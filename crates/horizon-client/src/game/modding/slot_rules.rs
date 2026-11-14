@@ -7,7 +7,7 @@ use super::*;
 use crate::game::api_values::TryIntoApi;
 use horizon_client::{
     containers::ModMenuType,
-    menu::{Kind, Menu, SlotRules},
+    menu::{Asked, Kind, Menu, SlotRules},
 };
 
 impl SlotRules for Game<'_> {
@@ -50,16 +50,17 @@ impl SlotRules for Game<'_> {
 impl Game<'_> {
     /// `Slot.mayPickup` of slot `slot` (the menu's index) of mod menu type `menu` while it holds
     /// `stack`, as the click itself answers it: the slot's own answer, then the parts' `may_pickup`.
-    /// For the server's own steps that run before the click, as `menu_quick_move` does.
+    /// For the server's own steps that run before the click, as `menu_quick_move` does; the
+    /// answers go to the click (`Menu::click_asked`), which does not ask again.
     pub(super) fn mod_menu_slot_gives(
         &self,
         menu: &'static ModMenuType,
         slot: usize,
         stack: &ItemStack,
-    ) -> bool {
+    ) -> (bool, Asked) {
         let mut view = Menu::new(Kind::Mod(menu));
         view.set_registry_id(Some(menu.id));
         view.load_slot(slot, Some(stack.clone()));
-        view.slot_gives(&self.menu_env(), slot)
+        view.ask_pickup(&self.menu_env(), slot)
     }
 }

@@ -30,9 +30,11 @@ pub use bundle::fits_inside_container_items;
 mod click;
 mod storage;
 pub use storage::{MutationStamp, Snapshot};
+mod asked;
 mod equippable;
 pub mod place;
 mod remainder;
+pub use asked::Asked;
 
 /// `ServerPlayer.getRecipeBook`: whether the player knows a recipe.
 pub trait KnownRecipes {
@@ -434,6 +436,7 @@ const OFFHAND: usize = 40;
 pub struct Menu {
     state: storage::State,
     stamp: storage::MutationStamp,
+    planning: asked::Planning,
 }
 
 /// `AnvilMenu`'s state besides its slots and `cost`.
@@ -837,6 +840,7 @@ impl Menu {
         containers[RESULT] = vec![None; 1];
         Self {
             stamp: storage::MutationStamp::fresh(),
+            planning: Default::default(),
             state: storage::State {
                 kind,
                 registry_id: match kind {
@@ -1790,15 +1794,7 @@ impl Menu {
         let Some(id) = self.registry_id() else {
             return (place, true, max.min(item_max));
         };
-        let index = self.state.slots[s].index;
-        apply_menu_slot_rules(
-            env.slot_rules,
-            id,
-            index,
-            stack,
-            (place, true, max),
-            item_max,
-        )
+        self.ask_slot_rules(env, id, s, stack, (place, true, max), item_max)
     }
 
     /// Capacity overrides for the backing container slots, refreshed before each server edit.
@@ -2309,18 +2305,10 @@ impl Menu {
         Some(result)
     }
 
-    /// `Slot.allowModification`: `mayPickup` and `mayPlace` of what the slot holds, one ask.
+    /// `Slot.allowModification`: `mayPickup` and `mayPlace` of what the slot holds, the click's
+    /// one ask for that stack.
     fn allow_modification(&self, env: &Env, s: usize) -> bool {
-        match self.slot(s) {
-            Some(held) if self.asks_pickup(s) => {
-                self.vanilla_may_pickup(env, s) && {
-                    let (place, pickup, _) = self.slot_rules(env, s, held);
-                    place && pickup
-                }
-            }
-            Some(held) => self.may_pickup(env, s) && self.may_place(env, s, held),
-            None => self.may_pickup(env, s),
-        }
+        self.may_pickup(env, s) && self.slot(s).is_none_or(|held| self.may_place(env, s, held))
     }
 
     fn safe_take(
@@ -2535,9 +2523,8 @@ impl Menu {
                         true,
                         CONTAINER_MAX,
                     );
-                    let (index, item_max) =
-                        (self.state.slots[dest].index, Self::max_stack(env, stack));
-                    !apply_menu_slot_rules(env.slot_rules, id, index, stack, own, item_max).0
+                    let item_max = Self::max_stack(env, stack);
+                    !self.ask_slot_rules(env, id, dest, stack, own, item_max).0
                 } else {
                     false
                 };

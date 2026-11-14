@@ -78,7 +78,9 @@ that ends on a single slot is a pickup click on that slot. A refused click leave
 were, and the server sends back the slots and cursor a client predicted otherwise. A slot that refuses placement
 gives up all of its stack or none of it. The slot's own rule comes first, and one ask answers `may_place` and
 `may_pickup` together. Vanilla menu types keep their slots' own `mayPickup`, and a shift-click a part answers
-with `menu_quick_move` is asked the pickup rule before that hook.
+with `menu_quick_move` is asked the pickup rule before that hook. A click asks once for each slot and stack: the
+take, the all-or-nothing check and a shift-click the parts leave to the game reuse that answer, so the server and
+the client's prediction ask the same number of times.
 
 ## Keeping a block menu open
 

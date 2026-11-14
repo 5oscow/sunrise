@@ -80,13 +80,18 @@ impl BlockEntityPart for PotBlock {
         mod_api::Flow::Continue
     }
 }
-struct PotMod;
+/// The pot's mod, with the block's `menu_quick_move` listener or without it.
+struct PotMod {
+    quick_move: bool,
+}
 #[mod_api::__subscriptions]
 impl Hooks for PotMod {
     fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
         r.menu_part(MENU, Pot);
         let kind = r.block_entity_type("pot").blocks(&[]).build();
-        r.block_entity_part(&kind, PotBlock).unwrap();
+        if self.quick_move {
+            r.block_entity_part(&kind, PotBlock).unwrap();
+        }
     }
 }
 
@@ -103,13 +108,28 @@ fn pot_type() -> &'static ModMenuType {
 fn stone(count: u32) -> Option<ItemStack> {
     Some(ItemStack::new("minecraft:stone", count))
 }
-fn asked() -> Vec<(usize, String, u32)> {
+/// What the rule was asked, in order: slot, item and count.
+type Asks = Vec<(usize, String, u32)>;
+fn asked() -> Asks {
     ASKED.with(|asked| std::mem::take(&mut *asked.borrow_mut()))
+}
+/// How many times `asks` name `count` of `item` in `slot`.
+fn times(asks: &Asks, (slot, item, count): (usize, &str, u32)) -> usize {
+    let question = (slot, item.to_owned(), count);
+    asks.iter().filter(|asked| **asked == question).count()
 }
 
 /// Guest 12 with the pot at `POS` open, and what their client is sent.
 fn with_pot(test: impl FnOnce(&mut crate::game::Game<'_>, &mpsc::Receiver<Out>)) {
-    let mods: Mods = vec![ModEntry::new("pot", Box::new(PotMod))].into();
+    with_pot_mod(true, test);
+}
+
+/// `with_pot`, with the block's `menu_quick_move` listener when `quick_move`.
+fn with_pot_mod(
+    quick_move: bool,
+    test: impl FnOnce(&mut crate::game::Game<'_>, &mpsc::Receiver<Out>),
+) {
+    let mods: Mods = vec![ModEntry::new("pot", Box::new(PotMod { quick_move }))].into();
     crate::game::api_values::install_parts(&mods).unwrap();
     crate::entry::install_client_hooks();
     mod_platform::testing::with_mods(mods, || {
@@ -276,6 +296,24 @@ fn click(
         .collect()
 }
 
+/// `action` from `slots` and `carried` in the client's prediction, then on the server as that
+/// client sends it: the prediction, and what each side asked the rule.
+fn asked_by_both(
+    game: &mut crate::game::Game<'_>,
+    rx: &mpsc::Receiver<Out>,
+    (slots, carried): (&[(usize, Option<ItemStack>)], Option<ItemStack>),
+    action: (i32, i32, Input),
+) -> (Menu, Asks, Asks) {
+    let mut menu = prediction(slots, carried);
+    serve(game, &menu);
+    asked();
+    menu.click(&game.menu_env(), action.0, action.1, action.2)
+        .unwrap();
+    let predicted = asked();
+    click(game, rx, action, Vec::new(), None);
+    (menu, predicted, asked())
+}
+
 /// `click` from `slots` and `carried`, on the server and in the client's prediction: what each
 /// leaves, and what the guest is sent back when its client claims the shown slot emptied.
 fn refused(
@@ -376,6 +414,233 @@ fn a_refused_quick_move_moves_nothing_and_asks_before_menu_quick_move() {
         assert_eq!(MOVED.with(|moved| moved.borrow().clone()), [0]);
         assert_eq!(served(game), predicted(&menu));
         assert_eq!(menu.slot(0), None);
+        // The rule is asked once for the clicked stack on each side: the server's ask before
+        // the hook is the one the game's routing uses. Main inventory index 30 (menu slot
+        // `SLOTS + 21`) moves into the pot, whose slots the move asks, so no other question
+        // names its index.
+        let from = SLOTS + 21;
+        MOVED.with(|moved| moved.borrow_mut().clear());
+        let (menu, client_asks, server_asks) = asked_by_both(
+            game,
+            rx,
+            (&[(from, stone(5))], None),
+            (from as i32, 0, Input::QuickMove),
+        );
+        assert_eq!(MOVED.with(|moved| moved.borrow().clone()), [from]);
+        assert_eq!(served(game), predicted(&menu));
+        assert_eq!(server_asks, client_asks);
+        assert_eq!(
+            times(&server_asks, (30, "minecraft:stone", 5)),
+            1,
+            "{server_asks:?}"
+        );
+        // A refused shift-click asks once on each side too, and the hook is not heard.
+        MOVED.with(|moved| moved.borrow_mut().clear());
+        let action = (SHOWN as i32, 0, Input::QuickMove);
+        let (_, client_asks, server_asks) =
+            asked_by_both(game, rx, (&[(SHOWN, stone(5))], None), action);
+        assert_eq!(server_asks, client_asks);
+        assert_eq!(server_asks, [(SHOWN, "minecraft:stone".to_owned(), 5)]);
+        assert!(MOVED.with(|moved| moved.borrow().is_empty()));
+    });
+}
+
+#[test]
+#[ignore = "daily"]
+fn a_quick_move_without_menu_quick_move_asks_once() {
+    with_pot_mod(false, |game, rx| {
+        // No listener: the game's routing asks alone, once for the clicked stack, as the
+        // prediction does, refused or not.
+        let from = SLOTS + 21;
+        let (menu, client_asks, server_asks) = asked_by_both(
+            game,
+            rx,
+            (&[(from, stone(5))], None),
+            (from as i32, 0, Input::QuickMove),
+        );
+        assert_eq!(menu.player_item(30), None);
+        assert_eq!(served(game), predicted(&menu));
+        assert_eq!(server_asks, client_asks);
+        assert_eq!(
+            times(&server_asks, (30, "minecraft:stone", 5)),
+            1,
+            "{server_asks:?}"
+        );
+        let action = (SHOWN as i32, 0, Input::QuickMove);
+        let (_, client_asks, server_asks) =
+            asked_by_both(game, rx, (&[(SHOWN, stone(5))], None), action);
+        assert_eq!(server_asks, client_asks);
+        assert_eq!(server_asks, [(SHOWN, "minecraft:stone".to_owned(), 5)]);
+    });
+}
+
+#[test]
+#[ignore = "daily"]
+fn each_path_asks_the_rule_once_per_slot_and_stack_on_both_sides() {
+    with_pot(|game, rx| {
+        let hotbar = SLOTS + 27;
+        let dirt = || Some(ItemStack::new("minecraft:dirt", 2));
+        let (stone5, dirt2) = (("minecraft:stone", 5), ("minecraft:dirt", 2));
+        // Pot slot 3 answers true, the shown slot refuses. Each row: the slots and cursor, the
+        // click, and how often the rule is asked each (slot, item, count) on each side. A take,
+        // `allowModification` and a throw's repeat reuse the click's answer for the held
+        // stack; the cursor's stack is a second question, for placing it.
+        type Row = (
+            Vec<(usize, Option<ItemStack>)>,
+            Option<ItemStack>,
+            (i32, i32, Input),
+            Vec<(usize, (&'static str, u32), usize)>,
+        );
+        let rows: Vec<Row> = vec![
+            // Pickup with either button.
+            (
+                vec![(3, stone(5))],
+                None,
+                (3, 0, Input::Pickup),
+                vec![(3, stone5, 1)],
+            ),
+            (
+                vec![(3, stone(5))],
+                None,
+                (3, 1, Input::Pickup),
+                vec![(3, stone5, 1)],
+            ),
+            (
+                vec![(SHOWN, stone(5))],
+                None,
+                (1, 0, Input::Pickup),
+                vec![(SHOWN, stone5, 1)],
+            ),
+            (
+                vec![(SHOWN, stone(5))],
+                None,
+                (1, 1, Input::Pickup),
+                vec![(SHOWN, stone5, 1)],
+            ),
+            // A matching cursor: the held stack, then the cursor's for placing.
+            (
+                vec![(3, stone(5))],
+                stone(3),
+                (3, 0, Input::Pickup),
+                vec![(3, stone5, 1), (3, ("minecraft:stone", 3), 1)],
+            ),
+            (
+                vec![(SHOWN, stone(5))],
+                stone(3),
+                (1, 0, Input::Pickup),
+                vec![(SHOWN, stone5, 1), (SHOWN, ("minecraft:stone", 3), 0)],
+            ),
+            // Hotbar and offhand swaps; with both stacks present the hotbar's is asked for
+            // placing, unless the pickup is refused first.
+            (
+                vec![(3, stone(5))],
+                None,
+                (3, 0, Input::Swap),
+                vec![(3, stone5, 1)],
+            ),
+            (
+                vec![(3, stone(5)), (hotbar, dirt())],
+                None,
+                (3, 0, Input::Swap),
+                vec![(3, stone5, 1), (3, dirt2, 1)],
+            ),
+            (
+                vec![(3, stone(5))],
+                None,
+                (3, 40, Input::Swap),
+                vec![(3, stone5, 1)],
+            ),
+            (
+                vec![(SHOWN, stone(5))],
+                None,
+                (1, 0, Input::Swap),
+                vec![(SHOWN, stone5, 1)],
+            ),
+            (
+                vec![(SHOWN, stone(5)), (hotbar, dirt())],
+                None,
+                (1, 0, Input::Swap),
+                vec![(SHOWN, stone5, 1), (SHOWN, dirt2, 0)],
+            ),
+            (
+                vec![(SHOWN, stone(5))],
+                None,
+                (1, 40, Input::Swap),
+                vec![(SHOWN, stone5, 1)],
+            ),
+            // Throws of one and of all.
+            (
+                vec![(3, stone(5))],
+                None,
+                (3, 0, Input::Throw),
+                vec![(3, stone5, 1)],
+            ),
+            (
+                vec![(3, stone(5))],
+                None,
+                (3, 1, Input::Throw),
+                vec![(3, stone5, 1)],
+            ),
+            (
+                vec![(SHOWN, stone(5))],
+                None,
+                (1, 0, Input::Throw),
+                vec![(SHOWN, stone5, 1)],
+            ),
+            (
+                vec![(SHOWN, stone(5))],
+                None,
+                (1, 1, Input::Throw),
+                vec![(SHOWN, stone5, 1)],
+            ),
+            // Pick-all on the refusing slot and on an empty one: each source once, over both
+            // passes and the take.
+            (
+                vec![(0, stone(3)), (SHOWN, stone(5))],
+                stone(1),
+                (1, 0, Input::PickupAll),
+                vec![(0, ("minecraft:stone", 3), 1), (SHOWN, stone5, 1)],
+            ),
+            (
+                vec![(0, stone(3)), (SHOWN, stone(5))],
+                stone(1),
+                (5, 0, Input::PickupAll),
+                vec![(0, ("minecraft:stone", 3), 1), (SHOWN, stone5, 1)],
+            ),
+            // The result slot onto a matching cursor, refused whole and taken whole.
+            (
+                vec![(RESULT, stone(10))],
+                stone(60),
+                (2, 0, Input::Pickup),
+                vec![
+                    (RESULT, ("minecraft:stone", 10), 1),
+                    (RESULT, ("minecraft:stone", 60), 1),
+                ],
+            ),
+            (
+                vec![(RESULT, stone(10))],
+                stone(50),
+                (2, 0, Input::Pickup),
+                vec![
+                    (RESULT, ("minecraft:stone", 10), 1),
+                    (RESULT, ("minecraft:stone", 50), 1),
+                ],
+            ),
+        ];
+        for (slots, carried, action, expected) in rows {
+            let (menu, client_asks, server_asks) =
+                asked_by_both(game, rx, (&slots, carried.clone()), action);
+            let row = format!("{action:?} {carried:?}");
+            assert_eq!(served(game), predicted(&menu), "{row}");
+            assert_eq!(server_asks, client_asks, "{row}");
+            for (slot, (item, count), n) in expected {
+                assert_eq!(
+                    times(&server_asks, (slot, item, count)),
+                    n,
+                    "{row} {server_asks:?}"
+                );
+            }
+        }
     });
 }
 
