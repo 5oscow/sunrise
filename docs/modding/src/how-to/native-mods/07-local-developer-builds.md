@@ -32,9 +32,32 @@ programs end in `.exe`:
 | `exporters/manifest.json` | in the checkout | `package`, `package-server` | sunrise-prepare compile-exporters --root CHECKOUT, then copy its server, client and manifest.json into CHECKOUT/exporters/ |
 <!-- end of required inputs -->
 
-The command returns a `developer-…` tag. Select that exact tag, prepare its resources, and pin an
-instance to it. Automatic updates do not replace a local unsigned base. Remove it with
+The command returns a `developer-…` tag. Select that exact tag and pin an instance to it.
+Automatic updates do not replace a local unsigned base. Remove it with
 `sunrise-launcher remove DEVELOPER_TAG` when no instance needs it.
+
+## Its resources come from the checkout
+
+A base needs Minecraft's own files prepared under `.local/sunrise-client/<version>` in its folder.
+When the checkout has them already — `sunrise-prepare --root CHECKOUT` made them, or you started the
+checkout's game once — `developer-install` copies that folder beside the base, and the base is ready
+to play: no official launcher install, no signed-in account, and no separate `prepare`, which would
+stop at `no Minecraft 26.3 client jar` on a machine that has neither (#4315).
+
+It is a copy, not a link. Preparing the base again rewrites only the base's files, and the base
+keeps working once the checkout moves or is deleted. `sunrise-data.bin` is left out because it names
+the folder it was written for: the game writes the base's own on its first start.
+
+When the checkout had nothing prepared yet, there are two ways:
+
+- prepare the base as before: `sunrise-launcher prepare --version DEVELOPER_TAG --minecraft <the game folder of your launcher>`;
+- or prepare the checkout's folder with `sunrise-prepare --root CHECKOUT` and repeat the same
+  `developer-install` command. The tag comes from the checkout's committed sources, so it does not
+  change and nothing is installed twice; the resources are copied then.
+
+By hand, that is a copy of `CHECKOUT/.local/sunrise-client/<version>` to
+`<launcher folder>/versions/DEVELOPER_TAG/.local/sunrise-client/<version>`, which is what
+`developer-install` does for you.
 
 A native mod build needs the prebuilt [SDK](../../reference/sdk.md) of the base's exact commit. For a commit without a
 published SDK, build it from the same checkout and name its folder; one folder holds one side:
