@@ -935,11 +935,19 @@ fn summon_answers_a_target_with_a_network_id() {
 
 // Stage 4b (#792): the same matrix rows through a compiled wasm mod's
 // `EntityPart`, the guest fixture of `crates/horizon-mod-wasm/tests/fixture`.
-// Its counter lives in the row's attachments under `wasm_fixture`, reached
-// here through attachment types with the same names, and its tick traps once
-// its count reaches the row's `entity_trap_after` attachment, after the write.
+// Its counter lives in the row's attachments under `wasm_fixture`, and its
+// tick traps once its count reaches the row's `entity_trap_after` attachment,
+// after the write. The tests seed and observe through the saved form only: a
+// decoded value stays in its own link group (the modding book's attachments
+// page: values from another Rust type domain answer `TypeMismatch` rather
+// than falling back to saved decoding), so a host never writes the guest's
+// counter through the typed methods, and never reads one mid-tick — the way
+// a saved world hands values to a freshly loaded mod, and the part_state
+// tests' view of a wasm value.
 
 /// The wasm fixture's counter, as the guest declares it (`entity_parts.rs`).
+/// Seeding and reading go through the saved form, so this type only names the
+/// key and codec here.
 static WASM_COUNTER: AttachmentType<i32> = AttachmentType {
     namespace: "wasm_fixture",
     name: "entity_counter",
@@ -955,17 +963,6 @@ static WASM_COUNTER: AttachmentType<i32> = AttachmentType {
     sync: false,
 };
 
-/// The trap arm of the same fixture part: nonzero traps once the count
-/// reaches it.
-static WASM_TRAP_AFTER: AttachmentType<i32> = AttachmentType {
-    namespace: "wasm_fixture",
-    name: "entity_trap_after",
-    default: || 0,
-    codec: None,
-    copy_on_death: false,
-    sync: false,
-};
-
 /// The native observer part's own counter, so a row's two parts leave two
 /// separable traces.
 static NATIVE_COUNTER: AttachmentType<i32> = AttachmentType {
@@ -977,11 +974,13 @@ static NATIVE_COUNTER: AttachmentType<i32> = AttachmentType {
     sync: false,
 };
 
-/// A native part on the wasm fixture's type: it records the wasm counter as
-/// it sees it, pinning that both kinds of part tick one row in one pass and
-/// in which order.
+/// A native part on the wasm fixture's type: it records whether the wasm
+/// counter is already stored when its turn comes, pinning that both kinds of
+/// part tick one row in one pass and in which order. Presence (`has`, never a
+/// value) is the one cross-group answer the store promises: a value decoded
+/// in the guest's link group does not cross back to a typed host read.
 struct Observer {
-    seen: Arc<Mutex<Vec<(u32, i32)>>>,
+    seen: Arc<Mutex<Vec<(u32, bool)>>>,
 }
 
 #[mod_api::horizon_part]
@@ -992,7 +991,7 @@ impl EntityPart for Observer {
         event: &mut GeneralEntityTickEvent<'_>,
     ) {
         let holder = Holder::Entity(event.entity.id());
-        let seen = WASM_COUNTER.get(host, holder).unwrap();
+        let seen = WASM_COUNTER.has(host, holder).unwrap();
         let count = NATIVE_COUNTER.get(host, holder).unwrap() + 1;
         NATIVE_COUNTER.set(host, holder, count).unwrap();
         self.seen.lock().unwrap().push((event.entity.id(), seen));
@@ -1002,7 +1001,7 @@ impl EntityPart for Observer {
 /// The observer's mod: its part joins the wasm fixture's on
 /// `wasm_fixture:robot`.
 struct Observe {
-    seen: Arc<Mutex<Vec<(u32, i32)>>>,
+    seen: Arc<Mutex<Vec<(u32, bool)>>>,
 }
 
 #[mod_api::__subscriptions]
@@ -1022,7 +1021,7 @@ impl Hooks for Observe {
 /// parts answer in install order: wasm first, native second.
 fn with_wasm_parts(
     observer: bool,
-    test: impl FnOnce(&mut Game<'_>, Option<Arc<Mutex<Vec<(u32, i32)>>>>) + Send + 'static,
+    test: impl FnOnce(&mut Game<'_>, Option<Arc<Mutex<Vec<(u32, bool)>>>>) + Send + 'static,
 ) {
     if std::env::var_os("HORIZON_WASM_FIXTURE").is_none() {
         // The compiled fixture is the wasm-mods CI lane's to build; without it
@@ -1070,35 +1069,83 @@ fn with_wasm_parts(
     });
 }
 
-/// One `wasm_fixture:robot` row, its counter seeded to `value`.
-fn seeded_wasm_row(game: &mut Game<'_>, uuid: [i32; 4], value: i32) -> u32 {
-    game.load_listed(
-        "wasm_fixture:robot",
-        None,
-        None,
-        record_at("wasm_fixture:robot", uuid, [0.5, 64.0, 0.5], Vec::new()),
-    )
-    .unwrap();
-    let id = game
-        .resident_entities
+/// One integer's saved envelope — `{"value": {"n": n}}` — the bytes a save
+/// writes and a load reads back.
+fn wasm_envelope(n: i32) -> Tag {
+    let mut value = Compound::new();
+    value.insert("n".into(), Tag::Int(n));
+    let mut envelope = Compound::new();
+    envelope.insert("value".into(), Tag::Compound(value));
+    Tag::Compound(envelope)
+}
+
+/// One `wasm_fixture:robot` row whose saved record carries the fixture's
+/// counter, and for the trap row its `entity_trap_after`: the way a saved
+/// world hands the guest its values. Nothing is written or decoded natively —
+/// a decoded value stays in its own link group.
+fn wasm_row(
+    game: &mut Game<'_>,
+    uuid: [i32; 4],
+    counter: Option<i32>,
+    trap_after: Option<i32>,
+) -> u32 {
+    let mut record = record_at("wasm_fixture:robot", uuid, [0.5, 64.0, 0.5], Vec::new());
+    let mut fixture = Compound::new();
+    if let Some(n) = counter {
+        fixture.insert("entity_counter".into(), wasm_envelope(n));
+    }
+    if let Some(n) = trap_after {
+        fixture.insert("entity_trap_after".into(), wasm_envelope(n));
+    }
+    if let Tag::Compound(map) = &mut record
+        && !fixture.is_empty()
+    {
+        let mut names = Compound::new();
+        names.insert("wasm_fixture".into(), Tag::Compound(fixture));
+        map.insert(
+            horizon_mod_runtime::attachments::ATTACHMENTS_KEY.into(),
+            Tag::Compound(names),
+        );
+    }
+    game.load_listed("wasm_fixture:robot", None, None, record)
+        .unwrap();
+    game.resident_entities
         .general
         .rows
         .iter()
         .find(|row| row.uuid == uuid)
         .unwrap()
-        .id;
-    WASM_COUNTER.set(game, Holder::Entity(id), value).unwrap();
-    id
+        .id
 }
 
-/// The matrix's counter row through the compiled wasm part: one tick, 40 to 41.
+/// The row's wasm counter from its saved form: the host's view of a wasm
+/// value, the part_state tests' channel.
+fn saved_wasm_counter(game: &Game<'_>, id: u32) -> Option<i32> {
+    let saved = game.entity_attachments.get(&id)?.to_nbt();
+    let Some(Tag::Compound(names)) = saved.get(&"wasm_fixture".into()) else {
+        return None;
+    };
+    let Some(Tag::Compound(entry)) = names.get(&"entity_counter".into()) else {
+        return None;
+    };
+    let Some(Tag::Compound(value)) = entry.get(&"value".into()) else {
+        return None;
+    };
+    match value.get(&"n".into()) {
+        Some(Tag::Int(n)) => Some(*n),
+        _ => None,
+    }
+}
+
+/// The matrix's counter row through the compiled wasm part: seeded 40 by its
+/// saved record, one tick produces 41.
 #[test]
 #[ignore = "needs prepared resources and a compiled HORIZON_WASM_FIXTURE"]
 fn wasm_counter_advances_one_per_tick() {
     with_wasm_parts(false, |game, _| {
-        let id = seeded_wasm_row(game, [1, 2, 3, 4], 40);
+        let id = wasm_row(game, [1, 2, 3, 4], Some(40), None);
         tick(game);
-        assert_eq!(WASM_COUNTER.get(game, Holder::Entity(id)).unwrap(), 41);
+        assert_eq!(saved_wasm_counter(game, id), Some(41));
     });
 }
 
@@ -1107,43 +1154,44 @@ fn wasm_counter_advances_one_per_tick() {
 #[ignore = "needs prepared resources and a compiled HORIZON_WASM_FIXTURE"]
 fn wasm_two_rows_share_the_part_but_not_their_counters() {
     with_wasm_parts(false, |game, _| {
-        let first = seeded_wasm_row(game, [1, 2, 3, 4], 40);
-        let second = seeded_wasm_row(game, [5, 6, 7, 8], 7);
+        let first = wasm_row(game, [1, 2, 3, 4], Some(40), None);
+        let second = wasm_row(game, [5, 6, 7, 8], Some(7), None);
         tick(game);
         assert_eq!(
             (
-                WASM_COUNTER.get(game, Holder::Entity(first)).unwrap(),
-                WASM_COUNTER.get(game, Holder::Entity(second)).unwrap()
+                saved_wasm_counter(game, first),
+                saved_wasm_counter(game, second)
             ),
-            (41, 8)
+            (Some(41), Some(8))
         );
     });
 }
 
 /// A row's wasm part and a native part on the same type tick one row in one
-/// pass, in install order: the fixture first, the observer second — the
-/// observer sees the counter the fixture already wrote.
+/// pass, in install order: the fixture first, the observer second. The row
+/// starts with no stored counter, so the observer's `has` answer names what
+/// it saw: stored already, only if the wasm part's write ran first.
 #[test]
 #[ignore = "needs prepared resources and a compiled HORIZON_WASM_FIXTURE"]
 fn wasm_and_native_parts_tick_in_install_order() {
     with_wasm_parts(true, |game, seen| {
         let seen = seen.unwrap();
-        let id = seeded_wasm_row(game, [1, 2, 3, 4], 40);
+        let id = wasm_row(game, [1, 2, 3, 4], None, None);
         tick(game);
         assert_eq!(
             *seen.lock().unwrap(),
-            [(id, 41)],
+            [(id, true)],
             "the wasm part ticked first"
         );
+        assert_eq!(saved_wasm_counter(game, id), Some(1));
         assert_eq!(NATIVE_COUNTER.get(game, Holder::Entity(id)).unwrap(), 1);
     });
 }
 
 /// The trap row: a wasm part that traps after its write rolls the whole
 /// row's tick back — its own count and the native part's write of the same
-/// row — while the later row in the same tick still ticks, and the next tick
-/// runs: the poisoned group answers nothing, the native part keeps ticking,
-/// the game goes on.
+/// row — while the later row's dispatch still runs, its wasm part silenced by
+/// the group stop and its native part ticking, and the next tick proceeds.
 #[test]
 #[ignore = "needs prepared resources and a compiled HORIZON_WASM_FIXTURE"]
 fn a_trapping_wasm_row_rolls_back_and_the_next_tick_proceeds() {
@@ -1151,40 +1199,48 @@ fn a_trapping_wasm_row_rolls_back_and_the_next_tick_proceeds() {
         let seen = seen.unwrap();
         let failures = horizon_mod_runtime::dispatch_failures::dispatch_failure_counter();
         let before = failures.get();
-        let first = seeded_wasm_row(game, [1, 2, 3, 4], 40);
-        WASM_TRAP_AFTER
-            .set(game, Holder::Entity(first), 41)
-            .unwrap();
-        let second = seeded_wasm_row(game, [5, 6, 7, 8], 7);
+        // The trap row: 40 seeded, armed to trap once its count reaches 41.
+        let first = wasm_row(game, [1, 2, 3, 4], Some(40), Some(41));
+        // The later row carries no counter: whether one appears says whether
+        // its wasm part ran.
+        let second = wasm_row(game, [5, 6, 7, 8], None, None);
         tick(game);
-        // The trapping row rolled back both parts' writes; the later row ticked.
+        // The trapping row rolled back both parts' writes of that row; the
+        // later row's wasm part answered nothing (its group stopped with the
+        // trap) and stored no counter, its native part ticked.
         assert_eq!(
             (
-                WASM_COUNTER.get(game, Holder::Entity(first)).unwrap(),
-                WASM_COUNTER.get(game, Holder::Entity(second)).unwrap()
+                saved_wasm_counter(game, first),
+                saved_wasm_counter(game, second)
             ),
-            (40, 8)
+            (Some(40), None)
         );
         assert_eq!(NATIVE_COUNTER.get(game, Holder::Entity(first)).unwrap(), 0);
         assert_eq!(NATIVE_COUNTER.get(game, Holder::Entity(second)).unwrap(), 1);
-        // The observer saw the trapped row's doomed 41 before the rollback.
-        assert_eq!(*seen.lock().unwrap(), [(first, 41), (second, 8)]);
+        // The observer ran inside the doomed pass too, after the trap row's
+        // wasm part had already written.
+        assert_eq!(*seen.lock().unwrap(), [(first, true), (second, false)]);
         assert_eq!(failures.get(), before + 1, "one trap, one dispatch failure");
-        // The next tick: the poisoned group answers nothing, the native part
-        // keeps ticking — the rollback left the row at 40, its new baseline.
+        // The next tick: the poisoned group answers nothing, the native parts
+        // keep ticking — the rollback left the trap row at 40, its baseline.
         tick(game);
         assert_eq!(
             (
-                WASM_COUNTER.get(game, Holder::Entity(first)).unwrap(),
-                WASM_COUNTER.get(game, Holder::Entity(second)).unwrap()
+                saved_wasm_counter(game, first),
+                saved_wasm_counter(game, second)
             ),
-            (40, 8)
+            (Some(40), None)
         );
         assert_eq!(NATIVE_COUNTER.get(game, Holder::Entity(first)).unwrap(), 1);
         assert_eq!(NATIVE_COUNTER.get(game, Holder::Entity(second)).unwrap(), 2);
         assert_eq!(
             *seen.lock().unwrap(),
-            [(first, 41), (second, 8), (first, 40), (second, 8)]
+            [
+                (first, true),
+                (second, false),
+                (first, true),
+                (second, false)
+            ]
         );
         assert_eq!(
             failures.get(),
