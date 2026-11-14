@@ -58,7 +58,7 @@ fn side_packages(folder: &Path) -> Index {
             ""
         };
         let manifest = format!(
-            "id='{id}'\nname='{id}'\nversion='1.0.0'\napi='0.2'\nside='{side}'\ncapabilities=[]\n{dependency}[native]\ngame='{GAME}'\nhorizon='{}'\nmixins='{}'\n",
+            "id='{id}'\nname='{id}'\nversion='1.0.0'\napi='0.2'\nside='{side}'\ncapabilities=['registries']\n{dependency}[native]\ngame='{GAME}'\nhorizon='{}'\nmixins='{}'\n",
             "a".repeat(40), "b".repeat(40)
         );
         let bytes = horizon_mod_package::Package::write_files(
@@ -124,13 +124,15 @@ fn every_package_side_installs_and_enters_the_build_on_both_targets() {
         assert_eq!(done.len(), 3);
         assert_eq!(installed::Installed::load(&home).entries.len(), 3);
         let mut labels = Vec::new();
-        for entry in &done {
+        for (id, side) in [
+            ("server_mod", Side::Server),
+            ("client_mod", Side::Client),
+            ("both_mod", Side::Both),
+        ] {
+            let entry = done.iter().find(|entry| entry.project == id).unwrap();
             assert!(entry.path(&home).unwrap().is_file());
             assert!(java::is_enabled(&home, &entry.project));
             assert!(entry.skipped.is_empty());
-            let side = index.project(&entry.project).unwrap().versions[0]
-                .side
-                .unwrap();
             assert_eq!(installed_side(&home, entry), Some(side));
             let label = installed_label(&home, entry);
             assert_eq!(label.matches(package_side(side)).count(), 1, "{label}");

@@ -662,9 +662,8 @@ mod tests {
             std::fs::create_dir_all(home.join(folder)).unwrap();
             let file = format!("{folder}/{id}.hmod");
             let mut manifest = format!(
-                "id='{id}'\nname='{id}'\nversion='1.0.0'\napi='0.2'\nside={}\ncapabilities={}\n",
+                "id='{id}'\nname='{id}'\nversion='1.0.0'\napi='0.2'\nside={}\ncapabilities=['registries']\n",
                 serde_json::to_string(&side).unwrap(),
-                if code { "[]" } else { "['registries']" },
             );
             let files: Vec<(&str, &[u8])> = if code {
                 manifest.push_str(&format!(
