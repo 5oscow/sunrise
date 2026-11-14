@@ -404,6 +404,7 @@ impl MenuPart for Mod {
     }
     fn menu_slot_rules(&self, _: &dyn Host, event: &mut MenuSlotRulesEvent<'_>) {
         event.may_place = false;
+        event.may_pickup = false;
         event.max_stack = self.id;
     }
 }

@@ -3,7 +3,10 @@
 //! the game's own routing.
 use super::Game;
 use horizon_client::{
-    block_entities::Pos, containers::BlockEntity, items::ItemStack, lan::menu::Slots,
+    block_entities::Pos,
+    containers::{BlockEntity, ModMenuType},
+    items::ItemStack,
+    lan::menu::Slots,
 };
 use horizon_protocol::packets::play;
 
@@ -122,8 +125,7 @@ impl Game<'_> {
         {
             return false;
         }
-        let size = menu.size;
-        let window = menu.window;
+        let (size, window, menu_type) = (menu.size, menu.window, menu.mod_type);
         // A mod menu type keeps its drag in the connection's machine menu
         // (`lan_machine_click`), not in `menu.drag`: a shift-click during it
         // goes there too, to only end the drag.
@@ -143,7 +145,7 @@ impl Game<'_> {
         }
         let handled = self
             .as_guest(conn, |game| {
-                game.mod_menu_quick_move(pos, size, p.slot as usize, at)
+                game.mod_menu_quick_move(pos, size, menu_type, p.slot as usize, at)
             })
             .unwrap_or(false);
         if !handled {
@@ -178,12 +180,19 @@ impl Game<'_> {
     }
 
     /// The mods' `native_menu_quick_move` on menu slot `slot` (living at
-    /// `at`) of the mod container at `pos` (`size` container slots), for the
-    /// player in place: true when
-    /// one took it, the slot then holding what is left of its stack. The
+    /// `at`) of the mod container at `pos` (`size` container slots, on mod
+    /// menu type `menu_type` or a vanilla one), for the player in place: true
+    /// when one took it, the slot then holding what is left of its stack. The
     /// block entity is out of the world during the call.
-    fn mod_menu_quick_move(&mut self, pos: Pos, size: usize, slot: usize, at: MenuSlot) -> bool {
-        let Some(BlockEntity::Mod(m)) = self.world.block_entities.get_mut(&pos) else {
+    fn mod_menu_quick_move(
+        &mut self,
+        pos: Pos,
+        size: usize,
+        menu_type: Option<&'static ModMenuType>,
+        slot: usize,
+        at: MenuSlot,
+    ) -> bool {
+        let Some(BlockEntity::Mod(m)) = self.world.block_entities.get(&pos) else {
             return false;
         };
         let held = match at {
@@ -191,6 +200,17 @@ impl Game<'_> {
             MenuSlot::Inventory(i) => self.inventory.get(i).cloned().flatten(),
         };
         let Some(mut stack) = held.filter(|s| s.count > 0) else {
+            return false;
+        };
+        // `doClick` asks `Slot.mayPickup` before the menu's `quickMoveStack`: a slot of a mod
+        // menu type its parts refuse (`menu_slot_rules`) asks no mod, and the game's own routing
+        // refuses it as well.
+        if mod_api::__private::has_part_hook(mod_api::HookId::MenuQuickMove)
+            && menu_type.is_some_and(|t| !self.mod_menu_slot_gives(t, slot, &stack))
+        {
+            return false;
+        }
+        let Some(BlockEntity::Mod(m)) = self.world.block_entities.get_mut(&pos) else {
             return false;
         };
         let mut taken = std::mem::take(&mut **m);

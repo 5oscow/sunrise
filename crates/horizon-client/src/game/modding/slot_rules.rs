@@ -5,7 +5,10 @@
 //! converted for it.
 use super::*;
 use crate::game::api_values::TryIntoApi;
-use horizon_client::menu::SlotRules;
+use horizon_client::{
+    containers::ModMenuType,
+    menu::{Kind, Menu, SlotRules},
+};
 
 impl SlotRules for Game<'_> {
     fn listens(&self, menu: &str) -> bool {
@@ -19,6 +22,7 @@ impl SlotRules for Game<'_> {
         slot: usize,
         stack: &ItemStack,
         may_place: &mut bool,
+        may_pickup: &mut bool,
         max_stack: &mut u32,
     ) {
         // A stack that cannot cross to the API is not asked about: the slot's answers stand.
@@ -29,15 +33,33 @@ impl SlotRules for Game<'_> {
         // stand (the dispatch writes nothing back from a failed pass), the failure is logged by
         // name, and the click goes on. The next ask, and the next click, are asked as ever.
         let asked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let (mut place, mut maximum) = (*may_place, *max_stack);
-            self.native_menu_slot_rules(menu, slot, &stack, &mut place, &mut maximum);
-            (place, maximum)
+            let mut answers = (*may_place, *may_pickup, *max_stack);
+            let (place, pickup, maximum) = &mut answers;
+            self.native_menu_slot_rules(menu, slot, &stack, place, pickup, maximum);
+            answers
         }));
         match asked {
-            Ok((place, maximum)) => (*may_place, *max_stack) = (place, maximum),
+            Ok(answers) => (*may_place, *may_pickup, *max_stack) = answers,
             Err(_) => log::error!(
                 "menu_slot_rules: a listener failed for {menu} slot {slot}; the slot's own answers stand"
             ),
         }
+    }
+}
+
+impl Game<'_> {
+    /// `Slot.mayPickup` of slot `slot` (the menu's index) of mod menu type `menu` while it holds
+    /// `stack`, as the click itself answers it: the slot's own answer, then the parts' `may_pickup`.
+    /// For the server's own steps that run before the click, as `menu_quick_move` does.
+    pub(super) fn mod_menu_slot_gives(
+        &self,
+        menu: &'static ModMenuType,
+        slot: usize,
+        stack: &ItemStack,
+    ) -> bool {
+        let mut view = Menu::new(Kind::Mod(menu));
+        view.set_registry_id(Some(menu.id));
+        view.load_slot(slot, Some(stack.clone()));
+        view.slot_gives(&self.menu_env(), slot)
     }
 }

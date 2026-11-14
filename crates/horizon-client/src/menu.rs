@@ -21,7 +21,7 @@ pub use mod_api::item::menu::{LogicalSide, MenuButtonContext};
 mod models;
 pub use models::{
     AnvilCraft, AnvilUpdate, AnvilVanilla, CarriedAccess, GrindstonePlace, GrindstoneTake,
-    SlotRules, SlotView, StackedOnOther,
+    SlotRules, SlotView, StackedOnOther, apply_menu_slot_rules,
 };
 use std::sync::Arc;
 
@@ -494,24 +494,6 @@ fn tidy(slot: &mut Option<ItemStack>) {
     if slot.as_ref().is_some_and(|s| s.count == 0) {
         *slot = None;
     }
-}
-
-/// Apply the scoped rule to a slot's own answers, then enforce its item cap. The rules are asked
-/// here, while the click plans, and only for a menu type a part answers; with none lent the
-/// slot's answers stand.
-pub fn apply_menu_slot_rules(
-    rules: Option<&dyn SlotRules>,
-    menu: &str,
-    slot: usize,
-    stack: &ItemStack,
-    mut may_place: bool,
-    mut max_stack: u32,
-    item_max: u32,
-) -> (bool, u32) {
-    if let Some(rules) = rules.filter(|rules| rules.listens(menu)) {
-        rules.rule(menu, slot, stack, &mut may_place, &mut max_stack);
-    }
-    (may_place, max_stack.clamp(1, CONTAINER_MAX).min(item_max))
 }
 
 /// Vanilla quick-craft count for one slot, based on the original carried stack.
@@ -1623,9 +1605,7 @@ impl Menu {
         if self.state.slots[s].role == Role::Hidden {
             return false;
         }
-        let own = self.vanilla_may_place(env, s, stack);
-        self.slot_rules(env, s, stack, own, self.vanilla_slot_max(s, stack))
-            .0
+        self.slot_rules(env, s, stack).0
     }
 
     fn vanilla_may_place(&self, env: &Env, s: usize, stack: &ItemStack) -> bool {
@@ -1687,7 +1667,22 @@ impl Menu {
         stack.item.ends_with("_banner")
     }
 
+    /// `Slot.mayPickup`: the slot's own answer, then, on a mod menu type and only for a stack
+    /// the slot holds, the parts' (`menu_slot_rules`).
     fn may_pickup(&self, env: &Env, s: usize) -> bool {
+        self.vanilla_may_pickup(env, s)
+            && match self.slot(s) {
+                Some(held) if self.asks_pickup(s) => self.slot_rules(env, s, held).1,
+                _ => true,
+            }
+    }
+
+    /// The parts answer `mayPickup` on a mod menu type's slots that its screen shows.
+    fn asks_pickup(&self, s: usize) -> bool {
+        matches!(self.state.kind, Kind::Mod(_)) && self.state.slots[s].role != Role::Hidden
+    }
+
+    fn vanilla_may_pickup(&self, env: &Env, s: usize) -> bool {
         match self.state.slots[s].role {
             Role::Inert | Role::Hidden => false,
             // AnvilMenu.mayPickup: the levels to pay, and a price.
@@ -1786,25 +1781,23 @@ impl Menu {
         partial
     }
 
-    fn slot_rules(
-        &self,
-        env: &Env,
-        s: usize,
-        stack: &ItemStack,
-        own: bool,
-        max: u32,
-    ) -> (bool, u32) {
+    /// Slot `s`'s `mayPlace`, the parts' `mayPickup` (true unless they refuse) and
+    /// `getMaxStackSize` for `stack`: its own answers, then the parts' on a registered menu
+    /// type, all from one ask.
+    fn slot_rules(&self, env: &Env, s: usize, stack: &ItemStack) -> (bool, bool, u32) {
+        let place = self.vanilla_may_place(env, s, stack);
+        let (max, item_max) = (self.vanilla_slot_max(s, stack), Self::max_stack(env, stack));
         let Some(id) = self.registry_id() else {
-            return (own, max.min(Self::max_stack(env, stack)));
+            return (place, true, max.min(item_max));
         };
+        let index = self.state.slots[s].index;
         apply_menu_slot_rules(
             env.slot_rules,
             id,
-            self.state.slots[s].index,
+            index,
             stack,
-            own,
-            max,
-            Self::max_stack(env, stack),
+            (place, true, max),
+            item_max,
         )
     }
 
@@ -1816,15 +1809,7 @@ impl Menu {
 
     /// `Slot.getMaxStackSize(stack)`.
     fn slot_max(&self, env: &Env, s: usize, stack: &ItemStack) -> u32 {
-        let max = self
-            .slot_rules(
-                env,
-                s,
-                stack,
-                self.vanilla_may_place(env, s, stack),
-                self.vanilla_slot_max(s, stack),
-            )
-            .1;
+        let max = self.slot_rules(env, s, stack).2;
         let slot = self.state.slots[s];
         if slot.container == MAIN {
             self.state
@@ -2324,12 +2309,18 @@ impl Menu {
         Some(result)
     }
 
+    /// `Slot.allowModification`: `mayPickup` and `mayPlace` of what the slot holds, one ask.
     fn allow_modification(&self, env: &Env, s: usize) -> bool {
-        self.may_pickup(env, s)
-            && match self.slot(s) {
-                Some(stack) => self.may_place(env, s, stack),
-                None => true,
+        match self.slot(s) {
+            Some(held) if self.asks_pickup(s) => {
+                self.vanilla_may_pickup(env, s) && {
+                    let (place, pickup, _) = self.slot_rules(env, s, held);
+                    place && pickup
+                }
             }
+            Some(held) => self.may_pickup(env, s) && self.may_place(env, s, held),
+            None => self.may_pickup(env, s),
+        }
     }
 
     fn safe_take(
@@ -2539,16 +2530,14 @@ impl Menu {
                 let refuses = if self.state.slots[dest].role == Role::Hidden {
                     true
                 } else if let Some(id) = self.registry_id() {
-                    !apply_menu_slot_rules(
-                        env.slot_rules,
-                        id,
-                        self.state.slots[dest].index,
-                        stack,
+                    let own = (
                         self.state.slots[dest].role != Role::ModResult,
+                        true,
                         CONTAINER_MAX,
-                        Self::max_stack(env, stack),
-                    )
-                    .0
+                    );
+                    let (index, item_max) =
+                        (self.state.slots[dest].index, Self::max_stack(env, stack));
+                    !apply_menu_slot_rules(env.slot_rules, id, index, stack, own, item_max).0
                 } else {
                     false
                 };
@@ -3834,6 +3823,7 @@ pub(crate) mod tests {
             slot: usize,
             _: &ItemStack,
             may_place: &mut bool,
+            _: &mut bool,
             max_stack: &mut u32,
         ) {
             if menu == "test:rules" && slot == 0 {
@@ -4552,18 +4542,12 @@ pub(crate) mod tests {
         let before = load.loop_context(LoopSide::Server, []);
         assert_eq!(before.setting("rules_mod", "stack"), None);
         bare_env_in(&before, |env| {
-            assert_eq!(
-                menu.slot_rules(env, 0, &stack, true, CONTAINER_MAX),
-                (true, 7)
-            );
+            assert_eq!(menu.slot_rules(env, 0, &stack), (true, true, 7));
         });
         std::fs::write(&file, "3").unwrap();
         let after = load.loop_context(LoopSide::Server, ["rules_mod"]);
         bare_env_in(&after, |env| {
-            assert_eq!(
-                menu.slot_rules(env, 0, &stack, true, CONTAINER_MAX),
-                (true, 3)
-            );
+            assert_eq!(menu.slot_rules(env, 0, &stack), (true, true, 3));
             // Slot 28 is hotbar 0 in this one-slot mod menu; both indices
             // refer to inventory cell 0 and the rule caps that cell at three.
             menu.set_player_item(0, Some(ItemStack::new("minecraft:stone", 8)));
@@ -4590,10 +4574,7 @@ pub(crate) mod tests {
             );
         });
         bare_env_in(&before, |env| {
-            assert_eq!(
-                menu.slot_rules(env, 0, &stack, true, CONTAINER_MAX),
-                (true, 7)
-            );
+            assert_eq!(menu.slot_rules(env, 0, &stack), (true, true, 7));
         });
         // The other loop hooks read the same context: before the reload the
         // setting is missing, after it every one sees it.

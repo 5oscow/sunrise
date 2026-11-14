@@ -554,15 +554,17 @@ impl View<'_> {
                 player_slot(i - c.len())
             }
         });
-        crate::menu::apply_menu_slot_rules(
+        // A vanilla menu type keeps its slots' own `mayPickup`: only a mod menu type's click,
+        // on the menu engine, reads the parts' answer.
+        let (place, _, max) = crate::menu::apply_menu_slot_rules(
             rules.slot_rules(),
             &menu.registry_id,
             index,
             stack,
-            own,
-            max,
+            (own, true, max),
             item_max,
-        )
+        );
+        (place, max)
     }
     fn may_place(&self, i: usize, stack: &ItemStack, rules: &dyn Rules) -> bool {
         self.enabled(i) && self.slot_rules(i, stack, rules).0
@@ -753,8 +755,7 @@ fn move_to(
                     &menu.registry_id,
                     index,
                     &stack,
-                    true,
-                    u32::MAX,
+                    (true, true, u32::MAX),
                     rules.max_stack(&stack.item).max(1),
                 )
                 .0

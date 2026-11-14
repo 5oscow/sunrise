@@ -41,15 +41,43 @@ pub struct StackedOnOther<'a> {
 pub trait SlotRules {
     /// Whether a part answers the menu type `menu`; a menu type none answers is never asked.
     fn listens(&self, menu: &str) -> bool;
-    /// The slot's own answers arrive in `may_place` and `max_stack`; the parts may change them.
+    /// The slot's own answers arrive in `may_place`, `may_pickup` and `max_stack`; the parts may
+    /// change them.
     fn rule(
         &self,
         menu: &str,
         slot: usize,
         stack: &ItemStack,
         may_place: &mut bool,
+        may_pickup: &mut bool,
         max_stack: &mut u32,
     );
+}
+
+/// Apply the scoped rule to a slot's own answers (`may_place`, `may_pickup` and the maximum, in
+/// that order), then enforce its item cap. The rules are asked here, while the click plans, and
+/// only for a menu type a part answers; with none lent the slot's answers stand.
+pub fn apply_menu_slot_rules(
+    rules: Option<&dyn SlotRules>,
+    menu: &str,
+    slot: usize,
+    stack: &ItemStack,
+    own: (bool, bool, u32),
+    item_max: u32,
+) -> (bool, bool, u32) {
+    let (mut may_place, mut may_pickup, mut max_stack) = own;
+    if let Some(rules) = rules.filter(|rules| rules.listens(menu)) {
+        rules.rule(
+            menu,
+            slot,
+            stack,
+            &mut may_place,
+            &mut may_pickup,
+            &mut max_stack,
+        );
+    }
+    let max_stack = max_stack.clamp(1, super::CONTAINER_MAX).min(item_max);
+    (may_place, may_pickup, max_stack)
 }
 
 /// What `AnvilUpdateEvent` asks about once `createResult` made vanilla's

@@ -61,8 +61,7 @@ mod tests {
                         "pot:menu",
                         0,
                         stack,
-                        true,
-                        64,
+                        (true, true, 64),
                         64,
                     )
                     .0

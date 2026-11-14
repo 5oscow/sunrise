@@ -41,7 +41,44 @@ generation, including an empty one. Closing a screen or changing dimension retai
 disconnecting discards it. Reads allocate nothing and do not rescan recipes or registries.
 
 Parts that read `context.setting(..)` or `side()` have no counterpart on the Host.
-Named injections for `menu_slot_rules` request `hook_version = 3`.
+Named injections for `menu_slot_rules` request `hook_version = 4`.
+
+## Slots that keep what they show
+
+On a mod menu type, `menu_slot_rules` also answers `Slot.mayPickup` in `event.may_pickup`. It arrives true and
+is asked with the stack the slot holds, on the server and in client prediction alike. A slot that only shows
+something, such as a cooking pot's preview of its result, refuses both rules: nothing can be taken from it and
+nothing put in it.
+
+```rust,ignore
+struct PotPreview;
+#[mod_api::horizon_part]
+impl mod_api::MenuPart for PotPreview {
+    fn menu_slot_rules(
+        &self,
+        _: &dyn mod_api::Host,
+        event: &mut mod_api::MenuSlotRulesEvent<'_>,
+    ) {
+        if event.slot == 6 {
+            event.may_pickup = false;
+            event.may_place = false;
+        }
+    }
+}
+// In Hooks::register:
+// registrar.menu_part("mymod:cooking_pot", PotPreview);
+```
+
+Every click that would take from the slot asks it: a pickup click with either button (after
+`item_stacked_on_other`, before any take, merge or exchange), a shift-click (once, before the move), a hotbar or
+offhand swap that takes the slot's item, a throw (a refusal drops nothing), and a double-click's pick-all
+(it gathers from the other slots when the clicked one refuses, and skips each slot that refuses). A drag
+spread, a creative clone, putting a stack into an empty slot and a click outside the window never ask it; a drag
+that ends on a single slot is a pickup click on that slot. A refused click leaves the slot and the cursor as they
+were, and the server sends back the slots and cursor a client predicted otherwise. A slot that refuses placement
+gives up all of its stack or none of it. The slot's own rule comes first, and one ask answers `may_place` and
+`may_pickup` together. Vanilla menu types keep their slots' own `mayPickup`, and a shift-click a part answers
+with `menu_quick_move` is asked the pickup rule before that hook.
 
 ## Keeping a block menu open
 
