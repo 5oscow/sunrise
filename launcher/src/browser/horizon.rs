@@ -7,7 +7,9 @@ use super::{
     details::{Details, GitHub, Link},
     download, installed, java, FileRef, Kind, Project, Query, Source, SourceId, Version, GAME,
 };
+use crate::i18n::{tr, trf};
 use horizon_mod_package::index::{self, Index, Trust};
+use horizon_mod_package::manifest::Side;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -305,6 +307,38 @@ fn official_in(index: Option<&Index>, id: &str) -> bool {
     index.and_then(|i| i.project(id)).is_some_and(official)
 }
 
+/// Package side describes join requirements, never whether to install or build a package.
+pub fn package_side(side: Side) -> &'static str {
+    match side {
+        Side::Server => tr("needs only the server; players joining don't need it"),
+        Side::Both => tr("needs both the server and players joining"),
+        Side::Client => tr("client only; not compared when joining"),
+        _ => tr("Unknown package side"),
+    }
+}
+
+/// The installed package's own side, including local and converted packages.
+/// A Java jar, non-mod entry or unreadable package has no package-side display.
+pub fn installed_side(home: &Path, entry: &installed::Entry) -> Option<Side> {
+    if entry.kind != Kind::Mod {
+        return None;
+    }
+    let package = horizon_mod_package::Package::read(&entry.path(home)?).ok()?;
+    Some(package.manifest.side)
+}
+
+/// One mod's install-summary label, using its checked manifest rather than a newer index entry.
+pub fn installed_label(home: &Path, entry: &installed::Entry) -> String {
+    let name = format!("{} {}", entry.title, entry.number);
+    match installed_side(home, entry) {
+        Some(side) => trf(
+            "{mod} · {side}",
+            &[("mod", &name), ("side", package_side(side))],
+        ),
+        None => name,
+    }
+}
+
 /// What the player reads about a registry project before installing it: who made it, whether its
 /// files are signed, and for a mod what it may do, in the game's words (Options > Mods). A native
 /// mod says it runs with the player's rights, and how it fits the Horizon `instance` plays.
@@ -318,6 +352,13 @@ pub fn trust_and_capabilities(
     let Some(p) = index.project(id) else {
         return Vec::new();
     };
+    trust_and_capabilities_of(p, instance)
+}
+
+fn trust_and_capabilities_of(
+    p: &index::Project,
+    instance: Option<&crate::instances::Instance>,
+) -> Vec<String> {
     let mut lines = vec![if official(p) {
         "Made by Horizon".to_owned()
     } else {
@@ -330,6 +371,9 @@ pub fn trust_and_capabilities(
         Some(_) => "Signed by its author: the launcher checks the signature".to_owned(),
         None => "Unsigned: the launcher checks its checksum only".to_owned(),
     });
+    if let Some(side) = project_side(p) {
+        lines.push(package_side(side).to_string());
+    }
     if p.kind == index::Kind::NativeMod {
         lines.push(
             "Native code: it is compiled into the game and runs with full access to your computer. Its source was reviewed before it was listed".into(),
@@ -359,6 +403,21 @@ pub fn trust_and_capabilities(
         }
     }
     lines
+}
+
+fn project_side(p: &index::Project) -> Option<Side> {
+    matches!(p.kind, index::Kind::Mod | index::Kind::NativeMod)
+        .then(|| p.versions.first().and_then(|v| v.side))
+        .flatten()
+}
+
+fn description_of(p: &index::Project) -> String {
+    let mut body = p.description.clone();
+    if let Some(side) = project_side(p) {
+        body.push_str("\n\n");
+        body.push_str(package_side(side));
+    }
+    body
 }
 
 fn project_of(p: &index::Project) -> Option<Project> {
@@ -582,7 +641,7 @@ impl Source for Registry {
             .project(&project.id)
             .ok_or_else(|| format!("{} isn't in Horizon's registry.", project.title))?;
         let newest = p.versions.first();
-        let mut body = p.description.clone();
+        let mut body = description_of(p);
         if let Some(v) = newest.filter(|v| !v.capabilities.is_empty()) {
             body.push_str("\n\n## What it may do\n\n");
             for c in &v.capabilities {

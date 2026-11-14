@@ -2292,7 +2292,18 @@ fn mods(action: ModsCmd, as_json: bool) -> Result<(), String> {
         (ModsCmd::Search { .. }, _) | (_, None) => backend::game_home(),
         (_, Some(i)) => i.home.clone(),
     };
-    let entry_json = |e: &installed::Entry| serde_json::to_value(e).unwrap_or_default();
+    let entry_json = |e: &installed::Entry| {
+        let mut value = serde_json::to_value(e).unwrap_or_default();
+        if let Some(side) = horizon::installed_side(&home, e) {
+            value["side"] = serde_json::to_value(side).unwrap_or_default();
+        }
+        value
+    };
+    let show_side = |e: &installed::Entry| {
+        if let Some(side) = horizon::installed_side(&home, e) {
+            println!("  {}", horizon::package_side(side));
+        }
+    };
     let line = |label: &str, f: f32| progress(label.to_string())(f);
     let from_registry = installed::Installed::load(&home)
         .entries
@@ -2327,6 +2338,12 @@ fn mods(action: ModsCmd, as_json: bool) -> Result<(), String> {
                     o.label(),
                     o.source_url()
                 );
+                let path = home
+                    .join(horizon_launcher::native_mods::INSTALLED)
+                    .join(format!("{}.hmod", o.id));
+                if let Ok(package) = horizon_mod_package::Package::read(&path) {
+                    println!("  {}", horizon::package_side(package.manifest.side));
+                }
             }
             for e in list.iter().filter(|_| !as_json) {
                 let off = java.is_some() && !java_instance::is_on(&home, e);
@@ -2340,6 +2357,7 @@ fn mods(action: ModsCmd, as_json: bool) -> Result<(), String> {
                     e.file,
                     e.checksum
                 );
+                show_side(e);
             }
         }
         ModsCmd::Search {
@@ -2547,6 +2565,7 @@ fn mods(action: ModsCmd, as_json: bool) -> Result<(), String> {
             }
             for e in done.iter().filter(|_| !as_json) {
                 println!("{} {}: {} ({})", e.title, e.number, e.file, e.checksum);
+                show_side(e);
                 for s in &e.skipped {
                     println!("  not ported: {s}");
                 }
@@ -2578,9 +2597,13 @@ fn mods(action: ModsCmd, as_json: bool) -> Result<(), String> {
                     None => installed::update_for(&*source, e)?,
                 };
                 match newer {
-                    None => println!("{} {}: up to date.", e.title, e.number),
+                    None => {
+                        println!("{} {}: up to date.", e.title, e.number);
+                        show_side(e);
+                    }
                     Some(v) if check => {
-                        println!("{} {}: {} is available.", e.title, e.number, v.number)
+                        println!("{} {}: {} is available.", e.title, e.number, v.number);
+                        show_side(e);
                     }
                     Some(_) => {
                         let p = source.project(&e.project)?;
@@ -2592,6 +2615,7 @@ fn mods(action: ModsCmd, as_json: bool) -> Result<(), String> {
                         };
                         for done in done {
                             println!("{} {}: {}", done.title, done.number, done.file);
+                            show_side(&done);
                         }
                     }
                 }

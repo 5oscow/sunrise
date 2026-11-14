@@ -213,7 +213,13 @@ impl Launcher {
         };
         ui::list_row(key, hovered, hover, &t)
             .child(icon)
-            .child(ui::list_text(row.name.clone(), note))
+            .child(
+                ui::list_text(row.name.clone(), note).children(row.side.map(|side| {
+                    ui::text(13., FontWeight::NORMAL, horizon_theme::glass::ink::QUIET)
+                        .line_height(px(19.5))
+                        .child(horizon_launcher::browser::horizon::package_side(side))
+                })),
+            )
             .children(
                 row.kind
                     .as_ref()

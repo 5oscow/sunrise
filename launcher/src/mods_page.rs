@@ -85,6 +85,7 @@ pub(super) struct Mods {
     more: bool,
     error: Option<String>,
     pub(super) installed: Vec<installed::Entry>,
+    sides: HashMap<String, horizon_mod_package::manifest::Side>,
     /// The registry native mods' versions the player picked on their Versions tab, by id
     /// (`horizon::chosen`), read with `installed`.
     pub(super) chosen: std::collections::BTreeMap<String, String>,
@@ -149,6 +150,11 @@ impl Mods {
     pub(super) fn reload_installed(&mut self) {
         let home = self.home();
         self.installed = installed::Installed::load(&home).entries;
+        self.sides = self
+            .installed
+            .iter()
+            .filter_map(|e| horizon::installed_side(&home, e).map(|side| (e.file.clone(), side)))
+            .collect();
         self.chosen = horizon::chosen(&home);
     }
 
@@ -204,6 +210,7 @@ impl Mods {
             more: false,
             error: None,
             installed: Vec::new(),
+            sides: HashMap::new(),
             chosen: Default::default(),
             checked_for: None,
             loaded: false,
@@ -921,7 +928,7 @@ impl Launcher {
                     let done = installed::install(&*source, &p, everything, &home, &progress)?;
                     let names: Vec<String> = done
                         .iter()
-                        .map(|e| format!("{} {}", e.title, e.number))
+                        .map(|e| horizon::installed_label(&home, e))
                         .collect();
                     let mods = names.join(", ");
                     if done.iter().any(|e| native_status::is_native_file(&e.file)) {
@@ -1580,6 +1587,12 @@ impl Launcher {
                         .collect::<Vec<_>>()
                         .join(" · ")
                 })
+                .children(
+                    self.mods
+                        .sides
+                        .get(&e.file)
+                        .map(|side| div().child(horizon::package_side(*side))),
+                )
                 .children(instance.as_ref().filter(|_| is_native).map(|name| {
                     div()
                         .text_color(t.ink)

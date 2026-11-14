@@ -208,6 +208,7 @@ pub struct Installed {
     pub file: String,
     pub id: String,
     pub version: String,
+    pub side: Option<horizon_mod_package::manifest::Side>,
     pub internals: Vec<String>,
     pub origin: Option<crate::github_mods::Origin>,
     /// The validated package icon, or the package error (the file remains removable).
@@ -240,6 +241,7 @@ pub fn untracked(home: &Path) -> Vec<Installed> {
                 file,
                 id,
                 version,
+                side: package.as_ref().ok().map(|p| p.manifest.side),
                 internals,
                 origin,
                 icon: package.map(|p| p.icon.map(Arc::new)),

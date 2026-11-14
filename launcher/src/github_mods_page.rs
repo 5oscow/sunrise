@@ -82,8 +82,24 @@ fn finish(
         .collect::<Result<Vec<_>, _>>()?;
     let names: Vec<String> = done
         .iter()
-        .map(|o| format!("{} {}", o.id, o.version))
-        .collect();
+        .map(|o| {
+            let name = format!("{} {}", o.id, o.version);
+            let path = home
+                .join(native_mods::INSTALLED)
+                .join(format!("{}.hmod", o.id));
+            let package = horizon_mod_package::Package::read(&path)?;
+            Ok(trf(
+                "{mod} · {side}",
+                &[
+                    ("mod", &name),
+                    (
+                        "side",
+                        horizon_launcher::browser::horizon::package_side(package.manifest.side),
+                    ),
+                ],
+            ))
+        })
+        .collect::<Result<_, String>>()?;
     Ok(trf(
         "Installed {mods} from GitHub ({source}). Build it on the Mods page.",
         &[("mods", &names.join(", ")), ("source", &found.label())],
@@ -581,6 +597,9 @@ impl Launcher {
                     .flex_col()
                     .child(row.version.clone())
                     .child(source)
+                    .children(row.side.map(|side| {
+                        div().child(horizon_launcher::browser::horizon::package_side(side))
+                    }))
                     .into_any_element(),
             ),
             Some(self.native_mod_actions(row, busy, cx).into_any_element()),

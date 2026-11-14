@@ -30,6 +30,7 @@ pub(super) struct ModRow {
     pub(super) file: String,
     pub(super) name: String,
     pub(super) version: String,
+    pub(super) side: Option<horizon_mod_package::manifest::Side>,
     pub(super) on: bool,
     /// What the browser knows of it; None: a file put in by hand.
     pub(super) entry: Option<installed::Entry>,
@@ -133,6 +134,7 @@ fn read(home: &Path, java_instance: bool) -> Vec<ModRow> {
                         file,
                         name,
                         version,
+                        side: None,
                         on,
                         entry,
                         icon,
@@ -154,6 +156,7 @@ fn read(home: &Path, java_instance: bool) -> Vec<ModRow> {
                     file: e.file.clone(),
                     name: e.title.clone(),
                     version: e.number.clone(),
+                    side: package.as_ref().ok().map(|p| p.manifest.side),
                     on: horizon::mod_id(&e).is_some_and(|id| java::is_enabled(home, id)),
                     entry: Some(e),
                     icon: icon.image,
@@ -178,6 +181,7 @@ fn read(home: &Path, java_instance: bool) -> Vec<ModRow> {
                 file: native.file.clone(),
                 name: native.id.clone(),
                 version: native.version.clone(),
+                side: native.side,
                 on: java::is_enabled(home, &native.id),
                 entry: None,
                 icon: icon.image,
@@ -577,6 +581,9 @@ impl Launcher {
                             )
                             .child(shell::text(night::CAPTION, c(n.muted)).child(row.version)),
                     )
+                    .children(row.side.map(|side| {
+                        shell::text(night::CAPTION, c(n.muted)).child(horizon::package_side(side))
+                    }))
                     .child(
                         shell::text(
                             night::CAPTION,
@@ -632,6 +639,69 @@ mod tests {
     impl Drop for TestHome {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn package_rows_expose_sides_for_tracked_and_local_mods() {
+        use horizon_mod_package::manifest::Side;
+
+        let scratch = TestHome::new();
+        let home = &scratch.0;
+        let mut entries = Vec::new();
+        for (id, side, code, tracked) in [
+            ("client_mod", Side::Client, false, true),
+            ("both_mod", Side::Both, true, true),
+            ("server_mod", Side::Server, true, false),
+        ] {
+            let folder = if code {
+                native_mods::INSTALLED
+            } else {
+                "horizon-mods"
+            };
+            std::fs::create_dir_all(home.join(folder)).unwrap();
+            let file = format!("{folder}/{id}.hmod");
+            let mut manifest = format!(
+                "id='{id}'\nname='{id}'\nversion='1.0.0'\napi='0.2'\nside={}\ncapabilities={}\n",
+                serde_json::to_string(&side).unwrap(),
+                if code { "[]" } else { "['registries']" },
+            );
+            let files: Vec<(&str, &[u8])> = if code {
+                manifest.push_str(&format!(
+                    "[native]\ngame='26.3'\nhorizon='{}'\nmixins='{}'\n",
+                    "a".repeat(40),
+                    "b".repeat(40),
+                ));
+                vec![
+                    (
+                        "Cargo.toml",
+                        b"[package]\nname='side_test'\nversion='1.0.0'\n",
+                    ),
+                    ("src/lib.rs", b"pub fn hooks() {}\n"),
+                ]
+            } else {
+                Vec::new()
+            };
+            let bytes = horizon_mod_package::Package::write_files(&manifest, &files).unwrap();
+            std::fs::write(home.join(&file), bytes).unwrap();
+            if tracked {
+                entries.push(serde_json::from_value(serde_json::json!({
+                    "source": "horizon", "project": id, "slug": id, "title": id, "kind": "mod",
+                    "version": "1.0.0", "number": "1.0.0", "file": file, "checksum": "", "page": "",
+                })).unwrap());
+            }
+        }
+        installed::Installed { entries }.save(home).unwrap();
+        let rows = read(home, false);
+        assert_eq!(rows.len(), 3);
+        for (id, side) in [
+            ("client_mod", Side::Client),
+            ("both_mod", Side::Both),
+            ("server_mod", Side::Server),
+        ] {
+            let row = rows.iter().find(|row| row.name == id).unwrap();
+            assert_eq!(row.side, Some(side));
+            assert!(row.error.is_none());
         }
     }
 

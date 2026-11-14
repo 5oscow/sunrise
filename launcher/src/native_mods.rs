@@ -487,6 +487,28 @@ pub(crate) fn stage_installed(home: &Path, out: PathBuf) -> Result<Option<PathBu
     Ok(Some(out))
 }
 
+/// Build every native package, independently of package join side. Only dependency declarations
+/// are selected by the installation target.
+pub(crate) fn build_inputs(
+    requested: &[Bundle],
+    target: Target,
+) -> (Vec<Bundle>, Vec<Vec<dependencies::Dependency>>) {
+    let mods: Vec<Bundle> = requested
+        .iter()
+        .filter(|b| b.manifest.native.is_some())
+        .cloned()
+        .collect();
+    let side = match target {
+        Target::Client => horizon_mod_package::manifest::Side::Client,
+        Target::Server => horizon_mod_package::manifest::Side::Server,
+    };
+    let declared = mods
+        .iter()
+        .map(|bundle| dependencies::from_manifest(&bundle.manifest.dependencies, side))
+        .collect();
+    (mods, declared)
+}
+
 /// A validated flat mod project. The package manifest owns identity and build pins.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Bundle {
@@ -1788,19 +1810,11 @@ fn pipeline(
             ..b
         })
         .collect();
-    let mods: Vec<Bundle> = requested
-        .iter()
-        .filter(|b| b.manifest.native.is_some())
-        .cloned()
-        .collect();
+    let (mods, declared) = build_inputs(&requested, target);
     let side = match target {
         Target::Client => horizon_mod_package::manifest::Side::Client,
         Target::Server => horizon_mod_package::manifest::Side::Server,
     };
-    let declared: Vec<Vec<dependencies::Dependency>> = mods
-        .iter()
-        .map(|bundle| dependencies::from_manifest(&bundle.manifest.dependencies, side))
-        .collect();
     let pairs: Vec<(&Bundle, &[dependencies::Dependency])> = mods
         .iter()
         .zip(&declared)

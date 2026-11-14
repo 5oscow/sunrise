@@ -44,7 +44,28 @@ folders are unsupported.
 The shared [manifest fields](../how-to/content-mods.md#the-manifest) include `id`, `name`, `version`, `api = "0.2"`
 and `capabilities = ["registries"]`. The content API is checked for exact equality. Unknown fields
 refuse the manifest. Native mods may declare top-level `internals`, an array of tables with
-`path`, optional `hash`, and `kind` when a path names several member kinds. Without `hash`, the build uses the fingerprint from the pinned game’s catalog. An explicitly empty `hash` is refused. Native code adds `[native]`:
+`path`, optional `hash`, and `kind` when a path names several member kinds. Without `hash`, the build uses the fingerprint from the pinned game’s catalog. An explicitly empty `hash` is refused.
+
+### Package side
+
+Top-level `side` describes what joining players need, not where the package installs:
+
+| Value | Install and build | Join comparison |
+| --- | --- | --- |
+| `"client"` (default) | Installed and built on every target | Local to the installation; never compared at join |
+| `"both"` | Installed and built on every target | The server and joining players need the same mod ID and version |
+| `"server"` | Installed and built on every target, including a client with an integrated server (single player or LAN host) | Needs only the server; players joining don't need it, at any version; never compared at join |
+
+No package is skipped because of its package side. A `server` package may carry assets, but the
+game refuses it by name at load if it declares registry content, a client-bound payload channel,
+a synced attachment, or a client-only hook or part that joining clients must already know.
+Dependencies keep their own rules: a `both` package can depend on a `server` package normally.
+This package field is separate from a dependency's `side = "server"`, which still means only
+the dedicated server installation, not an integrated server.
+
+### Native fields
+
+Native code adds `[native]`:
 
 | Field | Type | Rule |
 | --- | --- | --- |

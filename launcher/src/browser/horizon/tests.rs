@@ -39,6 +39,196 @@ fn put(index: &Index, local: bool, home: &Path) -> Result<Vec<installed::Entry>,
     install_version(index, local, p, &p.versions[0], home, &|_, _| {}).map(|e| vec![e])
 }
 
+fn side_packages(folder: &Path) -> Index {
+    use sha2::Digest;
+
+    let mut index = sample();
+    let template = index.projects[0].clone();
+    index.projects.clear();
+    for (id, side) in [
+        ("server_mod", "server"),
+        ("client_mod", "client"),
+        ("both_mod", "both"),
+    ] {
+        let dependency = if id == "both_mod" {
+            "[dependencies]\nserver_mod = '^1'\n"
+        } else if id == "client_mod" {
+            "[dependencies]\nserver_mod = { version = '^1', side = 'server' }\n"
+        } else {
+            ""
+        };
+        let manifest = format!(
+            "id='{id}'\nname='{id}'\nversion='1.0.0'\napi='0.2'\nside='{side}'\ncapabilities=[]\n{dependency}[native]\ngame='{GAME}'\nhorizon='{}'\nmixins='{}'\n",
+            "a".repeat(40), "b".repeat(40)
+        );
+        let bytes = horizon_mod_package::Package::write_files(
+            &manifest,
+            &[
+                (
+                    "Cargo.toml",
+                    b"[package]\nname='side_test'\nversion='1.0.0'\n".as_slice(),
+                ),
+                ("src/lib.rs", b"pub fn hooks() {}\n".as_slice()),
+            ],
+        )
+        .unwrap();
+        let path = folder.join(format!("{id}.hmod"));
+        fs::write(&path, &bytes).unwrap();
+        let facts = index::inspect(&index::Kind::NativeMod, &path).unwrap();
+        let mut project = template.clone();
+        project.id = id.into();
+        project.name = id.into();
+        project.kind = index::Kind::NativeMod;
+        project.key = None;
+        let mut version = project.versions[0].clone();
+        version.version = "1.0.0".into();
+        version.api = facts.api;
+        version.side = facts.side;
+        version.capabilities = facts.capabilities;
+        version.requires = facts.requires;
+        version.file = index::File {
+            name: format!("{id}.hmod"),
+            url: format!("file://{}", path.display()),
+            size: bytes.len() as u64,
+            sha256: format!("{:x}", sha2::Sha256::digest(&bytes)),
+            signature: None,
+        };
+        project.versions = vec![version];
+        index.projects.push(project);
+    }
+    index
+}
+
+#[test]
+fn every_package_side_installs_and_enters_the_build_on_both_targets() {
+    use crate::native_mods::{self, Target};
+    use horizon_mod_package::dependencies::{self, Overrides};
+
+    let scratch = tempfile::tempdir().unwrap();
+    let index = side_packages(scratch.path());
+    for target in [Target::Client, Target::Server] {
+        let home = scratch.path().join(target.name());
+        let mut done = Vec::new();
+        for project in &index.projects {
+            done.extend(
+                install_from(
+                    &index,
+                    true,
+                    &project_of(project).unwrap(),
+                    &home,
+                    &|_, _| {},
+                )
+                .unwrap(),
+            );
+        }
+        assert_eq!(done.len(), 3);
+        assert_eq!(installed::Installed::load(&home).entries.len(), 3);
+        let mut labels = Vec::new();
+        for entry in &done {
+            assert!(entry.path(&home).unwrap().is_file());
+            assert!(java::is_enabled(&home, &entry.project));
+            assert!(entry.skipped.is_empty());
+            let side = index.project(&entry.project).unwrap().versions[0]
+                .side
+                .unwrap();
+            assert_eq!(installed_side(&home, entry), Some(side));
+            let label = installed_label(&home, entry);
+            assert_eq!(label.matches(package_side(side)).count(), 1, "{label}");
+            labels.push(label);
+        }
+        assert_eq!(
+            labels
+                .join("\n")
+                .matches(package_side(Side::Server))
+                .count(),
+            1,
+        );
+        let staged = native_mods::stage_installed(&home, home.join("staged"))
+            .unwrap()
+            .unwrap();
+        let requested = native_mods::bundles(&staged).unwrap();
+        let (mods, declared) = native_mods::build_inputs(&requested, target);
+        assert_eq!(mods.len(), 3, "{} must build every package", target.name());
+        let manifests: Vec<_> = mods.iter().map(|b| &b.manifest).collect();
+        let running = if target == Target::Client {
+            Side::Client
+        } else {
+            Side::Server
+        };
+        dependencies::resolve_manifests(&manifests, running, &Overrides::default()).unwrap();
+        let inputs: Vec<_> = mods
+            .iter()
+            .zip(&declared)
+            .map(|(bundle, dependencies)| dependencies::Mod {
+                id: &bundle.manifest.id,
+                version: &bundle.manifest.version,
+                has_api: true,
+                code: true,
+                dependencies,
+            })
+            .collect();
+        let links = dependencies::resolve_links(&inputs).unwrap();
+        let order: Vec<_> = links
+            .order
+            .iter()
+            .map(|&i| mods[i].manifest.id.as_str())
+            .collect();
+        assert!(
+            order.iter().position(|id| *id == "server_mod").unwrap()
+                < order.iter().position(|id| *id == "both_mod").unwrap(),
+        );
+        let client = mods
+            .iter()
+            .position(|b| b.manifest.id == "client_mod")
+            .unwrap();
+        assert_eq!(
+            declared[client].len(),
+            usize::from(target == Target::Server)
+        );
+        let without_server: Vec<_> = manifests
+            .iter()
+            .copied()
+            .filter(|m| m.id != "server_mod")
+            .collect();
+        let error =
+            dependencies::resolve_manifests(&without_server, running, &Overrides::default())
+                .unwrap_err()
+                .to_string();
+        assert!(
+            error.contains("both_mod") && error.contains("server_mod"),
+            "{error}"
+        );
+        let client_only = [&mods[client].manifest];
+        let dependency_result =
+            dependencies::resolve_manifests(&client_only, running, &Overrides::default());
+        assert_eq!(dependency_result.is_ok(), target == Target::Client);
+    }
+}
+
+#[test]
+fn registry_page_and_browser_rows_use_the_index_package_side_once() {
+    let mut project = sample().projects[0].clone();
+    for kind in [index::Kind::Mod, index::Kind::NativeMod] {
+        project.kind = kind;
+        for side in [Side::Server, Side::Client, Side::Both] {
+            project.versions[0].side = Some(side);
+            let label = package_side(side);
+            let lines = trust_and_capabilities_of(&project, None);
+            assert_eq!(
+                lines.iter().filter(|line| line.as_str() == label).count(),
+                1
+            );
+            let body = description_of(&project);
+            assert_eq!(body.matches(label).count(), 1, "{body}");
+            assert!(body.starts_with(&project.description));
+        }
+    }
+    assert_eq!(
+        package_side(Side::Server),
+        crate::i18n::tr("needs only the server; players joining don't need it"),
+    );
+}
+
 #[test]
 fn native_registry_entries_are_mods_that_say_they_run_native_code() {
     assert_eq!(kind_of(&index::Kind::NativeMod), Some(Kind::Mod));
