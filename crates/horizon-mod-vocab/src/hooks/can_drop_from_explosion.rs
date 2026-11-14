@@ -14,6 +14,7 @@ pub trait Hooks {
 
 - **`BlockPart::can_drop_from_explosion(level, event)`** (`CanDropFromExplosionEvent { pos, state, explosion }`): whether the block an explosion destroys drops (NeoForge's `IBlockExtension.canDropFromExplosion`), asked once per destroyed block where `BlockBehaviour.onExplosionHit` asks `Block.dropFromExplosion`, before anything drops. `Some(false)` skips the drop: no loot, and none of the block's `spawnAfterBreak` (an infested block's silverfish, an ore's or a spawner's experience). `Some(true)` drops, even for TNT, which vanilla keeps from dropping. `None` leaves it to another part and then vanilla. The block is removed either way, `on_block_exploded` still hears it, and a TNT still primes: `TntBlock.wasExploded` is a separate moment. A panicking part is contained with a warning and vanilla's answer is used. Authoritative servers only; the level is read-only. With no part attached to the state, one table lookup per destroyed block. Diverges from upstream: new hook."#]
     #[hook(
+        signature = "pub(in crate::game) fn native_can_drop_from_explosion( &self, pos: BlockPos, state: BlockStateId, explosion: &ExplosionStart<'_>, drops: &mut Option<bool>, )",
         side = "server",
         contract = "replace",
         out = "drops",

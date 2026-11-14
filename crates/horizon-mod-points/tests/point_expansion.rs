@@ -26,6 +26,9 @@ mod mod_points {
         pub use mod_api::__private::points::cold;
         use std::sync::atomic::AtomicBool;
         pub static POINTS: [AtomicBool; 2] = [AtomicBool::new(false), AtomicBool::new(false)];
+        pub fn active(place: super::PointId) -> bool {
+            POINTS[place as usize].load(std::sync::atomic::Ordering::Acquire)
+        }
     }
     pub mod dispatch {
         pub fn double(args: &mut super::DoubleArgs) {

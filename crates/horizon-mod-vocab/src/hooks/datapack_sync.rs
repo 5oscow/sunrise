@@ -12,6 +12,8 @@ pub trait Hooks {
     /// new. An empty answer retains the client's own recipes, or restores
     /// them after an earlier nonempty answer.
     #[hook(
+        signature = "pub(in crate::game) fn native_datapack_sync( &mut self, call: mod_api::__private::DatapackSyncCall<'_>, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_datapack_sync",
         side = "server",
         contract = "collect",
         out = "recipe_types",

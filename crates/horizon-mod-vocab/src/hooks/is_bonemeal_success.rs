@@ -9,6 +9,7 @@ pub trait Hooks {
     /// draw from `native_level_random` to keep vanilla's order.
     /// Authoritative servers only.
     #[hook(
+        signature = "pub(in crate::game) fn native_is_bonemeal_success( &mut self, dimension: LevelDimension, pos: BlockPos, state: BlockStateId, success: &mut bool, )",
         side = "server",
         contract = "collect",
         out = "success",

@@ -8,6 +8,7 @@ pub trait Hooks {
     /// water's textures when it has none. Asked at startup and on resource reload before baking, and
     /// only on the client.
     #[hook(
+        signature = "pub(in crate::game) fn native_register_fluid_models( context: &mod_api::RegistrationContext, models: &mut Vec<mod_api::FluidModel>, )",
         side = "client",
         contract = "collect",
         out = "models",

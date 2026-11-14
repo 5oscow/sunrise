@@ -5,6 +5,8 @@ pub trait Hooks {
     /// A server player changed the page of a lectern, after its page and redstone pulse changed.
     /// `page` is the zero-based new page. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_player_lectern_page_change( &mut self, player: u128, name: &str, pos: [i32; 3], page: i32, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_player_lectern_page_change",
         side = "server",
         contract = "listen",
         neoforge = "none (NeoForge has no such event)"

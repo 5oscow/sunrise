@@ -7,6 +7,11 @@ fn native_listener_is_refused_by_mod_and_target() {
     if mod_points::STAGED {
         return;
     }
+    assert!(horizon_engine_slots::catalog().is_err());
+    horizon_game_points::install();
+    let catalog = horizon_engine_slots::catalog().unwrap();
+    assert!(std::ptr::eq(catalog.table, &mod_points::__private::TABLE));
+    assert_eq!(catalog.layout, mod_points::POINT_LAYOUT);
     let slot = mod_points::listeners::tick("named_mod", 0, "head", tick);
     // The one boundary every registration passes, not a wrapper of it.
     let error = mod_api::__private::points::register(&slot).unwrap_err();

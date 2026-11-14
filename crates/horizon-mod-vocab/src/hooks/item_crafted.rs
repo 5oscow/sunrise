@@ -15,6 +15,7 @@ pub trait Hooks {
     /// included, and not for a stonecutter's, a smithing table's or a
     /// furnace's result. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_item_crafted( &mut self, player: u128, recipe: &str, stack: &ItemStack, inputs: &[Option<ItemStack>], )",
         side = "server",
         contract = "listen",
         neoforge = "PlayerEvent.ItemCraftedEvent",

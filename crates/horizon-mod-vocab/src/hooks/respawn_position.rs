@@ -18,6 +18,7 @@ pub trait Hooks {
     /// key before any event conversion, so the cost is one table lookup per respawn. Diverges
     /// from upstream: new hook.
     #[hook(
+        signature = "pub(in crate::game) fn native_respawn_position( &self, state: BlockStateId, pos: BlockPos, entity_type: &str, orientation: f32, position: &mut Option<([f64; 3], f32, f32)>, )",
         side = "server",
         contract = "collect",
         out = "position",

@@ -7,6 +7,8 @@ pub trait Hooks {
     /// portal rectangle or the End platform origin. The completed blocks are
     /// already in the world.
     #[hook(
+        signature = "pub(in crate::game) fn native_portal_create(&mut self, dimension: &str, pos: [i32; 3])",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_portal_create",
         side = "server",
         contract = "listen",
         neoforge = "none (NeoForge has no such event)"

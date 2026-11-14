@@ -6,6 +6,8 @@ pub trait Hooks {
     /// added to or filtered from `suggestions`. `range` is the replaced byte range.
     /// The game snapshots completions only when a listener subscribes.
     #[hook(
+        signature = "pub(in crate::game) fn native_tab_complete( &mut self, player: u128, name: &str, command: &str, range: [usize; 2], suggestions: &mut Vec<Suggestion>, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_tab_complete",
         side = "server",
         contract = "collect",
         out = "suggestions",

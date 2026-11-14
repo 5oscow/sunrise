@@ -10,6 +10,7 @@ pub trait Hooks {
     /// Set `cancel` and it doesn't play: no sound, no particle, no
     /// `note_block_play` game event. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_note_block_play( &self, call: mod_api::__private::NoteBlockPlayCall<'_>, )",
         side = "server",
         contract = "cancel",
         out = "cancel",

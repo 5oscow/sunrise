@@ -12,6 +12,7 @@ pub trait Hooks {
     /// Asked once per recipe-book placement/apply or server transfer check, not per tick.
     /// Native and wasm listeners receive the same arguments and append to the same output.
     #[hook(
+        signature = "pub(in crate::game) fn native_recipe_sources( &mut self, player: u128, menu: &str, pos: [i32; 3], sources: &mut Vec<[i32; 3]>, )",
         side = "server",
         contract = "collect",
         out = "sources",

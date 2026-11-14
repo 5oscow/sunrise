@@ -20,6 +20,7 @@ pub trait Hooks {
     /// swapped in, so `host.players().acting_player()` answers them. Once for
     /// each wear, on a server.
     #[hook(
+        signature = "pub(in crate::game) fn native_damage_item( &mut self, stack: &ItemStack, entity: Option<LivingRef>, amount: &mut i32, canceled: &mut bool, break_now: &mut bool, )",
         side = "server",
         contract = "cancel",
         out = "canceled",

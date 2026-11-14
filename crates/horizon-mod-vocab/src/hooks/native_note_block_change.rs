@@ -7,6 +7,7 @@ pub trait Hooks {
     /// through 24; an out-of-range value keeps vanilla's. Cancel to leave the
     /// note unchanged and prevent playback.
     #[hook(
+        signature = "pub(in crate::game) fn native_note_block_change( &self, context: &NoteBlockChange, new_note: &mut i32, cancel: &mut bool, )",
         side = "server",
         contract = "cancel",
         out = "cancel",

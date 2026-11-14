@@ -10,6 +10,7 @@ pub trait Hooks {
     /// happens, as Bukkit's `EntityChangeBlockEvent` (@API:entity_change_block_v2@).
     /// The fork names this pre-change veto `entity_change_block_pre`; `entity_change_block` is the separate post-change notice.
     #[hook(
+        signature = "pub(in crate::game) fn native_entity_change_block_pre( &mut self, call: super::fire::EntityChangeBlockPreCall<'_>, )",
         side = "server",
         contract = "cancel",
         neoforge = "none (NeoForge has no such event; Bukkit's EntityChangeBlockEvent is cancellable)",

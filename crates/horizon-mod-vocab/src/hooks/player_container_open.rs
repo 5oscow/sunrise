@@ -15,6 +15,8 @@ pub trait Hooks {
     /// Replacing a menu follows its close; even inside one tick, open precedes
     /// `player_container_close`. The player's state is swapped in. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_player_container_open( &mut self, player: u128, name: &str, dimension: &str, menu: &str, pos: Option<[i32; 3]>, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_player_container_open",
         side = "server",
         contract = "listen",
         neoforge = "PlayerContainerEvent.Open",

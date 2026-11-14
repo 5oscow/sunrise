@@ -11,6 +11,8 @@ pub trait Hooks {
     /// hunger, a wall) is not reported. The player's state is swapped in, so
     /// the helpers and `PlayerRef::tell` work. Once for each change, on a server.
     #[hook(
+        signature = "pub(in crate::game) fn native_player_sprint( &mut self, player: u128, name: &str, sprinting: bool, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_player_sprint",
         side = "server",
         contract = "listen",
         neoforge = "none (NeoForge has no sprint event)"

@@ -16,6 +16,8 @@ pub trait Hooks {
     /// the proxy's forwarding) refuse earlier, on the connection, and this
     /// hook does not hear those players.
     #[hook(
+        signature = "pub(in crate::game) fn native_player_login( &mut self, player: u128, name: &str, cancel: &mut bool, reason: &mut Option<Text>, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_player_login",
         side = "server",
         contract = "cancel",
         out = "cancel",

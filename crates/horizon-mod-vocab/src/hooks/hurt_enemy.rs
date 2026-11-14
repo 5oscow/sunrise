@@ -8,6 +8,8 @@ pub trait Hooks {
     /// hears. Another player as the target is not told. Server-side, for
     /// every player of the world (the helpers read the acting one).
     #[hook(
+        signature = "pub(in crate::game) fn native_hurt_enemy( &mut self, stack: &ItemStack, entity: u32, kind: &str, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_hurt_enemy",
         side = "server",
         contract = "listen",
         scope = "item",

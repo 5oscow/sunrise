@@ -5,6 +5,7 @@ pub trait Hooks {
     /// `ClientTickEvent.Pre`): the window's `Game` only, so not on a server's
     /// own tick (`server_tick` is that moment). Client-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_client_tick_pre(&mut self)",
         side = "client",
         contract = "listen",
         neoforge = "ClientTickEvent.Pre",

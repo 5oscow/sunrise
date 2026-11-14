@@ -8,6 +8,7 @@ pub trait Hooks {
     /// damage or knockback, no sound, particles or game event. Before
     /// `explosion_prime`, which a cancel skips. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_explosion_start( &mut self, explosion: &ExplosionStart<'_>, cancel: &mut bool, )",
         side = "server",
         contract = "cancel",
         out = "cancel",

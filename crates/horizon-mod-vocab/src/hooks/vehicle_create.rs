@@ -5,6 +5,8 @@ pub trait Hooks {
     /// A boat or minecart was created at `pos`, after it joined the level.
     /// `kind` is the vehicle type. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_vehicle_create(&mut self, kind: &str, pos: [f64; 3])",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_vehicle_create",
         side = "server",
         contract = "listen",
         neoforge = "none (NeoForge has no such event; Bukkit's VehicleCreateEvent)"

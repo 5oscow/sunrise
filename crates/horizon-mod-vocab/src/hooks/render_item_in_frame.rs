@@ -6,6 +6,7 @@ pub trait Hooks {
 
 `render_item_in_frame(entity_id, pos, stack, canceled)` runs before a visible item frame draws its item or map, including glow and invisible frames. Set `canceled` to hide the item without hiding the frame."#]
     #[hook(
+        signature = "pub(in crate::game) fn native_render_item_in_frame( &self, entity_id: u32, pos: [i32; 3], stack: &ItemStack, canceled: &mut bool, )",
         side = "client",
         contract = "cancel",
         out = "canceled",

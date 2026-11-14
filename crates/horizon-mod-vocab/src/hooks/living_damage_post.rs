@@ -17,6 +17,7 @@ pub trait Hooks {
     /// entity or the world's blocks: the level host gives the hit's random and level attachments.
     /// The container is an API-owned scalar snapshot; the engine retains sequencing and normalization.
     #[hook(
+        signature = "pub(in crate::game) fn native_living_damage_post( &mut self, entity: i32, kind: &str, source: &HurtSource<'_>, container: &mod_api::DamageContainer, )",
         side = "server",
         contract = "listen",
         host = "level",

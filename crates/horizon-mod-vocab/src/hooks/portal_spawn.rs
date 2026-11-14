@@ -7,6 +7,7 @@ pub trait Hooks {
     /// `cancel` and no portal forms: the fire stays where it can survive, as
     /// without a frame. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_portal_spawn( &self, dimension: LevelDimension, pos: BlockPos, state: BlockStateId, shape: PortalShape, cancel: &mut bool, )",
         side = "server",
         contract = "cancel",
         out = "cancel",

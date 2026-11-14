@@ -146,6 +146,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "horizon-game-points"
+version = "0.1.0"
+dependencies = [
+ "horizon-engine-slots",
+ "horizon-mod-api-gen",
+ "horizon-mod-vocab",
+]
+
+[[package]]
 name = "horizon-mod-api"
 version = "0.1.0"
 dependencies = [
@@ -207,11 +216,9 @@ name = "horizon-mod-points"
 version = "0.1.0"
 dependencies = [
  "horizon-engine-slots",
+ "horizon-game-points",
  "horizon-mod-api",
  "horizon-mod-api-gen",
- "horizon-mod-point-shape",
- "quote",
- "syn 2.0.119",
 ]
 
 [[package]]

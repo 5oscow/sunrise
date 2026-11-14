@@ -7,6 +7,8 @@ pub trait Hooks {
     /// and the bucket does nothing. Server-side, for every player of the
     /// world (`host.players().acting_player()` says who).
     #[hook(
+        signature = "pub(in crate::game) fn native_fill_bucket( &mut self, stack: &ItemStack, pos: [i32; 3], canceled: &mut bool, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_fill_bucket",
         side = "server",
         contract = "cancel",
         out = "canceled",

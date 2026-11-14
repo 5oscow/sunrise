@@ -4,6 +4,7 @@
 pub trait Hooks {
     /// A sponge at `pos` absorbed water and became wet. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_sponge_absorb(&self, dimension: LevelDimension, pos: BlockPos)",
         side = "server",
         contract = "listen",
         neoforge = "none (NeoForge has no such event)",

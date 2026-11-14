@@ -13,6 +13,8 @@ pub trait Hooks {
     /// Once for each totem, on a server; the host of a LAN world's totem is
     /// not heard.
     #[hook(
+        signature = "pub(in crate::game) fn native_player_totem(&mut self, player: u128, name: &str)",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_player_totem",
         side = "server",
         contract = "listen",
         neoforge = "none (NeoForge's LivingUseTotemEvent can cancel the save; this hook only listens. Bukkit's EntityResurrectEvent)"

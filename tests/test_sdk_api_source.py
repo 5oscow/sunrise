@@ -236,6 +236,25 @@ class CollectTests(unittest.TestCase):
         self.assertEqual(files, {"crates/api/generated/gen.rs": b"pub struct Hook;\n",
                                  "crates/api/src/lib.rs": (self.root / "crates/api/src/lib.rs").read_bytes()})
 
+    def test_generator_cache_and_timing_are_not_sdk_outputs(self):
+        builds = [self.messages(build, "pub struct Hook;\n") for build in "abc"]
+        for index, messages in enumerate(builds):
+            out = Path(messages[0]["out_dir"])
+            cache = out / ("interfaces-" + str(index) * 64)
+            cache.mkdir()
+            (cache / "summary.cache").write_text("build-local")
+            (out / "points-timing.txt").write_text(f"written {index}.0s\n")
+        files = self.collect(*builds)
+        self.assertEqual(files["crates/api/generated/gen.rs"], b"pub struct Hook;\n")
+        self.assertFalse(any("interfaces-" in path or "points-timing" in path for path in files))
+
+    def test_a_compiler_read_of_an_excluded_report_is_refused(self):
+        messages = self.messages(
+            "report", "", reads=("crates/api/src/lib.rs", "target/out-report/points-timing.txt")
+        )
+        (Path(messages[0]["out_dir"]) / "points-timing.txt").write_text("not Rust")
+        self.assertEqual(self.refusal(messages), "E_GENERATED_ENTRY")
+
     def test_generated_output_that_differs_between_builds_is_refused(self):
         self.assertEqual(self.refusal(self.messages("a", "pub struct Hook;\n"),
                                       self.messages("b", "pub struct Hook(u32);\n"),

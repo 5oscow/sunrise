@@ -8,6 +8,7 @@ pub trait Hooks {
     /// after a resource reload. An id in vanilla's namespace, not of that form, or registered already
     /// is logged and left out; a select on a property nobody registers draws its fallback.
     #[hook(
+        signature = "pub(in crate::game) fn native_register_select_item_model_property( context: &mod_api::RegistrationContext, properties: &mut Vec<String>, )",
         side = "client",
         contract = "collect",
         out = "properties",

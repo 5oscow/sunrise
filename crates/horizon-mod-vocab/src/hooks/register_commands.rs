@@ -17,6 +17,8 @@ pub trait Hooks {
 
 - Besides `word`, `text`, `integer`, `number`, `boolean`, `player`, `item` and `block_pos`, an argument's kind may be `vec3`, `vec3_uncentered`, `column_pos`, `rotation`, `dimension` or `nbt`. Each is sent to clients as vanilla's parser, so `~`, `^` and the dimension list complete as in a vanilla command. A `vec3` and a `vec3_uncentered` cannot share a position in one command's usages, as they look the same to a client."#]
     #[hook(
+        signature = "pub(in crate::game) fn native_register_commands( &mut self, commands: &mut Vec<mod_api::Command>, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_register_commands",
         side = "server",
         contract = "collect",
         out = "commands",

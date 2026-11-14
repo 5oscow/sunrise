@@ -5,6 +5,8 @@ pub trait Hooks {
     /// A server player's book edit or signing packet is about to be applied. `pages` is its page
     /// count; `signing` means the packet has a title. Set `cancel` to drop the edit.
     #[hook(
+        signature = "pub(in crate::game) fn native_player_edit_book( &mut self, player: u128, name: &str, pages: i32, signing: bool, cancel: &mut bool, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_player_edit_book",
         side = "server",
         contract = "cancel",
         out = "cancel",

@@ -16,6 +16,7 @@ pub trait Hooks {
     /// documented `Animal.spawnChildFromBreeding` posting site; a rejected
     /// villager join instead leaves the child's bed free. On the server.
     #[hook(
+        signature = "pub(in crate::game) fn native_baby_entity_spawn( &mut self, parent: u32, partner: u32, player: Option<u128>, player_entity_id: Option<i32>, kind: &str, cancel: &mut bool, )",
         side = "server",
         contract = "cancel",
         out = "cancel",

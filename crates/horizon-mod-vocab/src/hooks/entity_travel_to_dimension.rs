@@ -25,6 +25,7 @@ pub trait Hooks {
     /// from upstream: replaces `player_portal`, which covered only server
     /// players through portals.
     #[hook(
+        signature = "pub(in crate::game) fn native_entity_travel_to_dimension( &mut self, entity: EntityRef, dimension: &str, cause: &str, cancel: &mut bool, )",
         side = "server",
         contract = "cancel",
         out = "cancel",

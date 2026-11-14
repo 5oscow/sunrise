@@ -12,6 +12,7 @@ pub trait Hooks {
     /// blocks rather than the retraction to replay. Diverges from upstream: `piston_move` is renamed to
     /// `piston_pre`, and `piston_post` is new.
     #[hook(
+        signature = "pub(in crate::game) fn native_piston_pre(&self, call: mod_api::__private::PistonPreCall<'_>)",
         side = "server",
         contract = "cancel",
         out = "canceled",
@@ -35,6 +36,7 @@ pub trait Hooks {
     /// Server-side. Diverges from upstream: `piston_move` is split into
     /// `piston_pre` and `piston_post`.
     #[hook(
+        signature = "pub(in crate::game) fn native_piston_post( &self, dimension: LevelDimension, piston: BlockPos, direction: [i32; 3], extending: bool, push: &[BlockPos], destroy: &[BlockPos], )",
         side = "server",
         contract = "listen",
         neoforge = "PistonEvent.Post",

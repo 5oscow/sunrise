@@ -6,6 +6,8 @@ pub trait Hooks {
     /// `trident`, `command` or `mod` (a native mod's `strike_lightning`); `player` is the responsible player when known.
     /// Set `cancel` to prevent the bolt and its effects.
     #[hook(
+        signature = "pub(in crate::game) fn native_lightning_strike( &mut self, player: Option<u128>, pos: [i32; 3], cause: &str, cancel: &mut bool, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_lightning_strike",
         side = "server",
         contract = "cancel",
         out = "cancel",

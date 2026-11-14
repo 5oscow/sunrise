@@ -10,6 +10,7 @@ pub trait Hooks {
     /// hears a server player's totem that did save them, after this. The level is the hit's: its blocks, random and own
     /// attachments.
     #[hook(
+        signature = "pub(in crate::game) fn native_living_use_totem( &mut self, entity: i32, kind: &str, source: &HurtSource<'_>, hand: Hand, item: &str, cancel: &mut bool, )",
         side = "server",
         contract = "cancel",
         out = "cancel",

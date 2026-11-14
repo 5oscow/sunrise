@@ -17,6 +17,7 @@ pub trait Hooks {
     /// a player's turn their state is swapped in; for the hardcore respawn
     /// it is not.
     #[hook(
+        signature = "pub(in crate::game) fn native_player_game_mode_changed( &mut self, player: u128, name: &str, from: GameMode, to: &mut GameMode, cancel: &mut bool, )",
         side = "server",
         contract = "cancel",
         out = "cancel",

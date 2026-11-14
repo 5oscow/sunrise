@@ -70,6 +70,7 @@ wasm mod) has its call refused or trapped, is logged once with its type and aske
 reload; its special models draw the missing model until then. A part naming a model no pack has makes that
 answer draw the missing model, logged once for the model."#]
     #[hook(
+        signature = "pub(in crate::game) fn native_register_special_model_renderer( context: &mod_api::RegistrationContext, renderers: &mut dyn SpecialModelRenderers, )",
         side = "client",
         contract = "listen",
         context = "registration",

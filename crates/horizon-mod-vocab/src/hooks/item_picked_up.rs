@@ -14,6 +14,7 @@ pub trait Hooks {
     /// window's own player of a world it ticks itself, whose pickup pass
     /// lifts the items out of the level, it reads as unavailable. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_item_picked_up( &mut self, player: u128, item: ItemEntityRef, can_pickup: &mut TriState, )",
         side = "server",
         contract = "listen",
         neoforge = "ItemEntityPickupEvent.Pre",

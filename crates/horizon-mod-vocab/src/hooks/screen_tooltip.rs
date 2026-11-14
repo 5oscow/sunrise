@@ -6,6 +6,8 @@ pub trait Hooks {
     /// screen, a mod's, over no item: push its lines when it is over
     /// something of yours. Legacy colour codes (§) work.
     #[hook(
+        signature = "pub(in crate::game) fn native_screen_tooltip( &self, block: &str, data: &[i32], at: [f32; 2], lines: &mut Vec<String>, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_screen_tooltip",
         side = "client",
         contract = "collect",
         out = "lines",

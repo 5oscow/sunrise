@@ -5,6 +5,8 @@ pub trait Hooks {
     /// Mending repaired a server player's item with experience from an orb. `repair` is durability
     /// restored and `experience` is the orb's value. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_player_item_mend( &mut self, player: u128, name: &str, item: &str, repair: u32, experience: u32, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_player_item_mend",
         side = "server",
         contract = "listen",
         neoforge = "none (NeoForge has no such event)"

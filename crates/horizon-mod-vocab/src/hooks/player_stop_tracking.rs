@@ -12,6 +12,8 @@ pub trait Hooks {
     /// necessarily still there, and a player who left is gone: no player's
     /// state is swapped in. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_player_stop_tracking( &mut self, player: u128, name: &str, entity: u32, uuid: u128, kind: &str, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_player_stop_tracking",
         side = "server",
         contract = "listen",
         neoforge = "PlayerEvent.StopTracking",

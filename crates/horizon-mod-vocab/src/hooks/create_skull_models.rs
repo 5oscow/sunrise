@@ -47,6 +47,7 @@ layer neither a mod nor vanilla has, or whose texture is empty. Skull types are 
 startup. Placed skull blocks of a mod type are not drawn by this hook: a mod block declaring that
 it is a skull is arismoko/horizon#2529."#]
     #[hook(
+        signature = "pub(in crate::game) fn native_create_skull_models( context: &mod_api::RegistrationContext, models: &mut Vec<SkullModel>, )",
         side = "client",
         contract = "collect",
         out = "models",

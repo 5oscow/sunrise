@@ -5,6 +5,8 @@ pub trait Hooks {
     /// A hopper selected a container while searching for items to push or
     /// pull. Exactly one of `container` and `entity` identifies the target.
     #[hook(
+        signature = "pub(in crate::game) fn native_hopper_inventory_search( &mut self, hopper: [i32; 3], container: Option<[i32; 3]>, entity: Option<u32>, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_hopper_inventory_search",
         side = "server",
         contract = "listen",
         neoforge = "none (NeoForge has no such event; Bukkit's InventoryMoveItemEvent)"

@@ -11,6 +11,8 @@ pub trait Hooks {
     /// vanilla's: change the world only where this `Game` runs the world,
     /// not on a server's client.
     #[hook(
+        signature = "pub(in crate::game) fn native_release_using( &mut self, stack: &ItemStack, entity: Option<i32>, time_left: i32, used: &mut bool, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_release_using",
         side = "both",
         contract = "listen",
         scope = "item",

@@ -14,6 +14,8 @@ pub trait Hooks {
     /// frame the hand draws one in use, on both sides. It has no user, as
     /// it is asked so often: answer from the stack alone.
     #[hook(
+        signature = "pub(in crate::game) fn native_use_duration(&self, stack: &ItemStack, duration: &mut i32)",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_use_duration",
         side = "both",
         contract = "listen",
         scope = "item",

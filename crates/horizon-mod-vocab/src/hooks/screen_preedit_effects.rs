@@ -9,6 +9,7 @@ pub trait Hooks {
     /// `screen_preedit_post` does not fire. Fires on the window while a
     /// screen is open, even when no text field is focused.
     #[hook(
+        signature = "pub(in crate::game) fn native_screen_preedit_pre( &self, screen: &ScreenView<'_>, full_text: &str, caret_position: usize, blocks: &[String], focused_block: usize, canceled: &mut bool, )",
         side = "client",
         contract = "cancel",
         out = "canceled",
@@ -21,6 +22,7 @@ pub trait Hooks {
     /// vanilla's focused field takes it, so this is a preedit no field
     /// wanted) and `screen_preedit_pre` did not cancel. Same arguments.
     #[hook(
+        signature = "pub(in crate::game) fn native_screen_preedit_post( &self, screen: &ScreenView<'_>, full_text: &str, caret_position: usize, blocks: &[String], focused_block: usize, )",
         side = "client",
         contract = "listen",
         neoforge = "ScreenEvent.Preedit.Post",
@@ -40,6 +42,7 @@ pub trait Hooks {
     /// recipe book opening between two layout builds), it is asked again for
     /// the new space. The exclusion areas follow this choice in the same frame.
     #[hook(
+        signature = "pub(in crate::game) fn native_screen_render_inventory_mob_effects( &self, screen: &ScreenView<'_>, available_space: i32, compact: &mut bool, horizontal_offset: &mut i32, canceled: &mut bool, )",
         side = "client",
         contract = "cancel",
         out = "canceled",

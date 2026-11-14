@@ -16,6 +16,7 @@ pub trait Hooks {
     /// otherwise; the level is read-only. Asked hundreds of times per fire
     /// tick: keep it short.
     #[hook(
+        signature = "pub(in crate::game) fn native_fire_odds( &self, dimension: LevelDimension, state: BlockStateId, pos: BlockPos, face: Direction, odds: &mut Option<(i32, i32)>, )",
         side = "server",
         contract = "replace",
         out = "odds",

@@ -6,6 +6,7 @@ pub trait Hooks {
     /// after the finalized new mob joined the level and before the old mob
     /// is removed, for the conversions `living_conversion_pre` tells.
     #[hook(
+        signature = "pub(in crate::game) fn native_living_conversion_post( &mut self, entity: u32, kind: &str, converted: u32, converted_kind: &str, )",
         side = "server",
         contract = "listen",
         neoforge = "LivingConversionEvent.Post",

@@ -15,6 +15,8 @@ pub trait Hooks {
     /// does in vanilla, and no guard here un-cancels it. Same screens as the
     /// press; a press that opened another screen ends on that one.
     #[hook(
+        signature = "pub(in crate::game) fn native_screen_mouse_button_released_pre( &self, screen: &ScreenView<'_>, button: i32, modifiers: u32, canceled: &mut bool, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_screen_mouse_button_released_pre",
         side = "client",
         contract = "cancel",
         out = "canceled",

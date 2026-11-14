@@ -6,6 +6,8 @@ pub trait Hooks {
     /// the ids of `gui_layer_pre`: draw here to put something above
     /// the layer (`RenderGuiLayerEvent.Post`).
     #[hook(
+        signature = "pub(in crate::game) fn native_gui_layer_post(&self, layer: &str, draw: &mut HudBatch)",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_gui_layer_post",
         side = "client",
         contract = "listen",
         neoforge = "RenderGuiLayerEvent.Post",

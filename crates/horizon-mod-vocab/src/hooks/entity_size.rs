@@ -19,6 +19,7 @@ pub trait Hooks {
     /// other kinds of entity, whose vanilla sizes are fixed, and a client's copies of other
     /// entities, which keep vanilla's size. Not cancellable.
     #[hook(
+        signature = "pub(in crate::game) fn native_entity_size( &self, entity: EntityRef, pose: mod_api::Pose, old_size: [f32; 3], size: &mut [f32; 3], )",
         side = "both",
         contract = "collect",
         out = "size",

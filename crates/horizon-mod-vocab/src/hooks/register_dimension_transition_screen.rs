@@ -46,6 +46,7 @@ fn dimension_transition_screen_draw(
 }
 ```"#]
     #[hook(
+        signature = "pub(in crate::game) fn native_register_dimension_transition_screen( context: &mod_api::RegistrationContext, screens: &mut Vec<mod_api::DimensionTransitionScreen>, )",
         side = "client",
         contract = "collect",
         out = "screens",

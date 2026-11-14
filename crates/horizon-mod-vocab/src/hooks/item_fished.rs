@@ -18,6 +18,7 @@ pub trait Hooks {
     /// Diverges: Horizon lets a listener change the drop list itself; the reference lets a
     /// listener change the stacks but not the list.
     #[hook(
+        signature = "pub(in crate::game) fn native_item_fished( &mut self, player: u128, player_entity_id: i32, fished: &ItemFished, drops: &mut Vec<ItemStack>, rod_damage: &mut i32, cancel: &mut bool, )",
         side = "server",
         version = 2,
         contract = "collect",

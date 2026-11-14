@@ -6,6 +6,7 @@ pub trait Hooks {
     /// template's behaviour; `TryWithEmptyHand` tries `useWithoutItem` on
     /// the main hand, and `Pass` goes on to the item's `useOn`.
     #[hook(
+        signature = "pub(in crate::game) fn native_use_item_on( &mut self, state: BlockStateId, click: &BlockClick<'_>, answer: &mut Option<mod_api::InteractionResult>, )",
         side = "server",
         contract = "replace",
         out = "answer",

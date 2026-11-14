@@ -37,6 +37,8 @@ pub trait Hooks {
     /// backspace. Same screens as the key press, and it fires with no text box
     /// focused (there is nothing to take the character then).
     #[hook(
+        signature = "pub(in crate::game) fn native_screen_char_typed_pre( &self, screen: &ScreenView<'_>, c: char, modifiers: u32, field: &mut Option<mod_api::client::widgets::TextEdit>, canceled: &mut bool, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_screen_char_typed_pre",
         side = "client",
         contract = "cancel",
         out = "canceled",

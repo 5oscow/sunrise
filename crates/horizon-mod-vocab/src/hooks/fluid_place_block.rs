@@ -5,6 +5,7 @@ pub trait Hooks {
     /// `cancel` to prevent placement or change `new_state` to replace it.
     /// Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_fluid_place_block( &self, dimension: LevelDimension, pos: BlockPos, liquid_pos: BlockPos, state: BlockStateId, new_state: &mut BlockStateId, cancel: &mut bool, )",
         side = "server",
         contract = "cancel",
         out = "cancel",

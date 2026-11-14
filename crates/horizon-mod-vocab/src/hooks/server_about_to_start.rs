@@ -11,6 +11,8 @@ pub trait Hooks {
     /// `world_lifecycle`'s `WorldOpenFailed`. `dedicated` tells a dedicated server from the single
     /// player one.
     #[hook(
+        signature = "pub(in crate::game) fn native_server_about_to_start(&mut self, dedicated: bool)",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_server_about_to_start",
         side = "server",
         contract = "listen",
         neoforge = "ServerAboutToStartEvent",

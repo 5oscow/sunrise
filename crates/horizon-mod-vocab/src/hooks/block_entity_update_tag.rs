@@ -11,6 +11,8 @@ pub trait Hooks {
     /// Leave it unset to send no tag of yours. A block change puts the one-shot fields of
     /// `ModBlockEntityView::set_client_update_fields` over it, and sends them alone when it is unset.
     #[hook(
+        signature = "pub(in crate::game) fn native_block_entity_update_tag( pos: [i32; 3], entity: &ModBlockEntity, tag: &mut Option<Compound>, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_block_entity_update_tag",
         side = "server",
         contract = "replace",
         out = "tag",

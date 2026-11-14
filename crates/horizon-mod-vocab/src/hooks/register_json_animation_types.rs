@@ -67,6 +67,7 @@ the registering mod's own, or one a mod depending on it supplies. `bake_with` re
 `AnimationTypes` that lacks one of the animation's types, once, and the error names the animation, the
 type and the mod that registered it."#]
     #[hook(
+        signature = "pub(in crate::game) fn native_register_json_animation_types( context: &mod_api::RegistrationContext, types: &mut Vec<Answered<JsonAnimationType>>, )",
         side = "client",
         contract = "collect",
         out = "types",

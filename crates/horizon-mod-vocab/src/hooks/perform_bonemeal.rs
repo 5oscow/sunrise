@@ -9,6 +9,7 @@ pub trait Hooks {
     /// `native_set_block_property`, and schedule with `native_schedule_block_tick`
     /// (`ticks` is the hook's). Authoritative servers only.
     #[hook(
+        signature = "pub(in crate::game) fn native_perform_bonemeal( &mut self, ticks: &mut Ticks, dimension: LevelDimension, pos: BlockPos, state: BlockStateId, )",
         side = "server",
         contract = "listen",
         scope = "block",

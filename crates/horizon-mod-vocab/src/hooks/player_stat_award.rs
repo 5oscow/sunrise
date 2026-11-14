@@ -11,6 +11,8 @@ pub trait Hooks {
     /// fire at vanilla's award point; inside a transaction, the award and this hook wait until
     /// the outermost successful commit, after tentative world and inventory writes.
     #[hook(
+        signature = "pub(in crate::game) fn native_player_stat_award( &mut self, player: u128, name: &str, stat_type: &mut String, stat: &mut String, value: &mut i32, cancel: &mut bool, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_player_stat_award",
         version = 2,
         side = "server",
         contract = "cancel",

@@ -23,6 +23,7 @@ The event identifies the player, position and old/new block names. This veto is
 separate from `entity_change_block`, the existing post-change mob notification,
 and from `farmland_trample`, the farmland-specific in-write event."#]
     #[hook(
+        signature = "pub(in crate::game) fn native_screen_transparent_background( &self, screen: &str, batch: &mut HudBatch, canceled: &mut bool, )",
         side = "client",
         contract = "cancel",
         neoforge = "ScreenEvent.Render.Pre (transparent background)",

@@ -10,6 +10,7 @@ pub trait Hooks {
     /// time. Runs in Config: settings reads and the scoped ConfigFiles service
     /// are available; world handles and transactions panic naming the phase. A file outside `config/`, or one already registered, is skipped.
     #[hook(
+        signature = "pub(in crate::game) fn native_register_configs(&mut self, configs: &mut Vec<mod_api::Config>)",
         side = "both",
         contract = "collect",
         out = "configs",
@@ -24,6 +25,7 @@ pub trait Hooks {
     /// and the scoped ConfigFiles service, not world handles or transactions. Client and Common load once on their
     /// owning side, Server once per world.
     #[hook(
+        signature = "pub(in crate::game) fn native_config_loading(&mut self, config: &ConfigFile)",
         side = "both",
         contract = "listen",
         neoforge = "ModConfigEvent.Loading",
@@ -36,6 +38,7 @@ pub trait Hooks {
     /// same text, removed or unreadable fires nothing and keeps its last
     /// text. Polling does not change the current phase.
     #[hook(
+        signature = "pub(in crate::game) fn native_config_reloading(&mut self, config: &ConfigFile)",
         side = "both",
         contract = "listen",
         neoforge = "ModConfigEvent.Reloading",
@@ -47,6 +50,7 @@ pub trait Hooks {
     /// world reads it again. `Client` and `Common` configs stay until the
     /// game quits. This notification leaves the World phase unchanged.
     #[hook(
+        signature = "pub(in crate::game) fn native_config_unloading(&mut self, config: &ConfigFile)",
         side = "server",
         contract = "listen",
         neoforge = "ModConfigEvent.Unloading",

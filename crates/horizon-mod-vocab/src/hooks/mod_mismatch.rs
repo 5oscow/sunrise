@@ -42,6 +42,7 @@ resolved at debug (self or other resolver), unresolved at warn. Only a missing m
 holds the open back; a changed version never does.
 "##]
     #[hook(
+        signature = "pub(in crate::game) fn native_mod_mismatch( &mut self, mismatches: &[mod_api::ModMismatch], resolved: &mut Vec<mod_api::ModMismatchResolution>, )",
         side = "both",
         contract = "collect",
         out = "resolved",

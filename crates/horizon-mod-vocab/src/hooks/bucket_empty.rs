@@ -12,6 +12,8 @@ pub trait Hooks {
     /// the filling one) without the player and the fluid. Not heard: a
     /// dispenser, a cauldron, and a fluid a block places itself.
     #[hook(
+        signature = "pub(in crate::game) fn native_bucket_empty( &mut self, player: u128, name: &str, pos: [i32; 3], fluid: &str, cancel: &mut bool, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_bucket_empty",
         side = "server",
         contract = "cancel",
         out = "cancel",

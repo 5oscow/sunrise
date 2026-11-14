@@ -18,6 +18,8 @@ pub trait Hooks {
     /// `item_picked_up` changes none of this. A creative player always takes
     /// the whole stack. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_item_picked_up_post( &mut self, player: u128, item: ItemEntityRef, original: &ItemStack, remaining: &mut Option<ItemStack>, )",
+        target = "horizon_client::game::native_hooks::item_picked_up::Game<'_>::native_item_picked_up_post",
         side = "server",
         contract = "listen",
         neoforge = "ItemEntityPickupEvent.Post",

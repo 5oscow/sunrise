@@ -6,6 +6,8 @@ pub trait Hooks {
     /// `pos`. Set `cancel` to leave the inventory closed. The player's state
     /// is not swapped in.
     #[hook(
+        signature = "pub(in crate::game) fn native_inventory_block_start( &mut self, player: u128, name: &str, pos: [i32; 3], cancel: &mut bool, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_inventory_block_start",
         side = "server",
         contract = "cancel",
         out = "cancel",

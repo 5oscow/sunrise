@@ -13,6 +13,7 @@ pub trait Hooks {
     /// item loses (below 0: vanilla's `itemDamage` of what is stopped). Set `blocked` to false and nothing is blocked, as NeoForge's `setBlocked(false)`; the event has no cancel. The level is the hit's: its blocks, random and own
     /// attachments.
     #[hook(
+        signature = "pub(in crate::game) fn native_living_shield_block( &mut self, entity: i32, kind: &str, source: &HurtSource<'_>, damage: f32, original_blocked: bool, block: &mut ShieldBlock, )",
         side = "server",
         contract = "listen",
         host = "level",

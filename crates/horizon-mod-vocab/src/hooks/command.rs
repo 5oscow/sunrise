@@ -16,6 +16,7 @@ pub trait Hooks {
     /// (more for redstone wire's diagonals and knock-on updates): keep it
     /// short.
     #[hook(
+        signature = "pub(in crate::game) fn native_update_shape( &self, ticks: &mut Ticks, call: super::fire::UpdateShapeCall<'_>, )",
         side = "server",
         contract = "replace",
         out = "new",
@@ -38,6 +39,8 @@ pub trait Hooks {
     /// when the mod ran it. Client-side: a server never asks, not for
     /// command blocks, guests or the console.
     #[hook(
+        signature = "pub(in crate::game) fn native_command(&mut self, command: &str, ran: &mut bool)",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_command",
         side = "client",
         contract = "cancel",
         out = "ran",

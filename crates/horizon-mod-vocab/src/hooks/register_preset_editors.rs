@@ -38,6 +38,7 @@ Dimension ids, stem structure and flat-layer height bounds are checked before ac
 an edit; registry resolution and generator-specific decoding still run when opening the world.
 "#]
     #[hook(
+        signature = "pub(in crate::game) fn native_register_preset_editors( context: &mod_api::RegistrationContext, editors: &mut Vec<mod_api::PresetEditor>, )",
         side = "client",
         contract = "collect",
         out = "editors",

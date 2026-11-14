@@ -8,6 +8,7 @@ pub trait Hooks {
     /// caused the change. `level.game_rules(host)` of any of the server's
     /// levels reads every rule, the new value included. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_game_rule_changed( &mut self, rule: &str, value: GameRuleValue, actor: Option<&GameRuleActor<'_>>, )",
         side = "server",
         contract = "listen",
         neoforge = "GameRuleChangedEvent"

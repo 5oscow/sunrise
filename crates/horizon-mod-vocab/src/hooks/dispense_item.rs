@@ -14,6 +14,8 @@ pub trait Hooks {
     /// nothing at all (`DispenseItemBehavior.NOOP`). To drop one normally,
     /// answer `(native_dispense_default(..), 1000)`.
     #[hook(
+        signature = "pub(in crate::game) fn native_dispense_item( &mut self, dimension: &str, pos: [i32; 3], facing: Direction, stack: &ItemStack, answer: &mut Option<mod_api::Dispensed>, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_dispense_item",
         side = "server",
         contract = "replace",
         out = "answer",

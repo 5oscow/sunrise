@@ -17,6 +17,8 @@ pub trait Hooks {
     ///
     /// Not on wasm: it gives a path in the game's file system, which a wasm mod has none of; a wasm mod keeps a player's data in attachments.
     #[hook(
+        signature = "pub(in crate::game) fn native_player_save_to_file( &mut self, player: u128, name: &str, directory: &std::path::Path, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_player_save_to_file",
         side = "server",
         contract = "listen",
         neoforge = "PlayerEvent.SaveToFile (not cancellable)",

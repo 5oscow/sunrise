@@ -4,6 +4,8 @@
 pub trait Hooks {
     /// A guest player's synchronized pose changed from `from` to `to`.
     #[hook(
+        signature = "pub(in crate::game) fn native_entity_pose_change( &mut self, player: u128, name: &str, from: &str, to: &str, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_entity_pose_change",
         side = "server",
         contract = "listen",
         neoforge = "none (NeoForge has no such event)"

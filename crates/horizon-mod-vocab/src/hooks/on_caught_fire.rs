@@ -10,6 +10,7 @@ pub trait Hooks {
     /// Lava, lightning, spread into air, flint and steel, TNT use, burning
     /// projectiles, redstone and dispensers are outside this spread-only hook.
     #[hook(
+        signature = "pub(in crate::game) fn native_on_caught_fire( &mut self, ticks: &mut Ticks, dimension: LevelDimension, state: BlockStateId, pos: BlockPos, face: Direction, )",
         side = "server",
         contract = "listen",
         scope = "block",

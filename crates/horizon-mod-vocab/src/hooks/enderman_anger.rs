@@ -8,6 +8,7 @@ pub trait Hooks {
     /// angry, to freeze while looked at and to teleport away up close. Set
     /// `cancel` and that stare doesn't count. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_enderman_anger( &self, enderman: EntityRef, player: PlayerRef, cancel: &mut bool, )",
         side = "server",
         contract = "cancel",
         out = "cancel",

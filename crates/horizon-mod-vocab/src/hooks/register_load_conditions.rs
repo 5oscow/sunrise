@@ -8,6 +8,7 @@ pub trait Hooks {
     /// Foreign unknown ids omit their file with one ERROR-level log entry,
     /// even inside `or(true, unknown)`; every combinator branch is visited.
     #[hook(
+        signature = "pub(in crate::game) fn native_register_load_conditions( context: &mod_api::RegistrationContext, conditions: &mut dyn LoadConditions, )",
         side = "server",
         contract = "collect",
         out = "conditions",

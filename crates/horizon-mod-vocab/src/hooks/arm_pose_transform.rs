@@ -11,6 +11,7 @@ pub trait Hooks {
     /// non-finite component is ignored. The ordinary swing and species animations
     /// still run afterward. Native and wasm mods receive the same value contract.
     #[hook(
+        signature = "pub(in crate::game) fn native_arm_pose_transform( &self, pose: mod_api::CustomArmPose, humanoid: &mod_api::HumanoidRenderState<'_>, right_arm: bool, angles: &mut mod_api::ArmAngles, )",
         side = "client",
         contract = "listen",
         neoforge = "HumanoidModel.ArmPose"

@@ -7,6 +7,7 @@ pub trait Hooks {
     /// keep the game's item. Creative breaking, such as a beehive's
     /// `playerWillDestroy`, does not ask this query. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_clone_item_stack( &self, dimension: LevelDimension, pos: BlockPos, block: &str, state: BlockStateId, include_data: bool, stack: &mut Option<ItemStack>, )",
         side = "server",
         contract = "replace",
         out = "stack",

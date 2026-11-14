@@ -21,6 +21,7 @@ pub trait Hooks {
     /// mobs and the ender dragon. The level is the hit's: its blocks, random and own
     /// attachments; the hurt entity is in the middle of its hit.
     #[hook(
+        signature = "pub(in crate::game) fn native_living_incoming_damage( &mut self, call: mod_api::__private::LivingIncomingDamageCall<'_>, )",
         side = "server",
         contract = "cancel",
         out = "canceled",
@@ -49,6 +50,8 @@ pub trait Hooks {
     /// (the tick or action that removed
     /// it). Check `kind`. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_entity_leave_level( &mut self, dimension: &str, entity: u32, kind: &str, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_entity_leave_level",
         side = "server",
         contract = "listen",
         neoforge = "EntityLeaveLevelEvent"

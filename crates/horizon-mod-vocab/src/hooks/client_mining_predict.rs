@@ -6,6 +6,7 @@ pub trait Hooks {
     /// The snapshot is read-only. A veto skips the new mining operation and preserves any
     /// retained dig. Release and correction still perform ordinary cleanup.
     #[hook(
+        signature = "pub(in crate::game) fn native_client_mining_predict( &self, prediction: ClientMiningPrediction, canceled: &mut bool, )",
         side = "client",
         contract = "cancel",
         out = "canceled",

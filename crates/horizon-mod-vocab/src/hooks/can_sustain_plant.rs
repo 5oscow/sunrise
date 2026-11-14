@@ -10,6 +10,7 @@ pub trait Hooks {
     /// your own soil. The level is read-only. Runs on every shape update of a plant over a part's
     /// block: keep it short.
     #[hook(
+        signature = "pub(in crate::game) fn native_can_sustain_plant( &self, dimension: LevelDimension, state: BlockStateId, ground: BlockStateId, ground_pos: BlockPos, sustains: &mut Option<bool>, )",
         side = "server",
         contract = "replace",
         out = "sustains",

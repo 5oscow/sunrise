@@ -8,6 +8,8 @@ pub trait Hooks {
     /// longer, zero or less lets it expire. Extensions are capped at 32766
     /// ticks.
     #[hook(
+        signature = "pub(in crate::game) fn native_item_expire( &mut self, entity: u32, stack: &ItemStack, extra_life: &mut i32, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_item_expire",
         side = "server",
         contract = "listen",
         neoforge = "ItemExpireEvent",

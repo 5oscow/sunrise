@@ -16,6 +16,7 @@ pub trait Hooks {
     /// Parts that read `context.setting(..)` or `side()` have no counterpart
     /// on the Host. Named injections request `hook_version = 3`.
     #[hook(
+        signature = "pub(in crate::game) fn native_menu_slot_rules( &self, menu: &str, slot: usize, stack: &mod_api::ItemStack, may_place: &mut bool, max_stack: &mut u32, )",
         side = "both",
         contract = "listen",
         scope = "menu",

@@ -14,6 +14,7 @@ pub trait Hooks {
     /// an unchanged hand and an empty hand aren't asked. Only the `ItemPart`s
     /// attached to `stack`'s item are asked. Client-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_should_cause_reequip_animation( &self, stack: &ItemStack, old: Option<&ItemStack>, hand: Hand, slot_changed: bool, reequip: &mut bool, )",
         side = "client",
         contract = "listen",
         scope = "item",

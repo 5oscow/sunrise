@@ -8,6 +8,7 @@ pub trait Hooks {
     /// Part; any result other than `Pass` ends the block interaction.
     /// A block-phase `TryWithEmptyHand` can still try the empty-hand behaviour.
     #[hook(
+        signature = "pub(in crate::game) fn native_use_item_on_block( &mut self, click: &BlockClick<'_>, phase: UsePhase, cancellation_result: &mut mod_api::InteractionResult, canceled: &mut bool, )",
         side = "both",
         contract = "cancel",
         out = "canceled",

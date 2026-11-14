@@ -39,6 +39,7 @@ place in the list is the `tintindex` it colours, and its object reaches the hook
 reload keeps reading the mod's colour. Ids are checked as for numeric properties. A source no mod registers draws
 white, decided once at load, and so does an entry no mod answers; an item with no mod source never reaches the hook."#]
     #[hook(
+        signature = "pub(in crate::game) fn native_register_item_tint_sources( context: &mod_api::RegistrationContext, sources: &mut Vec<String>, )",
         side = "client",
         contract = "collect",
         out = "sources",

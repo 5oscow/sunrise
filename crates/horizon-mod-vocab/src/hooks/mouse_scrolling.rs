@@ -6,6 +6,8 @@ pub trait Hooks {
     /// `scroll` is scaled x/y, `accumulated` whole x/y steps, `buttons` left/middle/right,
     /// and `cursor` the GUI position. Cancel skips gameplay scrolling.
     #[hook(
+        signature = "pub(in crate::game) fn native_mouse_scrolling( &mut self, scroll: [f64; 2], accumulated: [i32; 2], buttons: [bool; 3], cursor: [f32; 2], modifiers: u32, canceled: &mut bool, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_mouse_scrolling",
         side = "client",
         contract = "cancel",
         out = "canceled",

@@ -12,6 +12,7 @@ pub trait Hooks {
     /// which has none; `advanced` (F3+H) and `creative` are the tooltip's `TooltipFlag`. Asked each
     /// frame the tooltip shows, only while a mod listens. Client-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_gather_skipped_attribute_tooltips( &self, call: mod_api::__private::GatherSkippedAttributeTooltipsCall<'_>, )",
         side = "client",
         contract = "listen",
         neoforge = "GatherSkippedAttributeTooltipsEvent",

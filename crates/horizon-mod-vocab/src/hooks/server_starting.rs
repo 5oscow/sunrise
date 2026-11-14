@@ -6,6 +6,8 @@ pub trait Hooks {
     /// accepts play, on both integrated and dedicated servers. A failed startup
     /// still reaches `server_stopped`.
     #[hook(
+        signature = "pub(in crate::game) fn native_server_starting(&mut self, dedicated: bool)",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_server_starting",
         side = "server",
         contract = "listen",
         neoforge = "ServerStartingEvent",

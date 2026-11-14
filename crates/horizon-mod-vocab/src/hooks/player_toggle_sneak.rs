@@ -5,6 +5,8 @@ pub trait Hooks {
     /// A guest's client changed sneaking in its player input packet, after the hub applied the new state.
     /// The guest's state is swapped in. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_player_toggle_sneak( &mut self, player: u128, name: &str, sneaking: bool, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_player_toggle_sneak",
         side = "server",
         contract = "listen",
         neoforge = "none (NeoForge has no such event; Bukkit's PlayerToggleSneakEvent)"

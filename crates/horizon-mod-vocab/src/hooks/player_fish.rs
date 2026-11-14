@@ -16,6 +16,8 @@ pub trait Hooks {
     /// and the item helpers reach them. Once for each cast, bite and reel-in,
     /// on a server.
     #[hook(
+        signature = "pub(in crate::game) fn native_player_fish( &mut self, player: u128, name: &str, state: i32, cancel: &mut bool, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_player_fish",
         side = "server",
         contract = "cancel",
         out = "cancel",

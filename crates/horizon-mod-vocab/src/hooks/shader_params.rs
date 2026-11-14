@@ -9,6 +9,8 @@ pub trait Hooks {
     /// one that pack is for. Asked once a frame while a pack is on; a value
     /// that isn't finite reads as 0 (`native_shader_params_now`).
     #[hook(
+        signature = "pub(in crate::game) fn native_shader_params(&self, partial: f32, params: &mut [[f32; 4]; 8])",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_shader_params",
         side = "client",
         contract = "listen",
         neoforge = "none (Horizon-only; NeoForge has no counterpart)"

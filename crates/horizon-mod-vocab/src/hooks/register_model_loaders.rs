@@ -49,6 +49,7 @@ A model over 65,536 quads is refused whole, with a reason. A quad with a positio
 a texture key the model doesn't define, is skipped by itself with a reason. A `loader` no mod registered is
 logged as an error naming it and the model, which then draws only its elements."#]
     #[hook(
+        signature = "pub(in crate::game) fn native_register_model_loaders( context: &mod_api::RegistrationContext, loaders: &mut Vec<String>, )",
         side = "client",
         contract = "collect",
         out = "loaders",

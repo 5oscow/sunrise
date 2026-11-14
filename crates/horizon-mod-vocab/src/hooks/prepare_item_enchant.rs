@@ -4,6 +4,8 @@
 pub trait Hooks {
     /// Enchanting offers were calculated for a server player at `pos`. Change `costs` before they are sent to the menu.
     #[hook(
+        signature = "pub(in crate::game) fn native_prepare_item_enchant( &mut self, player: u128, name: &str, pos: [i32; 3], costs: &mut [i32; 3], )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_prepare_item_enchant",
         side = "server",
         contract = "listen",
         neoforge = "none (NeoForge has no such event)"

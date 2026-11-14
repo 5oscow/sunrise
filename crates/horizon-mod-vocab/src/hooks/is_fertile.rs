@@ -10,6 +10,7 @@ pub trait Hooks {
     /// authoritative server; the level is read-only. With no part attached to the state, the
     /// cost is one table lookup. Diverges from upstream: new hook.
     #[hook(
+        signature = "pub(in crate::game) fn native_is_fertile( &self, dimension: LevelDimension, state: BlockStateId, pos: BlockPos, fertile: &mut bool, )",
         side = "server",
         contract = "collect",
         out = "fertile",

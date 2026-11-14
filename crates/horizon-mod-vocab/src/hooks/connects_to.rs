@@ -22,6 +22,7 @@ pub trait Hooks {
     /// `2`: version `1` was `fence_connects_to`, for fences alone and without
     /// `kind`. Diverges from upstream: new hook.
     #[hook(
+        signature = "pub(in crate::game) fn native_connects_to(&self, call: super::fire::ConnectsToCall<'_>)",
         side = "server",
         contract = "collect",
         out = "connected",

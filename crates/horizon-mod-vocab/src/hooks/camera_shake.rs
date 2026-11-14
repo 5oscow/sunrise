@@ -9,6 +9,8 @@ pub trait Hooks {
     /// Horizon scales the sum by Distortion Effects and bounds it
     /// (`native_shake_matrix`).
     #[hook(
+        signature = "pub(in crate::game) fn native_camera_shake(&self, partial: f32, shake: &mut Shake)",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_camera_shake",
         side = "client",
         contract = "listen",
         neoforge = "ViewportEvent.ComputeCameraAngles"

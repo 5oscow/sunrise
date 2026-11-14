@@ -12,6 +12,7 @@ pub trait Hooks {
     /// Only the `ItemPart`s attached to `stack`'s item are asked: an item
     /// with none costs one table lookup. Server-side, with a read-only `Host`.
     #[hook(
+        signature = "pub(in crate::game) fn native_on_dropped_by_player( &mut self, player: PlayerRef, stack: &ItemStack, all: bool, canceled: &mut bool, )",
         side = "server",
         host = "read",
         contract = "cancel",

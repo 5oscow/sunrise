@@ -6,6 +6,11 @@ pub trait Hooks {
     /// so a mod ignores ids it does not own. `draw` shares its limits with that hook and clears every
     /// view, so nothing outlives a frame. A renderer that is not active is never asked, and neither is
     /// one without a world to draw in. Client-side.
-    #[hook(side = "client", contract = "listen", cancellable = false)]
+    #[hook(
+        signature = "pub(in crate::game) fn native_debug_renderer_draw( &self, id: &str, view: &mod_api::WorldRenderView, draw: &mut horizon_client::world_geometry::WorldGeometry, )",
+        side = "client",
+        contract = "listen",
+        cancellable = false
+    )]
     fn debug_renderer_draw();
 }

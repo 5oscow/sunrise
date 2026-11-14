@@ -5,9 +5,8 @@
 //! point's record: the arguments the API carries, and `cancel` or `result` where the function's
 //! return allows. Each declaration names the target, access and listener function.
 //!
-//! Depend on this crate only to listen at points: it is large (one record per point), and every
-//! crate that depends on it compiles a few seconds slower. Hooks, handles and parts are in
-//! `mod_api`.
+//! This SDK-only crate carries typed listener constructors and guest exports, using the one
+//! canonical record vocabulary in `horizon-game-points`. Runtime hosts need no SDK generation.
 #![deny(missing_docs)]
 // Its tests are integration tests, so the unit-test build (`cargo test --lib`) is empty rather than
 // a second compile of the generated points.

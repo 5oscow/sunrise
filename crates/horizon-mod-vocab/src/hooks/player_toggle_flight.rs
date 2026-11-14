@@ -13,6 +13,8 @@ pub trait Hooks {
     /// client asks for is heard: not the flight a game-mode change starts or
     /// ends (`/gamemode`), and not a LAN host's own player.
     #[hook(
+        signature = "pub(in crate::game) fn native_player_toggle_flight( &mut self, player: u128, name: &str, flying: bool, cancel: &mut bool, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_player_toggle_flight",
         side = "server",
         contract = "cancel",
         out = "cancel",

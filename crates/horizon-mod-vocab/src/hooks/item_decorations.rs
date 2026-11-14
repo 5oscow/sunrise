@@ -10,6 +10,8 @@ pub trait Hooks {
     /// The NeoForge counterpart is `IItemDecorator.render`; registration through
     /// `RegisterItemDecorationsEvent` is a separate moment.
     #[hook(
+        signature = "pub(in crate::game) fn native_item_decorations( &self, stack: &ItemStack, x: f32, y: f32, draw: &mut HudBatch, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_item_decorations",
         side = "client",
         contract = "listen",
         scope = "item",

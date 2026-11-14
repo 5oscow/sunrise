@@ -4,6 +4,7 @@ pub trait Hooks {
     /// The local player left-clicks empty space, with any main-hand stack.
     /// Client-side only; the server does not receive this event.
     #[hook(
+        signature = "pub(in crate::game) fn native_left_click_empty(&mut self)",
         side = "client",
         contract = "listen",
         neoforge = "PlayerInteractEvent.LeftClickEmpty",

@@ -7,6 +7,7 @@ pub trait Hooks {
     /// hand loop. `Success` swings on the client, `SuccessServer` on the
     /// server, and `Consume` has no swing.
     #[hook(
+        signature = "pub(in crate::game) fn native_right_click_item( &mut self, click: &ItemClick<'_>, cancellation_result: &mut mod_api::InteractionResult, canceled: &mut bool, )",
         side = "both",
         contract = "cancel",
         out = "canceled",

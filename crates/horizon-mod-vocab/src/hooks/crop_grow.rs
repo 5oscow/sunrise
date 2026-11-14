@@ -11,6 +11,7 @@ pub trait Hooks {
     /// it (`DO_NOT_GROW`). Vanilla's random roll is drawn either way, in
     /// vanilla's order. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_crop_grow_pre( &mut self, dimension: LevelDimension, pos: BlockPos, state: BlockStateId, result: &mut TriState, )",
         side = "server",
         contract = "listen",
         neoforge = "CropGrowEvent.Pre",
@@ -22,6 +23,7 @@ pub trait Hooks {
     /// `pos` now. Sugar cane reports the new cane above it, and kelp and
     /// vines the new head, as both states. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_crop_grow_post( &mut self, dimension: LevelDimension, pos: BlockPos, original_state: BlockStateId, state: BlockStateId, )",
         side = "server",
         contract = "listen",
         neoforge = "CropGrowEvent.Post",

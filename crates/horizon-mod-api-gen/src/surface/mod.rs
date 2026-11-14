@@ -223,7 +223,7 @@ pub fn export(root: &Path) -> Result<Export, String> {
 
 fn export_here(root: &Path) -> Result<Export, String> {
     let catalog = Catalog::load(root).map_err(|e| e.to_string())?;
-    let generated = crate::sources(root, crate::FillMode::Require)?;
+    let generated = crate::canonical_sources(root)?;
     let included = [
         (crate::host::AREAS_OUTPUT, generated.areas.as_str()),
         ("mod_api_generated.rs", generated.hooks.as_str()),

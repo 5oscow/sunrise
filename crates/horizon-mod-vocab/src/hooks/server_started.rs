@@ -9,6 +9,8 @@ pub trait Hooks {
     /// open that succeeds (a failed open fires `WorldOpenFailed` instead).
     /// `dedicated` tells a dedicated server from the single player one.
     #[hook(
+        signature = "pub(in crate::game) fn native_server_started(&mut self, dedicated: bool)",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_server_started",
         side = "server",
         contract = "listen",
         neoforge = "ServerStartedEvent",

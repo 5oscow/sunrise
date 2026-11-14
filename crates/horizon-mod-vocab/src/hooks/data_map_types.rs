@@ -19,6 +19,8 @@ pub trait Hooks {
     /// with `data_map_value` and `data_map_entries`. Server-side, not synced
     /// to clients.
     #[hook(
+        signature = "pub(in crate::game) fn native_data_map_types(&mut self, types: &mut Vec<DataMapType>)",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_data_map_types",
         side = "server",
         contract = "collect",
         out = "types",

@@ -326,7 +326,7 @@ fn real_member() {
         __pointa_remember_shutdown();
         matrix_checks::check();
         let mut args = mod_points::TickArgs::__new();
-        horizon_engine_slots::dispatch::tick(mod_api::HostSide::Server(&mut Quiet), &mut args);
+        horizon_game_points::dispatch::tick(mod_api::HostSide::Server(&mut Quiet), &mut args);
         assert!(
             args.cancel,
             "real wasm listener must modify the point record"
@@ -357,7 +357,7 @@ fn real_member() {
 
 /// `horizon_client::game::commands::wrap_degrees` (`Mth.wrapDegrees`), as the staging pass
 /// marks it.
-#[horizon_mod_api_macros::point(slot = 0, name = "game_commands_wrap_degrees", free)]
+#[horizon_mod_api_macros::point(game, slot = 0, name = "game_commands_wrap_degrees", free)]
 fn wrap_degrees(angle: f32) -> f32 {
     let wrapped = angle % 360.0;
     if wrapped >= 180.0 {
@@ -370,13 +370,18 @@ fn wrap_degrees(angle: f32) -> f32 {
 }
 
 /// `horizon_client::game::beacon::average`, as the staging pass marks it.
-#[horizon_mod_api_macros::point(slot = 2, name = "game_beacon_average", free)]
+#[horizon_mod_api_macros::point(game, slot = 2, name = "game_beacon_average", free)]
 fn average(a: u32, b: u32) -> u32 {
     panic!("a replaced body ran: {a} {b}")
 }
 
 /// `horizon_client::game::server_lifecycle::remember_shutdown`, as the staging pass marks it.
-#[horizon_mod_api_macros::point(slot = 4, name = "game_server_lifecycle_remember_shutdown", free)]
+#[horizon_mod_api_macros::point(
+    game,
+    slot = 4,
+    name = "game_server_lifecycle_remember_shutdown",
+    free
+)]
 fn remember_shutdown(failure: &mut Option<String>, message: String) {
     if failure.is_none() {
         *failure = Some(message);

@@ -5,6 +5,8 @@ pub trait Hooks {
     /// A server player's shield was disabled by a blocked melee hit. The shield cooldown is set
     /// immediately after this call. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_player_shield_disable( &mut self, player: u128, name: &str, ticks: u32, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_player_shield_disable",
         side = "server",
         contract = "listen",
         neoforge = "none (NeoForge has no such event)"

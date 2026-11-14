@@ -6,6 +6,7 @@ pub trait Hooks {
     /// autosave, `/save-all`, a pause, a closing level or the server
     /// stopping; each level of a world save in turn. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_level_save(&mut self, dimension: &str)",
         side = "server",
         contract = "listen",
         neoforge = "LevelEvent.Save",

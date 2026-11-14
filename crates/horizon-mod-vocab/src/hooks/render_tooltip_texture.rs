@@ -11,6 +11,7 @@ pub trait Hooks {
     /// as ARGB. `stack` is the item the tooltip describes, `None` for a text tooltip. Asked each
     /// frame a tooltip shows, only while a mod listens. Client-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_render_tooltip_texture( &self, stack: Option<&ItemStack>, texture: &mut Option<Identifier>, background: &mut u32, border_top: &mut u32, border_bottom: &mut u32, )",
         side = "client",
         contract = "listen",
         neoforge = "RenderTooltipEvent.Texture"

@@ -58,6 +58,7 @@ fails it in vanilla, and the log names the type and the entry's place. A `Textur
 `Pixels` whose length isn't `width * height * 4` or whose side is over 32768 pixels, are logged and skipped
 one by one."#]
     #[hook(
+        signature = "pub(in crate::game) fn native_register_sprite_sources( context: &mod_api::RegistrationContext, sources: &mut Vec<String>, )",
         side = "client",
         contract = "collect",
         out = "sources",

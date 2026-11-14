@@ -11,6 +11,7 @@ pub trait Hooks {
     /// start with an empty compound. The level is read-only, as `newBlockEntity`
     /// gets no level.
     #[hook(
+        signature = "pub(in crate::game) fn native_block_entity( &self, block: &str, state: BlockStateId, entity: &mut Option<Compound>, )",
         side = "both",
         contract = "replace",
         out = "entity",

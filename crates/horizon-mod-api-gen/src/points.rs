@@ -2,9 +2,9 @@
 //! admits and the API can carry is a point, and so is each such function marked `#[horizon_mod_api_macros::replaceable]` in
 //! the crates below it. The staging pass ([`stage`]) puts `#[point]` on each in a staged copy of the
 //! game's source, the copy the prebuilt game builds compile;
-//! the generator declares records, copy-in constructors and typed dispatch in
-//! `horizon_engine_slots`, and mod-facing registration and guest exports in `mod_points`.
-//! `points.json` is the compiled slot catalog. These are build outputs, never committed.
+//! lower canonical records live in `horizon_engine_slots`, game canonical records and the one
+//! complete catalog in `horizon_game_points`, and SDK constructors/guest exports in `mod_points`.
+//! `points.json` is the same complete compiled slot catalog, never a committed projection.
 
 use crate::replace::marked;
 use crate::source::{crate_files, crate_root, game_files, offset, owner, plain_path, unraw};
@@ -62,6 +62,11 @@ impl GamePoint {
             "cancel" if self.return_ty == "()" => None,
             _ => Some(&self.return_ty),
         }
+    }
+
+    fn lower_owned(&self) -> bool {
+        !self.target.starts_with("horizon_client::game::")
+            && !self.target.starts_with("listener_fixture::")
     }
 }
 
@@ -169,14 +174,13 @@ pub fn tracked(root: &Path) -> Result<Vec<PathBuf>, String> {
         .into_iter()
         .map(|file| file.path)
         .collect();
-    let crates: std::collections::BTreeSet<_> = marked(root)?
-        .into_iter()
-        .filter_map(|(_, path)| path.split("::").next().map(str::to_owned))
-        .collect();
-    for krate in crates {
-        files.extend(crate_files(root, &krate)?.into_iter().map(|file| file.path));
-    }
+    files.extend(tracked_lower(root)?);
     Ok(files)
+}
+
+/// Every source inspected while discovering lower markers; never the game module's files.
+pub(crate) fn tracked_lower(root: &Path) -> Result<Vec<PathBuf>, String> {
+    crate::replace::marked_with_sources(root).map(|(_, sources)| sources)
 }
 
 /// A point's function, as found in a parsed file.
@@ -392,16 +396,18 @@ pub type WireTypes = std::collections::BTreeSet<String>;
 
 /// Every file with points: the game module's, then each marked lower crate's that is not built
 /// under the points' own crate.
-fn scan(root: &Path) -> Result<(Vec<Scanned>, Vec<(String, String)>), String> {
+fn scan(root: &Path, include_game: bool) -> Result<(Vec<Scanned>, Vec<(String, String)>), String> {
     let mut files = Vec::new();
-    for file in game_files(&root.join("crates/horizon-client/src"), true)? {
-        files.push((file, None));
+    if include_game {
+        for file in game_files(&root.join("crates/horizon-client/src"), true)? {
+            files.push((file, None));
+        }
     }
     // The wasm host's listener tests listen at points of their own fixture file.
     #[cfg(feature = "listener-fixture")]
     {
         let path = root.join("crates/horizon-mod-wasm/tests/fixture/src/points.rs");
-        if path.is_file() {
+        if include_game && path.is_file() {
             files.push((
                 mod_source::modules::ModuleFile {
                     module: "listener_fixture".into(),
@@ -676,7 +682,20 @@ pub fn game_points(root: &Path) -> Result<Vec<GamePoint>, String> {
 
 /// [`game_points`] with the `mod_api` types a record may hold.
 pub(crate) fn points_with(root: &Path, wire: &WireTypes) -> Result<Vec<GamePoint>, String> {
-    let (scanned, list) = scan(root)?;
+    points_for_scan(root, wire, true)
+}
+
+/// Canonical records used by marked lower-crate sites, independent of game declarations.
+pub(crate) fn lower_points(root: &Path, wire: &WireTypes) -> Result<Vec<GamePoint>, String> {
+    points_for_scan(root, wire, false)
+}
+
+fn points_for_scan(
+    root: &Path,
+    wire: &WireTypes,
+    include_game: bool,
+) -> Result<Vec<GamePoint>, String> {
+    let (scanned, list) = scan(root, include_game)?;
     let mut points = all_points(&scanned, &list, wire)?
         .into_iter()
         .map(|(_, found)| point_record(found))
@@ -752,7 +771,7 @@ pub(crate) fn stage_with_manifest(
     root: &Path,
     wire: &WireTypes,
 ) -> Result<(Staged, Vec<GamePoint>), String> {
-    let (scanned, list) = scan(root)?;
+    let (scanned, list) = scan(root, true)?;
     let points = all_points(&scanned, &list, wire)?;
     let mut records = points
         .iter()
@@ -809,9 +828,15 @@ pub(crate) fn stage_with_manifest(
                 staged.refused += 1;
                 continue;
             }
+            let attribute = found.attribute();
+            let attribute = if file.package.is_none() {
+                format!("{attribute}, game")
+            } else {
+                attribute
+            };
             edits.push((
                 offset(source, &lines, start),
-                format!("#[horizon_mod_api_macros::point({})] ", found.attribute()),
+                format!("#[horizon_mod_api_macros::point({attribute})] "),
             ));
             staged.points += 1;
             staged.head_only += usize::from(!shape.has_return());
@@ -908,7 +933,7 @@ pub(crate) fn records_selected(
         .filter(|point| point.api_refusal.is_none())
         .map(|point| {
             let record = quote::format_ident!("{}", point.record);
-            quote!(pub use horizon_engine_slots::#record;)
+            quote!(pub use horizon_game_points::#record;)
         });
     let listeners = points.iter().map(|point| parse(&point.api[0]));
     let variants: Vec<_> = points.iter().map(|point| parse(&point.api[1])).collect();
@@ -924,6 +949,7 @@ pub(crate) fn records_selected(
         })
         .collect();
     let mut api_places = proc_macro2::TokenStream::new();
+    let mut catalog_places = proc_macro2::TokenStream::new();
     let mut api_refusals = proc_macro2::TokenStream::new();
     let mut layout = 0xcbf29ce484222325u64;
     for point in points {
@@ -984,6 +1010,14 @@ pub(crate) fn records_selected(
             };
             api_places
                 .extend(quote! { (PointId::#variant, #target, #at_return, #replace_refusal), });
+            catalog_places.extend(quote! {
+                horizon_engine_slots::ApiPlace {
+                    index: PointId::#variant as usize,
+                    target: #target,
+                    at_return: #at_return,
+                    replace_refusal: #replace_refusal,
+                },
+            });
             if selected.is_some_and(|names| !names.contains(&name)) {
                 continue;
             }
@@ -997,6 +1031,10 @@ pub(crate) fn records_selected(
     })
     .expect("point variants");
     let debug_names = ids.variants.iter().map(|variant| variant.ident.to_string());
+    let identity_checks = ids.variants.iter().map(|variant| {
+        let variant = &variant.ident;
+        quote!(assert!(PointId::#variant as usize == horizon_game_points::PointId::#variant as usize);)
+    });
     quote! {
         #(#records)*
         /// Target names for native load diagnostics.
@@ -1014,6 +1052,8 @@ pub(crate) fn records_selected(
         pub const API_REFUSALS: &[(&str, &str)] = &[#api_refusals];
         #[doc(hidden)]
         pub const API_PLACES: &[(PointId, &str, bool, Option<&str>)] = &[#api_places];
+        #[doc(hidden)]
+        pub const CATALOG_PLACES: &[horizon_engine_slots::ApiPlace] = &[#catalog_places];
         #[cfg(any(target_arch = "wasm32", feature = "wasm-guest"))]
         #[doc(hidden)]
         pub fn guest_dispatch(id: u32, input: &mut ::mod_api::wire::Reader<'_>, out: &mut ::mod_api::wire::Writer) -> Result<(), ::mod_api::wire::WireError> {
@@ -1051,6 +1091,11 @@ pub(crate) fn records_selected(
         /// The number of places, the length of the game's slot table.
         #[doc(hidden)]
         pub const POINT_COUNT: usize = PointId::__Count as usize;
+        const _: () = {
+            assert!(POINT_LAYOUT == horizon_game_points::POINT_LAYOUT);
+            assert!(POINT_COUNT == horizon_game_points::POINT_COUNT);
+            #(#identity_checks)*
+        };
         /// Typed API listener aliases and constructors, generated from the point catalog.
         pub mod listeners { use super::*; #(#listeners)* }
     }
@@ -1066,40 +1111,10 @@ pub(crate) fn engine_records(
         code.parse::<proc_macro2::TokenStream>()
             .expect("generated points")
     };
-    let records = points.iter().map(|point| {
-        let mut file: syn::File = syn::parse_str(&point.record_item).expect("point record");
-        if selected.is_some_and(|names| {
-            !names.contains(&point.name) && !names.contains(&format!("{}_return", point.name))
-        }) {
-            for item in &mut file.items {
-                if let syn::Item::Struct(record) = item {
-                    record.attrs.retain(|attr| {
-                        !(attr.path().is_ident("cfg_attr")
-                            && attr
-                                .to_token_stream()
-                                .to_string()
-                                .contains("derive (:: mod_api :: Wire)"))
-                    });
-                }
-            }
-        }
-        quote!(#file)
-    });
+    let records = points.iter().map(|point| record_source(point, selected));
     let variants: Vec<_> = points.iter().map(|point| parse(&point.api[1])).collect();
     let dispatch = points.iter().map(|point| parse(&point.api[2]));
-    let listeners = points.iter().map(|point| {
-        let items = parse(&point.api[0]);
-        let mut module: syn::ItemMod =
-            syn::parse2(quote!(mod listeners { #items })).expect("point listeners");
-        module
-            .content
-            .as_mut()
-            .unwrap()
-            .1
-            .retain(|item| matches!(item, syn::Item::Type(_)));
-        let items = &module.content.as_ref().unwrap().1;
-        quote!(#(#items)*)
-    });
+    let listeners = points.iter().map(listener_aliases);
     quote! {
         #(#records)*
         /// Catalog-ordered engine point places.
@@ -1114,6 +1129,120 @@ pub(crate) fn engine_records(
         pub mod dispatch { use super::*; #(#dispatch)* }
     }
     .to_string()
+}
+
+fn record_source(
+    point: &GamePoint,
+    selected: Option<&std::collections::BTreeSet<String>>,
+) -> proc_macro2::TokenStream {
+    let mut file: syn::File = syn::parse_str(&point.record_item).expect("point record");
+    if selected.is_some_and(|names| {
+        !names.contains(&point.name) && !names.contains(&format!("{}_return", point.name))
+    }) {
+        for item in &mut file.items {
+            if let syn::Item::Struct(record) = item {
+                record.attrs.retain(|attr| {
+                    !(attr.path().is_ident("cfg_attr")
+                        && attr
+                            .to_token_stream()
+                            .to_string()
+                            .contains("derive (:: mod_api :: Wire)"))
+                });
+            }
+        }
+    }
+    quote!(#file)
+}
+
+/// One canonical definition per record: lower sites use engine-owned records; game sites and
+/// SDK listeners use the game-owned definitions emitted here.
+pub(crate) fn game_records(
+    points: &[GamePoint],
+    selected: Option<&std::collections::BTreeSet<String>>,
+) -> String {
+    let records = points
+        .iter()
+        .filter(|point| point.api_refusal.is_none())
+        .map(|point| {
+            if point.lower_owned() {
+                let record = quote::format_ident!("{}", point.record);
+                quote!(pub use horizon_engine_slots::#record;)
+            } else {
+                record_source(point, selected)
+            }
+        });
+    let dispatch = points.iter().map(|point| {
+        point.api[2]
+            .parse::<proc_macro2::TokenStream>()
+            .expect("point dispatch")
+    });
+    let variants: Vec<_> = points
+        .iter()
+        .map(|point| {
+            point.api[1]
+                .parse::<proc_macro2::TokenStream>()
+                .expect("point variants")
+        })
+        .collect();
+    let listeners = points.iter().map(listener_aliases);
+    let mut mapping = proc_macro2::TokenStream::new();
+    for point in points.iter().filter(|point| point.lower_owned()) {
+        let variants: proc_macro2::TokenStream = point.api[1].parse().expect("point variants");
+        let ids: syn::ItemEnum =
+            syn::parse2(quote!(enum Places { #variants })).expect("point variants");
+        for variant in ids.variants {
+            let variant = variant.ident;
+            mapping.extend(quote! {
+                places[horizon_engine_slots::PointId::#variant as usize] = PointId::#variant as usize;
+            });
+        }
+    }
+    quote! {
+        #(#records)*
+        /// Catalog-ordered game point places.
+        #[doc(hidden)]
+        #[repr(usize)]
+        #[derive(Clone, Copy, PartialEq, Eq)]
+        pub enum PointId { #(#variants)* __Count }
+        /// Number of places in the complete game catalog.
+        pub const POINT_COUNT: usize = PointId::__Count as usize;
+        /// Canonical checked signatures used by game point dispatch.
+        pub mod listeners { use super::*; #(#listeners)* }
+        /// Typed dispatch through the game's installed point table.
+        pub mod dispatch { use super::*; #(#dispatch)* }
+        #[doc(hidden)]
+        pub const LOWER_PLACES: [usize; horizon_engine_slots::POINT_COUNT] = {
+            let mut places = [usize::MAX; horizon_engine_slots::POINT_COUNT];
+            #mapping
+            let mut index = 0;
+            while index < places.len() {
+                assert!(places[index] < POINT_COUNT, "a lower point is absent from the game catalog");
+                index += 1;
+            }
+            places
+        };
+    }.to_string()
+}
+
+fn listener_aliases(point: &GamePoint) -> proc_macro2::TokenStream {
+    let items: proc_macro2::TokenStream = point.api[0].parse().expect("point listeners");
+    let mut module: syn::ItemMod =
+        syn::parse2(quote!(mod listeners { #items })).expect("point listeners");
+    let items = &mut module.content.as_mut().unwrap().1;
+    items.retain(|item| matches!(item, syn::Item::Type(_)));
+    let items = &*items;
+    quote!(#(#items)*)
+}
+
+/// The runtime catalog uses the SDK model's exact constants, never a second hand-kept list.
+pub(crate) fn game_catalog(points: &[GamePoint]) -> Result<String, String> {
+    let source = records_selected(points, Some(&std::collections::BTreeSet::new()));
+    let file = syn::parse_file(&source).map_err(|error| error.to_string())?;
+    let items = file.items.iter().filter(|item| {
+        matches!(item, Item::Const(item) if matches!(item.ident.to_string().as_str(),
+            "POINT_TARGETS" | "POINT_LAYOUT" | "API_REFUSALS" | "API_PLACES" | "CATALOG_PLACES"))
+    });
+    Ok(quote!(#(#items)*).to_string())
 }
 
 #[cfg(test)]
@@ -1581,7 +1710,7 @@ name = 'horizon-mod-api-gen'
             "#[horizon_mod_api_macros::replaceable] pub fn mesh() {}\n",
         );
         assert_eq!(
-            scan(&root).err().unwrap(),
+            scan(&root, true).err().unwrap(),
             "crate horizon_client_render has points but does not depend on horizon-engine-slots"
         );
         put(
@@ -1595,7 +1724,7 @@ name = 'horizon-mod-api-gen'
             "[target.'cfg(unix)'.dependencies]\nslots = { package = 'horizon-engine-slots', path = '../horizon-engine-slots' }\n",
         ] {
             put(manifest, &format!("{package}{dependency}"));
-            let (files, _) = scan(&root).unwrap();
+            let (files, _) = scan(&root, true).unwrap();
             assert!(
                 files
                     .iter()

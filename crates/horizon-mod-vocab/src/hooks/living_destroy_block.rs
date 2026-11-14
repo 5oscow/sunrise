@@ -10,6 +10,7 @@ pub trait Hooks {
     /// enderman then holds nothing). Asked once per block, only while a mod is
     /// loaded. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_living_destroy_block( &mut self, entity: u32, kind: &str, pos: [i32; 3], state: BlockStateId, cancel: &mut bool, )",
         side = "server",
         contract = "cancel",
         out = "cancel",

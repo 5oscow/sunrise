@@ -30,6 +30,7 @@ mod is asked about every id, so a mod ignores ids it does not own. Output clears
 title or connect screens ask no renderer, so nothing stays after leaving a world. A renderer that
 is not active is never asked, so with none active a view only compares the selection's version."#]
     #[hook(
+        signature = "pub(in crate::game) fn native_register_debug_renderers( context: &mod_api::RegistrationContext, renderers: &mut Vec<DebugRenderer>, )",
         side = "client",
         contract = "collect",
         out = "renderers",

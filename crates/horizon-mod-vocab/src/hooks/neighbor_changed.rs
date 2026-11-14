@@ -8,6 +8,7 @@ pub trait Hooks {
     /// level: a part may read its inputs (`signal`, `has_neighbor_signal`) and
     /// schedule its tick here, as a diode does (`DiodeBlock.checkTickOnNeighbor`).
     #[hook(
+        signature = "pub(in crate::game) fn native_neighbor_changed( &self, ticks: &mut Ticks, dimension: LevelDimension, pos: BlockPos, state: BlockStateId, changed: mod_api::BlockKey, moved: bool, )",
         side = "server",
         contract = "listen",
         scope = "block",

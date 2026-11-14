@@ -8,6 +8,7 @@ pub trait Hooks {
     /// `host.tick_stats()` reads the rate. A client told the server's rate is not a server:
     /// nothing fires there. Server-side. Beyond NeoForge: there is no counterpart.
     #[hook(
+        signature = "pub(in crate::game) fn native_server_tick_rate_changed(&mut self)",
         side = "server",
         contract = "listen",
         neoforge = "none (vanilla MinecraftServer.onTickRateChanged; NeoForge adds no event or extension for it)"

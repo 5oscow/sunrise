@@ -44,6 +44,7 @@ load), and each particle carries its group's handle, so a spawn, a tick and a dr
 up by name and scan no mod. Live provider-driven particles are dropped when resources reload, in
 a group as in the built-in one."#]
     #[hook(
+        signature = "pub(in crate::game) fn native_register_particle_groups( context: &mod_api::RegistrationContext, groups: &mut Vec<ParticleGroup>, )",
         side = "client",
         contract = "collect",
         out = "groups",

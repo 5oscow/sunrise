@@ -14,6 +14,7 @@ pub trait Hooks {
     /// subscription and the block key before any event conversion, so the cost is one table
     /// lookup per block above a beacon. Diverges from upstream: new hook.
     #[hook(
+        signature = "pub(in crate::game) fn native_beacon_color_multiplier( &self, state: BlockStateId, pos: BlockPos, beacon_pos: BlockPos, color: &mut Option<u32>, )",
         side = "both",
         contract = "collect",
         out = "color",

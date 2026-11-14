@@ -10,13 +10,14 @@ description = "The mod host above the engine: loading, Host implementations, reg
 [dependencies]
 mod-render = { package = "horizon-mod-render", path = "../horizon-mod-render" }
 horizon-engine-slots = { path = "../horizon-engine-slots" }
-mod-points = { package = "horizon-mod-points", path = "../horizon-mod-points" }
 horizon-guest-stack = { path = "../horizon-guest-stack" }
 horizon-client = { path = "../horizon-client", default-features = false }
 
 horizon-mod-package = { path = "../horizon-mod-package", default-features = false, features = ["index"] }
 horizon-mod-wasm = { path = "../horizon-mod-wasm" }
 mod-api = { package = "horizon-mod-api", path = "../horizon-mod-api" }
+# Constructor artifacts belong to SDK materialization, not an ordinary runtime build.
+mod-points = { package = "horizon-mod-points", path = "../horizon-mod-points", optional = true }
 
 log = "0.4"
 libloading = "0.8"
@@ -29,6 +30,7 @@ workspace = true
 
 [features]
 default = ["audio", "controllers", "horizon-extras"]
+prebuilt-sdk = ["dep:mod-points"]
 audio = ["horizon-client/audio"]
 controllers = ["horizon-client/controllers"]
 horizon-extras = ["horizon-client/horizon-extras"]

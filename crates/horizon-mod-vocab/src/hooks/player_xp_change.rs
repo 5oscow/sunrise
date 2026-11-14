@@ -8,6 +8,7 @@ pub trait Hooks {
     /// Experience bottles and furnaces make orbs, so they come through the orb
     /// path. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_player_xp_change( &mut self, player: u128, player_entity_id: i32, name: &str, amount: &mut i32, cancel: &mut bool, )",
         side = "server",
         contract = "cancel",
         out = "cancel",

@@ -10,6 +10,7 @@ pub trait Hooks {
     /// answer changes, and once the wire is placed, update its neighbours
     /// (`level.update_neighbors`). Authoritative servers only.
     #[hook(
+        signature = "pub(in crate::game) fn native_should_redstone_wire_connect_to( &self, dimension: LevelDimension, pos: BlockPos, state: BlockStateId, direction: Option<Direction>, connected: &mut bool, )",
         side = "server",
         contract = "collect",
         out = "connected",

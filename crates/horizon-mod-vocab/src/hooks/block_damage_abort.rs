@@ -6,6 +6,8 @@ pub trait Hooks {
     /// the server cleared the dig and sent the block back to the client.
     /// The player's state is not swapped in.
     #[hook(
+        signature = "pub(in crate::game) fn native_block_damage_abort( &mut self, player: u128, name: &str, pos: [i32; 3], )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_block_damage_abort",
         side = "server",
         contract = "listen",
         neoforge = "none (NeoForge has no such event; Bukkit's BlockDamageAbortEvent)"

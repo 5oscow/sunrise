@@ -18,6 +18,7 @@ pub trait Hooks {
     /// doesn't show: a delayed message lets the next one through. Lines the
     /// client adds itself and validation errors are not told. Client-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_client_chat_received( &mut self, call: mod_api::__private::ClientChatReceivedCall<'_>, )",
         side = "client",
         contract = "cancel",
         out = "cancel",

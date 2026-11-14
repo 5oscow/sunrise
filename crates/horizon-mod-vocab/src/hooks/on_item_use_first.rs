@@ -7,6 +7,7 @@ pub trait Hooks {
     /// block's own `useItemOn`. An answer ends the click: neither the block
     /// nor the item's `useOn` runs. `Pass` goes on to the block.
     #[hook(
+        signature = "pub(in crate::game) fn native_on_item_use_first( &mut self, stack: &mod_api::ItemStack, click: &BlockClick<'_>, answer: &mut Option<mod_api::InteractionResult>, )",
         side = "server",
         contract = "replace",
         out = "answer",

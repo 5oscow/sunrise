@@ -11,6 +11,7 @@ pub trait Hooks {
     /// as in vanilla, only when vanilla found no problem. After it,
     /// `player_bed_enter` still fires and may cancel. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_can_player_sleep( &mut self, player: u128, name: &str, pos: [i32; 3], problem: &mut Option<String>, )",
         side = "server",
         contract = "listen",
         neoforge = "CanPlayerSleepEvent",

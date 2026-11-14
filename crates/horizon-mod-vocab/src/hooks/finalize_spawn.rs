@@ -16,6 +16,7 @@ in vanilla placement order, with each transformed state and its saved block-enti
 the palette selected at `at`; processors and entities are not included. Invalid or missing names
 return `None`. A builder can retain this snapshot and place its blocks over time."#]
     #[hook(
+        signature = "pub(in crate::game) fn native_finalize_spawn( &self, call: mod_api::__private::FinalizeSpawnCall<'_>, )",
         side = "server",
         contract = "cancel",
         out = "cancel",

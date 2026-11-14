@@ -8,6 +8,7 @@ pub trait Hooks {
     /// signal fire whose smoke rises higher, as over a hay bale. The level is
     /// read-only.
     #[hook(
+        signature = "pub(in crate::game) fn native_smoke_source( &self, dimension: LevelDimension, state: BlockStateId, smoke: &mut Option<bool>, )",
         side = "server",
         contract = "replace",
         out = "smoke",

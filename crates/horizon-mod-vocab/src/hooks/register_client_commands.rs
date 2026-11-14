@@ -10,6 +10,8 @@ pub trait Hooks {
     /// behaviour. A client command has no operator level: one with a nonzero
     /// `level` is left out.
     #[hook(
+        signature = "pub(in crate::game) fn native_register_client_commands( &mut self, commands: &mut Vec<mod_api::Command>, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_register_client_commands",
         side = "client",
         contract = "collect",
         out = "commands",

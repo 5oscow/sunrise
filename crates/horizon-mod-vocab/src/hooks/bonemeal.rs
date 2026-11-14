@@ -10,6 +10,7 @@ pub trait Hooks {
     /// Fired on both sides; changes to `stack` stay. Set it to None to consume
     /// the whole stack; a nonempty result is validated before any write-back.
     #[hook(
+        signature = "pub(in crate::game) fn native_bonemeal(&mut self, call: super::fire::BonemealCall<'_>)",
         side = "both",
         contract = "cancel",
         out = "canceled",

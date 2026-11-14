@@ -12,6 +12,8 @@ pub trait Hooks {
     /// parked: `event.dimension` names the opened level, not the Host's current level.
     /// Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_level_load(&mut self, dimension: &str)",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_level_load",
         side = "server",
         contract = "listen",
         neoforge = "LevelEvent.Load",

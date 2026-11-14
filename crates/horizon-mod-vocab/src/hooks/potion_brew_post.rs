@@ -8,6 +8,7 @@ pub trait Hooks {
     /// last, as `doBrew` ends: after `brewing_complete`, the brew sound and
     /// the ingredient's remainder dropping. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_potion_brew_post( &mut self, pos: [i32; 3], stacks: &mut [Option<ItemStack>; 5], )",
         side = "server",
         contract = "listen",
         neoforge = "PotionBrewEvent.Post",

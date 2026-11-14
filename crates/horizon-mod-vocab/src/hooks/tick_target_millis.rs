@@ -10,6 +10,7 @@ pub trait Hooks {
     /// at its own rate. Client-side. Beyond NeoForge: there is no counterpart. Diverges from
     /// upstream: new hook.
     #[hook(
+        signature = "pub(in crate::game) fn native_tick_target_millis(&self, millis: &mut f32)",
         side = "client",
         contract = "listen",
         cancellable = false,

@@ -10,6 +10,7 @@ pub trait Hooks {
     /// A stale or invalid replacement, including a fake player, is refused.
     /// Authoritative server only.
     #[hook(
+        signature = "pub(in crate::game) fn native_living_change_target( &self, call: mod_api::__private::LivingChangeTargetCall<'_>, )",
         side = "server",
         contract = "cancel",
         out = "cancel",

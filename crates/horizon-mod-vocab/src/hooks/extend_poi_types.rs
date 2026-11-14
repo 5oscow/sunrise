@@ -37,6 +37,7 @@ Wasm subscriptions to this hook currently refuse at load with a reason naming
 `PoiTypeExtensions::metadata`: its borrowed `BlockMetadata` accessor cannot yet cross
 Wire. No wasm registration runs partially or silently omits metadata."#]
     #[hook(
+        signature = "pub(in crate::game) fn native_extend_poi_types( context: &mod_api::RegistrationContext, extensions: &mut dyn PoiTypeExtensions, )",
         side = "server",
         contract = "collect",
         out = "extensions",

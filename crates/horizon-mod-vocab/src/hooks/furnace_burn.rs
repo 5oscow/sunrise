@@ -5,6 +5,8 @@ pub trait Hooks {
     /// A furnace at `pos` consumed fuel and began or resumed burning it.
     /// `fuel` is the item consumed from its fuel slot. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_furnace_burn(&mut self, pos: [i32; 3], fuel: &str)",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_furnace_burn",
         side = "server",
         contract = "listen",
         neoforge = "none (NeoForge has no such event)"

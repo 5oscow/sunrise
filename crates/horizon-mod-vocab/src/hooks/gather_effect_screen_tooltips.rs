@@ -10,6 +10,7 @@ pub trait Hooks {
     /// the effect the panel shows, `screen` the inventory. Asked each frame
     /// a rendered panel is hovered, only while a mod listens. Client-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_gather_effect_screen_tooltips( &self, screen: &ScreenView<'_>, effect: &ActiveEffect, tooltip: &mut Vec<(Text, u32)>, )",
         side = "client",
         contract = "listen",
         neoforge = "GatherEffectScreenTooltipsEvent",

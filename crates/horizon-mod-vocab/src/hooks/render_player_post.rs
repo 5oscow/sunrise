@@ -8,6 +8,7 @@ pub trait Hooks {
     /// `render_living_post` gets, None when the living pre hook was canceled. The player's name tag, leash,
     /// flames and shadow are drawn after it, as `render_living_post` says.
     #[hook(
+        signature = "pub(in crate::game) fn native_render_player_post( &self, player: &MobRender<'_>, who: &PlayerRender<'_>, parts: Option<&PosedParts>, draw: &mut BlockEntityDraw, )",
         side = "client",
         contract = "listen",
         neoforge = "RenderPlayerEvent.Post",

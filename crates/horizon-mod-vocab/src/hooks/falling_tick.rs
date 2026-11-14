@@ -13,6 +13,7 @@ pub trait Hooks {
     /// state a part listens to is recorded; with no such part, one table lookup per falling
     /// block per tick. Diverges from upstream: new hook.
     #[hook(
+        signature = "pub(in crate::game) fn native_falling_tick( &mut self, state: BlockStateId, pos: BlockPos, entity: EntityRef, )",
         side = "server",
         contract = "listen",
         scope = "block",

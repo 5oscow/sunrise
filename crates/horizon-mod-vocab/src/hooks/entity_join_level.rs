@@ -7,7 +7,13 @@ pub trait Hooks {
     /// `player` identifies the ticked player; on the server their state is
     /// acting. Fires before sleep, cooldowns and body work. Players still tick
     /// under `/tick freeze`, but not while the level is paused.
-    #[hook(side = "both", contract = "listen", neoforge = "PlayerTickEvent.Pre")]
+    #[hook(
+        signature = "pub(in crate::game) fn native_player_tick_pre( &mut self, call: mod_api::__private::PlayerTickPreCall, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_player_tick_pre",
+        side = "both",
+        contract = "listen",
+        neoforge = "PlayerTickEvent.Pre"
+    )]
     fn player_tick_pre(player: PlayerRef);
     /// After a player's tick on both logical sides (NeoForge 26.3
     /// `PlayerTickEvent.Post`). Non-cancellable, including death-screen ticks.
@@ -15,7 +21,13 @@ pub trait Hooks {
     /// their state is acting. Runs after body work and server-side item,
     /// arrow and XP pickups, so reads see the completed tick. Client reads
     /// see only the state available to that client, not future server updates.
-    #[hook(side = "both", contract = "listen", neoforge = "PlayerTickEvent.Post")]
+    #[hook(
+        signature = "pub(in crate::game) fn native_player_tick_post( &mut self, call: mod_api::__private::PlayerTickPostCall, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_player_tick_post",
+        side = "both",
+        contract = "listen",
+        neoforge = "PlayerTickEvent.Post"
+    )]
     fn player_tick_post(player: PlayerRef);
     /// An entity joins the server level `dimension` (NeoForge's
     /// `EntityJoinLevelEvent`): vanilla's `PersistentEntitySectionManager.addEntity`.
@@ -36,6 +48,8 @@ pub trait Hooks {
     /// before it ticks again. Not told: the entities Horizon keeps without
     /// simulating (displays, markers, interactions). Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_entity_join_level( &mut self, dimension: &str, entity: u32, kind: &str, pos: [f64; 3], loaded_from_disk: bool, canceled: &mut bool, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_entity_join_level",
         side = "server",
         contract = "cancel",
         out = "canceled",

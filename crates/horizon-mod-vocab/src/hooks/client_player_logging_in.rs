@@ -6,6 +6,7 @@ pub trait Hooks {
     /// is the server's entity ID. Client-side,
     /// once per connection, including single player.
     #[hook(
+        signature = "pub(in crate::game) fn native_client_player_logging_in(&mut self, player_id: i32, uuid: u128)",
         side = "client",
         contract = "listen",
         neoforge = "ClientPlayerNetworkEvent.LoggingIn",

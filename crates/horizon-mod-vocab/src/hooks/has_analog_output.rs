@@ -7,6 +7,7 @@ pub trait Hooks {
     /// level), so they ask `analog_output`. Asked from inside the
     /// level's update: answer from `state` alone. Authoritative servers only.
     #[hook(
+        signature = "pub(in crate::game) fn native_has_analog_output(&self, state: BlockStateId, output: &mut bool)",
         side = "server",
         contract = "collect",
         out = "output",

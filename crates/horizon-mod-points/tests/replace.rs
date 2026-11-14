@@ -13,7 +13,12 @@ static REPLACED: AtomicUsize = AtomicUsize::new(0);
 
 /// `horizon_client::game::server_lifecycle::remember_shutdown`, as the staging pass marks it: a
 /// unit-returning point, so its record has `cancel`.
-#[horizon_mod_api_macros::point(slot = 0, name = "game_server_lifecycle_remember_shutdown", free)]
+#[horizon_mod_api_macros::point(
+    game,
+    slot = 0,
+    name = "game_server_lifecycle_remember_shutdown",
+    free
+)]
 fn remember_shutdown(failure: &mut Option<String>, message: String) {
     SHUTDOWN_BODY.fetch_add(1, Ordering::Relaxed);
     if failure.is_none() {
@@ -23,7 +28,7 @@ fn remember_shutdown(failure: &mut Option<String>, message: String) {
 
 /// `horizon_client::game::blocks::beacon::average`, as the staging pass marks it: a point that
 /// returns an API value, so its record has `result`.
-#[horizon_mod_api_macros::point(slot = 2, name = "game_beacon_average", free)]
+#[horizon_mod_api_macros::point(game, slot = 2, name = "game_beacon_average", free)]
 fn average(a: u32, b: u32) -> u32 {
     AVERAGE_BODY.fetch_add(1, Ordering::Relaxed);
     (a + b) / 2

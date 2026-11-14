@@ -8,6 +8,7 @@ pub trait Hooks {
     /// ammunition; replace it to choose another. A replaced stack is not taken
     /// from the inventory.
     #[hook(
+        signature = "pub(in crate::game) fn native_living_get_projectile( &mut self, player: Option<u128>, name: &str, entity: Option<u32>, kind: &str, weapon: &ItemStack, projectile: &mut Option<ItemStack>, )",
         side = "both",
         contract = "collect",
         out = "projectile",

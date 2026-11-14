@@ -4,6 +4,7 @@ pub trait Hooks {
     /// replaces vanilla sampling; the global break_block event may override it.
     /// Answers are clamped to 0..=32767. A panic unwinds before the answer is applied.
     #[hook(
+        signature = "pub(in crate::game) fn native_exp_drop(&self, call: super::fire::ExpDropCall<'_>)",
         side = "server",
         contract = "replace",
         out = "experience",

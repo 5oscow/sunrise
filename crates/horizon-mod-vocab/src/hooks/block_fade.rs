@@ -5,6 +5,7 @@ pub trait Hooks {
     /// A block at `pos` is about to fade from `from` to `to` because of
     /// melting or coral death. Set `cancel` to keep it. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_block_fade( &self, dimension: LevelDimension, pos: BlockPos, from: BlockStateId, to: BlockStateId, cancel: &mut bool, )",
         side = "server",
         contract = "cancel",
         out = "cancel",

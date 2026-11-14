@@ -5,6 +5,8 @@ pub trait Hooks {
     /// A player bow or crossbow launched an arrow with `force`, after the
     /// projectile entered the level.
     #[hook(
+        signature = "pub(in crate::game) fn native_entity_shoot_bow( &mut self, player: u128, name: &str, projectile: u32, force: f32, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_entity_shoot_bow",
         side = "server",
         contract = "listen",
         neoforge = "none (NeoForge has no such event)"

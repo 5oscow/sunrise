@@ -19,6 +19,7 @@ pub trait Hooks {
     /// armour, held items and other layers keep every part. An entity is drawn afresh each frame:
     /// `draw.keep()` does nothing here.
     #[hook(
+        signature = "pub(in crate::game) fn native_render_living_pre( &self, entity: &MobRender<'_>, draw: &mut BlockEntityDraw, hidden: &mut HiddenParts, canceled: &mut bool, )",
         side = "client",
         version = 2,
         contract = "cancel",

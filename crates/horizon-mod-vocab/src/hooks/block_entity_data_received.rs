@@ -11,6 +11,7 @@ pub trait Hooks {
     /// `handleUpdateTag` perform loading; they are not counterparts of this notice,
     /// which runs after the merge.
     #[hook(
+        signature = "pub(in crate::game) fn native_block_entity_data_received( &self, entity: BlockEntityRef, source: BlockEntityDataSource, tag: &horizon_core::nbt::Compound, )",
         side = "client",
         contract = "listen",
         scope = "block_entity",

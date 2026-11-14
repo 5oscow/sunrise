@@ -5,6 +5,8 @@ pub trait Hooks {
     /// A recipe is about to be unlocked for a server player. Set `cancel` to keep it locked. The
     /// player's state is not swapped in. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_player_recipe_discovered( &mut self, player: u128, name: &str, recipe: &str, cancel: &mut bool, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_player_recipe_discovered",
         side = "server",
         contract = "cancel",
         out = "cancel",

@@ -8,6 +8,8 @@ pub trait Hooks {
     /// as `None`. Asked on the client when each render consumer updates; answer
     /// from the stack alone.
     #[hook(
+        signature = "pub(in crate::game) fn native_use_animation( &self, stack: &ItemStack, animation: &mut UseAnimation, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_use_animation",
         side = "client",
         contract = "listen",
         scope = "item",

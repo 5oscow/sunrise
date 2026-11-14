@@ -1,12 +1,48 @@
 use std::{fs, path::Path};
 
 fn compare(root: &Path, plain: &Path, cached: &Path) {
-    crate::build::generate_points_inner(root, plain).unwrap();
-    crate::generate_points(root, cached).unwrap();
-    assert_eq!(
-        fs::read(plain.join("points_generated.rs")).unwrap(),
-        fs::read(cached.join("points_generated.rs")).unwrap()
-    );
+    // Each generation gets a fresh bounded proc_macro2 span arena; its disk cache stays warm.
+    for (generate, output) in [
+        (
+            crate::build::generate_points_inner as fn(&Path, &Path) -> Result<(), String>,
+            plain,
+        ),
+        (crate::generate_points, cached),
+        (crate::build::generate_game_points_inner, plain),
+        (crate::generate_game_points, cached),
+        (crate::build::generate_engine_points_inner, plain),
+        (crate::generate_engine_points, cached),
+    ] {
+        std::thread::scope(|scope| {
+            std::thread::Builder::new()
+                .stack_size(64 << 20)
+                .spawn_scoped(scope, move || generate(root, output).unwrap())
+                .unwrap()
+                .join()
+                .unwrap();
+        });
+    }
+    for name in OUTPUTS {
+        assert_eq!(
+            fs::read(plain.join(name)).unwrap(),
+            fs::read(cached.join(name)).unwrap(),
+            "{name}"
+        );
+    }
+}
+
+const OUTPUTS: [&str; 4] = [
+    "points_generated.rs",
+    "game_records.rs",
+    "game_catalog.rs",
+    "engine_points.rs",
+];
+
+fn snapshot(output: &Path) -> Vec<Vec<u8>> {
+    OUTPUTS
+        .iter()
+        .map(|name| fs::read(output.join(name)).unwrap())
+        .collect()
 }
 
 #[test]
@@ -43,6 +79,7 @@ fn cached_points_match_full_generation_across_source_changes() {
     fs::create_dir_all(&cached).unwrap();
     compare(&root, &plain, &cached);
     compare(&root, &plain, &cached);
+    let lower = fs::read(cached.join("engine_points.rs")).unwrap();
     let probe = root.join("crates/horizon-client/src/game/mobs/build_cache_probe.rs");
     fs::write(
         &probe,
@@ -50,32 +87,29 @@ fn cached_points_match_full_generation_across_source_changes() {
     )
     .unwrap();
     compare(&root, &plain, &cached);
-    let before = fs::read(cached.join("points_generated.rs")).unwrap();
+    assert_eq!(lower, fs::read(cached.join("engine_points.rs")).unwrap());
+    let before = snapshot(&cached);
     fs::write(
         &probe,
         "pub fn build_cache_probe(value: i32) -> i32 { value + 1 }\n",
     )
     .unwrap();
     compare(&root, &plain, &cached);
-    assert_eq!(
-        before,
-        fs::read(cached.join("points_generated.rs")).unwrap()
-    );
+    assert_eq!(before, snapshot(&cached));
     fs::write(
         &probe,
         "pub fn build_cache_probe(value: i64) -> i64 { value }\n",
     )
     .unwrap();
     compare(&root, &plain, &cached);
-    assert_ne!(
-        before,
-        fs::read(cached.join("points_generated.rs")).unwrap()
-    );
+    assert_ne!(before, snapshot(&cached));
+    assert_eq!(lower, fs::read(cached.join("engine_points.rs")).unwrap());
     let renamed = probe.with_file_name("build_cache_renamed.rs");
     fs::rename(&probe, &renamed).unwrap();
     compare(&root, &plain, &cached);
     fs::remove_file(renamed).unwrap();
     compare(&root, &plain, &cached);
+    assert_eq!(lower, fs::read(cached.join("engine_points.rs")).unwrap());
     fs::remove_dir_all(scratch).unwrap();
 }
 

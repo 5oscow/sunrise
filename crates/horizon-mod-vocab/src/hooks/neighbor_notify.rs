@@ -9,6 +9,7 @@ pub trait Hooks {
     /// hears, on both paths. Asked for every such update, redstone
     /// included: answer fast. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_neighbor_notify( &self, dimension: LevelDimension, pos: BlockPos, state: BlockStateId, skipped_side: Option<Direction>, cancel: &mut bool, )",
         side = "server",
         contract = "cancel",
         out = "cancel",

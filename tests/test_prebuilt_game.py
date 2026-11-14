@@ -381,6 +381,7 @@ class AllocatorSelectionTests(unittest.TestCase):
         class Captured(Exception):
             pass
 
+        builds = []
         def capture(command, **kwargs):
             if command[:2] == ["cargo", "metadata"]:
                 return json.dumps({"packages": [], "resolve": {"nodes": []}})
@@ -388,6 +389,7 @@ class AllocatorSelectionTests(unittest.TestCase):
             self.assertEqual(kwargs["env"]["HORIZON_GAME_BUILD_ID"], "fixture-commit")
             self.assertIn("-C prefer-dynamic", kwargs["env"]["RUSTFLAGS"])
             self.assertNotIn("CARGO_ENCODED_RUSTFLAGS", kwargs["env"])
+            builds.append(command)
             raise Captured
 
         with patch.object(prebuilt_game, "stage", return_value=Path("staged")), \
@@ -397,6 +399,8 @@ class AllocatorSelectionTests(unittest.TestCase):
              patch.dict(prebuilt_game.os.environ, {"CARGO_ENCODED_RUSTFLAGS": "-Cprefer-dynamic=no"}):
             with self.assertRaises(Captured):
                 prebuilt_game.build(Path("unused-sdk"), False)
+        self.assertEqual([command[:2] for command in builds], [["cargo", "rustc"]])
+        self.assertIn(f"{prebuilt_game.GAME}/prebuilt-sdk", builds[0])
 
 
 class ExecutableLinkPolicyTests(unittest.TestCase):

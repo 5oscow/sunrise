@@ -10,6 +10,7 @@ pub trait Hooks {
     /// mooshroom a player shears, a zombie villager's cure, a villager turned
     /// by a zombie.
     #[hook(
+        signature = "pub(in crate::game) fn native_living_conversion_pre( &mut self, entity: u32, kind: &str, outcome: &str, cancel: &mut bool, )",
         side = "server",
         contract = "cancel",
         out = "cancel",

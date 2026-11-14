@@ -8,6 +8,10 @@ pub trait Hooks {
     /// `0xFF` as vanilla's sources give, only for a source your mod owns; left alone, the entry draws
     /// white. The owned stack snapshot is the one being resolved, including nested bundle items.
     /// `bundle_selected` is the runtime bundle selection index; -1 means none.
-    #[hook(side = "client", contract = "listen")]
+    #[hook(
+        signature = "pub(in crate::game) fn native_item_tint_source( &self, source: &str, config: &horizon_core::nbt::Tag, stack: &mod_api::ItemStack, bundle_selected: i32, color: &mut u32, )",
+        side = "client",
+        contract = "listen"
+    )]
     fn item_tint_source();
 }

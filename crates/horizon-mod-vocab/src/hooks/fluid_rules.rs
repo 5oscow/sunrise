@@ -7,6 +7,7 @@ pub trait Hooks {
     /// Asked for every flow step and every cell a spread looks at: answer fast. An answer
     /// outside what `WorldFluid` accepts is brought back within it. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_fluid_rules(&self, call: mod_api::__private::FluidRulesCall<'_>)",
         side = "server",
         contract = "listen",
         scope = "fluid",

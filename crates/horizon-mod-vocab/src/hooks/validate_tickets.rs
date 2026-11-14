@@ -10,6 +10,7 @@ pub trait Hooks {
     /// longer hold (a machine that is gone), and they stop forcing their
     /// chunks. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_validate_tickets( &mut self, dimension: &str, controller: TicketController, validation: &mut dyn mod_api::TicketValidation, )",
         side = "server",
         contract = "listen",
         neoforge = "LoadingValidationCallback",

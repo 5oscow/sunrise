@@ -8,6 +8,8 @@ pub trait Hooks {
     /// canceled impact flies on from, so a game without such a mod pays
     /// nothing. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_hears_projectile_impacts(&self, hears: &mut bool)",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_hears_projectile_impacts",
         side = "server",
         contract = "collect",
         out = "hears",

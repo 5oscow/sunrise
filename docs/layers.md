@@ -719,14 +719,25 @@ The mod API work on arismoko/horizon lands upstream as part of the platform. The
 `horizon-mod-runtime` gets no game dependency, and its CI property check stays as a stricter check inside the
 platform.
 
-The portable engine crate `horizon-engine-slots` owns the final registration seal socket
-and the generated point records, their copy-in constructors, typed dispatchers and activity table.
-The host installs its seal provider before engine startup and registers native API listeners
-after dependency ordering and installation. At sealing, `horizon-mod-points` installs the
-set-once dispatch provider before publishing activity flags. Ordering, owner guards,
-replacement authority and listener dispatch remain in the platform registry. Staged point
-sites name only engine-owned paths; staging does not inject point dependencies into engine manifests.
-The seal refuses repeat or re-entrant sealing and late provider installation.
+The portable engine crate `horizon-engine-slots` owns the final registration seal socket,
+canonical records for marked lower-crate sites, and an erased catalog/provider boundary.
+Game-specific records, the complete catalog and the one activity/registration table belong to
+the neutral engine crate `horizon-game-points`; actual game sites and the native/wasm SDK use
+those same canonical Rust record types. A compile-time-checked local-to-global index map keeps
+lower dispatch allocation-free and constant-time, without a per-call catalog scan.
+
+The game installs its actual catalog before startup uses points. Missing providers are errors,
+not empty catalogs. The host installs its seal callback and registers native/wasm listeners
+after dependency ordering and installation. Ordering, guards, replacement authority and the
+single-table refusal remain in the existing platform registry. The SDK-only `horizon-mod-points`
+generates typed constructors and guest exports when the SDK is materialized; the runtime wasm
+host does not depend on that generator. The materializer enables the host's `prebuilt-sdk`
+feature to build constructors in the same Cargo feature resolution as the Game; ordinary
+builds do not enable it. `horizon-mod-vocab` hook declarations carry canonical
+bridge signatures, while the game build still validates native targets, signatures and bodies.
+Consequently an implementation-only game edit does not invalidate lower API/runtime crates.
+The generated files are internally partitioned; record/constructor contracts, catalog ordering
+and wire layouts are unchanged. The seal still refuses repeat/re-entrant sealing and late providers.
 
 Engine crates import `horizon-mod-vocab` as `mod_api`. Their test-only
 `mod_platform` dependency reaches `horizon-mod-api`; dev-dependencies are exempt

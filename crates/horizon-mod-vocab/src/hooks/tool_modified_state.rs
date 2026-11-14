@@ -12,6 +12,7 @@ pub trait Hooks {
     /// result and may change or cancel it; a cancelled part skips it. Asked for the block's own parts only, so
     /// a block with none costs nothing.
     #[hook(
+        signature = "pub(in crate::game) fn native_tool_modified_state( &self, state: BlockStateId, stack: &ItemStack, tool: &ToolUse, final_state: &mut Option<BlockStateId>, cancel: &mut bool, )",
         side = "both",
         contract = "cancel",
         out = "cancel",

@@ -9,6 +9,8 @@ pub trait Hooks {
     /// tooltip with multiple components). Origin is this component's running
     /// top and the box's left edge. All text is drawn before any images.
     #[hook(
+        signature = "pub(in crate::game) fn native_tooltip_component_draw( &self, stack: &ItemStack, draw: &mut HudBatch, origin: [f32; 2], size: [f32; 2], )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_tooltip_component_draw",
         side = "client",
         contract = "listen",
         scope = "item",

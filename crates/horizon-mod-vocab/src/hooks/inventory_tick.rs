@@ -13,6 +13,8 @@ pub trait Hooks {
     /// `stack`'s item hear it. Server-side, for every living player of the world (the helpers
     /// read the acting one).
     #[hook(
+        signature = "pub(in crate::game) fn native_inventory_tick( &mut self, stack: &ItemStack, slot: i32, selected: bool, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_inventory_tick",
         side = "server",
         contract = "listen",
         scope = "item",

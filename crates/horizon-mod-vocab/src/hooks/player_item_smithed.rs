@@ -9,6 +9,7 @@ pub trait Hooks {
     /// menu already holds the used inputs, but before the table sounds.
     /// Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_player_item_smithed( &mut self, player: u128, player_entity_id: i32, inputs: &[Option<ItemStack>; 3], result: &ItemStack, )",
         side = "server",
         contract = "listen",
         neoforge = "PlayerEvent.ItemSmithedEvent",

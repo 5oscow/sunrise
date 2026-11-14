@@ -11,6 +11,7 @@ pub trait Hooks {
     /// the spread's other entities, its random draws and its feedback are
     /// unchanged.
     #[hook(
+        signature = "pub(in crate::game) fn native_spread_players_teleport( &mut self, dimension: &str, entity: u32, player: Option<u128>, from: [f64; 3], target: &mut [f64; 3], cancel: &mut bool, )",
         side = "server",
         contract = "cancel",
         out = "cancel",

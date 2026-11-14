@@ -13,6 +13,7 @@ pub trait Hooks {
     /// `level.update_neighbors(host, pos, state, NeighbourUpdate::Neighbours)`. Authoritative
     /// servers only.
     #[hook(
+        signature = "pub(in crate::game) fn native_block_signal( &self, dimension: LevelDimension, pos: BlockPos, state: BlockStateId, face: Direction, direct: bool, signal: &mut i32, )",
         side = "server",
         contract = "listen",
         scope = "block",

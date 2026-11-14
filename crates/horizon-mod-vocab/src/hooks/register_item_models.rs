@@ -45,6 +45,7 @@ applies to every model it draws. A name the node's `models` doesn't have draws n
 mod answers. A node type no mod registered is an error naming it: the item definition holding it isn't loaded,
 and the item draws the missing model."#]
     #[hook(
+        signature = "pub(in crate::game) fn native_register_item_models( context: &mod_api::RegistrationContext, models: &mut Vec<String>, )",
         side = "client",
         contract = "collect",
         out = "models",

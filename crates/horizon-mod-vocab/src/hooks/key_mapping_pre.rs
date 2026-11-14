@@ -12,6 +12,7 @@ pub trait Hooks {
     /// `set_mapping_down` and `click_mapping`, which are no physical input. No NeoForge counterpart.
     /// Client-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_key_mapping_pre( &mut self, mapping: &str, pressed: bool, canceled: &mut bool, )",
         side = "client",
         contract = "cancel",
         out = "canceled",

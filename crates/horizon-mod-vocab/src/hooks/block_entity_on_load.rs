@@ -8,6 +8,7 @@ pub trait Hooks {
     /// Read saved data through the attached handle and the supplied `HostSide`.
     #[notes = "`block_entity_on_load` is the per-instance attachment notice, after saved data is applied and before ticking. It also runs for fresh placement and for client chunk instances. The factory remains a separate creation step. Its counterpart is `IBlockEntityExtension.onLoad`."]
     #[hook(
+        signature = "pub(in crate::game) fn native_block_entity_on_load( &mut self, call: mod_api::__private::BlockEntityOnLoadCall, )",
         side = "both",
         contract = "listen",
         scope = "block_entity",

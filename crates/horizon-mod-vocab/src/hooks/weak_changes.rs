@@ -1,6 +1,7 @@
 pub trait Hooks {
     /// Whether this block receives block entity changes through an adjacent conductor. Starts false.
     #[hook(
+        signature = "pub(in crate::game) fn native_weak_changes( &self, dimension: LevelDimension, pos: BlockPos, state: BlockStateId, receive: &mut bool, )",
         side = "server",
         contract = "collect",
         out = "receive",

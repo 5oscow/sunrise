@@ -8,7 +8,7 @@ pub fn main_with(
     built: &'static [mod_api::__private::native::BuiltMod],
     startup: horizon_client::entry::Startup,
 ) {
-    horizon_engine_slots::install_seal(mod_points::__private::seal)
+    horizon_engine_slots::install_seal(mod_api::__private::points::seal)
         .expect("engine seal provider must be installed once before startup");
     // Platform instrumentation must precede registration and the first mod guard.
     if let Err(error) = mod_api::__private::initialize() {
@@ -151,7 +151,7 @@ pub fn main_with(
             mod_api::__private::install(mods.into());
             for &id in &ids {
                 for slot in slots.iter().filter(|slot| slot.id() == id) {
-                    if let Err(error) = mod_points::register(slot) {
+                    if let Err(error) = mod_api::__private::points::register(slot) {
                         log::error!("Horizon: {id}: {error}");
                         horizon_client::logging::flush();
                         std::process::exit(1);

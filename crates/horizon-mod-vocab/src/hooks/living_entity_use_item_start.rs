@@ -16,6 +16,8 @@ pub trait Hooks {
     /// and change the world only on the server (`native_window` is false
     /// there), not on a server's client.
     #[hook(
+        signature = "pub(in crate::game) fn native_living_entity_use_item_start( &mut self, stack: &ItemStack, entity: Option<i32>, hand: Hand, duration: &mut i32, canceled: &mut bool, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_living_entity_use_item_start",
         side = "both",
         contract = "cancel",
         out = "canceled",

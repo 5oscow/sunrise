@@ -9,6 +9,8 @@ pub trait Hooks {
 
 - `vec3` and `vec3_uncentered` are `CommandArgumentValue::Vec3`, `column_pos` is `ColumnPos`, `rotation` is `Rotation` (yaw, pitch), `dimension` is `Dimension(LevelRef)` and `nbt` is `Nbt(Compound)`. `~` and `^` resolve against the source's position and rotation. A `dimension` the world has not loaded is refused with `argument.dimension.invalid` before a listener runs."#]
     #[hook(
+        signature = "pub(in crate::game) fn native_run_mod_command( &mut self, source: &CommandSource, command: &CommandInvocation, ran: &mut bool, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_run_mod_command",
         side = "server",
         contract = "cancel",
         out = "ran",

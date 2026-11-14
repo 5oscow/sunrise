@@ -17,6 +17,8 @@ pub trait Hooks {
     /// and does not ask again; the integrated server's owner is not asked
     /// when the world's cheats are switched.
     #[hook(
+        signature = "pub(in crate::game) fn native_player_commands_sent( &mut self, player: u128, name: &str, names: &mut Vec<String>, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_player_commands_sent",
         side = "server",
         contract = "collect",
         out = "names",

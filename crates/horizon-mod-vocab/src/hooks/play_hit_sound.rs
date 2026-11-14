@@ -6,6 +6,7 @@ pub trait Hooks {
     /// Otherwise vanilla plays the state's hit sound at (volume + 1) / 8 and pitch * 0.5.
     /// The position and face identify the current hit; sculk growth is outside this hook.
     #[hook(
+        signature = "pub(in crate::game) fn native_play_hit_sound( &mut self, call: super::fire::PlayHitSoundCall<'_>, )",
         side = "client",
         contract = "cancel",
         out = "cancel",

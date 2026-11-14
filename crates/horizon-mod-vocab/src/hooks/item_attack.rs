@@ -12,6 +12,7 @@ pub trait Hooks {
     /// Only the `ItemPart`s attached to `stack`'s item are asked. Server-side,
     /// for every player of the world (the helpers read the acting one).
     #[hook(
+        signature = "pub(in crate::game) fn native_on_left_click_entity( &mut self, player: u128, stack: &ItemStack, entity: i32, kind: &str, canceled: &mut bool, )",
         side = "server",
         contract = "cancel",
         out = "canceled",
@@ -29,6 +30,7 @@ pub trait Hooks {
     /// the world only where this `Game` runs the world, not on a server's
     /// client.
     #[hook(
+        signature = "pub(in crate::game) fn native_on_entity_swing( &mut self, stack: &ItemStack, entity: Option<i32>, hand: Hand, canceled: &mut bool, )",
         side = "both",
         contract = "cancel",
         out = "canceled",

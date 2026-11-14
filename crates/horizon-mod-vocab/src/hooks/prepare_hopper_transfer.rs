@@ -6,6 +6,8 @@ pub trait Hooks {
     /// cooldown and enabled checks, before pushing or pulling any items.
     /// Server-side, including the single-player server.
     #[hook(
+        signature = "pub(in crate::game) fn native_prepare_hopper_transfer(&mut self, pos: [i32; 3])",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_prepare_hopper_transfer",
         side = "server",
         contract = "listen",
         neoforge = "none (NeoForge has no hopper event)"

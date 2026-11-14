@@ -16,6 +16,7 @@ Definitions retain resolved callbacks only for their world snapshot. Unknown fun
 `minecraft:always_pass` remains built in. Data-pack test definitions override code-registered defaults. Registration refuses duplicates, invalid names and the vanilla
 namespace. This adds no sequence engine and no per-tick registry lookup."#]
     #[hook(
+        signature = "pub(in crate::game) fn native_register_game_tests(&self, functions: &mut dyn GameTests)",
         side = "server",
         contract = "listen",
         host = "read",

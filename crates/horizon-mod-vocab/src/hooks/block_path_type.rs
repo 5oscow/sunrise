@@ -15,6 +15,7 @@ pub trait Hooks {
     /// and mob-specific adjustments run afterwards, outside that cache.
     /// Diverges from upstream: new hook.
     #[hook(
+        signature = "pub(in crate::game) fn native_block_path_type( &self, pos: BlockPos, state: BlockStateId, path_type: &mut Option<mod_api::PathType>, )",
         side = "server",
         contract = "replace",
         out = "path_type",

@@ -10,6 +10,8 @@ pub trait Hooks {
     /// set an infinite value for one never culled. Asked once a frame for each
     /// within its view distance (`block_entity_view_distance`) whose chunk is drawn.
     #[hook(
+        signature = "pub(in crate::game) fn native_block_entity_render_bounding_box( &self, pos: [i32; 3], block: &str, state: BlockStateId, entity: &ModBlockEntity, bounds: &mut [f32; 6], )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_block_entity_render_bounding_box",
         side = "client",
         contract = "collect",
         out = "bounds",

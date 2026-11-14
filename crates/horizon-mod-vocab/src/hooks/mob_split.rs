@@ -14,6 +14,7 @@ pub trait Hooks {
     /// mob not yet in the world, which this hook does not expose. On the
     /// server.
     #[hook(
+        signature = "pub(in crate::game) fn native_mob_split( &mut self, parent: u32, kind: &str, size: i32, child_size: i32, count: &mut u32, cancel: &mut bool, )",
         side = "server",
         contract = "cancel",
         out = "cancel",

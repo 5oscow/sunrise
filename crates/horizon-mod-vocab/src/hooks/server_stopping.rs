@@ -10,6 +10,8 @@ pub trait Hooks {
     /// `WorldCloseFinal` follows once the worlds are saved. A server whose loop
     /// fails still fires this before the final save attempt and `server_stopped`.
     #[hook(
+        signature = "pub(in crate::game) fn native_server_stopping(&mut self, dedicated: bool)",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_server_stopping",
         side = "server",
         contract = "listen",
         neoforge = "ServerStoppingEvent",

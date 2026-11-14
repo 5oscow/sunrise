@@ -10,6 +10,8 @@ pub trait Hooks {
     /// changing level. It only hears; the mob is already among the game's
     /// mobs. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_mob_spawned( &mut self, dimension: &str, kind: &str, pos: [f64; 3], natural: bool, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_mob_spawned",
         side = "server",
         contract = "listen",
         neoforge = "EntityJoinLevelEvent, FinalizeSpawnEvent"

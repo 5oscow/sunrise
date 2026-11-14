@@ -1,0 +1,23 @@
+[package]
+name = "horizon-game-points"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Engine-owned canonical game point records and complete native/wasm catalog"
+
+
+[features]
+listener-fixture = ["horizon-mod-api-gen/listener-fixture", "horizon-engine-slots/listener-fixture"]
+wasm-guest = ["mod_vocab/wasm-guest", "horizon-engine-slots/wasm-guest"]
+
+[dependencies]
+mod_vocab = { package = "horizon-mod-vocab", path = "../horizon-mod-vocab" }
+horizon-engine-slots = { path = "../horizon-engine-slots" }
+
+[build-dependencies]
+horizon-mod-api-gen = { path = "../horizon-mod-api-gen" }
+
+
+[lints]
+workspace = true

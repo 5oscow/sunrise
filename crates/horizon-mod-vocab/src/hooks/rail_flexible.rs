@@ -9,6 +9,7 @@ pub trait Hooks {
     /// world. With no part attached to the state, the cost is one table lookup. Diverges from
     /// upstream: new hook.
     #[hook(
+        signature = "pub(in crate::game) fn native_rail_flexible( &self, dimension: LevelDimension, state: BlockStateId, pos: BlockPos, flexible: &mut bool, )",
         side = "server",
         contract = "collect",
         out = "flexible",

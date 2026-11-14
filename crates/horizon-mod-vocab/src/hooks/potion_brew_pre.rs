@@ -9,6 +9,7 @@ pub trait Hooks {
     /// fires with those slots; `brewing_complete` doesn't, as nothing was
     /// brewed. Uncancelled, changes to `stacks` are dropped. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_potion_brew_pre( &mut self, pos: [i32; 3], stacks: &mut [Option<ItemStack>; 5], cancel: &mut bool, )",
         side = "server",
         contract = "cancel",
         out = "cancel",

@@ -5,6 +5,8 @@ pub trait Hooks {
     /// The server changed its thunder state through `/weather`. Set `cancel`
     /// to keep the previous thunder state and timer. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_thunder_change( &mut self, dimension: &str, thundering: bool, cancel: &mut bool, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_thunder_change",
         side = "server",
         contract = "cancel",
         out = "cancel",

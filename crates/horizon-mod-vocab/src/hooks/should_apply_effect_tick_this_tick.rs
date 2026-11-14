@@ -8,6 +8,8 @@ pub trait Hooks {
     /// the ticks left (the entity's tick count when infinite). Set `apply`
     /// and `native_apply_effect_tick` follows. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_should_apply_effect_tick_this_tick( &self, effect: EffectKey, tick_count: i32, amplifier: i32, apply: &mut bool, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_should_apply_effect_tick_this_tick",
         side = "server",
         contract = "listen",
         host = "read",

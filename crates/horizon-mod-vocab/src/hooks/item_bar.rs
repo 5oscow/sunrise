@@ -8,6 +8,8 @@ pub trait Hooks {
     /// replaced (width `0..=13`, colour `rgb`) or set to `None` to hide it.
     /// Asked each frame a stack is drawn. Client-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_item_bar(&self, stack: &ItemStack, bar: &mut Option<(i32, u32)>)",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_item_bar",
         side = "client",
         contract = "listen",
         scope = "item",

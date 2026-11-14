@@ -8,6 +8,7 @@ pub trait Hooks {
     /// Set `canceled` to leave the block at `to` as it is. Fluids ask on
     /// every flow: answer fast.
     #[hook(
+        signature = "pub(in crate::game) fn native_block_spread( &self, dimension: LevelDimension, kind: &str, from: BlockPos, to: BlockPos, canceled: &mut bool, )",
         side = "server",
         contract = "cancel",
         out = "canceled",

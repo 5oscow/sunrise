@@ -32,6 +32,7 @@ pub trait Hooks {
     /// `IBlockExtension.getRelocability` is an unrelated region-copy query that
     /// pistons do not ask. Diverges from upstream: new hook.
     #[hook(
+        signature = "pub(in crate::game) fn native_piston_carries_block_entity( &self, dimension: LevelDimension, pos: BlockPos, state: BlockStateId, movable: &mut Option<bool>, )",
         side = "both",
         contract = "replace",
         out = "movable",

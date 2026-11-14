@@ -22,6 +22,7 @@ before incoming-damage hooks and armor reductions. It is an effect registrar, no
 Callbacks are indexed directly by resolved slots; hits never scan installed mods. Hits without custom
 nodes retain the vanilla evaluator without constructing API weapon snapshots."#]
     #[hook(
+        signature = "pub(in crate::game) fn native_register_enchantment_damage_effects( context: &mod_api::RegistrationContext, effects: &mut dyn EnchantmentDamageEffects, )",
         side = "server",
         contract = "collect",
         out = "effects",

@@ -12,6 +12,7 @@ pub trait Hooks {
     /// the tooltip is cancelled; `draw.gui_draw_item_with` draws a stack with optional count text.
     /// Client-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_render_tooltip_pre( &self, call: mod_api::__private::RenderTooltipPreCall<'_>, )",
         side = "client",
         contract = "cancel",
         out = "cancel",

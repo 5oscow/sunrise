@@ -21,6 +21,7 @@ The six combat hooks (`living_incoming_damage`, `damage_pre`, `damage_post`, `li
 **Attacker and held stacks (`living_knockback`, the weapon of `living_incoming_damage`):** the attacker's id and the stacks it holds come from the hit that started the attack, not from process state, so a hit nested inside another (a thorns reply, a guest's attack during the host's) names its own attacker and nothing is left behind afterwards. No event field, order, random draw or cancel rule changes, so neither hook's version does. The game copies the held stacks only while a mod listens; without one the hit carries the attacker id and two empty slots, no allocation."#]
     /// The container is an API-owned scalar snapshot; the engine retains sequencing and normalization.
     #[hook(
+        signature = "pub(in crate::game) fn native_living_damage_pre( &mut self, entity: i32, kind: &str, source: &HurtSource<'_>, container: &mut mod_api::DamageContainer, )",
         side = "server",
         contract = "listen",
         host = "level",

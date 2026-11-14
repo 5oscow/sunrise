@@ -15,6 +15,8 @@ pub trait Hooks {
     /// drop), a dispenser putting armour on one, a mod's own changes.
     /// Server-side, for every player of the world.
     #[hook(
+        signature = "pub(in crate::game) fn native_armor_stand_manipulate( &mut self, player: u128, name: &str, stand_id: i32, slot: &str, cancel: &mut bool, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_armor_stand_manipulate",
         side = "server",
         contract = "cancel",
         out = "cancel",

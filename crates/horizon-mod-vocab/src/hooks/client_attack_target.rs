@@ -12,6 +12,7 @@ pub trait Hooks {
 
 `client_attack_target` runs with a ClientHost from the remote client's start-attack input path after interaction cancellation and before ordinary melee dispatch. Spear jabs bypass it. Cancellation suppresses attacks; an explicit target batch is deduplicated in first-occurrence order and each handle is checked for lifetime, reach, held-item range and occlusion. The server remains authoritative."#]
     #[hook(
+        signature = "pub(in crate::game) fn native_client_attack_target( &mut self, targets: &mut Vec<EntityRef>, canceled: &mut bool, )",
         side = "client",
         contract = "cancel",
         out = "canceled",

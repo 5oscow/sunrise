@@ -21,6 +21,7 @@ pub trait Hooks {
     /// tells nothing until it is. NeoForge's `chunkHolder` is not given:
     /// Horizon keeps no chunk holders. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_chunk_ticket_level_updated( &mut self, chunk: ChunkRef, old: mod_api::ChunkTicketLevel, new: mod_api::ChunkTicketLevel, )",
         side = "server",
         contract = "listen",
         neoforge = "ChunkTicketLevelUpdatedEvent"

@@ -13,6 +13,8 @@ pub trait Hooks {
     /// target that is no living entity (a dragon part) or when the hit does
     /// no damage. Fires on the Game that runs the attack.
     #[hook(
+        signature = "pub(in crate::game) fn native_critical_hit( &mut self, target_kind: &str, vanilla_critical: bool, critical: &mut bool, damage_multiplier: &mut f32, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_critical_hit",
         side = "server",
         contract = "listen",
         neoforge = "CriticalHitEvent",

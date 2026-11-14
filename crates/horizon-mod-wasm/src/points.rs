@@ -4,8 +4,7 @@ use horizon_mod_package::manifest::{
     Manifest,
     inject::{Inject, Kind},
 };
-use mod_points::__private::{Forward, PointHost, SlotListener};
-use mod_points::PointId;
+use mod_api::__private::points::{Forward, Place, PointHost, SlotListener};
 use std::cell::RefCell;
 
 struct Endpoint {
@@ -71,7 +70,7 @@ impl Endpoint {
             },
         );
         if self.module.is_stopped() {
-            mod_points::stop(self.owner);
+            mod_api::__private::points::stop(self.owner);
         }
     }
 }
@@ -86,15 +85,16 @@ fn listen_checked(manifest: &Manifest, module: &WasmMod) -> Result<(), String> {
     if engine.is_empty() {
         return Ok(());
     }
+    let catalog = horizon_engine_slots::catalog().map_err(|error| error.to_string())?;
     // The table's own answer, before the guest is asked anything: `register` would refuse each.
-    if !mod_points::__private::TABLE.has_sites() {
+    if !catalog.table.has_sites() {
         return Err(format!(
             "{}: {}: this build has no point sites; start the game through the launcher's mod build",
             manifest.id, engine[0].at
         ));
     }
     for inject in &engine {
-        if let Some((_, reason)) = mod_points::API_REFUSALS.iter().find(|(target, _)| {
+        if let Some((_, reason)) = catalog.refusals.iter().find(|(target, _)| {
             horizon_mod_point_emit::plain_path(target)
                 == horizon_mod_point_emit::plain_path(&inject.at)
         }) {
@@ -144,15 +144,19 @@ fn listen_checked(manifest: &Manifest, module: &WasmMod) -> Result<(), String> {
             listener,
         }));
         let id = Box::leak(id.into_boxed_str());
-        let mut slot =
-            SlotListener::forwarded(owner, place.place(), endpoint, 0x8000_0000 + place as u32)
-                .ordered(priority, id);
+        let mut slot = SlotListener::forwarded(
+            owner,
+            Place::new(catalog.table, place),
+            endpoint,
+            0x8000_0000 + place as u32,
+        )
+        .ordered(priority, id);
         // The guest's listener already owns the outcome (`mod_points::replace!`); the host's
         // slot carries the mark, so a second replace at the place is refused for either target.
         if replace {
             slot = slot.replacing();
         }
-        mod_points::register(&slot).map_err(|error| error.to_string())?;
+        mod_api::__private::points::register(&slot).map_err(|error| error.to_string())?;
     }
     Ok(())
 }
@@ -160,17 +164,20 @@ fn listen_checked(manifest: &Manifest, module: &WasmMod) -> Result<(), String> {
 /// The engine's API place `place` that a guest subscribed as its declared `inject`, checked
 /// against the game's own point list, not what the module says of itself: the target, the phase,
 /// and, for a `replace`, that its head returns `()` or an API value the listener can produce.
-fn checked_place(id: &str, inject: &Inject, place: u32) -> Result<PointId, String> {
-    let Some(&(point, target, at_return, replace_refusal)) = mod_points::API_PLACES
+fn checked_place(id: &str, inject: &Inject, place: u32) -> Result<usize, String> {
+    let catalog = horizon_engine_slots::catalog().map_err(|error| error.to_string())?;
+    let Some(point) = catalog
+        .places
         .iter()
-        .find(|(point, ..)| *point as u32 == place)
+        .find(|point| point.index as u32 == place)
     else {
         return Err(format!(
             "{id}: {}: no API record for place {place}",
             inject.at
         ));
     };
-    if (inject.kind == Kind::Return) != at_return
+    let target = point.target;
+    if (inject.kind == Kind::Return) != point.at_return
         || horizon_mod_point_emit::plain_path(&inject.at)
             != horizon_mod_point_emit::plain_path(target)
     {
@@ -178,13 +185,16 @@ fn checked_place(id: &str, inject: &Inject, place: u32) -> Result<PointId, Strin
             "{id}: listener does not match its declared API head/return target"
         ));
     }
-    if let Some(ty) = replace_refusal.filter(|_| inject.kind == Kind::Replace) {
+    if let Some(ty) = point
+        .replace_refusal
+        .filter(|_| inject.kind == Kind::Replace)
+    {
         return Err(format!(
             "{id}: no replace listener at {target}: a replace returns the function's value, and \
              `{ty}` has no API form"
         ));
     }
-    Ok(point)
+    Ok(point.index)
 }
 
 #[cfg(test)]
@@ -293,6 +303,7 @@ with='no_wire'
 
     #[test]
     fn missing_place_names_mod_row_and_declared_target() {
+        horizon_game_points::install();
         let error =
             checked_place("addon:own", &inject(Kind::Head, "game::tick"), u32::MAX).unwrap_err();
         assert_eq!(
@@ -305,6 +316,7 @@ with='no_wire'
     /// refuses one at a head whose return it can't produce, by the game's own point list.
     #[test]
     fn a_replace_is_checked_against_the_games_point_list_at_load() {
+        horizon_game_points::install();
         let heads = || {
             mod_points::API_PLACES
                 .iter()
@@ -322,14 +334,14 @@ with='no_wire'
         // An ordinary head listener there is unaffected.
         assert_eq!(
             checked_place("own", &inject(Kind::Head, target), fallible as u32),
-            Ok(fallible)
+            Ok(fallible as usize)
         );
         let &(owned, target, ..) = heads()
             .find(|(.., refusal)| refusal.is_none())
             .expect("a game point a replace can own");
         assert_eq!(
             checked_place("own", &inject(Kind::Replace, target), owned as u32),
-            Ok(owned)
+            Ok(owned as usize)
         );
     }
 }

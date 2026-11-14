@@ -17,6 +17,8 @@ pub trait Hooks {
     /// is not in that copy, and is dropped with the chunk.
     /// Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_chunk_load( &mut self, dimension: &str, chunk: [i32; 2], new: bool, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_chunk_load",
         side = "server",
         contract = "listen",
         neoforge = "ChunkEvent.Load",

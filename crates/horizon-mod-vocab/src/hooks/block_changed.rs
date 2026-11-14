@@ -5,6 +5,7 @@ pub trait Hooks {
     /// An authoritative server committed a changed state through `Level.setBlock`.
     /// The world contains `new`; block side effects and neighbour updates follow.
     #[hook(
+        signature = "pub(in crate::game) fn native_block_changed( &self, dimension: LevelDimension, pos: BlockPos, old: BlockStateId, new: BlockStateId, )",
         side = "server",
         contract = "listen",
         target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_block_changed",

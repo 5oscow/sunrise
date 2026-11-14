@@ -25,6 +25,7 @@ already gone is not told again. NeoForge tells only the forget packet
 state for a column the client no longer holds. `dimension` is the level the
 column belonged to: on a dimension change, the old one."##]
     #[hook(
+        signature = "pub(in crate::game) fn native_client_chunk_unload(&mut self, dimension: &str, chunk: [i32; 2])",
         side = "client",
         contract = "listen",
         neoforge = "ChunkEvent.Unload",

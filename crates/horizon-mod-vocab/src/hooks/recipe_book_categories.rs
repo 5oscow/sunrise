@@ -8,6 +8,7 @@ pub trait Hooks {
     /// The display/index load boundary returns typed errors; screen integration
     /// is separate. This declaration does not register a settings book.
     #[hook(
+        signature = "pub(in crate::game) fn native_recipe_book_categories( &mut self, categories: &mut Vec<RecipeBookCategory>, )",
         side = "both",
         contract = "listen",
         neoforge = "none (RegisterRecipeBookSearchCategoriesEvent registers search groups only, not a recipe type's categories)"

@@ -5,6 +5,7 @@ pub trait Hooks {
     /// `None` suppresses the transformation. The block's own `tool_modified_state` part answers
     /// first, and a block whose part cancelled the action never reaches this hook.
     #[hook(
+        signature = "pub(in crate::game) fn native_block_tool_modification( &self, stack: &ItemStack, tool: &ToolUse, final_state: &mut Option<BlockStateId>, cancel: &mut bool, )",
         side = "both",
         contract = "cancel",
         out = "cancel",

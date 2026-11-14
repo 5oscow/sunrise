@@ -8,6 +8,8 @@ pub trait Hooks {
     /// `client_level_load`. Not told when the game itself quits.
     /// Client-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_client_level_unload(&mut self, dimension: &str)",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_client_level_unload",
         side = "client",
         contract = "listen",
         neoforge = "LevelEvent.Unload",

@@ -24,6 +24,7 @@ pub trait Hooks {
     /// copy are mod-provided data forwarded to later Parts, never consumed by the engine.
     /// Authoritative servers only.
     #[hook(
+        signature = "pub(in crate::game) fn native_state_for_placement( &self, dimension: LevelDimension, state: BlockStateId, context: &PlacementContext, fluid: mod_api::FluidState, answer: &mut Option<Option<BlockStateId>>, )",
         side = "server",
         contract = "replace",
         out = "answer",

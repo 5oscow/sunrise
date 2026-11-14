@@ -10,6 +10,7 @@ pub trait Hooks {
     /// last word. Asked wherever the harvest rule is: the dig's progress (both sides, so a client
     /// predicts it), the break and a door's break.
     #[hook(
+        signature = "pub(in crate::game) fn native_can_harvest_block( &mut self, player: u32, pos: [i32; 3], state: BlockStateId, can_harvest: &mut bool, )",
         side = "both",
         contract = "collect",
         out = "can_harvest",

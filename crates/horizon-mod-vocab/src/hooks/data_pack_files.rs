@@ -18,6 +18,8 @@ pub trait Hooks {
     /// preserves the old engine generation, but does not undo callback effects. Contributions
     /// share one list, so a failed file cannot be attributed to a particular mod.
     #[hook(
+        signature = "pub(in crate::game) fn native_data_pack_files(&mut self, files: &mut Vec<(String, Vec<u8>)>)",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_data_pack_files",
         side = "server",
         contract = "collect",
         out = "files",

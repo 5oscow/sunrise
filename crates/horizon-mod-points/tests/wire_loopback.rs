@@ -98,7 +98,7 @@ fn top_return(args: &mut mod_points::GameServerLinksListTopArgs) {
     args.result = Some(value + 1.0);
 }
 
-#[horizon_mod_api_macros::point(slot = 0, name = "game_server_links_list_top", free)]
+#[horizon_mod_api_macros::point(game, slot = 0, name = "game_server_links_list_top", free)]
 fn fixture_list_top(h: f32, n: usize) -> f32 {
     BODY.fetch_add(1, Ordering::Relaxed);
     h + n as f32
@@ -161,9 +161,9 @@ fn head_and_return_share_the_hook_arena_and_native_listener_list() {
     mod_points::__private::seal();
     __pointa_fixture_list_top();
     let mut args = mod_points::TickArgs::__new();
-    horizon_engine_slots::dispatch::tick(mod_api::HostSide::Server(&mut Quiet), &mut args);
+    horizon_game_points::dispatch::tick(mod_api::HostSide::Server(&mut Quiet), &mut args);
     assert!(args.cancel);
-    horizon_engine_slots::dispatch::tick_return(mod_api::HostSide::Server(&mut Quiet), &mut args);
+    horizon_game_points::dispatch::tick_return(mod_api::HostSide::Server(&mut Quiet), &mut args);
     assert!(!args.cancel);
     assert_eq!(
         (HEAD.load(Ordering::Relaxed), RETURN.load(Ordering::Relaxed)),
@@ -197,7 +197,7 @@ fn head_and_return_share_the_hook_arena_and_native_listener_list() {
     assert_eq!(BODY.load(Ordering::Relaxed), 3);
     assert_eq!(TOP_RETURN.load(Ordering::Relaxed), 3);
     mod_points::stop("guest");
-    horizon_engine_slots::dispatch::tick(mod_api::HostSide::Server(&mut Quiet), &mut args);
+    horizon_game_points::dispatch::tick(mod_api::HostSide::Server(&mut Quiet), &mut args);
     assert!(!args.cancel);
     assert_eq!(HEAD.load(Ordering::Relaxed), 1);
     assert_eq!(fixture_list_top(3.0, 7), 10.0);

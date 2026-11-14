@@ -28,6 +28,7 @@ pub trait Hooks {
     /// charges, a mace smash's area, a hoglin's throw), nor for the ones Horizon makes another
     /// way (the ender dragon's). The level is the hit's: its blocks, random and own attachments.
     #[hook(
+        signature = "pub(in crate::game) fn native_living_knockback( &mut self, call: mod_api::__private::LivingKnockbackCall<'_>, )",
         side = "server",
         contract = "cancel",
         out = "canceled",
@@ -58,6 +59,8 @@ pub trait Hooks {
     /// raises `into`'s value with `native_set_experience_orb` in `experience_orb_merge`.
     /// Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_experience_orb_can_merge( &mut self, dimension: &str, into: u32, from: u32, into_value: i32, from_value: i32, can_merge: &mut bool, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_experience_orb_can_merge",
         side = "server",
         contract = "listen",
         neoforge = "none (vanilla ExperienceOrb.canMerge; NeoForge adds no event or extension for it)"

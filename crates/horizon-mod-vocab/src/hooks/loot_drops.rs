@@ -30,6 +30,8 @@ pub trait Hooks {
     /// Block and use drops retain their tool meaning.
     /// Server-side, for every player.
     #[hook(
+        signature = "pub(in crate::game) fn native_loot_drops( &mut self, context: &LootDrops<'_>, drops: &mut Vec<ItemStack>, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_loot_drops",
         side = "server",
         contract = "collect",
         out = "drops",

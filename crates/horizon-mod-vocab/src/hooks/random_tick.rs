@@ -12,6 +12,7 @@ pub trait Hooks {
     /// as it is now, if it still ticks randomly. Lava's fluid random tick
     /// runs either way.
     #[hook(
+        signature = "pub(in crate::game) fn native_random_tick( &mut self, ticks: &mut Ticks, dimension: LevelDimension, pos: BlockPos, state: BlockStateId, handled: &mut bool, )",
         side = "server",
         contract = "cancel",
         out = "handled",

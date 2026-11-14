@@ -16,6 +16,7 @@ pub trait Hooks {
     /// one check, with nothing decoded or allocated. Client-side. Diverges from upstream: new
     /// hook, a Horizon addition with no NeoForge counterpart.
     #[hook(
+        signature = "pub(in crate::game) fn native_viewed_level_sound( &mut self, call: mod_api::__private::ViewedLevelSoundCall<'_>, )",
         side = "client",
         contract = "listen",
         neoforge = "none (NeoForge has no viewed levels)"

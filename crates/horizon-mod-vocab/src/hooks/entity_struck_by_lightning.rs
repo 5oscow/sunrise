@@ -10,6 +10,7 @@ pub trait Hooks {
     /// as struck for Channeling's advancement. Not asked for a visual-only
     /// bolt, which hits nothing. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_entity_struck_by_lightning( &mut self, entity: EntityRef, bolt: EntityRef, cancel: &mut bool, )",
         side = "server",
         contract = "cancel",
         out = "cancel",

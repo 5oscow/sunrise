@@ -1,5 +1,7 @@
 //! Cargo-facing generation: the mod API's and the game's generated files.
-use super::{Catalog, Target, free_function_source, host, native_hook_files, sources};
+use super::{
+    Catalog, Target, canonical_sources, free_function_source, host, native_hook_files, sources,
+};
 use quote::ToTokens;
 use std::{fs, path::Path};
 mod vocab_boundary;
@@ -32,7 +34,7 @@ pub fn write_if_changed(path: impl AsRef<Path>, bytes: impl AsRef<[u8]>) -> std:
 /// Generate only this crate's files, tracking every source read by the generator.
 /// `root` is supplied at run time by the consuming crate's build script.
 pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), String> {
-    track(root, !matches!(&target, Target::Vocab))?;
+    track(root, matches!(&target, Target::Client))?;
     let inventory = if matches!(target, Target::Vocab) {
         let path = root.join("tools/layering/mod_vocab_state.json");
         crate::rerun_if_changed(&path.display());
@@ -48,7 +50,11 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
     if matches!(&target, Target::Client) {
         crate::rerun_if_staged(root);
     }
-    let generated = sources(root, super::FillMode::Require)?;
+    let generated = if matches!(target, Target::Client) {
+        sources(root, super::FillMode::Require)?
+    } else {
+        canonical_sources(root)?
+    };
     let outputs = match target {
         Target::Client => vec![
             ("native_hook_modules.rs", native_hook_modules(root)?),
@@ -233,7 +239,7 @@ pub fn generate_render(root: &Path, out_dir: &Path) -> Result<(), String> {
             .join("crates/horizon-mod-render/src/render.rs")
             .display(),
     );
-    let source = super::dispatch::render(root, &Catalog::load_declarations(root)?)?.render_dispatch;
+    let source = super::dispatch::render(root, &Catalog::load(root)?)?.render_dispatch;
     use syn::spanned::Spanned;
     let file = syn::parse_file(&source).map_err(|error| error.to_string())?;
     let lines: Vec<_> = std::iter::once(0)
@@ -300,7 +306,7 @@ pub(crate) fn wire_types(root: &Path) -> Result<std::collections::BTreeSet<Strin
     if !root.join("crates/horizon-mod-vocab/src/hooks").is_dir() {
         return Ok(Default::default());
     }
-    let generated = sources(root, super::FillMode::Require)?;
+    let generated = canonical_sources(root)?;
     wire_types_from_sources(root, &generated)
 }
 
@@ -326,8 +332,7 @@ pub(super) fn wire_types_from_sources(
     })
 }
 
-/// `horizon-mod-points`' generated file: each point's record, `PointId` and typed function constructors,
-/// from the game's source, tracking the game module's files.
+/// The game/SDK owner's complete point catalog and canonical game records, tracking game inputs.
 pub fn generate_points(root: &Path, out_dir: &Path) -> Result<(), String> {
     crate::interface_cache::with_cache(out_dir, || {
         crate::source::with_walk_cache(|| generate_points_inner(root, out_dir))
@@ -337,33 +342,86 @@ pub fn generate_points(root: &Path, out_dir: &Path) -> Result<(), String> {
 /// Generate the engine-owned point vocabulary and typed dispatch.
 pub fn generate_engine_points(root: &Path, out_dir: &Path) -> Result<(), String> {
     crate::interface_cache::with_cache(out_dir, || {
-        crate::source::with_walk_cache(|| {
-            for path in super::points::tracked(root)? {
-                crate::rerun_if_changed(&path.display());
-            }
-            crate::rerun_if_staged(root);
-            let points = super::points::game_points(root)?;
-            println!("cargo:rerun-if-env-changed=HORIZON_POINT_NAMES");
-            let selected = std::env::var("HORIZON_POINT_NAMES")
-                .ok()
-                .map(|json| {
-                    serde_json::from_str::<std::collections::BTreeSet<String>>(&json)
-                        .map_err(|error| format!("HORIZON_POINT_NAMES: {error}"))
-                })
-                .transpose()?;
-            let code = super::points::engine_records(&points, selected.as_ref());
-            let generated = syn::parse_file(&code).map_err(|e| format!("engine points: {e}"))?;
-            let mut code = String::new();
-            for item in generated.items {
-                code.push_str(&item.to_token_stream().to_string());
-                code.push('\n');
-            }
-            write_if_changed(out_dir.join("engine_points.rs"), code).map_err(|e| e.to_string())
-        })
+        crate::source::with_walk_cache(|| generate_engine_points_inner(root, out_dir))
     })
 }
 
+pub(super) fn generate_engine_points_inner(root: &Path, out_dir: &Path) -> Result<(), String> {
+    track(root, false)?;
+    for path in super::points::tracked_lower(root)? {
+        crate::rerun_if_changed(&path.display());
+    }
+    crate::rerun_if_staged(root);
+    let points = super::points::lower_points(root, &wire_types(root)?)?;
+    println!("cargo:rerun-if-env-changed=HORIZON_POINT_NAMES");
+    let selected = std::env::var("HORIZON_POINT_NAMES")
+        .ok()
+        .map(|json| {
+            serde_json::from_str::<std::collections::BTreeSet<String>>(&json)
+                .map_err(|error| format!("HORIZON_POINT_NAMES: {error}"))
+        })
+        .transpose()?;
+    let code = super::points::engine_records(&points, selected.as_ref());
+    let generated = syn::parse_file(&code).map_err(|e| format!("engine points: {e}"))?;
+    let mut code = String::new();
+    for item in generated.items {
+        code.push_str(&item.to_token_stream().to_string());
+        code.push('\n');
+    }
+    write_if_changed(out_dir.join("engine_points.rs"), code).map_err(|e| e.to_string())
+}
+
+/// Generate the neutral game-owned canonical records and complete erased catalog.
+pub fn generate_game_points(root: &Path, out_dir: &Path) -> Result<(), String> {
+    crate::interface_cache::with_cache(out_dir, || {
+        crate::source::with_walk_cache(|| generate_game_points_inner(root, out_dir))
+    })
+}
+
+pub(super) fn generate_game_points_inner(root: &Path, out_dir: &Path) -> Result<(), String> {
+    track(root, true)?;
+    for path in super::points::tracked(root)? {
+        crate::rerun_if_changed(&path.display());
+    }
+    crate::rerun_if_staged(root);
+    println!("cargo:rerun-if-env-changed=HORIZON_POINT_NAMES");
+    let selected = std::env::var("HORIZON_POINT_NAMES")
+        .ok()
+        .map(|json| {
+            serde_json::from_str::<std::collections::BTreeSet<String>>(&json)
+                .map_err(|error| format!("HORIZON_POINT_NAMES: {error}"))
+        })
+        .transpose()?;
+    let points = super::points::game_points(root)?;
+    let staged =
+        root.join(".horizon-source-staged").is_file() || cfg!(feature = "listener-fixture");
+    for (name, code) in [
+        (
+            "game_records.rs",
+            super::points::game_records(&points, selected.as_ref()),
+        ),
+        (
+            "game_catalog.rs",
+            super::points::game_catalog(&points)?
+                + &format!(
+                    "/// Whether this build compiled point sites.\npub const STAGED: bool = {staged};\n"
+                ),
+        ),
+    ] {
+        let parsed =
+            syn::parse_file(&code).map_err(|error| format!("generated Rust: {name}: {error}"))?;
+        let mut formatted = String::new();
+        for item in parsed.items {
+            formatted.push_str(&item.to_token_stream().to_string());
+            formatted.push('\n');
+        }
+        write_if_changed(out_dir.join(name), formatted).map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
 pub(super) fn generate_points_inner(root: &Path, out_dir: &Path) -> Result<(), String> {
+    track(root, false)?;
     // Phase durations for CI's build report (points-timing.txt beside the output); never read back.
     let started = std::time::Instant::now();
     let mut timing = String::new();
@@ -440,17 +498,14 @@ pub(super) fn track(root: &Path, all_game: bool) -> Result<(), String> {
         "rs",
         false,
     )?;
+    // Only the game owner reads and validates native implementations. Lower generation reads
+    // canonical vocabulary declarations, including each native bridge signature.
+    let catalog = Catalog::load(root)?;
     if all_game {
         directory(&root.join("crates/horizon-client/src/game"), "rs", true)?;
         crate::rerun_if_changed(&root.join("crates/horizon-client/src/game.rs").display());
-    } else {
-        directory(
-            &root.join("crates/horizon-client/src/game/native_hooks"),
-            "rs",
-            false,
-        )?;
     }
-    for hook in Catalog::load(root)?.hooks {
+    for hook in catalog.hooks {
         if let Some((krate, path)) = free_function_source(&hook.target) {
             let (module, _) = path.rsplit_once("::").ok_or("target missing module")?;
             let path = root
@@ -462,4 +517,99 @@ pub(super) fn track(root: &Path, all_game: bool) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tracking_tests {
+    use super::*;
+
+    fn tracked(root: &Path, all_game: bool) -> Vec<String> {
+        crate::CAPTURED_RERUNS.with_borrow_mut(|capture| *capture = Some(Vec::new()));
+        let result = track(root, all_game);
+        let paths = crate::CAPTURED_RERUNS.with_borrow_mut(|capture| capture.take().unwrap());
+        result.unwrap();
+        paths
+    }
+
+    #[test]
+    fn lower_tracking_reads_declarations_not_game_implementations() {
+        let root = tempfile::tempdir().unwrap();
+        let root = root.path();
+        for directory in [
+            super::super::catalog::DECLARATIONS,
+            super::super::exports::DIRECTORY,
+            "crates/horizon-mod-vocab/src/parts",
+            "crates/horizon-client/src/game/native_hooks",
+            "crates/horizon-client/src/game/blocks",
+        ] {
+            fs::create_dir_all(root.join(directory)).unwrap();
+        }
+        let hook = root.join("crates/horizon-client/src/game/native_hooks/one.rs");
+        fs::write(&hook, "").unwrap();
+        let game = root.join("crates/horizon-client/src/game");
+        let beacon = game.join("blocks/beacon.rs");
+        fs::write(&beacon, "fn implementation() {}").unwrap();
+        fs::write(game.with_extension("rs"), "").unwrap();
+
+        let inputs = tracked(root, false);
+        assert!(!inputs.contains(&hook.display().to_string()));
+        assert!(!inputs.contains(&game.display().to_string()));
+        assert!(!inputs.contains(&beacon.display().to_string()));
+        assert!(!inputs.contains(&game.with_extension("rs").display().to_string()));
+
+        let client_inputs = tracked(root, true);
+        assert!(client_inputs.contains(&hook.display().to_string()));
+        assert!(client_inputs.contains(&beacon.display().to_string()));
+        assert!(client_inputs.contains(&game.with_extension("rs").display().to_string()));
+
+        // Named hooks also derive from the declaration: logical/body validation belongs to
+        // the game owner, not the lower API dependency graph.
+        fs::write(
+            root.join(super::super::catalog::DECLARATIONS).join("one.rs"),
+            "pub trait Hooks { /// Doc.\n #[hook(side = \"server\", contract = \"listen\", target = \"horizon_client::game::blocks::Game<'_>::native_one\")] fn one(); }",
+        )
+        .unwrap();
+        let named_inputs = tracked(root, false);
+        assert!(!named_inputs.contains(&beacon.display().to_string()));
+        assert!(!named_inputs.contains(&game.with_extension("rs").display().to_string()));
+        assert!(
+            named_inputs.contains(
+                &root
+                    .join(super::super::catalog::DECLARATIONS)
+                    .join("one.rs")
+                    .display()
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn canonical_bridges_need_no_game_files_but_refuse_missing_or_mismatched_signatures() {
+        let root = tempfile::tempdir().unwrap();
+        let declaration = r#"pub trait Hooks {
+            /// One moment.
+            #[hook(side = "server", contract = "listen", signature = "fn native_one(&self)")]
+            fn one();
+        }"#;
+        let catalog = Catalog::parse(&[("one.rs".into(), declaration.into())]).unwrap();
+        let generated = crate::dispatch::declared(root.path(), &catalog).unwrap();
+        assert!(generated.traits.contains("fn one("));
+        assert!(!root.path().join("crates/horizon-client").exists());
+
+        let missing = declaration.replace(", signature = \"fn native_one(&self)\"", "");
+        let missing = Catalog::parse(&[("one.rs".into(), missing)]).unwrap();
+        let error = crate::dispatch::declared(root.path(), &missing)
+            .err()
+            .unwrap();
+        assert!(error.contains("one: declare its native bridge"));
+
+        let implementation: syn::ItemFn = syn::parse_quote!(
+            fn native_one(&self, value: u64) {}
+        );
+        let error =
+            crate::dispatch::emit(root.path(), catalog.hooks.iter(), &[implementation], &[])
+                .err()
+                .unwrap();
+        assert!(error.contains("one: native signature differs"));
+    }
 }

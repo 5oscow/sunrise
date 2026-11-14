@@ -6,6 +6,8 @@ pub trait Hooks {
     /// `screen.mouse` is the current GUI position; `delta` is its GUI-space movement.
     /// Cancel keeps the new cursor position but skips all screen drag handlers.
     #[hook(
+        signature = "pub(in crate::game) fn native_screen_mouse_dragged_pre( &self, screen: &ScreenView<'_>, button: i32, delta: [f32; 2], modifiers: u32, canceled: &mut bool, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_screen_mouse_dragged_pre",
         side = "client",
         contract = "cancel",
         out = "canceled",

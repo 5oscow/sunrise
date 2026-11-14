@@ -16,6 +16,7 @@ pub trait Hooks {
     /// left `None`, the block keeps the `BonemealableBlock` its template gives
     /// it, or takes no bone meal.
     #[hook(
+        signature = "pub(in crate::game) fn native_is_valid_bonemeal_target( &self, dimension: LevelDimension, pos: BlockPos, state: BlockStateId, valid: &mut Option<bool>, )",
         side = "both",
         contract = "replace",
         out = "valid",

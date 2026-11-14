@@ -6,6 +6,8 @@ pub trait Hooks {
     /// are the requested final states. Set `cancel` to keep the previous
     /// weather parameters. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_weather_change( &mut self, dimension: &str, raining: bool, thundering: bool, cancel: &mut bool, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_weather_change",
         side = "server",
         contract = "cancel",
         out = "cancel",

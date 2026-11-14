@@ -11,6 +11,7 @@ pub trait Hooks {
     /// occurrence wins, preserving answer order.
     /// Native and wasm listeners append positions with identical copy-out semantics.
     #[hook(
+        signature = "pub(in crate::game) fn native_menu_links( &mut self, player: u128, menu: &str, pos: [i32; 3], links: &mut Vec<[i32; 3]>, )",
         side = "server",
         contract = "collect",
         out = "links",

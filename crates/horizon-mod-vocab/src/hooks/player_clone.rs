@@ -10,6 +10,8 @@ pub trait Hooks {
     /// level. `player` is the replacement's UUID. Heard before placement on
     /// a server, without swapping a player's state in. Not cancellable.
     #[hook(
+        signature = "pub(in crate::game) fn native_player_clone( &mut self, player: u128, name: &str, was_death: bool, original: mod_api::OriginalPlayerRef, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_player_clone",
         side = "server",
         contract = "listen",
         neoforge = "PlayerEvent.Clone (not cancellable)",

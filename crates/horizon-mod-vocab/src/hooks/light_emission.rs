@@ -25,6 +25,7 @@ pub trait Hooks {
     /// contract does, so keep the answer a pure function of the level, `pos` and
     /// `state`. Diverges from upstream: new hook.
     #[hook(
+        signature = "pub(in crate::game) fn native_light_emission( &self, dimension: LevelDimension, pos: BlockPos, state: BlockStateId, emission: &mut Option<u8>, )",
         side = "both",
         contract = "replace",
         out = "emission",

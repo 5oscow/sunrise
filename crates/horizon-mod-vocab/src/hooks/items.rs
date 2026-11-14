@@ -12,6 +12,8 @@ pub trait Hooks {
     /// manifest (bare paths use its mod ID). Unowned namespaces refuse registration.
     /// Asked once at start, on every side.
     #[hook(
+        signature = "pub(in crate::game) fn native_items( context: &mod_api::RegistrationContext, items: &mut Vec<mod_api::Item>, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_items",
         side = "both",
         contract = "collect",
         out = "items",

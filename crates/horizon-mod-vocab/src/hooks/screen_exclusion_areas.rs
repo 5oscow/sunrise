@@ -8,6 +8,7 @@ pub trait Hooks {
     /// (`EmiExclusionArea`, JEI's `IGuiContainerHandler.getGuiExtraAreas`).
     /// Client-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_screen_exclusion_areas( &self, screen: &ScreenView<'_>, areas: &mut Vec<[f32; 4]>, )",
         side = "client",
         contract = "collect",
         out = "areas",

@@ -12,6 +12,7 @@ pub trait Hooks {
     /// none costs one table lookup, and a game with no such part none at all.
     /// Server-side, for every dropped item that ticks.
     #[hook(
+        signature = "pub(in crate::game) fn native_on_entity_item_update( &mut self, call: mod_api::__private::OnEntityItemUpdateCall<'_>, )",
         side = "server",
         contract = "cancel",
         out = "canceled",

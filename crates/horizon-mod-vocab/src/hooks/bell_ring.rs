@@ -5,6 +5,7 @@ pub trait Hooks {
     /// On an authoritative server, a bell at `pos` is about to ring. Set
     /// `cancel` to stop the ring and its raider reveal.
     #[hook(
+        signature = "pub(in crate::game) fn native_bell_ring( &self, dimension: LevelDimension, player: Option<u128>, pos: BlockPos, cancel: &mut bool, )",
         side = "server",
         contract = "cancel",
         out = "cancel",

@@ -27,6 +27,7 @@ receive `&dyn ClientHost`. They do not grant server writes.
 not for a dimension change. Initialization and final shutdown still use the
 existing `client_setup` and `client_stopping` hooks, with no parallel aliases."#]
     #[hook(
+        signature = "pub(in crate::game) fn native_gui_render_post( &self, batch: &mut HudBatch, gui_hidden: bool, focused: bool, )",
         side = "client",
         contract = "listen",
         cancellable = false,

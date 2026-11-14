@@ -10,6 +10,7 @@ pub trait Hooks {
     /// `can_convert` starts as the fluid's rule (`water_source_conversion`
     /// or `lava_source_conversion`). Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_create_fluid_source( &self, dimension: LevelDimension, pos: BlockPos, state: BlockStateId, can_convert: &mut bool, )",
         side = "server",
         contract = "listen",
         neoforge = "CreateFluidSourceEvent",

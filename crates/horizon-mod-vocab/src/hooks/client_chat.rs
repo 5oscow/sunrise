@@ -5,6 +5,7 @@ pub trait Hooks {
     /// `original_message` is immutable; change `message` or set `cancel` to
     /// prevent sending.
     #[hook(
+        signature = "pub(in crate::game) fn native_client_chat( &mut self, player_id: i32, player_uuid: u128, original_message: &str, message: &mut String, cancel: &mut bool, )",
         side = "client",
         contract = "cancel",
         out = "cancel",

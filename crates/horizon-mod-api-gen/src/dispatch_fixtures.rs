@@ -102,6 +102,7 @@ pub(crate) fn generate(root: &Path, out: &Path) -> Result<(), String> {
     // Their boundaries need not match when declarations are split per hook.
     let native_dir = root.join("crates/horizon-client/src/game/native_hooks");
     if native_dir.is_dir() {
+        crate::rerun_if_changed(&native_dir.display());
         areas.extend(Catalog::modules(&native_dir)?);
     }
     let mut output = BTreeMap::new();

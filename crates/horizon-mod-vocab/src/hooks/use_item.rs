@@ -22,6 +22,8 @@ pub trait Hooks {
     /// }
     /// ```
     #[hook(
+        signature = "pub(in crate::game) fn native_use_on(&mut self, call: mod_api::__private::UseOnCall<'_>)",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_use_on",
         side = "both",
         version = 2,
         contract = "replace",
@@ -61,6 +63,8 @@ pub trait Hooks {
     /// They name who clicked from the event alone, unlike `players().acting_player()`,
     /// which only answers while the host has set the acting player.
     #[hook(
+        signature = "pub(in crate::game) fn native_use_item(&mut self, call: mod_api::__private::UseItemCall<'_>)",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_use_item",
         side = "both",
         version = 2,
         contract = "replace",

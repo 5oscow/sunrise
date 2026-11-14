@@ -8,6 +8,7 @@ pub trait Hooks {
     /// state and the position, without touching the world. With no part attached to the
     /// state, the cost is one table lookup. Diverges from upstream: new hook.
     #[hook(
+        signature = "pub(in crate::game) fn native_rail_can_make_slopes( &self, dimension: LevelDimension, state: BlockStateId, pos: BlockPos, can: &mut bool, )",
         side = "server",
         contract = "collect",
         out = "can",

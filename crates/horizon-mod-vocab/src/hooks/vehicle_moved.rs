@@ -15,6 +15,8 @@ pub trait Hooks {
     /// (horse, pig...) or a vehicle carrying only a mob. Server-side, in the
     /// level the vehicle is in.
     #[hook(
+        signature = "pub(in crate::game) fn native_vehicle_moved( &mut self, player: Option<u128>, kind: &str, from: [f64; 3], to: [f64; 3], )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_vehicle_moved",
         side = "server",
         contract = "listen",
         neoforge = "none (NeoForge has no vehicle move event; EntityTickEvent covers the tick)"

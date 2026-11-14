@@ -7,6 +7,7 @@ pub trait Hooks {
     /// mouse turns the view; `ClientHost::set_local_rotation` sets the view directly, and the
     /// two meet in the same angles the tick's move packet sends.
     #[hook(
+        signature = "pub(in crate::game) fn native_calculate_player_turn( &self, player_entity_id: i32, player_uuid: u128, mouse_sensitivity: &mut f64, cinematic_camera_enabled: &mut bool, )",
         side = "client",
         contract = "listen",
         neoforge = "CalculatePlayerTurnEvent",

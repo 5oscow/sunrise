@@ -9,6 +9,7 @@ pub trait Hooks {
     /// that isn't finite and above 0 is ignored. Beyond NeoForge: the renderer's own method,
     /// no event.
     #[hook(
+        signature = "pub(in crate::game) fn native_block_entity_view_distance( &self, block: &str, distance: &mut f64, )",
         side = "client",
         contract = "collect",
         out = "distance",

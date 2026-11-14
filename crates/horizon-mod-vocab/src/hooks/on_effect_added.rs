@@ -13,6 +13,8 @@ pub trait Hooks {
     /// changes apply after the hook; clearing `keep` ends the effect.
     /// Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_apply_effect_tick( &self, call: mod_api::__private::ApplyEffectTickCall<'_>, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_apply_effect_tick",
         side = "server",
         contract = "listen",
         host = "read",
@@ -34,6 +36,8 @@ pub trait Hooks {
     /// (as in `native_apply_effect_tick`) the content mod's effect `effect`,
     /// which it didn't have. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_on_effect_added( &mut self, effect: EffectKey, entity: Option<i32>, amplifier: i32, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_on_effect_added",
         side = "server",
         contract = "listen",
         neoforge = "none (vanilla MobEffect.onEffectAdded; NeoForge adds no event or extension for it)"

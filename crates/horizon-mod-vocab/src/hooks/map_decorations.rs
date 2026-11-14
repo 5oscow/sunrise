@@ -15,6 +15,8 @@ pub trait Hooks {
     /// The client half of `MapDecorationType` and `addDecoration`: a type
     /// registered on the server and saved in the map's data is not here.
     #[hook(
+        signature = "pub(in crate::game) fn native_map_decorations( &self, map: &mod_api::MapInfo<'_>, decorations: &mut Vec<mod_api::MapDecoration>, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_map_decorations",
         side = "client",
         contract = "collect",
         out = "decorations",

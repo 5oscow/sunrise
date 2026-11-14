@@ -10,6 +10,7 @@ pub trait Hooks {
     /// resolves its structure: answer from the state, without touching the world. With no part
     /// attached to the state, the cost is one table lookup. Diverges from upstream: new hook.
     #[hook(
+        signature = "pub(in crate::game) fn native_is_slime_block( &self, dimension: LevelDimension, state: BlockStateId, slime: &mut bool, )",
         side = "server",
         contract = "collect",
         out = "slime",
@@ -29,6 +30,7 @@ pub trait Hooks {
     /// structure: answer from the state, without touching the world. With no part attached to the
     /// state, the cost is one table lookup. Diverges from upstream: new hook.
     #[hook(
+        signature = "pub(in crate::game) fn native_is_sticky_block( &self, dimension: LevelDimension, state: BlockStateId, sticky: &mut bool, )",
         side = "server",
         contract = "collect",
         out = "sticky",
@@ -49,6 +51,7 @@ pub trait Hooks {
     /// structure: answer from the two states, without touching the world. With no part attached to
     /// the state, the cost is one table lookup. Diverges from upstream: new hook.
     #[hook(
+        signature = "pub(in crate::game) fn native_can_stick_to( &self, dimension: LevelDimension, state: BlockStateId, other: BlockStateId, sticks: &mut bool, )",
         side = "server",
         contract = "collect",
         out = "sticks",

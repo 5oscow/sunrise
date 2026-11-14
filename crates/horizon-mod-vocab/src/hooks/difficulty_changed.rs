@@ -9,6 +9,8 @@ pub trait Hooks {
     /// go through, and it is told only when the difficulty is another one. It
     /// only hears: the change has already happened. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_difficulty_changed(&mut self, from: &str, to: &str)",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_difficulty_changed",
         side = "server",
         contract = "listen",
         neoforge = "DifficultyChangeEvent"

@@ -5,6 +5,8 @@ pub trait Hooks {
     /// A server player took an output from a furnace at `pos`; `item` is the output item id and
     /// `count` is how many were taken. The player's state is not swapped in.
     #[hook(
+        signature = "pub(in crate::game) fn native_furnace_extract( &mut self, player: u128, name: &str, pos: [i32; 3], item: &str, count: u32, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_furnace_extract",
         side = "server",
         contract = "listen",
         neoforge = "none (NeoForge has no such event)"

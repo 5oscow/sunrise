@@ -5,6 +5,8 @@ pub trait Hooks {
     /// A server player changed a beacon's selected effects, after they were stored. Each selected
     /// effect is an `Option<EffectKey>`; None means no effect. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_player_change_beacon_effect( &mut self, player: u128, name: &str, pos: [i32; 3], primary: Option<EffectKey>, secondary: Option<EffectKey>, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_player_change_beacon_effect",
         side = "server",
         contract = "listen",
         neoforge = "none (NeoForge has no such event)"

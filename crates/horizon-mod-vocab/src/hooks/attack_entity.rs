@@ -12,6 +12,8 @@ pub trait Hooks {
     /// knockback, the frame keeps its item). Server-side, for every player of
     /// the world (`host.players().acting_player()` says who).
     #[hook(
+        signature = "pub(in crate::game) fn native_attack_entity( &mut self, entity: i32, kind: &str, pos: [f64; 3], canceled: &mut bool, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_attack_entity",
         side = "server",
         contract = "cancel",
         out = "canceled",

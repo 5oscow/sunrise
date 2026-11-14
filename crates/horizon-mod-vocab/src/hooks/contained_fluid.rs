@@ -33,6 +33,7 @@ the stack as holding none and is logged once for that item. The hook is
 client-only; the server keeps the fluid in the stack's own data, through `ITEM_FLUIDS` and the item's
 components, as before."##]
     #[hook(
+        signature = "pub(in crate::game) fn native_contained_fluid( &self, stack: &mod_api::ItemStack, fluid: &mut Option<mod_api::FluidKey>, )",
         side = "client",
         contract = "listen",
         scope = "item",

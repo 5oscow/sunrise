@@ -25,6 +25,8 @@ pub trait Hooks {
     /// are GLFW's separate char callback and still come; see
     /// `screen_char_typed_pre`.
     #[hook(
+        signature = "pub(in crate::game) fn native_screen_key_pressed_pre( &self, screen: &ScreenView<'_>, key: &str, repeat: bool, modifiers: u32, canceled: &mut bool, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_screen_key_pressed_pre",
         side = "client",
         contract = "cancel",
         out = "canceled",

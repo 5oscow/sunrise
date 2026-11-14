@@ -8,6 +8,7 @@ pub trait Hooks {
     /// which keeps advancing. Outside a world both use the window clock.
     /// Listener writes do not change this frame's captured interpolation. Client-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_render_frame_pre( &mut self, elapsed: Duration, world_partial_tick: f32, partial_tick: f32, )",
         side = "client",
         contract = "listen",
         version = 2,

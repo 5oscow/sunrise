@@ -54,6 +54,12 @@ pub(crate) fn resolve(root: &Path, catalog: &mut Catalog) -> Result<(), String> 
             let (target, signature) = targets
                 .get(&name)
                 .ok_or_else(|| format!("{}: no native definition", hook.name))?;
+            if hook.target != *target {
+                return Err(format!(
+                    "{}: declared target {} differs from native definition {target}; update its hook declaration",
+                    hook.name, hook.target
+                ));
+            }
             if hook.stack_count.is_some() && hook.call.is_empty() {
                 let output = signature.inputs.iter().find_map(|input| {
                     let syn::FnArg::Typed(input) = input else {
@@ -68,7 +74,6 @@ pub(crate) fn resolve(root: &Path, catalog: &mut Catalog) -> Result<(), String> 
                 crate::catalog::validate_stack_count_output(&hook.name, output)
                     .map_err(|e| e.to_string())?;
             }
-            hook.target = target.clone();
         }
     }
     Ok(())
@@ -84,15 +89,7 @@ mod tests {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let mut catalog = Catalog::load(&root).unwrap();
 
-        let declared = Catalog::load_declarations(&root).unwrap();
-        let wrong = declared
-            .hooks
-            .iter()
-            .zip(&catalog.hooks)
-            .filter(|(old, new)| old.target != new.target)
-            .map(|(old, _)| old.name.as_str())
-            .collect::<Vec<_>>();
-        println!("{} corrected targets: {}", wrong.len(), wrong.join(", "));
+        resolve(&root, &mut catalog).unwrap();
         // Dispatch resolves named game methods and free render functions through the
         // same source parsers used for generation (including crate aliases).
         crate::sources(&root, crate::FillMode::Require).unwrap();

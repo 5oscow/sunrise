@@ -7,6 +7,8 @@ pub trait Hooks {
     /// The equip, item consumption, sound and game event have completed.
     /// Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_block_dispense_armor( &mut self, dimension: &str, pos: [i32; 3], item: &str, target: &str, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_block_dispense_armor",
         side = "server",
         contract = "listen",
         neoforge = "none (NeoForge has no such event)"

@@ -5,6 +5,8 @@ pub trait Hooks {
     /// A beacon at `pos` activated or deactivated after its beam was checked.
     /// `active` says whether it now has a complete pyramid. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_beacon_state_change( &mut self, dimension: &str, pos: [i32; 3], active: bool, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_beacon_state_change",
         side = "server",
         contract = "listen",
         neoforge = "none (NeoForge has no such event)"

@@ -5,6 +5,8 @@ pub trait Hooks {
     /// Before an eligible targeted block's selection outline is built.
     /// Cancel skips only the default block highlight, after normal HUD and game-mode gates.
     #[hook(
+        signature = "pub(in crate::game) fn native_block_highlight( &self, pos: [i32; 3], state: BlockStateId, partial: f32, canceled: &mut bool, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_block_highlight",
         side = "client",
         contract = "cancel",
         out = "canceled",

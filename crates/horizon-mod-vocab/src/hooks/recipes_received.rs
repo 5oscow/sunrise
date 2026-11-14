@@ -13,6 +13,8 @@ pub trait Hooks {
     /// recipes. A recipe the
     /// window's own recipe book doesn't know has `book_id` -1. Client-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_recipes_received(&mut self, recipe_types: &[String])",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_recipes_received",
         side = "client",
         contract = "listen",
         neoforge = "RecipesReceivedEvent"

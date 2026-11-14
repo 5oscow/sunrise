@@ -12,6 +12,7 @@ pub trait Hooks {
     /// children with it (the hat goes with the head), while its armour, held items and other
     /// layers, the cape among them, keep every part.
     #[hook(
+        signature = "pub(in crate::game) fn native_render_player_pre( &self, player: &MobRender<'_>, who: &PlayerRender<'_>, draw: &mut BlockEntityDraw, hidden: &mut HiddenParts, canceled: &mut bool, )",
         side = "client",
         contract = "cancel",
         out = "canceled",

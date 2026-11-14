@@ -6,6 +6,7 @@ pub trait Hooks {
     /// remove entries, or cancel to make the list empty. Mods can read the world,
     /// but cannot write it during the spawn pass.
     #[hook(
+        signature = "pub(in crate::game) fn native_potential_spawns( &self, dimension: &str, category: &str, pos: [i32; 3], entries: &mut Vec<SpawnEntry>, canceled: &mut bool, )",
         side = "server",
         contract = "cancel",
         out = "canceled",

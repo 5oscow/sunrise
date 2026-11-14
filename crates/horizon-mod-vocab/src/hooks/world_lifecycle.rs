@@ -6,6 +6,8 @@ pub trait Hooks {
     /// own open-failure text, empty otherwise. Server-side. A server loop or final
     /// save failure fires `WorldCloseFailed` with the error text.
     #[hook(
+        signature = "pub(in crate::game) fn native_world_lifecycle( &mut self, context: &LifecycleContext, phase: WorldPhase, error_text: &str, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_world_lifecycle",
         side = "server",
         contract = "listen",
         version = 2,

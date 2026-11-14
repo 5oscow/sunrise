@@ -7,6 +7,8 @@ pub trait Hooks {
     /// `host.players().server_players()`, so `PlayerRef::send_payload` reaches them.
     /// Once a join, with no player's state swapped in. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_player_logged_in(&mut self, player: u128, name: &str)",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_player_logged_in",
         side = "server",
         contract = "listen",
         neoforge = "PlayerEvent.PlayerLoggedInEvent"

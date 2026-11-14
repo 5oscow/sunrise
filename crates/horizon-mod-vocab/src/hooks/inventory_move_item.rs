@@ -6,6 +6,8 @@ pub trait Hooks {
     /// bone meal included. Set `cancel` to leave it in its source slot. A chest
     /// boat or minecart is reported at the block it is in.
     #[hook(
+        signature = "pub(in crate::game) fn native_inventory_move_item( &self, source: [i32; 3], destination: [i32; 3], item: &str, cancel: &mut bool, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_inventory_move_item",
         side = "server",
         contract = "cancel",
         out = "cancel",

@@ -6,6 +6,7 @@ pub trait Hooks {
     /// `from` and `to` are block state IDs. Set `cancel` to keep the old state.
     /// Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_block_form( &self, dimension: LevelDimension, pos: BlockPos, from: BlockStateId, to: BlockStateId, cancel: &mut bool, )",
         side = "server",
         contract = "cancel",
         out = "cancel",

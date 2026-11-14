@@ -8,6 +8,7 @@ pub trait Hooks {
     /// A cancelled tick schedules nothing; a mod taking over must re-schedule itself.
     /// It's asked once per tick, so keep it cheap. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_fluid_tick( &self, dimension: LevelDimension, pos: BlockPos, fluid: &str, cancel: &mut bool, )",
         side = "server",
         contract = "cancel",
         out = "cancel",

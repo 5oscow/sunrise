@@ -15,6 +15,8 @@ pub trait Hooks {
     /// server refuses before reading it (unsigned chat arguments, the chat
     /// rate limit) never reaches it.
     #[hook(
+        signature = "pub(in crate::game) fn native_player_command( &mut self, player: u128, name: &str, command: &str, canceled: &mut bool, replies: &mut Vec<Text>, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_player_command",
         side = "server",
         contract = "cancel",
         out = "canceled",

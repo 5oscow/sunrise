@@ -11,6 +11,8 @@ pub trait Hooks {
     /// `vanilla_can_eat`. Both sides (the client starts eating as the
     /// server does), so answer from the stack and the player alone.
     #[hook(
+        signature = "pub(in crate::game) fn native_can_eat( &self, stack: Option<&ItemStack>, vanilla_can_eat: bool, can_eat: &mut Option<bool>, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_can_eat",
         side = "both",
         contract = "replace",
         out = "can_eat",

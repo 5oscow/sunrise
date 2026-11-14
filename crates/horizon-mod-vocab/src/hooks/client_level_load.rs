@@ -10,6 +10,8 @@ pub trait Hooks {
     /// tells it after the new level is made. Client-side, on the window; the
     /// server's levels have `level_load`.
     #[hook(
+        signature = "pub(in crate::game) fn native_client_level_load(&mut self, dimension: &str)",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_client_level_load",
         side = "client",
         contract = "listen",
         neoforge = "LevelEvent.Load",

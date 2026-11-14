@@ -26,6 +26,8 @@ pub trait Hooks {
     /// `host.players().acting_player()` names them; `entity` is out of the world
     /// during the call, as in `menu_button`.
     #[hook(
+        signature = "pub(in crate::game) fn native_menu_quick_move( &mut self, pos: [i32; 3], entity: &mut ModBlockEntity, container_slots: usize, slot: usize, stack: &mut mod_api::ItemStack, handled: &mut bool, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_menu_quick_move",
         side = "server",
         contract = "cancel",
         out = "handled",

@@ -14,6 +14,7 @@ pub trait Hooks {
     /// client alike). Only the `ItemPart`s attached to `stack`'s item are
     /// asked. Client-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_should_cause_block_break_reset( &self, stack: &ItemStack, held: Option<&ItemStack>, reset: &mut bool, )",
         side = "client",
         contract = "listen",
         scope = "item",

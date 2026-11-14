@@ -13,6 +13,8 @@ pub trait Hooks {
     /// back in the inventory. State swapped in, when the player has a body.
     /// Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_player_container_close( &mut self, player: u128, name: &str, dimension: &str, menu: &str, pos: Option<[i32; 3]>, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_player_container_close",
         side = "server",
         contract = "listen",
         neoforge = "PlayerContainerEvent.Close",

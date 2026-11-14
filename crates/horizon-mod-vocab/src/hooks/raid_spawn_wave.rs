@@ -5,6 +5,8 @@ pub trait Hooks {
     /// A raid wave has been spawned at `pos`; `wave` is its one-based wave
     /// number and `raiders` counts the raiders, not the mobs they ride.
     #[hook(
+        signature = "pub(in crate::game) fn native_raid_spawn_wave( &mut self, raid: i32, pos: [i32; 3], wave: i32, raiders: usize, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_raid_spawn_wave",
         side = "server",
         contract = "listen",
         neoforge = "none (NeoForge has no such event)"

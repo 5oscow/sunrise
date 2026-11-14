@@ -5,6 +5,7 @@ pub trait Hooks {
     /// `ArrowNockEvent`): `has_ammo` is whether `getProjectile` found ammunition
     /// or the player is in creative. Set `cancel` to fail the use.
     #[hook(
+        signature = "pub(in crate::game) fn native_arrow_nock( &mut self, player: u128, name: &str, bow: &ItemStack, hand: Hand, has_ammo: bool, cancel: &mut bool, )",
         side = "server",
         contract = "cancel",
         out = "cancel",

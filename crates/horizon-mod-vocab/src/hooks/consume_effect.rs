@@ -10,6 +10,8 @@ pub trait Hooks {
     /// nothing. This is the runtime `ConsumeEffect.apply` moment, not effect
     /// type registration through NeoForge's `RegisterEvent`.
     #[hook(
+        signature = "pub(in crate::game) fn native_consume_effect( &mut self, kind: &str, data: &horizon_core::nbt::Tag, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_consume_effect",
         side = "server",
         contract = "listen",
         neoforge = "none (runtime ConsumeEffect.apply; RegisterEvent registers effect types, not invocations)"

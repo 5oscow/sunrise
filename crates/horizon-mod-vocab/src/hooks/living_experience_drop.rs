@@ -8,6 +8,7 @@ pub trait Hooks {
     /// sculk catalyst that takes the experience does not call this.
     /// Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_living_experience_drop( &mut self, entity: u32, kind: &str, attacking_player: Option<u128>, original: i32, amount: &mut i32, cancel: &mut bool, )",
         side = "server",
         contract = "cancel",
         out = "cancel",

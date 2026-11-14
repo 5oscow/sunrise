@@ -49,6 +49,51 @@ pub(super) fn emit<'a>(
     methods: &[syn::ItemFn],
     contexts: &[DrawContext],
 ) -> Result<HookSources, String> {
+    emit_inner(root, hooks, methods, contexts, false)
+}
+
+/// Emit from authoritative bridge signatures without reading game implementations.
+pub(super) fn declared(root: &Path, catalog: &Catalog) -> Result<HookSources, String> {
+    let methods = catalog
+        .hooks
+        .iter()
+        .filter(|hook| hook.target.starts_with("horizon_client::game::"))
+        .map(|hook| {
+            let signature = hook.signature.as_deref().ok_or_else(|| {
+                format!(
+                    "{}: declare its native bridge with signature = \"fn native_…(…)\"",
+                    hook.name
+                )
+            })?;
+            bridge_declaration(root, signature, &hook.name)
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    emit_inner(
+        root,
+        catalog.hooks.iter().filter(|hook| !is_render(hook)),
+        &methods,
+        &catalog.draw_contexts,
+        true,
+    )
+}
+
+fn bridge_declaration(root: &Path, signature: &str, name: &str) -> Result<syn::ItemFn, String> {
+    let mut declaration: syn::ItemFn = syn::parse_str(&format!("{signature} {{}}"))
+        .map_err(|error| format!("{name}: bridge signature: {error}"))?;
+    // Both staging modes widen every inherent method before generating their interfaces.
+    if root.join(".horizon-source-staged").is_file() {
+        declaration.vis = syn::parse_quote!(pub);
+    }
+    Ok(declaration)
+}
+
+fn emit_inner<'a>(
+    root: &Path,
+    hooks: impl Iterator<Item = &'a Hook>,
+    methods: &[syn::ItemFn],
+    contexts: &[DrawContext],
+    declarations: bool,
+) -> Result<HookSources, String> {
     let mut hook_ids = String::new();
     let mut hook_constants = String::new();
     let mut cancel_hooks = String::new();
@@ -112,7 +157,7 @@ pub(super) fn emit<'a>(
                 return Err(format!("wrong target for {name}"));
             }
             (
-                if target.starts_with("horizon_client::game::native_hooks::") {
+                if declarations || target.starts_with("horizon_client::game::native_hooks::") {
                     one_function(methods.iter(), &native)?.clone()
                 } else {
                     super::named_hooks::resolve(root, target, name)?
@@ -120,7 +165,22 @@ pub(super) fn emit<'a>(
                 format!("dispatch_{name}"),
             )
         };
-        let fill = !is_render && needs_fill(&method, &call, in_game)?;
+        if !declarations
+            && in_game
+            && let Some(signature) = &hook.signature
+        {
+            let declared = bridge_declaration(root, signature, name)?;
+            if declared.sig.to_token_stream().to_string()
+                != method.sig.to_token_stream().to_string()
+                || declared.vis.to_token_stream().to_string()
+                    != method.vis.to_token_stream().to_string()
+            {
+                return Err(format!(
+                    "{name}: native signature differs from its canonical hook declaration"
+                ));
+            }
+        }
+        let fill = !declarations && !is_render && needs_fill(&method, &call, in_game)?;
         let sig = &method.sig;
         let mut native_args = Vec::new();
         let mut receiver_mut = None;

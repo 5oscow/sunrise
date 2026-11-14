@@ -37,6 +37,7 @@ are texels, +y down and the front towards -z; convert the mob's frame with scale
 `[1.0, -1.0, -1.0]` then translation `[0.0, -1.501, 0.0]`, as `LivingEntityRenderer` does.
 The sprite is the entity texture ID and the tint is `0xRRGGBB`."#]
     #[hook(
+        signature = "pub(in crate::game) fn native_register_layer_definitions( context: &mod_api::RegistrationContext, layers: &mut Vec<(String, LayerDefinition)>, )",
         side = "client",
         contract = "collect",
         out = "layers",

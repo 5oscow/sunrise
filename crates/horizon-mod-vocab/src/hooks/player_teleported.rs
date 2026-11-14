@@ -14,6 +14,8 @@ pub trait Hooks {
     /// have their own hooks; a spectator's teleport menu is not heard yet;
     /// portals and respawns are not teleports here.
     #[hook(
+        signature = "pub(in crate::game) fn native_player_teleported( &mut self, player: u128, name: &str, from: [f64; 3], to: [f64; 3], dimension: &str, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_player_teleported",
         side = "server",
         contract = "listen",
         neoforge = "none (EntityTeleportEvent.TeleportCommand fires before the move and can cancel it; this hook is told after the move)"

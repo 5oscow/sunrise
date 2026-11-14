@@ -13,6 +13,8 @@ pub trait Hooks {
     /// before component lines are assembled. Afterwards [`Hooks::item_tooltip`]
     /// sees the finished list, including these parts' lines.
     #[hook(
+        signature = "pub(in crate::game) fn native_tooltip(&self, stack: &ItemStack, lines: &mut Vec<(Text, u32)>)",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_tooltip",
         side = "client",
         contract = "collect",
         out = "lines",

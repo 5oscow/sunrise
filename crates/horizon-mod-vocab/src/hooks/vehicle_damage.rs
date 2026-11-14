@@ -7,6 +7,8 @@ pub trait Hooks {
     /// to leave its damage and wobble unchanged. The attack itself still
     /// completes. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_vehicle_damage( &mut self, kind: &str, damage: &mut f32, cancel: &mut bool, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_vehicle_damage",
         side = "server",
         contract = "cancel",
         out = "cancel",

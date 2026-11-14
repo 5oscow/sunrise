@@ -9,6 +9,7 @@ pub trait Hooks {
     /// atlas: `texture_sprites` for [`TextureAtlas::Blocks`], `gui_sprite` for
     /// [`TextureAtlas::Gui`]. Never look them up by name every frame. Client-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_texture_atlas_stitched(&mut self, atlas: mod_api::TextureAtlas)",
         side = "client",
         contract = "listen",
         cancellable = false,

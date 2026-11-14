@@ -13,6 +13,7 @@ pub trait Hooks {
     /// the platform scan code, stable within a platform only). `action` is what it did, and the modifier bits
     /// the screen hooks' GLFW encoding. Not cancellable.
     #[hook(
+        signature = "pub(in crate::game) fn native_input_key( &mut self, key: &str, layout_key: Option<&str>, raw_code: u32, action: mod_api::KeyAction, modifiers: u32, )",
         side = "client",
         contract = "listen",
         version = 2,

@@ -1,6 +1,7 @@
 pub trait Hooks {
     /// A neighbouring block entity changed, was created or removed. Vanilla comparator processing runs first.
     #[hook(
+        signature = "pub(in crate::game) fn native_on_neighbor_change( &self, dimension: LevelDimension, pos: BlockPos, state: BlockStateId, neighbor: BlockPos, )",
         side = "server",
         contract = "listen",
         scope = "block",

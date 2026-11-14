@@ -18,6 +18,8 @@ pub trait Hooks {
     /// returning the offer read-only; now collects the live offer as `out`
     /// (the moment upstream's separate `merchant_offer_traded` covered).
     #[hook(
+        signature = "pub(in crate::game) fn native_trade_with_villager( &mut self, merchant: u32, kind: &str, offer: &mut MerchantOffer, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_trade_with_villager",
         side = "server",
         contract = "collect",
         out = "offer",

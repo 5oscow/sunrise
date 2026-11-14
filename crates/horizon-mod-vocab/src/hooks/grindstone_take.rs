@@ -10,6 +10,7 @@ pub trait Hooks {
     /// Set `cancel` to skip the rest of `onTake`: the result is still taken,
     /// but no experience, no sound, and the inputs stay. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_grindstone_take( &mut self, player: u128, player_entity_id: i32, pos: [i32; 3], take: &mut mod_api::item::menu::GrindstoneTake, cancel: &mut bool, )",
         side = "server",
         contract = "cancel",
         out = "cancel",

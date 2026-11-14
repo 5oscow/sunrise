@@ -5,6 +5,8 @@ pub trait Hooks {
     /// A server player completed a villager or wandering trader trade. `entity_id` is the merchant
     /// network id. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_player_trade( &mut self, player: u128, name: &str, entity_id: u32, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_player_trade",
         side = "server",
         contract = "listen",
         neoforge = "none (NeoForge has no such event)"

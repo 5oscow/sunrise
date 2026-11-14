@@ -22,6 +22,7 @@ pub trait Hooks {
     /// including accepted item writes, while aborted Host transactions stay aborted.
     /// The default `Changed` retains full checked write-back.
     #[hook(
+        signature = "pub(in crate::game) fn native_block_entity_tick( &mut self, reply: &mut mod_api::BlockEntityTickReply, pos: [i32; 3], entity: &mut ModBlockEntity, )",
         side = "server",
         contract = "listen",
         scope = "block_entity",

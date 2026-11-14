@@ -11,6 +11,8 @@ pub trait Hooks {
     /// `WorldOpenFailed` or `WorldCloseFailed`. Once for each
     /// `level_load`. Don't read its blocks. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_level_unload(&mut self, dimension: &str)",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_level_unload",
         side = "server",
         contract = "listen",
         neoforge = "LevelEvent.Unload",

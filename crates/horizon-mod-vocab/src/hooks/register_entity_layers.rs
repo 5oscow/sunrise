@@ -70,6 +70,7 @@ again; what it drew that frame is dropped. The layers draw on the mobs (vanilla'
 living types) and the players; the armour stand and the ender dragon take them once their own draws run
 layers, in a follow-up of #860, which lifts their refusal."#]
     #[hook(
+        signature = "pub(in crate::game) fn native_register_entity_layers( context: &mod_api::RegistrationContext, layers: &mut dyn EntityLayers, )",
         side = "client",
         contract = "listen",
         context = "registration",

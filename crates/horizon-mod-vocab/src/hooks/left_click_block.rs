@@ -11,6 +11,8 @@ pub trait Hooks {
     /// predicted crack still shows to the clicking player). Server-side, for
     /// every player of the world (the helpers read the acting one).
     #[hook(
+        signature = "pub(in crate::game) fn native_left_click_block( &mut self, pos: [i32; 3], face: [i32; 3], state: BlockStateId, canceled: &mut bool, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_left_click_block",
         side = "server",
         contract = "cancel",
         out = "canceled",

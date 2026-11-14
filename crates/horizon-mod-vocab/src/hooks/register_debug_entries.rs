@@ -27,6 +27,7 @@ An entry in `DebugGroup::Renderer` is vanilla's `DebugEntryNoop`: it has no line
 in the renderer section instead. It is the switch of the `DebugRenderer` with its id, see
 [debug renderers](#debug-renderers)."#]
     #[hook(
+        signature = "pub(in crate::game) fn native_register_debug_entries( context: &mod_api::RegistrationContext, entries: &mut Vec<DebugEntry>, )",
         side = "client",
         contract = "collect",
         out = "entries",

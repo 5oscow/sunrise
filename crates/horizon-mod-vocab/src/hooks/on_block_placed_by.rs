@@ -23,6 +23,7 @@ placement failure or `entity_place` cancellation never fires it. Items without a
 subscribed Part cost one `item_listens` lookup and no stack conversion.
 "##]
     #[hook(
+        signature = "pub(in crate::game) fn native_on_block_placed_by( &mut self, call: super::fire::OnBlockPlacedByCall<'_>, )",
         side = "server",
         contract = "listen",
         scope = "item",

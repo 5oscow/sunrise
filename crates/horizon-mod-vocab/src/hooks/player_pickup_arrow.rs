@@ -5,6 +5,8 @@ pub trait Hooks {
     /// A server player picked up an arrow after it was removed and its pickup was applied. `item` is
     /// the arrow's pickup item id. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_player_pickup_arrow( &mut self, player: u128, name: &str, entity_id: u32, item: &str, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_player_pickup_arrow",
         side = "server",
         contract = "listen",
         neoforge = "none (NeoForge has no such event)"

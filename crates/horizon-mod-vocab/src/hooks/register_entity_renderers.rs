@@ -72,6 +72,7 @@ panics, or (in a wasm mod) has its call refused or trapped is logged once with t
 more until the next resource load resolves it again; what it drew that frame is dropped, and until then
 its type draws as it would without one."#]
     #[hook(
+        signature = "pub(in crate::game) fn native_register_entity_renderers( context: &mod_api::RegistrationContext, renderers: &mut dyn EntityRenderers, )",
         side = "client",
         contract = "listen",
         context = "registration",

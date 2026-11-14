@@ -13,6 +13,7 @@ pub trait Hooks {
     /// sneaking factor, which vanilla reads through `isDiscrete`.
     /// Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_living_visibility( &self, entity: LivingRef, looking: Option<EntityRef>, visibility: &mut f64, )",
         side = "server",
         contract = "listen",
         host = "read",

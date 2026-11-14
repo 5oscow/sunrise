@@ -11,6 +11,7 @@ pub trait Hooks {
     /// Not told for the far ring's columns past the view distance (a Horizon
     /// server option). Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_chunk_watch(&mut self, player: PlayerRef, chunk: ChunkRef)",
         side = "server",
         contract = "listen",
         neoforge = "ChunkWatchEvent.Watch"
@@ -22,6 +23,7 @@ pub trait Hooks {
     /// network step for the level, with the state after that step, as
     /// `chunk_watch`. Not told for the far ring's columns. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_chunk_sent(&mut self, player: PlayerRef, chunk: ChunkRef)",
         side = "server",
         contract = "listen",
         neoforge = "ChunkWatchEvent.Sent"
@@ -35,6 +37,7 @@ pub trait Hooks {
     /// with the state after that step, as `chunk_watch`. Not told when the
     /// server stops. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_chunk_unwatch(&mut self, player: PlayerRef, chunk: ChunkRef)",
         side = "server",
         contract = "listen",
         neoforge = "ChunkWatchEvent.UnWatch"

@@ -12,6 +12,8 @@ pub trait Hooks {
     /// block gone) is heard too (`recheckOpeners`). Once for each change, with
     /// no player's state swapped in. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_mod_container_viewers( &mut self, dimension: &str, pos: [i32; 3], viewers: u32, previous: u32, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_mod_container_viewers",
         side = "server",
         contract = "listen",
         neoforge = "none (vanilla ContainerOpenersCounter; NeoForge adds no event or extension for it); PlayerContainerEvent.Open and Close fire per player"

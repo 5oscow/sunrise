@@ -4,6 +4,8 @@
 pub trait Hooks {
     /// The minimap a native mod shows: set `minimap` when it is none yet.
     #[hook(
+        signature = "pub(in crate::game) fn native_minimap(&self, minimap: &mut Option<mod_api::Minimap>)",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_minimap",
         side = "client",
         contract = "replace",
         out = "minimap",

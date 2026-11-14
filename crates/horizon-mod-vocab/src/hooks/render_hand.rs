@@ -19,6 +19,7 @@ pub trait Hooks {
     /// `draw`'s own: turning it moves what you draw, `render`'s pose moves
     /// the default geometry, and player render state is not exposed.
     #[hook(
+        signature = "pub(in crate::game) fn native_render_hand( &self, render: &mut HandRender<'_>, draw: &mut BlockEntityDraw, canceled: &mut bool, )",
         side = "client",
         contract = "cancel",
         out = "canceled",

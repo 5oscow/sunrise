@@ -4,6 +4,8 @@
 pub trait Hooks {
     /// Lightning charged a creeper.
     #[hook(
+        signature = "pub(in crate::game) fn native_creeper_power(&mut self, entity: u32, lightning: [f64; 3])",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_creeper_power",
         side = "server",
         contract = "listen",
         neoforge = "none (NeoForge has no such event)"

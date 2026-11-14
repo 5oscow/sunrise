@@ -6,6 +6,8 @@ pub trait Hooks {
     /// Per-pixel alpha in the overlay marks full-bright material, without
     /// illuminating the surrounding block or changing gameplay light.
     #[hook(
+        signature = "pub(in crate::game) fn native_emissive(&self, layers: &mut Vec<(&'static str, &'static str)>)",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_emissive",
         side = "client",
         contract = "collect",
         out = "layers",

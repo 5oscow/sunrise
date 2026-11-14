@@ -61,6 +61,7 @@ not by replaying captured moves after the tick. During a borrowed mob pass the H
 entity's position; every other Host operation is refused. There is no automatic mutation deferral: listeners
 must not move or remove the entity while its write is in progress."#]
     #[hook(
+        signature = "pub(in crate::game) fn native_entity_entering_section( &mut self, entity: EntityRef, old_section: [i32; 3], new_section: [i32; 3], chunk_changed: bool, )",
         side = "both",
         contract = "listen",
         neoforge = "EntityEvent.EnteringSection",

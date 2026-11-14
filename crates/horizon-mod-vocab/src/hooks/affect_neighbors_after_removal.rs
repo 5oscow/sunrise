@@ -9,6 +9,7 @@ pub trait Hooks {
     /// at once, as the block's own override would. Answered from inside the level's write: it
     /// reads, and cannot write blocks or spawn entities.
     #[hook(
+        signature = "pub(in crate::game) fn native_affect_neighbors_after_removal( &self, dimension: LevelDimension, pos: BlockPos, state: BlockStateId, moved: bool, updates: &mut Vec<NeighbourUpdate>, )",
         side = "server",
         contract = "collect",
         out = "updates",

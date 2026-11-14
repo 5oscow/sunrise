@@ -5,6 +5,8 @@ pub trait Hooks {
     /// A furnace at `pos` began cooking `item` (its cooking timer advanced
     /// from zero). Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_furnace_start_smelt(&mut self, pos: [i32; 3], item: &str)",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_furnace_start_smelt",
         side = "server",
         contract = "listen",
         neoforge = "none (NeoForge has no such event)"

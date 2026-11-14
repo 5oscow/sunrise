@@ -12,6 +12,7 @@ pub trait Hooks {
     /// the block's own rule doesn't run. The level is read-only. Asked on
     /// every shape update of such a block: keep it short.
     #[hook(
+        signature = "pub(in crate::game) fn native_can_survive( &self, dimension: LevelDimension, pos: BlockPos, state: BlockStateId, survives: &mut Option<bool>, )",
         side = "server",
         contract = "replace",
         out = "survives",

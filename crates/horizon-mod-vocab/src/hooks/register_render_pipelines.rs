@@ -67,6 +67,7 @@ stage they draw after that stage's plain quads and lines, in the order submitted
 pack they follow the plain quads: a stage the pack draws itself is drawn with the next stage the
 game reaches."#]
     #[hook(
+        signature = "pub(in crate::game) fn native_register_render_pipelines( context: &mod_api::RegistrationContext, pipelines: &mut Vec<mod_api::RenderPipeline>, )",
         side = "client",
         contract = "collect",
         out = "pipelines",

@@ -16,6 +16,7 @@ pub trait Hooks {
     /// Runs in Reloading: published asset/data queries can rebind caches; world handles
     /// and transactions remain unavailable.
     #[hook(
+        signature = "pub(in crate::game) fn native_default_components_bound( &mut self, cause: mod_api::TagsUpdateCause, )",
         side = "both",
         contract = "listen",
         neoforge = "DefaultDataComponentsBoundEvent"

@@ -29,6 +29,8 @@ beetroots mature at age 3, ordinary crops at 7; torchflower crops never reach th
 still crops. Pitcher crops are not `CropBlock`s and are not harvested by this behavior. Farming still
 requires a farmer at work and `mob_griefing` enabled."#]
     #[hook(
+        signature = "pub(in crate::game) fn native_blocks( context: &mod_api::RegistrationContext, blocks: &mut Vec<mod_api::Block>, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_blocks",
         side = "both",
         contract = "collect",
         out = "blocks",

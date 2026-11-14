@@ -7,6 +7,8 @@ pub trait Hooks {
     /// draws it). The server asks it too: a slot it hides is not in the menu
     /// there either, so shift-clicks never fill it.
     #[hook(
+        signature = "pub(in crate::game) fn native_screen(&self, block: &str, screen: &mut Option<mod_api::Screen>)",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_screen",
         side = "both",
         contract = "replace",
         out = "screen",

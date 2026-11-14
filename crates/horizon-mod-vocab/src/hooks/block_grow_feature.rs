@@ -7,6 +7,7 @@ pub trait Hooks {
     /// set `feature` to another key to grow that one. Server-side.
     /// Mods can use `level.random()` to access the growth random source.
     #[hook(
+        signature = "pub(in crate::game) fn native_block_grow_feature( &mut self, dimension: LevelDimension, pos: BlockPos, feature: &mut Option<String>, cancel: &mut bool, )",
         side = "server",
         contract = "cancel",
         out = "cancel",

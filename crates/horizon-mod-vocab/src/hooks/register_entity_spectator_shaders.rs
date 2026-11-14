@@ -37,6 +37,7 @@ fn register_entity_spectator_shaders(
 }
 ```"#]
     #[hook(
+        signature = "pub(in crate::game) fn native_register_entity_spectator_shaders( context: &mod_api::RegistrationContext, shaders: &mut Vec<mod_api::EntitySpectatorShader>, )",
         side = "client",
         contract = "collect",
         out = "shaders",

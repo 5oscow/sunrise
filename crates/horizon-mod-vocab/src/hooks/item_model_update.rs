@@ -11,6 +11,7 @@ pub trait Hooks {
     /// screen with no holder), `level` the level it is drawn in (`None` outside a world), and
     /// `seed` the draw's random seed.
     #[hook(
+        signature = "pub(in crate::game) fn native_item_model_update( &self, call: mod_api::__private::ItemModelUpdateCall<'_>, )",
         side = "client",
         contract = "listen",
         neoforge = "none (vanilla ItemModel.update of a type RegisterItemModelsEvent registers; NeoForge adds no event for it)"

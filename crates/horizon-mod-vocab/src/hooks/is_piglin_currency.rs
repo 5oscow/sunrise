@@ -19,6 +19,7 @@ pub trait Hooks {
     /// no such part costs one table lookup. The contract beyond the method's name and
     /// parameters is Horizon's reading, not checked against NeoForge's.
     #[hook(
+        signature = "pub(in crate::game) fn native_is_piglin_currency( &self, stack: &ItemStack, currency: &mut bool, )",
         side = "both",
         contract = "listen",
         scope = "item",

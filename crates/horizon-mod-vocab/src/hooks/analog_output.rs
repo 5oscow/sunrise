@@ -15,6 +15,7 @@ pub trait Hooks {
     /// on) tells the comparators itself, as vanilla's `Level.setBlock` does.
     /// Authoritative servers only.
     #[hook(
+        signature = "pub(in crate::game) fn native_analog_output( &self, dimension: LevelDimension, pos: BlockPos, state: BlockStateId, face: Direction, output: &mut i32, )",
         side = "server",
         contract = "collect",
         out = "output",

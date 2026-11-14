@@ -13,6 +13,8 @@ pub trait Hooks {
     /// boat or cart (it ticks with the player). Check `kind`; this runs for every ticking entity
     /// each tick, so keep it cheap. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_entity_tick_pre( &mut self, dimension: &str, entity: u32, kind: &str, canceled: &mut bool, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_entity_tick_pre",
         side = "server",
         contract = "cancel",
         out = "canceled",

@@ -4,6 +4,7 @@ pub trait Hooks {
     /// The local player right-clicks empty space with an empty `hand`.
     /// Client-side only; the server does not receive this event.
     #[hook(
+        signature = "pub(in crate::game) fn native_right_click_empty(&mut self, hand: Hand)",
         side = "client",
         contract = "listen",
         neoforge = "PlayerInteractEvent.RightClickEmpty",

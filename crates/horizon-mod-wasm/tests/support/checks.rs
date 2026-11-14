@@ -2,7 +2,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 static BODIES: AtomicUsize = AtomicUsize::new(0);
 
-#[horizon_mod_api_macros::point(slot = 6, name = "listener_fixture_sum", free)]
+#[horizon_mod_api_macros::point(game, slot = 6, name = "listener_fixture_sum", free)]
 fn sum(a: u32, b: &u32) -> u32 {
     BODIES.fetch_add(1, Ordering::SeqCst);
     a + *b
@@ -36,7 +36,7 @@ pub fn check() {
     let second = mod_api::BlockState::from(mod_api::BlockStateRecord::new(block, 1));
     let text = mod_api::Text::literal("fixture: café 水");
     let mut args = mod_points::ListenerFixtureMirrorsArgs::__new(text.clone(), first, second);
-    horizon_engine_slots::dispatch::listener_fixture_mirrors(&mut args);
+    horizon_game_points::dispatch::listener_fixture_mirrors(&mut args);
     assert!(args.cancel, "the mirror listener must have executed");
     assert_eq!(args.text, mod_api::Text::literal("fixture: café 水"));
     let metadata = mod_api::__private::block_definitions().unwrap();

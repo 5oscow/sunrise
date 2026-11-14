@@ -13,6 +13,7 @@ pub trait Hooks {
     /// `legs`, `chest` and `head`; a mob's `body` (a horse's armor).
     /// Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_armor_hurt( &mut self, player: Option<u128>, entity: u32, kind: &str, source: &HurtSource<'_>, entries: &mut Vec<mod_api::ArmorHurt>, cancel: &mut bool, )",
         side = "server",
         contract = "cancel",
         out = "cancel",

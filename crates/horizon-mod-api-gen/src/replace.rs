@@ -841,6 +841,14 @@ fn inventory(
 
 /// Marked lower-crate functions and their source locations.
 pub(crate) fn marked(root: &Path) -> Result<Vec<(String, String)>, String> {
+    marked_with_sources(root).map(|(marked, _)| marked)
+}
+
+/// Discovery inputs include unmarked modules: adding the first marker must invalidate the
+/// lower record vocabulary just as changing an already marked signature does.
+pub(crate) fn marked_with_sources(
+    root: &Path,
+) -> Result<(Vec<(String, String)>, Vec<PathBuf>), String> {
     fn scan(module: &str, items: &[Item], out: &mut Vec<(String, String)>) -> Result<(), String> {
         for item in items {
             match item {
@@ -898,9 +906,13 @@ pub(crate) fn marked(root: &Path) -> Result<Vec<(String, String)>, String> {
         Ok(())
     }
     let mut out = Vec::new();
+    let mut sources = Vec::new();
+    if root.join("Cargo.toml").is_file() {
+        sources.push(root.join("Cargo.toml"));
+    }
     let crates = root.join("crates");
     if !crates.exists() {
-        return Ok(out);
+        return Ok((out, sources));
     }
     for entry in fs::read_dir(&crates).map_err(|e| e.to_string())? {
         let package = entry.map_err(|e| e.to_string())?.path();
@@ -915,6 +927,7 @@ pub(crate) fn marked(root: &Path) -> Result<Vec<(String, String)>, String> {
         if name == "horizon_client" {
             continue;
         }
+        sources.push(package.join("Cargo.toml"));
         let manifest: toml::Value = toml::from_str(
             &fs::read_to_string(package.join("Cargo.toml")).map_err(|e| e.to_string())?,
         )
@@ -935,6 +948,7 @@ pub(crate) fn marked(root: &Path) -> Result<Vec<(String, String)>, String> {
             lib.parent().unwrap().to_owned(),
             true,
         )? {
+            sources.push(file.path.clone());
             let text = fs::read_to_string(&file.path).map_err(|e| e.to_string())?;
             if !text.contains("replaceable") {
                 continue;
@@ -946,7 +960,9 @@ pub(crate) fn marked(root: &Path) -> Result<Vec<(String, String)>, String> {
     }
     out.sort();
     out.dedup();
-    Ok(out)
+    sources.sort();
+    sources.dedup();
+    Ok((out, sources))
 }
 
 /// The refusal of a target below the game crate without the marker.

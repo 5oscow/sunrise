@@ -23,6 +23,7 @@ pub trait Hooks {
     /// successful pour counts for the `placed_block` criterion. Only the
     /// `ItemPart`s attached to `stack`'s item are asked. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_empty_contents( &mut self, player: Option<PlayerRef>, pos: BlockPos, hit: Option<(BlockPos, Direction)>, stack: &ItemStack, answer: &mut Option<bool>, )",
         side = "server",
         contract = "replace",
         out = "answer",

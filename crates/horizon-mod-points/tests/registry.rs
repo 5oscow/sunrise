@@ -97,36 +97,36 @@ fn one_list_registered_sealed_and_stopped() {
     assert!(POINTS[PointId::Tick as usize].load(Ordering::Acquire));
     assert!(POINTS[PointId::TickReturn as usize].load(Ordering::Acquire));
     let mut heard = 0;
-    horizon_engine_slots::__private::fire_api(horizon_engine_slots::PointId::Tick, &mut |_| {
+    horizon_game_points::__private::fire_api(horizon_game_points::PointId::Tick, &mut |_| {
         heard += 1
     });
     assert_eq!(heard, 0, "disabled before sealing");
     assert!(mod_api::__private::set_mod_enabled("tick_mod", true));
-    horizon_engine_slots::__private::fire_api(horizon_engine_slots::PointId::Tick, &mut |_| {
+    horizon_game_points::__private::fire_api(horizon_game_points::PointId::Tick, &mut |_| {
         heard += 1
     });
     assert_eq!(heard, 1);
     let mut args = mod_points::TickArgs::__new();
-    horizon_engine_slots::dispatch::tick(mod_api::HostSide::Server(&mut Quiet), &mut args);
+    horizon_game_points::dispatch::tick(mod_api::HostSide::Server(&mut Quiet), &mut args);
     assert!(
         args.cancel,
         "the checked function runs under its owner's guard and writes back"
     );
     assert_eq!(mod_api::content::crash::current_native_mod(), None);
     assert!(mod_api::__private::set_mod_enabled("tick_mod", false));
-    horizon_engine_slots::__private::fire_api(horizon_engine_slots::PointId::Tick, &mut |_| {
+    horizon_game_points::__private::fire_api(horizon_game_points::PointId::Tick, &mut |_| {
         heard += 1
     });
     assert_eq!(heard, 1);
     assert!(mod_api::__private::set_mod_enabled("tick_mod", true));
-    horizon_engine_slots::__private::fire_api(horizon_engine_slots::PointId::Tick, &mut |_| {
+    horizon_game_points::__private::fire_api(horizon_game_points::PointId::Tick, &mut |_| {
         heard += 1
     });
     assert_eq!(heard, 2);
     stop("tick_mod");
     assert!(mod_api::__private::set_mod_enabled("tick_mod", false));
     assert!(mod_api::__private::set_mod_enabled("tick_mod", true));
-    horizon_engine_slots::__private::fire_api(horizon_engine_slots::PointId::Tick, &mut |_| {
+    horizon_game_points::__private::fire_api(horizon_game_points::PointId::Tick, &mut |_| {
         heard += 1
     });
     assert_eq!(heard, 2, "an enable switch cannot undo a stop");

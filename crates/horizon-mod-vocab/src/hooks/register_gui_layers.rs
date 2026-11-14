@@ -31,6 +31,7 @@ next layer that is. As for vanilla's layers, F1 and a canceled `Hooks::render_gu
 every mod layer; a mod that
 draws under F1 uses `Hooks::gui_render_post`."#]
     #[hook(
+        signature = "pub(in crate::game) fn native_register_gui_layers( context: &mod_api::RegistrationContext, layers: &mut Vec<GuiLayer>, )",
         side = "client",
         contract = "collect",
         out = "layers",

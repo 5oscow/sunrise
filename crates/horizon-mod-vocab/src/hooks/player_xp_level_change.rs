@@ -8,6 +8,7 @@ pub trait Hooks {
     /// player's state is swapped in, so `host.players().acting_player()`, `PlayerRef::tell`
     /// and the item helpers reach them. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_player_xp_level_change( &mut self, player: u128, name: &str, levels: &mut i32, cancel: &mut bool, )",
         side = "server",
         contract = "cancel",
         out = "cancel",

@@ -11,6 +11,7 @@ pub trait Hooks {
     /// Asked on an authoritative server; the level is read-only. With no part attached to the
     /// farmland, the scan is vanilla's. Diverges from upstream: new hook.
     #[hook(
+        signature = "pub(in crate::game) fn native_can_be_hydrated( &self, dimension: LevelDimension, state: BlockStateId, pos: BlockPos, fluid: mod_api::FluidState, fluid_pos: BlockPos, hydrates: &mut Option<bool>, )",
         side = "server",
         contract = "replace",
         out = "hydrates",

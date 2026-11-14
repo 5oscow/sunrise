@@ -36,6 +36,7 @@ Packets the network thread sends itself (keep-alives, configuration pongs, cooki
 a dialog's custom click action) and far terrain requests do not fire it. With no listener the
 send path checks one flag and builds nothing."#]
     #[hook(
+        signature = "pub(in crate::game) fn native_client_packet(&mut self, packet: &ClientPacket)",
         side = "client",
         contract = "listen",
         cancellable = false,

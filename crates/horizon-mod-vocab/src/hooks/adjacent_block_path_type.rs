@@ -12,6 +12,7 @@ pub trait Hooks {
     /// classification; per-search evaluator caches remain.
     /// Diverges from upstream: new hook.
     #[hook(
+        signature = "pub(in crate::game) fn native_adjacent_block_path_type( &self, pos: BlockPos, state: BlockStateId, path_type: mod_api::PathType, adjacent: &mut Option<mod_api::PathType>, )",
         side = "server",
         contract = "replace",
         out = "adjacent",

@@ -5,6 +5,8 @@ pub trait Hooks {
     /// A sculk sensor or shrieker received a vibration for `event` at `pos`.
     /// Set `cancel` to suppress its response. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_block_receive_game( &mut self, dimension: &str, pos: [i32; 3], block: &str, event: &str, cancel: &mut bool, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_block_receive_game",
         side = "server",
         contract = "cancel",
         out = "cancel",

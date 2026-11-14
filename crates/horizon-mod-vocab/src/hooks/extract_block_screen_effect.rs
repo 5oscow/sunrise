@@ -11,6 +11,7 @@ pub trait Hooks {
     /// `partial_tick` is the world's.
     /// Client-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_extract_block_screen_effect( &self, effect: mod_api::BlockScreenEffect, state: BlockStateId, pos: BlockPos, partial_tick: f32, canceled: &mut bool, custom_draw: &mut bool, )",
         side = "client",
         contract = "cancel",
         out = "canceled",

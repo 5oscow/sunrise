@@ -22,6 +22,7 @@
 //! |---|---|
 //! | `side` | `"server"`, `"client"` or `"both"`; required |
 //! | `contract` | `"listen"`, `"cancel"`, `"collect"` or `"replace"`; required |
+//! | `signature` | the canonical native bridge signature, e.g. `"fn native_tick(&mut self)"`; required for game-owned hooks, validated against the implementation by the game build |
 //! | `out` | the event field a cancel, collect or replace hook writes; not for `"listen"` |
 //! | `scope`, `key` | a Part method: the kind of Part (`"block"`, `"block_entity"`, `"item"`, `"menu"`, `"fluid"`, `"entity"`) and the hook argument naming what it is attached to |
 //! | `answered_by` | `"mod"`: a global replace hook whose output also names the mod that answered, or a global collect hook whose output is `Vec<Answered<T>>`: each mod pushes `T`s into its own empty batch and dispatch names that mod on each entry |
@@ -42,5 +43,8 @@
 //! The JSON catalog (`native-hooks.json`,
 //! `tools/native-hook-fragments/`) is retired and a file there fails the build.
 //!
-//! The game function a hook names starts as `let _ = (every, parameter);`; `cargo run -p xtask --
-//! mod-api` fills in the dispatch call.
+//! The declaration is the source of the API, not a projection refreshed by a developer tool:
+//! change `signature` when changing its bridge, and the game build refuses a mismatch by name.
+//! Implementation-only edits do not invalidate lower API/runtime crates. The game still checks
+//! each target and dispatch body. A new game function starts as `let _ = (every, parameter);`;
+//! `cargo run -p xtask -- mod-api` fills its dispatch call.

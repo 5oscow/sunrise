@@ -11,7 +11,7 @@ horizon-guest-stack = { path = "../horizon-guest-stack" }
 horizon-core = { path = "../horizon-core" }
 horizon-java-properties = { path = "../horizon-java-properties" }
 horizon-mod-runtime = { path = "../horizon-mod-runtime" }
-mod_points = { package = "horizon-mod-points", path = "../horizon-mod-points" }
+horizon-engine-slots = { path = "../horizon-engine-slots" }
 mod_api = { package = "horizon-mod-api", path = "../horizon-mod-api" }
 horizon-mod-package = { path = "../horizon-mod-package", default-features = false }
 horizon-mod-point-emit = { path = "../horizon-mod-point-emit" }
@@ -36,6 +36,7 @@ libc = "0.2"
 horizon-mod-api-gen = { path = "../horizon-mod-api-gen" }
 mod_points = { package = "horizon-mod-points", path = "../horizon-mod-points" }
 horizon-mod-api-macros = { path = "../horizon-mod-api-macros" }
+horizon-game-points = { path = "../horizon-game-points" }
 horizon-client-core = { path = "../horizon-client-core" }
 mod_api = { package = "horizon-mod-api", path = "../horizon-mod-api", features = ["wasm-guest", "testing"] }
 wat = "1.261"

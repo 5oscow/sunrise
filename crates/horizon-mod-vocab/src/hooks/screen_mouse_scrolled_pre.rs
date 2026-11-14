@@ -27,6 +27,8 @@ pub trait Hooks {
     /// own. A wheel a gamepad or the keyboard's focus sends is not the mouse
     /// and fires nothing.
     #[hook(
+        signature = "pub(in crate::game) fn native_screen_mouse_scrolled_pre( &self, screen: &ScreenView<'_>, scroll: [f64; 2], modifiers: u32, canceled: &mut bool, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_screen_mouse_scrolled_pre",
         side = "client",
         contract = "cancel",
         out = "canceled",

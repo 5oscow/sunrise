@@ -9,6 +9,7 @@ pub trait Hooks {
     /// for what taking it gives; set `cancel` for no result.
     /// Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_grindstone_place( &mut self, player: u128, player_entity_id: i32, pos: [i32; 3], place: &mut mod_api::item::menu::GrindstonePlace, cancel: &mut bool, )",
         side = "server",
         contract = "cancel",
         out = "cancel",

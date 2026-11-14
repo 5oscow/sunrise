@@ -26,6 +26,7 @@ pub trait Hooks {
     /// and starting `age` (`ItemDrop::UNLIMITED_LIFETIME` never despawns); a
     /// drop left as it was spawns as before. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_living_drops( &mut self, call: mod_api::__private::LivingDropsCall<'_>, )",
         side = "server",
         contract = "cancel",
         out = "cancel",
@@ -56,6 +57,7 @@ pub trait Hooks {
     /// `source` and `recently_hit` are as in `native_living_drops`.
     /// Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_get_equipment_drop_chance( &mut self, call: mod_api::__private::GetEquipmentDropChanceCall<'_>, )",
         side = "server",
         contract = "listen",
         neoforge = "GetEquipmentDropChanceEvent",

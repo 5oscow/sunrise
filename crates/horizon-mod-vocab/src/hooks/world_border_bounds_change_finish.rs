@@ -6,6 +6,8 @@ pub trait Hooks {
     /// final size was applied. Server-side, including the single-player
     /// server.
     #[hook(
+        signature = "pub(in crate::game) fn native_world_border_bounds_change_finish(&mut self)",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_world_border_bounds_change_finish",
         side = "server",
         contract = "listen",
         neoforge = "none (NeoForge has no such event; Bukkit's WorldBorderBoundsChangeFinish)",

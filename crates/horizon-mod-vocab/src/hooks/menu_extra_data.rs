@@ -9,6 +9,7 @@ pub trait Hooks {
     /// set it wins, so answer only for your blocks. The player's state is not
     /// swapped in.
     #[hook(
+        signature = "pub(in crate::game) fn native_menu_extra_data( &mut self, player: u128, menu: &str, block: &str, pos: [i32; 3], data: &mut Option<Vec<u8>>, )",
         side = "server",
         contract = "replace",
         out = "data",

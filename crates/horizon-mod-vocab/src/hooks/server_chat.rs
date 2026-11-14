@@ -13,6 +13,7 @@ pub trait Hooks {
     /// A component deeper than 512 nodes refuses capture or the whole writeback;
     /// no event field is applied if any Text field fails conversion.
     #[hook(
+        signature = "pub(in crate::game) fn native_server_chat( &mut self, call: mod_api::__private::ServerChatCall<'_>, )",
         side = "server",
         contract = "cancel",
         out = "cancel",

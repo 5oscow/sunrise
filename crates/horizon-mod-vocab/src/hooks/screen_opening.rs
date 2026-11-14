@@ -6,6 +6,7 @@ pub trait Hooks {
     /// Answer `ScreenOpening::Cancel` to keep the current one, or
     /// `ScreenOpening::ModScreen` to open a mod's own screen instead.
     #[hook(
+        signature = "pub(in crate::game) fn native_screen_opening( &self, current: &ScreenView<'_>, new: &ScreenView<'_>, outcome: &mut Option<Answered<ScreenOpening>>, )",
         side = "client",
         contract = "replace",
         out = "outcome",

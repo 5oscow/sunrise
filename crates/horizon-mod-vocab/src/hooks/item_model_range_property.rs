@@ -8,6 +8,7 @@ pub trait Hooks {
     /// including nested bundle items.
     /// `bundle_selected` is the runtime bundle selection index; -1 means none.
     #[hook(
+        signature = "pub(in crate::game) fn native_item_model_range_property( &self, property: &str, stack: &mod_api::ItemStack, bundle_selected: i32, value: &mut f32, )",
         side = "client",
         contract = "listen",
         neoforge = "RegisterRangeSelectItemModelPropertyEvent"

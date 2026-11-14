@@ -11,6 +11,7 @@ pub trait Hooks {
     /// frame per bar, in the order the server added them, until the next bar would start a third
     /// of the way down the screen; not under F1. Client-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_customize_boss_event_progress( &self, bar: &mod_api::ClientBossBar, x: &mut i32, y: &mut i32, increment: &mut i32, cancel: &mut bool, )",
         side = "client",
         contract = "cancel",
         out = "cancel",

@@ -35,6 +35,7 @@ number, then the highest threshold at or below it wins, else `fallback`, as for 
 resource reload keeps reading the mod's number. An id in vanilla's namespace, not `<namespace>:<path>`, or
 registered twice is logged and left out. A property no mod registers reads 0, decided once at load."#]
     #[hook(
+        signature = "pub(in crate::game) fn native_register_range_select_item_model_property( context: &mod_api::RegistrationContext, properties: &mut Vec<String>, )",
         side = "client",
         contract = "collect",
         out = "properties",

@@ -10,6 +10,7 @@ pub trait Hooks {
     /// the stack alone. Only the `ItemPart`s attached to `stack`'s item are
     /// asked: an item with none costs one table lookup.
     #[hook(
+        signature = "pub(in crate::game) fn native_creator_mod_id( &self, stack: &ItemStack, mod_id: &mut Option<String>, )",
         side = "both",
         contract = "collect",
         out = "mod_id",

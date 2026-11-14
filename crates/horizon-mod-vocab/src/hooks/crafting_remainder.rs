@@ -20,6 +20,7 @@ The resolver checks the prepared item subscription table before converting or
 cloning stack components. Invalid returned stacks are refused at `ItemBoundary`,
 retaining the initial data remainder; native panics retain normal Part attribution."#]
     #[hook(
+        signature = "pub(in crate::game) fn native_crafting_remainder( &self, stack: &ItemStack, remainder: &mut Option<ItemStack>, )",
         side = "server",
         host = "read",
         contract = "listen",

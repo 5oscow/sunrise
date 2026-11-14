@@ -19,6 +19,7 @@ sprites on each call. Look them up with `texture_sprites` or `gui_sprite` after
 `texture_atlas_stitched`, then reacquire regions after a successful reload.
 A failed reload keeps the published atlases. No generated PNGs are written to disk."#]
     #[hook(
+        signature = "pub(in crate::game) fn native_register_runtime_sprites( context: &mod_api::RegistrationContext, sprites: &mut Vec<RuntimeSprite>, )",
         side = "client",
         contract = "collect",
         out = "sprites",

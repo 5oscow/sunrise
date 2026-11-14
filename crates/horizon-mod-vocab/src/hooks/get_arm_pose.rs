@@ -16,6 +16,7 @@ pub trait Hooks {
     /// Unknown registration slots are ignored. Mob-specific animations still run after
     /// the humanoid base pose, as in vanilla. Client-side, with a `ClientHost`.
     #[hook(
+        signature = "pub(in crate::game) fn native_get_arm_pose( &self, entity_id: u32, hand: Hand, stack: &mod_api::ItemStack, humanoid: &mod_api::HumanoidRenderState<'_>, pose: &mut Option<mod_api::ArmPose>, )",
         side = "client",
         contract = "replace",
         out = "pose",

@@ -4,6 +4,8 @@
 pub trait Hooks {
     /// A guest's accepted movement made the server jump them from the ground. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_player_jump(&mut self, player: u128, name: &str)",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_player_jump",
         side = "server",
         contract = "listen",
         neoforge = "none (NeoForge has no such event; Bukkit's PlayerJumpEvent)"

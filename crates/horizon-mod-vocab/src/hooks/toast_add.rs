@@ -10,6 +10,7 @@ pub trait Hooks {
     /// do not fire another add event. Client-lib and title producers prepare
     /// candidates for the game to admit with a `ClientHost` before applying.
     #[hook(
+        signature = "pub(in crate::game) fn native_toast_add( &self, kind: mod_api::ToastKind, title: &mut Text, description: &mut Option<Text>, cancel: &mut bool, )",
         side = "client",
         contract = "cancel",
         out = "cancel",

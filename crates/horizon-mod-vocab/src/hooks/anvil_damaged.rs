@@ -5,6 +5,8 @@ pub trait Hooks {
     /// An anvil at `pos` took damage, changing its block from `from` to `to`.
     /// `to` is air when the anvil broke. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_anvil_damaged( &mut self, dimension: &str, pos: [i32; 3], from: &str, to: &str, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_anvil_damaged",
         side = "server",
         contract = "listen",
         neoforge = "none (NeoForge has no such event)"

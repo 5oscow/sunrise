@@ -9,6 +9,7 @@ pub trait Hooks {
     /// block's own tick; a block changed without `handled` takes its own
     /// tick as it is now, if it is still the tick's block.
     #[hook(
+        signature = "pub(in crate::game) fn native_tick_block( &mut self, ticks: &mut Ticks, dimension: LevelDimension, pos: BlockPos, state: BlockStateId, handled: &mut bool, )",
         side = "server",
         contract = "cancel",
         out = "handled",

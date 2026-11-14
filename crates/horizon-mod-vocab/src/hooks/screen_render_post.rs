@@ -20,6 +20,8 @@ pub trait Hooks {
     /// their `screen.id` from the title state machine and the whole window
     /// their `rect`, and no dialog or prompt over them.
     #[hook(
+        signature = "pub(in crate::game) fn native_screen_render_post( &self, draw: &mut HudBatch, screen: &ScreenView<'_>, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_screen_render_post",
         side = "client",
         contract = "listen",
         neoforge = "ScreenEvent.Render.Post",

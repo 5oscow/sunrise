@@ -13,6 +13,8 @@ pub trait Hooks {
     /// A server-only answer leaves the client's off-hand prediction unchanged.
     /// ClientHost permits reads and local effects, not authoritative writes.
     #[hook(
+        signature = "pub(in crate::game) fn native_entity_interact( &mut self, hand: Hand, entity: i32, kind: &str, stack: Option<&ItemStack>, result: &mut Option<mod_api::InteractionResult>, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_entity_interact",
         side = "both",
         version = 2,
         contract = "replace",

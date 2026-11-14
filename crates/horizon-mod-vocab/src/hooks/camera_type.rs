@@ -10,6 +10,7 @@ pub trait Hooks {
     /// at any other moment. Client-side. Beyond NeoForge: there is no counterpart. Diverges from
     /// upstream: new hook.
     #[hook(
+        signature = "pub(in crate::game) fn native_camera_type_cycle( &mut self, previous: mod_api::CameraType, next: &mut mod_api::CameraType, )",
         side = "client",
         contract = "listen",
         cancellable = false,

@@ -57,6 +57,7 @@ type is not registered, a mod pushes `Refuse`, a pick names a state the block la
 or a model id that doesn't read, or no state is picked. A file several packs provide binds each pack's
 layer on its own, as vanilla does: a refused layer leaves the states to the layers below it."#]
     #[hook(
+        signature = "pub(in crate::game) fn native_register_block_state_models( context: &mod_api::RegistrationContext, definitions: &mut Vec<String>, )",
         side = "client",
         contract = "collect",
         out = "definitions",

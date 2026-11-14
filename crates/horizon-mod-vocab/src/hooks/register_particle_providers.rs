@@ -57,6 +57,7 @@ below gameplay; a provider that needs the world reads it in a hook. A type with 
 declarative motion, and live provider particles are dropped when resources reload, as a compiled
 controller's are."#]
     #[hook(
+        signature = "pub(in crate::game) fn native_register_particle_providers( context: &mod_api::RegistrationContext, providers: &mut dyn ParticleProviders, )",
         side = "client",
         contract = "listen",
         context = "registration",

@@ -10,6 +10,7 @@ pub trait Hooks {
     /// does (planks, wool and leaves yes; stone no). Answer only for your own
     /// blocks. The level is read-only.
     #[hook(
+        signature = "pub(in crate::game) fn native_ignited_by_lava( &self, dimension: LevelDimension, state: BlockStateId, pos: BlockPos, face: Direction, ignites: &mut Option<bool>, )",
         side = "server",
         contract = "replace",
         out = "ignites",

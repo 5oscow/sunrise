@@ -31,6 +31,7 @@ pub trait Hooks {
     /// creates a preparation for each call. A stale or missing target refuses wherever
     /// a part is asked; the no-listener data path performs no entity lookup.
     #[hook(
+        signature = "pub(in crate::game) fn native_can_equip( &self, stack: &mod_api::ItemStack, slot: &str, entity: LivingRef, kind: &str, can_equip: &mut bool, )",
         side = "both",
         contract = "listen",
         scope = "item",

@@ -5,6 +5,8 @@ pub trait Hooks {
     /// A server player toggled an ageable mob's age lock with a golden
     /// dandelion, after the lock and item use changed.
     #[hook(
+        signature = "pub(in crate::game) fn native_player_toggle_entity_age_lock( &mut self, player: u128, name: &str, entity_id: u32, locked: bool, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_player_toggle_entity_age_lock",
         side = "server",
         contract = "listen",
         neoforge = "none (NeoForge has no such event)"

@@ -3,6 +3,7 @@
 pub trait Hooks {
     /// A server-only, non-cancellable backing-block storage notice at Container.setChanged / BlockEntity.setChanged, after the write and before existing dirty/comparator updates. The event carries LevelRef, BlockPos and BlockState. Native After::Changed transactions notify each backing block once at the root commit, never on abort or simulation; explicit set_changed invalidates even equal contents. Nested writes to the block whose notice is active still apply but do not re-enter its notice; writes to another block notify normally. Double containers notify each backing component, not the other half merely refreshed for comparators. Vehicle/menu placeholder coordinates are excluded. Replaces the Create port positional contents_changed mixin for depot, package and schematic storage; there is no matching NeoForge bus event.
     #[hook(
+        signature = "pub(in crate::game) fn native_contents_changed( &mut self, level: LevelRef, pos: BlockPos, state: BlockStateId, )",
         side = "server",
         contract = "listen",
         scope = "block",

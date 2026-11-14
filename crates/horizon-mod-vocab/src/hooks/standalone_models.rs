@@ -18,6 +18,8 @@ pub trait Hooks {
     /// that are no edit of the text (dyeing, glow ink, waxing, `/data`,
     /// `/setblock`, mods' `native_with_mod_block_entity`).
     #[hook(
+        signature = "pub(in crate::game) fn native_sign_changed( &mut self, call: mod_api::__private::SignChangedCall<'_>, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_sign_changed",
         side = "server",
         contract = "cancel",
         out = "cancel",
@@ -40,6 +42,8 @@ pub trait Hooks {
     /// drops the entire form and logs its registering mod. Resolve the results through
     /// `RenderAssets::model` after `model_baking_completed`, just like plain ids.
     #[hook(
+        signature = "pub(in crate::game) fn native_standalone_models( context: &mod_api::RegistrationContext, models: &mut Vec<String>, forms: &mut Vec<mod_api::Answered<mod_api::StandaloneModelForm>>, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_standalone_models",
         side = "client",
         contract = "collect",
         out = "forms",

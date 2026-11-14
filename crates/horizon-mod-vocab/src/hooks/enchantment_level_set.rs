@@ -9,6 +9,7 @@ pub trait Hooks {
     /// as vanilla's. Asked for each row in order, before
     /// `prepare_item_enchant`. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_enchantment_level_set( &mut self, pos: [i32; 3], offer: &mod_api::item::stations::EnchantmentRow<'_>, level: &mut i32, )",
         side = "server",
         contract = "listen",
         neoforge = "EnchantmentLevelSetEvent",

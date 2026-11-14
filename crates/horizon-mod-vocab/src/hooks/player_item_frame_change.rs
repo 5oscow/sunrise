@@ -6,6 +6,8 @@ pub trait Hooks {
     /// `put`, `rotate`, `remove_item` or `break`; `item` is empty when no item remains, and `rotation`
     /// is the resulting step. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_player_item_frame_change( &mut self, player: u128, name: &str, entity_id: u32, action: &str, item: &str, rotation: u8, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_player_item_frame_change",
         side = "server",
         contract = "listen",
         neoforge = "none (NeoForge has no such event)"

@@ -23,6 +23,8 @@ pub trait Hooks {
     /// server's client. Runs every tick of every use:
     /// check the item first.
     #[hook(
+        signature = "pub(in crate::game) fn native_living_entity_use_item_tick( &mut self, stack: &ItemStack, entity: Option<i32>, hand: Hand, duration: &mut i32, canceled: &mut bool, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_living_entity_use_item_tick",
         side = "both",
         contract = "cancel",
         out = "canceled",

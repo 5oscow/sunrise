@@ -6,6 +6,8 @@ pub trait Hooks {
     /// `ExplosionPrimeEvent`). This is listen-only: the explosion proceeds as
     /// usual. Server-side, including the single-player server.
     #[hook(
+        signature = "pub(in crate::game) fn native_explosion_prime(&mut self, center: [f64; 3], radius: f32)",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_explosion_prime",
         side = "server",
         contract = "listen",
         neoforge = "none (NeoForge has no such event; Bukkit's ExplosionPrimeEvent)"

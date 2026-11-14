@@ -5,6 +5,7 @@ pub trait Hooks {
     /// On an authoritative server, fire is about to burn the block at `pos`
     /// away. Set `cancel` to keep that block.
     #[hook(
+        signature = "pub(in crate::game) fn native_block_burn( &self, dimension: LevelDimension, pos: BlockPos, cancel: &mut bool, )",
         side = "server",
         contract = "cancel",
         out = "cancel",

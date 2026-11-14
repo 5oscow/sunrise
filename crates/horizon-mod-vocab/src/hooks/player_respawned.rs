@@ -15,6 +15,8 @@ pub trait Hooks {
     /// when no chunks had to load. Not for the End exit, which isn't a respawn
     /// here (as for `player_respawned`). Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_player_respawn_position( &mut self, call: mod_api::__private::PlayerRespawnPositionCall<'_>, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_player_respawn_position",
         side = "server",
         contract = "listen",
         neoforge = "PlayerRespawnPositionEvent"
@@ -35,6 +37,8 @@ pub trait Hooks {
     /// food and experience reset, with their state swapped in. Once for each
     /// death that ends in a respawn, on a server; not for the End-exit one.
     #[hook(
+        signature = "pub(in crate::game) fn native_player_respawned(&mut self, player: u128, name: &str)",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_player_respawned",
         side = "server",
         contract = "listen",
         neoforge = "PlayerEvent.PlayerRespawnEvent"

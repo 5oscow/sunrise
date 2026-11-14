@@ -23,6 +23,8 @@ pub trait Hooks {
     /// dragon or crystal. Heard only when a mod also sets
     /// `hears_projectile_impacts`. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_projectile_impact( &mut self, call: mod_api::__private::ProjectileImpactCall<'_>, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_projectile_impact",
         side = "server",
         contract = "cancel",
         out = "canceled",
@@ -58,6 +60,8 @@ pub trait Hooks {
     /// same world tick. A rejected, nonresident passenger does not autonomously
     /// tick or retry. Loading a save does not notify. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_entity_mount( &mut self, call: mod_api::__private::EntityMountCall<'_>, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_entity_mount",
         side = "server",
         contract = "cancel",
         out = "canceled",
@@ -84,6 +88,8 @@ pub trait Hooks {
     /// of this flag. Attack and mining swing packets also honour the item swing veto. Pick
     /// only vetoes its packet and never swings. Fires on the window client.
     #[hook(
+        signature = "pub(in crate::game) fn native_interaction_key_mapping_triggered( &mut self, key: InteractionKey, hand: Hand, attempt: InteractionAttempt, swing_hand: &mut bool, canceled: &mut bool, )",
+        target = "horizon_client::game::native_hooks::interaction::Game<'_>::native_interaction_key_mapping_triggered",
         side = "client",
         contract = "cancel",
         out = "canceled",

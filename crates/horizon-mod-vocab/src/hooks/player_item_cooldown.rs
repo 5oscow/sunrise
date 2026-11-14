@@ -6,6 +6,8 @@ pub trait Hooks {
     /// duration. The player's state is not swapped in. Set `cancel` to skip starting the cooldown.
     /// Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_player_item_cooldown( &mut self, player: u128, name: &str, item: &str, ticks: i32, cancel: &mut bool, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_player_item_cooldown",
         side = "server",
         contract = "cancel",
         out = "cancel",

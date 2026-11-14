@@ -6,6 +6,7 @@ pub trait Hooks {
     /// conductor answer. `direction` is the input side of the block being powered,
     /// opposite the queried block's output side. Authoritative servers only.
     #[hook(
+        signature = "pub(in crate::game) fn native_should_check_weak_power( &self, dimension: LevelDimension, pos: BlockPos, state: BlockStateId, direction: Direction, check: &mut bool, )",
         side = "server",
         contract = "collect",
         out = "check",

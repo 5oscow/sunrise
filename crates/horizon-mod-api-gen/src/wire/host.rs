@@ -885,9 +885,8 @@ impl Cx {
 
 /// Generate the host boundary from the same source surface as the guest.
 pub fn generate_host(root: &std::path::Path) -> Result<String, String> {
-    // The build script that runs this reads the vocabulary's hook declarations, exports and
-    // parts and the native hook sources: ask Cargo to rerun it when any of them changes, from the
-    // generator's own list of what it reads (a list in the build script would drift).
+    // Read canonical vocabulary declarations, exports and parts, never game implementations.
+    // Keep tracking in the generator rather than a second list in its consuming build script.
     crate::build::track(root, false)?;
     host_and_coverage(root).map(|(code, _)| code)
 }
@@ -899,7 +898,7 @@ pub fn generate_coverage(root: &std::path::Path) -> Result<String, String> {
 }
 
 fn host_and_coverage(root: &std::path::Path) -> Result<(String, String), String> {
-    let generated = crate::sources(root, crate::FillMode::Require)?;
+    let generated = crate::canonical_sources(root)?;
     let (providers, provider_sources) = crate::capability_providers::generate(root, &[])?;
     for path in provider_sources {
         crate::rerun_if_changed(&path.display());
@@ -1038,12 +1037,17 @@ mod tests {
             "crates/horizon-mod-vocab/src/lib.rs",
             "crates/horizon-mod-vocab/src/host/draw.rs",
             "crates/horizon-mod-vocab/src/exports/generated_host.rs",
-            "crates/horizon-client/src/game/native_hooks",
         ] {
             assert!(
                 watched.iter().any(|path| path.ends_with(needed)),
                 "the host generator reads {needed} but does not ask Cargo to watch it: {watched:#?}"
             );
         }
+        assert!(
+            watched
+                .iter()
+                .all(|path| !path.contains("crates/horizon-client/src/game")),
+            "the lower wasm host must not read or track game implementation sources"
+        );
     }
 }

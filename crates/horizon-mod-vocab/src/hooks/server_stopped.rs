@@ -10,6 +10,8 @@ pub trait Hooks {
     /// level is installed; the session lock alone is not adoption). A failed
     /// save still reaches this hook, but does not emit `WorldCloseFinal`.
     #[hook(
+        signature = "pub(in crate::game) fn native_server_stopped(&mut self, dedicated: bool)",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_server_stopped",
         side = "server",
         contract = "listen",
         neoforge = "ServerStoppedEvent",

@@ -13,6 +13,7 @@ pub trait Hooks {
     /// Play-phase pongs pass through this hook; return `Flow::Cancel` to drop a packet.
     /// Beyond NeoForge: there is no counterpart. Diverges from upstream: new hook.
     #[hook(
+        signature = "pub(in crate::game) fn native_client_packet_send( &self, packet: &ClientPacket, canceled: &mut bool, )",
         side = "client",
         contract = "cancel",
         out = "canceled",

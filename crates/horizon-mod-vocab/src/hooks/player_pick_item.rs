@@ -6,6 +6,8 @@ pub trait Hooks {
     /// zero for an entity; `entity_id` is zero for a block. The player's state is swapped in. Set
     /// `cancel` to leave the inventory and client unchanged.
     #[hook(
+        signature = "pub(in crate::game) fn native_player_pick_item( &mut self, player: u128, name: &str, from_entity: bool, pos: [i32; 3], entity_id: i32, cancel: &mut bool, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_player_pick_item",
         side = "server",
         contract = "cancel",
         out = "cancel",

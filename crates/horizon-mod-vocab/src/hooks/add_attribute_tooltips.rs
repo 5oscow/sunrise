@@ -15,6 +15,7 @@ pub trait Hooks {
     /// A component deeper than 512 nodes refuses capture or the whole writeback;
     /// no event field is applied if any Text field fails conversion.
     #[hook(
+        signature = "pub(in crate::game) fn native_add_attribute_tooltips( &self, call: mod_api::__private::AddAttributeTooltipsCall<'_>, )",
         side = "client",
         contract = "listen",
         neoforge = "AddAttributeTooltipsEvent",

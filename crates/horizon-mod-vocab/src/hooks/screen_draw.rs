@@ -10,6 +10,8 @@ pub trait Hooks {
     /// values arrive, so read it with `get`. Draw with `native_sprite`, `native_fill` and
     /// `native_text`.
     #[hook(
+        signature = "pub(in crate::game) fn native_screen_draw( &self, block: &str, data: &[i32], draw: &mut HudBatch, origin: [f32; 2], )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_screen_draw",
         side = "client",
         contract = "listen",
         scope = "block_entity",

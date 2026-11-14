@@ -7,6 +7,7 @@ pub trait Hooks {
     /// clicks are reported: one sent during configuration (no player yet) is not. The
     /// player is not swapped in. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_custom_click_action( &mut self, player: u128, player_entity_id: i32, name: &str, id: &str, payload: Option<&Tag>, cancel: &mut bool, )",
         side = "server",
         contract = "cancel",
         out = "cancel",

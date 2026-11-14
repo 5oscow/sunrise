@@ -6,6 +6,7 @@ pub trait Hooks {
     /// or `lava`; the levels are 0 through 8. Set `cancel` to keep the old
     /// level. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_fluid_level_change( &self, dimension: LevelDimension, pos: BlockPos, fluid: &str, from: i32, to: i32, cancel: &mut bool, )",
         side = "server",
         contract = "cancel",
         out = "cancel",

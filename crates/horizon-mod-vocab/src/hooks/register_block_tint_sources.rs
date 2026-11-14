@@ -55,6 +55,7 @@ neighbours: block and fluid states, light, face shading and `block_tint(pos, res
 Block entities are not part of it. A block with no mod layers meshes as before, and the registrations hold after
 a pack change or F3+T. Fluids take their colour from their fluid model, not from these registrations."#]
     #[hook(
+        signature = "pub(in crate::game) fn native_register_block_tint_sources( context: &mod_api::RegistrationContext, sources: &mut dyn BlockTintSources, )",
         side = "client",
         contract = "listen",
         context = "registration",

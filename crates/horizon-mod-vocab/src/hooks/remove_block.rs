@@ -8,6 +8,7 @@ pub trait Hooks {
     /// The normal setBlock effects and flags 3 (+64 when moved by a piston)
     /// apply to the written state. The level is read-only during this call.
     #[hook(
+        signature = "pub(in crate::game) fn native_remove_block(&self, call: super::fire::RemoveBlockCall<'_>)",
         side = "server",
         contract = "replace",
         out = "answer",

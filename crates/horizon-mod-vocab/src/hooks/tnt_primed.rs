@@ -14,6 +14,8 @@ pub trait Hooks {
     /// blocks), a TNT minecart and a sulfur cube. Server-side and in single
     /// player.
     #[hook(
+        signature = "pub(in crate::game) fn native_tnt_primed( &mut self, player: Option<u128>, pos: [i32; 3], cancel: &mut bool, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_tnt_primed",
         side = "server",
         contract = "cancel",
         out = "cancel",

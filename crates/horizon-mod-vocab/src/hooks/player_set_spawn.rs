@@ -11,6 +11,7 @@ pub trait Hooks {
     /// respawned player is left with none). `player_entity_id` is the server's entity id for
     /// the player. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_player_set_spawn( &mut self, call: mod_api::__private::PlayerSetSpawnCall<'_>, )",
         side = "server",
         contract = "cancel",
         out = "cancel",

@@ -16,7 +16,12 @@ pub trait Hooks {
     /// including them, for any item, even one with no attached parts.
     /// A component deeper than 512 nodes refuses capture or the whole writeback;
     /// no event field is applied if any Text field fails conversion.
-    #[hook(side = "client", contract = "listen", neoforge = "ItemTooltipEvent")]
+    #[hook(
+        signature = "pub(in crate::game) fn native_item_tooltip( &self, call: mod_api::__private::ItemTooltipCall<'_>, )",
+        side = "client",
+        contract = "listen",
+        neoforge = "ItemTooltipEvent"
+    )]
     fn item_tooltip(
         player: u128,
         player_entity_id: i32,

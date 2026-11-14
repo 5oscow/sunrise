@@ -10,6 +10,7 @@ pub trait Hooks {
     /// one it can't stand on. Answer only for your own blocks. The level is
     /// read-only.
     #[hook(
+        signature = "pub(in crate::game) fn native_may_place_on( &self, dimension: LevelDimension, state: BlockStateId, ground: BlockStateId, ground_pos: BlockPos, may: &mut Option<bool>, )",
         side = "server",
         contract = "replace",
         out = "may",

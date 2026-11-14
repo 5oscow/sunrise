@@ -13,6 +13,8 @@ pub trait Hooks {
     /// may be gone by now. Heard after the tick's players and entities have
     /// moved, in order, with no player's state swapped in. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_player_start_tracking( &mut self, player: u128, name: &str, entity: u32, uuid: u128, kind: &str, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_player_start_tracking",
         side = "server",
         contract = "listen",
         neoforge = "PlayerEvent.StartTracking",

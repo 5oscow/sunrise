@@ -12,6 +12,8 @@ pub trait Hooks {
     /// change the world only where this `Game` runs the world, not on a
     /// server's client. Runs every tick of every use: check the item first.
     #[hook(
+        signature = "pub(in crate::game) fn native_on_use_tick( &mut self, stack: &ItemStack, entity: Option<i32>, remaining: i32, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_on_use_tick",
         side = "both",
         contract = "listen",
         scope = "item",

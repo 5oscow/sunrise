@@ -13,6 +13,7 @@ result, as `areAllEffectsAmbient`: only effects visible after the mods count. As
 entity's effects change, not every tick, and the answers are sent until the next change; with no listener nothing is
 kept and vanilla's list goes out. The window's own player draws its swirls from its own effects."#]
     #[hook(
+        signature = "pub(in crate::game) fn native_effect_particle_modification( &self, entity: LivingRef, effect: &ActiveEffect, original_particle: &ParticleOptions, particle: &mut Option<ParticleOptions>, visible: &mut bool, )",
         side = "server",
         contract = "listen",
         host = "read",

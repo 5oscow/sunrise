@@ -11,6 +11,7 @@ pub trait Hooks {
     /// sounds. Fires on the Game that runs the attack, and on the attacking
     /// client, which only asks.
     #[hook(
+        signature = "pub(in crate::game) fn native_sweep_attack( &mut self, target: &str, vanilla_sweep: bool, sweeping: &mut bool, canceled: &mut bool, )",
         side = "both",
         contract = "cancel",
         out = "canceled",

@@ -33,6 +33,7 @@ dimension change, leaving the server). The chunk-wide notice stays `chunk_unload
 it is told after the chunk's block entities, and a client is told of them alone. A chunk unload with no part
 subscribed costs one check."##]
     #[hook(
+        signature = "pub(in crate::game) fn native_on_chunk_unloaded( &mut self, pos: [i32; 3], block_entity: BlockEntityRef, entity: &ModBlockEntity, )",
         side = "both",
         contract = "listen",
         scope = "block_entity",

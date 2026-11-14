@@ -6,6 +6,8 @@ pub trait Hooks {
     /// Called for world rendering and near-plane overlays; hand/HUD FOV uses its own path.
     /// Only finite values in 1..=179 degrees replace the computed FOV.
     #[hook(
+        signature = "pub(in crate::game) fn native_compute_fov( &self, partial: f32, camera: [f64; 3], degrees: &mut f32, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_compute_fov",
         side = "client",
         contract = "listen",
         neoforge = "ViewportEvent.ComputeFov"

@@ -6,6 +6,8 @@ pub trait Hooks {
     /// option, before upload. Title panoramas skip it. Invalid color or distance values retain the
     /// original whole fog.
     #[hook(
+        signature = "pub(in crate::game) fn native_render_fog( &self, partial: f32, camera: [f64; 3], fog_type: mod_api::client::fog::FogType, fog: &mut mod_api::client::fog::FogData, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_render_fog",
         side = "client",
         contract = "listen",
         neoforge = "ViewportEvent.RenderFog"

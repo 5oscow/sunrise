@@ -10,6 +10,7 @@ pub trait Hooks {
     /// the list (`operators/clear`) is not a call to either, as in vanilla. Dedicated
     /// servers only; a single-player world has no operator list. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_permissions_changed( &mut self, player: u128, player_entity_id: Option<i32>, name: &str, old: PermissionLevel, new: PermissionLevel, cancel: &mut bool, )",
         side = "server",
         contract = "cancel",
         out = "cancel",

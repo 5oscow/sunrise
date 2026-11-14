@@ -11,6 +11,7 @@ pub trait Hooks {
     /// set it `Some(true)` to keep them asleep, `Some(false)` to wake them. The player's state is not swapped in
     /// on a guest tick.
     #[hook(
+        signature = "pub(in crate::game) fn native_can_continue_sleeping( &mut self, entity: u128, name: &str, kind: &str, pos: [i32; 3], problem: Option<SleepProblem>, may_continue: &mut Option<bool>, )",
         side = "server",
         contract = "replace",
         out = "may_continue",

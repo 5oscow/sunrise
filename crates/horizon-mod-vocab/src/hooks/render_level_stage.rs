@@ -26,6 +26,7 @@ geometry at the next stage it reaches instead, depth tested as usual: a shader p
 the sky, terrain, water or weather itself, and improved transparency for the translucent and
 weather stages. Nothing is dropped, and the order between stages is kept."#]
     #[hook(
+        signature = "pub(in crate::game) fn native_render_level_stage( &self, stage: mod_api::RenderLevelStage, view: &mod_api::WorldRenderView, draw: &mut horizon_client::world_geometry::WorldGeometry, )",
         side = "client",
         contract = "listen",
         neoforge = "RenderLevelStageEvent",

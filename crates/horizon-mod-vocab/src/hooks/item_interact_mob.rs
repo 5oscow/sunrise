@@ -10,6 +10,7 @@ pub trait Hooks {
     /// unchanged. ClientHost permits reads and local effects, not authoritative
     /// writes. Armor stands, other players and dragon parts are not covered.
     #[hook(
+        signature = "pub(in crate::game) fn native_item_interact_mob( &mut self, hand: Hand, entity: i32, kind: &str, stack: &ItemStack, result: &mut Option<mod_api::InteractionResult>, )",
         side = "both",
         version = 2,
         contract = "replace",

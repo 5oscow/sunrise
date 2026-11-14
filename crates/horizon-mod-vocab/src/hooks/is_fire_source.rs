@@ -11,6 +11,7 @@ pub trait Hooks {
     /// side is always the top. Answer only for your own blocks. The level is
     /// read-only.
     #[hook(
+        signature = "pub(in crate::game) fn native_is_fire_source( &self, dimension: LevelDimension, state: BlockStateId, pos: BlockPos, source: &mut Option<bool>, )",
         side = "server",
         contract = "replace",
         out = "source",

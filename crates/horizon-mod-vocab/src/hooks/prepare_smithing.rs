@@ -4,6 +4,8 @@
 pub trait Hooks {
     /// A smithing result was prepared for a server player at `pos`. Change it before it is sent.
     #[hook(
+        signature = "pub(in crate::game) fn native_prepare_smithing( &mut self, player: u128, name: &str, pos: [i32; 3], result: &mut Option<ItemStack>, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_prepare_smithing",
         side = "server",
         contract = "replace",
         out = "result",

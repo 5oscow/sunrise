@@ -28,6 +28,7 @@ The queue belongs to the running world: it is dropped when the world closes and 
 so a task never leaks into the next world and a mod that must outlive a restart writes its
 deadline to its own storage and schedules again when the world opens."#]
     #[hook(
+        signature = "pub(in crate::game) fn native_scheduled_task(&mut self, id: TaskId, owner: &str, token: u64)",
         side = "server",
         contract = "listen",
         neoforge = "none (vanilla MinecraftServer.tell(TickTask); NeoForge adds no event for it)",

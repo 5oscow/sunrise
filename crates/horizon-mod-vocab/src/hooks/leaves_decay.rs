@@ -5,6 +5,7 @@ pub trait Hooks {
     /// A non-persistent leaf block at distance 7 is about to decay at `pos`.
     /// Set `cancel` to keep it. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_leaves_decay( &self, dimension: LevelDimension, pos: BlockPos, cancel: &mut bool, )",
         side = "server",
         contract = "cancel",
         out = "cancel",

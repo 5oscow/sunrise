@@ -5,6 +5,7 @@ pub trait Hooks {
     /// Farmland at `pos` is about to change moisture from `from` to `to`.
     /// Set `cancel` to keep its old moisture. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_moisture_change( &self, dimension: LevelDimension, pos: BlockPos, from: i32, to: i32, cancel: &mut bool, )",
         side = "server",
         contract = "cancel",
         out = "cancel",

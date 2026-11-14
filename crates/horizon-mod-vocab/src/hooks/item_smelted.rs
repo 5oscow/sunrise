@@ -11,6 +11,7 @@ pub trait Hooks {
     /// passes the taken stack with 0. Fires before `furnace_extract`.
     /// Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_item_smelted( &mut self, player: u128, player_entity_id: i32, stack: Option<&ItemStack>, amount_removed: u32, )",
         side = "server",
         contract = "listen",
         neoforge = "PlayerEvent.ItemSmeltedEvent",

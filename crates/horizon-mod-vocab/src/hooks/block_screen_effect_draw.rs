@@ -15,6 +15,7 @@ pub trait Hooks {
 
 With no `custom_draw` set the hook is never asked, so a mod that only listens here draws nothing."#]
     #[hook(
+        signature = "pub(in crate::game) fn native_block_screen_effect_draw( &self, call: super::fire::BlockScreenEffectDrawCall<'_>, )",
         side = "client",
         contract = "listen",
         neoforge = "CustomBlockScreenEffectRenderer",

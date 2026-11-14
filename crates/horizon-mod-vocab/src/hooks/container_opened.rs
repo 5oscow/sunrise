@@ -18,6 +18,8 @@ pub trait Hooks {
     /// (`native_open_menu`), the inventory screen, and the editors (sign,
     /// book, command block). Server-side, for every player of the world.
     #[hook(
+        signature = "pub(in crate::game) fn native_container_opened( &mut self, player: u128, name: &str, kind: &str, pos: Option<[i32; 3]>, cancel: &mut bool, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_container_opened",
         side = "server",
         contract = "cancel",
         out = "cancel",

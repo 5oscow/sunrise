@@ -19,6 +19,8 @@ pub trait Hooks {
     /// hand; nothing is used up in creative mode. The hand holds the result,
     /// a mod's replacement included, until the server's inventory update.
     #[hook(
+        signature = "pub(in crate::game) fn native_living_entity_use_item_finish( &mut self, stack: &ItemStack, entity: Option<i32>, hand: Hand, duration: i32, result: &mut Option<ItemStack>, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_living_entity_use_item_finish",
         side = "both",
         contract = "listen",
         neoforge = "LivingEntityUseItemEvent.Finish"

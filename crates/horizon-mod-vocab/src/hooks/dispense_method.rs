@@ -14,6 +14,7 @@ pub trait Hooks {
     /// or 0 for nothing at all. Leave answer None and `dispense_item` decides,
     /// as it did before.
     #[hook(
+        signature = "pub(in crate::game) fn native_dispense_method( &mut self, dimension: &str, pos: [i32; 3], facing: Direction, state: BlockStateId, stack: &ItemStack, answer: &mut Option<mod_api::Dispensed>, )",
         side = "server",
         contract = "replace",
         out = "answer",

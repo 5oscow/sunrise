@@ -5,6 +5,8 @@ pub trait Hooks {
     /// A server player's XP orb pickup cooldown changed to `ticks`. It is
     /// reported after the value changes. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_player_exp_cooldown_change( &mut self, player: u128, name: &str, ticks: u32, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_player_exp_cooldown_change",
         side = "server",
         contract = "listen",
         neoforge = "none (NeoForge has no such event)"

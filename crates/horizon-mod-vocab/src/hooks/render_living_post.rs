@@ -15,6 +15,7 @@ pub trait Hooks {
     /// the renderer in the model's place, so it changes with #3915 and not before. For a player,
     /// its `render_player_post` follows.
     #[hook(
+        signature = "pub(in crate::game) fn native_render_living_post( &self, entity: &MobRender<'_>, parts: Option<&PosedParts>, draw: &mut BlockEntityDraw, )",
         side = "client",
         contract = "listen",
         neoforge = "RenderLivingEvent.Post",

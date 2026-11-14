@@ -15,6 +15,7 @@ pub trait Hooks {
     /// Server-side. The contract beyond the method's name and parameters is Horizon's reading,
     /// not checked against NeoForge's.
     #[hook(
+        signature = "pub(in crate::game) fn native_makes_piglins_neutral( &self, stack: &ItemStack, wearer: LivingRef, neutral: &mut bool, )",
         side = "server",
         contract = "listen",
         scope = "item",

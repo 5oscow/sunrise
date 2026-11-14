@@ -19,6 +19,7 @@ pub trait Hooks {
     /// No hook is called per tick or frame. With no part attached, the only dispatch cost is one
     /// block subscription lookup before event conversion. Diverges from upstream: new hook.
     #[hook(
+        signature = "pub(in crate::game) fn native_enchant_power_bonus( &self, state: BlockStateId, pos: BlockPos, table_pos: BlockPos, power: &mut f32, )",
         side = "both",
         version = 2,
         contract = "collect",

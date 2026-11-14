@@ -7,6 +7,8 @@ pub trait Hooks {
     /// Without it the game tells no entity's tick, and keeps no list of them. Asked once for
     /// each family (mobs, items, minecarts, boats) each tick. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_entity_tick_listened(&mut self, listened: &mut bool)",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_entity_tick_listened",
         side = "server",
         contract = "collect",
         out = "listened",

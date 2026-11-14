@@ -13,6 +13,7 @@ pub trait Hooks {
     /// owner and a LAN host. Not heard: the same swap made in an open inventory
     /// (hovering a slot and pressing the key, a menu click).
     #[hook(
+        signature = "pub(in crate::game) fn native_player_swap_hands( &mut self, player: u128, name: &str, to_main_hand: &mut Option<ItemStack>, to_off_hand: &mut Option<ItemStack>, cancel: &mut bool, )",
         side = "server",
         contract = "cancel",
         out = "cancel",

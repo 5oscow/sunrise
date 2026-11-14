@@ -5,6 +5,7 @@ pub trait Hooks {
     /// The Ender Dragon fight is about to place its first dragon egg at `pos`.
     /// Set `cancel` to leave the block unchanged. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_dragon_egg_form( &self, dimension: LevelDimension, pos: BlockPos, cancel: &mut bool, )",
         side = "server",
         contract = "cancel",
         out = "cancel",

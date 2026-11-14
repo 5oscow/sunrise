@@ -15,6 +15,8 @@ pub trait Hooks {
     /// helpers read the acting one). Diverges from upstream: renamed from
     /// `destroy_block`, to NeoForge's `BreakBlockEvent`.
     #[hook(
+        signature = "pub(in crate::game) fn native_break_block( &mut self, pos: [i32; 3], state: BlockStateId, canceled: &mut bool, exp_to_drop: &mut Option<u32>, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_break_block",
         side = "server",
         contract = "cancel",
         out = "canceled",

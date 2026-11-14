@@ -394,7 +394,9 @@ def build(out: Path, server: bool) -> None:
     # On macOS this also gives both dylibs an @rpath install name instead of an absolute build path.
     if sys.platform == "darwin":
         rustflags += " -C rpath"
-    features = cargo_features(server, sys.platform)
+    # Build constructor artifacts in the Game's one resolved graph. A separate SDK-root build
+    # can overwrite shared dylibs with different dependency feature identities.
+    features = [*cargo_features(server, sys.platform), "--features", f"{GAME}/prebuilt-sdk"]
     # Linux's executable RUNPATH doesn't cover transitive dependencies: the game itself must find
     # the wasm runtime beside it. macOS's @rpath install names use the executable's rpath.
     link = ["--", "-C", "link-arg=-Wl,-rpath,$ORIGIN"] if sys.platform == "linux" else []

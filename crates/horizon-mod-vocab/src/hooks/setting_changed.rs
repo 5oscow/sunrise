@@ -7,6 +7,8 @@ pub trait Hooks {
     /// `setting_bool` and its siblings. Only mod `mod_id` hears it: a mod is told of its own
     /// settings, never another's.
     #[hook(
+        signature = "pub(in crate::game) fn native_setting_changed(&mut self, mod_id: &str, key: &str)",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_setting_changed",
         side = "client",
         contract = "listen",
         owner = "mod_id",

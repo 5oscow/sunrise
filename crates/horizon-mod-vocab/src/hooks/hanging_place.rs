@@ -14,6 +14,8 @@ pub trait Hooks {
     /// guests of a server; `/summon`, a dispenser and the game's own player
     /// are not heard, nor is a lead tied to a mob or a boat.
     #[hook(
+        signature = "pub(in crate::game) fn native_hanging_place( &mut self, player: u128, name: &str, kind: &str, pos: [i32; 3], cancel: &mut bool, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_hanging_place",
         side = "server",
         contract = "cancel",
         out = "cancel",

@@ -6,6 +6,8 @@ pub trait Hooks {
     /// Push requests; Horizon validates and limits them before rendering.
     /// Called only while a world is visible.
     #[hook(
+        signature = "pub(in crate::game) fn native_visuals( &self, rims: &mut Vec<BlockRim>, lights: &mut Vec<ColoredLight>, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_visuals",
         side = "client",
         contract = "listen",
         neoforge = "none (Horizon-only; NeoForge has no counterpart)"

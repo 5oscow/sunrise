@@ -10,6 +10,8 @@ pub trait Hooks {
     /// who is in the level, once it is set counts from empty. Asked once a tick
     /// for the mobs, after their tick, and once for the players. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_living_equipment_listened(&mut self, listened: &mut bool)",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_living_equipment_listened",
         side = "server",
         contract = "collect",
         out = "listened",

@@ -50,6 +50,12 @@ impl Table {
         self.unsited.is_none()
     }
 
+    /// Whether this place has a listener after the one existing registry is sealed.
+    #[inline]
+    pub fn active(&self, place: usize) -> bool {
+        self.points[place].load(Ordering::Acquire)
+    }
+
     /// Runs the API functions and forwarding endpoints at point `place`, each under its owner's
     /// guard.
     #[cold]

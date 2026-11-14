@@ -22,6 +22,7 @@ resident is told again, without an unload between. A biome packet
 the server named it. An integrated world's own chunks have the server's
 `chunk_load` instead, and that hook is not called on the client."##]
     #[hook(
+        signature = "pub(in crate::game) fn native_client_chunk_load(&mut self, dimension: &str, chunk: [i32; 2])",
         side = "client",
         contract = "listen",
         neoforge = "ChunkEvent.Load",

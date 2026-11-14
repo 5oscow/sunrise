@@ -9,6 +9,7 @@ pub trait Hooks {
     /// still reports success. `entity_teleport` and `player_teleported` hear it after.
     /// Server-side. Diverges from upstream: new hook.
     #[hook(
+        signature = "pub(in crate::game) fn native_teleport_command( &mut self, dimension: &str, entity: u32, from: [f64; 3], to: &mut [f64; 3], cancel: &mut bool, )",
         side = "server",
         contract = "cancel",
         out = "cancel",

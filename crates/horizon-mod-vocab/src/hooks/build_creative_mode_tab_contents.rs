@@ -14,6 +14,7 @@ pub trait Hooks {
     /// are built: the first time the creative inventory opens after the game's resources load,
     /// and again whenever `has_permissions` changes. Client-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_build_creative_mode_tab_contents( &mut self, tab: &str, has_permissions: bool, items: &mut Vec<ItemStack>, )",
         side = "client",
         contract = "collect",
         out = "items",

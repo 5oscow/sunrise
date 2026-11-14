@@ -5,6 +5,10 @@ pub trait Hooks {
     /// id registered at startup; ignore ids you do not own. `progress` is the integrated server's
     /// smoothed progress, or None without server progress. The game's existing tracker closes
     /// this screen when ready; drawing cannot change readiness or the timeout. Client only.
-    #[hook(side = "client", contract = "listen")]
+    #[hook(
+        signature = "pub(in crate::game) fn native_dimension_transition_screen_draw( &self, screen: &str, reason: mod_api::DimensionTransitionReason, progress: Option<f32>, draw: &mut HudBatch, )",
+        side = "client",
+        contract = "listen"
+    )]
     fn dimension_transition_screen_draw();
 }

@@ -20,6 +20,8 @@ pub trait Hooks {
     /// is the hit point. For an entity, `hit_block` is the cell of `hit_at`
     /// and `hit_face` is `[0, 0, 0]`.
     #[hook(
+        signature = "pub(in crate::game) fn native_ender_pearl_teleport( &mut self, call: mod_api::__private::EnderPearlTeleportCall<'_>, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_ender_pearl_teleport",
         side = "server",
         contract = "cancel",
         version = 3,
@@ -42,6 +44,8 @@ pub trait Hooks {
     /// Entities from `chunk` finished loading into the server world. `count`
     /// is the number of saved entity records read.
     #[hook(
+        signature = "pub(in crate::game) fn native_entities_load( &mut self, dimension: &str, chunk: [i32; 2], count: usize, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_entities_load",
         side = "server",
         contract = "listen",
         neoforge = "none (NeoForge has no such event)"

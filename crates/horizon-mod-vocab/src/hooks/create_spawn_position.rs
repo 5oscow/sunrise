@@ -4,6 +4,7 @@ pub trait Hooks {
     /// Before a new server level selects its initial world spawn
     /// (NeoForge's `LevelEvent.CreateSpawnPosition`).
     #[hook(
+        signature = "pub(in crate::game) fn native_create_spawn_position( &mut self, position: &mut [i32; 3], rotation: &mut [f32; 2], cancel: &mut bool, )",
         side = "server",
         contract = "cancel",
         out = "cancel",

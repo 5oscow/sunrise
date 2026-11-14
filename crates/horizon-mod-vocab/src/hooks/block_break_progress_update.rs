@@ -5,6 +5,8 @@ pub trait Hooks {
     /// A server guest's block-breaking animation changed to `progress` at
     /// `pos` (0 through 9).
     #[hook(
+        signature = "pub(in crate::game) fn native_block_break_progress_update( &mut self, player: u128, name: &str, pos: [i32; 3], progress: i32, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_block_break_progress_update",
         side = "server",
         contract = "listen",
         neoforge = "none (NeoForge has no such event)"

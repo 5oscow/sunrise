@@ -21,6 +21,7 @@ An object a guest implements cannot cross to a wasm mod, so a mod's spawner is a
 
 Horizon ticks vanilla's spawners where it always has: the trader, patrol, cat and siege spawners in the custom spawner block (vanilla's own order differs, and moving it is a separate parity change) and the phantom spawner with the stats, after the mobs. A mod's spawners tick after them in list order, so the position of the `Phantom` entry in the list does not move it. Listeners run on replayed ticks, so they are pure functions of their inputs."#]
     #[hook(
+        signature = "pub(in crate::game) fn native_modify_custom_spawners( &self, dimension: &str, spawners: &mut mod_api::CustomSpawners, )",
         side = "server",
         contract = "listen",
         host = "read",
@@ -39,6 +40,7 @@ Horizon ticks vanilla's spawners where it always has: the trader, patrol, cat an
     /// check per tick. Beyond NeoForge: a key and this hook stand in for the `CustomSpawner`
     /// object. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_custom_spawner_tick( &mut self, dimension: &str, key: mod_api::SpawnerKey, spawn_enemies: bool, )",
         side = "server",
         contract = "listen",
         neoforge = "ModifyCustomSpawnersEvent"

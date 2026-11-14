@@ -12,6 +12,7 @@ pub trait Hooks {
     /// every tick doesn't keep the name up. Only the `ItemPart`s attached to
     /// `stack`'s item are asked. Client-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_highlight_tip(&self, stack: &ItemStack, name: &mut Text)",
         side = "client",
         contract = "listen",
         scope = "item",

@@ -4,6 +4,8 @@
 pub trait Hooks {
     /// A crafting-grid result was prepared for a server player; `pos` is the crafting table, or None for the inventory grid. Change `result` before it is sent.
     #[hook(
+        signature = "pub(in crate::game) fn native_prepare_item_craft( &mut self, player: u128, name: &str, pos: Option<[i32; 3]>, result: &mut Option<ItemStack>, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_prepare_item_craft",
         side = "server",
         contract = "replace",
         out = "result",

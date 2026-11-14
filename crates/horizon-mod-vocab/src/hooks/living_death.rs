@@ -11,6 +11,7 @@ pub trait Hooks {
     /// heal it to keep it alive; at health <= 0 its body is removed after 20 ticks.
     /// Armor stands, boats and other non-mob entities are not told.
     #[hook(
+        signature = "pub(in crate::game) fn native_living_death( &mut self, entity: u32, kind: &str, source: &HurtSource<'_>, weapon: Option<&mod_api::ItemStack>, cancel: &mut bool, )",
         side = "server",
         contract = "cancel",
         out = "cancel",

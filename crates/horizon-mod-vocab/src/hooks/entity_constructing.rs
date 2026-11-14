@@ -19,6 +19,7 @@ pub trait Hooks {
     /// and is not told again, where vanilla constructs the copy it moves
     /// (`Entity.teleportCrossDimension`, then `restoreFrom`).
     #[hook(
+        signature = "pub(in crate::game) fn native_entity_constructing( &mut self, holder: mod_api::Holder, kind: &str, )",
         side = "both",
         contract = "listen",
         neoforge = "EntityEvent.EntityConstructing"

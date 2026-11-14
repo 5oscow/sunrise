@@ -19,6 +19,7 @@ pub trait Hooks {
     /// Block positions are shuffled before destruction, so their list order is
     /// not destruction order either. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_explosion_detonate( &mut self, dimension: &str, center: [f64; 3], blocks: &mut Vec<[i32; 3]>, entities: &mut Vec<EntityRef>, )",
         side = "server",
         contract = "collect",
         out = "blocks",

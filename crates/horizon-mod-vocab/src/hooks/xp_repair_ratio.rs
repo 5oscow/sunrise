@@ -17,6 +17,7 @@ pub trait Hooks {
     /// `minecraft:repair_with_xp` effect in a data pack. Server-side,
     /// including `PlayerRef::give_experience_points`.
     #[hook(
+        signature = "pub(in crate::game) fn native_xp_repair_ratio( &self, player: u128, stack: &ItemStack, experience: u32, ratio: &mut f32, )",
         side = "server",
         contract = "listen",
         scope = "item",

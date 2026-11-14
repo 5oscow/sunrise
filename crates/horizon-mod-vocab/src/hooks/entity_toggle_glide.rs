@@ -5,6 +5,8 @@ pub trait Hooks {
     /// A guest's fall flying state changed on the server. The change has
     /// already been applied.
     #[hook(
+        signature = "pub(in crate::game) fn native_entity_toggle_glide( &mut self, player: u128, name: &str, gliding: bool, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_entity_toggle_glide",
         side = "server",
         contract = "listen",
         neoforge = "none (NeoForge has no such event)"

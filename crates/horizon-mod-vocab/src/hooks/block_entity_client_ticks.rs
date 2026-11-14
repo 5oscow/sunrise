@@ -8,6 +8,8 @@ pub trait Hooks {
     /// the first time a client level ticks with a part that has a client tick.
     /// Set `ticks` to true to make it tick, and never clear a value an earlier mod or mixin set.
     #[hook(
+        signature = "pub(in crate::game) fn native_block_entity_client_ticks(&self, block: &str, ticks: &mut bool)",
+        target = "horizon_client::game::native_hooks::block_entity_client_tick::Game<'_>::native_block_entity_client_ticks",
         side = "client",
         contract = "listen",
         scope = "block_entity",

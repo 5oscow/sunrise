@@ -10,6 +10,8 @@ pub trait Hooks {
     /// too.
     /// Nothing set draws Horizon's own.
     #[hook(
+        signature = "pub(in crate::game) fn native_health_hud( &mut self, inputs: &mod_api::client::hud_layout::HealthInputs, wi: i32, hi: i32, draws: &mut Option<Vec<GuiDraw>>, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_health_hud",
         side = "client",
         contract = "replace",
         out = "draws",

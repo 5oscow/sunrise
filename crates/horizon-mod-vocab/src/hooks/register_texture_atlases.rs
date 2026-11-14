@@ -27,6 +27,7 @@ registration of an atlas id wins; an unknown or malformed definition, a
 duplicate atlas and sprites past the budget are logged and skipped. A pack file
 already at a sprite's name wins over the sprite."#]
     #[hook(
+        signature = "pub(in crate::game) fn native_register_texture_atlases( context: &mod_api::RegistrationContext, atlases: &mut Vec<TextureAtlasRegistration>, )",
         side = "client",
         contract = "collect",
         out = "atlases",

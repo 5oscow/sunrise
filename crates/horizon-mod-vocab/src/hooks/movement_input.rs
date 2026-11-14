@@ -9,6 +9,7 @@ pub trait Hooks {
     /// passive listener's unchanged false); true requests vanilla eligibility.
     /// Without enabled listeners, vanilla latch, double tap and input are unchanged.
     #[hook(
+        signature = "pub(in crate::game) fn native_movement_input( &self, call: mod_api::__private::MovementInputCall<'_>, )",
         side = "client",
         contract = "listen",
         neoforge = "MovementInputUpdateEvent",

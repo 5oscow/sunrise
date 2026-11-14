@@ -22,4 +22,4 @@ pub fn exit_if_compile_child() {
 }
 
 /// A typed API-point listener supplied by generated native startup.
-pub use mod_points::__private::SlotListener;
+pub use mod_api::__private::points::SlotListener;

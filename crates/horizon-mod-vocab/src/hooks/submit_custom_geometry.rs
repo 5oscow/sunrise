@@ -29,6 +29,7 @@ Copies outside the frustum are omitted and do not count. Shader packs and any ro
 take GPU instances bake the same prepared geometry on the CPU instead of dropping the model; a
 `shaders/` pack shades those copies as block entities, as it shades `BlockEntityDrawContext::model`."#]
     #[hook(
+        signature = "pub(in crate::game) fn native_submit_custom_geometry( &self, view: &mod_api::WorldRenderView, draw: &mut horizon_client::world_geometry::WorldGeometry, )",
         side = "client",
         contract = "listen",
         neoforge = "SubmitCustomGeometryEvent",

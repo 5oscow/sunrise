@@ -30,6 +30,7 @@ disconnect wake, if added, uses `(true, false)`. Direct metadata clearing is not
 stop-sleeping, and client metadata resets do not emit this server hook.
 "#]
     #[hook(
+        signature = "pub(in crate::game) fn native_player_bed_leave( &mut self, player: u128, name: &str, pos: [i32; 3], wake_immediately: bool, update_level: bool, )",
         side = "server",
         contract = "listen",
         neoforge = "PlayerWakeUpEvent",

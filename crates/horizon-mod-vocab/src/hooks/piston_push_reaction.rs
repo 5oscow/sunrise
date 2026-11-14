@@ -11,6 +11,7 @@ pub trait Hooks {
     /// a live owned payload; raw-only or currently borrowed native payloads remain refused.
     /// Diverges from vanilla: push only never discards a block entity.
     #[hook(
+        signature = "pub(in crate::game) fn native_piston_push_reaction( state: BlockStateId, reaction: &mut Option<mod_api::PushReaction>, )",
         side = "both",
         contract = "replace",
         out = "reaction",

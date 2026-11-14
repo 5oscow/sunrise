@@ -11,6 +11,8 @@ pub trait Hooks {
     /// fuller arrangement as a village grows). Their sound events should be
     /// `stream: true` in `sounds.json`.
     #[hook(
+        signature = "pub(in crate::game) fn native_music_layers(&self, layers: &mut Vec<MusicLayer>)",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_music_layers",
         side = "client",
         contract = "collect",
         out = "layers",

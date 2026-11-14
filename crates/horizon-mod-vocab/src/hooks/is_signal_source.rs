@@ -6,6 +6,7 @@ pub trait Hooks {
     /// gives a signal, so redstone wire beside it connects to it. Authoritative
     /// servers only.
     #[hook(
+        signature = "pub(in crate::game) fn native_is_signal_source(&self, state: BlockStateId, source: &mut bool)",
         side = "server",
         contract = "listen",
         scope = "block",

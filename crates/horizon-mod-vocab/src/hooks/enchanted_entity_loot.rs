@@ -21,6 +21,7 @@ pub trait Hooks {
     /// The draws a mod makes from the level's random stay in order with the
     /// roll's. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_enchanted_entity_loot( &mut self, entity: LivingRef, source: &HurtSource<'_>, attacker: Option<EntityRef>, enchantment: &Identifier, level: &mut u32, )",
         side = "server",
         contract = "listen",
         neoforge = "EnchantedEntityLootEvent",

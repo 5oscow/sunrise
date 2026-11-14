@@ -888,10 +888,12 @@ impl WasmMod {
                     .map_err(load)?
                     .call(&mut group.store, ())
                     .map_err(load)?;
-                if built != mod_points::POINT_LAYOUT {
+                let catalog = horizon_engine_slots::catalog()
+                    .map_err(|error| Refusal::Runtime(error.to_string()))?;
+                if built != catalog.layout {
                     return Err(Refusal::PointLayout {
                         built,
-                        game: mod_points::POINT_LAYOUT,
+                        game: catalog.layout,
                     });
                 }
             }

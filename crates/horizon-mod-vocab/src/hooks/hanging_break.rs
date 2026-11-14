@@ -13,6 +13,8 @@ pub trait Hooks {
     /// frame and is not asked. The game's own player's hit is not asked, nor
     /// is `/kill`.
     #[hook(
+        signature = "pub(in crate::game) fn native_hanging_break( &mut self, player: Option<u128>, kind: &str, pos: [i32; 3], cancel: &mut bool, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_hanging_break",
         side = "server",
         contract = "cancel",
         out = "cancel",

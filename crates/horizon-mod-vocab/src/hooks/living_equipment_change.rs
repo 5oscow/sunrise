@@ -24,6 +24,8 @@ pub trait Hooks {
     /// host's own player, in single player or hosting a LAN world, isn't told
     /// here: `on_equip` hears it. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_living_equipment_change( &mut self, entity: u32, kind: &str, slot: &str, from: Option<&ItemStack>, to: Option<&ItemStack>, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_living_equipment_change",
         side = "server",
         contract = "listen",
         neoforge = "LivingEquipmentChangeEvent",

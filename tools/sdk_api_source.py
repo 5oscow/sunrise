@@ -367,7 +367,8 @@ def lock_disagreements(slice_lock: dict, game_lock: dict) -> list[str]:
 
 
 def build_messages(arguments: list[str], target_dir: Path) -> list[dict]:
-    output = run(["cargo", "check", "--locked", "-p", API, "--message-format", "json", *arguments], cwd=ROOT,
+    packages = [argument for package in prebuilt_game.API_ROOTS for argument in ("-p", package)]
+    output = run(["cargo", "check", "--locked", *packages, "--message-format", "json", *arguments], cwd=ROOT,
                  env={**os.environ, "CARGO_TARGET_DIR": str(target_dir)})
     return [json.loads(line) for line in output.splitlines() if line.startswith("{")]
 
@@ -408,13 +409,20 @@ def collect_build(messages: list[dict], label: str, by_directory: dict[Path, Cra
             continue
         out_dir = out_dirs.get(message["package_id"])
         if crate.generated:
-            stray = [path.name for path in out_dir.iterdir()
-                     if not path.is_file() or not re.fullmatch(r"[\w.-]+\.rs", path.name)]
+            stray = [
+                path.name for path in out_dir.iterdir()
+                if not (
+                    path.is_file() and (
+                        re.fullmatch(r"[\w.-]+\.rs", path.name) or path.name == "points-timing.txt"
+                    )
+                    or path.is_dir() and re.fullmatch(r"interfaces-[0-9a-f]{64}", path.name)
+                )
+            ]
             if stray:
                 raise Refusal("E_GENERATED_ENTRY", f"{crate.name}'s build script wrote {', '.join(sorted(stray))}, "
-                                                   "not a Rust file")
+                                                   "not a Rust output or generator-local cache/report")
             outputs = {path.name: relocate(path.read_text(), root_forms([workspace_root, ROOT], crate)).encode()
-                       for path in sorted(out_dir.iterdir())}
+                       for path in sorted(out_dir.iterdir()) if path.is_file() and path.suffix == ".rs"}
             first = generated.setdefault(crate.name, (label, outputs))
             if first[1] != outputs:
                 differing = sorted(name for name in first[1].keys() | outputs.keys()
@@ -429,6 +437,8 @@ def collect_build(messages: list[dict], label: str, by_directory: dict[Path, Cra
         for read in dep_info(info):
             path = Path(os.path.normpath(workspace_root / read))
             if out_dir is not None and path.parent == out_dir:
+                if crate.generated and path.name not in outputs:
+                    raise Refusal("E_GENERATED_ENTRY", f"{crate.name} reads excluded build-local input {path.name}")
                 continue
             if not path.is_relative_to(workspace_root / crate.directory):
                 raise Refusal("E_SOURCE_OUTSIDE_CRATE", f"{crate.name} reads {path}")
@@ -443,7 +453,10 @@ def build(out: Path) -> dict[str, bytes]:
         raise Refusal("E_OUT_NOT_EMPTY", f"{out} is not empty")
     metadata = json.loads(run(["cargo", "metadata", "--locked", "--format-version", "1"], cwd=ROOT))
     workspace_root = Path(metadata["workspace_root"])
-    crates = closure(metadata)
+    crates = sorted(
+        {crate.name: crate for root in prebuilt_game.API_ROOTS for crate in closure(metadata, root)}.values(),
+        key=lambda crate: crate.name,
+    )
     by_name = {crate.name: crate for crate in crates}
     workspace = tomllib.loads((workspace_root / "Cargo.toml").read_text())
     manifests = {crate.name: tomllib.loads((workspace_root / crate.directory / "Cargo.toml").read_text())

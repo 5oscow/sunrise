@@ -4,6 +4,7 @@
 pub trait Hooks {
     /// A hopper at `pos` is about to pick up `count` of `item`. Set `cancel` to leave the dropped stack in the world. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_hopper_pickup_item( &self, dimension: LevelDimension, pos: BlockPos, item: &str, count: u32, cancel: &mut bool, )",
         side = "server",
         contract = "cancel",
         out = "cancel",

@@ -16,6 +16,7 @@ pub trait Hooks {
     /// and apply on the owning game thread; completion restores the entering
     /// phase. Startup's empty Host grants no extra access.
     #[hook(
+        signature = "pub(in crate::game) fn native_add_client_reload_listeners( &self, listeners: &mut dyn ClientReloadListeners, )",
         side = "client",
         contract = "listen",
         neoforge = "AddClientReloadListenersEvent"

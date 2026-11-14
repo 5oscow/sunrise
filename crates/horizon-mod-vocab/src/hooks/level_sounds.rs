@@ -18,6 +18,7 @@ pub trait Hooks {
     /// `HostSide` identifies which one is being edited. UI and sound-engine-only
     /// playback do not ask this hook. Both sides.
     #[hook(
+        signature = "pub(in crate::game) fn native_play_level_sound_at_position( &mut self, call: mod_api::__private::PlayLevelSoundAtPositionCall<'_>, )",
         side = "both",
         contract = "cancel",
         out = "cancel",
@@ -50,6 +51,7 @@ pub trait Hooks {
     /// including steps, falls, hurt, bundle clicks and consumption; these remain
     /// positional sounds, not following sounds. Both sides, distinguished by `HostSide`.
     #[hook(
+        signature = "pub(in crate::game) fn native_play_level_sound_at_entity( &mut self, call: mod_api::__private::PlayLevelSoundAtEntityCall<'_>, )",
         side = "both",
         contract = "cancel",
         out = "cancel",

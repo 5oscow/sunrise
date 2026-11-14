@@ -16,6 +16,8 @@ pub trait Hooks {
     /// block's lower north-west corner, in blocks; `draw` also has the partial
     /// tick, the game time and the block's light.
     #[hook(
+        signature = "pub(in crate::game) fn native_block_entity_submit( &self, pos: [i32; 3], block: &str, state: BlockStateId, entity: &ModBlockEntity, draw: &mut BlockEntityDraw, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_block_entity_submit",
         side = "client",
         contract = "listen",
         scope = "block_entity",

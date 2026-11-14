@@ -23,6 +23,8 @@ pub trait Hooks {
     /// click there stays the game's own. A gamepad click or a click the
     /// keyboard's focus sends is not the mouse and fires nothing.
     #[hook(
+        signature = "pub(in crate::game) fn native_screen_mouse_button_pressed_pre( &self, screen: &ScreenView<'_>, button: i32, modifiers: u32, canceled: &mut bool, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_screen_mouse_button_pressed_pre",
         side = "client",
         contract = "cancel",
         out = "canceled",

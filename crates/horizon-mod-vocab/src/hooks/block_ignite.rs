@@ -7,6 +7,7 @@ pub trait Hooks {
     /// `player` is the acting server player when there is one. Set `cancel` to
     /// leave the position unchanged.
     #[hook(
+        signature = "pub(in crate::game) fn native_block_ignite( &self, dimension: LevelDimension, player: Option<u128>, pos: BlockPos, cause: &str, cancel: &mut bool, )",
         side = "server",
         contract = "cancel",
         out = "cancel",

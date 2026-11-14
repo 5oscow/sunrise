@@ -5,6 +5,8 @@ pub trait Hooks {
     /// A server player put a plant into a flower pot, after the potted block state was stored and the
     /// item consumed. `plant` is the item id and `pos` the pot position. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_player_flower_pot_manipulate( &mut self, player: u128, name: &str, pos: [i32; 3], plant: &str, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_player_flower_pot_manipulate",
         side = "server",
         contract = "listen",
         neoforge = "none (NeoForge has no such event)"

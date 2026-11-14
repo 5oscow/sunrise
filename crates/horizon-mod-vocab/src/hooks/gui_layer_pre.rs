@@ -20,6 +20,8 @@ pub trait Hooks {
     /// and `gui_layer_post` too, with its own id, in its place among
     /// these.
     #[hook(
+        signature = "pub(in crate::game) fn native_gui_layer_pre( &self, layer: &str, draw: &mut HudBatch, canceled: &mut bool, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_gui_layer_pre",
         side = "client",
         contract = "cancel",
         out = "canceled",

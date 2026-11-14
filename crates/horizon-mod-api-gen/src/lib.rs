@@ -517,11 +517,26 @@ fn native_hook_files(root: &Path) -> Result<Vec<PathBuf>, String> {
 
 /// Parse and validate the catalog and hook/helper signatures.
 fn sources(root: &Path, fill: FillMode) -> Result<Sources, String> {
+    sources_with(root, fill, false)
+}
+
+/// The API is declared by the vocabulary; only the game validates implementation bodies.
+fn canonical_sources(root: &Path) -> Result<Sources, String> {
+    sources_with(root, FillMode::Require, true)
+}
+
+fn sources_with(root: &Path, fill: FillMode, canonical: bool) -> Result<Sources, String> {
     #[allow(unused_mut)]
     let mut catalog = Catalog::load(root)?;
     let mut files = Vec::new();
     let mut methods = Vec::new();
-    for path in native_hook_files(root)? {
+    let native_files = if canonical {
+        Vec::new()
+    } else {
+        hook_targets::resolve(root, &mut catalog)?;
+        native_hook_files(root)?
+    };
+    for path in native_files {
         let source = fs::read_to_string(&path).map_err(|e| e.to_string())?;
         let file = syn::parse_file(&source).map_err(|e| e.to_string())?;
         let mut names = HashSet::new();
@@ -548,15 +563,19 @@ fn sources(root: &Path, fill: FillMode) -> Result<Sources, String> {
         cancel_hooks,
         hook_count,
         ..
-    } = dispatch::emit(
-        root,
-        catalog
-            .hooks
-            .iter()
-            .filter(|hook| !dispatch::is_render(hook)),
-        &methods,
-        &catalog.draw_contexts,
-    )?;
+    } = if canonical {
+        dispatch::declared(root, &catalog)?
+    } else {
+        dispatch::emit(
+            root,
+            catalog
+                .hooks
+                .iter()
+                .filter(|hook| !dispatch::is_render(hook)),
+            &methods,
+            &catalog.draw_contexts,
+        )?
+    };
     if catalog.hooks.is_empty() {
         return Err(catalog::CatalogError::NoHooks.into());
     }
@@ -681,7 +700,8 @@ pub(crate) mod source;
 pub mod staging;
 pub mod surface;
 pub use build::{
-    generate, generate_engine_points, generate_points, generate_render, write_if_changed,
+    generate, generate_engine_points, generate_game_points, generate_points, generate_render,
+    write_if_changed,
 };
 pub use notes::generate as generate_hook_notes;
 mod staged;
@@ -690,11 +710,11 @@ pub use staged::{MODS_STAGE, staged_mods};
 /// Generate the dispatch test fixture without preventing xtask from filling new placeholders.
 #[doc(hidden)]
 pub fn generate_test_hooks(root: &Path, out_dir: &Path) -> Result<(), String> {
-    build::track(root, true)?;
+    build::track(root, false)?;
     dispatch_fixtures::generate(root, out_dir)?;
     // These fixtures deliberately substitute dispatch-only stub values for API
     // types. Encoding is exercised by the real mod_api's Wire tests, not stubs.
-    let code = sources(root, FillMode::Ignore)?
+    let code = sources_with(root, FillMode::Ignore, true)?
         .hooks
         .replace(", horizon_mod_api_macros::Wire", "")
         .replace("#[derive(horizon_mod_api_macros::Wire)]\n", "");
@@ -742,11 +762,19 @@ mod tests {
             .find(|h| h.name == "recipes_received")
             .unwrap();
         assert_eq!(hook.contract, super::Contract::Listen);
-        let generated = super::sources(&root, super::FillMode::Require)
-            .unwrap()
-            .hooks;
-        assert!(generated.contains("fn recipes_received("));
-        assert!(generated.contains("/// Side: client."));
+        let native = super::sources(&root, super::FillMode::Require).unwrap();
+        let declared = super::canonical_sources(&root).unwrap();
+        for (name, canonical, implementation) in [
+            ("hooks", &declared.hooks, &native.hooks),
+            ("host", &declared.host, &native.host),
+            ("areas", &declared.areas, &native.areas),
+            ("fire", &declared.fire, &native.fire),
+            ("goal_view", &declared.goal_view, &native.goal_view),
+        ] {
+            assert_eq!(canonical, implementation, "{name}");
+        }
+        assert!(declared.hooks.contains("fn recipes_received("));
+        assert!(declared.hooks.contains("/// Side: client."));
     }
 
     #[test]
@@ -1032,10 +1060,25 @@ mod tests {
         std::fs::write(&first, original).unwrap();
         let hooks = root.join("crates/horizon-client/src/game/native_hooks/item_picked_up.rs");
         let shipped = std::fs::read_to_string(&hooks).unwrap();
+        let canonical = super::canonical_sources(&root).unwrap().hooks;
+        let changed_signature = shipped.replace("player: u128", "player: u64");
+        assert_ne!(changed_signature, shipped);
+        std::fs::write(&hooks, changed_signature).unwrap();
+        assert_eq!(
+            super::canonical_sources(&root).unwrap().hooks,
+            canonical,
+            "implementation changes cannot rewrite the canonical API declaration"
+        );
+        assert!(
+            super::sources(&root, super::FillMode::Require)
+                .unwrap_err()
+                .contains("item_picked_up: native signature differs")
+        );
         let call = "self.fire_item_picked_up(player, item, can_pickup);";
         assert_eq!(shipped.matches(call).count(), 1);
         let unfinished = shipped.replace(call, "let _ = (player, item);");
         std::fs::write(&hooks, &unfinished).unwrap();
+        assert_eq!(super::canonical_sources(&root).unwrap().hooks, canonical);
         assert!(
             super::fill_hooks(&root)
                 .unwrap_err()

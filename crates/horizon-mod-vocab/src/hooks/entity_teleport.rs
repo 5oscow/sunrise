@@ -8,6 +8,8 @@ pub trait Hooks {
     /// use Horizon's same-level target path; it does not change vanilla's
     /// movement.
     #[hook(
+        signature = "pub(in crate::game) fn native_entity_teleport( &mut self, dimension: &str, entity: u32, from: [f64; 3], to: [f64; 3], )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_entity_teleport",
         side = "server",
         contract = "listen",
         neoforge = "none (NeoForge has no such event)"

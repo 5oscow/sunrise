@@ -17,6 +17,7 @@ pub trait Hooks {
     /// them to one join-order walk), so a part attached to `minecraft:zombie`
     /// hears no tick from this hook. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_general_entity_tick( &mut self, kind: &str, entity: mod_api::EntityRef, )",
         side = "server",
         contract = "listen",
         scope = "entity",

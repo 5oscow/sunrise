@@ -5,6 +5,8 @@ pub trait Hooks {
     /// A server player filled an empty map, after the filled map and its saved data were created.
     /// Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_player_map_filled( &mut self, player: u128, name: &str, map_id: i32, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_player_map_filled",
         side = "server",
         contract = "listen",
         neoforge = "none (NeoForge has no such event)"

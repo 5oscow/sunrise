@@ -24,6 +24,7 @@ pub trait Hooks {
     /// owning game checks the hook subscription and prepared API block key before any event
     /// conversion, so the cost is one table lookup. Diverges from upstream: new hook.
     #[hook(
+        signature = "pub(in crate::game) fn native_bounce_restitution( &self, entity: i32, kind: &str, state: BlockStateId, pos: BlockPos, factor: &mut f32, )",
         side = "both",
         contract = "collect",
         out = "factor",

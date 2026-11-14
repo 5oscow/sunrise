@@ -16,6 +16,8 @@ pub trait Hooks {
     /// creative player gets other ways (middle-click pick block, `/give`).
     /// Server-side, for every player of the world.
     #[hook(
+        signature = "pub(in crate::game) fn native_creative_slot( &mut self, player: u128, name: &str, slot: i32, item: &str, count: i32, cancel: &mut bool, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_creative_slot",
         side = "server",
         contract = "cancel",
         out = "cancel",

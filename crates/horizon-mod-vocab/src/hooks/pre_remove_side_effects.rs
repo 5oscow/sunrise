@@ -10,6 +10,7 @@ pub trait Hooks {
     /// is still in place, so its attachments read as they were. Answered from
     /// inside the level's write: don't change the world here.
     #[hook(
+        signature = "pub(in crate::game) fn native_pre_remove_side_effects( &mut self, pos: BlockPos, state: BlockStateId, entity: &ModBlockEntity, drops: &mut Vec<ItemStack>, )",
         side = "server",
         contract = "collect",
         out = "drops",

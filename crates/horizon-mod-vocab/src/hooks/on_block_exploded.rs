@@ -4,6 +4,7 @@ pub trait Hooks {
     /// entity is readable. Writes are allowed; the engine still replaces the cell
     /// with air afterwards, including a replacement written by the part.
     #[hook(
+        signature = "pub(in crate::game) fn native_on_block_exploded( &mut self, pos: BlockPos, state: BlockStateId, block_entity: Option<BlockEntityRef>, explosion: &ExplosionStart<'_>, )",
         side = "server",
         contract = "listen",
         scope = "block",

@@ -107,6 +107,26 @@ fn copy_out(arg: &Arg, input: usize, point: &str) -> TokenStream {
 }
 /// `#[point]` on a function: see the attribute's documentation in the crate root.
 pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
+    use syn::parse::Parser;
+    let arguments = match syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated
+        .parse2(attribute)
+    {
+        Ok(arguments) => arguments,
+        Err(error) => return error.to_compile_error(),
+    };
+    if let Some(argument) = arguments.iter().find(|argument| {
+        argument.path().is_ident("game") && !matches!(argument, syn::Meta::Path(_))
+    }) {
+        return syn::Error::new_spanned(argument, "game is a marker, not a value or argument list")
+            .to_compile_error();
+    }
+    let game_owned = arguments
+        .iter()
+        .any(|argument| argument.path().is_ident("game"));
+    let arguments: syn::punctuated::Punctuated<syn::Meta, syn::Token![,]> = arguments
+        .into_iter()
+        .filter(|argument| !argument.path().is_ident("game"))
+        .collect();
     if let Some(inline) = function.attrs.iter().find(|attr| {
         attr.path().is_ident("inline")
             && attr
@@ -119,12 +139,16 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
         )
         .to_compile_error();
     }
-    let shape = match point_shape::shape(attribute, &function.sig) {
+    let shape = match point_shape::shape(quote!(#arguments), &function.sig) {
         Ok(shape) => shape,
         Err(e) => return e.to_compile_error(),
     };
     let name = shape.name.clone();
-    let table = quote!(::horizon_engine_slots);
+    let table = if game_owned {
+        quote!(::horizon_game_points)
+    } else {
+        quote!(::horizon_engine_slots)
+    };
     // The body moves to an inlined inner function, so the return listeners run however it
     // returns; the outer function takes each parameter by a plain, mutable name.
     let inner = syn::Ident::new(
@@ -220,7 +244,8 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
     };
     let cancels = matches!(shape.returns, Returns::Unit | Returns::UnitResult);
     let results = api_value.is_some();
-    let listened = |variant: &syn::Ident| quote!(#table::__private::POINTS[#table::PointId::#variant as usize].load(::std::sync::atomic::Ordering::Acquire));
+    let listened =
+        |variant: &syn::Ident| quote!(#table::__private::active(#table::PointId::#variant));
 
     // The head: copy in, the API listeners, copy out.
     let shared_locals =
@@ -562,5 +587,23 @@ mod tests {
                 .to_string()
                 .contains("compile_error")
         );
+    }
+
+    #[test]
+    fn sites_use_their_canonical_record_owner_and_indexed_activity_socket() {
+        let function: ImplItemFn = syn::parse_quote!(
+            fn double(value: i64) -> i64 {
+                value * 2
+            }
+        );
+        let lower = expand(quote!(slot = 0, name = "double", free), function.clone()).to_string();
+        let game = expand(quote!(game, slot = 0, name = "double", free), function).to_string();
+        assert!(lower.contains("horizon_engine_slots"));
+        assert!(!lower.contains("horizon_game_points"));
+        assert!(game.contains("horizon_game_points"));
+        assert!(!game.contains("horizon_engine_slots"));
+        for source in [lower, game] {
+            assert!(source.contains("__private :: active"), "{source}");
+        }
     }
 }

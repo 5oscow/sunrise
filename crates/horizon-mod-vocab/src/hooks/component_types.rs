@@ -4,6 +4,8 @@
 pub trait Hooks {
     /// Register namespaced NBT component types before content loads.
     #[hook(
+        signature = "pub(in crate::game) fn native_component_types( context: &mod_api::RegistrationContext, types: &mut Vec<String>, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_component_types",
         side = "both",
         contract = "collect",
         out = "types",

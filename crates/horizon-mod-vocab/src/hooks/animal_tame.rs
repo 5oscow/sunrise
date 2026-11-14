@@ -8,6 +8,7 @@ pub trait Hooks {
     /// attempt to fail instead, as a failed roll does: smoke for a pet, and
     /// a horse bucks its rider off. Before `entity_tame`. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_animal_tame( &mut self, tamer: u128, tamer_entity_id: i32, entity: u32, kind: &str, cancel: &mut bool, )",
         side = "server",
         contract = "cancel",
         out = "cancel",

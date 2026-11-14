@@ -5,6 +5,7 @@ pub trait Hooks {
     /// on the render thread for an orderly client exit, not for a dedicated server
     /// or a splitscreen guest. NeoForge's `ClientStoppedEvent`.
     #[hook(
+        signature = "pub(in crate::game) fn native_client_stopped(&mut self)",
         side = "client",
         contract = "listen",
         neoforge = "ClientStoppedEvent",

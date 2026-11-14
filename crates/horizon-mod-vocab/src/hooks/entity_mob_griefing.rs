@@ -18,6 +18,7 @@ pub trait Hooks {
     /// in explosions (asked for the exploding entity, and for the mob that
     /// causes the blast). Asked often: answer fast. Server-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_entity_mob_griefing( &self, entity: EntityRef, can_grief: &mut bool, )",
         side = "server",
         contract = "listen",
         host = "read",

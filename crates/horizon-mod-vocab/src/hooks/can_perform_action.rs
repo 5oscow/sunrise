@@ -21,6 +21,7 @@ pub trait Hooks {
     /// client's prediction agrees with the server: answer from the stack and
     /// `ability` alone, and fast. An item with no such part costs one table lookup.
     #[hook(
+        signature = "pub(in crate::game) fn native_can_perform_action( &self, stack: &ItemStack, ability: &str, can_perform: &mut bool, )",
         side = "both",
         contract = "listen",
         scope = "item",

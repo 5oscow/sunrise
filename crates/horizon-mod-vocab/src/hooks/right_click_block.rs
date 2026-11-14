@@ -36,6 +36,8 @@ pub trait Hooks {
     /// Item-internal triggers (such as shears) can legitimately
     /// fire `item_used_on_block` in addition to the game mode's trigger.
     #[hook(
+        signature = "pub(in crate::game) fn native_right_click_block( &mut self, click: &BlockClick<'_>, use_block: &mut TriState, use_item: &mut TriState, cancellation_result: &mut mod_api::InteractionResult, canceled: &mut bool, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_right_click_block",
         side = "both",
         contract = "cancel",
         out = "canceled",

@@ -15,6 +15,7 @@ pub trait Hooks {
     /// failure; parent folders are created. HDR copies follow the final name
     /// with `-hdr.png`. Agent captures and world icons do not fire this hook.
     #[hook(
+        signature = "pub(in crate::game) fn native_screenshot( &mut self, image: &mut ScreenshotImage, file_name: &mut String, message: &mut Option<Text>, cancel: &mut bool, )",
         side = "client",
         contract = "cancel",
         out = "cancel",

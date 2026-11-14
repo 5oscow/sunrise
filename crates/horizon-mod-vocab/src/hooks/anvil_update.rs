@@ -12,6 +12,7 @@ pub trait Hooks {
     /// material costs are clamped to zero. Both sides: the server's menu,
     /// and a server's client menu with the local player.
     #[hook(
+        signature = "pub(in crate::game) fn native_anvil_update( &mut self, player: u128, player_entity_id: i32, pos: [i32; 3], update: &mut mod_api::item::menu::AnvilUpdate, cancel: &mut bool, )",
         side = "both",
         contract = "cancel",
         out = "cancel",

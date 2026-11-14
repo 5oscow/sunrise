@@ -5,6 +5,7 @@ pub trait Hooks {
     /// frame the overlay draws it. `id` is the entry's id; push its lines to `lines`, legacy colour
     /// codes (§) work. A disabled entry is never asked. Client-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_debug_entry_lines(&self, id: &str, lines: &mut Vec<String>)",
         side = "client",
         contract = "collect",
         out = "lines",

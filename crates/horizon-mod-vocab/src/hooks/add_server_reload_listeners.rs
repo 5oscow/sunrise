@@ -9,6 +9,7 @@ pub trait Hooks {
     /// handles, services and transactions panic naming the phase. Existing
     /// data-load callbacks retain their DataLoadContext; no setup event is added.
     #[hook(
+        signature = "pub(in crate::game) fn native_add_server_reload_listeners( &self, listeners: &mut dyn ServerReloadListeners, )",
         side = "server",
         contract = "listen",
         host = "read",

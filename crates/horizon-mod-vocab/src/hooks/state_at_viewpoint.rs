@@ -13,6 +13,7 @@ pub trait Hooks {
     /// part on any block the subscription check skips the asks; otherwise each block read costs
     /// one table lookup. Diverges from upstream: new hook.
     #[hook(
+        signature = "pub(in crate::game) fn native_state_at_viewpoint( &self, state: BlockStateId, pos: BlockPos, viewpoint: [f64; 3], seen: &mut BlockStateId, )",
         side = "client",
         contract = "collect",
         out = "seen",

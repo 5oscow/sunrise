@@ -11,6 +11,8 @@ pub trait Hooks {
     /// still applies to the grass set here; the swamp's noise colours
     /// replace it.
     #[hook(
+        signature = "pub(in crate::game) fn native_biome_colors(&self, biome: &str, colors: &mut BiomeColors)",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_biome_colors",
         side = "client",
         contract = "listen",
         neoforge = "none (NeoForge adds ColorResolvers with RegisterColorHandlersEvent.ColorResolvers; it does not retint a biome's own colours)"

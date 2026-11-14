@@ -9,6 +9,8 @@ pub trait Hooks {
     /// No player's state is swapped in: the menu helpers take the player's
     /// UUID.
     #[hook(
+        signature = "pub(in crate::game) fn native_menu_clicked( &mut self, uuid: u128, window: i32, slot: i32, button: i32, mode: i32, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_menu_clicked",
         side = "server",
         contract = "listen",
         neoforge = "none (vanilla AbstractContainerMenu.clicked; NeoForge adds no event or extension for it)"

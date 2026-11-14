@@ -6,6 +6,8 @@ pub trait Hooks {
     /// the server. The block entity is out of the world during the call;
     /// mods may change it and the clicking player's carried stack.
     #[hook(
+        signature = "pub(in crate::game) fn native_menu_button( &mut self, context: &mod_api::item::menu::MenuButtonContext, entity: &mut ModBlockEntity, carried: &mut Option<mod_api::ItemStack>, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_menu_button",
         side = "server",
         contract = "listen",
         scope = "block_entity",

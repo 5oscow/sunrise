@@ -12,6 +12,7 @@ pub trait Hooks {
     /// nothing is drawn, and no `render_tooltip_texture` is asked. Asked each frame
     /// the tooltip shows, never for one the stack hides. Client-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_render_tooltip_gather_components( &self, stack: &ItemStack, screen_width: i32, screen_height: i32, elements: &mut Vec<TooltipElement>, max_width: &mut i32, cancel: &mut bool, )",
         side = "client",
         contract = "cancel",
         out = "cancel",

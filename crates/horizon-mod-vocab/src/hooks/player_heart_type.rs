@@ -9,6 +9,7 @@ pub trait Hooks {
     /// Only the heart sprites change: health, regeneration and the other rows stay vanilla's.
     /// Client-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_player_heart_type( &mut self, kind: &mut mod_api::client::hud_layout::HeartKind, )",
         side = "client",
         contract = "listen",
         neoforge = "PlayerHeartTypeEvent",

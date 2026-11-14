@@ -6,6 +6,7 @@ pub trait Hooks {
     /// fill level from `from_level` to `to_level` for `reason`. Set `cancel`
     /// to leave it unchanged.
     #[hook(
+        signature = "pub(in crate::game) fn native_cauldron_level_changed( &self, call: mod_api::__private::CauldronLevelChangedCall<'_>, )",
         side = "server",
         contract = "cancel",
         out = "cancel",
@@ -41,6 +42,8 @@ pub trait Hooks {
     /// Diverges from upstream: renamed from
     /// `chorus_fruit_teleport`.
     #[hook(
+        signature = "pub(in crate::game) fn native_item_consumption_teleport( &mut self, consumer: mod_api::LivingRef, consumed: &mod_api::ItemStack, from: [f64; 3], target: &mut [f64; 3], cancel: &mut bool, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_item_consumption_teleport",
         side = "server",
         contract = "cancel",
         version = 2,

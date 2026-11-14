@@ -11,6 +11,8 @@ pub trait Hooks {
     /// LAN guests; a remote client's own release path is not covered. Crossbows
     /// are not covered; `arrow_nock` is the bow's start.
     #[hook(
+        signature = "pub(in crate::game) fn native_arrow_loose( &mut self, stack: &ItemStack, has_ammo: bool, charge: &mut i32, canceled: &mut bool, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_arrow_loose",
         side = "server",
         contract = "cancel",
         out = "canceled",

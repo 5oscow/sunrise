@@ -8,6 +8,7 @@ pub trait Hooks {
     /// while a server dialog or the connection screen covers the window.
     /// Client-side.
     #[hook(
+        signature = "pub(in crate::game) fn native_render_gui_pre(&self, canceled: &mut bool)",
         side = "client",
         contract = "cancel",
         out = "canceled",

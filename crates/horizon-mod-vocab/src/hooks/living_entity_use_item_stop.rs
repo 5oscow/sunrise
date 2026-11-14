@@ -11,6 +11,8 @@ pub trait Hooks {
     /// the hand changed item, which stops the use without a release. Both
     /// sides, as `living_entity_use_item_tick`.
     #[hook(
+        signature = "pub(in crate::game) fn native_living_entity_use_item_stop( &mut self, stack: &ItemStack, entity: Option<i32>, hand: Hand, duration: i32, canceled: &mut bool, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_living_entity_use_item_stop",
         side = "both",
         contract = "cancel",
         out = "canceled",

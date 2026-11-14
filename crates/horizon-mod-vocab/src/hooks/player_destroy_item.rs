@@ -9,6 +9,8 @@ pub trait Hooks {
     /// The player's state is swapped in. Once for each break, on a server; a
     /// creative player and the host of a LAN world are not heard.
     #[hook(
+        signature = "pub(in crate::game) fn native_player_destroy_item( &mut self, player: u128, name: &str, item: &str, slot: &str, )",
+        target = "horizon_client::game::native_hooks::base::Game<'_>::native_player_destroy_item",
         side = "server",
         contract = "listen",
         neoforge = "none (NeoForge's PlayerDestroyItemEvent carries the original stack and a hand, which armour has not; this hook only listens and names the slot instead. Bukkit's PlayerItemBreakEvent)"

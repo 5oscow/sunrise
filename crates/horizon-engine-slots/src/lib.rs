@@ -129,26 +129,34 @@ mod tests {
 mod platform;
 pub use platform::{Platform, PlatformRefusal, install_platform, platform};
 
+mod catalog;
+pub use catalog::{ApiPlace, Catalog, CatalogUnavailable, catalog, install_catalog};
+
 include!(concat!(env!("OUT_DIR"), "/engine_points.rs"));
 
-/// The game's point table, set once by the game before any listened point is published.
-static POINT_TABLE: std::sync::OnceLock<&'static mod_vocab::__private::points::Table> =
-    std::sync::OnceLock::new();
+/// The lower vocabulary uses local IDs; the game installs their global places once.
+struct PointProvider {
+    table: &'static mod_vocab::__private::points::Table,
+    places: &'static [usize; POINT_COUNT],
+}
+static POINT_TABLE: std::sync::OnceLock<PointProvider> = std::sync::OnceLock::new();
 
 /// Install the game's point table before publishing any listened point.
 ///
 /// This is set-once: a second installation returns [`Refusal::AlreadyInstalled`].
-/// Direct typed dispatch before installation panics; quiet macro sites skip dispatch
-/// while their activity flag is unset.
+/// Activity checks and typed dispatch before installation panic: a missing provider is not an
+/// empty catalog.
 ///
 /// # Safety
-/// For each catalog index, every typed listener the table holds must be a valid
-/// function pointer with that point's generated host and record signature.
+/// `places` must map every lower `PointId` to its place in `table`. Each mapped place must
+/// carry this vocabulary's exact canonical record and host signature. The game generator emits
+/// a compile-time-checked map and shares these record definitions with its SDK.
 pub unsafe fn install_points(
     table: &'static mod_vocab::__private::points::Table,
+    places: &'static [usize; POINT_COUNT],
 ) -> Result<(), Refusal> {
     POINT_TABLE
-        .set(table)
+        .set(PointProvider { table, places })
         .map_err(|_| Refusal::AlreadyInstalled)
 }
 
@@ -157,17 +165,22 @@ pub unsafe fn install_points(
 pub mod __private {
     use super::*;
     pub use mod_vocab::__private::points::{ApiKind, PointHost, cold};
-    /// A quiet point costs one acquire load.
-    pub static POINTS: [std::sync::atomic::AtomicBool; POINT_COUNT] =
-        [const { std::sync::atomic::AtomicBool::new(false) }; POINT_COUNT];
+    /// A quiet point performs an indexed lookup and one acquire load, with no catalog scan.
+    pub fn active(place: PointId) -> bool {
+        let provider = POINT_TABLE
+            .get()
+            .expect("point provider must be installed before publication");
+        provider.table.active(provider.places[place as usize])
+    }
     /// Dispatch through the installed point table without owning listener policy.
     ///
-    /// Panics if [`install_points`] has not installed a table. Quiet macro sites
-    /// check their activity flag and do not call this function before publication.
+    /// Panics if [`install_points`] has not installed the game's table.
     pub fn fire_api(place: PointId, call: &mut dyn FnMut(ApiKind)) {
-        POINT_TABLE
+        let provider = POINT_TABLE
             .get()
-            .expect("point provider must be installed before publication")
-            .fire_api(place as usize, call);
+            .expect("point provider must be installed before publication");
+        provider
+            .table
+            .fire_api(provider.places[place as usize], call);
     }
 }

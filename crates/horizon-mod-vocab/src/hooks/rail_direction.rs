@@ -11,6 +11,7 @@ pub trait Hooks {
     /// same on each, from the level host and the event alone. With no part attached to the
     /// state, the cost is one table lookup per rail read. Diverges from upstream: new hook.
     #[hook(
+        signature = "pub(in crate::game) fn native_rail_direction( &self, dimension: LevelDimension, state: BlockStateId, pos: BlockPos, cart: Option<EntityRef>, shape: &mut RailShape, )",
         side = "both",
         contract = "collect",
         out = "shape",
