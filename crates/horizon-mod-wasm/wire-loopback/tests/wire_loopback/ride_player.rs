@@ -65,6 +65,8 @@ fn asks() -> Vec<(EntityRef, EntityRef, bool)> {
 
 #[test]
 fn a_wasm_mods_ride_player_crosses_whole_and_its_refusal_comes_back() {
+    // The neighbours' guards: per-thread journal, the phase scope and `TransportScope`.
+    ASKED.with_borrow_mut(Vec::clear);
     mod_api::__private::initialize().unwrap();
     let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
     let mut server = Server;

@@ -1,6 +1,7 @@
 //! A mob riding a server player (`Entity.startRiding` with a player as the
-//! vehicle), for `EntityRef::ride_player` and `EntityRef::start_riding`
-//! (#4456): Tinkers' Construct's piggyback pack seats a mob on its wearer.
+//! vehicle), for `EntityRef::ride_player` only (#4456): Tinkers' Construct's
+//! piggyback pack seats a mob on its wearer. `EntityRef::start_riding` keeps
+//! refusing a player vehicle.
 //!
 //! Vanilla never seats anything on a player (`/ride` refuses with
 //! `cant_ride_players`), so every path here is reached only after a mod's
@@ -113,10 +114,48 @@ impl Game<'_> {
                 return Err(RidePlayerRefusal::CannotRide);
             }
         }
-        if self.start_riding_target(rider, vehicle, force) {
+        if self.start_riding_with(rider, vehicle, force, true) {
             Ok(())
         } else {
             Err(RidePlayerRefusal::Canceled)
+        }
+    }
+
+    /// Gets every mob off the player whose entity id is `vehicle`, or off every player when
+    /// None: no save holds a player vehicle, and a player leaving, dying or changing level
+    /// carries nothing with it. Each mob gets off as `stop_riding` takes it off (`entity_mount`
+    /// hears it); one a listener kept on is taken off anyway. Nothing to do, and nothing
+    /// allocated, while no mob rides a player, which is every vanilla game.
+    pub(in crate::game) fn eject_player_riders(&mut self, vehicle: Option<u32>) {
+        let own = self.player.as_ref().map(|_| self.own_entity_id() as u32);
+        let is_player = |game: &Self, v: u32| match vehicle {
+            Some(only) => v == only,
+            None => {
+                own == Some(v)
+                    || game
+                        .lan
+                        .as_ref()
+                        .is_some_and(|host| host.hub.guests.iter().any(|g| g.entity_id as u32 == v))
+            }
+        };
+        if !self
+            .mobs
+            .iter()
+            .any(|m| !m.removed && m.extra.mount.is_some_and(|v| is_player(self, v)))
+        {
+            return;
+        }
+        let riders: Vec<(u32, u32)> = self
+            .mobs
+            .iter()
+            .filter(|m| !m.removed)
+            .filter_map(|m| m.extra.mount.filter(|&v| is_player(self, v)).map(|v| (m.id, v)))
+            .collect();
+        for (id, v) in riders {
+            self.dismount_mob(id);
+            if self.mob_object(id).is_some_and(|m| m.extra.mount == Some(v)) {
+                self.dismount_mob_reentrant(id);
+            }
         }
     }
 
@@ -216,6 +255,91 @@ mod tests {
     use horizon_client::mobs::{Mob, riders};
     use horizon_core::geometry::Vec3;
     use mod_api::RidePlayerRefusal as Refusal;
+    use mod_api::{EntityMountEvent, Flow, Hooks, ServerHost};
+    use std::sync::{Arc, Mutex};
+
+    /// The `entity_mount` calls a test heard: rider, vehicle, mounting.
+    type Heard = Arc<Mutex<Vec<(u32, u32, bool)>>>;
+
+    /// Hears `entity_mount`, and cancels every dismount when `keep` is set.
+    struct Mounts(Heard, bool);
+    #[mod_api::__subscriptions]
+    impl Hooks for Mounts {
+        fn entity_mount(&self, _: &mut dyn ServerHost, event: &mut EntityMountEvent<'_>) -> Flow {
+            self.0
+                .lock()
+                .unwrap()
+                .push((event.entity, event.vehicle, event.mounting));
+            if self.1 && !event.mounting { Flow::Cancel } else { Flow::Continue }
+        }
+    }
+
+    /// A pig seated on a guest, then `case` run on the game: afterwards the pig rides nothing
+    /// and `entity_mount` heard it get off the guest, a listener that cancels it or not.
+    fn ejected(case: impl Fn(&mut super::Game<'_>, u32)) {
+        for keep in [false, true] {
+            let heard = Heard::default();
+            let mods: mod_api::Mods =
+                vec![mod_api::ModEntry::new("mounts", Box::new(Mounts(heard.clone(), keep)))].into();
+            mod_platform::testing::with_mods(mods, || {
+                super::super::native_entity_refs::tests::with_game(|game| {
+                    // `entity_mount` is heard on a server thread.
+                    game.options.dedicated = Some(Vec::new());
+                    let pig = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+                    game.mobs.push(Mob::new(80, pig, Vec3::ZERO, 0.0));
+                    let player = super::super::native_player_death::tests::add_guest(game).entity();
+                    let pig = game.entity(80).unwrap();
+                    assert_eq!(game.entity_ride_player(pig, player, false), Ok(()));
+                    heard.lock().unwrap().clear();
+                    let conn = game.lan.as_ref().unwrap().hub.guests[0].conn;
+                    case(game, conn);
+                    let m = game.mobs.iter().find(|m| m.id == 80).unwrap();
+                    assert_eq!(m.extra.mount, None, "ejected, a cancelling listener or not");
+                    let heard = heard.lock().unwrap();
+                    assert!(heard.contains(&(80, player.id(), false)), "{heard:?}");
+                });
+            });
+        }
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_save_ejects_a_mob_riding_a_player() {
+        ejected(|game, _| {
+            let _ = game.save_entities(false);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_logout_ejects_a_mob_riding_the_player() {
+        ejected(|game, _| {
+            let host = game.lan.as_mut().unwrap();
+            host.hub.guests.update(0, |g| g.placed = true);
+            // The hub takes a guest out of its list before it reports the leave.
+            let guest = host.hub.guests.remove(0);
+            let event = horizon_client::lan::hub::HostEvent::Left(Box::new(guest));
+            let host = game.lan.take().unwrap();
+            game.lan = game.lan_process_events(host, [event], &[], [0.5, 64.0, 0.5]);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_death_ejects_a_mob_riding_the_player() {
+        ejected(|game, conn| {
+            game.lan.as_mut().unwrap().hub.guests.update(0, |g| g.health = 0.0);
+            game.guest_die(0, conn);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_dimension_change_ejects_a_mob_riding_the_player() {
+        ejected(|game, conn| {
+            game.start_server_trip(conn, super::super::Dim::Nether, None, false);
+        });
+    }
 
     /// The piggyback pack's cases on a guest: the refusals, the seat on top of
     /// the player as it moves, the guest's own `SetPassengers`, getting off,
@@ -268,9 +392,13 @@ mod tests {
             game.lan_riding(&[], &mut riding);
             assert!(riding.told_self.is_empty(), "told it carries nothing now");
 
-            // Off a vehicle, the boarding cooldown runs; start_riding forces it on.
+            // Off a vehicle, the boarding cooldown runs; ride_player forces it on. The plain
+            // start_riding keeps refusing a player vehicle, forced or not.
             assert_eq!(game.entity_ride_player(first, player, false), Err(Refusal::CannotRide));
-            assert!(game.entity_start_riding(first, player, true));
+            assert!(!game.entity_start_riding(first, player, true));
+            assert!(!game.entity_start_riding(first, player, false));
+            assert_eq!(game.entity_vehicle(first), None);
+            assert_eq!(game.entity_ride_player(first, player, true), Ok(()));
             assert_eq!(game.entity_vehicle(first), Some(player));
 
             // The player riding the second pig: that pig can't ride the player.

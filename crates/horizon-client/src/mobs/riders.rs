@@ -20,7 +20,7 @@ const MAX_PASSENGERS_ON_ONE_HOGLIN: i32 = 3;
 
 /// `LivingEntity.getScale`: the `minecraft:scale` the server sent on any
 /// living entity, 1 when unset (`Mob::model_scale`).
-pub(super) fn scale(m: &Mob) -> f64 {
+pub fn scale(m: &Mob) -> f64 {
     f64::from(m.model_scale())
 }
 /// Players and mannequins (`Avatar`).

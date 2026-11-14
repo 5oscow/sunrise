@@ -16,8 +16,8 @@ fn pick_up(host: &mut dyn ServerHost, mob: EntityRef, player: EntityRef) {
 }
 ```
 
-`EntityRef::start_riding(host, player, force)` takes the same path when the vehicle is a player. It returns `true` or
-`false`, while `ride_player` returns the reason as a `RidePlayerRefusal`.
+`ride_player` is the only way onto a player. `EntityRef::start_riding(host, player, force)` keeps refusing a player
+vehicle, forced or not, as vanilla's `startRiding` callers and `/ride` do.
 
 ## What the game does
 
@@ -30,9 +30,12 @@ fn pick_up(host: &mut dyn ServerHost, mob: EntityRef, player: EntityRef) {
   player's one-passenger limit. It doesn't bypass the other refusals.
 - **Clients.** Players who track the vehicle hear the change from the tracker (`ClientboundSetPassengersPacket`). The
   vehicle player's own client is told by the server too, since no tracker tells a client about its own entity. That is
-  the packet the piggyback pack sends its wearer itself. Clients draw the mob on top of the player.
+  the packet the piggyback pack sends its wearer itself. Clients draw the mob on top of the player's box for the pose
+  its server synced (standing, crouching, swimming, gliding, riptide or sleeping).
 - **Getting off.** `EntityRef::stop_riding` and `eject_passengers` take the mob off as they do for any vehicle. The
-  mob also gets off once the player has left the level.
+  mob also gets off at every save of the level or its entities, and when the player logs out, dies or changes level.
+  `entity_mount` hears each of these; one a listener cancels still takes the mob off, since no save holds a player
+  vehicle and a player can't carry a mob out of its level.
 - **Reads.** `vehicle`, `passengers`, `is_vehicle` and `root_vehicle` answer as for any other vehicle.
 
 ## Refusals
@@ -54,6 +57,5 @@ fn pick_up(host: &mut dyn ServerHost, mob: EntityRef, player: EntityRef) {
 
 - Only a mob can ride a player. A player can't ride a player, and items, boats and other entities can't ride one
   either.
-- Another player's client puts the mob at the top of that player's standing box (1.8 blocks), whatever its pose.
-- A player's save keeps no passengers. A mob riding a player is saved standing where it is, and it doesn't ride the
-  player after a reload.
+- A player's save keeps no passengers. A mob riding a player gets off before a save, so it is saved standing where it
+  is, and it doesn't ride the player after a reload.

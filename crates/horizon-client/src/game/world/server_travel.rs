@@ -866,13 +866,23 @@ impl Game<'_> {
     /// The player moves to `target`'s level (opened if nobody was there)
     /// and is told it is there, at the approximate exit, while it loads. The
     /// level whose tick is running is put back in place afterwards.
-    pub(super) fn start_server_trip(
+    pub(in crate::game) fn start_server_trip(
         &mut self,
         conn: u32,
         target: Dim,
         plan: Option<Plan>,
         credits_respawn: bool,
     ) {
+        // A player changing level carries no mob a mod seated on it: it gets off here.
+        if target != self.dim
+            && let Some(carrier) = self
+                .lan
+                .as_ref()
+                .and_then(|host| host.hub.guest(conn))
+                .map(|g| g.entity_id as u32)
+        {
+            self.eject_player_riders(Some(carrier));
+        }
         let Some(host) = self.lan.as_mut() else {
             return;
         };

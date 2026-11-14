@@ -2028,7 +2028,7 @@ impl Game<'_> {
     /// same event stream. Keep their side effects in one place so joins,
     /// departures, chat, and queued guest commands cannot drift apart. None when a native hook's
     /// command closed the hub.
-    fn lan_process_events(
+    pub(in crate::game) fn lan_process_events(
         &mut self,
         host: LanHost,
         events: impl IntoIterator<Item = HostEvent>,
@@ -2295,7 +2295,10 @@ impl Game<'_> {
                             let conn = guest.conn;
                             let host = self.lan.as_mut()?;
                             let at = host.hub.guests.len();
+                            let carrier = guest.entity_id as u32;
                             host.hub.guests.push(*guest);
+                            // A player logging out carries no mob a mod seated on it.
+                            self.eject_player_riders(Some(carrier));
                             self.guest_disconnected(conn);
                             let Some(host) = self.lan.as_mut() else {
                                 unreachable!("LanHost dropped inside a tick; closes are deferred")

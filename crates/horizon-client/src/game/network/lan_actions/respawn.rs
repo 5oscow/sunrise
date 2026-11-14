@@ -315,6 +315,10 @@ impl Game<'_> {
         if dying && self.guest_death_canceled(gi, conn) {
             return;
         }
+        // A dead player carries no mob a mod seated on it.
+        if dying && let Some(carrier) = self.lan.as_ref().map(|h| h.hub.guests[gi].entity_id as u32) {
+            self.eject_player_riders(Some(carrier));
+        }
         let Some(host) = self.lan.as_ref() else {
             return;
         };

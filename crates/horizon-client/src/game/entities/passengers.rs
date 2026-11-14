@@ -557,7 +557,13 @@ impl Game<'_> {
             .map(|&j| &self.mobs[j])
             .or_else(|| self.mobs.iter().find(|m| m.id == vehicle))
         {
-            let at = riders::seat(riders::passenger_attachment(v), 0.0, v.position, v.yaw);
+            // Another player: the top of its box for the pose its server synced.
+            let attachment = if &*v.kind.id == "minecraft:player" {
+                [0.0, player_box_top(v.extra.synced_pose, riders::scale(v)), 0.0]
+            } else {
+                riders::passenger_attachment(v)
+            };
+            let at = riders::seat(attachment, 0.0, v.position, v.yaw);
             return Some(glam::DVec3::new(at.x, at.y, at.z));
         }
         if let Some(d) = self.text_displays.get(&(vehicle as i32)) {
@@ -616,9 +622,8 @@ impl Game<'_> {
         let lift = if kind == "minecraft:area_effect_cloud" {
             0.5
         } else if kind == "minecraft:player" {
-            // Another player: `Player`'s passenger attachment, the top of its
-            // standing box (`Player.STANDING_DIMENSIONS`, 1.8 as a float).
-            f64::from(1.8_f32)
+            // A player this client has no copy of yet, so no synced pose: standing.
+            player_box_top(0, 1.0)
         } else {
             0.0
         };
@@ -736,6 +741,39 @@ impl Game<'_> {
             self.enchant_item(id, slot, special);
         }
         Some(id)
+    }
+}
+
+/// `Player`'s passenger attachment for synced pose `pose` (the `Pose` id): the top of its box
+/// in `Player.POSES` (`EntityDimensions.scale`, in floats), at the player's scale. Poses it has
+/// no box for stand (`getOrDefault(pose, STANDING_DIMENSIONS)`).
+fn player_box_top(pose: u8, scale: f64) -> f64 {
+    let height: f32 = match pose {
+        // FALL_FLYING, SWIMMING, SPIN_ATTACK: 0.6 x 0.6.
+        1 | 3 | 4 => 0.6,
+        // SLEEPING and DYING: 0.2 x 0.2.
+        2 | 7 => 0.2,
+        // CROUCHING: 0.6 x 1.5.
+        5 => 1.5,
+        _ => 1.8,
+    };
+    f64::from(height * scale as f32)
+}
+
+#[cfg(test)]
+mod player_seat_tests {
+    #[test]
+    fn another_players_passengers_sit_on_its_box_for_its_pose() {
+        // Player.POSES heights as floats widened to doubles: standing 1.8, crouching 1.5,
+        // swimming 0.6.
+        assert_eq!(super::player_box_top(0, 1.0), 1.7999999523162842);
+        assert_eq!(super::player_box_top(5, 1.0), 1.5);
+        assert_eq!(super::player_box_top(3, 1.0), 0.6000000238418579);
+        assert_eq!(super::player_box_top(1, 1.0), 0.6000000238418579, "gliding");
+        assert_eq!(super::player_box_top(4, 1.0), 0.6000000238418579, "riptide");
+        assert_eq!(super::player_box_top(2, 1.0), 0.20000000298023224, "sleeping");
+        assert_eq!(super::player_box_top(12, 1.0), 1.7999999523162842, "a pose with no box stands");
+        assert_eq!(super::player_box_top(5, 2.0), 3.0, "scaled with the player");
     }
 }
 

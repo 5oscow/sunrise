@@ -795,8 +795,9 @@ pub trait EntitiesBackendMut {
     /// Attempts to board a vehicle through the shared server mount path.
     ///
     /// Players and mobs can ride a mob, boat, minecart or generic seat entity
-    /// (an armor stand, display, marker or interaction), and a mob can ride a
-    /// player (as `entity_ride_player` seats it). Returns false for
+    /// (an armor stand, display, marker or interaction). A player vehicle is
+    /// refused, forced or not: only `entity_ride_player` seats a mob on one.
+    /// Returns false for
     /// unsupported entity pairs, stale or held-out handles, a full stored
     /// vehicle, a cycle, or a canceled mount or dismount. Mob vehicle capacity
     /// follows its species; minecarts store one passenger and boats store one
@@ -818,9 +819,10 @@ pub trait EntitiesBackendMut {
     /// the player's one-passenger limit (`Entity.canAddPassenger`), as in
     /// vanilla. `entity_mount` hears the mount, and the dismount from an old
     /// vehicle, and may cancel either. `entity_stop_riding` and
-    /// `entity_eject_passengers` take it off again; it also gets off when the
-    /// player leaves the level. A mob riding a player is saved standing where
-    /// it is, not as a passenger, since a player's save keeps no passengers.
+    /// `entity_eject_passengers` take it off again. It also gets off, with
+    /// `entity_mount` told, at every save of the level or its entities and when
+    /// the player logs out, dies or changes level, so it is saved standing where
+    /// it is: a player's save keeps no passengers.
     #[access(WorldOnly)]
     fn entity_ride_player(
         &mut self,

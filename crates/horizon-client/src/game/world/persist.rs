@@ -1746,6 +1746,8 @@ impl Game<'_> {
     /// meanwhile: `PersistentEntitySectionManager.autoSave` stores them
     /// without `saveAll`'s flush.
     pub(super) fn save_entities(&mut self, wait: bool) -> Result<()> {
+        // No save holds a player vehicle: a mob a mod seated on a player gets off first.
+        self.eject_player_riders(None);
         self.spawn_loaded_entities();
         let keys: HashSet<(i32, i32)> = self.world.chunks.keys().copied().collect();
         let chunks = self.entity_chunks(&keys, false);
