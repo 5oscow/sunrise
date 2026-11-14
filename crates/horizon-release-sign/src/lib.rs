@@ -525,7 +525,13 @@ mod tests {
         let sums = sums_file(&[("game.tar.gz".into(), "ab".repeat(32))]);
         let tag = "nightly-2026-11-10-abcdef0";
         let signed = |key: &SigningKey, repo| {
-            verify(tag, sums.as_bytes(), &key.sign(tag, sums.as_bytes()), &keys(repo)).is_ok()
+            verify(
+                tag,
+                sums.as_bytes(),
+                &key.sign(tag, sums.as_bytes()),
+                &keys(repo),
+            )
+            .is_ok()
         };
         assert!(signed(&sunrise, REPOSITORY));
         assert!(!signed(&other, REPOSITORY));
@@ -538,7 +544,11 @@ mod tests {
             )
             .is_err()
         );
-        for repository in ["horizon-rust/horizon", "arismoko/horizon", "unknown/horizon"] {
+        for repository in [
+            "horizon-rust/horizon",
+            "arismoko/horizon",
+            "unknown/horizon",
+        ] {
             assert!(keys(repository).is_empty(), "{repository}");
             assert!(trusted_keys_for(repository).is_empty(), "{repository}");
         }

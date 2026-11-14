@@ -1125,14 +1125,18 @@ mod tests {
     fn upstreams_unsigned_releases_are_not_pinned_for_sunrise() {
         if let Some(first) = ASSETS.first() {
             assert!(
-                horizon_release_sign::legacy_digest_for("horizon-rust/horizon", "v2026.10.19", first)
-                    .is_some(),
+                horizon_release_sign::legacy_digest_for(
+                    "horizon-rust/horizon",
+                    "v2026.10.19",
+                    first
+                )
+                .is_some(),
                 "v2026.10.19 is pinned for upstream's repository"
             );
             let old = json!({ "tag_name": "v2026.10.19", "assets": [{ "name": first, "browser_download_url": "u" }] });
             let nothing = |_: &str| -> Result<Vec<u8>, String> { Err("404".into()) };
-            let refused = pick(&old, nothing, &horizon_release_sign::trusted_keys_for(REPO))
-                .unwrap_err();
+            let refused =
+                pick(&old, nothing, &horizon_release_sign::trusted_keys_for(REPO)).unwrap_err();
             assert!(refused.contains("not signed"), "{refused}");
         }
     }

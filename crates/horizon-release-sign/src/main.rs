@@ -114,7 +114,9 @@ fn check_folder(args: &[String]) -> Result<(), String> {
             );
             horizon_release_sign::parse_sums(&String::from_utf8_lossy(&sums))?
         }
-        Err(_) if publishing && keys.is_empty() && repository == horizon_release_sign::REPOSITORY => {
+        Err(_)
+            if publishing && keys.is_empty() && repository == horizon_release_sign::REPOSITORY =>
+        {
             println!(
                 "::warning::{tag}: published with {SUMS} but unsigned: release-keys.txt lists no key yet"
             );
