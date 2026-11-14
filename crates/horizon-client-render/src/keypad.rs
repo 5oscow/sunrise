@@ -1,7 +1,7 @@
 // Adapted from Starling (https://github.com/starling-client/starling, `android` branch at
 // 150a414b09a1, `crates/horizon-client-render/src/keypad.rs`), written by Vasysik and the
 // Starling contributors. Copyright (c) 2026 Ludovic Marie and the Horizon contributors, under the
-// same MIT license as Horizon (LICENSE at the repository root).
+// same MIT license as Horizon (LICENSES/MIT-Horizon.txt).
 
 //! The keypad profile: play with a D-pad, a TV remote or a phone's number keys
 //! through the controller path. Each profile action is a set of keys; held

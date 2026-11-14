@@ -247,3 +247,7 @@ new pushes, we add it again.
 for bugs. To take something on, `/claim` its issue ([above](#claim-before-you-start)).
 
 How Horizon is run, and how people join the Team or lead a group: [GOVERNANCE.md](GOVERNANCE.md).
+
+## Licence and CLA
+
+Sunrise's code is under the [PolyForm Shield licence](LICENSE). Before your first pull request is merged, sign the [Contributor License Agreement](CLA.md) by commenting on the pull request as the CLA check asks: you keep the copyright to what you write, and Sunrise may license it under other terms, which lets the project say yes to commercial uses the licence doesn't cover or change licence later.
