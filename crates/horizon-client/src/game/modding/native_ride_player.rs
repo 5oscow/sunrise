@@ -293,10 +293,23 @@ mod tests {
                     heard.lock().unwrap().clear();
                     let conn = game.lan.as_ref().unwrap().hub.guests[0].conn;
                     case(game, conn);
-                    let m = game.mobs.iter().find(|m| m.id == 80).unwrap();
-                    assert_eq!(m.extra.mount, None, "ejected, a cancelling listener or not");
+                    // The unload save takes the pig away with its chunk; every other case keeps it.
+                    let mount = |game: &super::Game<'_>| {
+                        game.mobs.iter().find(|m| m.id == 80 && !m.removed).map(|m| m.extra.mount)
+                    };
+                    assert!(
+                        matches!(mount(game), None | Some(None)),
+                        "ejected, a cancelling listener or not"
+                    );
+                    assert_eq!(game.seated_passengers(player.id()), Vec::new());
+                    // It stays off: a later save and a tick of the world do not seat it again.
+                    let _ = game.save_entities(false);
+                    let _ = game.tick_creature_entities();
+                    assert!(matches!(mount(game), None | Some(None)), "stays dismounted");
+                    assert_eq!(game.seated_passengers(player.id()), Vec::new());
                     let heard = heard.lock().unwrap();
                     assert!(heard.contains(&(80, player.id(), false)), "{heard:?}");
+                    assert!(!heard.iter().any(|&(_, _, mounting)| mounting), "{heard:?}");
                 });
             });
         }
@@ -307,6 +320,49 @@ mod tests {
     fn a_save_ejects_a_mob_riding_a_player() {
         ejected(|game, _| {
             let _ = game.save_entities(false);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_level_save_ejects_a_mob_riding_a_player() {
+        ejected(|game, _| {
+            let _ = game.save_level(true);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn an_autosave_ejects_a_mob_riding_a_player() {
+        ejected(|game, _| {
+            let _ = game.save_game_with(false);
+        });
+    }
+
+    /// `save-all` from the control channel: the save staged across event-loop turns,
+    /// whose entity stage snapshots one chunk at a time.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_staged_save_ejects_a_mob_riding_a_player() {
+        ejected(|game, _| {
+            let (reply, _answer) = std::sync::mpsc::channel();
+            game.begin_control_save(true, reply).unwrap();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+            while game.pending_save.is_some() {
+                assert!(std::time::Instant::now() < deadline, "the save did not finish");
+                let _ = game.poll_closing_save();
+            }
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn an_unload_save_ejects_a_mob_riding_a_player() {
+        ejected(|game, _| {
+            let chunk = game.world.chunks.get(&(0, 0)).cloned().unwrap_or_else(|| {
+                std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0))
+            });
+            game.unload_entities(&[chunk]);
         });
     }
 

@@ -1540,12 +1540,17 @@ impl Game<'_> {
     /// The entity NBT of every simulated entity in `keys`, plus the unknown
     /// entities kept for them. With `remove`, the entities leave the world
     /// (their chunks unload).
+    ///
+    /// Every entity snapshot goes through here (the level save, the autosave,
+    /// the staged closing save, the unload save, a structure), so no snapshot
+    /// holds a player vehicle: a mob a mod seated on a player gets off first.
     pub(super) fn entity_chunks(
         &mut self,
         keys: &HashSet<(i32, i32)>,
         remove: bool,
     ) -> Vec<((i32, i32), Vec<Tag>)> {
         use horizon_client::join_seq::{JoinSeq, Joined};
+        self.eject_player_riders(None);
         // Each root with its id and join number, ordered once all are in.
         let mut roots: HashMap<(i32, i32), Vec<(u32, JoinSeq, Tag)>> = HashMap::new();
         // Every kind in `entity_lists!` saves itself (`Entity::save_nbt`).
@@ -1746,8 +1751,6 @@ impl Game<'_> {
     /// meanwhile: `PersistentEntitySectionManager.autoSave` stores them
     /// without `saveAll`'s flush.
     pub(super) fn save_entities(&mut self, wait: bool) -> Result<()> {
-        // No save holds a player vehicle: a mob a mod seated on a player gets off first.
-        self.eject_player_riders(None);
         self.spawn_loaded_entities();
         let keys: HashSet<(i32, i32)> = self.world.chunks.keys().copied().collect();
         let chunks = self.entity_chunks(&keys, false);
