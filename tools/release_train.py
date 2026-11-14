@@ -48,7 +48,7 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-REPO = os.environ.get("GITHUB_REPOSITORY", "horizon-rust/horizon")
+REPO = os.environ.get("GITHUB_REPOSITORY", "sunrise-org/sunrise")
 # The maintainer, left out of the notes' thanks (the repository's owner is the horizon-rust organization).
 MAINTAINER = "ludovic111"
 # Releases ship in batches, so players get a few releases a day rather than one per merge: BATCH player-facing pull
@@ -445,7 +445,7 @@ def notes(kind, version, prs, issues, previous=None, repository="horizon-rust/ho
         title = f"Horizon {version.removeprefix(GAME_PREFIX)}" + (f": {summary(new, fixed)}" if shown else "")
     else:
         title = f"Horizon launcher {version.removeprefix(OLD_LAUNCHER_PREFIX).removeprefix(LAUNCHER_PREFIX)}"
-    fork_launcher = kind == "launcher" and repository == "arismoko/horizon"
+    fork_launcher = kind == "launcher" and repository == "sunrise-org/sunrise"
     intro = None if fork_launcher else line_intro(kind, version, previous)
     parts = [PLAYERS] if kind == "game" else []
     if fork_launcher:
@@ -617,7 +617,7 @@ def green_main_head(parity=False, eligible=None):
     releases), the newest commit parity-main passed on whose checks passed too: parity-main runs on batches of
     merges, so the commits a run skipped are covered by the next one, and a superseded run counts for nothing. A
     later batch that failed holds only the merges after that commit, which the green one doesn't contain."""
-    if REPO == "arismoko/horizon":
+    if REPO == "sunrise-org/sunrise":
         # Runs are ordered by creation, not completion: a late old run must not
         # displace a newer push. Paginate beyond bursts of cancelled main runs.
         pages = gh_json("api", "--paginate", "--slurp",

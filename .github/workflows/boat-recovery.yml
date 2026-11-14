@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   recover:
-    if: github.repository == 'arismoko/horizon'
+    if: github.repository == 'sunrise-org/sunrise'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

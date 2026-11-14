@@ -23,7 +23,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[2]
 TITLE = "CI: self-hosted runners are not taking jobs"
-GUIDE = "https://github.com/horizon-rust/horizon/blob/main/docs/operations.md#self-hosted-runners-are-offline"
+GUIDE = "https://github.com/sunrise-org/sunrise/blob/main/docs/operations.md#self-hosted-runners-are-offline"
 
 # What stops while no runner with this label takes jobs, and what the Team does meanwhile. A job asks for a set of
 # labels; the first of these it asks for names it.
@@ -127,7 +127,7 @@ def open_issue(repo):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--repo", default="horizon-rust/horizon")
+    parser.add_argument("--repo", default="sunrise-org/sunrise")
     parser.add_argument("--hours", type=float, default=2.0, help="how long a job may wait before it counts")
     parser.add_argument("--dry-run", action="store_true", help="print what it would do, change nothing")
     args = parser.parse_args()

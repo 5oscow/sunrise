@@ -47,7 +47,7 @@ pub const STUN_SERVERS: &[&str] = &["stun.cloudflare.com:3478", "stun.l.google.c
 
 /// Play with Friends' troubleshooting page, shown to hosts nobody can reach.
 pub const FRIENDS_HELP: &str =
-    "https://github.com/horizon-rust/horizon/blob/main/docs/play-with-friends.md#troubleshooting";
+    "https://github.com/sunrise-org/sunrise/blob/main/docs/play-with-friends.md#troubleshooting";
 
 /// Horizon community invite used by launcher defaults.
 pub const COMMUNITY_DISCORD: &str = "https://discord.gg/playhorizon";
@@ -62,7 +62,7 @@ pub const SHOP: &str = "https://playhorizon.dev/shop";
 pub const LAUNCHER_ABOUT: &str = "https://playhorizon.dev";
 
 /// The separately branded arismoko fork launcher installer's product home.
-pub const FORK_LAUNCHER_ABOUT: &str = "https://github.com/arismoko/horizon";
+pub const FORK_LAUNCHER_ABOUT: &str = "https://github.com/sunrise-org/sunrise";
 
 /// Cargo's canonical source identity for the crates.io registry.
 pub const CARGO_CRATES_IO_SOURCE: &str = "registry+https://github.com/rust-lang/crates.io-index";
@@ -72,13 +72,13 @@ pub const HORIZON_MIXINS_SOURCE: &str =
     "https://codeload.github.com/horizon-rust/horizon-mixins/tar.gz";
 
 /// Where the fork releases the prebuilt horizon-mixins tool; a release's tag and file follow.
-pub const MIXINS_TOOL_RELEASES: &str = "https://github.com/arismoko/horizon/releases/download";
+pub const MIXINS_TOOL_RELEASES: &str = "https://github.com/sunrise-org/sunrise/releases/download";
 
 /// Where the fork publishes each game build's mod SDK (`sdk-<build id>`) and the game releases
 /// whose `sdk.json` names their build; a release's tag and file follow. `HORIZON_SDK_BASE`
 /// overrides it.
-pub const SDK_RELEASES: &str = "https://github.com/arismoko/horizon/releases/download";
+pub const SDK_RELEASES: &str = "https://github.com/sunrise-org/sunrise/releases/download";
 
 /// The fork's newest releases, which `cargo horizon-mod` reads to find the one SDK a short sha names.
 pub const SDK_RELEASE_LIST: &str =
-    "https://api.github.com/repos/arismoko/horizon/releases?per_page=100";
+    "https://api.github.com/repos/sunrise-org/sunrise/releases?per_page=100";
