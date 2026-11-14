@@ -60,6 +60,7 @@ handler!(dyn BlockEntityPart, "BlockEntityPart");
 handler!(dyn ItemPart, "ItemPart");
 handler!(dyn MenuPart, "MenuPart");
 handler!(dyn FluidPart, "FluidPart");
+handler!(dyn EntityPart, "EntityPart");
 handler!(dyn ServerReloadListener, "ServerReloadListener");
 handler!(dyn LoadCondition, "LoadCondition");
 handler!(dyn GameTestFunction, "GameTestFunction");

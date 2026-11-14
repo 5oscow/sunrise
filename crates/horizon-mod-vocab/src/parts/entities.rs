@@ -135,8 +135,8 @@ impl dyn Registrar + '_ {
     /// Attach `part` to the entity type `entity` (`minecraft:zombie`): its
     /// [`EntityPart::register_goals`] runs at every `Mob` construction of that
     /// type, spawning or loading, and its goals join the mob's selectors
-    /// beside vanilla's.
-    #[cfg(not(target_arch = "wasm32"))]
+    /// beside vanilla's. Its `general_entity_tick` runs for one general row
+    /// of the type (#792) — the part's one moment that crosses to a wasm mod.
     pub fn entity_part<P: EntityPart>(&mut self, entity: &str, part: P) {
         self.attach_entity_part(entity, type_name::<P>(), Arc::new(part));
     }
@@ -178,13 +178,10 @@ impl dyn Registrar + '_ {
 pub trait EntitiesRegistrar {
     /// Attach `part`, of kind `kind`, to the entity type `entity`
     /// (`minecraft:zombie`, `mymod:golem`): its `register_goals` runs at every
-    /// `Mob` construction of that type.
-    ///
-    /// Not on wasm: the goal surface a part's `register_goals` hands the game
-    /// does not cross; entity parts are a native mod's .
-    /// The gate keeps a wasm mod's call a compile error, not a runtime one;
-    /// the generator still keeps the method off the wasm world by this doc.
-    #[cfg(not(target_arch = "wasm32"))]
+    /// `Mob` construction of that type, and its `general_entity_tick` for one
+    /// general row's authoritative tick (#792). A wasm mod's part crosses
+    /// here as a handler the host calls back; the part's goal, behavior,
+    /// spawn-size and shear methods stay off wasm, as their docs say.
     fn attach_entity_part(&mut self, entity: &str, kind: &'static str, part: Arc<dyn EntityPart>);
 
     /// Answer entity capability `name` for entity type `kind` with `provider`; mods reach it
