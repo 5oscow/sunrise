@@ -157,12 +157,12 @@ impl Menu {
                 if !self.may_pickup(env, s) {
                     return Ok(());
                 }
-                let mut clicked = self.quick_move(env, s);
+                let mut clicked = self.quick_move_noted(env, s);
                 while let Some(c) = &clicked {
                     if !self.slot(s).is_some_and(|now| same_item(now, c)) {
                         break;
                     }
-                    clicked = self.quick_move(env, s);
+                    clicked = self.quick_move_noted(env, s);
                 }
             } else {
                 if slot_index < 0 {
@@ -227,6 +227,35 @@ impl Menu {
             self.pickup_all(env, slot_index as usize, button);
         }
         Ok(())
+    }
+
+    /// `Slot.onTake` of slot `s` for `menu_slot_take`, while a server caller listens (the
+    /// menu's `slot_takes`): `taken` left a mod menu type's own slot, noted with what the slot
+    /// holds now. It touches the menu, as every edit does.
+    pub(super) fn note_take(&mut self, s: usize, taken: &ItemStack) {
+        self.touch();
+        let own =
+            matches!(self.state.kind, Kind::Mod(_)) && self.state.slots[s].container != PLAYER;
+        let noted = own && taken.count > 0 && self.state.slot_takes.is_some();
+        let left = noted.then(|| self.slot(s).cloned());
+        if let (Some(left), Some(takes)) = (left, self.state.slot_takes.as_mut()) {
+            takes.push((s, taken.clone(), left));
+        }
+    }
+
+    /// One `quickMoveStack` of slot `s`. A move that took no `onTake` (any but a crafting
+    /// grid's result, whose take notes itself) is noted for `menu_slot_take` with the amount
+    /// it moved, the slot holding what stayed.
+    fn quick_move_noted(&mut self, env: &Env, s: usize) -> Option<ItemStack> {
+        let before = self.slot(s).map_or(0, |held| held.count);
+        let moved = self.quick_move(env, s)?;
+        if self.state.slots[s].role != Role::CraftResult {
+            let left = self.slot(s).map_or(0, |now| now.count);
+            let mut taken = moved.clone();
+            taken.count = before.saturating_sub(left);
+            self.note_take(s, &taken);
+        }
+        Some(moved)
     }
 
     /// The PICKUP branch of `doClick`: a bundle's override, else the

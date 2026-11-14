@@ -65,6 +65,14 @@ pub(super) fn input(id: i32) -> Input {
     }
 }
 
+/// What a click on a mod menu type changed, kept for `menu_slot_take`: the guest's inventory and
+/// cursor, and the mod block entity's slots, before it.
+type SlotTakeUndo = (
+    Vec<Option<ItemStack>>,
+    Option<ItemStack>,
+    Option<Vec<Option<ItemStack>>>,
+);
+
 /// The armor's player-container slots, head to feet (`Inventory` 39..36).
 const ARMOR: [usize; 4] = [39, 38, 37, 36];
 const OFFHAND: usize = 40;
@@ -231,8 +239,13 @@ impl Game<'_> {
             self.register_made_maps(maps);
         }
         // A taken anvil result waits for AnvilCraftEvent.Pre: what the click
-        // dropped waits with it (lan_station_op throws it or refuses the take).
-        let dropped = if menu.anvil_craft.is_some() {
+        // dropped waits with it (lan_station_op throws it or refuses the take),
+        // as it waits for `menu_slot_take`'s listeners (lan_machine_click).
+        let takes = menu
+            .slot_takes
+            .as_ref()
+            .is_some_and(|takes| !takes.is_empty());
+        let dropped = if menu.anvil_craft.is_some() || takes {
             Vec::new()
         } else {
             std::mem::take(&mut menu.dropped)
@@ -489,7 +502,20 @@ impl Game<'_> {
         // A crafting grid's result is what the guest was shown, the mods' say
         // included, while the grid is as it was then.
         let shown = Self::lan_mod_craft_shown(self.lan.as_ref().unwrap(), gi, &items);
+        // `menu_slot_take` hears the takes from a mod menu type's own slots in one action with
+        // them: what the click changes is kept, to undo it if a listener fails.
+        let heard = matches!(kind, Kind::Mod(_))
+            && mod_api::__private::has_part_hook(mod_api::HookId::MenuSlotTake);
+        let undo = heard.then(|| {
+            let guest = &self.lan.as_ref().unwrap().hub.guests[gi];
+            let entity = match self.world.block_entities.get(&pos) {
+                Some(BlockEntity::Mod(m)) => Some(m.items.clone()),
+                _ => None,
+            };
+            (guest.inventory.clone(), guest.carried.clone(), entity)
+        });
         let Some(mut changed) = self.guest_menu_op(gi, &mut menu, |menu, env| {
+            menu.slot_takes = heard.then(Vec::new);
             if matches!(kind, Kind::Mod(_)) {
                 menu.load_container(env, &items);
                 if let Some((slot, result)) = shown {
@@ -561,11 +587,26 @@ impl Game<'_> {
             }
             _ => {}
         }
-        // FurnaceResultSlot.checkTakeAchievements, each as the click made it.
         let Some(guest) = self.lan.as_ref().map(|host| &host.hub.guests[gi]) else {
             return true;
         };
         let (uuid, entity_id, at) = (guest.uuid, guest.entity_id, guest.position);
+        // Slot.onTake of each take from the mod's own slots, as the player: a failed listener
+        // undoes the take, and the guest's client gets the whole menu as it was.
+        if let Some(takes) = menu.slot_takes.take().filter(|takes| !takes.is_empty()) {
+            let heard = self.as_guest(conn, |game| {
+                game.mod_menu_slot_takes(pos, uuid, &menu_id, &takes)
+            });
+            if heard == Some(false) {
+                self.undo_slot_takes(gi, pos, undo);
+                if let Some(host) = self.lan.as_mut() {
+                    host.hub.resend_menu(conn, p.container, &self.world);
+                }
+                return true;
+            }
+            self.drop_guest_items(gi, std::mem::take(&mut menu.dropped));
+        }
+        // FurnaceResultSlot.checkTakeAchievements, each as the click made it.
         for (stack, removed) in std::mem::take(&mut menu.item_smelted) {
             self.native_item_smelted(uuid, entity_id, stack.as_ref(), removed);
         }
@@ -613,6 +654,26 @@ impl Game<'_> {
             host.hub.inventory_clicked(conn, p, &self.world, &changed);
         }
         true
+    }
+
+    /// Puts back what a click on a mod menu type changed (`undo`), when a `menu_slot_take`
+    /// listener failed.
+    /// What the click dropped was held for the listeners and is not thrown.
+    fn undo_slot_takes(&mut self, gi: usize, pos: (i32, i32, i32), undo: Option<SlotTakeUndo>) {
+        let Some((inventory, carried, entity)) = undo else {
+            return;
+        };
+        if let (Some(items), Some(BlockEntity::Mod(m))) =
+            (entity, self.world.block_entities.get_mut(&pos))
+        {
+            m.items = items;
+        }
+        if let Some(host) = self.lan.as_mut() {
+            host.hub.guests.update(gi, |guest| {
+                guest.inventory = inventory;
+                guest.carried = carried;
+            });
+        }
     }
 
     /// `ServerGamePacketListenerImpl.handleContainerSlotStateChanged`: a

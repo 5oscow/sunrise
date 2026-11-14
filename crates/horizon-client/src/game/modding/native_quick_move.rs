@@ -186,8 +186,9 @@ impl Game<'_> {
     /// `at`) of the mod container at `pos` (`size` container slots, on mod
     /// menu type `menu_type` or a vanilla one), for the player in place: true
     /// when one took it, the slot then holding what is left of its stack, and
-    /// the slot rules' answers asked before the mods (`Menu::click_asked`). The
-    /// block entity is out of the world during the call.
+    /// a move from a mod menu type's own slot heard as a take, and the slot
+    /// rules' answers asked before the mods (`Menu::click_asked`). The block
+    /// entity is out of the world during the call.
     fn mod_menu_quick_move(
         &mut self,
         pos: Pos,
@@ -221,6 +222,7 @@ impl Game<'_> {
         };
         let mut taken = std::mem::take(&mut **m);
         let items = taken.items.clone();
+        let held = stack.clone();
         let mut handled = false;
         self.api_menu_quick_move(
             [pos.0, pos.1, pos.2],
@@ -238,6 +240,20 @@ impl Game<'_> {
             &mut taken.items,
             &mut self.inventory,
         );
+        // The move a part applied from the block's own slot of a mod menu type is a take
+        // (`menu_slot_take`), heard after it with the amount it moved; a failed listener undoes it.
+        if let (true, Some(menu), MenuSlot::Container(k)) = (handled, menu_type, at) {
+            let left = taken.items.get(k).cloned().flatten();
+            let mut moved = held;
+            moved.count -= left.as_ref().map_or(0, |l| l.count).min(moved.count);
+            if moved.count > 0 {
+                let player = self.native_acting_id();
+                let take = [(slot, moved, left)];
+                if !self.api_menu_slot_takes(&mut taken, player, menu.id, &take) {
+                    taken.items.clone_from(&items);
+                }
+            }
+        }
         self.put_back_mod_block_entity(pos, taken, &items);
         (handled, asked)
     }

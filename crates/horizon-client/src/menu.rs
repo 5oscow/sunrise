@@ -874,6 +874,7 @@ impl Menu {
                 item_smelted: Vec::new(),
                 item_smithed_hook: false,
                 item_smithed: Vec::new(),
+                slot_takes: None,
                 output_removed: 0,
                 equipped: Vec::new(),
                 merchant: None,
@@ -1786,8 +1787,7 @@ impl Menu {
     }
 
     /// Slot `s`'s `mayPlace`, the parts' `mayPickup` (true unless they refuse) and
-    /// `getMaxStackSize` for `stack`: its own answers, then the parts' on a registered menu
-    /// type, all from one ask.
+    /// `getMaxStackSize` for `stack`: its own answers, then the parts' (one ask).
     fn slot_rules(&self, env: &Env, s: usize, stack: &ItemStack) -> (bool, bool, u32) {
         let place = self.vanilla_may_place(env, s, stack);
         let (max, item_max) = (self.vanilla_slot_max(s, stack), Self::max_stack(env, stack));
@@ -2082,7 +2082,7 @@ impl Menu {
 
     /// `ResultSlot.onTake` and the other `Slot.onTake` overrides.
     fn on_take(&mut self, env: &Env, s: usize, taken: &mut ItemStack) {
-        self.touch();
+        self.note_take(s, taken);
         if self.state.slots[s].role == Role::Output {
             self.furnace_take(env, taken);
             return;
