@@ -49,6 +49,10 @@ says otherwise, this section wins; "ours" marks what Horizon adds.
   GPU models, so an item render state's own reference to its baked models is the
   only lease, and there is no retirement step: an old state draws its models after
   a reload, and they are released once, when the last state holding them drops.
+- **Cost.** With no renderer registered, or none for a drawn model's type, a built-in
+  scene costs nothing more, down to its allocation count (row 13). An unchanged stack
+  costs a hash, one lookup and an `Arc` clone per draw; the measurements are in
+  [special item renderers](../../performance/special-item-renderers.md).
 - **Colour.** A part's tint is packed vanilla-space ARGB, as an item model's
   `tints` are, decoded once by the frame. A value above 1 has no input until a
   typed HDR tint exists (the limit `WorldQuad::color` has); it is not part of #876.

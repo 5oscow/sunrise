@@ -294,8 +294,17 @@ fn checked(parts: &[SpecialModelPart]) -> Result<Vec<SpecialPart>, String> {
 }
 
 #[cfg(test)]
+#[path = "native_special_renderers/cost_tests.rs"]
+mod cost_tests;
+#[cfg(test)]
 #[path = "native_special_renderers/frame_tests.rs"]
 pub(in crate::game) mod frame_tests;
+
+/// How many answers are kept, for every model node.
+#[cfg(test)]
+fn kept_answers() -> usize {
+    answers().kept.values().map(Vec::len).sum()
+}
 
 #[cfg(test)]
 mod tests {
