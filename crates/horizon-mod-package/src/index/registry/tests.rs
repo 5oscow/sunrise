@@ -210,6 +210,8 @@ fn publishes_native_and_content_package_sides_from_real_files_and_release_caches
             entry.id = id.clone();
             entry.kind = kind.clone();
             entry.key = None;
+            entry.icon = Some(format!("icons/{id}.png"));
+            scratch.write_bytes(&format!("icons/{id}.png"), &png(128, 128));
             let version = &mut entry.versions[0];
             version.version = "1.0.0".into();
             version.file = format!("{id}.hmod");
