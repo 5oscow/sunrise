@@ -143,7 +143,8 @@ impl Game<'_> {
                     || tnts.contains(&v)
                     || cushions.contains(&v)
                     || self.seat(v).is_some()
-                    || index.get(&v).is_some_and(|&j| !self.mobs[j].removed));
+                    || index.get(&v).is_some_and(|&j| !self.mobs[j].removed)
+                    || self.player_vehicle(v).is_some());
             if valid {
                 let place = (self.mobs[i].extra.vehicle_order, self.mobs[i].id);
                 riding
@@ -177,7 +178,8 @@ impl Game<'_> {
                         || self.cart_object(v).is_some()
                         || self.cushions.iter().any(|c| c.id == v)
                         || self.tnts.iter().any(|t| t.id == v && v != 0)
-                        || self.seat(v).is_some());
+                        || self.seat(v).is_some()
+                        || self.player_vehicle(v).is_some());
                 (!valid).then_some((m.id, v))
             })
             .collect();
@@ -276,6 +278,10 @@ impl Game<'_> {
                     // vehicle's drawn position; re-seating them here from the
                     // shared seat 0 yanked boat riders between two places.
                     if self.seats_own_riders(v) {
+                        continue;
+                    }
+                    // A mob a mod seated on a server player (`native_ride_player.rs`).
+                    if self.seat_player_passenger(i, v) {
                         continue;
                     }
                     // A mob on a text display: NPC plugins seat their sitting
@@ -609,6 +615,10 @@ impl Game<'_> {
         };
         let lift = if kind == "minecraft:area_effect_cloud" {
             0.5
+        } else if kind == "minecraft:player" {
+            // Another player: `Player`'s passenger attachment, the top of its
+            // standing box (`Player.STANDING_DIMENSIONS`, 1.8 as a float).
+            f64::from(1.8_f32)
         } else {
             0.0
         };

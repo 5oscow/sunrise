@@ -515,6 +515,10 @@ impl Game<'_> {
             | Target::Cart(id)
             | Target::Stand(id)
             | Target::Other(id) => id,
+            // Only a mod seats a mob on a player (`native_ride_player.rs`).
+            Target::Player | Target::Guest(_) if matches!(rider, Target::Mob(_)) => {
+                self.player_vehicle_id(vehicle)?
+            }
             _ => return None,
         };
         if self.entity(vehicle_id).is_none()
@@ -532,7 +536,11 @@ impl Game<'_> {
             if rider == Target::Mob(id) {
                 return None;
             }
-            current = self.native_vehicle_id(Target::Mob(id));
+            current = if matches!(vehicle, Target::Player | Target::Guest(_)) {
+                self.vehicle_of_any(id)
+            } else {
+                self.native_vehicle_id(Target::Mob(id))
+            };
         }
         if current.is_some() {
             return None;
@@ -593,6 +601,12 @@ impl Game<'_> {
                     return None;
                 }
             }
+            // `Player` keeps `Entity.canAddPassenger`: one passenger unless forced.
+            Target::Player | Target::Guest(_) => {
+                if !force && !self.seated_passengers(vehicle_id).is_empty() {
+                    return None;
+                }
+            }
             _ => return None,
         }
         Some(vehicle_id)
@@ -600,7 +614,8 @@ impl Game<'_> {
 
     /// Attempts to board a vehicle through the shared server mount path.
     ///
-    /// Players and mobs can ride a mob, boat, minecart or generic seat entity. Returns false for
+    /// Players and mobs can ride a mob, boat, minecart or generic seat entity, and a mob can ride
+    /// a player (`entity_ride_player`, which names its refusals). Returns false for
     /// unsupported entity pairs, stale or held-out handles, a full stored
     /// vehicle, a cycle, or a canceled mount or dismount. Normal mob capacity
     /// follows its species and is bypassed by force; minecarts store one passenger and boats store one

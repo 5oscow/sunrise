@@ -1,0 +1,2 @@
+ids = ["type:RidePlayerRefusal", "handle:EntityRef::ride_player"]
+why = "Adds EntityRef::ride_player, vanilla's Entity.startRiding with a player as the vehicle (Tinkers' Construct's piggyback pack): a mob seated on a server player at its passenger point, told to every client including the vehicle player's own, with named refusals. EntityRef::start_riding now accepts a player vehicle for a mob rider through the same path."
