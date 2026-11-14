@@ -10,6 +10,7 @@ pub mod bulk_files;
 pub mod capability_registration;
 pub mod cauldron;
 pub mod datapack;
+pub mod entity_parts;
 pub mod game_payload;
 pub mod interaction;
 pub mod lending;
@@ -311,6 +312,7 @@ impl Hooks for Mod {
         cauldron::register(registrar);
         tick_reply::register(registrar);
         part_state::register(registrar);
+        entity_parts::register(registrar);
         registrar.register_custom_stat("steps").unwrap();
         registrar
             .declare_datapack_registry(
