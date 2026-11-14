@@ -533,7 +533,8 @@ def archive_sizes(folder: Path) -> dict[str, int]:
 def starter_mod(folder: Path) -> None:
     """The native template as `cargo horizon-mod new` writes it, with the API dependency in the path form."""
     def fill(text: str) -> str:
-        return text.replace("{id}", "starter").replace("{name}", "Starter")
+        # `new_code(native=True)` leaves Cargo metadata empty; its pin is in horizon-mod.toml.
+        return text.replace("{id}", "starter").replace("{name}", "Starter").replace("{metadata}", "")
 
     manifest, count = re.subn(r"^horizon-mod-api = .*$", f'horizon-mod-api = {{ path = "{MOD_PATH}/crates/{API}" }}',
                               fill((TEMPLATE / "api.toml").read_text()), flags=re.MULTILINE)

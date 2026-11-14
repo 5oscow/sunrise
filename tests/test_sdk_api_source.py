@@ -331,6 +331,22 @@ class PackingTests(unittest.TestCase):
                 self.assertIn(self.refusal({**self.files(), stray: b""}), ("E_STRAY_FILE", "E_PATH"))
 
 
+class StarterTests(unittest.TestCase):
+    def test_native_starter_expands_the_real_cli_template(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary) / "starter"
+            api_source.starter_mod(folder)
+            text = (folder / "Cargo.toml").read_text()
+            manifest = tomllib.loads(text)
+            self.assertEqual(manifest["package"]["name"], "mod-starter")
+            self.assertEqual(manifest["dependencies"]["horizon-mod-api"]["path"],
+                             f"{api_source.MOD_PATH}/crates/{api_source.API}")
+            self.assertEqual(manifest["workspace"], {})
+            self.assertNotIn("metadata", manifest["package"])
+            self.assertNotIn("{metadata}", text)
+            self.assertIn("mod_api", (folder / "src/lib.rs").read_text())
+
+
 class ScratchTests(unittest.TestCase):
     def test_a_folder_check_did_not_make_is_never_emptied(self):
         with tempfile.TemporaryDirectory() as folder:
