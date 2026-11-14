@@ -18,7 +18,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-const REPO: &str = "horizon-rust/horizon";
+const REPO: &str = horizon_release_sign::REPOSITORY;
 /// The release archives for this computer, most specific first: on Linux the server build (no ALSA or
 /// udev), else the full game (releases before the server build).
 fn assets_for(os: &str, arch: &str, musl: bool) -> &'static [&'static str] {
@@ -283,7 +283,7 @@ pub fn release(tag: Option<&str>) -> Result<Release, String> {
         _ => e,
     })?;
     let json = serde_json::from_slice(&text).map_err(|e| format!("GitHub's answer: {e}"))?;
-    pick(&json, fetch, &horizon_release_sign::trusted_keys())
+    pick(&json, fetch, &horizon_release_sign::trusted_keys_for(REPO))
 }
 
 /// The archive for this computer in a release's JSON, with the SHA-256 the release's SHA256SUMS
@@ -319,7 +319,7 @@ fn pick_for_assets(
         })?;
     let name = asset["name"].as_str().unwrap_or_default();
     // A release from before signing: only the files pinned for it at the time (a rollback).
-    if let Some(hex) = horizon_release_sign::legacy_digest(tag, name) {
+    if let Some(hex) = horizon_release_sign::legacy_digest_for(REPO, tag, name) {
         return Ok(Release {
             tag: tag.to_owned(),
             asset: name.to_owned(),
@@ -1116,19 +1116,24 @@ mod tests {
         // With no key in release-keys.txt every update after the pinned releases would be refused:
         // this fails until the release environment's public key is listed (docs/security.md).
         assert!(
-            !horizon_release_sign::trusted_keys().is_empty(),
+            !horizon_release_sign::trusted_keys_for(REPO).is_empty(),
             "crates/horizon-release-sign/release-keys.txt lists no key"
         );
     }
 
     #[test]
-    fn a_release_from_before_signing_is_picked_with_its_pinned_digest() {
+    fn upstreams_unsigned_releases_are_not_pinned_for_sunrise() {
         if let Some(first) = ASSETS.first() {
-            let pinned = horizon_release_sign::legacy_digest("v2026.10.19", first)
-                .expect("v2026.10.19 is from before signing and has every platform's archive");
+            assert!(
+                horizon_release_sign::legacy_digest_for("horizon-rust/horizon", "v2026.10.19", first)
+                    .is_some(),
+                "v2026.10.19 is pinned for upstream's repository"
+            );
             let old = json!({ "tag_name": "v2026.10.19", "assets": [{ "name": first, "browser_download_url": "u" }] });
             let nothing = |_: &str| -> Result<Vec<u8>, String> { Err("404".into()) };
-            assert_eq!(pick(&old, nothing, &[]).unwrap().sha256, pinned);
+            let refused = pick(&old, nothing, &horizon_release_sign::trusted_keys_for(REPO))
+                .unwrap_err();
+            assert!(refused.contains("not signed"), "{refused}");
         }
     }
 

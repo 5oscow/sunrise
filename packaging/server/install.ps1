@@ -19,7 +19,7 @@ $ProgressPreference = "SilentlyContinue"
 $Repo = "horizon-rust/horizon"
 # Horizon's release public keys, base64: copy of crates/horizon-release-sign/release-keys.txt (rotation adds a key
 # there first; keep the two in step, and install.sh's RELEASE_KEYS too).
-$ReleaseKeys = @("MU4oiIQcCxkZvbwSjjXs7SySCuM6ywRQ3nGaJYZG0gw=")
+$ReleaseKeys = @("r53xb3cuafGxZSicLz06KC+xXp9NJdPH8snNmXo5pAc=")
 $Fallback = $null
 $Architecture = $env:PROCESSOR_ARCHITEW6432
 if (-not $Architecture) { $Architecture = $env:PROCESSOR_ARCHITECTURE }

@@ -22,7 +22,7 @@ BIN="$HOME/.local/bin"
 ARCHIVE=
 # Horizon's release public keys, base64, space-separated: copy of crates/horizon-release-sign/release-keys.txt
 # (rotation adds a key there first; keep the two in step).
-RELEASE_KEYS="MU4oiIQcCxkZvbwSjjXs7SySCuM6ywRQ3nGaJYZG0gw="
+RELEASE_KEYS="r53xb3cuafGxZSicLz06KC+xXp9NJdPH8snNmXo5pAc="
 
 die() { echo "horizon install: $*" >&2; exit 1; }
 

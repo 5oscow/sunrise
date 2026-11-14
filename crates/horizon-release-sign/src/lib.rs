@@ -30,7 +30,9 @@ pub const SIGNATURE_V2: &str = "SHA256SUMS.v2.sig";
 
 const KEYS: &str = include_str!("../release-keys.txt");
 const LEGACY: &str = include_str!("../legacy-releases.txt");
-const FORK_KEYS: &str = include_str!("../fork-release-keys.txt");
+
+/// The repository whose releases this build installs and checks: Sunrise's.
+pub const REPOSITORY: &str = "sunrise-org/sunrise";
 
 /// An Ed25519 public key.
 pub type PublicKey = [u8; 32];
@@ -38,21 +40,17 @@ pub type PublicKey = [u8; 32];
 /// The public keys built in: those in `release-keys.txt`. A file that doesn't parse gives none,
 /// so every download is refused rather than trusted (a test keeps the file valid).
 pub fn trusted_keys() -> Vec<PublicKey> {
-    trusted_keys_for("horizon-rust/horizon")
+    trusted_keys_for(REPOSITORY)
 }
 
-/// Repository-scoped release trust. Unknown repositories and an unconfigured fork fail closed.
-/// The fork's public release keys have one canonical home: `fork-release-keys.txt`.
+/// Repository-scoped release trust: [`REPOSITORY`]'s keys are `release-keys.txt`; any other
+/// repository (upstream's and arismoko's included) has none and fails closed.
 pub fn trusted_keys_for(repository: &str) -> Vec<PublicKey> {
-    parse_keys(repository_keys(repository, KEYS, FORK_KEYS)).unwrap_or_default()
+    parse_keys(repository_keys(repository, KEYS)).unwrap_or_default()
 }
 
-fn repository_keys<'a>(repository: &str, upstream: &'a str, fork: &'a str) -> &'a str {
-    match repository {
-        "horizon-rust/horizon" => upstream,
-        "arismoko/horizon" => fork,
-        _ => "",
-    }
+fn repository_keys<'a>(repository: &str, keys: &'a str) -> &'a str {
+    if repository == REPOSITORY { keys } else { "" }
 }
 
 /// The keys in a keys file: one base64 key per line; blank lines and `#` comments are skipped.
@@ -520,54 +518,34 @@ impl SigningKey {
 mod tests {
     #[test]
     fn repository_trust_is_isolated_and_unknown_repositories_fail_closed() {
-        let (upstream, _) = SigningKey::generate().unwrap();
-        let (fork, _) = SigningKey::generate().unwrap();
-        let upstream_text = upstream.public_base64();
-        let fork_text = fork.public_base64();
-        let keys = |repo| parse_keys(repository_keys(repo, &upstream_text, &fork_text)).unwrap();
+        let (sunrise, _) = SigningKey::generate().unwrap();
+        let (other, _) = SigningKey::generate().unwrap();
+        let sunrise_text = sunrise.public_base64();
+        let keys = |repo| parse_keys(repository_keys(repo, &sunrise_text)).unwrap();
         let sums = sums_file(&[("game.tar.gz".into(), "ab".repeat(32))]);
         let tag = "nightly-2026-11-10-abcdef0";
-        for (repository, signer, other) in [
-            ("horizon-rust/horizon", &upstream, &fork),
-            ("arismoko/horizon", &fork, &upstream),
-        ] {
-            assert!(
-                verify(
-                    tag,
-                    sums.as_bytes(),
-                    &signer.sign(tag, sums.as_bytes()),
-                    &keys(repository)
-                )
-                .is_ok()
-            );
-            assert!(
-                verify(
-                    tag,
-                    sums.as_bytes(),
-                    &other.sign(tag, sums.as_bytes()),
-                    &keys(repository)
-                )
-                .is_err()
-            );
-            assert!(
-                verify(
-                    "nightly",
-                    sums.as_bytes(),
-                    &signer.sign(tag, sums.as_bytes()),
-                    &keys(repository)
-                )
-                .is_err()
-            );
-        }
-        assert!(keys("unknown/horizon").is_empty());
-        assert!(trusted_keys_for("unknown/horizon").is_empty());
-        assert_eq!(
-            trusted_keys_for("horizon-rust/horizon"),
-            parse_keys(KEYS).unwrap()
+        let signed = |key: &SigningKey, repo| {
+            verify(tag, sums.as_bytes(), &key.sign(tag, sums.as_bytes()), &keys(repo)).is_ok()
+        };
+        assert!(signed(&sunrise, REPOSITORY));
+        assert!(!signed(&other, REPOSITORY));
+        assert!(
+            verify(
+                "nightly",
+                sums.as_bytes(),
+                &sunrise.sign(tag, sums.as_bytes()),
+                &keys(REPOSITORY)
+            )
+            .is_err()
         );
+        for repository in ["horizon-rust/horizon", "arismoko/horizon", "unknown/horizon"] {
+            assert!(keys(repository).is_empty(), "{repository}");
+            assert!(trusted_keys_for(repository).is_empty(), "{repository}");
+        }
+        assert_eq!(trusted_keys_for(REPOSITORY), parse_keys(KEYS).unwrap());
         assert_eq!(
-            trusted_keys_for("arismoko/horizon"),
-            parse_keys(FORK_KEYS).unwrap()
+            parse_keys(KEYS).unwrap(),
+            parse_keys("r53xb3cuafGxZSicLz06KC+xXp9NJdPH8snNmXo5pAc=").unwrap()
         );
     }
 
