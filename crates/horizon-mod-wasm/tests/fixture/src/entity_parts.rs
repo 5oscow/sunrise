@@ -27,12 +27,19 @@ pub static COUNTER: AttachmentType<i32> = AttachmentType {
 
 /// When nonzero, the row's tick traps once its count reaches this value,
 /// after the write: the host's transaction must roll the row back to the
-/// count below it. A test arms it through the same attachment.
+/// count below it. A test arms it through the saved form, the way a saved
+/// world would: the codec keeps it readable after a load.
 pub static TRAP_AFTER: AttachmentType<i32> = AttachmentType {
     namespace: "wasm_fixture",
     name: "entity_trap_after",
     default: || 0,
-    codec: None,
+    codec: Some(AttachmentCodec {
+        encode: |n| Ok([("n".into(), Tag::Int(*n))].into()),
+        decode: |tag: &Compound| match tag.get(&"n".into()) {
+            Some(Tag::Int(n)) => Ok(*n),
+            _ => Err(AttachmentError::Decode),
+        },
+    }),
     copy_on_death: false,
     sync: false,
 };
