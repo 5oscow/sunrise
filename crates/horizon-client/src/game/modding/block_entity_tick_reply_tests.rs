@@ -54,7 +54,9 @@ impl Hooks for Effects {
     }
 }
 
-pub(super) fn wasm_mods() -> Vec<mod_api::ModEntry> {
+/// The compiled wasm fixture as one initialized mod entry. `pub(in crate::game)`:
+/// the general entity tick's wasm tests (`game::entities::general::tick_tests`) load it too.
+pub(in crate::game) fn wasm_mods() -> Vec<mod_api::ModEntry> {
     use horizon_mod_package::manifest::Package;
     use horizon_mod_wasm::{WasmPackage, load};
     let path = std::path::PathBuf::from(std::env::var_os("HORIZON_WASM_FIXTURE").unwrap());
