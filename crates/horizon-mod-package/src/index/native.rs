@@ -63,6 +63,7 @@ impl Bundle {
             id: Some(self.manifest.id.clone()),
             version: Some(self.manifest.version.clone()),
             api: format!("native-1/{}/{}", native.horizon, native.mixins),
+            side: Some(self.manifest.side),
             game: Some(native.game.clone()),
             ..Facts::default()
         }
@@ -113,6 +114,7 @@ mod tests {
         let facts = bundle.facts();
         assert_eq!(facts.id.as_deref(), Some("veinminer"));
         assert_eq!(facts.version.as_deref(), Some("0.3.0"));
+        assert_eq!(facts.side, Some(crate::manifest::Side::Client));
         assert_eq!(
             facts.api,
             format!("native-1/{}/{}", "a".repeat(40), "b".repeat(40))

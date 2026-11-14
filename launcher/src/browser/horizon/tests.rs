@@ -40,8 +40,6 @@ fn put(index: &Index, local: bool, home: &Path) -> Result<Vec<installed::Entry>,
 }
 
 fn side_packages(folder: &Path) -> Index {
-    use sha2::Digest;
-
     let mut index = sample();
     let template = index.projects[0].clone();
     index.projects.clear();
@@ -74,29 +72,38 @@ fn side_packages(folder: &Path) -> Index {
         .unwrap();
         let path = folder.join(format!("{id}.hmod"));
         fs::write(&path, &bytes).unwrap();
-        let facts = index::inspect(&index::Kind::NativeMod, &path).unwrap();
         let mut project = template.clone();
         project.id = id.into();
         project.name = id.into();
         project.kind = index::Kind::NativeMod;
         project.key = None;
-        let mut version = project.versions[0].clone();
-        version.version = "1.0.0".into();
-        version.api = facts.api;
-        version.side = facts.side;
-        version.capabilities = facts.capabilities;
-        version.requires = facts.requires;
-        version.file = index::File {
-            name: format!("{id}.hmod"),
-            url: format!("file://{}", path.display()),
-            size: bytes.len() as u64,
-            sha256: format!("{:x}", sha2::Sha256::digest(&bytes)),
-            signature: None,
-        };
+        let entry: index::registry::Entry = serde_json::from_value(serde_json::json!({
+            "id": id, "kind": "native-mod", "repo": "proof/package-sides",
+            "name": id, "summary": "Package-side fixture",
+            "description": "A real native package used to verify package-side publication and installation.",
+            "authors": ["Proof"], "owners": ["proof"], "license": "MIT",
+            "source": "https://github.com/proof/package-sides"
+        })).unwrap();
+        let name = format!("{id}.hmod");
+        let mut version = index::registry::release_version(
+            &entry,
+            &index::registry::Release {
+                tag: "1.0.0",
+                published: "2026-11-14",
+                notes: "",
+                asset: &name,
+                game: GAME,
+                signature: None,
+            },
+            &path,
+        )
+        .unwrap();
+        // Only transport is local: every published metadata field came from the real package.
+        version.file.url = format!("file://{}", path.display());
         project.versions = vec![version];
         index.projects.push(project);
     }
-    index
+    Index::parse_local(&serde_json::to_string(&index).unwrap()).unwrap()
 }
 
 #[test]
@@ -133,6 +140,13 @@ fn every_package_side_installs_and_enters_the_build_on_both_targets() {
             assert!(entry.path(&home).unwrap().is_file());
             assert!(java::is_enabled(&home, &entry.project));
             assert!(entry.skipped.is_empty());
+            assert_eq!(index.project(id).unwrap().versions[0].side, Some(side));
+            assert_eq!(
+                description_of(index.project(id).unwrap())
+                    .matches(package_side(side))
+                    .count(),
+                1
+            );
             assert_eq!(installed_side(&home, entry), Some(side));
             let label = installed_label(&home, entry);
             assert_eq!(label.matches(package_side(side)).count(), 1, "{label}");
@@ -634,7 +648,7 @@ fn installs_combined_native_content_as_one_hmod() {
     v.api = format!("native-1/{a}/{b}");
     v.version = "0.1.0".into();
     v.game = GAME.into();
-    v.side = None;
+    v.side = Some(Side::Client);
     v.requires.clear();
     v.capabilities.clear();
     v.file.name = "coords_hud.hmod".into();

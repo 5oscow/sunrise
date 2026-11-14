@@ -166,4 +166,47 @@ mod tests {
         assert!(e.contains("horizon-shaders.toml"), "{e}");
         assert!(check(&pack, Kind::Mod, None, None).is_err());
     }
+
+    #[test]
+    fn native_check_reports_the_real_manifest_side_as_text_and_json() {
+        use horizon_mod_package::manifest::Side;
+
+        for (side, label) in [
+            (Side::Client, "client"),
+            (Side::Both, "both"),
+            (Side::Server, "server"),
+        ] {
+            let path = std::env::temp_dir().join(format!(
+                "horizon-check-native-side-{label}-{}.hmod",
+                std::process::id(),
+            ));
+            let manifest = format!(
+                "id='side_check'\nname='Side check'\nversion='1.0.0'\napi='0.2'\nside='{label}'\ncapabilities=['registries']\n[native]\ngame='26.3'\nhorizon='{}'\nmixins='{}'\n",
+                "a".repeat(40),
+                "b".repeat(40),
+            );
+            let bytes = horizon_mod_package::Package::write_files(
+                &manifest,
+                &[
+                    (
+                        "Cargo.toml",
+                        b"[package]\nname='side_check'\nversion='1.0.0'\n".as_slice(),
+                    ),
+                    ("src/lib.rs", b"pub fn hooks() {}\n".as_slice()),
+                ],
+            )
+            .unwrap();
+            std::fs::write(&path, bytes).unwrap();
+            let report = check(&path, kind_of(&path).unwrap(), None, None).unwrap();
+            assert_eq!(report.kind, Kind::NativeMod);
+            assert_eq!(report.facts.side, Some(side));
+            assert_eq!(report.json()["side"], label);
+            assert!(
+                report
+                    .text()
+                    .contains(&format!(", API {}, {label}", report.facts.api))
+            );
+            std::fs::remove_file(path).unwrap();
+        }
+    }
 }

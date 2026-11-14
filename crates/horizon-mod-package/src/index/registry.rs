@@ -380,6 +380,14 @@ pub fn project(entry: &Entry, src: &Sources) -> Result<Project, Vec<String>> {
     }
     // The versions read from the repository's releases passed their checks when they were read.
     // Newest first, the registry's own before them on a tie.
+    for version in &cache.versions {
+        if matches!(entry.kind, Kind::Mod | Kind::NativeMod) && version.side.is_none() {
+            errors.push(format!(
+                "{id} {}: cached mod package version needs its manifest side; recheck the release package",
+                version.version
+            ));
+        }
+    }
     versions.extend(cache.versions);
     versions.sort_by(|a: &Version, b| b.published.cmp(&a.published));
     if !errors.is_empty() {

@@ -146,6 +146,25 @@ fn refuses_broken_indexes() {
 }
 
 #[test]
+fn every_mod_index_version_requires_its_manifest_side() {
+    for kind in [Kind::Mod, Kind::NativeMod] {
+        let mut index = sample();
+        index.projects[0].kind = kind;
+        index.projects[0].versions[0].side = None;
+        assert_eq!(
+            index.check().unwrap_err(),
+            "coords_hud 0.1.0: mod package version needs its manifest side",
+        );
+        for side in [Side::Client, Side::Both, Side::Server] {
+            index.projects[0].versions[0].side = Some(side);
+            let published = serde_json::to_string(&index).unwrap();
+            let decoded = Index::parse(&published).unwrap();
+            assert_eq!(decoded.projects[0].versions[0].side, Some(side));
+        }
+    }
+}
+
+#[test]
 fn resource_packs_need_a_pack_mcmeta() {
     use std::io::Write;
     let dir = std::env::temp_dir().join(format!("horizon-index-rp-{}", std::process::id()));

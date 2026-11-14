@@ -172,6 +172,130 @@ fn builds_the_sample_index() {
 }
 
 #[test]
+fn publishes_native_and_content_package_sides_from_real_files_and_release_caches() {
+    use crate::manifest::Side;
+
+    let scratch = Scratch::new("package-sides");
+    let mut expected = Vec::new();
+    for (kind, code) in [(Kind::Mod, false), (Kind::NativeMod, true)] {
+        for (side, label) in [
+            (Side::Client, "client"),
+            (Side::Both, "both"),
+            (Side::Server, "server"),
+        ] {
+            let id = format!("{}_{}", if code { "native" } else { "content" }, label);
+            let mut manifest = format!(
+                "id='{id}'\nname='{id}'\nversion='1.0.0'\napi='0.2'\nside='{label}'\ncapabilities=['registries']\n",
+            );
+            let files: Vec<(&str, &[u8])> = if code {
+                manifest.push_str(&format!(
+                    "[native]\ngame='26.3'\nhorizon='{}'\nmixins='{}'\n",
+                    "a".repeat(40),
+                    "b".repeat(40),
+                ));
+                vec![
+                    (
+                        "Cargo.toml",
+                        b"[package]\nname='package_sides'\nversion='1.0.0'\n",
+                    ),
+                    ("src/lib.rs", b"pub fn hooks() {}\n"),
+                ]
+            } else {
+                Vec::new()
+            };
+            let bytes = crate::Package::write_files(&manifest, &files).unwrap();
+            let hash = super::super::sha256(&bytes);
+            std::fs::write(scratch.0.join("files").join(&hash), bytes).unwrap();
+            let mut entry: Entry = toml::from_str(&hud_entry()).unwrap();
+            entry.id = id.clone();
+            entry.kind = kind.clone();
+            entry.key = None;
+            let version = &mut entry.versions[0];
+            version.version = "1.0.0".into();
+            version.file = format!("{id}.hmod");
+            version.sha256 = hash;
+            version.signature = None;
+            scratch.write(&format!("mods/{id}.toml"), &entry.to_toml().unwrap());
+            expected.push((entry, side));
+        }
+    }
+    let published = scratch.build().unwrap();
+    let published = Index::parse(&serde_json::to_string(&published).unwrap()).unwrap();
+    for (entry, side) in &expected {
+        let project = published.project(&entry.id).unwrap();
+        let version = &project.versions[0];
+        assert_eq!(version.side, Some(*side));
+        let path = scratch.0.join("files").join(&version.file.sha256);
+        assert_eq!(
+            super::super::check_file(&published, project, version, &path),
+            Ok(super::super::Trust::Unsigned),
+        );
+        let mut wrong = version.clone();
+        wrong.side = Some(if *side == Side::Client {
+            Side::Both
+        } else {
+            Side::Client
+        });
+        assert!(
+            super::super::check_file(&published, project, &wrong, &path)
+                .unwrap_err()
+                .contains("isn't what the index lists")
+        );
+    }
+    std::fs::create_dir_all(scratch.0.join("repo").join(CACHE)).unwrap();
+    for (mut entry, side) in expected {
+        let old = entry.versions.remove(0);
+        entry.repo = Some("proof/package-sides".into());
+        let path = scratch.0.join("files").join(&old.sha256);
+        let version = release_version(
+            &entry,
+            &Release {
+                tag: "v1.0.0",
+                published: "2026-10-30",
+                notes: "",
+                asset: &old.file,
+                game: "26.3",
+                signature: None,
+            },
+            &path,
+        )
+        .unwrap();
+        assert_eq!(version.side, Some(side));
+        let cache = Cache {
+            page: Page::default(),
+            versions: vec![version],
+        };
+        scratch.write(
+            &format!("mods/{}.toml", entry.id),
+            &entry.to_toml().unwrap(),
+        );
+        scratch.write(
+            &format!("versions/{}.json", entry.id),
+            &serde_json::to_string(&cache).unwrap(),
+        );
+        let mut missing = cache.clone();
+        missing.versions[0].side = None;
+        scratch.write(
+            &format!("versions/{}.json", entry.id),
+            &serde_json::to_string(&missing).unwrap(),
+        );
+        let errors = scratch.build().unwrap_err();
+        assert!(errors.iter().any(|error| error.contains(&entry.id)
+            && error.contains("cached mod package version needs its manifest side")));
+        scratch.write(
+            &format!("versions/{}.json", entry.id),
+            &serde_json::to_string(&cache).unwrap(),
+        );
+        let republished = scratch.build().unwrap();
+        let republished = Index::parse(&serde_json::to_string(&republished).unwrap()).unwrap();
+        assert_eq!(
+            republished.project(&entry.id).unwrap().versions[0].side,
+            Some(side)
+        );
+    }
+}
+
+#[test]
 fn lists_every_problem_of_a_registry() {
     let s = Scratch::new("bad");
     // A file that isn't the one its hash names, an unsigned version of a

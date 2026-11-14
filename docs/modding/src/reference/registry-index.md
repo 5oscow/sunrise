@@ -53,7 +53,8 @@ entry leaves out.
 | `stars` | GitHub stars of the project's source repository, refreshed by the registry. Absent when zero or the source is not on GitHub. Read-only: never in an entry. The launcher shows the count and a button that opens the repository. |
 | `updated` | Its newest version's `published` (the latest of `versions[].published`), set by the registry, so a reader can sort by it beside `downloads` without walking every version. Absent when no version has a date. Read-only: never in an entry. |
 | `api` | A mod's API line (its manifest's `api`); a native mod's pinned revisions (`native-1/<horizon>/<mixins>`); a modpack's manifest format (`1`). |
-| `side`, `capabilities` | A mod's, read from its manifest during validation. |
+| `side` | Required for both content and native mods: the package manifest's `client`, `both` or `server`, read from the checked archive, never inferred from a build target. `server` is not compared at join; it still installs and builds on every target. |
+| `capabilities` | A content mod's, read from its manifest during validation. Native source runs unsandboxed rather than declaring sandbox capabilities. |
 | `game` | The Minecraft version it is for. |
 | `requires` | A modpack's mods: `{ id, version, sha256 }`, each a version in this index with that hash. |
 | `file` | A plain name with the kind's extension (`.hmod`, `.hpack`, `.zip`, `.hshader`), an `https://` URL (the registry's release `https://github.com/horizon-rust/horizon-mods/releases/download/<id>-<version>/<name>`, or an asset of the project's own repository, `https://github.com/<owner>/<repo>/releases/download/<tag>/<name>`: the launcher accepts exactly these shapes), the size (at most 64 MiB), the lowercase hex SHA-256, and the `.minisig` text when the project has a key. |
@@ -61,6 +62,12 @@ entry leaves out.
 
 Readers ignore fields they don't know, so an optional field can be added to schema 1. Renaming or removing a field, or
 changing what one means, makes schema 2.
+
+Native package metadata uses the same required `side` field as content packages. Regenerate the
+registry index from the actual packages when deploying this metadata change. For repository-release
+caches (`versions/<id>.json`), recheck each downloaded release with `cargo horizon-mod registry release`
+and replace its cached version metadata before building the index. The publisher reads the side from
+the package; a cached native version with no side is rejected, not treated as client or both.
 
 Each version may list `native_binaries`, an array of records with `build` (the
 exact game build ID, at most 128 bytes with no ASCII control characters), `target` (the canonical Rust target triple), and `file`.

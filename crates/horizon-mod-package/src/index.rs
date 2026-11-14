@@ -173,6 +173,7 @@ pub struct Version {
     pub changelog: String,
     /// A content mod's API line (`0.2`), from its manifest; a modpack's format (`1`).
     pub api: String,
+    /// Required for content and native mods: the checked package manifest's join side.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub side: Option<Side>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -329,6 +330,9 @@ impl Index {
                     || p.versions[..j].iter().any(|w| w.version == v.version)
                 {
                     return Err(at("empty or repeated version".into()));
+                }
+                if matches!(p.kind, Kind::Mod | Kind::NativeMod) && v.side.is_none() {
+                    return Err(at("mod package version needs its manifest side".into()));
                 }
                 let mut pairs = std::collections::HashSet::new();
                 for b in &v.native_binaries {
@@ -610,7 +614,7 @@ impl Facts {
             return Ok(());
         }
         Err(match project.kind {
-            Kind::Mod => format!(
+            Kind::Mod | Kind::NativeMod => format!(
                 "its horizon-mod.toml ({} {}, API {}, {:?}, {}) isn't what the index lists",
                 self.id.as_deref().unwrap_or("?"),
                 self.version.as_deref().unwrap_or("?"),
