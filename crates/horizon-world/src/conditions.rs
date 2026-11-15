@@ -151,23 +151,27 @@ impl LoadConditions {
     /// admitted file, drop an element whose own `neoforge:conditions` fail and
     /// strip the key from one whose conditions hold, before the file decodes.
     pub fn filter_elements(&self, file: &mut Value, path: &str) {
+        self.filter_elements_context(file, &|| path.to_owned());
+    }
+
+    fn filter_elements_context(&self, file: &mut Value, path: &dyn Fn() -> String) {
         match file {
             Value::Array(elements) => elements.retain_mut(|element| {
                 if element.get("neoforge:conditions").is_some() {
-                    if !self.allows_file(element, path) {
+                    if !self.allows_context(element, path) {
                         return false;
                     }
                     if let Some(fields) = element.as_object_mut() {
                         fields.remove("neoforge:conditions");
                     }
                 }
-                self.filter_elements(element, path);
+                self.filter_elements_context(element, path);
                 true
             }),
             Value::Object(fields) => {
                 for (key, value) in fields.iter_mut() {
                     if key != "neoforge:conditions" {
-                        self.filter_elements(value, path);
+                        self.filter_elements_context(value, path);
                     }
                 }
             }
@@ -180,8 +184,10 @@ impl LoadConditions {
         if !self.allows_id(file, kind, id) {
             return false;
         }
-        let (namespace, path) = id.split_once(':').unwrap_or(("minecraft", id));
-        self.filter_elements(file, &format!("data/{namespace}/{kind}/{path}.json"));
+        self.filter_elements_context(file, &|| {
+            let (namespace, path) = id.split_once(':').unwrap_or(("minecraft", id));
+            format!("data/{namespace}/{kind}/{path}.json")
+        });
         true
     }
 
@@ -820,6 +826,16 @@ mod tests {
         let with_tin = candidate.with_tags([("minecraft:item", vec!["c:ingots/tin"])]);
         assert!(empty.allows_file(&tin, "data/a/recipe/b.json"));
         assert!(!with_tin.allows_file(&tin, "data/a/recipe/b.json"));
+    }
+
+    #[test]
+    fn unconditioned_elements_never_build_a_diagnostic_path() {
+        let mut value = json!({"pools": [{"entries": [1, {"name": "test:entry"}]}]});
+        let expected = value.clone();
+        LoadConditions::vanilla().filter_elements_context(&mut value, &|| {
+            panic!("an unconditioned element has no diagnostic path")
+        });
+        assert_eq!(value, expected);
     }
 
     #[test]
