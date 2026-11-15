@@ -146,8 +146,17 @@ mod tests {
         ] {
             // As the build ends: the log's line, after any mods left out before it.
             let error = format!("maps was left out\n\n{refusal}");
-            let (text, failed) = failure_message(error, &built);
-            assert_eq!(text, refusal.plain());
+            let (text, failed) = failure_message(error.clone(), &built);
+            // Plain words naming the mod, not the log's line with its code.
+            assert!(text.contains("fast-ore"), "{text}");
+            assert!(!text.contains("E_NATIVE"), "{text}");
+            assert_ne!(text, error);
+            // The mod left out earlier is not blamed.
+            assert!(!text.contains("maps"), "{text}");
+            // With only an unrelated mod built, the refusal cannot be attributed.
+            let (text, failed_other) = failure_message(error.clone(), &["maps".to_string()]);
+            assert_eq!(text, error);
+            assert!(failed_other.is_empty());
             assert_eq!(failed, ["fast-ore"]);
         }
     }

@@ -781,23 +781,33 @@ impl Launcher {
     /// "Imported · 2026-10-30", a developer build's name, or the tag. Players who don't know what
     /// a nightly is see the day it came out, not the channel's jargon.
     pub(super) fn version_label(&self, tag: &str) -> String {
-        if let Some(developer) = horizon_launcher::developer_install::label(tag) {
-            return developer;
-        }
-        // A game built with mods reads as what it was built on: "Nov 13 update, with your mods".
-        if native_mods::is_native(tag) {
-            return match native_base(tag) {
-                Some(base) => trf(
-                    "{version}, with your mods",
-                    &[("version", &self.version_label(&base))],
-                ),
-                None => tr("A build with your mods").to_string(),
-            };
-        }
-        match horizon_launcher::nightly::date_of(tag) {
-            Some(_) => self.version_name(tag),
-            None => build_import::label(tag).unwrap_or_else(|| tag.to_string()),
-        }
+        label_of(tag, &native_base, &horizon_launcher::nightly::same_day_time)
+    }
+}
+
+/// [`Launcher::version_label`] with a native build's base given by `base_of` and the time a
+/// same-day build came out by `time_of`.
+pub(super) fn label_of(
+    tag: &str,
+    base_of: &dyn Fn(&str) -> Option<String>,
+    time_of: &dyn Fn(&str) -> Option<String>,
+) -> String {
+    if let Some(developer) = horizon_launcher::developer_install::label(tag) {
+        return developer;
+    }
+    // A game built with mods reads as what it was built on: "Nov 13 update, with your mods".
+    if native_mods::is_native(tag) {
+        return match base_of(tag) {
+            Some(base) => trf(
+                "{version}, with your mods",
+                &[("version", &label_of(&base, base_of, time_of))],
+            ),
+            None => tr("A build with your mods").to_string(),
+        };
+    }
+    match horizon_launcher::nightly::date_of(tag) {
+        Some(_) => glass_versions::name_of(tag, time_of),
+        None => build_import::label(tag).unwrap_or_else(|| tag.to_string()),
     }
 }
 

@@ -48,16 +48,18 @@ pub(super) fn compile(
             search,
             |package| &libraries[package],
             &rlibs,
-            &prebuilt::library_entry(
-                &api::template(&api.join(TEMPLATE))?,
-                &[&project.bundle.manifest],
-                &internals::Catalog::read(api)?,
-                sdk.commit(),
-                &project.bundle.manifest.id,
-                &project.bundle.manifest.version.to_string(),
-                &[],
-            ),
-            sdk.commit(),
+            prebuilt::LibraryInputs {
+                entry: &prebuilt::library_entry(
+                    &api::template(&api.join(TEMPLATE))?,
+                    &[&project.bundle.manifest],
+                    &internals::Catalog::read(api)?,
+                    sdk.commit(),
+                    &project.bundle.manifest.id,
+                    &project.bundle.manifest.version.to_string(),
+                    &[],
+                ),
+                build: sdk.commit(),
+            },
         )?;
         rlibs.insert(project.bundle.manifest.id.as_str(), rlib);
     }

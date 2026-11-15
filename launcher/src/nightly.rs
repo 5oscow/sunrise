@@ -73,24 +73,28 @@ pub fn note_published(releases: &[Release]) {
     let mut kept = SAME_DAY
         .write()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
+    *kept = same_day_times(&kept, releases);
+}
+
+/// The table [`note_published`] keeps after `releases`, given the `kept` one from before.
+fn same_day_times(kept: &[(String, String)], releases: &[Release]) -> Vec<(String, String)> {
     let mut known: Vec<(&str, &str, &str)> = releases
         .iter()
         .filter(|r| r.nightly.is_some())
         .map(|r| (r.tag.as_str(), r.date.as_str(), r.time.as_str()))
         .collect();
-    for (tag, time) in kept.iter() {
+    for (tag, time) in kept {
         if let Some(date) = date_of(tag).filter(|_| known.iter().all(|(t, ..)| t != tag)) {
             known.push((tag, date, time));
         }
     }
-    let same_day = known
+    known
         .iter()
         .filter(|(_, date, time)| {
             !time.is_empty() && known.iter().filter(|(_, d, _)| d == date).count() > 1
         })
         .map(|(tag, _, time)| (tag.to_string(), time.to_string()))
-        .collect();
-    *kept = same_day;
+        .collect()
 }
 
 /// When Nightly `version` came out, `HH:MM` UTC, if another came out the same day.
@@ -228,51 +232,57 @@ mod tests {
         assert!(horizon_release_sign::is_nightly(&version_of(&r)));
     }
 
-    #[test]
-    fn two_nightlies_of_one_day_are_named_with_their_times() {
-        let nightly = |version: &str, date: &str, time: &str| Release {
+    fn nightly(version: &str, date: &str, time: &str) -> Release {
+        Release {
             tag: version.into(),
             time: time.into(),
             nightly: Some(NIGHTLY.into()),
             ..release("", date)
-        };
-        note_published(&[
-            nightly("nightly-2031-03-04-bbbbbbb", "2031-03-04", "18:05"),
-            nightly("nightly-2031-03-04-aaaaaaa", "2031-03-04", "07:22"),
-            nightly("nightly-2031-03-03-ccccccc", "2031-03-03", "09:00"),
-        ]);
-        let late = update_name("nightly-2031-03-04-bbbbbbb").unwrap();
-        let early = update_name("nightly-2031-03-04-aaaaaaa").unwrap();
-        assert_ne!(late, early);
-        assert!(
-            late.contains("18:05") && early.contains("07:22"),
-            "{late} / {early}"
+        }
+    }
+
+    fn time_in<'a>(table: &'a [(String, String)], version: &str) -> Option<&'a str> {
+        table
+            .iter()
+            .find(|(tag, _)| tag == version)
+            .map(|(_, time)| time.as_str())
+    }
+
+    #[test]
+    fn only_nightlies_sharing_a_day_keep_their_time() {
+        let table = same_day_times(
+            &[],
+            &[
+                nightly("nightly-2031-03-04-bbbbbbb", "2031-03-04", "18:05"),
+                nightly("nightly-2031-03-04-aaaaaaa", "2031-03-04", "07:22"),
+                nightly("nightly-2031-03-03-ccccccc", "2031-03-03", "09:00"),
+            ],
         );
+        assert_eq!(time_in(&table, "nightly-2031-03-04-bbbbbbb"), Some("18:05"));
+        assert_eq!(time_in(&table, "nightly-2031-03-04-aaaaaaa"), Some("07:22"));
         // Alone on its day, a Nightly keeps its day's name.
-        assert_eq!(
-            update_name("nightly-2031-03-03-ccccccc"),
-            update_name("nightly-2031-03-03")
-        );
+        assert_eq!(time_in(&table, "nightly-2031-03-03-ccccccc"), None);
+        assert_eq!(table.len(), 2);
     }
 
     #[test]
     fn a_nightly_the_list_no_longer_has_keeps_its_time() {
-        let nightly = |version: &str, time: &str| Release {
-            tag: version.into(),
-            time: time.into(),
-            nightly: Some(NIGHTLY.into()),
-            ..release("", "2032-05-06")
-        };
-        let late = nightly("nightly-2032-05-06-bbbbbbb", "18:05");
-        note_published(&[late.clone(), nightly("nightly-2032-05-06-aaaaaaa", "07:22")]);
+        let late = nightly("nightly-2032-05-06-bbbbbbb", "2032-05-06", "18:05");
+        let first = same_day_times(
+            &[],
+            &[
+                late.clone(),
+                nightly("nightly-2032-05-06-aaaaaaa", "2032-05-06", "07:22"),
+            ],
+        );
         // A later list without the earlier build: both still read apart.
-        note_published(&[late]);
+        let second = same_day_times(&first, &[late]);
         assert_eq!(
-            same_day_time("nightly-2032-05-06-aaaaaaa").as_deref(),
+            time_in(&second, "nightly-2032-05-06-aaaaaaa"),
             Some("07:22")
         );
         assert_eq!(
-            same_day_time("nightly-2032-05-06-bbbbbbb").as_deref(),
+            time_in(&second, "nightly-2032-05-06-bbbbbbb"),
             Some("18:05")
         );
     }

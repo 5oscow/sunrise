@@ -21,6 +21,17 @@ pub(super) fn published(date: &str, time: &str) -> String {
     }
 }
 
+/// [`Launcher::version_name`] with the time a same-day build came out given by `time_of`.
+pub(super) fn name_of(tag: &str, time_of: &dyn Fn(&str) -> Option<String>) -> String {
+    match horizon_launcher::nightly::date_of(tag) {
+        Some(date) => {
+            let time = time_of(tag).unwrap_or_default();
+            trf("{date} update", &[("date", &published(date, &time))])
+        }
+        None => tag.to_owned(),
+    }
+}
+
 /// A version's state beside its name: a dot and a word, 13 px at 70 % (`Latest`).
 fn badge(tone: Tone, label: &str) -> Div {
     div()
@@ -65,13 +76,7 @@ impl Launcher {
     /// update came out the same day, [`horizon_launcher::nightly::same_day_time`]), for any screen
     /// that names it; the tag itself otherwise.
     pub(crate) fn version_name(&self, tag: &str) -> String {
-        match horizon_launcher::nightly::date_of(tag) {
-            Some(date) => {
-                let time = horizon_launcher::nightly::same_day_time(tag).unwrap_or_default();
-                trf("{date} update", &[("date", &published(date, &time))])
-            }
-            None => tag.to_owned(),
-        }
+        name_of(tag, &horizon_launcher::nightly::same_day_time)
     }
 
     /// The launcher's version when Use picked one older than the newest installed: what an
@@ -932,5 +937,29 @@ mod tests {
         let (title, line) = nightly_card_text(&release, true).expect("nightlies have card text");
         assert_eq!(title, "Nov 7, 14:32 UTC update");
         assert_eq!(line, "");
+    }
+
+    #[test]
+    fn two_builds_of_one_day_are_named_apart_and_a_native_build_follows_its_base() {
+        let time_of = |tag: &str| match tag {
+            "nightly-2026-11-07-aaaaaaa" => Some("07:22".to_string()),
+            "nightly-2026-11-07-bbbbbbb" => Some("18:05".to_string()),
+            _ => None,
+        };
+        let base_of = |tag: &str| (tag == "native-1").then(|| "nightly-2026-11-07-bbbbbbb".into());
+        let label = |tag: &str| crate::glass_instance::label_of(tag, &base_of, &time_of);
+        assert_eq!(
+            label("nightly-2026-11-07-aaaaaaa"),
+            "Nov 7, 07:22 UTC update"
+        );
+        assert_eq!(
+            label("nightly-2026-11-07-bbbbbbb"),
+            "Nov 7, 18:05 UTC update"
+        );
+        // Alone on its day: the day alone.
+        assert_eq!(label("nightly-2026-11-06-ccccccc"), "Nov 6 update");
+        assert_eq!(label("native-1"), "Nov 7, 18:05 UTC update, with your mods");
+        assert_eq!(label("native-2"), "A build with your mods");
+        assert_eq!(name_of("v0.2.97", &time_of), "v0.2.97");
     }
 }

@@ -2141,18 +2141,7 @@ fn pipeline(
                     target,
                     // Nothing to fetch (every slice kept from an earlier build) is said as such,
                     // never as a download of nothing.
-                    &|got: sdk_cache::Fetched| {
-                        progress(match got.total {
-                            0 => Step::ToolsKept {
-                                build: shown.clone(),
-                            },
-                            total => Step::Tools {
-                                build: shown.clone(),
-                                done: got.done,
-                                total,
-                            },
-                        })
-                    },
+                    &|got: sdk_cache::Fetched| progress(tools_step(&shown, got)),
                 )
                 .map_err(refused)?
             }
@@ -2235,10 +2224,12 @@ fn pipeline(
             game,
             &root().join("prebuilt-build"),
             folder,
-            route,
-            &projects,
-            &declared,
-            &resolution,
+            prebuilt::ModSet {
+                route,
+                projects: &projects,
+                declared: &declared,
+                resolution: &resolution,
+            },
             options.registry_consent,
             &|id, done, total| {
                 progress(Step::Mod {
@@ -2581,6 +2572,21 @@ fn copy_runtime(from: &Path, to: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// The step for the mod tools of `build` as the download reports: nothing to fetch (every slice
+/// kept from an earlier build) is [`Step::ToolsKept`], never a download of nothing.
+fn tools_step(build: &str, got: sdk_cache::Fetched) -> Step {
+    match got.total {
+        0 => Step::ToolsKept {
+            build: build.to_string(),
+        },
+        total => Step::Tools {
+            build: build.to_string(),
+            done: got.done,
+            total,
+        },
+    }
+}
+
 mod installation;
 /// Installs `binary` as version `version`, retaining the base's runtime helpers. Clients
 /// reference the base's prepared resources; standalone server exports still carry their own.
@@ -2643,18 +2649,90 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_window_says_build_steps_in_player_words() {
-        let rust = Step::Rust(0.42).shown();
-        assert!(!rust.contains("Rust") && !rust.contains('%'), "{rust}");
-        assert!(!Step::Tool.shown().contains("mixins"));
-        assert!(!Step::Mixins.shown().contains("mixins"));
-        // A step already in plain words reads the same in both.
-        let done = Step::Done {
-            secs: 41,
-            profile: Profile::Optimized,
-            plan: Plan::Prebuilt,
-        };
-        assert_eq!(done.shown(), done.label());
+    fn each_build_state_shows_its_own_step_in_the_window() {
+        let shown = |step: Step| step.shown();
+        // Steps that are the same stage to a player read the same, whatever the log says.
+        let ready = shown(Step::Crates);
+        assert_eq!(shown(Step::Source("0123456789".into())), ready);
+        assert_eq!(shown(Step::Plan(Plan::Prebuilt, Profile::Optimized)), ready);
+        let mods = shown(Step::PrebuiltMods);
+        assert_eq!(shown(Step::Mixins), mods);
+        assert_eq!(shown(Step::CachedMixins), mods);
+        // Different states read differently.
+        let states = [
+            shown(Step::Rust(0.42)),
+            shown(Step::Tool),
+            ready,
+            mods,
+            shown(Step::Compile {
+                done: 3,
+                total: Some(9),
+                name: "crate".into(),
+                profile: Profile::Optimized,
+            }),
+            shown(Step::ToolsKept { build: "b".into() }),
+        ];
+        for (i, a) in states.iter().enumerate() {
+            for b in &states[i + 1..] {
+                assert_ne!(a, b);
+            }
+        }
+        // The log keeps the detail the window leaves out.
+        assert_ne!(Step::Rust(0.42).label(), shown(Step::Rust(0.42)));
+        assert_ne!(Step::Tool.label(), shown(Step::Tool));
+        // Where each state sits in the build.
+        for (step, stage, fraction) in [
+            (Step::Rust(0.42), Stage::Prepare, Some(0.42)),
+            (Step::Tool, Stage::Prepare, None),
+            (Step::PrebuiltMods, Stage::Compile, None),
+            (Step::Install, Stage::Install, None),
+            (
+                Step::Mod {
+                    id: "fast-ore".into(),
+                    done: 3,
+                    total: 4,
+                },
+                Stage::Compile,
+                Some(0.5),
+            ),
+            (
+                Step::Done {
+                    secs: 41,
+                    profile: Profile::Optimized,
+                    plan: Plan::Prebuilt,
+                },
+                Stage::Install,
+                Some(1.),
+            ),
+        ] {
+            assert_eq!(step.progress(), Progress { stage, fraction }, "{step:?}");
+        }
+    }
+
+    #[test]
+    fn mod_tools_already_kept_are_not_shown_as_a_download() {
+        let kept = tools_step("abc", sdk_cache::Fetched { done: 0, total: 0 });
+        assert!(matches!(kept, Step::ToolsKept { .. }), "{kept:?}");
+        assert_eq!(kept.progress().fraction, Some(1.));
+        let fetching = tools_step(
+            "abc",
+            sdk_cache::Fetched {
+                done: 25,
+                total: 100,
+            },
+        );
+        assert!(
+            matches!(
+                fetching,
+                Step::Tools {
+                    done: 25,
+                    total: 100,
+                    ..
+                }
+            ),
+            "{fetching:?}"
+        );
+        assert_eq!(fetching.progress().fraction, Some(0.25));
     }
 
     #[test]

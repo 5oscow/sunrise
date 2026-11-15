@@ -632,29 +632,42 @@ fn registry_dependency(project: &api::Project<'_>) -> bool {
     })
 }
 
-/// Compiles the mods (`resolution`'s order, each with its installed mod dependencies) and the
-/// launcher's executable against the prebuilt game `package`, by `route` ([`Route::of`] the same
-/// `projects`), under `builds` (`native/prebuilt-build`), in folders keyed by the SDK's inputs
-/// ([`kept_build`]): the API route in `api-<key>`, the engine route in `rustc-<key>`, each mod's
-/// library reused only while its own inputs are unchanged, and the registry route's cargo build in
-/// `<key>`, staged per mods folder (`mods`). Returns
-/// the executable and the dynamic libraries it loads, to be installed beside it.
+/// The mods a build compiles: their projects, what each declares, the order they build in, and
+/// the route that order is built by.
+#[derive(Clone, Copy)]
+pub(super) struct ModSet<'a, 'p> {
+    /// [`Route::of`] the same `projects`.
+    pub(super) route: Route,
+    pub(super) projects: &'a [api::Project<'p>],
+    /// What each project declares, in the order of `projects`.
+    pub(super) declared: &'a [Vec<dependencies::Dependency>],
+    pub(super) resolution: &'a dependencies::Resolution,
+}
+
+/// Compiles the mods (`set`'s resolution order, each with its installed mod dependencies) and the
+/// launcher's executable against the prebuilt game `package`, by `set`'s route, under `builds`
+/// (`native/prebuilt-build`), in folders keyed by the SDK's inputs ([`kept_build`]): the API route
+/// in `api-<key>`, the engine route in `rustc-<key>`, each mod's library reused only while its own
+/// inputs are unchanged, and the registry route's cargo build in `<key>`, staged per mods folder
+/// (`mods`). Returns the executable and the dynamic libraries it loads, to be installed beside it.
 // Unlike the source workspace, this route invokes rustc with only selected --extern
 // libraries; it does not resolve or compile arbitrary transitive Cargo dependencies.
-#[allow(clippy::too_many_arguments)]
 pub(super) fn compile(
     rust: &Toolchain,
     package: &Package,
     builds: &Path,
     mods: &Path,
-    route: Route,
-    projects: &[api::Project<'_>],
-    declared: &[Vec<dependencies::Dependency>],
-    resolution: &dependencies::Resolution,
+    set: ModSet<'_, '_>,
     consent: Option<&dyn Fn(&super::RegistryInventory) -> bool>,
     // Each mod is its own library: told which one starts, and how far through them.
     on_mod: &dyn Fn(&str, usize, usize),
 ) -> Result<(PathBuf, Vec<PathBuf>), String> {
+    let ModSet {
+        route,
+        projects,
+        declared,
+        resolution,
+    } = set;
     let mut names = std::collections::HashSet::new();
     names.insert(dylib_name("horizon_patch").to_ascii_lowercase());
     for item in fs::read_dir(package.runtime.join("deps")).map_err(|e| e.to_string())? {
@@ -780,16 +793,18 @@ pub(super) fn compile(
                 _ => &libraries[package],
             },
             &rlibs,
-            &library_entry(
-                &api::template(&game.join(super::api_route::TEMPLATE))?,
-                &[&project.bundle.manifest],
-                &catalog,
-                sdk.commit(),
-                id,
-                &project.bundle.manifest.version.to_string(),
-                &[],
-            ),
-            sdk.commit(),
+            LibraryInputs {
+                entry: &library_entry(
+                    &api::template(&game.join(super::api_route::TEMPLATE))?,
+                    &[&project.bundle.manifest],
+                    &catalog,
+                    sdk.commit(),
+                    id,
+                    &project.bundle.manifest.version.to_string(),
+                    &[],
+                ),
+                build: sdk.commit(),
+            },
         )?;
         rlibs.insert(id, rlib);
         crate_names.insert(id, krate);
@@ -901,10 +916,17 @@ pub(super) fn library_entry(
         )
 }
 
+/// What a mod's library is built from besides its own source: the generated entry source and the
+/// SDK build it is compiled for.
+#[derive(Clone, Copy)]
+pub(super) struct LibraryInputs<'a> {
+    pub(super) entry: &'a str,
+    pub(super) build: &'a str,
+}
+
 /// Compiles `project`'s crate as an rlib into `out` with `rustc` (given the edition: rustc with
 /// the route's search paths), its game packages from `library` and its installed mod dependencies
 /// from `rlibs`. Returns the rlib and the crate's name.
-#[allow(clippy::too_many_arguments)]
 pub(super) fn compile_mod<'a>(
     project: &api::Project<'_>,
     declared: &[dependencies::Dependency],
@@ -912,9 +934,9 @@ pub(super) fn compile_mod<'a>(
     rustc: impl Fn(&str) -> Command,
     library: impl Fn(&str) -> &'a PathBuf,
     rlibs: &std::collections::HashMap<&str, PathBuf>,
-    entry: &str,
-    build: &str,
+    inputs: LibraryInputs<'_>,
 ) -> Result<(PathBuf, String), String> {
+    let LibraryInputs { entry, build } = inputs;
     let id = project.bundle.manifest.id.as_str();
     let edition = project
         .cargo

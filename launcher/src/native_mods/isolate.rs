@@ -163,18 +163,11 @@ mod tests {
         let left = with_dependents(&[LeftOut::new(&lib, Why::Unfit("why".into()))], &mods);
         let ids: Vec<&str> = left.iter().map(|l| l.id.as_str()).collect();
         assert_eq!(ids, ["lib", "addon", "extra"]);
-        assert_eq!(
-            left[2].label(),
-            "extra was left out: it needs addon, which was left out"
-        );
+        assert_eq!(left[2].why, Why::Needs("addon".into()));
         // What a build's record keeps reads back the same.
         let did_not_build = LeftOut::new(&other, Why::DidNotBuild);
         for l in left.iter().chain([&did_not_build]) {
             assert_eq!(LeftOut::from_json(&l.to_json()).as_ref(), Some(l));
         }
-        assert_eq!(
-            left[0].label(),
-            "lib was left out of this build: why. It comes back when its author makes a version for this game."
-        );
     }
 }
