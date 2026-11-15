@@ -526,7 +526,7 @@ pub const COMMANDS: &[Cmd] = &[
     cmd!("chat", Screens, "chat TEXT", "send a chat line (or a /command) as if typed", "", ["horizon-ctl chat hello"],
         &[p("text", Ty::Rest, "message")], mcp: true, local: false),
     cmd!("command", Screens, "command TEXT", "run a command (the leading / is optional)",
-        "Replies ok (the request was delivered, whatever the command did), chat (its feedback lines) and, in a world you host or run alone, success (the command succeeded) and result (its integer result, null when it never ran: a syntax error or an unknown command), as `execute store success|result` sees them. A server you joined answers in the chat only: no success, no result.",
+        "Replies ok (the request was delivered, whatever the command did), chat (its feedback lines) and, in a world you host or run alone, success (any run of the command succeeded: an execute that forks counts once per fork) and result (its integer result, the last fork's), as `execute store success|result` sees them. success is false and result null when the command never ran (a syntax error, an unknown command, an execute forking to no target, a line the game refuses, no world served or the owner not placed yet); ok stays true. A client mod's command gives only ok and chat, and a server you joined answers in the chat only.",
         ["horizon-ctl command time set day", "horizon-ctl command /give @s oak_log 4"], &[p("command", Ty::Rest, "command line")], mcp: true, local: false),
     cmd!("respawn", Screens, "respawn", "respawn from the death screen", "", ["horizon-ctl respawn"], &[], mcp: true, local: false),
     cmd!("pause", Screens, "pause", "open the pause menu", "", ["horizon-ctl pause"], &[], mcp: true, local: false),

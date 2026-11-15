@@ -203,11 +203,12 @@ pub(super) fn yaw_pitch(eye: [f64; 3], at: [f64; 3]) -> (f32, f32) {
     )
 }
 
-/// The reply of `command` when the game ran it: `ok` (the request was
-/// delivered), its feedback lines and, from the command's own result callback
-/// (`recording_command_outcome`), `success` and `result`. None when the command
-/// never reached a callback (syntax error, unknown command): `success` is
-/// false and `result` null.
+/// The reply of `command` in a world you host or run alone: `ok` (the request
+/// was delivered), its feedback lines and, from the command's result callbacks
+/// (`recording_command_outcome`), `success` (any fork succeeded) and `result`
+/// (the last fork's). None when no callback ran (a syntax error, an unknown
+/// command, nothing served, a line refused before it ran): `success` is false
+/// and `result` null.
 fn command_reply(chat: Vec<String>, outcome: Option<(bool, i32)>) -> Value {
     let (success, result) = outcome.map_or((false, None), |(s, r)| (s, Some(r)));
     json!({ "ok": true, "chat": chat, "success": success, "result": result })
@@ -2499,9 +2500,10 @@ mod tests {
     #[test]
     fn command_reply_carries_the_commands_own_outcome() {
         let chat = || vec!["Gave 4 Oak Log".to_owned()];
+        // `/give @s oak_log 4` returns the number of targets, 1.
         assert_eq!(
-            command_reply(chat(), Some((true, 4))),
-            json!({"ok": true, "chat": ["Gave 4 Oak Log"], "success": true, "result": 4})
+            command_reply(chat(), Some((true, 1))),
+            json!({"ok": true, "chat": ["Gave 4 Oak Log"], "success": true, "result": 1})
         );
         // `/clear` of nothing: the command ran and failed, with result 0.
         assert_eq!(
