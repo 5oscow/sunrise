@@ -142,9 +142,13 @@ impl QueuedWriter {
     pub(crate) fn prepare_packet(
         &self,
         body: Vec<u8>,
+        expected_generation: Option<u64>,
     ) -> std::result::Result<PreparedPacket, SendPacketError> {
-        let (generation, protocol) = *self.phase.lock().unwrap();
-        if protocol != Phase::Play {
+        let phase = self.phase.lock().unwrap();
+        let (generation, protocol) = *phase;
+        if protocol != Phase::Play
+            || expected_generation.is_some_and(|expected| expected != generation)
+        {
             return Err(SendPacketError::NotInPlay);
         }
         // Legacy adapters are stateful. Their FIFO worker must translate only

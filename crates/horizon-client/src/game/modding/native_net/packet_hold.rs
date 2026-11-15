@@ -68,7 +68,17 @@ impl Holds {
         self.overflowed.insert(*id);
         let mut packets = self.active.take().unwrap().1;
         packets.push(body);
-        Self::publish(packets, send)
+        let result = Self::publish(packets, send);
+        if matches!(
+            &result,
+            Err(HoldError::Send {
+                error: SendPacketError::NotInPlay | SendPacketError::NotConnected,
+                ..
+            })
+        ) {
+            self.clear();
+        }
+        result
     }
     // Send refusal policy: discard the tail and report the published prefix.
     fn publish(
@@ -97,14 +107,17 @@ impl Game<'_> {
         holds.start()
     }
     pub(in crate::game) fn release_held(&mut self, hold: HoldId) -> Result<usize, HoldError> {
-        let packets = {
+        let (incarnation, packets) = {
             let mut holds = self.native_net.holds.borrow_mut();
             holds.sync(self.hold_incarnation());
-            holds.take(hold)?
+            let packets = holds.take(hold)?;
+            (holds.incarnation.ok_or(HoldError::Unknown)?, packets)
         };
         let count = packets.len();
         let remote = self.remote.as_ref().ok_or(HoldError::Unknown)?;
-        Holds::publish(packets, |body| remote.session.send_held_body(body))?;
+        Holds::publish(packets, |body| {
+            remote.session.send_held_body(body, incarnation)
+        })?;
         Ok(count)
     }
     pub(in crate::game) fn drop_held(&mut self, hold: HoldId) -> Result<(), HoldError> {
@@ -122,8 +135,11 @@ impl Game<'_> {
             remote.session.send(packet);
             return;
         }
+        let incarnation = holds.incarnation.expect("active hold has an incarnation");
         if let Ok(body) = packet.try_encode() {
-            let _ = holds.queue(body, |body| remote.session.send_held_body(body));
+            let _ = holds.queue(body, |body| {
+                remote.session.send_held_body(body, incarnation)
+            });
         }
     }
     pub(in crate::game) fn publish_mod_held(
@@ -153,7 +169,10 @@ impl Game<'_> {
         let mut body = Writer::new();
         body.varint(id as i32);
         body.bytes(&packet.body);
-        let _ = holds.queue(body.data, |body| remote.session.send_held_body(body));
+        let incarnation = holds.incarnation.expect("active hold has an incarnation");
+        let _ = holds.queue(body.data, |body| {
+            remote.session.send_held_body(body, incarnation)
+        });
     }
 }
 impl Game<'_> {

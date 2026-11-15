@@ -495,7 +495,7 @@ impl Session {
             .as_ref()
             .cloned()
             .ok_or(SendPacketError::NotConnected)?;
-        writer.prepare_packet(encoded.data)
+        writer.prepare_packet(encoded.data, None)
     }
     /// The frozen receiving turn, retaining every input credit through its actor.
     #[horizon_mod_api_macros::replaceable]

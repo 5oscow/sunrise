@@ -250,3 +250,51 @@ fn second_hold_returns_literal_limit_and_first_releases_a_b_c_in_order() {
     );
     assert_eq!(sent, [b"A".to_vec(), b"B".to_vec(), b"C".to_vec()]);
 }
+
+#[test]
+#[ignore = "daily"]
+fn generation_change_after_a_drops_b_and_invalidates_the_hold() {
+    use horizon_protocol::packets::configuration::Ping;
+    let (session, mut peer, _keepalive) = horizon_client::net::Session::packet_hold_probe();
+    let incarnation = session.hold_incarnation().unwrap();
+    let mut h = Holds::default();
+    h.sync(Some(incarnation));
+    let id = h.start().unwrap();
+    for value in [65, 66] {
+        h.queue(S::Pong(Ping { id: value }).try_encode().unwrap(), |_| {
+            panic!("held packet sent")
+        })
+        .unwrap();
+    }
+    let mut published = 0;
+    let result = Holds::publish(h.take(id).unwrap(), |body| {
+        session.send_held_body(body, incarnation)?;
+        published += 1;
+        if published == 1 {
+            session.packet_hold_rollover();
+        }
+        Ok(())
+    });
+    assert_eq!(
+        result,
+        Err(HoldError::Send {
+            sent: 1,
+            error: SendPacketError::NotInPlay
+        })
+    );
+    assert_eq!(published, 1);
+    assert_eq!(
+        peer.recv().unwrap(),
+        (
+            horizon_protocol::ids::play::serverbound::PONG,
+            vec![0, 0, 0, 65]
+        )
+    );
+    assert_eq!(peer.recv().unwrap(), (3, vec![]));
+    assert_eq!(peer.recv().unwrap(), (3, vec![]));
+    peer.reader
+        .set_read_timeout(Some(std::time::Duration::from_millis(20)))
+        .unwrap();
+    assert!(peer.recv().is_err(), "B must not reach the new Play phase");
+    assert_eq!(h.take(id), Err(HoldError::Unknown));
+}

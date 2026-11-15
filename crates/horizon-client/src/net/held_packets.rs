@@ -48,12 +48,18 @@ impl Session {
     pub fn send_held_body(
         &self,
         body: Vec<u8>,
+        incarnation: (u64, u64),
     ) -> std::result::Result<(), mod_api::SendPacketError> {
+        if self.serial() != incarnation.0 {
+            return Err(mod_api::SendPacketError::NotConnected);
+        }
         let writer = self.writer.lock().unwrap();
         let writer = writer
             .as_ref()
             .ok_or(mod_api::SendPacketError::NotConnected)?;
-        writer.prepare_packet(body)?.try_publish()
+        writer
+            .prepare_packet(body, Some(incarnation.1))?
+            .try_publish()
     }
 }
 
@@ -80,5 +86,20 @@ impl Session {
                 .send(&play::Serverbound::KeepAlive(cfg::KeepAlive { id }).encode())
                 .unwrap();
         })
+    }
+}
+
+#[cfg(feature = "test-payload-probe")]
+impl Session {
+    /// Complete a protocol round trip for deterministic hold race tests.
+    #[doc(hidden)]
+    pub fn packet_hold_rollover(&self) {
+        use horizon_protocol::payload_negotiation::Phase;
+        let writer = self.writer.lock().unwrap();
+        let writer = writer.as_ref().unwrap();
+        writer
+            .transition_protocol(Phase::Configuration, &[3])
+            .unwrap();
+        writer.transition_protocol(Phase::Play, &[3]).unwrap();
     }
 }
