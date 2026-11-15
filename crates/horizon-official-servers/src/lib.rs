@@ -69,7 +69,13 @@ fn address_key(ip: &str) -> Option<(String, u16)> {
 /// When it moved (the marker names another address), the entries for its
 /// earlier addresses move to the new one, once (`move_official`).
 pub fn add_official_server(game_dir: &Path) -> std::io::Result<()> {
-    let (name, address) = OFFICIAL_SERVER;
+    add_server(game_dir, OFFICIAL_SERVER)
+}
+
+fn add_server(game_dir: &Path, (name, address): (&str, &str)) -> std::io::Result<()> {
+    if address.is_empty() {
+        return Ok(());
+    }
     let marker = game_dir.join(OFFICIAL_MARKER);
     // A marker that is there but can't be read: offered already, at an address not known.
     let offered = match std::fs::read_to_string(&marker) {
@@ -161,6 +167,20 @@ fn move_official(list: &mut Vec<ServerEntry>, address: &str, previous: &[&str]) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const OFFICIAL_SERVER: (&str, &str) = ("Test server", "play.playhorizon.dev");
+
+    fn add_official_server(dir: &Path) -> std::io::Result<()> {
+        add_server(dir, OFFICIAL_SERVER)
+    }
+
+    #[test]
+    fn an_unconfigured_server_does_not_touch_the_players_list() {
+        let dir = std::env::temp_dir().join(format!("sunrise-no-server-{}", std::process::id()));
+        assert!(!dir.exists());
+        add_server(&dir, ("", "")).unwrap();
+        assert!(!dir.exists());
+    }
 
     #[test]
     fn the_official_server_is_added_once_at_the_top() {

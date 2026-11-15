@@ -26,6 +26,7 @@ fn client_and_server_layouts_require_and_ship_std() {
         "crates/horizon-prepare/fixture",
         "research-lock.json",
         "LICENSE",
+        "LICENSES/MIT-Horizon.txt",
         "packaging/PLAY.txt",
         "exporters/manifest.json",
     ] {
@@ -107,6 +108,9 @@ fn client_and_server_layouts_require_and_ship_std() {
                 b"program"
             );
             assert!(out.join("exporters/manifest.json").is_file());
+            for notice in ["LICENSE", "LICENSES/MIT-Horizon.txt"] {
+                assert_eq!(fs::read(out.join(notice)).unwrap(), b"fixture");
+            }
             fs::remove_file(source.join("horizon-wasm-std.wasm")).unwrap();
         }
     }
