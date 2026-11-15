@@ -64,15 +64,13 @@ Everything below is in the current release.
 
 ## Download
 
-Get **the Sunrise launcher** from [playsunrise.net](https://playsunrise.net):
+Get **the Sunrise launcher** from [playsunrise.net/download](https://playsunrise.net/download), or from the newest `launcher@` release on [GitHub](https://github.com/sunrise-org/sunrise/releases?q=launcher&expanded=true):
 
 | Platform | File | Needs |
 | --- | --- | --- |
-| Windows x64 | `horizon-launcher-setup.exe` | Windows 10 or 11, a GPU with Vulkan or DirectX 12 |
-| Windows on Arm | `horizon-launcher-setup-arm64.exe` | Windows 11 on Arm |
-| macOS, Apple Silicon | `horizon-launcher-macos-arm64.dmg` | macOS 12 or later |
-| macOS, Intel | `horizon-launcher-macos-x64.dmg` | macOS 12 or later |
-| Linux x86-64 | `horizon-launcher-linux-x86_64.AppImage` or `.tar.gz` | a glibc distribution, X11 or Wayland, a GPU with Vulkan or OpenGL 3.3 |
+| Windows x64 | `sunrise-launcher-setup.exe` | Windows 10 or 11, a GPU with Vulkan or DirectX 12 |
+| macOS, Apple Silicon | `sunrise-launcher-macos-arm64.dmg` | macOS 12 or later; signed ad hoc, not notarized |
+| Linux x86-64 | `sunrise-launcher-linux-x86_64.AppImage` or `.tar.gz` | a glibc distribution, X11 or Wayland, a GPU with Vulkan or OpenGL 3.3 |
 
 **You also need a Microsoft account that owns Minecraft: Java Edition.** You sign in with it in the launcher, which plays only with an account that owns the game ([why](docs/microsoft-account.md)). Sunrise contains no Minecraft code or assets: an existing install (official launcher, Prism, MultiMC...) is reused, and without one the launcher downloads 26.3 from Mojang for your account. Step by step: [Install and first launch](https://playsunrise.net/docs/install).
 
