@@ -276,6 +276,7 @@ pub(super) fn potion_cloud_to_nbt(c: &Breath, uuid: [i32; 4], raw: Option<&Tag>)
     tag
 }
 
+pub(in crate::game) use cloud_particle::particle_options;
 /// An entity a cloud has affected (`AreaEffectCloud.victims`).
 #[derive(Clone, Copy, PartialEq)]
 pub(super) enum Victim {
@@ -425,17 +426,18 @@ fn splash_distance_sqr(at: Vec3, age: u32, bounds: Aabb) -> Option<f64> {
 impl Game<'_> {
     /// `LivingEntity.triggerOnDeathMobEffects` (`onMobRemoved` with the reason
     /// KILLED) for what Oozing, Weaving and Wind Charged do when their bearer
-    /// dies. `bearer` is the dying mob's id, `player` whether it is a player,
-    /// `random` the dying mob's own (`mob.getRandom()`; the world's for the
-    /// player).
+    /// dies. `bearer` is the dying mob's id, none when a player dies; `silent`
+    /// whether that source is heard, and `random` the dying mob's own
+    /// (`mob.getRandom()`; the world's for the player).
     pub(super) fn effects_on_death(
         &mut self,
         effects: &[&str],
         bounds: Aabb,
-        player: bool,
+        silent: bool,
         bearer: Option<u32>,
         mut random: Option<&mut LegacyRandom>,
     ) {
+        let player = bearer.is_none();
         let feet = bounds.bottom_center();
         if effects.contains(&"oozing") {
             // OozingMobEffect.numberOfSlimesToSpawn: two, fewer when the
@@ -498,7 +500,12 @@ impl Game<'_> {
                 source: bearer,
                 owner: bearer,
             };
-            let _ = self.wind_burst(center, radius, 1.0, false, false, cause);
+            let _ = self.wind_burst(
+                center,
+                radius,
+                1.0,
+                super::wind::Source::wind_charged(player, silent).with_cause(cause),
+            );
         }
     }
     /// `WeavingMobEffect.spawnCobwebsRandomlyAround`: two or three cobwebs in
@@ -1204,7 +1211,7 @@ impl Game<'_> {
             let ids: Vec<&'static str> = self.potions.effects.list.iter().map(|e| e.id).collect();
             self.potions.effects.clear();
             if !ids.is_empty() {
-                self.effects_on_death(&ids, bounds, true, None, None);
+                self.effects_on_death(&ids, bounds, self.player_silent(), None, None);
             }
         }
         // The omens act from inside the effect tick (BadOmenMobEffect,
@@ -1848,9 +1855,19 @@ impl Game<'_> {
     /// simulation as lingering potions, with their own timing and potion data.
     /// The caller retains their UUID and original compound for command queries.
     pub(super) fn load_potion_cloud(&mut self, tag: &Tag) -> Option<u32> {
+        self.load_potion_cloud_transferred(tag, None)
+    }
+    pub(super) fn load_potion_cloud_transferred(
+        &mut self,
+        tag: &Tag,
+        transferred: Option<super::entity_initialization::TransferredEntityState>,
+    ) -> Option<u32> {
         let (_, mut cloud) = potion_cloud_from_nbt(tag)?;
         let id = self.take_entity_id();
         cloud.id = id;
+        if let Some(state) = transferred {
+            self.adopt_transferred_entity_state(id, state);
+        }
         self.breath_clouds.push(cloud);
         Some(id)
     }
@@ -2746,7 +2763,7 @@ mod tests {
     use super::*;
     use horizon_client::{motion::PlayerMotion, screen_effects::nausea_blend_added};
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn lifecycle_cloud_commands_and_parked_owners() {
         super::super::entity::taken_pass_tests::LifecycleFixture {
             seed: |game, entries| {
@@ -2768,13 +2785,13 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn taken_breath_tick_keeps_both_spawns_before_survivors() {
         cloud_spawns_during_pass(false);
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn taken_potion_tick_keeps_both_spawns_before_survivors() {
         cloud_spawns_during_pass(true);
     }
@@ -2823,7 +2840,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn residency_cloud_load_expiry_bottling_and_late_ids() {
         crate::game::native_entity_refs::tests::with_game(|game| {
             game.breath_clouds.clear();
@@ -2919,7 +2936,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn mod_tick_heals_and_feeds_player() {
         // Mod effects are frozen process-wide: another fixture may have registered first.
         if super::super::native_entity_refs::tests::run_fresh_cases(
@@ -2948,7 +2965,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn mod_tick_magic_respects_player_hit_frames() {
         // Mod effects are frozen process-wide: another fixture may have registered first.
         if super::super::native_entity_refs::tests::run_fresh_cases(
@@ -2971,7 +2988,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn mod_tick_kills_mob_through_death_and_drops() {
         // Mod effects are frozen process-wide: another fixture may have registered first.
         if super::super::native_entity_refs::tests::run_fresh_cases(
@@ -3017,7 +3034,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn mod_tick_sees_prior_regeneration() {
         // Mod effects are frozen process-wide: another fixture may have registered first.
         if super::super::native_entity_refs::tests::run_fresh_cases(
@@ -3453,7 +3470,7 @@ mod tests {
     /// Real panel painting/hover selection dispatches even for a fully visible
     /// widget. Both inventories retain vanilla lines, suppression and layout rules.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_mod_adds_a_line_to_an_effect_tooltip() {
         use mod_api::{self, ClientHost, GatherEffectScreenTooltipsEvent, Hooks, ModEntry, Mods};
         use std::sync::{
@@ -3686,7 +3703,7 @@ mod sound_on_added_tests {
     /// Omen and Raid Omen sound once when they are new on the player, at its
     /// feet; a renewal and any other effect are silent (#11373).
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_new_omen_sounds_once_at_the_feet() {
         super::super::native_entity_refs::tests::with_game(|game| {
             game.player = Some(
@@ -3735,7 +3752,7 @@ mod xp_bottle_tests {
     /// orb starts 0.25 out from the face it hit, or back along the bottle's
     /// motion after an entity hit, moving that way (#11388).
     #[test]
-    #[ignore = "needs prepared resources (HORIZON_TEST_RESOURCES)"]
+    #[ignore = "daily"]
     fn bottle_orbs_start_away_from_what_it_hit() {
         super::super::native_entity_refs::tests::with_game(|game| {
             let bottle = ItemStack::new("minecraft:experience_bottle", 1);
@@ -3858,7 +3875,7 @@ mod mob_absorption_max_tests {
     /// clamped to the maximum left (LivingEntity.onAttributeUpdated), so a
     /// base-20 mob keeps it and a base-0 one loses it.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and a scratch HORIZON_HOME"]
+    #[ignore = "daily"]
     fn absorption_follows_the_max_absorption_it_adds_and_leaves() {
         with_game(|game| {
             // name, UUID word, base max_absorption, amplifier, duration seconds
@@ -4033,7 +4050,7 @@ mod mob_health_boost_tests {
     /// tick; removing the effect (`/effect clear`, or running out) clamps
     /// Health to the maximum without it (LivingEntity.onAttributeUpdated).
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and a scratch HORIZON_HOME"]
+    #[ignore = "daily"]
     fn health_boost_heals_to_its_maximum_and_clamps_when_it_goes() {
         with_game(|game| {
             // name, UUID word, Health, setup
@@ -4135,7 +4152,7 @@ mod mob_health_boost_tests {
     /// parity corpus. Taming still owns the wolf's cached maximum outside the
     /// model; that maximum and its current health remain unchanged.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and a scratch HORIZON_HOME"]
+    #[ignore = "daily"]
     fn health_boost_adds_to_size_attributes_and_keeps_the_tame_maximum() {
         with_game(|game| {
             // tag, UUID word, summon, amplifier
@@ -4144,9 +4161,9 @@ mod mob_health_boost_tests {
                 ("h205_cube", 20, "sulfur_cube 4.5 200 8.5 {Size:2", 1),
                 // size 5: attribute base and cache 20; Health Boost II adds 8
                 ("h205_cube_equal", 22, "sulfur_cube 6.5 200 8.5 {Size:4", 1),
-                // tame: cache 40, model 8; Health Boost II
+                // tame: max-health base 40; Health Boost II adds 8
                 ("h205_wolf", 21, "wolf 8.5 200 8.5 {", 1),
-                // tame: Health Boost VIII (+32) makes the model 40 = the cache
+                // tame: Health Boost VIII adds 32 to the tame base
                 ("h205_wolf_equal", 23, "wolf 10.5 200 8.5 {", 7),
             ];
             let mut ids = Vec::new();
@@ -4183,18 +4200,18 @@ mod mob_health_boost_tests {
             }
             assert_eq!(
                 horizon_client::mobs::finalize::max_health(&game.mobs[ids[3]]),
-                40.0,
-                "the coincidence: the boosted model equals the tame cache"
+                72.0,
+                "health boost adds to the tamed wolf's attribute base"
             );
             assert_eq!(
                 state(game),
                 [
                     (20.0, before[0].1),
                     (28.0, before[1].1),
-                    (40.0, before[2].1),
-                    (40.0, before[3].1),
+                    (48.0, before[2].1),
+                    (72.0, before[3].1),
                 ],
-                "size attributes gain the modifier without healing; tame caches keep their owner"
+                "size and tame attributes gain the modifier without healing"
             );
             for (tag, _, _, _) in cases {
                 assert!(game.run_command(&format!(
@@ -4285,7 +4302,7 @@ mod depleted_absorption_tests {
     /// MobEffectInstance.tickServer drops the effect on the mob's next tick,
     /// before the duration counts down; with any amount left it stays.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and a scratch HORIZON_HOME"]
+    #[ignore = "daily"]
     fn a_mob_loses_absorption_on_the_tick_after_it_is_used_up() {
         with_game(|game| {
             // name, UUID word, extra NBT, effect, hit
@@ -4390,7 +4407,7 @@ mod depleted_absorption_tests {
     /// Absorption goes, an unused one stays infinite, and another infinite
     /// effect is untouched.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and a scratch HORIZON_HOME"]
+    #[ignore = "daily"]
     fn infinite_absorption_goes_only_once_used_up() {
         with_game(|game| {
             // name, UUID word, infinite effects, hit

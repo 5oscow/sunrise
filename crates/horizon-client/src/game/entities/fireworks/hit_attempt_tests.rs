@@ -45,7 +45,7 @@ fn fresh_player(game: &mut Game<'_>, mode: GameMode) {
 }
 
 #[test]
-#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn remaining_hit_callers_observe_refusals_and_zero_damage() {
     let count = Arc::new(AtomicUsize::new(0));
     let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
@@ -232,6 +232,7 @@ fn remaining_hit_callers_observe_refusals_and_zero_damage() {
                     max_players: 20,
                     integrated: false,
                     levels: Default::default(),
+                    level_seeds: Default::default(),
                 },
             )
             .unwrap();

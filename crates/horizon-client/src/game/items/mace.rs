@@ -332,6 +332,7 @@ impl Game<'_> {
         let old_health = self.mobs[index].health;
         // The causing entity's aim, for what turns a blow by where it points
         // (`SulfurCube.knockback`).
+        self.mobs[index].creative_attacker = self.creative;
         self.mobs[index].attacker_aim = aim;
         self.mobs[index].dealt_absorbed = 0;
         let hurt = self.mobs[index].damage_with(
@@ -341,6 +342,7 @@ impl Game<'_> {
             Some(&mut breach),
         );
         self.mobs[index].attacker_aim = None;
+        self.mobs[index].creative_attacker = false;
         // `Guardian.hurtServer`'s spikes answer the attacker inside the hurt,
         // before `super.hurtServer` returns: those hits land here, where
         // `Who::Player` is the player whose blow this is. Left in the outbox,
@@ -835,7 +837,7 @@ mod tests {
     /// multiplies the wear by 5 makes it 5, one that halves it leaves 0 (the item stays whole), one
     /// that cancels it none; an iron sword without a part wears as vanilla.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES; process-wide parts, run this test alone"]
+    #[ignore = "daily"]
     fn a_damage_item_part_changes_the_wear_of_a_weapon_hit() {
         use crate::game::damage_item_tests::{Rule, with_wear_part};
         with_wear_part("minecraft:mace", Rule::Times(5), |game, wear| {

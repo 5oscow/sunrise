@@ -243,7 +243,7 @@ impl Game<'_> {
         self.native_data_pack_files(&mut contributed);
         let files = functions::overlay_files(stack, contributed);
         let inventory = horizon_mod_package::enabled::EnabledMods::read(root)?;
-        let conditions = self.registered_load_conditions(&inventory)?;
+        let conditions = self.registered_load_conditions(&inventory, stack, root, &files)?;
         let overlay = horizon_world::loot::PackOverlay {
             conditions: &conditions,
             files: &files,
@@ -270,6 +270,19 @@ impl Game<'_> {
         // Item damage predicates use the same frozen registry as player hurt.
         Arc::make_mut(&mut items.enchantments).bind_damage_catalog(&health.damage);
         items.bind_component_damage_catalog(&health.damage);
+        // Tag files are read before their tags are bound, so the tag readers below keep the
+        // context without tags: there `neoforge:tag_empty` is unsupported, never answered from a
+        // part of this load's tags.
+        let tag_files = horizon_world::loot::PackOverlay {
+            conditions: &conditions,
+            files: &files,
+        };
+        // The other tables read from here on see this load's bound tags (`neoforge:tag_empty`).
+        let conditions = conditions.with_tags(items.bound_tags());
+        let overlay = horizon_world::loot::PackOverlay {
+            conditions: &conditions,
+            files: &files,
+        };
         // The recipe tables, the stations and the recipe book read one folder:
         // hold its files so it is read once.
         let _recipe_files = horizon_client::json_folder::read(&root.join("data/minecraft/recipe"));
@@ -297,8 +310,11 @@ impl Game<'_> {
         // the registries they list.
         // Resolve membership against the very generation that will be published.
         // In particular, generation exhaustion refuses preparation before any state changes.
-        let datapack_registries = self
-            .datapack_candidate(stack, &conditions)?
+        let mut datapack_candidate = self.datapack_candidate(stack, &conditions)?;
+        if let Some(candidate) = &mut datapack_candidate {
+            native_registry_entries::bind_datapack_tags(root, &tag_files, candidate)?;
+        }
+        let datapack_registries = datapack_candidate
             .map(
                 |candidate| match self.mods.datapack_registries.as_ref().filter(|_| reload) {
                     Some(old) => old
@@ -348,7 +364,7 @@ impl Game<'_> {
             .collect::<std::collections::BTreeSet<_>>()
             .into_iter()
             .filter_map(|registry| {
-                match horizon_client::items::load_tags(root, registry, &overlay) {
+                match horizon_client::items::load_tags(root, registry, &tag_files) {
                     Ok(tags) => Some((registry, tags)),
                     Err(e) => {
                         log::warn!("Horizon: the world's {registry} tags are not applied: {e}");
@@ -401,7 +417,14 @@ impl Game<'_> {
             },
         )?;
         let data_maps = native_data_maps::DataMaps::load(&data_map_types, &overlay, &registries)
-            .with_builtins(builtin);
+            .with_builtins(builtin)
+            .with_biome_keys(mod_api::__private::BiomeKeys::new(
+                horizon_client::datapack_net::next_session(),
+                self.world_biomes
+                    .as_ref()
+                    .unwrap_or_else(|| self.res.biomes())
+                    .registry_order(),
+            ));
         drop(registries);
         conditions.check_errors()?;
         Ok((
@@ -768,8 +791,9 @@ impl Game<'_> {
         self.resolve_enchant_particles();
         Ok(())
     }
-    /// Ask the parts of each block `isPathfindable` once per state and type: the answer depends
-    /// on nothing else, so path finding and spawning read it with no dispatch. A server also
+    /// Ask the parts of each block `isPathfindable` once per state and type, and of each item
+    /// `isPrimaryItemFor` once per enchantment: the answers depend on nothing else, so path
+    /// finding, spawning and enchantment selection read them with no dispatch. A server also
     /// publishes its parts for its world generation.
     pub(super) fn install_parts(&self, prepared: PreparedParts) {
         cauldron_interactions::install(prepared.cauldrons);
@@ -785,19 +809,27 @@ impl Game<'_> {
         mod_api::__private::install_resolved_parts(prepared.parts);
         self.resolve_block_paths();
         self.resolve_piston_reactions();
+        self.resolve_primary_items();
     }
     pub(super) fn resolve_block_paths(&self) {
         use horizon_client::mobs::data::PartAnswers;
-        use mod_api::{__private::has_scoped_hook, HookId, PathComputationType};
-        let pathfindable: &dyn Fn(BlockStateId, PathComputationType, bool) -> bool =
-            &|state, kind, mut pathfindable| {
-                self.native_is_pathfindable(state, kind, &mut pathfindable);
-                pathfindable
-            };
-        self.res.mob_data().resolve_parts(
+        use mod_api::{HookId, PathComputationType};
+        let data = self.res.mob_data();
+        let pathfindable =
+            Self::resolve_per_state(HookId::IsPathfindable, data.states.len(), |state| {
+                PathComputationType::ALL
+                    .into_iter()
+                    .filter(|&kind| {
+                        let mut pathfindable = data.block_pathfindable(state, kind);
+                        self.native_is_pathfindable(state, kind, &mut pathfindable);
+                        pathfindable
+                    })
+                    .fold(0, |bits, kind| bits | PartAnswers::pathfindable_bit(kind))
+            });
+        data.resolve_parts(
             self.res.facts(),
             &PartAnswers {
-                pathfindable: has_scoped_hook(HookId::IsPathfindable).then_some(pathfindable),
+                pathfindable: pathfindable.as_deref(),
             },
         );
     }

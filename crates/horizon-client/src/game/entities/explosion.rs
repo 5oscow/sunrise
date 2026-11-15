@@ -1101,6 +1101,16 @@ impl Game<'_> {
             let Some((entity, handle)) = next else {
                 continue;
             };
+            // A callback may discard a later original without sweeping its
+            // storage yet. Removed entities no longer receive blast callbacks.
+            // A discarded mob stays in its storage flagged removed, and its
+            // selector target is gone, so the flag is read on its own.
+            if with_entity!(self, handle, e => e.is_removed())
+                || with_entity!(self, handle, e => e.selector_target())
+                    .is_some_and(|target| self.target_removed(&target))
+            {
+                continue;
+            }
             // An entity the blast's list does not name is neither hurt nor
             // pushed; without a listener the storages are the walk.
             let hit = if with_entity!(self, handle, e => self.combat.visits(e.id())) {
@@ -1336,15 +1346,24 @@ impl Game<'_> {
     /// cause, including a TNT igniter or the player who broke an end crystal.
     pub(super) fn explosion_kill_credit(&self) -> Option<super::commands::Target> {
         use super::commands::Target;
-        // A primed TNT's owner (a player) names the blast before any mob does.
-        let player =
-            self.combat.blast_owner_player || self.combat.explicit_explosion_cause.is_some();
-        if self.combat.blast_owner.is_some() && player {
-            return Some(
+        // An explicit crystal or cart source names its own cause.
+        if let Some(Some(cause)) = &self.combat.explicit_explosion_cause {
+            return Some(if cause.player {
+                cause.guest.map_or(Target::Player, Target::Guest)
+            } else {
+                Target::Mob(cause.entity.0)
+            });
+        }
+        // A primed TNT's owner names the blast before any mob does; a mob's UUID
+        // in its `owner` is that mob, not the player in place.
+        if let Some((id, _)) = self.combat.blast_owner {
+            return Some(if self.combat.blast_owner_player {
                 self.combat
                     .blast_guest
-                    .map_or(Target::Player, Target::Guest),
-            );
+                    .map_or(Target::Player, Target::Guest)
+            } else {
+                Target::Mob(id)
+            });
         }
         if let Some((id, _)) = self.blast_attacker() {
             return Some(Target::Mob(id));
@@ -1489,7 +1508,7 @@ impl Game<'_> {
             if self.combat.visits(self.cushions[i].id)
                 && blast_reaches(center, diameter, [p.x, p.y, p.z])
             {
-                self.break_cushion_by(i, false, self.explosion_kill_credit());
+                self.break_cushion_by(i, self.explosion_kill_credit());
             } else {
                 i += 1;
             }
@@ -2219,6 +2238,10 @@ mod tests {
             let pos = [event.pos.x, event.pos.y, event.pos.z];
             self.seen.lock().unwrap().push(pos);
             assert!(event.breaker.is_none() && event.tool.is_none());
+            assert!(
+                event.breaker_entity.is_none() && event.block_entity.is_none(),
+                "a blast and an untagged break give no breaker entity or block entity"
+            );
             assert_eq!(event.drops.len(), 1);
             assert_eq!(
                 event.drops[0].stack.count(),
@@ -2254,7 +2277,7 @@ mod tests {
     /// Edits/cancel affect only the originating block, after loot modifiers, on
     /// both real caller paths; cancel also suppresses a mob break's silverfish.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and an isolated process for native mods"]
+    #[ignore = "daily"]
     fn explosion_and_mob_breaks_apply_block_drops() {
         use crate::game::native_entity_refs::tests::with_game;
         use horizon_client::mobs::MobEvent;
@@ -2470,7 +2493,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn rays_reusing_their_last_block_explode_what_each_step_did() {
         let mut resources = None;
         let mut game = crate::game::game_tests::tests::server_game(&mut resources);
@@ -2895,7 +2918,7 @@ mod shulker_lock_drop_tests {
     use horizon_core::nbt::Tag;
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and scratch homes/cwd"]
+    #[ignore = "daily"]
     fn destruction_captures_the_external_shulker_lock_before_removal() {
         let mut resources = None;
         let mut game = server_game(&mut resources);
@@ -3051,7 +3074,7 @@ mod explicit_source_tests {
     use horizon_client::{mobs::Mob, motion::PlayerMotion};
 
     #[test]
-    #[ignore = "requires prepared resources"]
+    #[ignore = "daily"]
     fn explicit_sources_keep_names_without_inventing_kill_credit() {
         crate::game::native_entity_refs::tests::with_game(|game| {
             game.world.chunks.insert(

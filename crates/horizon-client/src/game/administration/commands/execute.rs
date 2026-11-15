@@ -1,8 +1,9 @@
 //! `/execute` (ExecuteCommand): walk the parsed redirect chain, forking and
 //! filtering command sources, then run the final command once per source,
 //! reporting each result to the `store` callbacks of its source.
-use super::{Arg, Context, Dim, Game, R, Target, data::DataRef, err};
+use super::{Arg, Context, Dim, Game, R, Target, data::DataRef, err, wrap_degrees};
 use horizon_client::{command::CommandError, nbt_path::NbtPath, text::Text};
+use horizon_core::geometry::trig;
 use horizon_core::nbt::Tag;
 
 /// `CommandSourceStack` fields Horizon models: the executing entity (None for
@@ -960,12 +961,15 @@ impl Game<'_> {
     /// The highest block of a heightmap type at a column (`Level.getHeight`).
     fn heightmap_at(&self, kind: &str, x: i32, z: i32) -> i32 {
         let top = self.world.top_y();
+        let facts = self.res.facts();
         for y in (self.world.bottom_y()..top).rev() {
             let state = self.world.block(x, y, z);
-            if state == self.world.air {
+            // `Heightmap.NOT_AIR` is `!state.isAir()`, so cave air and void
+            // air are skipped as well as air.
+            if facts.is_air(state) {
                 continue;
             }
-            let facts = self.res.facts().get(state);
+            let facts = facts.get(state);
             let blocks = facts.legacy_solid || facts.fluid != horizon_client::blocks::Fluid::None;
             let leaves = self
                 .pack
@@ -1045,10 +1049,13 @@ impl Game<'_> {
         let from = self.anchor_position(&s);
         let (dx, dy, dz) = (to[0] - from[0], to[1] - from[1], to[2] - from[2]);
         let horizontal = (dx * dx + dz * dz).sqrt();
-        let pitch = (-(dy.atan2(horizontal).to_degrees())) as f32;
-        let yaw = (dz.atan2(dx).to_degrees() - 90.0) as f32;
+        // `CommandSourceStack.facing`: `Mth.atan2` times the folded
+        // `Mth.RAD_TO_DEG`, cast to float, then `Mth.wrapDegrees`. The yaw
+        // stays in -180..180, so a south-east target is -135 and not 225.
+        let pitch = wrap_degrees(-trig::atan2_degrees(dy, horizontal));
+        let yaw = wrap_degrees(trig::atan2_degrees(dz, dx) - 90.0);
         Source {
-            rot: [yaw.rem_euclid(360.0), pitch],
+            rot: [yaw, pitch],
             ..s
         }
     }
@@ -1318,6 +1325,10 @@ fn is_player_in_place(
 }
 
 #[cfg(test)]
+#[path = "execute_facing_tests.rs"]
+mod execute_facing_tests;
+
+#[cfg(test)]
 mod tests {
     use super::is_player_in_place;
     use horizon_client::lan::playerdata::ints_uuid;
@@ -1367,7 +1378,7 @@ mod passenger_relation_tests {
         assert_eq!(game.score.board.score("#s", "h150u").unwrap().value, 1);
     }
     #[test]
-    #[ignore = "needs prepared resources and scratch homes/cwd"]
+    #[ignore = "daily"]
     fn h150_actual_registered_passengers_select_direct_live_mob_and_boat_children() {
         with_game(|game| {
             game.build_registries();
@@ -1587,7 +1598,7 @@ mod terminal_fork_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn terminal_conditions_keep_the_fork_state_and_callbacks() {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();

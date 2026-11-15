@@ -88,6 +88,9 @@ pub(super) struct PackStack {
     pub(super) content: DataPack,
     pub packs: Vec<Arc<DataPack>>,
     pub enabled: Vec<String>,
+    /// The feature flags the stack was selected for: the incoming world's, also on its first
+    /// open, before `self.level` holds them (what `neoforge:feature_flags_enabled` reads).
+    pub(super) features: Vec<String>,
 }
 impl PackStack {
     /// The enabled packs in `enabled` (the selected) order, later overriding
@@ -116,6 +119,7 @@ pub(super) fn pack_stack(
         builtin,
         packs: packs.into_iter().map(Arc::new).collect(),
         enabled,
+        features: enabled_features.to_vec(),
     }
 }
 
@@ -296,7 +300,8 @@ impl Game<'_> {
         if let Some(world) = world {
             self.install_world_tables(world);
         }
-        self.apply_server_reload(prepared, &stack, enabled_features);
+        self.build_native_commands(enabled_features);
+        self.apply_server_reload(prepared, &stack);
         self.run_native_advancement_grants();
         // The schedule is the world's live `TimerQueue` `SavedData`, not pack
         // content: firing an event (`TimerQueue.tick`) and `/schedule clear`
@@ -313,18 +318,17 @@ impl Game<'_> {
     /// Macro lines are parsed
     /// only after substitution, but ordinary lines in a macro file still
     /// have to compile (`CommandFunction.fromLines`).
-    pub(super) fn admit_store(
-        &mut self,
-        mut store: DataStore,
-        stack: &PackStack,
-        enabled_features: &[String],
-    ) {
+    pub(super) fn admit_store(&mut self, mut store: DataStore, stack: &PackStack) {
         // On explicit reload the actual content tables have already refreshed.
         // The candidate's named predicates/modifiers must also be available to
         // argument codecs before any of its functions can be exposed.
         self.sync_enchantment_registries();
         // A function's `loot ... loot <id>` names the reloaded packs' tables.
         self.sync_loot_table_ids();
+        // `ReloadableServerRegistries.reload` binds the packs' tags before
+        // `ServerFunctionLibrary` compiles its functions: an item or block
+        // argument's `#tag` resolves against them.
+        self.sync_pack_tag_ids();
         let mut registries = self.ui.registries.clone();
         registries.permission = self.fns.command_level();
         registries.functions = store.functions.keys().cloned().collect();
@@ -350,10 +354,7 @@ impl Game<'_> {
                 entry.ids.clone_from(ids);
             }
         }
-        let dispatcher = horizon_client::command::vanilla::session_dispatcher(
-            &self.level.rule_registry,
-            enabled_features,
-        );
+        let dispatcher = self.function_dispatcher();
         store.functions.retain(|id, function| {
             for line in &function.lines {
                 if let datapack::FunctionLine::Command(line) = line
@@ -377,6 +378,36 @@ impl Game<'_> {
         }
         self.fns.store = store;
         self.sync_function_registries(stack);
+    }
+    /// The item and block tags the world's packs define, as `TagLoader` binds
+    /// them into the registries before the functions compile: the item and
+    /// block arguments' `#tag` and the completions read them. Recomputed from
+    /// the content tables, so a tag a pack no longer defines leaves again.
+    pub(in crate::game) fn sync_pack_tag_ids(&mut self) {
+        let tags = |ids: &std::collections::HashMap<String, std::collections::HashSet<String>>| {
+            let mut out: Vec<String> = ids
+                .keys()
+                .map(|k| horizon_client::command::args::normalize(k))
+                .collect();
+            out.sort();
+            out
+        };
+        let item_tags = tags(&self.items().item_tags);
+        let block_tags = tags(&self.items().block_tags);
+        let reg = &mut self.ui.registries;
+        reg.item_tags.clone_from(&item_tags);
+        reg.block_tags.clone_from(&block_tags);
+        // `Registries::tags` reads an exported registry's entry first. Only
+        // update one the export made: a new empty entry would also take over
+        // `Registries::ids` and hide every item id.
+        for (registry, tags) in [
+            ("minecraft:item", item_tags),
+            ("minecraft:block", block_tags),
+        ] {
+            if let Some(entry) = reg.by_registry.get_mut(registry) {
+                entry.tags = tags;
+            }
+        }
     }
     fn save_datapack_settings(&self) {
         let disabled: Vec<&String> = self
@@ -704,7 +735,7 @@ impl Game<'_> {
             return Ok(());
         }
         let level = std::mem::replace(&mut self.ui.registries.permission, self.fns.command_level());
-        let d = self.ui.dispatcher.0.clone();
+        let d = self.function_dispatcher();
         let mut out = Ok(());
         for (line, entry) in lines.iter().zip(&f.lines) {
             if matches!(entry, datapack::FunctionLine::Macro(_))
@@ -719,6 +750,12 @@ impl Game<'_> {
         }
         self.ui.registries.permission = level;
         out
+    }
+    /// The tree every function line is checked against, a plain line at load and a macro line
+    /// after substitution: the session's (live rules, enabled features and the mods' commands,
+    /// registered before functions load), as the server's own dispatcher compiles functions.
+    fn function_dispatcher(&self) -> Arc<horizon_client::command::Dispatcher> {
+        self.ui.dispatcher.0.clone()
     }
     /// The functions a `FunctionArgument` names: a function or a tag.
     pub(in crate::game) fn functions_named(&mut self, name: &str) -> R<Vec<Function>> {
@@ -1399,7 +1436,8 @@ impl Game<'_> {
         self.save_datapack_settings();
         self.fns.load_pending = true;
         self.install_world_tables(world);
-        self.apply_server_reload(prepared, &stack, &self.level.enabled_features.clone());
+        self.build_native_commands(&self.level.enabled_features.clone());
+        self.apply_server_reload(prepared, &stack);
         self.run_native_advancement_grants();
         Ok(())
     }
@@ -1425,12 +1463,17 @@ impl Game<'_> {
                 .map_err(|e| err("argument.nbt.invalid", &[&e]))?;
             horizon_client::scoreboard::tag_to_json(&tag)
         } else {
-            self.fns
-                .store
-                .predicates
-                .get(id)
-                .cloned()
-                .ok_or_else(|| err("argument.predicate.unknown", &[&id]))?
+            self.fns.store.predicates.get(id).cloned().ok_or_else(|| {
+                let id = if id.contains(':') {
+                    id.to_string()
+                } else {
+                    format!("minecraft:{id}")
+                };
+                err(
+                    "argument.resource_or_id.no_such_element",
+                    &[&id, &"minecraft:predicate"],
+                )
+            })?
         };
         let source = self.command_source.unwrap_or_else(|| self.player_source());
         let view = source.entity.map(|t| {
@@ -1455,7 +1498,7 @@ mod tests {
     use super::*;
 
     #[test]
-    #[ignore = "needs prepared resources and scratch homes/cwd"]
+    #[ignore = "daily"]
     fn first_world_open_admits_block_function() {
         crate::game::native_entity_refs::tests::with_game(|game| {
             let folder = "first-open-block-function";
@@ -1509,8 +1552,131 @@ mod tests {
         });
     }
 
+    /// #4449: the mods' commands are in the tree before functions load, from the first world open
+    /// on, so a plain line and a macro line naming one both load and run; an unknown command is
+    /// refused as before, and a command the mods stop registering is refused after a reload.
     #[test]
-    #[ignore = "needs prepared resources and scratch homes/cwd"]
+    #[ignore = "daily"]
+    fn functions_name_mod_commands_from_the_first_world_open() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, AtomicU32, Ordering},
+        };
+        struct Commands {
+            offered: Arc<AtomicBool>,
+            ran: Arc<AtomicU32>,
+        }
+        #[mod_api::__subscriptions]
+        impl mod_api::Hooks for Commands {
+            fn register_commands(
+                &self,
+                _: &mut dyn mod_api::ServerHost,
+                event: &mut mod_api::RegisterCommandsEvent<'_>,
+            ) {
+                if self.offered.load(Ordering::Relaxed) {
+                    event
+                        .commands
+                        .push(mod_api::Command::new("fnmod [n:integer]"));
+                }
+            }
+            fn run_mod_command(
+                &self,
+                _: &mut dyn mod_api::ServerHost,
+                _: &mut mod_api::RunModCommandEvent<'_>,
+            ) -> mod_api::Flow {
+                self.ran.fetch_add(1, Ordering::Relaxed);
+                mod_api::Flow::Cancel
+            }
+        }
+        let offered = Arc::new(AtomicBool::new(true));
+        let ran = Arc::new(AtomicU32::new(0));
+        let mods = vec![mod_api::ModEntry::new(
+            "fnmod",
+            Box::new(Commands {
+                offered: offered.clone(),
+                ran: ran.clone(),
+            }),
+        )];
+        mod_platform::testing::with_mods(mods.into(), || {
+            crate::game::native_entity_refs::tests::with_game(|game| {
+                let scratch = tempfile::tempdir().unwrap();
+                let folder = "functions-name-mod-commands";
+                let world = scratch.path().join(folder);
+                let pack = world.join("datapacks/fnmod");
+                let functions = pack.join("data/fnmod/function");
+                std::fs::create_dir_all(&functions).unwrap();
+                let f = horizon_core::version::DATA_PACK_FORMAT;
+                std::fs::write(
+                    pack.join("pack.mcmeta"),
+                    serde_json::json!({"pack":{
+                        "description":"Mod commands in functions", "pack_format":f.0,
+                        "min_format":[f.0,f.1], "max_format":[f.0,f.1]
+                    }})
+                    .to_string(),
+                )
+                .unwrap();
+                for (name, line) in [
+                    ("plain", "fnmod 1"),
+                    ("macro", "$fnmod $(n)"),
+                    ("unknown", "nosuchmodcommand"),
+                ] {
+                    std::fs::write(functions.join(format!("{name}.mcfunction")), line).unwrap();
+                }
+                let mut request = crate::game::world_loading::WorldRequest::new(
+                    folder,
+                    None,
+                    Some(3042),
+                    true,
+                    None,
+                    game.level.rule_registry.clone(),
+                )
+                .unwrap();
+                request.save_root = world;
+                game.load_world(request).unwrap();
+                let store = &game.fns.store;
+                assert!(
+                    store.functions.contains_key("fnmod:plain"),
+                    "{:?}",
+                    store.errors
+                );
+                assert!(
+                    store.functions.contains_key("fnmod:macro"),
+                    "{:?}",
+                    store.errors
+                );
+                assert!(!store.functions.contains_key("fnmod:unknown"));
+                let refusal = |game: &Game<'_>, id: &str| {
+                    game.fns
+                        .store
+                        .errors
+                        .iter()
+                        .find(|(f, _)| f == id)
+                        .map(|(_, e)| e.clone())
+                };
+                assert!(
+                    refusal(game, "fnmod:unknown")
+                        .unwrap()
+                        .starts_with("Invalid command \"nosuchmodcommand\": ")
+                );
+                game.ui.registries.permission = 4;
+                assert!(game.run_command("function fnmod:plain"));
+                assert!(game.run_command("function fnmod:macro {n:3}"));
+                assert_eq!(ran.load(Ordering::Relaxed), 2);
+                offered.store(false, Ordering::Relaxed);
+                let features = game.level.enabled_features.clone();
+                game.reload_datapacks(false, &features).unwrap();
+                assert!(!game.fns.store.functions.contains_key("fnmod:plain"));
+                assert!(
+                    refusal(game, "fnmod:plain")
+                        .unwrap()
+                        .starts_with("Invalid command \"fnmod 1\": ")
+                );
+            });
+        });
+    }
+
+    #[test]
+    #[ignore = "daily"]
     fn prepared_function_calls_keep_causality_and_fallback_boundaries() {
         use crate::game::native_entity_refs::tests::with_game;
         use horizon_client::motion::PlayerMotion;
@@ -1814,7 +1980,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources and scratch homes/cwd"]
+    #[ignore = "daily"]
     fn forked_function_replies_keep_task_order_and_actual_callbacks() {
         use crate::game::native_entity_refs::tests::with_game;
         use horizon_client::motion::PlayerMotion;
@@ -1995,7 +2161,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn function_frames_restore_outer_frame() {
         use crate::game::native_entity_refs::tests::with_game;
         use horizon_client::datapack::{Function, FunctionLine};
@@ -2020,7 +2186,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn refused_item_key_reload_keeps_previous_world_generation() {
         use mod_api::{Hooks, ModEntry, Registrar, RegistrationContext};
 
@@ -2114,7 +2280,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn pack_changes_publish_the_new_zip_generation_for_template_reads() {
         use std::{io::Write, path::PathBuf};
         use {
@@ -2188,7 +2354,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "daily"]
     fn world_open_loads_functions_before_first_tick() {
         use crate::game::{native_entity_refs::tests::with_game, world_loading::WorldRequest};
 
@@ -2313,7 +2479,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn function_pack_rejects_invalid_ordinary_lines_before_execution() {
         use crate::game::{Audio, Options, Settings, load_resources};
         use std::time::Instant;
@@ -2567,6 +2733,11 @@ mod tests {
         );
         let error = run(&mut game, "function h166:novar").unwrap_err();
         assert_eq!(error.key, "arguments.function.unknown");
+        let error = game.check_predicate("h166missing").unwrap_err();
+        assert_eq!(error.key, "argument.resource_or_id.no_such_element");
+        let text = error.message.plain();
+        assert!(text.contains("minecraft:h166missing"), "{text}");
+        assert!(text.contains("minecraft:predicate"), "{text}");
         // A substituted line that does not parse fails the call, so no line of
         // it runs, and the reason names the line `MacroEntry.instantiate` got.
         let error = run(&mut game, "function h166:bad {v:1}").unwrap_err();
@@ -2586,7 +2757,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn unless_function_keeps_a_fallthrough_after_running_it_once() {
         use crate::game::{Audio, Options, Settings, load_resources};
         use horizon_client::datapack::FunctionLine;
@@ -2846,7 +3017,7 @@ mod entity_score_tests {
     use horizon_core::nbt::Tag;
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn named_scores_follow_the_registered_target_holder_and_mutations() {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
@@ -2947,7 +3118,7 @@ mod entity_score_tests {
         assert_eq!(game.world.game_time, time);
     }
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn folder_metadata_rejection_reaches_actual_function_commands() {
         use crate::game::{Audio, Options, Settings, load_resources};
         use std::time::Instant;
@@ -3080,7 +3251,7 @@ mod required_tag_tests {
     use super::*;
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn real_pack_required_tag_failures_execute_no_partial_functions() {
         use crate::game::{Audio, Options, Settings, load_resources};
         use std::time::{Instant, SystemTime, UNIX_EPOCH};
@@ -3295,7 +3466,7 @@ mod required_tag_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn named_predicates_resolve_loaded_references_for_actual_sources() {
         crate::game::native_entity_refs::tests::with_game(|game| {
             game.build_registries();
@@ -3527,6 +3698,11 @@ mod required_tag_tests {
 
 #[cfg(test)]
 include!("functions/typed_state_range_tests.rs");
+
+#[cfg(test)]
+#[path = "functions/pack_tag_tests.rs"]
+mod pack_tag_tests;
+
 #[cfg(test)]
 #[path = "functions/schedule_reload_tests.rs"]
 mod schedule_reload_tests;

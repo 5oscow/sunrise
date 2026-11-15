@@ -157,8 +157,8 @@ impl Game<'_> {
                 pos: mod_api::BlockPos::new(key.0, key.1, key.2),
             });
             let mut spawn = |l: &super::natural_spawning::GameLevel,
-                             r: &SpawnerSpawn,
-                             rng: &mut LevelRandom| {
+                             rng: &mut LevelRandom,
+                             r: &SpawnerSpawn| {
                 l.game.plan_spawner_mob(l, r, source, &mut planned, rng)
             };
             spawner.server_tick(&level, &mut random, pos, &mut spawn, &mut events);
@@ -726,7 +726,7 @@ mod tests {
     /// adding no mob. At 0 the spawn runs: with nothing to spawn it calls
     /// `delay`, which draws the next delay in [MinSpawnDelay, MaxSpawnDelay).
     #[test]
-    #[ignore = "needs prepared resources (HORIZON_TEST_RESOURCES)"]
+    #[ignore = "daily"]
     fn a_running_delay_counts_down_without_drawing() {
         crate::game::native_entity_refs::tests::with_game(|game| {
             game.options.dedicated = Some(Vec::new());

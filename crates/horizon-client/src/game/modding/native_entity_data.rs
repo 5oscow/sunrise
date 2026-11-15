@@ -74,8 +74,8 @@ impl Game<'_> {
             return false;
         }
         tags.push(tag.to_owned());
-        // False, not a silent no-op, for kinds whose tags aren't stored yet
-        // (ominous item spawners, falling blocks, rockets).
+        // False, not a silent no-op, for a kind with no saved compound to
+        // write tags to (a natural leash knot).
         self.set_entity_tags(t, &tags)
     }
     /// Removes tag `tag` (`Entity.removeTag`): false when it didn't have it.
@@ -283,7 +283,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "daily"]
     fn custom_name_and_visibility_are_saved_and_load_again() {
         with_game(|game| {
             let mob = push_mob(game, 12, "minecraft:zombie");
@@ -355,7 +355,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "daily"]
     fn classification_is_the_types_category() {
         with_game(|game| {
             for (id, kind, category) in [
@@ -386,7 +386,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources and an isolated process for native mods"]
+    #[ignore = "daily"]
     fn an_entity_is_in_its_level_from_its_join_until_its_removal() {
         use mod_api::{EntityJoinLevelEvent, Flow, Hooks, Host, ServerHost};
         use std::sync::{Arc, Mutex};

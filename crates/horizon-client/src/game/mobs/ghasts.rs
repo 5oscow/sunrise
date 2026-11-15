@@ -123,7 +123,8 @@ impl Game<'_> {
             return true;
         }
         if harnessed && !sneaking {
-            // doPlayerRide.
+            // doPlayerRide: `player.startRiding(this)`, which keeps the
+            // rider's view (`ServerPlayer.startRiding`'s `Relative.ROTATION`).
             let id = self.mobs[index].id;
             if !self.native_may_board(id) {
                 return true;
@@ -133,7 +134,6 @@ impl Game<'_> {
             // addPassenger: the rider is not standing on top, so no still
             // timeout.
             self.mobs[index].extra.counter = 0;
-            self.yaw = self.mobs[index].yaw;
             self.mount.reset_jump();
             if was_empty {
                 let down = happy_ghast::goggles(true, &self.mobs[index]);
@@ -214,7 +214,7 @@ mod item_collision_tests {
     /// An item dropped onto a minecart falls through it to the floor, and one
     /// dropped onto a boat rests on the boat (`canBeCollidedWith`).
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_dropped_item_rests_on_a_boat_but_falls_through_a_minecart() {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();

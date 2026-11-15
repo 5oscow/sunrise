@@ -12,6 +12,7 @@ use horizon_client::{
 use horizon_core::nbt::Tag;
 
 mod contents;
+pub(in crate::game) mod slot_sources;
 use contents::Component;
 
 /// One addressable slot.
@@ -35,6 +36,8 @@ pub(in crate::game) enum Slot {
     /// The ender dragon's equipment (`EquipmentSlot` ordinal).
     Dragon(u32, usize),
     Frame(u32),
+    /// A dropped item's stack: `ItemEntity.getSlot(0)`, the `contents` slot.
+    Item(u32),
     /// A chest or hopper minecart's slot (`ContainerEntity.getChestVehicleSlot`).
     Cart(u32, usize),
     Block([i32; 3], usize),
@@ -93,6 +96,14 @@ fn matches_name(pattern: &str, name: &str) -> bool {
 }
 
 impl Game<'_> {
+    /// The item's default `minecraft:rarity` ("common" when it has none).
+    pub(in crate::game) fn item_rarity(&self, item: &str) -> String {
+        self.items()
+            .enchantments
+            .props
+            .get(item)
+            .map_or_else(|| "common".into(), |props| props.rarity.clone())
+    }
     fn owner_of(&mut self, ctx: &Context, prefix: &str, many: bool) -> R<Vec<Owner>> {
         let kind = ctx
             .literals
@@ -210,6 +221,16 @@ impl Game<'_> {
                     add(Slot::Frame(*id));
                 }
             }
+            // `ItemEntity.getSlot(0)`: `contents`, `container.0` and `hotbar.0`
+            // are all slot 0 (`SlotRanges`), and it holds the stack.
+            Owner::Entity(Target::Item(id)) => {
+                if matches_name(name, "contents")
+                    || matches_name(name, "container.0")
+                    || matches_name(name, "hotbar.0")
+                {
+                    add(Slot::Item(*id));
+                }
+            }
             // `getChestVehicleSlot` takes any index below `getContainerSize`.
             Owner::Entity(Target::Cart(id)) => {
                 let size = self
@@ -229,15 +250,19 @@ impl Game<'_> {
     }
     /// `ItemCommands.getSlotsFromProvider`: evaluate inline sources against
     /// the accessor's live owner. Named ranges retain their existing adapter.
-    fn command_slots(&mut self, owner: &Owner, raw: &str) -> Vec<Slot> {
-        if raw.starts_with('{') || raw.starts_with('[') {
-            let Ok((tag, _)) = horizon_core::nbt::parse_snbt(raw) else {
-                return Vec::new();
-            };
-            self.inline_slots(owner, &horizon_client::scoreboard::tag_to_json(&tag))
-        } else {
-            self.slots_named(owner, raw)
+    fn command_slots(&mut self, owner: &Owner, raw: &str) -> R<Vec<Slot>> {
+        if let Owner::Block(p) = owner
+            && self.block_container_size(*p).is_none()
+        {
+            return Err(err(
+                "commands.item.source.not_a_container",
+                &[&p[0], &p[1], &p[2]],
+            ));
         }
+        Ok(match self.resolved_slot_source(raw)? {
+            Some(source) => self.inline_slots(owner, &source),
+            None => self.slots_named(owner, raw),
+        })
     }
     /// `SlotCollection.itemCopies` / `size`: transforms apply to the
     /// collection, before a command's item predicate or item modifier.
@@ -259,7 +284,11 @@ impl Game<'_> {
                     .flat_map(|s| self.inline_slots(owner, s))
                     .collect()
             }),
-            "slot_range" => self.slots_named(owner, source["slots"].as_str().unwrap_or_default()),
+            "slot_range" => self
+                .slot_source_owner(owner, source)
+                .map_or_else(Vec::new, |owner| {
+                    self.slots_named(&owner, source["slots"].as_str().unwrap_or_default())
+                }),
             "contents" => {
                 let Some(component) = source["component"].as_str().and_then(Component::named)
                 else {
@@ -273,7 +302,7 @@ impl Game<'_> {
             }
             "limit_slots" => {
                 let mut slots = self.inline_slots(owner, &source["slot_source"]);
-                slots.truncate(source["limit"].as_u64().unwrap_or(0) as usize);
+                slots.truncate(slot_sources::limit(source));
                 slots
             }
             "filtered" => {
@@ -296,25 +325,29 @@ impl Game<'_> {
     /// live stack when visited. Limits share the command's TrackingSelector
     /// count across owners and group terms, and count selected empty slots
     /// only for replacement (not modification).
-    fn command_slot_candidates(&mut self, owner: &Owner, raw: &str) -> Vec<SlotCandidate> {
-        let source = horizon_core::nbt::parse_snbt(raw)
-            .ok()
-            .map(|(tag, _)| horizon_client::scoreboard::tag_to_json(&tag));
-        if raw.starts_with('{') || raw.starts_with('[') {
+    fn command_slot_candidates(&mut self, owner: &Owner, raw: &str) -> R<Vec<SlotCandidate>> {
+        if let Owner::Block(p) = owner
+            && self.block_container_size(*p).is_none()
+        {
+            return Err(err(
+                "commands.item.target.not_a_container",
+                &[&p[0], &p[1], &p[2]],
+            ));
+        }
+        if let Some(source) = self.resolved_slot_source(raw)? {
             let mut out = Vec::new();
-            if let Some(source) = source {
-                self.slot_candidates(owner, &source, &[], usize::MAX, &mut out);
-            }
-            out
+            self.slot_candidates(owner, &source, &[], usize::MAX, &mut out);
+            Ok(out)
         } else {
-            self.slots_named(owner, raw)
+            Ok(self
+                .slots_named(owner, raw)
                 .into_iter()
                 .map(|slot| SlotCandidate {
                     slot,
                     filters: Vec::new(),
                     limit: usize::MAX,
                 })
-                .collect()
+                .collect())
         }
     }
     /// `CompositeSlotSource.provide` and `TransformedSlotSource.provide`:
@@ -346,7 +379,10 @@ impl Game<'_> {
                 }
             }
             "slot_range" => {
-                for slot in self.slots_named(owner, source["slots"].as_str().unwrap_or_default()) {
+                let Some(owner) = self.slot_source_owner(owner, source) else {
+                    return;
+                };
+                for slot in self.slots_named(&owner, source["slots"].as_str().unwrap_or_default()) {
                     out.push(SlotCandidate {
                         slot,
                         filters: filters.to_vec(),
@@ -374,7 +410,7 @@ impl Game<'_> {
                 owner,
                 &source["slot_source"],
                 filters,
-                limit.min(source["limit"].as_u64().unwrap_or(0) as usize),
+                limit.min(slot_sources::limit(source)),
                 out,
             ),
             _ => {}
@@ -427,6 +463,12 @@ impl Game<'_> {
                 .equipment
                 .get(*i)
                 .cloned(),
+            Slot::Item(id) => self
+                .dropped
+                .iter()
+                .find(|e| e.id == *id)
+                .map(|e| e.stack.clone())
+                .filter(|s| &*s.item != "minecraft:air" && s.count > 0),
             Slot::Dragon(id, i) => self
                 .dragon
                 .as_ref()
@@ -478,6 +520,9 @@ impl Game<'_> {
                 .is_some_and(|m| m.contains(&*s.item))
         });
         let recipes = world_recipes!(self);
+        // `ChiseledBookShelfBlockEntity.setItem`: the slot written is the one
+        // `updateState` takes, even when its occupancy does not change.
+        let mut shelf_slot = None;
         match self.world.block_entities.get_mut(&key) {
             Some(BlockEntity::Furnace(f)) if i == 0 => {
                 f.set_input(&self.loop_context, recipes, stack)
@@ -488,6 +533,15 @@ impl Game<'_> {
                 return true;
             }
             Some(BlockEntity::ChiseledBookshelf(_)) if !book => return true,
+            Some(BlockEntity::ChiseledBookshelf(b)) => {
+                // A book put in, or a stack taken out: `removeItem` only
+                // updates the state when it found something.
+                let had_book = b.items[i].is_some();
+                b.items[i] = stack;
+                if had_book || b.items[i].is_some() {
+                    shelf_slot = Some(i);
+                }
+            }
             Some(BlockEntity::Jukebox(_)) => {
                 self.jukebox_set_item(p, stack);
                 return true;
@@ -504,6 +558,9 @@ impl Game<'_> {
             }
             Some(entity) => entity.slots_mut()[i] = stack,
             None => return false,
+        }
+        if let Some(slot) = shelf_slot {
+            self.chiseled_bookshelf_update_state(p, slot);
         }
         self.container_changed(key);
         true
@@ -735,6 +792,17 @@ impl Game<'_> {
                 .as_mut()
                 .filter(|d| d.id == *id)
                 .is_some_and(|d| d.equipment.set(*i, stack)),
+            Slot::Item(id) => match self.dropped.iter_mut().find(|e| e.id == *id) {
+                Some(entity) => {
+                    // `ItemEntity.setItem`: the stack is the entity's.
+                    match stack.filter(|s| &*s.item != "minecraft:air" && s.count > 0) {
+                        Some(stack) => entity.stack = stack,
+                        None => entity.stack = ItemStack::new("minecraft:air", 0),
+                    }
+                    true
+                }
+                None => false,
+            },
             Slot::Frame(id) => match self.item_frames.iter().position(|f| f.id == *id) {
                 Some(i) => {
                     self.set_frame_item(i, stack);
@@ -1185,7 +1253,12 @@ impl Game<'_> {
             .item_modifiers
             .get(&id)
             .cloned()
-            .ok_or_else(|| err("argument.item_modifier.unknown", &[&id]))
+            .ok_or_else(|| {
+                err(
+                    "argument.resource_or_id.no_such_element",
+                    &[&id, &"minecraft:item_modifier"],
+                )
+            })
     }
     /// `/item modify (entity|block) <target> <slot> <modifier>`.
     pub(super) fn cmd_item_modify(&mut self, ctx: &Context) -> R<i32> {
@@ -1203,7 +1276,7 @@ impl Game<'_> {
         let mut tracker = Tracker::default();
         let mut selected = 0;
         for o in &targets {
-            let slots = self.command_slot_candidates(o, &slot_name);
+            let slots = self.command_slot_candidates(o, &slot_name)?;
             if slots.is_empty() {
                 if let Owner::Block(p) = o
                     && self.block_container_size(*p).is_none()
@@ -1337,7 +1410,7 @@ impl Game<'_> {
             };
             let mut found = Vec::new();
             for o in &sources {
-                for s in self.command_slots(o, &source_slots) {
+                for s in self.command_slots(o, &source_slots)? {
                     found.push(self.slot_get(&s));
                 }
             }
@@ -1383,7 +1456,7 @@ impl Game<'_> {
         let mut tracker = Tracker::default();
         let mut selected = 0;
         for o in &targets {
-            let slots = self.command_slot_candidates(o, &slot_name);
+            let slots = self.command_slot_candidates(o, &slot_name)?;
             if slots.is_empty() {
                 if let Owner::Block(p) = o
                     && self.block_container_size(*p).is_none()
@@ -1518,24 +1591,6 @@ impl Game<'_> {
         let Some(Arg::Str(slot_name)) = c.get("slots").cloned() else {
             return Ok((false, 0));
         };
-        // SlotSourceArgument keeps literal ranges ahead of registered holders.
-        // Only condition reads resolve named definitions here: the item write
-        // candidate adapters retain their existing supported scope.
-        let registered = if slot_name.starts_with('{')
-            || slot_name.starts_with('[')
-            || horizon_client::command::args::slot_ranges()
-                .iter()
-                .any(|(name, _)| name == &slot_name)
-        {
-            None
-        } else {
-            let id = if slot_name.contains(':') {
-                slot_name.clone()
-            } else {
-                format!("minecraft:{slot_name}")
-            };
-            self.fns.store.slot_sources.get(&id).cloned()
-        };
         let predicate = match c.get("item_predicate") {
             Some(Arg::Item(p)) => Some(p.clone()),
             _ => None,
@@ -1550,10 +1605,7 @@ impl Game<'_> {
                     &[&p[0], &p[1], &p[2]],
                 ));
             }
-            let slots = match &registered {
-                Some(source) => self.inline_slots(&o, source),
-                None => self.command_slots(&o, &slot_name),
-            };
+            let slots = self.command_slots(&o, &slot_name)?;
             if predicate.is_none() {
                 count += slots.len() as i32;
                 continue;
@@ -1774,7 +1826,7 @@ mod stand_equip_event_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn commands_post_stand_equipment_events_after_its_first_tick() {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
@@ -1922,7 +1974,7 @@ mod mob_equipment_command_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn world_pack_enchantments_reach_actual_game_catalog() {
         use horizon_client::enchant::EffectContext;
         use horizon_core::random::LegacyRandom;
@@ -2039,7 +2091,7 @@ mod mob_equipment_command_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn body_commands_reject_wrong_items_without_changing_head() {
         with_game(|game| {
             for (n, kind, slot, item) in [
@@ -2096,7 +2148,7 @@ mod mob_equipment_command_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn saddle_commands_round_trip_existing_model_and_saved_equipment() {
         use super::Slot;
         use horizon_core::nbt::Tag;
@@ -2162,7 +2214,7 @@ mod mob_equipment_command_tests {
     /// `SulfurCube.getEquipmentSlotForItem`: a `#sulfur_cube_swallowable`
     /// item is a body item, so the body's `SlotAccess` takes it (#12038).
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_sulfur_cubes_body_takes_a_swallowable_block() {
         with_game(|game| {
             assert!(game.run_command("summon sulfur_cube 4.5 200 4.5 {NoAI:1b,Tags:[\"cube\"]}"));
@@ -2189,7 +2241,7 @@ mod mob_equipment_command_tests {
         });
     }
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn effective_item_composition_rejects_before_destination_mutation() {
         use super::Slot;
         with_game(|game| {
@@ -2227,7 +2279,7 @@ mod mob_equipment_command_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn effective_item_validation_view_uses_loaded_prototypes_and_typed_removals() {
         use horizon_core::nbt::Tag;
         with_game(|game| {
@@ -2353,7 +2405,7 @@ mod mob_equipment_stack_tests {
         );
     }
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn offhand_commands_adopt_and_copy_the_whole_stack() {
         use super::Slot;
         with_game(|game| {
@@ -2413,7 +2465,7 @@ mod mob_equipment_stack_tests {
         });
     }
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn armor_command_copy_keeps_the_already_adopted_stack() {
         use super::Slot;
         with_game(|game| {
@@ -2482,7 +2534,7 @@ mod builtin_component_delivery_tests {
     use std::sync::{Arc, atomic::AtomicI32, mpsc};
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn h283_actual_command_inventory_bridge_encodes_four_builtin_components() {
         crate::game::native_entity_refs::tests::with_game(|game| {
             game.options.dedicated = Some(Vec::new());
@@ -2520,6 +2572,7 @@ mod builtin_component_delivery_tests {
                     max_players: 2,
                     integrated: false,
                     levels: Default::default(),
+                    level_seeds: Default::default(),
                 },
             )
             .unwrap();
@@ -2693,7 +2746,7 @@ mod builtin_component_delivery_tests {
 mod registered_slot_source_read_tests {
     use super::*;
     #[test]
-    #[ignore = "needs prepared resources and isolated homes/cwd"]
+    #[ignore = "daily"]
     fn registered_first_three_reads_match_inline_and_keep_the_chest() {
         let mut resources = None;
         let mut game = crate::game::game_tests::tests::server_game(&mut resources);
@@ -2826,7 +2879,7 @@ mod registered_slot_source_preservation_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources and isolated homes/cwd"]
+    #[ignore = "daily"]
     fn loaded_snapshot_changes_only_on_existing_reload_with_pack_precedence() {
         let mut resources = None;
         let directory = tempfile::tempdir().unwrap();
@@ -2850,25 +2903,34 @@ mod registered_slot_source_preservation_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources and isolated homes/cwd"]
-    fn admitted_item_arguments_still_fail_without_writing_or_player_fallback() {
+    #[ignore = "daily"]
+    fn admitted_absent_executor_sources_fail_without_player_fallback() {
         let mut resources = None;
         let (mut game, _) = scene(&mut resources, "slot-source-unsupported-world");
+        let path = game
+            .world_root
+            .join("datapacks/parity/data/parity/slot_source/this.json");
+        std::fs::write(
+            path,
+            r#"{"type":"minecraft:slot_range","source":"this","slots":"weapon.mainhand"}"#,
+        )
+        .unwrap();
+        game.reload_datapacks(true, &[]).unwrap();
         let before = game.block_entity_nbt([0, 100, 0]).unwrap();
         let clock = game.world.game_time;
         count(&mut game, 3);
         let player_was_present = game.player.is_some();
-        println!("unsupported registered item routes: actual Player present={player_was_present}");
+        println!("absent executor: actual Player present={player_was_present}");
         let mut commands = vec![
-            "item modify block 0 100 0 parity:first_three {type:\"minecraft:set_count\",count:1}"
+            "item modify block 0 100 0 parity:this {type:\"minecraft:set_count\",count:1}"
                 .to_owned(),
         ];
         for mode in ["replace", "fill", "override"] {
             commands.push(format!(
-                "item {mode} block 0 100 0 parity:first_three with diamond"
+                "item {mode} block 0 100 0 parity:this with diamond"
             ));
             commands.push(format!(
-                "item {mode} block 0 100 0 container.0 from block 0 100 0 parity:first_three"
+                "item {mode} block 0 100 0 container.0 from block 0 100 0 parity:this"
             ));
         }
         for command in commands {
@@ -2882,7 +2944,7 @@ mod registered_slot_source_preservation_tests {
             );
             assert!(
                 !game.run_command(&command),
-                "unsupported registered write must fail: {command}"
+                "absent executor must not fall back to a Player: {command}"
             );
             assert_eq!(
                 game.block_entity_nbt([0, 100, 0]).as_ref(),
@@ -2892,6 +2954,121 @@ mod registered_slot_source_preservation_tests {
             assert_eq!(game.player.is_some(), player_was_present);
             assert_eq!(game.world.game_time, clock);
         }
+    }
+
+    /// SlotSources.CODEC is a holder codec: a quoted id is the same reference
+    /// as an unquoted one, and so is a group's single quoted term.
+    /// LimitSlotSource's limit is ExtraCodecs.POSITIVE_INT: a string or 0
+    /// fails to parse, and the command changes nothing.
+    #[test]
+    #[ignore = "daily"]
+    fn quoted_holders_resolve_and_a_non_int_limit_fails_to_parse() {
+        let mut resources = None;
+        let (mut game, _) = scene(&mut resources, "slot-source-quoted-world");
+        let before = game.block_entity_nbt([0, 100, 0]).unwrap();
+        let clock = game.world.game_time;
+        count(&mut game, 3);
+        for source in [
+            r#""parity:first_three""#,
+            r#"{type:"group",terms:"parity:first_three"}"#,
+        ] {
+            assert!(game.run_command("scoreboard players set #q slotprobe -99"));
+            assert!(game.run_command(&format!(
+                "execute store result score #q slotprobe run execute if slots block 0 100 0 {source}"
+            )));
+            assert_eq!(
+                game.score.board.score("#q", "slotprobe").unwrap().value,
+                3,
+                "{source}"
+            );
+        }
+        for limit in [r#""x""#, "0"] {
+            assert!(game.run_command("scoreboard players set #q slotprobe -99"));
+            let command = format!(
+                "execute store result score #q slotprobe run execute if slots block 0 100 0 {{type:\"limit_slots\",limit:{limit},slot_source:{{type:\"slot_range\",slots:\"container.*\"}}}}"
+            );
+            assert!(!game.run_command(&command), "{command}");
+            assert_eq!(
+                game.score.board.score("#q", "slotprobe").unwrap().value,
+                -99,
+                "{command}"
+            );
+        }
+        assert_eq!(game.block_entity_nbt([0, 100, 0]).as_ref(), Some(&before));
+        assert_eq!(game.world.game_time, clock);
+    }
+
+    /// `Codec.INT` gives `limit:1b` and `limit:2.5d` their `Number.intValue()`:
+    /// a read counts that many slots and a write changes that many.
+    #[test]
+    #[ignore = "daily"]
+    fn a_byte_or_fractional_limit_selects_its_int_value() {
+        let mut resources = None;
+        let (mut game, _) = scene(&mut resources, "slot-source-numeric-limit-world");
+        let source = |limit: &str| {
+            format!(
+                "{{type:\"limit_slots\",limit:{limit},slot_source:{{type:\"slot_range\",slots:\"container.*\"}}}}"
+            )
+        };
+        for (limit, slots) in [("1b", 1), ("2.5d", 2)] {
+            assert!(game.run_command("scoreboard players set #q slotprobe -99"));
+            assert!(game.run_command(&format!(
+                "execute store result score #q slotprobe run execute if slots block 0 100 0 {}",
+                source(limit)
+            )));
+            assert_eq!(
+                game.score.board.score("#q", "slotprobe").unwrap().value,
+                slots,
+                "{limit}"
+            );
+        }
+        // `/item override` writes the stack over the selected slots and no further:
+        // one slot for `1b`, two for `2.5d`, the stone in the fourth slot never.
+        let held = |game: &mut Game<'_>| {
+            [0, 1, 3].map(|slot| {
+                game.slot_get(&Slot::Block([0, 100, 0], slot))
+                    .map(|stack| (stack.item.to_string(), stack.count))
+            })
+        };
+        let stack = |item: &str, count| Some((format!("minecraft:{item}"), count));
+        assert!(game.run_command(&format!(
+            "item override block 0 100 0 {} with minecraft:diamond 2",
+            source("1b")
+        )));
+        assert_eq!(
+            held(&mut game),
+            [stack("diamond", 2), stack("dirt", 2), stack("stone", 7)]
+        );
+        assert!(game.run_command(&format!(
+            "item override block 0 100 0 {} with minecraft:emerald 2",
+            source("2.5d")
+        )));
+        assert_eq!(
+            held(&mut game),
+            [stack("emerald", 2), None, stack("stone", 7)]
+        );
+    }
+
+    /// A command the player types runs as them (`CommandSourceStack.getEntity`),
+    /// so `source:"this"` is their own slots without an `execute as`.
+    #[test]
+    #[ignore = "daily"]
+    fn a_command_the_player_types_binds_this_to_them() {
+        let mut resources = None;
+        let (mut game, _) = scene(&mut resources, "slot-source-player-this-world");
+        game.player = Some(
+            horizon_client::motion::PlayerMotion::new(
+                game.motion,
+                horizon_core::geometry::Vec3::new(0.5, 101.0, 0.5),
+            )
+            .unwrap(),
+        );
+        assert!(game.command_source.is_none());
+        assert!(game.run_command(
+            r#"item replace entity @s {type:"slot_range",source:"this",slots:"weapon.mainhand"} with minecraft:stone"#
+        ));
+        let hand = game.slot_get(&Slot::MainHand).unwrap();
+        assert_eq!((&*hand.item, hand.count), ("minecraft:stone", 1));
     }
 }
 
@@ -2907,3 +3084,6 @@ mod set_custom_data_tests {
         assert!(saved.is_none_or(|c| c.get("minecraft:custom_data").is_none()));
     }
 }
+
+#[cfg(test)]
+mod item_entity_contents_tests;

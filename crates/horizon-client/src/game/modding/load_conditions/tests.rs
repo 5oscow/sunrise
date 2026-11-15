@@ -86,7 +86,7 @@ impl Hooks for Registrant {
     }
 }
 #[test]
-#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn load_conditions_recipe_reload_counts_and_failed_candidates_keep_old_recipes() {
     let scratch = tempfile::tempdir().unwrap();
     let count = Arc::new(AtomicUsize::new(0));
@@ -132,7 +132,7 @@ fn load_conditions_recipe_reload_counts_and_failed_candidates_keep_old_recipes()
                     let stack = game
                         .reload_datapacks(true, &game.level.enabled_features.clone())
                         .unwrap();
-                    assert_eq!(count.load(Ordering::SeqCst), 6);
+                    assert_eq!(count.load(Ordering::SeqCst), 5);
                     assert!(game.recipes().recipe("testmod:not_false").is_some());
                     assert!(game.recipes().recipe("testmod:not_true").is_none());
                     assert!(game.recipes().recipe("testmod:nested").is_some());
@@ -157,10 +157,9 @@ fn load_conditions_recipe_reload_counts_and_failed_candidates_keep_old_recipes()
                 count.store(0, Ordering::SeqCst);
                 game.reload_datapacks(true, &game.level.enabled_features.clone())
                     .unwrap();
-                assert_eq!(count.load(Ordering::SeqCst), 6);
+                assert_eq!(count.load(Ordering::SeqCst), 5);
                 assert!(
-                    !game
-                        .items()
+                    game.items()
                         .block_tags
                         .get("testmod:flag")
                         .is_some_and(|tag| tag.contains("minecraft:stone"))
@@ -306,4 +305,62 @@ fn load_conditions_disabled_owner_does_not_execute_registered_handler() {
             assert_eq!(count.load(Ordering::SeqCst), 2);
         },
     );
+}
+
+/// `neoforge:registered` reads the candidate's registries: the built-in entries the prepared root
+/// exports and what this load's packs add, so a new pack entry counts on its first load and one
+/// a pack dropped stops counting, whatever an earlier load put in the game's registries.
+#[test]
+fn registered_reads_the_candidate_packs_not_the_last_load() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(
+        root.path().join("command-registries.json"),
+        json!({"by_registry": {
+            "minecraft:item": {"ids": ["minecraft:stone"]},
+            "minecraft:worldgen/biome": {"ids": ["minecraft:plains"]}
+        }})
+        .to_string(),
+    )
+    .unwrap();
+    let pack = |keys: &[&str]| -> Vec<(String, Vec<Vec<u8>>)> {
+        keys.iter()
+            .map(|key| ((*key).to_owned(), vec![b"{}".to_vec()]))
+            .collect()
+    };
+    let registered = |registry: &str, value: &str| {
+        json!({"neoforge:conditions": [
+            {"type": "neoforge:registered", "registry": registry, "value": value}
+        ]})
+    };
+    let dunes = registered("minecraft:worldgen/biome", "test:dunes");
+    let admission = horizon_world::conditions::LoadConditions::new([]);
+    let mut files = pack(&["worldgen/biome/test:dunes", "recipe/test:a/b"]);
+    // An entry its own conditions turn off is not in the registry.
+    files.push((
+        "worldgen/biome/test:off".into(),
+        vec![br#"{"neoforge:conditions":[{"type":"neoforge:false"}]}"#.to_vec()],
+    ));
+    let first = super::candidate_registries(root.path(), &files, &admission);
+    let first = horizon_world::conditions::LoadConditions::new([]).with_registries(
+        first
+            .iter()
+            .map(|(registry, ids)| (registry.as_str(), ids.iter().map(String::as_str))),
+    );
+    assert!(
+        first.allows(&dunes),
+        "a pack's new biome counts on its first load"
+    );
+    assert!(first.allows(&registered("minecraft:worldgen/biome", "minecraft:plains")));
+    assert!(!first.allows(&registered("minecraft:worldgen/biome", "test:off")));
+    assert!(first.allows(&registered("minecraft:item", "minecraft:stone")));
+    let next = super::candidate_registries(root.path(), &pack(&[]), &admission);
+    let next = horizon_world::conditions::LoadConditions::new([]).with_registries(
+        next.iter()
+            .map(|(registry, ids)| (registry.as_str(), ids.iter().map(String::as_str))),
+    );
+    assert!(
+        !next.allows(&dunes),
+        "the pack no longer has it: not registered"
+    );
+    assert!(next.allows(&registered("minecraft:worldgen/biome", "minecraft:plains")));
 }

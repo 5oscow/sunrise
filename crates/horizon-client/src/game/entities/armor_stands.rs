@@ -12,7 +12,7 @@ use horizon_client::{
     entities::ArmorStand,
     items::ItemStack,
     mesher::Vertex,
-    mobs::{Mob, Part, anim::Poses},
+    mobs::{Mob, Part, Who, anim::Poses},
     trims::{TrimOverride, TrimRegistry, TrimTexture},
 };
 use horizon_core::{
@@ -682,18 +682,22 @@ impl Game<'_> {
                 return false;
             }
             let id = stand.id;
+            let at = [stand.position.x, stand.position.y, stand.position.z];
             let name = stand.custom_name.as_ref().map(|name| name.plain());
             if alive {
-                // NameTagItem shrinks the stack even with infinite materials.
-                let mut rest = stack.clone();
-                rest.count -= 1;
-                *self.held_mut() = (rest.count > 0).then_some(rest);
+                // `Player.interactOn` gives a creative player the count back.
+                self.consume_held();
                 if let (Some(player), Some(player_name), Some(name)) =
                     (self.lan_acting_uuid, self.lan_acting_name.clone(), name)
                 {
                     self.native_player_name_entity(player, &player_name, id, &name);
                 }
             }
+            // `Player.interactOn`: the tag consumed the use, so the stand
+            // posts `gameEvent(GameEvent.ENTITY_INTERACT)` from the player,
+            // alive or not (`NameTagItem` succeeds either way).
+            let ctx = self.who_context(Some(Who::Player), None);
+            self.post_game_event("minecraft:entity_interact", at, ctx);
             self.swing_arm();
             return true;
         }
@@ -2540,7 +2544,7 @@ mod pumpkin_equippable_use_tests {
     use std::sync::{atomic::AtomicI32, mpsc};
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn h207_connected_use_item_adopts_actual_pumpkin_equippable_and_preserves_controls() {
         crate::game::native_entity_refs::tests::with_game(|game| {
             game.build_registries();
@@ -2577,6 +2581,7 @@ mod pumpkin_equippable_use_tests {
                     max_players: 2,
                     integrated: false,
                     levels: Default::default(),
+                    level_seeds: Default::default(),
                 },
             )
             .unwrap();
@@ -2674,7 +2679,7 @@ mod stand_lodestone_inventory_tick_tests {
     use horizon_core::{geometry::Vec3, position::BlockPos};
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and scratch homes/cwd"]
+    #[ignore = "daily"]
     fn actual_stand_equipment_compasses_tick_after_loaded_lodestone_removal() {
         let mut resources = None;
         let mut game = crate::game::game_tests::tests::server_game(&mut resources);
@@ -2862,7 +2867,7 @@ mod postbaseline_lodestone_controls {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and scratch homes/cwd"]
+    #[ignore = "daily"]
     fn postbaseline_six_slots_noncompass_guard_and_dimension_preservation() {
         let mut resources = None;
         let mut game = crate::game::game_tests::tests::server_game(&mut resources);

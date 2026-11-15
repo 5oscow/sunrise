@@ -2,6 +2,19 @@
 //! `tick_experience`), the stacks a destroyed container lets fall, and spawning and merging orbs.
 use super::*;
 
+/// A dropped item's `bobOffs` (its bob and spin phase) from its random's draw `drawn`, or under
+/// `HORIZON_STILL` from a random seeded by its position alone: a client seeds an item's random
+/// with the server's entity id, which follows the order chunks load in and differs between
+/// launches. The draw is made either way, so the item's random stays where vanilla's would be.
+pub(super) fn bob_offset(position: Vec3, drawn: f32, still: bool) -> f32 {
+    let drawn = if still {
+        horizon_client::mobs::entity_random(0, position).next_float()
+    } else {
+        drawn
+    };
+    drawn * std::f32::consts::PI * 2.0
+}
+
 impl Game<'_> {
     pub(super) fn tick_items(&mut self) {
         let mut round = self.item_update_round();
@@ -228,7 +241,8 @@ impl Game<'_> {
                 },
             );
             if environment.should_play_lava_hurt_sound(item.ticks) {
-                let pitch = 2.0 + self.world.random.next_float() * 0.4;
+                // `Entity.lavaHurt` pitches the burn from `this.random`, the item's own.
+                let pitch = 2.0 + item.random.next_float() * 0.4;
                 self.audio.play(
                     "minecraft:entity.generic.burn",
                     Some([item.position.x, item.position.y, item.position.z]),
@@ -518,6 +532,7 @@ impl Game<'_> {
             health: 5,
             air: 300,
             following: None,
+            fire_ticks: 0,
         });
         // ServerLevel.addFreshEntity.
         self.native_joins_flush(false, 0);
@@ -596,8 +611,8 @@ impl Game<'_> {
         for o in taken {
             // ClientPacketListener.handleTakeItemEntity: every orb taken sounds
             // at the orb, whether mending took its points or not.
-            let pitch =
-                (self.world.random.next_float() - self.world.random.next_float()) * 0.35 + 0.9;
+            let mut r = random_source::create();
+            let pitch = (r.next_float() - r.next_float()) * 0.35 + 0.9;
             let at = [o.position.x, o.position.y, o.position.z];
             self.audio.play(
                 "minecraft:entity.experience_orb.pickup",
@@ -635,11 +650,14 @@ impl Game<'_> {
             self.apply_equipment();
         }
         let stacks = stacks.into_iter().map(|stack| (stack, at, 0)).collect();
+        let mut random = random_source::entity();
         self.drop_death_items(dying, stacks, 40, |game| {
-            let r = &mut game.world.random;
-            let strength = f64::from(r.next_float()) * 0.5;
-            let angle = f64::from(r.next_float()) * std::f64::consts::TAU;
-            Some([-angle.sin() * strength, 0.2, angle.cos() * strength])
+            Some(horizon_client::entities::drop_motion(
+                &mut random,
+                game.yaw,
+                game.pitch,
+                true,
+            ))
         });
     }
 
@@ -811,8 +829,23 @@ impl Game<'_> {
         randomly: bool,
         thrown_from_hand: bool,
     ) -> Option<u32> {
-        let r = &mut self.world.random;
-        let v = horizon_client::entities::drop_motion(r, self.yaw, self.pitch, randomly);
+        // `Player.drop` draws the spread from the player's own random. A throw with no player
+        // in place (a `/give` remainder whose target this game doesn't hold) keeps a fresh one
+        // rather than losing the item.
+        let v = match self.player.as_mut() {
+            Some(player) => horizon_client::entities::drop_motion(
+                &mut player.random,
+                self.yaw,
+                self.pitch,
+                randomly,
+            ),
+            None => horizon_client::entities::drop_motion(
+                &mut random_source::entity(),
+                self.yaw,
+                self.pitch,
+                randomly,
+            ),
+        };
         let at = [eye[0], eye[1] - f64::from(0.3f32), eye[2]];
         let uuid = thrown_from_hand.then(|| self.acting_player_uuid());
         // Only `drop(.., false)` tosses ask `item_toss`: a death's scatter (`randomly`) does not.
@@ -872,7 +905,7 @@ mod destroyed_contents_tests {
     /// lava, fire and cactus in the item's environment tick, an explosion, and
     /// the damage command.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn spilled_stacks_rise_from_their_own_randoms() {
         let mut resources = None;
         let mut game = server_game(&mut resources);
@@ -902,7 +935,7 @@ mod destroyed_contents_tests {
     /// The damage command is one of those callers: killing a shulker box item
     /// spills its contents with the same upward motion.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_damaged_shulker_box_spills_its_stacks_upward() {
         let mut resources = None;
         let mut game = server_game(&mut resources);
@@ -955,7 +988,7 @@ mod escape_tests {
     /// `Entity.moveTowardsClosestSpace` uses the item's own random, never the
     /// level's random. Seeded Java values pin vanilla's float arithmetic (#13043).
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn an_item_escapes_a_block_at_its_own_randoms_speed() {
         let mut game_resources = None;
         let mut game = server_game(&mut game_resources);
@@ -987,5 +1020,35 @@ mod escape_tests {
         assert_eq!(item.velocity.y, f64::from_bits(0x3fc5_9ef4_570f_5500));
         assert_eq!(item.random.clone().next_float().to_bits(), 0x3f03_61b3);
         assert_eq!(game.world.random.next_float(), level.next_float());
+    }
+}
+
+#[cfg(test)]
+#[path = "tests/thrown_items_tests.rs"]
+mod thrown_items_tests;
+
+#[cfg(test)]
+mod bob_tests {
+    use horizon_core::geometry::Vec3;
+    use horizon_core::random::RandomSource;
+
+    /// The bob a client gives the item with entity id `id` at `at`.
+    fn bob(id: u32, at: Vec3, still: bool) -> f32 {
+        let mut random = horizon_client::mobs::entity_random(id, at);
+        super::bob_offset(at, random.next_float(), still)
+    }
+
+    /// Under `HORIZON_STILL` the item's position decides its bob, not the id the server gave
+    /// it; without it the bob is the id-seeded random's own draw.
+    #[test]
+    fn a_still_items_bob_comes_from_its_position() {
+        let at = Vec3::new(0.5, 64.0, 2.5);
+        assert_eq!(bob(17, at, true), bob(22, at, true));
+        for id in [17, 22] {
+            let mut random = horizon_client::mobs::entity_random(id, at);
+            let vanilla = random.next_float() * std::f32::consts::PI * 2.0;
+            assert_eq!(bob(id, at, false), vanilla);
+        }
+        assert_ne!(bob(17, at, false), bob(22, at, false));
     }
 }

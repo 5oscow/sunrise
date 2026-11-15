@@ -782,6 +782,43 @@ impl Game<'_> {
         }
     }
 
+    /// `menu_transfer` for the guest's open mod menu in window `container`: the part of its
+    /// type moves `recipe`'s ingredients itself (or, with `dry_run`, only says what that would
+    /// do). None when no part answers, the window isn't the guest's mod menu, or no mod listens.
+    fn guest_menu_transfer(
+        &mut self,
+        gi: usize,
+        container: i32,
+        recipe: &str,
+        max: bool,
+        dry_run: bool,
+    ) -> Option<mod_api::RecipeTransferResult> {
+        if !mod_api::__private::has_part_hook(mod_api::HookId::MenuTransfer) {
+            return None;
+        }
+        let g = &self.lan.as_ref()?.hub.guests[gi];
+        let menu = g
+            .menu
+            .as_ref()
+            .filter(|menu| menu.window == container && menu.mod_type.is_some())?;
+        if !mod_api::__private::menu_listens(mod_api::HookId::MenuTransfer, &menu.registry_id) {
+            return None;
+        }
+        let (player, menu_id) = (g.uuid, menu.registry_id.to_string());
+        let pos = menu.pos.map(|(x, y, z)| [x, y, z]);
+        let mut result = None;
+        self.native_menu_transfer(mod_api::__private::MenuTransferCall {
+            player,
+            menu: &menu_id,
+            pos,
+            recipe,
+            max,
+            dry_run,
+            result: &mut result,
+        });
+        result
+    }
+
     pub(super) fn guest_recipe_transfer(&mut self, conn: u32, data: &[u8]) {
         use horizon_protocol::buf::Writer;
         let Some(host) = self.lan.as_ref() else {
@@ -798,7 +835,12 @@ impl Game<'_> {
         else {
             return;
         };
-        let result = if container == 0 && (g.menu.is_some() || g.creative()) {
+        let blocked = container == 0 && (g.menu.is_some() || g.creative());
+        // A mod menu's part moves the ingredients itself; without one the grid transfer runs.
+        let answered = self.guest_menu_transfer(gi, container, &id, all, false);
+        let result = if let Some(answer) = answered {
+            recipes::transfer_outcome(answer)
+        } else if blocked {
             Err(TransferError::Unavailable)
         } else {
             self.lan_apply_recipe(gi, container, |menu, env| {
@@ -852,7 +894,13 @@ impl Game<'_> {
             return;
         }
         play.recipe_checks += RECIPE_CHECK_COST;
-        let check = if container == 0 && unavailable {
+        let answered = self.guest_menu_transfer(gi, container, &id, false, true);
+        let check = if let Some(answer) = answered {
+            Some(TransferCheck {
+                result: recipes::transfer_outcome(answer),
+                missing: Vec::new(),
+            })
+        } else if container == 0 && unavailable {
             None
         } else {
             self.lan_check_recipe(gi, container, &id)
@@ -1568,7 +1616,7 @@ mod machine_recipe_placement_tests {
     use std::sync::{Arc, atomic::AtomicI32, mpsc};
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn h234_registered_place_recipe_reaches_actual_furnace_and_preserves_controls() {
         crate::game::native_entity_refs::tests::with_game(|game| {
             game.build_registries();
@@ -1605,6 +1653,7 @@ mod machine_recipe_placement_tests {
                     max_players: 2,
                     integrated: false,
                     levels: Default::default(),
+                    level_seeds: Default::default(),
                 },
             )
             .unwrap();
@@ -1939,7 +1988,7 @@ mod recipe_check_tests {
     /// would and changes nothing: no slot, no block entity, no chunk marked
     /// changed, no packet but its reply. The transfer after it does move.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_check_answers_and_leaves_the_world_and_the_guest_alone() {
         crate::game::native_entity_refs::tests::with_game(|game| {
             game.build_registries();
@@ -1966,6 +2015,7 @@ mod recipe_check_tests {
                     max_players: 2,
                     integrated: false,
                     levels: Default::default(),
+                    level_seeds: Default::default(),
                 },
             )
             .unwrap();
@@ -2074,7 +2124,7 @@ mod recipe_check_tests {
     /// Ten checks at once are answered, the next is dropped, and one more
     /// goes through once the throttle has drained.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn checks_past_the_limit_go_unanswered() {
         crate::game::native_guest_turn_tests::with_guests(|game| {
             let (tx, rx) = mpsc::channel();
@@ -2127,7 +2177,7 @@ mod empty_ingredient_placement_tests {
     use std::sync::{Arc, atomic::AtomicI32, mpsc};
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn server_packet_refuses_retained_empty_ingredient_recipes() {
         mod_platform::testing::with_mods(
             vec![mod_api::ModEntry::new("empty_fixture", Box::new(Predicate))].into(),
@@ -2253,6 +2303,7 @@ mod empty_ingredient_placement_tests {
                             max_players: 2,
                             integrated: false,
                             levels: Default::default(),
+                            level_seeds: Default::default(),
                         },
                     )
                     .unwrap();

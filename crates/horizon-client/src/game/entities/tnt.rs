@@ -690,6 +690,13 @@ impl Game<'_> {
             self.send_overlay_message(message);
             return Ok(false);
         }
+        // `TntBlock.prime`: an adventure player lights TNT only with a stack
+        // whose `can_break` matches it. The refused click is still SUCCESS: the
+        // arm swings, and neither the block, the stack nor the fuse changes.
+        if !self.may_build() && !self.can_break_in_adventure(hit.pos) {
+            self.swing_arm();
+            return Ok(true);
+        }
         if !self.tnt_prime_allowed(pos) {
             return Ok(true);
         }
@@ -751,6 +758,10 @@ impl Game<'_> {
             self.view_scale(),
         );
         for t in &self.tnts {
+            // LevelExtractor: the camera entity is not drawn from its own eyes.
+            if self.hides_as_camera(t.id) {
+                continue;
+            }
             // EntityRenderer.shouldRender.
             if !self.standing_entity_in_view(
                 camera,
@@ -1607,7 +1618,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn portal_transfer_tnt_state_follows_memory_but_not_saved_nbt() {
         use super::super::commands::Target;
         let mut resources = None;
@@ -1636,7 +1647,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn portal_transfer_ordinary_nbt_cannot_supply_runtime_immunity() {
         use horizon_core::nbt::Tag;
         let mut resources = None;
@@ -1657,7 +1668,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn portal_blast_sulfur_cube_uses_only_positive_cooldown() {
         use horizon_client::mobs::Mob;
         use horizon_client::nether_portal::PortalState;
@@ -1816,7 +1827,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn live_data_commands_adopt_into_the_existing_tnt() {
         use crate::game::commands::Target;
         use horizon_core::nbt::Tag;
@@ -2360,7 +2371,7 @@ mod entity_collision_tests {
     /// a boat holds the TNT and the orb up, a shulker the sand, as they hold
     /// up a dropped item (`canBeCollidedWith`).
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn tnt_sand_and_orbs_land_on_boats_and_shulkers() {
         super::super::native_entity_refs::tests::with_game(|game| {
             game.build_registries();

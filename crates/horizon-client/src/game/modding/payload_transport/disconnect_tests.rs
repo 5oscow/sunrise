@@ -36,7 +36,11 @@ struct Probe {
 }
 impl IPayloadHandler for Probe {
     /// The payload's one byte names the player to disconnect.
-    fn handle(&self, bytes: PayloadBytes, context: &mut dyn IPayloadContext) -> Result<(), String> {
+    fn handle(
+        &self,
+        bytes: PayloadBytes,
+        context: &mut dyn IPayloadContext,
+    ) -> Result<(), mod_api::PayloadHandleError> {
         let sender = context.player().unwrap();
         let host = context.server_host().unwrap();
         let index = usize::from(bytes.0[0]);
@@ -120,7 +124,7 @@ fn send(c: &mut Connection, target: u8) {
 }
 
 #[test]
-#[ignore = "needs HORIZON_TEST_RESOURCES; starts an integrated server and two physical TCP clients"]
+#[ignore = "daily"]
 fn a_payload_handler_disconnects_once_and_the_poll_logs_out_once() {
     super::tests::require_resources();
     if super::super::native_entity_refs::tests::run_fresh_cases(

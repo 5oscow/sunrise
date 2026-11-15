@@ -237,6 +237,12 @@ impl Trip {
     pub(super) fn is(&self, conn: u32) -> bool {
         self.conn == conn
     }
+
+    /// Respawn searches, like command arrivals, must finish before the client can leave
+    /// their loading area. `hold` alone names a command's already-placed body.
+    fn holds_movement(&self) -> bool {
+        self.hold || self.respawn.is_some() || self.world_spawn
+    }
 }
 
 impl Game<'_> {
@@ -279,12 +285,9 @@ impl Game<'_> {
             left: None,
         });
     }
-    /// Before the arrivals: a hold follows the player where a mod sent them (`native_player_teleport` may cancel
-    /// a `tp` or send the player elsewhere: the guest stands where the hub put them, not at the hold's target),
-    /// and a hold that ended without its arrival (replaced by a `tp` to lit land, a trip to another level, a
-    /// respawn, a death) lets their client's moves be heard again. A portal's trip still waiting for the player
-    /// lands them itself.
-    fn release_held_arrivals(&mut self) {
+    /// A command hold follows the player where a mod sent them (`native_player_teleport` may
+    /// cancel or redirect it). A respawn keeps its own destination and stand-up search.
+    fn follow_command_arrivals(&mut self) {
         let Some(host) = self.lan.as_ref() else {
             return;
         };
@@ -302,6 +305,11 @@ impl Game<'_> {
         for (conn, at) in moved {
             self.hold_for_chunks(conn, at);
         }
+    }
+
+    /// Release movement after completed or replaced arrivals. A spawn search can requeue
+    /// itself while a candidate chunk loads: that still owns the hold until it finishes.
+    fn release_held_arrivals(&mut self) {
         let Some(host) = self.lan.as_mut() else {
             return;
         };
@@ -311,7 +319,11 @@ impl Game<'_> {
                 continue;
             }
             let conn = g.conn;
-            if self.server_trips.iter().any(|t| t.is(conn) && t.hold) {
+            if self
+                .server_trips
+                .iter()
+                .any(|t| t.is(conn) && t.holds_movement())
+            {
                 continue;
             }
             let landing = self
@@ -789,7 +801,7 @@ impl Game<'_> {
     /// a portal (a vehicle's transition time is 0): the riders travel with
     /// it and ride it again on arrival (`Entity.teleportCrossDimension`), so
     /// a rider never waits for its own portal delay.
-    fn carry_riders_through_portals(&mut self) {
+    pub(in crate::game) fn carry_riders_through_portals(&mut self) {
         for (vehicle, entry) in self.take_carrying(self.dim) {
             let Some(plan) = self.vehicle_plan(vehicle, entry) else {
                 continue;
@@ -1140,7 +1152,7 @@ impl Game<'_> {
     /// around their target: the exit (the Nether portal found or built, the
     /// End platform, the Overworld's spawn column) and the teleport there.
     fn arrive_server_trips(&mut self) {
-        self.release_held_arrivals();
+        self.follow_command_arrivals();
         let mut k = 0;
         while k < self.server_trips.len() {
             let trip = &self.server_trips[k];
@@ -1156,7 +1168,7 @@ impl Game<'_> {
                 (trip.target.x.floor() as i32) >> 4,
                 (trip.target.z.floor() as i32) >> 4,
             );
-            if trip.hold {
+            if trip.holds_movement() {
                 self.lan.as_mut().unwrap().hub.guests.update(i, |g| {
                     g.landing = true;
                     g.tp_held = true;
@@ -1173,12 +1185,6 @@ impl Game<'_> {
                 continue;
             }
             let mut trip = self.server_trips.remove(k);
-            if trip.hold {
-                self.lan.as_mut().unwrap().hub.guests.update(i, |g| {
-                    g.landing = false;
-                    g.tp_held = false;
-                });
-            }
             if trip.placed {
                 self.tell_mods_changed_dimension(trip.conn, trip.left, trip.dim);
                 continue;
@@ -1363,13 +1369,14 @@ impl Game<'_> {
             }
             self.tell_mods_changed_dimension(trip.conn, trip.left, trip.dim);
         }
+        self.release_held_arrivals();
     }
 
     /// The vehicle the player rode arrives with it, at the point the player
     /// arrives: it keeps its entity id, so the ride is never broken
     /// (`Entity.teleportCrossDimension` recreates the vehicle in the other
     /// dimension, and its passengers ride it again).
-    fn arrive_vehicle(&mut self, source: Dim, id: u32, at: Vec3, yaw: f32) {
+    pub(in crate::game) fn arrive_vehicle(&mut self, source: Dim, id: u32, at: Vec3, yaw: f32) {
         let Some(id) = self.parked_vehicle_root(source, id) else {
             return;
         };
@@ -1607,7 +1614,7 @@ mod tests {
     use std::sync::Arc;
 
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "daily"]
     fn guest_portal_entry_uses_body_sleep_and_vehicle() {
         super::super::native_guest_turn_tests::with_guests(|game| {
             let mut chunk = horizon_client::chunk::Chunk::empty(0, 0);
@@ -1660,7 +1667,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "daily"]
     fn arriving_vehicle_is_announced_once_after_destination_entities() {
         use mod_api::{self, EntityJoinLevelEvent, Flow, Hooks};
         use std::sync::Mutex;
@@ -1731,7 +1738,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn natural_carrier_moves_full_objects_and_readmits_the_tree_in_order() {
         use mod_api::{AttachmentType, EntityConstructingEvent, Holder, Hooks, HostSide};
         use std::sync::Mutex;
@@ -1858,7 +1865,7 @@ mod tests {
     /// vehicle, so a pig that shares its boat's or minecart's UUID takes it in
     /// the destination and the vehicle is retained off-level below it.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn natural_carrier_retains_a_vehicle_root_refused_by_its_passenger() {
         for (kind, uuid) in [("minecraft:oak_boat", 705), ("minecraft:minecart", 706)] {
             super::super::native_entity_refs::tests::with_game(|game| {
@@ -1904,7 +1911,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn natural_portal_schedules_a_player_on_a_retained_indirect_vehicle() {
         super::super::native_entity_refs::tests::with_game(|game| {
             game.options.dedicated = Some(Vec::new());
@@ -2070,7 +2077,7 @@ mod transfer_lifetime_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "daily"]
     fn transfer_arrival_rebinds_only_bound_owners_with_the_same_id() {
         for kind in ["minecraft:minecart", "minecraft:oak_boat", "minecraft:pig"] {
             for bound in [true, false] {
@@ -2279,6 +2286,7 @@ mod credits_respawn_tests {
                 max_players: 2,
                 integrated: false,
                 levels: Default::default(),
+                level_seeds: Default::default(),
             },
         )
         .unwrap();
@@ -2387,6 +2395,7 @@ mod credits_respawn_tests {
                 max_players: 2,
                 integrated: false,
                 levels: Default::default(),
+                level_seeds: Default::default(),
             },
         )
         .unwrap();

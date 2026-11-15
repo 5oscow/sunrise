@@ -2,6 +2,9 @@
 //! where the player fell from, turned into the vanilla death message.
 use super::{Game, commands::Target};
 
+#[cfg(test)]
+#[path = "tests/infested_roll_tests.rs"]
+mod infested_roll_tests;
 use horizon_client::{
     health::{Attack, HealthEvent},
     mobs::{Damage, Mob, Species, Who, stuck::Stuck},
@@ -436,6 +439,13 @@ impl Game<'_> {
         // The attacker of the hit whose damage was just recorded, for its criterion.
         let mut recorded: Option<(String, u32)> = None;
         for e in events {
+            // `LivingEntity.hurtServer` ends with the effects' `onMobHurt`,
+            // whatever `actuallyHurt` made of the hit: a hit absorption or
+            // armor takes whole still rolls the Infested chance.
+            if matches!(e, MotionEvent::Health(HealthEvent::MobHurt)) {
+                self.player_infested();
+                continue;
+            }
             let (name, amount) = match e {
                 // LivingEntity.hurtServer reached resolvePlayerResponsibleForDamage:
                 // every hit that got past the cooldown, absorbed or blocked too.
@@ -539,10 +549,6 @@ impl Game<'_> {
                 direct,
             });
             self.combat.last_damage = now;
-            // InfestedMobEffect.onMobHurt.
-            if self.potions.effects.get("infested").is_some() {
-                self.player_infested();
-            }
         }
         self.combat.pending.clear();
         self.combat.pending_direct.clear();
@@ -1177,7 +1183,7 @@ mod pet_credit_tests {
     /// content mod's type copying the wolf (#4031) names its owner too, and
     /// an untamed one names no one.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_tame_mod_wolf_types_hit_is_its_owners() {
         crate::game::native_entity_refs::tests::with_game(|game| {
             let wolf = game.res.mob_types().get("minecraft:wolf").cloned().unwrap();
@@ -1210,7 +1216,7 @@ mod guest_hit_tests {
     /// A bystander stands exactly under the mob that bites, listed first: the
     /// search by position ignores height and would have named the bystander.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn an_effect_hit_on_a_guest_credits_the_mob_that_swung() {
         crate::game::native_entity_refs::tests::with_game(|game| {
             game.player = Some(PlayerMotion::new(game.motion, Vec3::new(0.5, 100.0, 0.5)).unwrap());

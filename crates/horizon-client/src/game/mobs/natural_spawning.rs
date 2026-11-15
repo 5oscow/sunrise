@@ -13,8 +13,9 @@ use horizon_client::{
         seen_grid::SeenGrid,
         spawn_rules::{Reason, SpawnLevel},
         spawn_selection::{
-            self, Category, Counted, Heightmap, NaturalLevel, PlayerSquares, SpawnCost,
-            SpawnPlayer, SpawnRequest, SpawnState, Spawned, StructureAt, StructureSpawns,
+            self, Category, Counted, Heightmap, NaturalLevel, PlayerSquares, SpawnBuffers,
+            SpawnCost, SpawnPlayer, SpawnRequest, SpawnState, Spawned, StructureAt,
+            StructureSpawns,
         },
     },
 };
@@ -65,6 +66,8 @@ pub(super) struct SpawnScratch {
     /// dx/dz order, that no earlier player's square holds.
     segments: Vec<Vec<(i32, i32)>>,
     stale: Vec<bool>,
+    /// The spawn state's allocations, reused across passes.
+    spawn_buffers: SpawnBuffers,
 }
 impl SpawnScratch {
     fn chunk(p: &LevelPlayer) -> (i32, i32) {
@@ -429,8 +432,7 @@ impl GameLevel<'_, '_> {
         )
     }
     fn biome(&self, x: i32, y: i32, z: i32) -> Option<&BiomeInfo> {
-        let chunk = self.game.world.chunks.get(&(x >> 4, z >> 4))?;
-        Some(world_biomes!(self.game).get(chunk.biome(x, y, z)))
+        Some(world_biomes!(self.game).get(self.game.world.noise_biome(x, y, z)?))
     }
     /// The block whose noise cell `BiomeManager.getBiome` reads.
     fn zoomed(&self, x: i32, y: i32, z: i32) -> [i32; 3] {
@@ -780,11 +782,13 @@ impl NaturalLevel for GameLevel<'_, '_> {
             entries.clear();
         }
     }
+    // `Level.getMinY` and `getMaxY`: the level's own range (0..255 in vanilla's
+    // Nether and End), not the widened column its chunks hold.
     fn min_y(&self) -> i32 {
-        self.w.world.bottom_y()
+        self.w.world.shape.min_y
     }
     fn max_y(&self) -> i32 {
-        self.w.world.top_y() - 1
+        self.w.world.shape.max_y() - 1
     }
     fn ambient_light(&self) -> f32 {
         self.game.dimension_type().ambient_light
@@ -905,8 +909,11 @@ impl NaturalLevel for GameLevel<'_, '_> {
     /// skipped (air counts for no heightmap). An unloaded column reads as air.
     fn heightmap(&self, kind: Heightmap, x: i32, z: i32) -> i32 {
         let world = self.w.world;
+        // A heightmap reads at least the level's minimum Y (an empty column of a level
+        // narrower than its chunks' column would read the column's bottom).
+        let min_y = world.shape.min_y;
         if kind == Heightmap::WorldSurface {
-            return self.w.world_surface(x, z);
+            return self.w.world_surface(x, z).max(min_y);
         }
         world
             .chunks
@@ -916,7 +923,7 @@ impl NaturalLevel for GameLevel<'_, '_> {
                     spawn_selection::heightmap_blocks(self, kind, x, y, z)
                 })
             })
-            .map_or(self.w.world.bottom_y(), |y| y + 1)
+            .map_or(min_y, |y| (y + 1).max(min_y))
     }
     fn pathfindable_land(&self, x: i32, y: i32, z: i32) -> bool {
         self.w
@@ -1168,9 +1175,10 @@ impl<'a> Game<'a> {
         level: &GameLevel<'_, '_>,
         spawnable: i32,
         players: Vec<SpawnPlayer>,
+        buffers: SpawnBuffers,
         counted: &[Counted],
     ) -> SpawnState {
-        SpawnState::new(level, spawnable, players, counted, |cx, cz| {
+        SpawnState::new_in(level, spawnable, players, buffers, counted, |cx, cz| {
             self.world.chunks.contains_key(&(cx, cz))
         })
         .with_limits(self.spawn_policy(self.dim.key()).limits)
@@ -1280,7 +1288,8 @@ impl<'a> Game<'a> {
                 })
                 .collect();
             laps.lap("sn_materialize");
-            let mut state = self.natural_spawn_state(&level, spawnable, players, &counted);
+            let buffers = std::mem::take(&mut scratch.spawn_buffers);
+            let mut state = self.natural_spawn_state(&level, spawnable, players, buffers, &counted);
             laps.lap("sn_state");
             last_state = state.counts();
             let categories = self.natural_categories(&state);
@@ -1317,6 +1326,7 @@ impl<'a> Game<'a> {
                     );
                 }
             }
+            scratch.spawn_buffers = state.into_parts().1;
             let created = std::mem::take(&mut *level.spawned.borrow_mut());
             let rides = std::mem::take(&mut *level.rides.borrow_mut());
             (created, rides)
@@ -1419,7 +1429,7 @@ mod tests {
     /// `Level.hasNearbyAlivePlayer` as spawners ask it, against the same
     /// test on every player's full record (`level_players`).
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn alive_player_near_tests_guests_where_they_stand() {
         use horizon_client::lan::{Joined, NetConfig, PlayerSender, guest::Guest, hub::HubConfig};
         use horizon_protocol::packets::configuration::ClientInformation;
@@ -1450,6 +1460,7 @@ mod tests {
                 max_players: 8,
                 integrated: false,
                 levels: Default::default(),
+                level_seeds: Default::default(),
             },
         )
         .unwrap();
@@ -1508,8 +1519,51 @@ mod tests {
         }
     }
 
+    /// An End chunk read back from a save holds the table's first biome (badlands) in the
+    /// sections its widened column adds below Y 0 and above 255. Natural spawning reads the
+    /// level's own range (`getMinY` 0, `getMaxY` 255) and biomes clamped to it
+    /// (`getNoiseBiome`): next to a floor at Y 0 every monster list is the End's, and an
+    /// empty column's surface is the floor (#15880).
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
+    fn end_spawning_reads_the_level_range_not_the_widened_column() {
+        use horizon_client::chunk::{Chunk, LevelShape};
+        use std::sync::Arc;
+        let mut resources = None;
+        let mut game = crate::game::game_tests::tests::server_game(&mut resources);
+        game.dim = Dim::End;
+        game.world.shape = LevelShape::END;
+        let end = world_biomes!(game).id("minecraft:the_end");
+        // The column runs -64..320: quart rows 16..80 are the level's 0..256. The zoom
+        // reaches into the neighbours.
+        for (cx, cz) in (-1..=1).flat_map(|x| (-1..=1).map(move |z| (x, z))) {
+            let mut chunk = Chunk::with_layout(cx, cz, LevelShape::END.column());
+            for qy in 16..80 {
+                for qz in 0..4 {
+                    for qx in 0..4 {
+                        chunk.set_biome_cell(qx, qy, qz, end);
+                    }
+                }
+            }
+            game.world.chunks.insert((cx, cz), Arc::new(chunk));
+        }
+        let level = game.natural_level();
+        for x in 0..16 {
+            for z in 0..16 {
+                for y in [1, 2, 3, 254, 255] {
+                    let list = spawn_selection::mobs_at(&level, Category::Monster, x, y, z);
+                    let types: Vec<&str> = list.iter().map(|e| e.entity.as_str()).collect();
+                    assert_eq!(types, ["minecraft:enderman"], "at {x} {y} {z}");
+                }
+            }
+        }
+        assert_eq!((level.min_y(), level.max_y()), (0, 255));
+        assert_eq!(level.heightmap(Heightmap::WorldSurface, 3, 3), 0);
+        assert_eq!(level.heightmap(Heightmap::MotionBlocking, 3, 3), 0);
+    }
+
+    #[test]
+    #[ignore = "daily"]
     fn authoritative_world_border_gates_positions_and_whole_chunks() {
         use horizon_core::position::BlockPos;
         use horizon_world::level::LevelAccess;
@@ -1539,7 +1593,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn world_border_outer_chunk_gate_keeps_attempt_randomness() {
         use horizon_client::{chunk::Chunk, motion::PlayerMotion};
         use std::sync::Arc;
@@ -1825,7 +1879,7 @@ mod tests {
     /// its draws are vanilla's whatever a mod answers. The position check replaces vanilla's two
     /// checks: no listener and `Default` draw exactly as vanilla, `Succeed` and `Fail` draw nothing.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and an isolated process for native mods"]
+    #[ignore = "daily"]
     fn spawn_checks_pin_the_random_draws_of_both_halves() {
         use super::super::native_entity_refs::tests::with_game;
         with_game(|game| {
@@ -2045,7 +2099,7 @@ mod tests {
     /// id and spawned mob as with no listener, so the mob it read is the one that spawned, not
     /// created twice. A `Fail` drops each mob: none is added and no provisional id is used.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and an isolated process for native mods"]
+    #[ignore = "daily"]
     fn natural_spawn_checks_lend_the_mob_and_keep_the_draws() {
         use super::super::native_entity_refs::tests::with_game;
         with_game(|game| {
@@ -2144,7 +2198,7 @@ mod tests {
     /// (the lent mob is the one that joins); a `Fail` adds no mob, uses no entity id and leaves
     /// no tracking entry. Spawn data with entity data lends the kind and position only.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and an isolated process for native mods"]
+    #[ignore = "daily"]
     fn spawner_checks_tell_the_block_and_keep_the_draws() {
         use super::super::native_entity_refs::tests::with_game;
         use horizon_client::chunk::block_entity::Next;
@@ -2234,7 +2288,7 @@ mod tests {
     /// `Spawner::Trial` at the block; a `Default` listener leaves the draws, ids and mob as with
     /// none; a `Fail` adds no mob and no tracking entry.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and an isolated process for native mods"]
+    #[ignore = "daily"]
     fn trial_spawner_checks_tell_the_block_and_keep_the_draws() {
         use super::super::native_entity_refs::tests::with_game;
         use horizon_client::mobs::spawner::{SpawnData, SpawnDataExt};
@@ -2327,7 +2381,7 @@ mod tests {
     /// No listener and a listener that changes nothing finalize and draw as vanilla; a cancel
     /// skips finalization and its draws, the mob still spawning; `spawn_cancelled` adds no mob.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and an isolated process for native mods"]
+    #[ignore = "daily"]
     fn finalize_spawn_cancels_pin_the_draws_and_the_outcome() {
         use super::super::native_entity_refs::tests::with_game;
         with_game(|game| {
@@ -2391,7 +2445,7 @@ mod tests {
     /// A site vanilla makes without `finalizeSpawn` (an infested block's silverfish) is not
     /// told; one it finalizes is.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and an isolated process for native mods"]
+    #[ignore = "daily"]
     fn finalize_spawn_is_told_only_where_vanilla_finalizes() {
         use super::super::creatures::SpawnSite;
         use super::super::native_entity_refs::tests::with_game;
@@ -2443,7 +2497,7 @@ mod tests {
     /// `ZombieHorse.finalizeSpawn` finalizes its rider with the horse's own
     /// `spawnReason`, a baby zombie's chicken with `JOCKEY`.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and an isolated process for native mods"]
+    #[ignore = "daily"]
     fn jockeys_finalize_with_the_parents_reason() {
         use super::super::creatures::SpawnSite;
         use super::super::native_entity_refs::tests::with_game;
@@ -2496,7 +2550,7 @@ mod tests {
     /// real draw source (a `LegacyRandom`), compared with an untouched copy.
     /// A mob in an unloaded chunk is never asked.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and an isolated process for native mods"]
+    #[ignore = "daily"]
     fn mob_despawn_answers_override_vanilla_and_default_passes_through() {
         use super::super::native_entity_refs::tests::with_game;
         use mod_api::Despawn::{Allow, Default as Vanilla, Deny};
@@ -2530,7 +2584,7 @@ mod tests {
                         id,
                     ));
                     let pos = [mob.position.x, mob.position.y, mob.position.z];
-                    game.native_mob_despawn(
+                    crate::game::native_hooks::NativeHookHost { host: game }.native_mob_despawn(
                         "minecraft:overworld",
                         handle,
                         &mob.kind.id,
@@ -2575,7 +2629,7 @@ mod tests {
     /// With no mod listening, `Mob.despawn` stays `Default` and vanilla's checks
     /// and draws run as before.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn mob_despawn_with_no_listener_draws_as_vanilla() {
         use super::super::native_entity_refs::tests::with_game;
         with_game(|game| {
@@ -2658,7 +2712,7 @@ mod tests {
     /// vanilla's for its type and reason (the first part to answer wins), a part that does not
     /// answer, and a type with no part, leave it to vanilla.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and an isolated process for native mods"]
+    #[ignore = "daily"]
     fn entity_parts_answer_the_spawn_cluster_size() {
         use super::super::native_entity_refs::tests::{run_fresh_cases, with_game};
         if run_fresh_cases(
@@ -2703,7 +2757,7 @@ mod tests {
     /// tick joins before that tick's natural and custom spawns, with the
     /// lower entity ids. The phases name themselves in the spans they run in.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn raids_tick_before_natural_and_custom_spawning() {
         let mut resources = None;
         let mut game = crate::game::game_tests::tests::server_game(&mut resources);

@@ -30,9 +30,23 @@ Content-root composition follows the same tag rule, including block/biome tag
 bundles. The damage registry remains frozen after world open; reloads reevaluate
 its tags. Generated item default components retain their prototype lifetime.
 
-Supported forms are `neoforge:mod_loaded`, `neoforge:true`, `neoforge:not`
-(`value`), and `neoforge:and` / `neoforge:or` (`values`), inside a
-`neoforge:conditions` array. Every condition must hold. An unknown kind in a
+Supported forms are `neoforge:mod_loaded`, `neoforge:true`, `neoforge:false`,
+`neoforge:not` (`value`), `neoforge:and` / `neoforge:or` (`values`),
+`neoforge:feature_flags_enabled` (`flags`: every flag the world enables),
+`neoforge:registered` (`registry`, default `minecraft:item`, and `value`) and
+`neoforge:tag_empty` (`registry`, default `minecraft:item`, and `tag`), inside a
+`neoforge:conditions` array. Every condition must hold. `registered` reads the
+registries as this load holds them: each registry's built-in entries (the prepared
+root's export) and what this load's packs add, so a pack's new entry counts on its
+first load and one a pack no longer has stops counting. `tag_empty` reads the tags
+this load bound (block, item and fluid tags), so it holds only for recipes and the
+readers after them; tag files themselves, and every reader before the tags are
+bound, omit the file with one error rather than answer from a partial or earlier
+set of tags. Within a supplied registry or tag view, a registry absent from that
+view is empty: `registered` is false and `tag_empty` is true, with no diagnostic.
+Advancements and datapack registry entries evaluate conditions per file only.
+Tag-list and native data-map file readers do not recursively filter list elements;
+data-map per-value condition handling is separate. An unknown kind in a
 namespace where a loaded mod registered conditions refuses reload, naming the
 file, condition and owner. Other unknown kinds omit the file with one named
 error-level log entry, including beneath `not` or `or`. Files without the array load normally.

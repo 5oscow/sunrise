@@ -138,7 +138,7 @@ impl Game<'_> {
             )
         };
         let name = match &state.name {
-            Some(n) => horizon_protocol::text::literal(n),
+            Some(n) => horizon_client::scoreboard::json_to_tag(&n.component()),
             None => Tag::compound([("translate", Tag::String(key.as_str().into()))]),
         };
         let uuid = state.mob.map_or([0; 4], |id| self.mob_uuid(id));
@@ -741,6 +741,7 @@ mod tests {
             max_players: 2,
             integrated: true,
             levels: game.level_shapes,
+            level_seeds: game.levels.runtime.seeds(),
         };
         game.lan_host(settings, net, config).unwrap();
         let (tx, rx) = std::sync::mpsc::channel();
@@ -812,7 +813,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn changing_an_open_merchant_to_an_unknown_profession_closes_without_trading() {
         use horizon_core::nbt::Tag;
         with_game(|game| {
@@ -957,7 +958,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn explicit_nbt_offers_and_xp_override_the_live_trade() {
         use horizon_core::nbt::Tag;
         with_game(|game| {
@@ -1003,7 +1004,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_merchant_edit_reaches_the_guest_trading_with_it() {
         with_game(|game| {
             let (villager, rx, first) = open_trade(game, 1);
@@ -1094,7 +1095,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_lowered_level_still_levels_up_with_the_next_trade_set() {
         with_game(|game| {
             let (villager, _rx, first) = open_trade(game, 3);
@@ -1144,7 +1145,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_type_change_reaches_the_open_session_before_a_level_up() {
         with_game(|game| {
             let (villager, _rx, _) = open_trade(game, 4);
@@ -1166,7 +1167,7 @@ mod tests {
     type Seen = Arc<std::sync::Mutex<Vec<(Option<u32>, usize, bool, bool)>>>;
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_trade_hook_fired_by_a_real_select_can_write_the_open_trade() {
         use mod_api::{self, Hooks, TradeSelectEvent};
         struct Observer(Seen);

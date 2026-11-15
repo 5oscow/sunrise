@@ -108,8 +108,10 @@ jobs:
     uses: ./.github/workflows/wasm-mods.yml
     with:
       commit: ${{ needs.resolve.outputs.commit }}
+  # Against this run's own SDK (the sdk job's legs, or sdk-<sha> when that is already released), signed with a
+  # throwaway key that only the debug-assertions launcher it builds trusts. It waits for the sdk job for the legs.
   fn-replace-check:
-    needs: resolve
+    needs: [resolve, sdk]
     if: needs.resolve.outputs.skip == 'false'
     uses: ./.github/workflows/fn-replace-check.yml
     with:
@@ -157,6 +159,7 @@ jobs:
       contents: write  # the daily-green tag
       issues: write
       actions: read
+      pull-requests: read  # which pull request closed a test's last issue, and whether this commit holds its fix
     outputs:
       green: ${{ steps.summary.outputs.green }}
     steps:
@@ -204,9 +207,11 @@ jobs:
     permissions:
       issues: write
       actions: read
+      pull-requests: read  # as the summary: whether this commit holds the fix that closed the leg's last issue
     steps:
       - uses: actions/checkout@v4
         with:
+          fetch-depth: 0  # the commit's whole history, for that check
           persist-credentials: false
       - env:
           GH_TOKEN: ${{ github.token }}

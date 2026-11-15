@@ -205,25 +205,8 @@ impl ModsState {
     }
 }
 
-/// Capture load inputs at the resource-generation boundary, before workers share them.
-pub(super) fn load_item_data(root: &Path, role: ExecutionRole) -> horizon_client::Result<ItemData> {
-    let phase = mod_api::__private::PhaseOwner::scope(if role.is_client() {
-        mod_api::__private::ModPhase::Setup
-    } else {
-        mod_api::__private::ModPhase::World
-    });
-    let _reload = phase.reloading()?;
-    let inputs = LoadInputs::new(builtin_registry_names(root)?, Game::mod_data_root());
-    let inventory = horizon_mod_package::enabled::EnabledMods::read(root)?;
-    let ids: Vec<_> = if role.is_logical_server() {
-        inventory.server_ids().collect()
-    } else {
-        inventory.client_ids().collect()
-    };
-    let context = LoadContext::new(role.data_load_origin(), Arc::new(inputs), ids);
-
-    Ok(ItemData::load(root, context)?)
-}
+mod item_data_load;
+pub(super) use item_data_load::{LoadRole, load_item_data};
 
 /// The built-in registries' names in ID order, with Horizon's own data components.
 fn builtin_registry_names(root: &Path) -> horizon_client::Result<BTreeMap<String, Vec<String>>> {
@@ -302,6 +285,7 @@ pub(super) fn freeze_declarations() -> horizon_client::Result<()> {
     Ok(())
 }
 
+#[derive(Clone)]
 struct NativeDeclared {
     errors: Vec<String>,
     blocks: Vec<horizon_mod_package::content::Block>,
@@ -311,9 +295,8 @@ struct NativeDeclared {
 }
 
 /// The same native declarations serve startup and every pack reload.
-fn native_declared() -> &'static NativeDeclared {
-    static DECLARED: std::sync::OnceLock<NativeDeclared> = std::sync::OnceLock::new();
-    DECLARED.get_or_init(|| {
+fn native_declared() -> std::borrow::Cow<'static, NativeDeclared> {
+    let collect = || {
         let (mut blocks, mut items) = (Vec::new(), Vec::new());
         let context = RegistrationContext::new();
         Game::native_blocks(&context, &mut blocks);
@@ -360,7 +343,19 @@ fn native_declared() -> &'static NativeDeclared {
             types,
             fluids,
         }
-    })
+    };
+    // Production freezes one loaded mod set for startup and reload. Tests replace
+    // that set in thread-local scopes, so a process-wide snapshot would retain
+    // whichever fixture reached content loading first, even on another thread.
+    #[cfg(not(test))]
+    {
+        static DECLARED: std::sync::OnceLock<NativeDeclared> = std::sync::OnceLock::new();
+        std::borrow::Cow::Borrowed(DECLARED.get_or_init(collect))
+    }
+    #[cfg(test)]
+    {
+        std::borrow::Cow::Owned(collect())
+    }
 }
 /// The native mods' standalone models (`native_standalone_models`), set once
 /// before the resources first load.
@@ -794,6 +789,10 @@ pub(super) fn content_overlay(
                 continue;
             }
         };
+        // What every client must have refuses a server package outright, code or content alone.
+        if let Some(e) = content.server_only_refusal(m) {
+            return Err(e.into());
+        }
         let known = match &mut known {
             Some(types) => types,
             None => match mod_content::known_components(root) {
@@ -829,9 +828,27 @@ pub(super) fn content_overlay(
         items,
         types,
         fluids,
-    } = native_declared();
+    } = &*native_declared();
     if !errors.is_empty() {
         return Err(errors.join("\n").into());
+    }
+    let declared_ids = (blocks.iter().map(|b| ("block", b.id.as_str())))
+        .chain(items.iter().map(|i| ("item", i.id.as_str())))
+        .chain(types.iter().map(|t| ("block entity type", t.id.as_str())))
+        .chain(fluids.iter().map(|f| ("fluid", f.id.as_str())));
+    for m in packages.iter().map(|s| s.manifest) {
+        if let Some(e) = m.server_only_declaration(declared_ids.clone()) {
+            return Err(e.into());
+        }
+        if m.side == horizon_mod_package::manifest::Side::Server
+            && let Some(requirement) = mod_api::__private::client_requirement(&m.id)
+        {
+            return Err(format!(
+                "{}: a side = \"server\" mod {requirement}; declare side = \"both\"",
+                m.id
+            )
+            .into());
+        }
     }
     if !blocks.is_empty() || !items.is_empty() || !types.is_empty() {
         let known = match &mut known {
@@ -887,7 +904,7 @@ pub(super) fn content_overlay(
     })
 }
 
-fn resolve_particle_providers(
+pub(in crate::game) fn resolve_particle_providers(
     source: &horizon_assets::resource_source::ResourceSource,
 ) -> Result<(), String> {
     if mod_api::__private::particles_resolved() {
@@ -1046,6 +1063,10 @@ pub(in crate::game) fn register_iterated_registries(
         mod_api::__private::resolve_entity_types(ids.names.iter().map(String::as_str))
             .map_err(|errors| errors.join("\n"))?;
     }
+    if let Some(ids) = builtin.get("minecraft:game_event") {
+        mod_api::__private::resolve_game_events(ids.names.iter().map(String::as_str))
+            .map_err(|errors| errors.join("\n"))?;
+    }
     if let Some(ids) = builtin.get("minecraft:menu") {
         mod_api::__private::resolve_menus(ids.names.iter().map(String::as_str))
             .map_err(|errors| errors.join("\n"))?;
@@ -1190,11 +1211,11 @@ fn announced_entry(
     mod_list::Entry {
         id: id.to_owned(),
         version: version.to_owned(),
-        // `Side` is open to new kinds; until the list carries one, such a mod stays local.
-        side: if side == Side::Both {
-            mod_list::Side::Both
-        } else {
-            mod_list::Side::Client
+        side: match side {
+            Side::Both => mod_list::Side::Both,
+            Side::Server => mod_list::Side::Server,
+            // `Side` is open to new kinds; until the list carries one, such a mod stays local.
+            _ => mod_list::Side::Client,
         },
     }
 }
@@ -1439,13 +1460,16 @@ impl Game<'_> {
         });
     }
 
-    /// Build this game's loop context over the loaded registries and the mods'
-    /// current settings. Called where a resource generation starts or reloads: a
-    /// client at window start and after a resource reload, a server when it starts
-    /// its mods and on `/reload`. A client hands a second one to its audio; a
-    /// server publishes one for its world generation.
+    /// Publish the initial generation's captured settings to its loop readers.
+    /// An integrated server has a distinct origin and captures its own inputs.
     pub(super) fn refresh_loop_context(&mut self) -> horizon_client::Result<()> {
-        let context = self.prepare_loop_context(&self.options.resources)?;
+        let role = self.options.execution_role;
+        let load = self.res.core.item_data.context();
+        let context = if load.origin() == role.data_load_origin() {
+            self.loop_context_readers(load.captured_loop_context(role.loop_side()))
+        } else {
+            self.prepare_loop_context(&self.options.resources)?
+        };
         self.install_loop_context(context);
         Ok(())
     }
@@ -1462,19 +1486,25 @@ impl Game<'_> {
             inventory.client_ids().collect()
         };
         let item_data = self.res.core.item_data.context();
+        Ok(self.loop_context_readers(item_data.loop_context(side, ids.iter().copied())))
+    }
+
+    fn loop_context_readers(
+        &self,
+        context: horizon_world::native_load_context::LoopContext,
+    ) -> PreparedLoopContext {
+        let game = Arc::new(context);
         let audio = self
             .options
             .execution_role
             .is_client()
-            .then(|| item_data.loop_context(side, ids.iter().copied()));
-        let worldgen = self
-            .is_logical_server()
-            .then(|| item_data.worldgen_context(ids.iter().copied()));
-        Ok(PreparedLoopContext {
-            game: Arc::new(item_data.loop_context(side, ids.iter().copied())),
+            .then(|| game.as_ref().clone());
+        let worldgen = self.is_logical_server().then(|| game.worldgen_context());
+        PreparedLoopContext {
+            game,
             audio,
             worldgen,
-        })
+        }
     }
 
     pub(super) fn install_loop_context(&mut self, context: PreparedLoopContext) {
@@ -1941,6 +1971,34 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
+    #[test]
+    fn native_declarations_follow_the_scoped_mod_fixture() {
+        struct DeclaresBlock;
+        #[mod_api::__subscriptions]
+        impl mod_api::Hooks for DeclaresBlock {
+            fn blocks(&self, _: &RegistrationContext, event: &mut mod_api::BlocksEvent<'_>) {
+                event
+                    .blocks
+                    .push(mod_api::Block::new("test:blastproof", "minecraft:stone"));
+            }
+        }
+        mod_platform::testing::with_mods(Vec::new().into(), || {
+            assert!(native_declared().blocks.is_empty());
+        });
+        let mods = vec![mod_api::ModEntry::new("test", Box::new(DeclaresBlock))].into();
+        mod_platform::testing::with_mods(mods, || {
+            assert!(
+                native_declared()
+                    .blocks
+                    .iter()
+                    .any(|b| b.id == "test:blastproof")
+            );
+        });
+        mod_platform::testing::with_mods(Vec::new().into(), || {
+            assert!(native_declared().blocks.is_empty());
+        });
+    }
+
     use super::*;
     use horizon_mod_package::runtime::Runtime;
     use mod_api::__private::native::BuiltMod;
@@ -2154,7 +2212,7 @@ mod tests {
     /// built from the template's, so the reads of #1469 and #1493 answer the
     /// declared values with no second copy.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_mods_declared_entity_attributes_reach_spawn_and_the_live_map() {
         use horizon_client::mobs::Mob;
         use horizon_core::geometry::Vec3;
@@ -2223,7 +2281,7 @@ mod tests {
     /// by string id — a guest's catalog built from the same mods decodes the
     /// same network id.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_mods_declared_attribute_reaches_rows_the_live_map_saves_and_sync() {
         use horizon_client::lan;
         use horizon_client::living_attributes::{self, LivingAttributes};
@@ -2370,7 +2428,7 @@ mod tests {
     /// ghoul's 40 health) gives way to the template's, so a mob of the type
     /// spawns with what the live attribute map answers (#845, review).
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_declared_type_spawns_with_its_merged_row_not_its_content_row() {
         use horizon_client::mobs::Mob;
         use horizon_core::geometry::Vec3;
@@ -2786,6 +2844,62 @@ mod tests {
         );
     }
 
+    /// A `side = "server"` content package goes through the real loader: a registry
+    /// declaration fails the load by name even when it would not parse, and assets load.
+    #[test]
+    #[ignore = "daily"]
+    fn a_server_package_is_refused_at_load_for_registry_files_and_loads_with_assets() {
+        const MODE: &str = "HORIZON_SERVER_PACKAGE_TEST";
+        if std::env::var_os(MODE).is_none() {
+            run_in_child(
+                "game::mods::tests::a_server_package_is_refused_at_load_for_registry_files_and_loads_with_assets",
+                MODE,
+            );
+            return;
+        }
+        let f = Fixture::new("server-package");
+        let package = f.0.join("srv");
+        let write = |file: &str, text: &str| {
+            let path = package.join(file);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, text).unwrap();
+        };
+        write(
+            "horizon-mod.toml",
+            "id='srv'\nname='srv'\nversion='1'\napi='0.2'\nside='server'\ncapabilities=['registries']\n",
+        );
+        write("data/srv/horizon/item/gem.json", "{ not json");
+        // Merging a mod's assets reads the prepared root's block reports, so this is the real one.
+        let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let mut sources = ModsState {
+            dev: vec![package.clone()],
+            ..Default::default()
+        };
+        let enabled = Default::default();
+        sources.select(&f.0, &enabled);
+        let error = content_overlay(&base, &sources, &f.0.join("jars"))
+            .err()
+            .unwrap()
+            .to_string();
+        assert_eq!(
+            error,
+            "srv: a side = \"server\" mod carries data/srv/horizon/item/gem.json, which every \
+             client must have; declare side = \"both\""
+        );
+        std::fs::remove_dir_all(package.join("data")).unwrap();
+        write("assets/srv/lang/en_us.json", "{}");
+        sources.select(&f.0, &enabled);
+        let overlay = content_overlay(&base, &sources, &f.0.join("jars")).unwrap();
+        assert_eq!(
+            overlay
+                .mods
+                .iter()
+                .map(|m| m.id.as_str())
+                .collect::<Vec<_>>(),
+            ["srv"]
+        );
+    }
+
     #[test]
     #[ignore = "daily"]
     fn native_content_follows_the_build_and_misplaced_content_follows_its_selection() {
@@ -3099,5 +3213,88 @@ mod concurrent_content_tests {
             );
         }
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod server_side_tests {
+    use mod_api::*;
+
+    struct Reloads;
+    #[mod_api::__subscriptions]
+    impl Hooks for Reloads {
+        fn add_client_reload_listeners(
+            &self,
+            _: &dyn ClientHost,
+            _: &mut AddClientReloadListenersEvent<'_>,
+        ) {
+        }
+    }
+    struct Hider;
+    #[mod_api::horizon_part]
+    impl BlockPart for Hider {
+        fn block_render_visibility(&self, _: &dyn ClientHost, _: &mut BlockRenderVisibilityEvent) {}
+    }
+    struct HidesLogs;
+    #[mod_api::__subscriptions]
+    impl Hooks for HidesLogs {
+        fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
+            r.block_part_tag("minecraft:logs", Hider);
+        }
+    }
+    struct Pings;
+    #[mod_api::__subscriptions]
+    impl Hooks for Pings {
+        fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
+            let mut payloads = r.payload_handlers();
+            let mut required = payloads.registrar("1");
+            required.play_to_client(PayloadId("pings:ping".into()), None);
+            required.play_to_client(PayloadId("pings:pong".into()), None);
+            required
+                .optional()
+                .play_to_client(PayloadId("pings:hint".into()), None);
+        }
+    }
+    struct Quiet;
+    #[mod_api::__subscriptions]
+    impl Hooks for Quiet {
+        fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
+            r.payload_handlers()
+                .registrar("1")
+                .optional()
+                .play_to_client(PayloadId("quiet:hint".into()), None);
+        }
+    }
+
+    /// What a joining client must have is named for its own mod only: a client hook, a part
+    /// listening to one, the first required clientbound payload. An optional payload is not.
+    #[test]
+    fn what_a_client_must_have_is_named_for_its_mod_only() {
+        let mods: Mods = vec![
+            ModEntry::new("reloads", Box::new(Reloads)),
+            ModEntry::new("hides_logs", Box::new(HidesLogs)),
+            ModEntry::new("pings", Box::new(Pings)),
+            ModEntry::new("quiet", Box::new(Quiet)),
+        ]
+        .into();
+        mod_platform::__private::part_tests::install_parts_fixture(&mods).unwrap();
+        mod_platform::testing::with_mods(mods, || {
+            assert_eq!(
+                mod_api::__private::client_requirement("reloads").unwrap(),
+                "listens to the client hook add_client_reload_listeners"
+            );
+            assert_eq!(
+                mod_api::__private::client_requirement("hides_logs").unwrap(),
+                format!(
+                    "attaches the part {}, which listens to the client hook block_render_visibility",
+                    std::any::type_name::<Hider>()
+                )
+            );
+            assert_eq!(
+                mod_api::__private::client_requirement("pings").unwrap(),
+                "sends the required payload pings:ping to clients"
+            );
+            assert_eq!(mod_api::__private::client_requirement("quiet"), None);
+        });
     }
 }

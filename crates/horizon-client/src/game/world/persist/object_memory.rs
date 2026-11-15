@@ -913,6 +913,8 @@ impl Game<'_> {
         }
         self.write_leash(&mut tag, id);
         write_attachments(&mut tag, id, &self.entity_attachments);
+        // A mod's AI pause beside the mods' attachments, whose map would drop it.
+        entity_nbt::write_ai_paused(self.mob_at(object).ai.ai_paused, &mut tag);
         tag
     }
 
@@ -987,7 +989,7 @@ mod namespace_review_tests {
     use super::*;
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn captured_content_vehicle_type_matches_its_actual_save_id() {
         crate::game::native_entity_refs::tests::with_game(|game| {
             let mut kind = game.res.mob_types().get("minecraft:cow").unwrap().clone();

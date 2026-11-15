@@ -229,7 +229,7 @@ fn replay(window: Arc<Window>) -> Result<(), Box<dyn std::error::Error>> {
         None,
         settings.graphics_api(),
         settings.translucent_batching,
-        false,
+        (false, false),
         // HDR off, as the replays draw.
         &horizon_client_render::graphics::Graphics::default(),
         Default::default(),
@@ -706,6 +706,7 @@ fn remesh(
                         translucent_layers: &[],
                         leaf_culling,
                         hidden_states: &[],
+                        part_tables: Default::default(),
                     };
                     let mut scratch = MeshScratch::default();
                     let mut out = Vec::new();

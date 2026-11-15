@@ -286,12 +286,16 @@ impl Hooks for Mod {
         runtime_environment::register(cx);
         capability_registration::register(registrar, cx);
         game_payload::register(registrar);
+        typed_payload::register(registrar);
         interaction::register(registrar);
         predicted_use::register(registrar);
         cauldron::register(registrar);
         tick_reply::register(registrar);
         part_state::register(registrar);
         registrar.register_custom_stat("steps").unwrap();
+        if cx.mods().get("wasm_storage_attempt_observer").is_some() {
+            storage_attempts::register(registrar);
+        }
         registrar
             .declare_datapack_registry(
                 "spell",

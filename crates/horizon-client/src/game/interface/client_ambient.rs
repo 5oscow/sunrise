@@ -259,6 +259,11 @@ impl Game<'_> {
     /// list the server sent, and the mobs and guests of a game in the frame
     /// theirs.
     fn effect_swirls(&mut self) {
+        // `ITEM_SLIME` and `ITEM_COBWEB` crumbs draw the item's model, which
+        // `BreakingItemParticle`'s providers resolve as they spawn: the sprites
+        // are kept per type here, and this resolves them once (it returns at
+        // once after).
+        self.ensure_item_particle_sprites();
         if let Some(p) = self.player.as_ref() {
             let effects = &self.potions.effects.list;
             let list: Vec<_> = effects
@@ -359,7 +364,7 @@ mod sprint_handle_tests {
     use std::sync::Arc;
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn client_entity_sprint_particles_use_the_local_block_and_reject_stale_handles() {
         super::super::native_entity_refs::tests::with_game(|game| {
             game.options.execution_role = super::super::execution_role::ExecutionRole::Client;
@@ -417,3 +422,7 @@ mod sprint_handle_tests {
         });
     }
 }
+
+#[cfg(test)]
+#[path = "tests/effect_particle_tests.rs"]
+mod effect_particle_tests;
