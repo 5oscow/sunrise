@@ -523,7 +523,7 @@ class ReleaseTrainTests(unittest.TestCase):
         self.assertTrue(body.startswith("# Sunrise Launcher\n"))
         self.assertIn("### Fixed\n- Fix launcher updates (#3)", body)
         self.assertNotIn(train.LAUNCHER_FOOTER, body)
-        self.assertNotIn("macOS", body)
+        self.assertIn("sunrise-launcher-macos-arm64.dmg", body)
         self.assertNotIn("numbered with the game", body)
         command = next(line for line in body.splitlines() if line.startswith("cargo run "))
         self.assertEqual(shlex.split(command), [
