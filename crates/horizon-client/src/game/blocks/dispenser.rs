@@ -2823,6 +2823,20 @@ mod tests {
     #[ignore = "daily"]
     fn a_can_equip_part_decides_whether_a_dispenser_dresses_a_guest() {
         use horizon_core::nbt::Tag;
+        // Before any part is installed: `install_parts` outlives `installed`, and a leftover part
+        // that accepts players would answer for the stack in place of its component.
+        {
+            let mut resources = None;
+            let mut game = server_with_guest(&mut resources);
+            let zombies = vec![Tag::String("zombie".into())];
+            let fields = vec![
+                ("slot", Tag::String("head".into())),
+                ("allowed_entities", Tag::List(zombies)),
+            ];
+            let mut stack = helmet_with(Some(fields));
+            assert!(!game.dispense_equipment((8, 201, 8), Direction::Down, &mut stack));
+            assert!(game.lan.as_ref().unwrap().hub.guest(2).unwrap().armor[0].is_none());
+        }
         let fits = Fits::new("minecraft:armor_stand");
         fits.installed(|| {
             let mut resources = None;
@@ -2849,16 +2863,6 @@ mod tests {
             );
             assert_eq!(fits.asked(), [(asked.0, asked.1, asked.2, at)]);
         });
-        let mut resources = None;
-        let mut game = server_with_guest(&mut resources);
-        let zombies = vec![Tag::String("zombie".into())];
-        let fields = vec![
-            ("slot", Tag::String("head".into())),
-            ("allowed_entities", Tag::List(zombies)),
-        ];
-        let mut stack = helmet_with(Some(fields));
-        assert!(!game.dispense_equipment((8, 201, 8), Direction::Down, &mut stack));
-        assert!(game.lan.as_ref().unwrap().hub.guest(2).unwrap().armor[0].is_none());
     }
 
     #[test]

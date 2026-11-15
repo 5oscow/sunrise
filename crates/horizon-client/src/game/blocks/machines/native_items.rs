@@ -74,7 +74,9 @@ impl Game<'_> {
             // Reserve the offered item before writable insertion notices can re-enter.
             let reserved = game.take_one(source, slot).ok_or(())?;
             let went = part.insert_any(game, tx, &resource, 1);
-            let accepted = part.checked(went, 1, &at) == Some(1);
+            // A part answering more than it was offered is a broken mod: abort, undoing
+            // whatever its insertion moved. A plain refusal still commits.
+            let accepted = part.checked(went, 1, &at).ok_or(())? == 1;
             if !accepted {
                 match game.slot_mut_at(source, slot).ok_or(())? {
                     Some(held) if held.same_item_same_components(&reserved) => {
