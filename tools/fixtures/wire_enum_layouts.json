@@ -865,6 +865,12 @@
       "canonical_path": "crate::item::types::ToolAbility"
     },
     {
+      "name": "TravelMode",
+      "path": "crate::entity::types::TravelMode",
+      "hash": "1383dbf322af50ce",
+      "canonical_path": "crate::entity::types::TravelMode"
+    },
+    {
       "name": "TriState",
       "path": "crate::world::types::TriState",
       "hash": "25afa4adbad61ffe",

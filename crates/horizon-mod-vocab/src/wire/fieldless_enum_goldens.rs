@@ -716,6 +716,11 @@ fn existing_fieldless_enum_layouts_match_baseline() {
         "ToolAbility"
     );
     assert_eq!(
+        <crate::entity::types::TravelMode as Wire>::layout(&mut vec![]),
+        0x1383dbf322af50ce,
+        "TravelMode"
+    );
+    assert_eq!(
         <crate::world::types::TriState as Wire>::layout(&mut vec![]),
         0x25afa4adbad61ffe,
         "TriState"

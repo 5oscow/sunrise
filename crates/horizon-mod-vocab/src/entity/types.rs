@@ -1484,6 +1484,27 @@ impl MoveCause {
     ];
 }
 
+/// Which `LivingEntity.travel` branch a living body is about to run (the
+/// `living_travel` hook of #2308/#2414): water, lava, the glide, the flying
+/// branch, or ordinary air travel. The game resolves it before the branch
+/// selection runs and hands it to the listener as data: replacing the
+/// travel's input or velocity does not change which branch runs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
+pub enum TravelMode {
+    /// `LivingEntity.travelInAir`: the ordinary ground-and-air branch.
+    Air,
+    /// `LivingEntity.travelInFluid` with water: swimming.
+    Water,
+    /// `LivingEntity.travelInFluid` with lava.
+    Lava,
+    /// `LivingEntity.travelFallFlying`: gliding.
+    Glide,
+    /// The flying branch (`Player` abilities flying, a flying mob kind).
+    Flying,
+}
+
 /// How a declared attribute's modifier lines read on item tooltips: NeoForge's
 /// `RangedAttribute`, `PercentageAttribute` and `BooleanAttribute`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

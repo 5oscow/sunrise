@@ -141,6 +141,7 @@
   "crate::block::block_sprites::TextureAtlas",
   "crate::client::types::ToastKind",
   "crate::item::types::ToolAbility",
+  "crate::entity::types::TravelMode",
   "crate::world::types::TriState",
   "crate::client::camera::UseItem",
   "crate::item::types::UsePhase",
