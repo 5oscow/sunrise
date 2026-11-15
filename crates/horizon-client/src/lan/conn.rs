@@ -378,9 +378,10 @@ impl PlayerSender {
         sender.payload_transport = transport;
         sender
     }
-    /// Real bounded output queue without socket adoption, for executor tests.
-    #[cfg(test)]
-    pub(crate) fn payload_executor_test_sender(
+    /// Real bounded output queue without socket adoption, for executor tests (and the
+    /// game's, through `test-payload-probe`).
+    #[cfg(any(test, feature = "test-payload-probe"))]
+    pub fn payload_executor_test_sender(
         transport: Arc<Transport>,
     ) -> (Self, impl Fn() -> Vec<Vec<u8>>) {
         let pending = Arc::default();

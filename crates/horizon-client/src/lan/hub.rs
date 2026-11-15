@@ -53,6 +53,7 @@ mod pending_move;
 mod raw_inbox;
 mod selector_sync;
 mod spawn_info;
+mod tracking_pass;
 use advancements::AdvancementOwners;
 use chat::yellow_names;
 pub use pending_move::{Accepted, Hearing, PendingMove};
@@ -277,7 +278,12 @@ pub struct TickGrants {
 pub struct TrackingBatch {
     pub player: u128,
     pub name: String,
+    pub conn: u32,
     pub events: Vec<super::entity::TrackEvent>,
+    /// The output of the pass that made `events`, not sent yet: the game sends it up to each
+    /// event's packet (`TrackEvent::at`) before telling the mods (`Hub::send_tracking_out`).
+    /// Empty when it went out with the pass (no mod listened); `at` is then None.
+    pub held: Vec<super::Body>,
 }
 
 /// A holder whose synced attachments one player is sent whole, because the
@@ -301,14 +307,22 @@ fn queue_snapshots(
 }
 
 /// Moves a guest's tracking events into `out`, one batch, and the entities it
-/// started tracking into `snapshots`.
+/// started tracking into `snapshots`. `held` is the output of the pass that made
+/// them, kept back for the game; without it the output is already sent and the
+/// events lose their place in it.
 fn take_tracking(
     g: &mut Guest,
     out: &mut Vec<TrackingBatch>,
     snapshots: &mut Vec<AttachmentSnapshot>,
     sync_attachments: bool,
+    held: Option<Vec<super::Body>>,
 ) {
-    let events = g.tracker.take_events();
+    let mut events = g.tracker.take_events();
+    if held.is_none() {
+        for e in &mut events {
+            e.at = None;
+        }
+    }
     if !events.is_empty() {
         if sync_attachments {
             let started = events.iter().filter(|e| e.start);
@@ -321,7 +335,9 @@ fn take_tracking(
         out.push(TrackingBatch {
             player: g.uuid,
             name: g.name.clone(),
+            conn: g.conn,
             events,
+            held: held.unwrap_or_default(),
         });
     }
 }
@@ -345,6 +361,9 @@ pub struct Hub {
     /// The entities players started and stopped tracking, collected by
     /// `collect_tracking`, for the game to tell the mods.
     pub native_tracking: Vec<TrackingBatch>,
+    /// The players' own state waits for the game to tell the mods of the pass
+    /// (`finish_tracking_pass`).
+    players_after_tracking: bool,
     /// The holders players started seeing, for the game to send their synced
     /// attachments (`flush_attachment_sync`).
     pub attachment_snapshots: Vec<AttachmentSnapshot>,
@@ -838,6 +857,7 @@ impl Hub {
             moves_listened: false,
             transfers: None,
             native_tracking: Vec::new(),
+            players_after_tracking: false,
             attachment_snapshots: Vec::new(),
             sync_attachments: false,
             native_advancement_grants: Vec::new(),
@@ -2289,6 +2309,7 @@ impl Hub {
         // running level/maintenance work. Game uses the split methods.
         if !self.packets_paused() {
             events.extend(self.tick_level(ctx));
+            self.finish_tracking_pass();
             self.end_tick();
         }
         events
@@ -2483,6 +2504,17 @@ impl Hub {
         crate::spans::time("lan_containers", || self.sync_containers(ctx.world));
         self.sync_hidden();
         crate::spans::time("lan_track_entities", || self.track_entities(ctx));
+        if self.native_tracking.iter().any(|b| !b.held.is_empty()) {
+            // The mods hear the pass's pairings first (`finish_tracking_pass`).
+            self.players_after_tracking = true;
+        } else {
+            self.sync_players();
+        }
+        events
+    }
+
+    /// `ServerPlayer.doTick`'s health, food, experience and effects for the level's players.
+    fn sync_players(&mut self) {
         crate::spans::time("lan_player_state", || {
             for i in 0..self.guests.len() {
                 if self.here(&self.guests[i]) {
@@ -2491,7 +2523,6 @@ impl Hub {
                 }
             }
         });
-        events
     }
 
     /// After every level: `PlayerList.tick`.
@@ -2529,6 +2560,7 @@ impl Hub {
                 &mut self.native_tracking,
                 &mut self.attachment_snapshots,
                 self.sync_attachments,
+                None,
             );
         });
     }
@@ -2566,14 +2598,9 @@ impl Hub {
         if !g.placed {
             return g;
         }
-        // `PlayerList.remove`: the entities it tracked stop (`removePairing`).
+        // `PlayerList.remove`: the entities it tracked stop (`removePairing`). The stops stay
+        // with the guest: the game tells them after `player_logged_out` (`HostEvent::Left`).
         g.tracker.clear();
-        take_tracking(
-            &mut g,
-            &mut self.native_tracking,
-            &mut self.attachment_snapshots,
-            self.sync_attachments,
-        );
         // To the held players too: they were told of this one, and see its entity.
         self.broadcast_watching(&C::PlayerInfoRemove(play::PlayerInfoRemove {
             uuids: vec![g.uuid],
@@ -3393,7 +3420,28 @@ impl Hub {
             entity_type(types, sync, kind)
         });
         drop(viewers);
-        for (g, out) in self.guests.iter().filter(|g| here(g)).zip(outs.iter_mut()) {
+        // While a mod listens, a player's output that started or stopped tracking waits for the
+        // game to tell the mods at each pairing's packet (`tracking_pass`).
+        let hold = tracking_pass::tracking_listened();
+        let mut rows = outs.iter_mut();
+        for i in 0..self.guests.len() {
+            if !here(&self.guests[i]) {
+                continue;
+            }
+            let out = rows.next().expect("one output per visible guest");
+            if hold && self.guests[i].tracker.cut() {
+                self.guests.update(i, |g| {
+                    take_tracking(
+                        g,
+                        &mut self.native_tracking,
+                        &mut self.attachment_snapshots,
+                        self.sync_attachments,
+                        Some(std::mem::take(out)),
+                    );
+                });
+                continue;
+            }
+            let g = &self.guests[i];
             self.hold_sound_removals(g.conn, out);
             g.sender.send_many(out.drain(..));
         }

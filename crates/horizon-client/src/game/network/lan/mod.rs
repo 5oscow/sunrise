@@ -2315,6 +2315,10 @@ impl Game<'_> {
                     host.forget_menus(guest.conn);
                     self.clear_guest_book_connection(guest.conn);
                     self.native_guest_left(&guest);
+                    // PlayerList.remove after the logout: what it tracked stops (removePairing).
+                    for e in guest.tracker.take_events() {
+                        self.tell_tracking(guest.uuid, &guest.name, &e);
+                    }
                 }
                 HostEvent::Flight { conn, flying } => {
                     self.lan_flight_toggled(conn, flying);
@@ -2767,7 +2771,7 @@ impl Game<'_> {
             }
             host.hub.far_level(&self.save);
             let spawn = self.world_spawn_position();
-            let events = {
+            let (events, last) = {
                 let clock_rate = self.network_clock_rate();
                 let Some(host) = self.lan.as_mut() else {
                     return;
@@ -2826,11 +2830,17 @@ impl Game<'_> {
                 events.extend(horizon_client::spans::time("lan_tick_level", || {
                     host.hub.tick_level(&mut ctx)
                 }));
-                if pass.last {
+                (events, pass.last)
+            };
+            // The mods hear the pass's starts and stops of tracking at each one's packet, before
+            // the players' own state and the end of the tick (#4522).
+            self.run_native_tracking();
+            if let Some(host) = self.lan.as_mut() {
+                host.hub.finish_tracking_pass();
+                if last {
                     horizon_client::spans::time("lan_end_tick", || host.hub.end_tick());
                 }
-                events
-            };
+            }
             self.wake_woken_guests();
             let Some(host) = self.lan.take() else {
                 return;
@@ -6094,3 +6104,6 @@ mod merchant_packet_tests {
         });
     }
 }
+
+#[cfg(test)]
+mod tracking_hook_tests;

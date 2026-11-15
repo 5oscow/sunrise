@@ -825,6 +825,11 @@ pub struct TrackEvent {
     pub start: bool,
     pub entity: i32,
     pub tracked: Arc<Tracked>,
+    /// Where its packet ends in the client's output of the pass that made it (`Viewer::out`): the
+    /// spawn bundle of a start, the removal of a stop. A mod told of it sends what follows that
+    /// packet (`Hub::cut_tracking_out`). None for a stop without a packet of the pass: the caller
+    /// removes the entities itself (`Tracker::clear`, `Tracker::forget`).
+    pub at: Option<usize>,
 }
 
 /// The entities one client tracks (`TrackedEntity.seenBy`, from the
@@ -857,6 +862,7 @@ impl Tracker {
             start: false,
             entity,
             tracked,
+            at: None,
         }));
     }
     /// Stop tracking `id` without a packet: the caller removes it from the
@@ -869,6 +875,7 @@ impl Tracker {
             start: false,
             entity: id,
             tracked,
+            at: None,
         });
         true
     }
@@ -877,6 +884,11 @@ impl Tracker {
     }
     pub fn is_empty(&self) -> bool {
         self.seen.is_empty()
+    }
+    /// Whether a start or stop since the last call has a packet in the pass's output
+    /// (`TrackEvent::at`): the output can be cut there for the mods.
+    pub fn cut(&self) -> bool {
+        self.events.iter().any(|e| e.at.is_some())
     }
     /// The starts and stops since the last call, in order.
     pub fn take_events(&mut self) -> Vec<TrackEvent> {
@@ -1153,6 +1165,7 @@ impl Entities {
                     start: true,
                     entity: e.id,
                     tracked: Arc::clone(&s.tracked),
+                    at: Some(v.out.len()),
                 });
             }
             self.states.insert(e.id, s);
@@ -1476,12 +1489,15 @@ impl Entities {
                                     start: false,
                                     entity: *id,
                                     tracked: Arc::clone(tracked),
+                                    // Set once the removal below is in `out`.
+                                    at: None,
                                 });
                                 false
                             }
                         });
                     }
                     if !removed.is_empty() {
+                        let stops = removed.len();
                         v.out.push(
                             play::Clientbound::RemoveEntities(play::RemoveEntities {
                                 ids: removed,
@@ -1489,6 +1505,11 @@ impl Entities {
                             .encode()
                             .into(),
                         );
+                        // Every stop of the batch ends with its one removal packet.
+                        let at = v.out.len();
+                        for e in v.tracker.events.iter_mut().rev().take(stops) {
+                            e.at = Some(at);
+                        }
                     }
                     // A viewing client starts tracking no more than its viewed world holds.
                     if v.sources.is_some() {
@@ -1595,6 +1616,9 @@ impl Entities {
                         Bodies::of(&packets)
                     });
                     v.out.extend(bodies.to(v).iter().cloned());
+                    // The bundle ends here: its changes follow (sendChanges), after
+                    // what a mod sends for the pairing.
+                    let at = v.out.len();
                     if synced && !self.packets.is_empty() {
                         if !encoded {
                             self.bodies.encode(&self.packets);
@@ -1611,6 +1635,7 @@ impl Entities {
                             start: true,
                             entity: e.id,
                             tracked: Arc::clone(&s.tracked),
+                            at: Some(at),
                         });
                     }
                 }
@@ -1704,6 +1729,8 @@ impl Entities {
                         && let Some(pairing) = &m.pairing
                     {
                         v.out.extend(pairing.to(v).iter().cloned());
+                        // As `send_in_order`: the bundle ends before its changes.
+                        let at = v.out.len();
                         if m.synced {
                             v.out.extend(m.changes.to(v).iter().cloned());
                         }
@@ -1717,6 +1744,7 @@ impl Entities {
                                 start: true,
                                 entity: id,
                                 tracked: Arc::clone(&m.state.tracked),
+                                at: Some(at),
                             });
                         }
                     }
