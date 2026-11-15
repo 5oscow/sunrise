@@ -61,12 +61,99 @@ impl Game<'_> {
                 || !self.mods.native.packages().is_empty())
     }
 
+    /// The conditions of a load from `root` over the candidate pack `files`.
     pub(super) fn registered_load_conditions(
         &self,
         inventory: &horizon_mod_package::enabled::EnabledMods,
+        stack: &super::functions::PackStack,
+        root: &std::path::Path,
+        files: &[(String, Vec<Vec<u8>>)],
     ) -> Result<horizon_world::conditions::LoadConditions, String> {
-        conditions_for_mods(&self.mods, inventory)
+        // `ICondition.IContext`: the world's feature flags and every registry's
+        // entries as this candidate holds them. Tags join later, once this load has bound them.
+        let features = || stack.features.iter().map(String::as_str);
+        // Admission of a pack entry reads every condition but the registries this builds.
+        let admission = conditions_for_mods(&self.mods, inventory)?.with_features(features());
+        let registries = candidate_registries(root, files, &admission);
+        Ok(conditions_for_mods(&self.mods, inventory)?
+            .with_features(features())
+            .with_registries(
+                registries
+                    .iter()
+                    .map(|(registry, ids)| (registry.as_str(), ids.iter().map(String::as_str))),
+            ))
     }
+}
+
+/// Every registry's entries as the candidate load holds them, which `neoforge:registered` reads:
+/// the built-in ones the prepared root exports (`command-registries.json`, never what an earlier
+/// load added), and the entries the candidate's pack `files` add to a registry that takes them
+/// (vanilla's, or a datapack registry a mod declared). So an id a pack adds counts on its first
+/// load, and one a pack no longer has stops counting on the next.
+fn candidate_registries(
+    root: &std::path::Path,
+    files: &[(String, Vec<Vec<u8>>)],
+    admission: &horizon_world::conditions::LoadConditions,
+) -> BTreeMap<String, std::collections::BTreeSet<String>> {
+    let export: serde_json::Value = std::fs::read(root.join("command-registries.json"))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default();
+    let mut registries: BTreeMap<String, std::collections::BTreeSet<String>> =
+        export["by_registry"]
+            .as_object()
+            .into_iter()
+            .flatten()
+            .map(|(registry, entry)| {
+                let ids = entry["ids"].as_array().into_iter().flatten();
+                let ids = ids.filter_map(serde_json::Value::as_str).map(str::to_owned);
+                (registry.clone(), ids.collect())
+            })
+            .collect();
+    for declaration in mod_api::__private::datapack_registry_declarations().iter() {
+        registries.entry(declaration.key.clone()).or_default();
+    }
+    // A pack file's key is `<folder>/<namespace>:<path>`: `worldgen/biome/test:dunes` for
+    // `minecraft:worldgen/biome`, `mymod/spell/test:fire` for a mod's `mymod:spell`.
+    let folder = |registry: &str| match registry.split_once(':') {
+        Some(("minecraft", path)) => path.to_owned(),
+        Some((namespace, path)) => format!("{namespace}/{path}"),
+        None => registry.to_owned(),
+    };
+    let by_folder: BTreeMap<String, String> = registries
+        .keys()
+        .map(|registry| (folder(registry), registry.clone()))
+        .collect();
+    for (key, versions) in files {
+        let Some(slash) = key.find(':').and_then(|colon| key[..colon].rfind('/')) else {
+            continue;
+        };
+        // The winning file, if its own conditions hold: an entry they turn off is not there.
+        // One whose conditions read registries or tags, which this view is still building,
+        // counts, as it may load.
+        let admitted = versions.last().is_some_and(|bytes| {
+            let Ok(file) = serde_json::from_slice::<serde_json::Value>(bytes) else {
+                return true;
+            };
+            let payload = file.get("neoforge:conditions").map(ToString::to_string);
+            payload.is_none_or(|payload| {
+                payload.contains("\"neoforge:registered\"")
+                    || payload.contains("\"neoforge:tag_empty\"")
+                    || admission.allows_file(&file, key)
+            })
+        });
+        if !admitted {
+            continue;
+        }
+        if let Some(registry) = by_folder.get(&key[..slash]) {
+            let id = key[slash + 1..].to_owned();
+            registries
+                .get_mut(registry)
+                .expect("named above")
+                .insert(id);
+        }
+    }
+    registries
 }
 
 pub(super) fn conditions_for_mods(

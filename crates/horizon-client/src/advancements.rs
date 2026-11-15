@@ -218,8 +218,8 @@ impl Tree {
                 Err(e) => log::warn!("Horizon: pack advancement {id} not loaded: {e}"),
             }
         }
-        for (id, v) in json {
-            if !overlay.conditions.allows_id(&v, "advancement", &id) {
+        for (id, mut v) in json {
+            if !overlay.conditions.admit_id(&mut v, "advancement", &id) {
                 continue;
             }
             if let Some(a) = parse(&id, &v) {
