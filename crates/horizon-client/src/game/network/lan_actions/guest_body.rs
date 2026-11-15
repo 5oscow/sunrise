@@ -63,7 +63,7 @@ impl Game<'_> {
     /// hazards (drowning, lava, fire blocks, suffocation, the void), and
     /// regeneration and the food tick (ServerPlayer.doTick). Their hurt
     /// sounds are heard at the guest.
-    pub(super) fn guest_server_tick(&mut self, conn: u32) {
+    pub(super) fn guest_server_tick(&mut self, conn: u32, body: bool) {
         self.guest_replay(conn);
         self.guest_vehicle_tick(conn);
         // The last move's fall stands in for the server's delta movement.
@@ -102,7 +102,7 @@ impl Game<'_> {
             // tickRegeneration, and foodData.tick go on while it watches
             // (#11312). The hazards, the travel and the movement statistics
             // below are what a spectator's body skips.
-            if !self.guest_body_ticks(g) {
+            if !body {
                 return;
             }
             if !g.effects.list.is_empty() {

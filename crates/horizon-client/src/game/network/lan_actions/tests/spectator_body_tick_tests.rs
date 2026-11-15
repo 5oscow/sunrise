@@ -231,3 +231,80 @@ fn leftover_sleep_countdown_waits_at_the_unloaded_edge_then_resumes() {
         });
     });
 }
+
+#[test]
+#[ignore = "daily"]
+fn pre_teleport_to_unloaded_edge_keeps_the_resolved_body_tick() {
+    struct Move;
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for Move {
+        fn player_tick_pre(&self, host: HostSide<'_>, event: &mut mod_api::PlayerTickPreEvent) {
+            let HostSide::Server(host) = host else {
+                panic!("server fixture");
+            };
+            assert!(mod_api::EntityRef::from(event.player).teleport_to(
+                host,
+                [15.5, 64.0, 8.5],
+                None
+            ));
+        }
+    }
+    mod_platform::testing::with_mods(
+        vec![mod_api::ModEntry::new("move", Box::new(Move))].into(),
+        || {
+            with_game(|game| {
+                open_to_lan(game);
+                game.world
+                    .chunks
+                    .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+                assert!(!game.world.chunks.contains_key(&(1, 0)));
+                let mut watcher = placed(1, 8.5, SPECTATOR);
+                let mut motion = PlayerMotion::new(game.motion, Vec3::new(8.5, 64.0, 8.5)).unwrap();
+                motion.health.food.exhaustion = 5.0;
+                watcher.motion = Some(Box::new(motion));
+                watcher.saved = Some(horizon_core::nbt::Tag::compound([(
+                    "ShoulderEntityLeft",
+                    horizon_core::nbt::Tag::compound([
+                        (
+                            "id",
+                            horizon_core::nbt::Tag::String("minecraft:parrot".into()),
+                        ),
+                        ("Silent", horizon_core::nbt::Tag::Byte(1)),
+                    ]),
+                )]));
+                game.lan.as_mut().unwrap().hub.guests.push(watcher);
+                game.lan
+                    .as_mut()
+                    .unwrap()
+                    .play
+                    .entry(1)
+                    .or_default()
+                    .cooldowns
+                    .add("minecraft:ender_pearl".into(), 5);
+                game.tick_guests();
+                let watcher = game.lan.as_ref().unwrap().hub.guest(1).unwrap();
+                assert_eq!(watcher.position, [15.5, 64.0, 8.5]);
+                assert!(
+                    !game.guest_body_ticks(watcher),
+                    "a fresh decision would skip the body"
+                );
+                assert_eq!(luck_left(game), [99]);
+                assert_eq!(pearl_left(game), [4]);
+                assert_eq!(watcher.motion.as_ref().unwrap().health.food.exhaustion, 1.0);
+                assert!(
+                    watcher
+                        .saved
+                        .as_ref()
+                        .unwrap()
+                        .get("ShoulderEntityLeft")
+                        .is_none()
+                );
+                game.tick_guests();
+                let watcher = game.lan.as_ref().unwrap().hub.guest(1).unwrap();
+                assert_eq!(luck_left(game), [99]);
+                assert_eq!(pearl_left(game), [4]);
+                assert_eq!(watcher.motion.as_ref().unwrap().health.food.exhaustion, 1.0);
+            });
+        },
+    );
+}

@@ -230,7 +230,7 @@ impl Game<'_> {
                 }
             }
             self.guest_delayed_destroy(conn);
-            self.guest_server_tick(conn);
+            self.guest_server_tick(conn, body);
             // Player.tick's statistics and ServerPlayer.tick's triggers, then
             // PlayerAdvancements.flushDirty.
             let Some(host) = self.lan.as_mut() else {
