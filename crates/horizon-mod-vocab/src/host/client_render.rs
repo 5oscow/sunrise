@@ -27,7 +27,8 @@ pub trait ClientRenderClientHost {
     fn instance_group_destroy(&self, group: InstanceGroupRef) -> Result<(), GroupError>;
     /// Side: client.
     /// Asks `block_render_visibility` again for every state and, when the answers differ
-    /// from those in use, remeshes every loaded section with them. Call it when your answer changes (a toggle key, a scan
+    /// from those in use, remeshes every loaded section with them. While a mod listens to
+    /// `section_visibility`, every loaded section meshes again and is asked anew. Call it when your answer changes (a toggle key, a scan
     /// finishing) and once when the player joins, not every frame: a rebuild takes the workers a
     /// few seconds. With no part answering, nothing is asked and the mesher keeps its no-mod path.
     #[access(WorldOnly)]

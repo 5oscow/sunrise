@@ -219,6 +219,7 @@ pub(super) fn tesselate(
     water_color: u32,
     out: &mut SectionMesh,
     [x, y, z]: [i32; 3],
+    faces: u8,
 ) {
     use horizon_assets::model::Direction as D;
     let cardinal = |d: D| {
@@ -238,8 +239,11 @@ pub(super) fn tesselate(
     let same = |s: &Info| s.fluid.kind().same_family(kind);
     let neighbor = |d: Direction| at(super::OFFSETS[d as usize]);
     let (down, up) = (neighbor(Direction::Down), neighbor(Direction::Up));
-    let should_render = |d: Direction| !same(neighbor(d)) && !occluded_by_self(me, d);
-    let render_up = !same(up);
+    // `faces`: the directions a mod's section visibility keeps (all six without one).
+    let kept = |d: Direction| faces >> d as u8 & 1 != 0;
+    let should_render =
+        |d: Direction| kept(d) && !same(neighbor(d)) && !occluded_by_self(me, d);
+    let render_up = kept(Direction::Up) && !same(up);
     let render_down =
         should_render(Direction::Down) && !occluded_by(Direction::Down, MAX_HEIGHT, down);
     let sides = [
@@ -600,6 +604,7 @@ mod tests {
                 0x00FF00,
                 &mut mesh,
                 [0, 0, 0],
+                0b11_1111,
             );
             let (vertices, expected) = if kind == FluidKind::Lava {
                 assert!(mesh.translucent.is_empty());
@@ -634,6 +639,7 @@ mod tests {
             0x00FF00,
             &mut mesh,
             [0, 0, 0],
+            0b11_1111,
         );
         let mut layers: Vec<_> = mesh.translucent.iter().map(|v| v.layer).collect();
         layers.sort_unstable();

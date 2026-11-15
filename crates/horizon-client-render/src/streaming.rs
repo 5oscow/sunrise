@@ -288,6 +288,8 @@ struct MeshSettings {
     opaque_ice: bool,
     translucent_layers: Arc<[bool]>,
     leaf_culling: LeafCullingMode,
+    /// The section's frozen `section_visibility` plan; `None` on the no-mod path.
+    visibility: Option<Arc<crate::mesher::SectionVisibilityPlan>>,
 }
 enum Job {
     Generate(i32, i32),
@@ -616,6 +618,8 @@ pub struct Streaming {
     /// Finished meshes the renderer has not taken yet (the game's pending
     /// uploads): they count against the meshing room as the jobs do.
     pub upload_backlog: usize,
+    /// Sections waiting for the mods' `section_visibility` answers, and the answers kept.
+    pub section_visibility: section_visibility::SectionPreparation,
     /// Dimension flags: sky light, Nether face shading.
     pub sky_light: bool,
     pub nether_shading: bool,
@@ -1128,6 +1132,8 @@ pub use queue_census::QueueCensus;
 mod forced_cover;
 mod forced_ring;
 mod mesh_job;
+mod section_visibility;
+pub use section_visibility::{SectionPreparation, VisibilityRequest};
 mod relight_now;
 mod viewed_meshing;
 use bounded::nearest_first;
@@ -1224,6 +1230,7 @@ impl Streaming {
             mod_tickets: ModTickets::default(),
             paused: false,
             upload_backlog: 0,
+            section_visibility: Default::default(),
             sky_light: true,
             nether_shading: false,
             shader_pack_lighting: false,
@@ -1920,6 +1927,7 @@ impl Streaming {
                 self.decorated.remove(key);
             }
             removed = commit_unloads(world, &far);
+            self.forget_visibility(world, &far);
             for key in &far {
                 world.entities_pending.remove(key);
                 self.lit.remove(key);
@@ -2286,21 +2294,7 @@ impl Streaming {
             };
             world.dirty_sections.take_column(x, z);
             for sy in sections.iter().map(|sy| sy as i32) {
-                let first = self.meshed.insert((x, z));
-                self.sequence += 1;
-                self.meshing.insert((x, sy, z), self.sequence);
-                self.submit(
-                    Some((x, z)),
-                    if first { 2 } else { 0 },
-                    Job::Mesh(
-                        x,
-                        sy,
-                        z,
-                        region.clone(),
-                        self.sequence,
-                        self.mesh_settings(),
-                    ),
-                );
+                self.submit_mesh((x, sy, z), &region);
             }
         }
         self.cover_current = false;

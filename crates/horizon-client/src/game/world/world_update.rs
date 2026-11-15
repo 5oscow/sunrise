@@ -217,6 +217,8 @@ impl Game<'_> {
         let (uploads, unloaded) = horizon_client::spans::time("streaming", || {
             self.streaming.complete_commit(&mut self.world, commit)
         });
+        // Sections chosen to mesh wait for the mods' `section_visibility` (none without a mod).
+        self.prepare_section_visibility();
         self.streaming.extra.truncate(areas);
         // The viewed levels' meshing, queued after the player's level's (nothing while no view
         // names one).
