@@ -812,8 +812,27 @@ pub trait EntitiesBackendMut {
     /// `force` bypasses normal admission checks, not these storage limits.
     /// Player boarding cooldown and the strider's
     /// eye-in-lava admission check are not represented by the game.
+    /// A player vehicle is refused, forced or not, as vanilla refuses it.
+    /// `entity_try_start_riding` is the same mount and names each refusal.
     #[access(WorldOnly)]
     fn entity_start_riding(&mut self, entity: EntityRef, vehicle: EntityRef, force: bool) -> bool;
+    /// Side: server.
+    /// `entity_start_riding`, with the cause of a refusal named: the same
+    /// checks in the same order, the same mount, and `Ok(())` exactly where
+    /// that call returns true. A player vehicle is refused as
+    /// `StartRidingRefusal::PlayerVehicle`, forced or not: vanilla's
+    /// `Entity.startRiding` refuses a vehicle whose entity type is not saved
+    /// with the level before it reads `force`, and the player type is one, as
+    /// a player's save keeps no passengers. `entity_mount` fires only after
+    /// every other check passed, and its cancel is
+    /// `StartRidingRefusal::Canceled`.
+    #[access(WorldOnly)]
+    fn entity_try_start_riding(
+        &mut self,
+        entity: EntityRef,
+        vehicle: EntityRef,
+        force: bool,
+    ) -> Result<(), StartRidingRefusal>;
     /// Side: server.
     /// Gets the entity off its vehicle (`Entity.stopRiding`), where the
     /// vehicle lets it out, as `/ride ... dismount` does. False when it rode

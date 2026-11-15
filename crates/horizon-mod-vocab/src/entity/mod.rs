@@ -7,6 +7,7 @@ pub(crate) mod entity_reach;
 pub(crate) mod mob_ai_pause;
 pub(crate) mod player_data;
 pub(crate) mod player_world;
+pub(crate) mod start_riding;
 // hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod behaviors;
