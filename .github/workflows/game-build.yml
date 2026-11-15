@@ -137,7 +137,7 @@ jobs:
     # Windows ARM64 and musl stay optional. Snapshots also leave Intel macOS optional: only the SDK's
     # platforms are required there. Nightlies and releases retain their existing Intel macOS requirement.
     # Optional failed legs still run; signing omits their absent archives, and snapshot notes name them.
-    continue-on-error: ${{ matrix.name == 'windows-arm64' || matrix.name == 'linux-musl' || (inputs.kind == 'snapshot' && matrix.name == 'macos-x64') }}
+    continue-on-error: ${{ (github.repository == 'sunrise-org/sunrise' && matrix.mac == true) || matrix.name == 'windows-arm64' || matrix.name == 'linux-musl' || (inputs.kind == 'snapshot' && matrix.name == 'macos-x64') }}
     strategy:
       fail-fast: false
       matrix:
