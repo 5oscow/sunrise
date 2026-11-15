@@ -3,8 +3,7 @@
 Add a `neoforge:conditions` array to control whether a server JSON file loads.
 Supported readers are
 recipes, loot tables, item modifiers, predicates, enchantments, jukebox songs,
-instruments, damage types, advancements, synchronized registry JSON, world-table
-tags (including loot, damage, synchronized registry and function tags), and native item/block data maps.
+instruments, damage types, advancements, and synchronized registry JSON.
 Every condition must hold; a false condition omits the file. Mods can
 [register conditions](load-conditions.md) for this same evaluator.
 Register one handler per id using the read-only `RegistrationContext`. A handler
@@ -13,8 +12,9 @@ arguments. Invalid mod input must return `ConditionError`, never panic.
 
 Ordinary JSON resources select the winning pack file first, then evaluate its
 conditions before decoding the data. If the winner is omitted, a lower pack's
-version does not return. Tags and data maps evaluate each layer before merging,
-`replace`, or `remove`, so an omitted layer leaves lower entries intact. A damage
+version does not return. Tag files and data-map files ignore a top-level
+`neoforge:conditions` key. Data-map values evaluate their own conditions when
+read; a failing value is omitted before merging. A damage
 registry is frozen at world open; reloading reevaluates its tags, not its type
 definitions. Generated item default components retain their prototype
 lifetime and are not conditional data files.

@@ -331,12 +331,6 @@ impl DataMaps {
             if let Some((_, versions)) = overlay.files.iter().find(|(k, _)| *k == wanted) {
                 for bytes in versions {
                     let file = serde_json::from_slice::<Value>(bytes).ok();
-                    if file
-                        .as_ref()
-                        .is_some_and(|file| !overlay.conditions.allows_file(file, &wanted))
-                    {
-                        continue;
-                    }
                     let applied = file.is_some_and(|file| {
                         apply_file(
                             &mut map,
@@ -896,29 +890,20 @@ mod tests {
     }
 
     #[test]
-    fn conditional_layers_are_skipped_before_replace_and_remove() {
+    fn top_level_conditions_do_not_suppress_map_layers() {
         let f = files(&[(
             "data_maps/mymod:item/fuel",
             &[
                 json!({"values":{"minecraft:coal":1}}),
-                json!({"neoforge:conditions":[{"type":"unsupported"}],"replace":true}),
-                json!({"neoforge:conditions":[{"type":"neoforge:mod_loaded","modid":"provider"}],"remove":["minecraft:coal"],"values":{"minecraft:stick":2}}),
+                json!({"neoforge:conditions":[{"type":"neoforge:false"}],"replace":true,"values":{
+                    "minecraft:stick":2,
+                    "minecraft:coal":{"neoforge:conditions":[{"type":"neoforge:false"}],"value":3}
+                }}),
             ],
         )]);
-        let off = load(&f);
-        assert_eq!(get(&off, "minecraft:coal"), Some(&json!(1)));
-        assert!(get(&off, "minecraft:stick").is_none());
-        let enabled = horizon_world::conditions::LoadConditions::new(["provider"]);
-        let on = DataMaps::load(
-            &[ty("mymod:fuel", "minecraft:item")],
-            &horizon_world::loot::PackOverlay {
-                files: &f,
-                conditions: &enabled,
-            },
-            &Fixture::default(),
-        );
-        assert!(get(&on, "minecraft:coal").is_none());
-        assert_eq!(get(&on, "minecraft:stick"), Some(&json!(2)));
+        let maps = load(&f);
+        assert_eq!(get(&maps, "minecraft:stick"), Some(&json!(2)));
+        assert!(get(&maps, "minecraft:coal").is_none());
     }
 
     #[test]

@@ -47,7 +47,8 @@ Its values are `data/mymod/data_maps/item/emc.json` in any data pack, and files 
 through `data_pack_files` under `data_maps/mymod:item/emc`. The folder is the registry's path for
 a `minecraft` registry (`entity_type`, `worldgen/biome`) and `<namespace>/<path>` for another.
 An id the registry doesn't hold is skipped, with one warning per file. A value may carry its own
-load conditions (`WithConditions`): it counts only when they hold.
+load conditions (`WithConditions`): it counts only when they hold. A top-level
+`neoforge:conditions` key on the data-map file is ignored.
 
 ```json
 { "values": {

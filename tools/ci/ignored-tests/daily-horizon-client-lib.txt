@@ -371,6 +371,7 @@ horizon-client-lib mobs::wither::upstream_sync_tests::a_withers_side_head_does_n
 horizon-client-lib mobs::wither::upstream_sync_tests::idle_blue_skull_volleys_come_only_on_normal_and_hard lib daily resources
 horizon-client-lib mobs::world::missing_data_report_tests::missing_mob_data_reports_one_counted_skip_per_test lib daily child-process
 horizon-client-lib mobs::world::scaffolding_sight_tests::scaffolding_blocks_sight_only_from_above lib daily resources
+horizon-client-lib mod_content::tests::registered_conditions_tests::content_root_tag_layers_ignore_failing_top_level_conditions lib daily resources
 horizon-client-lib mod_content::tests::registered_conditions_tests::failed_condition_build_removes_generated_staging lib daily resources
 horizon-client-lib mod_content::tests::registered_conditions_tests::registered_conditions_select_content_root_tags_and_structure_modifiers lib daily resources
 horizon-client-lib motion::exclusions::tests::an_excluded_block_has_no_inside_effect_and_its_neighbour_still_does lib daily resources

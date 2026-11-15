@@ -454,12 +454,6 @@ fn load_registry_tags(
     let mut definitions = TagDefinitions::default();
     for (id, versions) in files {
         for bytes in versions {
-            let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
-                continue;
-            };
-            if !overlay.conditions.allows_id(&value, &tag_folder, &id) {
-                continue;
-            }
             if let Ok(json) = std::str::from_utf8(&bytes) {
                 // TagLoader retains lower-priority members when a tag codec fails.
                 let _ = definitions.apply_json(&id, "registry tags", json);
@@ -470,4 +464,30 @@ fn load_registry_tags(
         .build(|id, _| known(id).then(|| id.to_owned()))
         .map(|built| built.tags)
         .map_err(|error| error.to_string())
+}
+
+#[cfg(test)]
+mod condition_tests {
+    #[test]
+    fn registry_tags_ignore_top_level_conditions() {
+        let root = tempfile::tempdir().unwrap();
+        let files = vec![(
+            "tags/test:spell/hot".to_owned(),
+            vec![
+                br#"{"neoforge:conditions":[{"type":"neoforge:false"}],"values":["test:fire"]}"#
+                    .to_vec(),
+            ],
+        )];
+        let tags = super::load_registry_tags(
+            root.path(),
+            &horizon_world::loot::PackOverlay {
+                files: &files,
+                ..horizon_world::loot::PackOverlay::NONE
+            },
+            "spell",
+            |id| id == "test:fire",
+        )
+        .unwrap();
+        assert_eq!(tags["test:hot"], ["test:fire"]);
+    }
 }
