@@ -22,7 +22,7 @@ def job(name, conclusion="success", failed=()):
     return {"name": name, "conclusion": conclusion, "steps": steps}
 
 
-GREEN_JOBS = [job("shards / plan"), job("shards / ignored-tests-shards (horizon-world)"),
+GREEN_JOBS = [job("shards / plan"), job("shards / ignored-tests-shards (sunrise-world)"),
               job("wasm-mods / fixture"), job("wasm-mods / Guest stack / ubuntu-latest"),
               job("fn-replace-check / route"), job("fn-replace-check / fn-replace-check"),
               job("linkage / route"), job("linkage / linkage x86_64-unknown-linux-gnu"),
@@ -31,15 +31,15 @@ GREEN_JOBS = [job("shards / plan"), job("shards / ignored-tests-shards (horizon-
               job("machine-sample / route"), job("machine-sample / build"),
               job("sdk / fresh"), job("sdk / build linux"), job("sdk / publish", "skipped")]
 # Every other shard of the daily matrix, green (the summary expects each by name: summary.expected_shards).
-GREEN_JOBS += [job(name) for name in summary.expected_shards() if name != "shards / ignored-tests-shards (horizon-world)"]
+GREEN_JOBS += [job(name) for name in summary.expected_shards() if name != "shards / ignored-tests-shards (sunrise-world)"]
 
 
 def shard_report(problems=(), passed=(), incomplete=()):
-    return {"shards": ["horizon-world"], "problems": list(problems), "passed": list(passed),
+    return {"shards": ["sunrise-world"], "problems": list(problems), "passed": list(passed),
             "incomplete": list(incomplete)}
 
 
-def failure(test, panic="crates/horizon-world/src/lib.rs:7:3", kind="failed", package="horizon-world"):
+def failure(test, panic="crates/sunrise-world/src/lib.rs:7:3", kind="failed", package="sunrise-world"):
     return {"package": package, "test": test, "kind": kind, "panic": panic, "policy": None}
 
 
@@ -156,11 +156,11 @@ class DailySummaryTests(unittest.TestCase):
         self.assertEqual(quiet.writes, [])
 
     def test_all_green_moves_the_tag_and_closes_issues_that_went_green(self):
-        api = Api(GREEN_JOBS, issues=[{"number": 5, "title": "Daily: horizon-world a::b"},
+        api = Api(GREEN_JOBS, issues=[{"number": 5, "title": "Daily: sunrise-world a::b"},
                                       {"number": 6, "title": "Daily: fn-replace-check / fn-replace-check did not complete"},
-                                      {"number": 7, "title": "Daily: horizon-world still::unseen"},
+                                      {"number": 7, "title": "Daily: sunrise-world still::unseen"},
                                       {"number": 8, "title": "Something else"}], tag=True)
-        text, out = self.run_summary(api, [shard_report(passed=[{"package": "horizon-world", "test": "a::b"}])])
+        text, out = self.run_summary(api, [shard_report(passed=[{"package": "sunrise-world", "test": "a::b"}])])
         self.assertIn("green=true", out)
         self.assertIn(("PATCH", "git/refs/tags/daily-green", {"sha": COMMIT, "force": True}), api.writes)
         closed = [path for method, path, body in api.writes if method == "PATCH" and path.startswith("issues/")]
@@ -173,7 +173,7 @@ class DailySummaryTests(unittest.TestCase):
             job("sdk / fresh"), job("sdk / build linux", "skipped"), job("sdk / publish", "skipped")]
         _, out = self.run_summary(Api(jobs), [shard_report()])
         self.assertIn("green=true", out, "sdk-<sha> already exists, and a dry run publishes nothing")
-        jobs = [job("shards / ignored-tests-shards (horizon-world)", "skipped")] + GREEN_JOBS[2:]
+        jobs = [job("shards / ignored-tests-shards (sunrise-world)", "skipped")] + GREEN_JOBS[2:]
         api = Api(jobs)
         _, out = self.run_summary(api, [])
         self.assertIn("green=false", out, "a skipped shard is missing coverage")
@@ -193,7 +193,7 @@ class DailySummaryTests(unittest.TestCase):
         self.assertIn(("POST", "git/refs", {"ref": "refs/tags/daily-green", "sha": COMMIT}), api.writes)
 
     def test_a_failing_test_gets_one_issue_with_location_run_and_suspects(self):
-        jobs = GREEN_JOBS[:1] + [job("shards / ignored-tests-shards (horizon-world)", "failure",
+        jobs = GREEN_JOBS[:1] + [job("shards / ignored-tests-shards (sunrise-world)", "failure",
                                      ["Run the ignored tests that need prepared data"])] + GREEN_JOBS[2:]
         api = Api(jobs)
         report = shard_report([failure("game::x::tests::broken"), failure("game::x::tests::broken")])
@@ -202,18 +202,18 @@ class DailySummaryTests(unittest.TestCase):
         created = [body for method, path, body in api.writes if (method, path) == ("POST", "issues")]
         self.assertEqual(len(created), 1, "one issue per failing test")
         issue = created[0]
-        self.assertEqual(issue["title"], "Daily: horizon-world game::x::tests::broken")
+        self.assertEqual(issue["title"], "Daily: sunrise-world game::x::tests::broken")
         self.assertEqual(issue["labels"], ["bug"])
         self.assertTrue(issue["body"].startswith(summary.DISCLOSURE + "\n"))
-        for part in ("`crates/horizon-world/src/lib.rs:7:3`", "https://github.com/arismoko/horizon/actions/runs/77",
+        for part in ("`crates/sunrise-world/src/lib.rs:7:3`", "https://github.com/arismoko/horizon/actions/runs/77",
                      "#12, #15"):
             self.assertIn(part, issue["body"])
         self.assertFalse(any("tags" in path for _, path, _ in api.writes), "a red run never moves the tag")
 
     def test_an_open_issue_gets_a_comment_not_a_duplicate(self):
-        jobs = [job("shards / ignored-tests-shards (horizon-world)", "failure", ["Run"])] + GREEN_JOBS[2:]
+        jobs = [job("shards / ignored-tests-shards (sunrise-world)", "failure", ["Run"])] + GREEN_JOBS[2:]
         issues = [{"number": n, "title": f"filler {n}"} for n in range(150)]
-        issues.append({"number": 900, "title": "Daily: horizon-world game::x::tests::broken", "body": "> filed"})
+        issues.append({"number": 900, "title": "Daily: sunrise-world game::x::tests::broken", "body": "> filed"})
         api = Api(jobs, issues=issues)
         self.run_summary(api, [shard_report([failure("game::x::tests::broken")])],
                          results=dict(LEGS, shards={"result": "failure"}))
@@ -222,11 +222,11 @@ class DailySummaryTests(unittest.TestCase):
         self.assertTrue(api.writes[0][2]["body"].startswith("🤖 Agent: "))
 
     def test_a_red_whose_fix_merged_after_the_tested_commit_comments_on_the_closed_issue(self):
-        jobs = [job("shards / ignored-tests-shards (horizon-world)", "failure", ["Run"])] + GREEN_JOBS[2:]
+        jobs = [job("shards / ignored-tests-shards (sunrise-world)", "failure", ["Run"])] + GREEN_JOBS[2:]
         late, early = "f" * 40, "e" * 40
-        issues = [{"number": 901, "title": "Daily: horizon-world a::fixed_later", "state": "closed"},
-                  {"number": 902, "title": "Daily: horizon-world a::fixed_before", "state": "closed"},
-                  {"number": 903, "title": "Daily: horizon-world a::closed_by_hand", "state": "closed"}]
+        issues = [{"number": 901, "title": "Daily: sunrise-world a::fixed_later", "state": "closed"},
+                  {"number": 902, "title": "Daily: sunrise-world a::fixed_before", "state": "closed"},
+                  {"number": 903, "title": "Daily: sunrise-world a::closed_by_hand", "state": "closed"}]
         api = Api(jobs, issues=issues)
         report = shard_report([failure("a::fixed_later"), failure("a::fixed_before"), failure("a::closed_by_hand")])
         self.run_summary(api, [report], results=dict(LEGS, shards={"result": "failure"}),
@@ -237,10 +237,10 @@ class DailySummaryTests(unittest.TestCase):
         self.assertFalse(any(path == "issues/901" for _, path, _ in api.writes), "it stays closed")
         # A fix the tested commit holds did not fix it, and a hand close names no fix: both are filed anew.
         self.assertCountEqual([body["title"] for _, path, body in api.writes if path == "issues"],
-                              ["Daily: horizon-world a::fixed_before", "Daily: horizon-world a::closed_by_hand"])
+                              ["Daily: sunrise-world a::fixed_before", "Daily: sunrise-world a::closed_by_hand"])
 
     def test_a_leg_that_failed_without_test_names_gets_one_issue_per_leg(self):
-        jobs = [job("shards / ignored-tests-shards (horizon-world)", "cancelled", ["Prepare checkout-keyed vanilla data"]),
+        jobs = [job("shards / ignored-tests-shards (sunrise-world)", "cancelled", ["Prepare checkout-keyed vanilla data"]),
                 job("wasm-mods / fixture", "failure", ["Build tool and shared member"]),
                 job("fn-replace-check / fn-replace-check", "failure", ["Refusals by name"])] + GREEN_JOBS[6:]
         api = Api(jobs)
@@ -248,7 +248,7 @@ class DailySummaryTests(unittest.TestCase):
                                                **{"fn-replace-check": {"result": "failure"}}), tag=False)
         titles = sorted(body["title"] for method, path, body in api.writes if path == "issues")
         self.assertEqual(titles, ["Daily: fn-replace-check / fn-replace-check did not complete",
-                                  "Daily: shards / ignored-tests-shards (horizon-world) did not complete",
+                                  "Daily: shards / ignored-tests-shards (sunrise-world) did not complete",
                                   "Daily: wasm-mods / fixture did not complete"])
         bodies = " ".join(body["body"] for _, path, body in api.writes if path == "issues")
         self.assertIn("`Refusals by name`", bodies)
@@ -256,23 +256,23 @@ class DailySummaryTests(unittest.TestCase):
 
     def test_a_shard_killed_for_memory_says_by_what_with_its_memory_time_and_running_tests(self):
         stuck = [f"game::slow::case_{n}" for n in range(7)]
-        incomplete = {"shard": "horizon-world", "reason": "a test process crashed", "ended_by": "signal 9 (SIGKILL)",
+        incomplete = {"shard": "sunrise-world", "reason": "a test process crashed", "ended_by": "signal 9 (SIGKILL)",
                       "cargo_exit": 101, "wall_seconds": 4454, "memory_peak_bytes": 34359738368,
                       "memory_max_bytes": 34359738368, "oom_kills": 1, "still_running": stuck,
                       "still_running_more": 0, "never_reported": None}
-        jobs = [job("shards / ignored-tests-shards (horizon-world)", "failure",
+        jobs = [job("shards / ignored-tests-shards (sunrise-world)", "failure",
                     ["Run the ignored tests that need prepared data"])] + GREEN_JOBS[2:]
         api = Api(jobs)
         self.run_summary(api, [shard_report(incomplete=[incomplete])], results=dict(LEGS, shards={"result": "failure"}))
         body = next(body["body"] for _, path, body in api.writes if path == "issues")
-        self.assertIn("a test run did not complete: `horizon-world` killed by signal 9 (SIGKILL), out of memory "
+        self.assertIn("a test run did not complete: `sunrise-world` killed by signal 9 (SIGKILL), out of memory "
                       "(1 kill by the kernel); job memory peak 32.0 GiB of 32.0 GiB; after 74 min; still running past "
                       "60 s: `game::slow::case_0`, `game::slow::case_1`, `game::slow::case_2`, `game::slow::case_3`, "
                       "`game::slow::case_4` and 2 more.", body)
 
     def test_what_a_stopped_run_reports_is_shown_only_as_names_and_numbers(self):
-        self.assertEqual(summary.stopped_text({"shard": "horizon-client#2of2", "in_progress": True}),
-                         "`horizon-client#2of2` was still running when the leg ended (its time limit, a cancel, or a "
+        self.assertEqual(summary.stopped_text({"shard": "sunrise-client#2of2", "in_progress": True}),
+                         "`sunrise-client#2of2` was still running when the leg ended (its time limit, a cancel, or a "
                          "lost runner); which tests were running and the process's end are not known")
         self.assertEqual(summary.stopped_text({"shard": "x", "reason": "listed tests never reported a result",
                                                "cargo_exit": 0, "wall_seconds": 30, "never_reported": 2}),
@@ -315,20 +315,20 @@ class DailySummaryTests(unittest.TestCase):
 
     def test_fixture_test_failures_are_filed_by_test_name(self):
         jobs = GREEN_JOBS[:2] + [job("wasm-mods / fixture", "failure", [summary.FIXTURE_TESTS_STEP])] + GREEN_JOBS[3:]
-        report = {"needs": "HORIZON_WASM_FIXTURE", "incomplete": [], "passed": [],
-                  "problems": [failure("game::wasm::wasm_interaction_shared_matrix", None, package="horizon-client")]}
+        report = {"needs": "SUNRISE_WASM_FIXTURE", "incomplete": [], "passed": [],
+                  "problems": [failure("game::wasm::wasm_interaction_shared_matrix", None, package="sunrise-client")]}
         api = Api(jobs)
         self.run_summary(api, [report], results=dict(LEGS, **{"wasm-mods": {"result": "failure"}}))
         titles = [body["title"] for _, path, body in api.writes if path == "issues"]
-        self.assertEqual(titles, ["Daily: horizon-client game::wasm::wasm_interaction_shared_matrix"])
+        self.assertEqual(titles, ["Daily: sunrise-client game::wasm::wasm_interaction_shared_matrix"])
 
     def test_a_second_invocation_for_one_run_posts_nothing_twice(self):
-        jobs = [job("shards / ignored-tests-shards (horizon-world)", "failure", ["Run"])] + GREEN_JOBS[2:]
+        jobs = [job("shards / ignored-tests-shards (sunrise-world)", "failure", ["Run"])] + GREEN_JOBS[2:]
         red = dict(LEGS, shards={"result": "failure"})
-        issues = [{"number": 900, "title": "Daily: horizon-world old::red", "body": "> filed earlier"},
-                  {"number": 901, "title": "Daily: horizon-world was::red", "body": "> filed earlier"}]
+        issues = [{"number": 900, "title": "Daily: sunrise-world old::red", "body": "> filed earlier"},
+                  {"number": 901, "title": "Daily: sunrise-world was::red", "body": "> filed earlier"}]
         report = shard_report([failure("old::red"), failure("new::red")],
-                              passed=[{"package": "horizon-world", "test": "was::red"}])
+                              passed=[{"package": "sunrise-world", "test": "was::red"}])
         api = Api(jobs, issues=issues)
         self.run_summary(api, [report], results=red)
         first = list(api.writes)
@@ -342,11 +342,11 @@ class DailySummaryTests(unittest.TestCase):
                          "only the idempotent close is repeated")
 
     def test_a_partial_first_application_completes_on_the_second(self):
-        jobs = [job("shards / ignored-tests-shards (horizon-world)", "failure", ["Run"])] + GREEN_JOBS[2:]
+        jobs = [job("shards / ignored-tests-shards (sunrise-world)", "failure", ["Run"])] + GREEN_JOBS[2:]
         run_url = "https://github.com/arismoko/horizon/actions/runs/77"
         # The first attempt filed the new issue, then stopped before commenting on the old one.
-        issues = [{"number": 900, "title": "Daily: horizon-world old::red", "body": "> filed earlier"},
-                  {"number": 950, "title": "Daily: horizon-world new::red", "body": f"> filed\nFirst daily run that saw it: {run_url} on `ccc`."}]
+        issues = [{"number": 900, "title": "Daily: sunrise-world old::red", "body": "> filed earlier"},
+                  {"number": 950, "title": "Daily: sunrise-world new::red", "body": f"> filed\nFirst daily run that saw it: {run_url} on `ccc`."}]
         api = Api(jobs, issues=issues)
         self.run_summary(api, [shard_report([failure("old::red"), failure("new::red")])],
                          results=dict(LEGS, shards={"result": "failure"}))
@@ -399,14 +399,14 @@ class DailySummaryTests(unittest.TestCase):
                          ["Daily: sdk did not complete"])
 
     def test_a_rerun_that_turns_a_test_green_still_posts_its_close_comment(self):
-        red_jobs = [job("shards / ignored-tests-shards (horizon-world)", "failure", ["Run"])] + GREEN_JOBS[2:]
-        issues = [{"number": 900, "title": "Daily: horizon-world flaky::one", "body": "> filed earlier"}]
+        red_jobs = [job("shards / ignored-tests-shards (sunrise-world)", "failure", ["Run"])] + GREEN_JOBS[2:]
+        issues = [{"number": 900, "title": "Daily: sunrise-world flaky::one", "body": "> filed earlier"}]
         api = Api(red_jobs, issues=issues)
         self.run_summary(api, [shard_report([failure("flaky::one")])], results=dict(LEGS, shards={"result": "failure"}))
         self.assertEqual([(m, p) for m, p, _ in api.writes], [("POST", "issues/900/comments")])
         api.writes.clear()
         api.jobs = GREEN_JOBS
-        self.run_summary(api, [shard_report(passed=[{"package": "horizon-world", "test": "flaky::one"}])])
+        self.run_summary(api, [shard_report(passed=[{"package": "sunrise-world", "test": "flaky::one"}])])
         self.assertEqual([(m, p) for m, p, _ in api.writes if p.startswith("issues/")],
                          [("POST", "issues/900/comments"), ("PATCH", "issues/900")],
                          "the red comment of this run does not hide its green-again comment")
@@ -455,7 +455,7 @@ class DailySummaryTests(unittest.TestCase):
             self.assertEqual(summary.seen(sha, Api([], runs=runs)), "", "dry and cancelled runs do not")
 
     def test_nothing_is_written_off_main_or_in_a_dry_run(self):
-        jobs = [job("shards / ignored-tests-shards (horizon-world)", "failure", ["Run"])] + GREEN_JOBS[2:]
+        jobs = [job("shards / ignored-tests-shards (sunrise-world)", "failure", ["Run"])] + GREEN_JOBS[2:]
         for ref, dry_run in (("refs/heads/hotspots-daily", "false"), ("refs/heads/main", "true")):
             with self.subTest(ref=ref, dry_run=dry_run):
                 api = Api(jobs)
@@ -463,10 +463,10 @@ class DailySummaryTests(unittest.TestCase):
                                            results=dict(LEGS, shards={"result": "failure"}))
                 self.assertEqual(api.writes, [])
                 self.assertIn("(dry run: nothing written)", text)
-                self.assertIn("File **Daily: horizon-world a::b**", text)
+                self.assertIn("File **Daily: sunrise-world a::b**", text)
 
     def test_a_failed_lookup_writes_nothing(self):
-        jobs = [job("shards / ignored-tests-shards (horizon-world)", "failure", ["Run"])] + GREEN_JOBS[2:]
+        jobs = [job("shards / ignored-tests-shards (sunrise-world)", "failure", ["Run"])] + GREEN_JOBS[2:]
         api = Api(jobs, fail_on="issues?")
         with self.assertRaises(SystemExit):
             self.run_summary(api, [shard_report([failure("a::b")])], results=dict(LEGS, shards={"result": "failure"}))
@@ -535,10 +535,10 @@ class DailyWorkflowTests(unittest.TestCase):
         self.assertEqual(steps["actions/upload-artifact@v4"]["with"]["name"], "sdk-leg-${{ matrix.name }}")
         self.assertNotIn("env", build, "no hand-set archive name")
 
-        # The launcher and the mod tool ask for horizon_mod_package::sdk::Asset::name(kind, target, side):
+        # The launcher and the mod tool ask for sunrise_mod_package::sdk::Asset::name(kind, target, side):
         # `{kind}-{target}{-server}.tar.xz`, the kinds named runtime, api and engine; and the release's other files
         # are its BESIDE_ASSETS. Producer (the legs), publish check (SDK_ARCHIVES, SDK_ASSETS) and launcher agree.
-        sdk = (ROOT / "crates/horizon-mod-package/src/sdk.rs").read_text()
+        sdk = (ROOT / "crates/sunrise-mod-package/src/sdk.rs").read_text()
         self.assertIn('format!("{}-{target}{suffix}.tar.xz", kind.name())', sdk)
         self.assertIn('let suffix = if side == Side::Server { "-server" } else { "" };', sdk)
         for kind in ("runtime", "api", "engine", "build-data", "api-source"):

@@ -3,7 +3,7 @@ name: checks
 # requires, so it runs in every run of this workflow, even a cancelled one: a skipped job counts as passed, and every
 # run must report a real verify (a pull request that changes no Rust finishes its Rust parts in seconds instead).
 # parity: the vanilla harnesses a pull request's changes can affect, on the Mac mini's runner, which holds the
-# maintainer's own Minecraft files (Horizon never downloads the game); .github/workflows/parity.yml. Only for a pull
+# maintainer's own Minecraft files (Sunrise never downloads the game); .github/workflows/parity.yml. Only for a pull
 # request that changes a harness, oracle, probe or the runner: the rest are checked on main by parity-main. A fork's pull
 # request runs it only when a maintainer adds the run-parity label (.github/workflows/run-parity.yml), so labels
 # never start this workflow. See docs/release-flow.md.
@@ -27,7 +27,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 env:
   # Test runs never reach the telemetry server: no live-count ping, no uploads (docs/telemetry.md).
-  HORIZON_TELEMETRY_URL: "off"
+  SUNRISE_TELEMETRY_URL: "off"
 jobs:
   # verify runs as three jobs side by side, so a run takes as long as its slowest part (the Rust tests), not the sum:
   # one job doing them in turn took 14-21 minutes on GitHub's runners (main's run 43595807302: 859 s), and every merge
@@ -35,7 +35,7 @@ jobs:
   # each passed or had nothing to do. It runs even in a cancelled run (`always()`), so it fails there instead of being
   # skipped, which GitHub would count as passed. A failed part re-runs alone ("Re-run failed jobs"), not the others.
   #
-  # Where (docs/ci-runners.md): our checks runners (label horizon-checks: the desktop's, an isolated user, so a fork's
+  # Where (docs/ci-runners.md): our checks runners (label sunrise-checks: the desktop's, an isolated user, so a fork's
   # pull request runs there too) take the pull requests whose number ends in 0 or 1, about what their three runners
   # can do; GitHub's runners take the others and main's pushes (which also save the Rust cache GitHub's pull request
   # runs read), so both pools work at once. The repository variable SELF_HOSTED_CI moves them: `all` every job to
@@ -48,7 +48,7 @@ jobs:
       github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository &&
       (endsWith(format('{0}', github.event.pull_request.number), '0') ||
       endsWith(format('{0}', github.event.pull_request.number), '1'))) &&
-      fromJSON('["self-hosted", "linux", "horizon-checks"]') || 'ubuntu-24.04' }}
+      fromJSON('["self-hosted", "linux", "sunrise-checks"]') || 'ubuntu-24.04' }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
@@ -87,7 +87,7 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: python3 tools/check_layers.py ${BASE_SHA:+--base "$BASE_SHA" --pull-request-merge}
-      # docs/layers.md#built-in-addresses: every built-in outside address in the Horizon layer's home; the rest only shrinks.
+      # docs/layers.md#built-in-addresses: every built-in outside address in the Sunrise layer's home; the rest only shrinks.
       - name: Built-in addresses stay in their home
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -105,7 +105,7 @@ jobs:
       github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository &&
       (endsWith(format('{0}', github.event.pull_request.number), '0') ||
       endsWith(format('{0}', github.event.pull_request.number), '1'))) &&
-      fromJSON('["self-hosted", "linux", "horizon-checks"]') || 'ubuntu-24.04' }}
+      fromJSON('["self-hosted", "linux", "sunrise-checks"]') || 'ubuntu-24.04' }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
@@ -144,13 +144,13 @@ jobs:
         if: steps.rust.outputs.required != 'false'
         run: |
           cargo +stable fmt --all -- --check
-          find crates/horizon-mod-api/src crates/horizon-mod-vocab/src -name '*.rs' -print0 | xargs -0 rustup run stable rustfmt --edition 2024 --check --config skip_children=true
-          find crates/horizon-client/src/game -name '*.rs' -print0 | xargs -0 rustup run stable rustfmt --edition 2024 --config skip_children=true --check
-          rustup run stable rustfmt --edition 2024 --check crates/horizon-mod-api-gen/dispatch-tests/src/fixtures/*.rs crates/horizon-mod-api-gen/dispatch-tests/src/fixtures/*/*.rs
-          rustup run stable rustfmt --edition 2024 --check crates/horizon-mod-wasm/wire-loopback/tests/wire_loopback/*.rs
+          find crates/sunrise-mod-api/src crates/sunrise-mod-vocab/src -name '*.rs' -print0 | xargs -0 rustup run stable rustfmt --edition 2024 --check --config skip_children=true
+          find crates/sunrise-client/src/game -name '*.rs' -print0 | xargs -0 rustup run stable rustfmt --edition 2024 --config skip_children=true --check
+          rustup run stable rustfmt --edition 2024 --check crates/sunrise-mod-api-gen/dispatch-tests/src/fixtures/*.rs crates/sunrise-mod-api-gen/dispatch-tests/src/fixtures/*/*.rs
+          rustup run stable rustfmt --edition 2024 --check crates/sunrise-mod-wasm/wire-loopback/tests/wire_loopback/*.rs
           cargo +stable clippy --workspace --all-targets --locked -- -D warnings
-          # The server build (released as horizon-engine): the game without sound or controllers.
-          cargo +stable clippy -p horizon-client -p horizon-game -p horizon-mod-host --all-targets --locked --no-default-features -- -D warnings
+          # The server build (released as sunrise-engine): the game without sound or controllers.
+          cargo +stable clippy -p sunrise-client -p sunrise-game -p sunrise-mod-host --all-targets --locked --no-default-features -- -D warnings
       - name: Check generated mod API signatures
         if: steps.rust.outputs.required != 'false'
         run: python3 tools/ci/check_api_boundary.py
@@ -161,7 +161,7 @@ jobs:
       github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository &&
       (endsWith(format('{0}', github.event.pull_request.number), '0') ||
       endsWith(format('{0}', github.event.pull_request.number), '1'))) &&
-      fromJSON('["self-hosted", "linux", "horizon-checks"]') || 'ubuntu-24.04' }}
+      fromJSON('["self-hosted", "linux", "sunrise-checks"]') || 'ubuntu-24.04' }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
@@ -202,7 +202,7 @@ jobs:
       # these 4-core runners it was no faster (#4978).
       - name: Build the runtime holder test actor
         if: steps.rust.outputs.required != 'false'
-        run: cargo +stable build -p horizon-mod-package --features runtime-process --example holder_actor
+        run: cargo +stable build -p sunrise-mod-package --features runtime-process --example holder_actor
       # A pull request tests the crates it changes, the crates that depend on them, and the crates whose tests read
       # its files (tools/ci/test_scope.py); a change outside every crate tests the whole workspace. main's pushes
       # always test the whole workspace, so a missed crate shows on main.
@@ -249,7 +249,7 @@ jobs:
       github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository &&
       (endsWith(format('{0}', github.event.pull_request.number), '0') ||
       endsWith(format('{0}', github.event.pull_request.number), '1'))) &&
-      fromJSON('["self-hosted", "linux", "horizon-checks"]') || 'ubuntu-24.04' }}
+      fromJSON('["self-hosted", "linux", "sunrise-checks"]') || 'ubuntu-24.04' }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
@@ -327,24 +327,24 @@ jobs:
           Write-Output "Using $($clang.Source)"
           & $clang.Source --version
       - name: Build the game for native Windows ARM64 (the official game, as game-build.yml ships it)
-        run: cargo build --release --locked --target aarch64-pc-windows-msvc -p horizon-official --bin horizon-official -p horizon-client-lib --bin horizon-ctl -p horizon-prepare --bin horizon-prepare -p horizon-server --bin horizon-server
+        run: cargo build --release --locked --target aarch64-pc-windows-msvc -p sunrise-official --bin sunrise-official -p sunrise-client-lib --bin sunrise-ctl -p sunrise-prepare --bin sunrise-prepare -p sunrise-server --bin sunrise-server
       - name: Check the game's PE machine
-        run: python tools/check_pe_arch.py arm64 target/aarch64-pc-windows-msvc/release/horizon-official.exe target/aarch64-pc-windows-msvc/release/horizon-ctl.exe target/aarch64-pc-windows-msvc/release/horizon-prepare.exe target/aarch64-pc-windows-msvc/release/horizon-server.exe
+        run: python tools/check_pe_arch.py arm64 target/aarch64-pc-windows-msvc/release/sunrise-official.exe target/aarch64-pc-windows-msvc/release/sunrise-ctl.exe target/aarch64-pc-windows-msvc/release/sunrise-prepare.exe target/aarch64-pc-windows-msvc/release/sunrise-server.exe
       - name: Check game DLL imports
-        run: python tools/check_imports.py target/aarch64-pc-windows-msvc/release/horizon-official.exe target/aarch64-pc-windows-msvc/release/horizon-ctl.exe target/aarch64-pc-windows-msvc/release/horizon-prepare.exe target/aarch64-pc-windows-msvc/release/horizon-server.exe
+        run: python tools/check_imports.py target/aarch64-pc-windows-msvc/release/sunrise-official.exe target/aarch64-pc-windows-msvc/release/sunrise-ctl.exe target/aarch64-pc-windows-msvc/release/sunrise-prepare.exe target/aarch64-pc-windows-msvc/release/sunrise-server.exe
       - name: Start every game executable
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $client = 'target/aarch64-pc-windows-msvc/release/horizon-official.exe'
+          $client = 'target/aarch64-pc-windows-msvc/release/sunrise-official.exe'
           $output = & $client --help 2>&1
-          if ($LASTEXITCODE -ne 0 -or ($output -join "`n") -notmatch '--resources') { throw 'horizon-client --help failed' }
-          foreach ($binary in @('horizon-ctl.exe', 'horizon-prepare.exe', 'horizon-server.exe')) {
+          if ($LASTEXITCODE -ne 0 -or ($output -join "`n") -notmatch '--resources') { throw 'sunrise-client --help failed' }
+          foreach ($binary in @('sunrise-ctl.exe', 'sunrise-prepare.exe', 'sunrise-server.exe')) {
             $path = "target/aarch64-pc-windows-msvc/release/$binary"
             $output = & $path --help 2>&1
             if ($LASTEXITCODE -ne 0 -or -not $output) { throw "$binary --help failed" }
           }
-          foreach ($binary in @('horizon-prepare.exe', 'horizon-server.exe')) {
+          foreach ($binary in @('sunrise-prepare.exe', 'sunrise-server.exe')) {
             $path = "target/aarch64-pc-windows-msvc/release/$binary"
             $output = & $path --version 2>&1
             if ($LASTEXITCODE -ne 0 -or -not $output) { throw "$binary --version failed" }
@@ -357,28 +357,28 @@ jobs:
           cargo build --release --locked --target aarch64-pc-windows-msvc
       - name: Check the launcher's PE machine
         working-directory: launcher
-        run: python ../tools/check_pe_arch.py arm64 target/aarch64-pc-windows-msvc/release/horizon-launcher.exe
+        run: python ../tools/check_pe_arch.py arm64 target/aarch64-pc-windows-msvc/release/sunrise-launcher.exe
       - name: Check launcher DLL imports and command-line startup
         working-directory: launcher
         # bash, as launcher.yml's check on the same runner: the launcher is a GUI-subsystem program, and a pwsh
         # `$output = & launcher --version` read no output from it (run 42217014588).
         shell: bash
         run: |
-          launcher=target/aarch64-pc-windows-msvc/release/horizon-launcher.exe
+          launcher=target/aarch64-pc-windows-msvc/release/sunrise-launcher.exe
           python ../tools/check_imports.py "$launcher"
           out=$("$launcher" --version)
           echo "$out"
-          [[ "$out" == "horizon-launcher "* ]] || { echo "::error::horizon-launcher --version printed '$out'"; exit 1; }
+          [[ "$out" == "sunrise-launcher "* ]] || { echo "::error::sunrise-launcher --version printed '$out'"; exit 1; }
       - name: Build a native-mod game with the launcher's managed toolchain
         working-directory: launcher
         shell: pwsh
         env:
-          HORIZON_LAUNCHER_HOME: ${{ runner.temp }}\horizon-native-arm64-toolchain
-          HORIZON_NATIVE_TARGET_DIR: ${{ runner.temp }}\horizon-native-arm64-toolchain\target
+          SUNRISE_LAUNCHER_HOME: ${{ runner.temp }}\sunrise-native-arm64-toolchain
+          SUNRISE_NATIVE_TARGET_DIR: ${{ runner.temp }}\sunrise-native-arm64-toolchain\target
         run: |
           $ErrorActionPreference = 'Stop'
           cargo test --release --locked --target aarch64-pc-windows-msvc --lib rust_toolchain::tests::managed_arm64_toolchain_builds_the_game -- --ignored --exact --nocapture
-          $client = Join-Path $env:HORIZON_NATIVE_TARGET_DIR 'fast/horizon-client.exe'
+          $client = Join-Path $env:SUNRISE_NATIVE_TARGET_DIR 'fast/sunrise-client.exe'
           python ../tools/check_pe_arch.py arm64 $client
           python ../tools/check_imports.py $client
   # Most pull requests leave the harnesses to parity-main, which runs them on main a batch of merges at a time
@@ -386,8 +386,8 @@ jobs:
   # a harness, an oracle, a probe or the runner, or carries the run-parity label (run-parity.yml, when it is added).
   parity-scope:
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-    # A git diff of this repository's own branch: one of our small runners (horizon-light, docs/ci-runners.md).
-    runs-on: ${{ vars.SELF_HOSTED_CI != 'off' && fromJSON('["self-hosted", "linux", "horizon-light"]') || 'ubuntu-latest' }}
+    # A git diff of this repository's own branch: one of our small runners (sunrise-light, docs/ci-runners.md).
+    runs-on: ${{ vars.SELF_HOSTED_CI != 'off' && fromJSON('["self-hosted", "linux", "sunrise-light"]') || 'ubuntu-latest' }}
     outputs:
       run: ${{ steps.scope.outputs.run }}
     steps:
@@ -402,7 +402,7 @@ jobs:
           LABELS: ${{ join(github.event.pull_request.labels.*.name, ' ') }}
         run: |
           changed=$(git diff --name-only "$(git merge-base "$BASE_SHA" HEAD)" HEAD)
-          harness=$(grep -E '^(tools/test_[a-z0-9_]+_parity\.py|tools/(parity[a-z_]*|lab)\.py|tools/parity_hosts\.json|mods/horizon/src/test/|crates/[^/]+/examples/|crates/horizon-client/src/game/([a-z_]+/)?[a-z_]*(fixture|harness)\.rs|\.github/workflows/parity[a-z-]*\.yml)' <<< "$changed" || true)
+          harness=$(grep -E '^(tools/test_[a-z0-9_]+_parity\.py|tools/(parity[a-z_]*|lab)\.py|tools/parity_hosts\.json|mods/sunrise/src/test/|crates/[^/]+/examples/|crates/sunrise-client/src/game/([a-z_]+/)?[a-z_]*(fixture|harness)\.rs|\.github/workflows/parity[a-z-]*\.yml)' <<< "$changed" || true)
           if [ -n "$harness" ] || [[ " $LABELS " == *" run-parity "* ]] || [[ " $LABELS " == *" frame-identity "* ]]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
             echo "The pull request runs its harnesses: ${harness:-label run-parity}"
@@ -419,13 +419,13 @@ jobs:
       head: ${{ github.event.pull_request.head.sha }}
       full: ${{ contains(github.event.pull_request.labels.*.name, 'full-parity') }}
       frame_identity: ${{ contains(github.event.pull_request.labels.*.name, 'frame-identity') }}
-  # Horizon never downloads the game. These jobs need a self-hosted Linux runner
-  # (label horizon-game) holding the maintainer's own copy: the official launcher's
-  # game directory in HORIZON_MINECRAFT_DIR and the pinned server jar in
-  # HORIZON_SERVER_JAR. Start them by hand: gh workflow run checks --ref <branch>.
+  # Sunrise never downloads the game. These jobs need a self-hosted Linux runner
+  # (label sunrise-game) holding the maintainer's own copy: the official launcher's
+  # game directory in SUNRISE_MINECRAFT_DIR and the pinned server jar in
+  # SUNRISE_SERVER_JAR. Start them by hand: gh workflow run checks --ref <branch>.
   vanilla-parity:
     if: github.event_name == 'workflow_dispatch'
-    runs-on: [self-hosted, linux, horizon-game]
+    runs-on: [self-hosted, linux, sunrise-game]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -773,7 +773,7 @@ jobs:
         run: python tools/test_float_log_parity.py
   jfr-analysis:
     if: github.event_name == 'workflow_dispatch'
-    runs-on: [self-hosted, linux, horizon-game]
+    runs-on: [self-hosted, linux, sunrise-game]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7

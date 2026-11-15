@@ -61,7 +61,7 @@ console.log(JSON.stringify(eval(expression)));
         def evaluate(expression, matrix, trusted, repository="sunrise-org/sunrise"):
             result = subprocess.run(["node", "-e", script], input=json.dumps({"expression": expression, "matrix": matrix, "inputs": {"trusted": trusted}, "vars": variables, "github": {"repository": repository}}), text=True, capture_output=True, check=True)
             return json.loads(result.stdout)
-        default_mac = ["self-hosted", "macOS", "horizon-nightly"]
+        default_mac = ["self-hosted", "macOS", "sunrise-nightly"]
         bookkeeping = re.search(r"^\s*runs-on:\s*\$\{\{(.*?)\}\}\s*$", NIGHTLY.read_text(), re.M).group(1)
         for configured, release_runner, disabled, trusted, dyna in itertools.product(
             [False, True], [False, True], [False, True], [False, True], [None, "false", "true"]
@@ -80,7 +80,7 @@ console.log(JSON.stringify(eval(expression)));
             with self.subTest(configured=configured, release_runner=release_runner, disabled=disabled, trusted=trusted, dyna=dyna):
                 self.assertEqual(evaluate(guard_if, {}, trusted), trusted and not release_runner)
                 self.assertEqual(evaluate(expressions[0], {}, trusted), expected_exporter)
-                expected_bookkeeping = "dyna-small" if override else ("ubuntu-latest" if disabled else ["self-hosted", "linux", "horizon-light"])
+                expected_bookkeeping = "dyna-small" if override else ("ubuntu-latest" if disabled else ["self-hosted", "linux", "sunrise-light"])
                 self.assertEqual(evaluate(bookkeeping, {}, trusted), expected_bookkeeping)
                 self.assertEqual(evaluate(smoke_if, {}, trusted), not trusted and override)
                 if not trusted and override:
@@ -106,8 +106,8 @@ console.log(JSON.stringify(eval(expression)));
         commands = re.findall(r"check_glibc.py ([^\n]+)", text.replace("\\\n", " "))
         checked = [{Path(argument).name for argument in shlex.split(command)} for command in commands]
         self.assertEqual(checked, [
-            {"horizon-client", "horizon-ctl", "horizon-prepare", "horizon-server"},
-            {"horizon-engine", "horizon-server", "horizon-prepare"},
+            {"sunrise-client", "sunrise-ctl", "sunrise-prepare", "sunrise-server"},
+            {"sunrise-engine", "sunrise-server", "sunrise-prepare"},
         ])
         tools = [step for step in text.split("\n      - ") if "path: .workflow-tools" in step]
         self.assertTrue(tools)
@@ -155,7 +155,7 @@ console.log(JSON.stringify(eval(expression)));
             root = Path(folder)
             binary_dir = root / "target tree/release"
             binary_dir.mkdir(parents=True)
-            binary = binary_dir / "horizon-client"
+            binary = binary_dir / "sunrise-client"
             binary.write_text("#!/bin/sh\nprintf 'smoke ran'\n")
             binary.chmod(0o755)
             for directory in [str(binary_dir), str(binary_dir.relative_to(root))]:
@@ -168,7 +168,7 @@ console.log(JSON.stringify(eval(expression)));
     def test_linux_smoke_gets_a_ready_display(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
-            binary = root / "horizon-client"
+            binary = root / "sunrise-client"
             # A controlled game fixture isolates the real smoke orchestration and Xvfb.
             binary.write_text(textwrap.dedent('''\
                 #!/usr/bin/env python3

@@ -111,10 +111,10 @@ jobs:
         run: python3 tools/ci/cargo_jobs.py --job-mib 3072 --cap
       - name: Every crossable real internal has compiling host and guest bindings
         run: |
-          export HORIZON_COVERAGE_WASM_CARGO="$(rustup which --toolchain "$(cat tools/ci/rust-version)" cargo)"
-          export HORIZON_COVERAGE_WASM_RUSTC="$(rustup which --toolchain "$(cat tools/ci/rust-version)" rustc)"
-          cargo test -j4 -p horizon-mod-api-gen --lib guest_compiler_ignores_another_toolchains_driver -- --ignored --nocapture
-          cargo test -j4 -p horizon-mod-api-gen --lib real_catalog_has_compiling_host_and_guest_bindings -- --ignored --nocapture
+          export SUNRISE_COVERAGE_WASM_CARGO="$(rustup which --toolchain "$(cat tools/ci/rust-version)" cargo)"
+          export SUNRISE_COVERAGE_WASM_RUSTC="$(rustup which --toolchain "$(cat tools/ci/rust-version)" rustc)"
+          cargo test -j4 -p sunrise-mod-api-gen --lib guest_compiler_ignores_another_toolchains_driver -- --ignored --nocapture
+          cargo test -j4 -p sunrise-mod-api-gen --lib real_catalog_has_compiling_host_and_guest_bindings -- --ignored --nocapture
       - uses: actions/cache/save@v4
         if: runner.environment == 'github-hosted' && steps.coverage-cache.outputs.cache-hit != 'true'
         with:

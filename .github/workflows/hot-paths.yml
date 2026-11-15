@@ -25,7 +25,7 @@ concurrency:
   cancel-in-progress: false
 env:
   CARGO_INCREMENTAL: 0
-  HORIZON_TELEMETRY_URL: "off"
+  SUNRISE_TELEMETRY_URL: "off"
 jobs:
   route:
     runs-on: ubuntu-latest
@@ -78,17 +78,17 @@ jobs:
         run: python3 tools/ci/cargo_jobs.py --job-mib 3072 --cap
       - name: Prepare checkout-keyed vanilla data
         run: |
-          for dir in minecraft datagen horizon-client tools; do
-            if [ ! -d "/cache/horizon-local/$dir" ]; then
+          for dir in minecraft datagen sunrise-client tools; do
+            if [ ! -d "/cache/sunrise-local/$dir" ]; then
               echo "::error::prepared data unavailable on this runner: $dir"
               exit 1
             fi
           done
-          HORIZON_DYNA_CACHE=true HORIZON_PREPARED_CACHE="$DYNA_CI_BUILD/vanilla" HORIZON_SHARED_SOURCE=/cache/horizon-local bash tools/ci/vanilla-data.sh
-      # The profile players get, on the server build (no audio, no controllers). horizon-hot-paths-game is
-      # horizon-game's entry, with one native listener mod it installs only for the hook workload.
+          SUNRISE_DYNA_CACHE=true SUNRISE_PREPARED_CACHE="$DYNA_CI_BUILD/vanilla" SUNRISE_SHARED_SOURCE=/cache/sunrise-local bash tools/ci/vanilla-data.sh
+      # The profile players get, on the server build (no audio, no controllers). sunrise-hot-paths-game is
+      # sunrise-game's entry, with one native listener mod it installs only for the hook workload.
       - name: Build the release game
-        run: cargo build --release --locked -p horizon-hot-paths-game
+        run: cargo build --release --locked -p sunrise-hot-paths-game
       - name: Measure
         run: |
           set -euo pipefail
@@ -97,8 +97,8 @@ jobs:
           scratch=$(mktemp -d "$target/hot-paths.XXXXXX")
           trap 'rm -rf "$scratch"' EXIT
           command -v valgrind > /dev/null || echo "::warning::no valgrind on this runner: instructions and allocations are not measured"
-          python3 tools/hot_paths.py measure --game "$target/release/horizon-hot-paths-game" \
-            --resources "$PWD/.local/horizon-client/26.3" --work "$scratch" \
+          python3 tools/hot_paths.py measure --game "$target/release/sunrise-hot-paths-game" \
+            --resources "$PWD/.local/sunrise-client/26.3" --work "$scratch" \
             --commit "$(git rev-parse HEAD)" --host dyna-medium --run "$GITHUB_RUN_ID.$GITHUB_RUN_ATTEMPT" \
             --out "$RUNNER_TEMP/hot-paths.json" | tee -a "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4

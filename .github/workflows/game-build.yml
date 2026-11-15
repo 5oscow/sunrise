@@ -15,7 +15,7 @@ on:
         type: string
         required: true
       version:
-        description: The version built in (HORIZON_VERSION), e.g. 0.2.81 or nightly-2026-10-28
+        description: The version built in (SUNRISE_VERSION), e.g. 0.2.81 or nightly-2026-10-28
         type: string
         required: true
       kind:
@@ -23,7 +23,7 @@ on:
         type: string
         default: release
       nightly:
-        description: A nightly's "<date> <short sha>" (HORIZON_NIGHTLY), shown by the game; empty for a release
+        description: A nightly's "<date> <short sha>" (SUNRISE_NIGHTLY), shown by the game; empty for a release
         type: string
         default: ''
       trusted:
@@ -53,11 +53,11 @@ jobs:
   exporters:
     needs: runner-configuration
     # This runner holds the maintainer's own pinned Minecraft jars. Only our classes leave it. An untrusted build
-    # goes to the Mac mini's nightly runner (macOS + horizon-nightly: ludovics-mac-mini-nightly, beside the one that
+    # goes to the Mac mini's nightly runner (macOS + sunrise-nightly: ludovics-mac-mini-nightly, beside the one that
     # runs pull requests' parity jobs, so a nightly never waits behind their queue), never the release runner
     # (MAC_RUNNER: ludovics-mac-mini-release) nor parity-main's.
     # toJSON keeps an empty trusted runner as an invalid empty label, never a Nightly fallback.
-    runs-on: ${{ fromJSON(inputs.trusted && toJSON(vars.MAC_RUNNER) || (vars.DYNA_CI_SELF_HOSTED == 'true' && vars.NIGHTLY_EXPORTERS_RUNNER) || (vars.SELF_HOSTED_CI != 'off' && '["self-hosted", "macOS", "horizon-nightly"]') || '"ubuntu-latest"') }}
+    runs-on: ${{ fromJSON(inputs.trusted && toJSON(vars.MAC_RUNNER) || (vars.DYNA_CI_SELF_HOSTED == 'true' && vars.NIGHTLY_EXPORTERS_RUNNER) || (vars.SELF_HOSTED_CI != 'off' && '["self-hosted", "macOS", "sunrise-nightly"]') || '"ubuntu-latest"') }}
     # Three full preparations (two isolated, one batched) besides the compile.
     timeout-minutes: 60
     steps:
@@ -88,20 +88,20 @@ jobs:
         run: |
           if [[ -z "${DYNA_CI_BUILD:-}" ]]; then bash tools/ci/runner-env.sh; fi
         env:
-          HORIZON_NO_SCCACHE: ${{ inputs.trusted && '1' || '' }}
+          SUNRISE_NO_SCCACHE: ${{ inputs.trusted && '1' || '' }}
       - name: Build the shared wasm standard library
         shell: bash
         run: |
-          cargo run --locked -p cargo-horizon-mod -- horizon-mod wasm-std horizon-wasm-std.wasm
+          cargo run --locked -p cargo-sunrise-mod -- sunrise-mod wasm-std sunrise-wasm-std.wasm
       - uses: actions/upload-artifact@v7
         with:
           name: wasm-std
-          path: horizon-wasm-std.wasm
+          path: sunrise-wasm-std.wasm
           if-no-files-found: error
       - name: Private exporter inputs
         run: |
           if [[ -n "${DYNA_CI_BUILD:-}" ]]; then
-            HORIZON_DYNA_CACHE=true HORIZON_PREPARED_CACHE="$DYNA_CI_BUILD/vanilla" HORIZON_SHARED_SOURCE=/cache/horizon-local bash tools/ci/vanilla-data.sh
+            SUNRISE_DYNA_CACHE=true SUNRISE_PREPARED_CACHE="$DYNA_CI_BUILD/vanilla" SUNRISE_SHARED_SOURCE=/cache/sunrise-local bash tools/ci/vanilla-data.sh
           else
             bash tools/ci/vanilla-data.sh
           fi
@@ -111,8 +111,8 @@ jobs:
           set -euo pipefail
           # target/ is gone after the clean checkout, and vanilla-data.sh builds the preparer only when it
           # prepares afresh.
-          cargo build --release --locked -p horizon-prepare
-          preparer="${CARGO_TARGET_DIR:-target}/release/horizon-prepare"
+          cargo build --release --locked -p sunrise-prepare
+          preparer="${CARGO_TARGET_DIR:-target}/release/sunrise-prepare"
           # Compiled here, never taken from the runner's shared preparations: pull requests' parity jobs
           # write those (vanilla-data.sh links .local/exporters to them).
           rm -rf .local/exporters
@@ -121,7 +121,7 @@ jobs:
           cp -R "$bundle/server" "$bundle/client" "$bundle/manifest.json" exporters/
           # Only our classes and their manifest leave this runner.
           stray=$(find exporters -type f ! -path exporters/manifest.json \
-            ! \( -name '*.class' \( -path 'exporters/server/dev/horizonlab/parity/*' -o -path 'exporters/client/dev/horizonlab/parity/*' \) \))
+            ! \( -name '*.class' \( -path 'exporters/server/dev/sunriselab/parity/*' -o -path 'exporters/client/dev/sunriselab/parity/*' \) \))
           [ -z "$stray" ] || { echo "::error::not one of our classes: $stray"; exit 1; }
           python3 tools/check_prepare_exporters.py --binary "$preparer"
       - uses: actions/upload-artifact@v7
@@ -144,20 +144,20 @@ jobs:
         include:
           - name: linux
             os: ubuntu-22.04
-            dir: horizon-linux-x86_64
-            asset: horizon-linux-x86_64.tar.gz
+            dir: sunrise-linux-x86_64
+            asset: sunrise-linux-x86_64.tar.gz
             # The server build too: packaging/server/install.sh installs it on Linux.
-            server_dir: horizon-server-linux-x86_64
-            server_asset: horizon-server-linux-x86_64.tar.gz
+            server_dir: sunrise-server-linux-x86_64
+            server_asset: sunrise-server-linux-x86_64.tar.gz
           - name: linux-musl
             os: ubuntu-22.04
             musl: true
-            dir: horizon-linux-musl-x86_64
-            asset: horizon-linux-musl-x86_64.tar.gz
+            dir: sunrise-linux-musl-x86_64
+            asset: sunrise-linux-musl-x86_64.tar.gz
           - name: windows
             os: windows-latest
-            dir: horizon-windows-x64
-            asset: horizon-windows-x64.zip
+            dir: sunrise-windows-x64
+            asset: sunrise-windows-x64.zip
             exe: .exe
             pe_arch: x64
             # The C runtime linked in, so the game runs without the Visual C++ redistributable.
@@ -165,8 +165,8 @@ jobs:
           - name: windows-arm64
             os: windows-11-vs2026-arm
             target: aarch64-pc-windows-msvc
-            dir: horizon-windows-arm64
-            asset: horizon-windows-arm64.zip
+            dir: sunrise-windows-arm64
+            asset: sunrise-windows-arm64.zip
             exe: .exe
             pe_arch: arm64
             # The ARM64 runner builds and runs native ARM64 executables; keep the C runtime in the archive.
@@ -174,25 +174,25 @@ jobs:
           - name: macos
             mac: true
             target: aarch64-apple-darwin
-            dir: horizon-macos-arm64
-            asset: horizon-macos-arm64.zip
+            dir: sunrise-macos-arm64
+            asset: sunrise-macos-arm64.zip
           # Intel Macs: built on the same runner for another target; its checks and smoke test run the x86_64
           # programs under Rosetta 2.
           - name: macos-x64
             mac: true
             target: x86_64-apple-darwin
-            dir: horizon-macos-x64
-            asset: horizon-macos-x64.zip
-    runs-on: ${{ matrix.mac && fromJSON(inputs.trusted && toJSON(vars.MAC_RUNNER) || (vars.DYNA_CI_SELF_HOSTED == 'true' && vars.NIGHTLY_MAC_RUNNER) || (vars.SELF_HOSTED_CI != 'off' && '["self-hosted", "macOS", "horizon-nightly"]') || '"macos-15"') || matrix.os }}
+            dir: sunrise-macos-x64
+            asset: sunrise-macos-x64.zip
+    runs-on: ${{ matrix.mac && fromJSON(inputs.trusted && toJSON(vars.MAC_RUNNER) || (vars.DYNA_CI_SELF_HOSTED == 'true' && vars.NIGHTLY_MAC_RUNNER) || (vars.SELF_HOSTED_CI != 'off' && '["self-hosted", "macOS", "sunrise-nightly"]') || '"macos-15"') || matrix.os }}
     # The fork's cold client + headless builds need both feature variants; keep upstream's limits unchanged.
     timeout-minutes: ${{ github.repository == 'sunrise-org/sunrise' && 60 || (matrix.mac && 60 || 40) }}
     env:
       RUSTFLAGS: ${{ matrix.rustflags }}
-      # The release's version, built in (horizon_core::release): --version, user agents and crash reports
+      # The release's version, built in (sunrise_core::release): --version, user agents and crash reports
       # say it. No version-bump commits.
-      HORIZON_VERSION: ${{ inputs.version }}
+      SUNRISE_VERSION: ${{ inputs.version }}
       # A nightly's date and commit ("2026-10-28 0c02067"), which the game shows; empty for a release.
-      HORIZON_NIGHTLY: ${{ inputs.nightly }}
+      SUNRISE_NIGHTLY: ${{ inputs.nightly }}
       # Where cargo puts the programs: target/release, or target/<target>/release for another target.
       BIN: ${{ matrix.target && format('target/{0}/release', matrix.target) || 'target/release' }}
     defaults:
@@ -248,26 +248,26 @@ jobs:
         with:
           distribution: temurin
           java-version: '25'
-      - name: Build the official game, horizon-ctl, horizon-prepare and horizon-server
+      - name: Build the official game, sunrise-ctl, sunrise-prepare and sunrise-server
         if: ${{ !matrix.musl }}
-        run: cargo build --release --locked ${{ matrix.target && format('--target {0}', matrix.target) || '' }} -p horizon-official --bin horizon-official -p horizon-client-lib --bin horizon-ctl -p horizon-prepare --bin horizon-prepare -p horizon-server --bin horizon-server
+        run: cargo build --release --locked ${{ matrix.target && format('--target {0}', matrix.target) || '' }} -p sunrise-official --bin sunrise-official -p sunrise-client-lib --bin sunrise-ctl -p sunrise-prepare --bin sunrise-prepare -p sunrise-server --bin sunrise-server
       - name: The official game is the game players get, under its name
-        # horizon-official: horizon-client's game with Horizon's own parts plugged in (docs/layers.md, "How a
-        # Horizon crate plugs in"). Everything below, the launcher and players know it as horizon-client.
+        # sunrise-official: sunrise-client's game with Sunrise's own parts plugged in (docs/layers.md, "How a
+        # Sunrise crate plugs in"). Everything below, the launcher and players know it as sunrise-client.
         if: ${{ !matrix.musl }}
-        run: cp -f "$BIN/horizon-official${{ matrix.exe }}" "$BIN/horizon-client${{ matrix.exe }}"
+        run: cp -f "$BIN/sunrise-official${{ matrix.exe }}" "$BIN/sunrise-client${{ matrix.exe }}"
       - name: Every program the release folder takes was built
         if: ${{ !matrix.musl }}
         run: |
-          for binary in horizon-client horizon-ctl horizon-prepare horizon-server; do
+          for binary in sunrise-client sunrise-ctl sunrise-prepare sunrise-server; do
             test -f "$BIN/$binary${{ matrix.exe }}" || { echo "::error::$BIN/$binary${{ matrix.exe }} is missing"; exit 1; }
           done
       - name: Verify Windows executable architecture
         if: runner.os == 'Windows'
         run: |
           python tools/check_pe_arch.py "${{ matrix.pe_arch }}" \
-            "$BIN/horizon-client${{ matrix.exe }}" "$BIN/horizon-ctl${{ matrix.exe }}" \
-            "$BIN/horizon-prepare${{ matrix.exe }}" "$BIN/horizon-server${{ matrix.exe }}"
+            "$BIN/sunrise-client${{ matrix.exe }}" "$BIN/sunrise-ctl${{ matrix.exe }}" \
+            "$BIN/sunrise-prepare${{ matrix.exe }}" "$BIN/sunrise-server${{ matrix.exe }}"
       - name: Rosetta for the Intel build on Apple Silicon
         if: runner.os == 'macOS' && matrix.target == 'x86_64-apple-darwin'
         run: |
@@ -279,7 +279,7 @@ jobs:
         env:
           EXPECTED_ARCH: ${{ matrix.target == 'x86_64-apple-darwin' && 'x86_64' || 'arm64' }}
         run: |
-          for binary in horizon-client horizon-ctl horizon-prepare horizon-server; do
+          for binary in sunrise-client sunrise-ctl sunrise-prepare sunrise-server; do
             actual=$(lipo -archs "$BIN/$binary")
             [[ "$actual" == "$EXPECTED_ARCH" ]] || { echo "::error::$binary is $actual, expected $EXPECTED_ARCH"; exit 1; }
           done
@@ -294,9 +294,9 @@ jobs:
         env:
           MACOS_SIGN_IDENTITY: ${{ vars.MACOS_SIGN_IDENTITY }}
         run: |
-          for binary in horizon-client horizon-ctl horizon-prepare horizon-server; do
+          for binary in sunrise-client sunrise-ctl sunrise-prepare sunrise-server; do
             codesign --force --options runtime --timestamp --keychain "$MACOS_SIGN_KEYCHAIN" \
-              --identifier "dev.horizon.${binary#horizon-}" --sign "$MACOS_SIGN_IDENTITY" "$BIN/$binary"
+              --identifier "dev.sunrise.${binary#sunrise-}" --sign "$MACOS_SIGN_IDENTITY" "$BIN/$binary"
             codesign --verify --strict --verbose=2 "$BIN/$binary"
           done
       - name: Only system libraries
@@ -304,7 +304,7 @@ jobs:
         # Windows: no non-system DLL (a "DLL not found" dialog on some players' machines). Linux: the standard
         # loader and libraries every desktop distribution has. macOS: only the system's own libraries.
         run: |
-          for binary in horizon-client horizon-ctl horizon-prepare horizon-server; do
+          for binary in sunrise-client sunrise-ctl sunrise-prepare sunrise-server; do
             file="$BIN/$binary${{ matrix.exe }}"
             if [[ "$RUNNER_OS" == macOS ]]; then
               others=$(otool -L "$file" | tail -n +2 | awk '{print $1}' | grep -v -E '^(/usr/lib/|/System/Library/)' || true)
@@ -321,26 +321,26 @@ jobs:
           set -euo pipefail
           rustup component add llvm-tools
           ${{ runner.os == 'Windows' && 'python' || 'python3' }} tools/check_cpu_baseline.py \
-            $(for binary in horizon-client horizon-ctl horizon-prepare horizon-server; do echo "$BIN/$binary${{ matrix.exe }}"; done)
+            $(for binary in sunrise-client sunrise-ctl sunrise-prepare sunrise-server; do echo "$BIN/$binary${{ matrix.exe }}"; done)
       - name: Linux glibc baseline (Ubuntu 22.04)
         if: runner.os == 'Linux' && !matrix.musl
         run: |
           python3 .workflow-tools/tools/check_glibc.py \
-            "$BIN/horizon-client" "$BIN/horizon-ctl" "$BIN/horizon-prepare" "$BIN/horizon-server"
+            "$BIN/sunrise-client" "$BIN/sunrise-ctl" "$BIN/sunrise-prepare" "$BIN/sunrise-server"
       - name: macOS main-stack diagnostics
         if: runner.os == 'macOS'
         run: |
-          echo "LC_MAIN of horizon-client:"
-          otool -l "$BIN/horizon-client" | grep -A4 LC_MAIN || true
-          if [[ "$(lipo -archs "$BIN/horizon-client")" == x86_64 ]]; then
+          echo "LC_MAIN of sunrise-client:"
+          otool -l "$BIN/sunrise-client" | grep -A4 LC_MAIN || true
+          if [[ "$(lipo -archs "$BIN/sunrise-client")" == x86_64 ]]; then
             translated=$(arch -x86_64 /usr/sbin/sysctl -n sysctl.proc_translated 2>/dev/null || echo 0)
             stack_limit=$(arch -x86_64 /bin/sh -c 'ulimit -s' || true)
           else
             translated=$(sysctl -n sysctl.proc_translated 2>/dev/null || echo 0)
             stack_limit=$(ulimit -s || true)
           fi
-          echo "sysctl.proc_translated (horizon-client architecture): $translated"
-          echo "ulimit -s (horizon-client architecture): $stack_limit"
+          echo "sysctl.proc_translated (sunrise-client architecture): $translated"
+          echo "ulimit -s (sunrise-client architecture): $stack_limit"
           echo "Runner uname -m:"
           uname -m || true
           echo "Runner arch:"
@@ -350,26 +350,26 @@ jobs:
         run: |
           set -euo pipefail
           bin=$BIN
-          "$bin/horizon-client${{ matrix.exe }}" --help | grep -q -- '--resources'
-          "$bin/horizon-ctl${{ matrix.exe }}" --help > /dev/null
-          "$bin/horizon-prepare${{ matrix.exe }}" --help | grep -q -- '--minecraft-dir'
+          "$bin/sunrise-client${{ matrix.exe }}" --help | grep -q -- '--resources'
+          "$bin/sunrise-ctl${{ matrix.exe }}" --help > /dev/null
+          "$bin/sunrise-prepare${{ matrix.exe }}" --help | grep -q -- '--minecraft-dir'
           # The version is the release's.
-          for binary in horizon-prepare horizon-server; do
+          for binary in sunrise-prepare sunrise-server; do
             out=$("$bin/$binary${{ matrix.exe }}" --version | tr -d '\r')
             echo "$out"
-            [[ "$out" == "$binary $HORIZON_VERSION" ]] || { echo "::error::expected $binary $HORIZON_VERSION"; exit 1; }
+            [[ "$out" == "$binary $SUNRISE_VERSION" ]] || { echo "::error::expected $binary $SUNRISE_VERSION"; exit 1; }
           done
       - name: Tools from the runner
         if: runner.environment == 'self-hosted'
         env:
-          HORIZON_NO_SCCACHE: ${{ inputs.trusted && '1' || '' }}
+          SUNRISE_NO_SCCACHE: ${{ inputs.trusted && '1' || '' }}
         run: |
           if [[ -z "${DYNA_CI_BUILD:-}" ]]; then bash tools/ci/runner-env.sh; fi
       - name: Resources prepared from the runner's own Minecraft
         if: runner.environment == 'self-hosted'
         run: |
           if [[ -n "${DYNA_CI_BUILD:-}" ]]; then
-            HORIZON_DYNA_CACHE=true HORIZON_PREPARED_CACHE="$DYNA_CI_BUILD/vanilla" HORIZON_SHARED_SOURCE=/cache/horizon-local bash tools/ci/vanilla-data.sh
+            SUNRISE_DYNA_CACHE=true SUNRISE_PREPARED_CACHE="$DYNA_CI_BUILD/vanilla" SUNRISE_SHARED_SOURCE=/cache/sunrise-local bash tools/ci/vanilla-data.sh
           else
             bash tools/ci/vanilla-data.sh
           fi
@@ -399,13 +399,13 @@ jobs:
         # Run Docker on the Ubuntu host: JavaScript actions themselves require glibc.
         run: |
           docker run --rm -v "$PWD:/work" -w /work \
-            -e HORIZON_VERSION -e HORIZON_NIGHTLY \
+            -e SUNRISE_VERSION -e SUNRISE_NIGHTLY \
             rust:alpine3.22 sh tools/ci/build-musl.sh
       - name: Package
         if: ${{ !matrix.musl }}
         run: |
           set -euo pipefail
-          cargo run --locked -p xtask -- package "$BIN/horizon-client${{ matrix.exe }}" "dist/${{ matrix.dir }}"
+          cargo run --locked -p xtask -- package "$BIN/sunrise-client${{ matrix.exe }}" "dist/${{ matrix.dir }}"
           # Windows x64: Microsoft's DXC, pinned and checksummed, which DirectX 12 uses on integrated GPUs
           # (gfx/dx12_compiler.rs), with its licence. ARM64 keeps FXC (THIRD_PARTY_NOTICES.md says why).
           if [[ "${{ matrix.name }}" == windows ]]; then
@@ -430,7 +430,7 @@ jobs:
         # A zip of programs can't be stapled: Gatekeeper asks Apple the first time each one runs.
         if: runner.os == 'macOS' && vars.MACOS_SIGN_IDENTITY != '' && inputs.developer_id
         run: |
-          for binary in horizon-client horizon-ctl horizon-prepare horizon-server; do
+          for binary in sunrise-client sunrise-ctl sunrise-prepare sunrise-server; do
             codesign --verify --strict "dist/${{ matrix.dir }}/$binary"
           done
           packaging/macos/notarize.sh "dist/${{ matrix.asset }}"
@@ -440,19 +440,19 @@ jobs:
           path: dist/${{ matrix.asset }}
           if-no-files-found: error
           retention-days: 3
-      - name: The server build (the game without sound or controllers, as horizon-engine)
+      - name: The server build (the game without sound or controllers, as sunrise-engine)
         if: matrix.server_asset
         run: |
           set -euo pipefail
-          # After the client is packaged: target/release/horizon-client is rebuilt without the audio and
+          # After the client is packaged: target/release/sunrise-client is rebuilt without the audio and
           # controllers features, so it needs neither libasound nor libudev (minimal server images lack them).
-          cargo build --release --locked -p horizon-game --no-default-features --bin horizon-client
-          cargo run --locked -p xtask -- package-server "$BIN/horizon-client" "dist/${{ matrix.server_dir }}"
+          cargo build --release --locked -p sunrise-game --no-default-features --bin sunrise-client
+          cargo run --locked -p xtask -- package-server "$BIN/sunrise-client" "dist/${{ matrix.server_dir }}"
           folder="dist/${{ matrix.server_dir }}"
-          python3 tools/check_imports.py --server "$folder/horizon-engine" "$folder/horizon-server" "$folder/horizon-prepare"
-          python3 .workflow-tools/tools/check_glibc.py "$folder/horizon-engine" "$folder/horizon-server" "$folder/horizon-prepare"
-          "$folder/horizon-engine" --help | grep -q -- '--resources'
-          [[ "$("$folder/horizon-server" --version)" == "horizon-server $HORIZON_VERSION" ]]
+          python3 tools/check_imports.py --server "$folder/sunrise-engine" "$folder/sunrise-server" "$folder/sunrise-prepare"
+          python3 .workflow-tools/tools/check_glibc.py "$folder/sunrise-engine" "$folder/sunrise-server" "$folder/sunrise-prepare"
+          "$folder/sunrise-engine" --help | grep -q -- '--resources'
+          [[ "$("$folder/sunrise-server" --version)" == "sunrise-server $SUNRISE_VERSION" ]]
           cd dist
           rm -f "${{ matrix.server_asset }}"
           tar czf "${{ matrix.server_asset }}" "${{ matrix.server_dir }}"
@@ -508,18 +508,18 @@ jobs:
           java-version: '25'
       - uses: actions/download-artifact@v8
         with:
-          name: horizon-linux-x86_64.tar.gz
+          name: sunrise-linux-x86_64.tar.gz
           path: ${{ runner.temp }}/hosted-linux
       - name: Unpack the hosted-built game, unchanged
         run: |
-          tar xzf "$RUNNER_TEMP/hosted-linux/horizon-linux-x86_64.tar.gz" -C "$RUNNER_TEMP/hosted-linux"
-          echo "BIN=$RUNNER_TEMP/hosted-linux/horizon-linux-x86_64" >> "$GITHUB_ENV"
+          tar xzf "$RUNNER_TEMP/hosted-linux/sunrise-linux-x86_64.tar.gz" -C "$RUNNER_TEMP/hosted-linux"
+          echo "BIN=$RUNNER_TEMP/hosted-linux/sunrise-linux-x86_64" >> "$GITHUB_ENV"
       - name: Private resources from the Dyna runner
         run: |
           : "${DYNA_CI_BUILD:?Linux smoke requires a Dyna private-data runner}"
           mkdir -p exporters
           cp -a "$BIN/exporters/." exporters/
-          HORIZON_DYNA_CACHE=true HORIZON_PREPARED_CACHE="$DYNA_CI_BUILD/vanilla" HORIZON_SHARED_SOURCE=/cache/horizon-local bash tools/ci/vanilla-data.sh
+          SUNRISE_DYNA_CACHE=true SUNRISE_PREPARED_CACHE="$DYNA_CI_BUILD/vanilla" SUNRISE_SHARED_SOURCE=/cache/sunrise-local bash tools/ci/vanilla-data.sh
       - name: The hosted artifact draws a world under Xvfb
         run: bash .workflow-tools/tools/ci/game_smoke.sh
       - uses: actions/upload-artifact@v7

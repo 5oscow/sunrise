@@ -1,8 +1,8 @@
 name: prebuilt mixins tool
-# The horizon-mixins tool the launcher runs for [[native.mixin]] builds, prebuilt for each launcher
+# The sunrise-mixins tool the launcher runs for [[native.mixin]] builds, prebuilt for each launcher
 # platform, so a player's first mixin build downloads it instead of compiling it for a minute. The
-# tool is decided by the pinned horizon-mixins commit and the one carried patch
-# (crates/horizon-mod-package/src/mixins_tool.rs), so one prerelease per pair, tagged
+# tool is decided by the pinned sunrise-mixins commit and the one carried patch
+# (crates/sunrise-mod-package/src/mixins_tool.rs), so one prerelease per pair, tagged
 # mixins-tool-<commit>-<patch hash>, never marked latest and never deleted: older launchers keep
 # finding theirs. A run whose pair already has a release stops early, unless a dispatch forces the build. The source is patched by
 # `xtask mixins-tool patch`, the applier the launcher uses where no prebuilt exists. A dispatch on
@@ -12,7 +12,7 @@ on:
     branches: [main]
     paths:
       - tools/mixins/**
-      - crates/horizon-mod-package/src/mixins_tool.rs
+      - crates/sunrise-mod-package/src/mixins_tool.rs
       - .github/workflows/prebuilt-mixins-tool.yml
   workflow_dispatch:
     inputs:
@@ -83,7 +83,7 @@ jobs:
       run:
         shell: bash
     env:
-      ARCHIVE: horizon-mixins-${{ matrix.target }}.tar.gz
+      ARCHIVE: sunrise-mixins-${{ matrix.target }}.tar.gz
     steps:
       - uses: actions/checkout@v4
         with:
@@ -109,7 +109,7 @@ jobs:
       - name: Build
         run: |
           set -euo pipefail
-          cargo install --locked --path source/crates/horizon-mixins-cli --root tool
+          cargo install --locked --path source/crates/sunrise-mixins-cli --root tool
           rm -f tool/.crates.toml tool/.crates2.json
           cargo run --locked -p xtask -- mixins-tool identity "${{ matrix.target }}" > tool/identity.txt
           # Information only: the launcher checks the lines above it.
@@ -118,8 +118,8 @@ jobs:
       - name: The built tool answers and stages its own fixture
         run: |
           set -euo pipefail
-          tool/bin/horizon-mixins --version
-          tool/bin/horizon-mixins apply --workspace source/fixtures/game --mods source/fixtures/mods \
+          tool/bin/sunrise-mixins --version
+          tool/bin/sunrise-mixins apply --workspace source/fixtures/game --mods source/fixtures/mods \
             --out "$RUNNER_TEMP/staged" > /dev/null
           test -f "$RUNNER_TEMP/staged/Cargo.toml"
       # A player has no MinGW: the launcher unpacks the archive and runs the tool, so every DLL it imports
@@ -128,7 +128,7 @@ jobs:
         if: runner.os == 'Windows'
         run: |
           set -euo pipefail
-          imports=$(objdump -p tool/bin/horizon-mixins.exe | sed -n 's/^[[:space:]]*DLL Name: //p' | tr -d '\r' | sort -fu)
+          imports=$(objdump -p tool/bin/sunrise-mixins.exe | sed -n 's/^[[:space:]]*DLL Name: //p' | tr -d '\r' | sort -fu)
           test -n "$imports"
           echo "$imports"
           missing=
@@ -142,7 +142,7 @@ jobs:
             esac
           done
           if [ -n "$missing" ]; then
-            echo "::error::horizon-mixins.exe imports$missing: neither in the archive beside it nor a Windows system DLL"
+            echo "::error::sunrise-mixins.exe imports$missing: neither in the archive beside it nor a Windows system DLL"
             exit 1
           fi
       # The archive's flags are GNU tar's; macOS's own tar is BSD.
@@ -183,7 +183,7 @@ jobs:
         run: |
           set -euo pipefail
           cd archives
-          sha256sum horizon-mixins-*.tar.gz > SHA256SUMS
-          gh release create "$TAG" horizon-mixins-*.tar.gz SHA256SUMS --target "$GITHUB_SHA" --prerelease \
-            --latest=false --title "horizon-mixins tool ${REV::12}" \
-            --notes "The horizon-mixins tool at horizon-rust/horizon-mixins ${REV} with the carried patch tools/mixins/narrow-reference-rule.patch, for the launcher's [[native.mixin]] builds."
+          sha256sum sunrise-mixins-*.tar.gz > SHA256SUMS
+          gh release create "$TAG" sunrise-mixins-*.tar.gz SHA256SUMS --target "$GITHUB_SHA" --prerelease \
+            --latest=false --title "sunrise-mixins tool ${REV::12}" \
+            --notes "The sunrise-mixins tool at horizon-rust/horizon-mixins ${REV} with the carried patch tools/mixins/narrow-reference-rule.patch, for the launcher's [[native.mixin]] builds."
