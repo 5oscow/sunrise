@@ -243,7 +243,7 @@ impl Game<'_> {
         self.native_data_pack_files(&mut contributed);
         let files = functions::overlay_files(stack, contributed);
         let inventory = horizon_mod_package::enabled::EnabledMods::read(root)?;
-        let conditions = self.registered_load_conditions(&inventory)?;
+        let conditions = self.registered_load_conditions(&inventory, root, &files)?;
         let overlay = horizon_world::loot::PackOverlay {
             conditions: &conditions,
             files: &files,
@@ -270,7 +270,14 @@ impl Game<'_> {
         // Item damage predicates use the same frozen registry as player hurt.
         Arc::make_mut(&mut items.enchantments).bind_damage_catalog(&health.damage);
         items.bind_component_damage_catalog(&health.damage);
-        // The tables read from here on see this load's bound tags (`neoforge:tag_empty`).
+        // Tag files are read before their tags are bound, so the tag readers below keep the
+        // context without tags: there `neoforge:tag_empty` is unsupported, never answered from a
+        // part of this load's tags.
+        let tag_files = horizon_world::loot::PackOverlay {
+            conditions: &conditions,
+            files: &files,
+        };
+        // The other tables read from here on see this load's bound tags (`neoforge:tag_empty`).
         let conditions = conditions.with_tags(items.bound_tags());
         let overlay = horizon_world::loot::PackOverlay {
             conditions: &conditions,
@@ -305,7 +312,7 @@ impl Game<'_> {
         // In particular, generation exhaustion refuses preparation before any state changes.
         let mut datapack_candidate = self.datapack_candidate(stack, &conditions)?;
         if let Some(candidate) = &mut datapack_candidate {
-            native_registry_entries::bind_datapack_tags(root, &overlay, candidate)?;
+            native_registry_entries::bind_datapack_tags(root, &tag_files, candidate)?;
         }
         let datapack_registries = datapack_candidate
             .map(
@@ -357,7 +364,7 @@ impl Game<'_> {
             .collect::<std::collections::BTreeSet<_>>()
             .into_iter()
             .filter_map(|registry| {
-                match horizon_client::items::load_tags(root, registry, &overlay) {
+                match horizon_client::items::load_tags(root, registry, &tag_files) {
                     Ok(tags) => Some((registry, tags)),
                     Err(e) => {
                         log::warn!("Horizon: the world's {registry} tags are not applied: {e}");

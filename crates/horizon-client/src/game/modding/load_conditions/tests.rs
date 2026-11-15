@@ -306,3 +306,56 @@ fn load_conditions_disabled_owner_does_not_execute_registered_handler() {
         },
     );
 }
+
+/// `neoforge:registered` reads the candidate's registries: the built-in entries the prepared root
+/// exports and what this load's packs add, so a new pack entry counts on its first load and one
+/// a pack dropped stops counting, whatever an earlier load put in the game's registries.
+#[test]
+fn registered_reads_the_candidate_packs_not_the_last_load() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(
+        root.path().join("command-registries.json"),
+        json!({"by_registry": {
+            "minecraft:item": {"ids": ["minecraft:stone"]},
+            "minecraft:worldgen/biome": {"ids": ["minecraft:plains"]}
+        }})
+        .to_string(),
+    )
+    .unwrap();
+    let pack = |keys: &[&str]| -> Vec<(String, Vec<Vec<u8>>)> {
+        keys.iter()
+            .map(|key| ((*key).to_owned(), vec![b"{}".to_vec()]))
+            .collect()
+    };
+    let registered = |registry: &str, value: &str| {
+        json!({"neoforge:conditions": [
+            {"type": "neoforge:registered", "registry": registry, "value": value}
+        ]})
+    };
+    let dunes = registered("minecraft:worldgen/biome", "test:dunes");
+    let first = super::candidate_registries(
+        root.path(),
+        &pack(&["worldgen/biome/test:dunes", "recipe/test:a/b"]),
+    );
+    let first = horizon_world::conditions::LoadConditions::new([]).with_registries(
+        first
+            .iter()
+            .map(|(registry, ids)| (registry.as_str(), ids.iter().map(String::as_str))),
+    );
+    assert!(
+        first.allows(&dunes),
+        "a pack's new biome counts on its first load"
+    );
+    assert!(first.allows(&registered("minecraft:worldgen/biome", "minecraft:plains")));
+    assert!(first.allows(&registered("minecraft:item", "minecraft:stone")));
+    let next = super::candidate_registries(root.path(), &pack(&[]));
+    let next = horizon_world::conditions::LoadConditions::new([]).with_registries(
+        next.iter()
+            .map(|(registry, ids)| (registry.as_str(), ids.iter().map(String::as_str))),
+    );
+    assert!(
+        !next.allows(&dunes),
+        "the pack no longer has it: not registered"
+    );
+    assert!(next.allows(&registered("minecraft:worldgen/biome", "minecraft:plains")));
+}

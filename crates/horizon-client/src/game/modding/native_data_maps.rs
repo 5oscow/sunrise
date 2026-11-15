@@ -330,12 +330,17 @@ impl DataMaps {
             let mut map = BTreeMap::new();
             if let Some((_, versions)) = overlay.files.iter().find(|(k, _)| *k == wanted) {
                 for bytes in versions {
-                    let file = serde_json::from_slice::<Value>(bytes).ok();
+                    let mut file = serde_json::from_slice::<Value>(bytes).ok();
                     if file
                         .as_ref()
                         .is_some_and(|file| !overlay.conditions.allows_file(file, &wanted))
                     {
                         continue;
+                    }
+                    // Element conditions inside the file's lists; a value's own conditions are
+                    // read by `entry_value`.
+                    if let Some(file) = &mut file {
+                        overlay.conditions.filter_elements(file, &wanted);
                     }
                     let applied = file.is_some_and(|file| {
                         apply_file(
