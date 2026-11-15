@@ -6,13 +6,6 @@ use super::native_entity_refs::tests::with_game;
 use mod_api::{EntityMoveEvent, Flow, Hooks, LivingTravelEvent, LoopContext, TravelMode};
 use std::sync::{Arc, Mutex};
 
-/// What the counter heard: each travel's kind and mode, and each move's
-/// kind.
-type Heard = (
-    Arc<Mutex<Vec<(String, TravelMode)>>>,
-    Arc<Mutex<Vec<String>>>,
-);
-
 /// A listener that counts travels and moves by kind.
 struct Counter(
     Arc<Mutex<Vec<(String, TravelMode)>>>,
