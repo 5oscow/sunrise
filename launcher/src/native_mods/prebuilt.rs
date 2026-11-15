@@ -47,6 +47,28 @@ impl std::fmt::Display for Refusal {
     }
 }
 
+impl Refusal {
+    /// What the player reads about it, in the words of a mod that doesn't compile: the code and
+    /// its remedy for the mod's author stay in the build log ([`Display`](std::fmt::Display)).
+    pub fn plain(&self) -> String {
+        let why = match self {
+            Self::BuildScript { mod_id } => trf(
+                "{mod} can't be built here: it brings build steps of its own, which Horizon doesn't run.",
+                &[("mod", mod_id)],
+            ),
+            Self::Features { mod_id } => trf(
+                "{mod} can't be built here: it asks for build options Horizon's game doesn't offer.",
+                &[("mod", mod_id)],
+            ),
+            Self::Sdk(refusal) => return refusal.to_string(),
+        };
+        format!(
+            "{why} {}",
+            tr("The problem is in the mod, not in your game. Switch it off to play, or send the log to its author.")
+        )
+    }
+}
+
 /// The first structural reason these projects cannot use the prebuilt game.
 pub(super) fn refusal(projects: &[api::Project<'_>]) -> Option<Refusal> {
     projects.iter().find_map(project_refusal)
@@ -630,6 +652,8 @@ pub(super) fn compile(
     declared: &[Vec<dependencies::Dependency>],
     resolution: &dependencies::Resolution,
     consent: Option<&dyn Fn(&super::RegistryInventory) -> bool>,
+    // Each mod is its own library: told which one starts, and how far through them.
+    on_mod: &dyn Fn(&str, usize, usize),
 ) -> Result<(PathBuf, Vec<PathBuf>), String> {
     let mut names = std::collections::HashSet::new();
     names.insert(dylib_name("horizon_patch").to_ascii_lowercase());
@@ -653,15 +677,8 @@ pub(super) fn compile(
     let key = kept_build(rust, package)?;
     if route == Route::Api {
         let out = &builds.join(format!("api-{key}"));
-        let built = super::api_route::compile(
-            rust,
-            &package.runtime,
-            &package.api,
-            out,
-            projects,
-            declared,
-            resolution,
-        );
+        let built =
+            super::api_route::compile(rust, package, out, projects, declared, resolution, on_mod);
         // Stamped after the route has made its folder again, failed or not.
         if out.exists() {
             crate::storage::mark_used(out).map_err(super::cache_error)?;
@@ -715,9 +732,10 @@ pub(super) fn compile(
     libraries.insert("mod_vocab", library(&deps, "mod_vocab")?);
     let mut rlibs: std::collections::HashMap<&str, PathBuf> = std::collections::HashMap::new();
     let mut crate_names: std::collections::HashMap<&str, String> = std::collections::HashMap::new();
-    for &index in &resolution.order {
+    for (n, &index) in resolution.order.iter().enumerate() {
         let project = &projects[index];
         let id = project.bundle.manifest.id.as_str();
+        on_mod(id, n + 1, resolution.order.len());
         let api_dependencies = project.api_dependencies();
         if internals::needed(&project.bundle.manifest)
             || api_dependencies
@@ -859,7 +877,6 @@ pub(super) fn dylib_name(krate: &str) -> String {
     )
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(super) fn library_entry(
     template: &str,
     mods: &[&horizon_mod_package::Manifest],
@@ -1030,7 +1047,7 @@ fn forbids_unsafe(meta: &syn::Meta) -> bool {
 
 /// What the build log and a failure call compiling mod `id`: a failure starts
 /// "Compiling <id> failed".
-pub(super) fn compiling(id: &str) -> String {
+pub fn compiling(id: &str) -> String {
     trf("Compiling {mod}", &[("mod", id)])
 }
 

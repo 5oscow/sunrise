@@ -63,7 +63,7 @@ impl Game<'_> {
     /// hazards (drowning, lava, fire blocks, suffocation, the void), and
     /// regeneration and the food tick (ServerPlayer.doTick). Their hurt
     /// sounds are heard at the guest.
-    pub(super) fn guest_server_tick(&mut self, conn: u32) {
+    pub(super) fn guest_server_tick(&mut self, conn: u32, body: bool) {
         self.guest_replay(conn);
         self.guest_vehicle_tick(conn);
         // The last move's fall stands in for the server's delta movement.
@@ -97,21 +97,19 @@ impl Game<'_> {
         if g.spectator() {
             // ServerPlayer.doTick runs the player's whole tick for a spectator
             // too, unless its box touches an unloaded chunk
-            // (`touchingUnloadedChunk`): its effects (LivingEntity.baseTick),
-            // Player.aiStep's tickRegeneration and foodData.tick go on while
-            // it watches (#11312). The hazards, the travel and the movement
-            // statistics below are what a spectator's body skips.
-            let (at, body) = (g.position, g.dimensions());
-            let loaded =
-                !touching_unloaded_chunk(at, body, |x, z| self.world.chunks.contains_key(&(x, z)));
+            // (`touchingUnloadedChunk`, `guest_body_ticks`): its effects
+            // (LivingEntity.baseTick), Player.aiStep's shoulder entities and
+            // tickRegeneration, and foodData.tick go on while it watches
+            // (#11312). The hazards, the travel and the movement statistics
+            // below are what a spectator's body skips.
+            if !body {
+                return;
+            }
             if !g.effects.list.is_empty() {
                 self.as_guest(conn, |game| game.tick_mob_effects());
             }
             self.as_guest(conn, |game| {
                 game.handle_shoulder_entities();
-                if !loaded {
-                    return;
-                }
                 let rules = game.world.health_rules;
                 let Some(player) = game.player.as_mut() else {
                     return;

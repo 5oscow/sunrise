@@ -86,6 +86,17 @@ pub trait RecipesClientHost {
     #[access(WorldOnly)]
     fn panel_style(&mut self, mod_id: &str, style: PanelStyle);
     /// Side: client.
+    /// Shows `page` in mod `mod_id`'s item panel instead of its items, drawn by
+    /// the game with its own slots (`RecipePage`, `RecipeView`): a title and a
+    /// back button, tabs, and the recipes paged to the panel's height. `None`,
+    /// or a page without recipes, shows the items again. The renderer's limits
+    /// are cut, never refused: 256 recipes and 16 tabs a page, 27 slots, 4
+    /// results and 8 fluids each way a recipe, 64 stacks a slot. The same title
+    /// and tab again keep the page the player turned to. Clicks on its slots,
+    /// actions, page turns, the back button and tabs come back as `panel_event`.
+    #[access(WorldOnly)]
+    fn panel_recipes(&mut self, mod_id: &str, page: Option<RecipePage>);
+    /// Side: client.
     /// Places a recipe in the open screen's grid as a click in the recipe
     /// book does (`ServerboundPlaceRecipePacket`): the inventory's grid or a
     /// crafting table's. `all` places as many as the items allow, as with
@@ -121,6 +132,26 @@ pub trait RecipesClientHost {
     /// takes `transfer_recipe` and on a server that doesn't answer it.
     #[access(WorldOnly)]
     fn transfer_recipe_check(&mut self, book_id: i32) -> Option<RecipeTransferCheck>;
+    /// Side: client.
+    /// The `book_id`s of the recipe `recipe_id` (`minecraft:stick`), the ids
+    /// `transfer_recipe`, `transfer_recipe_check`, `place_recipe` and
+    /// `known_recipes` use: one for each way the recipe book shows it, in the
+    /// book's order. For a recipe viewer, which has the recipe from
+    /// `recipes_of_type` and needs its id for "+". A server numbers its
+    /// recipes itself and names none of them, so an id is given only when the
+    /// server sent the recipe book entry with that number and this client's
+    /// own numbering of the recipe agrees with it: the entry is the same
+    /// recipe (the same result, category and ingredients), so two different
+    /// recipes with identical displays cannot be told apart. Empty otherwise: a
+    /// recipe the server sent no entry for (the player's book does not hold
+    /// it, or it was removed), one the server numbers differently, one the
+    /// book doesn't show (campfire, stonecutting, smithing, a mod's own
+    /// type), an unknown id, and outside a world. The answer changes when
+    /// the server adds, replaces or removes entries and when recipes reload
+    /// or arrive, and no hook announces a recipe book change: query it when
+    /// you use it, rather than keeping an answer from `recipes_received`.
+    #[access(WorldOnly)]
+    fn recipe_book_ids(&mut self, recipe_id: &str) -> Arc<[i32]>;
 }
 /// The handles' reads of the `recipes` area, implemented by the game and reached through [`Backend`].
 // hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait

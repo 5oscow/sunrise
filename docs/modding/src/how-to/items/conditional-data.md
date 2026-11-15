@@ -23,7 +23,15 @@ lifetime and are not conditional data files.
 server-mod IDs, including active code-only native and WebAssembly mods, plus
 `minecraft` always. Client-only, disabled and refused packages are absent;
 resource namespaces are not mod IDs. Other supported forms are `neoforge:true`,
-`neoforge:not` (`value`), and `neoforge:and` / `neoforge:or` (`values`). A namespace
+`neoforge:false`, `neoforge:not` (`value`), `neoforge:and` / `neoforge:or`
+(`values`), `neoforge:feature_flags_enabled`, `neoforge:registered` and
+`neoforge:tag_empty`. `feature_flags_enabled` takes `flags`, an array of feature-id
+strings that must all be enabled. `registered` and `tag_empty` take a `registry` (default `minecraft:item`)
+and a `value` or `tag`: `registered` reads the registries as this load holds them,
+and `tag_empty` reads the block, item and fluid tags this load bound, so it is
+answered for recipes and the readers after them, never for tag files.
+Within a supplied view, a registry absent from it has no entries or tags: `registered` is false and `tag_empty` is true, with no diagnostic.
+A namespace
 is owned only when a loaded mod registered at least one condition in it. Unknown
 names there refuse reload, naming the file, condition and mod, at any depth in
 these trees.

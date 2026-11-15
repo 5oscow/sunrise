@@ -73,4 +73,21 @@ mod tests {
             vec![("first".into(), first)]
         );
     }
+
+    #[test]
+    fn registry_entry_elements_keep_their_original_bytes() {
+        let entry = br#"{ "tiers": [
+            {"neoforge:conditions": [{"type": "neoforge:false"}], "name": "tin"},
+            {"neoforge:conditions": [{"type": "neoforge:true"}], "name": "iron"}
+        ] }"#
+            .to_vec();
+        assert_eq!(
+            registry_versions(
+                vec![("pack".into(), entry.clone())],
+                &horizon_world::conditions::LoadConditions::new([]),
+                "data/test/registry/entry.json"
+            ),
+            vec![("pack".into(), entry)]
+        );
+    }
 }

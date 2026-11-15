@@ -204,7 +204,7 @@ mod player_bed_leave_tests {
                 assert!(game.bed_can_sleep_now());
                 game.world.set(5, 64, 5, air).unwrap();
                 in_bed(game, 12);
-                game.guest_sleep_tick(game.guest_index(12).unwrap());
+                game.guest_sleep_tick(game.guest_index(12).unwrap(), true);
                 assert_eq!(
                     std::mem::take(&mut *heard.lock().unwrap()),
                     [(true, true, Some([5, 64, 5]))]
@@ -223,7 +223,7 @@ mod player_bed_leave_tests {
                         g.health = 0.0;
                     })
                     .unwrap();
-                game.guest_sleep_tick(game.guest_index(12).unwrap());
+                game.guest_sleep_tick(game.guest_index(12).unwrap(), true);
                 assert_eq!(
                     std::mem::take(&mut *heard.lock().unwrap()),
                     [(true, true, Some([5, 64, 5]))]
@@ -233,7 +233,7 @@ mod player_bed_leave_tests {
                 game.world.day_time = 6000;
                 assert!(!game.bed_can_sleep_now());
                 in_bed(game, 12);
-                game.guest_sleep_tick(game.guest_index(12).unwrap());
+                game.guest_sleep_tick(game.guest_index(12).unwrap(), true);
                 assert_eq!(
                     std::mem::take(&mut *heard.lock().unwrap()),
                     [(false, true, Some([5, 64, 5]))]
@@ -243,7 +243,7 @@ mod player_bed_leave_tests {
                 // bed-rule refusal just because sleeping would be disallowed.
                 game.world.set(5, 64, 5, air).unwrap();
                 in_bed(game, 12);
-                game.guest_sleep_tick(game.guest_index(12).unwrap());
+                game.guest_sleep_tick(game.guest_index(12).unwrap(), true);
                 assert_eq!(
                     std::mem::take(&mut *heard.lock().unwrap()),
                     [(true, true, Some([5, 64, 5]))]
@@ -340,7 +340,7 @@ mod player_bed_leave_tests {
                     game.world.set(5, 64, 5, state).unwrap();
                     game.world.day_time = time;
                     in_bed(game, 12);
-                    game.guest_sleep_tick(game.guest_index(12).unwrap());
+                    game.guest_sleep_tick(game.guest_index(12).unwrap(), true);
                     let guest = game.command_guest(12).unwrap();
                     assert!(!guest.sleeping);
                     assert_eq!(guest.sleep_timer, expected);
