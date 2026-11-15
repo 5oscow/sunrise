@@ -1145,7 +1145,7 @@ impl Dispatcher {
         cursor: usize,
         reg: &Registries,
     ) -> (Range, Vec<Suggestion>) {
-        let (range, list, _) = self.suggestions_within(parse, cursor, reg, u8::MAX);
+        let (range, list, _, _) = self.suggestions_within(parse, cursor, reg, u8::MAX);
         (range, list)
     }
     /// The suggestions the player's chat shows: the client's tree only holds
@@ -1156,7 +1156,7 @@ impl Dispatcher {
         cursor: usize,
         reg: &Registries,
     ) -> (Range, Vec<Suggestion>) {
-        let (range, list, _) = self.suggestions_within(parse, cursor, reg, reg.permission);
+        let (range, list, _, _) = self.suggestions_within(parse, cursor, reg, reg.permission);
         (range, list)
     }
     /// [`Self::client_suggestions`], and whether a node at the cursor asks
@@ -1168,7 +1168,21 @@ impl Dispatcher {
         cursor: usize,
         reg: &Registries,
     ) -> (Range, Vec<Suggestion>, bool) {
-        self.suggestions_within(parse, cursor, reg, reg.permission)
+        let (range, list, ask, _) = self.suggestions_within(parse, cursor, reg, reg.permission);
+        (range, list, ask)
+    }
+    /// [`Self::client_suggestions`], and whether an argument at the cursor answers from a
+    /// suggestion provider its type declares: that answer is the argument's own, so no
+    /// completion listener may add to, replace or erase it (`tab_complete` is asked for
+    /// ordinary completions only).
+    pub fn client_suggestions_owned(
+        &self,
+        parse: &ParseResults,
+        cursor: usize,
+        reg: &Registries,
+    ) -> (Range, Vec<Suggestion>, bool) {
+        let (range, list, _, owned) = self.suggestions_within(parse, cursor, reg, reg.permission);
+        (range, list, owned)
     }
     fn suggestions_within(
         &self,
@@ -1176,12 +1190,13 @@ impl Dispatcher {
         cursor: usize,
         reg: &Registries,
         permission: u8,
-    ) -> (Range, Vec<Suggestion>, bool) {
+    ) -> (Range, Vec<Suggestion>, bool, bool) {
         let (parent, start, context) = parse.context.suggestion_context(cursor);
         let start = start.min(cursor);
         let truncated = &parse.input[..cursor.min(parse.input.len())];
         let mut all = Vec::new();
         let mut ask = false;
+        let mut owned = false;
         for &child in &self.nodes[parent].children {
             if self.nodes[child].permission > permission {
                 continue;
@@ -1194,10 +1209,15 @@ impl Dispatcher {
                         builder.suggest(l.clone());
                     }
                 }
-                NodeKind::Argument { ty, name } => match &self.nodes[child].suggests {
-                    Some(provider) => provider.suggest(&mut builder, reg, &parse.context),
-                    None => ty.suggest(&mut builder, reg, context, name),
-                },
+                NodeKind::Argument { ty, name } => {
+                    // A type that declares a provider answers for its argument: that answer is the
+                    // argument's own, and nothing else may add to it.
+                    owned |= matches!(ty, ArgType::Custom(custom) if custom.declares_provider());
+                    match &self.nodes[child].suggests {
+                        Some(provider) => provider.suggest(&mut builder, reg, &parse.context),
+                        None => ty.suggest(&mut builder, reg, context, name),
+                    }
+                }
                 NodeKind::Root => {}
             }
             all.extend(builder.out);
@@ -1213,7 +1233,7 @@ impl Dispatcher {
         } else {
             range
         };
-        (range, list, ask)
+        (range, list, ask, owned)
     }
     fn smart_usage_of(&self, node: usize, optional: bool, deep: bool, level: u8) -> Option<String> {
         let n = &self.nodes[node];

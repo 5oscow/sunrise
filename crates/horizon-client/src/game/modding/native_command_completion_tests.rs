@@ -200,6 +200,103 @@ fn suggestions(game: &mut Game<'_>, rx: &mpsc::Receiver<Out>, command: &str) -> 
     panic!("no command suggestions packet for `{command}`");
 }
 
+/// A type whose arguments declare a suggestion provider: its own `suggest` must never answer.
+struct ProviderWarps;
+
+impl mod_api::CommandArgumentType for ProviderWarps {
+    fn kind(&self) -> mod_api::CommandArgumentKind {
+        mod_api::CommandArgumentKind::Word
+    }
+
+    fn parse(&self, input: &str) -> Result<String, mod_api::CommandArgumentError> {
+        Ok(input.to_owned())
+    }
+
+    fn suggest(
+        &self,
+        _: Option<&mod_api::CommandSender>,
+        _: &str,
+    ) -> Vec<mod_api::CommandSuggestion> {
+        panic!("`suggest` is not called for an argument that declares a provider")
+    }
+
+    fn suggestion_provider(&self) -> Option<Arc<dyn mod_api::SuggestionProvider>> {
+        Some(Arc::new(Warps))
+    }
+}
+
+/// The provider that owns its argument's completions: two candidates, one of which the typed text
+/// does not match.
+struct Warps;
+
+impl mod_api::SuggestionProvider for Warps {
+    fn suggest(&self, _: &mod_api::SuggestionRequest) -> mod_api::SuggestionReply {
+        mod_api::SuggestionReply::new([
+            mod_api::CommandSuggestion::with_tooltip("press", "the press"),
+            mod_api::CommandSuggestion::new("furnace"),
+        ])
+    }
+}
+
+/// A listener that would erase the answer of the argument being completed and put its own there:
+/// it must never see a provider's answer.
+struct ErasingCompletion;
+
+#[mod_api::__subscriptions]
+impl mod_api::Hooks for ErasingCompletion {
+    fn tab_complete(
+        &self,
+        _: &mut dyn mod_api::ServerHost,
+        event: &mut mod_api::TabCompleteEvent<'_>,
+    ) {
+        event.suggestions.clear();
+        event.suggestions.push(mod_api::Suggestion::new(
+            (event.range[0], event.range[1]),
+            "erased",
+        ));
+    }
+}
+
+/// The provider's answer reaches the player as the provider gave it, and the request never offers
+/// it to `tab_complete`; an ordinary argument still reaches the listener.
+#[test]
+#[ignore = "daily"]
+fn a_providers_answer_reaches_the_player_without_passing_through_the_completion_listener() {
+    let mods = vec![mod_api::ModEntry::new(
+        "erasing_completion",
+        Box::new(ErasingCompletion),
+    )]
+    .into();
+    mod_platform::testing::with_mods(mods, || {
+        let mut resources = None;
+        let (mut game, rx) = game_with_guest(&mut resources, "Alex");
+        let arguments: CommandArguments = std::collections::HashMap::from([(
+            "test:warp".to_owned(),
+            Arc::new(ProviderWarps) as Arc<dyn mod_api::CommandArgumentType>,
+        )]);
+        let (tree, _, problems) = command_tree(
+            &[
+                mod_api::Command::new("warp go <name:test:warp>"),
+                mod_api::Command::new("probe <value:word>"),
+            ],
+            |_| false,
+            &arguments,
+        );
+        assert!(problems.is_empty(), "{problems:?}");
+        let mut dispatcher = (*game.ui.dispatcher.0).clone();
+        register_dispatcher(&mut dispatcher, &tree, MOD_COMMAND, &arguments);
+        game.ui.dispatcher.0 = Arc::new(dispatcher);
+        game.lan.as_mut().unwrap().hub.set_mod_commands(0, tree);
+        last_tree(&rx);
+
+        // The provider's argument: its matching candidate, its tooltip, and nothing the listener
+        // would have put there.
+        assert_eq!(suggestions(&mut game, &rx, "warp go pr"), ["press"]);
+        // A plain `word` argument: the listener still answers, so the hook is not gone.
+        assert_eq!(suggestions(&mut game, &rx, "probe "), ["erased"]);
+    });
+}
+
 struct IdentifierCompletion;
 
 #[mod_api::__subscriptions]

@@ -193,6 +193,58 @@ fn a_declared_provider_is_asked_only_for_its_argument_with_the_sender_and_the_ar
     );
 }
 
+/// The same builder builds the server's tree and the client's own: a client command that names an
+/// argument type declaring a provider is refused by name, and no mod code runs for it, while an
+/// ordinary argument type still builds and completes.
+#[test]
+fn a_client_command_refuses_an_argument_type_that_declares_a_provider_by_name() {
+    let seen = seen();
+    let arguments = arguments(Declared {
+        candidates: vec![mod_api::CommandSuggestion::new("press")],
+        seen: seen.clone(),
+        panic_on_answer: false,
+    });
+    let commands = [
+        mod_api::Command::new("warp go <world:test:mode> <name:test:warp>"),
+        mod_api::Command::new("warp use <world:test:mode>"),
+    ];
+
+    // The client's own tree: the usage that would run the provider is left out, named.
+    let (tree, _, problems) = super::client_command_tree(&commands, |_| false, &arguments);
+    assert_eq!(problems.len(), 1, "{problems:?}");
+    assert!(problems[0].contains("test:warp"), "{}", problems[0]);
+    assert!(
+        problems[0].contains("suggestion provider"),
+        "{}",
+        problems[0]
+    );
+    assert!(
+        tree["children"]["warp"]["children"].get("go").is_none(),
+        "the provider-backed usage is left out"
+    );
+
+    // The ordinary argument type keeps building, and completes by its own `suggest`.
+    let mut chat = horizon_client::command::vanilla::game_dispatcher().clone();
+    register_dispatcher(&mut chat, &tree, "native_mod_command", &arguments);
+    let registries = Registries::default();
+    let typed = "warp use cr";
+    let (_, suggestions) =
+        chat.client_suggestions(&chat.parse(typed, &registries), typed.len(), &registries);
+    assert_eq!(texts(&suggestions), ["creative"]);
+    assert!(
+        seen.lock().unwrap().is_empty(),
+        "no provider ran for a client command"
+    );
+
+    // The server's tree keeps the same usage.
+    let (tree, _, problems) = super::command_tree(&commands, |_| false, &arguments);
+    assert!(problems.is_empty(), "{problems:?}");
+    assert_eq!(
+        tree["children"]["warp"]["children"]["go"]["children"]["world"]["children"]["name"]["custom_argument"],
+        "test:warp"
+    );
+}
+
 #[test]
 fn a_panicking_provider_answers_no_suggestion_and_the_rest_of_the_line_still_completes() {
     let seen = seen();

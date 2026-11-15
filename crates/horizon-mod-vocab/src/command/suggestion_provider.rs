@@ -67,15 +67,16 @@ impl SuggestionRequest {
 
 /// What a provider answers: candidates, which the engine filters against the typed text.
 ///
-/// At most 1,000 candidates are kept, each within the protocol's 32,767 UTF-16 code units (and a
-/// tooltip within 65,535 bytes of Java modified UTF-8). A candidate past either bound is dropped
-/// and reported in the diagnostics; the others are kept. Non-exhaustive so a later field does not
-/// break a mod that builds one.
+/// At most 1,000 candidates are kept, counted after the engine's own matching and drops, each
+/// within the protocol's 32,767 UTF-16 code units (and a tooltip within 65,535 bytes of Java
+/// modified UTF-8). A candidate past either bound is dropped and reported in the diagnostics; the
+/// others are kept. Non-exhaustive so a later field does not break a mod that builds one.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
 #[derive(horizon_mod_api_macros::Wire)]
 pub struct SuggestionReply {
-    /// The candidates for the typed prefix, in the order the chat should show them.
+    /// The candidates for the typed prefix; the engine keeps the matching ones and sorts them
+    /// before the chat shows them.
     pub suggestions: Vec<CommandSuggestion>,
 }
 
@@ -93,8 +94,9 @@ impl SuggestionReply {
 /// Declare it from the type: `CommandArgumentType::suggestion_provider` returns it, and the type's
 /// arguments then ask it instead of [`CommandArgumentType::suggest`](crate::CommandArgumentType::suggest).
 /// The engine calls it on the server, when a player's client asks for that argument: nothing is
-/// kept between two requests, and an error, a panic or a reply past the bounds answers no
-/// suggestion for that request.
+/// kept between two requests, and a panic answers no suggestion for that request. A candidate
+/// that does not match the typed text, or that is past the protocol's bounds, is dropped alone,
+/// and the others are kept.
 ///
 /// The game keeps one value per registered argument type and may ask it from more than one
 /// request: implement it to be shared, without mutable state.

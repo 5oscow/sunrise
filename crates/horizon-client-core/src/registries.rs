@@ -19,7 +19,8 @@ pub struct SelectorToken {
 }
 /// Who a completion is for: the player typing, whose command permission level is
 /// [`Registries::permission`]. A mod's own completion - the argument type's `suggest`, or the
-/// suggestion provider it declares - decides what to offer; the game does not filter its answer.
+/// suggestion provider it declares - decides what to offer. The engine keeps `suggest`'s answer
+/// as it comes and, for a provider, keeps only the candidates that match the typed text.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct CommandSender {
     /// The player's UUID.

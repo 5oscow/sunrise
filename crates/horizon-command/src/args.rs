@@ -42,8 +42,8 @@ pub struct ParsedArgument {
     pub text: String,
 }
 
-/// The most candidates a mod's suggestion provider may answer for one argument
-/// (`ServerSuggestionProvider.limitSuggestionCount`).
+/// The most candidates a reply keeps for one argument (`ServerSuggestionProvider.limitSuggestionCount`),
+/// counted after the engine's own matching and bounds checks.
 pub const MAX_PROVIDER_SUGGESTIONS: usize = 1000;
 /// The longest completion text, in UTF-16 code units (STRING_UTF8's limit).
 pub const MAX_SUGGESTION_TEXT: usize = 32767;
@@ -105,6 +105,11 @@ impl CustomArgument {
     ) -> Self {
         self.provider = Some(Arc::new(provider));
         self
+    }
+    /// Whether the type declares a suggestion provider: its arguments are answered by that
+    /// provider alone, and no completion listener may add to, replace or erase the answer.
+    pub(crate) fn declares_provider(&self) -> bool {
+        self.provider.is_some()
     }
     /// The registered type's namespaced id.
     pub fn id(&self) -> &str {
@@ -644,7 +649,14 @@ fn modified_utf8_len(text: &str) -> usize {
 /// and the others stay; nothing here panics.
 fn add_provider_suggestions(builder: &mut SuggestionsBuilder, candidates: Vec<CustomSuggestion>) {
     let (count, lower) = (candidates.len(), builder.remaining_lower());
-    for candidate in candidates.into_iter().take(MAX_PROVIDER_SUGGESTIONS) {
+    // The cap counts what the reply keeps, not what the provider answered: a candidate that does
+    // not match the typed text, or that is past a bound, spends none of it, so a long list of
+    // non-matches before the matching ones still completes.
+    let mut kept = 0;
+    for candidate in candidates {
+        if kept == MAX_PROVIDER_SUGGESTIONS {
+            break;
+        }
         if !matches_sub_str(&lower, &candidate.text.to_lowercase()) {
             continue;
         }
@@ -665,11 +677,12 @@ fn add_provider_suggestions(builder: &mut SuggestionsBuilder, candidates: Vec<Cu
             Some(tooltip) => builder.suggest_tooltip(candidate.text, tooltip),
             None => builder.suggest(candidate.text),
         }
+        kept += 1;
     }
     if count > MAX_PROVIDER_SUGGESTIONS {
         eprintln!(
-            "mod command argument provider answered {count} suggestions; the reply keeps \
-             {MAX_PROVIDER_SUGGESTIONS}"
+            "mod command argument provider answered {count} suggestions; at most \
+             {MAX_PROVIDER_SUGGESTIONS} are kept"
         );
     }
 }
