@@ -2896,6 +2896,7 @@ impl PlayerInside<'_, '_, '_, '_> {
 }
 
 impl crate::block_contact::InsideWalk for PlayerInside<'_, '_, '_, '_> {
+    type Effects = mod_api::InsideEffects;
     type Error = Box<dyn std::error::Error>;
     fn bounds_at(&self, at: Vec3) -> Aabb {
         self.m.player.dimensions.bounds(at)

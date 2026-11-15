@@ -671,23 +671,19 @@ impl ItemEntity {
     /// in.
     fn stuck_multiplier(&self, world: &World, facts: &BlockFacts) -> Option<Vec3> {
         let b = self.bounds().deflate(Vec3::new(1e-5, 1e-5, 1e-5));
-        let (lo, hi) = (b.min_position(), b.max_position());
         let mut stuck = None;
-        for x in lo.x.floor() as i32..=hi.x.floor() as i32 {
-            for y in lo.y.floor() as i32..=hi.y.floor() as i32 {
-                for z in lo.z.floor() as i32..=hi.z.floor() as i32 {
-                    match &*facts.get(world.block(x, y, z)).name {
-                        "minecraft:cobweb" => {
-                            stuck = Some(Vec3::new(0.25, f64::from(0.05_f32), 0.25));
-                        }
-                        "minecraft:powder_snow" => {
-                            stuck = Some(Vec3::new(f64::from(0.9_f32), 1.5, f64::from(0.9_f32)));
-                        }
-                        _ => {}
-                    }
+        crate::block_contact::box_cells(b, |p| {
+            match &*facts.get(world.block(p.x, p.y, p.z)).name {
+                "minecraft:cobweb" => {
+                    stuck = Some(Vec3::new(0.25, f64::from(0.05_f32), 0.25));
                 }
+                "minecraft:powder_snow" => {
+                    stuck = Some(Vec3::new(f64::from(0.9_f32), 1.5, f64::from(0.9_f32)));
+                }
+                _ => {}
             }
-        }
+            true
+        });
         stuck
     }
     /// `SlimeBlock.stepOn` for an item on the ground: slow vertical speed
@@ -725,16 +721,12 @@ impl ItemEntity {
     /// false for an item).
     fn apply_honey_slide(&mut self, world: &World, facts: &BlockFacts) {
         let b = self.bounds().deflate(Vec3::new(1e-5, 1e-5, 1e-5));
-        let (lo, hi) = (b.min_position(), b.max_position());
-        for x in lo.x.floor() as i32..=hi.x.floor() as i32 {
-            for y in lo.y.floor() as i32..=hi.y.floor() as i32 {
-                for z in lo.z.floor() as i32..=hi.z.floor() as i32 {
-                    if &*facts.get(world.block(x, y, z)).name == "minecraft:honey_block" {
-                        self.honey_block_inside([x, y, z]);
-                    }
-                }
+        crate::block_contact::box_cells(b, |p| {
+            if &*facts.get(world.block(p.x, p.y, p.z)).name == "minecraft:honey_block" {
+                self.honey_block_inside([p.x, p.y, p.z]);
             }
-        }
+            true
+        });
     }
     /// `HoneyBlock.isSlidingDown` then `doSlideMovement`. `getOldDeltaY` /
     /// `getNewDeltaY` wrap the stored velocity the same way they do for every
@@ -790,54 +782,47 @@ fn lava_cauldron_contacts(
     let epsilon = f64::from(1e-5_f32);
     let mut contacts = 0;
     let candidates = bounds.deflate(Vec3::new(epsilon, epsilon, epsilon));
-    for x in candidates.min_position().x.floor() as i32..=candidates.max_position().x.floor() as i32
-    {
-        for y in
-            candidates.min_position().y.floor() as i32..=candidates.max_position().y.floor() as i32
+    crate::block_contact::box_cells(candidates, |p| {
+        let (x, y, z) = (p.x, p.y, p.z);
+        if !registry
+            .state(world.block(x, y, z))
+            .is_some_and(|s| s.name == "minecraft:lava_cauldron")
         {
-            for z in candidates.min_position().z.floor() as i32
-                ..=candidates.max_position().z.floor() as i32
-            {
-                if !registry
-                    .state(world.block(x, y, z))
-                    .is_some_and(|s| s.name == "minecraft:lava_cauldron")
-                {
-                    continue;
-                }
-                let shape = SHAPE.get_or_init(|| {
-                    let cuboid = |x0, y0, z0, x1, y1, z1| {
-                        VoxelShape::from_box(Aabb::new(
-                            Vec3::new(x0 / 16.0, y0 / 16.0, z0 / 16.0),
-                            Vec3::new(x1 / 16.0, y1 / 16.0, z1 / 16.0),
-                        ))
-                        .expect("valid cauldron box")
-                    };
-                    let mut solid = VoxelShape::block();
-                    // AbstractCauldronBlock.SHAPE: the openings under its feet
-                    // and its hollow centre are cut out of the unit block.
-                    for hole in [
-                        cuboid(0.0, 0.0, 4.0, 16.0, 3.0, 12.0),
-                        cuboid(4.0, 0.0, 0.0, 12.0, 3.0, 16.0),
-                        cuboid(2.0, 0.0, 2.0, 14.0, 3.0, 14.0),
-                        cuboid(2.0, 4.0, 2.0, 14.0, 16.0, 14.0),
-                    ] {
-                        solid = solid
-                            .join(&hole, ShapeOp::ONLY_FIRST)
-                            .expect("valid cauldron cutout");
-                    }
-                    solid
-                        .join(&cuboid(2.0, 4.0, 2.0, 14.0, 15.0, 14.0), ShapeOp::OR)
-                        .expect("valid filled cauldron")
-                });
-                let local = bounds.move_by(Vec3::new(-f64::from(x), -f64::from(y), -f64::from(z)));
-                // Only block enumeration uses the deflated box. The actual
-                // shape contact follows Entity.collidedWithShapeMovingFrom.
-                if local.collided_along_vector(Vec3::ZERO, shape.boxes()) {
-                    contacts += 1;
-                }
-            }
+            return true;
         }
-    }
+        let shape = SHAPE.get_or_init(|| {
+            let cuboid = |x0, y0, z0, x1, y1, z1| {
+                VoxelShape::from_box(Aabb::new(
+                    Vec3::new(x0 / 16.0, y0 / 16.0, z0 / 16.0),
+                    Vec3::new(x1 / 16.0, y1 / 16.0, z1 / 16.0),
+                ))
+                .expect("valid cauldron box")
+            };
+            let mut solid = VoxelShape::block();
+            // AbstractCauldronBlock.SHAPE: the openings under its feet
+            // and its hollow centre are cut out of the unit block.
+            for hole in [
+                cuboid(0.0, 0.0, 4.0, 16.0, 3.0, 12.0),
+                cuboid(4.0, 0.0, 0.0, 12.0, 3.0, 16.0),
+                cuboid(2.0, 0.0, 2.0, 14.0, 3.0, 14.0),
+                cuboid(2.0, 4.0, 2.0, 14.0, 16.0, 14.0),
+            ] {
+                solid = solid
+                    .join(&hole, ShapeOp::ONLY_FIRST)
+                    .expect("valid cauldron cutout");
+            }
+            solid
+                .join(&cuboid(2.0, 4.0, 2.0, 14.0, 15.0, 14.0), ShapeOp::OR)
+                .expect("valid filled cauldron")
+        });
+        let local = bounds.move_by(Vec3::new(-f64::from(x), -f64::from(y), -f64::from(z)));
+        // Only block enumeration uses the deflated box. The actual
+        // shape contact follows Entity.collidedWithShapeMovingFrom.
+        if local.collided_along_vector(Vec3::ZERO, shape.boxes()) {
+            contacts += 1;
+        }
+        true
+    });
     contacts
 }
 /// `ExperienceOrbRenderer.submit`'s billboard before its 0.3 scale, in the
@@ -2458,36 +2443,32 @@ impl ArmorStand {
         // Entity.checkInsideBlocks: test the deflated body against block cells,
         // not their inset collision shape (the stand slides beside that shape).
         let bounds = self.bounds().deflate(Vec3::new(1e-5, 1e-5, 1e-5));
-        let (lo, hi) = (bounds.min_position(), bounds.max_position());
         let overlap = 0.4375 + if self.small { 0.125 } else { 0.25 };
-        for x in lo.x.floor() as i32..=hi.x.floor() as i32 {
-            for y in lo.y.floor() as i32..=hi.y.floor() as i32 {
-                for z in lo.z.floor() as i32..=hi.z.floor() as i32 {
-                    if &*facts.get(world.block(x, y, z)).name != "minecraft:honey_block"
-                        || self.position.y > f64::from(y) + 0.9375 - 1.0e-7
-                    {
-                        continue;
-                    }
-                    let dx = (f64::from(x) + 0.5 - self.position.x).abs();
-                    let dz = (f64::from(z) + 0.5 - self.position.z).abs();
-                    if dx + 1.0e-7 <= overlap && dz + 1.0e-7 <= overlap {
-                        continue;
-                    }
-                    // HoneyBlock.doSlideMovement, including its float-widened
-                    // getOldDeltaY/getNewDeltaY conversion around air travel.
-                    let old = old_delta_y(self.velocity.y);
-                    if old < -0.13 {
-                        let factor = -0.05 / old;
-                        self.velocity.x *= factor;
-                        self.velocity.z *= factor;
-                    }
-                    self.velocity.y = (-0.05 - 0.08) * f64::from(0.98_f32);
-                    self.enchantment_fall_distance = 0.0;
-                    // The new oldDeltaY is -0.05, so another honey cell cannot slide again.
-                    return;
-                }
+        crate::block_contact::box_cells(bounds, |p| {
+            let (x, y, z) = (p.x, p.y, p.z);
+            if &*facts.get(world.block(x, y, z)).name != "minecraft:honey_block"
+                || self.position.y > f64::from(y) + 0.9375 - 1.0e-7
+            {
+                return true;
             }
-        }
+            let dx = (f64::from(x) + 0.5 - self.position.x).abs();
+            let dz = (f64::from(z) + 0.5 - self.position.z).abs();
+            if dx + 1.0e-7 <= overlap && dz + 1.0e-7 <= overlap {
+                return true;
+            }
+            // HoneyBlock.doSlideMovement, including its float-widened
+            // getOldDeltaY/getNewDeltaY conversion around air travel.
+            let old = old_delta_y(self.velocity.y);
+            if old < -0.13 {
+                let factor = -0.05 / old;
+                self.velocity.x *= factor;
+                self.velocity.z *= factor;
+            }
+            self.velocity.y = (-0.05 - 0.08) * f64::from(0.98_f32);
+            self.enchantment_fall_distance = 0.0;
+            // The new oldDeltaY is -0.05, so another honey cell cannot slide again.
+            false
+        });
     }
     /// The rest of the stand's travel: the water slowdown, the lava slowdown
     /// and sink, or the air drag and gravity. The blocks' push (a bubble

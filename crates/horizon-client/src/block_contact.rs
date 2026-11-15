@@ -17,10 +17,23 @@ use std::{
 pub enum InsideShape {
     /// `Shapes.block()`: every move through the block is inside it.
     Full,
-    /// The shape's boxes, block-local, swept along the move.
+    /// The shape's boxes, in world space at the block, swept along the move.
     Boxes(Vec<horizon_core::geometry::Aabb>),
     /// An empty shape: nothing is inside it.
     Empty,
+}
+
+/// The collector a walk queues its per-step effects into. `advanceStep` is the only
+/// call the shared walk makes on it; the kind's own moments queue the effects.
+pub trait StepCollector {
+    /// `InsideBlockEffectApplier.StepBasedCollector.advanceStep`.
+    fn advance_step(&mut self, step: i32);
+}
+
+impl StepCollector for mod_api::InsideEffects {
+    fn advance_step(&mut self, step: i32) {
+        mod_api::InsideEffects::advance_step(self, step);
+    }
 }
 
 /// One entity kind's view of `Entity.checkInsideBlocks`: what the walk needs from the
@@ -28,6 +41,12 @@ pub enum InsideShape {
 /// mid-walk where vanilla runs them and queue into the shared collector.
 pub trait InsideWalk {
     type Error;
+    /// The collector the kind's moments queue into.
+    type Effects: StepCollector;
+    /// The epsilon `makeBoundingBox(to).deflate(..)` shrinks the target box by before
+    /// the cells are enumerated. Vanilla's is `1.0E-5F`; a kind that always widened it
+    /// from `f32` keeps that, the others keep the `f64` they always used.
+    const DEFLATE: f64 = 1.0e-5;
     /// `makeBoundingBox(at)`: the entity's box at a position.
     fn bounds_at(&self, at: horizon_core::geometry::Vec3) -> horizon_core::geometry::Aabb;
     /// `isAlive`: the walk stops the moment the entity dies.
@@ -55,36 +74,76 @@ pub trait InsideWalk {
         state: BlockStateId,
         step: i32,
         precise: bool,
-        effects: &mut mod_api::InsideEffects,
+        effects: &mut Self::Effects,
     ) -> Result<(), Self::Error>;
     /// `advanceStep` → `fluidState.entityInside`.
     fn fluid_inside(
         &mut self,
         _at: BlockPos,
         _step: i32,
-        _effects: &mut mod_api::InsideEffects,
+        _effects: &mut Self::Effects,
     ) -> Result<(), Self::Error> {
         Ok(())
+    }
+}
+
+/// Which of a candidate cell's two shapes the move touches. Both are decided before
+/// the cell is marked visited, as `Entity.checkInsideBlocks` decides them: a cell
+/// neither touches stays unvisited, so a later segment can still reach it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Contacted {
+    /// The block's inside shape (`collidedWithShapeMovingFrom`, or the full block).
+    pub block: bool,
+    /// The fluid's shape (`collidedWithFluid`).
+    pub fluid: bool,
+}
+
+impl Contacted {
+    /// Whether either shape was touched: the cell is visited.
+    pub fn any(self) -> bool {
+        self.block || self.fluid
+    }
+}
+
+/// The one contact decision every traversal makes for a non-air candidate `state` at
+/// `at`, for the move from `from` to `to`: the block's inside shape, then the fluid's,
+/// independently. A stationary pass gives `from == to`.
+pub fn contact_at<W: InsideWalk>(
+    walk: &mut W,
+    state: BlockStateId,
+    at: BlockPos,
+    from: horizon_core::geometry::Vec3,
+    to: horizon_core::geometry::Vec3,
+) -> Contacted {
+    let block = match walk.inside_shape(state, at) {
+        InsideShape::Full => true,
+        InsideShape::Empty => false,
+        InsideShape::Boxes(boxes) => walk
+            .bounds_at(from)
+            .collided_along_vector(to.subtract(from), &boxes),
+    };
+    Contacted {
+        block,
+        fluid: walk.collided_with_fluid(at, from, to),
     }
 }
 
 /// `Entity.checkInsideBlocks(from, to, …)`: the blocks the box at `to` sweeps through
 /// from `from`, in the walk's order, each visited once, stopping when the entity dies
 /// or the iteration budget runs out. Returns the iterations used plus one. Air is
-/// passed over; a block is inside when its shape is the whole block, the move sweeps
-/// its boxes, or its fluid collides, and the step advances before the block's
-/// `entityInside` and again before the fluid's, as vanilla does.
+/// passed over; a block is inside when [`contact_at`] says its shape or its fluid is
+/// touched, and the step advances before the block's `entityInside` and again before
+/// the fluid's, as vanilla does.
 pub fn sweep_inside_blocks<W: InsideWalk>(
     walk: &mut W,
     from: horizon_core::geometry::Vec3,
     to: horizon_core::geometry::Vec3,
     visited: &mut crate::fast_hash::FxHashSet<i64>,
-    effects: &mut mod_api::InsideEffects,
+    effects: &mut W::Effects,
     max_iterations: i32,
 ) -> Result<i32, W::Error> {
-    let deflated = walk
-        .bounds_at(to)
-        .deflate(horizon_core::geometry::Vec3::new(1.0e-5, 1.0e-5, 1.0e-5));
+    let epsilon = horizon_core::geometry::Vec3::new(W::DEFLATE, W::DEFLATE, W::DEFLATE);
+    let deflated = walk.bounds_at(to).deflate(epsilon);
     // Mth.square(0.9999900000002526): a long move counts every block it crosses as
     // precise.
     let far = 0.999_990_000_000_252_6_f64;
@@ -95,7 +154,8 @@ pub fn sweep_inside_blocks<W: InsideWalk>(
         from,
         to,
         deflated,
-        1_000_000,
+        // The traversal's own cap; a whole-path pass with a larger budget raises it.
+        (max_iterations.max(0) as usize).max(1_000_000),
         |p, iteration| {
             if !walk.is_alive() || iteration >= max_iterations {
                 return false;
@@ -109,30 +169,81 @@ pub fn sweep_inside_blocks<W: InsideWalk>(
         },
     );
     for (step, p, state) in hits {
-        let shape = walk.inside_shape(state, p);
-        let inside_block = match shape {
-            InsideShape::Full => true,
-            InsideShape::Empty => false,
-            InsideShape::Boxes(boxes) => walk
-                .bounds_at(from)
-                .collided_along_vector(to.subtract(from), &boxes),
-        };
-        let inside_fluid = walk.collided_with_fluid(p, from, to);
-        if !(inside_block || inside_fluid) || !visited.insert(p.pack()) {
+        let contact = contact_at(walk, state, p, from, to);
+        if !contact.any() || !visited.insert(p.pack()) {
             continue;
         }
-        if inside_block {
+        if contact.block {
             // `isPrecise` and the step advance, then the block's own moment.
             let precise = moved_far || deflated.intersects(horizon_core::geometry::Aabb::block(p));
             effects.advance_step(step);
             walk.entity_inside(p, state, step, precise, effects)?;
         }
-        if inside_fluid {
+        if contact.fluid {
             effects.advance_step(step);
             walk.fluid_inside(p, step, effects)?;
         }
     }
     Ok(iterations + 1)
+}
+
+/// The cells a box covers, x then y then z, each floor to floor inclusive: the
+/// stationary enumeration (`BlockPos.betweenClosed`) the box-cell passes share.
+/// `each` returns whether to go on; the result is whether every cell was seen.
+pub fn box_cells(
+    area: horizon_core::geometry::Aabb,
+    mut each: impl FnMut(BlockPos) -> bool,
+) -> bool {
+    let (lo, hi) = (area.min_position(), area.max_position());
+    for x in lo.x.floor() as i32..=hi.x.floor() as i32 {
+        for y in lo.y.floor() as i32..=hi.y.floor() as i32 {
+            for z in lo.z.floor() as i32..=hi.z.floor() as i32 {
+                if !each(BlockPos::new(x, y, z)) {
+                    return false;
+                }
+            }
+        }
+    }
+    true
+}
+
+/// A stationary contact pass at `at` over the cells of `area` (the box at `at`,
+/// already deflated), on the shared decision: each non-air cell [`contact_at`]
+/// touches is visited once, its block moment at step 0 and rough, then its fluid
+/// moment. No step advances: the pass shares the walk's first step, as the kind's
+/// own pass always did.
+pub fn visit_box_cells<W: InsideWalk>(
+    walk: &mut W,
+    area: horizon_core::geometry::Aabb,
+    at: horizon_core::geometry::Vec3,
+    visited: &mut crate::fast_hash::FxHashSet<i64>,
+    effects: &mut W::Effects,
+) -> Result<(), W::Error> {
+    let mut result = Ok(());
+    box_cells(area, |p| {
+        let state = walk.block(p);
+        if walk.is_air(state) {
+            return true;
+        }
+        let contact = contact_at(walk, state, p, at, at);
+        if !contact.any() || !visited.insert(p.pack()) {
+            return true;
+        }
+        if contact.block
+            && let Err(error) = walk.entity_inside(p, state, 0, false, effects)
+        {
+            result = Err(error);
+            return false;
+        }
+        if contact.fluid
+            && let Err(error) = walk.fluid_inside(p, 0, effects)
+        {
+            result = Err(error);
+            return false;
+        }
+        true
+    });
+    result
 }
 
 /// `Entity.checkInsideBlocks(movements, collector)`: every movement of a tick, each
@@ -143,7 +254,7 @@ pub fn sweep_movements<W: InsideWalk>(
     walk: &mut W,
     movements: &[horizon_world::entity_move::MovementRecord],
     visited: &mut crate::fast_hash::FxHashSet<i64>,
-    effects: &mut mod_api::InsideEffects,
+    effects: &mut W::Effects,
 ) -> Result<(), W::Error> {
     use horizon_core::geometry::{Axis, Direction};
     for movement in movements {
@@ -519,6 +630,7 @@ mod tests {
     }
     impl super::InsideWalk for Grid {
         type Error = ();
+        type Effects = mod_api::InsideEffects;
         fn bounds_at(&self, at: horizon_core::geometry::Vec3) -> horizon_core::geometry::Aabb {
             horizon_core::geometry::Aabb::new(
                 at.subtract(horizon_core::geometry::Vec3::new(0.3, 0.0, 0.3)),
@@ -751,3 +863,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "block_contact_parity_tests.rs"]
+mod parity_tests;
