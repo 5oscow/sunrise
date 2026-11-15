@@ -462,6 +462,169 @@ fn state_light_from_native_declarations_invalidates_the_content_cache() {
     fs::remove_dir_all(base.parent().unwrap()).unwrap();
 }
 
+/// The prepared resources, a mod's files, and a game folder's link to them.
+fn tag_files(values: &str) -> Vec<(&'static str, String)> {
+    vec![
+        ("horizon-mod.toml", manifest("testmod", "")),
+        (
+            "data/testmod/tags/item/a.json",
+            format!(r#"{{"values":[{values}]}}"#),
+        ),
+    ]
+}
+
+fn resources(dir: &Path) -> PathBuf {
+    let base = dir.join("resources");
+    small_base(&base);
+    fs::write(base.join("horizon-resources.json"), b"{}").unwrap();
+    fs::write(
+        base.join("facts.json"),
+        r#"{"states":[["minecraft:stone"]],"defaults":{"minecraft:stone":0}}"#,
+    )
+    .unwrap();
+    fs::write(
+        base.join("gameplay-facts.json"),
+        r#"{"states":[{"item":"minecraft:stone"}]}"#,
+    )
+    .unwrap();
+    base
+}
+
+fn mod_in(dir: &Path, files: &[(&'static str, String)]) -> Vec<ContentMod> {
+    let files: Vec<(&str, &str)> = files.iter().map(|(n, t)| (*n, t.as_str())).collect();
+    vec![folder_mod(&dir.join("mod"), &files)]
+}
+
+#[test]
+fn the_stamp_follows_a_mod_files_contents_not_its_folder_or_time() {
+    let scratch = tempfile::tempdir().unwrap();
+    let base = resources(scratch.path());
+    let at = |dir: &str, files: &[(&'static str, String)]| {
+        let mods = mod_in(&scratch.path().join(dir), files);
+        stamp(&base, &base.join("jars"), &mods, &fixture_inventory(&mods)).unwrap()
+    };
+    let files = tag_files("");
+    let first = at("one", &files);
+    assert_eq!(first, at("two", &files), "the same files in another folder");
+    let tag = scratch.path().join("one/mod/data/testmod/tags/item/a.json");
+    fs::File::options()
+        .write(true)
+        .open(&tag)
+        .unwrap()
+        .set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(60))
+        .unwrap();
+    assert_eq!(
+        first,
+        at("one", &files),
+        "a newer file time, the same bytes"
+    );
+    assert_ne!(
+        first,
+        at("three", &tag_files(r#""minecraft:stone""#)),
+        "one file's bytes differ"
+    );
+}
+
+/// Each game folder reaches the one set of prepared resources through its own link
+/// (`.local/horizon-client/26.3`), and keeps its own copy of the mods.
+#[cfg(unix)]
+fn game_folder(
+    parent: &Path,
+    name: &str,
+    resources: &Path,
+    files: &[(&'static str, String)],
+) -> (PathBuf, Vec<ContentMod>) {
+    let folder = parent.join(name);
+    let link = folder.join(".local/horizon-client/26.3");
+    fs::create_dir_all(link.parent().unwrap()).unwrap();
+    std::os::unix::fs::symlink(resources, &link).unwrap();
+    (link, mod_in(&folder, files))
+}
+
+#[cfg(unix)]
+#[test]
+fn game_folders_linking_the_same_resources_share_a_stamp() {
+    let scratch = tempfile::tempdir().unwrap();
+    let real = resources(scratch.path());
+    let files = tag_files("");
+    let (one, mods_one) = game_folder(scratch.path(), "one", &real, &files);
+    let (two, mods_two) = game_folder(scratch.path(), "two", &real, &files);
+    let stamp_of = |base: &Path, mods: &[ContentMod]| {
+        stamp(base, &base.join("jars"), mods, &fixture_inventory(mods)).unwrap()
+    };
+    assert_eq!(stamp_of(&one, &mods_one), stamp_of(&two, &mods_two));
+    assert_eq!(stamp_of(&one, &mods_one), stamp_of(&real, &mods_one));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_root_built_from_one_game_folder_is_reused_after_it_is_deleted() {
+    let scratch = tempfile::tempdir().unwrap();
+    let real = resources(scratch.path());
+    let cache = scratch.path().join("cache");
+    let files = tag_files("");
+    let (one, mods_one) = game_folder(scratch.path(), "one", &real, &files);
+    let first = resource_root_fixture(&one, &one.join("jars"), &mods_one, &cache).unwrap();
+    let built = fs::metadata(first.join(STAMP)).unwrap().modified().unwrap();
+    fs::remove_dir_all(scratch.path().join("one")).unwrap();
+    let (two, mods_two) = game_folder(scratch.path(), "two", &real, &files);
+    let second = resource_root_fixture(&two, &two.join("jars"), &mods_two, &cache).unwrap();
+    assert_eq!(first, second, "the same root, not a rebuilt one");
+    assert_eq!(
+        built,
+        fs::metadata(second.join(STAMP))
+            .unwrap()
+            .modified()
+            .unwrap(),
+        "its stamp wasn't written again"
+    );
+    assert_eq!(
+        fs::read(second.join("facts.json")).unwrap(),
+        fs::read(real.join("facts.json")).unwrap(),
+        "its links reach the resources after the first folder is gone"
+    );
+    let loaded =
+        resolved_resources(&two, second.clone(), &two.join("jars"), &mods_two, cache).unwrap();
+    assert!(loaded.source().read("items.json").is_ok());
+}
+
+/// A smoke test: concurrent starts on one cache end with one valid root. It doesn't
+/// prove the lock is what kept them apart.
+#[cfg(unix)]
+#[test]
+fn starts_preparing_one_root_at_once_all_get_the_same_valid_root() {
+    let scratch = tempfile::tempdir().unwrap();
+    let real = resources(scratch.path());
+    let cache = scratch.path().join("cache");
+    let files = tag_files("");
+    let games: Vec<_> = ["one", "two", "three", "four"]
+        .into_iter()
+        .map(|name| game_folder(scratch.path(), name, &real, &files))
+        .collect();
+    let roots: Vec<PathBuf> = std::thread::scope(|scope| {
+        let starts: Vec<_> = games
+            .iter()
+            .map(|(base, mods)| {
+                let cache = &cache;
+                scope.spawn(move || {
+                    resource_root_fixture(base, &base.join("jars"), mods, cache).unwrap()
+                })
+            })
+            .collect();
+        starts.into_iter().map(|s| s.join().unwrap()).collect()
+    });
+    assert!(roots.iter().all(|root| root == &roots[0]));
+    let loaded = resolved_resources(
+        &games[0].0,
+        roots[0].clone(),
+        &games[0].0.join("jars"),
+        &games[0].1,
+        cache,
+    )
+    .unwrap();
+    assert!(loaded.source().read("items.json").is_ok());
+}
+
 #[test]
 #[ignore = "daily"]
 fn block_aliases_keep_the_original_item_in_placement_context() {

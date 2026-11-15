@@ -3236,6 +3236,14 @@ fn used_path(root: &Path) -> PathBuf {
     root.with_extension("used")
 }
 
+/// In the roots folder: held while a root is checked, built or pruned there, and never deleted.
+const ROOTS_LOCK: &str = ".lock";
+
+/// Where the base really is: the root links into it, so the key and the links use this path.
+fn real_base(base: &Path) -> Result<PathBuf> {
+    Ok(fs::canonicalize(base).map_err(|e| format!("{}: {e}", base.display()))?)
+}
+
 /// Whether turning a content mod on or off can apply in a running game
 /// (docs/design/mod-hotload.md): its assets and data can, through the
 /// resource reload and the server's data reload. What a world numbers or
@@ -3306,7 +3314,12 @@ pub fn check_jars(root: &Path, jar_store: &Path) -> std::result::Result<(), JarI
 
 /// What a content root is built from: this build of the game, the base's
 /// manifest and the tables [`build`] rewrites, and every file of every mod
-/// in order. Files count by size and modification time, as build tools do.
+/// in order. The base's tables count by path, size and modification time (the
+/// root links into the base, so its real path belongs in the key). The
+/// game's build (its commit, else its executable's contents) and every mod
+/// file count by name and contents, not by where they sit, so identical
+/// copies in other folders share one root. A jar is
+/// named by its SHA-512 in `m.jars`, and counts only if it is in `jar_store`.
 fn stamp(
     base: &Path,
     jar_store: &Path,
@@ -3327,12 +3340,33 @@ fn stamp(
             modified.as_nanos()
         ))
     };
+    let hash = |path: &Path| -> Result<String> {
+        let mut hasher = Sha256::new();
+        let mut file = fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        std::io::copy(&mut file, &mut hasher).map_err(|e| format!("{}: {e}", path.display()))?;
+        Ok(format!("{:x}", hasher.finalize()))
+    };
+    // This build of the game: its commit when the build knows it, else the
+    // executable's contents (once per process, not on every stamp). Contents, not size and
+    // time: copies of one executable in other folders must share a root.
+    static EXE: std::sync::OnceLock<std::result::Result<String, String>> =
+        std::sync::OnceLock::new();
+    let exe = match crate::save::level_mods::build_commit() {
+        Some(commit) => commit.to_owned(),
+        None => EXE
+            .get_or_init(|| {
+                let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+                hash(&exe).map_err(|e| e.to_string())
+            })
+            .clone()?,
+    };
     let mut parts = vec![
-        "horizon mod content 7".to_owned(),
+        "horizon mod content 8".to_owned(),
         serde_json::to_string(inventory)?,
     ];
-    parts.push(meta(&std::env::current_exe()?)?);
-    let base = std::path::absolute(base)?;
+    parts.push(exe);
+    // The root links into the base: where it really is, not how this folder reaches it.
+    let base = real_base(base)?;
     parts.push(
         String::from_utf8_lossy(&fs::read(base.join("horizon-resources.json"))?).into_owned(),
     );
@@ -3344,8 +3378,13 @@ fn stamp(
     for m in mods {
         parts.push(m.id.clone());
         parts.push(format!("jars {}", serde_json::to_string(&m.jars)?));
+        // A jar's file is named by its SHA-512: only whether it is still in the
+        // store (and its size) counts, so a root isn't reused once one is gone.
         for jar in &m.jars {
-            parts.push(meta(&jar.cache_path(jar_store)).unwrap_or_else(|_| "not cached".into()));
+            parts.push(match fs::metadata(jar.cache_path(jar_store)) {
+                Ok(file) => format!("cached {}", file.len()),
+                Err(_) => "not cached".into(),
+            });
         }
         // What it declares, so blocks and items from code count too.
         parts.push(format!(
@@ -3357,10 +3396,10 @@ fn stamp(
             // Declared in code only: nothing to read.
         } else if source.is_dir() {
             for file in &m.content.files {
-                parts.push(meta(&source.join(file))?);
+                parts.push(format!("{file} {}", hash(&source.join(file))?));
             }
         } else {
-            parts.push(meta(source)?);
+            parts.push(hash(source)?);
         }
     }
     let mut hasher = Sha256::new();
