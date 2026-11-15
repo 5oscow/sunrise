@@ -1,6 +1,9 @@
 //! The shared native/wasm `WorldDrawContext::name_tag` scene (#4171). It draws only at
 //! `AfterLevel` in a view whose game time is `SCENE_TIME`, so other tests' views stay empty.
-use mod_api::{NameTagOptions, RenderLevelStage, RenderLevelStageEvent, Text, text::TextStyle};
+use mod_api::{
+    DrawError, NameTagOptions, RenderLevelStage, RenderLevelStageEvent, Text, WorldDepth,
+    WorldLine, text::TextStyle,
+};
 
 /// The game time of the one view this scene draws in.
 pub const SCENE_TIME: i64 = 4171;
@@ -41,7 +44,35 @@ pub fn render_level_stage(event: &mut RenderLevelStageEvent<'_>) {
     if event.stage != RenderLevelStage::AfterLevel || event.view.game_time != SCENE_TIME {
         return;
     }
-    for (at, text, options) in scene() {
-        let _ = event.draw.name_tag(at, &text, options);
+    let camera = event.view.camera;
+    for (n, (at, text, options)) in scene().into_iter().enumerate() {
+        let code = result_code(event.draw.name_tag(at, &text, options));
+        // Each call's result, readable on the host's side of a wasm run: a marker line one
+        // block ahead, `code` blocks to the right, `n` blocks up (see `RESULT_CODES`).
+        let from = [
+            camera[0] + f64::from(code),
+            camera[1] + n as f64,
+            camera[2] - 1.0,
+        ];
+        let to = [from[0] + 0.5, from[1], from[2]];
+        let _ = event
+            .draw
+            .lines(&[WorldLine::new(from, to, !0, 1.0, WorldDepth::Tested)]);
+    }
+}
+
+/// The results [`scene`]'s calls must return, coded by [`result_code`]: three drawn, NaN refused.
+pub const RESULT_CODES: [u32; 4] = [0, 0, 0, 1];
+
+/// A `name_tag` result as a number: 0 drawn, then each refusal.
+pub fn result_code(result: Result<(), DrawError>) -> u32 {
+    match result {
+        Ok(()) => 0,
+        Err(DrawError::NonFinite) => 1,
+        Err(DrawError::InvalidWidth) => 2,
+        Err(DrawError::CapacityExceeded) => 3,
+        Err(DrawError::TextTooDeep) => 4,
+        Err(DrawError::TextRefused) => 5,
+        Err(_) => 6,
     }
 }
