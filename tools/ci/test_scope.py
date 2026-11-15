@@ -96,7 +96,7 @@ READERS = {
     "xtask": [
         "crates/horizon-client/src", "crates/horizon-mod-vocab/src/hooks", "crates/horizon-perf/web",
         "crates/horizon-prepare", "crates/horizon-theme", "docs/media/brand", "mods/horizon/src/test/java", "packaging",
-        "research-lock.json", "tools",
+        "research-lock.json", "tools", "LICENSES/MIT-Horizon.txt",
     ],
 }
 # What a package's tests only read at run time and nothing else uses: the package is selected, its dependents are not.
