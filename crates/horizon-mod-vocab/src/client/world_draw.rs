@@ -86,14 +86,20 @@ pub enum DrawError {
 #[non_exhaustive]
 #[derive(horizon_mod_api_macros::Wire)]
 pub struct NameTagOptions {
-    /// Also draw a faded copy over everything, walls included, as vanilla does for a name
-    /// that is not sneaking.
+    /// Draw it as vanilla draws a name that is not sneaking: opaque text in the world and a
+    /// faded copy over everything, walls included. Off, it is drawn once as a sneaking name:
+    /// the faded text, depth tested and translucent. The faded text's alpha follows the
+    /// text background opacity: 255 times the larger of (opacity + 0.75) / 2 and 0.5, 0x7F
+    /// at the default.
     pub see_through: bool,
-    /// Put the translucent black backdrop behind the text, at the player's text background
-    /// opacity (`Options.getBackgroundOpacity(0.25)`).
+    /// Put the translucent black backdrop behind the faded text, at the player's text
+    /// background opacity (`Options.getBackgroundOpacity(0.25)`: 0x3F at the default).
     pub background: bool,
-    /// The light at the label: sky light in the high four bits, block light in the low four
-    /// (`0xF0` is full sky light), as a name tag reads its entity's.
+    /// The light at the label, as a name tag reads its entity's: sky light in the high four
+    /// bits, block light in the low four (`0xF0` is full sky light and no block light; `0x0F`
+    /// full block light under no sky). Without `see_through` the label is drawn in exactly
+    /// this light; with it, the copy in the world raises each of the two levels to at least 2
+    /// (`lightCoordsWithEmission(light, 2)`) and the copy over everything ignores it.
     pub light: u8,
 }
 impl NameTagOptions {

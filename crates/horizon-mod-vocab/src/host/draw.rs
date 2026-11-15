@@ -480,11 +480,12 @@ pub trait WorldDrawContext {
     /// A label at world position `at`, drawn as vanilla draws a name tag
     /// (`SubmitNodeCollection.submitNameTag`): 0.5 blocks above `at`, facing the camera,
     /// 0.025 blocks per font pixel (so it shrinks with distance; scale by distance yourself
-    /// for a constant screen size), centred, in `text`'s styles. With
-    /// [`NameTagOptions::see_through`] it is drawn twice, as an unsneaking name: once in the
-    /// world and once faded over everything, walls included, with the backdrop; without it,
-    /// once in the world, the backdrop behind it. Labels draw with the world's name tags,
-    /// whatever the stage. Each glyph and backdrop quad, both copies counted, takes one of
+    /// for a constant screen size), centred, in `text`'s styles. Without
+    /// [`NameTagOptions::see_through`] it is drawn once, as a sneaking name: depth tested and
+    /// translucent, the faded text on the backdrop, in [`NameTagOptions::light`] as given. With
+    /// it, twice, as an unsneaking name: opaque in the world (sky and block light each at least
+    /// 2), and faded on the backdrop over everything, walls included, unlit. Labels draw with
+    /// the world's name tags, far to near, whatever the stage. Each glyph and backdrop quad, both copies counted, takes one of
     /// the view's 4,096 quads shared with [`quads`](Self::quads) ([`usage`](Self::usage)).
     /// Refuses a non-finite `at` ([`DrawError::NonFinite`]), text deeper than 512 component
     /// nodes ([`DrawError::TextTooDeep`]) or otherwise refused ([`DrawError::TextRefused`]),

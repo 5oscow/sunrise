@@ -753,6 +753,15 @@ impl Settings {
             default,
         )
     }
+    /// The faded name-tag text alpha that goes with [`Self::text_background`]
+    /// (`hud_layout::faded_text_alpha`).
+    pub fn faded_text_alpha(&self, default: f32) -> u32 {
+        crate::hud_layout::faded_text_alpha(
+            self.file.bool("backgroundForChatOnly"),
+            f64::from(self.text_background_opacity),
+            default,
+        )
+    }
     pub fn chat_options(&self) -> crate::chat::ChatOptions {
         crate::chat::ChatOptions {
             opacity: f64::from(self.chat_opacity),
