@@ -17,6 +17,7 @@ they are not paid back.
   hosts take a fee from what comes in.
 - When Sunrise's non-profit association exists, the pot moves to it.
 - Income from any deal Sunrise makes goes into the pot like everything else.
+- Sunrise's money comes only from donations and sponsorships, never from selling anything to players.
 
 ## What it pays for, in order
 
@@ -38,7 +39,8 @@ and a Core vote approves it, with the amount and the reason public.
 - **No salaries, fees, profit shares or dividends** for anyone, Core members included.
 - **Reimbursement only:** a documented cost someone paid for the project can be paid back from the budget, with the
   receipt public. The person being paid back doesn't approve it.
-- **No paid features or shop** without a Core vote announced publicly first. Any income from one goes into the pot.
+- **No paid features, no shop and no advertisements**, ever, in the launcher, the game or anything else Sunrise ships.
+  This is one of the rules that are never voted on ([GOVERNANCE.md](GOVERNANCE.md)).
 
 ## In the open
 

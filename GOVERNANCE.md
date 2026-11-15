@@ -67,6 +67,7 @@ These are conditions for Sunrise existing, not choices:
 - Playing needs a **Microsoft account that owns Minecraft: Java Edition**.
 - **No Mojang files** in Sunrise's repositories or downloads. Players' own copies stay on their own machines.
 - **No gambling**, in any form, including with in-game currency.
+- **No paid features, no shop and no advertisements** in the launcher, the game or anything else Sunrise ships.
 - **Mojang's and Microsoft's terms and Usage Guidelines** apply to everything Sunrise does.
 - **The law**, and the terms of service of Discord and GitHub.
 
