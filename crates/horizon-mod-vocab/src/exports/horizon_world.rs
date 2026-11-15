@@ -5,6 +5,7 @@ pub use horizon_core::identifier::Identifier;
 /// A level's key (`LevelDimension::Custom`).
 pub use horizon_core::level_key::LevelKey;
 pub use horizon_core::nbt::Compound;
+pub use horizon_core::nbt::JavaString;
 pub use horizon_core::nbt::Tag;
 pub use horizon_core::use_animation::UseAnimation;
 pub use {
