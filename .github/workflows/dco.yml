@@ -16,10 +16,16 @@ jobs:
         && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     steps:
+      # The checker comes from the base commit, never the pull request: a branch made before it existed still gets
+      # checked, and a pull request can't change the check it is held to. Its commits are only read as git objects.
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.base.sha }}
           fetch-depth: 0
+      - name: The pull request's commits
+        env:
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: git fetch --no-tags origin "$HEAD"
       - name: Every commit is signed off by its author
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
