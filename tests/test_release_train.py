@@ -519,8 +519,8 @@ class ReleaseTrainTests(unittest.TestCase):
         tag = "launcher@0.3.0"
         title, body = train.notes("launcher", tag, [pr(3, "Fix launcher updates")], [],
                                  previous="launcher-v0.17.0", repository="sunrise-org/sunrise")
-        self.assertEqual(title, f"Horizon Fork Launcher (arismoko) {tag}")
-        self.assertTrue(body.startswith("# Horizon Fork Launcher (arismoko)\n"))
+        self.assertEqual(title, f"Sunrise Launcher {tag}")
+        self.assertTrue(body.startswith("# Sunrise Launcher\n"))
         self.assertIn("### Fixed\n- Fix launcher updates (#3)", body)
         self.assertNotIn(train.LAUNCHER_FOOTER, body)
         self.assertNotIn("macOS", body)

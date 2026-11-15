@@ -449,7 +449,7 @@ def notes(kind, version, prs, issues, previous=None, repository="horizon-rust/ho
     intro = None if fork_launcher else line_intro(kind, version, previous)
     parts = [PLAYERS] if kind == "game" else []
     if fork_launcher:
-        title = f"Horizon Fork Launcher (arismoko) {version}"
+        title = f"Sunrise Launcher {version}"
         parts.append((ROOT / "packaging/fork-launcher-release-notes.md").read_text().replace("{tag}", version).strip())
     if intro:
         parts.append(intro)
