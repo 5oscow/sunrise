@@ -34,10 +34,7 @@ fn client_context() -> horizon_world::native_load_context::LoopContext {
 enum Answer {
     Continue,
     Cancel,
-    Replace {
-        input: [f64; 3],
-        velocity: [f64; 3],
-    },
+    Replace { input: [f64; 3], velocity: [f64; 3] },
     Panic,
 }
 
@@ -53,12 +50,10 @@ struct Probe {
 #[mod_api::__subscriptions]
 impl Hooks for Probe {
     fn living_travel(&self, _: &dyn LoopContext, event: &mut LivingTravelEvent<'_>) -> Flow {
-        self.heard.lock().unwrap().push((
-            event.entity,
-            event.mode,
-            *event.input,
-            *event.velocity,
-        ));
+        self.heard
+            .lock()
+            .unwrap()
+            .push((event.entity, event.mode, *event.input, *event.velocity));
         match self.answer {
             Answer::Continue => Flow::Continue,
             Answer::Cancel => Flow::Cancel,
@@ -126,8 +121,7 @@ fn install(answer: Answer) -> (Arc<Mutex<Heard>>, mod_api::Mods) {
 /// entity, its mode, and the resolved input and velocity.
 #[test]
 fn continue_runs_the_resolved_travel() {
-    let (_, input, velocity, heard, mode_calls) =
-        decided_with(Answer::Continue, &server_context());
+    let (_, input, velocity, heard, mode_calls) = decided_with(Answer::Continue, &server_context());
     assert_eq!(
         heard,
         vec![(
@@ -197,10 +191,8 @@ fn a_malformed_replacement_is_refused_whole() {
         ([0.0, 0.0, 0.0], [0.0, -65.0, 0.0]),
         ([0.0, 0.0, 0.0], [0.0, 0.0, f64::INFINITY]),
     ] {
-        let (_, got_input, got_velocity, _, _) = decided_with(
-            Answer::Replace { input, velocity },
-            &server_context(),
-        );
+        let (_, got_input, got_velocity, _, _) =
+            decided_with(Answer::Replace { input, velocity }, &server_context());
         assert_eq!(
             (got_input, got_velocity),
             (Vec3::new(0.216, 0.0, 0.0), Vec3::new(1.0, -0.078_4, 0.0)),
@@ -228,7 +220,10 @@ fn a_panicking_listener_keeps_the_resolved_travel_and_is_disabled() {
             &mut velocity,
         );
         assert!(runs, "the travel carries on past the panic");
-        assert_eq!((input, velocity), (Vec3::new(0.216, 0.0, 0.0), Vec3::new(1.0, -0.078_4, 0.0)));
+        assert_eq!(
+            (input, velocity),
+            (Vec3::new(0.216, 0.0, 0.0), Vec3::new(1.0, -0.078_4, 0.0))
+        );
         // The poison skips this hook of the mod: this travel hears nobody.
         let mut input = Vec3::new(2.0, 0.0, 0.0);
         let runs = horizon_client::travel_gate::decide(
@@ -301,7 +296,10 @@ fn a_client_side_travel_asks_nobody() {
     let (_, input, velocity, heard, mode_calls) = decided_with(Answer::Continue, &client_context());
     assert!(heard.is_empty(), "a client travel fires nobody");
     assert_eq!(mode_calls, 0, "the mode is not built without a dispatch");
-    assert_eq!((input, velocity), (Vec3::new(0.216, 0.0, 0.0), Vec3::new(1.0, -0.078_4, 0.0)));
+    assert_eq!(
+        (input, velocity),
+        (Vec3::new(0.216, 0.0, 0.0), Vec3::new(1.0, -0.078_4, 0.0))
+    );
 }
 
 /// With no listener the mode closure never runs: the resolved values stand
@@ -330,7 +328,10 @@ fn without_listeners_the_mode_is_never_built() {
         },
     );
     assert_eq!(*mode_calls.lock().unwrap(), 0, "no listener, no mode");
-    assert_eq!((input, velocity), (Vec3::new(0.216, 0.0, 0.0), Vec3::new(1.0, -0.078_4, 0.0)));
+    assert_eq!(
+        (input, velocity),
+        (Vec3::new(0.216, 0.0, 0.0), Vec3::new(1.0, -0.078_4, 0.0))
+    );
 }
 
 /// A mod whose `living_travel` listener panicked keeps every other hook:

@@ -11,8 +11,7 @@ thread_local! {
 /// What the guest's generated `living_travel` listener heard on
 /// its last call: entity, kind, mode, and the input and velocity as they
 /// arrived.
-pub(super) fn take_heard()
--> Option<(u32, String, mod_api::TravelMode, [f64; 3], [f64; 3])> {
+pub(super) fn take_heard() -> Option<(u32, String, mod_api::TravelMode, [f64; 3], [f64; 3])> {
     HEARD.with_borrow_mut(std::mem::take)
 }
 
@@ -21,10 +20,7 @@ pub(super) fn take_heard()
 pub(super) enum GuestAnswer {
     Continue,
     Cancel,
-    Replace {
-        input: [f64; 3],
-        velocity: [f64; 3],
-    },
+    Replace { input: [f64; 3], velocity: [f64; 3] },
 }
 thread_local! {
     static ANSWER: std::cell::RefCell<Option<GuestAnswer>> = const { std::cell::RefCell::new(None) };

@@ -64,6 +64,24 @@ delta, not an earlier listener's replacement. Later listeners do not run on that
 invocation, and the failed listener is disabled for this hook for the session;
 its other hooks remain enabled. Native and wasm listeners share this contract.
 
+`living_travel` runs one step earlier, on the server, at each living body's
+`LivingEntity.travel` boundary: the player's branch selection (after the player's
+swim steering) and a mob's travel entry. It receives the loop context, not a
+`Host`, and decides only the travel's input, velocity and cancel. `TravelMode`
+names the branch about to run — water, lava, glide, flying, or air — as data a
+replacement does not change. A NoAI mob never travels, so it fires nobody.
+
+An input component must lie in [-1, 1], and a velocity component must be finite
+and within ±64 blocks; a result with a component outside its budget is refused
+whole, and the travel runs on the values the game resolved. Cancellation skips
+the invocation — the branch, its nested move and the flying vertical damping
+included — without undoing what the tick already did (input processing, the
+player's swim steering). The move the branch ends in still fires `entity_move`,
+so a travel replacement can meet a move veto. A panicking or trapped listener
+keeps the resolved values, not an earlier replacement, and is disabled for this
+hook for the session; its other hooks remain enabled. Native and wasm listeners
+share this contract.
+
 ## Teleport hooks
 
 `ender_pearl_teleport` covers player-owned and mob-owned pearls. Its `owner` is an
