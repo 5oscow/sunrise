@@ -1,6 +1,7 @@
 name: modding-book-pages
-# Publishes the modding book and the mod API reference to GitHub Pages
-# (https://arismoko.github.io/horizon/, reference under /api/mod_api/).
+# Publishes the modding book and the mod API reference to this repository's GitHub Pages (reference under
+# /api/mod_api/). Deploys only while the repository variable MODDING_BOOK_PAGES is `on` and Pages is turned on in
+# Settings; without it the build still runs and keeps the artifact.
 on:
   push:
     branches: [main]
@@ -31,6 +32,7 @@ jobs:
           path: target/modding-book
   deploy:
     needs: build
+    if: vars.MODDING_BOOK_PAGES == 'on'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
