@@ -97,7 +97,8 @@ horizon-bots: load-test bots for a Minecraft Java Edition 26.3 server (offline m
                          other swing, landing it while falling: a critical hit, then a sweep from the
                          ground (give them swords); for PvP benches (crit and sweep particles)
   --name PREFIX          bot names: PREFIX0, PREFIX1...; default Bot
-  --brand B              the client brand sent in configuration (minecraft:brand); default none
+  --brand B              the client brand sent in configuration (minecraft:brand); default none; with
+                         horizon, the bot also echoes a Horizon server's mod list and content digest
   --height H             blocks above spawn the bots fly at (walk, explore, idle); default 24
   --ground               claim the ground in every move (with --height 0 on a flat world: walking
                          on it; higher, or over water: a no-fall or jesus cheat, to test an anticheat)
@@ -864,8 +865,8 @@ fn configure(
         )
         .map_err(err)?;
     }
-    // A Horizon server lists its both-side mods after our brand and refuses a known-packs answer that comes
-    // before ours, so the bot holds that answer until it has echoed the list.
+    // A Horizon server sends its mod list after our brand, takes our known-packs answer and compares the lists
+    // then, so the list must be echoed first: the bot holds that answer until it has.
     let mut server_is_horizon = false;
     let mut mods_declared = false;
     let mut held_packs = None;
@@ -1773,8 +1774,8 @@ mod tests {
         config_payload("minecraft:brand", w.data)
     }
 
-    /// Runs `configure` against a scripted server over a pipe: its brand and known packs come first, as
-    /// `lan/conn.rs` sends them, and the test reads what the bot sends back.
+    /// Runs `configure` against a scripted server over a pipe: its brand, the payload Query and known packs
+    /// come first, as `lan/conn.rs` sends them, and the test reads what the bot sends back.
     fn configuring(
         bot_brand: Option<&'static str>,
         server_brand: &str,
@@ -1788,6 +1789,14 @@ mod tests {
             .unwrap();
         let handle = thread::spawn(move || configure(Connection::local(client), 10, bot_brand));
         server.send(&brand_payload(server_brand)).unwrap();
+        server
+            .send(&config_payload(
+                horizon_protocol::payload_negotiation::CHANNEL,
+                horizon_protocol::payload_negotiation::Control::Query
+                    .encode()
+                    .unwrap(),
+            ))
+            .unwrap();
         server
             .send(
                 &configuration::Clientbound::SelectKnownPacks(configuration::SelectKnownPacks {
@@ -1815,6 +1824,14 @@ mod tests {
         assert!(
             matches!(next(&mut server), configuration::Serverbound::CustomPayload(p) if p.channel == "minecraft:brand")
         );
+        let configuration::Serverbound::CustomPayload(offer) = next(&mut server) else {
+            panic!("the payload Query is answered with an Offer");
+        };
+        assert_eq!(
+            offer.channel,
+            horizon_protocol::payload_negotiation::CHANNEL
+        );
+        assert_eq!(offer.data, [1, 1, 0]);
         let list = encode(&[Entry {
             id: "ruby".into(),
             version: "1.0".into(),
@@ -1863,7 +1880,8 @@ mod tests {
                 match next(&mut server) {
                     configuration::Serverbound::ClientInformation(_) => {}
                     configuration::Serverbound::CustomPayload(p)
-                        if p.channel == "minecraft:brand" => {}
+                        if p.channel == "minecraft:brand"
+                            || p.channel == horizon_protocol::payload_negotiation::CHANNEL => {}
                     other => break other,
                 }
             };
