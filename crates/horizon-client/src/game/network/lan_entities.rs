@@ -1150,7 +1150,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "daily"]
     fn tracking_ids_preserve_all_family_interleaving() {
         crate::game::native_entity_refs::tests::with_game(|game| {
             for (kind, nbt) in [
@@ -1224,7 +1224,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "daily"]
     fn tracking_ids_refuse_bound_zero_owners() {
         for kind in ["minecraft:falling_block", "minecraft:arrow"] {
             crate::game::native_entity_refs::tests::with_game(|game| {
@@ -1256,7 +1256,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "daily"]
     fn tracking_ids_only_number_the_spawn_buffer_during_a_taken_pass() {
         macro_rules! check {
             ($kind:expr, $nbt:expr, $game:ident, $list:expr) => {
@@ -1326,7 +1326,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "daily"]
     fn late_dragon_ids_reserve_parts_before_crystals() {
         crate::game::native_entity_refs::tests::with_game(|game| {
             game.summon_with_nbt("minecraft:ender_dragon", [1.0, 70.0, 1.0], "{}")
@@ -1355,7 +1355,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn kept_display_data_is_what_a_build_gives() {
         crate::game::native_entity_refs::tests::with_game(|game| {
             let snbt = |s: &str| horizon_client::command::snbt::parse_fully(s).unwrap();
