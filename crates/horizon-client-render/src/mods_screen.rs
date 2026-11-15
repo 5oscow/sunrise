@@ -102,9 +102,9 @@ impl Entry {
             version: horizon_core::release::VERSION.into(),
             authors: "Ludovic Marie and the Horizon contributors".into(),
             license: "MIT".into(),
-            license_url: Some("https://github.com/horizon-rust/horizon/blob/main/LICENSE".into()),
+            license_url: Some("https://github.com/sunrise-org/sunrise/blob/main/LICENSE".into()),
             homepage: Some("https://playhorizon.dev".into()),
-            issues: Some("https://github.com/horizon-rust/horizon/issues".into()),
+            issues: Some("https://github.com/sunrise-org/sunrise/issues".into()),
             description: crate::lang::get("horizon.mods.screen.horizon.description"),
             ..Self::default()
         }

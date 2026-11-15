@@ -31,7 +31,7 @@ rustPlatform.buildRustPackage {
 
   meta = {
     description = "Horizon's headless game engine, run by horizon-server";
-    homepage = "https://playhorizon.dev";
+    homepage = "https://playsunrise.net";
     license = lib.licenses.mit;
     mainProgram = "horizon-engine";
     platforms = lib.platforms.linux ++ lib.platforms.darwin;

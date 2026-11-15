@@ -49,7 +49,7 @@ rustPlatform.buildRustPackage {
 
   meta = {
     description = "Prepare Horizon's game files from your own copy of Minecraft: Java Edition 26.3";
-    homepage = "https://playhorizon.dev";
+    homepage = "https://playsunrise.net";
     license = lib.licenses.mit;
     mainProgram = "horizon-prepare";
     platforms = lib.platforms.linux ++ lib.platforms.darwin;

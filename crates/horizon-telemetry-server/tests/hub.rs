@@ -41,7 +41,7 @@ fn hub(config: Config) -> Hub {
             labels: issue.labels.clone(),
         });
         Ok(format!(
-            "https://github.com/horizon-rust/horizon/issues/{}",
+            "https://github.com/sunrise-org/sunrise/issues/{}",
             1000 + opened.len()
         ))
     });
@@ -151,7 +151,7 @@ async fn a_report_becomes_an_issue_in_the_bug_template() {
     assert_eq!(code, StatusCode::CREATED);
     assert_eq!(
         body["issue"],
-        "https://github.com/horizon-rust/horizon/issues/1001"
+        "https://github.com/sunrise-org/sunrise/issues/1001"
     );
     let issue = hub.github.opened.lock().unwrap().remove(0);
     assert_eq!(issue.title, "Water is black on AMD");
@@ -314,7 +314,7 @@ async fn the_website_may_post_from_the_browser() {
     let res = router(hub.app.clone())
         .oneshot(
             Request::options("/hub/report")
-                .header("origin", "https://playhorizon.dev")
+                .header("origin", "https://playsunrise.net")
                 .header("access-control-request-method", "POST")
                 .body(Body::empty())
                 .unwrap(),
@@ -325,7 +325,7 @@ async fn the_website_may_post_from_the_browser() {
     let header = |name: &str| res.headers()[name].to_str().unwrap().to_owned();
     assert_eq!(
         header("access-control-allow-origin"),
-        "https://playhorizon.dev"
+        "https://playsunrise.net"
     );
     assert_eq!(header("access-control-allow-methods"), "POST");
     assert_eq!(header("access-control-allow-headers"), "content-type");
@@ -345,7 +345,7 @@ async fn a_report_sent_twice_while_github_is_slow_opens_one_issue() {
         started.lock().unwrap().send(()).unwrap();
         wait.lock().unwrap().recv().unwrap();
         Ok(format!(
-            "https://github.com/horizon-rust/horizon/issues/{}",
+            "https://github.com/sunrise-org/sunrise/issues/{}",
             1000 + n
         ))
     });

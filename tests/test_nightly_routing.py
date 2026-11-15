@@ -58,7 +58,7 @@ const matrix = context(state.matrix), vars = context(state.vars), inputs = state
 const expression = state.expression, fromJSON = JSON.parse, toJSON = JSON.stringify;
 console.log(JSON.stringify(eval(expression)));
 """
-        def evaluate(expression, matrix, trusted, repository="arismoko/horizon"):
+        def evaluate(expression, matrix, trusted, repository="sunrise-org/sunrise"):
             result = subprocess.run(["node", "-e", script], input=json.dumps({"expression": expression, "matrix": matrix, "inputs": {"trusted": trusted}, "vars": variables, "github": {"repository": repository}}), text=True, capture_output=True, check=True)
             return json.loads(result.stdout)
         default_mac = ["self-hosted", "macOS", "horizon-nightly"]
@@ -96,9 +96,9 @@ console.log(JSON.stringify(eval(expression)));
                         self.assertEqual(evaluate(expressions[1], row, trusted), expected)
 
         timeout = re.search(r"^\s*timeout-minutes:\s*\$\{\{(.*?)\}\}", workflow_jobs["build"], re.M).group(1)
-        for repository, trusted, row in itertools.product(["arismoko/horizon", "horizon-rust/horizon"], [False, True], rows):
+        for repository, trusted, row in itertools.product(["sunrise-org/sunrise", "horizon-rust/horizon"], [False, True], rows):
             with self.subTest(repository=repository, trusted=trusted, entry=row["name"]):
-                expected = 60 if repository == "arismoko/horizon" or row.get("mac") else 40
+                expected = 60 if repository == "sunrise-org/sunrise" or row.get("mac") else 40
                 self.assertEqual(evaluate(timeout, row, trusted, repository), expected)
 
     def test_every_shipped_glibc_program_is_checked_by_workflow_owned_tools(self):
@@ -199,7 +199,7 @@ console.log(JSON.stringify(eval(expression)));
             stub = root / "gh"
             stub.write_text("#!/bin/sh\nprintf '[]'\n")
             stub.chmod(0o755)
-            result = subprocess.run(["bash", "-c", shell], cwd=root, env={**os.environ, "DRY_RUN": "true", "GITHUB_REPOSITORY": "arismoko/horizon", "PATH": str(root) + os.pathsep + os.environ["PATH"]}, text=True, capture_output=True)
+            result = subprocess.run(["bash", "-c", shell], cwd=root, env={**os.environ, "DRY_RUN": "true", "GITHUB_REPOSITORY": "sunrise-org/sunrise", "PATH": str(root) + os.pathsep + os.environ["PATH"]}, text=True, capture_output=True)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("smoke", result.stdout.lower())
 

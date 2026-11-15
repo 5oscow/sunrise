@@ -20,7 +20,7 @@ REQUESTS = 0
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
-REPO = "arismoko/horizon"
+REPO = "sunrise-org/sunrise"
 WEB = f"https://github.com/{REPO}"
 API = f"https://api.github.com/repos/{REPO}"
 SECTIONS = ("Merged", "Releases", "New issues open for contributors", "Fixed bugs")
@@ -144,7 +144,7 @@ def collect(now, days):
     for offset in range(0, len(missing), 50):
         fields = 'number title body mergedAt headRefName headRefOid author { login __typename } labels(first: 100) { nodes { name } }'
         aliases = ' '.join(f'p{n}: pullRequest(number: {n}) {{ {fields} }}' for n in missing[offset:offset + 50])
-        response = get('https://api.github.com/graphql', {'query': '{ repository(owner: "arismoko", name: "horizon") { ' + aliases + ' } }'})
+        response = get('https://api.github.com/graphql', {'query': '{ repository(owner: "sunrise-org", name: "sunrise") { ' + aliases + ' } }'})
         if response.get('errors'):
             raise RuntimeError('GitHub member lookup failed')
         for pr in response['data']['repository'].values():

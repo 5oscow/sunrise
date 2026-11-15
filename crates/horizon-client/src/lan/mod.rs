@@ -231,7 +231,7 @@ pub struct NetLog {
 pub const HORIZON_CLIENTS_ONLY: &str = "horizon-clients-only";
 /// What another client is told.
 pub const HORIZON_CLIENTS_ONLY_REASON: &str =
-    "This server is for the Horizon client: playhorizon.dev";
+    "This server is for the Horizon client: playsunrise.net";
 /// The server.properties key (server.toml's `server.accept_older_clients`) that lets 26.2 clients join
 /// (off unless "true").
 pub const ACCEPT_OLDER_CLIENTS: &str = "horizon-accept-older-clients";

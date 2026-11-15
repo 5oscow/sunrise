@@ -35,7 +35,7 @@ rustPlatform.buildRustPackage {
       Holds none of Mojang's files: the server reads the game files you prepare from your own copy of
       Minecraft 26.3 with horizon-prepare (docs/hosting.md).
     '';
-    homepage = "https://playhorizon.dev";
+    homepage = "https://playsunrise.net";
     license = lib.licenses.mit;
     mainProgram = "horizon-server";
     platforms = lib.platforms.linux ++ lib.platforms.darwin;

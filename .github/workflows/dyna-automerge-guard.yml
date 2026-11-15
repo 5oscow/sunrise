@@ -10,7 +10,7 @@ permissions:
   pull-requests: write
 jobs:
   disarm:
-    if: github.repository == 'arismoko/horizon' && github.event.pull_request.auto_merge != null
+    if: github.repository == 'sunrise-org/sunrise' && github.event.pull_request.auto_merge != null
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

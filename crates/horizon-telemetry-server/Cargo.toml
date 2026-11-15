@@ -12,6 +12,7 @@ description = "Receives opt-in data collection batches, keeps them compactly in 
 
 [dependencies]
 horizon-telemetry = { path = "../horizon-telemetry", default-features = false }
+horizon-addresses = { path = "../horizon-addresses" }
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "json", "query"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "time"] }
 # SQLite built in: one file on a small volume is the whole database.

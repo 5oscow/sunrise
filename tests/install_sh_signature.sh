@@ -141,7 +141,7 @@ run "$d" "$P" --version v9.9.9; verdict "signature replayed under another tag re
 
 # 6. Signed by a key that is not the release key.
 d=$W/wrong; make_release "$d" v1.2.3; with_key "$d"
-edit 's|^RELEASE_KEYS=.*|RELEASE_KEYS="MU4oiIQcCxkZvbwSjjXs7SySCuM6ywRQ3nGaJYZG0gw="|' "$d/install.sh"
+edit 's|^RELEASE_KEYS=.*|RELEASE_KEYS="r53xb3cuafGxZSicLz06KC+xXp9NJdPH8snNmXo5pAc="|' "$d/install.sh"
 run "$d" "$P" --version v1.2.3; verdict "wrong key refused" 1 "signature doesn't match" "$d"
 
 # 7. No OpenSSL: says so, keeps the SHA-256 check.

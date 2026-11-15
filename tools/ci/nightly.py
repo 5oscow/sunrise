@@ -22,7 +22,7 @@ in their order and pushed as nightly/build-<date>-<n>; with no set, main alone. 
 this repository's checks passed (`dyna-checks` on the fork, `checks` and `parity-main` upstream), as for a release
 (release_train.green_main_head), or NIGHTLY_BASE when the caller gives that commit. It is published as the
 `nightly` pre-release; the previous one stays a week as nightly-<date>.
-On arismoko/horizon only, the base is the commit `daily-green` points to (the newest daily run that passed every
+On sunrise-org/sunrise only, the base is the commit `daily-green` points to (the newest daily run that passed every
 leg, which also published its SDK: release_train.daily_green_commit), with a complete published `sdk-<sha>` release
 of the current package format for that exact SHA, whose sdk.json the Nightly carries in its signed sums. An explicit base that is any other commit, or has no SDK, fails; PR picks are
 disabled, and the final SHA is rechecked before pushing.
@@ -114,7 +114,7 @@ def notes(today: str, chosen: Ref, main: Ref, picked: list[dict], left_out: list
     fixed = [pr for pr in shown if "feature" not in pr["labels"]]
     built = f"main ({main.sha[:7]})" + (f" with {len(picked)} pull requests merged in" if picked else "")
     # The banner first: people who land on the Nightly ran its game zip for the launcher (a player, 2026-10-30).
-    fork = train.REPO == "arismoko/horizon"
+    fork = train.REPO == "sunrise-org/sunrise"
     parts = [FORK_PLAYERS if fork else train.PLAYERS,
              f"Nightly {today} · {chosen.sha[:7]}: {built}, built from `{chosen.name}` ({chosen.sha}).",
              source_line(today, chosen.sha)]
@@ -202,7 +202,7 @@ def build_set(main: Ref, prs: list[dict], left_out: list[str], today: str, force
         state, _, _ = ns.load_state()
         asked_in = issue or next((x["issue"] for x in reversed(state.get("log", [])) if x.get("issue")), "")
         stop(repo, asked_in, f"the build stopped: {c.text()}")
-    if repo == "arismoko/horizon" and (sha != main.sha or not sdk_ready(sha)):
+    if repo == "sunrise-org/sunrise" and (sha != main.sha or not sdk_ready(sha)):
         stop(repo, issue, f"the build stopped: final source {sha} is not the SDK-paired main commit.")
     previous = git("ls-remote", "--tags", "origin", "refs/tags/nightly").split("\t")[0] or None
     build = force or previous != sha
@@ -259,7 +259,7 @@ SDK_ASSETS = SDK_ARCHIVES + (SDK_INDEX, "SHA256SUMS", "SHA256SUMS.sig")
 def ready_sdk_shas() -> set[str]:
     """Snapshot of the complete published `sdk-<sha>` releases; API failures fail closed."""
     releases = train.gh_json("api", "--paginate", "--slurp",
-                             f"repos/arismoko/horizon/releases?per_page=100")
+                             f"repos/sunrise-org/sunrise/releases?per_page=100")
     return {release["tag_name"].removeprefix("sdk-")
             for page in releases for release in page
             if not release["draft"] and re.fullmatch(r"sdk-[0-9a-f]{40}", release["tag_name"])
@@ -284,7 +284,7 @@ def signature_check(sha: str, folder: Path, names: list[str]) -> list[str]:
     """The command that checks sdk-<sha>'s SHA256SUMS signature in `folder` as the launcher does (horizon-release-sign,
     with the fork's keys and the tag the signature must name), and the bytes of `names` against it."""
     return ["cargo", "run", "--locked", "--quiet", "-p", "horizon-release-sign", "--", "verify",
-            "--repository", "arismoko/horizon", "--tag", f"sdk-{sha}",
+            "--repository", "sunrise-org/sunrise", "--tag", f"sdk-{sha}",
             *(argument for name in names for argument in ("--only", name)), str(folder)]
 
 
@@ -292,7 +292,7 @@ def released(sha: str, name: str) -> bytes:
     """The asset `name` of sdk-<sha>, once its SHA256SUMS signature is the fork's for `sdk-<sha>` and its bytes match
     them ([`signature_check`])."""
     with tempfile.TemporaryDirectory() as folder:
-        gh("release", "download", f"sdk-{sha}", "--repo", "arismoko/horizon", "--dir", folder,
+        gh("release", "download", f"sdk-{sha}", "--repo", "sunrise-org/sunrise", "--dir", folder,
            "--pattern", name, "--pattern", "SHA256SUMS", "--pattern", "SHA256SUMS.sig")
         data = (Path(folder) / name).read_bytes()
         if not listed(name, data, (Path(folder) / "SHA256SUMS").read_text()):
@@ -341,7 +341,7 @@ def previous_sdk(sha: str) -> str:
 
 def require_sdk(sha: str) -> None:
     """Refuse before rotating/publishing Nightly if its SDK disappeared or its index is not this build's."""
-    if os.environ.get("GITHUB_REPOSITORY") == "arismoko/horizon":
+    if os.environ.get("GITHUB_REPOSITORY") == "sunrise-org/sunrise":
         if not sdk_ready(sha):
             raise SystemExit(f"Nightly publication refused: {sha} has no complete published sdk-{sha} release")
         published_index(sha)
@@ -351,7 +351,7 @@ def green_base(repo: str, issue: str) -> Ref:
     """NIGHTLY_BASE, else a green main commit from this repository's checks
     (dyna-checks on the fork, checks plus parity-main upstream), never an untested fallback."""
     explicit = os.environ.get("NIGHTLY_BASE", "").strip()
-    fork = repo == "arismoko/horizon"
+    fork = repo == "sunrise-org/sunrise"
     if explicit:
         sha = explicit
     elif fork:
@@ -384,7 +384,7 @@ def pick(force: bool) -> None:
     repo, token = os.environ.get("GITHUB_REPOSITORY", ""), os.environ.get("GH_TOKEN", "")
     main = green_base(repo, os.environ.get("NIGHTLY_ISSUE", ""))
     dry_run = os.environ.get("DRY_RUN") == "true"
-    if repo == "arismoko/horizon":
+    if repo == "sunrise-org/sunrise":
         if os.environ.get("NIGHTLY_PRS", "").strip():
             stop(repo, os.environ.get("NIGHTLY_ISSUE", ""), "fork Nightlies require an SDK-paired main commit, not PR picks")
         return build_set(main, [], [], today, force, dry_run)
@@ -414,7 +414,7 @@ def pick_snapshot() -> None:
     git("fetch", "--quiet", "origin", "+refs/heads/main:refs/remotes/origin/main")
     repo, dry_run = os.environ.get("GITHUB_REPOSITORY", ""), os.environ.get("DRY_RUN") == "true"
     sha = train.channel_head("snapshot", os.environ.get("NIGHTLY_BASE", "").strip())
-    sdk = repo != "arismoko/horizon" or sdk_ready(sha)
+    sdk = repo != "sunrise-org/sunrise" or sdk_ready(sha)
     if not sdk:
         if not dry_run:
             stop(repo, "", f"the snapshot stopped: {sha} has no complete published SDK (release.yml publishes it first).")

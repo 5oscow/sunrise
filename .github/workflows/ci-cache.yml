@@ -15,7 +15,7 @@ env:
   CARGO_INCREMENTAL: 0
 jobs:
   lint:
-    if: github.repository == 'arismoko/horizon'
+    if: github.repository == 'sunrise-org/sunrise'
     runs-on: ubuntu-latest
     timeout-minutes: 100
     steps:
@@ -61,7 +61,7 @@ jobs:
           key: ${{ steps.lint-cache.outputs.cache-primary-key }}
 
   verify:
-    if: github.repository == 'arismoko/horizon'
+    if: github.repository == 'sunrise-org/sunrise'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:

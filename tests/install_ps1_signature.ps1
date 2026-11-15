@@ -34,7 +34,7 @@ $env:PROCESSOR_ARCHITECTURE = "AMD64"
 $env:PROCESSOR_ARCHITEW6432 = $null
 $SavedPath = $env:PATH
 $Asset = "horizon-windows-x64.zip"
-$RealKey = "MU4oiIQcCxkZvbwSjjXs7SySCuM6ywRQ3nGaJYZG0gw="
+$RealKey = "r53xb3cuafGxZSicLz06KC+xXp9NJdPH8snNmXo5pAc="
 $script:Fails = 0
 $global:HorizonTestRel = $null
 

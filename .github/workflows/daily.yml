@@ -41,7 +41,7 @@ env:
 jobs:
   # Dyna runners accept dispatches, not scheduled events (as dyna-checks' nightly-dispatch).
   schedule-dispatch:
-    if: github.repository == 'arismoko/horizon' && github.event_name == 'schedule'
+    if: github.repository == 'sunrise-org/sunrise' && github.event_name == 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

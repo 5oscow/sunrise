@@ -48,7 +48,7 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-REPO = os.environ.get("GITHUB_REPOSITORY", "horizon-rust/horizon")
+REPO = os.environ.get("GITHUB_REPOSITORY", "sunrise-org/sunrise")
 # The maintainer, left out of the notes' thanks (the repository's owner is the horizon-rust organization).
 MAINTAINER = "ludovic111"
 # Releases ship in batches, so players get a few releases a day rather than one per merge: BATCH player-facing pull
@@ -96,14 +96,14 @@ LAUNCHER_IGNORED = ["launcher/links.json", "launcher/docs/", "launcher/tests/"]
 # notes view and one-line summary skip (pulldown-cmark's HTML events), so launchers never tell players to get
 # themselves. The site's Releases page leaves it out too.
 # The same warning closes the notes, above the disclaimer, for whoever scrolls past the changes to the files.
-PLAYERS_FOOTER = ('<h1>Want to play? Download the <a href="https://playhorizon.dev">Horizon launcher</a>.</h1>'
+PLAYERS_FOOTER = ('<h1>Want to play? Download the <a href="https://playsunrise.net">Horizon launcher</a>.</h1>'
                   '<h1>Do NOT run the files below. They will not work on their own.</h1>')
 PLAYERS = (PLAYERS_FOOTER + '<p>The launcher installs this version and keeps it up to date. You need your own copy of '
            'Minecraft: Java Edition. The files below are what the launcher installs, and the dedicated server for '
            'people who host one.</p>')
 LAUNCHER_FOOTER = ("Your launcher updates itself. New here? On Linux take the .AppImage below, make it executable "
                    "and run it; on Windows and macOS download the archive, extract it and run `horizon-launcher` "
-                   "(Horizon.app on macOS). Website: https://playhorizon.dev")
+                   "(Horizon.app on macOS). Website: https://playsunrise.net")
 DISCLAIMER = "Not an official Minecraft product. Not approved by or associated with Mojang or Microsoft."
 # An open issue with this label holds every game release (docs/release-flow.md). Only people who can triage the
 # repository can add it, and the issue's text is never read: its author could edit it afterwards.
@@ -445,7 +445,7 @@ def notes(kind, version, prs, issues, previous=None, repository="horizon-rust/ho
         title = f"Horizon {version.removeprefix(GAME_PREFIX)}" + (f": {summary(new, fixed)}" if shown else "")
     else:
         title = f"Horizon launcher {version.removeprefix(OLD_LAUNCHER_PREFIX).removeprefix(LAUNCHER_PREFIX)}"
-    fork_launcher = kind == "launcher" and repository == "arismoko/horizon"
+    fork_launcher = kind == "launcher" and repository == "sunrise-org/sunrise"
     intro = None if fork_launcher else line_intro(kind, version, previous)
     parts = [PLAYERS] if kind == "game" else []
     if fork_launcher:
@@ -617,7 +617,7 @@ def green_main_head(parity=False, eligible=None):
     releases), the newest commit parity-main passed on whose checks passed too: parity-main runs on batches of
     merges, so the commits a run skipped are covered by the next one, and a superseded run counts for nothing. A
     later batch that failed holds only the merges after that commit, which the green one doesn't contain."""
-    if REPO == "arismoko/horizon":
+    if REPO == "sunrise-org/sunrise":
         # Runs are ordered by creation, not completion: a late old run must not
         # displace a newer push. Paginate beyond bursts of cancelled main runs.
         pages = gh_json("api", "--paginate", "--slurp",

@@ -51,7 +51,7 @@ class DynaRoutingTests(unittest.TestCase):
                                               ("0", "9999999999", "false")):
                 stub = 'gh() { case "$*" in *SELF_HOSTED*) echo true;; *created_at*) date -u +%FT%TZ;; *) echo "$LIVE";; esac; };\n'
                 env = dict(os.environ, EVENT="push", SAME_REPO="true", VARS_ENABLED="true",
-                           VARS_LEASE=snapshot, LIVE=live, GITHUB_REPOSITORY="arismoko/horizon",
+                           VARS_LEASE=snapshot, LIVE=live, GITHUB_REPOSITORY="sunrise-org/sunrise",
                            GITHUB_OUTPUT=str(output), GITHUB_RUN_ID="1")
                 subprocess.run(["bash", "-e", "-c", stub + script], env=env, cwd=ROOT,
                                capture_output=True, text=True, check=True)
@@ -485,7 +485,7 @@ class DynaRoutingTests(unittest.TestCase):
         self.assertIn("if: github.event_name != 'schedule'", blocks["changes"])
         parity = blocks["vanilla-parity"]
         self.assertIn("github.event_name == 'workflow_dispatch'", parity)
-        self.assertIn("github.repository == 'arismoko/horizon'", parity)
+        self.assertIn("github.repository == 'sunrise-org/sunrise'", parity)
         self.assertIn("runs-on: dyna-large", parity)
         self.assertIn("persist-credentials: false", parity)
 

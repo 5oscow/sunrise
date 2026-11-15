@@ -62,7 +62,7 @@ async fn count(app: &Arc<App>) -> Count {
     assert_eq!(headers[header::CONTENT_TYPE], "application/json");
     assert_eq!(
         headers[header::ACCESS_CONTROL_ALLOW_ORIGIN],
-        "https://playhorizon.dev"
+        "https://playsunrise.net"
     );
     serde_json::from_str(&body).unwrap()
 }
@@ -241,7 +241,7 @@ async fn the_history_serves_the_recorded_minutes_and_peaks() {
     assert_eq!(headers[header::CACHE_CONTROL], "public, max-age=60");
     assert_eq!(
         headers[header::ACCESS_CONTROL_ALLOW_ORIGIN],
-        "https://playhorizon.dev"
+        "https://playsunrise.net"
     );
     let day: serde_json::Value = serde_json::from_str(&body).unwrap();
     assert_eq!(day["range"], "24h");

@@ -112,7 +112,7 @@ pub struct Config {
 }
 
 /// The website: the browser origin answered by default, and where a game report's capture link must point.
-pub(crate) const WEBSITE: &str = "https://playhorizon.dev";
+pub(crate) const WEBSITE: &str = horizon_addresses::WEBSITE;
 
 impl Default for Config {
     fn default() -> Self {
@@ -137,7 +137,7 @@ impl Default for Config {
             hub_keep_days: 90,
             export_token: None,
             github_token: None,
-            github_repo: "horizon-rust/horizon".into(),
+            github_repo: "sunrise-org/sunrise".into(),
             reads_per_hour: 600.0,
             aggregate_builds_per_hour: 600.0,
             aggregate_days: None,

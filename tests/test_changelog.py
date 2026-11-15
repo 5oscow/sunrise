@@ -136,7 +136,7 @@ class ChangelogTests(unittest.TestCase):
         self.assertEqual(output.split('<details>')[0].count('/pull/'), 5)
         self.assertIn('15 more maintenance', output)
         for number in range(15):
-            self.assertIn(f'[#{number}](https://github.com/arismoko/horizon/pull/{number})', output)
+            self.assertIn(f'[#{number}](https://github.com/sunrise-org/sunrise/pull/{number})', output)
         self.assertNotIn('merged%3A', output)
 
     def test_bot_filter_and_label_override(self):
