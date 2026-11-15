@@ -1,3 +1,12 @@
 {
-   "signedContributors": []
+  "signedContributors": [
+    {
+      "name": "arismoko",
+      "id": 19542195,
+      "comment_id": 6900141384,
+      "created_at": "2026-11-15T19:39:22Z",
+      "repoId": 1438526794,
+      "pullRequestNo": 926
+    }
+  ]
 }
