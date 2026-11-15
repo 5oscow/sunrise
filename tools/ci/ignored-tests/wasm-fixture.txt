@@ -11,9 +11,5 @@ horizon-client game::block_entity_tick_reply_tests::native_and_compiled_wasm_tic
 horizon-client game::remote::movement_input_tests::wasm_movement_input_keys_axes_and_sprint HORIZON_WASM_FIXTURE needs
 horizon-client game::native_hooks::runtime_environment::tests::native_and_wasm_process_environment_in_registration_and_game_hosts HORIZON_WASM_FIXTURE needs
 horizon-client game::registration_capability_coverage_wasm_tests::compiled_guest_reads_game_coverage_during_registration HORIZON_WASM_FIXTURE needs
-horizon-client game::entities::general::tick_tests::wasm_counter_advances_one_per_tick HORIZON_WASM_FIXTURE needs # #792 stage 4b
-horizon-client game::entities::general::tick_tests::wasm_two_rows_share_the_part_but_not_their_counters HORIZON_WASM_FIXTURE needs # #792 stage 4b
-horizon-client game::entities::general::tick_tests::wasm_and_native_parts_tick_in_install_order HORIZON_WASM_FIXTURE needs # #792 stage 4b
-horizon-client game::entities::general::tick_tests::a_trapping_wasm_row_rolls_back_and_the_next_tick_proceeds HORIZON_WASM_FIXTURE needs # #792 stage 4b
 horizon-client-lib raw_payloads::wasm_tests::compiled_guest_observes_physical_provider_pressure HORIZON_WASM_FIXTURE needs
 horizon-client game::native_hooks::math::tests::math_profile_selection_matches_platform_and_is_stable HORIZON_WASM_FIXTURE needs-plain

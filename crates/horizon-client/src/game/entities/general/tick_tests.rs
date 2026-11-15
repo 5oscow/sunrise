@@ -1140,7 +1140,7 @@ fn saved_wasm_counter(game: &Game<'_>, id: u32) -> Option<i32> {
 /// The matrix's counter row through the compiled wasm part: seeded 40 by its
 /// saved record, one tick produces 41.
 #[test]
-#[ignore = "needs prepared resources and a compiled HORIZON_WASM_FIXTURE"]
+#[ignore = "daily"]
 fn wasm_counter_advances_one_per_tick() {
     with_wasm_parts(false, |game, _| {
         let id = wasm_row(game, [1, 2, 3, 4], Some(40), None);
@@ -1151,7 +1151,7 @@ fn wasm_counter_advances_one_per_tick() {
 
 /// Two rows of one type share the wasm part; their counters live apart.
 #[test]
-#[ignore = "needs prepared resources and a compiled HORIZON_WASM_FIXTURE"]
+#[ignore = "daily"]
 fn wasm_two_rows_share_the_part_but_not_their_counters() {
     with_wasm_parts(false, |game, _| {
         let first = wasm_row(game, [1, 2, 3, 4], Some(40), None);
@@ -1172,7 +1172,7 @@ fn wasm_two_rows_share_the_part_but_not_their_counters() {
 /// starts with no stored counter, so the observer's `has` answer names what
 /// it saw: stored already, only if the wasm part's write ran first.
 #[test]
-#[ignore = "needs prepared resources and a compiled HORIZON_WASM_FIXTURE"]
+#[ignore = "daily"]
 fn wasm_and_native_parts_tick_in_install_order() {
     with_wasm_parts(true, |game, seen| {
         let seen = seen.unwrap();
@@ -1193,7 +1193,7 @@ fn wasm_and_native_parts_tick_in_install_order() {
 /// row — while the later row's dispatch still runs, its wasm part silenced by
 /// the group stop and its native part ticking, and the next tick proceeds.
 #[test]
-#[ignore = "needs prepared resources and a compiled HORIZON_WASM_FIXTURE"]
+#[ignore = "daily"]
 fn a_trapping_wasm_row_rolls_back_and_the_next_tick_proceeds() {
     with_wasm_parts(true, |game, seen| {
         let seen = seen.unwrap();
