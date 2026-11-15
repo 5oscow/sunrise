@@ -109,19 +109,25 @@ fn candidate_registry_files(
     let files = horizon_client::datapack::registry_files(&packs, &keys, false, |_, _, _| true)
         .map_err(|error| format!("{error:?}"))?
         .into_iter()
-        .filter_map(|(file, versions)| {
-            let (namespace, path) = file.strip_prefix("data/")?.split_once('/')?;
-            let (folder, entry) = keys.iter().find_map(|(ns, key)| {
-                let folder = format!("{ns}/{key}");
-                path.strip_prefix(&folder)
-                    .and_then(|entry| entry.strip_prefix('/'))
-                    .and_then(|entry| entry.strip_suffix(".json"))
-                    .map(|entry| (folder, entry.to_owned()))
-            })?;
-            Some((
-                format!("{folder}/{namespace}:{entry}"),
-                versions.into_iter().map(|(_, bytes)| bytes).collect(),
-            ))
+        .flat_map(|(file, versions)| {
+            let bytes: Vec<Vec<u8>> = versions.into_iter().map(|(_, bytes)| bytes).collect();
+            // A file under nested declared folders is an entry of each, as the live loader reads it.
+            let entries: Vec<String> = file
+                .strip_prefix("data/")
+                .and_then(|rest| rest.split_once('/'))
+                .map(|(namespace, path)| {
+                    keys.iter()
+                        .filter_map(|(ns, key)| {
+                            let folder = format!("{ns}/{key}");
+                            path.strip_prefix(&folder)
+                                .and_then(|entry| entry.strip_prefix('/'))
+                                .and_then(|entry| entry.strip_suffix(".json"))
+                                .map(|entry| format!("{folder}/{namespace}:{entry}"))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            entries.into_iter().map(move |key| (key, bytes.clone()))
         })
         .collect();
     Ok(files)
