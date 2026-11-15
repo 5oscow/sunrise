@@ -290,6 +290,8 @@ struct MeshSettings {
     leaf_culling: LeafCullingMode,
     /// The section's frozen `section_visibility` plan; `None` on the no-mod path.
     visibility: Option<Arc<crate::mesher::SectionVisibilityPlan>>,
+    /// The mods' frozen state mesh recipes (`section_mesh_recipes`); `None` without any.
+    recipes: Option<Arc<crate::mesher::MeshRecipes>>,
 }
 enum Job {
     Generate(i32, i32),
@@ -1269,6 +1271,7 @@ impl Streaming {
     /// were made with the old resources; their results are dropped.
     pub fn reload_resources(&mut self, world: &mut World, context: Arc<WorkerContext>) {
         *self.shared.context.write().unwrap() = context;
+        self.section_visibility.recipes_stale();
         self.reload_sections(world);
     }
     /// `LevelExtractor.allChanged`: discard mesh work made before the reload and

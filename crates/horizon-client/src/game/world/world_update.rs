@@ -197,6 +197,8 @@ impl Game<'_> {
         self.streaming
             .extra
             .extend(waiting.into_iter().map(|chunk| (chunk, 0)));
+        // The mods' state mesh recipes, asked again only after a resource load or a refresh.
+        self.prepare_mesh_recipes();
         self.streaming.upload_backlog = self.pending_uploads.len();
         let plan = horizon_client::spans::time("streaming_plan", || {
             let mut step = self.streaming.begin_plan_update(&mut self.world);

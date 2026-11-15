@@ -7,6 +7,7 @@
 //! `NoMasks` body, in which every step below is a constant and compiles away.
 use super::{ALL_VISIBLE, B, Info, Mesher, P, Padded, SectionMesh, pi};
 use crate::chunk::Chunk;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// The face bits of a cell's kept bits: down, up, north, south, west, east (`Direction` order).
 pub(super) const FACES: u8 = 0b0011_1111;
@@ -23,6 +24,52 @@ pub(super) trait CellMasks {
     const ACTIVE: bool;
     /// The kept bits ([`FACES`], [`MODEL`], [`FLUID`]) of padded cell `padded`.
     fn at(&self, padded: usize) -> u8;
+    /// The state mesh recipe of state `id` (`section_mesh_recipes`); none without a table.
+    #[inline(always)]
+    fn recipe(&self, _id: u32) -> Option<&super::mesh_recipes::ResolvedRecipe> {
+        None
+    }
+    /// After the solid rows are read: opens the cells whose recipes occlude less.
+    #[inline(always)]
+    fn open_recipes(&self, _pad: &Padded, _rows: &mut [u32]) {}
+}
+
+/// A section meshed with the mods' state recipes, and its visibility plan if it has one.
+pub(super) struct Prepared<'a> {
+    pub(super) plan: Option<&'a SectionVisibilityPlan>,
+    pub(super) recipes: &'a super::mesh_recipes::MeshRecipes,
+    /// The recipes would pass the section's quad ceiling: it meshes without them.
+    pub(super) over_budget: std::cell::Cell<bool>,
+}
+impl CellMasks for Prepared<'_> {
+    const ACTIVE: bool = true;
+    #[inline]
+    fn at(&self, padded: usize) -> u8 {
+        self.plan.map_or(ALL, |plan| plan.cells[padded])
+    }
+    #[inline]
+    fn recipe(&self, id: u32) -> Option<&super::mesh_recipes::ResolvedRecipe> {
+        if self.over_budget.get() {
+            return None;
+        }
+        self.recipes.get(id)
+    }
+    fn open_recipes(&self, pad: &Padded, rows: &mut [u32]) {
+        let added = super::mesh_recipes::added_quads(self.recipes, pad);
+        if added > super::mod_geometry::MAX_QUADS {
+            self.over_budget.set(true);
+            // Logged once per process: a diagnostic, not a resolved answer.
+            static LOGGED: AtomicBool = AtomicBool::new(false);
+            if !LOGGED.swap(true, Ordering::Relaxed) {
+                log::warn!(
+                    "Horizon: E_MESH_RECIPE_SECTION: {added} recipe quads in a section, over {}",
+                    super::mod_geometry::MAX_QUADS
+                );
+            }
+            return;
+        }
+        super::mesh_recipes::open_recipes(self.recipes, pad, rows);
+    }
 }
 
 /// The no-mod path: everything kept, nothing read.

@@ -12,6 +12,8 @@ mod mod_geometry;
 mod mod_tint;
 pub mod packed;
 mod sides;
+mod mesh_recipes;
+pub use mesh_recipes::{MeshRecipes, MeshRecipesBuilder, ResolvedQuad, ResolvedRecipe};
 mod visibility_plan;
 pub use visibility_plan::{
     SectionAnswer, SectionPlanBuilder, SectionVisibilityPlan, capture_input, plan_section,
@@ -2129,7 +2131,8 @@ impl Mesher<'_> {
         self.mesh_masked(region, sy, out, scratch, &visibility_plan::NoMasks)
     }
     /// [`mesh_reusing`](Self::mesh_reusing) under the section's frozen visibility plan
-    /// (`section_visibility`); `None` is exactly `mesh_reusing`.
+    /// (`section_visibility`) and the mods' state recipes (`section_mesh_recipes`); `None` and
+    /// `None` is exactly `mesh_reusing`.
     pub fn mesh_planned(
         &mut self,
         region: &[[Option<&Chunk>; 3]; 3],
@@ -2137,11 +2140,22 @@ impl Mesher<'_> {
         out: SectionMesh,
         scratch: &mut MeshScratch,
         plan: Option<&SectionVisibilityPlan>,
+        recipes: Option<&MeshRecipes>,
     ) -> SectionMesh {
-        match plan {
-            None => self.mesh_reusing(region, sy, out, scratch),
-            Some(plan) if plan.hides_terrain() => visibility_plan::hidden_terrain(self, region, sy, out),
-            Some(plan) => self.mesh_masked(region, sy, out, scratch, plan),
+        match (plan, recipes) {
+            (None, None) => self.mesh_reusing(region, sy, out, scratch),
+            (Some(plan), _) if plan.hides_terrain() => {
+                visibility_plan::hidden_terrain(self, region, sy, out)
+            }
+            (Some(plan), None) => self.mesh_masked(region, sy, out, scratch, plan),
+            (plan, Some(recipes)) => {
+                let prepared = visibility_plan::Prepared {
+                    plan,
+                    recipes,
+                    over_budget: std::cell::Cell::new(false),
+                };
+                self.mesh_masked(region, sy, out, scratch, &prepared)
+            }
         }
     }
     /// The mesher's one body: `M` is `NoMasks` on the no-mod path, a constant that compiles
@@ -2190,6 +2204,7 @@ impl Mesher<'_> {
         solid_rows(pad, &self.tables.solid, &mut scratch.solid_rows);
         if M::ACTIVE {
             visibility_plan::open_masked(masks, &mut scratch.solid_rows);
+            masks.open_recipes(&scratch.padded, &mut scratch.solid_rows);
         }
         let opaque = &scratch.solid_rows;
         let (open, hidden) = row_masks(opaque);
@@ -2289,6 +2304,13 @@ impl Mesher<'_> {
                             visible[d as usize] = true;
                             continue;
                         }
+                        // A neighbour whose recipe declares its occlusion occludes only that.
+                        if M::ACTIVE
+                            && let Some(faces) = masks.recipe(neighbor).and_then(|r| r.occlusion())
+                        {
+                            visible[d as usize] = faces >> opposite & 1 == 0;
+                            continue;
+                        }
                         // `should_render_face`'s first test, without its lookups: a
                         // full occlusion face toward this block hides the face.
                         if full_faces[neighbor as usize] >> opposite & 1 != 0 {
@@ -2334,7 +2356,13 @@ impl Mesher<'_> {
                     }
                     let connected = &self.render.connected;
                     let start = [out.solid.len(), out.translucent.len()];
-                    for model in &models {
+                    let recipe = if M::ACTIVE { masks.recipe(id) } else { None };
+                    let models = if recipe.is_some_and(|r| r.replaces()) {
+                        &[][..]
+                    } else {
+                        &models[..]
+                    };
+                    for model in models {
                         for face in &model.faces {
                             if face.quad.cull.is_some_and(|d| !visible[d as usize]) {
                                 continue;
@@ -2376,6 +2404,10 @@ impl Mesher<'_> {
                                 interior_leaf,
                             );
                         }
+                    }
+                    if let Some(recipe) = recipe {
+                        let light = pad.light[cell];
+                        mesh_recipes::emit(self, recipe, [x, y, z], light, &visible, &mut out);
                     }
                     if self.shader_pack {
                         out.record_source(

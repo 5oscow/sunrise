@@ -55,6 +55,7 @@ pub mod particles;
 pub mod player_chat;
 pub(crate) mod posed_parts;
 pub(crate) mod render_pipeline;
+pub(crate) mod mesh_recipes;
 pub(crate) mod scene;
 pub(crate) mod section_visibility;
 pub(crate) mod screenshot;

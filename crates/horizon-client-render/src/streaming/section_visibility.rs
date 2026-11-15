@@ -6,7 +6,7 @@
 //! mesh sequence and frozen into the job. With no mod listening a chosen section is queued at
 //! once, exactly as before.
 use super::{Job, Streaming};
-use crate::mesher::{Region, SectionAnswer, SectionVisibilityPlan, plan_section};
+use crate::mesher::{MeshRecipes, Region, SectionAnswer, SectionVisibilityPlan, plan_section};
 use crate::world::World;
 use crate::fast_hash::{FxHashMap, FxHashSet};
 use std::sync::Arc;
@@ -24,12 +24,28 @@ pub struct SectionPreparation {
     answers: FxHashMap<(i32, i32, i32), Arc<SectionAnswer>>,
     /// The mods and refusal codes logged since the last refresh: each is logged once.
     logged: FxHashSet<(&'static str, &'static str)>,
+    /// The mods' state mesh recipes in use (`section_mesh_recipes`), and whether the resources
+    /// or a refresh changed since they were asked.
+    recipes: Option<Arc<MeshRecipes>>,
+    recipes_fresh: bool,
 }
 
 impl SectionPreparation {
     /// Whether sections wait for the mods' answers before they are queued.
     pub fn listening(&self) -> bool {
         self.listening
+    }
+    /// The state mesh recipes every new job reads.
+    pub(super) fn recipes(&self) -> Option<Arc<MeshRecipes>> {
+        self.recipes.clone()
+    }
+    /// The resources reloaded or a mod refreshed: the recipes are asked again.
+    pub fn recipes_stale(&mut self) {
+        self.recipes_fresh = false;
+    }
+    /// Whether the recipes must be asked again before the next meshes.
+    pub fn recipes_need_asking(&self) -> bool {
+        !self.recipes_fresh
     }
     /// Whether the mods are asked: listening and no listener failed since the last refresh.
     pub fn asks(&self) -> bool {
@@ -131,6 +147,18 @@ impl Streaming {
             });
             self.queue_mesh(key, region, seq, first, plan.map(Arc::new));
         }
+    }
+    /// The mods' newly resolved state mesh recipes (`None` for none), asked after the resources
+    /// or a refresh changed: every loaded section meshes again with them, results in flight are
+    /// refused as stale. With none before and none now, nothing happens.
+    pub fn set_mesh_recipes(&mut self, world: &mut World, recipes: Option<Arc<MeshRecipes>>) {
+        let state = &mut self.section_visibility;
+        state.recipes_fresh = true;
+        if state.recipes.is_none() && recipes.is_none() {
+            return;
+        }
+        state.recipes = recipes;
+        self.reload_sections(world);
     }
     /// A mod's `refresh_render_visibility`, or the join: whether a mod listens now, every
     /// answer forgotten and, when a mod listens or listened, every loaded section meshed again

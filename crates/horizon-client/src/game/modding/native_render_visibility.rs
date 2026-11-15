@@ -17,6 +17,8 @@ impl Game<'_> {
         let listening = mod_api::__private::listened(mod_api::HookId::SectionVisibility);
         self.streaming
             .refresh_section_visibility(&mut self.world, listening);
+        // The state mesh recipes are asked again before the next meshes.
+        self.streaming.section_visibility.recipes_stale();
         let asked = mod_api::__private::has_scoped_hook(mod_api::HookId::BlockRenderVisibility);
         let mut hidden: Arc<[bool]> = if asked {
             (0..self.pack.assets.registry.len())

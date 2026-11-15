@@ -43,8 +43,8 @@ pub(super) fn mesh_section(
         biomes: &context.biomes,
         visibility,
     };
-    let plan = settings.visibility.as_deref();
-    let mut mesh = mesher.mesh_planned(&borrow(region), sy, recycled, scratch, plan);
+    let (plan, recipes) = (settings.visibility.as_deref(), settings.recipes.as_deref());
+    let mut mesh = mesher.mesh_planned(&borrow(region), sy, recycled, scratch, plan, recipes);
     mesh.sort_solid();
     *faces = Some((context.tables.clone(), mesher.visibility));
     mesh
@@ -66,6 +66,7 @@ impl Streaming {
             translucent_layers: self.translucent_layers.clone(),
             leaf_culling: self.leaf_culling,
             visibility: None,
+            recipes: self.section_visibility.recipes(),
         }
     }
 }

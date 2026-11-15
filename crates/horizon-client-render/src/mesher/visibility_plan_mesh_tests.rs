@@ -66,7 +66,7 @@ fn mesh(f: &Fixture, chunk: &Chunk, plan: Option<&SectionVisibilityPlan>) -> Sec
         hidden_states: &[],
     };
     let mut scratch = MeshScratch::default();
-    mesher.mesh_planned(&region, 0, SectionMesh::default(), &mut scratch, plan)
+    mesher.mesh_planned(&region, 0, SectionMesh::default(), &mut scratch, plan, None)
 }
 
 fn quads(mesh: &SectionMesh) -> usize {
@@ -201,7 +201,7 @@ fn without_a_plan_meshes_are_byte_identical() {
     };
     let mut scratch = MeshScratch::default();
     let before = mesher.mesh_reusing(&region, 0, SectionMesh::default(), &mut scratch);
-    let none = mesher.mesh_planned(&region, 0, SectionMesh::default(), &mut scratch, None);
+    let none = mesher.mesh_planned(&region, 0, SectionMesh::default(), &mut scratch, None, None);
     let keep_all = SectionVisibilityPlan {
         hide_terrain: false,
         cells: vec![ALL; P * P * P].into_boxed_slice(),
@@ -212,6 +212,7 @@ fn without_a_plan_meshes_are_byte_identical() {
         SectionMesh::default(),
         &mut scratch,
         Some(&keep_all),
+        None,
     );
     for other in [&none, &kept] {
         assert_eq!(

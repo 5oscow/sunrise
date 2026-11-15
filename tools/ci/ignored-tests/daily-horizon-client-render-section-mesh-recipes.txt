@@ -1,0 +1,2 @@
+horizon-client-render mesher::mesh_recipes::mesh_tests::recipes_replace_append_and_cull_through_the_mesher lib daily resources
+horizon-client-render mesher::mesh_recipes::mesh_tests::without_recipes_meshes_are_byte_identical lib daily resources
