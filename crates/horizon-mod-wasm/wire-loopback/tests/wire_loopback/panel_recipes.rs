@@ -25,6 +25,7 @@ fn keys() {
         "minecraft:stone",
         "minecraft:emerald",
         "minecraft:iron_helmet",
+        "minecraft:amethyst_shard",
         "minecraft:oak_log",
         "minecraft:oak_planks",
     ])
