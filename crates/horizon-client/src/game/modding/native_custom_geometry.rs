@@ -6,8 +6,8 @@ use horizon_client::mesher::Vertex;
 use horizon_client::screen_effects::{CameraQuads, sampling};
 use horizon_client::world_geometry::{self, ModelBatch, WorldGeometry};
 use mod_api::{
-    DrawError, InstanceError, ModelInstance, ModelRef, PipelineDrawError, PipelineQuad,
-    RenderLevelStage, RenderPipelineRef, WorldDrawUsage, WorldLine, WorldQuad,
+    DrawError, InstanceError, ModelInstance, ModelRef, NameTagOptions, PipelineDrawError,
+    PipelineQuad, RenderLevelStage, RenderPipelineRef, WorldDrawUsage, WorldLine, WorldQuad,
 };
 
 impl Game<'_> {
@@ -93,6 +93,70 @@ impl Game<'_> {
         }
         self.native_render_level_stage(*last, &view, draw);
         self.commit_model_instances(draw, DVec3::from(camera), entities);
+        // Labels (`name_tag`) draw with the world's name tags, their copies over everything.
+        let [world, see_through] = draw.labels();
+        if !world.is_empty() {
+            self.mark_translucent_entity(entities.len(), "minecraft:name_tag");
+            entities.extend_from_slice(world);
+        }
+        self.see_through_vertices.extend_from_slice(see_through);
+    }
+    /// A mod's label as `SubmitNodeCollection.submitNameTag` draws a name: 0.5 above `at`,
+    /// facing the camera, 0.025 blocks a font pixel. See-through, the text in the world and
+    /// its faded copy on the backdrop over everything; otherwise once, on the backdrop.
+    /// Refused whole, before any layout, for a position that is not finite.
+    pub(super) fn native_world_name_tag(
+        &self,
+        draw: &mut WorldGeometry,
+        at: [f64; 3],
+        text: &mod_api::Text,
+        options: NameTagOptions,
+    ) -> Result<(), DrawError> {
+        use super::api_values::TryIntoEngine;
+        draw.check_label(at)?;
+        let text = text.try_into_engine(&()).map_err(|error| match error {
+            mod_api::TextFormError::TooDeep => DrawError::TextTooDeep,
+            _ => DrawError::TextRefused,
+        })?;
+        let o = DVec3::from(at) + DVec3::new(0.0, 0.5, 0.0) - DVec3::from(draw.camera());
+        let lines = [(text, 0.0)];
+        // Options.getBackgroundOpacity(0.25), and LightCoordsUtil.lightCoordsWithEmission(light, 2).
+        let backdrop = if options.background {
+            self.settings.text_background(0.25)
+        } else {
+            0
+        };
+        let light = options.light;
+        let lit = horizon_client::block_entity_render::vertex_light(
+            (light >> 4).max(2) << 4 | (light & 15).max(2),
+        );
+        let unit = super::names::NAME_TAG_UNIT;
+        let (mut world, mut see_through) = (Vec::new(), Vec::new());
+        let quads = |alpha, backdrop, layer, light, out: &mut Vec<Vertex>| {
+            self.styled_name_tag_quads(
+                o,
+                &lines,
+                alpha,
+                backdrop,
+                layer,
+                light,
+                unit,
+                out,
+                Default::default(),
+                None,
+            )
+        };
+        let mut patches = if options.see_through {
+            let mut patches = quads(0xFF, 0, 0, lit, &mut world);
+            // RenderPipelines.TEXT_SEE_THROUGH: no depth test, no lightmap.
+            patches.extend(quads(super::names::FADED, backdrop, 2, 0, &mut see_through));
+            patches
+        } else {
+            quads(0xFF, backdrop, 0, lit, &mut world)
+        };
+        draw.label(&world, &see_through)?;
+        self.text_patches.borrow_mut().append(&mut patches);
+        Ok(())
     }
     /// Submit unlit ARGB world lines atomically. Invalid coordinates or widths,
     /// or a batch exceeding the view's fixed capacity, leave the batch unchanged.

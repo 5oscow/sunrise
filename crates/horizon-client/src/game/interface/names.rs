@@ -19,6 +19,11 @@ use horizon_client::{
 
 /// The world size of one text pixel in a name tag: `Matrix4f.scale(0.025F, -0.025F, 0.025F)`.
 pub(super) const NAME_TAG_UNIT: f32 = 0.025;
+/// Options.getBackgroundOpacity(0.25) black, as ARGB.color.
+const BACKGROUND: u32 = 0x3F00_0000;
+/// The text alpha that goes with getBackgroundOpacity(0.25):
+/// max((0.25 + 0.75) / 2, 0.5), as ARGB.color (the floor of 255 times it).
+pub(super) const FADED: u32 = 0x7F;
 
 /// Local glyph quads only: camera transforms and lighting stay per frame.
 /// Slots follow submission order; comparing the whole styled text also handles entity reorder,
@@ -33,7 +38,7 @@ pub(super) struct NameTagLayouts {
 struct NameTagLine {
     text: Text,
     alpha: u32,
-    background: bool,
+    background: u32,
     y: f32,
     behind: usize,
     vertices: Vec<HudVertex>,
@@ -64,7 +69,7 @@ impl NameTagLayouts {
         text: &Text,
         y: f32,
         alpha: u32,
-        background: bool,
+        background: u32,
     ) -> usize {
         // At most 512 * 512 HUD vertices (~10 MiB), plus short text keys. Longer tags and
         // excess lines still render normally. Animated/random glyphs and live inline skins
@@ -88,13 +93,7 @@ impl NameTagLayouts {
             batch.vertices.extend_from_slice(&line.vertices);
             return line.behind;
         }
-        let behind = batch.name_tag(
-            atlas,
-            text,
-            y,
-            alpha << 24 | 0xFF_FFFF,
-            if background { 0x3F00_0000 } else { 0 },
-        );
+        let behind = batch.name_tag(atlas, text, y, alpha << 24 | 0xFF_FFFF, background);
         if slot < MAX_LINES {
             if self.lines.len() <= slot {
                 self.lines.resize_with(slot + 1, || None);
@@ -597,9 +596,6 @@ impl Game<'_> {
         out: &mut Vec<Vertex>,
         see_through: &mut Vec<Vertex>,
     ) {
-        // The text alpha that goes with getBackgroundOpacity(0.25):
-        // max((0.25 + 0.75) / 2, 0.5), as ARGB.color (the floor of 255 times it).
-        const FADED: u32 = 0x7F;
         let mut patches = Vec::new();
         let mut layouts = std::mem::take(&mut self.name_tag_layouts);
         layouts.begin_frame(&self.gui.atlas);
@@ -619,7 +615,7 @@ impl Game<'_> {
                     o,
                     &tag.lines,
                     FADED,
-                    true,
+                    BACKGROUND,
                     0,
                     light,
                     NAME_TAG_UNIT,
@@ -637,7 +633,7 @@ impl Game<'_> {
                 o,
                 &tag.lines,
                 0xFF,
-                false,
+                0,
                 0,
                 light,
                 NAME_TAG_UNIT,
@@ -650,7 +646,7 @@ impl Game<'_> {
                 o,
                 &tag.lines,
                 FADED,
-                true,
+                BACKGROUND,
                 2,
                 0,
                 NAME_TAG_UNIT,
@@ -683,7 +679,7 @@ impl Game<'_> {
             o,
             lines,
             text_alpha,
-            background,
+            if background { BACKGROUND } else { 0 },
             text_layer,
             light,
             unit,
@@ -693,16 +689,16 @@ impl Game<'_> {
         )
     }
 
-    /// [`Self::name_tag_quads`], with Horizon's marks on the last line (the name): the Horizon
-    /// player's mark before the text, a name tag style's badge after it and its line under the
-    /// background.
+    /// [`Self::name_tag_quads`] on a `background` of its own (ARGB, none when its alpha is 0),
+    /// with Horizon's marks on the last line (the name): the Horizon player's mark before the
+    /// text, a name tag style's badge after it and its line under the background.
     #[allow(clippy::too_many_arguments)]
-    fn styled_name_tag_quads(
+    pub(super) fn styled_name_tag_quads(
         &self,
         o: glam::DVec3,
         lines: &[(Text, f64)],
         text_alpha: u32,
-        background: bool,
+        background: u32,
         text_layer: u32,
         light: u32,
         unit: f32,
@@ -710,8 +706,6 @@ impl Game<'_> {
         marks: Marks,
         mut layouts: Option<&mut NameTagLayouts>,
     ) -> Vec<horizon_client::font::Patch> {
-        // Options.getBackgroundOpacity(0.25) black, as ARGB.color.
-        const BACKGROUND: u32 = 0x3F00_0000;
         // The camera's facing (Camera.rotation()), turned round in third-person
         // front view, so the text reads the right way from where it is seen.
         let (view_yaw, view_pitch) = match self.posed_rotation {
@@ -761,7 +755,7 @@ impl Game<'_> {
                     text,
                     y0,
                     text_alpha << 24 | 0xFF_FFFF,
-                    if background { BACKGROUND } else { 0 },
+                    background,
                 ),
             };
             if let Some(mark) = marks.mark.filter(|_| n == last) {
@@ -1043,7 +1037,8 @@ mod tests {
     ) -> Vec<u8> {
         cache.begin_frame(atlas);
         let mut batch = HudBatch::scratch([1, 1]);
-        let behind = cache.name_tag(&mut batch, atlas, text, 0.0, alpha, background);
+        let backdrop = if background { BACKGROUND } else { 0 };
+        let behind = cache.name_tag(&mut batch, atlas, text, 0.0, alpha, backdrop);
         cache.end_frame();
         let mut fresh = HudBatch::scratch([1, 1]);
         assert_eq!(
@@ -1099,7 +1094,7 @@ mod tests {
             cache.begin_frame(&atlas);
             atlas.font.reseed(seed);
             let mut batch = HudBatch::scratch([1, 1]);
-            cache.name_tag(&mut batch, &atlas, &text, 0.0, 255, false);
+            cache.name_tag(&mut batch, &atlas, &text, 0.0, 255, 0);
             cache.end_frame();
             let bytes = bytemuck::cast_slice::<_, u8>(&batch.vertices).to_vec();
             atlas.font.reseed(seed);

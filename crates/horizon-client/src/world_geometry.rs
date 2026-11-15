@@ -43,6 +43,9 @@ pub struct WorldGeometry {
     /// a stage. They count against the quad capacity.
     pipeline_quads: Vec<PipelineVertex>,
     pipeline_runs: Vec<PipelineRun>,
+    /// Labels (`name_tag`), 4 vertices a quad: drawn with the world's name tags, then their
+    /// see-through copies. They count against the quad capacity.
+    labels: [Vec<Vertex>; 2],
     /// `PipelineFrame.time` for this view.
     time: f32,
     copies: Vec<ModelCopy>,
@@ -64,6 +67,7 @@ impl Default for WorldGeometry {
             quads: std::array::from_fn(|_| Vec::with_capacity(CAPACITY as usize * 4)),
             pipeline_quads: Vec::with_capacity(CAPACITY as usize * 4),
             pipeline_runs: Vec::with_capacity(CAPACITY as usize),
+            labels: std::array::from_fn(|_| Vec::with_capacity(CAPACITY as usize * 4)),
             time: 0.0,
             copies: Vec::with_capacity(INSTANCE_CAPACITY as usize),
             groups: std::collections::HashSet::with_capacity(INSTANCE_CAPACITY as usize),
@@ -84,6 +88,7 @@ impl WorldGeometry {
         self.quads.iter_mut().for_each(Vec::clear);
         self.pipeline_quads.clear();
         self.pipeline_runs.clear();
+        self.labels.iter_mut().for_each(Vec::clear);
         self.clear_copies();
         self.model_cut = 0;
         self.groups.clear();
@@ -123,7 +128,8 @@ impl WorldGeometry {
             self.lines.iter().map(|v| v.len() as u32).sum(),
             CAPACITY,
             self.quads.iter().map(|v| v.len() as u32 / 4).sum::<u32>()
-                + self.pipeline_quads.len() as u32 / 4,
+                + self.pipeline_quads.len() as u32 / 4
+                + self.labels.iter().map(|v| v.len() as u32 / 4).sum::<u32>(),
             CAPACITY,
             self.accepted_models,
             INSTANCE_CAPACITY,
@@ -277,6 +283,25 @@ impl WorldGeometry {
             ));
         }
         Ok(())
+    }
+    /// Refuses a label's position before its text is read or laid out.
+    pub fn check_label(&self, at: [f64; 3]) -> Result<(), DrawError> {
+        self.validate_positions(std::iter::once(at))
+    }
+    /// Append one label's quads, laid out by the caller (`world` drawn with the name tags,
+    /// `see_through` over everything), or leave the output unchanged.
+    pub fn label(&mut self, world: &[Vertex], see_through: &[Vertex]) -> Result<(), DrawError> {
+        let quads = (world.len() + see_through.len()) / 4;
+        if quads > (CAPACITY - self.usage().quads) as usize {
+            return Err(DrawError::CapacityExceeded);
+        }
+        self.labels[0].extend_from_slice(world);
+        self.labels[1].extend_from_slice(see_through);
+        Ok(())
+    }
+    /// This view's labels: those drawn with the name tags, then their see-through copies.
+    pub fn labels(&self) -> [&[Vertex]; 2] {
+        [&self.labels[0], &self.labels[1]]
     }
     /// Append an entire batch of quads drawn by the mod pipeline in `slot`, or leave the
     /// output unchanged. The caller has resolved the handle; quads that follow the last ones
@@ -862,5 +887,36 @@ mod tests {
                 assert_eq!(capture.0.get(), expected);
             }
         }
+    }
+
+    #[test]
+    fn labels_share_the_quad_capacity_atomically_and_reset_per_view() {
+        let mut draw = WorldGeometry::default();
+        draw.reset([30_000_000.0, 20.0, 0.0], Mat4::IDENTITY, [0.5, 0.5]);
+        assert_eq!(draw.check_label([30_000_000.5, 70.0, 0.5]), Ok(()));
+        for at in [
+            [f64::NAN, 70.0, 0.5],
+            [0.5, f64::INFINITY, 0.5],
+            [f64::MAX, 70.0, 0.5],
+        ] {
+            assert_eq!(draw.check_label(at), Err(DrawError::NonFinite));
+        }
+        let quad = [<Vertex as bytemuck::Zeroable>::zeroed(); 4];
+        // One glyph in the world, and its see-through copy on a backdrop: three quads.
+        draw.label(&quad, &[quad, quad].concat()).unwrap();
+        assert_eq!(draw.usage().quads, 3);
+        assert_eq!(draw.labels().map(<[Vertex]>::len), [4, 8]);
+        let world = WorldQuad::new([[30_000_000.0, 20.0, -1.0]; 4], !0, WorldDepth::Tested);
+        draw.quads(&vec![world; CAPACITY as usize - 4]).unwrap();
+        // One quad left: a label of two is refused whole, one of one fits.
+        assert_eq!(draw.label(&quad, &quad), Err(DrawError::CapacityExceeded));
+        assert_eq!(draw.labels().map(<[Vertex]>::len), [4, 8]);
+        draw.label(&[], &quad).unwrap();
+        assert_eq!(draw.usage().quads, CAPACITY);
+        assert_eq!(draw.quads(&[world]), Err(DrawError::CapacityExceeded));
+        let capacities = draw.labels.each_ref().map(Vec::capacity);
+        draw.reset([0.0; 3], Mat4::IDENTITY, [0.0; 2]);
+        assert_eq!(draw.labels().map(<[Vertex]>::len), [0, 0]);
+        assert_eq!(draw.labels.each_ref().map(Vec::capacity), capacities);
     }
 }

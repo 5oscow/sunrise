@@ -1,6 +1,7 @@
 # Field of view and name tags
 
-Two client hooks change what the local player sees without drawing anything yourself.
+Two client hooks change what the local player sees without drawing anything yourself, and a world draw hook can
+add labels of its own.
 
 ## Field of view
 
@@ -30,6 +31,27 @@ frame, before the tag is drawn. It is NeoForge's `RenderNameTagEvent`.
 
 Distance and the entity's availability still apply. The local player's own tag is considered only when its camera
 and settings would show it.
+
+## Labels in the world
+
+A world draw hook (`render_level_stage`, `submit_custom_geometry`, a debug renderer) draws a label of its own
+with `draw.name_tag`, as vanilla draws a name tag: half a block above the position, facing the camera.
+
+```rust,ignore
+let options = NameTagOptions::new(false, true, 0xF0);
+let _ = event.draw.name_tag([x + 0.5, y + 1.0, z + 0.5], &Text::literal("Furnace"), options);
+```
+
+| `NameTagOptions` field | Meaning |
+| --- | --- |
+| `see_through` | Also draw a faded copy over everything, walls included |
+| `background` | The black backdrop, at the player's text background opacity |
+| `light` | The light at the label: sky light in the high four bits, block light in the low four |
+
+A label is 0.025 blocks a font pixel, so it shrinks with distance; scale by distance yourself for a constant size.
+Its quads share the view's 4,096 with `quads`. A position that is not finite, text deeper than 512 component nodes
+and a label past the quads left are refused by name (`DrawError`) and draw nothing. The
+[hook notes](../../reference/hook-notes.md#custom-world-geometry) give the details.
 
 ## The client session
 

@@ -217,7 +217,7 @@ fn existing_fieldless_enum_layouts_match_baseline() {
     );
     assert_eq!(
         <crate::client::world_draw::DrawError as Wire>::layout(&mut vec![]),
-        0x6738751c2f3fac7a,
+        0x7bfc4da231ac39e2,
         "DrawError"
     );
     assert_eq!(
