@@ -74,7 +74,11 @@ impl Game<'_> {
         let features = || stack.features.iter().map(String::as_str);
         // Admission of a pack entry reads every condition but the registries this builds.
         let admission = conditions_for_mods(&self.mods, inventory)?.with_features(features());
-        let registries = candidate_registries(root, files, &admission);
+        // DataStore's fixed content folders omit mod-declared registry folders.
+        // Include those entries from this candidate's packs before conditions read them.
+        let registry_files = candidate_registry_files(stack)?;
+        let registries =
+            candidate_registries(root, files.iter().chain(&registry_files), &admission);
         Ok(conditions_for_mods(&self.mods, inventory)?
             .with_features(features())
             .with_registries(
@@ -85,14 +89,52 @@ impl Game<'_> {
     }
 }
 
+/// Read declared registry folders with the same scanner as the live registry loader.
+/// Convert its resource paths to the content keys candidate_registries consumes.
+fn candidate_registry_files(
+    stack: &super::functions::PackStack,
+) -> Result<Vec<(String, Vec<Vec<u8>>)>, String> {
+    let declarations = mod_api::__private::datapack_registry_declarations();
+    if declarations.is_empty() {
+        return Ok(Vec::new());
+    }
+    let keys: Vec<_> = declarations
+        .iter()
+        .filter_map(|declaration| declaration.key.split_once(':'))
+        .collect();
+    let packs: Vec<_> = std::iter::once(&stack.content)
+        .chain(stack.enabled_packs())
+        .collect();
+    // Admission is evaluated below, against the load-scoped conditions; no fallback.
+    let files = horizon_client::datapack::registry_files(&packs, &keys, false, |_, _, _| true)
+        .map_err(|error| format!("{error:?}"))?
+        .into_iter()
+        .filter_map(|(file, versions)| {
+            let (namespace, path) = file.strip_prefix("data/")?.split_once('/')?;
+            let (folder, entry) = keys.iter().find_map(|(ns, key)| {
+                let folder = format!("{ns}/{key}");
+                path.strip_prefix(&folder)
+                    .and_then(|entry| entry.strip_prefix('/'))
+                    .and_then(|entry| entry.strip_suffix(".json"))
+                    .map(|entry| (folder, entry.to_owned()))
+            })?;
+            Some((
+                format!("{folder}/{namespace}:{entry}"),
+                versions.into_iter().map(|(_, bytes)| bytes).collect(),
+            ))
+        })
+        .collect();
+    Ok(files)
+}
+
 /// Every registry's entries as the candidate load holds them, which `neoforge:registered` reads:
 /// the built-in ones the prepared root exports (`command-registries.json`, never what an earlier
 /// load added), and the entries the candidate's pack `files` add to a registry that takes them
 /// (vanilla's, or a datapack registry a mod declared). So an id a pack adds counts on its first
 /// load, and one a pack no longer has stops counting on the next.
-fn candidate_registries(
+fn candidate_registries<'a>(
     root: &std::path::Path,
-    files: &[(String, Vec<Vec<u8>>)],
+    files: impl IntoIterator<Item = &'a (String, Vec<Vec<u8>>)>,
     admission: &horizon_world::conditions::LoadConditions,
 ) -> BTreeMap<String, std::collections::BTreeSet<String>> {
     let export: serde_json::Value = std::fs::read(root.join("command-registries.json"))
@@ -230,3 +272,7 @@ pub(super) fn content_root_with_conditions(
         &conditions,
     )
 }
+
+#[cfg(test)]
+#[path = "load_conditions/reload_tests.rs"]
+mod reload_tests;
