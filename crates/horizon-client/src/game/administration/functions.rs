@@ -88,6 +88,9 @@ pub(super) struct PackStack {
     pub(super) content: DataPack,
     pub packs: Vec<Arc<DataPack>>,
     pub enabled: Vec<String>,
+    /// The feature flags the stack was selected for: the incoming world's, also on its first
+    /// open, before `self.level` holds them (what `neoforge:feature_flags_enabled` reads).
+    pub(super) features: Vec<String>,
 }
 impl PackStack {
     /// The enabled packs in `enabled` (the selected) order, later overriding
@@ -116,6 +119,7 @@ pub(super) fn pack_stack(
         builtin,
         packs: packs.into_iter().map(Arc::new).collect(),
         enabled,
+        features: enabled_features.to_vec(),
     }
 }
 

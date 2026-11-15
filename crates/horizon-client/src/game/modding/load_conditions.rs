@@ -65,14 +65,18 @@ impl Game<'_> {
     pub(super) fn registered_load_conditions(
         &self,
         inventory: &horizon_mod_package::enabled::EnabledMods,
+        stack: &super::functions::PackStack,
         root: &std::path::Path,
         files: &[(String, Vec<Vec<u8>>)],
     ) -> Result<horizon_world::conditions::LoadConditions, String> {
         // `ICondition.IContext`: the world's feature flags and every registry's
         // entries as this candidate holds them. Tags join later, once this load has bound them.
-        let registries = candidate_registries(root, files);
+        let features = || stack.features.iter().map(String::as_str);
+        // Admission of a pack entry reads every condition but the registries this builds.
+        let admission = conditions_for_mods(&self.mods, inventory)?.with_features(features());
+        let registries = candidate_registries(root, files, &admission);
         Ok(conditions_for_mods(&self.mods, inventory)?
-            .with_features(self.level.enabled_features.iter().map(String::as_str))
+            .with_features(features())
             .with_registries(
                 registries
                     .iter()
@@ -89,6 +93,7 @@ impl Game<'_> {
 fn candidate_registries(
     root: &std::path::Path,
     files: &[(String, Vec<Vec<u8>>)],
+    admission: &horizon_world::conditions::LoadConditions,
 ) -> BTreeMap<String, std::collections::BTreeSet<String>> {
     let export: serde_json::Value = std::fs::read(root.join("command-registries.json"))
         .ok()
@@ -119,10 +124,27 @@ fn candidate_registries(
         .keys()
         .map(|registry| (folder(registry), registry.clone()))
         .collect();
-    for (key, _) in files {
+    for (key, versions) in files {
         let Some(slash) = key.find(':').and_then(|colon| key[..colon].rfind('/')) else {
             continue;
         };
+        // The winning file, if its own conditions hold: an entry they turn off is not there.
+        // One whose conditions read registries or tags, which this view is still building,
+        // counts, as it may load.
+        let admitted = versions.last().is_some_and(|bytes| {
+            let Ok(file) = serde_json::from_slice::<serde_json::Value>(bytes) else {
+                return true;
+            };
+            let payload = file.get("neoforge:conditions").map(ToString::to_string);
+            payload.is_none_or(|payload| {
+                payload.contains("\"neoforge:registered\"")
+                    || payload.contains("\"neoforge:tag_empty\"")
+                    || admission.allows_file(&file, key)
+            })
+        });
+        if !admitted {
+            continue;
+        }
         if let Some(registry) = by_folder.get(&key[..slash]) {
             let id = key[slash + 1..].to_owned();
             registries

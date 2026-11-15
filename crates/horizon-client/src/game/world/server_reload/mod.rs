@@ -72,6 +72,7 @@ impl Game<'_> {
         let conditions = self
             .registered_load_conditions(
                 &inventory,
+                stack,
                 resources,
                 &super::functions::content_overlay(stack),
             )

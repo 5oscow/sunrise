@@ -333,10 +333,14 @@ fn registered_reads_the_candidate_packs_not_the_last_load() {
         ]})
     };
     let dunes = registered("minecraft:worldgen/biome", "test:dunes");
-    let first = super::candidate_registries(
-        root.path(),
-        &pack(&["worldgen/biome/test:dunes", "recipe/test:a/b"]),
-    );
+    let admission = horizon_world::conditions::LoadConditions::new([]);
+    let mut files = pack(&["worldgen/biome/test:dunes", "recipe/test:a/b"]);
+    // An entry its own conditions turn off is not in the registry.
+    files.push((
+        "worldgen/biome/test:off".into(),
+        vec![br#"{"neoforge:conditions":[{"type":"neoforge:false"}]}"#.to_vec()],
+    ));
+    let first = super::candidate_registries(root.path(), &files, &admission);
     let first = horizon_world::conditions::LoadConditions::new([]).with_registries(
         first
             .iter()
@@ -347,8 +351,9 @@ fn registered_reads_the_candidate_packs_not_the_last_load() {
         "a pack's new biome counts on its first load"
     );
     assert!(first.allows(&registered("minecraft:worldgen/biome", "minecraft:plains")));
+    assert!(!first.allows(&registered("minecraft:worldgen/biome", "test:off")));
     assert!(first.allows(&registered("minecraft:item", "minecraft:stone")));
-    let next = super::candidate_registries(root.path(), &pack(&[]));
+    let next = super::candidate_registries(root.path(), &pack(&[]), &admission);
     let next = horizon_world::conditions::LoadConditions::new([]).with_registries(
         next.iter()
             .map(|(registry, ids)| (registry.as_str(), ids.iter().map(String::as_str))),
