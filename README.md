@@ -137,7 +137,7 @@ python3 tools/pr_ready.py
 
 It runs rustfmt, clippy, the touched crates' tests, the Python tests, the public-tree check and the vanilla harnesses your change affects. Never commit game files, decompiled source or prepared resources.
 
-How Horizon is run (the council, theme groups and their leads, the Horizon Team, moderation): [GOVERNANCE.md](GOVERNANCE.md).
+How Sunrise is run (the Core Team, area teams and their leads): [GOVERNANCE.md](GOVERNANCE.md). Where money goes: [FUNDING.md](FUNDING.md).
 
 ## Project status
 
