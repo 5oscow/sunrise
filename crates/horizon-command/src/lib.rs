@@ -25,6 +25,7 @@ mod vanilla_order;
 
 pub use args::{
     Arg, ArgType, CustomArgument, CustomArgumentKind, CustomCompletionAction, CustomSuggestion,
+    MAX_PROVIDER_SUGGESTIONS, MAX_SUGGESTION_TEXT, MAX_SUGGESTION_TOOLTIP, ParsedArgument,
     Registries, modify_custom_completions,
 };
 use horizon_client_core::text::Text;
@@ -637,9 +638,6 @@ fn compare_suggestions(a: &Suggestion, b: &Suggestion) -> std::cmp::Ordering {
         _ => compare_ignore_case(&a.text, &b.text),
     }
 }
-/// The longest completion text a suggestion packet carries: `ByteBufCodecs.STRING_UTF8` counts
-/// 32767 UTF-16 code units, which is what vanilla's reader and its client both enforce.
-const MAX_SUGGESTION_TEXT: usize = 32767;
 /// Suggestions.create: merged, expanded to a common range and sorted case-insensitively.
 pub fn merge_suggestions(input: &str, list: Vec<Suggestion>) -> (Range, Vec<Suggestion>) {
     if list.is_empty() {

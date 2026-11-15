@@ -17,9 +17,9 @@ pub struct SelectorToken {
     /// A `sort=` value: `nearest`, `furthest`, `random` or `arbitrary`.
     pub sort: &'static str,
 }
-/// Who a completion is for, when a mod's own argument type completes the text:
-/// the player typing, whose command permission level is [`Registries::permission`].
-/// The mod's provider decides what to offer; the game does not filter its answer.
+/// Who a completion is for: the player typing, whose command permission level is
+/// [`Registries::permission`]. A mod's own completion - the argument type's `suggest`, or the
+/// suggestion provider it declares - decides what to offer; the game does not filter its answer.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct CommandSender {
     /// The player's UUID.
@@ -31,9 +31,9 @@ pub struct CommandSender {
 pub struct Registries {
     /// Permission level of the command source.
     pub permission: u8,
-    /// The player a completion is for, while a mod's argument type completes the
-    /// text; `None` for the console and for a client completing its own commands
-    /// before its profile is known.
+    /// The player a completion is for, while a mod's argument type completes the text or the
+    /// provider it declares answers it; `None` for the console and for a client completing its own
+    /// commands before its profile is known.
     pub sender: Option<CommandSender>,
     pub items: Vec<String>,
     pub item_tags: Vec<String>,
