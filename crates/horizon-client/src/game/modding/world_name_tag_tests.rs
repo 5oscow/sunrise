@@ -425,7 +425,7 @@ impl Hooks for Native {
 /// The scene drawn by a whole world view (`fill_world_geometry`, every stage): the name-tag
 /// vertices it adds to the entities, its see-through vertices, and their pixels in front of
 /// a wall that hides the labels that are not see-through.
-fn scene_frame(game: &mut super::Game<'_>) -> ([Vec<Vertex>; 2], Vec<u8>) {
+fn scene_frame(game: &mut super::Game<'_>) -> ([Vec<Vertex>; 2], Vec<u8>, Vec<u32>) {
     face_south(game);
     game.world.game_time = scene::SCENE_TIME;
     game.see_through_vertices.clear();
@@ -435,7 +435,16 @@ fn scene_frame(game: &mut super::Game<'_>) -> ([Vec<Vertex>; 2], Vec<u8>) {
     let see_through = std::mem::take(&mut game.see_through_vertices);
     let open = pixels(game, &entities, &see_through);
     let walled = pixels(game, &[wall(game), entities.clone()].concat(), &see_through);
-    ([entities, see_through], [open, walled].concat())
+    // Each call's result, from the scene's marker lines: `code` across, the call's index up.
+    let mut results: Vec<(f32, u32)> = draw
+        .batch()
+        .lines
+        .iter()
+        .map(|line| (line[1], line[0].round() as u32))
+        .collect();
+    results.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let results = results.into_iter().map(|(_, code)| code).collect();
+    ([entities, see_through], [open, walled].concat(), results)
 }
 
 /// The same `name_tag` calls from the compiled wasm fixture (through the generated import)
@@ -454,7 +463,12 @@ fn a_wasm_mods_labels_draw_the_same_pixels_as_a_native_mods() {
                     mod_platform::testing::with_mods(native, || {
                         with_client_game(|game| expected = Some(scene_frame(game)));
                     });
-                    let (expected_vertices, expected_pixels) = expected.unwrap();
+                    let (expected_vertices, expected_pixels, native_results) = expected.unwrap();
+                    assert_eq!(
+                        native_results,
+                        scene::RESULT_CODES,
+                        "native name_tag results"
+                    );
                     let [world, through] = &expected_vertices;
                     // Hidden (one copy), Through (two) and Bold (one) drew; NaN was refused.
                     assert!(!world.is_empty() && !through.is_empty());
@@ -473,7 +487,8 @@ fn a_wasm_mods_labels_draw_the_same_pixels_as_a_native_mods() {
                             |game| actual = Some(scene_frame(game)),
                         );
                     });
-                    let (actual_vertices, actual_pixels) = actual.unwrap();
+                    let (actual_vertices, actual_pixels, wasm_results) = actual.unwrap();
+                    assert_eq!(wasm_results, scene::RESULT_CODES, "wasm name_tag results");
                     for (copy, (native, wasm)) in ["world", "see-through"]
                         .iter()
                         .zip(expected_vertices.iter().zip(&actual_vertices))
