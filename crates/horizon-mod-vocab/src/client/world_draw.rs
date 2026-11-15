@@ -75,6 +75,36 @@ pub enum DrawError {
     InvalidWidth,
     /// The batch would exceed this view's setup-time capacity.
     CapacityExceeded,
+    /// A label's text is deeper than 512 component nodes (`MAX_TEXT_DEPTH`).
+    TextTooDeep,
+    /// A label's text is otherwise refused at the boundary (`TextFormError`).
+    TextRefused,
+}
+
+/// How [`WorldDrawContext::name_tag`](crate::WorldDrawContext::name_tag) draws a label.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
+pub struct NameTagOptions {
+    /// Also draw a faded copy over everything, walls included, as vanilla does for a name
+    /// that is not sneaking.
+    pub see_through: bool,
+    /// Put the translucent black backdrop behind the text, at the player's text background
+    /// opacity (`Options.getBackgroundOpacity(0.25)`).
+    pub background: bool,
+    /// The light at the label: sky light in the high four bits, block light in the low four
+    /// (`0xF0` is full sky light), as a name tag reads its entity's.
+    pub light: u8,
+}
+impl NameTagOptions {
+    /// Describe a label's drawing.
+    pub fn new(see_through: bool, background: bool, light: u8) -> Self {
+        Self {
+            see_through,
+            background,
+            light,
+        }
+    }
 }
 
 /// Where in the world's frame a stage's geometry is drawn: NeoForge 26.3's

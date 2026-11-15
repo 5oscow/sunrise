@@ -27,7 +27,22 @@ counted by `usage().instances_used` against `instances_capacity`. A refused batc
 A model with a translucent face returns `InstanceError::Translucent` and is not drawn as solid.
 Copies outside the frustum are omitted and do not count. Shader packs and any route that cannot
 take GPU instances bake the same prepared geometry on the CPU instead of dropping the model; a
-`shaders/` pack shades those copies as block entities, as it shades `BlockEntityDrawContext::model`."#]
+`shaders/` pack shades those copies as block entities, as it shades `BlockEntityDrawContext::model`.
+
+`WorldDrawContext::name_tag(at, &text, NameTagOptions { see_through, background, light })` draws
+a label as vanilla draws a name tag (`submitNameTag`): 0.5 above `at`, facing the camera, 0.025
+blocks a font pixel, so it shrinks with distance (scale by distance yourself for a constant size),
+centred, in the text's styles. `background` puts the black backdrop behind it at the player's
+text background opacity; `light` is the light at the label, sky in the high four bits and block in
+the low four. With `see_through` it is drawn twice: in the world, and faded on the backdrop over
+everything, walls included. Without it, once in the world, hidden behind what is in front. Labels
+draw with the world's name tags whatever the stage. Each glyph and backdrop quad, both copies
+counted, takes one of the 4,096 quads `quads` uses (`usage().quads`). A position that is not
+finite (`DrawError::NonFinite`), text deeper than 512 component nodes (`DrawError::TextTooDeep`)
+or otherwise refused (`DrawError::TextRefused`), and a label past the quads left
+(`DrawError::CapacityExceeded`) are refused whole: nothing is drawn. `see_through` can show a
+label through any wall, which vanilla does only for the names its own renderers choose; the call
+sends nothing and reads nothing the client does not already hold."#]
     #[hook(
         side = "client",
         contract = "listen",

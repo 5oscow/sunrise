@@ -224,6 +224,29 @@ pub fn render(
     view_proj: Mat4,
     hdr: bool,
 ) -> std::result::Result<Vec<u8>, String> {
+    render_layers(vertices, &[], atlas_size, atlas, view_proj, hdr)
+}
+
+/// [`render`], then `see_through` quads as the game draws them (`RenderPipelines.TEXT_SEE_THROUGH`:
+/// no depth test or writes, culled, blended), over the entity quads.
+pub fn render_see_through(
+    vertices: &[Vertex],
+    see_through: &[Vertex],
+    atlas_size: [u32; 2],
+    atlas: &[u8],
+    view_proj: Mat4,
+) -> std::result::Result<Vec<u8>, String> {
+    render_layers(vertices, see_through, atlas_size, atlas, view_proj, false)
+}
+
+fn render_layers(
+    vertices: &[Vertex],
+    see_through: &[Vertex],
+    atlas_size: [u32; 2],
+    atlas: &[u8],
+    view_proj: Mat4,
+    hdr: bool,
+) -> std::result::Result<Vec<u8>, String> {
     let _gpu = crate::gfx::test_gpu::lock();
     let frame = software_frame(atlas_size, atlas, view_proj, 0.0, [SIZE, SIZE])?;
     let shader = frame
@@ -246,7 +269,7 @@ pub fn render(
     })];
     let reuse = reuse::Reuse::default();
     let kept = reuse.on(&frame.device);
-    let make = |fragment, depth_write, bias, blend, write_mask| {
+    let make_with = |fragment, depth_write, bias, blend, write_mask, compare, cull_mode| {
         entity_pipeline_factory(
             &kept,
             &layout,
@@ -257,9 +280,9 @@ pub fn render(
             false,
         )(EntityPipelineOptions {
             label: "Entities",
-            cull_mode: None,
+            cull_mode,
             depth_write,
-            compare: wgpu::CompareFunction::GreaterEqual,
+            compare,
             bias,
             blend,
             clouds: false,
@@ -267,6 +290,18 @@ pub fn render(
             fragment,
             write_mask,
         })
+    };
+    let make = |fragment, depth_write, bias, blend, write_mask| {
+        let compare = wgpu::CompareFunction::GreaterEqual;
+        make_with(
+            fragment,
+            depth_write,
+            bias,
+            blend,
+            write_mask,
+            compare,
+            None,
+        )
     };
     let pipeline = make(
         "fs_entity",
@@ -288,11 +323,22 @@ pub fn render(
             wgpu::ColorWrites::ALPHA,
         )
     });
+    let see_through_pipeline = make_with(
+        "fs_entity_unmarked",
+        false,
+        wgpu::DepthBiasState::default(),
+        wgpu::BlendState::ALPHA_BLENDING,
+        wgpu::ColorWrites::ALL,
+        wgpu::CompareFunction::Always,
+        Some(wgpu::Face::Back),
+    );
+    let entity_quads = vertices.len() as u32 / 4;
+    let vertices = [vertices, see_through].concat();
     let vertex = frame
         .device
         .create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: None,
-            contents: bytemuck::cast_slice(vertices),
+            contents: bytemuck::cast_slice(&vertices),
             usage: wgpu::BufferUsages::VERTEX,
         });
     let indices: Vec<u32> = (0..vertices.len() as u32 / 4)
@@ -334,13 +380,74 @@ pub fn render(
         pass.set_bind_group(0, &frame.group, &[]);
         pass.set_vertex_buffer(0, vertex.slice(..));
         pass.set_index_buffer(index.slice(..), wgpu::IndexFormat::Uint32);
-        pass.draw_indexed(0..indices.len() as u32, 0, 0..1);
+        pass.draw_indexed(0..entity_quads * 6, 0, 0..1);
         if let Some(hdr_pipeline) = &hdr_pipeline {
             pass.set_pipeline(hdr_pipeline);
-            pass.draw_indexed(0..indices.len() as u32, 0, 0..1);
+            pass.draw_indexed(0..entity_quads * 6, 0, 0..1);
+        }
+        if indices.len() as u32 > entity_quads * 6 {
+            pass.set_pipeline(&see_through_pipeline);
+            pass.draw_indexed(entity_quads * 6..indices.len() as u32, 0, 0..1);
         }
     }
     readback(&frame, encoder)
+}
+
+#[cfg(test)]
+mod see_through_tests {
+    use super::*;
+
+    /// A quad in clip space from `x0` to `x1`, half the height, at reversed depth `z`.
+    fn quad(x0: f32, x1: f32, z: f32, color: u32) -> [Vertex; 4] {
+        let corner = |x, y| Vertex {
+            pos: [x, y, z],
+            uv: [0.5, 0.5],
+            layer: 0,
+            color,
+            light: 0xF0,
+            normal: [0, 0, 127, 127],
+            glint_uv: [0.0, 0.0],
+        };
+        [
+            corner(x0, -0.5),
+            corner(x1, -0.5),
+            corner(x1, 0.5),
+            corner(x0, 0.5),
+        ]
+    }
+
+    fn centre(pixels: &[u8]) -> [u8; 4] {
+        pixels.as_chunks::<4>().0[(SIZE / 2 * SIZE + SIZE / 2) as usize]
+    }
+
+    /// A wall hides an entity quad behind it; the same quad drawn see-through shows over the
+    /// wall from the front, and not from behind (culled, as `TEXT_SEE_THROUGH` is).
+    #[test]
+    #[ignore = "needs software Vulkan"]
+    fn see_through_quads_draw_over_the_wall_that_hides_entity_quads() {
+        let atlas = [255u8; 4].repeat(16);
+        let draw = |world: &[Vertex], see_through: &[Vertex]| {
+            render_see_through(world, see_through, [4, 4], &atlas, Mat4::IDENTITY)
+                .expect("software Vulkan see-through pixels")
+        };
+        // Reversed depth: the wall (0.5) is nearer than the red quad (0.25).
+        let wall = quad(-1.0, 1.0, 0.5, 0xFF80_8080);
+        let red = quad(-0.5, 0.5, 0.25, 0xFF00_00FF);
+        let only_wall = draw(&wall, &[]);
+        assert_eq!(
+            draw(&[wall, red].concat(), &[]),
+            only_wall,
+            "hidden by the wall"
+        );
+        let shown = centre(&draw(&wall, &red));
+        assert!(
+            shown[0] > 0 && shown[1] == 0 && shown[2] == 0,
+            "red over the wall: {shown:?}"
+        );
+        let mut back = red;
+        back.reverse();
+        assert_eq!(draw(&wall, &back), only_wall, "its back is culled");
+    }
 }
 
 /// Inputs for one offscreen prepared instance. Fields stay named so the draw is not a long argument list.

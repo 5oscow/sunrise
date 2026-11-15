@@ -477,6 +477,27 @@ pub trait WorldDrawContext {
     ) -> Result<(), PipelineDrawError> {
         unimplemented!("WorldDrawContext::pipeline_quads")
     }
+    /// A label at world position `at`, drawn as vanilla draws a name tag
+    /// (`SubmitNodeCollection.submitNameTag`): 0.5 blocks above `at`, facing the camera,
+    /// 0.025 blocks per font pixel (so it shrinks with distance; scale by distance yourself
+    /// for a constant screen size), centred, in `text`'s styles. With
+    /// [`NameTagOptions::see_through`] it is drawn twice, as an unsneaking name: once in the
+    /// world and once faded over everything, walls included, with the backdrop; without it,
+    /// once in the world, the backdrop behind it. Labels draw with the world's name tags,
+    /// whatever the stage. Each glyph and backdrop quad, both copies counted, takes one of
+    /// the view's 4,096 quads shared with [`quads`](Self::quads) ([`usage`](Self::usage)).
+    /// Refuses a non-finite `at` ([`DrawError::NonFinite`]), text deeper than 512 component
+    /// nodes ([`DrawError::TextTooDeep`]) or otherwise refused ([`DrawError::TextRefused`]),
+    /// and a label past the quads left ([`DrawError::CapacityExceeded`]); on `Err` nothing
+    /// is drawn.
+    fn name_tag(
+        &mut self,
+        at: [f64; 3],
+        text: &Text,
+        options: NameTagOptions,
+    ) -> Result<(), DrawError> {
+        unimplemented!("WorldDrawContext::name_tag")
+    }
     /// Queued counts and fixed capacities, shared by both depth modes and all listeners.
     /// Capacity is allocated during setup, never grown during submission.
     fn usage(&self) -> WorldDrawUsage {
