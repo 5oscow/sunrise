@@ -23,6 +23,7 @@ glam = "0.30"
 horizon-mod-api-gen = { path = "../horizon-mod-api-gen" }
 
 [dev-dependencies]
+horizon-protocol = { path = "../horizon-protocol" }
 # Shared API docs deliberately exercise the mod-facing facade, as mods do.
 horizon-mod-api = { path = "../horizon-mod-api" }
 # `Items::for_tests` for the fluid ingredient unit tests.

@@ -2455,6 +2455,7 @@ dependencies = [
  "horizon-mod-api-gen",
  "horizon-mod-api-macros",
  "horizon-mod-runtime",
+ "horizon-protocol",
  "log",
  "serde",
  "serde_json",
@@ -2493,11 +2494,14 @@ dependencies = [
 name = "horizon-mod-wasm-wire-loopback"
 version = "0.1.0"
 dependencies = [
+ "horizon-client-lib",
  "horizon-core",
  "horizon-game-discovery",
+ "horizon-items",
  "horizon-mod-api",
  "horizon-mod-api-gen",
  "horizon-mod-runtime",
+ "horizon-protocol",
  "horizon-world",
  "log",
  "serde_json",

@@ -11,6 +11,9 @@ horizon-game-discovery = { path = "../../horizon-game-discovery" }
 horizon-mod-api-gen = { path = "../../horizon-mod-api-gen" }
 
 [dev-dependencies]
+horizon-client-lib = { path = "../../horizon-client-lib", default-features = false }
+horizon-items = { path = "../../horizon-items" }
+horizon-protocol = { path = "../../horizon-protocol" }
 horizon-core = { path = "../../horizon-core" }
 horizon-mod-runtime = { path = "../../horizon-mod-runtime" }
 horizon-world = { path = "../../horizon-world" }

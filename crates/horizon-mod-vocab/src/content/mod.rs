@@ -12,6 +12,7 @@ pub(crate) mod game_event_key;
 pub(crate) mod jar_inputs_error;
 pub(crate) mod mod_settings;
 pub(crate) mod package_side;
+pub(crate) mod packet_builders;
 pub(crate) mod packets;
 pub(crate) mod payload_codec;
 pub(crate) mod registry_entry;

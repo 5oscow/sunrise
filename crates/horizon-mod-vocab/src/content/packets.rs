@@ -9,6 +9,16 @@ use crate::Identifier;
 /// commits. A phase change or disconnect before publication cancels it. Registered and
 /// engine-reserved custom payload channels require their payload/service API instead.
 /// This is not a connection or protocol implementation; submission applies no local effects.
+/// Signed chat, signed commands and chat sessions have no typed builders:
+/// ```compile_fail
+/// mod_vocab::ServerboundPlayPacket::chat("hello");
+/// ```
+/// ```compile_fail
+/// mod_vocab::ServerboundPlayPacket::chat_command_signed("help");
+/// ```
+/// ```compile_fail
+/// mod_vocab::ServerboundPlayPacket::chat_session_update();
+/// ```
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 #[derive(horizon_mod_api_macros::Wire)]
