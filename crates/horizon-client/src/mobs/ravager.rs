@@ -360,7 +360,7 @@ mod tests {
     use std::sync::Arc;
 
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "daily"]
     fn modded_collision_without_leaves_jumps_without_if_broke() {
         assert!(super::super::world::with_test_world(&[], |world, types| {
             let mut world = world.clone();
@@ -384,7 +384,7 @@ mod tests {
     /// `destroyBlock(pos, true, ravager)` names the ravager for the loot, and
     /// `LivingDestroyBlockEvent` doesn't hear of it.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_trampled_crop_names_the_ravager() {
         for crop in ["minecraft:wheat", "minecraft:pitcher_crop"] {
             let build =
@@ -427,7 +427,7 @@ mod tests {
     /// A mod that lets the ravager grief against the rule (`canEntityGrief`)
     /// has it trample a crop and a pitcher crop with `mobGriefing` off.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_mod_lets_the_ravager_trample_crops_with_the_rule_off() {
         struct Allow;
         impl crate::mobs::MobHooks for Allow {
@@ -491,7 +491,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "daily"]
     fn modded_collision_with_leaves_defers_jump() {
         let build = |world: &mut crate::world::World,
                      registry: &horizon_world::registry::BlockRegistry| {
@@ -562,6 +562,7 @@ mod sight_tests {
     /// `Ravager.hasLineOfSight` (`Sensing.hasLineOfSight` calls it): a stunned or roaring ravager sees nobody,
     /// a biting one still sees. The player stands ten blocks away on a flat floor with nothing between.
     #[test]
+    #[ignore = "daily"]
     fn a_stunned_or_roaring_ravager_does_not_see_the_player() {
         let build = |world: &mut crate::world::World,
                      registry: &horizon_world::registry::BlockRegistry| {
@@ -605,7 +606,7 @@ mod sight_tests {
                 "only a ravager is blind"
             );
         });
-        let _ = ran;
+        assert!(ran, "vanilla data is missing");
     }
 
     fn blind_of_other_species(world: &MobWorld, types: &crate::mobs::MobTypes) -> bool {

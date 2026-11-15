@@ -39,8 +39,9 @@ MOD_API_GEN = [
     "Cargo.lock", "crates/horizon-assets/src", "crates/horizon-client", "crates/horizon-client-core/src",
     "crates/horizon-client-render", "crates/horizon-core/src", "crates/horizon-engine-slots", "crates/horizon-items",
     "crates/horizon-mod-api", "crates/horizon-mod-api-macros/src/lib.rs", "crates/horizon-mod-package/src",
-    "crates/horizon-mod-render", "crates/horizon-mod-runtime/src", "crates/horizon-mod-vocab/src",
-    "crates/horizon-world", "packaging/executable_link.rs", "tools/layering/mod_vocab_state.json", "tools/refactors",
+    "crates/horizon-mod-render", "crates/horizon-mod-runtime/src", "crates/horizon-mod-vocab/behaviours",
+    "crates/horizon-mod-vocab/src", "crates/horizon-world", "packaging/executable_link.rs",
+    "tools/layering/mod_vocab_state.json",
 ]
 READERS = {
     "cargo-horizon-mod": [
@@ -55,9 +56,13 @@ READERS = {
     "horizon-client-render": [
         "crates/horizon-client/assets/horizon/lang", "crates/horizon-client/assets/horizon/textures/gui",
     ],
+    # The daily Character comparator reads the original public-JDK API helper.
+    "horizon-core": ["tools/JavaCharacterTables.java"],
     # The build scripts hand the repository root to the generator.
     "horizon-engine-slots": MOD_API_GEN,
     "horizon-game": ["packaging/windows/exe.rs"],
+    # Shared source-only module discovery reads the game's declarations and vocabulary export fragments.
+    "horizon-game-discovery": ["crates/horizon-client/src", "crates/horizon-mod-vocab/src"],
     # The shared guest-stack tests read the sources that use its constants, and the jobs they wait on.
     "horizon-guest-stack": ["crates/horizon-client/src", "crates/horizon-threads/src"],
     "horizon-mod-api": MOD_API_GEN,

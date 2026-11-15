@@ -31,7 +31,7 @@ fn disconnects(rx: &Receiver<Out>) -> Vec<Tag> {
 }
 
 #[test]
-#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn disconnect_sends_the_reason_to_that_guest_only() {
     with_guests(|game| {
         let players = game.players().server_players();
@@ -67,7 +67,7 @@ fn disconnect_sends_the_reason_to_that_guest_only() {
 }
 
 #[test]
-#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn disconnect_reaches_acting_and_displaced_players() {
     with_guests(|game| {
         let players = game.players().server_players();
@@ -101,7 +101,7 @@ fn disconnect_reaches_acting_and_displaced_players() {
 /// A disconnect is pending until the connection is removed: a second call answers false,
 /// sends nothing and keeps the first reason.
 #[test]
-#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn a_second_disconnect_while_pending_is_refused() {
     with_guests(|game| {
         let a = game.players().server_players()[0];
@@ -128,18 +128,14 @@ fn a_second_disconnect_while_pending_is_refused() {
 }
 
 #[test]
-#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-fn disconnect_refuses_the_owner_fakes_stale_and_offline_players() {
+#[ignore = "daily"]
+fn disconnect_refuses_the_owner_stale_and_offline_players() {
     with_guests(|game| {
         let players = game.players().server_players();
         let (a, b) = (players[0], players[1]);
         game.lan.as_mut().unwrap().hub.singleplayer_owner = Some(12);
         assert!(!a.disconnect(game, Text::literal("owner")).unwrap());
         game.lan.as_mut().unwrap().hub.singleplayer_owner = None;
-
-        let level = game.level("minecraft:overworld").unwrap();
-        let fake = game.fake_player(level, 100, "robot").unwrap();
-        assert!(!fake.disconnect(game, Text::literal("fake")).unwrap());
 
         let stale = mod_api::__private::game::player_ref(
             mod_api::EntityRef::new(
@@ -174,7 +170,7 @@ fn disconnect_refuses_the_owner_fakes_stale_and_offline_players() {
 /// crosses the wire and the answers come back encoded (checked inside the guest, which
 /// traps on a mismatch and then leaves the tick phase unanswered).
 #[test]
-#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn wasm_disconnect_crosses_the_generated_forwarder() {
     crate::game::native_entity_refs::tests::run_on_guest_stack(|| {
         with_guests(|game| {

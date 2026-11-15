@@ -718,7 +718,7 @@ mod tests {
     use super::*;
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn actual_tick_restores_navigation_after_goal_unwind() {
         use super::super::goals::{Cx, Goal};
         use std::sync::{
@@ -813,7 +813,7 @@ mod tests {
 
     // Lower-layer loan test, not a native GoalContext integration test.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn retained_controller_disables_goals_without_becoming_a_target() {
         let mut vehicle = of(71, Species::Spider);
         let mut rider = of(72, Species::Skeleton);
@@ -1067,6 +1067,7 @@ mod tests {
     /// spider takes the spider's fixed seat — 0.3125 of its scale, and a cave
     /// spider's 0.21875 — and a wider one the type's default.
     #[test]
+    #[ignore = "daily"]
     fn a_spider_sits_by_its_own_rule_on_a_narrow_vehicle() {
         // World-gated: without the extracted data the body never runs.
         let _ = crate::mobs::world::with_test_world(&[], |_, types| {
