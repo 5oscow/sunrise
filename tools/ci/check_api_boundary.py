@@ -291,8 +291,12 @@ def generated_findings(target: Path):
     from generation. Checking only the catalog would miss those public types.
     Cargo must run first; callers may not silently skip missing build output.
     """
+    # Cargo's build folder: `build/horizon-mod-vocab-<hash>/out`, or `build/horizon-mod-vocab/<hash>/out` in the
+    # layout newer Cargo uses.
     candidates = [p for p in target.rglob("mod_api_generated.rs")
-                  if re.fullmatch(r"horizon-mod-vocab-[0-9a-f]+", p.parent.parent.name)]
+                  if re.fullmatch(r"horizon-mod-vocab-[0-9a-f]+", p.parent.parent.name)
+                  or (p.parent.parent.parent.name == "horizon-mod-vocab"
+                      and re.fullmatch(r"[0-9a-f]+", p.parent.parent.name))]
     if not candidates:
         return [Finding(str(target), 1, "missing-generated", "build horizon-mod-vocab before the full boundary audit")]
     newest = max(candidates, key=lambda p: p.stat().st_mtime_ns)
