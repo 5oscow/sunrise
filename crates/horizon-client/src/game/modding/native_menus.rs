@@ -845,19 +845,16 @@ mod tests {
     }
 
     /// The content mod menu type the mod-menu tests open: a prepared registry slot
-    /// (`minecraft:generic_9x1`) for a synthetic definition, in the fresh process each case
-    /// runs in, which keeps the one-shot menu table out of other fixtures.
+    /// (`minecraft:generic_9x1`) for a synthetic definition.
     const MOD_MENU: &str = "minecraft:generic_9x1";
 
-    fn register_mod_menu() {
-        assert!(horizon_client::containers::register_mod_menu_types([(
-            MOD_MENU.into(),
-            9,
-            0,
-            Vec::new(),
-            None,
-            None,
-        )]));
+    /// [`with_game`] with [`MOD_MENU`] as the thread's menu types, so a test neither depends on
+    /// registering first nor touches the one-shot process table.
+    fn with_mod_menu_game(test: impl FnOnce(&mut Game<'_>)) {
+        horizon_client::containers::with_mod_menu_types(
+            [(MOD_MENU.into(), 9, 0, Vec::new(), None, None)],
+            || with_game(test),
+        );
     }
 
     /// [`watched_guest`] on a Horizon client that reads a menu opened with no block, and the
@@ -916,8 +913,7 @@ mod tests {
             "close_first" => MenuReplace::CloseFirst,
             _ => MenuReplace::InPlace,
         };
-        register_mod_menu();
-        with_game(|game| {
+        with_mod_menu_game(|game| {
             let (rx, key) = mod_menu_guest(game);
             // Where the game keeps what the mods last heard the player open.
             game.lan.as_mut().unwrap().play.entry(1).or_default();
@@ -1005,8 +1001,7 @@ mod tests {
         ) {
             return;
         }
-        register_mod_menu();
-        with_game(|game| {
+        with_mod_menu_game(|game| {
             let (rx, key) = mod_menu_guest(game);
             let player = game.player(123).unwrap();
             let old = open(game, 1, "old", MenuReplace::CloseFirst);
