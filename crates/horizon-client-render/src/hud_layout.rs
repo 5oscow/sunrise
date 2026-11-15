@@ -85,7 +85,9 @@ pub enum GuiDraw {
 pub type Pose = [f32; 6];
 pub const IDENTITY: Pose = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
 
-/// Applies `op` like JOML's `translate` / `scale` (same float order).
+/// Applies `op` like JOML's `translate` / `scale` / `rotate` (same float order). A
+/// `Rotate` by a NaN or infinite angle is refused: `m` stays as it was (see
+/// [`pose_refused`]).
 pub fn pose_apply(m: &mut Pose, op: PoseOp) {
     match op {
         PoseOp::Translate(x, y) => {
@@ -98,7 +100,31 @@ pub fn pose_apply(m: &mut Pose, op: PoseOp) {
             m[2] *= y;
             m[3] *= y;
         }
+        PoseOp::Rotate(angle) if !angle.is_finite() => {}
+        PoseOp::Rotate(angle) => {
+            // `Matrix3x2f.rotate`: JOML's `Math.cos` / `Math.sin` are `java.lang.Math`'s,
+            // computed in double and rounded to float.
+            let f = f64::from(angle);
+            let (cos, sin) = (
+                horizon_core::jmath::cos(f) as f32,
+                horizon_core::jmath::sin(f) as f32,
+            );
+            let m00 = m[0] * cos + m[2] * sin;
+            let m01 = m[1] * cos + m[3] * sin;
+            m[2] = m[0] * -sin + m[2] * cos;
+            m[3] = m[1] * -sin + m[3] * cos;
+            m[0] = m00;
+            m[1] = m01;
+        }
     }
+}
+
+/// The first op of `ops` that [`pose_apply`] refuses (a `Rotate` by a NaN or infinite
+/// angle), if any.
+pub fn pose_refused(ops: &[PoseOp]) -> Option<PoseOp> {
+    ops.iter()
+        .copied()
+        .find(|op| matches!(op, PoseOp::Rotate(angle) if !angle.is_finite()))
 }
 
 pub const WHITE: u32 = 0xFFFF_FFFF;
@@ -908,3 +934,7 @@ fn opaque(color: u32) -> u32 {
         color
     }
 }
+
+#[cfg(test)]
+#[path = "hud_layout_rotate_tests.rs"]
+mod rotate_tests;

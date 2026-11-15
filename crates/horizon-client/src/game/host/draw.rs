@@ -63,6 +63,7 @@ impl DrawContext for GameDrawContext<'_, '_> {
     }
     fn gui_paint(&mut self, draws: &[GuiDraw]) -> Result<(), mod_api::text::TextFormError> {
         let draws = draws.try_into_engine(&())?;
+        crate::game::gui_pose::report_refused_poses(&draws);
         self.game.native_gui_paint(&mut *self.surface, &draws);
         Ok(())
     }
