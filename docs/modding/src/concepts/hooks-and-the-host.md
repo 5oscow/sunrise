@@ -23,6 +23,15 @@ What a hook's return value means depends on its kind:
 
 A hook with no receiver gets no `Host`.
 
+## Player tick hooks
+
+`player_tick_pre` and `player_tick_post` bracket the player's body tick on both
+logical sides. On the server, neither hook fires for a spectator whose bounds
+touch an unloaded chunk: that player's body tick is skipped. Connection and
+level upkeep and outgoing state updates still run. The server resolves whether
+the body runs before the pre hook; a listener changing the player's position
+does not change that decision for the current tick.
+
 ## Explosion membership
 
 `explosion_detonate` version 2 exposes mutable `blocks` and `entities` lists
