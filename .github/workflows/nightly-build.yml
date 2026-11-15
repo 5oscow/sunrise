@@ -386,6 +386,17 @@ jobs:
           # Earlier attempts of this same run have no remaining consumers either.
           for ((attempt=1; attempt<=GITHUB_RUN_ATTEMPT; attempt++)); do
             ref="nightly/dry-run-${GITHUB_RUN_ID}-${attempt}"
+            # DELETE returns 422 for a ref never created (for example, pick refused the base).
+            status=$(curl --silent --show-error \
+              --header "Authorization: Bearer $GH_TOKEN" \
+              --header 'Accept: application/vnd.github+json' \
+              --output "$RUNNER_TEMP/dry-ref-cleanup.json" --write-out '%{http_code}' \
+              "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/git/ref/heads/$ref")
+            case "$status" in
+              404) echo "Temporary ref $ref already absent"; continue ;;
+              200) ;;
+              *) echo "Temporary ref lookup failed: HTTP $status"; exit 1 ;;
+            esac
             status=$(curl --silent --show-error --request DELETE \
               --header "Authorization: Bearer $GH_TOKEN" \
               --header 'Accept: application/vnd.github+json' \
