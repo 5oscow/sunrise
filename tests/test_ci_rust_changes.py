@@ -5,7 +5,8 @@ import tempfile
 import unittest
 
 from tools.ci.rust_changes import (
-    UNKNOWN_CHANGE, changed_entries, changed_paths, needs_launcher, needs_rust, needs_tooling, selections,
+    UNKNOWN_CHANGE, changed_entries, changed_paths, needs_launcher, needs_rust, needs_server_build, needs_tooling,
+    selections,
 )
 
 
@@ -15,9 +16,15 @@ class RustChangesTests(unittest.TestCase):
         self.assertFalse(needs_rust([
             "docs/setup.md", "docs/media/banner.webp", "README.md",
         ]))
+        # The Python tools: verify's Python steps run their tests, and no Rust build or test reads them.
+        self.assertFalse(needs_rust([
+            "tools/parity.py", "tools/test_tick_parity.py", "tests/test_ci_runners.py", "docs/setup.md",
+        ]))
         for path in [
             "crates/horizon-client/src/game.rs", "xtask/src/main.rs", "Cargo.lock",
             ".cargo/config.toml", ".github/workflows/ci.yml", "tools/ci/rust_changes.py",
+            "tools/release_train.py", "tools/ci/sign_release.sh", "tools/native-hook-fragments/a.json",
+            "tools/parity_hosts.json", "mods/horizon/src/x.py",
             "research-lock.json", "crates/horizon-theme/tokens.css", "unknown-file",
         ]:
             with self.subTest(path=path):
@@ -34,6 +41,17 @@ class RustChangesTests(unittest.TestCase):
                      ".github/workflows/ci.yml", ".github/workflows/dyna-ci.yml"]:
             with self.subTest(path=path):
                 self.assertTrue(needs_launcher(["README.md", path]))
+
+    def test_the_server_build_clippy_follows_the_client_crates_and_manifests(self):
+        for path in ["crates/horizon-world/src/lib.rs", "crates/horizon-perf/src/lib.rs", "tools/parity.py",
+                     "docs/setup.md", "launcher/src/main.rs"]:
+            with self.subTest(path=path):
+                self.assertFalse(needs_server_build([path]))
+        for path in ["crates/horizon-client/src/game.rs", "crates/horizon-client-render/src/hud.rs",
+                     "crates/horizon-client-core/src/lang.rs", "crates/horizon-world/Cargo.toml", "Cargo.lock",
+                     "Cargo.toml", ".cargo/config.toml", ".github/workflows/ci.yml", "tools/ci/rust_changes.py"]:
+            with self.subTest(path=path):
+                self.assertTrue(needs_server_build(["docs/setup.md", path]))
 
     def test_moving_source_into_docs_still_requires_rust(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -90,20 +108,17 @@ class RustChangesTests(unittest.TestCase):
                 self.assertTrue(selections([("M", path)])["rust_required"])
         self.assertFalse(selections([("M", "docs/setup.md")])["rust_required"])
 
-    def test_shared_selections_preserve_launcher_and_sample_requirements(self):
+    def test_shared_selections_preserve_launcher_requirements(self):
         self.assertEqual(selections([("M", "docs/setup.md")]), {
-            "rust_required": False, "launcher_required": False,
-            "tooling_required": False, "sample_required": False,
+            "rust_required": False, "launcher_required": False, "tooling_required": False,
         })
         for path in ["Cargo.lock", "tools/ci/rust_changes.py", ".github/workflows/dyna-ci.yml"]:
             selected = selections([("M", path)])
             self.assertTrue(selected["rust_required"])
             self.assertTrue(selected["launcher_required"])
             self.assertTrue(selected["tooling_required"])
-        # A sample-selected API change must not run its compiler without installing Rust.
-        selected = selections([("M", "crates/horizon-mod-api/README.md")])
-        self.assertTrue(selected["sample_required"])
-        self.assertTrue(selected["rust_required"])
+        # The machine sample is a daily leg: a mod API change selects nothing extra in dyna-checks.
+        self.assertFalse(selections([("M", "crates/horizon-mod-api/README.md")])["rust_required"])
 
     def test_git_status_and_cli_selections_for_actual_documentation_changes(self):
         selector = Path(__file__).resolve().parents[1] / "tools/ci/rust_changes.py"
@@ -145,7 +160,7 @@ class RustChangesTests(unittest.TestCase):
             )
             self.assertEqual(dict(line.split("=") for line in output.splitlines()), {
                 "rust_required": "false", "launcher_required": "false",
-                "tooling_required": "true", "sample_required": "false",
+                "tooling_required": "true",
             })
 
     def test_a_base_missing_from_the_checkout_means_everything_changed(self):

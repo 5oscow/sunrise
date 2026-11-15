@@ -1,6 +1,4 @@
-//! GPU renderer for streamed terrain sections, sky, block outline and HUD.
-//! Section origins are supplied relative to the camera each frame so large
-//! world coordinates keep full precision.
+//! GPU renderer: terrain, sky, block outline and HUD. Camera-relative section origins keep world coordinates precise.
 use crate::{
     Result,
     block_entity_render::{StaticCacheFrameStats, StaticSectionRevision, StaticSectionSnapshot},
@@ -12,7 +10,9 @@ use crate::{
     section_mask::SectionMask,
     sprites::SpriteAnimation,
 };
-use glam::{DVec3, Mat4, Vec3, Vec4};
+#[cfg(any(test, feature = "test-support"))]
+use glam::Vec4;
+use glam::{DVec3, Mat4, Vec3};
 use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Instant};
 use wgpu::util::DeviceExt;
 use winit::window::Window;
@@ -234,7 +234,7 @@ mod section_fade;
 #[cfg(test)]
 mod sprite_arrays_tests;
 mod terrain_model;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub(crate) mod test_gpu;
 mod weather;
 mod world_text;
@@ -249,7 +249,7 @@ pub use entity_batch::{
     mark_oit,
 };
 use external::{shadow_box, shadow_runs};
-pub use frustum::{Cull, Frusta, ShadowCull};
+pub use frustum::{Cull, Frusta, JoinedFrusta, ShadowCull};
 use frustum::{block_entities_within_reach, frustum, shadow_casters, taa_frustum};
 use section_fade::{
     CHUNK_VISIBILITY_THRESHOLD, FadeInputs, chunk_visibility, fade_millis, section_instance,
@@ -354,6 +354,8 @@ fn packed_wanted() -> bool {
 pub(crate) mod animate;
 mod arena;
 pub mod capture;
+mod celestial;
+mod census;
 pub mod compositor;
 pub(crate) mod core_lines;
 pub(crate) mod core_sky;
@@ -372,9 +374,8 @@ mod hdr_icc;
 mod hdr_start;
 mod hdr_stats;
 pub(crate) mod hud_coverage;
+mod in_flight;
 pub use hdr::{Calibration as HdrCalibration, Output as HdrOutput};
-mod hold;
-pub use hold::WorldHold;
 pub use output::{DisplayReading, EffectiveOutput, FrameConfiguration, FrameRequest};
 
 pub mod block_light;
@@ -434,8 +435,10 @@ mod timing;
 pub mod translucency;
 pub(crate) mod upload;
 mod view;
+mod view_sections;
 mod visbuffer;
 mod wgsl_prefix;
+mod world_handover;
 mod world_post;
 pub mod world_primitives;
 mod world_views;
@@ -558,13 +561,17 @@ struct Globals {
     /// HDR output's tier windows, low to very bright: where the lift starts, where it is
     /// full (`hdr::Hdr::windows`); zero without HDR.
     hdr_windows: [[f32; 4]; 2],
+    /// x and y unused; z 1 with HDR output on; w the world's writers write light (terrain.wgsl).
     hdr_light: [f32; 4],
-    /// The scene's peak, HDR lighting's gain, world/look and debug; then the tiers' gains
+    /// The sun's disc's peak, an unused lane, world/look and debug; then the tiers' gains
     /// (`Hdr::draw_params`).
     hdr_settings: [f32; 4],
     hdr_gains: [f32; 4],
     /// The camera-relative eye fog is measured from: zero but in a mod's world view.
     view_origin: [f32; 4],
+    /// A mod's world view's own (`world_views::ViewCamera`), zero outside one: x -1 when it is
+    /// mirrored, else 1; y the clip-space depth its entities come forward; z 1 with a clip plane.
+    world_view: [f32; 4],
 }
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -582,7 +589,7 @@ struct GpuStaticEntitySection {
 }
 pub type SectionKey = (i32, i32, i32);
 /// What a section's mesh brings with it besides its quads (`Renderer::upload`): placed with
-/// the mesh, now or when a hold lets go of it.
+/// the mesh.
 struct MeshFacts<'a> {
     visibility: u64,
     block_entities: &'a [([i32; 3], u32)],
@@ -602,28 +609,6 @@ impl<'a> MeshFacts<'a> {
             bounds: mesh.bounds,
             translucent: !mesh.translucent.is_empty(),
             empty: mesh.solid.is_empty() && mesh.translucent.is_empty(),
-        }
-    }
-}
-/// A section's new mesh waiting behind a hold (gfx/hold.rs): uploaded, with what goes with it.
-struct HeldMesh {
-    gpu: Option<SectionGpu>,
-    visibility: u64,
-    block_entities: Vec<([i32; 3], u32)>,
-    lights: Vec<([i32; 3], u32)>,
-    bounds: Option<[glam::Vec3; 2]>,
-    translucent: bool,
-    empty: bool,
-}
-impl HeldMesh {
-    fn facts(&self) -> MeshFacts<'_> {
-        MeshFacts {
-            visibility: self.visibility,
-            block_entities: &self.block_entities,
-            lights: &self.lights,
-            bounds: self.bounds,
-            translucent: self.translucent,
-            empty: self.empty,
         }
     }
 }
@@ -1336,8 +1321,8 @@ pub struct Renderer {
     mirror_globals: wgpu::Buffer,
     mirror_group: wgpu::BindGroup,
     mirror: Option<MirrorTarget>,
-    /// Native mods' world views' targets, by id, and the largest side the device can give one.
-    world_views: world_views::Targets,
+    /// Native mods' world views' targets and pipelines, and the largest side the device gives one.
+    world_views: world_views::Kept,
     world_view_side: u32,
     entity_pipeline: wgpu::RenderPipeline,
     static_entity_pipeline: wgpu::RenderPipeline,
@@ -1377,7 +1362,7 @@ pub struct Renderer {
     world_text_pipeline: wgpu::RenderPipeline,
     fluid_pipeline: wgpu::RenderPipeline,
     terrain_model_pipelines: [wgpu::RenderPipeline; 3],
-    celestial_pipeline: wgpu::RenderPipeline,
+    celestial: celestial::Celestial,
     celestial_buffer: wgpu::Buffer,
     end_sky: end_sky::EndSky,
     stars: stars::Stars,
@@ -1496,9 +1481,6 @@ pub struct Renderer {
     lod_retiring: crate::fast_hash::FxHashSet<SectionKey>,
     /// Removed sections fading out over far terrain (`leave_section`).
     lod_leaving: Vec<(SectionKey, std::time::Instant)>,
-    /// A mod's hold on the terrain's picture (`hold_world`, gfx/hold.rs) and the new meshes
-    /// waiting behind it.
-    hold: hold::Hold<HeldMesh>,
     /// Finished tile meshes `upload_lods` has yet to upload.
     lod_pending: Option<lod::Pending>,
     detail_columns: FxHashMap<(i32, i32), SectionMask>,
@@ -2692,160 +2674,6 @@ fn on_off(on: bool) -> &'static str {
     if on { "on" } else { "off" }
 }
 impl Renderer {
-    /// Sections with GPU buffers, for soak tests watching residency.
-    pub fn resident_sections(&self) -> usize {
-        self.sections.len()
-    }
-    /// Quads of the far terrain tiles with GPU buffers.
-    pub fn lod_quads(&self) -> u64 {
-        self.lods
-            .values()
-            .map(|tile| u64::from(tile.mesh.solid + tile.mesh.translucent))
-            .sum()
-    }
-    /// Tiles and quads of the far terrain tiles with GPU buffers, by level.
-    pub fn lod_levels(&self) -> Vec<[u64; 2]> {
-        let mut levels = Vec::new();
-        for (key, tile) in &self.lods {
-            let level = usize::from(key.level);
-            if levels.len() <= level {
-                levels.resize(level + 1, [0, 0]);
-            }
-            levels[level][0] += 1;
-            levels[level][1] += u64::from(tile.mesh.solid + tile.mesh.translucent);
-        }
-        levels
-    }
-    /// Whether solid quads go to the arena in the compact layout
-    /// (`packed_quads`), and whether far tiles' own records are on
-    /// (`lod::packed::far_packing`).
-    pub fn packed_layout(&self) -> [bool; 2] {
-        [self.packed_quads, crate::lod::packed::far_packing()]
-    }
-    /// Bytes of the arena the resident chunk sections hold, and of the one far
-    /// tiles hold: the same split `gpu_census` reports, for `status`, so the
-    /// compact layouts can be seen working.
-    pub fn vertex_bytes_split(&self) -> [u64; 2] {
-        let stride = std::mem::size_of::<TerrainVertex>() as u64;
-        let used = |s: &SectionGpu| (s.solid_slots + u64::from(s.translucent) * 4) * stride;
-        [
-            self.sections.values().map(used).sum(),
-            self.lods.values().map(|tile| used(&tile.mesh)).sum(),
-        ]
-    }
-    /// Bytes of the section vertex arenas' buffers, and of the vertices
-    /// resident sections hold in them.
-    pub fn section_vertex_bytes(&self) -> [u64; 2] {
-        let stride = std::mem::size_of::<TerrainVertex>() as u64;
-        let vertices: u64 = self
-            .sections
-            .values()
-            .chain(self.lods.values().map(|tile| &*tile.mesh))
-            .map(|s| s.solid_slots + u64::from(s.translucent) * 4)
-            .sum();
-        let translucent = self.translucent_arena.as_ref();
-        let arenas = self.arena.bytes() + translucent.map_or(0, arena::Arena::bytes);
-        [arenas, vertices * stride]
-    }
-    /// Bytes of the renderer's largest GPU resources, by name (`scene_replay --memory`):
-    /// the terrain arenas (their pages, and what resident sections and far tiles use of
-    /// them), the quad indices, the block sprites with their mips, the LabPBR maps, flat
-    /// draws' buffers and the visibility buffer's.
-    pub fn gpu_census(&self) -> Vec<(&'static str, u64)> {
-        let stride = std::mem::size_of::<TerrainVertex>() as u64;
-        let used = |s: &SectionGpu| (s.solid_slots + u64::from(s.translucent) * 4) * stride;
-        let textures = |t: &[wgpu::Texture]| t.iter().map(texture_bytes).sum::<u64>();
-        let translucent = self.translucent_arena.as_ref();
-        vec![
-            ("section_arena_pages", self.arena.bytes()),
-            (
-                "translucent_arena_pages",
-                translucent.map_or(0, arena::Arena::bytes),
-            ),
-            ("sorted_index_pages", self.sorted_indices.bytes()),
-            (
-                "near_section_vertices",
-                self.sections.values().map(used).sum(),
-            ),
-            (
-                "held_section_vertices",
-                self.hold
-                    .sections()
-                    .filter_map(|held| held.gpu.as_ref())
-                    .map(used)
-                    .sum(),
-            ),
-            (
-                "far_tile_vertices",
-                self.lods.values().map(|tile| used(&tile.mesh)).sum(),
-            ),
-            ("quad_indices", self.indices.size()),
-            ("block_sprites", textures(&self.sprite_textures)),
-            (
-                "pbr_maps",
-                self.pbr_maps
-                    .as_ref()
-                    .map_or(0, |maps| maps.iter().flatten().map(texture_bytes).sum()),
-            ),
-            (
-                "flat_draws",
-                self.flat.as_ref().map_or(0, flat::Flat::bytes),
-            ),
-            (
-                "visibility_buffer",
-                self.visbuf.as_ref().map_or(0, visbuffer::Visbuffer::bytes),
-            ),
-        ]
-    }
-    /// Device memory the backend's allocator holds, by the label of what holds
-    /// it, largest first, with its allocated and reserved totals (Vulkan and
-    /// DirectX 12; none on Metal and OpenGL) (`horizon-ctl memory`).
-    pub fn gpu_memory_by_label(&self) -> Option<(u64, u64, Vec<(String, u64)>)> {
-        let report = self.device.generate_allocator_report()?;
-        let mut by_label: HashMap<String, u64> = HashMap::new();
-        for a in report.allocations {
-            *by_label.entry(a.name).or_default() += a.size;
-        }
-        let mut labels: Vec<_> = by_label.into_iter().collect();
-        labels.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-        Some((
-            report.total_allocated_bytes,
-            report.total_reserved_bytes,
-            labels,
-        ))
-    }
-    /// Heap bytes of the renderer's per-section bookkeeping (`horizon-ctl memory`):
-    /// resident sections, far tiles, block entities and light sources by section.
-    pub fn cpu_census(&self) -> [(&'static str, usize); 4] {
-        use std::mem::size_of;
-        let per_section = |map_len: usize, lists: usize| {
-            map_len * (size_of::<SectionKey>() + size_of::<Vec<([i32; 3], u32)>>() + 1)
-                + lists * size_of::<([i32; 3], u32)>()
-        };
-        let lists = |map: &crate::fast_hash::FxHashMap<SectionKey, Vec<([i32; 3], u32)>>| {
-            per_section(
-                map.capacity(),
-                map.values().map(Vec::capacity).sum::<usize>(),
-            )
-        };
-        let animated: usize = self
-            .sections
-            .values()
-            .map(|s| s.animated_layers.len() * size_of::<u16>())
-            .sum();
-        [
-            ("resident_sections", self.sections.heap_bytes() + animated),
-            (
-                "far_tiles",
-                self.lods.capacity()
-                    * (size_of::<crate::lod::TileKey>() + size_of::<lod::Tile>() + 1),
-            ),
-            ("block_entities", lists(&self.block_entities)),
-            ("light_sources", lists(&self.light_blocks)),
-        ]
-    }
-}
-impl Renderer {
     /// Uploads one generation of prepared geometry. A failed upload leaves the previous
     /// generation in place.
     pub fn install_prepared_models(
@@ -2917,7 +2745,7 @@ impl Renderer {
         previous: Option<&Self>,
         api: GraphicsApi,
         translucent_batching: bool,
-        shader_pack: bool,
+        (shader_pack, pack_starts_wide): (bool, bool),
         // The settings and the pack's `request` pick the frame (`output::resolve_frame`),
         // with what this window's display reported to the renderer before (`display`).
         settings: &crate::graphics::Graphics,
@@ -3296,13 +3124,14 @@ impl Renderer {
                 None,
             )
         };
-        // A solid terrain pipeline (back faces culled, depth written, no blend) without HDR
+        // A solid terrain pipeline (`cull` faces culled, depth written, no blend) without HDR
         // output's lighting, and with it where the display offers HDR output.
         let solid_in = |layout: &wgpu::PipelineLayout,
                         label: &str,
                         vertex: &str,
                         fragment: &str,
-                        buffers: &[Option<wgpu::VertexBufferLayout<'_>>]| {
+                        buffers: &[Option<wgpu::VertexBufferLayout<'_>>],
+                        cull: wgpu::Face| {
             let build = |constants: &[(&str, f64)]| {
                 pipeline_with(
                     constants,
@@ -3312,7 +3141,7 @@ impl Renderer {
                     fragment,
                     buffers,
                     wgpu::PrimitiveTopology::TriangleList,
-                    Some(wgpu::Face::Back),
+                    Some(cull),
                     true,
                     true,
                     None,
@@ -3353,6 +3182,7 @@ impl Renderer {
             "vs_terrain",
             "fs_solid",
             &terrain_buffers,
+            wgpu::Face::Back,
         );
         // `solid` in two passes (terrain.wgsl's `opaque_quad`, `mesher::Part`), for the
         // world pass without a shader pack: no cutout first, through a shader that never
@@ -3363,6 +3193,7 @@ impl Renderer {
             "vs_terrain_opaque",
             "fs_opaque",
             &terrain_buffers,
+            wgpu::Face::Back,
         );
         let solid_cutout = solid_in(
             &layout,
@@ -3370,20 +3201,35 @@ impl Renderer {
             "vs_terrain_cutout",
             "fs_solid",
             &terrain_buffers,
+            wgpu::Face::Back,
         );
-        // The water mirror's camera sees the world from the other side of the plane, which
-        // flips the winding: its solid terrain culls the front.
-        let solid_mirror = pipeline(
-            "Terrain solid (mirrored)",
+        // The water mirror's camera sees the world from the other side of the plane, and a
+        // mirrored world view's picture is flipped (`world_views::Flipped`): each turns the
+        // winding round, so their terrain culls the front.
+        let front = |label, fragment, blend| {
+            pipeline(
+                label,
+                "vs_terrain",
+                fragment,
+                &terrain_buffers,
+                tri,
+                Some(wgpu::Face::Front),
+                true,
+                true,
+                blend,
+            )
+        };
+        let solid_mirror = front("Terrain solid (mirrored)", "fs_solid_mirror", None);
+        let flipped = solid_in(
+            &layout,
+            "Terrain solid (flipped)",
             "vs_terrain",
-            "fs_solid_mirror",
+            "fs_solid",
             &terrain_buffers,
-            tri,
-            Some(wgpu::Face::Front),
-            true,
-            true,
-            None,
+            wgpu::Face::Front,
         );
+        let alpha = Some(alpha_blend);
+        let translucent_flipped = front("Terrain translucent (flipped)", "fs_translucent", alpha);
         let translucent = pipeline(
             "Terrain translucent",
             "vs_terrain",
@@ -4540,58 +4386,13 @@ impl Renderer {
             },
             ..additive_descriptor
         });
-        let celestial_pipeline = kept.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Celestial bodies"),
-            layout: Some(&entity_layout),
-            vertex: wgpu::VertexState {
-                module: &entity_shader,
-                entry_point: Some("vs_entity"),
-                compilation_options: Default::default(),
-                buffers: &entity_vertex,
-            },
-            primitive: wgpu::PrimitiveState {
-                cull_mode: None,
-                ..Default::default()
-            },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: wgpu::TextureFormat::Depth32Float,
-                depth_write_enabled: Some(false),
-                depth_compare: Some(wgpu::CompareFunction::Always),
-                stencil: Default::default(),
-                bias: Default::default(),
-            }),
-            multisample: Default::default(),
-            fragment: Some(wgpu::FragmentState {
-                module: &entity_shader,
-                entry_point: Some("fs_sky_celestial"),
-                compilation_options: wgpu::PipelineCompilationOptions {
-                    constants: &linear_blend::frame_constants(frame_format, linear_light),
-                    ..Default::default()
-                },
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: frame_format,
-                    // RenderPipelines.CELESTIAL: additive (src alpha, one), with
-                    // the colour premultiplied in fs_sky_celestial. Its alpha is
-                    // how much a texel adds: HDR output (hdr.wgsl) lets the sun's
-                    // and moon's discs shine; nothing else reads the frame's alpha.
-                    blend: Some(wgpu::BlendState {
-                        color: wgpu::BlendComponent {
-                            src_factor: wgpu::BlendFactor::One,
-                            dst_factor: wgpu::BlendFactor::One,
-                            operation: wgpu::BlendOperation::Add,
-                        },
-                        alpha: wgpu::BlendComponent {
-                            src_factor: wgpu::BlendFactor::Zero,
-                            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
-                            operation: wgpu::BlendOperation::Add,
-                        },
-                    }),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            multiview_mask: None,
-            cache: None,
-        });
+        let celestial = celestial::Celestial::new(
+            &kept,
+            &entity_layout,
+            &entity_shader,
+            &entity_vertex,
+            (frame_format, linear_light),
+        );
         drop(entity_step);
         // WorldBorderRenderer: misc/forcefield.png as a MipmappedTexture
         // (repeat, linear minification with mipmaps, nearest magnification).
@@ -4922,13 +4723,15 @@ impl Renderer {
                         layout, label, vertex, fragment, buffers, tri, cull, true, true, blend,
                     )
                 },
-                |layout, label, vertex, fragment| solid_in(layout, label, vertex, fragment, &[]),
+                |layout, label, vertex, fragment, cull| {
+                    solid_in(layout, label, vertex, fragment, &[], cull)
+                },
             )
         });
         // With flat draws' page groups the per-section solid draws read their vertices from
         // the page too (`Flat::page_group`), in either layout of the solid quads
         // (`mesher::packed`): only the origins stay a vertex buffer, at slot 1.
-        let (solid, solid_opaque, solid_cutout, solid_mirror) = match &flat {
+        let (solid, solid_opaque, solid_cutout, solid_mirror, flipped) = match &flat {
             Some(f) => {
                 let pulled_layout = kept.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                     label: Some("Horizon terrain layout (pulled)"),
@@ -4936,13 +4739,24 @@ impl Renderer {
                     ..Default::default()
                 });
                 let origins = [None, terrain_buffers[1].clone()];
-                let solid = |label: &str, vertex: &str, fragment: &str| {
-                    solid_in(&pulled_layout, label, vertex, fragment, &origins)
+                let solid = |label: &str, vertex: &str, fragment: &str, cull| {
+                    solid_in(&pulled_layout, label, vertex, fragment, &origins, cull)
                 };
+                let (back, front) = (wgpu::Face::Back, wgpu::Face::Front);
                 (
-                    solid("Terrain solid", "vs_section", "fs_solid"),
-                    solid("Terrain solid opaque", "vs_section_opaque", "fs_opaque"),
-                    solid("Terrain solid cutout", "vs_section_cutout", "fs_solid"),
+                    solid("Terrain solid", "vs_section", "fs_solid", back),
+                    solid(
+                        "Terrain solid opaque",
+                        "vs_section_opaque",
+                        "fs_opaque",
+                        back,
+                    ),
+                    solid(
+                        "Terrain solid cutout",
+                        "vs_section_cutout",
+                        "fs_solid",
+                        back,
+                    ),
                     pipeline_in(
                         &pulled_layout,
                         "Terrain solid (mirrored)",
@@ -4950,18 +4764,19 @@ impl Renderer {
                         "fs_solid_mirror",
                         &origins,
                         tri,
-                        Some(wgpu::Face::Front),
+                        Some(front),
                         true,
                         true,
                         None,
                     ),
+                    solid("Terrain solid (flipped)", "vs_section", "fs_solid", front),
                 )
             }
-            None => (solid, solid_opaque, solid_cutout, solid_mirror),
+            None => (solid, solid_opaque, solid_cutout, solid_mirror, flipped),
         };
         // The solid quads in the compact layout where every pass reads it; the first world
         // frames settle it for the picked pack (`follow_packed_layout`).
-        let packed_quads = flat.is_some() && !shader_pack && packed_wanted();
+        let packed_quads = flat.is_some() && !pack_starts_wide && packed_wanted();
         packed::pack_quads(packed_quads);
         let visbuf = flat
             .as_ref()
@@ -5008,9 +4823,8 @@ impl Renderer {
         // first world frame (`shader_pack`: the picked pack draws flat, a `shaders/`
         // pack or one of Horizon's own with `[shadow]`), and the frames before it, the
         // level loading screen's among them, keep the layout the sections upload in
-        // (`draw_frame`). It starts as that pack's, a `shaders/` pack taken to draw
-        // terrain: the pack loading keeps it, and only one whose terrain and shadow
-        // pass draw none meshes the sections again.
+        // (`draw_frame`). It starts as that pack's (`pack_starts_wide`: a `shaders/` pack
+        // taken to draw terrain), so the pack loading keeps it.
         let (sorted_indices, translucent_arena) = arena::Arena::translucent_arenas(
             &device,
             std::mem::size_of::<TerrainVertex>() as u64,
@@ -5094,6 +4908,7 @@ impl Renderer {
             world_primitives::DEFAULT_CAPACITY,
             world_primitives::DEFAULT_CAPACITY,
         );
+        let views = world_views::Kept::new(flipped, translucent_flipped, entity_pipeline_with);
         Ok(Self {
             display: None,
             reading: display,
@@ -5166,7 +4981,7 @@ impl Renderer {
             mirror_globals,
             mirror_group,
             mirror: None,
-            world_views: Default::default(),
+            world_views: views,
             world_view_side: max_side,
             entity_pipeline,
             static_entity_pipeline,
@@ -5197,7 +5012,7 @@ impl Renderer {
             world_text_pipeline,
             fluid_pipeline,
             terrain_model_pipelines,
-            celestial_pipeline,
+            celestial,
             celestial_buffer,
             end_sky: end_sky::EndSky::default(),
             stars,
@@ -5282,7 +5097,6 @@ impl Renderer {
             lod_cutout: Default::default(),
             lod_retiring: Default::default(),
             lod_leaving: Vec::new(),
-            hold: Default::default(),
             lod_pending: None,
             detail_columns: Default::default(),
             detail_revision: 0,
@@ -5407,7 +5221,7 @@ impl Renderer {
             pass.draw_indexed(0..quads * 6, (first * 4) as i32, 0..1);
         }
     }
-    /// HDR lighting on the clouds just drawn: the sky's value (`fs_hdr_cloud_mark`).
+    /// Unmarks the clouds just drawn (`fs_hdr_cloud_mark`).
     fn mark_clouds(&self, pass: &mut wgpu::RenderPass<'_>, quads: u32) {
         if !light_marks(self.output.frame.format, self.hdr.is_some())
             || self.hdr.as_ref().is_none_or(|h| !h.lighting)
@@ -5422,7 +5236,7 @@ impl Renderer {
         pass.draw_indexed(0..quads * 6, 0, 0..1);
         pass.set_bind_group(0, &self.group, &[]);
     }
-    /// HDR lighting on translucent terrain, over the draws that just blended it.
+    /// Unmarks translucent terrain, over the draws that just blended it (`fs_translucent_mark`).
     fn mark_translucent_terrain(
         &self,
         pass: &mut wgpu::RenderPass<'_>,
@@ -5595,7 +5409,7 @@ impl Renderer {
             .get_mut()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .take();
-        self.frame_gen.stop();
+        self.frame_gen.stop_to_configure();
         self.surface = None;
         let surface = match spare {
             Some(surface) => surface,
@@ -5949,12 +5763,6 @@ impl Renderer {
         if let Some(copies) = &mut self.capture_copies {
             copies.section(key, mesh);
         }
-        if self.hold.holds(key) && self.shown(key) && self.upload_held(key, mesh) {
-            return;
-        }
-        if let Some(gpu) = self.hold.take(key).and_then(|held| held.gpu) {
-            self.release_mesh(gpu);
-        }
         let facts = MeshFacts::of(mesh);
         let fading = self.before_mesh(key, &facts);
         let section = self.upload_mesh(mesh);
@@ -5994,94 +5802,6 @@ impl Renderer {
             self.sections
                 .insert_marked(key, section, mesh.bounds, marked);
         }
-    }
-    /// Whether section `key` has its mesh on screen (`set_detail`): an empty one counts.
-    fn shown(&self, key: SectionKey) -> bool {
-        self.detail_columns
-            .get(&(key.0, key.2))
-            .is_some_and(|mask| mask.contains(key.1 as usize))
-    }
-    /// The bytes a section's quads take in the arenas.
-    fn mesh_bytes(gpu: Option<&SectionGpu>) -> u64 {
-        let stride = std::mem::size_of::<TerrainVertex>() as u64;
-        gpu.map_or(0, |s| {
-            (s.solid_slots + u64::from(s.translucent) * 4) * stride
-        })
-    }
-    /// A mod's hold on the terrain's picture (gfx/hold.rs, `WorldHold`), asked once a frame
-    /// before the frame's uploads: while held, a section on screen that is meshed again waits,
-    /// uploaded, behind the mesh drawn. What no longer waits takes its place on this frame.
-    pub fn hold_world(&mut self, ask: &WorldHold) {
-        let waiting = match self.hold.ask(ask, Instant::now()) {
-            hold::Release::None => return,
-            hold::Release::All => self.hold.take_all(),
-            hold::Release::Outside => self.hold.take_outside(),
-        };
-        self.place_held(waiting);
-    }
-    /// Whether a mod's hold covers chunk column `column` (`hold_world`): what changes there waits.
-    pub fn world_holds_column(&self, column: (i32, i32)) -> bool {
-        self.hold.holds((column.0, 0, column.1))
-    }
-    /// Section `key`'s new mesh waits behind the hold, uploaded. False when the arena has no
-    /// room for it: what waited takes its place (giving the old meshes back), the hold is
-    /// spent, and this one goes in as ever.
-    fn upload_held(&mut self, key: SectionKey, mesh: &SectionMesh) -> bool {
-        let facts = MeshFacts::of(mesh);
-        let gpu = self.upload_mesh(mesh);
-        if gpu.is_none() && !facts.empty {
-            log::warn!("Horizon: no memory left for a held world's new sections: let go");
-            self.hold.spend();
-            let waiting = self.hold.take_all();
-            self.place_held(waiting);
-            return false;
-        }
-        let bytes = Self::mesh_bytes(gpu.as_ref());
-        let held = HeldMesh {
-            gpu,
-            visibility: facts.visibility,
-            block_entities: facts.block_entities.to_vec(),
-            lights: facts.lights.to_vec(),
-            bounds: facts.bounds,
-            translucent: facts.translucent,
-            empty: facts.empty,
-        };
-        let (old, over) = self.hold.wait(key, held, bytes);
-        if let Some(gpu) = old.and_then(|old| old.gpu) {
-            self.release_mesh(gpu);
-        }
-        if over {
-            log::warn!(
-                "Horizon: a held world's new sections came to {} MiB: let go",
-                self.hold.bytes() >> 20
-            );
-            self.hold.spend();
-            let waiting = self.hold.take_all();
-            self.place_held(waiting);
-        }
-        true
-    }
-    /// Sections that waited behind the hold take their place, on this frame.
-    fn place_held(&mut self, waiting: Vec<(SectionKey, HeldMesh)>) {
-        if waiting.is_empty() {
-            return;
-        }
-        let (count, started) = (waiting.len(), Instant::now());
-        let bytes: u64 = waiting
-            .iter()
-            .map(|(_, held)| Self::mesh_bytes(held.gpu.as_ref()))
-            .sum();
-        for (key, mut held) in waiting {
-            let gpu = held.gpu.take();
-            let facts = held.facts();
-            let fading = self.before_mesh(key, &facts);
-            self.after_mesh(key, &facts, gpu, fading);
-        }
-        log::debug!(
-            "Horizon: {count} held sections ({} MiB) took their place in {:.1} ms",
-            bytes >> 20,
-            started.elapsed().as_secs_f64() * 1e3
-        );
     }
     fn upload_mesh(&mut self, mesh: &SectionMesh) -> Option<SectionGpu> {
         let solid = (mesh.solid.len() / 4) as u32;
@@ -6401,13 +6121,7 @@ impl Renderer {
         let meshes = self
             .sections
             .values_mut()
-            .chain(self.lods.values_mut().flat_map(|tile| tile.meshes_mut()))
-            // (meshes waiting behind a hold move with the rest, or they would keep the page)
-            .chain(
-                self.hold
-                    .sections_mut()
-                    .filter_map(|held| held.gpu.as_mut()),
-            );
+            .chain(self.lods.values_mut().flat_map(|tile| tile.meshes_mut()));
         let flat = self
             .flat
             .as_mut()
@@ -6450,12 +6164,7 @@ impl Renderer {
                 let meshes = self
                     .sections
                     .values_mut()
-                    .chain(self.lods.values_mut().flat_map(|tile| tile.meshes_mut()))
-                    .chain(
-                        self.hold
-                            .sections_mut()
-                            .filter_map(|held| held.gpu.as_mut()),
-                    );
+                    .chain(self.lods.values_mut().flat_map(|tile| tile.meshes_mut()));
                 match begin_shrink(arena, &self.device, meshes, *part) {
                     Some(true) => break,
                     Some(false) => wait = SHRINK_RETRY, // the other arena may still go
@@ -6479,13 +6188,7 @@ impl Renderer {
         let meshes = self
             .sections
             .values_mut()
-            .chain(self.lods.values_mut().flat_map(|tile| tile.meshes_mut()))
-            // (meshes waiting behind a hold move with the rest, or they would keep the page)
-            .chain(
-                self.hold
-                    .sections_mut()
-                    .filter_map(|held| held.gpu.as_mut()),
-            );
+            .chain(self.lods.values_mut().flat_map(|tile| tile.meshes_mut()));
         // As many quads a frame either way: a quad's indices are a quarter of its bytes.
         let cap = match part {
             Part::Indices => COMPACT_BUDGET / 4,
@@ -6552,7 +6255,7 @@ impl Renderer {
         &'a self,
         fade_seconds: f32,
         camera: DVec3,
-        frustum: Option<Frustum>,
+        frustum: Option<JoinedFrusta>,
         keep_section: impl Fn(u32) -> bool + 'a,
         keep_long_range: impl Fn(u32) -> bool + 'a,
     ) -> impl Iterator<Item = (&'a ([i32; 3], u32), bool)> + 'a {
@@ -6659,8 +6362,6 @@ impl Renderer {
         self.block_entity_revision = next_block_entity_revision();
         self.sections.clear();
         self.ray_clear();
-        // (a hold on land that is gone ends; the arenas' clearing below takes what waited)
-        self.hold.clear();
         self.lods.clear();
         self.lod_cutout.clear();
         self.lod_retiring.clear();
@@ -6722,25 +6423,14 @@ impl Renderer {
         }
     }
     /// Uploads solid quads in the compact layout (`packed_quads`) unless a pack reads the
-    /// arena's vertices as `TerrainVertex`es: Horizon's own packs' stages, and a `shaders/`
-    /// pack's terrain and shadow programs outside flat draws (flat ones unpack the records,
-    /// `pack_atlas::PULL_FLAT`). Leaving it drops every section and far tile for the game to
-    /// mesh again, as `follow_translucent_layout` does.
+    /// arena's vertices as `TerrainVertex`es: a `shaders/` pack's terrain and shadow
+    /// programs outside flat draws (flat ones unpack the records, `pack_atlas::PULL_FLAT`).
+    /// Leaving it drops every section and far tile for the game to mesh again.
     fn follow_packed_layout(&mut self) {
         let pack = self.pack_post.as_ref().and_then(|p| p.1.as_ref()).is_some();
-        let want = self.flat.is_some()
-            && (!pack || self.pack_terrain_flat)
-            && self.native.is_none()
-            && self.packed_on;
+        let want = self.flat.is_some() && (!pack || self.pack_terrain_flat) && self.packed_on;
         if want == self.packed_quads {
             return;
-        }
-        let held_packed = |held: &HeldMesh| held.gpu.as_ref().is_some_and(|s| s.packed);
-        if !want && self.hold.sections().any(held_packed) {
-            // (held meshes in the layout going away take their place, and go with the rest)
-            self.hold.spend();
-            let waiting = self.hold.take_all();
-            self.place_held(waiting);
         }
         log::info!(
             "Horizon: compact solid terrain {}",
@@ -6749,7 +6439,7 @@ impl Renderer {
         self.packed_quads = want;
         packed::pack_quads(want);
         let laid_out = self.sections.values().any(|s| s.packed)
-            || self.lods.values().any(|t| t.drawn().packed);
+            || self.lods.values().any(|t| t.holds_packed());
         if !want && laid_out {
             self.sections_dropped = true;
             self.clear_sections(self.layout);
@@ -6865,11 +6555,6 @@ impl Renderer {
         let columns: Vec<(i32, i32)> = columns.into_iter().collect();
         if let Some(copies) = &mut self.capture_copies {
             copies.remove_columns(&columns);
-        }
-        if !self.hold.is_empty() && !columns.is_empty() {
-            let gone = columns.iter().copied().collect();
-            let held = self.hold.take_columns(&gone);
-            self.release_meshes(held.into_iter().filter_map(|held| held.gpu).collect());
         }
         // Most of the view at once (a teleport at render distance 32 drops some 3700
         // columns): a pass over each store instead of a lookup per section key, which
@@ -6999,7 +6684,7 @@ impl Renderer {
     /// Configures the window surface again. One that fails is still the one
     /// wgpu configured before, which acquisition reports as a validation error.
     fn configure_surface(&mut self) {
-        self.frame_gen.stop();
+        self.frame_gen.stop_to_configure();
         // The submit thread may still present to the old swapchain.
         self.queue.wait();
         if let Some(surface) = &self.surface
@@ -7012,6 +6697,7 @@ impl Renderer {
             )
         {
             log::warn!("Horizon renderer: the window surface did not configure ({e})");
+            self.frame_gen.refused = true;
         }
     }
     /// HDR calibration's test picture (`crate::hdr_calibration`) while it runs, else None.
@@ -7068,32 +6754,6 @@ impl Renderer {
             hdr.look = on;
         }
     }
-    /// Whether this renderer's frame is the one a renderer made now would draw in
-    /// (`requested_frame`). Under `HORIZON_HDR_FRAME=float` the game makes the renderer again
-    /// when it isn't (docs/design/hdr-linear-light.md, "When it changes").
-    pub fn frame_follows(
-        &self,
-        settings: &crate::graphics::Graphics,
-        request: output::FrameRequest,
-    ) -> bool {
-        self.requested_frame(settings, request) == self.output.frame
-    }
-    /// The frame a renderer made now would draw in (`output::resolve_frame`) for `settings`
-    /// and the pack's `request`, with what this renderer's destination offers and its display
-    /// reports.
-    pub fn requested_frame(
-        &self,
-        settings: &crate::graphics::Graphics,
-        request: output::FrameRequest,
-    ) -> output::FrameConfiguration {
-        output::resolve_frame(
-            settings,
-            request,
-            self.caps_for(settings),
-            output_apply::graced(self.auto_off_since, self.reading, &self.output),
-            self.config.format,
-        )
-    }
     /// Measures which pixels of each block sprite may shine (`hdr_stats`), at the current
     /// masks. Only with HDR output on: without it the frame's alpha is never read.
     pub fn measure_emission(&mut self) {
@@ -7112,17 +6772,16 @@ impl Renderer {
             .map(entity_skin::EntitySkin::stored)
     }
 
-    /// Whether the game may pose ordinary entity models on the GPU (`Frame::skin`).
-    /// Standard packs need every bridge stage; native packs, frame generation and
-    /// native observers of the CPU entity stream retain their existing fallback.
+    /// Whether ordinary entity models may be posed on the GPU (`Frame::skin`, `entity_skin::poses`).
     pub fn skins_entities(&self) -> bool {
         self.entity_skin.is_some()
-            && !self.frame_gen.on
-            && self.pack_post.as_ref().is_none_or(|(_, post)| {
-                post.as_ref().is_some_and(|post| post.skins_entities())
-                    && !native_render::needs().entity_spans
-            })
-            && self.native.is_none()
+            && entity_skin::poses(
+                self.frame_gen.on,
+                (self.pack_post.as_ref())
+                    .map(|(_, p)| p.as_ref().is_some_and(|p| p.skins_entities())),
+                self.native.is_some(),
+                || native_render::needs().entity_spans,
+            )
     }
 
     /// Whether the layers tagged `OIT_ENTITY` (the eyes render type's, horse
@@ -7759,27 +7418,26 @@ impl Renderer {
             frame.depth_far,
         ))
     }
-    /// The view frustum `render` will cull with, for culling geometry built
-    /// before the frame (entities, block entities) the same way.
+    /// The frusta `render` will cull with from `camera`, for culling geometry built before the
+    /// frame (entities, block entities) the same way: the camera's and this frame's world
+    /// views', which it asks the mods for (once a frame, `view_sections`).
     pub fn camera_frustum(
-        &self,
+        &mut self,
+        camera: DVec3,
         fov_degrees: f32,
         yaw: f32,
         pitch: f32,
         bob: Mat4,
         depth_far: f32,
-    ) -> Frustum {
+    ) -> JoinedFrusta {
         let views = ViewSet::single(self.screen_view(fov_degrees, yaw, pitch, depth_far));
-        world_views::open_while_asked(
-            Frustum {
-                planes: frustum(views.cull().view_proj(bob)),
-            },
-            self.world_view_side,
-        )
+        let planes = frustum(views.cull().view_proj(bob));
+        self.ask_world_views(camera, depth_far, Frustum { planes })
     }
     /// A conservative view for geometry built before TAA chooses this frame's
     /// jitter. Cover a whole rendered pixel on each side, at the configured
     /// resolution scale/upscale, rather than borrowing the previous frame's size.
+    /// With `camera_frustum`'s world views.
     pub fn camera_frustum_with_jitter(
         &self,
         fov_degrees: f32,
@@ -7787,16 +7445,12 @@ impl Renderer {
         pitch: f32,
         bob: Mat4,
         depth_far: f32,
-    ) -> Frustum {
+    ) -> JoinedFrusta {
         let views = ViewSet::single(self.screen_view(fov_degrees, yaw, pitch, depth_far));
-        world_views::open_while_asked(
-            taa_frustum(
-                views.cull().view_proj(bob),
-                self.world_post
-                    .taa_render_size([self.config.width, self.config.height]),
-            ),
-            self.world_view_side,
-        )
+        let size = self
+            .world_post
+            .taa_render_size([self.config.width, self.config.height]);
+        self.asked_world_views(taa_frustum(views.cull().view_proj(bob), size))
     }
     fn screen_view(&self, fov_degrees: f32, yaw: f32, pitch: f32, far: f32) -> View {
         let aspect = self.config.width as f32 / self.config.height.max(1) as f32;
@@ -8043,6 +7697,9 @@ impl Renderer {
         self.world_post.scale = scale / scale.max(1.0);
         self.hud.zoom = size[0] as f32 / window[0] as f32;
         [self.config.width, self.config.height] = size;
+        // Frame generation's present thread shows the window's frames, not this one: it stops,
+        // and the window's next frame starts it again.
+        self.frame_gen.stop();
         let surface = self.surface.take();
         let hdr = self.hdr.take_if(|_| !layered);
         let offscreen = std::mem::replace(&mut self.offscreen, target);
@@ -8123,7 +7780,7 @@ impl Renderer {
             if self.device_lost.load(std::sync::atomic::Ordering::Relaxed) {
                 return Err("the graphics device was lost".into());
             }
-            self.frame_gen.stop();
+            self.frame_gen.stop_to_configure();
             if Self::configure(
                 &self.device,
                 surface,
@@ -8139,12 +7796,15 @@ impl Renderer {
         }
         laps.lap("r_prepare");
         // Frame generation: its present thread acquires and presents, this frame draws
-        // into frames of its own. Not over menus that blur the frame, a shader pack's
-        // own post passes, HDR (or the 16-bit frame it was started with) or the title screen.
+        // into frames of its own. Not over menus that blur the frame, a shader pack's own post
+        // passes, HDR output without the HUD's layer (or the 16-bit frame HDR was started
+        // with) or the title screen.
         let fg = self.frame_gen.on
-            && !self.frame_gen.paused
-            && self.hdr.is_none()
-            && self.output.frame.format == self.config.format.remove_srgb_suffix()
+            && !(self.frame_gen.paused || self.frame_gen.refused)
+            && (self.hdr.as_ref()).map_or(
+                self.output.frame.format == self.config.format.remove_srgb_suffix(),
+                hdr::Hdr::layered,
+            )
             && !frame.title
             && frame.menu_blur.is_none()
             && self.pack_post.as_ref().is_none_or(|p| p.1.is_none())
@@ -8165,7 +7825,7 @@ impl Renderer {
                     self.surface.as_ref(),
                     self.offscreen.as_ref(),
                     &self.window,
-                    &self.config,
+                    &self.surface_config(),
                 )
             })
             .flatten();
@@ -8218,8 +7878,8 @@ impl Renderer {
         }
         let size = [self.config.width, self.config.height];
         let target_texture = match (&surface_frame, &mut self.hdr) {
-            _ if let Some((real, _)) = &fg_frames => real.clone(),
             (_, Some(hdr)) => hdr.frame(&self.device, size),
+            _ if let Some((real, _)) = &fg_frames => real.clone(),
             // A screenshot of a swapchain without COPY_SRC (OpenGL), and a 16-bit frame
             // with HDR off, draw into a texture of their own, then onto the swapchain or
             // the offscreen target.
@@ -8451,13 +8111,8 @@ impl Renderer {
             ],
             hdr_windows: self.hdr.as_ref().map_or([[0.0; 4]; 2], hdr::Hdr::windows),
             hdr_light: [
-                frame.sky.sky_light_factor,
-                // The underwater overlay: the sky and fog are the water's own colour there.
-                if frame.screen.iter().any(|q| q.world_tint) {
-                    0.0
-                } else {
-                    frame.sky.sky_light_factor
-                },
+                0.0,
+                0.0,
                 // Only HDR output reads the solid terrain's lighting alpha.
                 if self.hdr.is_some() { 1.0 } else { 0.0 },
                 f32::from(u8::from(hdr_gain)),
@@ -8465,6 +8120,7 @@ impl Renderer {
             hdr_settings,
             hdr_gains,
             view_origin: [0.0; 4],
+            world_view: [0.0; 4],
         };
         self.uploads
             .buffer(&mut encoder, &self.globals, 0, bytemuck::bytes_of(&globals));
@@ -8529,16 +8185,13 @@ impl Renderer {
         };
         let camera = frame.camera;
         let camera_section = camera_section(camera, self.layout.min_y());
-        // Native mods' world views (`world_views`): the lists take in their frusta, and nothing is
-        // left out by what follows the camera alone.
-        let asked = world_views::Asked::new(frame, self.world_view_side);
         // The water mirror draws the same lists: they take in what its camera sees too
         // (above the screen's top, the far shore, the trees against the sky).
         let mirror_plane = frame
             .water_plane
             .filter(|_| !frame.title && self.wants_water_plane());
         let mirror = mirror_plane.map(|plane| Frustum {
-            planes: frustum(mirror_view_projection(
+            planes: frustum(view::mirror_view_projection(
                 cull_proj,
                 plane - frame.camera.y as f32,
             )),
@@ -8546,11 +8199,11 @@ impl Renderer {
         // Solid quads facing away from the eye are left out: the bob moves
         // the eye off `camera`, so it is found from the projection. With the mirror, those
         // facing its eye are kept too: it sits straight below, at this camera-relative y.
-        let eye = projection_center(cull_proj).filter(|_| self.sides_on && !asked.on());
+        let eye = view::projection_center(cull_proj).filter(|_| self.sides_on);
         let mirror_low = mirror_plane
             .zip(eye)
             .map(|(plane, eye)| 2.0 * (plane - frame.camera.y as f32) - eye.y);
-        let culling = !frame.title && frame.cave_culling && !asked.on();
+        let culling = !frame.title && frame.cave_culling;
         if culling {
             crate::spans::time("occlusion", || {
                 self.start_occlusion(camera, frame.detail_distance)
@@ -8623,8 +8276,7 @@ impl Renderer {
             && !pack_terrain
             && shadow_view.is_none()
             && mirror_plane.is_none()
-            && !displaced
-            && !asked.on();
+            && !displaced;
         #[cfg(debug_assertions)]
         if gpu_frame {
             if self.gpu_checks.is_multiple_of(64) {
@@ -8694,7 +8346,7 @@ impl Renderer {
             self.sections.walk(
                 camera,
                 radius,
-                &world_views::Union(Frusta(view, mirror), &asked.frusta),
+                &Frusta(view, mirror),
                 |k| !culling || reachable.contains(k),
                 |x, z| {
                     (!cutout.is_empty() && cutout.contains(&(x, z)))
@@ -8768,7 +8420,13 @@ impl Renderer {
                 let height = |s: &resident::Visible| glam::Vec3::from(s.origin).dot(light);
                 height(b).total_cmp(&height(a))
             });
+            for v in &shadow_visible {
+                self.sort_unseen(&mut encoder, v.slot, v.key, camera);
+            }
         }
+        crate::spans::time("world view visibility", || {
+            self.walk_world_views(&mut encoder, frame, radius)
+        });
         // A `shaders/` pack that draws the terrain, or its shadow, sees it as Iris does.
         let shaders_pack = !frame.title
             && self
@@ -8778,7 +8436,12 @@ impl Renderer {
                 .is_some_and(|p| p.has_terrain() || p.has_shadow());
         if shaders_pack {
             let from = pack_terrain_camera(camera);
-            for v in visible.iter_mut().chain(shadow_visible.iter_mut()) {
+            let lists = self.world_views.sections.sections_mut();
+            for v in visible
+                .iter_mut()
+                .chain(shadow_visible.iter_mut())
+                .chain(lists)
+            {
                 v.origin = resident::origin(v.key, self.sections.min_y(), from)
                     .as_vec3()
                     .to_array();
@@ -8786,7 +8449,8 @@ impl Renderer {
         }
         if self.animated_textures {
             self.active_animated_layers.fill(0);
-            for v in &visible {
+            let lists = self.world_views.sections.sections();
+            for v in visible.iter().chain(&shadow_visible).chain(lists) {
                 let s = self.sections.get(v.slot);
                 for &layer in &*s.animated_layers {
                     let layer = layer as usize;
@@ -8808,14 +8472,6 @@ impl Renderer {
                     }
                 }
             }
-            for v in &shadow_visible {
-                let s = self.sections.get(v.slot);
-                for &layer in &*s.animated_layers {
-                    let layer = layer as usize;
-                    self.active_animated_layers[layer / u64::BITS as usize] |=
-                        1_u64 << (layer % u64::BITS as usize);
-                }
-            }
             // Visibility is collected before terrain draw commands are recorded,
             // so upload the current mask here and keep animation updates ahead
             // of every draw in this command buffer. A GPU frame's walk leaves out
@@ -8823,7 +8479,8 @@ impl Renderer {
             self.animate(&mut encoder, frame.ticks, !frame.title && !gpu_frame);
         }
         let listed = visible.len() + visible_lods.len();
-        let instances = listed + shadow_visible.len();
+        let viewed = listed + shadow_visible.len();
+        let instances = viewed + self.world_views.sections.sections().count();
         if instances as u64 > self.instance_capacity {
             self.instance_capacity = (instances as u64).next_power_of_two();
             self.instances = self.device.create_buffer(&wgpu::BufferDescriptor {
@@ -8869,7 +8526,11 @@ impl Renderer {
                     shadow_visible
                         .iter()
                         .map(|v| section_instance(v.origin, 0, visibility(v.key))),
-                ),
+                )
+                .chain(self.world_views.sections.sections().map(|v| {
+                    let code = fade_code(sections.get(v.slot), &v.key);
+                    section_instance(v.origin, code, visibility(v.key))
+                })),
         );
         if !self.origins.is_empty() {
             self.uploads.buffer(
@@ -8896,14 +8557,14 @@ impl Renderer {
                             let s = self.sections.get(v.slot);
                             (s.solid > 0).then(|| displace::Near {
                                 buffer: self.arena.buffer(s.page),
-                                start: s.start,
+                                base: s.solid_base(),
                                 quads: s.solid,
                                 origin: v.origin,
                             })
                         })
                         .collect()
                 };
-            d.prepare(&self.queue, &mut encoder, &near, view_proj);
+            d.prepare(&self.device, &self.queue, &mut encoder, &near, view_proj);
         }
         // Solid sections front to back, then translucent ones back to front,
         // as one list of indirect draws over the section arena.
@@ -8924,7 +8585,6 @@ impl Renderer {
                     && self.multi_draw
                     // Occlusion is found from the camera, not the mirror's eye.
                     && mirror.is_none()
-                    && !asked.on()
                     // It tests the CPU's lists, which leave out GPU culling's sections.
                     && !gpu_frame
                     && visible.len() >= c.min_sections
@@ -9242,31 +8902,10 @@ impl Renderer {
             let height = |v: &resident::Visible| glam::Vec3::from(v.origin).dot(view.light);
             let top = shadow_visible.first().map_or(0.0, height);
             for (k, v) in shadow_visible.iter().enumerate() {
-                let s = self.sections.get_mut(v.slot);
+                let s = self.sections.get(v.slot);
                 let instance = (base + k) as u32;
                 let depth = f64::from(top - height(v)).max(0.0);
                 let distance = (depth * depth).to_bits();
-                // A section the camera never saw has no sorted indices yet: sorted once now.
-                if let Some((index_page, index_start)) = s.sorted_indices
-                    && !s.sort.is_sorted()
-                {
-                    let origin = [
-                        v.key.0 * 16,
-                        self.layout.min_y() + v.key.1 * 16,
-                        v.key.2 * 16,
-                    ];
-                    if let Some(indices) =
-                        s.sort
-                            .update(camera.to_array(), origin, &mut self.translucent_sorter)
-                    {
-                        self.uploads.buffer(
-                            &mut encoder,
-                            self.sorted_indices.buffer(index_page),
-                            index_start * 4,
-                            bytemuck::cast_slice(indices),
-                        );
-                    }
-                }
                 let before = self.draws.len();
                 shadow_runs(&s.sides, view, v.origin, |first, quads| {
                     let start = s.solid_base() + first * 4;
@@ -9308,6 +8947,9 @@ impl Renderer {
             (shadow_first + shadow_solid) as usize,
         );
         let shadow_translucent = self.draws.len() as u32 - shadow_first - shadow_solid;
+        // Each world view's draws after them (`view_sections`).
+        let (lists, draws) = (&mut self.world_views.sections, &mut self.draws);
+        lists.push_draws(&self.sections, draws, &mut self.draw_pages, viewed as u32);
         laps.lap("r_nearby");
         // Metal replays a multi-draw as one draw call per entry.
         let mut section_draw_calls = if self.multi_draw && self.info.backend != wgpu::Backend::Metal
@@ -9971,7 +9613,7 @@ impl Renderer {
                     && self.native.as_ref().is_none_or(|n| n.material.is_none());
                 let sections = &self.sections;
                 let lods = &self.lods;
-                let sorted = &self.sorted_indices;
+                let (sorted, lists) = (&self.sorted_indices, &self.world_views.sections);
                 let phase2 = self.cull.as_ref().filter(|_| culling).map(|c| &c.phase2);
                 crate::spans::time("flatten", || {
                     flat.prepare(
@@ -9982,13 +9624,14 @@ impl Renderer {
                         &self.draw_pages,
                         phase1_draws as usize,
                         solid_draws as usize,
-                        [shadow_first, shadow_first + shadow_solid].map(|d| d as usize),
+                        lists.marks([shadow_first, shadow_first + shadow_solid]),
                         [opaque_end, cutout_start, phase2_cutout as usize],
                         phase2,
                         self.translucent_arena.is_some(),
                         visible
                             .iter()
                             .chain(&shadow_visible)
+                            .chain(lists.sections())
                             .filter_map(|v| {
                                 let section = sections.get(v.slot);
                                 let code = fade_code(section, &v.key);
@@ -10272,7 +9915,7 @@ impl Renderer {
                 pass.set_pipeline(&shadow.solid);
                 pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
                 pass.set_vertex_buffer(1, self.instances.slice(..));
-                self.draw_sections(&mut pass, &self.indirect, 0, shadow_first, shadow_solid);
+                self.draw_solid_sections(&mut pass, &self.indirect, 0, shadow_first, shadow_solid);
             }
             // `[displacement]`'s grid casts in place of the flat quads it took over.
             if let Some((d, picks, pipeline)) = native
@@ -10295,10 +9938,9 @@ impl Renderer {
                 && let Some(pipeline) = &shadow.flat_translucent
             {
                 pass.set_pipeline(pipeline);
-                let [_, translucent] = flat.shadow_calls;
                 flat.draw(
                     &mut pass,
-                    &flat.calls[translucent..],
+                    flat.shadow_translucent_calls(),
                     flat_vertices(&self.arena, self.translucent_arena.as_ref()),
                 );
             } else if !flat_frame {
@@ -10325,8 +9967,8 @@ impl Renderer {
                 pass.set_vertex_buffer(0, self.entity_buffer.slice(..));
                 pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..entity_quads * 6, 0, 0..1);
-                // At the end of the buffer (`EntityBatch::append_shadow_only`).
-                let first = entity_vertices as u32 - shadow_only_quads * 4;
+                // Before the GPU-posed outlines (`EntityBatch::append_shadow_only`).
+                let first = outline_base - shadow_only_quads * 4;
                 pass.draw_indexed(0..shadow_only_quads * 6, first as i32, 0..1);
             }
         }
@@ -10412,21 +10054,16 @@ impl Renderer {
             if let Some(mirror) = &self.mirror {
                 // Mirrored about y = `plane` (camera-relative).
                 let plane = plane - frame.camera.y as f32;
-                let inverse_view = mirror_inverse_view(globals.inverse_view, plane);
+                let inverse_view = view::mirror_inverse_view(globals.inverse_view, plane);
                 // fog_ends.w: the plane, below which fs_solid_mirror cuts the world away
                 // (only entity.wgsl reads the glint strength there, and no entity draws here).
                 let mut fog_ends = globals.fog_ends;
                 fog_ends[3] = plane;
                 let mirror_globals = Globals {
-                    view_proj: mirror_view_projection(view_proj, plane).to_cols_array_2d(),
+                    view_proj: view::mirror_view_projection(view_proj, plane).to_cols_array_2d(),
                     inverse_view,
                     fog_ends,
-                    hdr_light: [
-                        globals.hdr_light[0],
-                        globals.hdr_light[1],
-                        globals.hdr_light[2],
-                        0.0,
-                    ],
+                    hdr_light: [0.0, 0.0, globals.hdr_light[2], 0.0],
                     ..globals
                 };
                 self.uploads.buffer(
@@ -10646,7 +10283,7 @@ impl Renderer {
                     self.panorama.draw(&mut pass);
                     pass.set_bind_group(0, &self.group, &[]);
                 } else if celestial_vertices > 0 || frame.end_sky {
-                    pass.set_pipeline(&self.celestial_pipeline);
+                    pass.set_pipeline(&self.celestial.added);
                     pass.set_bind_group(0, &self.entity_group, &[]);
                     pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
                     if frame.end_sky {
@@ -10655,7 +10292,7 @@ impl Renderer {
                         if self.custom_sky.is_drawing() && !pack_draws_sky && self.native.is_none()
                         {
                             self.custom_sky.draw(&mut pass);
-                            pass.set_pipeline(&self.celestial_pipeline);
+                            pass.set_pipeline(&self.celestial.added);
                             pass.set_bind_group(0, &self.entity_group, &[]);
                         }
                     }
@@ -10668,8 +10305,14 @@ impl Renderer {
                                 .as_ref()
                                 .is_some_and(|n| n.sky.is_some() && !n.vanilla_sun);
                         let first = if own_sun { 6 } else { 0 };
+                        // A resource pack's core/sky isn't vanilla's sky times the sky's
+                        // lift, which the sun's disc pass assumes: today's add there.
+                        let lifted = hdr_gain
+                            && self.hdr.as_ref().is_some_and(|h| h.lighting)
+                            && !self.core_sky.as_ref().is_some_and(|c| c.draws_disc());
+                        let bodies = first..(celestial_vertices as u32 / 4) * 6;
                         pass.set_vertex_buffer(0, self.celestial_buffer.slice(..));
-                        pass.draw_indexed(first..(celestial_vertices as u32 / 4) * 6, 0, 0..1);
+                        self.celestial.draw_bodies(&mut pass, lifted, bodies);
                     }
                     pass.set_bind_group(0, &self.group, &[]);
                 }
@@ -10865,9 +10508,8 @@ impl Renderer {
                         ],
                         _ => &[(solid_pipeline, 0..phase1_draws, phase1_draws..solid_draws)],
                     };
-                    // The vanilla solid pipelines read the page themselves; a native
-                    // material's take it as vertices.
-                    let pulled = material.is_none() && self.flat.is_some();
+                    // The solid pipelines, a native material's too, read the page themselves.
+                    let pulled = self.flat.is_some();
                     pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
                     pass.set_vertex_buffer(1, self.instances.slice(..));
                     pass.stage(self.own_timing.as_mut(), "solid terrain");
@@ -11288,7 +10930,7 @@ impl Renderer {
             // (`opaque_depth`, `opaque_color`): the pass ends, the targets are copied, and a
             // pass that loads both carries on.
             if material.is_some()
-                && let Some(native) = &self.native
+                && let Some(native) = self.native.as_ref().filter(|n| n.frame.reads_opaque)
             {
                 drop(pass);
                 let depth = world_depth.texture();
@@ -11705,6 +11347,12 @@ impl Renderer {
                 self.draw_hand(&mut pass, hand_quads, world_quads + additive_quads);
             }
         }
+        let lifts_world = output::lifts_world(
+            frame.title,
+            self.output.frame.format == LINEAR_FRAME,
+            self.shader_pack_kind() == Some("iris"),
+            self.native.as_ref().map(|n| n.frame.api),
+        );
         if let Some((color, depth)) = &scaled
             && pack_post
             && let Some((dimension, Some(mut post))) = self.pack_post.take()
@@ -11757,7 +11405,7 @@ impl Renderer {
                                 L::Solid => &flat.calls[..flat.solid_calls],
                                 L::Translucent => flat.translucent_calls(),
                                 L::ShadowSolid => &flat.calls[shadow..shadow_translucent],
-                                L::ShadowTranslucent => &flat.calls[shadow_translucent..],
+                                L::ShadowTranslucent => flat.shadow_translucent_calls(),
                             };
                             match geometry {
                                 Some((instances, layout)) => {
@@ -11846,11 +11494,6 @@ impl Renderer {
                 native.timing.as_mut(),
             );
         } else if let (Some((_, generated)), Some((_, depth))) = (&fg_frames, &scaled) {
-            let world = self
-                .frame_gen
-                .world(&self.device, &self.world_post, &self.config);
-            self.world_post
-                .finish(&self.queue, &mut encoder, &world, self.own_timing.as_mut());
             let camera = frame_gen::Camera {
                 jittered,
                 view_proj,
@@ -11862,32 +11505,19 @@ impl Renderer {
                 far: frame.depth_far,
                 fov_y: frame.fov_degrees.to_radians(),
             };
-            let generated_view = generated.create_view(&wgpu::TextureViewDescriptor {
-                format: Some(self.config.format.remove_srgb_suffix()),
-                ..Default::default()
-            });
-            fg_made = self.frame_gen.generate(
-                &self.device,
-                &self.queue,
-                &mut encoder,
-                &self.world_post,
-                &view_target,
-                &generated_view,
-                &camera,
-            );
-            if fg_made {
-                let overlay = Overlay {
-                    hand_quads: hand_quads * u32::from(!pack_draws_hand),
-                    first_hand_vertex: made_hand_vertex,
-                    crosshair,
-                    first_crosshair: debug_depth + debug_top,
-                    world_depth: false,
-                    real: false,
-                    hand_drawn: !pack_draws_hand,
-                    hand_view_proj,
-                };
-                self.draw_overlay(&mut encoder, frame, &generated_view, generated, &overlay);
-            }
+            let overlay = Overlay {
+                hand_quads: hand_quads * u32::from(!pack_draws_hand),
+                first_hand_vertex: made_hand_vertex,
+                crosshair,
+                first_crosshair: debug_depth + debug_top,
+                world_depth: false,
+                real: false,
+                hand_drawn: !pack_draws_hand,
+                hand_view_proj,
+            };
+            let onto = (&view_target, &target_texture, generated);
+            fg_made =
+                self.draw_generated(&mut encoder, frame, &camera, &overlay, onto, lifts_world);
         } else if scaled.is_some() {
             self.world_post.finish(
                 &self.queue,
@@ -11897,15 +11527,7 @@ impl Renderer {
             );
         }
         if !frame.title {
-            let counts = [solid_draws, translucent_draws, entity_quads];
-            self.draw_world_views(
-                &mut encoder,
-                frame,
-                &asked.views,
-                globals,
-                flat_frame,
-                counts,
-            );
+            self.draw_world_views(&mut encoder, frame, globals, flat_frame, entity_quads);
             let (depth, depth_size) = match &scaled {
                 Some((_, depth)) => (depth, self.world_post.size().unwrap_or(size)),
                 None => (&self.depth, size),
@@ -11962,7 +11584,10 @@ impl Renderer {
         };
         let overlay = Overlay {
             hand_quads: hand_quads * u32::from(!pack_draws_hand && !hand_in_world),
-            first_hand_vertex: ((world_quads + additive_quads) * 4) as i32,
+            first_hand_vertex: match fg_made && frame_gen::generated_only() && self.hdr.is_some() {
+                true => made_hand_vertex,
+                false => ((world_quads + additive_quads) * 4) as i32,
+            },
             crosshair,
             first_crosshair: debug_depth + debug_top,
             world_depth: scaled.is_none(),
@@ -12013,17 +11638,17 @@ impl Renderer {
         {
             self.readback.present(&self.device, &mut encoder, image);
         }
-        let lifts_world = output::lifts_world(
-            frame.title,
-            self.output.frame.format == LINEAR_FRAME,
-            self.shader_pack_kind() == Some("iris"),
-            self.native.as_ref().map(|n| n.frame.api),
-        );
-        match (&self.hdr, &surface_frame) {
-            (Some(hdr), Some(f)) => hdr.present(
+        // With frame generation on a window, its real frame.
+        let shown = surface_frame.as_ref().map(|f| &f.texture);
+        let shown = shown.or(fg_frames
+            .as_ref()
+            .filter(|_| self.surface.is_some())
+            .map(|f| &f.0));
+        match (&self.hdr, shown) {
+            (Some(hdr), Some(texture)) => hdr.present(
                 &self.queue,
                 &mut encoder,
-                &f.texture,
+                texture,
                 lifts_world,
                 self.own_timing.as_mut(),
             ),
@@ -12187,7 +11812,7 @@ impl Renderer {
                 self.configure_surface();
             }
         } else if let Some((real, generated)) = fg_frames {
-            self.frame_gen.present(real, generated, fg_made);
+            self.present_generated(real, generated, fg_made);
         }
         if self.surface.is_none() {
             // No swapchain paces offscreen frames: keep two on the GPU at most.
@@ -12656,126 +12281,6 @@ pub(crate) fn copy_frame(
     );
     buffer
 }
-impl Renderer {
-    /// The frame's readbacks to start right after its submission (on the submit thread when
-    /// the frame goes there): occlusion culling's results (`cull`) and GPU culling's
-    /// statistics. GPU frames leave occlusion culling off, so a frame has one at most.
-    fn after_submit(&mut self) -> Option<submit::AfterSubmit> {
-        let cull = self.cull.as_mut().and_then(|c| c.submitted());
-        let gpu = self.gpu_culling.as_mut().and_then(|g| g.submitted());
-        match (cull, gpu) {
-            (Some(c), Some(g)) => Some(Box::new(move || {
-                c();
-                g();
-            })),
-            (Some(c), None) => Some(Box::new(c)),
-            (None, Some(g)) => Some(Box::new(g)),
-            (None, None) => None,
-        }
-    }
-    /// Frame `frame`'s statistics shown, unless a newer frame's are: a CPU frame's as it is
-    /// drawn, a GPU frame's when its counts come back (`GpuCulling::collect`).
-    fn show_stats(&mut self, frame: u64, [sections, draws, calls]: [usize; 3]) {
-        if frame > self.stats_frame {
-            self.stats_frame = frame;
-            (
-                self.drawn_sections,
-                self.section_draws,
-                self.section_draw_calls,
-            ) = (sections, draws, calls);
-        }
-    }
-    /// Frames between the last one drawn and the one whose statistics are shown: 0 after a
-    /// CPU frame, one to three in GPU frames, while their counts are on their way back.
-    pub fn stats_lag(&self) -> u64 {
-        self.frame_serial - self.stats_frame
-    }
-    /// Take in the frame the submit thread submitted: start its readbacks and, offscreen,
-    /// keep at most two frames ahead of the GPU, as a frame submitted in place does.
-    fn land_frame(&mut self) {
-        let Some(offscreen) = self.deferred.take() else {
-            return;
-        };
-        let submission = self.queue.landed();
-        if let Some(timer) = &mut self.gpu_timer {
-            timer.submitted(&self.queue);
-            timer.collect(&self.device, &mut self.gpu_times);
-        }
-        if let Some(Some(timer)) = Self::pass_timer(&mut self.pack_post, &mut self.native) {
-            timer.submitted(&self.queue);
-        }
-        if let Some(timer) = &mut self.own_timing {
-            timer.submitted(&self.queue);
-        }
-        if offscreen && let Some(submission) = submission {
-            self.in_flight.push_back(submission);
-            if !self.paced_elsewhere {
-                self.wait_frames();
-            }
-        }
-    }
-    /// No swapchain paces offscreen frames: keep two on the GPU at most.
-    pub fn wait_in_flight(&mut self) {
-        self.land_frame();
-        self.wait_frames();
-    }
-    /// The frame on the submit thread submitted and presented: a surface reconfigure waits
-    /// for the device and breaks if a frame is submitted while it waits, the compositor
-    /// copies views after them, and `flip_frame` listeners hear a frame after its present.
-    /// (The end of a frame already lands the frames of the turn before; this is the turn's
-    /// own.)
-    pub fn wait_submissions(&mut self) {
-        self.queue.wait();
-    }
-    fn wait_frames(&mut self) {
-        while self.in_flight.len() > 2 {
-            let index = self.in_flight.pop_front();
-            let _ = self.device.poll(wgpu::PollType::Wait {
-                submission_index: index,
-                timeout: Some(std::time::Duration::from_secs(5)),
-            });
-        }
-    }
-    /// Take a screenshot request: queue the frame's copy, or report why the
-    /// frame cannot be read back.
-    fn take_readback(
-        &mut self,
-        request: ScreenshotRequest,
-        encoder: &mut wgpu::CommandEncoder,
-        texture: &wgpu::Texture,
-    ) -> Option<(ScreenshotRequest, wgpu::Buffer)> {
-        // The copy and PNG writer both assume 8-bit pixels; a float surface would make
-        // the row stride too small for the copy and abort in validation.
-        if self.config.format.block_copy_size(None) == Some(4) {
-            let size = [self.config.width, self.config.height];
-            let format = self.config.format.remove_srgb_suffix();
-            // The layered float frame maps the world to SDR, then adds the HUD as drawn.
-            // Other 16-bit frames keep their clipped 8-bit copy.
-            let copy = self
-                .hdr
-                .as_mut()
-                .and_then(|hdr| {
-                    hdr.sdr_screenshot(&self.device, encoder, format, request.size.is_some())
-                })
-                .or_else(|| {
-                    (texture.format() != format && texture.format() == self.output.frame.format)
-                        .then(|| {
-                            self.readback
-                                .unorm_copy(&self.device, encoder, texture, format)
-                        })
-                });
-            let texture = copy.as_ref().unwrap_or(texture);
-            Some((request, copy_frame(&self.device, encoder, texture, size)))
-        } else {
-            let error = format!(
-                "screenshots need a 32-bit surface format, not {:?}",
-                self.config.format
-            );
-            self.screenshot_result = Some(Err(error));
-            None
-        }
-    }
-}
 /// `screenshots/2026-10-28_12.00.00.png` -> `screenshots/2026-10-28_12.00.00-hdr.png`.
 fn hdr_screenshot_path(path: &std::path::Path) -> PathBuf {
     let stem = path.file_stem().unwrap_or_default().to_string_lossy();
@@ -12830,61 +12335,12 @@ pub(crate) fn square_downscale(pixels: &[u8], width: u32, height: u32, size: [u3
     }
     out
 }
-/// Camera-relative clip planes (`Frustum`).
-#[derive(Clone, Copy, Debug)]
-pub struct Frustum {
-    planes: [Vec4; 6],
-}
+mod view_frustum;
+pub use view_frustum::Frustum;
 
-/// A frustum with the given clip planes, for tests that drive the public draw call.
 #[cfg(feature = "test-support")]
-pub fn test_frustum(planes: [Vec4; 6]) -> Frustum {
-    Frustum { planes }
-}
-impl Frustum {
-    /// Whether the camera-relative box `min..max` is at least partly inside.
-    pub fn intersects(&self, min: Vec3, max: Vec3) -> bool {
-        !self.planes.iter().any(|p| {
-            let sign = p.truncate().cmpge(Vec3::ZERO);
-            let v = Vec3::select(sign, max, min);
-            p.truncate().dot(v) + p.w < 0.0
-        })
-    }
-    /// Whether a camera-relative sphere is at least partly inside. Frustum
-    /// planes are normalized, so each test needs only one dot product and a
-    /// radius comparison.
-    pub fn intersects_sphere(&self, center: Vec3, radius: f32) -> bool {
-        if !center.is_finite() || !radius.is_finite() || radius < 0.0 {
-            return true;
-        }
-        !self
-            .planes
-            .iter()
-            .any(|plane| plane.truncate().dot(center) + plane.w < -radius)
-    }
-    /// Depth clip planes alone: X/Y projection jitter cannot change this test.
-    /// Retaining side-of-screen geometry makes this safe before TAA selects a phase.
-    pub fn intersects_depth(&self, min: Vec3, max: Vec3) -> bool {
-        if !min.is_finite() || !max.is_finite() || !min.cmple(max).all() {
-            return true;
-        }
-        !self.planes[4..].iter().any(|p| {
-            let sign = p.truncate().cmpge(Vec3::ZERO);
-            let v = Vec3::select(sign, max, min);
-            p.truncate().dot(v) + p.w < 0.0
-        })
-    }
-    /// Whether the camera-relative box `min..max` is entirely inside. Then
-    /// `intersects` accepts every box within it: each plane's distance only
-    /// grows from this box's nearest corner to the inner box's farthest, and
-    /// rounding keeps that order.
-    pub fn contains(&self, min: Vec3, max: Vec3) -> bool {
-        self.planes.iter().all(|p| {
-            let sign = p.truncate().cmpge(Vec3::ZERO);
-            let v = Vec3::select(sign, min, max);
-            p.truncate().dot(v) + p.w >= 0.0
-        })
-    }
+pub fn test_frustum(planes: [Vec4; 6]) -> JoinedFrusta {
+    JoinedFrusta::new(Frustum { planes }, [])
 }
 /// Vanilla's `Projection`: reversed depth (near maps to 1, far to 0, tests
 /// are GREATER_THAN_OR_EQUAL), which keeps far faces a hair apart, like
@@ -12923,45 +12379,8 @@ pub(crate) fn world_projection(fov_degrees: f32, aspect: f32, far: f32) -> Mat4 
     Mat4::perspective_rh(fov_degrees.to_radians(), aspect, far, NEAR_PLANE)
 }
 
-/// `view_proj` mirrored about the horizontal plane at the camera-relative height `plane`:
-/// with F the mirror (y flips and moves to 2 * plane), `view_proj * F` negates column 1
-/// and moves column 3 by 2 * plane times column 1.
-///
-/// `mirror_inverse_view` is the inverse's other side: F * `inverse_view`.
-fn mirror_view_projection(view_proj: Mat4, plane: f32) -> Mat4 {
-    let mut m = view_proj.to_cols_array_2d();
-    let col1 = m[1];
-    m[1] = col1.map(|v| -v);
-    m[3] = std::array::from_fn(|i| m[3][i] + 2.0 * plane * col1[i]);
-    Mat4::from_cols_array_2d(&m)
-}
-
-/// The mirror's `inverse_view` (the sky's rays): what the view sees, mirrored about the
-/// horizontal plane at the camera-relative height `plane`, so F * `inverse_view`.
-fn mirror_inverse_view(inverse_view: [[f32; 4]; 4], plane: f32) -> [[f32; 4]; 4] {
-    inverse_view.map(|[x, y, z, w]| [x, 2.0 * plane * w - y, z, w])
-}
-/// Where a perspective `view_proj` sees from, in its own (camera-relative)
-/// space: the point whose clip x, y and w are all 0. `None` for a
-/// projection without one (orthographic).
-fn projection_center(view_proj: Mat4) -> Option<Vec3> {
-    let m = view_proj.as_dmat4();
-    let rows = [m.row(0), m.row(1), m.row(3)];
-    let a = glam::DMat3::from_cols(
-        DVec3::new(rows[0].x, rows[1].x, rows[2].x),
-        DVec3::new(rows[0].y, rows[1].y, rows[2].y),
-        DVec3::new(rows[0].z, rows[1].z, rows[2].z),
-    );
-    let det = a.determinant();
-    if !det.is_normal() {
-        return None;
-    }
-    let b = DVec3::new(rows[0].w, rows[1].w, rows[2].w);
-    Some((a.inverse() * -b).as_vec3())
-}
-
 /// Calls `draw(first, quads)` for each run of a mesh's solid quads that can
-/// face `eye` (`projection_center`), the mesh at the camera-relative
+/// face `eye` (`view::projection_center`), the mesh at the camera-relative
 /// `origin`; all of them when there is no eye.
 fn facing_runs(sides: &Sides, eye: Option<Vec3>, origin: [f32; 3], draw: impl FnMut(u32, u32)) {
     facing_runs_from(sides, eye, None, origin, Quads::All, draw)
@@ -13258,7 +12677,7 @@ mod tests {
         let view_proj = super::world_projection(70.0, 1.5, 512.0)
             * Mat4::look_to_rh(Vec3::ZERO, Vec3::new(0.3, -0.4, -1.0), Vec3::Y);
         let plane = -3.25;
-        let mirror = super::mirror_view_projection(view_proj, plane);
+        let mirror = super::view::mirror_view_projection(view_proj, plane);
         for p in [Vec3::new(1.0, 2.0, -9.0), Vec3::new(-4.0, -1.5, -20.0)] {
             let reflected = Vec3::new(p.x, 2.0 * plane - p.y, p.z);
             let a = mirror * Vec4::from((p, 1.0));
@@ -13272,7 +12691,7 @@ mod tests {
         // A camera looking down: its mirror looks up, by as much.
         let forward = Vec3::new(0.3, -0.64, -1.0).normalize();
         let view = Mat4::look_to_rh(Vec3::ZERO, forward, Vec3::Y);
-        let mirrored = super::mirror_inverse_view(view.inverse().to_cols_array_2d(), -3.25);
+        let mirrored = super::view::mirror_inverse_view(view.inverse().to_cols_array_2d(), -3.25);
         let ray = Mat4::from_cols_array_2d(&mirrored) * Vec4::new(0.0, 0.0, -1.0, 0.0);
         let reflected = Vec3::new(forward.x, -forward.y, forward.z);
         assert!((ray.truncate() - reflected).length() < 1e-5, "{ray}");
@@ -13737,6 +13156,7 @@ mod tests {
     /// writes it for FXC (shader model 5.1), entry point by entry point, and
     /// every shader the OpenGL backend runs also translates to GLSL.
     #[test]
+    #[ignore = "daily"]
     fn shaders_translate_to_hlsl_for_directx_12_and_glsl_for_opengl() {
         fn wgsl_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
             for entry in std::fs::read_dir(dir).unwrap() {
@@ -14210,6 +13630,7 @@ mod tests {
     /// GPU culling is switched off (`forget_records`), every mark is the one a
     /// section has while it is off.
     #[test]
+    #[ignore = "daily"]
     fn fading_sections_go_to_the_cpu_and_come_back() {
         use super::{
             FadeInputs, SectionGpu, SectionKey, decide_fade, forget_records, gpu_culling,
@@ -14544,17 +13965,17 @@ mod tests {
         use glam::{Mat4, Vec3};
         let projection = super::world_projection(70.0, 16.0 / 9.0, 512.0);
         let view = crate::camera::view_matrix(30.0, 20.0);
-        let eye = super::projection_center(projection * view).unwrap();
+        let eye = super::view::projection_center(projection * view).unwrap();
         assert!(eye.length() < 1e-5, "{eye}");
         // A pose translated by the bob: the eye is where the pose's inverse
         // takes the view's origin.
         let bob = Mat4::from_rotation_z(0.02) * Mat4::from_translation(Vec3::new(0.03, -0.08, 0.0));
         let expected = (bob * view).inverse().transform_point3(Vec3::ZERO);
-        let eye = super::projection_center(projection * bob * view).unwrap();
+        let eye = super::view::projection_center(projection * bob * view).unwrap();
         assert!(eye.distance(expected) < 1e-5, "{eye} {expected}");
         assert!(expected.length() > 0.05);
         assert!(
-            super::projection_center(Mat4::orthographic_rh(-1.0, 1.0, -1.0, 1.0, 0.0, 1.0))
+            super::view::projection_center(Mat4::orthographic_rh(-1.0, 1.0, -1.0, 1.0, 0.0, 1.0))
                 .is_none()
         );
     }
@@ -14929,9 +14350,11 @@ struct DisplayWatch {
 }
 
 impl DisplayReading {
-    /// What wgpu reads from the OS for `surface`'s display; nothing without one.
+    /// What wgpu reads from the OS for `surface`'s display; without one, `hdr::offscreen_display`.
     fn read(surface: Option<&wgpu::Surface>, adapter: &wgpu::Adapter) -> Self {
-        surface.map_or_else(Self::default, |s| Self::os(&s.display_hdr_info(adapter)))
+        surface.map_or_else(hdr::offscreen_display, |s| {
+            Self::os(&s.display_hdr_info(adapter))
+        })
     }
     fn os(info: &wgpu::DisplayHdrInfo) -> Self {
         #[cfg(target_os = "macos")]

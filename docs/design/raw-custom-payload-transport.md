@@ -11,7 +11,8 @@ Replace the legacy envelope transport, its broadcast hooks, old send methods, br
 30,000-byte envelope bound and 32-message counters outright. Application packets
 use their declared namespaced custom-payload channel and exact opaque body bytes.
 There is no Horizon application envelope and no second path for typed payloads.
-Existing attachment synchronization is outside this raw transport migration.
+Attachment synchronization rides this transport as an engine declaration (#813 step 4a;
+see the typed-payload design note).
 
 Registration runs in dependency order during mod loading. `PayloadRegistrar`
 provides play, configuration and common registrations, each ToClient, ToServer or
@@ -102,3 +103,13 @@ refusal, generic-send bypass and named decode failures. Native and wasm must bot
 exercise the real transport. Measure allocations for a 1 MiB wasm transfer; do not
 claim zero-copy across Wire. The author supplies prepared-data self-check evidence;
 review is static. The lane lead separately orders independent network test commands.
+
+The `wasm-mods` fixture job runs
+`game::payload_transport::wasm_config_tests::compiled_guest_runs_on_configuration_connection_thread`
+by exact name and requires one passing test. It loads this run's compiled fixture,
+negotiates payloads over TCP with the actual LAN connection, and holds known packs
+and the serving Game thread while requiring two transformed, guest-counted replies.
+This keeps dispatch in CONFIGURATION on `horizon-lan-conn`, before the Play I/O pool:
+the existing guest-entry `check_current()` rejects a default-stack connection thread
+instead of producing the expected replies. Its isolated child uses fresh game and
+launcher homes and a scratch game directory/current working directory.

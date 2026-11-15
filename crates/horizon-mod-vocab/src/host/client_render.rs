@@ -26,14 +26,14 @@ pub trait ClientRenderClientHost {
     #[access(PublishedResources)]
     fn instance_group_destroy(&self, group: InstanceGroupRef) -> Result<(), GroupError>;
     /// Side: client.
-    /// Asks `native_block_render_visibility` again for every state and, when the answers differ
+    /// Asks `block_render_visibility` again for every state and, when the answers differ
     /// from those in use, remeshes every loaded section with them. Call it when your answer changes (a toggle key, a scan
     /// finishing) and once when the player joins, not every frame: a rebuild takes the workers a
     /// few seconds. With no part answering, nothing is asked and the mesher keeps its no-mod path.
     #[access(WorldOnly)]
     fn refresh_render_visibility(&mut self);
     /// Side: client.
-    /// Asks `native_biome_colors` again for every biome and, when the colours
+    /// Asks `biome_colors` again for every biome and, when the colours
     /// differ from those in use, rebuilds every loaded section and the far
     /// terrain with them (`LevelRenderer.allChanged`, as changing Biome Blend
     /// does). Call it when your colours change (a new season, a new day of a
@@ -49,6 +49,10 @@ pub trait ClientRenderClientHost {
     /// `MOD_IMAGE_SIZE`; false when it is not that
     /// size. The upload costs a texture patch of the image, so send one when the
     /// image changed, not every frame.
+    ///
+    /// The slot exists whenever a client mod, native or wasm, is loaded: the atlas packs it at
+    /// load and on a resource reload, with no mixin and no opt-in. It is one image for all mods
+    /// together: a second mod's write replaces the first's.
     #[access(WorldOnly)]
     fn mod_image(&mut self, width: u32, height: u32, rgba: &[u8]) -> bool;
     /// Side: client.

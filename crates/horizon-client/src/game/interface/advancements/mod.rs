@@ -2,6 +2,7 @@
 //! events (`CriteriaTriggers`), awarding with rewards, the toast and the
 //! chat announcement, and `players/advancements/<uuid>.json`.
 use super::{Dim, Game};
+mod icons;
 
 #[cfg(test)]
 #[path = "inventory_changed_tests.rs"]
@@ -50,7 +51,7 @@ fn progress_snapshot(a: &adv::Advancement, progress: &Progress) -> mod_api::Adva
 }
 
 pub(super) struct Toast {
-    icon: String,
+    icon: ItemStack,
     frame: Frame,
     title: Text,
     description: Option<Text>,
@@ -69,7 +70,7 @@ impl Toast {
     /// `RecipeToast.addOrUpdate` on a new toast.
     pub(super) fn recipe(items: Vec<(String, ItemStack)>) -> Self {
         Self {
-            icon: String::new(),
+            icon: ItemStack::new("minecraft:air", 0),
             frame: Frame::Task,
             title: Text::translate("recipe.toast.title", &[]),
             description: Some(Text::translate("recipe.toast.description", &[])),
@@ -407,7 +408,7 @@ impl Game<'_> {
         let data = self.options.resources.join("data");
         // The world's packs' advancements go over the game's own, and a
         // native mod's contributed files are already among them: the tables
-        // were built for this open (`build_world_tables`), so the hook is
+        // were built for this open (`stage_world_tables`), so the hook is
         // asked once, not again here.
         let files = match &self.world_tables {
             Some(tables) => tables.files.clone(),
@@ -1138,15 +1139,15 @@ impl Game<'_> {
     }
     /// `AdvancementRewards.grant`'s pickup: volume 0.2 at the player's feet,
     /// pitch `(nextFloat - nextFloat) * 0.7 + 1`, times 2. `playSound(null, …)`
-    /// so the player hears it. The draws are the level random, which is the
-    /// stream item pickup already uses for this pitch.
+    /// so the player hears it. The draws are the player's own random
+    /// (`player.getRandom()`), which no level draw shares.
     fn advancement_pickup_sound(&mut self) {
         let Some(p) = self.player.as_ref() else {
             return;
         };
         let at = [p.position.x, p.position.y, p.position.z];
-        let pitch =
-            ((self.world.random.next_float() - self.world.random.next_float()) * 0.7 + 1.0) * 2.0;
+        let mut random = horizon_client::random_source::entity();
+        let pitch = ((random.next_float() - random.next_float()) * 0.7 + 1.0) * 2.0;
         self.audio
             .play("minecraft:entity.item.pickup", Some(at), 0.2, pitch);
     }
@@ -1280,7 +1281,7 @@ impl Game<'_> {
         self.adv.last_inventory = key;
         // Native mods hear the change before any criterion is looked at, so
         // they do with no `inventory_changed` advancement in the tree too
-        // (`native_player_inventory_changed`, API @API:player_inventory_changed@).
+        // (`native_player_inventory_changed`, API 579).
         if self.remote.is_none()
             && !self.no_player_here()
             && mod_api::__private::listened(mod_api::HookId::PlayerInventoryChanged)
@@ -1564,7 +1565,7 @@ impl Game<'_> {
     }
     /// `DistanceTrigger`: the player's `player` condition, `start_position`
     /// at `start`, and the `distance` from `start` to the player.
-    fn trigger_distance(&mut self, name: &str, start: [f64; 3]) {
+    pub(super) fn trigger_distance(&mut self, name: &str, start: [f64; 3]) {
         let me = self.player_entity_for(name);
         self.trigger(name, move |c, w| {
             let pctx = adv::Entities {
@@ -2306,16 +2307,24 @@ impl Game<'_> {
     /// Overworld position the player went into the Nether from (`at`) is kept
     /// for the way back, and any other trip drops it.
     pub(super) fn trigger_dimension(&mut self, from: Dim, to: Dim, at: [f64; 3]) {
-        let (from_id, to_id) = (from.id().to_owned(), to.id().to_owned());
-        self.trigger("minecraft:changed_dimension", move |c, _| {
-            c["from"].as_str().is_none_or(|f| adv::full(f) == from_id)
-                && c["to"].as_str().is_none_or(|t| adv::full(t) == to_id)
-        });
+        self.trigger_changed_dimension(from, to);
         if from == Dim::Overworld && to == Dim::Nether {
             self.adv.marks.nether = Some(at);
         } else if !(from == Dim::Nether && to == Dim::Overworld) {
             self.adv.marks.nether = None;
         }
+    }
+    /// `CriteriaTriggers.CHANGED_DIMENSION` alone, without the
+    /// `enteredNetherPosition` bookkeeping of
+    /// `ServerPlayer.triggerDimensionChangeTriggers`: a respawn after the
+    /// credits triggers the criterion (`END` → `OVERWORLD`, whatever level
+    /// the point is in) and leaves that position as it is.
+    pub(super) fn trigger_changed_dimension(&mut self, from: Dim, to: Dim) {
+        let (from_id, to_id) = (from.id().to_owned(), to.id().to_owned());
+        self.trigger("minecraft:changed_dimension", move |c, _| {
+            c["from"].as_str().is_none_or(|f| adv::full(f) == from_id)
+                && c["to"].as_str().is_none_or(|t| adv::full(t) == to_id)
+        });
     }
     /// `ToastManager.SLOT_COUNT`.
     pub(super) const TOAST_SLOTS: usize = 5;
@@ -2403,26 +2412,27 @@ impl Game<'_> {
     }
 
     /// The `AdvancementToast` or `RecipeToast` at `index` in its slot at `y`.
-    fn draw_toast(&mut self, batch: &mut HudBatch, index: usize, y: f32, multiplier: f64) {
+    fn draw_toast(&self, batch: &mut HudBatch, index: usize, y: f32, multiplier: f64) {
         let t = &self.adv.toasts[index];
         let x = batch.width - 160.0 * t.slide.portion;
         let fully_for = t.slide.fully_for;
-        let (title, frame, icon) = (t.title.clone(), t.frame, t.icon.clone());
-        let description = t.description.clone().unwrap_or_else(|| Text::literal(""));
+        let (title, frame, icon) = (&t.title, t.frame, &t.icon);
+        let empty = Text::literal("");
+        let description = t.description.as_ref().unwrap_or(&empty);
         let recipe = t
             .is_recipe()
-            .then(|| t.recipes[t.displayed_recipe(fully_for, multiplier)].clone());
+            .then(|| &t.recipes[t.displayed_recipe(fully_for, multiplier)]);
         if let Some((station, item)) = recipe {
             // RecipeToast: black description under a purple title, the
             // station at 0.6 scale in the corner over the cycling result.
             let atlas = &self.gui.atlas;
             batch.sprite(atlas, "gui/sprites/toast/recipe", x, y);
-            batch.text_styled(atlas, &title, x + 30.0, y + 7.0, 0xFF50_0050, false);
-            batch.text_styled(atlas, &description, x + 30.0, y + 18.0, 0xFF00_0000, false);
+            batch.text_styled(atlas, title, x + 30.0, y + 7.0, 0xFF50_0050, false);
+            batch.text_styled(atlas, description, x + 30.0, y + 18.0, 0xFF00_0000, false);
             let start = batch.vertices.len();
-            self.draw_item_model(batch, &ItemStack::new(&station, 1), x + 3.0, y + 3.0);
+            self.draw_item_model(batch, &ItemStack::new(station, 1), x + 3.0, y + 3.0);
             batch.scale_since(start, x, y, 0.6, 0.6);
-            self.draw_item_model(batch, &item, x + 8.0, y + 8.0);
+            self.draw_item_model(batch, item, x + 8.0, y + 8.0);
             return;
         }
         let atlas = &self.gui.atlas;
@@ -2435,13 +2445,13 @@ impl Game<'_> {
         let label = title;
         let rgb = color & 0x00FF_FFFF;
         if let [line] = lines.as_slice() {
-            batch.text_styled(atlas, &label, x + 30.0, y + 7.0, color, false);
+            batch.text_styled(atlas, label, x + 30.0, y + 7.0, color, false);
             batch.text_styled(atlas, line, x + 30.0, y + 18.0, u32::MAX, false);
         } else if fully_for < 1500 {
             let fade = ((1500 - fully_for) as f32 / 300.0).clamp(0.0, 1.0);
             let alpha = (fade * 255.0).floor() as u32;
             if alpha != 0 {
-                batch.text_styled(atlas, &label, x + 30.0, y + 11.0, alpha << 24 | rgb, false);
+                batch.text_styled(atlas, label, x + 30.0, y + 11.0, alpha << 24 | rgb, false);
             }
         } else {
             let fade = ((fully_for - 1500) as f32 / 300.0).clamp(0.0, 1.0);
@@ -2461,7 +2471,7 @@ impl Game<'_> {
                 }
             }
         }
-        self.draw_item(batch, &ItemStack::new(&icon, 1), x + 8.0, y + 8.0);
+        self.draw_item(batch, icon, x + 8.0, y + 8.0);
     }
 }
 /// The toast's frame label and its colour (`AdvancementToast`: -30465, pink,
@@ -2576,12 +2586,10 @@ impl Game<'_> {
 impl Game<'_> {
     /// `ClientAdvancements.update` (ClientboundUpdateAdvancementsPacket):
     /// the server's advancements replace or join the tree, each changed one
-    /// takes the progress sent, and one just done shows its toast. `icons`
-    /// are the added advancements' icon items by name.
+    /// takes the progress sent, and one just done shows its toast.
     pub(super) fn remote_advancements(
         &mut self,
         p: horizon_protocol::packets::play::UpdateAdvancements,
-        icons: Vec<String>,
     ) {
         use horizon_client::scoreboard::tag_to_json;
         let mut list: Vec<adv::Advancement> = Vec::new();
@@ -2600,10 +2608,10 @@ impl Game<'_> {
         for id in &p.removed {
             self.adv.progress.criteria.remove(id);
         }
-        for (a, icon) in p.added.into_iter().zip(icons) {
+        for a in p.added {
             list.retain(|o| o.id != a.id);
             let display = a.display.map(|d| adv::Display {
-                icon,
+                icon: self.remote_advancement_icon(d.icon),
                 title: tag_to_json(&d.title),
                 description: tag_to_json(&d.description),
                 frame: match d.frame {
@@ -2688,7 +2696,7 @@ mod tests {
     use super::*;
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn helmet_wear_reports_the_old_stack_and_the_unclamped_damage() {
         const ID: &str = "testmod:wear";
         let scratch = std::env::temp_dir().join(format!("helmet-wear-{}", std::process::id()));
@@ -2720,8 +2728,9 @@ mod tests {
             let mut helmet = ItemStack::new("minecraft:iron_helmet", 1);
             helmet.damage = 164;
             game.armor[0] = Some(helmet);
-            let source = game.motion.health.damage.id("minecraft:falling_anvil");
-            game.hurt_helmet(source.unwrap(), 8.0);
+            let source =
+                horizon_client::health::NO_ATTACK.player_source("minecraft:falling_anvil", 0);
+            game.hurt_helmet(&source, 8.0);
             assert_eq!(game.armor[0], None);
             assert!(game.adv.progress.has(ID, "worn"));
         });
@@ -2729,7 +2738,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn toast_admission_cancels_edits_and_preserves_queue_behavior() {
         use mod_api::{ClientHost, Flow, Hooks, ModEntry, ToastAddEvent, ToastKind};
         struct Listener;
@@ -2756,7 +2765,7 @@ mod tests {
                 game.options.execution_role = super::super::execution_role::ExecutionRole::Client;
                 game.adv.toasts.clear();
                 let advancement = |name: &str| Toast {
-                    icon: "minecraft:stone".into(),
+                    icon: ItemStack::new("minecraft:stone", 1),
                     frame: Frame::Challenge,
                     title: Text::translate("advancements.toast.challenge", &[]),
                     description: Some(Text::literal(name)),
@@ -2775,7 +2784,7 @@ mod tests {
                     serde_json::json!({"translate": "advancements.toast.challenge"})
                 );
                 assert_eq!(original.description.as_ref().unwrap().plain(), "untouched");
-                assert_eq!(original.icon, "minecraft:stone");
+                assert_eq!(original.icon, ItemStack::new("minecraft:stone", 1));
                 assert!(original.slot.is_none());
                 assert!(
                     original.slide.origin.is_none(),
@@ -2818,7 +2827,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn mob_name_components_read_live_text_without_saved_nbt() {
         use crate::game::{Audio, Options, Settings, commands::Target, load_resources};
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
@@ -2906,7 +2915,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn mob_predicate_view_reads_active_effect_instances() {
         use crate::game::{Audio, Options, Settings, commands::Target, load_resources};
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
@@ -3140,7 +3149,7 @@ mod tests {
             id: "quests:board".into(),
             parent: None,
             display: Some(adv::Display {
-                icon: "minecraft:book".into(),
+                icon: horizon_client::items::ItemStack::new("minecraft:book", 1),
                 title,
                 description,
                 frame: Frame::Task,
@@ -3284,7 +3293,7 @@ mod structure_tag_tests {
     /// `worldgen/structure` tags, and with a world's data packs theirs over
     /// the game's.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn location_structure_tags_hold_their_structures() {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
@@ -3367,9 +3376,7 @@ mod structure_tag_tests {
             &[],
             &[],
         );
-        let (tables, _) = game
-            .build_world_tables(&stack, false, &root, false)
-            .unwrap();
+        let (tables, _, _) = game.stage_world_tables(&stack, false, &root).unwrap();
         game.world_tables = tables;
         assert!(game.world_tables.is_some());
         assert!(holds(&game, "#mypack:village", "minecraft:igloo"));
@@ -3391,7 +3398,7 @@ mod random_chance_command_tests {
     use crate::game::commands::Target;
     use horizon_core::nbt::Tag;
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn registered_named_random_chance_uses_real_source_and_world_draws() {
         use crate::game::{Audio, Options, Settings, load_resources};
         use std::time::Instant;
@@ -3530,7 +3537,7 @@ mod custom_data_equipment_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and scratch homes/cwd"]
+    #[ignore = "daily"]
     fn actual_mob_equipment_projects_typed_custom_data_into_named_predicate_evaluation() {
         crate::game::native_entity_refs::tests::with_game(|game| {
             game.build_registries();
@@ -3662,7 +3669,7 @@ mod movement_predicate_tests {
     use serde_json::json;
 
     #[test]
-    #[ignore = "requires prepared resources and scratch cwd/homes"]
+    #[ignore = "daily"]
     fn actual_registered_movement_predicate_uses_admitted_mob() {
         let mut resources = None;
         let mut game = server_game(&mut resources);

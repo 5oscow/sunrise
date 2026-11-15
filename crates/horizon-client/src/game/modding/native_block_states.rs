@@ -230,6 +230,12 @@ impl Game<'_> {
         self.pack.assets.registry.state(state)?;
         Some(self.res.facts().get(state).hardness)
     }
+    /// The explosion resistance the block of this state declares (`Block.getExplosionResistance`):
+    /// stone 6, obsidian 1200, bedrock 3,600,000. None for an unknown state.
+    pub(super) fn block_state_explosion_resistance(&self, state: BlockStateId) -> Option<f32> {
+        self.pack.assets.registry.state(state)?;
+        Some(self.res.facts().get(state).explosion_resistance)
+    }
     /// `BlockState.getSoundType()`: its volume, pitch and the sound events for breaking,
     /// stepping on, placing, hitting and falling on it. None for an unknown state.
     pub(super) fn block_state_sound(&self, state: BlockStateId) -> Option<BlockSoundType> {
@@ -439,7 +445,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn item_and_block_registry_facts_use_the_loaded_tables() {
         use super::super::api_values::TryIntoApi;
         use mod_api::Host;
@@ -502,7 +508,7 @@ mod tests {
     /// A mod item maps back to the content block it places: the item's
     /// binding is the block the content root registered for it.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn item_block_maps_a_mod_items_back_to_its_block() {
         use super::super::native_entity_refs::tests::{run_fresh_cases, with_game_at};
         use mod_api::{self, Hooks, Host};
@@ -549,7 +555,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn host_key_iteration_matches_the_26_3_registries_in_registry_order() {
         use mod_api::Host;
         let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
@@ -612,6 +618,28 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "daily"]
+    fn public_host_resolves_literal_block_and_effect_names() {
+        mod_platform::testing::with_mods(std::sync::Arc::from([]), || {
+            let root =
+                std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+            super::super::native_entity_refs::tests::with_game_at(root, |game| {
+                let host: &dyn mod_api::Host = game;
+                assert_eq!(
+                    host.block_key("minecraft:stone").unwrap().id(host),
+                    "minecraft:stone"
+                );
+                assert_eq!(
+                    host.effect_key("minecraft:speed").unwrap().id(host),
+                    "minecraft:speed"
+                );
+                assert_eq!(host.block_key("test:missing_block"), None);
+                assert_eq!(host.effect_key("test:missing_effect"), None);
+            });
+        });
+    }
+
+    #[test]
     fn description_ids_write_a_path_separator_as_a_dot() {
         assert_eq!(
             super::description_id("fluid_type", "ruby:molten/iron").as_deref(),
@@ -621,7 +649,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn fluid_type_properties_answer_each_fluid_family() {
         use mod_api::{Host, HostFluidStates};
         super::super::native_entity_refs::tests::with_game(|game| {
@@ -686,7 +714,7 @@ mod tests {
     /// `FluidState.createLegacyBlock`: a source is its block at level 0, flowing water of amount
     /// 3 is level 5, falling adds 8, the empty fluid is air; states no fluid can be in have none.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn legacy_blocks_follow_the_liquid_levels() {
         use mod_api::{Host, HostFluidStates};
         super::super::native_entity_refs::tests::with_game(|game| {
@@ -746,7 +774,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn fluid_definitions_and_constraints_use_the_loaded_registry() {
         use mod_api::{Host, HostFluidStates};
         super::super::native_entity_refs::tests::with_game(|game| {
@@ -975,7 +1003,7 @@ mod facts_tests {
     use mod_api::{BlockStateRecord, HostBlockStates};
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn block_state_facts_read_vanillas_tables_through_the_host() {
         super::super::native_entity_refs::tests::with_game(|game| {
             let state = |name: &str| {
@@ -1112,7 +1140,7 @@ mod crafting_remainder_tests {
         }
     }
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn crafting_remainder_without_parts_matches_data() {
         let mods: mod_api::Mods = Vec::new().into();
         crate::game::api_values::install_parts(&mods).unwrap();
@@ -1144,7 +1172,7 @@ mod crafting_remainder_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn crafting_remainder_part_override_and_default() {
         let mods: mod_api::Mods =
             vec![mod_api::ModEntry::new("remainder", Box::new(RemainderMod))].into();

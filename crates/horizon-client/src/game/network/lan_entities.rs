@@ -26,7 +26,26 @@ impl Game<'_> {
         self.next_entity += 1;
         self.next_entity
     }
+    /// Whether the id counter is within [`ENTITY_ID_HEADROOM`] of the end: then a mod's spawn is
+    /// refused and the tick spawns nothing of its own, named once in the log. Ids already handed
+    /// out are never taken back, so a stale handle never names a later entity.
+    pub(super) fn entity_ids_exhausted(&mut self) -> bool {
+        let exhausted = self.next_entity >= u32::MAX - ENTITY_ID_HEADROOM;
+        if exhausted && !self.native_lifecycle.ids_exhausted_told {
+            self.native_lifecycle.ids_exhausted_told = true;
+            log::error!(
+                "entity ids exhausted: {} of {} handed out; no entity spawns until the world reopens",
+                self.next_entity,
+                u32::MAX
+            );
+        }
+        exhausted
+    }
 }
+
+/// The ids kept back below `u32::MAX`: far more than one tick hands out (a whole ender dragon
+/// takes nine in a row) and the provisional ids a natural spawn pass counts down from the end.
+pub(super) const ENTITY_ID_HEADROOM: u32 = 1 << 24;
 
 fn add_state<'a>(
     out: &'a mut States,
@@ -679,6 +698,23 @@ impl Game<'_> {
         }
     }
 
+    /// ServerEntity.sendChanges clears needsSync once it has looked, and
+    /// SteppedInterpolationTracker.updateTracking clears syncPosition: once the states for the
+    /// tracking pass are taken.
+    pub(super) fn lan_syncs_looked(&mut self) {
+        for m in &mut self.mobs {
+            m.needs_sync = false;
+            m.sync_position = false;
+        }
+        self.creatures
+            .projectiles
+            .for_each_mut(|p| p.needs_sync = false);
+        for d in &mut self.dropped {
+            d.needs_sync = false;
+        }
+        self.tridents.iter_mut().for_each(|t| t.needs_sync = false);
+    }
+
     /// Gives the entities Horizon keeps without an id one (`Entity.id`, from
     /// the same counter as the rest) before they are first tracked.
     pub(super) fn lan_assign_ids(&mut self) {
@@ -1065,7 +1101,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "daily"]
     fn tracking_ids_preserve_all_family_interleaving() {
         crate::game::native_entity_refs::tests::with_game(|game| {
             for (kind, nbt) in [
@@ -1139,7 +1175,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "daily"]
     fn tracking_ids_refuse_bound_zero_owners() {
         for kind in ["minecraft:falling_block", "minecraft:arrow"] {
             crate::game::native_entity_refs::tests::with_game(|game| {
@@ -1171,7 +1207,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "daily"]
     fn tracking_ids_only_number_the_spawn_buffer_during_a_taken_pass() {
         macro_rules! check {
             ($kind:expr, $nbt:expr, $game:ident, $list:expr) => {
@@ -1241,7 +1277,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "daily"]
     fn late_dragon_ids_reserve_parts_before_crystals() {
         crate::game::native_entity_refs::tests::with_game(|game| {
             game.summon_with_nbt("minecraft:ender_dragon", [1.0, 70.0, 1.0], "{}")
@@ -1270,7 +1306,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn kept_display_data_is_what_a_build_gives() {
         crate::game::native_entity_refs::tests::with_game(|game| {
             let snbt = |s: &str| horizon_client::command::snbt::parse_fully(s).unwrap();

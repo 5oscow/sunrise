@@ -60,7 +60,7 @@ impl Game<'_> {
             .chunks
             .get(&(key.0 >> 4, key.2 >> 4))
             .and_then(|c| c.saved.as_ref())
-            .is_some_and(|s| s.rolled_loot.iter().any(|r| r.pos == key))
+            .is_some_and(|s| s.pending_loot.contains_key(&key))
         {
             self.send_overlay_message(
                 Text::translate("container.spectatorCantOpen", &[])
@@ -524,6 +524,7 @@ impl Game<'_> {
                 256.0,
                 256.0,
             );
+            self.draw_screen_phase(batch, horizon_client::screen_draw::RenderPhase::Background);
             // ShulkerBoxScreen draws the menu's title: the box's custom name
             // (BaseContainerBlockEntity.getDisplayName) or its default name.
             let title = self.remote_menu_title().unwrap_or_else(|| {
@@ -555,6 +556,7 @@ impl Game<'_> {
             r.u1 = r.u0 + 176.0 * du;
             batch.rect_uv(ox, oy + top, 176.0, 96.0, r, u32::MAX);
         }
+        self.draw_screen_phase(batch, horizon_client::screen_draw::RenderPhase::Background);
         let title = self.chest_title(rows);
         super::screen_info::name_container(|| title.plain());
         batch.text_styled(atlas, &title, ox + 8.0, oy + 6.0, grey, false);
@@ -586,7 +588,7 @@ mod tests {
     /// `ChestBlockEntity`'s opener counter plays the block's own hinge
     /// sound: a copper chest's, by weather state, not the wooden chest's.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_player_opens_and_closes_a_chest_with_its_own_hinge_sound() {
         let mut resources = None;
         let mut game = super::super::game_tests::tests::server_game(&mut resources);
@@ -668,7 +670,7 @@ mod reach_tests {
     /// asks both halves): breaking the half the player did not click ends the
     /// six-row menu instead of leaving a three-row one.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn breaking_the_other_half_closes_the_open_double_chest() {
         let mut resources = None;
         let mut game = server_game(&mut resources);
@@ -722,7 +724,7 @@ mod lock_tests {
     /// `createMenu`, so the block is never set as the open container. A hand
     /// holding the lock's item opens it.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_locked_container_refuses_the_local_players_open() {
         let mut resources = None;
         let mut game = server_game(&mut resources);
@@ -777,7 +779,7 @@ mod lock_tests {
     /// `canOpen` of both halves, so a lock on the half the player did not
     /// click still refuses the six-row menu.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_lock_on_either_half_refuses_a_double_chest() {
         let mut resources = None;
         let mut game = server_game(&mut resources);

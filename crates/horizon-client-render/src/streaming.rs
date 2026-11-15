@@ -10,12 +10,11 @@ use crate::{
     chunk_map::ChunkMembershipDelta,
     graphics::LeafCullingMode,
     light::{LightChanges, LightTables, light_chunk},
-    mesher::{MeshScratch, MeshTables, Mesher, Region, SectionMesh, borrow},
+    mesher::{MeshScratch, MeshTables, Region, SectionMesh, borrow},
     world::World,
 };
 use horizon_core::biome::BiomeZoom;
 use horizon_threads::jobs::{Class, PerWorker, Rank, Registration, Source};
-use horizon_world::block_render::FaceVisibility;
 use horizon_world::worldgen::decoration_order::DecorationOrder;
 use std::{
     collections::{BinaryHeap, HashSet, VecDeque},
@@ -485,7 +484,7 @@ fn plan_unloads(world: &World, unload: impl Fn(i32, i32) -> bool) -> Vec<(i32, i
 
 fn commit_unloads(world: &mut World, keys: &[(i32, i32)]) -> Vec<Arc<Chunk>> {
     keys.iter()
-        .filter_map(|key| world.chunks.remove(key))
+        .filter_map(|&key| world.unload_chunk(key))
         .collect()
 }
 
@@ -899,7 +898,7 @@ impl GenerationScan {
 /// state and face shape) and the mesher's scratch.
 struct WorkerLocal<W> {
     worker: W,
-    faces: Option<(Arc<MeshTables>, FaceVisibility)>,
+    faces: Faces,
     mesh_scratch: MeshScratch,
 }
 /// A streamer's jobs, run by the process's shared pool (`horizon_threads::jobs`).
@@ -1015,10 +1014,10 @@ impl<G: ChunkGenerator> Source for Jobs<G> {
         });
     }
     fn all_idle(&self) {
-        // No worker needs retained mesh capacity now. Drop it outside the
-        // pool lock; the pool then asks the allocator to return freed pages.
+        // No worker needs its kept meshes or light scratch: freed outside the pool lock.
         let meshes = std::mem::take(&mut *self.shared.meshes.lock().unwrap());
         drop(meshes);
+        crate::light::release_scratch();
         self.generator.all_idle();
     }
 }
@@ -1096,35 +1095,16 @@ impl<G: ChunkGenerator> Jobs<G> {
             }
             Job::Mesh(x, sy, z, region, seq, settings) => {
                 let context = shared.context.read().unwrap().clone();
-                let visibility = match faces.take() {
-                    Some((tables, visibility)) if Arc::ptr_eq(&tables, &context.tables) => {
-                        visibility
-                    }
-                    _ => context.tables.visibility.clone(),
-                };
-                let mut mesher = Mesher {
-                    nether_shading: settings.nether,
-                    shader_pack_lighting: settings.shader_pack_lighting,
-                    separate_ao: settings.separate_ao,
-                    shader_pack: settings.shader_pack,
-                    zoom: settings.zoom,
-                    blend_radius: settings.blend_radius,
-                    smooth_lighting: settings.smooth_lighting,
-                    cutout_leaves: settings.cutout_leaves,
-                    opaque_ice: settings.opaque_ice,
-                    translucent_layers: &settings.translucent_layers,
-                    leaf_culling: settings.leaf_culling,
-                    hidden_states: &context.hidden_states,
-                    assets: &context.assets,
-                    render: &context.render,
-                    tables: &context.tables,
-                    biomes: &context.biomes,
-                    visibility,
-                };
                 let recycled = shared.meshes.lock().unwrap().take();
-                let mut mesh = mesher.mesh_reusing(&borrow(&region), sy, recycled, mesh_scratch);
-                mesh.sort_solid();
-                *faces = Some((context.tables.clone(), mesher.visibility));
+                let mesh = mesh_section(
+                    &context,
+                    &settings,
+                    faces,
+                    mesh_scratch,
+                    &region,
+                    sy,
+                    recycled,
+                );
                 Done::Meshed(x, sy, z, mesh, seq)
             }
         };
@@ -1147,10 +1127,17 @@ mod queue_census;
 pub use queue_census::QueueCensus;
 mod forced_cover;
 mod forced_ring;
+mod mesh_job;
 mod relight_now;
+mod viewed_meshing;
 use bounded::nearest_first;
 use dynamic_emission::light_region_ready;
 use forced_cover::ForcedCover;
+use mesh_job::{Faces, mesh_section};
+pub use viewed_meshing::{
+    MAX_VIEWED_SECTIONS, MeshSource, VIEWED_LINGER, VIEWED_MESH_WORKERS, VIEWED_UPLOADS_PER_FRAME,
+    ViewedLevel, ViewedMeshing,
+};
 impl Streaming {
     pub fn new<G: ChunkGenerator>(
         generator: Arc<G>,
@@ -1525,21 +1512,14 @@ impl Streaming {
         if chunk.fresh {
             world.modified.insert(key);
         }
-        world.load_chunk_block_entities(key, std::mem::take(&mut chunk.block_entities));
-        if let Some(extras) = &chunk.saved {
-            for (pos, attachments) in &extras.block_entity_attachments {
-                world
-                    .block_entities
-                    .restore_attachments(*pos, attachments.clone());
-            }
-        }
+        world.install_chunk_block_entities(&mut chunk);
         world
             .block_names
             .extend(std::mem::take(&mut chunk.block_names));
         let entities = std::mem::take(&mut chunk.entities);
         world.entities_pending.insert((chunk.x, chunk.z));
         if !entities.is_empty() {
-            world.loaded_entities.push(((chunk.x, chunk.z), entities));
+            world.queue_entity_nbt((chunk.x, chunk.z), entities);
         }
         self.generated_total += 1;
         // A chunk saved with its light needs no light job; its unlit
@@ -1798,9 +1778,16 @@ impl Streaming {
         // at once when the view moves and every eighth tick otherwise: a
         // column can stay a little past the edge without anyone noticing.
         let area = (self.center, self.radius);
-        let sweep = area != self.scan_area || self.scan_age >= 8;
-        self.scan_area = area;
-        self.scan_age = if sweep { 0 } else { self.scan_age + 1 };
+        // The sweep unloads columns, saving them and dropping their block entities' bindings:
+        // never while a transaction is open, whose values may still be tentative. A due sweep
+        // waits for the next update instead.
+        let sweep = (area != self.scan_area || self.scan_age >= 8)
+            && !world.block_entities.defers_retirement();
+        if sweep {
+            (self.scan_area, self.scan_age) = (area, 0);
+        } else {
+            self.scan_age = self.scan_age.saturating_add(1);
+        }
         self.requeue();
         self.relight_edits(world);
         hz_laps.lap("st_relight_edits");
@@ -1963,10 +1950,7 @@ impl Streaming {
                                 > r4 * r4)
                         && !ranges.in_extra(x, z, 4)
                         && !ranges.in_band(x, z, 4)
-                        && !ranges.forced.iter().any(|f| {
-                            (x - f.0).abs() <= FORCED_TERRAIN_RING
-                                && (z - f.1).abs() <= FORCED_TERRAIN_RING
-                        })
+                        && !ranges.forced_within(x, z, FORCED_TERRAIN_RING)
                 })
                 .map(|(k, _)| *k)
                 .collect();
@@ -2314,19 +2298,7 @@ impl Streaming {
                         z,
                         region.clone(),
                         self.sequence,
-                        MeshSettings {
-                            nether: self.nether_shading,
-                            shader_pack_lighting: self.shader_pack_lighting,
-                            separate_ao: self.separate_ao,
-                            shader_pack: self.shader_pack,
-                            zoom: self.biome_zoom,
-                            blend_radius: self.biome_blend,
-                            smooth_lighting: self.smooth_lighting,
-                            cutout_leaves: self.cutout_leaves,
-                            opaque_ice: self.opaque_ice,
-                            translucent_layers: self.translucent_layers.clone(),
-                            leaf_culling: self.leaf_culling,
-                        },
+                        self.mesh_settings(),
                     ),
                 );
             }
@@ -3624,7 +3596,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn late_generated_saves_yield_before_writing_in_all_receive_loops() {
         use crate::{
             assets::Assets, biome::Biomes, light::LightTables, mesher::MeshTables, models,
@@ -4946,6 +4918,7 @@ mod cover_tests {
     /// cell's position relative to the areas: the full check took 20 of the ~30 s of the crate's tests.
     /// `cargo test --release -p horizon-client --lib the_grid_answers_as_the_scan` checks every cell.
     #[test]
+    #[ignore = "daily"]
     fn the_grid_answers_as_the_scan() {
         let stride = if cfg!(debug_assertions) { 4 } else { 1 };
         let mut seed = 0x9E37_79B9_7F4A_7C15u64;
@@ -4987,6 +4960,7 @@ mod cover_tests {
     /// Players thousands of blocks apart: no grid fits them, and the buckets
     /// answer what a scan of every area does, the nearest centre included.
     #[test]
+    #[ignore = "daily"]
     fn the_buckets_answer_as_the_scan() {
         let mut seed = 0x51_7CC1_B727_220Au64;
         let forced: HashSet<(i32, i32)> = HashSet::new();
@@ -5006,11 +4980,21 @@ mod cover_tests {
                 band: None,
             };
             let (scan, buckets) = (ranges(None), ranges(Some(&cover)));
-            // Around each area, and on a coarse lattice over the whole spread.
-            let near = extra.iter().flat_map(|&((cx, cz), _)| {
-                (-80..=80)
-                    .step_by(7)
-                    .flat_map(move |dz| (-80..=80).step_by(7).map(move |dx| (cx + dx, cz + dz)))
+            // Around each area, and on a coarse lattice over the whole spread. A debug build
+            // takes every third lattice point, shifted by case so the points still fall at
+            // different positions against the 64-block bucket edges.
+            let step = if cfg!(debug_assertions) { 21 } else { 7 };
+            let shift = if cfg!(debug_assertions) {
+                (case % 21) as i32
+            } else {
+                0
+            };
+            let near = extra.iter().flat_map(move |&((cx, cz), _)| {
+                (-80 + shift..=80).step_by(step).flat_map(move |dz| {
+                    (-80 + shift..=80)
+                        .step_by(step)
+                        .map(move |dx| (cx + dx, cz + dz))
+                })
             });
             let lattice = (-3200..=3200)
                 .step_by(97)

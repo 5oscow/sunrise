@@ -62,6 +62,18 @@ pub enum Primaries {
     Bt2020,
 }
 
+/// `[material] coverage` (0.2): which alpha decides whether a point of solid or cutout terrain is
+/// drawn.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Coverage {
+    /// The engine's alpha test on the sampled texture, as Horizon's own terrain: the returned
+    /// alpha is translucent terrain's opacity only, and the stage may not `discard`.
+    #[default]
+    Engine,
+    /// The returned alpha drives the alpha test, and the stage may `discard`. 0.1 always.
+    Pack,
+}
+
 impl Primaries {
     /// `Frame.luminance`: the weights that give a colour's luminance in these primaries.
     pub const fn luminance(self) -> [f32; 3] {
@@ -116,10 +128,15 @@ pub struct Manifest {
     pub post: Vec<Stage>,
     /// 0.2: the picture for the display, after the post chain (Horizon's tone curve when absent).
     pub tonemap: Option<Stage>,
+    /// 0.2: the lit colour of entities, block entities, items and particles (Horizon's own when
+    /// absent). Checked, not yet drawn.
+    pub entity: Option<Stage>,
     /// 0.2: `[frame] blend`.
     pub blend: Blend,
     /// 0.2: `[frame] primaries`.
     pub primaries: Primaries,
+    /// 0.2: `[material] coverage`; `Pack` on 0.1, whose returned alpha always decides.
+    pub coverage: Coverage,
     pub options: Vec<PackOption>,
     /// How the settings page lays the options out; the first page is the one it opens on.
     /// Empty: one page with every option.
@@ -387,6 +404,9 @@ pub struct Stage {
     /// (true when absent); false for a pack that fogs its surfaces itself.
     #[serde(default)]
     pub fog: Option<bool>,
+    /// The material stage only (0.2): `"engine"` (when absent) or `"pack"`, `Manifest::coverage`.
+    #[serde(default)]
+    pub coverage: Option<String>,
     /// The sky stage only: whether Minecraft's clouds still draw (true when absent); false for
     /// a pack whose sky draws its own.
     #[serde(default)]
@@ -499,6 +519,7 @@ struct Raw {
     #[serde(default)]
     post: Vec<Stage>,
     tonemap: Option<Stage>,
+    entity: Option<Stage>,
     frame: Option<RawFrame>,
     #[serde(default)]
     options: Vec<RawOption>,
@@ -640,7 +661,12 @@ impl Manifest {
         if api == Api::V0_1 {
             for (present, key) in [
                 (raw.tonemap.is_some(), "[tonemap]"),
+                (raw.entity.is_some(), "[entity]"),
                 (raw.frame.is_some(), "[frame]"),
+                (
+                    raw.material.as_ref().is_some_and(|m| m.coverage.is_some()),
+                    "[material] coverage",
+                ),
             ] {
                 if present {
                     return Err(err(format!(
@@ -667,6 +693,12 @@ impl Manifest {
             }
             Some(p) => return Err(err(format!("frame.primaries {p:?}: bt709 or bt2020"))),
         };
+        let coverage = match raw.material.as_ref().and_then(|m| m.coverage.as_deref()) {
+            _ if api == Api::V0_1 => Coverage::Pack,
+            None | Some("engine") => Coverage::Engine,
+            Some("pack") => Coverage::Pack,
+            Some(c) => return Err(err(format!("material.coverage {c:?}: engine or pack"))),
+        };
         let id_ok = (1..=64).contains(&raw.id.len())
             && raw
                 .id
@@ -683,11 +715,13 @@ impl Manifest {
             && raw.weather.is_none()
             && raw.post.is_empty()
             && raw.tonemap.is_none()
+            && raw.entity.is_none()
         {
             return Err(err(match api {
                 Api::V0_1 => "no stage: give it a [sky], a [material], a [weather] or a [[post]]",
                 Api::V0_2 => {
-                    "no stage: give it a [sky], a [material], a [weather], a [[post]] or a [tonemap]"
+                    "no stage: give it a [sky], a [material], a [weather], a [[post]], an [entity] \
+                     or a [tonemap]"
                 }
             }
             .into()));
@@ -703,6 +737,7 @@ impl Manifest {
             .chain(&raw.vertex)
             .chain(&raw.post)
             .chain(&raw.tonemap)
+            .chain(&raw.entity)
             .any(|s| s.fog.is_some())
         {
             return Err(err("`fog` is a key of [material] only".into()));
@@ -710,9 +745,22 @@ impl Manifest {
         if raw
             .sky
             .iter()
+            .chain(&raw.vertex)
+            .chain(&raw.weather)
+            .chain(&raw.post)
+            .chain(&raw.tonemap)
+            .chain(&raw.entity)
+            .any(|s| s.coverage.is_some())
+        {
+            return Err(err("`coverage` is a key of [material] only".into()));
+        }
+        if raw
+            .sky
+            .iter()
             .chain(&raw.material)
             .chain(&raw.vertex)
             .chain(&raw.tonemap)
+            .chain(&raw.entity)
             .any(|s| s.scale.is_some() || s.output.is_some())
         {
             return Err(err("`scale` and `output` are keys of [[post]] only".into()));
@@ -731,7 +779,8 @@ impl Manifest {
             .chain(&raw.vertex)
             .chain(&raw.weather)
             .chain(&raw.post)
-            .chain(&raw.tonemap);
+            .chain(&raw.tonemap)
+            .chain(&raw.entity);
         for file in raw
             .shared
             .iter()
@@ -747,6 +796,7 @@ impl Manifest {
             .iter()
             .chain(&raw.post)
             .chain(&raw.tonemap)
+            .chain(&raw.entity)
             .any(sky_only)
         {
             return Err(err(
@@ -868,15 +918,19 @@ impl Manifest {
                 repeat,
             });
         }
-        if !raw.lights.is_empty() && raw.material.is_none() {
-            return Err(err(
-                "lights are read by the material stage: give it a [material]".into(),
-            ));
+        // 0.2's entity stage reads the coloured lights and the shadow map as the material's does.
+        let unlit = raw.material.is_none() && raw.entity.is_none();
+        let lit = match api {
+            Api::V0_1 => "a [material]",
+            Api::V0_2 => "a [material] or an [entity]",
+        };
+        if !raw.lights.is_empty() && unlit {
+            return Err(err(format!("no stage reads the lights: give it {lit}")));
         }
-        if !raw.particle_lights.is_empty() && raw.material.is_none() {
-            return Err(err(
-                "particle lights are read by the material stage: give it a [material]".into(),
-            ));
+        if !raw.particle_lights.is_empty() && unlit {
+            return Err(err(format!(
+                "no stage reads the particle lights: give it {lit}"
+            )));
         }
         if raw.particle_lights.len() > MAX_PARTICLE_LIGHTS {
             return Err(err(format!(
@@ -943,8 +997,12 @@ impl Manifest {
             }
         }
         if let Some(s) = &raw.shadow {
-            if raw.material.is_none() && raw.post.is_empty() {
-                return Err(err("[shadow] needs [material] or [[post]]".into()));
+            if unlit && raw.post.is_empty() {
+                return Err(err(match api {
+                    Api::V0_1 => "[shadow] needs [material] or [[post]]",
+                    Api::V0_2 => "[shadow] needs [material], [entity] or [[post]]",
+                }
+                .into()));
             }
             if !SHADOW_RESOLUTIONS.contains(&s.resolution) {
                 return Err(err(format!(
@@ -1055,8 +1113,10 @@ impl Manifest {
             weather: raw.weather,
             post: raw.post,
             tonemap: raw.tonemap,
+            entity: raw.entity,
             blend,
             primaries,
+            coverage,
             options,
             pages,
             tags: raw.tags,
@@ -1169,7 +1229,8 @@ impl Manifest {
             .chain(&self.vertex)
             .chain(&self.weather)
             .chain(&self.post)
-            .chain(&self.tonemap);
+            .chain(&self.tonemap)
+            .chain(&self.entity);
         for file in self
             .shared
             .iter()

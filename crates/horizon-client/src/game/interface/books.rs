@@ -430,14 +430,20 @@ impl Game<'_> {
             return;
         };
         if let Some(title) = title {
-            let mut written = ItemStack::new("minecraft:written_book", 1);
-            written.data_mut().written = Some(WrittenBook {
+            // `signBook` transmutes the carried stack, so a renamed book and
+            // quill stays renamed and keeps its other components.
+            let mut written = stack.transmute("minecraft:written_book", stack.count);
+            let data = written.data_mut();
+            data.writable_pages = Vec::new();
+            data.written = Some(WrittenBook {
                 title,
                 author,
                 generation: 0,
                 pages,
                 page_tags: Vec::new(),
-                resolved: false,
+                // `signBook`'s `new WrittenBookContent(..., true)`: the pages
+                // are literals, so the content is already resolved.
+                resolved: true,
             });
             *stack = written;
         } else {
@@ -527,14 +533,17 @@ impl Game<'_> {
                 _ => {}
             },
             Some(BookScreen::Edit { signing: true, .. }) => match key {
-                Some(KeyCode::Escape) => {
-                    self.set_book_signing(false);
-                }
+                // `BookSignScreen` overrides neither `onClose` nor
+                // `shouldCloseOnEsc`: Escape is `Screen.onClose`, which closes
+                // the whole book and saves nothing.
+                Some(KeyCode::Escape) => self.close_book(),
+                // `BookSignScreen.keyPressed` signs whenever the title box is
+                // not empty, blank or not, and trims the title on send.
                 Some(KeyCode::Enter | KeyCode::NumpadEnter) => {
-                    let blank = self.book.as_ref().is_some_and(
-                        |b| matches!(b, BookScreen::Edit { title, .. } if title.trim().is_empty()),
+                    let empty = self.book.as_ref().is_some_and(
+                        |b| matches!(b, BookScreen::Edit { title, .. } if title.is_empty()),
                     );
-                    if !blank {
+                    if !empty {
                         self.save_book(true);
                     }
                 }
@@ -546,7 +555,10 @@ impl Game<'_> {
                 }
             },
             Some(BookScreen::Edit { .. }) => match key {
-                Some(KeyCode::Escape) => self.save_book(false),
+                // `BookEditScreen` overrides neither `onClose` nor
+                // `shouldCloseOnEsc` either: Escape is `Screen.onClose`, and
+                // only Done calls `saveChanges`.
+                Some(KeyCode::Escape) => self.close_book(),
                 Some(KeyCode::PageUp) => self.turn_page(false),
                 Some(KeyCode::PageDown) => self.turn_page(true),
                 Some(KeyCode::ArrowUp) => self.book_move_line(-1),
@@ -1788,7 +1800,7 @@ mod lectern_books_tag_tests {
     /// `LecternBlock.useItemOn` checks `ItemTags.LECTERN_BOOKS`; a world's
     /// data pack adds its own book to that tag, and the lectern takes it.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_packs_lectern_books_entry_goes_onto_the_lectern() {
         let mut resources = None;
         let mut game = server_game(&mut resources);
@@ -1815,10 +1827,7 @@ mod lectern_books_tag_tests {
         game.world_root = dir;
         let stack = game.reload_datapacks(false, &[]).unwrap();
         let root = game.options.resources.clone();
-        game.world_tables = game
-            .build_world_tables(&stack, false, &root, game.mods.data_switched)
-            .unwrap()
-            .0;
+        game.world_tables = game.stage_world_tables(&stack, false, &root).unwrap().0;
 
         let state = game
             .pack
@@ -1846,6 +1855,10 @@ mod lectern_books_tag_tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "tests/book_escape_tests.rs"]
+mod book_escape_tests;
 
 #[cfg(test)]
 #[path = "tests/lectern_tests.rs"]
@@ -1889,7 +1902,7 @@ mod lectern_signal_tests {
     /// `LecternBlock.getAnalogOutputSignal` reads the block entity only while
     /// the state's `HAS_BOOK` is true.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_lectern_without_the_has_book_state_feeds_no_comparator() {
         let mut resources = None;
         let mut game = server_game(&mut resources);
@@ -1945,7 +1958,7 @@ mod lectern_signal_tests {
     /// An entity with no book at all reads 14 too: a page count of 0 is a page
     /// progress of 1.0 with no book to add.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_lecterns_signal_adds_one_only_for_a_book() {
         let mut resources = None;
         let mut game = server_game(&mut resources);
@@ -2041,7 +2054,7 @@ mod lectern_book_removal_tests {
     /// `LecternBlock.resetBookState`: the book coming off a lectern clears
     /// `has_book` and posts `block_change` at it.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_lectern_book_removal_posts_block_change() {
         let mut game_resources = None;
         let mut game = server_game(&mut game_resources);
@@ -2104,7 +2117,7 @@ mod lectern_reach_tests {
     /// lectern screen closes once the player is out of the interaction range
     /// (with vanilla's four-block buffer), as the guest path already does.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_lectern_screen_closes_out_of_reach() {
         let mut game_resources = None;
         let mut game = server_game(&mut game_resources);
@@ -2183,6 +2196,10 @@ mod sign_tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "tests/sign_book_tests.rs"]
+mod sign_book_tests;
 
 fn link_cursor(style: &horizon_client::text::Style) -> Option<horizon_client::widgets::Cursor> {
     style

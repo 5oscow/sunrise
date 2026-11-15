@@ -935,6 +935,22 @@ fn patch_config(shared: &Shared, body: &[u8]) -> Response {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// A shorter wait for the endpoint file in tests that expect it never to appear.
+    pub(crate) static ENDPOINT_WAIT: std::cell::Cell<Option<Duration>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// How long `Client::open` waits for the endpoint file of a server that holds the lock.
+fn endpoint_wait() -> Duration {
+    #[cfg(test)]
+    if let Some(wait) = ENDPOINT_WAIT.with(|w| w.get()) {
+        return wait;
+    }
+    Duration::from_secs(5)
+}
+
 /// The API of the server running in a folder, for the CLI.
 pub struct Client {
     address: SocketAddr,
@@ -949,7 +965,7 @@ impl Client {
         }
         // The supervisor writes the endpoint just after taking the lock: give it a moment.
         let path = dir.join(ENDPOINT);
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + endpoint_wait();
         let text = loop {
             match std::fs::read_to_string(&path) {
                 Ok(text) => break text,
@@ -1081,6 +1097,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "daily"]
     fn auth_and_command_replies_match_api_v1_goldens() {
         let golden: Value =
             serde_json::from_str(include_str!("../testdata/api-v1-auth-command.json")).unwrap();
@@ -1370,6 +1387,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "daily"]
     fn a_backup_whose_flush_fails_turns_saving_back_on() {
         let dir = std::env::temp_dir().join(format!("horizon-server-flush-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -1425,6 +1443,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "daily"]
     fn the_api_wants_its_token() {
         let dir = std::env::temp_dir().join(format!("horizon-server-api-{}", std::process::id()));
         std::fs::create_dir_all(dir.join(".horizon")).unwrap();
@@ -1477,6 +1496,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "daily"]
     fn a_token_and_a_port_from_server_toml() {
         let dir =
             std::env::temp_dir().join(format!("horizon-server-api-fixed-{}", std::process::id()));
@@ -1711,6 +1731,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "daily"]
     fn backup_replies_match_api_v1_goldens() {
         let golden: Value =
             serde_json::from_str(include_str!("../testdata/api-v1-backups.json")).unwrap();

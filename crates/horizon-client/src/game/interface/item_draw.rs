@@ -70,6 +70,15 @@ impl horizon_client::hud_kit::icon::IconPainter for IconPainter<'_, '_> {
 pub(super) struct Env<'a, 'g> {
     game: &'a Game<'g>,
 }
+impl Game<'_> {
+    /// Before a frame is drawn: the model draws prepared for the last one are dropped, and so are
+    /// the special model renderers' answers it didn't draw.
+    pub(super) fn begin_frame_draws(&self) {
+        self.prepared_model_draws.borrow_mut().clear();
+        super::native_special_renderers::begin_frame(std::ptr::from_ref(self) as usize);
+    }
+}
+
 impl ItemEnv for Env<'_, '_> {
     fn item_model_property(&self, property: &str, stack: &StackView) -> bool {
         if !mod_api::__private::listened(mod_api::HookId::ItemModelProperty) {
@@ -170,6 +179,17 @@ impl ItemEnv for Env<'_, '_> {
                 seed: ctx.seed,
                 models,
             });
+    }
+    fn special_model_parts(
+        &self,
+        slot: horizon_assets::item_model::SpecialModelSlot,
+        base: &str,
+        config: &std::sync::Arc<horizon_core::nbt::Tag>,
+        stack: &StackView,
+    ) -> Option<horizon_assets::item_model::PreparedParts> {
+        super::native_special_renderers::parts(self.game, slot, config, stack, |parts| {
+            self.game.pack.item_renderer.prepare_parts(base, parts)
+        })
     }
     fn stack_fluid(&self, stack: &StackView) -> Option<&str> {
         // Vanilla's items keep vanilla's closed set; only a mod's own item asks its parts.
@@ -947,7 +967,7 @@ mod tests {
     /// The resolver skips a mod that leaves `item_model_property` at its default;
     /// a mod that implements it is asked on every resolve.
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "daily"]
     fn item_model_property_is_asked_only_while_a_mod_answers() {
         use mod_api::{self, HookId, Hooks, ItemModelPropertyEvent, ModEntry};
         use std::sync::{
@@ -1036,7 +1056,7 @@ mod tests {
 
     /// The resolver reads a mod's number for its property, 0 for another's or with no mod.
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "daily"]
     fn item_model_range_property_reads_the_mods_number() {
         let stack = StackView::new("minecraft:stick", 16);
         let mods: mod_api::Mods = vec![mod_api::ModEntry::new("fill", Box::new(Fill))].into();
@@ -1100,7 +1120,7 @@ mod tests {
 
     /// The resolver reads a mod's value for its property, none for another's or with no mod.
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "daily"]
     fn item_model_select_property_reads_the_mods_value() {
         let mods: mod_api::Mods = vec![mod_api::ModEntry::new("mode", Box::new(Mode))].into();
         mod_platform::testing::with_mods(mods, || {
@@ -1234,7 +1254,7 @@ mod tests {
     /// `ItemModel.update` reads: the stack, where the item is drawn, its owner and level when it
     /// has them, and the seed. Another type, or no mod, draws nothing.
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "daily"]
     fn a_mods_item_model_type_answers_with_the_draws_context() {
         use horizon_assets::item_model::{Context, DisplayContext, LevelState, OwnerState};
         use mod_api::__private::game::*;
@@ -1319,7 +1339,7 @@ mod tests {
 
     /// The resolver reads a mod's colour per stack, white for another's or with no mod.
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "daily"]
     fn item_tint_source_reads_the_mods_colour() {
         let config = horizon_core::json_nbt::json_to_tag(
             &serde_json::json!({"type": "example:charge", "low": 0xFFAA_BBCC_u32}),

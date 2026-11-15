@@ -2,12 +2,30 @@ use super::*;
 
 impl Game<'_> {
     pub(super) fn guest_tick_death(&mut self, gi: usize) {
-        if self
-            .lan
-            .as_mut()
-            .is_some_and(|host| host.hub.guests.update(gi, |g| g.tick_death()))
-        {
-            self.guest_drop_carried(gi);
+        let removed = self.lan.as_mut().and_then(|host| {
+            host.hub.guests.update(gi, |guest| {
+                if !guest.tick_death() || guest.death_time != 20 {
+                    return None;
+                }
+                let dimensions = guest.dimensions();
+                Some((
+                    guest.entity_id,
+                    guest.position,
+                    dimensions,
+                    guest.death_canceled,
+                ))
+            })
+        });
+        if let Some((entity, position, dimensions, death_canceled)) = removed {
+            self.lan_entity_event(entity, 60, position);
+            self.death_poof(
+                position,
+                f64::from(dimensions.width),
+                f64::from(dimensions.height),
+            );
+            if !death_canceled {
+                self.guest_drop_carried(gi);
+            }
         }
     }
 
@@ -49,9 +67,9 @@ impl Game<'_> {
             g.position[2],
         ];
         let (yaw, pitch) = (g.yaw, g.pitch);
+        let mut r = horizon_client::random_source::entity(); // the guest's Entity.random
         for stack in stacks {
-            let r = &mut self.world.random;
-            let v = horizon_client::entities::drop_motion(r, yaw, pitch, false);
+            let v = horizon_client::entities::drop_motion(&mut r, yaw, pitch, false);
             self.spawn_item(stack, eye, v, 40);
         }
     }
@@ -256,7 +274,7 @@ impl Game<'_> {
         }
         let inside = (0..3).all(|k| (hit.point[k] - f64::from(hit.pos[k]) - 0.5).abs() < 1.0000001);
         if !inside {
-            let d = horizon_client::java_text::double_to_string;
+            let d = horizon_core::java_number::double_to_string;
             let at = |k: usize| d(hit.point[k]);
             let line = format!(
                 "Rejecting UseItemOnPacket from {}: Location ({}, {}, {}) too far away from hit block BlockPos{{x={}, y={}, z={}}}.",
@@ -352,14 +370,7 @@ impl Game<'_> {
         let Some(host) = self.lan.as_mut() else {
             return refused.map_or(Ok(consumed), Err);
         };
-        for pos in [
-            hit.pos,
-            [
-                hit.pos[0] + face[0],
-                hit.pos[1] + face[1],
-                hit.pos[2] + face[2],
-            ],
-        ] {
+        for pos in [hit.pos, hit.beside()] {
             let state = self.world.block(pos[0], pos[1], pos[2]).0 as i32;
             host.hub
                 .send_to(conn, &C::BlockUpdate(play::BlockUpdate { pos, state }));

@@ -635,7 +635,7 @@ impl Game<'_> {
             spectator: false,
             stepping_carefully: false,
             dampens: mob.is_some_and(|m| m.species() == Species::Warden),
-            targetable: mob.is_some_and(|m| m.alive() && m.species() != Species::Warden),
+            targetable: mob.is_some_and(warden::can_be_targeted),
             living: true,
             player: mob.is_some_and(|m| m.rider.is_some()),
         }
@@ -985,7 +985,7 @@ impl Game<'_> {
                 // The sensor does not hear its own placement or removal.
                 let own = source_block == [key.0, key.1, key.2]
                     && matches!(event, "minecraft:block_destroy" | "minecraft:block_place");
-                let frequency = sculk::frequency(event);
+                let frequency = self.mob_maps().vibration_frequency(event);
                 let calibrated_out = kind == SculkKind::Calibrated && {
                     let back = self.calibrated_signal(key);
                     back != 0 && frequency != back
@@ -1047,8 +1047,9 @@ impl Game<'_> {
     /// `Warden.VibrationUser`: accept a vibration for the warden at `index`.
     fn warden_listen(&mut self, index: usize, event: &'static str, pos: [f64; 3], ctx: &Context) {
         let now = self.world.game_time;
+        let ctx = warden::heard_by(*ctx, &self.mob_teams(), self.mobs[index].id);
         let (occludes, world) = (&self.sculk.tables.occludes, &self.world);
-        let avoided = warden::listen(&mut self.mobs[index], now, event, pos, ctx, |a, b| {
+        let avoided = warden::listen(&mut self.mobs[index], now, event, pos, &ctx, |a, b| {
             sculk::is_occluded(a, b, |p| {
                 let state = world.block(p.x, p.y, p.z);
                 occludes.get(state.0 as usize).copied().unwrap_or(false)
@@ -1237,7 +1238,7 @@ impl Game<'_> {
             SculkKind::Sensor | SculkKind::Calibrated => {
                 let state = self.world.block(key.0, key.1, key.2);
                 if self.res.behaviours().sculk_sensor_can_activate(state) {
-                    let frequency = sculk::frequency(info.event);
+                    let frequency = self.mob_maps().vibration_frequency(info.event);
                     if let Some(e) = self.sculk_entity(key) {
                         e.last_frequency = frequency;
                     }
@@ -1622,12 +1623,7 @@ impl Game<'_> {
         if self.potions.effects.get("conduit_power").is_some()
             && let Some(eye) = self.eye_position()
         {
-            let in_water = horizon_client::fog::fog_type(
-                &self.world,
-                self.res.facts(),
-                eye,
-                &self.near_plane(),
-            ) == FogType::Water;
+            let in_water = self.camera_fog_type(eye) == FogType::Water;
             return self.fog.water_vision(in_water);
         }
         0.0
@@ -2691,7 +2687,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "daily"]
     fn dropped_wool_dampens_its_own_vibrations() {
         use crate::game::native_entity_refs::tests::with_game;
         use horizon_client::{chunk::Chunk, items::ItemStack};
@@ -2759,7 +2755,7 @@ mod tests {
     /// `vanilla_game_event` hears `GameEvent.Context.affectedState`: the state a context
     /// was made with reaches the listener, and a context made with none reads as None.
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "daily"]
     fn vanilla_game_event_carries_the_affected_state() {
         use crate::game::native_entity_refs::tests::with_game;
         use mod_api::{Hooks, ModEntry, VanillaGameEventEvent};
@@ -2802,7 +2798,7 @@ mod tests {
     /// The wardens that hear an event are those in the list when it is
     /// posted, however the list changed since the last one.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn wardens_hear_events_however_the_list_changed_between_them() {
         crate::game::native_entity_refs::tests::with_game(|game| {
             game.sculk_prepare();
@@ -2971,7 +2967,7 @@ mod command_damage_listener_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and scratch homes/cwd"]
+    #[ignore = "daily"]
     fn command_damage_posts_before_teleport_and_deduplicates_the_scan() {
         let root = std::path::PathBuf::from(
             std::env::var_os("HORIZON_TEST_RESOURCES").expect("prepared resources required"),
@@ -3105,7 +3101,7 @@ mod shriek_capture_tests {
     use std::sync::Arc;
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and scratch homes/cwd"]
+    #[ignore = "daily"]
     fn level_event_shriek_keeps_local_play_and_random_but_not_shared_capture() {
         let root = std::path::PathBuf::from(
             std::env::var_os("HORIZON_TEST_RESOURCES").expect("prepared resources required"),

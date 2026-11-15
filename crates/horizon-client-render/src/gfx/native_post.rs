@@ -356,6 +356,10 @@ pub struct NativeFrame {
     /// Whether the pack's material reads `reflection` (`NativePack::new`): else no mirror
     /// is drawn and `has_reflection` stays 0.
     pub reflects: bool,
+    /// Whether the pack's material reads `opaque_depth` or `opaque_color`
+    /// (`NativePack::new`): else they stay 1×1 and unwritten, and the world pass doesn't break
+    /// before translucent terrain to copy them.
+    pub reads_opaque: bool,
     /// Last frame's view-projection, camera and time (`write`).
     last: Option<([[f32; 4]; 4], glam::DVec3, std::time::Instant)>,
     /// The eased eye light (block, sky) and being in water and lava (`write`); NaN until the
@@ -581,6 +585,7 @@ impl NativeFrame {
             shadow_map,
             shadow_camera: shadow.map(super::native_shadow::camera),
             reflects: false,
+            reads_opaque: false,
             api,
             linear,
             decoder: (api == Api::V0_2).then(|| Decoder::new(device, linear)),
@@ -689,13 +694,17 @@ impl NativeFrame {
 
     /// Keeps the opaque copies the size of the world's depth `depth` and, where the world's
     /// colour `color` can be copied (the scaled target, not the window's own), its size and
-    /// format; the group is made again when they change.
+    /// format; the group is made again when they change. Nothing for a pack that doesn't read
+    /// them.
     pub fn fit_opaque(
         &mut self,
         device: &wgpu::Device,
         depth: &wgpu::Texture,
         color: Option<&wgpu::Texture>,
     ) {
+        if !self.reads_opaque {
+            return;
+        }
         let size = [depth.width(), depth.height()];
         let (color_size, format) = match color {
             Some(c) if self.decoder.is_some() => ([c.width(), c.height()], INTERMEDIATE),
@@ -1053,7 +1062,7 @@ impl NativePost {
             let present = present_constants(&stage.module, constants);
             let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
             let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some(&stage.label),
+                label: Some(&super::dx12_compiler::module_label(&stage.label)),
                 source: wgpu::ShaderSource::Naga(std::borrow::Cow::Owned(stage.module)),
             });
             let options = wgpu::PipelineCompilationOptions {
@@ -1765,6 +1774,7 @@ mod tests {
     /// delta, and a long wait between its frames is not a gap that starts them over.
     #[test]
     fn a_scripted_clock_drives_time_frame_index_and_eased_values() {
+        let _gpu = crate::gfx::test_gpu::lock();
         use crate::gfx::pack_uniforms::FrameTiming;
         let Some((device, _)) = device(false) else {
             return;
@@ -1814,6 +1824,7 @@ mod tests {
     /// however the frames before moved the eased values, wetness and the frame count.
     #[test]
     fn a_reset_frame_gives_a_fresh_pack_s_inputs() {
+        let _gpu = crate::gfx::test_gpu::lock();
         use crate::gfx::pack_uniforms::FrameTiming;
         let Some((device, _)) = device(false) else {
             return;
@@ -1863,26 +1874,27 @@ mod tests {
     /// `fb`, which a pass reads before the pass that writes it, so it holds last frame's.
     #[test]
     fn a_reset_post_reads_its_own_targets_blank() {
+        let _gpu = crate::gfx::test_gpu::lock();
         let Some((device, queue)) = device(true) else {
             return;
         };
         let manifest = "schema = 1
-id = \"t\"
-name = \"T\"
-version = \"1\"
-api = \"0.1\"
+    id = \"t\"
+    name = \"T\"
+    version = \"1\"
+    api = \"0.1\"
             [[post]]
-file = \"a.wgsl\"
-[[post]]
-file = \"b.wgsl\"
-output = \"fb\"
+    file = \"a.wgsl\"
+    [[post]]
+    file = \"b.wgsl\"
+    output = \"fb\"
             [[post]]
-file = \"c.wgsl\"
-";
+    file = \"c.wgsl\"
+    ";
         let a = "fn post(input: PostInput) -> vec4<f32> { return vec4<f32>(textureLoad(fb, vec2<i32>(input.pixel), 0).rgb + 0.25, 1.0); }
-";
+    ";
         let pass = "fn post(input: PostInput) -> vec4<f32> { return input.color; }
-";
+    ";
         let files = [
             (MANIFEST, manifest),
             ("a.wgsl", a),
@@ -1995,6 +2007,7 @@ file = \"c.wgsl\"
     /// must keep it) times an option, the second halves it and writes the depth as alpha.
     #[test]
     fn passes_chain_through_half_float_targets_with_options_and_depth() {
+        let _gpu = crate::gfx::test_gpu::lock();
         let Some((device, queue)) = device(true) else {
             return;
         };
@@ -2114,23 +2127,24 @@ file = \"c.wgsl\"
     /// frame before.
     #[test]
     fn the_last_pass_reads_last_frames_input_as_history() {
+        let _gpu = crate::gfx::test_gpu::lock();
         let Some((device, queue)) = device(true) else {
             return;
         };
         let manifest = "schema = 1
-id = \"t\"
-name = \"T\"
-version = \"1\"
-api = \"0.1\"
+    id = \"t\"
+    name = \"T\"
+    version = \"1\"
+    api = \"0.1\"
             [[post]]
-file = \"a.wgsl\"
-[[post]]
-file = \"b.wgsl\"
-";
+    file = \"a.wgsl\"
+    [[post]]
+    file = \"b.wgsl\"
+    ";
         let a = "fn post(input: PostInput) -> vec4<f32> { return vec4<f32>(input.color.rgb * 0.5, 1.0); }
-";
+    ";
         let b = "fn post(input: PostInput) -> vec4<f32> { return textureLoad(history, vec2<i32>(input.pixel), 0); }
-";
+    ";
         let files = [(MANIFEST, manifest), ("a.wgsl", a), ("b.wgsl", b)]
             .map(|(n, t)| (n.to_owned(), t.as_bytes().to_vec()))
             .into();
@@ -2238,6 +2252,7 @@ file = \"b.wgsl\"
     /// is an integer format, and `surface_at` gets the floats back from the stored bits.
     #[test]
     fn the_surface_is_an_integer_target_that_the_post_stage_reads_bit_exact() {
+        let _gpu = crate::gfx::test_gpu::lock();
         assert_eq!(
             super::super::native_material::SURFACE_FORMAT.sample_type(None, None),
             Some(wgpu::TextureSampleType::Uint)
@@ -2414,6 +2429,7 @@ file = \"b.wgsl\"
     /// signs and denormals included.
     #[test]
     fn the_surface_keeps_every_bit_of_the_floats_written_through_the_material_stage_bitcast() {
+        let _gpu = crate::gfx::test_gpu::lock();
         let Some((device, queue)) = device(false) else {
             return;
         };
@@ -2549,6 +2565,7 @@ file = \"b.wgsl\"
     /// an 8-bit step), at alpha 1.
     #[test]
     fn a_0_2_world_comes_back_through_decode_tonemap_and_encode() {
+        let _gpu = crate::gfx::test_gpu::lock();
         assert!(tonemap_entries(false).contains("horizon_encode(min(horizon_sanitize(out)"));
         let Some((device, queue)) = device(true) else {
             return;
@@ -2670,6 +2687,7 @@ file = \"b.wgsl\"
     /// without one: `hdr` 0, `headroom` 1, `paper_white` and `peak` 80, `black_level` 0.
     #[test]
     fn a_0_2_frame_describes_the_display_it_goes_to() {
+        let _gpu = crate::gfx::test_gpu::lock();
         let Some((device, _)) = device(false) else {
             return;
         };
@@ -2711,6 +2729,7 @@ file = \"b.wgsl\"
     /// to scRGB and back to HDR10 (`Hdr::retargeted`) maps it once all the same.
     #[test]
     fn a_0_2_pack_is_tone_mapped_once_by_its_own_curve_or_horizons() {
+        let _gpu = crate::gfx::test_gpu::lock();
         let Some((device, queue)) = device(true) else {
             return;
         };

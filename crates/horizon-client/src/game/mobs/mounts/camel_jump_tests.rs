@@ -50,12 +50,17 @@ pub(super) fn game() -> Game<'static> {
         None,
     )
     .unwrap();
+    game.native_lifecycle
+        .begin_open(mod_api::Authority::IntegratedServer);
     game.build_registries();
     game.set_allow_commands(true);
     for x in 0..2 {
         game.world
             .chunks
             .insert((x, 0), Arc::new(Chunk::empty(x, 0)));
+    }
+    for x in 0..2 {
+        game.load_ticking_neighbourhood(x, 0);
     }
     assert!(game.run_command("fill 0 99 0 31 99 15 stone"));
     game.player = Some(PlayerMotion::new(game.motion, Vec3::new(4.5, 100.0, 6.5)).unwrap());
@@ -109,6 +114,9 @@ pub(super) fn game() -> Game<'static> {
     // Its view, as the client sent it: straight down.
     guest.pitch = 90.0;
     game.lan.as_mut().unwrap().hub.guests.push(guest);
+    // This fixture installs the guest without the normal login allocator.
+    // Reserve its entity ID before commands allocate the camel and sensor mob.
+    game.next_entity = game.next_entity.max(2);
     game
 }
 
@@ -180,7 +188,7 @@ fn selected(game: &mut Game<'_>) -> Option<String> {
 }
 
 #[test]
-#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn a_saddled_camels_riding_jump_posts_entity_action() {
     let mut game = game();
     scene(&mut game, true);
@@ -202,7 +210,7 @@ fn a_saddled_camels_riding_jump_posts_entity_action() {
 }
 
 #[test]
-#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn a_jump_without_power_or_saddle_posts_nothing() {
     let mut game = game();
     scene(&mut game, true);
@@ -215,7 +223,7 @@ fn a_jump_without_power_or_saddle_posts_nothing() {
 }
 
 #[test]
-#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn the_scene_sensor_hears_a_mob_beside_it() {
     let mut game = game();
     scene(&mut game, true);
@@ -245,7 +253,7 @@ fn posted_actions(game: &mut Game<'_>, jumps: &[i32]) -> usize {
 }
 
 #[test]
-#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn control_each_accepted_jump_posts_one_entity_action() {
     let mut game = game();
     scene(&mut game, true);

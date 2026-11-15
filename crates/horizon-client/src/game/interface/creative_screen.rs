@@ -151,6 +151,7 @@ impl Game<'_> {
         }
         let (tx, ty) = Creative::tab_position(tab);
         batch.sprite(&self.gui.atlas, &tab_sprite(tab, true), ox + tx, oy + ty);
+        self.draw_screen_phase(batch, horizon_client::screen_draw::RenderPhase::Background);
         for t in tabs.iter().filter(|t| self.creative_screen.on_page(t)) {
             let (tx, ty) = Creative::tab_position(t);
             let stack = ItemStack {
@@ -272,6 +273,8 @@ impl Game<'_> {
         }
         let effect_tip = self.draw_inventory_effects(batch, (ox, oy), Creative::WIDTH as i32);
         self.draw_creative_pages(batch, ox, oy);
+        let browser_tip = self.draw_mod_browser(batch);
+        self.draw_screen_phase(batch, horizon_client::screen_draw::RenderPhase::Foreground);
         for t in tabs.iter().filter(|t| self.creative_screen.on_page(t)) {
             let (tx, ty) = Creative::tab_position(t);
             if self.cursor.0 >= ox + tx
@@ -324,6 +327,9 @@ impl Game<'_> {
         {
             let title = self.creative_tab_title(t);
             self.tooltip(batch, &title, self.cursor.0, self.cursor.1);
+        }
+        if let Some(tooltip) = browser_tip {
+            self.draw_mod_browser_tooltip(batch, tooltip);
         }
     }
     pub(super) fn creative_trash_hovered(batch: &HudBatch, cursor: (f32, f32)) -> bool {
@@ -423,22 +429,24 @@ impl Game<'_> {
             }
             return;
         }
-        let tabs = self.creative_screen.tabs.clone();
-        for (i, t) in tabs.iter().enumerate() {
-            if !self.creative_screen.on_page(t) {
-                continue;
-            }
+        // Only the clicked tab's index is needed: cloning the tabs here copied
+        // every tab's items on each click, saved hotbars' stacks included.
+        let creative = &self.creative_screen;
+        let clicked = creative.tabs.iter().position(|t| {
             let (tx, ty) = Creative::tab_position(t);
-            if cx >= ox + tx && cx < ox + tx + 26.0 && cy >= oy + ty && cy < oy + ty + 32.0 {
-                select_creative_tab(&mut self.creative_screen, &mut self.inv_clicks, i);
-                // The tab's slots and page replace the previous tab's: the
-                // build reads the new ones from this click on.
-                self.build_screen();
-                self.refresh_saved_hotbars();
-                self.inv_drag = None;
-                self.last_inv_click = None;
-                return;
-            }
+            creative.on_page(t)
+                && cx >= ox + tx
+                && cx < ox + tx + 26.0
+                && cy >= oy + ty
+                && cy < oy + ty + 32.0
+        });
+        if let Some(i) = clicked {
+            select_creative_tab(&mut self.creative_screen, &mut self.inv_clicks, i);
+            self.build_screen();
+            self.refresh_saved_hotbars();
+            self.inv_drag = None;
+            self.last_inv_click = None;
+            return;
         }
         if self.creative_inventory_open() {
             if Self::creative_trash_hovered(&batch, self.cursor) {

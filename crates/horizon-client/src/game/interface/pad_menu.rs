@@ -351,7 +351,7 @@ impl Game<'_> {
         key_focus::tab_step(&rest, None, true).map(|i| rest[i])
     }
 
-    pub(super) fn gui_scale(&self) -> Option<HudBatch> {
+    pub(super) fn gui_batch(&self) -> Option<HudBatch> {
         self.renderer.as_ref().map(|r| {
             HudBatch::new(
                 [r.config.width, r.config.height],
@@ -411,7 +411,7 @@ impl Game<'_> {
 
     fn pad_visible_targets(&self) -> Vec<Target> {
         let targets = self.pad_all_targets();
-        match self.gui_scale() {
+        match self.gui_batch() {
             Some(batch) => key_focus::on_screen(targets, (batch.width, batch.height)),
             None => targets,
         }
@@ -426,7 +426,7 @@ impl Game<'_> {
         {
             return targets;
         }
-        let Some(batch) = self.gui_scale() else {
+        let Some(batch) = self.gui_batch() else {
             return targets;
         };
         let slot = |x: f32, y: f32| Target {
@@ -516,7 +516,7 @@ impl Game<'_> {
         {
             return Some(targets[i]);
         }
-        let batch = self.gui_scale()?;
+        let batch = self.gui_batch()?;
         let at = |x: f32, y: f32| {
             targets
                 .iter()
@@ -571,7 +571,7 @@ impl Game<'_> {
 
     /// Send the window a pointer move to `at` (GUI pixels), as the mouse would.
     fn pad_pointer_to(&mut self, event_loop: &dyn EventLoopCtl, at: (f32, f32)) {
-        let (Some(window), Some(batch)) = (self.window.as_ref(), self.gui_scale()) else {
+        let (Some(window), Some(batch)) = (self.window.as_ref(), self.gui_batch()) else {
             return;
         };
         let id = window.id();
@@ -1332,7 +1332,9 @@ impl Game<'_> {
     /// the one in front (a screen that just opened leaves the old focus
     /// behind it), so every menu's click focus goes.
     pub(super) fn clear_screen_click_focus(&mut self) {
-        if let Some(title) = self.title.as_mut() {
+        if let Some(title) = self.title.as_mut()
+            && !matches!(title.mode, horizon_client::title::Mode::MissingMods { .. })
+        {
             title.focused_button = None;
         }
         self.pause_focus = None;
@@ -1688,7 +1690,7 @@ impl Game<'_> {
     /// same widget. Too far for `pad_follow_focus` and `snap::follow`, which it
     /// holds off (true) until then.
     fn pad_follow_resize(&mut self, event_loop: &dyn EventLoopCtl) -> bool {
-        let Some(batch) = self.gui_scale() else {
+        let Some(batch) = self.gui_batch() else {
             return false;
         };
         let (screen, size) = (self.key_screen(), (batch.width, batch.height));
@@ -1935,6 +1937,13 @@ impl Game<'_> {
         let Some(focus) = self.pad.menu.focus else {
             return;
         };
+        // Includes focus restored or followed directly above, not only explicit
+        // pad_focus_on landings. The pad now owns the screen's focus mark.
+        if !self.pad.menu.keyboard
+            && let Some(title) = self.title.as_mut()
+        {
+            title.missing_mods_pad_focus();
+        }
         if self.pad.menu.pos.is_none() || self.pad.menu.held.iter().any(|h| *h) {
             return;
         }
@@ -2074,6 +2083,13 @@ impl Game<'_> {
     /// value). Whether the key was used; when not, the screen has it (a
     /// container also has Tab and the arrows once they moved the focus).
     pub(super) fn key_focus_key(&mut self, event_loop: &dyn EventLoopCtl, key: KeyCode) -> bool {
+        if self
+            .title
+            .as_ref()
+            .is_some_and(|t| matches!(t.mode, horizon_client::title::Mode::MissingMods { .. }))
+        {
+            return false;
+        }
         let Some(nav) = key_focus::nav_of(key, self.has_shift_down()) else {
             return false;
         };

@@ -14,7 +14,7 @@ pub(super) struct GuestPlay {
     destroy_delay: u32,
     using: Option<(usize, u32)>,
     use_duration: i32,
-    use_ticks_set: bool,
+    use_start: super::using_item::UseStart,
     use_delay: u32,
     /// The shield's ItemCooldowns entry: an axe disabled it for this many ticks.
     pub(super) shield_cooldown: u32,
@@ -59,16 +59,10 @@ pub(super) struct GuestPlay {
     mount: super::mounts::MountState,
     /// The trading screen the guest has open.
     pub(super) merchant: Option<super::lan_trading::GuestMerchant>,
-    /// The inventory menu and the crafting table the guest crafts in.
-    pub(super) crafting: super::lan_crafting::GuestCrafting,
-    /// The workstation menu the guest has open (game/network/lan_stations.rs).
-    pub(super) station: MenuOwner<Option<super::lan_stations::GuestStation>>,
     /// The mount inventory the guest has open (game/network/lan_mount_menu.rs).
     pub(super) mount_window: Option<super::lan_mount_menu::GuestMount>,
     /// The lectern the guest reads (game/network/lan_stations.rs).
     pub(super) lectern: Option<super::lan_stations::GuestLectern>,
-    /// The menu the mods last heard this guest open (`tick_player_menus`).
-    pub(super) menu_heard: Option<super::native_menus::HeardMenu>,
     /// The equipment the mods last heard this guest wear (`native_players_equipment`), by
     /// `EquipmentSlot`: main hand, off hand, feet, legs, chest, head.
     pub(super) equipment_heard: Option<Box<[Option<crate::items::ItemStack>; 6]>>,
@@ -177,7 +171,7 @@ pub(super) struct GuestSwap {
     destroy_delay: u32,
     using: Option<(usize, u32)>,
     use_duration: i32,
-    use_ticks_set: bool,
+    use_start: super::using_item::UseStart,
     use_delay: u32,
     pub(super) shield_cooldown: u32,
     /// The guest's item cooldowns (`Game::cooldowns` for its turn).
@@ -285,6 +279,7 @@ impl GuestPlay {
 struct ItemRules<'a>(
     &'a horizon_client::items::Items,
     &'a horizon_client::enchant::Enchantments,
+    Option<&'a dyn horizon_client::menu::SlotRules>,
 );
 impl Rules for ItemRules<'_> {
     fn items(&self) -> &horizon_client::items::Items {
@@ -295,6 +290,9 @@ impl Rules for ItemRules<'_> {
     }
     fn max_stack(&self, item: &str) -> u32 {
         self.0.get(item).map_or(64, |i| i.max_stack)
+    }
+    fn slot_rules(&self) -> Option<&dyn horizon_client::menu::SlotRules> {
+        self.2
     }
 }
 
@@ -316,17 +314,6 @@ pub(super) fn guest_within_entity_range(
     let range = if g.creative() { 5.0 } else { 3.0 } + buffer;
     d[0] * d[0] + d[1] * d[1] + d[2] * d[2] < range * range
 }
-fn direction(face: i32) -> [i32; 3] {
-    match face {
-        0 => [0, -1, 0],
-        1 => [0, 1, 0],
-        2 => [0, 0, -1],
-        3 => [0, 0, 1],
-        4 => [-1, 0, 0],
-        _ => [1, 0, 0],
-    }
-}
-
 fn building_player(g: &horizon_client::lan::guest::Guest) -> BuildingPlayer {
     BuildingPlayer {
         conn: Some(g.conn),
@@ -517,7 +504,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires prepared game resources"]
+    #[ignore = "daily"]
     fn menu_rules_match_guest_packets_and_prediction() {
         use horizon_client::{
             chunk::Chunk,
@@ -533,11 +520,7 @@ mod tests {
         struct Part;
         #[mod_api::horizon_part]
         impl MenuPart for Part {
-            fn menu_slot_rules(
-                &self,
-                _: &dyn mod_api::LoopContext,
-                event: &mut MenuSlotRulesEvent<'_>,
-            ) {
+            fn menu_slot_rules(&self, _: &dyn mod_api::Host, event: &mut MenuSlotRulesEvent<'_>) {
                 if mod_api::__private::item_key_id(event.stack.item()).unwrap()
                     == "minecraft:granite"
                     && event.stack.count() < 8
@@ -911,7 +894,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires prepared game resources"]
+    #[ignore = "daily"]
     fn crafting_guest_self_swap_keeps_eight_items() {
         use horizon_client::chunk::Chunk;
         use horizon_protocol::packets::play::{ContainerClick, Serverbound};
@@ -936,7 +919,7 @@ mod tests {
                 .lan
                 .as_ref()
                 .unwrap()
-                .play
+                .menus
                 .get(&12)
                 .unwrap()
                 .crafting
@@ -971,7 +954,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires prepared game resources"]
+    #[ignore = "daily"]
     fn block_menu_handle_and_use_each_count_the_guest_once() {
         use horizon_client::chunk::Chunk;
         use mod_api::BlockUpdateFlags;
@@ -1086,7 +1069,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires prepared game resources"]
+    #[ignore = "daily"]
     fn block_menu_click_keeps_spent_action_on_cancellation() {
         use horizon_client::{chunk::Chunk, lan::guest::GuestKind};
         use mod_api::BlockUpdateFlags;
@@ -1122,7 +1105,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires prepared game resources"]
+    #[ignore = "daily"]
     fn block_parts_pick_and_use_on_the_server_and_for_a_guest() {
         use super::super::{lan::LanSettings, native_entity_refs::tests::with_game};
         use horizon_client::{
@@ -1132,8 +1115,8 @@ mod tests {
         use horizon_protocol::packets::{configuration::ClientInformation, play};
         use mod_api::InteractionResult as Answer;
         use mod_api::{
-            self, BlockPart, CloneItemStackEvent, Flow, Hooks, Host, ItemPart, ItemStack,
-            Registrar, ServerHost, UseItemOnEvent, UseOnEvent, UseWithoutItemEvent,
+            self, BlockPart, CloneItemStackEvent, Hooks, Host, ItemPart, ItemStack, Registrar,
+            ServerHost, UseItemOnEvent, UseOnEvent, UseWithoutItemEvent,
         };
         use std::sync::{
             Arc, Mutex,
@@ -1215,10 +1198,10 @@ mod tests {
         // The held items' own `Item.useOn`, counted, taking the click.
         #[mod_api::horizon_part]
         impl ItemPart for User {
-            fn use_on(&self, _: &mut dyn ServerHost, _: &mut UseOnEvent<'_>) -> Flow {
+            fn use_on(&self, _: mod_api::HostSide<'_>, _: &mut UseOnEvent<'_>) -> Option<Answer> {
                 self.item_uses
                     .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                Flow::Cancel
+                Some(Answer::SuccessServer)
             }
         }
         struct Mod {
@@ -1447,6 +1430,7 @@ mod tests {
                             ticks: 0,
                             playing: false,
                             song_clock_present: false,
+                            loaded_clock: false,
                         },
                     ),
                 );
@@ -1805,7 +1789,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires prepared game resources"]
+    #[ignore = "daily"]
     fn block_part_use_item_on_consumes_once() {
         use super::super::native_entity_refs::tests::with_game;
         use horizon_client::chunk::Chunk;
@@ -1873,7 +1857,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires prepared game resources"]
+    #[ignore = "daily"]
     fn replacing_empty_note_block_use_does_not_award_vanilla_stats() {
         use super::super::native_entity_refs::tests::with_game;
         use horizon_client::chunk::Chunk;
@@ -1943,7 +1927,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires prepared game resources"]
+    #[ignore = "daily"]
     fn fake_body_does_not_count_toward_sleep() {
         super::super::native_entity_refs::tests::with_game(|game| {
             game.player = Some(
@@ -2153,7 +2137,7 @@ mod hotbar_tests {
     /// player by UUID and entity id; the same slot again fires neither, and a cancelled pre
     /// keeps the old slot with no post.
     #[test]
-    #[ignore = "requires prepared game resources"]
+    #[ignore = "daily"]
     fn a_hotbar_switch_fires_pre_then_post_and_pre_can_keep_the_slot() {
         let heard = Heard::default();
         let mods = vec![ModEntry::new("hotbar", Box::new(Hotbar(heard.clone())))].into();
@@ -2224,7 +2208,7 @@ mod respawn_position_tests {
     /// player's handle, and its new point, facing and copy choice are what
     /// the player gets.
     #[test]
-    #[ignore = "requires prepared game resources"]
+    #[ignore = "daily"]
     fn a_mod_moves_a_respawn_and_drops_the_point() {
         let heard = Heard::default();
         let mods = vec![ModEntry::new("east", Box::new(East(heard.clone())))].into();
@@ -2274,7 +2258,7 @@ mod respawn_position_tests {
     /// point facing the respawn direction, not the way it died, and keeps
     /// the point.
     #[test]
-    #[ignore = "requires prepared game resources"]
+    #[ignore = "daily"]
     fn a_listening_mod_leaves_the_respawn_as_it_was() {
         let heard = Arc::default();
         let mods = vec![ModEntry::new(
@@ -2357,6 +2341,7 @@ mod pickup_xp_tests {
                 age: 0,
                 on_ground: true,
                 count: 1,
+                fire_ticks: 0,
                 ticks: 0,
                 air: 300,
                 health: 5,
@@ -2374,7 +2359,7 @@ mod pickup_xp_tests {
     /// `PlayerXpEvent.PickupXp` through the shared `listened` probe: a pickup goes the
     /// same with no listener and with one that changes nothing, and a cancel keeps the orb.
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "daily"]
     fn pickup_xp_is_the_same_with_and_without_a_listener() {
         let none = take_orb();
         assert_eq!(none, (false, 7));
@@ -2395,7 +2380,7 @@ mod respawn_world_point_tests {
 
     /// PlayerList.respawn sends world respawn data, independently of the personal landing.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn guest_respawn_keeps_world_information_distinct_from_personal_landing() {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
@@ -2550,7 +2535,7 @@ mod swing_echo_tests {
     /// placed (SUCCESS) is the client's own swing, a bed's use
     /// (SUCCESS_SERVER) is not (#9887).
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn only_a_server_only_use_swings_back_to_the_player() {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
@@ -2793,7 +2778,7 @@ mod guest_close_listener_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and scratch homes/cwd"]
+    #[ignore = "daily"]
     fn ordinary_guest_final_close_posts_to_actual_listener() {
         let root = std::path::PathBuf::from(
             std::env::var_os("HORIZON_TEST_RESOURCES").expect("prepared resources required"),
@@ -3282,17 +3267,17 @@ mod item_on_block_cooldown_tests {
         }
     }
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn failed_stick_use_keeps_group_available_for_placement() {
         placement_control(None);
     }
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn actual_guest_placement_starts_its_cooldown() {
         placement_control(Some(true));
     }
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn actual_guest_second_placement_is_rejected() {
         placement_control(Some(false));
     }

@@ -8,7 +8,7 @@ use horizon_client::{
     Result,
     confirm_screen::Confirm,
     hud::{HudAtlas, HudBatch},
-    java_text, multiplayer, packs,
+    multiplayer, packs,
     scoreboard::{comp_text, tag_to_json},
     server_packs::{Prompt, ServerPacks, action, download, parse_sha1, valid_url},
     text::{Text, named_color},
@@ -205,7 +205,10 @@ fn human_readable(bytes: u64) -> String {
     let exp = (jmath::log(bytes as f64) / jmath::log(1024.0)) as i32;
     let prefix = &"KMGTPE"[exp as usize - 1..exp as usize];
     let value = bytes as f64 / 1024f64.powi(exp);
-    format!("{} {prefix}B", java_text::format_fixed(value, 1))
+    format!(
+        "{} {prefix}B",
+        horizon_core::java_number::format_fixed(value, 1)
+    )
 }
 
 pub(super) fn saves() -> PathBuf {
@@ -359,7 +362,7 @@ impl Game<'_> {
             self.server_packs.packs.reject();
             if prompt.required {
                 let reason = Text::translate("multiplayer.requiredTexturePrompt.disconnect", &[]);
-                return self.leave_server(Some(reason.plain()));
+                return self.leave_server(Some(reason));
             }
             Some(false)
         };

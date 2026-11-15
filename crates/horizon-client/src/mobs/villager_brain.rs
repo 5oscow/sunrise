@@ -747,28 +747,7 @@ fn sense_hurt(m: &mut Mob, w: &MobWorld) {
         mm.hurt_by_entity.clear();
     }
 }
-/// `VillagerHostilesSensor.ACCEPTABLE_DISTANCE_FROM_HOSTILES`.
-fn hostile_distance(s: Species) -> Option<f32> {
-    Some(match s {
-        Species::Drowned
-        | Species::Husk
-        | Species::Vex
-        | Species::Zombie
-        | Species::ZombieVillager => 8.0,
-        Species::Evoker | Species::Illusioner | Species::Ravager => 12.0,
-        Species::Pillager => 15.0,
-        Species::Vindicator | Species::Zoglin => 10.0,
-        _ => return None,
-    })
-}
-fn sense_hostiles(m: &mut Mob, w: &MobWorld) {
-    let hostile = find_closest(m, w, |m, who| {
-        let Who::Mob(id) = who else { return false };
-        let Some(s) = w.seen(id) else { return false };
-        hostile_distance(s.species).is_some_and(|d| m.distance_sqr(s.position) <= f64::from(d * d))
-    });
-    mem(m).nearest_hostile.set_opt(hostile);
-}
+include!("villager_brain/hostile_sensor.rs");
 fn sense_babies(m: &mut Mob, w: &MobWorld) {
     let list = mem_ref(m)
         .and_then(|mm| mm.visible_mobs.get())
@@ -1987,7 +1966,7 @@ impl B {
                     return false;
                 }
                 let kind = *kind;
-                if kind == Interact::BreedVillager && !super::villager::can_breed(m) {
+                if kind == Interact::BreedVillager && !super::villager::can_breed_in(m, cx.w) {
                     return false;
                 }
                 let w = cx.w;
@@ -2828,7 +2807,7 @@ impl B {
                 if close {
                     if now - *started > 20 {
                         cx.events.push(MobEvent::ThrowGift {
-                            table: super::villager::gift_table(m),
+                            table: super::villager::gift_table(m, cx.w.mob_maps),
                             from: [m.position.x, m.eye_y() - 0.3, m.position.z],
                             to: [p.position.x, p.position.y, p.position.z],
                         });
@@ -2959,7 +2938,7 @@ impl B {
                     if now >= *birth {
                         // The parent's half happens in its own tick: it eats,
                         // takes a bed for the child, picks its type and rests.
-                        super::villager::ext_mut(m).eat_and_digest();
+                        super::villager::eat_and_digest_in(m, cx.w);
                         let child = take_bed_for_child(m, cx.w).map(|bed| {
                             // Villager.getBreedOffspring: half the biome's type,
                             // a quarter each parent's.
@@ -3363,7 +3342,7 @@ fn play_work_sound(m: &mut Mob, cx: &mut Bx) {
     }
 }
 /// `WorkAtPoi.start`'s restock.
-fn restock_if_due(m: &mut Mob, w: &MobWorld) {
+pub(super) fn restock_if_due(m: &mut Mob, w: &MobWorld) {
     if w.professions.state_index(&m.extra.profession).is_none() {
         return;
     }
@@ -3591,7 +3570,7 @@ fn breeding_possible(m: &mut Mob, w: &MobWorld) -> bool {
         return false;
     };
     villager_target_valid(m, w, Mem::BreedTarget)
-        && super::villager::can_breed(m)
+        && super::villager::can_breed_in(m, w)
         && w.seen(id).is_some_and(|s| s.in_love)
 }
 /// `VillagerMakeLove.takeVacantBed`: `PoiManager.take(HOME, ..., 48)` over a

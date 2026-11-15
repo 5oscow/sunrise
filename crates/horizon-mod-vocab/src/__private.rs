@@ -5,6 +5,49 @@ use crate::*;
 #[path = "__private/registry_installation.rs"]
 mod registry_installation;
 
+/// Native libraries' launcher-to-game registration contract, not a mod-facing API.
+/// The launcher generates manifest rows independently of hook factories. The game checks
+/// them against the packages beside its executable (`horizon_mod_package::runtime`).
+/// These types live in the shared API closure so every library uses the same Rust ABI.
+pub mod native {
+    /// One dynamically loaded native library, registered before the engine seal.
+    pub struct NativeMod {
+        /// Hook factories owned by this library.
+        pub entries: fn() -> Vec<crate::ModEntry>,
+        /// Compiled API point listeners owned by this library.
+        pub slots: fn() -> Vec<super::points::SlotListener>,
+        /// Manifest identities (empty for the patch library).
+        pub built: &'static [BuiltMod],
+        /// Install patch copies and return their verification rows.
+        pub installs: fn() -> Vec<(&'static str, &'static [&'static str], bool)>,
+    }
+
+    impl NativeMod {
+        /// The library's registration, as its generated entry module builds it.
+        pub fn new(
+            entries: fn() -> Vec<crate::ModEntry>,
+            slots: fn() -> Vec<super::points::SlotListener>,
+            built: &'static [BuiltMod],
+            installs: fn() -> Vec<(&'static str, &'static [&'static str], bool)>,
+        ) -> Self {
+            Self {
+                entries,
+                slots,
+                built,
+                installs,
+            }
+        }
+    }
+
+    /// One native mod supplied by a library, with its manifest's `side`.
+    #[derive(Clone, Copy, Debug, Default, PartialEq)]
+    pub struct BuiltMod {
+        pub id: &'static str,
+        pub version: &'static str,
+        pub side: crate::Side,
+    }
+}
+
 /// Switch an installed mod's dispatches on or off, returning whether it was found.
 pub fn set_mod_enabled(id: &str, on: bool) -> bool {
     crate::set_mod_enabled(id, on)
@@ -36,14 +79,28 @@ pub fn listened(hook: HookId) -> bool {
     crate::listened(hook)
 }
 
+/// Whether at least one enabled mod subscribes to `hook`, visiting only its subscribers.
+pub fn enabled_listened(hook: HookId) -> bool {
+    crate::runtime::enabled_listened(hook)
+}
+
+/// Whether any part subscribed to the scoped entity hook `hook` is attached to
+/// entity type `kind`, so a family's walk can resolve its rows' slots once per
+/// pass instead of naming each row's type.
+pub fn entity_part_hooked(hook: HookId, name: &'static str, kind: &str) -> bool {
+    crate::parts::parts(hook, name)
+        .for_hook(hook)
+        .is_some_and(|table| !table.entity(|| Some(kind)).is_empty())
+}
+
 /// A read backend wrapper for a host the game builds narrowed: the mob tick's
-/// goal view hands itself out as its own backend (#1077).
+/// goal view hands itself out as its own backend.
 pub fn backend_ref(inner: &dyn Backend) -> crate::BackendRef<'_> {
     crate::BackendRef::of(inner)
 }
 /// Call `read` on `host`'s real backend, or `None` where the host has none:
 /// the mob tick's goal view forwards the level's own reads — blocks, loaded
-/// chunks, time, height, weather, block entities — through it (#1077); the
+/// chunks, time, height, weather, block entities — through it; the
 /// entity data its snapshot does not carry stays refused. Returned borrows stay tied to the host.
 pub fn backend_read<'a, R>(
     host: &'a dyn crate::Host,
@@ -62,6 +119,25 @@ pub fn installed_code_ids() -> impl Iterator<Item = &'static str> {
     crate::mods().iter().map(|entry| entry.id)
 }
 
+/// What the installed code mod `id` carries that a joining client must have, as the end of a
+/// sentence about the mod: its first subscription to a client-side hook, its first part that
+/// subscribes to one, or its first required payload channel sent to clients. The engine refuses
+/// a `side = "server"` mod that has one. Read once the parts are installed.
+pub fn client_requirement(id: &str) -> Option<String> {
+    let mine = || crate::mods().iter().filter(|entry| entry.id == id);
+    if let Some(hook) = mine().find_map(|entry| entry.client_hook()) {
+        return Some(format!("listens to the client hook {hook}"));
+    }
+    let installed = crate::parts::installed()?;
+    if let Some((part, hook)) = installed.client_part(id) {
+        return Some(format!(
+            "attaches the part {part}, which listens to the client hook {hook}"
+        ));
+    }
+    let channel = installed.keys.payloads.as_ref()?.client_bound(id)?;
+    Some(format!("sends the required payload {channel} to clients"))
+}
+
 /// The command argument types mods registered at startup, by namespaced id, for the game's
 /// command trees. Not part of the mod surface.
 pub fn command_argument_types() -> Vec<(String, std::sync::Arc<dyn crate::CommandArgumentType>)> {
@@ -69,6 +145,24 @@ pub fn command_argument_types() -> Vec<(String, std::sync::Arc<dyn crate::Comman
         .iter()
         .map(|info| (info.id.to_string(), info.argument.clone()))
         .collect()
+}
+
+/// The selector tokens mods registered at startup, by name, for the game's command
+/// registries. Not part of the mod surface.
+pub fn entity_selector_types() -> impl Iterator<Item = (&'static str, &'static crate::SelectorBase)>
+{
+    crate::parts::installed_entity_selectors()
+        .iter()
+        .map(|info| (info.name.as_ref(), &info.base))
+}
+
+/// Resolve an installed selector's handler by reference, without allocating or cloning a resource.
+pub fn entity_selector_type(name: &str) -> Option<&'static dyn crate::EntitySelectorType> {
+    let selectors = crate::parts::installed_entity_selectors();
+    selectors
+        .binary_search_by(|info| info.name.as_ref().cmp(name))
+        .ok()
+        .map(|index| selectors[index].selector.as_ref())
 }
 
 /// The startup package inventory at an owning engine load boundary.
@@ -154,6 +248,14 @@ pub mod game {
     /// A player handle the game names.
     pub fn player_ref(entity: EntityRef, uuid: u128) -> PlayerRef {
         PlayerRef { entity, uuid }
+    }
+    /// The player a completion is for, as the game knows them.
+    pub fn command_sender(uuid: u128, name: String, permission: PermissionLevel) -> CommandSender {
+        CommandSender {
+            uuid,
+            name,
+            permission,
+        }
     }
     /// A stack's modifiers for `item_attribute_modifier`, as its component
     /// gives them.

@@ -263,7 +263,7 @@ impl Game<'_> {
                 .and_then(|s| s.properties.get("triggered"))
                 .is_some_and(|v| v == "true");
             if let Some(BlockEntity::Crafter(c)) = self.world.block_entities.get_mut(&p) {
-                c.triggered = triggered;
+                c.triggered = i32::from(triggered);
                 c.state_triggered = Some(triggered);
             }
         }
@@ -333,9 +333,7 @@ impl Game<'_> {
                 center,
                 op["radius"].as_f64().unwrap_or(3.0) as f32,
                 1.0,
-                breeze,
-                !breeze,
-                Default::default(),
+                super::wind::Source::charge(breeze, false),
             )?;
         } else if let Some(op) = case.get("remove") {
             used = self.fixture_remove(origin, op)?;
@@ -440,7 +438,7 @@ impl Game<'_> {
                 p.1,
                 p.2,
                 c.crafting_ticks,
-                c.triggered,
+                c.is_triggered(),
                 c.redstone_signal(),
                 disabled.join(",")
             ));
@@ -584,6 +582,7 @@ impl Game<'_> {
                 may_build: true,
                 can_eat: self.creative,
                 game_master: false,
+                respawn_point: None,
             };
             let hit = horizon_core::geometry::Vec3::new(
                 f64::from(pos.x) + 0.5,
@@ -998,6 +997,7 @@ impl Game<'_> {
                         items: [stack],
                         ticks: 0,
                         playing: false,
+                        loaded_clock: false,
                     }),
                 );
             }
@@ -1451,6 +1451,9 @@ impl Game<'_> {
                 ProjectileKind::Egg => "minecraft:egg",
                 ProjectileKind::SmallFireball => "minecraft:small_fireball",
                 ProjectileKind::WindCharge => "minecraft:wind_charge",
+                ProjectileKind::Potion(_, true) => "minecraft:lingering_potion",
+                ProjectileKind::Potion(..) => "minecraft:splash_potion",
+                ProjectileKind::ExperienceBottle => "minecraft:experience_bottle",
                 _ => "minecraft:unknown_projectile",
             };
             let (p, v) = (shot.position, shot.velocity);

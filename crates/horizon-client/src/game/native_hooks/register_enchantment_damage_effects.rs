@@ -80,7 +80,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources and an isolated process for startup registration"]
+    #[ignore = "daily"]
     fn custom_enchantment_changes_real_hit_damage_and_observes_hit_context() {
         let reads: Observations = Default::default();
         with_mods(
@@ -128,7 +128,7 @@ mod tests {
                     let stack = game.reload_datapacks(false, &[]).unwrap();
                     let resources = game.options.resources.clone();
                     game.world_tables = game
-                        .build_world_tables(&stack, false, &resources, game.mods.data_switched)
+                        .stage_world_tables(&stack, false, &resources)
                         .unwrap()
                         .0;
                     assert!(
@@ -148,6 +148,7 @@ mod tests {
                     player.entity_id = 7;
                     player.ground.on_ground = true;
                     game.player = Some(player);
+                    crate::game::native_entity_refs::tests::bind_local_player(game, 7, 1);
                     game.lan_acting_uuid = Some(1);
                     game.lan_acting_entity = Some(7);
                     game.lan_acting_name = Some("attacker".into());

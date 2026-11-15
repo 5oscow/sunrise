@@ -7,6 +7,8 @@ mod wire;
 ///
 /// `#[payload(crate = ::mod_vocab)]` selects the contract crate for
 /// lower-layer crates. The default is `::mod_api`.
+/// For mutually recursive types, `#[payload(bound = "T: ::mod_api::PayloadCodec")]`
+/// replaces inferred predicates; use `#[payload(bound = "")]` when none are needed.
 #[proc_macro_derive(PayloadCodec, attributes(payload))]
 pub fn derive_payload_codec(input: TokenStream) -> TokenStream {
     payload::expand(syn::parse_macro_input!(input as syn::DeriveInput))
@@ -129,9 +131,7 @@ fn expand(mut implementation: ItemImpl, export: bool) -> TokenStream {
         "ItemPart" => Some("item_subscribed"),
         "MenuPart" => Some("menu_subscribed"),
         "FluidPart" => Some("fluid_subscribed"),
-        // Entity parts carry no scoped hook yet (#1077): `register_goals` is
-        // not one, so its subscriptions stay empty whatever it overrides.
-        "EntityPart" => Some("entity_subscribed_empty"),
+        "EntityPart" => Some("entity_subscribed"),
         _ => {
             return syn::Error::new_spanned(name, "expected a hook or part trait")
                 .into_compile_error()
@@ -152,8 +152,15 @@ fn expand(mut implementation: ItemImpl, export: bool) -> TokenStream {
     let mut methods = Vec::new();
     let mut cfgs = Vec::new();
     let mut listeners = Vec::new();
+    // A block part's plain declarations are not hooks, so their names subscribe nothing.
+    const BLOCK_PART_PLAIN: [&str; 1] = ["explosion_resistance_is_pure"];
     for item in &mut implementation.items {
         if let ImplItem::Fn(method) = item {
+            if name == "BlockPart"
+                && BLOCK_PART_PLAIN.contains(&method.sig.ident.to_string().as_str())
+            {
+                continue;
+            }
             match take_listener(method) {
                 Ok(Some(_)) if part.is_some() => {
                     return syn::Error::new_spanned(
@@ -176,15 +183,43 @@ fn expand(mut implementation: ItemImpl, export: bool) -> TokenStream {
     let id = format_ident!("HookId");
     let ids = format_ident!("hook_ids");
     let subscribed_name = format_ident!("{}", part.unwrap_or("subscribed"));
-    let subscribed = if subscribed_name == "entity_subscribed_empty" {
-        // Entity parts (arismoko/horizon#1077): no scoped hook exists for them
-        // yet, so `register_goals` cannot be mistaken for one.
-        syn::parse_quote! {
-            fn entity_subscribed(&self) -> &'static [Option<mod_api::HookId>] {
-                &[]
+    // Entity parts (#1077) carry plain methods beside their scoped hooks
+    // (#792): the goal, behavior and spawn-size registrars are not hooks, so
+    // their names subscribe nothing.
+    if name == "EntityPart" {
+        const ENTITY_PART_PLAIN: [&str; 5] = [
+            "register_goals",
+            "register_behaviors",
+            "spawn_cluster_size",
+            "is_shearable",
+            "on_sheared",
+        ];
+        let plain: Vec<bool> = methods
+            .iter()
+            .map(|method| ENTITY_PART_PLAIN.contains(&method.to_string().as_str()))
+            .collect();
+        let hooked: Vec<_> = methods
+            .iter()
+            .zip(&plain)
+            .filter(|(_, plain)| !*plain)
+            .map(|(method, _)| method)
+            .collect();
+        let hooked_cfgs: Vec<_> = cfgs
+            .iter()
+            .zip(&plain)
+            .filter(|(_, plain)| !*plain)
+            .map(|(cfgs, _)| cfgs)
+            .collect();
+        implementation.items.push(syn::parse_quote! {
+            fn #subscribed_name(&self) -> &'static [Option<mod_api::#id>] {
+                &[#(#(#hooked_cfgs)* mod_api::#ids::#hooked),*]
             }
-        }
-    } else {
+        });
+        // A part impl carries no `#[listener]` (refused above) and no guest
+        // export (Hooks only), so the shared tail has nothing left to add.
+        return quote!(#implementation).into();
+    }
+    let subscribed = {
         syn::parse_quote! {
             fn #subscribed_name(&self) -> &'static [Option<mod_api::#id>] {
                 &[#(#(#cfgs)* mod_api::#ids::#methods),*]

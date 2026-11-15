@@ -148,6 +148,9 @@ fn host(game: &mut Game<'_>) {
         },
     )
     .unwrap();
+    // Existing mobs and knots already own runtime IDs when hosting starts.
+    game.next_entity += 1;
+    let guest_id = game.next_entity;
     let (tx, _rx) = mpsc::channel();
     let mut guest = Guest::new(
         Joined {
@@ -162,7 +165,7 @@ fn host(game: &mut Game<'_>) {
             address: "127.0.0.1:25565".parse().unwrap(),
             expected: false,
         },
-        2,
+        guest_id as i32,
         [12.5, 201.0, 4.5],
         1,
     );
@@ -172,7 +175,7 @@ fn host(game: &mut Game<'_>) {
 }
 
 #[test]
-#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn a_server_that_starts_tracking_later_shows_the_same_knot() {
     let mut resources = None;
     let mut game = game(&mut resources);
@@ -208,7 +211,7 @@ fn a_server_that_starts_tracking_later_shows_the_same_knot() {
 }
 
 #[test]
-#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn two_leads_on_one_fence_share_one_knot() {
     let mut resources = None;
     let mut game = game(&mut resources);
@@ -232,7 +235,7 @@ fn two_leads_on_one_fence_share_one_knot() {
 }
 
 #[test]
-#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn a_knot_tied_again_after_its_last_lead_is_a_new_entity() {
     let mut resources = None;
     let mut game = game(&mut resources);
@@ -260,7 +263,7 @@ fn a_knot_tied_again_after_its_last_lead_is_a_new_entity() {
 }
 
 #[test]
-#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn the_same_fence_position_in_another_level_is_another_knot() {
     let mut resources = None;
     let mut game = game(&mut resources);
@@ -311,7 +314,7 @@ fn the_same_fence_position_in_another_level_is_another_knot() {
 }
 
 #[test]
-#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn commands_that_would_move_or_remove_a_natural_knot_fail() {
     let mut resources = None;
     let mut game = game(&mut resources);

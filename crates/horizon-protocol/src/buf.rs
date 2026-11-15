@@ -6,15 +6,10 @@ use horizon_core::{nbt, nbt::Tag};
 use std::marker::PhantomData;
 
 /// Vanilla's default NBT quota for network tags (NbtAccounter.defaultQuota).
-pub const NBT_QUOTA: usize = 2_097_152;
-/// The least `NbtAccounter` charges for one tag: `EndTag`'s `SELF_SIZE_IN_BYTES`, the smallest
-/// tag's (every other tag costs more: `ByteTag` 9 bytes, a compound 48 plus its entries).
-const MIN_TAG_COST: usize = 8;
-/// The most tags one network NBT value can hold within [`NBT_QUOTA`]: vanilla charges each at least
-/// [`MIN_TAG_COST`] of its estimated heap, so a value with more tags is one vanilla refuses too. A
-/// byte count alone let a crafted server send ~1 M byte tags in 1 MB that vanilla refuses and that
-/// take ~32 bytes each here; capped, one value's tags take at most ~8 MiB.
-pub const NBT_MAX_TAGS: usize = NBT_QUOTA / MIN_TAG_COST;
+pub const NBT_QUOTA: usize = nbt::Limits::network().max_bytes;
+/// The most tags one network NBT value can hold within [`NBT_QUOTA`], using
+/// vanilla's minimum eight-byte per-tag heap charge.
+pub const NBT_MAX_TAGS: usize = nbt::Limits::network().max_nodes;
 
 /// Whether a peer can read `tag` as network NBT: written within [`NBT_QUOTA`], then read back by
 /// [`Reader::nbt`] under the receiver's own limits (`NbtAccounter.defaultQuota` and its tag count).
@@ -181,7 +176,7 @@ impl<'a> Reader<'a> {
     /// String (UTF-16 units: a character outside the BMP counts twice).
     pub fn string(&mut self, max: usize) -> Result<String> {
         let len = self.count(max.saturating_mul(3))?;
-        let s = packet_utf8(self.bytes(len)?);
+        let s = java_utf8(self.bytes(len)?);
         if s.encode_utf16().count() > max {
             return Err(Error::new(format!("string longer than {max} chars")));
         }
@@ -196,11 +191,10 @@ impl<'a> Reader<'a> {
     }
     /// A network NBT tag (NbtIo.readAnyTag without a root name); `End` means none.
     pub fn nbt(&mut self) -> Result<Tag> {
-        let limits = nbt::Limits {
-            max_bytes: NBT_QUOTA,
-            max_nodes: NBT_MAX_TAGS,
-            ..nbt::Limits::default()
-        };
+        self.nbt_within(nbt::Limits::network())
+    }
+    /// [`Self::nbt`] within `limits`, for a codec whose writer uses the same ones.
+    pub fn nbt_within(&mut self, limits: nbt::Limits) -> Result<Tag> {
         let (tag, used) = nbt::read_network(&self.data[self.pos..], limits)
             .map_err(|e| Error::new(format!("NBT: {e}")))?;
         self.pos += used;
@@ -218,10 +212,11 @@ impl<'a> Reader<'a> {
     }
 }
 
-/// Java's UTF-8 replacement decoder, as used by Utf8String.read. Most malformed
+/// Java's UTF-8 replacement decoder, as used by Utf8String.read and by a reader
+/// opened on a UTF-8 file (Guava's `Files.newReader`). Most malformed
 /// sequences have Rust's maximal-subpart grouping, but Java consumes an encoded
 /// surrogate (including its truncated two-byte prefix) as one replacement.
-fn packet_utf8(mut bytes: &[u8]) -> String {
+pub fn java_utf8(mut bytes: &[u8]) -> String {
     let mut output = String::with_capacity(bytes.len());
     loop {
         match std::str::from_utf8(bytes) {

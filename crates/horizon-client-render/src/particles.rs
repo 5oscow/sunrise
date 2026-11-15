@@ -7,7 +7,6 @@
 //! follow the vanilla classes; sprite sets come from `particles/*.json`.
 use crate::{
     blocks::{BlockFacts, Fluid},
-    collisions::SceneCollisions,
     hud::Rect,
     mesher::Vertex,
     world::World,
@@ -30,6 +29,9 @@ use std::{
 
 pub use horizon_client_core::particle_type::ParticleType;
 pub use horizon_items::firework::{DYE_FIREWORK_COLORS, FireworkExplosion, FireworkShape};
+mod collide;
+mod explosions;
+pub use explosions::ExplosionParticle;
 mod groups;
 mod mod_behaviour;
 mod native;
@@ -981,21 +983,6 @@ pub struct ParticleLevel<'a> {
     pub cached_chunk: std::cell::Cell<Option<((i32, i32), Option<&'a crate::chunk::Chunk>)>>,
 }
 impl<'a> ParticleLevel<'a> {
-    fn collide(&self, bb: Aabb, d: [f64; 3]) -> [f64; 3] {
-        let mut scene = SceneCollisions {
-            world: self.world,
-            binding: self.collision,
-            subject: None,
-        };
-        let movement = Vec3::new(d[0], d[1], d[2]);
-        if scene.cells_without_collision(bb.expand_towards(movement)) {
-            return d;
-        }
-        match scene.resolve(bb, movement, 0.0, false) {
-            Ok(v) => [v.x, v.y, v.z],
-            Err(_) => d,
-        }
-    }
     pub(crate) fn block_at(p: [f64; 3]) -> [i32; 3] {
         [
             p[0].floor() as i32,
@@ -1126,11 +1113,15 @@ pub struct ParticleEngine {
     pub camera: [f64; 3],
     /// The Particles option (`ParticleStatus`): 0 all, 1 decreased, 2 minimal.
     pub particle_level: u8,
+    /// The most live particles (`len`) this engine keeps: a new one past it is not
+    /// added. None, the level's engine, has only each group's own limit; a mod screen's
+    /// scene sets its own.
+    pub live_limit: Option<usize>,
     /// FireworkParticles.Starter instances.
     starters: Vec<Starter>,
     elder_guardians: Vec<i32>,
     /// `ClientExplosionTracker` tracked explosions pending debris generation.
-    tracked_explosions: Vec<TrackedExplosion>,
+    tracked_explosions: Vec<explosions::TrackedExplosion>,
     /// Local sounds requested by particles (dripstone drips, firework bursts):
     /// (event, position, volume, pitch, distanceDelay).
     pub sounds: Vec<(&'static str, [f64; 3], f32, f32, bool)>,
@@ -1184,100 +1175,8 @@ impl ParticleLightCache {
     }
 }
 
-const PARTICLE_SECTION_CACHE_SIZE: usize = 128;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum SectionFrustumResult {
-    Outside,
-    Intersects,
-    Inside,
-}
-
-#[derive(Clone, Copy)]
-struct CachedSectionFrustum {
-    section: [i32; 3],
-    radius_quarters: i32,
-    result: SectionFrustumResult,
-}
-
-struct ParticleSectionFrustumCache {
-    entries: [Option<CachedSectionFrustum>; PARTICLE_SECTION_CACHE_SIZE],
-}
-
-impl Default for ParticleSectionFrustumCache {
-    fn default() -> Self {
-        Self {
-            entries: [None; PARTICLE_SECTION_CACHE_SIZE],
-        }
-    }
-}
-
-impl ParticleSectionFrustumCache {
-    fn result(
-        &mut self,
-        world: [f64; 3],
-        camera: DVec3,
-        radius: f64,
-        frustum: &crate::gfx::Frustum,
-    ) -> SectionFrustumResult {
-        let Some(section) = world_section(world) else {
-            return SectionFrustumResult::Intersects;
-        };
-        if !radius.is_finite() || radius < 0.0 || radius * 4.0 > f64::from(i32::MAX) {
-            return SectionFrustumResult::Intersects;
-        }
-        let radius_quarters = (radius * 4.0).ceil() as i32;
-        let hash = (section[0] as u32).wrapping_mul(73_856_093)
-            ^ (section[1] as u32).wrapping_mul(19_349_663)
-            ^ (section[2] as u32).wrapping_mul(83_492_791)
-            ^ (radius_quarters as u32).wrapping_mul(2_654_435_761);
-        let slot = hash as usize & (PARTICLE_SECTION_CACHE_SIZE - 1);
-        if let Some(entry) = self.entries[slot]
-            && entry.section == section
-            && entry.radius_quarters == radius_quarters
-        {
-            return entry.result;
-        }
-
-        let pad = f64::from(radius_quarters) * 0.25;
-        let camera = camera.to_array();
-        let min = array::from_fn(|axis| f64::from(section[axis]) * 16.0 - pad - camera[axis]);
-        let max = array::from_fn(|axis| min[axis] + 16.0 + 2.0 * pad);
-        let result = if min.into_iter().chain(max).any(|v| !v.is_finite()) {
-            SectionFrustumResult::Intersects
-        } else {
-            let min = FVec3::from_array(min.map(|v| v as f32));
-            let max = FVec3::from_array(max.map(|v| v as f32));
-            if !min.is_finite() || !max.is_finite() {
-                SectionFrustumResult::Intersects
-            } else if frustum.contains(min, max) {
-                SectionFrustumResult::Inside
-            } else if frustum.intersects(min, max) {
-                SectionFrustumResult::Intersects
-            } else {
-                SectionFrustumResult::Outside
-            }
-        };
-        self.entries[slot] = Some(CachedSectionFrustum {
-            section,
-            radius_quarters,
-            result,
-        });
-        result
-    }
-}
-
-fn world_section(position: [f64; 3]) -> Option<[i32; 3]> {
-    let mut block = [0; 3];
-    for axis in 0..3 {
-        let value = position[axis].floor();
-        if !value.is_finite() || value < f64::from(i32::MIN) || value > f64::from(i32::MAX) {
-            return None;
-        }
-        block[axis] = value as i32;
-    }
-    Some([block[0] >> 4, block[1] >> 4, block[2] >> 4])
-}
+mod view_cull;
+use view_cull::{PARTICLE_FRUSTUM_OFFSET, ParticleSectionFrustumCache, SectionFrustumResult};
 
 fn below_half_pixel(radius: f64, distance_squared: f64, pixel_focal_length: f32) -> bool {
     let projected_limit = 4.0 * radius * f64::from(pixel_focal_length);
@@ -1291,13 +1190,6 @@ fn below_half_pixel(radius: f64, distance_squared: f64, pixel_focal_length: f32)
         && projected_limit * projected_limit < distance_squared
 }
 
-/// `ClientExplosionTracker.ExplosionInfo`.
-#[derive(Clone, Copy, Debug)]
-struct TrackedExplosion {
-    center: [f64; 3],
-    radius: f32,
-    block_count: usize,
-}
 impl ParticleEngine {
     pub fn new(
         root: &ResourceSource,
@@ -1325,6 +1217,7 @@ impl ParticleEngine {
             providers: native::registered().clone(),
             set_sprites: Vec::new(),
             parallel_min: PARALLEL_MIN,
+            live_limit: None,
             parallel_threads: parallel_threads(),
             polytone: None,
             polytone_overrides: HashMap::new(),
@@ -1510,6 +1403,12 @@ impl ParticleEngine {
     }
     pub fn is_empty(&self) -> bool {
         self.particles.is_empty() && self.groups.iter().all(|g| g.particles.is_empty())
+    }
+    /// The live particles `len` counts: the engine's own, then each group's.
+    pub fn live(&self) -> impl Iterator<Item = &Particle> {
+        self.particles
+            .iter()
+            .chain(self.groups.iter().flat_map(|g| g.particles.iter()))
     }
     /// The live particles of the groups this engine holds, as `ParticleEngine.countParticles`
     /// counts them: ordinary particles, firework starters (`NO_RENDER`) and elder guardian
@@ -1731,36 +1630,6 @@ impl ParticleEngine {
             }
         }
     }
-    /// `ClientExplosionTracker.track`: queue an explosion's block count and position
-    /// for debris generation during `ClientLevel.tick`.
-    pub fn track_explosion(&mut self, center: [f64; 3], radius: f32, block_count: usize) {
-        if block_count > 0 {
-            self.tracked_explosions.push(TrackedExplosion {
-                center,
-                radius,
-                block_count,
-            });
-        }
-    }
-    /// `ClientPacketListener.handleExplosion` + `ClientExplosionTracker`: the
-    /// explosion particle (the emitter unless `ServerExplosion.isSmall`) and
-    /// debris tracked for `tick`.
-    pub fn explosion(
-        &mut self,
-        center: [f64; 3],
-        small: bool,
-        block_count: usize,
-        radius: f32,
-        _is_air: &dyn Fn([i32; 3]) -> bool,
-    ) {
-        let ty = if small {
-            ParticleType::Explosion
-        } else {
-            ParticleType::ExplosionEmitter
-        };
-        self.add(&ParticleOptions::simple(ty), center, [1.0, 0.0, 0.0]);
-        self.track_explosion(center, radius, block_count);
-    }
     /// `LlamaSpit.recreateFromPacket`: seven spit particles thrown ahead of a
     /// new spit, each faster than the last along x and z.
     pub fn llama_spit_burst(&mut self, at: [f64; 3], movement: [f64; 3]) {
@@ -1858,6 +1727,11 @@ impl ParticleEngine {
         self.random = LegacyRandom::new(provider);
         self.level_random = LegacyRandom::new(level);
         self.spell_random = LegacyRandom::new(spell);
+    }
+    /// Seeds each new particle's own random from `seed` (a screen scene's tick), so the
+    /// same ticks give the same particles whatever the engine made before.
+    pub fn seed_particle_randoms(&mut self, seed: i64) {
+        self.seeds = LegacyRandom::new(seed);
     }
     /// Parity probes: the next long of the provider, level and spell generators.
     pub fn next_randoms(&mut self) -> [i64; 3] {
@@ -3719,7 +3593,11 @@ impl ParticleEngine {
                     let live = p.group.map_or(self.particles.len(), |handle| {
                         self.groups[handle as usize].particles.len()
                     });
-                    if self.group_has_space(live) {
+                    // A scene's own limit first: the level's engine has none, and draws
+                    // `group_has_space`'s random exactly as before.
+                    if self.live_limit.is_none_or(|limit| self.len() < limit)
+                        && self.group_has_space(live)
+                    {
                         match p.group {
                             Some(handle) => self.groups[handle as usize].particles.push(p),
                             None => self.particles.push(p),
@@ -3739,81 +3617,6 @@ impl ParticleEngine {
             return self.random.next_float() < free * free;
         }
         true
-    }
-    /// `ClientExplosionTracker.tick`: throws up to 512 debris particles across all
-    /// explosions tracked in this tick, weighted by each explosion's block count.
-    fn tick_explosions(&mut self, level: &ParticleLevel) {
-        self.tick_explosions_with(&|b| level.facts.is_air(level.world.block(b[0], b[1], b[2])));
-    }
-    fn tick_explosions_with(&mut self, is_air: &dyn Fn([i32; 3]) -> bool) {
-        if self.tracked_explosions.is_empty() {
-            return;
-        }
-        let explosions = std::mem::take(&mut self.tracked_explosions);
-        if self.particle_level != 0 {
-            return;
-        }
-        let total_blocks: usize = explosions.iter().map(|e| e.block_count).sum();
-        if total_blocks == 0 {
-            return;
-        }
-        let total_particles = total_blocks.min(512);
-        for _ in 0..total_particles {
-            // `WeightedRandom.getRandomItem` draws its `nextInt(totalWeight)`
-            // even when one explosion is tracked.
-            let mut pick = self.random.next_int_bound(total_blocks as i32).unwrap_or(0) as usize;
-            let mut explosion = &explosions[0];
-            for exp in &explosions {
-                if pick < exp.block_count {
-                    explosion = exp;
-                    break;
-                }
-                pick -= exp.block_count;
-            }
-            let r = &mut self.random;
-            let d = Vec3::new(
-                f64::from(r.next_float() * 2.0 - 1.0),
-                f64::from(r.next_float() * 2.0 - 1.0),
-                f64::from(r.next_float() * 2.0 - 1.0),
-            )
-            .normalize();
-            let distance = r.next_float().cbrt() * explosion.radius;
-            let local = [
-                d.x * f64::from(distance),
-                d.y * f64::from(distance),
-                d.z * f64::from(distance),
-            ];
-            let at = [
-                explosion.center[0] + local[0],
-                explosion.center[1] + local[1],
-                explosion.center[2] + local[2],
-            ];
-            if !is_air(ParticleLevel::block_at(at)) {
-                continue;
-            }
-            let speed =
-                0.5 / (distance / explosion.radius + 0.1) * r.next_float() * r.next_float() + 0.3;
-            // Level.DEFAULT_EXPLOSION_BLOCK_PARTICLES: poof (scaling 0.5) or smoke, equally weighted.
-            let (ty, scaling) = if r.next_int_bound(2).unwrap_or(0) == 0 {
-                (ParticleType::Poof, 0.5)
-            } else {
-                (ParticleType::Smoke, 1.0)
-            };
-            let p = [
-                explosion.center[0] + local[0] * scaling,
-                explosion.center[1] + local[1] * scaling,
-                explosion.center[2] + local[2] * scaling,
-            ];
-            self.add(
-                &ParticleOptions::simple(ty),
-                p,
-                [
-                    d.x * f64::from(speed),
-                    d.y * f64::from(speed),
-                    d.z * f64::from(speed),
-                ],
-            );
-        }
     }
     #[allow(clippy::too_many_lines)]
     fn tick_particle(&mut self, p: &mut Particle, level: &ParticleLevel) {
@@ -4596,16 +4399,7 @@ impl ParticleEngine {
         light_at: &dyn Fn([i32; 3]) -> u8,
         out: &mut Vec<Vertex>,
     ) {
-        self.render_inner::<false>(
-            camera,
-            base,
-            partial,
-            0.0,
-            None,
-            &mut |_, _| false,
-            light_at,
-            out,
-        );
+        self.render_in_view(camera, base, partial, None, light_at, out);
     }
 
     /// Render particles after rejecting view-frustum misses and any particles
@@ -4617,13 +4411,13 @@ impl ParticleEngine {
         partial: f32,
         pixel_focal_length: f32,
         culling_enabled: bool,
-        frustum: Option<&crate::gfx::Frustum>,
+        frustum: Option<&crate::gfx::JoinedFrusta>,
         mut occluded: impl FnMut([f64; 3], [f64; 3]) -> bool,
         light_at: &dyn Fn([i32; 3]) -> u8,
         out: &mut Vec<Vertex>,
     ) {
         if !culling_enabled {
-            self.render(camera, base, partial, light_at, out);
+            self.render_in_view(camera, base, partial, frustum, light_at, out);
             return;
         }
         self.render_inner::<true>(
@@ -4654,7 +4448,7 @@ impl ParticleEngine {
         base: Quat,
         partial: f32,
         pixel_focal_length: f32,
-        frustum: Option<&crate::gfx::Frustum>,
+        frustum: Option<&crate::gfx::JoinedFrusta>,
         occluded: &mut dyn FnMut([f64; 3], [f64; 3]) -> bool,
         light_at: &dyn Fn([i32; 3]) -> u8,
         out: &mut Vec<Vertex>,
@@ -4664,8 +4458,14 @@ impl ParticleEngine {
         additive.clear();
         let mut section_cache =
             (CULL && frustum.is_some()).then(ParticleSectionFrustumCache::default);
+        let view = frustum.map(|f| f.pulled_back(PARTICLE_FRUSTUM_OFFSET));
         for (p, blend) in self.drawn() {
             if p.no_render {
+                continue;
+            }
+            if let Some(view) = &view
+                && !view_cull::in_view(view, p, camera)
+            {
                 continue;
             }
             // SparkParticle.extract: twinkling sparks blink after a third of their life.
@@ -5343,6 +5143,131 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         assert_eq!(attributes(&disabled), attributes(&regular));
+    }
+
+    /// An engine whose smoke particles stand at `positions`, camera-relative (the camera is at
+    /// the origin looking down -z, like `Mat4::IDENTITY` as a view).
+    fn smoke_at(positions: &[[f64; 3]]) -> ParticleEngine {
+        let mut engine = ParticleEngine::new(
+            &ResourceSource::indexed(Default::default()),
+            &HashMap::new(),
+            &HashSet::new(),
+        );
+        let sprite = "test:smoke".to_owned();
+        engine.atlas.insert(
+            sprite.clone(),
+            (
+                Rect {
+                    u0: 0.0,
+                    v0: 0.0,
+                    u1: 1.0,
+                    v1: 1.0,
+                    w: 16,
+                    h: 16,
+                },
+                false,
+            ),
+        );
+        let mut random = LegacyRandom::new(7);
+        for &at in positions {
+            let mut particle = Particle::moving(&mut random, ParticleType::Smoke, at, [0.0; 3]);
+            particle.sprite = Sprite::Named(sprite.clone());
+            engine.particles.push(particle);
+        }
+        engine
+    }
+
+    fn quad_vertices(engine: &ParticleEngine, view: Option<&crate::gfx::JoinedFrusta>) -> usize {
+        let mut out = Vec::new();
+        engine.render_in_view(DVec3::ZERO, Quat::IDENTITY, 0.5, view, &|_| 0xf0, &mut out);
+        out.len()
+    }
+
+    #[test]
+    fn particles_outside_the_pulled_back_frustum_make_no_quads() {
+        use crate::gfx::{Frustum, JoinedFrusta, world_projection};
+        let view = JoinedFrusta::from(Frustum::from_view_projection(world_projection(
+            70.0,
+            16.0 / 9.0,
+            512.0,
+        )));
+        let kept = [
+            [0.0, 0.0, -5.0],   // straight ahead
+            [0.0, 0.0, 2.5],    // behind the camera, inside the 3 blocks of offset
+            [0.0, 0.0, -300.0], // far, inside the far plane
+        ];
+        let dropped = [
+            [0.0, 0.0, 10.0],   // well behind the camera
+            [0.0, 0.0, 3.5],    // just past the offset
+            [100.0, 0.0, -5.0], // far to the side
+            [0.0, 60.0, -5.0],  // far above
+            [0.0, 0.0, -600.0], // beyond the far plane
+        ];
+        let all: Vec<_> = kept.iter().chain(&dropped).copied().collect();
+        let engine = smoke_at(&all);
+        let only_kept = quad_vertices(&smoke_at(&kept), None);
+        assert!(only_kept > 0);
+        assert_eq!(quad_vertices(&engine, Some(&view)), only_kept);
+        // Without a view every particle is drawn, as before.
+        assert_eq!(
+            quad_vertices(&engine, None),
+            only_kept * all.len() / kept.len()
+        );
+        // `render` is the same as no view.
+        let mut regular = Vec::new();
+        engine.render(DVec3::ZERO, Quat::IDENTITY, 0.5, &|_| 0xf0, &mut regular);
+        assert_eq!(regular.len(), quad_vertices(&engine, None));
+    }
+
+    #[test]
+    fn the_culled_path_applies_the_same_frustum_test() {
+        use crate::gfx::{Frustum, JoinedFrusta, world_projection};
+        let view = JoinedFrusta::from(Frustum::from_view_projection(world_projection(
+            70.0,
+            16.0 / 9.0,
+            512.0,
+        )));
+        let engine = smoke_at(&[[0.0, 0.0, -5.0], [0.0, 0.0, 10.0]]);
+        let mut out = Vec::new();
+        // The disabled setting still keeps vanilla's always-on test.
+        engine.render_culled(
+            DVec3::ZERO,
+            Quat::IDENTITY,
+            0.5,
+            900.0,
+            false,
+            Some(&view),
+            |_, _| panic!("disabled culling must not query particle visibility"),
+            &|_| 0xf0,
+            &mut out,
+        );
+        assert_eq!(
+            out.len(),
+            quad_vertices(&smoke_at(&[[0.0, 0.0, -5.0]]), None)
+        );
+    }
+
+    #[test]
+    fn a_particle_is_tested_at_its_position_this_tick_not_an_interpolated_one() {
+        use crate::gfx::{Frustum, JoinedFrusta, world_projection};
+        let view = JoinedFrusta::from(Frustum::from_view_projection(world_projection(
+            70.0,
+            16.0 / 9.0,
+            512.0,
+        )));
+        // The frame is drawn half way (0.5) between `previous` and `position`.
+        // Ahead now, far behind a tick ago (half way: 12.5 behind, outside): kept.
+        let mut coming = smoke_at(&[[0.0, 0.0, -5.0]]);
+        coming.particles[0].previous = [0.0, 0.0, 30.0];
+        assert!(quad_vertices(&coming, None) > 0);
+        assert_eq!(
+            quad_vertices(&coming, Some(&view)),
+            quad_vertices(&coming, None)
+        );
+        // Behind now, ahead a tick ago (half way: 5 ahead, inside): dropped.
+        let mut going = smoke_at(&[[0.0, 0.0, 10.0]]);
+        going.particles[0].previous = [0.0, 0.0, -20.0];
+        assert_eq!(quad_vertices(&going, Some(&view)), 0);
     }
 
     #[test]
@@ -6299,14 +6224,14 @@ mod tests {
             &HashSet::new(),
         );
         assert!(engine.tracked_explosions.is_empty());
-        engine.track_explosion([1.0, 2.0, 3.0], 4.0, 100);
-        engine.track_explosion([5.0, 6.0, 7.0], 2.0, 50);
+        engine.track_explosion([1.0, 2.0, 3.0], 4.0, 100, &ExplosionParticle::defaults());
+        engine.track_explosion([5.0, 6.0, 7.0], 2.0, 50, &ExplosionParticle::defaults());
         assert_eq!(engine.tracked_explosions.len(), 2);
         assert_eq!(engine.tracked_explosions[0].block_count, 100);
         assert_eq!(engine.tracked_explosions[1].block_count, 50);
 
         // Zero block count explosions are not queued.
-        engine.track_explosion([0.0; 3], 1.0, 0);
+        engine.track_explosion([0.0; 3], 1.0, 0, &ExplosionParticle::defaults());
         assert_eq!(engine.tracked_explosions.len(), 2);
     }
     #[test]
@@ -6317,8 +6242,8 @@ mod tests {
             &HashSet::new(),
         );
         // Queue two explosions near camera: 400 blocks and 300 blocks (total 700).
-        engine.track_explosion([0.0, 0.0, 0.0], 4.0, 400);
-        engine.track_explosion([2.0, 0.0, 2.0], 5.0, 300);
+        engine.track_explosion([0.0, 0.0, 0.0], 4.0, 400, &ExplosionParticle::defaults());
+        engine.track_explosion([2.0, 0.0, 2.0], 5.0, 300, &ExplosionParticle::defaults());
         assert_eq!(engine.tracked_explosions.len(), 2);
 
         // In pure air, total particles spawned must be capped at 512.
@@ -6333,7 +6258,7 @@ mod tests {
             &HashMap::new(),
             &HashSet::new(),
         );
-        engine.track_explosion([0.0, 64.0, 0.0], 4.0, 100);
+        engine.track_explosion([0.0, 64.0, 0.0], 4.0, 100, &ExplosionParticle::defaults());
 
         // When no blocks are air, zero debris particles are emitted.
         engine.tick_explosions_with(&|_| false);

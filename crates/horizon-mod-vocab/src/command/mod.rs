@@ -1,6 +1,7 @@
 //! Parsed native command input and the source that executes it.
 
-use crate::{DimensionKey, EntityRef, Identifier, ItemStack, PermissionLevel, PlayerRef};
+use crate::{DimensionKey, EntityRef, Identifier, ItemStack, LevelRef, PermissionLevel, PlayerRef};
+use horizon_core::nbt::Compound;
 
 /// The origin of a registered mod command, independent of `execute as`'s executor.
 #[derive(Clone, Debug, PartialEq)]
@@ -91,6 +92,21 @@ pub enum CommandArgumentValue {
     /// A `block_pos` argument resolved from world, relative or local coordinates.
     /// Resolution does not load chunks or require the block to be loaded.
     BlockPos([i32; 3]),
+    /// A `vec3` or `vec3_uncentered` argument resolved against the source: `~` and `^` offsets
+    /// applied to its position and rotation. `vec3` centres whole `x` and `z` on their block
+    /// (`5` is `5.5`); `vec3_uncentered` keeps them as written. Resolution does not load chunks.
+    Vec3([f64; 3]),
+    /// A `column_pos` argument: a block `x z`, `~` resolved against the source's block and
+    /// floored.
+    ColumnPos([i32; 2]),
+    /// A `rotation` argument as yaw and pitch in degrees, `~` resolved against the source's
+    /// rotation, as `entity_rotation` returns them.
+    Rotation([f32; 2]),
+    /// A `dimension` argument: the level of a dimension the world has loaded. An unknown one is
+    /// refused with `argument.dimension.invalid`. Side: server.
+    Dimension(LevelRef),
+    /// An `nbt` argument: a compound tag written as SNBT.
+    Nbt(Compound),
     /// A custom argument type's canonical value: the registered type's id
     /// (`mymod:machine`) and what its parser returned for the typed text.
     Custom {
@@ -99,6 +115,8 @@ pub enum CommandArgumentValue {
         /// The value `CommandArgumentType::parse` returned.
         value: String,
     },
+    /// A `resource:<registry>` argument: an id present in that registry (static or data pack).
+    Id(Identifier),
 }
 
 /// An argument's registered name and its validated value.
@@ -134,14 +152,27 @@ pub struct CommandInvocation {
     pub literals: Vec<String>,
     /// Present arguments in parse order; omitted optional arguments have no entry.
     pub arguments: Vec<CommandArgument>,
+    /// The level the command executes in, after `execute in`; the console's is the overworld.
+    pub dimension: DimensionKey,
+    /// The execution position, after `execute at` or `positioned`; the console's is the
+    /// world spawn's block corner.
+    pub position: [f64; 3],
 }
 
 impl CommandInvocation {
-    /// Build an invocation from its parsed literal path and resolved arguments.
-    pub fn new(literals: Vec<String>, arguments: Vec<CommandArgument>) -> Self {
+    /// Build an invocation from its parsed literal path, resolved arguments and execution
+    /// level and position.
+    pub fn new(
+        literals: Vec<String>,
+        arguments: Vec<CommandArgument>,
+        dimension: DimensionKey,
+        position: [f64; 3],
+    ) -> Self {
         Self {
             literals,
             arguments,
+            dimension,
+            position,
         }
     }
 
@@ -155,6 +186,29 @@ impl CommandInvocation {
     }
 }
 
+/// A command's outcome and the messages received by its source.
+///
+/// The default is an unsuccessful run with no feedback, including when a handle
+/// cannot resolve or its host has no backend.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
+pub struct CommandResult {
+    /// Whether the command parsed and ran successfully, as `EntityRef::run_command` reports.
+    pub success: bool,
+    /// Success and failure messages received by the source, in order, as plain text.
+    /// Player chat delivery is preserved. Silent sources have no feedback lines.
+    pub feedback: Vec<String>,
+}
+
+impl CommandResult {
+    /// Build a result from the execution outcome and the source's feedback lines.
+    pub fn new(success: bool, feedback: Vec<String>) -> Self {
+        Self { success, feedback }
+    }
+}
+
 pub(crate) mod command_argument;
+pub(crate) mod entity_selector;
 pub(crate) mod suggestion;
 pub(crate) mod types;

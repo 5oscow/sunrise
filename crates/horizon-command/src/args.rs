@@ -22,10 +22,14 @@ pub enum CustomArgumentKind {
 /// One completion a registered custom argument offers.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CustomSuggestion {
-    /// The text that replaces the typed prefix.
+    /// The text that replaces the typed prefix, or the part of it `replace_start` sends the
+    /// replacement from.
     pub text: String,
     /// An optional explanation shown beside the completion.
     pub tooltip: Option<String>,
+    /// The byte offset into the prefix where the replacement starts; `None` replaces the whole
+    /// prefix. A mod uses it to complete one token inside a greedy text argument.
+    pub replace_start: Option<usize>,
 }
 
 /// A mod's registered argument type, as the dispatcher parses and completes it.
@@ -37,7 +41,7 @@ pub struct CustomArgument {
     id: Arc<str>,
     kind: CustomArgumentKind,
     parse: Arc<dyn Fn(&str) -> Result<String, Text> + Send + Sync>,
-    suggest: Arc<dyn Fn(&str) -> Vec<CustomSuggestion> + Send + Sync>,
+    suggest: Arc<dyn Fn(&Registries, &str) -> Vec<CustomSuggestion> + Send + Sync>,
 }
 
 impl fmt::Debug for CustomArgument {
@@ -51,12 +55,13 @@ impl fmt::Debug for CustomArgument {
 
 impl CustomArgument {
     /// A custom argument type `id` (such as `mymod:machine`) that reads a [`CustomArgumentKind`],
-    /// validates it with `parse` and completes it with `suggest`.
+    /// validates it with `parse` and completes it with `suggest`, which also sees the registries
+    /// the request is for (the sender and their permission).
     pub fn new(
         id: impl Into<Arc<str>>,
         kind: CustomArgumentKind,
         parse: impl Fn(&str) -> Result<String, Text> + Send + Sync + 'static,
-        suggest: impl Fn(&str) -> Vec<CustomSuggestion> + Send + Sync + 'static,
+        suggest: impl Fn(&Registries, &str) -> Vec<CustomSuggestion> + Send + Sync + 'static,
     ) -> Self {
         Self {
             id: id.into(),
@@ -134,6 +139,11 @@ pub enum ArgType {
     Resource(Resource),
     /// A plain identifier; suggestions come from the named list.
     Id(&'static str),
+    /// Vanilla's free identifier (`minecraft:resource_location`): a `namespace:path` of
+    /// identifier characters, canonical with the `minecraft` namespace when it is left out, with
+    /// no registry to check and no list of its own to suggest: the node asks the server, which
+    /// answers from the mods' own suggestions.
+    Identifier,
     /// ResourceArgument over a registry (the element must exist).
     Res(&'static str),
     /// ResourceKeyArgument (checked when the command runs).
@@ -416,8 +426,10 @@ pub struct Selector {
     pub player_name: Option<String>,
     /// The entity UUID when the argument was one.
     pub uuid: Option<u128>,
-    /// 'p', 'a', 'r', 's', 'e', 'n'.
+    /// 'p', 'a', 'r', 's', 'e', 'n'; 'e' for a mod's token.
     pub kind: char,
+    /// The mod's selector token (`allies` for `@allies`), whose type filters the candidates.
+    pub token: Option<String>,
     pub limit: usize,
     pub sort: Sort,
     pub include_entities: bool,
@@ -1120,8 +1132,8 @@ impl ArgType {
                     return Err(CommandError::tr_at(
                         "argument.float.low",
                         &[
-                            &horizon_client_core::snbt::java_float(*min),
-                            &horizon_client_core::snbt::java_float(v),
+                            &horizon_core::java_number::float_to_string(*min),
+                            &horizon_core::java_number::float_to_string(v),
                         ],
                         reader,
                     ));
@@ -1131,8 +1143,8 @@ impl ArgType {
                     return Err(CommandError::tr_at(
                         "argument.float.big",
                         &[
-                            &horizon_client_core::snbt::java_float(*max),
-                            &horizon_client_core::snbt::java_float(v),
+                            &horizon_core::java_number::float_to_string(*max),
+                            &horizon_core::java_number::float_to_string(v),
                         ],
                         reader,
                     ));
@@ -1146,8 +1158,8 @@ impl ArgType {
                     return Err(CommandError::tr_at(
                         "argument.double.low",
                         &[
-                            &horizon_client_core::snbt::java_double(*min),
-                            &horizon_client_core::snbt::java_double(v),
+                            &horizon_core::java_number::double_to_string(*min),
+                            &horizon_core::java_number::double_to_string(v),
                         ],
                         reader,
                     ));
@@ -1157,8 +1169,8 @@ impl ArgType {
                     return Err(CommandError::tr_at(
                         "argument.double.big",
                         &[
-                            &horizon_client_core::snbt::java_double(*max),
-                            &horizon_client_core::snbt::java_double(v),
+                            &horizon_core::java_number::double_to_string(*max),
+                            &horizon_core::java_number::double_to_string(v),
                         ],
                         reader,
                     ));
@@ -1167,6 +1179,9 @@ impl ArgType {
             }
             ArgType::Word => Arg::Str(reader.read_unquoted_string().to_owned()),
             ArgType::Str => Arg::Str(reader.read_string()?),
+            // ResourceLocationArgument: the longest run of identifier characters, canonicalised
+            // to `namespace:path`; an upper-case or two-colon token is `argument.id.invalid`.
+            ArgType::Identifier => Arg::Str(read_id(reader)?),
             ArgType::Greedy => {
                 let s = reader.remaining().to_owned();
                 reader.cursor = reader.string.len();
@@ -1420,7 +1435,7 @@ impl ArgType {
                     .map(char::len_utf8)
                     .sum();
                 match (run > 0)
-                    .then(|| super::selector::java_uuid(&rest[..run]))
+                    .then(|| horizon_core::text::parse_java_uuid(&rest[..run]))
                     .flatten()
                 {
                     Some(_) => {
@@ -1937,10 +1952,25 @@ impl ArgType {
             ArgType::Swizzle | ArgType::Message | ArgType::Nbt => {}
             ArgType::Custom(custom) => {
                 let prefix = builder.remaining().to_owned();
-                for suggestion in (custom.suggest)(&prefix) {
+                for suggestion in (custom.suggest)(reg, &prefix) {
+                    // A suggestion may replace only the tail of the text argument, from its
+                    // offset: a completion for the token a greedy text is typing. One that
+                    // starts past the typed text or inside a character is left out rather than
+                    // panicking where the chat applies it (the game refuses it by name first).
+                    let start = match suggestion.replace_start {
+                        Some(offset)
+                            if offset <= prefix.len() && prefix.is_char_boundary(offset) =>
+                        {
+                            builder.start + offset
+                        }
+                        Some(_) => continue,
+                        None => builder.start,
+                    };
                     match suggestion.tooltip {
-                        Some(tooltip) => builder.suggest_tooltip(suggestion.text, tooltip),
-                        None => builder.suggest(suggestion.text),
+                        Some(tooltip) => {
+                            builder.suggest_at_tooltip(start, suggestion.text, tooltip)
+                        }
+                        None => builder.suggest_at(start, suggestion.text),
                     }
                 }
             }

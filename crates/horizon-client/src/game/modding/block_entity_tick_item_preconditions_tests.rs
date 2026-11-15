@@ -6,7 +6,7 @@ use horizon_client::{
 };
 
 #[test]
-#[ignore = "needs prepared resources; each interference case uses an isolated process"]
+#[ignore = "daily"]
 fn finalization_never_retargets_stale_items_or_replaced_placeholders() {
     const NAME: &str = "game::block_entity_tick_item_preconditions_tests::finalization_never_retargets_stale_items_or_replaced_placeholders";
     if super::native_entity_refs::tests::run_fresh_cases(
@@ -102,7 +102,7 @@ fn finalization_never_retargets_stale_items_or_replaced_placeholders() {
             }
             game.block_entity_tick_items.as_mut().unwrap().snapshot =
                 Some(Box::new((snapshot, before)));
-            game.finish_tick_item_writeback(pos, taken, &original_items, (None, None));
+            game.finish_tick_item_writeback(pos, taken, &original_items, (None, None), true);
             assert!(game.block_entity_tick_items.is_none());
             assert!(game.block_entity_tick_key.is_none());
             assert!(game.transactions.is_empty());

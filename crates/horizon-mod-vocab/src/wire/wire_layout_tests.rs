@@ -3,7 +3,7 @@ use super::*;
 use crate::*;
 use horizon_core::nbt::{Compound, JavaString};
 
-fn install_layout_resources() {
+pub(super) fn install_layout_resources() {
     let _ = crate::wire::install_resource_access(crate::wire::ResourceAccess {
         intern: |value| {
             if value.len() > crate::wire::MAX_STATIC_STRING_BYTES {
@@ -178,10 +178,13 @@ fn handle_records_have_declared_field_bytes() {
     let entity = EntityRef::new(epoch, 29);
     let player = crate::__private::game::player_ref(entity, 0x1234);
     let pos = BlockPos { x: 7, y: -8, z: 9 };
-    fields(level, (epoch, DimensionKey::OVERWORLD));
+    fields(level, (epoch, DimensionKey::OVERWORLD, 0u32));
+    let reopened = LevelRef::with_generation(epoch, DimensionKey::NETHER, 5);
+    fields(reopened, (epoch, DimensionKey::NETHER, 5u32));
     fields(ChunkRef::new(level, [3, -4]), (level, [3i32, -4]));
     fields(RaidRef::new(level, 53), (level, 53i32));
     fields(RaidRef::new(level, -1), (level, -1i32));
+    fields(WaterTicket::new(level, 59), (level, 59u64));
     fields(player, (entity, 0x1234u128));
     fields(
         GlobalPos::new(id("example:moon"), pos),
@@ -462,7 +465,15 @@ fn registration_and_attribute_records_have_declared_field_bytes() {
             PackageKind::Code,
             Side::Both,
             vec!["example".into()],
-            vec!["library".into()],
+            vec![PackageDependency::new(
+                "library".into(),
+                "^1".into(),
+                crate::DependencyKind::Optional,
+                crate::DependencyOrder::After,
+                crate::Side::Both,
+                None,
+                None,
+            )],
         ),
         (
             "example".to_owned(),
@@ -470,7 +481,89 @@ fn registration_and_attribute_records_have_declared_field_bytes() {
             PackageKind::Code,
             Side::Both,
             vec!["example".to_owned()],
-            vec!["library".to_owned()],
+            // Nested tuples flatten into one field list.
+            (
+                vec![PackageDependency::new(
+                    "library".into(),
+                    "^1".into(),
+                    crate::DependencyKind::Optional,
+                    crate::DependencyOrder::After,
+                    crate::Side::Both,
+                    None,
+                    None,
+                )],
+                PackageDetails::default(),
+            ),
+        ),
+    );
+    fields(PropertyValue::Integer(3), (1u32, 3i64));
+    let dependency = PackageDependency::new(
+        "library".into(),
+        "^1".into(),
+        crate::DependencyKind::Optional,
+        crate::DependencyOrder::After,
+        crate::Side::Both,
+        None,
+        None,
+    );
+    fields(
+        dependency.clone(),
+        (
+            "library".to_owned(),
+            "^1".to_owned(),
+            crate::DependencyKind::Optional,
+            crate::DependencyOrder::After,
+            crate::Side::Both,
+            (None::<String>, None::<String>),
+        ),
+    );
+    // Independently check actual enum discriminants, not just a round trip
+    // through the same enum codec: Optional = 1, After = 0, Both = 1.
+    let mut bytes = Writer::new();
+    bytes.put(&dependency);
+    let raw = Reader::decode::<(
+        String,
+        String,
+        u32,
+        u32,
+        u32,
+        (Option<String>, Option<String>),
+    )>(bytes.bytes())
+    .unwrap();
+    assert_eq!(
+        raw,
+        (
+            "library".to_owned(),
+            "^1".to_owned(),
+            1u32,
+            0u32,
+            1u32,
+            (None::<String>, None::<String>)
+        )
+    );
+    let details = PackageDetails {
+        name: "Example".into(),
+        icon_path: Some("icon.png".into()),
+        runtime: Some(PackageRuntime::Native),
+        properties: [("ratio".into(), PropertyValue::Float(0.5))].into(),
+        ..Default::default()
+    };
+    fields(
+        details.clone(),
+        (
+            (
+                "Example".to_owned(),
+                String::new(),
+                Vec::<String>::new(),
+                String::new(),
+                None::<String>,
+            ),
+            (
+                None::<String>,
+                Some("icon.png".to_owned()),
+                Some(PackageRuntime::Native),
+                details.properties.clone(),
+            ),
         ),
     );
     let spawners = vec![
@@ -656,6 +749,7 @@ fn newtype_widths_and_unit_enum_tags_match_their_layouts() {
     fields(crate::wire::wire_slots::Id(0x100000003), (0x100000003u64,));
     fields(BlockUpdateFlags(17), (17u32,));
     fields(PackageKind::Code, (0u32,));
+    fields(PackageRuntime::Wasm, (1u32,));
     fields(Side::Both, (1u32,));
     fields(Reduction::Armor, (1u8,));
     fields(SpawnerKind::Patrol, (1u32,));
@@ -740,6 +834,18 @@ fn every_item_place_case_has_declared_tag_and_field_types() {
             slot: EquipmentSlot::Saddle,
         },
         (9u32, 29u32, EquipmentSlot::Saddle),
+    );
+    fields(ItemPlace::Scratch(41), (10u32, 41u64));
+    fields(ItemPlace::ScratchSlots(43), (14u32, 43u64));
+    let parent = Box::new(ItemPlace::ItemEntity { id: 71 });
+    fields(ItemPlace::Strict(parent.clone()), (11u32, parent.clone()));
+    fields(ItemPlace::OneByOne(parent.clone()), (12u32, parent.clone()));
+    fields(
+        ItemPlace::InfiniteMaterials {
+            player: 0x1234,
+            inner: parent.clone(),
+        },
+        (13u32, 0x1234u128, parent),
     );
     // The other four holder cases are exercised in handle_records above.
     fields(AttachmentHolder::Level(level), (4u32, level));

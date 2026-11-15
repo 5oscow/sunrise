@@ -319,6 +319,7 @@ impl StartupMenu {
         match event.physical_key {
             PhysicalKey::Code(KeyCode::Escape) => title.escape(),
             PhysicalKey::Code(KeyCode::F5) => title.refresh_servers(),
+            PhysicalKey::Code(key) if title.page_missing_mods(key, viewport) => {}
             PhysicalKey::Code(KeyCode::Tab) => {
                 title.tab_dir(self.modifiers.shift_key(), viewport);
             }
@@ -388,6 +389,7 @@ fn panic_text(payload: &(dyn std::any::Any + Send)) -> &str {
 pub(super) fn spawn_loader(
     options: &Options,
     settings: &Settings,
+    load_role: mods::LoadRole,
     vanilla_root: &std::path::Path,
     started: Instant,
     progress: &Progress,
@@ -398,7 +400,6 @@ pub(super) fn spawn_loader(
     let mut mod_sources = options.mods.clone();
     mod_sources.capture_code_switches(&settings.mods.disabled);
     let world = launch_world(options).map(str::to_owned);
-    let role = options.execution_role;
     let progress = progress.clone();
     let handle = horizon_guest_stack::builder()
         .name("resource-loader".into())
@@ -420,7 +421,7 @@ pub(super) fn spawn_loader(
                         &settings,
                         started,
                         true,
-                        role,
+                        load_role,
                         &progress,
                         &mut |gui, root| {
                             let _ = sender.send(LoaderMsg::Ui(gui, root.to_path_buf()));
@@ -919,6 +920,16 @@ impl Loading {
     /// pointer sits on the focus; a step past a list's visible rows doesn't
     /// scroll it here). Whether the key was used.
     fn menu_key_focus(&mut self, event_loop: &dyn EventLoopCtl, key: KeyCode) -> bool {
+        // This safety prompt owns its default and spatial navigation in Title.
+        if !self.menu.options_open
+            && self
+                .menu
+                .title
+                .as_ref()
+                .is_some_and(|t| matches!(t.mode, horizon_client::title::Mode::MissingMods { .. }))
+        {
+            return false;
+        }
         let Some(nav) = key_focus::nav_of(key, self.menu.modifiers.shift_key()) else {
             return false;
         };
@@ -1341,7 +1352,9 @@ impl Loading {
         let screen = self.menu.key_screen();
         if super::pad_menu::another_screen_is_front(&mut self.menu.focus_screen, screen) {
             self.menu.options.clear_click_focus();
-            if let Some(title) = self.menu.title.as_mut() {
+            if let Some(title) = self.menu.title.as_mut()
+                && !matches!(title.mode, horizon_client::title::Mode::MissingMods { .. })
+            {
                 title.focused_button = None;
             }
         }
@@ -1353,13 +1366,16 @@ impl Loading {
                 self.progress.fraction(),
                 self.settings.file.bool("darkMojangStudiosBackground"),
             );
+            let (bars, lines) = super::startup_progress::shown();
+            horizon_client::level_loading::draw_mod_progress(batch, &gui.atlas, &bars, &lines);
         } else if let Some((win, frame)) = &mut self.menu.win {
             let now = Instant::now();
             // 20 ticks a second: the startup menu runs no tick rate.
             let delta_ticks = now.duration_since(*frame).as_secs_f32() * 20.0;
             *frame = now;
             horizon_client::widgets::begin_screen(|| win.screen_info());
-            win.draw(batch, &gui.atlas, delta_ticks, Default::default());
+            win.draw_background(batch, &gui.atlas, Default::default());
+            win.draw_contents(batch, &gui.atlas, delta_ticks);
             if win.finished(batch.height) {
                 self.menu.win = None;
             }
@@ -1370,7 +1386,13 @@ impl Loading {
                 .map_or(Default::default(), |r| r.output());
             self.menu
                 .options
-                .draw(&self.settings, output, batch, &gui.atlas, self.menu.cursor);
+                .draw_background(&self.settings, output, batch, &gui.atlas);
+            self.menu
+                .options
+                .draw_contents(&self.settings, batch, &gui.atlas, self.menu.cursor);
+            self.menu
+                .options
+                .draw_overlays(batch, &gui.atlas, self.menu.cursor);
         } else if let Some(title) = &mut self.menu.title {
             title.poll_backup();
             if std::mem::take(&mut title.onboarding_finished) {
@@ -1395,6 +1417,7 @@ impl Loading {
                 self.menu.cursor,
                 self.settings.file.bool("hideSplashTexts"),
                 self.settings.file.bool("hideServerAddress"),
+                &mut |_, _| {},
             );
         }
         if let Some(focus) = self.menu.key_focus
@@ -1435,6 +1458,7 @@ impl Loading {
         let (receiver, handle) = spawn_loader(
             options,
             &self.settings,
+            options.execution_role.into(),
             &self.vanilla_root,
             self.started,
             &self.progress,
@@ -1515,7 +1539,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn queued_creation_is_reconciled_at_handoff() {
         use horizon_client::gamerules::Value;
         use mod_api::{Hooks, Registrar, RegistrationContext};
@@ -1583,7 +1607,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn live_gui_scale_uses_the_current_owner() {
         let (_, receiver) = std::sync::mpsc::channel();
         let mut first = loading(receiver);
@@ -1612,7 +1636,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and scratch homes/cwd"]
+    #[ignore = "daily"]
     fn resource_pack_drops_import_from_startup_and_game_options() {
         if super::super::native_entity_refs::tests::run_fresh_cases(
             "game::startup_menu::tests::resource_pack_drops_import_from_startup_and_game_options",

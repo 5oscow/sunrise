@@ -260,7 +260,7 @@ fn lifecycle_scratch_is_removed_when_an_assertion_unwinds() {
 }
 
 #[test]
-#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn lifecycle_fixture_walks_fangs_owners() {
     LifecycleFixture {
         seed: |game, entries| {
@@ -278,7 +278,7 @@ fn lifecycle_fixture_walks_fangs_owners() {
 }
 
 #[test]
-#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn lifecycle_fixture_walks_other_owners() {
     LifecycleFixture {
         seed: |game, entries| {
@@ -321,14 +321,18 @@ pub(in crate::game) fn in_both_dimensions(mut test: impl FnMut(&mut Game<'_>, &P
             game.world_root = root.0.clone();
             game.enter_level(dimension).unwrap();
             use horizon_client::join_seq::residency::{Kind, Owner};
-            let balance = PassBalance::bind(
-                &mut game.mobs,
-                Owner {
+            let balance = PassBalance {
+                journal: game
+                    .resident_entities
+                    .table
+                    .borrow()
+                    .producer()
+                    .observe_structural_events(),
+                owner: Owner {
                     dimension: game.dim.key(),
                     kind: Kind::Mob,
                 },
-                |mob| (mob.id, mob.join),
-            );
+            };
             test(game, &balance);
             balance.assert_parked(game);
             assert_eq!(
@@ -344,15 +348,6 @@ pub(in crate::game) struct PassBalance {
     owner: horizon_client::join_seq::residency::Owner,
 }
 impl PassBalance {
-    fn bind<T: horizon_client::join_seq::Joined, const DIRECT: bool>(
-        list: &mut JoinList<T, DIRECT>,
-        owner: horizon_client::join_seq::residency::Owner,
-        identity: fn(&T) -> (u32, horizon_client::join_seq::JoinSeq),
-    ) -> Self {
-        let journal = horizon_client::join_seq::residency::Journal::default();
-        list.bind_residency(&journal, owner, identity);
-        Self { journal, owner }
-    }
     pub(in crate::game) fn drain_balanced(&self) -> usize {
         use horizon_client::join_seq::residency::Change;
         let mut events = Vec::new();
@@ -360,7 +355,9 @@ impl PassBalance {
         let mut depth = 0usize;
         let mut lifts = 0;
         for event in events {
-            assert_eq!(event.owner, self.owner);
+            if event.owner != self.owner {
+                continue;
+            }
             match event.change {
                 Change::Lifted => {
                     depth += 1;
@@ -504,7 +501,7 @@ pub(in crate::game) fn assert_projectile_spawn_survives(
 }
 
 #[test]
-#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn data_merge_preserves_two_distinct_other_joins_for_every_runtime_kind() {
     crate::game::native_entity_refs::tests::with_game(|game| {
         game.build_registries();
@@ -545,7 +542,7 @@ fn data_merge_preserves_two_distinct_other_joins_for_every_runtime_kind() {
 }
 
 #[test]
-#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn mob_tick_restores_spawn_buffer_before_multiple_survivors_without_renumbering() {
     fn seed(game: &mut Game<'_>, ids: std::ops::RangeInclusive<u32>, x: f64) {
         for (index, id) in ids.enumerate() {

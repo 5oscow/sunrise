@@ -3,6 +3,8 @@
 mod horizon_look;
 use crate::{crash, game, logging};
 use horizon_mod_package::selection::{Argument, LaunchArguments};
+pub(crate) mod dedicated_arguments;
+pub(crate) mod runtime_environment;
 
 /// Validated startup state. No native hooks or workers may run before prepare returns.
 pub struct Startup {
@@ -102,6 +104,7 @@ pub fn start<G>(
         options,
         _capture,
     } = startup;
+    runtime_environment::capture(&launch);
     horizon_threads::configure_allocator();
     horizon_chat_filter::install();
     horizon_look::give();
@@ -146,11 +149,15 @@ pub fn start<G>(
     );
     // The log's first line names the build, so a bug report that carries the log says which one it was.
     log::info!("Horizon {}", crash::version());
+    // Mods' startup bars and lines (`RegistrationContext::progress`), before they register.
+    game::startup_progress::install(side == "server");
     // Mod loading emits refusals; both client and dedicated logs must exist first.
     let (_ids, _loaded_code) = load(&native, &launch);
     crash::install(home.clone(), side);
     if horizon_world::native_load_hooks::install(
         horizon_world::native_load_hooks::NativeLoadHooks {
+            item_ability_default: horizon_items::item_abilities::vanilla_can_perform,
+            loot_ability: crate::game::api_values::loot_values::dispatch_loot_ability,
             loot_table_load: |context, id, table| {
                 if !mod_api::__private::listened(mod_api::HookId::LootTableLoad) {
                     return;
@@ -185,6 +192,9 @@ pub fn start<G>(
     if horizon_world::native_worldgen_hooks::install(
         horizon_world::native_worldgen_hooks::NativeWorldgenHooks {
             alter_ground: crate::game::api_values::alter_ground,
+            on_tree_grow: crate::game::native_tree_grow::on_tree_grow,
+            rotate: crate::game::native_rotate::rotate,
+            feature: crate::game::native_worldgen_parts::feature,
         },
     )
     .is_err()
@@ -202,8 +212,11 @@ pub fn start<G>(
     raise_open_file_limit();
     if let Err(error) = game::run_with(options, native) {
         // A bad command line is the caller's mistake, not a crash: no report.
-        let usage = error.is::<game::UsageError>();
-        log::error!("Horizon: {error}");
+        let missing_mods = game::dedicated::is_missing_mods_refusal(error.as_ref());
+        let usage = error.is::<game::UsageError>() || missing_mods;
+        if !missing_mods {
+            log::error!("Horizon: {error}");
+        }
         logging::flush();
         // The report's path is the last line on stderr (crash::SAVED_LINE).
         if !usage {
@@ -229,7 +242,6 @@ pub fn start<G>(
 pub(crate) fn install_client_hooks() {
     game::api_values::install_stack_hooks();
     if !crate::native_client_hooks::install(crate::native_client_hooks::NativeClientHooks {
-        menu_slot_rules: game::api_values::menu_slot_rules,
         menu_still_valid: game::api_values::menu_still_valid,
         menu_still_valid_listens: |menu| {
             mod_api::__private::menu_listens(mod_api::HookId::MenuStillValid, menu)
@@ -350,6 +362,8 @@ pub(crate) fn install_client_hooks() {
         is_ladder: |context, entity, pos, state, ladder| {
             crate::game::is_ladder(context, entity, pos, state, ladder);
         },
+        makes_open_trapdoor_above_climbable:
+            crate::game::native_trapdoor_ladder::makes_open_trapdoor_above_climbable,
         friction: |context, entity, kind, pos, state, friction| {
             crate::game::native_surface::friction(context, entity, kind, pos, state, friction);
         },

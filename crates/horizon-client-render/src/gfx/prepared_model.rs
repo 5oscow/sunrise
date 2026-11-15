@@ -750,8 +750,9 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs software Vulkan"]
+    #[ignore = "daily"]
     fn oversized_prepared_upload_returns_an_error() {
+        let _gpu = crate::gfx::test_gpu::lock();
         let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
         descriptor.backends = wgpu::Backends::VULKAN;
         let instance = wgpu::Instance::new(descriptor);

@@ -100,6 +100,9 @@ impl Game<'_> {
         if self.screen == screen && owner.is_none() {
             return;
         }
+        if self.screen == Screen::Options {
+            self.ui.options.discard_draw();
+        }
         self.apply_screen_with_mod_book(screen, owner);
     }
     /// Whether a change of screen asks the screen hooks: a mod listens to
@@ -510,7 +513,7 @@ impl OpenNativeScreen {
     /// block its slots are under (a server without `horizon:menu_extra`).
     fn pos(&self) -> Option<[i32; 3]> {
         match &self.extra {
-            Some(extra) => Some(extra.pos),
+            Some(extra) => extra.pos,
             None if self.key.0 != i32::MIN => Some([self.key.0, self.key.1, self.key.2]),
             None => None,
         }
@@ -833,26 +836,14 @@ impl Game<'_> {
         .into_iter()
         .any(mod_api::__private::listened)
     }
-    /// `Render.Pre`, then `Render.Background` unless it cancelled: whether the
-    /// screen draws.
+    /// `Render.Pre`: whether the screen draws. The screen owns its later phases.
     pub(super) fn screen_render_begin(&self, draw: &mut HudBatch, screen: &ScreenView<'_>) -> bool {
         let mut canceled = false;
         self.native_screen_render_pre(draw, screen, &mut canceled);
-        if !canceled {
-            self.native_screen_render_background(draw, screen);
-        }
         !canceled
     }
-    /// `Render.Foreground` when the screen `drawn`, then `Render.Post`.
-    pub(super) fn screen_render_end(
-        &self,
-        draw: &mut HudBatch,
-        screen: &ScreenView<'_>,
-        drawn: bool,
-    ) {
-        if drawn {
-            self.native_screen_render_foreground(draw, screen);
-        }
+    /// `Render.Post`, including when Pre cancelled the screen's drawing.
+    pub(super) fn screen_render_end(&self, draw: &mut HudBatch, screen: &ScreenView<'_>) {
         self.native_screen_render_post(draw, screen);
     }
     /// The open screen as a native mod sees it (`ScreenView`): its id,
@@ -1453,7 +1444,10 @@ impl Game<'_> {
             attacker,
             held,
             projectile: None,
+            projectile_is_arrow: false,
             direct: None,
+            position: None,
+            projectile_weapon: None,
             player_uuid,
         }
     }
@@ -1479,29 +1473,27 @@ pub(super) fn knockback(level: DamageLevel<'_>, pushed: Hurting<'_>, knock: &mut
     if !mod_api::__private::listened(mod_api::HookId::LivingKnockback) {
         return false;
     }
+    let attack = level.attack();
     let attacker = match &pushed {
         Hurting::Mob(mob, damage) => match damage.attacker.or(mob.ai.last_hurt_by) {
             Some(Who::Mob(id)) => id as i32,
-            _ => level.attack().attacker,
+            _ => attack.attacker,
         },
         Hurting::Player(_, source)
         | Hurting::Dragon(_, source)
         | Hurting::ArmorStand(_, source)
-        | Hurting::Entity(_, _, source) => {
-            if source.causing != 0 {
-                source.causing
-            } else {
-                level.attack().attacker
-            }
-        }
+        | Hurting::Entity(_, _, source) => match source.causing {
+            0 => attack.attacker,
+            causing => causing,
+        },
     };
-    let attack = level.attack();
     let (entity, kind, source) = hurt_server_args(pushed, level.attack());
     let mut canceled = false;
     let [main, off] = &attack.held;
     let (Ok(main), Ok(off)) = (main.try_into_api(), off.try_into_api()) else {
         return false;
     };
+    let entry = level.knockback_entry();
     HitLevel(level).native_living_knockback(mod_api::__private::LivingKnockbackCall {
         entity,
         kind,
@@ -1509,6 +1501,7 @@ pub(super) fn knockback(level: DamageLevel<'_>, pushed: Hurting<'_>, knock: &mut
         attacker,
         attacker_main: main.as_ref(),
         attacker_off: off.as_ref(),
+        entry,
         strength: &mut knock.strength,
         x: &mut knock.x,
         z: &mut knock.z,
@@ -1526,6 +1519,7 @@ pub(super) const DAMAGE_HOOKS: DamageHooks = DamageHooks {
     knockback: Some(knockback),
     totem: Some(use_totem),
     shield: Some(shield_block),
+    accepted: Some(living_death::capture_hit),
 };
 /// The contacts of a simulating entity with a block, as the simulation's own code (client-lib)
 /// reports them.
@@ -1615,46 +1609,8 @@ pub(super) const BLOCK_CONTACT_HOOKS: horizon_client::block_contact::Hooks =
             *movement = horizon_core::geometry::Vec3::new(answer[0], answer[1], answer[2]);
         },
     };
-
-/// `native_living_incoming_damage`'s entity, entity type and source for a hit.
-fn hurt_server_args<'a>(hurting: Hurting<'a>, attack: &Attack) -> (i32, &'a str, HurtSource<'a>) {
-    match hurting {
-        Hurting::Player(entity, source) => (entity, "minecraft:player", source),
-        Hurting::Mob(mob, damage) => (
-            mob.id as i32,
-            mob.kind.id.as_str(),
-            mob_source(damage, attack),
-        ),
-        Hurting::Dragon(entity, source) => (entity, "minecraft:ender_dragon", source),
-        Hurting::ArmorStand(entity, source) => (entity, "minecraft:armor_stand", source),
-        Hurting::Entity(entity, kind, source) => (entity, kind, source),
-    }
-}
-/// A mob's damage as its `DamageSource`: the causing entity is known when it
-/// is a mob, or the player whose attack the level lends. The direct entity is
-/// the attacker in melee, or the projectile when this damage type names one
-/// (`arrow`, `wither_skull`). `magic()` does not, even during the impact.
-fn mob_source(damage: &Damage, attack: &Attack) -> HurtSource<'static> {
-    let causing = match damage.attacker {
-        Some(Who::Mob(id)) => id as i32,
-        Some(Who::Player) => attack.attacker,
-        None => 0,
-    };
-    let damage_type = super::creatures::source_damage_type(*damage);
-    let melee = super::creatures::melee(damage.kind);
-    HurtSource {
-        damage_type,
-        causing,
-        direct: if let Some(direct) = attack.direct {
-            direct
-        } else if melee {
-            causing
-        } else {
-            attack.projectile_direct(damage_type)
-        },
-        position: damage.from,
-    }
-}
+pub(super) use horizon_client::health::mob_source;
+pub(super) use living_death::hurt_server_args;
 
 /// Whether `id` is a sound event's id, `namespace:path` as `Identifier`
 /// allows: the namespace of `[a-z0-9_.-]`, the path also with `/`.
@@ -2359,7 +2315,7 @@ impl Game<'_> {
 
 /// A mob's kind as the hook points name it (`minecraft:zombie`).
 pub(super) fn mob_kind(mob: &horizon_client::mobs::Mob) -> String {
-    ["minecraft:", mob.kind.id.trim_start_matches("minecraft:")].concat()
+    crate::game::native_namespaced_id::namespaced(&mob.kind.id)
 }
 
 /// The level behaviour's answer, or `None` to try `useWithoutItem`.
@@ -3110,6 +3066,7 @@ impl Game<'_> {
             }
         }
         self.native_screen_draw(&s.block, &s.data, batch, [ox, oy]);
+        self.draw_screen_phase(batch, horizon_client::screen_draw::RenderPhase::Background);
         if s.screen.own_labels {
             return true;
         }
@@ -3121,44 +3078,6 @@ impl Game<'_> {
         let label_y = oy + s.screen.inventory_y - 11.0;
         batch.text(atlas, &inventory, ox + 8.0, label_y, grey, false);
         true
-    }
-    /// The tick of the mod block entity at `pos`.
-    pub(super) fn tick_mod_block_entity_loaded(&mut self, pos: Pos) {
-        let Some(BlockEntity::Mod(m)) = self.world.block_entities.get_mut(&pos) else {
-            return;
-        };
-        // An empty id marks its place while the mod has it.
-        let mut taken = std::mem::take(&mut **m);
-        let placeholder_identity = m.revision().identity();
-        let state = self.world.block(pos.0, pos.1, pos.2).0;
-        let slots = self
-            .world
-            .block_entities
-            .mod_container(state)
-            .map_or(0, |c| c.slots);
-        // Grown only: items a container no longer has room for stay saved.
-        if taken.items.len() < slots {
-            taken.items.resize(slots, None);
-        }
-        let items = taken.items.clone();
-        // Without a container, an `Items` item list is the mod's own field.
-        if slots == 0 && !taken.items.is_empty() {
-            let items = horizon_client::save::encode_items(&std::mem::take(&mut taken.items));
-            taken.nbt.insert("Items".into(), items);
-        }
-        let parent = (
-            self.block_entity_tick_key
-                .replace(super::block_entity_tick_items::Key {
-                    pos,
-                    placeholder_identity,
-                    failure_generation: self.wasm_dispatch_failures.get(),
-                    transaction_depth: self.transactions.len(),
-                    unbalanced: false,
-                }),
-            self.block_entity_tick_items.take(),
-        );
-        self.api_block_entity_tick([pos.0, pos.1, pos.2], &mut taken);
-        self.finish_tick_item_writeback(pos, taken, &items, parent);
     }
     /// Puts back a mod block entity taken out for a call, unless the call
     /// removed or replaced it, with what its `setChanged` does.
@@ -3741,7 +3660,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn enchantment_registry_returns_records_and_unknown_cost() {
         super::super::native_entity_refs::tests::with_game(|game| {
             let all = game.enchantments();
@@ -3760,7 +3679,7 @@ mod tests {
         });
     }
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn translate_gives_the_text_of_a_defined_key_and_none_otherwise() {
         use horizon_client::lang::{Language, ResourceSource, scoped};
         struct Empty;
@@ -3780,7 +3699,7 @@ mod tests {
         });
     }
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_trait_mod_measures_text_through_its_draw_context() {
         use super::super::host::draw::GameDrawContext;
         use super::super::native_entity_refs::tests::with_game;
@@ -3788,10 +3707,7 @@ mod tests {
 
         with_game(|game| {
             let mut batch = horizon_client::hud::HudBatch::scratch([320, 240]);
-            let draw = GameDrawContext {
-                game,
-                surface: &mut batch,
-            };
+            let draw = GameDrawContext::new(game, &mut batch);
             // A server's HUD atlas is metrics-only (upstream 2e5a2629a): no sprite sheets,
             // while an upper-case A still advances 6 GUI pixels.
             assert_eq!(draw.text_width("AA"), 12.0);
@@ -3800,7 +3716,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn declared_types_create_tick_and_reload_through_game() {
         use super::super::native_entity_refs::tests::{record_key, run_fresh_cases, with_game_at};
         use horizon_client::{chunk::Chunk, containers::BlockEntity, save};
@@ -4011,7 +3927,7 @@ mod tests {
                 let probe = level.capability(game, &PROBE, [x, 64, 0], None).unwrap();
                 assert_eq!((probe.value(), probe.owner()), (6300, "be_user".into()));
                 game.tick_mod_block_entity(pos);
-                let saved = save::encode_block_entity(
+                let saved = save::block_entity_encode::encode(
                     pos,
                     game.world.block_entities.get(&pos).unwrap(),
                     block,
@@ -4024,7 +3940,7 @@ mod tests {
                 assert!(save::decode_block_entity_for_block(&saved, EMPTY).is_none());
                 game.world.block_entities.insert(pos, restored);
                 game.tick_mod_block_entity(pos);
-                let saved = save::encode_block_entity(
+                let saved = save::block_entity_encode::encode(
                     pos,
                     game.world.block_entities.get(&pos).unwrap(),
                     block,
@@ -4053,7 +3969,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn client_host_reads_current_pause_state() {
         use super::super::native_entity_refs::tests::with_game;
         use crate::game::execution_role::ExecutionRole;
@@ -4068,7 +3984,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn client_host_reads_playing_and_key_mappings() {
         use super::super::Screen;
         use super::super::native_entity_refs::tests::with_game;
@@ -4114,12 +4030,12 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn replacing_mod_block_entity_payload_keeps_its_type_and_saved_identity() {
         use super::super::native_entity_refs::tests::with_game;
         use horizon_client::chunk::Chunk;
         use horizon_client::containers::{BlockEntity, ModBlockEntity, ModBlockEntityFields};
-        use horizon_client::save::{decode_block_entity, encode_block_entity};
+        use horizon_client::save::{block_entity_encode, decode_block_entity};
         use std::sync::Arc;
 
         with_game(|game| {
@@ -4150,7 +4066,7 @@ mod tests {
             assert_eq!(machine.data, [7]);
             assert_ne!(machine.revision(), made);
             assert!(game.world.modified.contains(&(0, 0)));
-            let saved = encode_block_entity(pos, entity, "minecraft:stone");
+            let saved = block_entity_encode::encode(pos, entity, "minecraft:stone");
             let (saved_pos, loaded) = decode_block_entity(&saved).unwrap();
             assert_eq!(saved_pos, pos);
             assert_eq!(loaded.id(), "test:machine");
@@ -4196,7 +4112,7 @@ mod tests {
     /// Exercise the gameplay constructor, where name-based entities compete
     /// with a mod block's sign template.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn mod_sign_constructor_prioritizes_templates_over_suffixes() {
         // This fixture adds blocks that are absent from the shared vanilla
         // game's frozen process-wide block definitions.
@@ -4257,10 +4173,7 @@ mod tests {
                 jars: Vec::new(),
             }],
             &root,
-            &horizon_mod_package::enabled::EnabledMods::new([(
-                "ruby".into(),
-                horizon_mod_package::Side::Both,
-            )]),
+            &horizon_mod_package::enabled::EnabledMods::new([("ruby".into(), mod_api::Side::Both)]),
         )
         .unwrap();
         let settings = Settings::default();
@@ -4330,7 +4243,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn generated_fire_matches_dispatch() {
         use super::super::{Audio, Game, Options, Progress, Settings, load_resources};
         use mod_api::{ClientHost, Flow, Hooks, ModEntry};
@@ -4440,18 +4353,7 @@ mod tests {
                 }
                 let collect_trace = trace.lock().unwrap().clone();
                 trace.lock().unwrap().clear();
-                let (mut forward, mut strafe, mut jump, mut sneak) = (1.0, 0.0, false, false);
-                if fire {
-                    game.fire_movement_input(&mut forward, &mut strafe, &mut jump, &mut sneak);
-                } else {
-                    mod_api::dispatch_movement_input(
-                        &game,
-                        &mut forward,
-                        &mut strafe,
-                        &mut jump,
-                        &mut sneak,
-                    );
-                }
+                let forward = game.movement_dispatch_fixture(fire);
                 (
                     canceled,
                     cancel_trace,
@@ -4472,7 +4374,7 @@ mod tests {
 
     /// With no window to lay a screen out in there is no slot under the pointer.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn no_item_is_hovered_without_a_window() {
         use super::super::{Audio, Game, Options, Progress, Settings, load_resources};
 
@@ -4892,6 +4794,7 @@ mod tests {
                     direct: None,
                     player_uuid: None,
                     held: Default::default(),
+                    ..Default::default()
                 },
             );
             (s.damage_type, s.causing, s.direct)
@@ -4918,6 +4821,7 @@ mod tests {
                     direct: None,
                     player_uuid: None,
                     held: Default::default(),
+                    ..Default::default()
                 },
             );
             (s.damage_type, s.direct)
@@ -5085,7 +4989,7 @@ mod item_fall_on_tests {
     /// Only the inner production loan is exercised: the outer dropped-item pass
     /// is deliberately not claimed to survive this unwind.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and an isolated mod registry"]
+    #[ignore = "daily"]
     fn item_fall_on_returns_progressed_level_loan_after_part_panic() {
         let payload = std::sync::Arc::new(());
         let mods: mod_api::Mods = vec![ModEntry::new(
@@ -5163,7 +5067,7 @@ mod item_fall_on_tests {
     /// `minecraft:item`, with the whole fall and no damage; the write the part asks for lands
     /// after the items' batch; and an item resting there lands no more.
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "daily"]
     fn a_dropped_item_lands_on_a_fall_on_part() {
         let heard = Lands::default();
         let mods: mod_api::Mods = vec![ModEntry::new("lands", Box::new(Mod(heard.clone())))].into();
@@ -5244,6 +5148,7 @@ pub(super) mod particle_count_tests {
             age: 0,
             on_ground: false,
             count: 1,
+            fire_ticks: 0,
             ticks: 0,
             health: 5,
             air: 300,
@@ -5273,7 +5178,7 @@ pub(super) mod particle_count_tests {
     /// before the next frame is drawn, with no tick in between (a paused or frozen game),
     /// or at the next particle tick. A server answers 0 and refuses the clear.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_client_mod_counts_and_clears_particles() {
         super::super::native_entity_refs::tests::with_game(|game| {
             game.options.execution_role = super::ExecutionRole::Client;
@@ -5335,7 +5240,7 @@ pub(super) mod particle_count_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn late_gui_clear_prevents_same_frame_particle_geometry_without_a_tick() {
         let mods: mod_api::Mods =
             vec![mod_api::ModEntry::new("clear_gui", Box::new(ClearInGui))].into();
@@ -5380,7 +5285,7 @@ pub(super) mod particle_count_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_model_callback_clear_discards_particle_geometry_already_extracted() {
         let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
@@ -5636,7 +5541,7 @@ pub(super) mod particle_count_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and a display"]
+    #[ignore = "daily"]
     fn fog_clear_reaches_the_complete_frame_consumer() {
         let name = "game::native_hooks::particle_count_tests::fog_clear_reaches_the_complete_frame_consumer";
         if super::super::native_entity_refs::tests::run_fresh_cases(
@@ -5698,7 +5603,7 @@ pub(super) mod particle_count_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and a display"]
+    #[ignore = "daily"]
     fn late_clear_removes_native_particle_lights_at_the_frame_consumer() {
         let name = "game::native_hooks::particle_count_tests::late_clear_removes_native_particle_lights_at_the_frame_consumer";
         if super::super::native_entity_refs::tests::run_fresh_cases(

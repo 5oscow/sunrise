@@ -84,6 +84,13 @@ impl Screen {
             | Self::HudEditor => true,
         }
     }
+    /// `Screen.isAllowedInPortal`: `LocalPlayer.handlePortalTransitionEffect`
+    /// leaves a screen that allows it open. The class default is
+    /// `isPauseScreen`, and only `ChatScreen`, `DeathScreen` and `WinScreen`
+    /// override it true (the win screen whatever its poem says).
+    pub(super) fn allowed_in_portal(self) -> bool {
+        matches!(self, Self::Chat | Self::Dead | Self::Win) || self.is_pause_screen()
+    }
     /// Screen.extractBackground for non-isInGameUi screens, and
     /// PauseScreen.extractBackground only when showPauseMenu is true.
     pub(super) fn blurs_background(self, pause_menu: bool) -> bool {
@@ -382,6 +389,7 @@ impl Game<'_> {
         let atlas = &self.gui.atlas;
         let (w, h) = (batch.width, batch.height);
         ui::menu_background(batch, atlas, 0.0, 0.0, w, h, true);
+        self.draw_screen_phase(batch, horizon_client::screen_draw::RenderPhase::Background);
         let title = Text::translate("menu.game", &[]);
         widgets::begin_screen(|| ScreenInfo::new("pause", title.plain()));
         let tw = atlas.font.width_text(&title);
@@ -480,6 +488,7 @@ impl Game<'_> {
                 });
             }
         }
+        self.draw_screen_phase(batch, horizon_client::screen_draw::RenderPhase::Foreground);
         // SpriteIconButton.withTootip: the label as a tooltip.
         if let Some(tip) = tooltip {
             let lines: Vec<Text> = atlas
@@ -746,6 +755,7 @@ impl Game<'_> {
                 ),
             );
         }
+        self.draw_screen_phase(batch, horizon_client::screen_draw::RenderPhase::Background);
         // DeathScreen.handleExitToTitleScreen: the TitleConfirmScreen takes the
         // screen over, on the same background.
         if let Some(opened) = self.ui.death_confirm {
@@ -768,6 +778,7 @@ impl Game<'_> {
                 [&labels[0], &labels[1]],
                 opened.elapsed().as_millis() >= 1000,
             );
+            self.draw_screen_phase(batch, horizon_client::screen_draw::RenderPhase::Foreground);
             return;
         }
         let title = if self.level.hardcore {
@@ -826,6 +837,7 @@ impl Game<'_> {
                 hover,
             );
         }
+        self.draw_screen_phase(batch, horizon_client::screen_draw::RenderPhase::Foreground);
         // DeathScreen.visitText(HoveredTextEffects.TOOLTIP_AND_CURSOR): a
         // styled cause shows its hover tooltip, and a clickable one asks for
         // the hand.

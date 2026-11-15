@@ -299,8 +299,41 @@ impl Game<'_> {
             return None;
         };
         let m = self.mobs.iter().find(|m| m.id == id)?;
+        Some(self.mob_query_invulnerable(m, damage_type))
+    }
+
+    /// `Entity.isInvulnerableTo` asked of `mob` outside a hit, for a source of `damage_type`:
+    /// the vanilla answer, which `entity_invulnerability_check` listeners may change.
+    pub(in crate::game) fn mob_query_invulnerable(
+        &self,
+        mob: &horizon_client::mobs::Mob,
+        damage_type: &str,
+    ) -> bool {
         let source = Damage::of(Self::damage_kind(&self.motion.health.damage, damage_type));
-        Some(m.refuses_damage(&source))
+        let vanilla = mob.refuses_damage(&source);
+        horizon_client::health::query_invulnerability(
+            &self.world,
+            self.pack.assets.registry,
+            Some(world_items!(self)),
+            Some(&self.pack.block_registries),
+            &self.damage_hooks,
+            horizon_client::health::Hurting::Mob(mob, &source),
+            vanilla,
+        )
+    }
+
+    /// `isInvulnerableToBase` of a non-living entity the acting player strikes in melee
+    /// (`player_attack`), asked of listeners.
+    pub(in crate::game) fn native_player_hit_invulnerable(&mut self, id: u32, kind: &str) -> bool {
+        let attacker = self.own_entity_id();
+        let source = horizon_client::health::HurtSource {
+            damage_type: "minecraft:player_attack",
+            causing: attacker,
+            direct: attacker,
+            position: None,
+        };
+        let vanilla = self.saved_refuses_damage(id, "minecraft:player_attack", self.creative);
+        self.native_nonliving_invulnerable(id, kind, source, vanilla)
     }
 
     /// Whether `source`'s damage may hit `entity` through their teams
@@ -403,7 +436,7 @@ mod tests {
     use mod_api::{EntityRef, WorldEpoch};
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn review_unknown_damage_type_is_refused() {
         with_game(|game| {
             let pig = game.res.mob_types().get("minecraft:pig").unwrap().clone();
@@ -418,7 +451,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn review_fire_immune_query() {
         with_game(|game| {
             let blaze = game.res.mob_types().get("minecraft:blaze").unwrap().clone();
@@ -448,7 +481,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn review_direct_entity_preserved() {
         let heard = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
@@ -507,7 +540,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn hurt_routes_to_the_engines_damage_paths() {
         let heard = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
@@ -579,7 +612,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn teams_allow_damage_without_a_team() {
         with_game(|game| {
             let zombie = game
@@ -603,7 +636,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_mob_keeps_its_flag_and_damage_cooldown() {
         with_game(|game| {
             let zombie = game
@@ -634,7 +667,7 @@ mod tests {
     /// #916: the permanent flag reaches players and non-mob kinds, and a
     /// player's damage is really refused by it.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn the_flag_reaches_players_and_non_mobs_and_refuses_player_damage() {
         use horizon_client::motion::PlayerMotion;
         super::super::native_entity_refs::tests::with_game(|game| {
@@ -708,7 +741,7 @@ mod tests {
     /// damage cooldown — on a mob and a player alike, and both survive a
     /// save and load.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn the_entity_timer_never_shares_the_living_cooldown() {
         use horizon_client::motion::PlayerMotion;
         super::super::native_entity_refs::tests::with_game(|game| {
@@ -777,7 +810,7 @@ mod tests {
     /// invulnerability — and enemies no longer see it as a target, until the
     /// window closes.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn the_window_refuses_damage_and_hides_the_mob_from_enemies() {
         use horizon_client::mobs::{Damage, DamageKind, Mob};
         use horizon_core::geometry::Vec3;
@@ -826,12 +859,12 @@ mod tests {
             game.mobs[0].health = 20.0;
             assert!(game.mobs[0].invulnerable_time > 0);
             assert!(game.mobs[0].is_invulnerable());
-            assert!(game.mobs[0].seen(None).invulnerable);
+            assert!(game.mobs[0].seen(None, game.items()).invulnerable);
             // ...and once the window has run out, the enemy sees it again.
             game.mobs[0].invulnerable_time = 1;
             game.tick_mobs().unwrap();
             assert_eq!(game.mobs[0].invulnerable_time, 0);
-            assert!(!game.mobs[0].seen(None).invulnerable);
+            assert!(!game.mobs[0].seen(None, game.items()).invulnerable);
             let _ = enemy;
             keep(game);
         });
@@ -844,7 +877,7 @@ mod tests {
     /// ability gate (a creative player's own mode) holds even a creative
     /// hit back, as vanilla `Player.hurtServer` does.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn the_players_permanent_flag_is_apart_from_their_abilities() {
         use horizon_client::motion::PlayerMotion;
         super::super::native_entity_refs::tests::with_game(|game| {
@@ -910,7 +943,7 @@ mod tests {
     /// #916, review: a non-mob's saved window counts down each tick, and the
     /// item damage path refuses by it.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_non_mobs_saved_window_counts_down_and_refuses() {
         use horizon_client::entities::ArmorStand;
         use horizon_core::geometry::Vec3;
@@ -935,7 +968,7 @@ mod tests {
     /// tick, so its saved window does not count down in that pass — while
     /// one the pass reaches does.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn an_item_outside_the_ticking_chunks_keeps_its_window() {
         use horizon_client::items::ItemStack;
         use horizon_client::motion::PlayerMotion;
@@ -969,7 +1002,7 @@ mod tests {
     /// #916, review round 2: the piercing query is `Entity.isInvulnerable()`
     /// — the flag or the open window — for every kind that keeps either.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn the_piercing_query_follows_the_flag_or_the_window_of_every_kind() {
         use horizon_client::entities::ArmorStand;
         use horizon_client::motion::PlayerMotion;
@@ -1000,7 +1033,7 @@ mod tests {
     /// mob's target — the write handle's facts, the goal view, and
     /// `asValidTarget` behind both.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_flagged_player_is_no_ones_target() {
         use super::Target;
         use horizon_client::motion::PlayerMotion;
@@ -1042,7 +1075,7 @@ mod tests {
     /// survival punch — no wobble, no break — while a creative player's hit
     /// passes both, as `DamageSource.isCreativePlayer` does.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_saved_stand_refuses_the_punch_that_would_break_it() {
         use horizon_client::entities::ArmorStand;
         with_game(|game| {
@@ -1068,7 +1101,7 @@ mod tests {
     /// #916, review round 2: the player's flag and window ride the save —
     /// `sync_level` writes them, `load_saved_state_once` reads them back.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn the_players_flag_and_window_ride_the_save() {
         use horizon_client::motion::PlayerMotion;
         use horizon_core::nbt::Tag;
@@ -1111,7 +1144,7 @@ mod tests {
     /// except from a creative player — the one refusal every saved kind
     /// shares (`saved_refuses_damage`).
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn the_dragons_saved_flag_refuses_all_but_a_creative_player() {
         use super::super::dragon::Dragon;
         use horizon_client::mobs::DamageKind;

@@ -15,8 +15,11 @@ pub mod bed_geometry;
 pub mod block_contact;
 pub mod block_sounds;
 pub mod item_damage;
+pub mod packet_source;
 pub mod parallel;
 pub mod powder_snow;
+#[cfg(test)]
+mod test_log;
 #[cfg(test)]
 mod test_resources;
 pub use horizon_client_render::{
@@ -69,6 +72,7 @@ pub mod debug_entries;
 pub mod debug_keys;
 pub mod debug_overlay;
 pub mod debugworld;
+pub mod desktop;
 pub mod dialog;
 pub mod dialog_screen;
 pub mod enchantment_levels;
@@ -99,6 +103,7 @@ pub mod item_render;
 pub mod item_sync;
 pub mod item_tooltip;
 pub mod join_seq;
+pub mod move_gate;
 /// Game-owned JSON metadata conversion, shared by recipe and API adapters.
 pub use horizon_core::json_nbt;
 pub mod lan;
@@ -109,6 +114,7 @@ pub mod locator_bar;
 pub mod lod_net;
 pub mod map_decoration_types;
 pub mod menu;
+pub mod menu_extra_net;
 pub mod merchant;
 pub mod mobs;
 pub mod mod_content;
@@ -119,6 +125,7 @@ pub mod multiplayer;
 pub mod music;
 pub mod native_client_hooks;
 pub mod native_stack_hooks;
+pub mod neoforge_mob_maps;
 pub mod net;
 pub mod nether_portal;
 pub mod no_resources;
@@ -153,6 +160,7 @@ mod carrier_store_tests;
 pub mod scoreboard_cmd;
 pub mod screen_layout;
 pub mod screen_narrator;
+pub mod skull_models;
 pub mod social_screen;
 pub mod world_geometry;
 pub use horizon_server_files as server;
@@ -179,6 +187,7 @@ pub mod title;
 pub mod toasts;
 pub mod ui_theme;
 pub mod vanillagen;
+pub mod viewed_levels_net;
 pub mod voxel_occlusion;
 // Keep the old path for native callers while giving the implementation a name
 // that does not collide with the gameplay adapter in `game/interface/entity_culling/mod.rs`.
@@ -204,6 +213,7 @@ pub use horizon_client_input::gamepad;
 pub use horizon_client_input::gameplay_guide;
 pub use horizon_client_input::held;
 pub use horizon_client_input::input;
+pub use horizon_client_input::input_queue;
 pub use horizon_client_input::input_source;
 pub use horizon_client_input::interaction_input;
 pub use horizon_client_input::key_names;

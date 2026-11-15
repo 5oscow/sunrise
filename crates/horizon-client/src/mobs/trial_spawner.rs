@@ -216,6 +216,14 @@ pub fn load_registry(root: &Path) {
 pub fn registry_config(id: &str) -> Option<TrialConfig> {
     REGISTRY.get()?.get(id).cloned()
 }
+/// The accepted, decoded trial-spawner registry identities, without cloning configurations.
+pub fn registry_contains(id: &str) -> Option<bool> {
+    Some(REGISTRY.get()?.contains_key(id))
+}
+/// The identities of the same immutable registry gameplay reads.
+pub fn registry_ids() -> Option<Vec<&'static str>> {
+    Some(REGISTRY.get()?.keys().map(String::as_str).collect())
+}
 
 fn float(t: &Tag) -> Option<f32> {
     Some(match t {
@@ -468,7 +476,7 @@ pub trait TrialSpawnerExt: Sized {
         pos: [i32; 3],
         state: TrialState,
         ominous: bool,
-        spawn: &mut dyn FnMut(&L, &SpawnerSpawn, &mut R) -> Option<Uuid>,
+        spawn: &mut dyn FnMut(&L, &mut R, &SpawnerSpawn) -> Option<Uuid>,
         eject: &mut dyn FnMut(&str, &mut R) -> bool,
         events: &mut Vec<TrialEvent>,
     ) -> TrialState;
@@ -480,7 +488,7 @@ pub trait TrialSpawnerExt: Sized {
         random: &mut R,
         pos: [i32; 3],
         state: TrialState,
-        spawn: &mut dyn FnMut(&L, &SpawnerSpawn, &mut R) -> Option<Uuid>,
+        spawn: &mut dyn FnMut(&L, &mut R, &SpawnerSpawn) -> Option<Uuid>,
         eject: &mut dyn FnMut(&str, &mut R) -> bool,
         events: &mut Vec<TrialEvent>,
     ) -> TrialState;
@@ -490,7 +498,7 @@ pub trait TrialSpawnerExt: Sized {
         l: &L,
         random: &mut R,
         pos: [i32; 3],
-        spawn: &mut dyn FnMut(&L, &SpawnerSpawn, &mut R) -> Option<Uuid>,
+        spawn: &mut dyn FnMut(&L, &mut R, &SpawnerSpawn) -> Option<Uuid>,
         events: &mut Vec<TrialEvent>,
     ) -> Option<Uuid>;
 }
@@ -887,7 +895,7 @@ impl TrialSpawnerExt for TrialSpawner {
         pos: [i32; 3],
         state: TrialState,
         ominous: bool,
-        spawn: &mut dyn FnMut(&L, &SpawnerSpawn, &mut R) -> Option<Uuid>,
+        spawn: &mut dyn FnMut(&L, &mut R, &SpawnerSpawn) -> Option<Uuid>,
         eject: &mut dyn FnMut(&str, &mut R) -> bool,
         events: &mut Vec<TrialEvent>,
     ) -> TrialState {
@@ -913,7 +921,7 @@ impl TrialSpawnerExt for TrialSpawner {
         random: &mut R,
         pos: [i32; 3],
         state: TrialState,
-        spawn: &mut dyn FnMut(&L, &SpawnerSpawn, &mut R) -> Option<Uuid>,
+        spawn: &mut dyn FnMut(&L, &mut R, &SpawnerSpawn) -> Option<Uuid>,
         eject: &mut dyn FnMut(&str, &mut R) -> bool,
         events: &mut Vec<TrialEvent>,
     ) -> TrialState {
@@ -1044,7 +1052,7 @@ impl TrialSpawnerExt for TrialSpawner {
         l: &L,
         random: &mut R,
         pos: [i32; 3],
-        spawn: &mut dyn FnMut(&L, &SpawnerSpawn, &mut R) -> Option<Uuid>,
+        spawn: &mut dyn FnMut(&L, &mut R, &SpawnerSpawn) -> Option<Uuid>,
         events: &mut Vec<TrialEvent>,
     ) -> Option<Uuid> {
         let data = self.next_or_create(random, events).clone();
@@ -1114,7 +1122,7 @@ impl TrialSpawnerExt for TrialSpawner {
             equipment: data.equipment.as_ref(),
             trial: true,
         };
-        let uuid = spawn(l, &request, random)?;
+        let uuid = spawn(l, random, &request)?;
         let flame = i32::from(self.is_ominous);
         events.push(TrialEvent::LevelEvent(3011, pos, flame));
         events.push(TrialEvent::LevelEvent(3012, block, flame));

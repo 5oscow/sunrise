@@ -20,7 +20,9 @@ pub use mod_platform::content::crash::{clear_detail, enter_native_mod, set_detai
 use std::cell::{Cell, RefCell};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Local};
 use horizon_system::{command_output, machine_arch};
@@ -113,6 +115,8 @@ const COMMENTS: &[&str] = &[
 /// One crash, ready to be written.
 pub struct Report {
     pub time: DateTime<Local>,
+    /// The lines mods put under the title (`Registrar::crash_header`), `<mod id>: <text>`.
+    pub headers: Vec<String>,
     pub description: String,
     /// The error's message, first line of the stack section.
     pub error: String,
@@ -136,6 +140,9 @@ impl Report {
         let comment = COMMENTS[self.time.timestamp().rem_euclid(COMMENTS.len() as i64) as usize];
         let mut out = String::new();
         let _ = writeln!(out, "---- Horizon Crash Report ----");
+        for header in &self.headers {
+            let _ = writeln!(out, "{header}");
+        }
         let _ = writeln!(out, "// {comment}\n");
         let _ = writeln!(out, "Time: {}", self.time.format("%Y-%m-%d %H:%M:%S"));
         let _ = writeln!(out, "Description: {}\n", self.description);
@@ -333,7 +340,103 @@ pub fn system_details(side: &str) -> Vec<(String, String)> {
             .filter(|(k, _)| side != "server" || *k != "Render Settings")
             .map(|(k, v)| (k.to_owned(), v)),
     );
+    out.extend(mod_lines(false));
     out
+}
+
+/// The lines mods put under a report's title, `<mod id>: <text>`.
+fn mod_headers() -> Vec<String> {
+    mod_lines(true)
+        .into_iter()
+        .map(|(name, text)| format!("{name}: {text}"))
+        .collect()
+}
+
+/// How long a report waits for the mods' lines, all of them together: a line waiting on a lock the
+/// crashing thread holds must not keep the report from being written.
+const MOD_LINES_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// The mods' `Registrar::crash_header` lines (`headers`) or `crash_section` lines, in registration
+/// order, as `(<mod id>: <label>, text)`, or `(<mod id>, text)` for a header. Each is asked once,
+/// under [`contain`], on a guest-sized thread of its own: this runs inside the panic hook, where a
+/// second panic would end the process before any catch could. A line that panics, traps or misses
+/// [`MOD_LINES_WAIT`] reads `~~ERROR~~`; one that answers `None` is left out, as are the lines of
+/// the mod this thread's crash is attributed to. No mod line, no thread.
+fn mod_lines(headers: bool) -> Vec<(String, String)> {
+    let faulted = current_native_mod();
+    let lines: Vec<_> = mod_api::__private::game::mod_crash_lines()
+        .into_iter()
+        .filter(|(owner, label, _)| label.is_none() == headers && Some(*owner) != faulted)
+        .collect();
+    if lines.is_empty() {
+        return Vec::new();
+    }
+    let (send, answers) = std::sync::mpsc::channel();
+    let asked: Vec<_> = lines
+        .iter()
+        .map(|(owner, _, line)| (*owner, line.clone()))
+        .collect();
+    // A thread that doesn't start drops `send`: every line then reads as an error.
+    let _ = horizon_guest_stack::spawn("Crash report lines".into(), move || {
+        let failures = horizon_mod_runtime::dispatch_failures::dispatch_failure_counter();
+        for (owner, line) in asked {
+            let before = failures.get();
+            let answer = contain(|| {
+                let _mod = enter_native_mod(ModCall {
+                    id: owner,
+                    hook: "crash_section",
+                    part: None,
+                });
+                line.value()
+            });
+            // A wasm line that traps answers `None` through its proxy; the failed call tells.
+            if send
+                .send(answer.ok().filter(|_| failures.get() == before))
+                .is_err()
+            {
+                break;
+            }
+        }
+    });
+    let deadline = std::time::Instant::now() + MOD_LINES_WAIT;
+    let mut waiting = true;
+    lines
+        .into_iter()
+        .filter_map(|(owner, label, _)| {
+            // After one line misses the wait, a later answer would belong to that line, not this.
+            let answer = waiting
+                .then(|| {
+                    answers
+                        .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+                        .ok()
+                })
+                .flatten();
+            waiting = answer.is_some();
+            let text = match answer {
+                Some(Some(None)) => return None,
+                Some(Some(Some(text))) => one_line(&text),
+                _ => "~~ERROR~~".to_owned(),
+            };
+            let name = match label {
+                Some(label) => format!("{owner}: {}", one_line(&label)),
+                None => owner.to_owned(),
+            };
+            Some((name, text))
+        })
+        .collect()
+}
+
+/// `text` on one line, so no mod line passes for one of the report's own: control characters
+/// become spaces, and it is cut to 4096 bytes at a character boundary.
+fn one_line(text: &str) -> String {
+    let mut end = text.len().min(4096);
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    text[..end]
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect()
 }
 
 /// The thread's name as vanilla's reports say it: the main thread is the client's "Render thread"
@@ -364,6 +467,71 @@ pub fn on_report(hook: ReportHook) {
         .write()
         .unwrap_or_else(|e| e.into_inner())
         .push(hook);
+}
+
+type EmergencyHook = std::sync::Arc<dyn Fn() + Send + Sync>;
+static EMERGENCY_SAVE: Mutex<Option<EmergencyHook>> = Mutex::new(None);
+const SAVE_NOT_STARTED: u8 = 0;
+const SAVE_RUNNING: u8 = 1;
+const SAVE_FINISHED: u8 = 2;
+// Taking the hook must not let a second crashing worker exit before the save finishes.
+static EMERGENCY_SAVE_STATE: AtomicU8 = AtomicU8::new(SAVE_NOT_STARTED);
+
+/// Unregisters this emergency save, without removing a newer registration.
+#[must_use]
+pub struct EmergencySave(EmergencyHook);
+
+impl Drop for EmergencySave {
+    fn drop(&mut self) {
+        let mut hook = EMERGENCY_SAVE.lock().unwrap_or_else(|e| e.into_inner());
+        if hook
+            .as_ref()
+            .is_some_and(|f| std::sync::Arc::ptr_eq(f, &self.0))
+        {
+            *hook = None;
+        }
+    }
+}
+
+/// Replaces the process's emergency save. The callback must not panic and must
+/// bound its wait: it runs on the crashing worker, before the process exits.
+pub fn on_emergency_save(f: impl Fn() + Send + Sync + 'static) -> EmergencySave {
+    let hook: EmergencyHook = std::sync::Arc::new(f);
+    *EMERGENCY_SAVE.lock().unwrap_or_else(|e| e.into_inner()) = Some(hook.clone());
+    EmergencySave(hook)
+}
+
+fn emergency_save() {
+    // Leave room for the integrated server's own 30 s save timeout.
+    emergency_save_with_timeout(Duration::from_secs(35));
+}
+
+/// Run once per process; other crashing workers wait rather than cutting the save short.
+fn emergency_save_with_timeout(timeout: Duration) {
+    if EMERGENCY_SAVE_STATE
+        .compare_exchange(
+            SAVE_NOT_STARTED,
+            SAVE_RUNNING,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        )
+        .is_err()
+    {
+        let started = Instant::now();
+        while EMERGENCY_SAVE_STATE.load(Ordering::Acquire) == SAVE_RUNNING {
+            let Some(left) = timeout.checked_sub(started.elapsed()) else {
+                break;
+            };
+            std::thread::sleep(left.min(Duration::from_millis(5)));
+        }
+        return;
+    }
+    // Never wait on the registry in a panic hook, or hold it while stopping the server.
+    let hook = EMERGENCY_SAVE.try_lock().ok().and_then(|mut h| h.take());
+    if let Some(hook) = hook {
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| hook()));
+    }
+    EMERGENCY_SAVE_STATE.store(SAVE_FINISHED, Ordering::Release);
 }
 
 /// Writes the report and tells where it is; the log gets the error too.
@@ -428,6 +596,7 @@ pub fn report_watchdog(
         home,
         Report {
             time: Local::now(),
+            headers: mod_headers(),
             description: "Watching Server".into(),
             error: format!("{message} (Watching Server)"),
             stack,
@@ -448,6 +617,7 @@ pub fn report_memory_limit(home: &Path, side: &'static str, message: String) {
     }
     let report = Report {
         time: Local::now(),
+        headers: mod_headers(),
         description: "RAM limit reached".into(),
         error: message,
         stack: String::new(),
@@ -559,6 +729,7 @@ fn short_path<'a>(path: &'a str, root: &str) -> &'a str {
 pub fn panic_report(info: &std::panic::PanicHookInfo, side: &'static str) -> Report {
     Report {
         time: Local::now(),
+        headers: mod_headers(),
         description: "Unexpected error".into(),
         error: panic_message(info),
         stack: stack_lines(
@@ -624,6 +795,7 @@ pub fn install(home: PathBuf, side: &'static str) {
             deliver(&home, panic_report(info, side));
         } else if is_worker_thread(std::thread::current().name()) {
             deliver(&home, worker_panic_report(info, side));
+            emergency_save();
             // The crash ends the game, as the relayed report does on vanilla's main thread.
             std::process::exit(101);
         } else {
@@ -675,6 +847,7 @@ pub fn report_error(
             home,
             Report {
                 time: Local::now(),
+                headers: mod_headers(),
                 description: DebugCrash::MESSAGE.into(),
                 error: DebugCrash::MESSAGE.into(),
                 stack: debug.stack.clone(),
@@ -695,6 +868,7 @@ pub fn report_error(
         home,
         Report {
             time: Local::now(),
+            headers: mod_headers(),
             description: "Fatal error".into(),
             error: message,
             stack: String::new(),
@@ -819,6 +993,87 @@ mod tests {
         }
     }
 
+    static EMERGENCY_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    fn reset_emergency_save() {
+        *EMERGENCY_SAVE.lock().unwrap() = None;
+        EMERGENCY_SAVE_STATE.store(SAVE_NOT_STARTED, Ordering::Release);
+    }
+
+    #[test]
+    fn emergency_save_second_caller_waits_for_save() {
+        let _serial = EMERGENCY_TEST_LOCK.lock().unwrap();
+        reset_emergency_save();
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let saved = std::sync::Arc::new(AtomicBool::new(false));
+        let (started, running) = std::sync::mpsc::channel();
+        let (count, flag) = (calls.clone(), saved.clone());
+        let _hook = on_emergency_save(move || {
+            count.fetch_add(1, Ordering::Relaxed);
+            started.send(()).unwrap();
+            std::thread::sleep(Duration::from_millis(200));
+            flag.store(true, Ordering::Release);
+        });
+        let first = std::thread::spawn(emergency_save);
+        running.recv_timeout(Duration::from_secs(2)).unwrap();
+        let second = std::thread::spawn(move || {
+            emergency_save();
+            assert!(saved.load(Ordering::Acquire));
+        });
+        first.join().unwrap();
+        second.join().unwrap();
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn emergency_save_waiter_times_out() {
+        let _serial = EMERGENCY_TEST_LOCK.lock().unwrap();
+        reset_emergency_save();
+        EMERGENCY_SAVE_STATE.store(SAVE_RUNNING, Ordering::Release);
+        let bound = Duration::from_millis(20);
+        let started = Instant::now();
+        emergency_save_with_timeout(bound);
+        assert!(started.elapsed() >= bound);
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn emergency_save_registry_calls_once_replaces_and_unregisters() {
+        use std::sync::{Arc, atomic::AtomicUsize};
+        let _serial = EMERGENCY_TEST_LOCK.lock().unwrap();
+        reset_emergency_save();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let count = calls.clone();
+        let old = on_emergency_save(move || {
+            count.fetch_add(1, Ordering::Relaxed);
+        });
+        emergency_save();
+        emergency_save();
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+        reset_emergency_save();
+        let count = calls.clone();
+        let replaced = on_emergency_save(move || {
+            count.fetch_add(10, Ordering::Relaxed);
+        });
+        let count = calls.clone();
+        let latest = on_emergency_save(move || {
+            count.fetch_add(100, Ordering::Relaxed);
+        });
+        drop(old);
+        drop(replaced);
+        emergency_save();
+        assert_eq!(calls.load(Ordering::Relaxed), 101);
+        reset_emergency_save();
+        let count = calls.clone();
+        let removed = on_emergency_save(move || {
+            count.fetch_add(1000, Ordering::Relaxed);
+        });
+        drop(removed);
+        emergency_save();
+        assert_eq!(calls.load(Ordering::Relaxed), 101);
+        drop(latest);
+    }
+
     #[test]
     fn an_emulated_build_names_both_architectures() {
         // A Windows ARM64 PC playing the x64 build: its reports say so (#7513 read "x86_64").
@@ -879,17 +1134,17 @@ mod tests {
     #[test]
     fn a_panic_in_a_converted_package_names_the_runtime_package_export_and_site() {
         let runtime = enter_native_mod(ModCall {
-            id: "portizon",
+            id: "converter_runtime",
             hook: "client_tick_pre",
             part: None,
         });
-        let packages = ConvertedPackages::new("portizon", ["example:mod"]);
+        let packages = ConvertedPackages::new("converter_runtime", ["example:mod"]);
         let package = packages.package("example:mod").unwrap();
         let scope = package
             .enter("tick", "com.example.Foo.tick(Foo.java:42)")
             .unwrap();
         assert!(attributed("boom".into()).ends_with(
-            "\nin native mod portizon, hook client_tick_pre\n\
+            "\nin native mod converter_runtime, hook client_tick_pre\n\
              in converted package example:mod, export tick, \
              call site com.example.Foo.tick(Foo.java:42)"
         ));
@@ -910,7 +1165,8 @@ mod tests {
         );
         drop(scope);
         assert!(
-            attributed("boom".into()).ends_with("\nin native mod portizon, hook client_tick_pre")
+            attributed("boom".into())
+                .ends_with("\nin native mod converter_runtime, hook client_tick_pre")
         );
         drop(runtime);
         assert_eq!(attributed("boom".into()), "boom");
@@ -919,11 +1175,11 @@ mod tests {
     #[test]
     fn a_guest_export_cannot_forge_a_report_line() {
         let runtime = enter_native_mod(ModCall {
-            id: "portizon",
+            id: "converter_runtime",
             hook: "client_tick_pre",
             part: None,
         });
-        let packages = ConvertedPackages::new("portizon", ["example:mod"]);
+        let packages = ConvertedPackages::new("converter_runtime", ["example:mod"]);
         let scope = packages
             .package("example:mod")
             .unwrap()
@@ -996,6 +1252,7 @@ mod tests {
     fn report() -> Report {
         Report {
             time: chrono::TimeZone::with_ymd_and_hms(&Local, 2026, 10, 14, 9, 5, 7).unwrap(),
+            headers: Vec::new(),
             description: "Unexpected error".into(),
             error: "panicked at src/game.rs:10:5:\nboom".into(),
             stack: "horizon_client::game::frame (src/game.rs:10:5)\n".into(),
@@ -1176,6 +1433,70 @@ mod tests {
         ) {
             panic!("a broken mod");
         }
+    }
+
+    struct Line(Option<&'static str>);
+    impl mod_api::CrashSection for Line {
+        fn value(&self) -> Option<String> {
+            self.0.map(str::to_owned)
+        }
+    }
+
+    struct Panics;
+    impl mod_api::CrashSection for Panics {
+        fn value(&self) -> Option<String> {
+            panic!("a broken crash line")
+        }
+    }
+
+    struct Lines;
+    impl mod_api::Hooks for Lines {
+        fn subscribed(&self) -> &'static [Option<mod_api::HookId>] {
+            &[]
+        }
+        fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
+            r.crash_section(
+                "caches",
+                std::sync::Arc::new(Line(Some("3 caches\n\tHorizon Version: forged"))),
+            );
+            r.crash_section("idle", std::sync::Arc::new(Line(None)));
+            r.crash_section("worker", std::sync::Arc::new(Panics));
+            r.crash_header(std::sync::Arc::new(Line(Some("modded"))));
+        }
+    }
+
+    #[test]
+    fn mod_lines_are_asked_when_the_report_is_written() {
+        let _hook = PANIC_HOOK.lock().unwrap_or_else(|e| e.into_inner());
+        let mods: mod_api::Mods =
+            std::sync::Arc::from([mod_api::ModEntry::new("test", Box::new(Lines))]);
+        mod_platform::testing::with_mods(mods.clone(), || {
+            mod_platform::__private::part_tests::install_parts_fixture(&mods).unwrap();
+            let details = system_details("client");
+            let lines: Vec<_> = details
+                .iter()
+                .filter(|(key, _)| key.starts_with("test"))
+                .map(|(key, value)| (key.as_str(), value.as_str()))
+                .collect();
+            assert_eq!(
+                lines,
+                [
+                    ("test: caches", "3 caches  Horizon Version: forged"),
+                    ("test: worker", "~~ERROR~~"),
+                ]
+            );
+            let text = Report {
+                headers: mod_headers(),
+                ..report()
+            }
+            .text();
+            let lines: Vec<&str> = text.lines().collect();
+            assert_eq!(
+                lines[..2],
+                ["---- Horizon Crash Report ----", "test: modded"]
+            );
+            assert!(lines[2].starts_with("// "));
+        });
     }
 
     #[test]

@@ -834,7 +834,7 @@ mod teleport_hook_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources and an isolated native-mod process"]
+    #[ignore = "daily"]
     fn consumption_hook_keeps_the_stack_before_use_and_cancellation_stops_attempts() {
         let heard = Arc::new(Mutex::new(Vec::new()));
         let moved = Arc::new(AtomicBool::new(false));
@@ -847,11 +847,15 @@ mod teleport_hook_tests {
             with_game(|game| {
                 let at = Vec3::new(0.0, 65.0, 0.0);
                 game.player = Some(PlayerMotion::new(game.motion, at).unwrap());
+                // This body belongs to the guest record installed below, never
+                // to a separately admitted local player with the same runtime ID.
+                game.player.as_mut().unwrap().entity_id = 2;
                 game.lan_acting = Some(12);
                 game.lan_acting_uuid = Some(7);
                 game.lan_acting_name = Some("ConsumedStackTest".into());
                 game.lan_acting_entity = Some(2);
                 game.lan_acting_permission = Some(4);
+                crate::game::native_entity_refs::tests::bind_acting_guest(game);
                 game.creative = false;
                 let mut consumed = ItemStack::new("minecraft:chorus_fruit", 7);
                 consumed.damage = 3;
@@ -1039,7 +1043,7 @@ mod fox_consumption_hook_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources and an isolated native-mod process"]
+    #[ignore = "daily"]
     fn fox_consumption_adapter_uses_full_host_and_preserves_listener_writes() {
         let mode = Arc::new(AtomicU8::new(0));
         let heard = Arc::new(Mutex::new(Vec::new()));
@@ -1157,7 +1161,7 @@ mod fox_consumption_hook_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources and an isolated native-mod process"]
+    #[ignore = "daily"]
     fn fox_tick_pauses_before_movement_and_next_actor_and_preserves_full_host_writes() {
         let heard = Arc::new(Mutex::new(Vec::new()));
         let spawned = Arc::new(Mutex::new(Vec::new()));

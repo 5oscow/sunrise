@@ -3,9 +3,7 @@
 use super::{Dim, Game, host::draw::GameCameraDrawContext};
 use horizon_client::assets::Properties;
 use horizon_client::camera::NearPlane;
-use horizon_client::fog::{
-    FogData, FogInputs, FogType, fog_type, settle_rain_fog, update_rain_fog,
-};
+use horizon_client::fog::{FogData, FogInputs, FogType, settle_rain_fog, update_rain_fog};
 use horizon_client::{
     animate_tick::{AnimateContext, animate_tick, campfire_particles, marker_particle_target},
     biome::Biomes,
@@ -170,7 +168,7 @@ impl Game<'_> {
     ) -> FogData {
         let forward = self.forward();
         let at = [camera.x, camera.y, camera.z];
-        let fog_type = fog_type(&self.world, self.res.facts(), at, &self.near_plane());
+        let fog_type = self.camera_fog_type(at);
         let (rain, thunder) = self.view_weather(self.clock.fraction() as f32);
         let title_fog = horizon_client::fog::FogTables::default();
         let tables = if self.title.is_some() {
@@ -310,12 +308,7 @@ impl Game<'_> {
         };
         self.overworld_skybox()
             && camera.y < horizon
-            && fog_type(
-                &self.world,
-                self.res.facts(),
-                [camera.x, camera.y, camera.z],
-                &self.near_plane(),
-            ) != FogType::Water
+            && self.camera_fog_type([camera.x, camera.y, camera.z]) != FogType::Water
     }
     /// `ScreenEffectRenderer` + `Hud` camera overlays for this frame.
     /// `scale` is the player's `LivingEntity.getScale`.
@@ -425,10 +418,7 @@ impl Game<'_> {
                     pos,
                     partial_tick: partial,
                     hide_gui: self.ui.hide_gui,
-                    draw: &mut GameCameraDrawContext {
-                        game: self,
-                        surface: &mut quads,
-                    },
+                    draw: &mut GameCameraDrawContext::new(self, &mut quads),
                     replace_vanilla: &mut replace_vanilla,
                 },
             );
@@ -523,8 +513,7 @@ impl Game<'_> {
                 }
             }
         }
-        let in_water =
-            fog_type(&self.world, self.res.facts(), eye, &self.near_plane()) == FogType::Water;
+        let in_water = self.camera_fog_type(eye) == FogType::Water;
         let eye_block = eye.map(|c| c.floor() as i32);
         let water = in_water
             && !spectator
@@ -663,8 +652,7 @@ impl Game<'_> {
             let nausea = self.potions.effects.get("nausea").map(nausea_has_effect);
             self.screen_fx.tick_spinning(nausea);
             // LocalPlayer water vision and AtmosphericFogEnvironment rain fog.
-            let in_water =
-                fog_type(&self.world, self.res.facts(), e, &self.near_plane()) == FogType::Water;
+            let in_water = self.camera_fog_type(e) == FogType::Water;
             self.fog.tick(in_water, self.spectator());
             let (rain, sky_light, rains) = self.rain_fog_inputs(e);
             update_rain_fog(&mut self.fog, rain, sky_light, rains, 1.0);
@@ -714,6 +702,7 @@ impl Game<'_> {
         // Level.isThundering: a thunder level above 0.9 where the sky is open.
         let thundering = self.can_have_weather() && world.weather.levels(1.0).1 > 0.9;
         let ctx = AnimateContext {
+            enchant_power: &self.ambience.enchant_power,
             world,
             facts,
             collision: self.collision,
@@ -1012,7 +1001,7 @@ mod tests {
     /// leaves the frame's block overlays as they are with no block there, the fire overlay
     /// included; dirt in the same place keeps its overlay.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_mod_cancels_the_screen_effect_of_one_block() {
         use horizon_core::{geometry::Vec3, position::BlockPos};
         use mod_api::{

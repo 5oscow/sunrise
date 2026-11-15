@@ -695,6 +695,11 @@ pub struct MobEffect {
     pub category: EffectCategory,
     /// RGB, `0x000000` to `0xFFFFFF`.
     pub color: u32,
+    /// Where the effect sits in the HUD icons and the inventory's effect list
+    /// (NeoForge's `IMobEffectExtension.getSortOrder`): compared where vanilla
+    /// compares the colour, which it is when absent.
+    #[serde(default)]
+    pub sort_order: Option<i32>,
 }
 
 /// Vanilla's `DyeColor` names, by id.
@@ -720,10 +725,13 @@ pub const DYE_COLORS: [&str; 16] = [
 /// the vanilla entity types a mod's type may copy: thrown item
 /// projectiles (`ThrowableItemProjectile`), then living mobs
 /// ([`LIVING_TEMPLATES`]).
-pub const ENTITY_TEMPLATES: [&str; 4] = [
+pub const ENTITY_TEMPLATES: [&str; 7] = [
     "minecraft:snowball",
+    "minecraft:cat",
+    "minecraft:parrot",
     "minecraft:villager",
     "minecraft:wandering_trader",
+    "minecraft:wolf",
     "minecraft:zombie",
 ];
 
@@ -732,10 +740,14 @@ pub const ENTITY_TEMPLATES: [&str; 4] = [
 /// ...)`), with its own default attributes (`EntityAttributeCreationEvent`).
 /// The wandering trader is the neutral one whose behaviour is all goals,
 /// which a native mod can replace (`register_goals`); a villager's is its
-/// brain.
-pub const LIVING_TEMPLATES: [&str; 3] = [
+/// brain. The cat, the parrot and the wolf are the tameable ones
+/// (`TamableAnimal`): a type copying one tames, sits and follows its owner.
+pub const LIVING_TEMPLATES: [&str; 6] = [
+    "minecraft:cat",
+    "minecraft:parrot",
     "minecraft:villager",
     "minecraft:wandering_trader",
+    "minecraft:wolf",
     "minecraft:zombie",
 ];
 
@@ -1090,6 +1102,30 @@ impl Content {
         self.files.is_empty()
     }
 
+    /// The refusal of a `side = "server"` package whose files declare registry content
+    /// (`data/<owned namespace>/horizon/`), naming the mod and the first such file: every client
+    /// must have that content. Assets and data vanilla syncs itself (recipes, loot, tags) are
+    /// allowed. None for a package of any other side.
+    pub fn server_only_refusal(&self, manifest: &Manifest) -> Option<String> {
+        if manifest.side != crate::manifest::Side::Server {
+            return None;
+        }
+        let name = self.files.iter().find(|name| {
+            let mut parts = name.splitn(3, '/');
+            let (top, namespace, rest) = (parts.next(), parts.next(), parts.next());
+            top == Some("data")
+                && rest.is_some_and(|rest| rest.starts_with("horizon/"))
+                && manifest
+                    .owned_namespaces()
+                    .any(|owned| Some(owned) == namespace)
+        })?;
+        Some(format!(
+            "{}: a side = \"server\" mod carries {name}, which every client must have; \
+             declare side = \"both\"",
+            manifest.id
+        ))
+    }
+
     /// One content file's bytes.
     pub fn file(&self, name: &str) -> Result<Vec<u8>, String> {
         self.reader()?.read(name)
@@ -1126,6 +1162,12 @@ impl Content {
             else {
                 continue;
             };
+            // A server package's registry declaration refuses the whole package by name
+            // (`server_only_refusal`), so it is not parsed: a malformed one must not turn
+            // that refusal into a skipped content error.
+            if manifest.side == crate::manifest::Side::Server {
+                continue;
+            }
             let parse = |kind: &str| -> Option<String> {
                 let path = decl
                     .strip_prefix(kind)?
@@ -2285,11 +2327,11 @@ capabilities = ["registries"]
     }
 
     #[test]
-    fn mob_effects_take_a_category_and_a_colour() {
+    fn mob_effects_take_a_category_a_colour_and_a_sort_order() {
         let files: &[(&str, &[u8])] = &[
             (
                 "data/ruby/horizon/mob_effect/glow.json",
-                br#"{"category": "beneficial", "color": 16711680}"#,
+                br#"{"category": "beneficial", "color": 16711680, "sort_order": -3}"#,
             ),
             (
                 "data/ruby/horizon/mob_effect/curse/dark.json",
@@ -2300,13 +2342,13 @@ capabilities = ["registries"]
         let effects: Vec<_> = content
             .effects
             .iter()
-            .map(|e| (e.id.as_str(), e.category, e.color))
+            .map(|e| (e.id.as_str(), e.category, e.color, e.sort_order))
             .collect();
         assert_eq!(
             effects,
             [
-                ("ruby:curse/dark", EffectCategory::Harmful, 0),
-                ("ruby:glow", EffectCategory::Beneficial, 0xFF0000),
+                ("ruby:curse/dark", EffectCategory::Harmful, 0, None),
+                ("ruby:glow", EffectCategory::Beneficial, 0xFF0000, Some(-3)),
             ]
         );
         for (case, file, why) in [
@@ -2568,6 +2610,19 @@ capabilities = ["registries"]
                 "data/ruby/horizon/entity_type/merchant.json",
                 br#"{"template": "minecraft:wandering_trader"}"#,
             ),
+            // The tameable ones (#4031).
+            (
+                "data/ruby/horizon/entity_type/hound.json",
+                br#"{"template": "minecraft:wolf", "attributes": {"minecraft:max_health": 20}}"#,
+            ),
+            (
+                "data/ruby/horizon/entity_type/macaw.json",
+                br#"{"template": "minecraft:parrot"}"#,
+            ),
+            (
+                "data/ruby/horizon/entity_type/tabby.json",
+                br#"{"template": "minecraft:cat"}"#,
+            ),
         ];
         let content = hmod("living", MANIFEST_TEXT, files).unwrap();
         let types: Vec<_> = content
@@ -2596,8 +2651,16 @@ capabilities = ["registries"]
                         ("minecraft:movement_speed", 0.3)
                     ]
                 ),
+                (
+                    "ruby:hound",
+                    "minecraft:wolf",
+                    true,
+                    vec![("minecraft:max_health", 20.0)]
+                ),
+                ("ruby:macaw", "minecraft:parrot", true, vec![]),
                 ("ruby:merchant", "minecraft:wandering_trader", true, vec![]),
                 ("ruby:settler", "minecraft:villager", true, vec![]),
+                ("ruby:tabby", "minecraft:cat", true, vec![]),
             ]
         );
         let zombie = |rest: &str| format!(r#"{{"template": "minecraft:zombie"{rest}}}"#);
@@ -2764,6 +2827,39 @@ capabilities = ["registries"]
             ["!minecraft:lore", "minecraft:max_stack_size"]
         );
         assert_eq!(components["minecraft:max_stack_size"], 16);
+    }
+
+    #[test]
+    fn a_server_mod_is_refused_for_registry_files_but_not_for_assets() {
+        let server = MANIFEST_TEXT.replace("side = \"both\"", "side = \"server\"");
+        let manifest = Manifest::parse(&server).unwrap();
+        let recipe: &[u8] = br#"{"type": "minecraft:crafting_shapeless"}"#;
+        for (file, bytes) in [
+            ("data/ruby/horizon/item/gem.json", ITEM),
+            ("data/ruby/horizon/block/ruby_block.json", BLOCK),
+        ] {
+            let content = hmod("server-refused", &server, &[(file, bytes)]).unwrap();
+            assert_eq!(
+                content.server_only_refusal(&manifest).unwrap(),
+                format!(
+                    "ruby: a side = \"server\" mod carries {file}, which every client must have; declare side = \"both\""
+                )
+            );
+        }
+        let content = hmod(
+            "server-loads",
+            &server,
+            &[
+                ("assets/ruby/lang/en_us.json", &b"{}"[..]),
+                ("data/ruby/recipe/gem.json", recipe),
+            ],
+        )
+        .unwrap();
+        assert_eq!(content.server_only_refusal(&manifest), None);
+        assert_eq!(
+            content.files,
+            ["assets/ruby/lang/en_us.json", "data/ruby/recipe/gem.json"]
+        );
     }
 
     #[test]

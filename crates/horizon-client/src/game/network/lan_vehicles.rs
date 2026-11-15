@@ -18,6 +18,7 @@ use horizon_protocol::{
     packets::play::{self, Clientbound as C},
     text::translatable,
 };
+use horizon_world::entity_move::MoverType;
 
 /// `PlayerInput` flags, as the server player's client last sent them.
 pub(super) fn input_keys(flags: u8) -> Keys {
@@ -449,7 +450,7 @@ impl Game<'_> {
                 .iter()
                 .position(|m| m.id == v && equine::moved_by_client(m))
         });
-        // The vehicle's id, position, rotation, motion, box, step height
+        // The vehicle's id, kind, position, rotation, motion, box, step height
         // and ground.
         let (id, old, yaw, velocity, bounds, step, on_ground) = if let Some(i) = boat {
             let b = &self.boats[i];
@@ -504,18 +505,41 @@ impl Game<'_> {
         }
         // vehicle.move(PLAYER, target - lastGood) with the vehicle's
         // collisions: where it can't follow the client (a quarter block off,
-        // the height aside), it moved wrongly.
+        // the height aside), it moved wrongly. A Player-cause move through
+        // the move gate (#2414); PR 1a records the movement unchanged.
         let mut scene = SceneCollisions {
             world: &self.world,
             binding: self.collision,
             subject: None,
         };
         let wanted = target.subtract(good);
-        let resolved = scene
-            .resolve(bounds, wanted, step, on_ground)
-            .unwrap_or(wanted);
+        // The vehicle's type name only if a listener asks for it (#2414: no
+        // string on a move nobody listens to).
+        let kind = || match (boat, mount) {
+            (Some(i), _) => std::borrow::Cow::Owned(self.boats[i].entity_type()),
+            (None, Some(i)) => std::borrow::Cow::Borrowed(&*self.mobs[i].kind.id),
+            // Unreachable: the vehicle was a boat or a mount, or it returned.
+            (None, None) => std::borrow::Cow::Borrowed(""),
+        };
+        let mut gate = horizon_client::move_gate::armed_with(
+            &self.loop_context,
+            id,
+            kind,
+            MoverType::Player,
+            wanted,
+        );
+        let wanted = gate.delta();
+        // A listener's decision that is not the request (#2414, ruling 5):
+        // the driver is put back whatever the distance - the flag comes from
+        // the gate, not from the numbers.
+        let overridden = gate.overridden();
+        let resolved = horizon_client::move_gate::scene_resolve(
+            &mut gate, &mut scene, bounds, wanted, step, on_ground,
+        )
+        .unwrap_or(wanted);
         let reached = old.add_vector(resolved);
-        let wrongly = (target.x - reached.x).powi(2) + (target.z - reached.z).powi(2) > 0.0625;
+        let wrongly =
+            overridden || (target.x - reached.x).powi(2) + (target.z - reached.z).powi(2) > 0.0625;
         let free_before = scene.unobstructed(bounds).unwrap_or(true);
         // isEntityCollidingWithAnythingNew: a box that was free is not there.
         let moved_box = bounds.move_by(target.subtract(old));
@@ -532,7 +556,10 @@ impl Game<'_> {
             let reset = self.vehicle_fall_reset(self.boats[i].fall_distance, old, resolved);
             self.boats.update(i, |boat| boat.fall_distance = reset);
         }
-        if free_before && (wrongly || !free_after) {
+        // An overridden decision is put back from wherever the vehicle starts:
+        // the free-old-box exemption is the distance test's (review round 1),
+        // like the hub's unobstructed-start check.
+        if overridden || (free_before && (wrongly || !free_after)) {
             log::warn!("vehicle {id} moved wrongly");
             back(self.lan.as_mut().unwrap(), old, yaw);
             return;
@@ -558,6 +585,8 @@ impl Game<'_> {
             &self.lan.as_ref().unwrap().hub.encoder,
         );
         self.lan.as_mut().unwrap().hub.guests.update(gi, |g| {
+            // `ServerChunkCache.move` after `absSnapTo` of the accepted move.
+            g.release_tickets();
             g.vehicle_good = Some([target.x, target.y, target.z]);
             let rested = std::mem::replace(
                 &mut g.vehicle_rests,
@@ -775,7 +804,7 @@ mod controller_tests {
     /// seat's client, which still sends where it sees the boat, used to put
     /// the boat back every tick (#11541).
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn the_first_rider_in_drives_the_boat() {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
@@ -914,6 +943,40 @@ mod controller_tests {
             game.boats[0].fall_distance, 0.0,
             "a guest's boat on the ground"
         );
+        // `AbstractBoat.tick` still runs `applyEffectsFromBlocks` on the server
+        // for the boat its guest drives: `WebBlock.entityInside` resets the fall
+        // (`Entity.makeStuckInBlock`).
+        let cobweb = game
+            .pack
+            .assets
+            .registry
+            .default_state("minecraft:cobweb")
+            .unwrap();
+        let p = game.boats[0].position;
+        game.world
+            .set(
+                p.x.floor() as i32,
+                p.y.floor() as i32,
+                p.z.floor() as i32,
+                cobweb,
+            )
+            .unwrap();
+        game.boats.update(0, |b| b.fall_distance = 4.0);
+        game.guest_move_vehicle(
+            3,
+            &play::MoveVehicleRequest {
+                position: [p.x, p.y, p.z],
+                yaw: 0.0,
+                pitch: 0.0,
+                on_ground: false,
+            },
+        );
+        assert_eq!(game.boats[0].fall_distance, 4.0, "still falling");
+        game.tick_boats();
+        assert_eq!(
+            game.boats[0].fall_distance, 0.0,
+            "a cobweb resets the fall of a boat its guest drives"
+        );
     }
 
     /// handleMoveVehicle for a horse its guest's client moves: `vehicle.move`
@@ -922,7 +985,7 @@ mod controller_tests {
     /// on the ground, lands the horse: `AbstractHorse.causeFallDamage` of the
     /// whole fall. The horse used to keep no fall at all (#13042).
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_guests_horse_falls_and_lands() {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();

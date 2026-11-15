@@ -51,6 +51,17 @@ pub enum LinkError {
     },
     /// The member did not compile or instantiate (a type that doesn't match its provider's).
     Instantiate { member: String, why: String },
+    /// A child compile exceeded its runtime budget; this is not malformed code.
+    CompileTimeout {
+        member: String,
+        budget: crate::compile_budget::CompileBudget,
+    },
+    /// Bounded compilation was unavailable; never retry without the applied budget.
+    CompileUnavailable {
+        member: String,
+        budget: crate::compile_budget::CompileBudget,
+        why: String,
+    },
     /// A call into a member trapped or named no export.
     Call {
         member: String,
@@ -74,6 +85,17 @@ impl fmt::Display for LinkError {
                 second,
             } => write!(f, "{second}: exports {symbol}, which {first} already does"),
             Self::Instantiate { member, why } => write!(f, "{member}: {why}"),
+            Self::CompileTimeout { member, budget } => {
+                write!(f, "{member}: compilation time limit exceeded: {budget}")
+            }
+            Self::CompileUnavailable {
+                member,
+                budget,
+                why,
+            } => write!(
+                f,
+                "{member}: cannot enforce compilation budget {budget}: {why}; restore a private writable .horizon-cache/wasm directory and a working compiler executable"
+            ),
             Self::Call {
                 member,
                 function,
@@ -84,6 +106,30 @@ impl fmt::Display for LinkError {
 }
 
 impl std::error::Error for LinkError {}
+
+impl LinkError {
+    pub(crate) fn compile(member: &str, error: wasmtime::Error) -> Self {
+        if let Some(timeout) = error.downcast_ref::<crate::module_cache::CompileTimeout>() {
+            Self::CompileTimeout {
+                member: member.to_owned(),
+                budget: timeout.0,
+            }
+        } else if let Some(unavailable) =
+            error.downcast_ref::<crate::module_cache::CompileUnavailable>()
+        {
+            Self::CompileUnavailable {
+                member: member.to_owned(),
+                budget: unavailable.budget,
+                why: unavailable.why.clone(),
+            }
+        } else {
+            Self::Malformed {
+                member: member.to_owned(),
+                why: format!("{error:#}"),
+            }
+        }
+    }
+}
 
 /// A linked group: its store, and each member's instance.
 pub struct Group<T: 'static = ()> {
@@ -115,6 +161,7 @@ impl<T: 'static> Group<T> {
         cache: Option<&crate::module_cache::ModuleCache>,
         mut host: impl FnMut(&mut Store<T>, &str, &str) -> Option<Extern>,
     ) -> Result<Self, LinkError> {
+        let _timer = crate::load_times::timer(crate::load_times::Phase::Group);
         let engine = store.engine();
         let mut parsed = Vec::with_capacity(members.len());
         for member in members {
@@ -326,12 +373,14 @@ impl<T: 'static> Group<T> {
                 };
                 imports.push(extern_);
             }
+            let instantiate = crate::load_times::timer(crate::load_times::Phase::Instantiate);
             let instance = Instance::new(&mut store, &layout.module, &imports).map_err(|e| {
                 LinkError::Instantiate {
                     member: member.name.to_owned(),
                     why: format!("{e:#}"),
                 }
             })?;
+            drop(instantiate);
             // Shared members have no core start function. Resolve their self-references to
             // actual exports before any relocation helper or constructor can execute.
             for (name, slot) in self_funcs {
@@ -376,6 +425,9 @@ impl<T: 'static> Group<T> {
                         name.as_str(),
                         "horizon_layout" | "horizon_layout_ext" | "horizon_in" | "horizon_hook"
                     )
+                    || crate::boundary::PREPARED_EXPORTS
+                        .iter()
+                        .any(|(_, entries)| entries.iter().any(|(entry, _)| *entry == name))
                     || name == "memory"
                     || !matches!(extern_, Extern::Func(_) | Extern::Global(_))
                 {
@@ -397,6 +449,7 @@ impl<T: 'static> Group<T> {
             members: instances,
             memory,
         };
+        let _instantiate = crate::load_times::timer(crate::load_times::Phase::Instantiate);
         for hook in [
             "__wasm_start",
             "__wasm_apply_data_relocs",
@@ -460,6 +513,7 @@ impl Layout {
         member: &Member<'_>,
         cache: Option<&crate::module_cache::ModuleCache>,
     ) -> Result<Self, LinkError> {
+        let _timer = crate::load_times::timer(crate::load_times::Phase::Modules);
         let malformed = |why: String| LinkError::Malformed {
             member: member.name.to_owned(),
             why,
@@ -525,7 +579,7 @@ impl Layout {
                 .map(|(module, _)| module),
             None => Module::new(engine, member.module),
         }
-        .map_err(|e| malformed(format!("{e:#}")))?;
+        .map_err(|error| LinkError::compile(member.name, error))?;
         let got_funcs = module
             .imports()
             .filter(|import| import.module() == "GOT.func")

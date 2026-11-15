@@ -21,6 +21,7 @@ use super::{
     Game,
     commands::Target,
     entity::{Entity as _, entity_lists_of, for_each_entity},
+    transactions::After,
 };
 use horizon_core::geometry::{Aabb, Vec3};
 use horizon_items::items::ItemStack;
@@ -183,19 +184,18 @@ impl Game<'_> {
             .collect()
     }
     /// The level `dimension` (`minecraft:the_nether`) as a handle: on a client,
-    /// the level it shows, whatever the server calls it. None with no world
-    /// open, or for a dimension the server hasn't loaded. API 373.
+    /// the level it shows, whatever the server calls it, or one the server opened
+    /// for viewing (`client_level_key`). None with no world open, or for a
+    /// dimension the server hasn't loaded. API 373.
     pub(super) fn level(&self, dimension: &str) -> Option<LevelRef> {
-        if !self.is_logical_server() {
-            let epoch = self.native_lifecycle.epoch()?;
-            let remote = self.remote.as_ref().filter(|r| r.logged_in)?;
-            return (remote.level == dimension).then(|| LevelRef::new(epoch, remote.level_key));
-        }
         let epoch = self.native_lifecycle.epoch()?;
+        if !self.is_logical_server() {
+            return Some(LevelRef::new(epoch, self.client_level_key(dimension)?));
+        }
         let dim = std::iter::once(self.dim)
             .chain(self.levels.parked_dims())
             .find(|d| d.id() == dimension)?;
-        Some(LevelRef::new(epoch, dim.key()))
+        Some(self.level_ref(epoch, dim.key()))
     }
     /// The client level in place as a handle: the level this window shows and
     /// ticks. None before login, while reconfiguring, or with no world open.
@@ -253,9 +253,7 @@ impl Game<'_> {
         min: [f64; 3],
         max: [f64; 3],
     ) -> Option<Vec<EntityRef>> {
-        if self.native_lifecycle.epoch() != Some(level.epoch())
-            || !min.iter().chain(&max).all(|v| v.is_finite())
-        {
+        if !self.level_handle_current(level) || !min.iter().chain(&max).all(|v| v.is_finite()) {
             return None;
         }
         let bounds = Aabb::new(
@@ -321,10 +319,10 @@ impl Game<'_> {
         ids
     }
     /// `ClientLevel.getEntities` for `level_entities_in`: the entities the server
-    /// tracks to this client in entity-list order, the dragon and then the
-    /// window's own player unless it spectates, then the dragon's parts. Other
-    /// players are left out, as their handles do not resolve on a client. None
-    /// before login or for a level the client does not show.
+    /// tracks to this client in entity-list order, other players among them (a
+    /// tracked player has a client copy, so its handle resolves), the dragon and
+    /// then the window's own player unless it spectates, then the dragon's parts.
+    /// None before login or for a level the client does not show.
     fn client_entities_in(&self, level: LevelRef, bounds: Aabb) -> Option<Vec<EntityRef>> {
         let remote = self.remote.as_ref().filter(|r| r.logged_in)?;
         if level.dimension() != self.native_level_key() {
@@ -387,6 +385,9 @@ impl Game<'_> {
         tool: Option<&ItemStack>,
         entity: Option<EntityRef>,
     ) -> Option<Vec<ItemStack>> {
+        if self.entity_ids_exhausted() {
+            return None;
+        }
         if !self.native_level_write_allowed(level, pos) || self.dim.key() != level.dimension() {
             return None;
         }
@@ -412,7 +413,7 @@ impl Game<'_> {
         entity: Option<EntityRef>,
     ) -> Option<Vec<ItemStack>> {
         if !self.is_logical_server()
-            || self.native_lifecycle.epoch() != Some(level.epoch())
+            || !self.level_handle_current(level)
             || self.dim.key() != level.dimension()
             || !world_items!(self).has_loot_table(table)
         {
@@ -551,7 +552,7 @@ impl Game<'_> {
         if !self.native_level_write_allowed(level, pos) || self.dim.key() != level.dimension() {
             return false;
         }
-        self.server_destroy_block_progress(breaker, pos, progress);
+        self.after_commit(After::BreakProgress(breaker, pos, progress));
         true
     }
     /// `Level.sendBlockUpdated`: queue the block at `pos` to be sent to the clients again.
@@ -559,9 +560,7 @@ impl Game<'_> {
         if !self.native_level_write_allowed(level, pos) || self.dim.key() != level.dimension() {
             return false;
         }
-        self.after_commit(super::transactions::After::NotifyClients((
-            pos[0], pos[1], pos[2],
-        )));
+        self.notify_block_clients((pos[0], pos[1], pos[2]));
         true
     }
     /// `LevelRenderer.destroyBlockProgress` for this client's own view only.
@@ -648,7 +647,7 @@ impl Game<'_> {
         // through the level gate refuses while the operation runs.
         !self.world.carrier_fences.locks_cell(&pos)
             && self.is_logical_server()
-            && self.native_lifecycle.epoch() == Some(level.epoch())
+            && self.level_handle_current(level)
             && self.world.loaded(pos[0], pos[2])
             && self.world.shape.contains_y(pos[1])
     }
@@ -663,7 +662,7 @@ impl Game<'_> {
         pos: [i32; 3],
         kind: BlockShapeKind,
     ) -> Option<Vec<[f64; 6]>> {
-        if !self.is_logical_server() || self.native_lifecycle.epoch() != Some(level.epoch()) {
+        if !self.is_logical_server() || !self.level_handle_current(level) {
             return None;
         }
         let (world, anims) = if self.dim.key() == level.dimension() {
@@ -724,8 +723,9 @@ impl Game<'_> {
         })
     }
 
-    /// Clip an empty-context ray against collider or outline shapes, without fluids.
-    /// None on failed reads, dynamic shapes, invalid rays or traversal limits.
+    /// Clip an empty-context ray against collider or outline shapes, without fluids, in the
+    /// world `native_level_view_world` reads. None on failed reads, dynamic shapes, invalid
+    /// rays or traversal limits.
     pub(super) fn level_clip(
         &self,
         level: LevelRef,
@@ -740,7 +740,7 @@ impl Game<'_> {
             collision_context::CollisionContext,
             world_ray::{RayBlockMode, RayFluidMode, clip_world},
         };
-        let world = self.native_level_world(level)?;
+        let world = self.native_level_view_world(level)?;
         let mut rays = super::explosion::ColliderRays {
             scene: SceneCollisions {
                 world,
@@ -795,6 +795,12 @@ impl Game<'_> {
     /// The entity's position (`Entity.position`): its feet, the middle of
     /// its box for a painting or an item frame.
     pub(super) fn entity_position(&self, entity: EntityRef) -> Option<[f64; 3]> {
+        if self.native_lifecycle.epoch() == Some(entity.epoch())
+            && let Some((id, position)) = self.native_lifecycle.entity_sections.write_position
+            && id == entity.id()
+        {
+            return Some(position);
+        }
         match self.native_entity_read_target(entity) {
             Some(target) => self.target_position(target),
             None => self
@@ -815,12 +821,12 @@ impl Game<'_> {
     }
     /// The entity's type (`Entity.getType`): `minecraft:zombie`. API
     /// 373.
-    pub(super) fn entity_kind(&self, entity: EntityRef) -> Option<String> {
+    pub(super) fn entity_kind(&self, entity: EntityRef) -> Option<mod_api::EntityTypeKey> {
         match self.native_entity_read_target(entity) {
-            Some(t) => Some(self.target_type(t)),
-            None => self
-                .native_client_tracked(entity)
-                .map(|(kind, _)| kind.to_owned()),
+            Some(target) => self.native_entity_kind_key(target),
+            None => {
+                mod_api::__private::resolved_entity_type_key(self.native_client_tracked(entity)?.0)
+            }
         }
     }
     /// The entity's UUID (`Entity.getUUID`), the one it is saved with; an
@@ -872,7 +878,7 @@ impl Game<'_> {
                 .native_client_tracked(entity)
                 .map(|_| self.native_level_key())?,
         };
-        Some(LevelRef::new(entity.epoch(), key))
+        Some(self.level_ref(entity.epoch(), key))
     }
 }
 
@@ -956,6 +962,17 @@ pub(super) mod tests {
     use mod_api::__private::game::*;
     /// Isolate declarations and frozen registries without changing another test's resources.
     pub(in crate::game) fn run_fresh_cases(name: &str, flag: &str, cases: &[&str]) -> bool {
+        run_fresh_cases_at_once(name, flag, cases, 1)
+    }
+
+    /// [`run_fresh_cases`] with up to `at_once` children running together, for a test that runs
+    /// alone in its job (the wasm fixture's): each child still has its own process and folders.
+    pub(in crate::game) fn run_fresh_cases_at_once(
+        name: &str,
+        flag: &str,
+        cases: &[&str],
+        at_once: usize,
+    ) -> bool {
         if std::env::var_os(flag).is_some() {
             return false;
         }
@@ -965,15 +982,8 @@ pub(super) mod tests {
                 .unwrap();
         let scratch_owner = tempfile::tempdir().unwrap();
         let target = scratch_owner.path();
-        for case in cases {
-            let scratch = target.join(format!(
-                "be-types-fixture-{}-{}",
-                std::process::id(),
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_nanos()
-            ));
+        let run = |case: &str| {
+            let scratch = target.join(format!("fresh-case-{case}"));
             std::fs::create_dir(&scratch).unwrap();
             let mut command = std::process::Command::new(std::env::current_exe().unwrap());
             command
@@ -1003,19 +1013,83 @@ pub(super) mod tests {
                 std::fs::create_dir(&home).unwrap();
                 command.env(key, home);
             }
-            let output = command.output().unwrap();
+            let output = output_within(&mut command, name, case);
             std::fs::remove_dir_all(scratch).unwrap();
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            // The child's log, captured with this test's own output.
-            print!("{stdout}");
-            eprint!("{}", String::from_utf8_lossy(&output.stderr));
-            assert!(output.status.success(), "{name}: {case}");
-            assert!(
-                ran_one_test(&stdout),
-                "{name}: {case}: the child matched no test of that name"
-            );
+            output
+        };
+        for group in cases.chunks(at_once.max(1)) {
+            let run = &run;
+            let outputs: Vec<_> = std::thread::scope(|scope| {
+                let running: Vec<_> = group
+                    .iter()
+                    .map(|&case| scope.spawn(move || run(case)))
+                    .collect();
+                running
+                    .into_iter()
+                    .map(|child| child.join().unwrap())
+                    .collect()
+            });
+            for (case, output) in group.iter().zip(outputs) {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                // The child's log, captured with this test's own output.
+                print!("{stdout}");
+                eprint!("{}", String::from_utf8_lossy(&output.stderr));
+                assert!(output.status.success(), "{name}: {case}");
+                assert!(
+                    ran_one_test(&stdout),
+                    "{name}: {case}: the child matched no test of that name"
+                );
+            }
         }
         true
+    }
+
+    /// The longest a fresh child may run: a hang in its startup or shutdown fails the parent
+    /// with the child killed, instead of waiting for the whole test run's own limit.
+    const FRESH_CASE_LIMIT: std::time::Duration = std::time::Duration::from_secs(900);
+
+    /// `command`'s output, killing the child if it outlives [`FRESH_CASE_LIMIT`].
+    fn output_within(
+        command: &mut std::process::Command,
+        name: &str,
+        case: &str,
+    ) -> std::process::Output {
+        use std::io::Read;
+        use std::process::Stdio;
+        let mut child = command
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut stdout = child.stdout.take().unwrap();
+        let mut stderr = child.stderr.take().unwrap();
+        let out = std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            let _ = stdout.read_to_end(&mut bytes);
+            bytes
+        });
+        let err = std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            let _ = stderr.read_to_end(&mut bytes);
+            bytes
+        });
+        let deadline = std::time::Instant::now() + FRESH_CASE_LIMIT;
+        let status = loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                break status;
+            }
+            if std::time::Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("{name}: {case}: the child did not finish within {FRESH_CASE_LIMIT:?}");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        };
+        std::process::Output {
+            status,
+            stdout: out.join().unwrap(),
+            stderr: err.join().unwrap(),
+        }
     }
 
     /// Whether libtest's summary says exactly one test passed: `--exact` with a name no test
@@ -1028,7 +1102,7 @@ pub(super) mod tests {
 
     /// A child run with a name no test has fails the parent instead of passing vacuously.
     #[test]
-    #[ignore = "runs in an isolated scratch process"]
+    #[ignore = "daily"]
     #[should_panic(expected = "matched no test of that name")]
     fn a_fresh_case_whose_name_matches_no_test_fails() {
         run_fresh_cases(
@@ -1086,12 +1160,78 @@ pub(super) mod tests {
 
     /// Bind the fixture body's canonical identity before configuring its acting context.
     pub(in crate::game) fn bind_local_player(game: &mut super::Game<'_>, id: u32, uuid: u128) {
+        game.next_entity = game.next_entity.max(id);
         game.player.as_mut().expect("fixture player body").entity_id =
             i32::try_from(id).expect("fixture entity ID fits the protocol");
         game.level.player_uuid = Some(horizon_client::lan::playerdata::uuid_ints(uuid));
         game.bind_local_player_residency();
         game.lan_acting_entity = Some(id);
         game.lan_acting_uuid = Some(uuid);
+    }
+
+    /// Install the server record backing a fixture's already configured acting body.
+    pub(in crate::game) fn bind_acting_guest(game: &mut super::Game<'_>) {
+        use horizon_client::lan::{Joined, NetConfig, PlayerSender, guest::Guest, hub::HubConfig};
+        use horizon_protocol::packets::configuration::ClientInformation;
+        use std::sync::{
+            Arc,
+            atomic::{AtomicI32, AtomicUsize},
+        };
+        let conn = game.lan_acting.unwrap();
+        let id = game.lan_acting_entity.unwrap();
+        let uuid = game.lan_acting_uuid.unwrap();
+        let name = game.lan_acting_name.clone().unwrap();
+        let at = game.player.as_ref().unwrap().position;
+        game.next_entity = game.next_entity.max(id);
+        game.lan_host(
+            super::super::lan::LanSettings {
+                port: 0,
+                guest_commands: false,
+                force_game_mode: false,
+            },
+            NetConfig {
+                listen: false,
+                announce: false,
+                lod_distance: 0,
+                ..NetConfig::lan(0, String::new(), 2)
+            },
+            HubConfig {
+                default_game_mode: 0,
+                guest_commands: false,
+                force_game_mode: false,
+                hardcore: false,
+                view_distance: 2,
+                simulation_distance: 2,
+                dimension: game.dim.id().to_owned(),
+                allow_flight: true,
+                seed: 0,
+                max_players: 2,
+                integrated: true,
+                levels: game.level_shapes,
+            },
+        )
+        .unwrap();
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let mut guest = Guest::new(
+            Joined {
+                conn,
+                uuid,
+                name,
+                properties: Vec::new(),
+                info: ClientInformation::new(8),
+                brand: String::new(),
+                sender: PlayerSender::new(tx, Arc::new(AtomicUsize::new(0))),
+                latency: Arc::new(AtomicI32::new(0)),
+                address: "127.0.0.1:1".parse().unwrap(),
+                expected: false,
+            },
+            id as i32,
+            [at.x, at.y, at.z],
+            10,
+        );
+        guest.placed = true;
+        game.lan.as_mut().unwrap().hub.guests.push(guest);
+        game.reset_entity_residency();
     }
 
     pub(in crate::game) fn with_game(test: impl FnOnce(&mut super::Game<'_>)) {
@@ -1154,6 +1294,10 @@ pub(super) mod tests {
             })
             .collect();
         crate::game::api_values::register_game_keys(ids);
+        // Rebuilding Parts replaces the entity-type lookup snapshot that content_root
+        // completed. Publish the prepared registry order into this new fixture epoch.
+        super::super::mods::register_iterated_registries(&root).unwrap();
+        let saves = tempfile::tempdir().unwrap();
         let settings = Settings::default();
         let loaded = load_resources(
             horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
@@ -1171,6 +1315,7 @@ pub(super) mod tests {
         let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
         options.resources = root.clone();
         options.execution_role = role;
+        options.game_dir = Some(saves.path().to_path_buf());
         let mut game = Game::new(
             &loaded.resources,
             loaded.pack,
@@ -1192,21 +1337,15 @@ pub(super) mod tests {
         resolve_parts(&game).unwrap();
         // The title's save folder is under the working directory: give each test its own, so a
         // test that saves leaves the checkout clean and parallel tests don't share files.
-        let saves = std::env::temp_dir().join(format!(
-            "horizon-with-game-{}-{:?}",
-            std::process::id(),
-            std::thread::current().id()
-        ));
         game.save = std::sync::Arc::new(horizon_client::save::SaveDir::new(
-            saves.clone(),
+            saves.path().to_path_buf(),
             horizon_client::save::LevelShape::OVERWORLD,
         ));
         test(&mut game);
-        let _ = std::fs::remove_dir_all(saves);
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn typed_uuid_and_nbt_reads_follow_the_entity_level() {
         with_game(|game| {
             game.options.dedicated = Some(Vec::new());
@@ -1248,7 +1387,7 @@ pub(super) mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn block_part_allows_weak_power_in_real_game_level() {
         use horizon_client::chunk::Chunk;
         use horizon_core::position::BlockPos;
@@ -1282,7 +1421,7 @@ pub(super) mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_soil_part_answers_for_the_plants_above_it_in_a_real_game_level() {
         use horizon_client::chunk::Chunk;
         use horizon_core::position::BlockPos;
@@ -1319,7 +1458,7 @@ pub(super) mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_block_part_decides_whether_the_tool_harvests() {
         use horizon_client::{chunk::Chunk, motion::PlayerMotion};
         use horizon_core::{geometry::Vec3, position::ChunkPos};
@@ -1416,7 +1555,7 @@ pub(super) mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_level_handle_reads_redstone_as_signal_getter_does() {
         use horizon_core::geometry::Direction::{East, North, West};
 
@@ -1449,7 +1588,7 @@ pub(super) mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_level_bone_meals_a_block_and_sets_a_biome_cell() {
         use horizon_client::chunk::Chunk;
         use std::sync::Arc;
@@ -1492,7 +1631,7 @@ pub(super) mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_level_can_survive_asks_the_blocks_own_rule() {
         use horizon_client::chunk::Chunk;
         use std::sync::Arc;
@@ -1518,7 +1657,7 @@ pub(super) mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_level_handle_updates_neighbours_as_vanillas_writes_do() {
         use horizon_core::geometry::Direction::East;
         use mod_api::NeighbourUpdate::{Neighbours, NeighboursExcept, OutputSignal};
@@ -1694,7 +1833,7 @@ pub(super) mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn neighbor_changed_reads_its_inputs_and_its_tick_fires_at_its_delay() {
         use mod_platform::__private::part_tests::{
             SignalRead, signal_reader_game_thread, signal_reads,
@@ -1755,7 +1894,7 @@ pub(super) mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_level_handle_reads_redstone_through_should_check_weak_power() {
         use horizon_core::geometry::Direction::West;
 
@@ -1773,7 +1912,7 @@ pub(super) mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn block_part_answers_is_pathfindable_once_per_state_and_type() {
         use mod_api::entity::mobs::PathComputationType::{self, Air, Land, Water};
 
@@ -1805,17 +1944,17 @@ pub(super) mod tests {
             // A block with no part answers as before.
             assert!(!asks("minecraft:stone", Land));
             // A reload without the mod's answers takes them back.
-            game.res
-                .rest()
-                .mob_data
-                .set_pathfindable(false, |_, _, vanilla| vanilla);
+            game.res.mob_data().resolve_parts(
+                game.res.facts(),
+                &horizon_client::mobs::data::PartAnswers::default(),
+            );
             assert!(!asks("minecraft:glass", Land));
             assert!(asks("minecraft:air", Land));
         });
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn block_part_asks_neighbours_to_update_when_its_block_is_removed() {
         use horizon_client::chunk::Chunk;
         use horizon_core::position::BlockPos;
@@ -1916,7 +2055,7 @@ pub(super) mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn block_parts_decide_what_a_piston_pulls_along() {
         use horizon_client::chunk::Chunk;
         use std::sync::Arc;
@@ -1963,7 +2102,7 @@ pub(super) mod tests {
     /// entity's level, on the side that ticks it, with the entity and the block's position; a
     /// block without a part is not asked, and a non-finite answer is ignored.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_block_part_changes_the_bounce_restitution_an_entity_reads() {
         use horizon_client::block_contact::{Contact, bounce_restitution};
         use horizon_core::position::BlockPos;
@@ -2014,7 +2153,7 @@ pub(super) mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn block_part_connects_wire_in_a_real_game_level() {
         use horizon_client::chunk::Chunk;
         use horizon_core::{geometry::Direction, position::BlockPos};
@@ -2050,7 +2189,7 @@ pub(super) mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn block_part_flips_fence_wall_and_pane_connections_in_a_real_game_level() {
         use horizon_client::chunk::Chunk;
         use horizon_core::{geometry::Direction, position::BlockPos};
@@ -2096,7 +2235,7 @@ pub(super) mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn side_guards_agree_across_integrated_dedicated_and_client() {
         use super::super::execution_role::ExecutionRole;
         use horizon_client::chunk::Chunk;
@@ -2132,7 +2271,7 @@ pub(super) mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn chunk_handles_resolve_loaded_parked_and_stale_levels() {
         use horizon_client::chunk::Chunk;
         use mod_api::{Authority, ChunkStatus};
@@ -2173,7 +2312,7 @@ pub(super) mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn level_reads_and_writes_use_dimension_build_height() {
         use horizon_client::chunk::{Chunk, LevelShape};
         use mod_api::BlockUpdateFlags;
@@ -2217,7 +2356,7 @@ pub(super) mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn equipping_mobs_by_hand_keeps_one_complete_stack() {
         use horizon_client::{items::ItemStack, mobs::Mob};
         use horizon_core::geometry::Vec3;
@@ -2253,7 +2392,7 @@ pub(super) mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn sulfur_cube_absorbs_one_complete_stack_by_hand_and_pickup() {
         use horizon_client::{items::ItemStack, mobs::Mob};
         use horizon_core::geometry::Vec3;
@@ -2293,7 +2432,7 @@ pub(super) mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn shearing_llama_and_happy_ghast_returns_full_body_stacks() {
         use horizon_client::{items::ItemStack, mobs::Mob};
         use horizon_core::geometry::Vec3;
@@ -2324,7 +2463,7 @@ pub(super) mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn acting_guest_handles_resolve_during_guest_turns() {
         use super::super::lan::LanSettings;
         use horizon_client::{
@@ -2584,7 +2723,10 @@ pub(super) mod tests {
             let other = game.entity(13).unwrap();
             assert_eq!(other.position(game), Some([3.0, 64.0, 5.0]));
             assert_eq!(other.uuid(game), Some(13));
-            assert_eq!(other.kind(game).as_deref(), Some("minecraft:player"));
+            assert_eq!(
+                other.kind(game).map(|kind| kind.id(game)).as_deref(),
+                Some("minecraft:player")
+            );
             let living = game.living(other).unwrap();
             assert_eq!(
                 living
@@ -2681,7 +2823,7 @@ pub(super) mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn entities_in_returns_readable_handles_and_intersects_boxes() {
         use horizon_client::entities::ArmorStand;
         use horizon_core::geometry::Vec3;
@@ -2699,7 +2841,9 @@ pub(super) mod tests {
             assert_eq!(found.len(), 1);
             assert_eq!(game.entity_position(found[0]), Some([1.0, 0.0, 0.0]));
             assert_eq!(
-                game.entity_kind(found[0]).as_deref(),
+                game.entity_kind(found[0])
+                    .map(|kind| kind.id(game))
+                    .as_deref(),
                 Some("minecraft:armor_stand")
             );
             assert!(
@@ -2719,7 +2863,7 @@ pub(super) mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "daily"]
     fn connectionless_guest_has_no_transport() {
         use horizon_client::{
             lan::{
@@ -3417,7 +3561,7 @@ pub(super) mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "daily"]
     fn level_sturdy_uses_gameplay_support() {
         use horizon_client::chunk::Chunk;
         use mod_api::SupportType as Support;
@@ -3625,7 +3769,7 @@ pub(super) mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "daily"]
     fn level_clip_reads_parked_world_and_refuses_unloaded() {
         use horizon_client::chunk::Chunk;
         use mod_api::{BlockFace as Face, ClipBlock as Block, ClipFluid as Fluid};
@@ -3775,7 +3919,7 @@ pub(super) mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn living_attributes_answer_for_mobs_stands_and_the_dragon() {
         use horizon_client::{entities::ArmorStand, mobs::Mob};
         use horizon_core::geometry::Vec3;
@@ -3807,7 +3951,7 @@ pub(super) mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn level_shapes_use_empty_context() {
         use super::super::{Audio, Game, Options, Progress, Settings, load_resources};
         use horizon_client::chunk::Chunk;
@@ -3948,7 +4092,7 @@ pub(super) mod tests {
         );
     }
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn level_block_writes_validate_and_change_world() {
         use super::super::{Audio, Game, Options, Progress, Settings, load_resources};
         use horizon_client::{chunk::Chunk, items::ItemStack};
@@ -4089,11 +4233,11 @@ pub(super) mod tests {
             Err(())
         });
         assert!(aborted.is_err());
-        assert!(!game.world.block_log.as_ref().unwrap().contains(&(6, 64, 0)));
+        assert!(game.world.block_log.as_ref().unwrap().contains(&(6, 64, 0)));
         assert!(!game.level_send_block_updated(level, [5, 10_000, 0]));
         assert_eq!(
             game.world.block_log.as_ref().unwrap(),
-            &vec![(3, 64, 0), (4, 64, 0), (5, 64, 0)]
+            &vec![(3, 64, 0), (4, 64, 0), (5, 64, 0), (6, 64, 0)]
         );
         // A bare hand mines at the base speed; an unloaded position has none.
         assert_eq!(
@@ -4330,7 +4474,7 @@ pub(super) mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_client_finds_the_entities_it_tracks_and_its_own_player_in_a_box() {
         use super::super::execution_role::ExecutionRole;
         use horizon_core::geometry::Vec3;
@@ -4383,8 +4527,87 @@ pub(super) mod tests {
         });
     }
 
+    /// A client's `entities_in` lists another player standing in the box (added through the
+    /// real `AddEntity` packet), after the entities the server tracks and before the window's
+    /// own player; a player outside the box, and one the server removed, are not listed.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
+    fn a_client_lists_another_player_in_the_box_after_the_tracked_entities() {
+        use super::super::execution_role::ExecutionRole;
+        use horizon_core::geometry::Vec3;
+        use horizon_protocol::{
+            connection::Pipe,
+            packets::play::{AddEntity, Clientbound as C, RemoveEntities},
+        };
+        use mod_api::{Host, LevelRef};
+        with_game(|game| {
+            game.options.execution_role = ExecutionRole::Client;
+            game.options.dedicated = None;
+            let (client, _server) = Pipe::pair();
+            game.connect_local(client, "EntitiesInTest").unwrap();
+            let remote = game.remote.as_mut().unwrap();
+            remote.logged_in = true;
+            remote.entity_id = 7;
+            remote.profile = 42;
+            let player = remote
+                .builtin
+                .get("minecraft:entity_type")
+                .unwrap()
+                .id("minecraft:player")
+                .unwrap();
+            game.player =
+                Some(horizon_client::motion::PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            game.spawn_entity(15, "minecraft:pig", [2.0, 0.0, 0.0], [0.0; 3]);
+            let add_player = |game: &mut crate::game::Game<'_>, id, uuid, x| {
+                game.handle_packet(C::AddEntity(AddEntity {
+                    id,
+                    uuid,
+                    kind: player,
+                    position: [x, 0.0, 0.0],
+                    velocity: [0.0; 3],
+                    pitch: 0,
+                    yaw: 0,
+                    head_yaw: 0,
+                    data: 0,
+                }))
+                .unwrap();
+            };
+            // 18 stands in the box, 19 far outside it, 20 in it until the server removes it.
+            add_player(game, 18, 9, 1.0);
+            add_player(game, 19, 10, 40.0);
+            add_player(game, 20, 11, 0.5);
+            assert!(
+                [18, 19, 20]
+                    .iter()
+                    .all(|id| game.mobs.iter().any(|m| m.id == *id))
+            );
+            let level = game.level("minecraft:overworld").unwrap();
+            let ids = |host: &dyn Host, level: LevelRef, min, max| {
+                level
+                    .entities_in(host, min, max)
+                    .map(|found| found.into_iter().map(|e| e.id()).collect::<Vec<_>>())
+            };
+            // Entity-list order: the pig, then the other players, then the window's own.
+            assert_eq!(
+                ids(game, level, [-1.0, -1.0, -1.0], [3.0, 2.0, 1.0]),
+                Some(vec![15, 18, 20, 7])
+            );
+            // A box around only the far player finds it, and the near box did not.
+            assert_eq!(
+                ids(game, level, [39.0, -1.0, -1.0], [41.0, 2.0, 1.0]),
+                Some(vec![19])
+            );
+            game.handle_packet(C::RemoveEntities(RemoveEntities { ids: vec![20] }))
+                .unwrap();
+            assert_eq!(
+                ids(game, level, [-1.0, -1.0, -1.0], [3.0, 2.0, 1.0]),
+                Some(vec![15, 18, 7])
+            );
+        });
+    }
+
+    #[test]
+    #[ignore = "daily"]
     fn a_client_refuses_a_box_with_a_bound_that_is_not_finite_and_swaps_an_inverted_one() {
         use super::super::execution_role::ExecutionRole;
         use horizon_core::geometry::Vec3;
@@ -4432,3 +4655,7 @@ pub(super) mod tests {
         });
     }
 }
+
+#[cfg(test)]
+#[path = "native_entity_refs/restitution_replay_tests.rs"]
+mod restitution_replay_tests;

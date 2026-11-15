@@ -1982,6 +1982,7 @@ pub(super) mod initial_history_tests {
     #[test]
     #[ignore = "requires a host GPU; run with --ignored --nocapture"]
     fn core_matrix_inputs_render_provider_values() {
+        let _gpu = crate::gfx::test_gpu::lock();
         let instance = crate::gfx::test_gpu::instance();
         let adapter = pollster::block_on(instance.request_adapter(&Default::default())).unwrap();
         eprintln!("Core matrix GPU: {:?}", adapter.get_info());
@@ -2057,8 +2058,9 @@ pub(super) mod initial_history_tests {
     /// `normalMatrix` in a core-profile gbuffers program is the view's rotation; in the
     /// compatibility profile it stays zero (the issue's Iris 1.11.7 probes, #9136).
     #[test]
-    #[ignore = "requires a host GPU; run with --ignored --nocapture"]
+    #[ignore = "daily"]
     fn core_normal_matrix_renders_the_view_rotation() {
+        let _gpu = crate::gfx::test_gpu::lock();
         let instance = crate::gfx::test_gpu::instance();
         let adapter = pollster::block_on(instance.request_adapter(&Default::default())).unwrap();
         eprintln!("Normal matrix GPU: {:?}", adapter.get_info());

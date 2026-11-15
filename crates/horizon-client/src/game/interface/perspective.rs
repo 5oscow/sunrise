@@ -186,6 +186,7 @@ pub(super) fn player_type_with_document(
 fn load_player_type(models: &horizon_client::mobs::EntityModelDocument) -> Option<Arc<MobType>> {
     models.model("minecraft:player#main").map(|model| {
         Arc::new(MobType {
+            shadow: None,
             id: "minecraft:player".into(),
             // Players render as a humanoid; the species only drives local AI.
             species: horizon_client::mobs::Species::Zombie,
@@ -206,6 +207,7 @@ fn load_player_type(models: &horizon_client::mobs::EntityModelDocument) -> Optio
             jump_strength: 0.42,
             attributes: Default::default(),
             item_stack_limits: Default::default(),
+            attribute_bounds: Default::default(),
             gravity: 0.08,
             safe_fall_distance: 3.0,
             fall_damage_multiplier: 1.0,
@@ -806,24 +808,21 @@ impl Game<'_> {
         let lookup = |name: &str| atlas.sprites.get(name).map(|r| [r.u0, r.v0, r.u1, r.v1]);
         let start = out.len();
         let body = self.own_body_visible();
-        // `native_player_submit`: a native mod's own model for this player,
-        // in place of the vanilla one and its layers (an invisible player is
-        // not asked, as for the others).
+        // The mods' pre hooks (`render_player_pre`, then `render_living_pre`), as for the other
+        // players: a cancel skips the rest of this player's drawing and its post hooks, and the
+        // frame's later passes (flames, name tag) leave it out too.
         let name = self.own_profile_name();
         let who = PlayerRender {
             name: &name,
             local: true,
         };
-        let (drawn, hidden) = match body {
-            true => self.mod_player_geometry(m, who, alpha as f32, camera, packed, out),
-            false => (false, mod_api::HiddenParts::default()),
-        };
-        if drawn {
-            return;
-        }
-        // `native_mob_layer`'s posed parts, kept from the draw below while a mod listens.
-        let mut parts = None;
         let listened = self.mob_render_listened();
+        let pre = self.mod_render_pre(m, Some(who), listened, alpha as f32, camera, packed, out);
+        let Some(hidden) = pre else {
+            return;
+        };
+        // The mods' layers' posed parts, kept from the draw below while they want them.
+        let (mut parts, layers) = (None, self.mod_layers(m));
         // A spectator still draws its own model in third person: the poses'
         // visibility (set by player_model_visibility) hides body parts, and
         // translucent_body marks the body OIT for the ghostly look. Only first
@@ -838,7 +837,7 @@ impl Game<'_> {
                 self.res.mob_data(),
                 &self.player_armor_layers(),
                 hidden,
-                listened.then_some(&mut parts),
+                (listened || layers.is_some()).then_some(&mut parts),
                 out,
             );
         } else {
@@ -850,7 +849,7 @@ impl Game<'_> {
                 packed,
                 self.res.mob_data(),
                 &self.player_armor_layers(),
-                listened.then_some(&mut parts),
+                (listened || layers.is_some()).then_some(&mut parts),
                 out,
             );
         }
@@ -878,9 +877,20 @@ impl Game<'_> {
             self.held_item_geometry(m, camera, alpha, packed, true, None, out);
             // CustomHeadLayer: a pumpkin, skull or other head item.
             self.head_item_geometry(m, camera, alpha, packed, true, out);
-            // `native_mob_layer`: a native mod's layer, over the vanilla ones.
-            self.mod_mob_layer_geometry(m, Some(who), parts, alpha as f32, camera, packed, out);
+            // Mods' layers (`register_entity_layers`), over vanilla's.
+            self.mod_layer_geometry(
+                m,
+                Some(who),
+                parts,
+                layers,
+                alpha as f32,
+                camera,
+                packed,
+                out,
+            );
         }
+        // The post hooks, whether or not the layers drew (a spectator draws none).
+        self.mod_render_post(m, Some(who), parts, alpha as f32, camera, packed, out);
         // LivingEntity.isCurrentlyGlowing: the Glowing effect.
         let vanilla = self
             .potions
@@ -1451,7 +1461,7 @@ impl Game<'_> {
 /// (-0.2, -1, 0), with the 0.6 light power and 0.4 ambient. `normal` is the
 /// face's outward normal in the preview's screen space (x right, y down, z
 /// towards the viewer), where a face that looks up has a negative y.
-fn entity_in_ui_shade(normal: glam::Vec3) -> f32 {
+pub(super) fn entity_in_ui_shade(normal: glam::Vec3) -> f32 {
     const LIGHT_0: glam::Vec3 = glam::Vec3::new(0.2, -1.0, 1.0);
     const LIGHT_1: glam::Vec3 = glam::Vec3::new(-0.2, -1.0, 0.0);
     let light = LIGHT_0.normalize().dot(normal).max(0.0) + LIGHT_1.normalize().dot(normal).max(0.0);
@@ -1918,7 +1928,7 @@ mod preview_tests {
     }
 
     #[test]
-    #[ignore = "requires prepared model data in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn player_render_transform_uses_vanilla_avatar_scale() {
         let root = std::path::PathBuf::from(
             std::env::var_os("HORIZON_TEST_RESOURCES").expect("HORIZON_TEST_RESOURCES"),
@@ -1997,7 +2007,7 @@ mod preview_tests {
             pois: Default::default(),
             species_placements: Default::default(),
             mod_spawns: Default::default(),
-            pathfindable_overrides: Default::default(),
+            resolved: Default::default(),
         };
         let draw = |body: bool| {
             let mut out = Vec::new();

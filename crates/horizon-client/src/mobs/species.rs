@@ -3,6 +3,20 @@
 //! (`getMaxHeadXRot`, `getAmbientSoundInterval`, `getWaterSlowDown`...).
 use super::{Brain, Flags, anim::Anim};
 
+impl super::MobType {
+    /// The vanilla entity type whose class this type's mobs are: the type
+    /// itself, or the template a content mod's living type copies. What a
+    /// class saves and syncs of its own (`Zombie.addAdditionalSaveData`, its
+    /// entity data) follows it; the saved and sent id stays [`Self::id`].
+    pub fn class_id(&self) -> &str {
+        if self.id.starts_with("minecraft:") {
+            &self.id
+        } else {
+            vanilla_id(self.species)
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Species {
     Tadpole,
@@ -1643,6 +1657,7 @@ impl Def {
             S::Goat => "goat_food",
             S::Sniffer => "sniffer_food",
             S::HappyGhast => "happy_ghast_food",
+            S::Camel => "camel_food",
             S::CamelHusk => "camel_husk_food",
             S::Nautilus | S::ZombieNautilus => "nautilus_food",
             S::SulfurCube => "sulfur_cube_food",

@@ -7,10 +7,14 @@ use crate::{
 };
 use horizon_core::random::{LegacyRandom, LevelRandom};
 use horizon_world::registry::BlockStateId;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
+
+mod path_type_cache;
+mod pending_entity;
+pub use pending_entity::{EntityLoadReason, PendingEntity};
 
 mod modified;
-pub use modified::ModifiedChunks;
+pub use modified::{ChunkMark, ModifiedChunks};
 
 /// Sections (x, section index, z) waiting to be remeshed, kept by column
 /// (a bit per section index), so the mesh scheduler looks at each column once
@@ -59,14 +63,23 @@ impl DirtySections {
     }
 }
 pub struct World {
+    // Initialized only for a logical server level, then borrowed by every AI worker.
+    path_type_cache: OnceLock<path_type_cache::PathTypeCache>,
+    /// The dimension type's fire-source tag, resolved at entry and data reload.
+    pub infiniburn: Option<Arc<horizon_world::level::data::BlockSet>>,
     /// Server-owned mod data attached to this dimension.
     pub attachments: horizon_mod_runtime::attachments::Attachments,
+    /// Mod-owned watered areas; never serialized with the world.
+    pub water_tickets: horizon_mod_runtime::water_tickets::WaterTickets,
     /// The holders lent to mods since the last flush, whose synced changes
     /// `flush_attachment_sync` sends.
     pub attachment_syncs: FxHashSet<horizon_mod_runtime::attachments::Holder>,
     /// Block entities a moving piston landed since the last flush, whose
     /// synced attachments `flush_attachment_sync` sends whole (#3184).
     pub attachment_landings: FxHashSet<horizon_mod_runtime::attachments::Holder>,
+    /// The capability generations mods' providers advanced here
+    /// (`level_invalidate_capabilities`), which kept capabilities compare.
+    pub capability_generations: horizon_mod_runtime::capability_generations::CapabilityGenerations,
     /// The level's build range and skylight (its dimension type); its
     /// chunks hold `shape.column()`.
     pub shape: LevelShape,
@@ -88,7 +101,7 @@ pub struct World {
     /// set. An index that no longer holds its position (drained, rolled back) is ignored.
     pub light_checks: crate::fast_hash::FxHashMap<(i32, i32, i32), usize>,
     /// Saved entities of chunks that just loaded, spawned by the game.
-    pub loaded_entities: Vec<((i32, i32), Vec<horizon_core::nbt::Tag>)>,
+    pub loaded_entities: Vec<((i32, i32), Vec<PendingEntity>)>,
     /// Chunks loaded since the level's last pass, their entity sections not
     /// ready yet (`PersistentEntitySectionManager`'s PENDING), empty ones too:
     /// the pass ends by readying them (`processPendingLoads`).
@@ -230,6 +243,30 @@ impl Weather {
             self.thunder_level.0 + (self.thunder_level.1 - self.thunder_level.0) * partial;
         (rain, thunder * rain)
     }
+    /// `ClientPacketListener.handleGameEvent`'s weather events, the player's level's or a viewed
+    /// level's: START_RAINING (1), STOP_RAINING (2), RAIN_LEVEL_CHANGE (7) and
+    /// THUNDER_LEVEL_CHANGE (8), with the event's `param`. Any other event is not the weather's.
+    pub fn game_event(&mut self, event: u8, param: f32) {
+        match event {
+            1 => {
+                self.raining = true;
+                self.rain_level = (0.0, 0.0);
+            }
+            2 => {
+                self.raining = false;
+                self.rain_level = (1.0, 1.0);
+            }
+            7 => {
+                self.rain_level = (param, param);
+                self.raining = param > 0.0;
+            }
+            8 => {
+                self.thunder_level = (param, param);
+                self.thundering = param > 0.0;
+            }
+            _ => {}
+        }
+    }
 }
 impl World {
     /// Install loaded instances, retiring an existing column's block entities even
@@ -249,9 +286,28 @@ impl World {
         }
         self.block_entities.load_chunk(entities);
     }
+    /// A loaded column's block entities, as fresh instances, with the attachment maps its save
+    /// kept for them.
+    pub fn install_chunk_block_entities(&mut self, chunk: &mut crate::chunk::Chunk) {
+        let key = (chunk.x, chunk.z);
+        self.load_chunk_block_entities(key, std::mem::take(&mut chunk.block_entities));
+        if let Some(extras) = &chunk.saved {
+            for (pos, attachments) in &extras.block_entity_attachments {
+                self.block_entities
+                    .restore_attachments(*pos, attachments.clone());
+            }
+        }
+    }
+    /// Queue ordinary NBT; transient transfer state is never decoded from it.
+    pub fn queue_entity_nbt(&mut self, key: (i32, i32), tags: Vec<horizon_core::nbt::Tag>) {
+        self.loaded_entities
+            .push((key, tags.into_iter().map(PendingEntity::from).collect()));
+    }
 
     pub fn new(air: BlockStateId, seed: i64) -> Self {
         Self {
+            path_type_cache: OnceLock::new(),
+            infiniburn: None,
             shape: LevelShape::OVERWORLD,
             chunks: Default::default(),
             random: LevelRandom::for_level(LegacyRandom::new(seed)),
@@ -268,8 +324,10 @@ impl World {
             loaded_chunks: Vec::new(),
             modified: ModifiedChunks::default(),
             attachments: Default::default(),
+            water_tickets: Default::default(),
             attachment_syncs: FxHashSet::default(),
             attachment_landings: FxHashSet::default(),
+            capability_generations: Default::default(),
             block_entities: Default::default(),
             carrier_fences: Default::default(),
             carrier_data_existed_at_open: false,
@@ -363,6 +421,14 @@ impl World {
     /// An entity below it is out of the world.
     pub fn below_world_y(&self) -> f64 {
         f64::from(self.shape.min_y - 64)
+    }
+    /// The biome table index of the noise cell at a block (`ChunkAccess.getNoiseBiome`): a
+    /// cell above or below the level reads its top or bottom cells, not the cells the chunks'
+    /// widened column holds there (vanilla's Nether and End save none, and read back they
+    /// hold the table's first biome). `None` where the chunk isn't loaded.
+    pub fn noise_biome(&self, x: i32, y: i32, z: i32) -> Option<u16> {
+        let y = y.clamp(self.shape.min_y, self.shape.max_y() - 1);
+        Some(self.chunks.get(&(x >> 4, z >> 4))?.biome(x, y, z))
     }
     /// One above the highest block Y the level's chunks hold.
     pub fn top_y(&self) -> i32 {
@@ -548,6 +614,12 @@ impl World {
     pub fn loaded(&self, x: i32, z: i32) -> bool {
         self.chunks.contains_key(&(x >> 4, z >> 4))
     }
+    /// Takes chunk `key` out of the level as it unloads, with the capability generations its
+    /// positions held.
+    pub fn unload_chunk(&mut self, key: (i32, i32)) -> Option<Arc<Chunk>> {
+        self.capability_generations.unload_chunk(key);
+        self.chunks.remove(&key)
+    }
     /// `Level.isLoaded`: `y` is inside the build height and the chunk of `(x, z)` is loaded.
     /// Never loads a chunk.
     pub fn is_loaded_at(&self, x: i32, y: i32, z: i32) -> bool {
@@ -600,6 +672,11 @@ impl World {
             Tag::Compound(_) => Some(lock.clone()),
             _ => None,
         });
+        let mut tag = tag.clone();
+        if let Tag::Compound(map) = &mut tag {
+            map.remove(&"LootTable".into());
+            map.remove(&"LootTableSeed".into());
+        }
         self.with_chunk_extras(key, |extras| {
             let at = extras
                 .block_entity_sources
@@ -627,7 +704,7 @@ impl World {
         });
     }
     /// The fields Horizon keeps beside a block entity's model, for a journal: the tag it was
-    /// loaded or set with (its `lock`) and its loot table roll.
+    /// loaded or set with (its `lock`) and its pending loot metadata.
     pub fn block_entity_extras(&self, key: (i32, i32, i32)) -> BlockEntityExtras {
         let saved = self
             .chunks
@@ -640,7 +717,7 @@ impl World {
                     .find(|(p, _)| *p == key)
                     .map(|(_, tag)| tag.clone())
             }),
-            rolled_loot: saved.and_then(|s| s.rolled_loot.iter().find(|r| r.pos == key).cloned()),
+            pending_loot: saved.and_then(|s| s.pending_loot.get(&key).cloned()),
         }
     }
     /// Puts back what [`World::block_entity_extras`] kept.
@@ -650,8 +727,10 @@ impl World {
             extras
                 .block_entity_sources
                 .extend(kept.source.map(|tag| (key, tag)));
-            extras.rolled_loot.retain(|r| r.pos != key);
-            extras.rolled_loot.extend(kept.rolled_loot);
+            extras.pending_loot.remove(&key);
+            extras
+                .pending_loot
+                .extend(kept.pending_loot.map(|loot| (key, loot)));
         });
     }
     /// `LevelChunk.removeBlockEntity`: the tag a block entity was loaded or set
@@ -659,12 +738,13 @@ impl World {
     pub fn forget_block_entity_source(&mut self, key: (i32, i32, i32)) {
         self.with_chunk_extras(key, |extras| {
             extras.block_entity_sources.retain(|(p, _)| *p != key);
+            extras.pending_loot.remove(&key);
         });
     }
     /// Run `f` on the keep-as-loaded data of the chunk holding `key`, put back
     /// for the next save (`block_entity_sources` is where Horizon restores the
     /// block entity fields its model does not hold).
-    fn with_chunk_extras(
+    pub fn with_chunk_extras(
         &mut self,
         key: (i32, i32, i32),
         f: impl FnOnce(&mut crate::chunk::ChunkExtras),
@@ -845,6 +925,47 @@ mod tests {
         }
     }
 
+    /// `ChunkAccess.getNoiseBiome` clamps the cell to the level. An End chunk read back from a
+    /// save holds the table's first biome in the sections its widened column adds below Y 0
+    /// and above 255, which a read there must not reach.
+    #[test]
+    fn noise_biome_reads_stay_inside_the_level() {
+        use crate::chunk::LevelShape;
+        let mut world = World::new(BlockStateId(0), 0);
+        world.shape = LevelShape::END;
+        // The column runs -64..320: quart rows 16..80 are the level's 0..256.
+        let mut chunk = Chunk::with_layout(0, 0, LevelShape::END.column());
+        for qy in 16..80 {
+            let biome = match qy {
+                16 => 5,
+                79 => 6,
+                _ => 7,
+            };
+            for qz in 0..4 {
+                for qx in 0..4 {
+                    chunk.set_biome_cell(qx, qy, qz, biome);
+                }
+            }
+        }
+        world.chunks.insert((0, 0), Arc::new(chunk));
+        for (y, biome) in [
+            (-64, 5),
+            (-4, 5),
+            (-1, 5),
+            (0, 5),
+            (3, 5),
+            (4, 7),
+            (251, 7),
+            (252, 6),
+            (255, 6),
+            (256, 6),
+            (319, 6),
+        ] {
+            assert_eq!(world.noise_biome(9, y, 9), Some(biome), "y {y}");
+        }
+        assert_eq!(world.noise_biome(16, 0, 0), None);
+    }
+
     /// A box misses a state only where no section it reaches lists it, and
     /// unloaded columns or heights past the world count as their air.
     #[test]
@@ -871,5 +992,5 @@ mod tests {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct BlockEntityExtras {
     pub source: Option<horizon_core::nbt::Tag>,
-    pub rolled_loot: Option<crate::chunk::RolledLoot>,
+    pub pending_loot: Option<crate::chunk::PendingContainerLoot>,
 }

@@ -12,9 +12,9 @@ address), op and deop, the whitelist, and metrics as Prometheus text.
 
 | | Count |
 | --- | --- |
-| Commands | 30 (`init`, `run`, `start`, `stop`, `restart`, `status`, `cmd`, `logs`, `console`, `backup`, `backups`, `restore`, `service`, `panel`, `update`, `rollback`, `config`, `config set`, `import`, `mcp`, `op`, `deop`, `whitelist`, `players`, `kick`, `ban`, `pardon`, `ban-ip`, `pardon-ip`, `version`) |
-| `server.toml` keys | 25 in 7 sections, plus `[properties]` for any other vanilla key |
-| Control API endpoints | 30 under `/api/v1` |
+| Commands | 32 (`init`, `run`, `start`, `stop`, `restart`, `status`, `cmd`, `report`, `logs`, `console`, `backup`, `backups`, `restore`, `service`, `panel`, `update`, `rollback`, `config`, `config set`, `import`, `import-resources`, `mcp`, `op`, `deop`, `whitelist`, `players`, `kick`, `ban`, `pardon`, `ban-ip`, `pardon-ip`, `version`) |
+| `server.toml` keys | 40 in 9 sections, plus `[properties]` for any other vanilla key |
+| Control API endpoints | 32 under `/api/v1` |
 
 ## Guide
 
@@ -105,7 +105,7 @@ answer on this fork; those fields now live only under `provenance`.
 ## Not there yet
 
 - **Mods on a dedicated server**: turn on and off, and their settings, once native mods can be built for the
-  server ([content mods](../modding/src/how-to/content-mods.md), [native mods](../modding/src/how-to/native-mods.md#multiplayer)).
+  server ([content mods](../modding/src/how-to/content-mods.md), [native mods](../modding/src/how-to/native-mods/11-multiplayer.md)).
 - **Vanilla's management protocol**: `serversettings/*` (the live settings not yet done) and the world
   upgrade's notifications (the others are sent). The methods answer
   an internal error saying so; a kick's translatable message is sent as its key.

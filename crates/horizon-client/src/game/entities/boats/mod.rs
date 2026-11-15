@@ -28,7 +28,7 @@ use horizon_client::{
 };
 use horizon_core::nbt::Tag;
 use horizon_core::{
-    geometry::{Aabb, ShapeOp, Vec3, VoxelShape, trig},
+    geometry::{Aabb, ShapeOp, Vec3, VoxelShape},
     position::BlockPos,
     random::{LegacyRandom, RandomSource},
 };
@@ -106,11 +106,9 @@ pub(super) struct Boat {
     /// `Entity.fallDistance`: counted by `AbstractBoat.checkFallDamage`, saved
     /// and loaded (`fall_distance`).
     pub fall_distance: f64,
-    /// `AbstractBoat.lastYd`: the vertical velocity at the last move's
-    /// `checkFallDamage`, before collisions zero it (not saved).
-    pub last_yd: f64,
     /// `Entity.stuckSpeedMultiplier`: set where the boat sits in powder snow
-    /// (`PowderSnowBlock.entityInside`), spent by the next move.
+    /// (`PowderSnowBlock.entityInside`) or a cobweb (`WebBlock.entityInside`),
+    /// spent by the next move.
     stuck: Vec3,
     /// `ChestBoat`: a chest with 27 slots in the back seat.
     pub chest: bool,
@@ -140,9 +138,9 @@ pub(super) const BUBBLE_UP_EVENT: i8 = 72;
 fn powder_snow_stuck() -> Vec3 {
     Vec3::new(f64::from(0.9_f32), 1.5, f64::from(0.9_f32))
 }
-/// The powder snow cells a box reaches into (deflated by 1e-5, as `Entity.checkInsideBlocks`
-/// does), in x, y, z order.
-fn powder_snow_cells(bounds: Aabb, is_snow: impl Fn([i32; 3]) -> bool) -> Vec<[i32; 3]> {
+/// The cells a box reaches into (deflated by 1e-5, as `Entity.checkInsideBlocks` does),
+/// in x, y, z order.
+fn reached_cells(bounds: Aabb, is: impl Fn([i32; 3]) -> bool) -> Vec<[i32; 3]> {
     let e = f64::from(1.0e-5_f32);
     let bounds = bounds.deflate(Vec3::new(e, e, e));
     let (lo, hi) = (bounds.min_position(), bounds.max_position());
@@ -150,7 +148,7 @@ fn powder_snow_cells(bounds: Aabb, is_snow: impl Fn([i32; 3]) -> bool) -> Vec<[i
     for x in lo.x.floor() as i32..=hi.x.floor() as i32 {
         for y in lo.y.floor() as i32..=hi.y.floor() as i32 {
             for z in lo.z.floor() as i32..=hi.z.floor() as i32 {
-                if is_snow([x, y, z]) {
+                if is([x, y, z]) {
                     cells.push([x, y, z]);
                 }
             }
@@ -187,21 +185,6 @@ pub(super) fn put_ticks_frozen(map: &mut horizon_core::nbt::Compound, ticks: i32
 }
 pub(super) const WIDTH: f64 = 1.375;
 pub(super) const HEIGHT: f64 = 0.5625;
-/// `AbstractBoat.controlBoat`'s push along the boat's yaw:
-/// `Mth.sin(-yRot * 0.017453292F) * acceleration` and `Mth.cos(..)`, with
-/// `Mth`'s sine table and float products, widened to double.
-fn paddle_push(yaw: f32, acceleration: f32) -> (f64, f64) {
-    let (x, z) = (-yaw * 0.017_453_292, yaw * 0.017_453_292);
-    (
-        f64::from(trig::sin(f64::from(x)) * acceleration),
-        f64::from(trig::cos(f64::from(z)) * acceleration),
-    )
-}
-/// `getBbWidth() * Mth.SQRT_OF_TWO` in `getDismountLocationForPassenger`: a
-/// float product.
-fn boat_escape_width() -> f64 {
-    f64::from(WIDTH as f32 * std::f32::consts::SQRT_2)
-}
 impl Boat {
     /// `AbstractBoat.tick`: the hurt wobble and the damage wear off, before
     /// `Entity.baseTick` can burn the boat.
@@ -259,7 +242,6 @@ impl Boat {
             input: [false; 4],
             on_ground: false,
             fall_distance: 0.0,
-            last_yd: 0.0,
             stuck: Vec3::ZERO,
             chest: false,
             items: Vec::new(),
@@ -591,8 +573,7 @@ impl Game<'_> {
     fn water_level_above(&self, b: &Boat) -> f32 {
         let bb = b.bounds();
         let (lo, hi) = (bb.min_position(), bb.max_position());
-        // Up to where a falling boat's top was a move ago (`ceil(maxY - lastYd)`).
-        let (y0, y1) = (hi.y.floor() as i32, (hi.y - b.last_yd).ceil() as i32);
+        let (y0, y1) = (hi.y.floor() as i32, hi.y.ceil() as i32);
         'rows: for y in y0..y1 {
             let mut height = 0.0f32;
             for x in lo.x.floor() as i32..hi.x.ceil() as i32 {
@@ -905,20 +886,37 @@ impl Game<'_> {
             if down {
                 acceleration -= 0.005;
             }
-            let (x, z) = paddle_push(b.yaw, acceleration);
-            b.velocity.x += x;
-            b.velocity.z += z;
+            let r = b.yaw.to_radians();
+            b.velocity.x += f64::from((-r).sin() * acceleration);
+            b.velocity.z += f64::from(r.cos() * acceleration);
             b.paddling = [right && !left || up, left && !right || up];
         }
         // Entity.move: collisions zero the blocked components, the world border's
-        // among them (`CollisionGetter.borderCollision`).
+        // among them (`CollisionGetter.borderCollision`). The boat's own move
+        // is a self move (#2414: vanilla's `AbstractBoat.tick` passes SELF);
+        // PR 1a records the movement unchanged.
         let mut scene = EntityCollisions {
             blocks: scene,
             entities: &obstacles,
             border: Some((self.border.geometry(), [b.position.x, b.position.z])),
         };
         let movement = b.take_movement();
-        if let Ok(moved) = scene.resolve(b.bounds(), movement, 0.0, b.on_ground) {
+        let mut gate = horizon_client::move_gate::armed_with(
+            &self.loop_context,
+            b.id,
+            || std::borrow::Cow::Owned(b.entity_type()),
+            horizon_world::entity_move::MoverType::SelfMovement,
+            movement,
+        );
+        let movement = gate.delta();
+        if let Ok(moved) = horizon_client::move_gate::entities_resolve(
+            &mut gate,
+            &mut scene,
+            b.bounds(),
+            movement,
+            0.0,
+            b.on_ground,
+        ) {
             b.fall_distance = self.vehicle_fall_reset(b.fall_distance, b.position, moved);
             b.position = Vec3::new(
                 b.position.x + moved.x,
@@ -926,7 +924,6 @@ impl Game<'_> {
                 b.position.z + moved.z,
             );
             b.on_ground = movement.y < 0.0 && moved.y > movement.y;
-            b.last_yd = b.velocity.y;
             b.fall_distance = self.boat_fall(&b, moved.y);
             if (moved.x - movement.x).abs() > 1.0e-7 {
                 b.velocity.x = 0.0;
@@ -938,11 +935,9 @@ impl Game<'_> {
                 b.velocity.y = 0.0;
             }
         }
-        // AbstractBoat.tick's applyEffectsFromBlocks: powder snow makes the boat stuck,
-        // which slows its next move (`PowderSnowBlock.entityInside`).
-        if !self.boat_powder_snow_cells(&b).is_empty() {
-            b.stuck = powder_snow_stuck();
-        }
+        // AbstractBoat.tick's applyEffectsFromBlocks: powder snow or a cobweb makes the
+        // boat stuck, which slows its next move, and resets its fall.
+        self.boat_stuck_in_blocks(&mut b);
         // Entity.move's last step: soul sand and honey slow the boat too.
         let factor = crate::motion::block_speed_factor_at(
             &self.world,
@@ -1066,11 +1061,16 @@ impl Game<'_> {
                 self.boats.update(i, |b| b.wear_off_hurt());
                 // Entity.baseTick burns it before it moves; the fire may break it.
                 if !self.boat_fire_tick(i) && !self.boat_below_world(i) {
-                    self.with_entity_held_out(id, |game| {
+                    let section_step = self.with_entity_held_out(id, |game| {
                         let b = game.boats[i].clone();
+                        let from = b.position;
                         let b = game.tick_boat(b, false);
-                        game.store_boat_back(i, b);
+                        let to = b.position;
+                        game.store_boat_back(i, b).then_some((from, to))
                     });
+                    if let Some((from, to)) = section_step {
+                        self.entity_section_step(id, [from.x, from.y, from.z], [to.x, to.y, to.z]);
+                    }
                     self.boat_server_passes(id, &driven, &ticking, &round);
                 }
                 self.native_tick_post_one(&round, id, &kind);
@@ -1113,8 +1113,16 @@ impl Game<'_> {
             self.boat_powder_snow_snowflakes(i);
         }
         // `AbstractBoat.tick` counts submersion on the server even when
-        // its controlling client owns the boat's movement.
+        // its controlling client owns the boat's movement. Its
+        // `applyEffectsFromBlocks` still runs here: a cobweb or powder snow
+        // resets the fall of the boat the guest drives.
         if driven.contains(&id) {
+            let mut b = self.boats[i].clone();
+            self.boat_stuck_in_blocks(&mut b);
+            self.boats.update(i, |boat| {
+                boat.stuck = b.stuck;
+                boat.fall_distance = b.fall_distance;
+            });
             self.refresh_boat_status(i);
         }
         if self.boats[i].out_of_control >= 60.0 {
@@ -1314,15 +1322,49 @@ impl Game<'_> {
     /// `PowderSnowBlock.entityInside` for a boat: the powder snow cells its box, and the box it
     /// had before its move, reach into (`Entity.checkInsideBlocks` along the move).
     fn boat_powder_snow_cells(&self, b: &Boat) -> Vec<[i32; 3]> {
-        let mut cells = powder_snow_cells(b.bounds(), |p| self.is_powder_snow(p));
+        self.boat_reached_cells(b, |p| self.is_powder_snow(p))
+    }
+    /// The cells a boat's box, and the box it had before its move, reach into
+    /// (`Entity.checkInsideBlocks` along the move), in x, y, z order.
+    fn boat_reached_cells(&self, b: &Boat, is: impl Fn([i32; 3]) -> bool) -> Vec<[i32; 3]> {
+        let mut cells = reached_cells(b.bounds(), &is);
         if b.previous != b.position {
-            for p in powder_snow_cells(Boat::bounds_at(b.previous), |p| self.is_powder_snow(p)) {
+            for p in reached_cells(Boat::bounds_at(b.previous), &is) {
                 if !cells.contains(&p) {
                     cells.push(p);
                 }
             }
         }
         cells
+    }
+    /// `Entity.makeStuckInBlock` from the powder snow (`PowderSnowBlock.entityInside`) and
+    /// cobweb (`WebBlock.entityInside`) cells a boat's box reaches into: each resets its fall
+    /// and the last one reached leaves the multiplier its next move spends.
+    fn boat_stuck_in_blocks(&self, b: &mut Boat) {
+        // `forEachBlockIntersectedBetween` visits the box before the move first and the box
+        // after it last, so a block the boat moves into wins over one it leaves.
+        let mut cells = Vec::new();
+        if b.previous != b.position {
+            cells.extend(reached_cells(Boat::bounds_at(b.previous), |_| true));
+        }
+        for cell in reached_cells(b.bounds(), |_| true) {
+            if !cells.contains(&cell) {
+                cells.push(cell);
+            }
+        }
+        for cell in cells {
+            let name = &*self
+                .res
+                .facts()
+                .get(self.world.block(cell[0], cell[1], cell[2]))
+                .name;
+            b.stuck = match name {
+                "minecraft:powder_snow" => powder_snow_stuck(),
+                "minecraft:cobweb" => horizon_client::falling_block::web_multiplier(),
+                _ => continue,
+            };
+            b.fall_distance = 0.0;
+        }
     }
     /// `BaseFireBlock.fireDamage` of a fire block at `p`.
     fn fire_damage_at(&self, p: [i32; 3]) -> Option<f32> {
@@ -1372,7 +1414,7 @@ impl Game<'_> {
             let mut in_snow = false;
             let mut seen = Vec::new();
             for &bounds in &steps {
-                let cells = powder_snow_cells(bounds, |p| !seen.contains(&p));
+                let cells = reached_cells(bounds, |p| !seen.contains(&p));
                 seen.extend_from_slice(&cells);
                 let fires: Vec<f32> = cells
                     .iter()
@@ -1572,8 +1614,14 @@ impl Game<'_> {
     /// `getDismountLocationForPassenger` for a passenger `width` wide
     /// facing `yaw`.
     pub(super) fn boat_dismount_target(&self, b: &Boat, width: f64, yaw: f32) -> Vec3 {
-        let off = super::mounts::escape_vector(boat_escape_width(), width, yaw);
-        let (x, z) = (b.position.x + off.x, b.position.z + off.z);
+        let r = yaw.to_radians();
+        let distance = (WIDTH * std::f64::consts::SQRT_2 + width + 1.0e-5) / 2.0;
+        let (s, c) = (-(r.sin()) as f64, r.cos() as f64);
+        let m = s.abs().max(c.abs());
+        let (x, z) = (
+            b.position.x + s * distance / m,
+            b.position.z + c * distance / m,
+        );
         let top = b.bounds().max_position().y;
         let (bx, by, bz) = (x.floor() as i32, top.floor() as i32, z.floor() as i32);
         let below = self.res.facts().get(self.world.block(bx, by - 1, bz));
@@ -1587,7 +1635,6 @@ impl Game<'_> {
             Vec3::new(b.position.x, top, b.position.z)
         }
     }
-    /// `BoatItem.use`: aim at a block or the water surface.
     /// `Entity.setYRot` on a boat just made (its old rotation moves with it).
     pub(super) fn set_boat_yaw(&mut self, id: u32, yaw: f32) {
         if let Some(i) = self.boats.iter().position(|b| b.id == id) {
@@ -1597,6 +1644,7 @@ impl Game<'_> {
             });
         }
     }
+    /// `BoatItem.use`: aim at a block or the water surface.
     pub(super) fn place_boat(&mut self, stack: &ItemStack) -> bool {
         let Some(boat) = self.boat_to_place(stack) else {
             return false;
@@ -1609,7 +1657,7 @@ impl Game<'_> {
         self.world.modified.insert(key);
         let (id, kind, yaw) = (boat.id, boat.entity_type(), boat.yaw);
         self.boats.push(boat);
-        self.apply_vehicle_stack_config(super::commands::Target::Boat(id), &kind, stack, true);
+        self.apply_item_stack_config(super::commands::Target::Boat(id), &kind, stack, true);
         // BoatItem.use: setYRot(player.getYRot()) after the stack's config.
         self.set_boat_yaw(id, yaw);
         if self.serving.is_some() || self.options.dedicated.is_some() {
@@ -1885,70 +1933,15 @@ impl Game<'_> {
         )
     }
 
-    /// `ContainerEntity.unpackChestVehicleLootTable`: slot access rolls once;
-    /// only a player opening the menu fires `CriteriaTriggers.GENERATE_LOOT`, before filling.
+    /// Existing boat access routes all use the shared unpack operation.
     pub(super) fn unpack_boat_loot(&mut self, i: usize, player: bool) {
-        use horizon_core::nbt::Tag;
-        let id = self.boats[i].id;
-        let (table, seed) = {
-            let Some(Tag::Compound(map)) = self.persist.raw.get(&id) else {
-                return;
-            };
-            let Some(table) = crate::save::text(map.get(&"LootTable".into()))
-                .and_then(|id| horizon_client_core::identifier::normalize_id(&id))
-            else {
-                return;
-            };
-            let seed = match map.get(&"LootTableSeed".into()) {
-                Some(Tag::Long(seed)) => Some(*seed),
-                _ => None,
-            };
-            (table, seed)
-        };
-        if player {
-            self.trigger_loot_table(&table);
-        }
-        // Advancement rewards can remove the boat or shift its index.
-        let Some(i) = self.boats.iter().position(|b| b.id == id) else {
-            return;
-        };
-        if let Some(Tag::Compound(map)) = self.persist.raw.get_mut(&id) {
-            map.remove(&"LootTable".into());
-            map.remove(&"LootTableSeed".into());
-        }
-        let key = (i32::MAX - 15, super::minecarts::CART_KEY_Y, id as i32);
-        self.store_cart_items(key);
-        let loot = crate::structure_blocks::loot_data(
-            &self.options.resources,
-            &self.pack_files(),
-            self.res.item_defaults(),
+        let player = player.then(|| self.native_acting_player()).flatten();
+        self.unpack_loot(
+            super::container_loot::LootTarget::Boat(self.boats[i].id),
+            player,
         );
-        let b = &self.boats[i];
-        let at = Vec3::new(b.position.x, b.position.y, b.position.z);
-        let biome = self.biome_name_at(at).unwrap_or_default();
-        let pos = (
-            b.position.x.floor() as i32,
-            b.position.y.floor() as i32,
-            b.position.z.floor() as i32,
-        );
-        self.boats.update(i, |b| {
-            crate::structure_blocks::roll_container(
-                &mut b.items,
-                loot.as_deref(),
-                table,
-                seed,
-                pos,
-                &biome,
-            );
-        });
-        if let Some(horizon_client::containers::BlockEntity::Chest(items)) =
-            self.world.block_entities.get_mut(&key)
-        {
-            items.clone_from(&self.boats[i].items);
-        }
     }
 
-    /// None means a canceled hit; Some records whether an accepted hit destroyed it.
     pub(super) fn hurt_boat_result(
         &mut self,
         i: usize,
@@ -2072,6 +2065,10 @@ impl Game<'_> {
             self.view_scale(),
         );
         for b in &self.boats {
+            // LevelExtractor: the camera entity is not drawn from its own eyes.
+            if self.hides_as_camera(b.id) {
+                continue;
+            }
             // EntityRenderer.shouldRender.
             let (previous, position) = (at(b.previous), at(b.position));
             if !self.standing_entity_in_view(
@@ -2195,37 +2192,12 @@ impl Game<'_> {
 mod tests {
     use super::*;
 
-    /// `controlBoat`'s push with `Mth`'s sine table (65,536 float entries,
-    /// indexed by `(long)(radians * 10430.378350470453) & 65535`) and float
-    /// products. Expected values worked out apart from Horizon, in Python with
-    /// float32 rounding; the platform's sine differs in the fourth digit.
-    #[test]
-    fn paddling_pushes_along_the_sine_table() {
-        for (yaw, push) in [
-            (17.3, (-0.011893643997609615, 0.03819085285067558)),
-            (-123.45, (0.03337550163269043, -0.022047126665711403)),
-            (250.0, (0.03758755698800087, -0.013681206852197647)),
-        ] {
-            assert_eq!(paddle_push(yaw, 0.04), push, "yaw {yaw}");
-        }
-    }
-
-    /// `getDismountLocationForPassenger`'s escape vector for a player (0.6F
-    /// wide) facing 17.3 degrees: the boat's float width times
-    /// `Mth.SQRT_OF_TWO`, the 1.0E-5F margin and the sine table, worked out
-    /// apart from Horizon as above.
-    #[test]
-    fn a_boat_rider_steps_off_along_the_sine_table() {
-        let v = super::super::mounts::escape_vector(boat_escape_width(), f64::from(0.6f32), 17.3);
-        assert_eq!((v.x, v.z), (-0.3962207300897882, 1.2722768119620014));
-    }
-
     fn boat() -> Boat {
         Boat::new(1, Arc::from("oak"), Vec3::ZERO, 0.0)
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn destruction_and_underwater_ejection_snap_rejected_passenger_descendants() {
         for broken in [false, true] {
             super::super::native_entity_refs::tests::with_game(|game| {
@@ -2370,18 +2342,18 @@ mod tests {
         let snow = |cells: &'static [[i32; 3]]| move |p: [i32; 3]| cells.contains(&p);
         // Inside, a corner cell, and a cell the box only ends against.
         assert_eq!(
-            powder_snow_cells(b.bounds(), snow(&[[10, 64, 10]])),
+            reached_cells(b.bounds(), snow(&[[10, 64, 10]])),
             vec![[10, 64, 10]]
         );
         assert_eq!(
-            powder_snow_cells(b.bounds(), snow(&[[9, 64, 11], [12, 64, 10], [10, 65, 10]])),
+            reached_cells(b.bounds(), snow(&[[9, 64, 11], [12, 64, 10], [10, 65, 10]])),
             vec![[9, 64, 11]],
             "the cell beyond the edge and the one above the box are not reached"
         );
         let edge = Boat::new(1, "oak".into(), Vec3::new(11.3125, 64.0, 10.5), 0.0);
-        assert!(powder_snow_cells(edge.bounds(), snow(&[[12, 64, 10]])).is_empty());
+        assert!(reached_cells(edge.bounds(), snow(&[[12, 64, 10]])).is_empty());
         // x, y, z order.
-        let all = powder_snow_cells(b.bounds(), |_| true);
+        let all = reached_cells(b.bounds(), |_| true);
         assert_eq!(all.len(), 9);
         assert_eq!((all[0], all[8]), ([9, 64, 9], [11, 64, 11]));
     }
@@ -2459,3 +2431,129 @@ mod tests {
 }
 horizon_client::impl_joined!(Boat);
 horizon_mod_runtime::impl_attachment_lifetime!(Boat);
+#[cfg(test)]
+mod cobweb_tests {
+    use super::Boat;
+    use crate::game::game_tests::tests::server_game;
+    use horizon_client::chunk::Chunk;
+    use horizon_core::geometry::Vec3;
+    use std::sync::Arc;
+
+    /// `AbstractBoat.tick`'s `applyEffectsFromBlocks` calls `WebBlock.entityInside`, which
+    /// makes the boat stuck: its next move goes a quarter of the speed across and a
+    /// twentieth down, its velocity is spent and its fall is reset. A boat outside the web
+    /// moves as it did and keeps falling.
+    #[test]
+    #[ignore = "daily"]
+    fn a_cobweb_slows_a_boat_and_resets_its_fall() {
+        let mut resources = None;
+        let mut game = server_game(&mut resources);
+        let web = game
+            .pack
+            .assets
+            .registry
+            .default_state("minecraft:cobweb")
+            .unwrap();
+        game.world
+            .chunks
+            .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+        game.world.set(8, 64, 8, web).unwrap();
+        let boat = |x: f64| {
+            let mut b = Boat::new(1, Arc::from("oak"), Vec3::new(x, 64.0, 8.5), 0.0);
+            b.velocity = Vec3::new(1.0, 0.0, 0.0);
+            b.fall_distance = 5.0;
+            b
+        };
+        let (mut in_web, mut outside) = (boat(8.5), boat(12.5));
+        // The tick in the web sets the multiplier and resets the fall.
+        in_web = game.tick_boat(in_web, false);
+        outside = game.tick_boat(outside, false);
+        let (web_fall, free_fall) = (in_web.fall_distance, outside.fall_distance);
+        // The next move spends the multiplier.
+        let (web_from, free_from) = (in_web.position, outside.position);
+        in_web = game.tick_boat(in_web, false);
+        outside = game.tick_boat(outside, false);
+        let (web_moved, free_moved) = (
+            in_web.position.subtract(web_from),
+            outside.position.subtract(free_from),
+        );
+        assert!(
+            free_moved.x > 0.5,
+            "the boat outside the web moves: {free_moved:?}"
+        );
+        assert_eq!(
+            web_moved.x,
+            free_moved.x * 0.25,
+            "a quarter of the speed across"
+        );
+        assert_eq!(web_moved.z, 0.0);
+        assert!(
+            (web_moved.y - free_moved.y * f64::from(0.05_f32)).abs() < 1e-12,
+            "a twentieth down: {} against {}",
+            web_moved.y,
+            free_moved.y
+        );
+        assert_eq!(
+            in_web.velocity,
+            Vec3::ZERO,
+            "the multiplier and velocity are spent"
+        );
+        assert_eq!(web_fall, 0.0, "makeStuckInBlock resets the fall");
+        assert!(
+            free_fall > 5.0,
+            "a boat outside the web keeps falling: {free_fall}"
+        );
+    }
+
+    /// A boat whose box reaches a cobweb and, after the move, powder snow takes
+    /// the multiplier of the block vanilla's traversal reaches last: the one
+    /// after the move, not the one it leaves.
+    #[test]
+    #[ignore = "daily"]
+    fn a_boat_leaving_a_cobweb_for_powder_snow_takes_the_powder_snow() {
+        let mut resources = None;
+        let mut game = server_game(&mut resources);
+        let (web, snow) = {
+            let registry = &game.pack.assets.registry;
+            (
+                registry.default_state("minecraft:cobweb").unwrap(),
+                registry.default_state("minecraft:powder_snow").unwrap(),
+            )
+        };
+        game.world
+            .chunks
+            .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+        game.world.set(8, 64, 8, web).unwrap();
+        game.world.set(10, 64, 8, snow).unwrap();
+        let mut boat = Boat::new(1, Arc::from("oak"), Vec3::new(8.5, 64.0, 8.5), 0.0);
+        // Far enough in one move to leave the cobweb's cell and reach the snow's.
+        boat.velocity = Vec3::new(2.0, 0.0, 0.0);
+        boat = game.tick_boat(boat, false);
+        // The same boat without the stored multiplier: the next move is the full one.
+        let mut free = boat.clone();
+        free.stuck = Vec3::ZERO;
+        let (from, free_from) = (boat.position, free.position);
+        boat = game.tick_boat(boat, false);
+        free = game.tick_boat(free, false);
+        let (moved, free_moved) = (
+            boat.position.subtract(from),
+            free.position.subtract(free_from),
+        );
+        assert!(
+            free_moved.x > 1.0,
+            "the boat outside the blocks moves: {free_moved:?}"
+        );
+        assert!(
+            (moved.x - free_moved.x * f64::from(0.9_f32)).abs() < 1e-12,
+            "powder snow's across multiplier: {} against {}",
+            moved.x,
+            free_moved.x
+        );
+        assert!(
+            (moved.y - free_moved.y * 1.5).abs() < 1e-12,
+            "powder snow's down multiplier: {} against {}",
+            moved.y,
+            free_moved.y
+        );
+    }
+}

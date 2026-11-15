@@ -40,6 +40,10 @@ pub enum SpawnEvent {
 
 /// The level as finalizeSpawn reads it.
 pub trait FinalizeLevel {
+    /// The owning world's immutable builtin generation (vanilla for bare fixtures).
+    fn mob_maps(&self) -> &crate::neoforge_mob_maps::NeoForgeMobMaps {
+        crate::neoforge_mob_maps::NeoForgeMobMaps::vanilla()
+    }
     /// The biome id at a block.
     fn biome(&self, pos: [i32; 3]) -> String;
     /// The biome at a block is in a biome tag (`minecraft:...`).
@@ -400,19 +404,51 @@ impl Attr {
             Self::FlyingSpeed => "minecraft:flying_speed",
         }
     }
-    /// `RangedAttribute` bounds.
-    fn range(self) -> (f64, f64) {
-        match self {
-            Self::MaxHealth => (1.0, 1024.0),
-            Self::MovementSpeed => (0.0, 1024.0),
-            Self::FollowRange => (0.0, 2048.0),
-            Self::AttackDamage => (0.0, 2048.0),
-            Self::KnockbackResistance | Self::SpawnReinforcements => (0.0, 1.0),
-            Self::JumpStrength => (0.0, 32.0),
-            Self::Armor => (0.0, 30.0),
-            Self::BurningTime | Self::FlyingSpeed => (0.0, 1024.0),
+}
+/// The definition of each [`Attr`] and of `max_absorption`
+/// (`RangedAttribute`'s default and bounds), read once from the attribute
+/// catalog when the mob types load: what a mob's own attribute record
+/// sanitizes its values with, as `AttributeInstance` does. A type built
+/// without a catalog (a test fixture, the player's render type) has none,
+/// and its values are not clamped.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct AttrBounds {
+    attrs: [Option<horizon_world::attributes::Definition>; Attr::ALL.len()],
+    /// `Attributes.MAX_ABSORPTION`'s, for a mob with no attribute map yet.
+    max_absorption: Option<horizon_world::attributes::Definition>,
+}
+impl AttrBounds {
+    /// Each attribute's definition in `catalog`.
+    pub fn of(catalog: &horizon_world::attributes::entity::Catalog) -> Self {
+        Self {
+            attrs: Attr::ALL.map(|a| catalog.definition(a.id())),
+            max_absorption: catalog.definition("minecraft:max_absorption"),
         }
     }
+    /// `RangedAttribute.sanitizeValue` of `a`: NaN to the minimum, then into
+    /// the bounds.
+    pub fn sanitize(&self, a: Attr, value: f64) -> f64 {
+        sanitize(self.attrs[a as usize], value)
+    }
+    /// The saved base `base` of the attribute `id` as a load takes it
+    /// ([`crate::living_attributes::loaded_base`]): clamped into an [`Attr`]'s
+    /// bounds when a mod that widened them is gone.
+    pub fn loaded_base(&self, id: &str, base: f64) -> f64 {
+        Attr::ALL
+            .into_iter()
+            .find(|a| a.id() == id)
+            .and_then(|a| self.attrs[a as usize])
+            .map_or(base, |definition| {
+                crate::living_attributes::loaded_base(id, definition, base)
+            })
+    }
+    /// `RangedAttribute.sanitizeValue` of `max_absorption`.
+    pub fn sanitize_max_absorption(&self, value: f64) -> f64 {
+        sanitize(self.max_absorption, value)
+    }
+}
+fn sanitize(definition: Option<horizon_world::attributes::Definition>, value: f64) -> f64 {
+    definition.map_or(value, |definition| definition.sanitize(value))
 }
 /// `AttributeModifier.Operation`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -616,12 +652,7 @@ fn compute(m: &Mob, a: Attr, with_transient: bool, extra: &[(f64, Op)]) -> f64 {
             result *= 1.0 + amount;
         }
     }
-    let (lo, hi) = a.range();
-    if result.is_nan() {
-        lo
-    } else {
-        result.clamp(lo, hi)
-    }
+    m.kind.attribute_bounds.sanitize(a, result)
 }
 /// Copies the attribute values into the fields the game reads.
 fn refresh(m: &mut Mob, a: Attr) {
@@ -804,13 +835,20 @@ pub fn zombie_attributes(m: &mut Mob, special: f32, reason: Reason) {
 pub fn max_health(m: &Mob) -> f32 {
     value(m, Attr::MaxHealth) as f32
 }
+/// Whether the mob stores a base for `a`: `set_base` or a load made one.
+pub fn has_base(m: &Mob, a: Attr) -> bool {
+    m.extra
+        .attributes
+        .as_ref()
+        .is_some_and(|s| s.bases.iter().any(|(x, _)| *x == a))
+}
 /// `LivingEntity.onAttributeUpdated(MAX_HEALTH)` after a Health Boost
 /// change: the cached maximum follows the attribute model again, and Health
-/// above it is lowered (nothing is healed). Wolves write their maximum
-/// straight into the cache (`tame::set_tame`), outside the model, so they
-/// keep theirs.
+/// above it is lowered (nothing is healed). A wolf with no stored max health
+/// base keeps the cached maximum it was given outside the model; taming
+/// stores the base (`tame::set_tame`), so a tame wolf follows the model.
 pub fn health_boost_changed(m: &mut Mob) {
-    if m.species() == Species::Wolf {
+    if m.species() == Species::Wolf && !has_base(m, Attr::MaxHealth) {
         return;
     }
     refresh(m, Attr::MaxHealth);
@@ -979,21 +1017,15 @@ fn age_boundary_reached(m: &mut Mob, w: Option<&MobWorld<'_>>) {
 /// `Goat.finalizeSpawn` on a natural spawn (the spawn path in spawning.rs): the ram
 /// cooldowns (`GoatAi.initMemories`), screaming 2 percent of the time and a
 /// horn lost 10 percent of the time, adults only.
-pub fn goat_spawn(m: &mut Mob) {
-    let jump = m
-        .random
-        .next_int_between_inclusive(600, 1200)
-        .unwrap_or(600);
+pub fn goat_spawn(m: &mut Mob, r: &mut impl RandomSource) {
+    let jump = r.next_int_between_inclusive(600, 1200).unwrap_or(600);
     set_memory(m, "long_jump_cooling_down", i64::from(jump), i64::MAX);
-    let ram = m
-        .random
-        .next_int_between_inclusive(600, 6000)
-        .unwrap_or(600);
+    let ram = r.next_int_between_inclusive(600, 6000).unwrap_or(600);
     set_memory(m, "ram_cooldown_ticks", i64::from(ram), i64::MAX);
-    m.extra.screaming = m.random.next_double() < 0.02;
+    m.extra.screaming = r.next_double() < 0.02;
     age_boundary_reached(m, None);
-    if !m.is_baby() && m.random.next_float() < 0.1 {
-        let left = m.random.next_boolean();
+    if !m.is_baby() && r.next_float() < 0.1 {
+        let left = r.next_boolean();
         m.extra.lost_horns[usize::from(!left)] = true;
     }
 }
@@ -1005,7 +1037,8 @@ pub fn spawn_egg_is_for(egg: &str, kind: &str) -> bool {
 
 /// `SpawnEggItem.spawnOffspringFromSpawnEgg`: the offspring of a spawn egg
 /// used on a mob of the same kind is a baby of that kind: it starts with
-/// the age of a baby and keeps the parent's variant and colour.
+/// the age of a baby and takes the variant and colour it is given (the
+/// parent's, but a mooshroom's colour rolled by `MushroomCow.getOffspringVariant`).
 pub fn spawn_egg_offspring(child: &mut Mob, species: Species, variant: u8, color: u8) {
     set_baby(child, true);
     child.extra.variant = variant;
@@ -1825,7 +1858,7 @@ impl<L: FinalizeLevel + ?Sized, R: RandomSource> Ctx<'_, L, R> {
     }
     fn villager_type(&mut self, m: &mut Mob) {
         let at = block(m);
-        m.extra.variant = villager_type(&self.level.biome(at));
+        m.extra.variant = self.level.mob_maps().villager_type(&self.level.biome(at));
     }
     /// `VariantUtils.selectVariantToSpawn` into `variant`, by registry name.
     fn variant(&mut self, m: &mut Mob, registry: fn(&SpawnRegistries) -> &VariantRegistry) {
@@ -1925,18 +1958,11 @@ impl<L: FinalizeLevel + ?Sized, R: RandomSource> Ctx<'_, L, R> {
             }
             S::Rabbit => {
                 let at = block(m);
-                let roll = self.int(100);
-                let mut variant = if self.level.biome_tag("minecraft:spawns_white_rabbits", at) {
-                    if roll < 80 { 1 } else { 3 }
-                } else if self.level.biome_tag("minecraft:spawns_gold_rabbits", at) {
-                    4
-                } else if roll < 50 {
-                    0
-                } else if roll < 90 {
-                    5
-                } else {
-                    2
-                };
+                let mut variant = super::rabbit::random_variant(
+                    self.level.biome_tag("minecraft:spawns_white_rabbits", at),
+                    self.level.biome_tag("minecraft:spawns_gold_rabbits", at),
+                    self.random,
+                );
                 let g = match g {
                     Some(Group::Rabbit(a, v)) => {
                         variant = v;
@@ -2437,30 +2463,90 @@ pub fn variant_name(s: Species, index: u8) -> &'static str {
             .unwrap_or("temperate"),
     }
 }
-/// `VillagerType.byBiome` (index into `render::VILLAGER_TYPES`: plains,
-/// desert, jungle, savanna, snow, swamp, taiga).
+/// `VillagerType.BY_BIOME` (index into `render::VILLAGER_TYPES`: plains,
+/// desert, jungle, savanna, snow, swamp, taiga); other biomes are plains.
+pub const BIOME_VILLAGER_TYPES: &[(&str, u8)] = &[
+    ("badlands", 1),
+    ("desert", 1),
+    ("eroded_badlands", 1),
+    ("wooded_badlands", 1),
+    ("bamboo_jungle", 2),
+    ("jungle", 2),
+    ("sparse_jungle", 2),
+    ("savanna_plateau", 3),
+    ("savanna", 3),
+    ("windswept_savanna", 3),
+    ("deep_frozen_ocean", 4),
+    ("frozen_ocean", 4),
+    ("frozen_river", 4),
+    ("ice_spikes", 4),
+    ("snowy_beach", 4),
+    ("snowy_taiga", 4),
+    ("snowy_plains", 4),
+    ("grove", 4),
+    ("snowy_slopes", 4),
+    ("frozen_peaks", 4),
+    ("jagged_peaks", 4),
+    ("swamp", 5),
+    ("mangrove_swamp", 5),
+    ("old_growth_spruce_taiga", 6),
+    ("old_growth_pine_taiga", 6),
+    ("windswept_gravelly_hills", 6),
+    ("windswept_hills", 6),
+    ("taiga", 6),
+    ("windswept_forest", 6),
+];
+/// `VillagerType.byBiome` over vanilla's table.
 pub fn villager_type(biome: &str) -> u8 {
-    match biome.strip_prefix("minecraft:").unwrap_or(biome) {
-        "badlands" | "desert" | "eroded_badlands" | "wooded_badlands" => 1,
-        "bamboo_jungle" | "jungle" | "sparse_jungle" => 2,
-        "savanna_plateau" | "savanna" | "windswept_savanna" => 3,
-        "deep_frozen_ocean" | "frozen_ocean" | "frozen_river" | "ice_spikes" | "snowy_beach"
-        | "snowy_taiga" | "snowy_plains" | "grove" | "snowy_slopes" | "frozen_peaks"
-        | "jagged_peaks" => 4,
-        "swamp" | "mangrove_swamp" => 5,
-        "old_growth_spruce_taiga"
-        | "old_growth_pine_taiga"
-        | "windswept_gravelly_hills"
-        | "windswept_hills"
-        | "taiga"
-        | "windswept_forest" => 6,
-        _ => 0,
-    }
+    let biome = biome.strip_prefix("minecraft:").unwrap_or(biome);
+    BIOME_VILLAGER_TYPES
+        .iter()
+        .find(|(b, _)| *b == biome)
+        .map_or(0, |(_, t)| *t)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A mob's own attribute record sanitizes with the definitions of the
+    /// catalog its type loaded with, not with copies of vanilla's bounds:
+    /// 26.3's catalog keeps `max_health` at 1..1024 and `knockback_resistance`
+    /// at -2..1, and a catalog with wider bounds keeps more.
+    #[test]
+    fn a_mobs_attributes_take_the_bounds_of_the_types_catalog() {
+        use horizon_world::attributes::entity::Catalog;
+        let bits = |v: f64| format!("{:016x}", v.to_bits());
+        let catalog = |max_health: f64| {
+            Catalog::from_json(&serde_json::json!({
+                "data_version": horizon_world::DATA_VERSION,
+                "attributes": [
+                    {"id": "minecraft:max_health", "default": bits(20.0), "min": bits(1.0), "max": bits(max_health), "syncable": true},
+                    {"id": "minecraft:knockback_resistance", "default": bits(0.0), "min": bits(-2.0), "max": bits(1.0), "syncable": true},
+                ],
+                "entities": {},
+            }))
+            .unwrap()
+        };
+        let mob = |catalog: &Catalog| {
+            let mut kind = (*crate::mobs::sensor_scan_tests::kind()).clone();
+            kind.attribute_bounds = AttrBounds::of(catalog);
+            let mut m = Mob::new(1, Arc::new(kind), horizon_core::geometry::Vec3::ZERO, 0.0);
+            set_base(&mut m, Attr::MaxHealth, 5000.0);
+            set_base(&mut m, Attr::KnockbackResistance, -1.5);
+            m
+        };
+        let vanilla = mob(&catalog(1024.0));
+        assert_eq!(value(&vanilla, Attr::MaxHealth), 1024.0);
+        assert_eq!(vanilla.attrs.max_health, 1024.0);
+        assert_eq!(value(&vanilla, Attr::KnockbackResistance), -1.5);
+        let mut nan = mob(&catalog(1024.0));
+        set_base(&mut nan, Attr::MaxHealth, f64::NAN);
+        assert_eq!(value(&nan, Attr::MaxHealth), 1.0, "NaN is the minimum");
+        let wide = mob(&catalog(1e6));
+        assert_eq!(value(&wide, Attr::MaxHealth), 5000.0);
+        assert_eq!(wide.attrs.max_health, 5000.0);
+    }
 
     #[test]
     fn panda_genes_follow_the_vanilla_table() {

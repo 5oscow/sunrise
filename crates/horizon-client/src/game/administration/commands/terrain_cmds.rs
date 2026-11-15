@@ -81,7 +81,7 @@ fn ticks_to_seconds(ticks: i64) -> String {
 /// double `5.9999968E7` (the value `setSize` compares against too), and a `%s`
 /// substitution prints a double with `Double.toString`.
 fn size_limit_text() -> String {
-    horizon_client::java_text::double_to_string(MAX_SIZE)
+    horizon_core::java_number::double_to_string(MAX_SIZE)
 }
 
 impl Game<'_> {
@@ -330,6 +330,9 @@ impl Game<'_> {
     /// (`minecraft:plains`), as `/fillbiome` does for one cell: the chunk is saved, re-meshed and
     /// resent. False for an unknown biome, an unloaded or out-of-height position, or a cell that
     /// already has it.
+    /// Tentative reads see the new cells inside a transaction. Abort restores the cells
+    /// without publishing. Saving, remeshing and resending wait for the outermost commit,
+    /// once per column. Outside a transaction they run immediately.
     pub(in crate::game) fn set_biome_at(&mut self, pos: [i32; 3], biome: &str) -> bool {
         let Some(target) = world_biomes!(self)
             .list
@@ -347,13 +350,15 @@ impl Game<'_> {
         {
             return false;
         }
+        let old = chunk.biome(pos[0], pos[1], pos[2]);
+        self.journal_biome(pos, old);
         let qy =
             ((pos[1] - self.world.bottom_y()) >> 2).clamp(0, self.world.layout().height() / 4 - 1);
         if let Some(chunk) = self.world.chunks.get_mut(&key) {
             let chunk = std::sync::Arc::make_mut(chunk);
             chunk.set_biome_cell((pos[0] & 15) >> 2, qy, (pos[2] & 15) >> 2, target as u16);
         }
-        self.commit_biome_columns(&std::collections::HashSet::from([key]), &[key]);
+        self.after_commit(super::super::transactions::After::Biome(key));
         true
     }
 
@@ -425,8 +430,8 @@ impl Game<'_> {
             _ => 0.0,
         };
         let time = match ctx.get("time") {
-            Some(Arg::Int(t)) => i64::from(*t),
-            _ => 0,
+            Some(Arg::Int(t)) => Some(i64::from(*t)),
+            _ => None,
         };
         match id {
             "worldborder.get" => {
@@ -439,10 +444,15 @@ impl Game<'_> {
             }
             "worldborder.set" | "worldborder.add" => {
                 let current = self.border.size();
-                let distance = if id == "worldborder.add" {
-                    current + double
-                } else {
-                    double
+                // `add` measures from the size the border has now and, given a
+                // time, keeps a change in flight going for its remaining ticks
+                // plus the argument (`getLerpTime() + time`); `set` replaces it.
+                let (distance, ticks) = match (id, time) {
+                    ("worldborder.add", Some(t)) => {
+                        (current + double, self.border.remaining_ticks() + t)
+                    }
+                    ("worldborder.add", None) => (current + double, 0),
+                    (_, t) => (double, t.unwrap_or(0)),
                 };
                 if current == distance {
                     return Err(err("commands.worldborder.set.failed.nochange", &[]));
@@ -457,8 +467,8 @@ impl Game<'_> {
                     ));
                 }
                 let shown = Text::literal(super::percent_f(distance, 1));
-                if time > 0 {
-                    self.border.lerp_to(distance, time);
+                if ticks > 0 {
+                    self.border.lerp_to(distance, ticks);
                     let key = if distance > current {
                         "commands.worldborder.set.grow"
                     } else {
@@ -466,7 +476,7 @@ impl Game<'_> {
                     };
                     self.feedback(Text::translate(
                         key,
-                        &[shown, Text::literal(ticks_to_seconds(time))],
+                        &[shown, Text::literal(ticks_to_seconds(ticks))],
                     ));
                 } else {
                     self.border.set_size(distance);
@@ -1010,7 +1020,7 @@ mod loot_mine_component_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and scratch homes/cwd"]
+    #[ignore = "daily"]
     fn loot_mine_copies_actual_empty_and_right_pot_components_into_the_chest() {
         let root = std::path::PathBuf::from(
             std::env::var_os("HORIZON_TEST_RESOURCES").expect("prepared resources required"),
@@ -1194,7 +1204,7 @@ mod loot_mine_component_tests {
         );
     }
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and scratch homes/cwd"]
+    #[ignore = "daily"]
     fn loot_mine_uses_the_actual_stand_or_server_executor_presence() {
         let root = std::path::PathBuf::from(
             std::env::var_os("HORIZON_TEST_RESOURCES").expect("prepared resources required"),
@@ -1318,7 +1328,7 @@ mod loot_position_tests {
     use crate::game::{Audio, Game, Options, Progress, Settings, load_resources};
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn actual_loot_replacement_retains_the_emitted_zero_slot() {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
@@ -1428,7 +1438,7 @@ mod loot_kill_target_tests {
     use horizon_client::{chunk::Chunk, containers::BlockEntity};
     use std::sync::Arc;
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and scratch homes/cwd"]
+    #[ignore = "daily"]
     fn loot_kill_uses_actual_sheep_state_without_killing_the_target() {
         let root = std::path::PathBuf::from(
             std::env::var_os("HORIZON_TEST_RESOURCES").expect("prepared resources required"),
@@ -1547,7 +1557,7 @@ mod loot_mine_location_tests {
     use std::sync::Arc;
     const TABLE: &str = r###"{"type":"minecraft:block","pools":[{"rolls":1,"entries":[{"type":"minecraft:item","name":"minecraft:emerald","modifier":{"type":"minecraft:set_count","count":2}}]},{"rolls":1,"condition":{"type":"minecraft:location_check","offsetX":1,"predicate":{"block":{"blocks":"minecraft:oak_log","state":{"axis":"x"}}}},"entries":[{"type":"minecraft:item","name":"minecraft:diamond"}]}]}"###;
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and scratch homes/cwd"]
+    #[ignore = "daily"]
     fn loot_mine_location_reads_actual_offset_block_state() {
         crate::game::native_entity_refs::tests::with_game(|game| {
             game.options.game_dir = Some(
@@ -1604,12 +1614,7 @@ mod loot_mine_location_tests {
             .unwrap();
             let stack = game.reload_datapacks(false, &[]).unwrap();
             game.world_tables = game
-                .build_world_tables(
-                    &stack,
-                    false,
-                    &game.options.resources.clone(),
-                    game.mods.data_switched,
-                )
+                .stage_world_tables(&stack, false, &game.options.resources.clone())
                 .unwrap()
                 .0;
             assert!(game.world_tables.is_some());

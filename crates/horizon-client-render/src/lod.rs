@@ -9,6 +9,7 @@ use crate::{
 };
 pub mod bake;
 pub mod cache;
+mod detail;
 mod kept;
 mod mesh;
 pub mod packed;
@@ -2388,13 +2389,6 @@ impl Lod {
             self.shared.mesh_wake.notify_all();
         }
     }
-    /// Reduced far detail (`graphics::FarDetail::Reduced`): the next update
-    /// replans when it changes, and tiles sampled from then on approximate
-    /// wide cells (`GeneratorWorker::lod_grid`).
-    pub fn set_reduced_detail(&mut self, reduced: bool) {
-        self.reduced_detail = reduced;
-        self.shared.approximate.store(reduced, Ordering::Relaxed);
-    }
     fn held(&self) -> bool {
         self.small && self.near_loading
     }
@@ -4272,7 +4266,7 @@ mod tests {
         assert!(resampled_over(&ready, &FxHashSet::default(), (40, 40)).is_empty());
     }
     #[test]
-    #[ignore = "requires prepared models/textures in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn slab_materials_survive_chunk_summaries_and_draw_far_faces() -> crate::Result<()> {
         use crate::{assets::Assets, biome::Biomes, light::LightTables, mesher::MeshTables};
         let root = std::path::PathBuf::from(
@@ -4342,7 +4336,7 @@ mod tests {
         Ok(())
     }
     #[test]
-    #[ignore = "requires prepared models/textures in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn real_mesh_clips_near_chunks_and_preserves_water_and_edited_surfaces() -> crate::Result<()> {
         use crate::{
             assets::Assets, biome::Biomes, light::LightTables, mesher::MeshTables,
@@ -5717,7 +5711,7 @@ mod tests {
         }
     }
     #[test]
-    #[ignore = "requires prepared models/textures in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn chunks_a_server_dropped_stay_drawn_as_far_terrain() -> crate::Result<()> {
         let mut far = ServerLod::new("lod-dropped")?;
         // A server's view distance of 10 (it sends a ring more), drawn to a
@@ -5761,7 +5755,7 @@ mod tests {
         Ok(())
     }
     #[test]
-    #[ignore = "requires prepared models/textures in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn far_cells_sampled_before_their_chunks_were_kept_fill_in() -> crate::Result<()> {
         let mut far = ServerLod::new("lod-late")?;
         // Seen from 5000 blocks: cells of 32 blocks and wider over them.
@@ -5852,7 +5846,7 @@ mod tests {
         }
     }
     #[test]
-    #[ignore = "requires prepared models/textures in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn coarser_stand_ins_keep_the_ring_past_the_near_chunks_drawn() -> crate::Result<()> {
         let arrived = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let mut far = ServerLod::with("lod-waiting", |_| {
@@ -6016,5 +6010,35 @@ mod tests {
         lod.finish_observed((1, 1), ReducedColumns::new(columns));
         assert!(lod.stale.contains(&key));
         assert_eq!(queued(&mut lod), [key]);
+    }
+
+    #[test]
+    fn changing_far_detail_samples_tiles_again() {
+        for level in [0, 1, 2, 3, 5] {
+            let mut lod = Lod::scheduler_for_test();
+            let key = TileKey { x: 0, z: 0, level };
+            lod.plan.nodes.insert(key);
+            lod.active.insert(key);
+            lod.ready.insert(key, Arc::new(samples(70)));
+            assert!(
+                queued(&mut lod).is_empty(),
+                "level {level}: sampled tile is not asked again"
+            );
+            lod.set_reduced_detail(true);
+            assert!(
+                lod.ready.contains_key(&key),
+                "level {level}: old samples stay"
+            );
+            assert_eq!(queued(&mut lod), [key], "level {level}: not sampled again");
+            lod.finish_sample(key, samples(70));
+            lod.set_reduced_detail(true);
+            assert!(queued(&mut lod).is_empty(), "level {level}: same value");
+            lod.set_reduced_detail(false);
+            assert_eq!(
+                queued(&mut lod),
+                [key],
+                "level {level}: not sampled again on the way back"
+            );
+        }
     }
 }

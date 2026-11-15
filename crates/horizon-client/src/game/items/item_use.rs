@@ -112,7 +112,10 @@ impl Game<'_> {
         };
         self.using = Some((self.held_slot(), 0));
         self.use_duration = duration;
-        self.use_ticks_set = ticks_set;
+        self.use_start = super::using_item::UseStart {
+            ticks_set,
+            item: Some(stack.clone()),
+        };
         // `LivingEntity.startUsingItem`: `causeUseVibration(ITEM_INTERACT_START)`
         // when the use effects of the stack ask for interaction vibrations.
         self.use_vibration(&stack, "minecraft:item_interact_start");
@@ -275,8 +278,8 @@ impl Game<'_> {
         let (mut remaining, mut canceled) = (before, false);
         let hand = self.used_hand().unwrap_or(self.hand);
         self.native_living_entity_use_item_tick(stack, None, hand, &mut remaining, &mut canceled);
-        let (left, set) = tick_left(before, remaining, canceled, self.use_ticks_set);
-        self.use_ticks_set = set;
+        let (left, set) = tick_left(before, remaining, canceled, self.use_start.ticks_set);
+        self.use_start.ticks_set = set;
         self.use_duration = duration_leaving(ticks, left);
         left > 0 || !set
     }
@@ -336,9 +339,15 @@ impl Game<'_> {
                 return false;
             };
             let Some(stack) = game.stack_in(slot).cloned() else {
+                game.use_start.item = None;
                 return true;
             };
-            let hand_changed = game.use_hand_changed(slot);
+            // `releaseUsing` only for the same item; `stopUsingItem` always,
+            // from the stack the use began with.
+            let (stack, hand_changed) = match game.use_start.item.take() {
+                Some(item) if item.item != stack.item => (item, true),
+                _ => (stack, game.use_hand_changed(slot)),
+            };
             let player = (!mod_api::__private::mods().is_empty()).then(|| {
                 let name = game.acting_player_name().to_owned();
                 (game.native_acting_id(), name)
@@ -665,7 +674,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "daily"]
     fn patched_bow_keeps_vanilla_animation_without_listener() {
         super::super::native_entity_refs::tests::with_client_game(|game| {
             use UseAnimation::*;
@@ -702,7 +711,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "daily"]
     fn item_animation_dispatches_vanilla_parts_and_refuses_invalid_spears() {
         use mod_api::{ClientHost, Hooks, ItemPart, ModEntry, Mods, Registrar, UseAnimationEvent};
         use std::sync::{
@@ -881,7 +890,7 @@ mod tests {
     /// hand out. The pose the mod sets moves vanilla's hand, not what it
     /// drew. The empty off hand is asked too.
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "daily"]
     fn a_mod_draws_in_a_hand_that_holds_an_item() {
         use mod_api::{ClientHost, Flow, Hand, Hooks, ModEntry, Mods, RenderHandEvent};
         use std::sync::{
@@ -1241,7 +1250,7 @@ pub(super) mod interact_vibration_tests {
     /// finish the same way, which Horizon already did, so a use is a pair of
     /// vibrations and an item that turns them off is neither.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_use_start_is_an_item_interact_start_vibration() {
         let bow = || ItemStack::new("minecraft:bow", 1);
         let Some(lines) = with_game("minecraft:bow", |game| {
@@ -1269,7 +1278,7 @@ pub(super) mod interact_vibration_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources and an isolated process for native mods"]
+    #[ignore = "daily"]
     fn cake_context_uses_can_eat_instead_of_raw_hunger() {
         use mod_api::{CanEatEvent, Hooks};
         use std::sync::{
@@ -1404,7 +1413,7 @@ pub(super) mod interact_vibration_tests {
     /// casts, is drawn cast while its hook is out, and reels in. Another item
     /// is not a rod.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_content_mods_rod_casts_and_reels_in() {
         let Some(_) = with_game("minecraft:stick", |game| {
             // A world with a data pack has tables of its own, which take the mod's item.
@@ -1431,11 +1440,9 @@ pub(super) mod interact_vibration_tests {
             game.world_root = dir.clone();
             let stack = game.reload_datapacks(false, &[]).unwrap();
             let root = game.options.resources.clone();
-            game.world_tables = game
-                .build_world_tables(&stack, false, &root, game.mods.data_switched)
-                .unwrap()
-                .0;
-            let items = &mut game.world_tables.as_mut().unwrap().items.items;
+            game.world_tables = game.stage_world_tables(&stack, false, &root).unwrap().0;
+            let items =
+                &mut std::sync::Arc::make_mut(&mut game.world_tables.as_mut().unwrap().items).items;
             let mut info = items["minecraft:fishing_rod"].clone();
             info.id = std::sync::Arc::from("ruby:rod");
             info.template = Some(std::sync::Arc::from("minecraft:fishing_rod"));
@@ -1445,7 +1452,8 @@ pub(super) mod interact_vibration_tests {
             );
             items.insert(info.id.clone(), info);
 
-            let items = &mut game.world_tables.as_mut().unwrap().items.items;
+            let items =
+                &mut std::sync::Arc::make_mut(&mut game.world_tables.as_mut().unwrap().items).items;
             let mut stick_info = items["minecraft:stick"].clone();
             stick_info.id = std::sync::Arc::from("ruby:stick");
             stick_info.template = Some(std::sync::Arc::from("minecraft:stick"));
@@ -1486,7 +1494,7 @@ pub(super) mod interact_vibration_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn fishing_cast_and_reel_post_player_vibrations() {
         use horizon_client::mobs::Who;
         let Some(_) = with_game("minecraft:fishing_rod", |game| {
@@ -1547,7 +1555,7 @@ pub(super) mod interact_vibration_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn thrown_eye_posts_projectile_shoot_at_eye_from_player() {
         use horizon_client::mobs::Who;
         let Some(_) = with_game("minecraft:ender_eye", |game| {

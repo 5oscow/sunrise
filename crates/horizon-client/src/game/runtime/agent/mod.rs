@@ -706,6 +706,9 @@ impl Game<'_> {
             Mode::MissingBiomeRegions { world, missing } => {
                 json!({ "mode": "missing-biome-regions", "folder": world.folder, "name": world.name, "missing": missing.iter().map(|(owner, region)| json!({ "mod": owner, "region": region })).collect::<Vec<_>>() })
             }
+            Mode::MissingMods { world, missing } => {
+                json!({ "mode": "missing-mods", "folder": world.folder, "name": world.name, "missing": missing.iter().map(|m| json!({ "mod": m.id, "saved_version": m.saved_version, "code": m.code, "content": m.content, "blocks": m.blocks })).collect::<Vec<_>>() })
+            }
             Mode::Recover { world, issues } => {
                 let issue = |i: &Option<horizon_client::save::DatIssue>| match i {
                     None => json!(null),
@@ -723,7 +726,7 @@ impl Game<'_> {
             Mode::Multiplayer(horizon_client::multiplayer::Screen::Disconnected {
                 reason, ..
             }) => {
-                json!({ "mode": "multiplayer", "disconnected": reason })
+                json!({ "mode": "multiplayer", "disconnected": reason.plain() })
             }
             Mode::Multiplayer(_) => json!({ "mode": "multiplayer" }),
             Mode::Realms(_) => json!({ "mode": "realms" }),
@@ -2392,7 +2395,7 @@ mod tests {
     use super::*;
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and scratch homes"]
+    #[ignore = "daily"]
     fn region_adoption_agent_state_reports_the_actual_title_mode() {
         crate::game::native_entity_refs::tests::with_game(|game| {
             use horizon_client::title::{Mode, Title, list_worlds};

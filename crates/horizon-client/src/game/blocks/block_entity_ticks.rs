@@ -16,6 +16,16 @@ use horizon_client::{
 use horizon_core::position::BlockPos;
 use horizon_world::registry::BlockStateId;
 
+/// Shared decision for a borrowed position read and an owned tick-phase snapshot.
+fn block_ticking_at(
+    levels: &horizon_client::ticket_levels::Levels,
+    pending: &horizon_client::fast_hash::FxHashSet<(i32, i32)>,
+    x: i32,
+    z: i32,
+) -> bool {
+    levels.block_ticking_at(x, z) && !pending.contains(&(x >> 4, z >> 4))
+}
+
 /// What `block_entities.tick` is visiting: the kinds its dispatch ticks, read once per entry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TickedKind {
@@ -600,14 +610,12 @@ impl Game<'_> {
     /// (`ServerLevel.areEntitiesLoaded`).
     pub(super) fn block_ticking_area(&self) -> impl Fn(i32, i32) -> bool + use<> {
         let levels = self.tickets.levels();
-        let has_pending = !self.world.entities_pending.is_empty();
-        let pending = has_pending.then(|| self.world.entities_pending.clone());
-        move |x, z| {
-            levels.block_ticking_at(x, z)
-                && pending
-                    .as_ref()
-                    .is_none_or(|p| !p.contains(&(x >> 4, z >> 4)))
-        }
+        let pending = self.world.entities_pending.clone();
+        move |x, z| block_ticking_at(&levels, &pending, x, z)
+    }
+    /// Single-position read without copying the pending-entity set.
+    pub(super) fn block_ticking_at(&self, x: i32, z: i32) -> bool {
+        block_ticking_at(&self.tickets.levels(), &self.world.entities_pending, x, z)
     }
     /// `DaylightDetectorBlock.tickEntity` of the detector at `pos`.
     fn tick_daylight_detector(&mut self, pos: Pos) {
@@ -800,7 +808,7 @@ mod jukebox_stop_tests {
     /// vibration only when the block itself was broken, so pulling the disc out
     /// was silent to a sculk sensor beside it.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_jukebox_that_stops_tells_the_listeners() {
         let Some(lines) = with_jukebox(|game, disc| {
             assert!(
@@ -906,7 +914,7 @@ mod add_blocks_tests {
     use std::sync::{Arc, OnceLock};
 
     #[test]
-    #[ignore = "needs prepared resources; isolates process-wide registries"]
+    #[ignore = "daily"]
     fn vanilla_template_membership_creates_ticks_and_saves() {
         const FLAG: &str = "HORIZON_ADD_BLOCKS_CASE";
         const BLOCK: &str = "add_blocks_test:vault";
@@ -1074,11 +1082,12 @@ mod add_blocks_tests {
                     panic!("must create vanilla vault")
                 };
                 assert_eq!(vault.state_updating_resumes_at, 120);
-                let tag = horizon_client::save::encode_block_entity((1, 64, 1), entity, BLOCK);
+                let tag =
+                    horizon_client::save::block_entity_encode::encode((1, 64, 1), entity, BLOCK);
                 let (_, restored) =
                     horizon_client::save::decode_block_entity_for_block(&tag, BLOCK).unwrap();
                 assert_eq!(
-                    horizon_client::save::encode_block_entity((1, 64, 1), &restored, BLOCK),
+                    horizon_client::save::block_entity_encode::encode((1, 64, 1), &restored, BLOCK),
                     tag
                 );
                 let BlockEntity::Vault(restored) = restored else {
@@ -1129,7 +1138,7 @@ mod furnace_changed_tests {
     /// that completes while the furnace stays LIT changes the output and the
     /// input without changing the block state, so nothing else marks it.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_finished_smelt_marks_the_chunk() {
         let mut game_resources = None;
         let mut game = server_game(&mut game_resources);
@@ -1177,7 +1186,7 @@ mod furnace_changed_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_refuel_while_lit_marks_the_chunk() {
         // litTimeRemaining goes 1 -> 0 and the furnace takes new fuel in the
         // same tick: it stays LIT, and consuming the fuel sets changed.
@@ -1260,7 +1269,7 @@ mod slot_guard_tests {
 
     /// Each call of a slot, before and after an entry, runs inside its mod's guard.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_slot_is_entered_as_its_mod_before_and_after_an_entry() {
         let mut game_resources = None;
         let mut game = server_game(&mut game_resources);
@@ -1368,7 +1377,7 @@ mod slot_mutation_tests {
     /// A slot that removes the entity it is asked about and answers Continue: it does not tick,
     /// and no `after` is called for it; the next one ticks.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_removed_current_entity_does_not_tick() {
         with_blocks(
             &[(A, "minecraft:hopper"), (B, "minecraft:hopper")],
@@ -1386,7 +1395,7 @@ mod slot_mutation_tests {
     /// A slot that puts another kind of block entity in the visited one's place: the old kind's
     /// tick is not run on it, and no `after` is called for it.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_replaced_current_entity_of_another_kind_does_not_tick() {
         with_blocks(
             &[(A, "minecraft:hopper"), (B, "minecraft:hopper")],
@@ -1411,7 +1420,7 @@ mod slot_mutation_tests {
     /// One a slot adds is not visited in this pass (the pass's list was taken when it started)
     /// and is from the next.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn an_added_entity_ticks_from_the_next_pass() {
         with_blocks(
             &[(A, "minecraft:hopper"), (B, "minecraft:hopper")],
@@ -1432,7 +1441,7 @@ mod slot_mutation_tests {
     /// then the enclosing pass goes on with its own scratch. Its later hopper takes an item, and
     /// its spawner list holds the spawner once, as its own pass ticked it.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_nested_pass_leaves_the_enclosing_pass_its_scratch() {
         with_blocks(
             &[
@@ -1466,7 +1475,7 @@ mod slot_mutation_tests {
     /// A slot that catches a nested pass's panic and goes on: the enclosing pass still has its own
     /// scratch, so the spawner it ticked is listed once and its later hopper takes an item.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_caught_nested_panic_leaves_the_enclosing_pass_its_scratch() {
         struct Boom;
         impl BlockEntityTickSlot for Boom {
@@ -1673,7 +1682,7 @@ mod own_block_entity_tests {
     /// (B made its type valid there): each mod's slot is asked about all of them and counts only
     /// its own entities, whatever block they stand on. An id with no type counts nothing.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES; runs in an isolated scratch process"]
+    #[ignore = "daily"]
     fn each_slot_counts_only_its_own_mods_block_entities() {
         // The content root freezes the process's block entity types.
         if run_fresh_cases(
@@ -1719,7 +1728,7 @@ mod own_block_entity_tests {
     /// valid on, beside each mod's own block and a detector with its vanilla block entity: mod B's
     /// slot counts it, mod A's doesn't, and it ticks as B's. Neither counts the vanilla detector.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES; runs in an isolated scratch process"]
+    #[ignore = "daily"]
     fn a_mods_block_entity_on_a_vanilla_block_is_only_its_own_mods() {
         // The content root freezes the process's block entity types.
         if run_fresh_cases(
@@ -1837,7 +1846,7 @@ mod own_block_entity_tests {
     /// A's type, though B's entity stands there), the replaced entity does not tick, as A's or at
     /// all, and no slot's `after` sees it. The next pass visits it as B's.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES; runs in an isolated scratch process"]
+    #[ignore = "daily"]
     fn an_entity_replaced_by_another_mods_type_does_not_tick_as_the_old_one() {
         // The content root freezes the process's block entity types.
         if run_fresh_cases(

@@ -4,7 +4,7 @@
 //! return to the owner, pickup) with `ThrownTridentRenderer`, and Channeling's
 //! lightning on a hit (`channeling.json`).
 use super::level_sounds::LevelSound;
-use super::{Game, view_vector};
+use super::{Game, commands::Target, minecarts::CartHit, view_vector};
 use horizon_client::{
     arrows::{Pickup, back_off, clip_block_hit},
     collisions::SceneCollisions,
@@ -221,6 +221,13 @@ impl ThrownTrident {
             last_state: None,
         }
     }
+    /// `Entity.noPhysics`, with the synced flag a client reads
+    /// (`AbstractArrow`'s entity-data flags, bit 1): the tracker sends them
+    /// again on the next tick.
+    pub(in crate::game) fn set_no_physics(&mut self, no_physics: bool) {
+        self.no_physics = no_physics;
+        self.needs_sync = true;
+    }
     /// `Entity.move(PISTON)`: the position only; `release_after_piston` follows
     /// (`AbstractArrow.move`).
     pub(super) fn move_by_piston(&mut self, movement: Vec3) {
@@ -272,6 +279,16 @@ impl ThrownTrident {
         let at = self.position;
         self.in_ground
             && scene.no_block_collision(Aabb::new(at, at).inflate(Vec3::new(0.06, 0.06, 0.06)))
+    }
+    /// `ThrownTrident.tickDespawn`: a Loyalty trident that can be picked up never
+    /// counts; any other adds one to `life` (`AbstractArrow.tickDespawn`) and
+    /// is discarded at 1200. True when it is discarded.
+    fn tick_despawn(&mut self) -> bool {
+        if self.loyalty > 0 && self.pickup == Pickup::Allowed {
+            return false;
+        }
+        self.life += 1;
+        self.life >= 1200
     }
     /// `AbstractArrow.startFalling`: unstick, scaling the velocity by three
     /// draws of `nextFloat() * 0.2F` in x, y, z order.
@@ -553,7 +570,8 @@ impl Game<'_> {
                 p.auto_spin_attack_item = spin_stack;
             }
             // `player.move(SELF, (0, 1.1999999, 0))` when on the ground: the lift
-            // stops at a ceiling.
+            // stops at a ceiling. A self move through the move gate (#2414);
+            // PR 1a records the movement unchanged.
             let lift = self
                 .player
                 .as_ref()
@@ -566,7 +584,17 @@ impl Game<'_> {
                     subject: None,
                 };
                 let up = Vec3::new(0.0, f64::from(1.1999999f32), 0.0);
-                let moved = scene.resolve(bounds, up, 0.0, true).unwrap_or(Vec3::ZERO);
+                let mut gate = horizon_client::move_gate::armed(
+                    &self.loop_context,
+                    self.player.as_ref().map_or(0, |p| p.entity_id as u32),
+                    "minecraft:player",
+                    horizon_world::entity_move::MoverType::SelfMovement,
+                    up,
+                );
+                let moved = horizon_client::move_gate::scene_resolve(
+                    &mut gate, &mut scene, bounds, up, 0.0, true,
+                )
+                .unwrap_or(Vec3::ZERO);
                 if let Some(p) = self.player.as_mut() {
                     p.position.y += moved.y;
                 }
@@ -708,7 +736,13 @@ impl Game<'_> {
     /// `ThrownTrident.onHitEntity` on the guest `conn`: the hurt runs as them and
     /// `ServerPlayer.hurtServer` refuses it when the `pvp` game rule or their
     /// teams forbid it (`canHarmPlayer`); the trident bounces off either way.
-    fn trident_hits_guest(&mut self, t: &ThrownTrident, conn: u32, damage: f32) {
+    fn trident_hits_guest(
+        &mut self,
+        t: &ThrownTrident,
+        conn: u32,
+        damage: f32,
+        attack: horizon_client::health::Attack,
+    ) {
         let Some(host) = self.lan.as_ref() else {
             return;
         };
@@ -722,11 +756,13 @@ impl Game<'_> {
         let shooter = self.player_attacker(t.guest);
         let from = [t.previous.x, t.previous.y, t.previous.z];
         self.guest_hit_by(conn, |g| {
-            g.combat.refuse_player_hit = refused;
-            g.combat.projectile_attacker = shooter;
-            g.mob_hits_player(damage, from, "minecraft:trident");
-            g.combat.refuse_player_hit = false;
-            g.combat.projectile_attacker = None;
+            g.with_attack(attack, |g| {
+                g.combat.refuse_player_hit = refused;
+                g.combat.projectile_attacker = shooter;
+                g.mob_hits_player(damage, from, "minecraft:trident");
+                g.combat.refuse_player_hit = false;
+                g.combat.projectile_attacker = None;
+            })
         });
     }
     /// The players tridents fly back to or land at: this game's player and the
@@ -920,9 +956,9 @@ impl Game<'_> {
             if t.in_ground {
                 // AbstractArrow.tick: `if (lastState != blockState && shouldFall())
                 // startFalling();` (`blockState` is the block at its position).
-                // Its `else tickDespawn()` counts `life` (`ThrownTrident.tickDespawn`:
-                // not for a Loyalty trident that can be picked up); the discard
-                // at 1200 has no counterpart here.
+                // Its `else tickDespawn()` counts `life` and discards at 1200
+                // (`ThrownTrident.tickDespawn`: not for a Loyalty trident that
+                // can be picked up).
                 let mut falls = false;
                 if !t.no_physics {
                     let rain = self.arrow_rain();
@@ -932,8 +968,10 @@ impl Game<'_> {
                 }
                 if falls {
                     t.start_falling();
-                } else if t.loyalty == 0 || t.pickup != Pickup::Allowed {
-                    t.life += 1;
+                } else if t.tick_despawn() {
+                    // `discard()`: gone for everything after, so no block
+                    // effects (`isAlive`) and no pickup this tick.
+                    continue;
                 }
                 t.in_ground_time += 1;
                 if !t.no_physics {
@@ -1081,15 +1119,25 @@ impl Game<'_> {
                             self.evaluate_weapon_damage(&t.stack, Some((attacker, id)), ctx, 8.0);
                         t.dealt_damage = true;
                         let mut hurt_at = None;
-                        let mut accepted_source = None;
                         let aim = self.attacker_aim(Some(Who::Player));
+                        let mut attack = self.attack_of(attacker as i32);
+                        attack.projectile = Some(t.id as i32);
+                        attack.projectile_is_arrow = true;
+                        Self::set_projectile_weapon(&mut attack, Some(&t.stack));
+                        let trident_source = DamageKind::Named(
+                            horizon_client::mobs::NamedDamage::registered(
+                                &self.health_resources.damage,
+                                "minecraft:trident",
+                            )
+                            .expect("registered vanilla trident damage"),
+                        );
                         if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
                             let from = Some([t.position.x, t.position.y, t.position.z]);
                             let hurt = m.damage_projectile(
-                                crate::game::entity::damage_level_of!(self),
+                                crate::game::entity::damage_level_of!(self, &attack),
                                 damage,
                                 Damage {
-                                    kind: DamageKind::Arrow,
+                                    kind: trident_source,
                                     attacker: Some(Who::Player),
                                     from,
                                     attacker_species: None,
@@ -1098,16 +1146,8 @@ impl Game<'_> {
                                 [t.velocity.x, t.velocity.z],
                             );
                             if hurt {
-                                if mod_api::__private::listened(mod_api::HookId::LootDrops)
-                                    && m.projectile_damage_committed
-                                {
-                                    accepted_source = m.last_damage;
-                                }
                                 hurt_at = Some([m.position.x, m.position.y, m.position.z]);
                             }
-                        }
-                        if let Some(source) = accepted_source {
-                            self.capture_projectile_weapon(id, source, Some(&t.stack));
                         }
                         self.thrower_dealt_absorbed(t.guest);
                         // ThrownTrident.onHitEntity on a boat or minecart:
@@ -1152,7 +1192,11 @@ impl Game<'_> {
                                     vanilla,
                                 )
                             {
-                                self.hurt_cart(i, damage, creative, false);
+                                // `damageSources().trident(this, owner)`: the trident is the
+                                // direct entity, so no piglin anger.
+                                let by = t.guest.map_or(Target::Player, Target::Guest);
+                                let hit = CartHit::attributed(Some(by));
+                                self.hurt_cart(i, damage, creative, false, hit);
                             }
                         } else {
                             // ItemFrame.hurtServer: the item comes out, or the frame breaks.
@@ -1160,7 +1204,7 @@ impl Game<'_> {
                         }
                         // ThrownTrident.onHitEntity on another player.
                         if let Some(conn) = self.trident_guest_conn(id) {
-                            self.trident_hits_guest(&t, conn, damage);
+                            self.trident_hits_guest(&t, conn, damage, attack);
                         }
                         // `minecraft:post_attack` of Channeling, on the victim.
                         if let Some(at) = hurt_at
@@ -1310,16 +1354,14 @@ impl Game<'_> {
                 if let Some(by) = catchers.iter().find(near)
                     && self.trident_taken(&t, by)
                 {
-                    // Its move this tick is filed before it goes.
-                    let (from, to) = (t.previous, t.position);
-                    self.entity_section_step(t.id, [from.x, from.y, from.z], [to.x, to.y, to.z]);
                     continue;
                 }
             }
+            let (id, from, to) = (t.id, t.previous, t.position);
             self.tridents.insert(i, t);
+            self.entity_section_step(id, [from.x, from.y, from.z], [to.x, to.y, to.z]);
             i += 1;
         }
-        self.entity_sections_stepped(super::entity_sections::Family::Tridents);
     }
     /// ThrownTridentRenderer.
     pub(super) fn trident_geometry(&self, camera: glam::DVec3, alpha: f64, out: &mut Vec<Vertex>) {
@@ -1494,6 +1536,44 @@ mod tests {
         up.velocity = Vec3::new(0.0, 0.5, 0.0);
         up.turn_towards_movement();
         assert_eq!(up.pitch, 17.999998);
+    }
+
+    /// `AbstractArrow.tickDespawn` through `ThrownTrident.tickDespawn`: the tick
+    /// that brings `life` to 1200 discards a stuck trident, one loaded past
+    /// 1200 goes on its first count, and a Loyalty trident that can be picked
+    /// up never counts.
+    #[test]
+    fn a_stuck_trident_is_discarded_when_life_reaches_1200() {
+        use horizon_client::arrows::Pickup;
+        let mut t = ThrownTrident::remote(1, Vec3::ZERO, 0.0, 0.0);
+        t.life = 1198;
+        assert!(!t.tick_despawn());
+        assert_eq!(t.life, 1199);
+        assert!(t.tick_despawn());
+        assert_eq!(t.life, 1200);
+        let mut loaded = ThrownTrident::remote(2, Vec3::ZERO, 0.0, 0.0);
+        loaded.life = 5000;
+        assert!(loaded.tick_despawn());
+        // Loyalty only exempts a trident that can be picked up.
+        let mut loyal = ThrownTrident::remote(3, Vec3::ZERO, 0.0, 0.0);
+        (loyal.loyalty, loyal.pickup, loyal.life) = (3, Pickup::Allowed, 1199);
+        assert!(!loyal.tick_despawn());
+        assert_eq!(loyal.life, 1199);
+        loyal.pickup = Pickup::CreativeOnly;
+        assert!(loyal.tick_despawn());
+        loyal.pickup = Pickup::Allowed;
+        loyal.loyalty = 0;
+        assert!(loyal.tick_despawn());
+    }
+
+    /// `AbstractArrow.startFalling` sets `life = 0`: a block removed under a
+    /// trident that was about to despawn starts the count over.
+    #[test]
+    fn a_trident_that_starts_falling_restarts_its_life() {
+        let mut t = ThrownTrident::remote(1, Vec3::ZERO, 0.0, 0.0);
+        (t.in_ground, t.life) = (true, 1199);
+        t.start_falling();
+        assert_eq!((t.in_ground, t.life), (false, 0));
     }
 
     /// A block registry with air and stone, for save round trips.
@@ -1685,7 +1765,7 @@ mod tests {
     /// A stack can reach its final durability point after use began. The release
     /// guard is independent of admission, and short charges still do nothing.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn trident_release_rechecks_stack_durability_after_charge() {
         use crate::game::{Audio, Options, PlayerMotion, Progress, Settings, load_resources};
         use horizon_core::nbt::Tag;

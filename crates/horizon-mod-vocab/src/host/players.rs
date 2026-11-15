@@ -24,6 +24,24 @@ pub trait PlayersServerHost {
     /// Create or retrieve a connectionless player for the level currently in place.
     #[access(WorldOnly)]
     fn fake_player(&mut self, level: LevelRef, uuid: u128, name: &str) -> Option<PlayerRef>;
+    /// Side: server.
+    /// The most players who may be on at once (`PlayerList.getMaxPlayers`,
+    /// `max-players`), as the server list shows it and logins are refused
+    /// beyond. None where no server is open to players (a client, or a server
+    /// nobody can join): the one reason there is none.
+    #[access(WorldOnly)]
+    fn server_max_players(&self) -> Option<u32>;
+    /// Side: server.
+    /// Sets the player limit from the next login and server list ping on
+    /// (Paper's `Server.setMaxPlayers`); players already on stay, even when
+    /// they are more than the new limit. `server.properties` is not changed,
+    /// so a restart goes back to its `max-players`. Writes nothing and refuses
+    /// with `PlayerLimitRefusal::NotOpen` where no server is open to players,
+    /// and with `TooHigh { maximum }` for a limit above `i32::MAX`, as vanilla
+    /// keeps the limit in an `int` (Paper's `setMaxPlayers` takes one). Zero is
+    /// taken: it lets nobody else on.
+    #[access(WorldOnly)]
+    fn server_set_max_players(&mut self, max_players: u32) -> Result<(), PlayerLimitRefusal>;
 }
 /// The client host's methods of the `players` area, implemented by the game and reached through [`crate::ClientHost`].
 #[horizon_mod_api_macros::host_area]
@@ -34,6 +52,48 @@ pub trait PlayersClientHost {
     /// clamped to -4..4; a spectator, or a value that is not a number, is left alone.
     #[access(WorldOnly)]
     fn push_player(&mut self, kick: [f32; 3]);
+    /// Side: client.
+    /// For a client mod: chooses the local player's hotbar slot, `slot` (0 to 8), as
+    /// `Inventory.setSelectedSlot` does for a number key. It sends nothing itself: the game
+    /// sends the carried-item packet at the next tick's start at the latest, and before the
+    /// packets of an attack, a use, an interact, a release, a drop and a continued block break
+    /// (not before a block break start). Refused above 8 with `OutOfRange`, without a client
+    /// world with `NoWorld`, and for a spectator with `Refused` (its number keys open the
+    /// spectator menu), leaving the selection as it was.
+    #[access(WorldOnly)]
+    fn select_hotbar_slot(&mut self, slot: u8) -> Result<(), HotbarSlotError>;
+    /// Side: client.
+    /// For a client mod: the local player's collision exclusions, the client half of
+    /// `EntityRef::set_collision_exclusions`, with the same boxes, rules and refusals (a client
+    /// with no player of its own answers `Stale`). The client moves its player itself, so a mod
+    /// sets the same boxes on both sides: the engine sends neither set to the other.
+    #[access(WorldOnly)]
+    fn set_collision_exclusions(
+        &mut self,
+        boxes: &[[f64; 6]],
+    ) -> Result<(), CollisionExclusionsError>;
+    /// Moves the window's player through `passage` (#3775), one its server told it of, as
+    /// Immersive Portals' client does: its feet, where it was a tick ago (so the frames
+    /// between two ticks do not jump), its velocity and its look come out at the far side,
+    /// turned with the passage, and the server is told the passage and where the feet were.
+    /// Nothing else of the player changes: on ground, fall distance, sprinting, what it
+    /// uses. The server checks the move to there as any move, then answers with a position
+    /// packet that changes nothing (all relative and zero), so the player keeps its velocity;
+    /// as any position packet does, it stops mining (a passage crossed while mining aborts
+    /// the dig). A refused crossing puts the player back where the server has it
+    /// ([`Self::last_passage_refusal`] says why). One crossing at a time: the next waits
+    /// for the server's answer. Refused, with nothing moved or sent, when not connected to
+    /// a server, with no player, while riding, for a passage the window does not hold, when
+    /// the feet are more than 20 blocks from the opening, and when a mod's
+    /// `client_packet_send` cancels the crossing's payload.
+    #[access(WorldOnly)]
+    fn cross_passage(&mut self, passage: PassageId) -> Result<(), PassageCrossError>;
+    /// Side: client.
+    /// The server's refusal of the window's last crossing ([`Self::cross_passage`]) and the
+    /// passage it named, until the next crossing; None when it was not refused or no answer
+    /// came yet.
+    #[access(WorldOnly)]
+    fn last_passage_refusal(&self) -> Option<(PassageId, PassageCrossRefusal)>;
 }
 /// The handles' reads of the `players` area, implemented by the game and reached through [`Backend`].
 // hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
@@ -105,6 +165,12 @@ pub trait PlayersBackend {
     /// unavailable player; displaced online players retain their identity.
     #[access(WorldOnly)]
     fn player_name(&self, player: PlayerRef) -> Option<String>;
+    /// Side: server.
+    /// `ServerPlayer.getGameProfile`: the UUID, name and login properties (skin
+    /// `textures` included) of a connected or acting player. An offline-mode
+    /// player has no properties. None for a stale or unavailable player.
+    #[access(WorldOnly)]
+    fn player_profile(&self, player: PlayerRef) -> Option<GameProfile>;
     /// Side: both.
     /// The level the online player is in (`ServerPlayer.level`): on an integrated
     /// server or dedicated server, the player's current dimension; on a client,
@@ -118,7 +184,8 @@ pub trait PlayersBackend {
     #[access(WorldOnly)]
     fn player_dimension(&self, player: PlayerRef) -> Option<Identifier>;
     /// Side: both.
-    /// `Inventory.getSelectedSlot`: the hotbar slot the player holds, 0..9.
+    /// `Inventory.getSelectedSlot`: the hotbar slot the player holds, 0..9. On a client,
+    /// [`crate::ClientHost::select_hotbar_slot`] chooses it.
     #[access(WorldOnly)]
     fn player_selected_slot(&self, player: PlayerRef) -> Option<usize>;
     /// Side: both.
@@ -282,6 +349,27 @@ pub trait PlayersBackend {
     /// local player's inventory is available.
     #[access(WorldOnly)]
     fn player_inventory(&self, player: PlayerRef) -> Option<Vec<ItemStack>>;
+    /// Side: server.
+    /// The player's non-empty inventory slots by `Inventory`'s numbers, with their
+    /// components: 0 to 35 the main inventory (0 to 8 the hotbar), 36 feet, 37 legs, 38
+    /// chest, 39 head, 40 the off hand, 41 body and 42 saddle
+    /// (`Inventory.EQUIPMENT_SLOT_MAPPING`), lowest first. The numbers
+    /// `player_set_inventory_slot` takes, and for 0 to 35 the `Slot` of a saved player's
+    /// `Inventory` list. None for a player that is not online (stale handle) and on a client.
+    #[access(WorldOnly)]
+    fn player_inventory_slots(&self, player: PlayerRef) -> Option<Vec<(u32, ItemStack)>>;
+    /// Side: server.
+    /// The player's non-empty ender chest slots (`Player.getEnderChestInventory`, 27 slots
+    /// numbered 0 to 26 as the `Slot` of a saved player's `EnderItems`), lowest first. None for
+    /// a stale or unavailable player and on a client.
+    #[access(WorldOnly)]
+    fn player_ender_chest(&self, player: PlayerRef) -> Option<Vec<(u32, ItemStack)>>;
+    /// Side: server.
+    /// The compound mods keep on a server player (NeoForge's `Entity.getPersistentData`),
+    /// saved in their file as `NeoForgeData` beside the keys the game keeps; empty when there
+    /// is none. None for a stale or unavailable player and on a client.
+    #[access(WorldOnly)]
+    fn player_persistent_data(&self, player: PlayerRef) -> Option<Compound>;
     /// Side: both.
     /// `ServerPlayerGameMode.getGameModeForPlayer`; Paper `HumanEntity#getGameMode`.
     /// None for stale, offline or unavailable players (including displaced outer players).
@@ -309,6 +397,30 @@ pub trait PlayersBackend {
     /// `Player.getAbilities`; Paper `Player#getAllowFlight/isFlying/getFlySpeed/getWalkSpeed`.
     #[access(WorldOnly)]
     fn player_abilities(&self, player: PlayerRef) -> Option<PlayerAbilities>;
+    /// Side: both.
+    /// `IPlayerExtension.mayFly` (NeoForge): whether the player may start flying, by game mode
+    /// or ability. Read this rather than `player_abilities`' `may_fly`, which a creative-flight
+    /// attribute would not show; Horizon has no such attribute yet, so today the two agree.
+    /// None for a stale or unavailable player.
+    #[access(WorldOnly)]
+    fn player_may_fly(&self, player: PlayerRef) -> Option<bool>;
+    /// Side: server.
+    /// Whether `entity` is within the player's reach by the server's rule
+    /// `reach` ([`EntityReach`]): from the player's eyes to the closest point
+    /// of the entity's box, with the rule's own buffer, the range from the
+    /// player's `minecraft:entity_interaction_range` (3.0, 5.0 in creative)
+    /// and, for an attack, the main hand's `attack_range` component. With the
+    /// eyes inside the box the distance is 0; there is no ray and no other
+    /// fallback. This is the server's check, not the client's pick. None for a
+    /// stale player or entity, one whose box Horizon doesn't keep, or one in
+    /// another level.
+    #[access(WorldOnly)]
+    fn player_within_entity_reach(
+        &self,
+        player: PlayerRef,
+        entity: EntityRef,
+        reach: EntityReach,
+    ) -> Option<bool>;
     /// Side: server.
     /// The value of statistic `stat_type` for `key` (`minecraft:stone`,
     /// `minecraft:jump`...), as `ServerStatsCounter.getValue`: 0 when never
@@ -340,6 +452,18 @@ pub trait PlayersBackend {
     /// unavailable player.
     #[access(WorldOnly)]
     fn player_announced_channels(&self, player: PlayerRef) -> Option<Vec<String>>;
+    /// Side: server.
+    /// Whether `viewer`'s client is shown the player `target` by the rules players are tracked
+    /// with (`ServerPlayer.broadcastToPlayer`; Paper's `Player.canSee`): a spectator is seen
+    /// only by spectators, and by them only while it watches through its own camera, and a
+    /// player hidden with `player_hide` is seen only by players of at least that level.
+    /// Distance and chunks are not part of it, so a player out of range is still seen. A player
+    /// sees themselves. Refuses with `PlayerWorldRefusal`: `Client`, `Stale` (a handle of the
+    /// two no longer identifies a player in the server's list) and `NoConnection` (a fake
+    /// player is no one's viewer or target).
+    #[access(WorldOnly)]
+    fn player_sees(&self, viewer: PlayerRef, target: PlayerRef)
+    -> Result<bool, PlayerWorldRefusal>;
 }
 /// The handles' client reads of the `players` area, implemented by the game and reached through [`Backend`].
 // hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
@@ -423,6 +547,22 @@ pub trait PlayersBackendMut {
         footer: &Text,
     ) -> Result<bool, TextFormError>;
     /// Side: server.
+    /// Disconnects that player with `reason`, as `/kick` does
+    /// (`ServerGamePacketListenerImpl.disconnect`): their client shows it, the log's "lost
+    /// connection" line names it, `player_kicked` hears it and a dedicated server records a
+    /// `kick` event. The connection closes when the server next polls it, so the calling hook
+    /// finishes first; works for the acting player inside their own hook, and without the
+    /// world published. A fake (client-less) player leaves through the same removal path:
+    /// the leave line is broadcast once and `player_logged_out` fires once at the next poll.
+    /// False for a stale or unavailable player, the single-player owner (`/kick` refuses the
+    /// owner) and a player whose disconnect is already pending (a second call, also from
+    /// `player_kicked`: the first reason stands).
+    /// A second disconnect on a guest already leaving is a no-op and keeps the first reason.
+    #[access(WorldOnly)]
+    /// Refuses text deeper than 512 component nodes before applying any changes.
+    fn player_disconnect(&mut self, player: PlayerRef, reason: Text)
+    -> Result<bool, TextFormError>;
+    /// Side: server.
     /// Whether that player counts for `players_sleeping_percentage`: an
     /// ignored player who isn't in bed is left out of the players the night
     /// needs asleep, as a spectator is (an away-from-keyboard mod). Kept
@@ -484,6 +624,53 @@ pub trait PlayersBackendMut {
         player: PlayerRef,
         entity: BlockEntityRef,
     ) -> Result<bool, BlockEntityError>;
+    /// Side: server.
+    /// Opens content mod menu type `menu` for a connected player from anywhere, with no
+    /// block (`ServerPlayer.openMenu(provider, extraDataWriter)`): an item's use, an entity,
+    /// a command. The menu replaces the one they had open. Its container slots show empty
+    /// and their clicks go to the mods (`native_menu_clicked`), as `open_menu`'s do. `extra`
+    /// (at most 32 KiB) is what the client's `screen_extra_data` reads, and `pos`, when
+    /// given, its `screen_pos`. The old menu closes on the server as a close does (its
+    /// `removed`, `player_container_close`, the cursor stack and crafting grids back to the
+    /// inventory) before the new one is built; `replace` says whether the client is first sent
+    /// a close for it, as for `open_menu`. `MenuReplace::InPlace` sends none: the client keeps
+    /// its screen and mouse until the new screen replaces it. The window id, or Ok(None) when
+    /// a mod cancelled the open. Errors: `NotModMenu`, `PlayerUnavailable` (stale, fake or
+    /// vanilla client), `TooLarge`, or `Title` for a title that could not cross; a cancelled or
+    /// refused open leaves the old menu as it was.
+    #[access(WorldOnly)]
+    fn player_open_mod_menu(
+        &mut self,
+        player: PlayerRef,
+        menu: MenuKey,
+        title: Text,
+        extra: Vec<u8>,
+        pos: Option<[i32; 3]>,
+        replace: MenuReplace,
+    ) -> Result<Option<i32>, OpenMenuError>;
+    /// Side: server.
+    /// Backs the container slots of the mod menu `window` that `player_open_mod_menu` opened
+    /// for the player with storage that is not a block entity (#3385; NeoForge's
+    /// `StackCopySlot` and `ResourceHandlerSlot`): `places[n]` is what slot `n` shows. From then
+    /// on a click or shift-click on those slots, and an `ItemPlace::MenuSlot` write, go through
+    /// that storage's own handler, journalled; the client sees ordinary synced slots, mirrored
+    /// after each click and each write through an `ItemPlace` of that storage, never each tick.
+    /// A slot past `places` stays the mods' own (`native_menu_clicked`). The menu closes once a
+    /// place stops resolving (the backpack left the hand, the entity is gone) or a held stack is
+    /// no longer the one bound when the slots were backed, checked before each click and at
+    /// each change notice. A `MenuSlotPlace::HeldItem` locks the inventory slot holding that
+    /// stack while the menu is open, so it can't go into itself. Backing again replaces the
+    /// places; a slot no longer backed (an empty list, a shorter one) is emptied, never left
+    /// holding the copy it showed. A [`MenuSlotBackRefusal`], and nothing changes, for a player
+    /// not online or a window that is not their open menu, a menu that is not a blockless mod
+    /// menu, more places than its container slots, or a place that doesn't resolve now.
+    #[access(WorldOnly)]
+    fn player_back_mod_menu_slots(
+        &mut self,
+        player: PlayerRef,
+        window: i32,
+        places: Vec<MenuSlotPlace>,
+    ) -> Result<(), MenuSlotBackRefusal>;
     /// Side: server.
     /// Sends the player `uuid` the whole picture of map `map_id`: 128 x 128
     /// colours (`MapColor` ids times 4 plus the shade, row by row), scale 0,
@@ -697,7 +884,7 @@ pub trait PlayersBackendMut {
     fn player_remove_fake(&mut self, player: PlayerRef) -> bool;
     /// Side: server.
     /// `Player.awardStat(stat, amount)`: adds `amount`, as the game does
-    /// for its own counts, so `player_stat_award` hears it and may cancel
+    /// for its own counts, so `player_stat_award` hears it and may rewrite or cancel
     /// it, and scoreboard criteria follow. False for a player it can't
     /// reach.
     #[access(WorldOnly)]
@@ -766,6 +953,47 @@ pub trait PlayersBackendMut {
         volume: f32,
         pitch: f32,
     ) -> bool;
+    /// Side: server.
+    /// The calling mod's chunk areas for this player, in place of the ones it asked before; an
+    /// empty slice withdraws them, and other mods' areas stay. The engine keeps each area's
+    /// chunks loaded with a ticket of its own (`Loaded`, or `Ticking` as a player's simulation
+    /// ticket), generates what is missing, and sends a level besides the player's own to a client
+    /// that can view it. A chunk no area covers any more is forgotten 52 ticks later. An area
+    /// counts as no player for spawning, sleeping, raids or any other rule. Areas are never saved
+    /// and end when the player leaves. A call that breaks a limit changes nothing and names it.
+    #[access(WorldOnly)]
+    fn player_set_chunk_areas(
+        &mut self,
+        player: PlayerRef,
+        areas: &[ChunkArea],
+    ) -> Result<(), ChunkAreaRefusal>;
+    /// Side: server.
+    /// `ServerPlayerGameMode.destroyBlock`: breaks the block at `pos` in the player's level as
+    /// this player breaks it, as FTB Ultimine does for each block of a vein. The player's own
+    /// checks hold: a spectator, an adventure player whose tool can't break it, a held item that
+    /// can't break blocks (a sword in creative), a game master block without the permission and
+    /// a dedicated server's spawn protection leave it. Then `break_block` hears it and may cancel
+    /// it, and the break runs as the player's own: the block's effects, events, particles and
+    /// sound, `player_destroyed_block`, the loot rolled for the held item and its enchantments,
+    /// `block_drops` with this player as the breaker, the item's wear, the mined statistic and
+    /// the exhaustion. A vein miner takes each block's drops and experience in `block_drops` and
+    /// sets them down where it wants with `LevelRef::pop_resource` and
+    /// `LevelRef::award_experience`; what else the break sets loose (a torch losing its support,
+    /// a container's contents) still drops in the world. With `into_inventory`, the drops left
+    /// after `block_drops` go to the player's inventory instead, and what doesn't fit drops from
+    /// them as `Inventory.placeItemBackInInventory` drops it. The player needn't reach or look at
+    /// the block. Breaking from `break_block` or `block_drops` makes them hear these breaks too:
+    /// a mod keeps its own guard, and a break started from inside eight others is refused (a
+    /// Horizon safeguard that the reference does not have). True when the block was removed; false, with nothing broken, for a stale handle, a player who
+    /// isn't here or is dead, air, an unloaded block, a block no survival player can break
+    /// (bedrock), a canceled break, and off a server.
+    #[access(WorldOnly)]
+    fn player_destroy_block(
+        &mut self,
+        player: PlayerRef,
+        pos: [i32; 3],
+        into_inventory: bool,
+    ) -> bool;
     /// Side: both.
     /// Simulate one client movement tick for this server player without changing the player. Refuses stale, absent, dead, spectator or riding players and invalid input.
     #[access(WorldOnly)]
@@ -774,4 +1002,137 @@ pub trait PlayersBackendMut {
         player: PlayerRef,
         input: PlayerInput,
     ) -> Option<SimulatedMove>;
+    /// Side: server.
+    /// Respawns a dead player as their client's Respawn button does
+    /// (`ServerGamePacketListenerImpl.handleClientCommand`'s `PERFORM_RESPAWN`, then
+    /// `PlayerList.respawn`): at their respawn point, else the world spawn, with
+    /// `player_respawned` heard. It is a call for outside every player's hook, and it
+    /// returns once the player is alive again. Each refusal changes nothing and is named by
+    /// `RespawnRefusal`, checked in this order: `Client`, `InPlayerHook` (a player's state is
+    /// swapped in; call it from `server_tick`), `Stale` (no player on this server behind the
+    /// handle), `NoConnection` (a fake player, or the world's own player in a single-player
+    /// world) and `Alive` (health above 0 and the game not won: the Respawn button
+    /// ignores exactly that player; one who has won the game and is watching the End poem is
+    /// respawned even alive, on the server's next tick, as the button does).
+    #[access(WorldOnly)]
+    fn player_respawn(&mut self, player: PlayerRef) -> Result<(), RespawnRefusal>;
+    /// Side: server.
+    /// Acknowledges the player's block actions up to `sequence`
+    /// (`ServerGamePacketListenerImpl.ackBlockChangesUpTo`), for a mod that handled one itself,
+    /// such as an editor's own message: the client's predicted blocks settle on the server's
+    /// states once it gets `ClientboundBlockChangedAckPacket`, which goes after the next tick's
+    /// block changes. Pending acknowledgements take the maximum: a lower sequence after a
+    /// higher one has no effect. Any nonnegative sequence is accepted, so a value too high can
+    /// end pending client predictions early. Refuses, queueing nothing, with
+    /// `PlayerWorldRefusal`: `Client`, `Stale`, `NoConnection` and `NegativeSequence`.
+    #[access(WorldOnly)]
+    fn player_ack_block_changes(
+        &mut self,
+        player: PlayerRef,
+        sequence: i32,
+    ) -> Result<(), PlayerWorldRefusal>;
+    /// Side: server.
+    /// Shows that player alone `state` at `pos` in their level (`ClientboundBlockUpdatePacket`
+    /// to their client; Paper's `Player.sendBlockChange`), at once. The world is not changed:
+    /// the real block comes back when it or its chunk is next sent, as in vanilla, so a mod
+    /// sends it again while it still wants it shown. The visual override is not remembered;
+    /// it does not itself acknowledge or clear pending client predictions.
+    /// Refuses, sending nothing, with `PlayerWorldRefusal`: `Client`, `Stale`, `NoConnection`, `UnknownState` and
+    /// `PositionNotSendable` (y outside -2048..=2047, x or z outside -33554432..33554432).
+    #[access(WorldOnly)]
+    fn player_show_block(
+        &mut self,
+        player: PlayerRef,
+        pos: [i32; 3],
+        state: BlockState,
+    ) -> Result<(), PlayerWorldRefusal>;
+    /// Side: server.
+    /// Writes `state` at `pos` in `level` for the player, for a state the mod already chose
+    /// (an editor's or a schematic's). It is `level_set_block` with a placement's flags
+    /// (`NEIGHBORS | CLIENTS`, plus `KNOWN_SHAPE` when `update_neighbour_shapes` is false; without
+    /// it the neighbours' shapes update, so fences, walls and stairs connect), so the block entity
+    /// follows that write's rules, and then `Block.setPlacedBy` of the block that stands there, run in
+    /// the player's turn (a bed places its head, a door its upper half). Nothing else of vanilla's `BlockItem.place`
+    /// or `useOn` runs: no check that the block may be placed there (survival, entity
+    /// obstruction, build permission, spawn protection), no `placed_block` advancement trigger or
+    /// statistic, no place sound, no game event, no item used or consumed, and `setPlacedBy` is
+    /// not given the player as placer. The player is only whose turn `setPlacedBy` runs in, so it is
+    /// not "as player" in the sense of a use-on. The state is written as given. Refuses, writing
+    /// nothing, with `PlayerWorldRefusal`: `Client`, `Stale`, `Dead`, `StaleLevel`, `OtherLevel`
+    /// (not the level in place, where the player is), `UnknownState`, `OutOfWorld`, `NotLoaded`
+    /// and `Unchanged` (that state already stands there, or the write was refused as
+    /// `level_set_block` returns false).
+    #[access(WorldOnly)]
+    fn player_place_block(
+        &mut self,
+        player: PlayerRef,
+        level: LevelRef,
+        pos: [i32; 3],
+        state: BlockState,
+        update_neighbour_shapes: bool,
+    ) -> Result<(), PlayerWorldRefusal>;
+    /// Numbers: 0..35 main (0..8 hotbar), 36..39 feet to head, 40 offhand,
+    /// 41 body, 42 saddle. ItemPlace uses 100..103 for armour and -106 for offhand;
+    /// InventoryMenu has no 41 or 42.
+    /// `Inventory.setItem(slot, stack)` by `player_inventory_slots`' numbers: `stack` (None
+    /// empties it) goes into that slot as `/item replace entity <player> <slot>` puts it,
+    /// without the slot's item check, so a worn slot takes any item; the equip sound and
+    /// equipment changes follow for 36 to 42. The client is sent the slot with the tick's
+    /// inventory sync (`ContainerSetSlot`), as vanilla's `broadcastChanges`. Each refusal
+    /// writes nothing and is named by `PlayerDataRefusal`: `Stale` (no online player behind
+    /// the handle), `Client`, `Dead`, `SlotOutOfRange` (a slot past 42, never a panic) and
+    /// `Stack` (an item the world lacks, a count or damage the item does not allow).
+    /// An open transaction journals this write; an abort restores the previous value.
+    /// Equipment effects wait for the outermost commit.
+    #[access(WorldOnly)]
+    fn player_set_inventory_slot(
+        &mut self,
+        player: PlayerRef,
+        slot: u32,
+        stack: Option<ItemStack>,
+    ) -> Result<(), PlayerDataRefusal>;
+    /// Side: server.
+    /// `PlayerEnderChestContainer.setItem(slot, stack)`: `stack` (None empties it) in ender
+    /// chest slot `slot` (0 to 26). A player looking into their ender chest is sent the slot
+    /// with the open menu's sync. Refuses as `player_set_inventory_slot` does, with
+    /// `SlotOutOfRange { last: 26 }` for a slot past 26 (never a panic).
+    /// An open transaction journals this write; an abort restores the previous value.
+    #[access(WorldOnly)]
+    fn player_set_ender_chest_slot(
+        &mut self,
+        player: PlayerRef,
+        slot: u32,
+        stack: Option<ItemStack>,
+    ) -> Result<(), PlayerDataRefusal>;
+    /// Side: server.
+    /// Gives `stack` as `/give` does, components and all: `Inventory.add` fills matching
+    /// stacks, then empty slots (the selected one first); what does not fit is thrown from
+    /// the player's eyes with no pickup delay and only they may pick it up; a stack that went
+    /// in whole plays the pickup sound. Refuses, with nothing given, with `Stale`, `Client`,
+    /// `Dead` or `Stack`, as `player_set_inventory_slot` does.
+    /// An open transaction journals this write; an abort restores the previous value.
+    /// Overflow drops and pickup sounds wait for the outermost commit.
+    #[access(WorldOnly)]
+    fn player_give_stack(
+        &mut self,
+        player: PlayerRef,
+        stack: ItemStack,
+    ) -> Result<(), PlayerDataRefusal>;
+    /// Side: server.
+    /// Replaces the compound mods keep on a server player (`player_persistent_data`) with
+    /// `data`; an empty compound takes it away. It is saved with the player and never sent to
+    /// a client; changing it raises no notification, so a mod that wants to hear of changes
+    /// keeps its own. On a death respawn and on a player's first exit from the End (before
+    /// the credits) only the `PlayerPersisted` sub-compound is carried to the new player, as
+    /// NeoForge does, and every other key is lost; dimension changes, later End exits and
+    /// teleports keep the whole compound. For ports: new mods use attachments. Refuses,
+    /// writing nothing: `Stale`, `Client`, `Dead`, and `TooDeep` for data that would sit 512
+    /// levels deep or more in the player's file.
+    /// An open transaction journals this write; an abort restores the previous value.
+    #[access(WorldOnly)]
+    fn player_set_persistent_data(
+        &mut self,
+        player: PlayerRef,
+        data: Compound,
+    ) -> Result<(), PlayerDataRefusal>;
 }

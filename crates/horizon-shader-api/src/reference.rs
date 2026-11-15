@@ -65,9 +65,9 @@ the frame stores gamma (`[frame] blend`, below).
 ## Room to grow
 
 `Frame`, the stage inputs (`SkyInput`, `VertexInput`, `MaterialInput`, `DisplacementInput`, `WeatherInput`,
-`PostInput`, `TonemapInput`) and `surface_at`'s `SurfaceData` may gain fields in later releases. Read their fields and
-pass them along, but don't construct them: `horizon-shader check` refuses `PostInput(...)` and the like. `Surface` is
-yours to construct and keeps its one field; later material outputs come as helpers.
+`PostInput`, `TonemapInput`, `EntityInput`) and `surface_at`'s `SurfaceData` may gain fields in later releases. Read
+their fields and pass them along, but don't construct them: `horizon-shader check` refuses `PostInput(...)` and the
+like. `Surface` is yours to construct and keeps its one field; later material outputs come as helpers.
 
 **New names reach a stage only if the pack asked for them.** A later release puts a new name before your files (a
 helper, a struct, a resource, a constant) only under a manifest key the pack sets, or in a stage added later, whose
@@ -105,11 +105,55 @@ space the pack's colours are in, and `frame.luminance` holds that space's lumina
 
 ";
 
+/// 0.2's `[material] coverage`, after the paragraph on what a stage is.
+const COVERAGE_0_2: &str = "\
+## `[material] coverage`
+
+Which points of terrain are drawn is the engine's unless the pack says otherwise. Under `coverage = \"engine\"` (the
+default) solid and cutout terrain keep Horizon's alpha test on the texture's own alpha (cut below 0.5, except the
+leaves Horizon draws opaque), and the alpha `material` returns is ignored there; translucent terrain is cut where the
+texture's alpha is below 0.01, and the returned alpha is its opacity, so water and glass still set how see-through
+they are. `material`, and every function it calls, may not `discard`: the check refuses it. A pack that cuts its own
+holes sets `coverage = \"pack\"`: the returned alpha then drives the alpha test (below 0.5 on solid and cutout
+terrain, below 0.01 on translucent) and the stage may `discard`. Normal and parallax shading that keeps the
+silhouette needs no `\"pack\"`, and neither do `[vertex]` and `[displacement]`, which move geometry, not coverage.
+The stage writes no depth of its own either way.
+
+";
+
+/// The entity stage's notes, after its input: what it returns, and vanilla's own.
+const ENTITY_NOTES: &str = "\
+`entity` lights what is no block terrain: `input.kind` says which. It returns the same `Surface` as `material` (rgb
+linear light, 0 or more and unbounded; alpha its coverage), so a pack writes its lighting once and calls it from both
+stages. Around it Horizon keeps vanilla's order: the alpha test on the returned alpha, then the enchantment glint
+added on top, then fog. `horizon-shader check` takes the stage; **the game doesn't draw it yet** and refuses a pack
+that has it. A pack without `[entity]` is drawn as before, and sees none of this stage's names. Until the game draws
+the stage its prelude may still gain names; from then on the rule for new names holds for it too.
+
+Vanilla's own, the picture a pack without the stage gets:
+
+```wgsl
+fn entity(input: EntityInput) -> Surface {
+    let base = input.albedo.rgb * input.tint.rgb * input.shade;
+    // Vanilla lays the flash over the surface in its gamma (the 2.2 power), before the light.
+    let gamma = vec3<f32>(1.0 / 2.2);
+    let flashed = pow(mix(pow(base, gamma), pow(input.overlay.rgb, gamma), input.overlay.a), vec3<f32>(2.2));
+    return Surface(vec4<f32>(flashed * input.lightmap, input.albedo.a * input.tint.a));
+}
+```
+
+Without a flash (`overlay.a` 0) that is `albedo * tint * shade * lightmap`. In linear light alone,
+`mix(base, input.overlay.rgb, input.overlay.a) * input.lightmap` is the same flash a little brighter. The shade and
+the light act on rgb only. `lightmap` holds no coloured light: where `colored_light` is above 0, Horizon's own draw
+adds it to the light colour, and the expression above leaves it out.
+
+";
+
 /// The line's reference.
 pub fn markdown(api: Api) -> String {
     let mut out = format!(
         "# Shader API reference ({api})\n\n\
-         Generated from `crates/horizon-shader-api` (`HORIZON_WRITE_DOCS=1 cargo test -p horizon-shader-api --test reference`\n\
+         Generated from `crates/horizon-shader-api` (`HORIZON_WRITE_DOCS=1 cargo test -p horizon-shader-api --test it reference::`\n\
          rewrites it; the test fails when it drifts). The API's design and pack format: [shaders.md](shaders.md).\n\n"
     );
     if api == Api::V0_2 {
@@ -117,8 +161,11 @@ pub fn markdown(api: Api) -> String {
     }
     out += "A stage is a function your WGSL defines, with the signature below; Horizon puts the prelude (these structs, the\n\
             resources and helpers) before your files and calls the function from its own pass. Your files declare no\n\
-            bindings and no entry points, and no names starting with `horizon_`.\n\n\
-            ## Stages\n\n\
+            bindings and no entry points, and no names starting with `horizon_`.\n\n";
+    if api == Api::V0_2 {
+        out += COVERAGE_0_2;
+    }
+    out += "## Stages\n\n\
             | Stage | In `horizon-shaders.toml` | Your function |\n| --- | --- | --- |\n";
     for &kind in api.stages() {
         let key = match kind {
@@ -128,6 +175,7 @@ pub fn markdown(api: Api) -> String {
             StageKind::Vertex => "[vertex]",
             StageKind::Weather => "[weather]",
             StageKind::Tonemap => "[tonemap]",
+            StageKind::Entity => "[entity]",
         };
         out += &format!("| {} | `{key}` | `{}` |\n", kind.name(), kind.signature());
     }
@@ -135,16 +183,26 @@ pub fn markdown(api: Api) -> String {
     for &kind in api.stages() {
         out += &format!("## {}\n\n`{}`\n\n", kind.name(), kind.signature());
         out += &table(kind.input(), None);
+        if kind == StageKind::Entity {
+            out += ENTITY_NOTES;
+        }
         if kind == StageKind::Material {
             let surface = table(&SURFACE, None);
             // 0.2's lit colour is linear light and may pass white; 0.1's reference keeps its text.
             out += &match api {
                 Api::V0_1 => surface,
-                Api::V0_2 => surface.replace(
-                    "The lit colour, 0..1, with its alpha.",
-                    "The lit colour: rgb linear light, 0 or more and unbounded (more than 1 is brighter than \
-                     white); alpha its coverage.",
-                ),
+                Api::V0_2 => surface
+                    .replace(
+                        "The lit colour, 0..1, with its alpha.",
+                        "The lit colour: rgb linear light, 0 or more and unbounded (more than 1 is brighter \
+                         than white); alpha translucent terrain's opacity, and what the alpha test reads under \
+                         `[material] coverage = \"pack\"`.",
+                    )
+                    .replace(
+                        "Horizon then applies the alpha test (cutout and translucent) and fog.",
+                        "Horizon then applies the alpha test (cutout and translucent; on the texture's alpha \
+                         unless `[material] coverage = \"pack\"`) and fog.",
+                    ),
             };
             out += "Under `[displacement]` the stage also defines \
                     `fn displacement(input: DisplacementInput) -> f32`, called for each corner of the grid the \
@@ -200,6 +258,10 @@ pub fn markdown(api: Api) -> String {
                     - `fn block_pbr_size() -> vec2<f32>`: the LabPBR maps' size in texels.\n\
                     - `fn set_surface(normal: vec3<f32>, smoothness: f32, data: f32)`: what the post stage's \
                     `surface_at` reads for this point of solid terrain (`data` the pack's own; the face's normal and 0, 0 unset).\n";
+        }
+        if kind == StageKind::Entity {
+            out += "- `fn block_light_color(position: vec3<f32>) -> vec4<f32>`: the colour of the block light at the \
+                    camera-relative `position` (rgb) and how strongly it reaches it (a), as the material stage's.\n";
         }
         if kind != StageKind::Sky {
             out += "- `fn shadow_position(position: vec3<f32>) -> vec3<f32>`: where the camera-relative point `position` is\n  \

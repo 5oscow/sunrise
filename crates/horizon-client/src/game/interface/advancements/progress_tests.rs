@@ -100,7 +100,7 @@ fn assert_progress(progress: &AdvancementProgress, obtained: [bool; 3], groups: 
 }
 
 #[test]
-#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn progress_events_capture_each_players_full_mutation_state() {
     if run_fresh_cases(
         "game::advancements::progress_tests::progress_events_capture_each_players_full_mutation_state",
@@ -376,7 +376,11 @@ fn progress_events_capture_each_players_full_mutation_state() {
             sync.advancements = horizon_client::lan::ServerAdvancements::load(
                 &scratch,
                 &horizon_world::loot::PackOverlay::NONE,
-                Default::default(),
+                // Rewards must name a recipe registered in the server's index.
+                std::collections::BTreeMap::from([(
+                    "testmod:reward".into(),
+                    r#"{"type":"minecraft:crafting_shapeless","ingredients":["minecraft:stone"],"result":{"id":"minecraft:diamond","count":1}}"#.into(),
+                )]),
                 Default::default(),
             );
             let reload = case == "reload";

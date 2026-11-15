@@ -72,6 +72,7 @@ impl ItemTables<'_> {
             entity_boxes,
             Some(self.border),
             Some(&self.motion.blocks),
+            self.context,
         );
         item.check_fall(&mut step, |fall, from, moved| {
             if fall == 0.0 || moved.length_squared() < 1.0 {
@@ -284,7 +285,7 @@ mod tests {
     /// floating in water, falling, and merging into a later item before its turn (whose move
     /// is then made at its turn).
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn moves_worked_out_ahead_match_those_made_at_each_turn() {
         let mut resources = None;
         let mut game = server_game(&mut resources);

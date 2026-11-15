@@ -75,7 +75,7 @@ impl Hooks for Registration {
 }
 
 #[test]
-#[ignore = "needs HORIZON_TEST_RESOURCES; starts an integrated server and two physical TCP clients"]
+#[ignore = "daily"]
 fn published_tcp_attributes_players_and_orders_actions() {
     super::tests::require_resources();
     if super::super::native_entity_refs::tests::run_fresh_cases(
@@ -206,7 +206,7 @@ fn published_tcp_attributes_players_and_orders_actions() {
     });
 }
 
-fn connect_peer(port: u16, name: &str) -> Connection {
+pub(super) fn connect_peer(port: u16, name: &str) -> Connection {
     use horizon_protocol::{
         packets::{handshake, login},
         payload_negotiation::Control,

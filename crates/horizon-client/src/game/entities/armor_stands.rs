@@ -12,7 +12,7 @@ use horizon_client::{
     entities::ArmorStand,
     items::ItemStack,
     mesher::Vertex,
-    mobs::{Mob, Part, anim::Poses},
+    mobs::{Mob, Part, Who, anim::Poses},
     trims::{TrimOverride, TrimRegistry, TrimTexture},
 };
 use horizon_core::{
@@ -21,7 +21,7 @@ use horizon_core::{
     random::RandomSource,
 };
 use std::{collections::HashMap, sync::Arc};
-
+pub(super) const TYPE_ID: &str = "minecraft:armor_stand";
 /// Build the living-drops input at the loot-source boundary, before equipment pops.
 fn armor_stand_dying_drops<'a>(
     stand: &ArmorStand,
@@ -682,18 +682,22 @@ impl Game<'_> {
                 return false;
             }
             let id = stand.id;
+            let at = [stand.position.x, stand.position.y, stand.position.z];
             let name = stand.custom_name.as_ref().map(|name| name.plain());
             if alive {
-                // NameTagItem shrinks the stack even with infinite materials.
-                let mut rest = stack.clone();
-                rest.count -= 1;
-                *self.held_mut() = (rest.count > 0).then_some(rest);
+                // `Player.interactOn` gives a creative player the count back.
+                self.consume_held();
                 if let (Some(player), Some(player_name), Some(name)) =
                     (self.lan_acting_uuid, self.lan_acting_name.clone(), name)
                 {
                     self.native_player_name_entity(player, &player_name, id, &name);
                 }
             }
+            // `Player.interactOn`: the tag consumed the use, so the stand
+            // posts `gameEvent(GameEvent.ENTITY_INTERACT)` from the player,
+            // alive or not (`NameTagItem` succeeds either way).
+            let ctx = self.who_context(Some(Who::Player), None);
+            self.post_game_event("minecraft:entity_interact", at, ctx);
             self.swing_arm();
             return true;
         }
@@ -982,6 +986,7 @@ impl Game<'_> {
             self.spawn_item(stack, center, v, 10);
         }
         self.show_breaking_particles(at, f64::from(width), f64::from(height));
+        self.stand_game_event("minecraft:entity_die", at, by);
         true
     }
     /// `Entity.gameEvent(event, attributedTo)` for a stand at `at`: the
@@ -1029,22 +1034,13 @@ impl Game<'_> {
             // aiStep's freezing step (removeFrost) makes the speed instance.
             a.speed_instance = true;
             // LivingEntity.aiStep -> EntityEquipment.tick, before movement.
-            // Inspect in slot order, then mutate only each actual owned compass.
-            for slot in 0..horizon_items::equipment::SLOT_NAMES.len() {
-                let Some(mut stack) = self.armor_stands[i].equipment.get(slot).cloned() else {
-                    continue;
-                };
-                if stack.item.as_ref() == "minecraft:compass"
-                    && super::maps::lodestone_target_gone(self, &stack, self.dim.id())
-                {
-                    stack.data_mut().set_other(
-                        "minecraft:lodestone_tracker",
-                        Some(horizon_core::nbt::Tag::Compound(Default::default())),
-                    );
-                    self.armor_stands[i].equipment.set(slot, Some(stack));
-                }
-            }
             let a = &mut self.armor_stands[i];
+            super::inventory_tick::equipment_inventory_tick(
+                &self.world,
+                self.res.facts(),
+                self.dim.id(),
+                &mut a.equipment,
+            );
             let (water_height, lava_height) =
                 a.push_by_fluid(&self.world, &self.res.motion().fluids, &self.loop_context);
             let in_water = water_height > 0.0;
@@ -1085,6 +1081,7 @@ impl Game<'_> {
                     tops.push(pos)
                 });
             }
+            let section_step = (a.id, a.previous, a.position);
             for pos in tops {
                 self.bubble_column_particles(pos);
             }
@@ -1164,17 +1161,12 @@ impl Game<'_> {
             ) {
                 dead.push((i, damage_type));
             }
-        }
-        // A stand that breaks has its move this tick filed before it goes.
-        for &(i, _) in &dead {
-            let s = &self.armor_stands[i];
-            let (id, from, to) = (s.id, s.previous, s.position);
+            let (id, from, to) = section_step;
             self.entity_section_step(id, [from.x, from.y, from.z], [to.x, to.y, to.z]);
         }
         for (i, damage_type) in dead.into_iter().rev() {
             self.break_armor_stand_by_anything(i, damage_type, 0);
         }
-        self.entity_sections_stepped(super::entity_sections::Family::ArmorStands);
         Ok(())
     }
     /// A lid's `Entity.move` for armor stand `i`, one with physics (vanilla's
@@ -1211,6 +1203,12 @@ impl Game<'_> {
             Some(self.border.geometry()),
             &nearby,
             travels_after,
+            if shulker.is_some() {
+                horizon_world::entity_move::MoverType::Shulker
+            } else {
+                horizon_world::entity_move::MoverType::ShulkerBox
+            },
+            &self.loop_context,
         );
     }
     /// `Ravager.roar` with `mob_griefing` on: every armor stand in `area` (the
@@ -1371,7 +1369,15 @@ impl Game<'_> {
                 }
             },
         );
-        self.drop_death_items(&dying, stacks, 10, |_| None);
+        self.drop_death_items(
+            &dying,
+            stacks
+                .into_iter()
+                .map(|(stack, at)| (stack, at, 0))
+                .collect(),
+            10,
+            |_| None,
+        );
     }
     /// `ArmorStand.brokenByAnything`, then `kill`, as burning out or a blast
     /// breaks a stand: its equipment pops above its block, the stand item does
@@ -2538,7 +2544,7 @@ mod pumpkin_equippable_use_tests {
     use std::sync::{atomic::AtomicI32, mpsc};
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn h207_connected_use_item_adopts_actual_pumpkin_equippable_and_preserves_controls() {
         crate::game::native_entity_refs::tests::with_game(|game| {
             game.build_registries();
@@ -2672,7 +2678,7 @@ mod stand_lodestone_inventory_tick_tests {
     use horizon_core::{geometry::Vec3, position::BlockPos};
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and scratch homes/cwd"]
+    #[ignore = "daily"]
     fn actual_stand_equipment_compasses_tick_after_loaded_lodestone_removal() {
         let mut resources = None;
         let mut game = crate::game::game_tests::tests::server_game(&mut resources);
@@ -2860,7 +2866,7 @@ mod postbaseline_lodestone_controls {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and scratch homes/cwd"]
+    #[ignore = "daily"]
     fn postbaseline_six_slots_noncompass_guard_and_dimension_preservation() {
         let mut resources = None;
         let mut game = crate::game::game_tests::tests::server_game(&mut resources);
@@ -2904,6 +2910,7 @@ mod postbaseline_lodestone_controls {
         game.block_ticks
             .add_empty_chunk(BlockPos::new(64, 0, 64).chunk())
             .unwrap();
+        game.load_ticking_neighbourhood(0, 0);
         assert!(game.run_command("fill 64 199 64 79 199 79 stone"));
         assert!(game.run_command(&format!("summon armor_stand 65.5 200.0 65.5 {{UUID:[I;42321,0,0,102],Health:20f,NoGravity:1b,equipment:{{mainhand:{}}}}}",item("minecraft:compass",tracked,100,1))));
         let id = |n| {

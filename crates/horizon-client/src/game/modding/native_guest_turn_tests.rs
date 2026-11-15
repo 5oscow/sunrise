@@ -1,6 +1,6 @@
 //! Real-game regressions for native handles used during a guest's turn.
 
-use super::{lan::LanSettings, native_entity_refs::tests::with_game};
+use super::lan::LanSettings;
 use horizon_client::{
     lan::{Joined, NetConfig, PlayerSender, guest::Guest, hub::HubConfig},
     mobs::Mob,
@@ -14,7 +14,15 @@ use std::sync::{
 };
 
 pub(in crate::game) fn with_guests(test: impl FnOnce(&mut super::Game<'_>)) {
-    with_game(|game| {
+    let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+    with_guests_at(root, test);
+}
+
+pub(in crate::game) fn with_guests_at(
+    root: std::path::PathBuf,
+    test: impl FnOnce(&mut super::Game<'_>),
+) {
+    super::native_entity_refs::tests::with_game_at(root, |game| {
         let settings = LanSettings {
             port: 0,
             guest_commands: false,
@@ -68,7 +76,7 @@ pub(in crate::game) fn with_guests(test: impl FnOnce(&mut super::Game<'_>)) {
 }
 
 #[test]
-#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn player_dimensions_validate_identity_on_both_server_roles() {
     use super::execution_role::ExecutionRole;
     let previous_extra = super::EXTRA_DIMS.read().unwrap().clone();
@@ -159,7 +167,7 @@ fn player_dimensions_validate_identity_on_both_server_roles() {
 }
 
 #[test]
-#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn refused_wire_reload_preserves_hub_and_engine_generation() {
     with_guests(|game| {
         let before = game.lan.as_ref().unwrap().hub.lan.shared.sync();
@@ -167,6 +175,25 @@ fn refused_wire_reload_preserves_hub_and_engine_generation() {
         let old_context = game.loop_context.clone();
         let root = std::env::temp_dir().join(format!("reload-wire-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
+        // Table staging now reads the resource root before the wire reload.
+        // Supply its ordinary inputs, but deliberately omit the registry report
+        // so it is still the wire preparation that refuses this candidate.
+        let mut folders = vec![(game.options.resources.clone(), root.clone())];
+        while let Some((source, destination)) = folders.pop() {
+            std::fs::create_dir_all(&destination).unwrap();
+            for entry in std::fs::read_dir(&source).unwrap() {
+                let entry = entry.unwrap();
+                let name = entry.file_name();
+                let path = entry.path();
+                if entry.file_type().unwrap().is_dir() {
+                    if source != game.options.resources || name == "data" {
+                        folders.push((path, destination.join(name)));
+                    }
+                } else if name != "registries.json" {
+                    std::fs::copy(path, destination.join(name)).unwrap();
+                }
+            }
+        }
         let stack = super::functions::pack_stack(
             &game.world_root,
             &root,
@@ -177,7 +204,7 @@ fn refused_wire_reload_preserves_hub_and_engine_generation() {
             &[],
         );
         let error = game
-            .prepare_world_reload(&stack, &root, false)
+            .prepare_world_reload(&stack, &root)
             .err()
             .unwrap()
             .to_string();
@@ -204,7 +231,7 @@ fn refused_wire_reload_preserves_hub_and_engine_generation() {
             &[],
             &[],
         );
-        let prepared = game.prepare_world_reload(&stack, &good, false).unwrap();
+        let prepared = game.prepare_world_reload(&stack, &good).unwrap();
         game.install_world_tables(prepared);
         game.run_native_advancement_grants();
         assert!(!Arc::ptr_eq(
@@ -216,7 +243,7 @@ fn refused_wire_reload_preserves_hub_and_engine_generation() {
 }
 
 #[test]
-#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn level_event_excludes_its_source_even_during_another_guests_turn() {
     use horizon_client::lan::PlayerSender;
     use horizon_world::level::{LevelEvent, LevelEventPlayer};
@@ -274,7 +301,7 @@ fn level_event_excludes_its_source_even_during_another_guests_turn() {
 /// Before #228, the host was absent during a guest turn and B and the
 /// online list were invisible to native handles.
 #[test]
-#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn another_guest_and_online_players_are_visible_during_a_turn() {
     with_guests(|game| {
         let rider = game.entity(13).unwrap();
@@ -294,7 +321,7 @@ fn another_guest_and_online_players_are_visible_during_a_turn() {
 /// B's live menu and motion stay available while A acts, but displaced
 /// menus and an outer turn's motion must not use the swapped-out records.
 #[test]
-#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn another_guests_menu_and_push_work_during_a_turn() {
     use horizon_client::items::ItemStack;
 
@@ -370,7 +397,7 @@ fn another_guests_menu_and_push_work_during_a_turn() {
 /// Native services can reach B during A's turn without exposing displaced
 /// inventories or changing ordinary command resolution during nested turns.
 #[test]
-#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn another_guests_services_work_during_a_turn() {
     use super::{
         commands::Target,
@@ -525,7 +552,7 @@ fn another_guests_services_work_during_a_turn() {
 
 /// The body/saddle store and existing armor/offhand move with nested turns.
 #[test]
-#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn nested_guest_turns_restore_each_equipment_store() {
     use horizon_client::items::ItemStack;
     use horizon_items::equipment::{BODY, SADDLE};
@@ -576,7 +603,7 @@ fn nested_guest_turns_restore_each_equipment_store() {
 
 /// A merchant's live session belongs to B even while A is acting.
 #[test]
-#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn another_guests_live_merchant_session_is_visible_during_a_turn() {
     use super::{
         native_merchant_refs::tests::{offer, spawn},
@@ -624,7 +651,7 @@ fn another_guests_live_merchant_session_is_visible_during_a_turn() {
 
 /// The passenger walk (horizon-rust/horizon#8383) keeps #228's host visibility.
 #[test]
-#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn another_guest_follows_a_vehicle_teleported_during_a_turn() {
     with_guests(|game| {
         game.lan
@@ -640,8 +667,9 @@ fn another_guest_follows_a_vehicle_teleported_during_a_turn() {
         game.guest_boarded(13, None);
         let vehicle = game.entity(42).unwrap();
         let rider = game.entity(13).unwrap();
-        let before = [3.0, 64.0 + (1.44375 - 0.6), 5.0];
-        let after = [10.0, 70.0 + (1.44375 - 0.6), -4.0];
+        // EntityTypes stores the horse's passenger attachment as a float.
+        let before = [3.0, 64.0 + (f64::from(1.44375_f32) - 0.6), 5.0];
+        let after = [10.0, 70.0 + (f64::from(1.44375_f32) - 0.6), -4.0];
         game.as_guest(12, |game| {
             assert_eq!(rider.position(game), Some(before));
             assert!(vehicle.teleport_to(game, [10.0, 70.0, -4.0], None));
@@ -657,7 +685,7 @@ fn another_guest_follows_a_vehicle_teleported_during_a_turn() {
 }
 
 #[test]
-#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn a_mounted_guests_turn_publishes_its_teleport_without_dismounting() {
     use super::native_sound_refs::tests::packets;
     use horizon_protocol::packets::play::{Clientbound as C, relative};
@@ -738,7 +766,7 @@ fn a_mounted_guests_turn_publishes_its_teleport_without_dismounting() {
 /// The split services retain connected identities even while another player's
 /// body is swapped in, and still queue acting-player messages after the hook.
 #[test]
-#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn server_services_preserve_identity_and_message_delivery() {
     use horizon_protocol::packets::play::Clientbound as C;
     use mod_api::{ServerHost, Text};
@@ -858,7 +886,7 @@ fn server_services_preserve_identity_and_message_delivery() {
 /// Permission reads keep the existing owner and fake-player contracts, not
 /// just the connected-player list that the services enumerate.
 #[test]
-#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn canonical_permissions_preserve_owner_and_fake_player_reads() {
     use horizon_client::motion::PlayerMotion;
     use mod_api::GameMode;
@@ -941,7 +969,7 @@ pub(in crate::game) fn place_host(game: &mut super::Game<'_>) {
 /// A turn lists the acting player once, under their own UUID and with their
 /// live body. The host's body is displaced for the turn, so it is not listed.
 #[test]
-#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn level_players_name_each_body_once_during_turns() {
     with_guests(|game| {
         place_host(game);
@@ -964,7 +992,7 @@ fn level_players_name_each_body_once_during_turns() {
 }
 
 #[test]
-#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn level_players_exclude_guests_in_other_levels() {
     with_guests(|game| {
         place_host(game);
@@ -980,7 +1008,7 @@ fn level_players_exclude_guests_in_other_levels() {
 }
 
 #[test]
-#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn level_players_exclude_fake_players() {
     with_guests(|game| {
         let _serving = super::integrated::tests::install_serving(game, false);
@@ -1012,7 +1040,7 @@ fn level_players_exclude_fake_players() {
 /// A listener sees the newly granted criterion before its recipe reward on
 /// both a player's first tick and a resource reload.
 #[test]
-#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn tick_advancement_notice_precedes_recipe_reward() {
     use crate::game::native_entity_refs::tests::run_fresh_cases;
     use mod_api::{Hooks, ModEntry, Mods, PlayerAdvancementProgressEvent, ServerHost};
@@ -1059,7 +1087,11 @@ fn tick_advancement_notice_precedes_recipe_reward() {
         sync.advancements = horizon_client::lan::ServerAdvancements::load(
             &scratch,
             &horizon_world::loot::PackOverlay::NONE,
-            Default::default(),
+            // Rewards must name a recipe registered in the server's index.
+            std::collections::BTreeMap::from([(
+                "testmod:reward".into(),
+                r#"{"type":"minecraft:crafting_shapeless","ingredients":["minecraft:stone"],"result":{"id":"minecraft:diamond","count":1}}"#.into(),
+            )]),
             Default::default(),
         );
         let reload = std::env::var("HORIZON_ADVANCEMENT_ORDER_CHILD").as_deref() == Ok("reload");
@@ -1090,7 +1122,7 @@ fn tick_advancement_notice_precedes_recipe_reward() {
 /// `PlayerRef::set_selected_slot` from inside the guest's own turn: their state is in place, so
 /// the slot is written there, and their client is still told (`leave_guest` sends nothing).
 #[test]
-#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn set_selected_slot_tells_an_acting_guests_client() {
     with_guests(|game| {
         let (tx, rx) = std::sync::mpsc::channel();
@@ -1126,7 +1158,7 @@ fn set_selected_slot_tells_an_acting_guests_client() {
 /// `PlayerRef::drop_stack` hands a refused stack back: an empty one, and one a mod's `item_toss`
 /// vetoes, which the game itself would discard.
 #[test]
-#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn a_vetoed_drop_gives_the_stack_back() {
     use super::api_values::TryIntoApi;
     use horizon_client::items::ItemStack;
@@ -1136,7 +1168,7 @@ fn a_vetoed_drop_gives_the_stack_back() {
     struct Veto;
     #[mod_api::__subscriptions]
     impl Hooks for Veto {
-        fn item_toss(&self, _: &mut dyn ServerHost, _: &mut ItemTossEvent<'_>) -> Flow {
+        fn item_toss(&self, _: &mut dyn ServerHost, _: &mut ItemTossEvent) -> Flow {
             Flow::Cancel
         }
     }
@@ -1178,7 +1210,7 @@ impl mod_api::Hooks for PanicOnce {
 }
 
 #[test]
-#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn guest_damage_unwind_restores_and_next_same_connection_hit_lands() {
     let calls = Arc::new(AtomicUsize::new(0));
     let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
@@ -1262,7 +1294,7 @@ fn guest_damage_unwind_restores_and_next_same_connection_hit_lands() {
 }
 
 #[test]
-#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+#[ignore = "daily"]
 /// A real native panic inside `as_guest_messaged` puts the outer message capture back, and the
 /// same connection's next messaged turn runs and captures nothing outside it (#2244).
 fn guest_message_capture_is_restored_after_a_real_native_panic() {
@@ -1347,7 +1379,7 @@ impl mod_api::Hooks for PanicOnFood {
 /// food change still lets the guest swap be restored and the turn's progress be written back,
 /// and the same connection's next turn runs and is heard (#2240).
 #[test]
-#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn a_panic_in_a_turn_end_callback_still_restores_the_guest() {
     let calls = Arc::new(AtomicUsize::new(0));
     let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
@@ -1396,5 +1428,241 @@ fn a_panic_in_a_turn_end_callback_still_restores_the_guest() {
             assert_eq!(food(game), before - 4);
             assert!(game.lan_guest_swaps.is_empty());
         });
+    });
+}
+
+/// An armor stand summoned at (1.5, 70, 1.5) in the level in place, which `with_guests` puts
+/// its two players beside, at (3, 64, 5).
+fn summon_stand(game: &mut super::Game<'_>) -> mod_api::EntityRef {
+    game.options.dedicated = Some(Vec::new());
+    game.world
+        .chunks
+        .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
+    let (horizon_core::nbt::Tag::Compound(tag), _) =
+        horizon_core::nbt::parse_snbt("{NoGravity:1b}").unwrap()
+    else {
+        unreachable!()
+    };
+    let id = game
+        .summon(
+            game.dim.id(),
+            "minecraft:armor_stand",
+            [1.5, 70.0, 1.5],
+            tag,
+        )
+        .unwrap();
+    game.entity(id).unwrap()
+}
+
+/// Whether anything the server sent the acting player since `before` is a chat line.
+fn told_since(game: &super::Game<'_>, before: usize) -> bool {
+    use horizon_protocol::packets::play::Clientbound as C;
+    game.guest_packets[before..]
+        .iter()
+        .any(|p| matches!(p, C::SystemChat(_)))
+}
+
+/// `withPermission(level)`: the line is checked at the level the mod gives, whatever the
+/// entity's own (a guest's is 0 here), with no ceiling. `TickCommand` needs admins (3), so game
+/// masters (2) are refused it and admins run it; `GiveCommand` needs game masters.
+#[test]
+#[ignore = "daily"]
+fn run_command_checks_the_line_at_the_level_given() {
+    use mod_api::PermissionLevel::{Admins, All, Gamemasters, Owners};
+
+    with_guests(|game| {
+        game.build_registries();
+        let a = game.player(12).unwrap().entity();
+        assert!(!a.run_command(game, "give @s minecraft:diamond 1", All));
+        assert!(a.run_command(game, "give @s minecraft:diamond 1", Gamemasters));
+        assert!(!a.run_command(game, "tick query", Gamemasters));
+        assert!(a.run_command(game, "tick query", Admins));
+        assert!(a.run_command(game, "tick query", Owners));
+        let stand = summon_stand(game);
+        assert!(!stand.run_command(game, "tick query", Gamemasters));
+        assert!(stand.run_command(game, "tick query", Admins));
+    });
+}
+
+/// The entity is the executor, from its own position in its level: `@s` is it and `~` its
+/// position, not the server spawn's (from there the stand would end at (2, 64, -1)). A player
+/// out of a turn, the acting player and another player during that turn are each `@s`.
+#[test]
+#[ignore = "daily"]
+fn run_command_runs_as_the_entity_from_where_it_is() {
+    use super::native_inventories::NativeInventoryKind::Player;
+    use horizon_client::items::ItemStack;
+    use mod_api::PermissionLevel::Gamemasters;
+
+    with_guests(|game| {
+        game.build_registries();
+        let a = game.player(12).unwrap().entity();
+        let b = game.player(13).unwrap().entity();
+        let holds = |game: &super::Game<'_>, uuid: u128, item: &str| {
+            let stack = ItemStack::new(item, 1);
+            let slots = game.native_inventory(uuid, Player).unwrap().slots;
+            slots.iter().flatten().any(|s| *s == stack)
+        };
+        let stand = summon_stand(game);
+        let guest = |game: &super::Game<'_>, conn: u32| {
+            game.lan.as_ref().unwrap().hub.guest(conn).unwrap().position
+        };
+
+        assert!(stand.run_command(game, "/tp @s ~2 ~ ~-1", Gamemasters));
+        assert_eq!(stand.position(game), Some([3.5, 70.0, 0.5]));
+        assert_eq!(guest(game, 12), [3.0, 64.0, 5.0]);
+        assert_eq!(guest(game, 13), [3.0, 64.0, 5.0]);
+
+        assert!(a.run_command(game, "give @s minecraft:diamond 1", Gamemasters));
+        game.as_guest(12, |game| {
+            assert!(a.run_command(game, "give @s minecraft:apple 1", Gamemasters));
+            assert!(b.run_command(game, "give @s minecraft:stick 1", Gamemasters));
+        })
+        .unwrap();
+        assert!(holds(game, 12, "minecraft:diamond"));
+        assert!(holds(game, 12, "minecraft:apple"));
+        assert!(holds(game, 13, "minecraft:stick"));
+        assert!(!holds(game, 13, "minecraft:diamond"));
+        assert!(!holds(game, 12, "minecraft:stick"));
+    });
+}
+
+/// A player's source answers them as their own command does, feedback and failure both
+/// (`ServerPlayer.commandSource`); another entity's says nothing to anyone, not even the
+/// player whose turn it runs in (`CommandSource.NULL`).
+#[test]
+#[ignore = "daily"]
+fn run_command_answers_a_player_and_no_one_for_another_entity() {
+    use mod_api::PermissionLevel::Admins;
+
+    with_guests(|game| {
+        game.build_registries();
+        let a = game.player(12).unwrap().entity();
+        let stand = summon_stand(game);
+        game.as_guest(12, |game| {
+            for (line, ran) in [("tick query", true), ("kill @e[type=minecraft:pig]", false)] {
+                let before = game.guest_packets.len();
+                assert_eq!(a.run_command(game, line, Admins), ran, "{line}");
+                assert!(told_since(game, before), "the player is told: {line}");
+                let before = game.guest_packets.len();
+                assert_eq!(stand.run_command(game, line, Admins), ran, "{line}");
+                assert!(!told_since(game, before), "no one is told: {line}");
+            }
+        })
+        .unwrap();
+    });
+}
+
+/// A line that doesn't parse, or parses and fails, answers false without a panic, and so does a
+/// handle of an earlier open or of an entity that is gone.
+#[test]
+#[ignore = "daily"]
+fn run_command_answers_false_for_a_bad_line_or_a_stale_handle() {
+    use mod_api::PermissionLevel::Owners;
+
+    with_guests(|game| {
+        game.build_registries();
+        let a = game.player(12).unwrap().entity();
+        let stand = summon_stand(game);
+        for entity in [a, stand] {
+            for line in [
+                "",
+                "/",
+                "no_such_command",
+                "give @s minecraft:diamond many",
+                "tp @s ~ ~ ~ ~ ~ ~ ~",
+                "kill @e[type=minecraft:pig]",
+            ] {
+                assert!(!entity.run_command(game, line, Owners), "{line:?}");
+            }
+        }
+        let stale = mod_api::EntityRef::new(mod_api::WorldEpoch::new(a.epoch().get() + 1), a.id());
+        assert!(!stale.run_command(game, "tick query", Owners));
+        assert!(stand.run_command(game, "kill @s", Owners));
+        assert!(!stand.run_command(game, "tick query", Owners));
+    });
+}
+
+/// A live player in another dimension is outside the level in place: that level is parked
+/// while the hook runs, so the call answers false and nothing runs, neither the part about
+/// the player (`give @s`) nor the part about the server (`gamerule`). Back in the level in
+/// place, the same player and line run.
+#[test]
+#[ignore = "daily"]
+fn run_command_refuses_a_player_whose_level_is_parked() {
+    use super::native_inventories::NativeInventoryKind::Player;
+    use horizon_client::{gamerules::vanilla::SEND_COMMAND_FEEDBACK, items::ItemStack};
+    use mod_api::PermissionLevel::Owners;
+
+    with_guests(|game| {
+        game.build_registries();
+        let b = game.player(13).unwrap().entity();
+        let move_to = |game: &mut super::Game<'_>, dimension: &str| {
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .update_guest(13, |guest| guest.dimension = dimension.to_owned())
+                .unwrap();
+        };
+        let has_stick = |game: &super::Game<'_>| {
+            let stick = ItemStack::new("minecraft:stick", 1);
+            let slots = game.native_inventory(13, Player).unwrap().slots;
+            slots.iter().flatten().any(|s| *s == stick)
+        };
+        assert!(game.ui.rules.bool_at(SEND_COMMAND_FEEDBACK));
+
+        move_to(game, "minecraft:the_nether");
+        assert!(!b.run_command(game, "give @s minecraft:stick 1", Owners));
+        assert!(!b.run_command(game, "gamerule send_command_feedback false", Owners));
+        assert!(game.ui.rules.bool_at(SEND_COMMAND_FEEDBACK));
+
+        move_to(game, "minecraft:overworld");
+        assert!(!has_stick(game));
+        assert!(b.run_command(game, "give @s minecraft:stick 1", Owners));
+        assert!(has_stick(game));
+    });
+}
+
+/// `ServerPlayer.createCommandSourceStack`: a player's source is their own position and
+/// rotation, also when the mod calls from inside an outer command run from elsewhere
+/// (`execute positioned 50 80 50 rotated 90 30 run <a mod's command>`), for a player entered
+/// for it and for the acting player in their own turn. From the outer source, `~1 ~ ~ ~10 ~`
+/// would put them at (51, 80, 50) facing yaw 100, pitch 30.
+#[test]
+#[ignore = "daily"]
+fn run_command_runs_from_the_players_own_place_inside_an_outer_command() {
+    use super::commands::execute::Source;
+    use mod_api::PermissionLevel::Gamemasters;
+
+    with_guests(|game| {
+        game.build_registries();
+        let a = game.player(12).unwrap().entity();
+        let b = game.player(13).unwrap().entity();
+        let place = |game: &super::Game<'_>, conn: u32| {
+            let g = game.lan.as_ref().unwrap().hub.guest(conn).unwrap();
+            (g.position, [g.yaw, g.pitch])
+        };
+        let (start, [yaw, pitch]) = place(game, 12);
+        assert_eq!(place(game, 13), (start, [yaw, pitch]));
+        let outer = Source {
+            pos: [50.0, 80.0, 50.0],
+            rot: [90.0, 30.0],
+            ..game.server_source()
+        };
+        game.with_source(outer, |game| {
+            assert!(b.run_command(game, "tp @s ~1 ~ ~ ~10 ~", Gamemasters));
+            game.as_guest(12, |game| {
+                assert!(a.run_command(game, "tp @s ~1 ~ ~ ~10 ~", Gamemasters));
+            })
+            .unwrap();
+        });
+        for conn in [12, 13] {
+            assert_eq!(
+                place(game, conn),
+                ([start[0] + 1.0, start[1], start[2]], [yaw + 10.0, pitch]),
+                "guest {conn}"
+            );
+        }
     });
 }

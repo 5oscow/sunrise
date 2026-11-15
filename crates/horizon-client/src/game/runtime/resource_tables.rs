@@ -1,6 +1,25 @@
 //! The game's shared read-only tables: `Resources` (blocks, items, recipes, mob types, biomes),
 //! `UiResources` and `PackResources`.
 use super::*;
+use std::path::Path;
+
+pub(super) fn load_animate_tables(
+    root: &Path,
+    registry: &horizon_world::registry::BlockRegistry,
+    draws: bool,
+    biomes: &Biomes,
+) -> Result<(
+    horizon_client::animate_tick::AnimateTables,
+    horizon_client::fog::FogTables,
+)> {
+    let _step = startup::step("rest.animate_fog");
+    let animate = if draws {
+        horizon_client::animate_tick::AnimateTables::load(root, registry)?
+    } else {
+        Default::default()
+    };
+    Ok((animate, horizon_client::fog::FogTables::load(root, biomes)))
+}
 
 impl Resources {
     pub(super) fn rest(&self) -> &WorldRest {
@@ -125,6 +144,14 @@ impl Game<'_> {
     }
 }
 
+/// Whether the HUD atlas packs the mod image slot (`horizon/modimage`): whenever a client mod is
+/// loaded, native or wasm, since any of them can call `ClientHost::mod_image`, with no mixin and
+/// no opt-in (#4437). A game with no mod pays none of its 4 MiB. Read where the atlas is built:
+/// at the first load and on a resource reload.
+pub(in crate::game) fn mod_image_slot() -> bool {
+    !mod_api::__private::mods().is_empty()
+}
+
 impl UiResources {
     /// The resolved resource generation, including the base layer and pack filters.
     /// Its splash pool is empty until `with_splashes`.
@@ -137,7 +164,7 @@ impl UiResources {
                     horizon_client::gfx::panorama::Faces::load(root, root)
                 })
             });
-            let mod_image = horizon_client_render::render_slots::world_drawn_hooked();
+            let mod_image = mod_image_slot();
             let atlas = startup::time("ui.atlas", || {
                 HudAtlas::build_over_with_image(root, root, mod_image)
             });

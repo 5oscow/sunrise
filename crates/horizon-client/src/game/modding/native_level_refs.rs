@@ -71,6 +71,60 @@ fn biome_search_within_budget(parameters: mod_api::BiomeSearch, height: i32) -> 
 }
 
 impl Game<'_> {
+    pub(super) fn level_add_water_ticket(
+        &mut self,
+        level: LevelRef,
+        min: [i32; 3],
+        max: [i32; 3],
+    ) -> Option<mod_api::WaterTicket> {
+        let owner = mod_api::content::crash::current_native_mod()?;
+        let owner_index = mod_api::__private::mod_index(owner)?;
+        if !mod_api::__private::mod_index_on(owner_index) {
+            return None;
+        }
+        self.native_level_world(level)?;
+        let world = if level.dimension() == self.dim.key() {
+            &mut self.world
+        } else {
+            self.levels.parked_world_mut_of(level.dimension_id())?
+        };
+        world
+            .water_tickets
+            .add(owner, min, max, || {
+                mod_api::__private::mod_index_on(owner_index)
+            })
+            .map(|id| mod_api::WaterTicket::new(level, id))
+    }
+
+    pub(super) fn water_ticket_remove(&mut self, ticket: mod_api::WaterTicket) -> bool {
+        let Some(owner) = mod_api::content::crash::current_native_mod() else {
+            return false;
+        };
+        let Some(owner_index) = mod_api::__private::mod_index(owner) else {
+            return false;
+        };
+        if !mod_api::__private::mod_index_on(owner_index) {
+            return false;
+        }
+        let level = ticket.level();
+        if self.native_level_world(level).is_none() {
+            return false;
+        }
+        let world = if level.dimension() == self.dim.key() {
+            &mut self.world
+        } else if let Some(world) = self.levels.parked_world_mut_of(level.dimension_id()) {
+            world
+        } else {
+            return false;
+        };
+        world.water_tickets.remove(owner, ticket.id())
+    }
+
+    pub(super) fn level_has_water_ticket(&self, level: LevelRef, pos: [i32; 3]) -> bool {
+        self.native_level_world(level)
+            .is_some_and(|world| world.water_tickets.contains(pos))
+    }
+
     /// `ServerLevel.findClosestBiome3d`, using the same generator query as `/locate biome`.
     pub(super) fn level_find_closest_biome(
         &self,
@@ -254,7 +308,7 @@ impl Game<'_> {
         if !self.is_logical_server() {
             return Err(mod_api::LevelReadError::Unavailable);
         }
-        if self.native_lifecycle.epoch() != Some(level.epoch()) {
+        if !self.level_handle_current(level) {
             return Err(mod_api::LevelReadError::Stale);
         }
         if level.dimension() == self.dim.key() {
@@ -272,7 +326,7 @@ impl Game<'_> {
             return self.native_level_world(level);
         }
         (self.remote.as_ref().is_some_and(|r| r.logged_in)
-            && self.native_lifecycle.epoch() == Some(level.epoch())
+            && self.level_handle_current(level)
             && level.dimension() == self.native_level_key())
         .then_some(&self.world)
     }
@@ -472,10 +526,10 @@ impl Game<'_> {
         Some(forced.into_iter().map(|(x, z)| [x, z]).collect())
     }
     /// The block state ID at `pos` (`Level.getBlockState`), without formatting a string.
-    /// None for a chunk that isn't loaded or a `y` outside the world. On a client, the
-    /// state is the one the server sent for a chunk the client holds.
+    /// None for a chunk that isn't loaded or a `y` outside the world. On a client, the state
+    /// the server sent for a column the client holds, of its own level or a viewed one.
     pub(super) fn level_block_state(&self, level: LevelRef, pos: [i32; 3]) -> Option<BlockStateId> {
-        let world = self.native_level_read_world(level)?;
+        let world = self.native_level_view_world(level)?;
         let [x, y, z] = pos;
         world.is_loaded_at(x, y, z).then(|| world.block(x, y, z))
     }
@@ -587,7 +641,7 @@ impl Game<'_> {
     /// client.
     pub(super) fn level_in_place(&self, level: LevelRef) -> bool {
         self.is_logical_server()
-            && self.native_lifecycle.epoch() == Some(level.epoch())
+            && self.level_handle_current(level)
             && self.dim.key() == level.dimension()
     }
     /// `f` over the game's own `SignalGetter` for the level in place, as the level's blocks
@@ -695,6 +749,34 @@ impl Game<'_> {
         self.world.light_edits.push(((x, y, z), state, state));
         true
     }
+    /// The capability generation at `pos`, in an active or parked level. None for a stale
+    /// handle, a client, an unloaded position and one outside build height.
+    pub(super) fn level_capability_generation(
+        &self,
+        level: LevelRef,
+        [x, y, z]: [i32; 3],
+    ) -> Option<u64> {
+        let world = self.native_level_world(level)?;
+        (world.loaded(x, z) && world.shape.contains_y(y))
+            .then(|| world.capability_generations.get((x, y, z)))
+    }
+    /// Moves the capability generation at `pos` on, at the root commit inside a transaction.
+    /// False off the level in place, for a stale handle, on a client and for a position that
+    /// isn't loaded.
+    pub(super) fn level_invalidate_capabilities(
+        &mut self,
+        level: LevelRef,
+        [x, y, z]: [i32; 3],
+    ) -> bool {
+        if !self.level_in_place(level)
+            || !self.world.loaded(x, z)
+            || !self.world.shape.contains_y(y)
+        {
+            return false;
+        }
+        self.after_commit(super::transactions::After::Capabilities((x, y, z)));
+        true
+    }
     /// `LivingEntity.hasLineOfSight`'s clip between two points (collider shapes, no fluids):
     /// whether it misses. None as for `level_clip`.
     pub(super) fn level_line_of_sight(
@@ -709,7 +791,7 @@ impl Game<'_> {
     /// Whether `level` is a current handle on the server: what the world's own data (its
     /// respawn data and maps, shared by its levels) needs.
     fn native_world_data_allowed(&self, level: LevelRef) -> bool {
-        self.is_logical_server() && self.native_lifecycle.epoch() == Some(level.epoch())
+        self.is_logical_server() && self.level_handle_current(level)
     }
     /// `LevelData.getRespawnData`: the world spawn and its facing. None on a client, for a
     /// stale handle, and before the world has chosen its spawn.
@@ -884,7 +966,7 @@ impl Game<'_> {
     /// The time of the level's own clock (its dimension type's `default_clock`) in ticks: what the
     /// level's sky, spawning and beds go by, and what `/time` sets there. None for a level without
     /// a default clock, a stale handle and a client.
-    pub(super) fn level_clock_time(&self, level: LevelRef) -> Option<i64> {
+    pub(in crate::game) fn level_clock_time(&self, level: LevelRef) -> Option<i64> {
         self.native_level_read_world(level)?;
         if !self.is_logical_server() {
             return None;
@@ -908,7 +990,7 @@ mod tests {
     use mod_api::{ChunkRef, LevelRef, LightLayer, WorldEpoch};
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn review_climate_literals() {
         with_game(|game| {
             let level = game.level("minecraft:overworld").unwrap();
@@ -942,7 +1024,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_level_with_its_own_clock_counts_apart_from_the_overworlds() {
         with_game(|game| {
             game.world.day_time = 100;
@@ -1003,7 +1085,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn block_transform_preview_preserves_state_and_marks_simulation() {
         use super::super::native_guest_turn_tests::with_guests;
         use horizon_client::{chunk::Chunk, items::ItemStack};
@@ -1113,7 +1195,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn shared_level_signal_dispatches_and_clamps_part_output() {
         use horizon_client::chunk::Chunk;
         use horizon_core::geometry::Direction;
@@ -1144,7 +1226,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn shared_level_signal_reads_live_comparator_and_refuses_other_levels() {
         use horizon_client::chunk::Chunk;
         use horizon_core::geometry::Direction;
@@ -1188,7 +1270,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn respawn_data_maps_and_ticks_write_through_the_handle_and_refuse_others() {
         use horizon_client::chunk::Chunk;
         use std::sync::Arc;
@@ -1271,7 +1353,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn loaded_chunks_lists_the_level_in_order_without_loading() {
         use horizon_client::chunk::Chunk;
         use std::sync::Arc;
@@ -1298,7 +1380,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn bounds_reads_follow_the_level_without_loading_chunks() {
         with_game(|game| {
             let level = game.level("minecraft:overworld").unwrap();
@@ -1329,7 +1411,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn world_border_reads_refuse_stale_and_unopened_levels() {
         with_game(|game| {
             let level = game.level("minecraft:overworld").unwrap();
@@ -1347,7 +1429,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn height_reads_server_levels_and_the_joined_client_level() {
         use super::super::execution_role::ExecutionRole;
         use horizon_client::chunk::LevelShape;
@@ -1389,7 +1471,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn block_state_reads_stored_ids_and_refuses_unloaded_positions() {
         use horizon_client::chunk::Chunk;
         use std::sync::Arc;
@@ -1426,7 +1508,7 @@ mod tests {
     /// source, normalized; so does the source, toward it; a source with only air on stone
     /// around it, and air, have none.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn fluid_flow_reads_the_current_that_pushes_entities() {
         use horizon_client::chunk::Chunk;
         use mod_api::Vec3;
@@ -1497,7 +1579,7 @@ mod tests {
     /// under air and a full block under water, flowing water of level 5 a third high, the
     /// camera's full block under a sturdy ceiling, and what water and lava replace.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn fluid_queries_answer_vanilla_values_at_a_position() {
         use mod_api::{Direction, Host};
 
@@ -1596,7 +1678,7 @@ mod tests {
 
     /// Lava flows fast in the Nether: the delay follows the level's own dimension.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn lava_ticks_every_ten_in_a_fast_lava_level() {
         use mod_api::Host;
 
@@ -1616,7 +1698,7 @@ mod tests {
     /// neighbours with flowing water of level 1 (amount 7), once; an empty cell, an unloaded
     /// column, a position below the world, a stale handle and a level not in place do nothing.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn an_explicit_fluid_tick_spreads_a_source_and_refuses_other_positions() {
         with_game(|game| {
             let level = game.level(game.dim.id()).unwrap();
@@ -1651,7 +1733,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn forced_chunks_set_clear_and_query_like_forceload() {
         with_chunk_streaming(|game| {
             let level = game.level(game.dim.id()).unwrap();
@@ -1696,7 +1778,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn forced_chunk_changes_the_ticket_sources_and_the_saved_set() {
         with_chunk_streaming(|game| {
             let level = game.level(game.dim.id()).unwrap();
@@ -1712,7 +1794,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn forced_chunks_of_a_parked_level_and_stale_handles() {
         with_chunk_streaming(|game| {
             let stale_epoch = WorldEpoch::new(game.native_lifecycle.epoch().unwrap().get() + 1);
@@ -1754,7 +1836,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_level_ref_draws_from_its_levels_own_stream() {
         use horizon_core::random::RandomSource;
         use mod_api::{LevelRef, ServerHost};
@@ -1900,7 +1982,253 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
+    fn water_tickets_hydrate_real_farmland_and_preserve_vanilla_water_and_rain() {
+        use horizon_client::chunk::Chunk;
+        use std::sync::Arc;
+
+        with_machines(|game| {
+            game.install_live_features();
+            let level = game.level(game.dim.id()).unwrap();
+            let registry = game.pack.assets.registry;
+            let dry = registry.default_state("minecraft:farmland").unwrap();
+            let wheat = registry.default_state("minecraft:wheat").unwrap();
+            let air = registry.default_state("minecraft:air").unwrap();
+            let water = registry.default_state("minecraft:water").unwrap();
+            let stone = registry.default_state("minecraft:stone").unwrap();
+            let plains = game.res.biomes().id("minecraft:plains");
+            let mut chunk = Chunk::empty(0, 0);
+            for qy in 0..game.world.shape.height / 4 {
+                for qx in 0..4 {
+                    for qz in 0..4 {
+                        chunk.set_biome_cell(qx, qy, qz, plains);
+                    }
+                }
+            }
+            game.world.chunks.insert((0, 0), Arc::new(chunk));
+            game.block_ticks
+                .add_empty_chunk(horizon_core::position::ChunkPos::new(0, 0))
+                .unwrap();
+            assert!(level.set_weather_levels(game, 0.0, 0.0));
+            let moisture = |game: &super::super::Game<'_>, pos| {
+                level
+                    .block_property(game, pos, "moisture")
+                    .unwrap()
+                    .parse::<i32>()
+                    .unwrap()
+            };
+            for x in 4..9 {
+                for z in 4..9 {
+                    game.world.set(x, 64, z, dry).unwrap();
+                    game.world.set(x, 65, z, wheat).unwrap();
+                }
+            }
+            game.world.set(9, 64, 4, dry).unwrap();
+            game.world.set(9, 65, 4, wheat).unwrap();
+            let guard = in_mod("machines");
+            let ticket = level
+                .add_water_ticket(game, [4, 64, 4], [9, 65, 9])
+                .unwrap();
+            for x in 4..9 {
+                for z in 4..9 {
+                    assert!(level.has_water_ticket(game, [x, 64, z]));
+                    assert!(level.block_random_tick(game, [x, 64, z]));
+                    assert_eq!(moisture(game, [x, 64, z]), 7);
+                }
+            }
+            assert!(!level.has_water_ticket(game, [9, 64, 4]));
+            assert!(level.block_random_tick(game, [9, 64, 4]));
+            assert_eq!(moisture(game, [9, 64, 4]), 0);
+            assert!(ticket.remove(game));
+            assert!(!ticket.remove(game));
+            for expected in (0..7).rev() {
+                for x in 4..9 {
+                    for z in 4..9 {
+                        assert!(level.block_random_tick(game, [x, 64, z]));
+                        assert_eq!(moisture(game, [x, 64, z]), expected);
+                    }
+                }
+            }
+            // A real water block at vanilla's four-block edge still hydrates without a ticket.
+            game.world.set(0, 64, 4, water).unwrap();
+            assert!(level.block_random_tick(game, [4, 64, 4]));
+            assert_eq!(moisture(game, [4, 64, 4]), 7);
+            game.world.set(0, 64, 4, air).unwrap();
+            game.world.set(4, 64, 4, dry).unwrap();
+            game.world.set(4, 65, 4, air).unwrap();
+            assert!(level.set_weather_levels(game, 1.0, 0.0));
+            assert_eq!(level.is_raining_at(game, [4, 65, 4]), Some(true));
+            assert!(level.block_random_tick(game, [4, 64, 4]));
+            assert_eq!(moisture(game, [4, 64, 4]), 7);
+            // A roof still excludes rain: tickets have not replaced the rain predicate.
+            game.world.set(4, 66, 4, stone).unwrap();
+            assert_eq!(level.is_raining_at(game, [4, 65, 4]), Some(false));
+            assert!(level.block_random_tick(game, [4, 64, 4]));
+            assert_eq!(moisture(game, [4, 64, 4]), 6);
+            drop(guard);
+        });
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn water_ticket_handles_isolate_dimensions_owners_and_unload_lifetimes() {
+        with_machines(|game| {
+            let overworld = game.level(game.dim.id()).unwrap();
+            assert!(
+                overworld
+                    .add_water_ticket(game, [0, 64, 0], [5, 65, 5])
+                    .is_none()
+            );
+            let guard = in_mod("machines");
+            let a = overworld
+                .add_water_ticket(game, [-17, 64, -1], [18, 65, 2])
+                .unwrap();
+            let stale = LevelRef::new(
+                WorldEpoch::new(overworld.epoch().get() + 1),
+                overworld.dimension(),
+            );
+            assert!(!stale.has_water_ticket(game, [0, 64, 0]));
+            assert!(
+                stale
+                    .add_water_ticket(game, [0, 64, 0], [5, 65, 5])
+                    .is_none()
+            );
+            for pos in [[-17, 64, -1], [17, 64, 1]] {
+                assert!(overworld.has_water_ticket(game, pos));
+            }
+            for pos in [
+                [-18, 64, 0],
+                [18, 64, 0],
+                [0, 63, 0],
+                [0, 65, 0],
+                [0, 64, -2],
+                [0, 64, 2],
+            ] {
+                assert!(!overworld.has_water_ticket(game, pos), "{pos:?}");
+            }
+            game.enter_level(Dim::Nether).unwrap();
+            let nether = game.level(game.dim.id()).unwrap();
+            assert!(!nether.has_water_ticket(game, [0, 64, 0]));
+            assert!(overworld.has_water_ticket(game, [0, 64, 0]));
+            let b = nether
+                .add_water_ticket(game, [0, 64, 0], [5, 65, 5])
+                .unwrap();
+            assert!(
+                overworld
+                    .add_water_ticket(game, [0, 64, 0], [5, 65, 5])
+                    .is_some()
+            );
+            drop(guard);
+            let guard = in_mod("other");
+            assert!(!a.remove(game), "only its owner removes a ticket");
+            let overlap = nether
+                .add_water_ticket(game, [3, 64, 3], [4, 65, 4])
+                .unwrap();
+            drop(guard);
+            assert!(mod_api::__private::set_mod_enabled("machines", false));
+            assert!(!overworld.has_water_ticket(game, [0, 64, 0]));
+            assert!(!nether.has_water_ticket(game, [0, 64, 0]));
+            assert!(nether.has_water_ticket(game, [3, 64, 3]));
+            assert!(mod_api::__private::set_mod_enabled("machines", true));
+            assert!(
+                !overworld.has_water_ticket(game, [0, 64, 0]),
+                "re-enable never restores old tickets"
+            );
+            let guard = in_mod("machines");
+            assert!(!b.remove(game));
+            let fresh = overworld
+                .add_water_ticket(game, [0, 64, 0], [5, 65, 5])
+                .unwrap();
+            game.native_levels_closing();
+            assert!(!overworld.has_water_ticket(game, [0, 64, 0]));
+            assert!(!nether.has_water_ticket(game, [3, 64, 3]));
+            assert!(!fresh.remove(game));
+            drop(guard);
+            let guard = in_mod("other");
+            assert!(!overlap.remove(game));
+            drop(guard);
+            // The client cannot query or mutate the server's in-memory marks.
+            game.options.execution_role = super::super::execution_role::ExecutionRole::Client;
+            let guard = in_mod("machines");
+            assert!(!nether.has_water_ticket(game, [0, 64, 0]));
+            assert!(
+                nether
+                    .add_water_ticket(game, [0, 64, 0], [5, 65, 5])
+                    .is_none()
+            );
+            assert!(!b.remove(game));
+            drop(guard);
+        });
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn water_tickets_are_not_restored_with_saved_farmland() {
+        use horizon_client::{chunk::Chunk, save::SaveDir, world::World};
+        use std::sync::Arc;
+
+        with_machines(|game| {
+            let level = game.level(game.dim.id()).unwrap();
+            let registry = game.pack.assets.registry;
+            let dry = registry.default_state("minecraft:farmland").unwrap();
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            game.block_ticks
+                .add_empty_chunk(horizon_core::position::ChunkPos::new(0, 0))
+                .unwrap();
+            game.world.set(4, 64, 4, dry).unwrap();
+            let guard = in_mod("machines");
+            let old = level
+                .add_water_ticket(game, [4, 64, 4], [9, 65, 9])
+                .unwrap();
+            assert!(level.block_random_tick(game, [4, 64, 4]));
+            assert_eq!(
+                level
+                    .block_property(game, [4, 64, 4], "moisture")
+                    .as_deref(),
+                Some("7")
+            );
+            game.save
+                .save(
+                    &[game.world.chunks.get(&(0, 0)).unwrap().clone()],
+                    registry,
+                    game.res.biomes(),
+                )
+                .unwrap();
+            let root = game.save.root.clone();
+            let shape = game.world.shape;
+            game.native_levels_closing();
+            let save = SaveDir::new(root, shape);
+            let chunk = save.load(0, 0, registry, game.res.biomes()).unwrap();
+            game.world = World::new(registry.default_state("minecraft:air").unwrap(), 0);
+            game.world.chunks.insert((0, 0), Arc::new(chunk));
+            game.save = Arc::new(save);
+            game.native_lifecycle
+                .begin_open(mod_api::Authority::IntegratedServer);
+            let reopened = game.level(game.dim.id()).unwrap();
+            assert_ne!(level.epoch(), reopened.epoch());
+            assert!(!reopened.has_water_ticket(game, [4, 64, 4]));
+            assert!(!old.remove(game));
+            assert_eq!(
+                reopened
+                    .block_property(game, [4, 64, 4], "moisture")
+                    .as_deref(),
+                Some("7")
+            );
+            assert!(reopened.block_random_tick(game, [4, 64, 4]));
+            assert_eq!(
+                reopened
+                    .block_property(game, [4, 64, 4], "moisture")
+                    .as_deref(),
+                Some("6")
+            );
+            drop(guard);
+        });
+    }
+
+    #[test]
+    #[ignore = "daily"]
     fn mod_tickets_are_scoped_by_owner_and_share_the_forceload_store() {
         use mod_api::TicketOwner::{Block, Entity};
         with_machines(|game| {
@@ -1972,7 +2300,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn mod_tickets_save_apart_from_vanillas_tickets_and_release_with_the_world() {
         use mod_api::TicketOwner::{Block, Entity};
         with_machines(|game| {
@@ -2025,7 +2353,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_mod_ticket_keeps_a_parked_level_active() {
         with_machines(|game| {
             let level = game.level(game.dim.id()).unwrap();
@@ -2059,7 +2387,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn forceload_add_returns_with_each_new_column_loaded() {
         with_chunk_streaming(|game| {
             game.ui.registries.permission = 4;
@@ -2082,7 +2410,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn forceload_query_lists_only_command_tickets() {
         with_machines(|game| {
             let level = game.level(game.dim.id()).unwrap();
@@ -2105,7 +2433,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn natural_spawning_tickets_and_plain_ones_save_and_load_apart() {
         use mod_api::TicketOwner::Block;
         with_machines(|game| {
@@ -2152,7 +2480,7 @@ mod tests {
     /// attempt); the local mob cap still wants a non-spectator within 128
     /// blocks of its centre.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_natural_spawning_ticket_far_from_every_player_runs_the_attempt_but_the_local_cap_refuses()
     {
         use horizon_client::chunk::Chunk;
@@ -2216,7 +2544,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn validation_drops_a_removed_ticket_and_leaves_the_rest() {
         with_machines(|game| {
             // `quarry` and `vault` validate; `plain` doesn't. All of them hold the pruned block.
@@ -2269,7 +2597,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn validation_runs_when_a_parked_level_opens_and_not_without_a_listener() {
         mod_platform::testing::with_mods(mods(), || {
             with_game(|game| {
@@ -2320,7 +2648,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn validation_sees_the_saved_tickets_not_ones_added_after_the_load() {
         with_machines(|game| {
             let level = game.level(game.dim.id()).unwrap();
@@ -2340,7 +2668,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn light_and_loaded_reads_match_the_games_query_and_load_nothing() {
         use horizon_client::chunk::{Chunk, Light};
         use mod_api::LevelHost;
@@ -2397,7 +2725,7 @@ mod tests {
     /// where the next update asks a `dynamic_light` block again and relights it; a stale
     /// handle and a position that isn't loaded queue nothing.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn check_light_queues_the_cell_with_the_light_edits() {
         use horizon_client::chunk::Chunk;
         use std::sync::Arc;
@@ -2444,7 +2772,7 @@ mod environment_read_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn biome_reads_follow_live_cells_parked_levels_and_client_login_without_loading() {
         use crate::game::execution_role::ExecutionRole;
         use horizon_protocol::connection::Pipe;
@@ -2508,7 +2836,7 @@ mod environment_read_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn floor_reads_real_collision_shapes_and_refuses_unloaded_positions() {
         with_game(|game| {
             game.world
@@ -2551,7 +2879,7 @@ mod environment_read_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn sky_and_logical_height_read_the_named_dimension_and_client_state() {
         use crate::game::execution_role::ExecutionRole;
         use horizon_client::chunk::LevelShape;
@@ -2630,7 +2958,7 @@ mod environment_read_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn closest_biome_uses_the_named_generator_without_loading_resident_chunks() {
         use horizon_client::vanillagen::{TerrainResources, VanillaTerrain};
 
@@ -2739,7 +3067,7 @@ mod environment_read_tests {
     /// (`ConcentricRingsStructurePlacement` with distance 32), each then moved
     /// to a biome it may start in within 112 blocks.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn nearest_structure_uses_the_named_generator_without_loading_resident_chunks() {
         use horizon_client::vanillagen::{TerrainResources, VanillaTerrain};
         use mod_api::StructureSearch;
@@ -2836,7 +3164,7 @@ mod environment_read_tests {
 
     /// API results over original fixture worlds, compared with independently recorded vanilla calls.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn level_environment_reads_match_vanilla_vectors() {
         use horizon_client::vanillagen::{TerrainResources, VanillaTerrain};
         use serde_json::{Value, json};

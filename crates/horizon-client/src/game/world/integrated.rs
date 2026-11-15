@@ -11,7 +11,10 @@
 use super::{
     Dim, Game, Options, PackResources, Resources, UiResources, WorldIcon,
     execution_role::ExecutionRole,
-    lan::{LanSettings, Owner, SyncPreload, preload_sync_data},
+    lan::{
+        LanSettings, Owner,
+        sync::{SyncPreload, preload_sync_data},
+    },
     world_loading::{WorldLoader, WorldRequest},
 };
 use horizon_client::level_loading::{STATUS_RADIUS, Stage};
@@ -78,6 +81,7 @@ struct Flags {
     /// `Minecraft.pause`: a single-player pause screen is open.
     paused: AtomicBool,
     stop: AtomicBool,
+    finished: AtomicBool,
     failure: Mutex<Option<String>>,
     /// `IntegratedServer.getPort`: the port it is open to the LAN on, 0
     /// while it is not.
@@ -114,6 +118,36 @@ struct Flags {
     debug: Mutex<super::debug_lines::ServerDebug>,
 }
 
+impl Flags {
+    fn emergency_save(&self, server: std::thread::ThreadId, timeout: Duration) -> bool {
+        if std::thread::current().id() == server || self.finished.load(Ordering::Acquire) {
+            return true;
+        }
+        log::warn!("Horizon: saving the world before the crash");
+        self.stop.store(true, Ordering::Relaxed);
+        let started = Instant::now();
+        while !self.finished.load(Ordering::Acquire) {
+            let Some(left) = timeout.checked_sub(started.elapsed()) else {
+                log::warn!(
+                    "Horizon: the world did not save within {} s",
+                    timeout.as_secs()
+                );
+                return false;
+            };
+            std::thread::sleep(left.min(Duration::from_millis(10)));
+        }
+        true
+    }
+}
+
+// Signal even if serve returns an error or unwinds; no game data is touched here.
+struct Finished(Arc<Flags>);
+impl Drop for Finished {
+    fn drop(&mut self) {
+        self.0.finished.store(true, Ordering::Release);
+    }
+}
+
 /// Work the window hands its server thread (`MinecraftServer.execute`).
 type Task = Box<dyn FnOnce(&mut Game<'_>) + Send>;
 
@@ -121,6 +155,7 @@ type Task = Box<dyn FnOnce(&mut Game<'_>) + Send>;
 pub(super) struct Integrated {
     flags: Arc<Flags>,
     thread: Option<JoinHandle<()>>,
+    emergency_save: Option<horizon_client::crash::EmergencySave>,
     tasks: Sender<Task>,
     /// The world's name (`level.dat`'s `LevelName`), for the pause menu.
     pub world_name: String,
@@ -292,6 +327,7 @@ impl Integrated {
     }
     fn halt(&mut self) -> Result<()> {
         self.request_stop();
+        self.emergency_save.take();
         if let Some(thread) = self.thread.take() {
             thread
                 .join()
@@ -508,6 +544,7 @@ impl Game<'_> {
         ));
         self.world_biomes_base = self.world_biomes.clone();
         let (res, pack, settings) = (self.res.clone(), self.pack.clone(), self.settings.clone());
+        horizon_client::parallel::set_setting(settings.horizon.parallel_tick);
         let flags = Arc::new(Flags::default());
         flags
             .render_distance
@@ -525,6 +562,7 @@ impl Game<'_> {
         let (tasks, server_tasks) = channel();
         let server_flags = flags.clone();
         let run_server = move |_: &()| {
+            let _finished = Finished(server_flags.clone());
             // MinecraftServer.spin's Thread.setPriority(8).
             horizon_threads::favour_current();
             let result = serve(
@@ -551,7 +589,13 @@ impl Game<'_> {
             .name(horizon_client::crash::INTEGRATED_SERVER_THREAD.into())
             .stack_size(server_thread_stack())
             .spawn(move || run_server(&()))?;
+        let emergency_flags = flags.clone();
+        let server_id = thread.thread().id();
+        let emergency_save = horizon_client::crash::on_emergency_save(move || {
+            emergency_flags.emergency_save(server_id, Duration::from_secs(30));
+        });
         let handle = Integrated {
+            emergency_save: Some(emergency_save),
             flags,
             thread: Some(thread),
             tasks,
@@ -792,10 +836,17 @@ impl Game<'_> {
                         self.tick_server_measured(true)?;
                     } else {
                         self.follow_distances(flags);
+                        let cpu = horizon_client::spans::thread_cpu();
                         let started = Instant::now();
                         self.tick_server_measured(false)?;
                         // MinecraftServer.tickServer's tick times, for /tick query.
                         self.clock.record(started.elapsed());
+                        // Parallel Tick's Auto decides here, between ticks, how the next one runs.
+                        let on_cpu = horizon_client::spans::thread_cpu().zip(cpu);
+                        horizon_client::parallel::after_tick(
+                            started.elapsed().as_secs_f32() * 1000.0,
+                            on_cpu.map(|(end, start)| (end - start).as_secs_f32() * 1000.0),
+                        );
                         self.debug_charts.log_tick(started, started.elapsed());
                         flags.smoothed_tick_ms.store(
                             self.debug_charts.smoothed_tick_ms.to_bits(),
@@ -891,7 +942,7 @@ impl Game<'_> {
         if let Ok(dir) = std::env::current_dir() {
             self.native_configs_server_start(&dir.join("saves").join(&launch.folder), false);
         }
-        // MinecraftServer.loadLevel's start: nothing is loaded yet.
+        let prepared = self.prepare_early_game_rules(opening.world?)?;
         self.native_server_about_to_start(false);
         self.native_server_starting(false);
         self.native_lifecycle_open_started();
@@ -899,7 +950,7 @@ impl Game<'_> {
         startup::time("server.wait_rest", || self.join_world_rest())?;
         self.perf.world_opening();
         let open_step = startup::step("server.open_world");
-        self.finish_open_world(opening.world?.finish()?)?;
+        self.finish_open_world(prepared)?;
         drop(open_step);
         if let Some(sync) = opening.sync {
             startup::time("server.sync_adopt", || sync.adopt(&self.pack_files()));
@@ -1392,6 +1443,8 @@ struct Opening {
 pub(super) enum ComponentHarness {
     Dispenser(String),
     Sculk(String),
+    /// The hot-path benchmark (`hot_paths`), which builds its own levels the same way.
+    HotPaths(String),
 }
 
 impl Game<'_> {
@@ -1417,6 +1470,7 @@ impl Game<'_> {
                     match fixture {
                         ComponentHarness::Dispenser(spec) => server.dispense_fixture(&spec),
                         ComponentHarness::Sculk(spec) => server.sculk_fixture(&spec),
+                        ComponentHarness::HotPaths(output) => server.hot_paths(&output),
                     }
                 };
                 run().map_err(|e| e.to_string())
@@ -1485,7 +1539,7 @@ pub(super) mod tests {
     use mod_api::prelude::*;
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn posted_native_panic_writes_one_server_report() {
         let scratch = tempfile::tempdir().unwrap();
         let home = scratch.path().to_path_buf();
@@ -1493,6 +1547,7 @@ pub(super) mod tests {
         horizon_client::crash::install(home.clone(), "client");
         let (tasks, receiver) = channel::<Task>();
         let mut server = Integrated {
+            emergency_save: None,
             flags: Arc::new(Flags::default()),
             thread: None,
             tasks,
@@ -1582,7 +1637,7 @@ pub(super) mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn integrated_rules_screen_shares_server_session_registry() {
         super::super::native_entity_refs::tests::with_client_game(|game| {
             let registry = Arc::new(horizon_client::gamerules::RuleRegistry::with_categories(&[
@@ -1592,6 +1647,7 @@ pub(super) mod tests {
                 WorldRequest::new("test", None, None, true, None, registry.clone()).unwrap();
             let (tasks, _receiver) = channel();
             game.integrated = Some(Integrated {
+                emergency_save: None,
                 flags: Arc::new(Flags::default()),
                 thread: None,
                 tasks,
@@ -1614,12 +1670,13 @@ pub(super) mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn client_session_identifies_only_its_own_integrated_server() {
         super::super::native_entity_refs::tests::with_client_game(|game| {
             let _pipe = super::super::native_client_session::tests::logged_client(game);
             let (tasks, _waiting_server) = channel();
             game.integrated = Some(Integrated {
+                emergency_save: None,
                 flags: Arc::new(Flags::default()),
                 thread: None,
                 tasks,
@@ -1653,7 +1710,7 @@ pub(super) mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn integrated_tick_panic_saves_changed_world() {
         crate::game::native_entity_refs::tests::with_game(|game| {
             let root = std::env::temp_dir().join(format!(
@@ -1706,9 +1763,35 @@ pub(super) mod tests {
     }
 
     #[test]
+    fn emergency_save_waits_for_finished_and_times_out() {
+        let flags = Arc::new(Flags::default());
+        let saving = flags.clone();
+        let server = std::thread::spawn(move || {
+            let _finished = Finished(saving.clone());
+            while !saving.stop.load(Ordering::Relaxed) {
+                std::thread::yield_now();
+            }
+        });
+        let id = server.thread().id();
+        assert!(flags.emergency_save(id, Duration::from_secs(2)));
+        assert!(flags.finished.load(Ordering::Acquire));
+        server.join().unwrap();
+        assert!(flags.emergency_save(id, Duration::ZERO));
+        let flags = Flags::default();
+        let started = Instant::now();
+        assert!(!flags.emergency_save(id, Duration::from_millis(20)));
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert!(flags.stop.load(Ordering::Relaxed));
+        let flags = Flags::default();
+        assert!(flags.emergency_save(std::thread::current().id(), Duration::ZERO));
+        assert!(!flags.stop.load(Ordering::Relaxed));
+    }
+
+    #[test]
     fn pregen_toggle_back_is_queued_while_server_is_busy() {
         let (tasks, waiting_server) = channel();
         let server = Integrated {
+            emergency_save: None,
             flags: Arc::new(Flags::default()),
             thread: None,
             tasks,
@@ -1760,6 +1843,7 @@ pub(super) mod tests {
         let (release, wait) = channel();
         let (tasks, _) = channel();
         let server = Integrated {
+            emergency_save: None,
             flags: flags.clone(),
             thread: Some(std::thread::spawn(move || wait.recv().unwrap())),
             tasks,
@@ -1780,6 +1864,7 @@ pub(super) mod tests {
         let saving = flags.clone();
         let (tasks, _) = channel();
         let server = Integrated {
+            emergency_save: None,
             flags,
             thread: Some(std::thread::spawn(move || {
                 *saving.failure.lock().unwrap() = Some("disk write failed".into());

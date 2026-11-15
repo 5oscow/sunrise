@@ -104,6 +104,7 @@ fn configurations_coexist_without_eviction() {
     let (_dir, cache, _, bytes) = fixture();
     let production = crate::runtime::engine().unwrap();
     let mut config = wasmtime::Config::new();
+    crate::runtime::without_threads(&mut config);
     config.epoch_interruption(crate::runtime::ENGINE_CONFIG.1);
     config.max_wasm_stack(horizon_guest_stack::GUEST_STACK_BYTES);
     // Wasmtime validates this bound even for synchronous engines. No async
@@ -198,7 +199,7 @@ fn stale_temporaries_are_removed_and_fresh_ones_kept() {
 
 #[test]
 fn the_key_is_one_sha256_per_input() {
-    let engine = Engine::default();
+    let engine = crate::runtime::test_engine();
     let a = ModuleCache::key(&engine, &wasm(42));
     assert_eq!(a.len(), 129);
     assert_eq!(a, ModuleCache::key(&engine, &wasm(42)));
@@ -339,7 +340,7 @@ fn group_linker_uses_cache_and_programmatic_linking_leaves_it_empty() {
         use crate::link::{Group, Member};
         let (_dir, cache, _, _) = fixture();
         // Programmatic linking does not install a production epoch deadline.
-        let engine = Engine::default();
+        let engine = crate::runtime::test_engine();
         let bytes = wat::parse_str(
             r#"(module
         (@custom "dylink.0" "\01\04\00\00\00\00")
@@ -428,7 +429,11 @@ fn measure_child_compile() {
         let start = std::time::Instant::now();
         assert!(
             std::process::Command::new(std::env::current_exe().unwrap())
-                .args(["--exact", "module_cache::tests::compiler_actor"])
+                .args([
+                    "--include-ignored",
+                    "--exact",
+                    "module_cache::tests::compiler_actor"
+                ])
                 .env_clear()
                 .env("HORIZON_COMPILER_INPUT", &input.0)
                 .env("HORIZON_COMPILER_OUTPUT", ModuleCache::key(&engine, &bytes))
@@ -457,7 +462,11 @@ fn actor_command(input: &Path, key: &str, mode: &str) -> std::process::Command {
     let mut command = std::process::Command::new(std::env::current_exe().unwrap());
     command
         .env_clear()
-        .args(["--exact", "module_cache::tests::compiler_actor"])
+        .args([
+            "--include-ignored",
+            "--exact",
+            "module_cache::tests::compiler_actor",
+        ])
         .env("HORIZON_COMPILER_INPUT", input)
         .env("HORIZON_COMPILER_OUTPUT", key)
         .env("HORIZON_COMPILER_MODE", mode);
@@ -486,6 +495,7 @@ fn missing(_: &Path, _: &str) -> std::process::Command {
 }
 
 #[test]
+#[ignore = "daily"]
 fn child_success_avoids_in_process_compile() {
     let (_dir, cache, _, bytes) = fixture();
     let engine = crate::runtime::engine().unwrap();
@@ -503,7 +513,8 @@ fn child_success_avoids_in_process_compile() {
 }
 
 #[test]
-fn child_failures_fall_back_to_identical_compilation() {
+#[ignore = "daily"]
+fn child_failures_refuse_without_unbounded_compilation() {
     for (command, marker) in [
         (wrong as fn(&Path, &str) -> std::process::Command, None),
         (crash, None),
@@ -514,27 +525,40 @@ fn child_failures_fall_back_to_identical_compilation() {
     ] {
         let (_dir, cache, _, bytes) = fixture();
         let engine = crate::runtime::engine().unwrap();
-        let (module, source) = cache
+        let error = cache
             .load_with_child(
                 &engine,
                 &bytes,
                 Some((command, std::time::Duration::from_secs(10))),
             )
-            .unwrap();
-        assert_eq!(source, Source::Compiled);
+            .unwrap_err();
+        if marker.is_some() {
+            assert!(
+                error.downcast_ref::<CompileTimeout>().is_some(),
+                "{error:#}"
+            );
+        } else {
+            assert!(
+                error.downcast_ref::<CompileUnavailable>().is_some(),
+                "{error:#}"
+            );
+            let diagnostic = error.to_string();
+            assert!(diagnostic.contains("cannot enforce compilation budget"));
+            assert!(diagnostic.contains("private writable .horizon-cache/wasm"));
+        }
         if let Some(marker) = marker {
             assert!(cache.root.parent().unwrap().join(marker).exists());
         }
-        assert_eq!(answer(&engine, &module), 42);
-        assert_eq!(cache.compiles.load(Ordering::Relaxed), 1);
-        assert_eq!(
-            module.serialize().unwrap(),
-            Module::new(&engine, &bytes).unwrap().serialize().unwrap()
+        assert_eq!(cache.compiles.load(Ordering::Relaxed), 0);
+        assert!(
+            !cache
+                .entry_path(&ModuleCache::key(&engine, &bytes))
+                .exists()
         );
         assert!(
             entries(&cache)
                 .iter()
-                .all(|p| p.extension().unwrap() == "cwasm")
+                .all(|path| path.extension().unwrap() == "cwasm")
         );
     }
 }

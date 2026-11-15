@@ -18,6 +18,10 @@ on:
         description: The version built in (HORIZON_VERSION), e.g. 0.2.81 or nightly-2026-10-28
         type: string
         required: true
+      kind:
+        description: Build channel; snapshots require only SDK-supported platforms
+        type: string
+        default: release
       nightly:
         description: A nightly's "<date> <short sha>" (HORIZON_NIGHTLY), shown by the game; empty for a release
         type: string
@@ -62,7 +66,15 @@ jobs:
           ref: ${{ inputs.ref }}
           persist-credentials: false
           clean: true
-      - uses: dtolnay/rust-toolchain@stable
+      - name: The pinned Rust (tools/ci/rust-version)
+        id: rust
+        shell: bash
+        run: echo "version=$(cat "$GITHUB_WORKSPACE/tools/ci/rust-version")" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.rust.outputs.version }}
+          # wasm-std uses -Zbuild-std even when this pinned toolchain is already installed.
+          components: rust-src, rustfmt
       - uses: actions/setup-python@v6
         if: runner.environment == 'github-hosted'
         with:
@@ -122,10 +134,10 @@ jobs:
   build:
     needs: [runner-configuration, exporters]
     name: build ${{ matrix.name }}
-    # Windows ARM64 and musl are new: a failure never holds the other platforms' release (the signing job
-    # needs this job, and a failed entry of it would fail it). The release steps leave the missing
-    # optional archives out with a warning.
-    continue-on-error: ${{ matrix.name == 'windows-arm64' || matrix.name == 'linux-musl' }}
+    # Windows ARM64 and musl stay optional. Snapshots also leave Intel macOS optional: only the SDK's
+    # platforms are required there. Nightlies and releases retain their existing Intel macOS requirement.
+    # Optional failed legs still run; signing omits their absent archives, and snapshot notes name them.
+    continue-on-error: ${{ matrix.name == 'windows-arm64' || matrix.name == 'linux-musl' || (inputs.kind == 'snapshot' && matrix.name == 'macos-x64') }}
     strategy:
       fail-fast: false
       matrix:
@@ -197,7 +209,7 @@ jobs:
           # keeps its preparations outside the checkout.
           clean: true
       - name: Workflow-owned validation tools
-        if: (runner.os == 'Linux' && !matrix.musl) || runner.environment == 'self-hosted'
+        # Every matrix leg reads the Rust pin below, not only Linux and self-hosted legs.
         uses: actions/checkout@v7
         with:
           ref: ${{ github.workflow_sha }}
@@ -207,11 +219,17 @@ jobs:
           sparse-checkout: |
             tools/check_glibc.py
             tools/ci/game_smoke.sh
+            tools/ci/rust-version
             tools/ci/with_xvfb.py
-            tools/ci/nightly_catalog.py
-      - uses: dtolnay/rust-toolchain@stable
+      - name: The pinned Rust (tools/ci/rust-version)
+        id: rust
+        shell: bash
+        run: echo "version=$(cat "$GITHUB_WORKSPACE/.workflow-tools/tools/ci/rust-version")" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: ${{ steps.rust.outputs.version }}
           targets: ${{ matrix.target }}
+          components: rustfmt
       - uses: actions/setup-python@v6
         if: runner.environment == 'github-hosted'
         with:
@@ -230,18 +248,6 @@ jobs:
         with:
           distribution: temurin
           java-version: '25'
-      - name: Export the pinned Nightly SDK catalog
-        if: github.repository == 'arismoko/horizon' && inputs.nightly != '' && matrix.name == 'linux'
-        env:
-          CATALOG_COMMIT: ${{ inputs.ref }}
-        run: python3 .workflow-tools/tools/ci/nightly_catalog.py --root "$PWD" --commit "$CATALOG_COMMIT" --output "$RUNNER_TEMP/mod-catalog.json"
-      - uses: actions/upload-artifact@v7
-        if: github.repository == 'arismoko/horizon' && inputs.nightly != '' && matrix.name == 'linux'
-        with:
-          name: horizon-mod-catalog
-          path: ${{ runner.temp }}/mod-catalog.json
-          if-no-files-found: error
-          retention-days: 3
       - name: Build the official game, horizon-ctl, horizon-prepare and horizon-server
         if: ${{ !matrix.musl }}
         run: cargo build --release --locked ${{ matrix.target && format('--target {0}', matrix.target) || '' }} -p horizon-official --bin horizon-official -p horizon-client-lib --bin horizon-ctl -p horizon-prepare --bin horizon-prepare -p horizon-server --bin horizon-server
@@ -321,6 +327,24 @@ jobs:
         run: |
           python3 .workflow-tools/tools/check_glibc.py \
             "$BIN/horizon-client" "$BIN/horizon-ctl" "$BIN/horizon-prepare" "$BIN/horizon-server"
+      - name: macOS main-stack diagnostics
+        if: runner.os == 'macOS'
+        run: |
+          echo "LC_MAIN of horizon-client:"
+          otool -l "$BIN/horizon-client" | grep -A4 LC_MAIN || true
+          if [[ "$(lipo -archs "$BIN/horizon-client")" == x86_64 ]]; then
+            translated=$(arch -x86_64 /usr/sbin/sysctl -n sysctl.proc_translated 2>/dev/null || echo 0)
+            stack_limit=$(arch -x86_64 /bin/sh -c 'ulimit -s' || true)
+          else
+            translated=$(sysctl -n sysctl.proc_translated 2>/dev/null || echo 0)
+            stack_limit=$(ulimit -s || true)
+          fi
+          echo "sysctl.proc_translated (horizon-client architecture): $translated"
+          echo "ulimit -s (horizon-client architecture): $stack_limit"
+          echo "Runner uname -m:"
+          uname -m || true
+          echo "Runner arch:"
+          arch || true
       - name: Every program starts
         if: ${{ !matrix.musl }}
         run: |
@@ -469,8 +493,15 @@ jobs:
           sparse-checkout-cone-mode: false
           sparse-checkout: |
             tools/ci/game_smoke.sh
+            tools/ci/rust-version
             tools/ci/with_xvfb.py
-      - uses: dtolnay/rust-toolchain@stable
+      - name: The pinned Rust (tools/ci/rust-version)
+        id: rust
+        shell: bash
+        run: echo "version=$(cat "$GITHUB_WORKSPACE/.workflow-tools/tools/ci/rust-version")" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.rust.outputs.version }}
       - uses: actions/setup-java@v4
         with:
           distribution: temurin

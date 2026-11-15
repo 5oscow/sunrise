@@ -5,7 +5,11 @@
 /// `pay <player:player> <amount:integer>`, `balance [player:player]`,
 /// `eco give <player:player> <amount:integer>`. Kinds: `word`, `text` (the
 /// rest of the line, last), `integer`, `number`, `boolean`, `player`, `players`,
-/// `entity`, `entities`, `item`, `block_pos`, or a command argument type a mod registered with
+/// `entity`, `entities`, `item`, `block_pos`, `vec3` (a point, `Vec3Argument.vec3()`; delivered
+/// as `Vec3`), `id` (a free `namespace:path` identifier, delivered as that canonical string),
+/// `mod_id` (a loaded package id, delivered as a
+/// string), `resource:<registry>` (an id that registry holds, delivered as `Id`:
+/// `<kind:resource:minecraft:entity_type>`), or a command argument type a mod registered with
 /// `Registrar::register_command_argument`, named by its namespaced id:
 /// `machine use <machine:mymod:machine>`. Usages of one command share their
 /// words; the server merges them into one tree. Each executable usage keeps its own level:
@@ -50,13 +54,13 @@ impl Command {
 #[non_exhaustive]
 #[derive(horizon_mod_api_macros::Wire)]
 pub enum Authority {
-    /// A single-player game with no server thread; never fires today.
+    /// A single-player game with no server thread; does not fire.
     LocalAuthoritative,
     /// The server thread of a single-player or LAN world.
     IntegratedServer,
     /// A dedicated server.
     DedicatedServer,
-    /// A client of someone else's server; never fires today.
+    /// A client of someone else's server; does not fire.
     RemoteClient,
 }
 

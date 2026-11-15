@@ -10,6 +10,7 @@ use super::{
     entity::{
         Entity as _, EntityHandle, ThunderHit, entity_lists_of, for_each_entity, with_entity,
     },
+    minecarts::CartHit,
 };
 use horizon_client::advancements::EntityView;
 use horizon_client::mobs::{Damage, DamageKind, Species};
@@ -63,6 +64,29 @@ fn thunder_strike_column(ticks: &mut Ticks, cx: i32, cz: i32) -> (i32, i32) {
     let r = ticks.block_random_pos(cx * 16, 0, cz * 16, 15);
     (r.x, r.z)
 }
+
+#[cfg(test)]
+impl Bolt {
+    /// A spent bolt at `at`, for tests that call `thunder_hit` directly.
+    pub(in crate::game) fn struck_at(id: u32, at: [f64; 3]) -> Self {
+        Self {
+            id,
+            at,
+            life: 0,
+            flashes: 0,
+            seed: 0,
+            random: LegacyRandom::new(0),
+            visual_only: false,
+            converted: Vec::new(),
+            hit: Vec::new(),
+            hit_items: Vec::new(),
+            spared: Vec::new(),
+            fires: 0,
+            cause: None,
+        }
+    }
+}
+
 impl Game<'_> {
     /// `ServerChunkCache.tickSpawningChunk`: one `tickThunder` roll per
     /// spawning chunk (within 128 blocks of a player) that is in entity
@@ -551,7 +575,7 @@ impl Game<'_> {
     /// `CHANNELED_LIGHTNING` counts them. Boats, minecarts and experience
     /// orbs are hit too (`VehicleEntity.hurtServer` adds 5 x 10 > 40 and
     /// destroys them; an orb has 5 health).
-    fn thunder_hit(&mut self, b: &mut Bolt) -> Vec<EntityView> {
+    pub(in crate::game) fn thunder_hit(&mut self, b: &mut Bolt) -> Vec<EntityView> {
         let at = b.at;
         let strike = Aabb::new(
             Vec3::new(at[0] - 3.0, at[1] - 3.0, at[2] - 3.0),
@@ -603,7 +627,10 @@ impl Game<'_> {
                     keep_equipment: false,
                     preserve_can_pick_up_loot: old.species() == Species::Pig,
                 };
-                if self.convert_to(&old, outcome, params, |_, _| {}).is_some() {
+                if self
+                    .convert_to(&old, outcome, params, false, |_, _| {})
+                    .is_some()
+                {
                     continue;
                 }
             }
@@ -715,7 +742,7 @@ impl Game<'_> {
                     };
                     let vanilla = self.saved_refuses_damage(id, "minecraft:lightning_bolt", false);
                     if !self.native_nonliving_invulnerable(id, kind, source, vanilla) {
-                        self.hurt_cart(i, 5.0, false, false);
+                        self.hurt_cart(i, 5.0, false, false, CartHit::default());
                     }
                 }
                 EntityHandle::Orb(i) => {
@@ -760,7 +787,7 @@ impl Game<'_> {
         };
         strike_players(self);
         self.each_guest_hit(strike_players);
-        // Dropped items burn up (ItemEntity health 5), save fire-resistant ones.
+        // Items run Entity.thunderHit, then the shared ItemEntity hurt path.
         let mut left = self.thunder_count(strike, ThunderHit::Item);
         for h in self.entity_handles_rev() {
             if left == 0 {
@@ -776,10 +803,24 @@ impl Game<'_> {
             if !self.lightning_may_strike(e.id, bolt) {
                 continue;
             }
-            let e = &self.dropped[i];
-            if !(e.stack.item.contains("netherite") || (e.age < 20 && b.spared.contains(&e.id))) {
-                self.dropped.remove(i);
+            let e = &mut self.dropped[i];
+            e.fire_ticks += 1;
+            if e.fire_ticks == 0 {
+                e.fire_ticks = 160;
             }
+            // Cushion spare stands in for vanilla's invulnerableTime window.
+            if e.age < 20 && b.spared.contains(&e.id) {
+                continue;
+            }
+            let id = e.id;
+            self.hurt_item_entity(
+                id,
+                5.0,
+                "minecraft:lightning_bolt",
+                Some(Target::Other(bolt)),
+                None,
+                Some(at),
+            );
         }
         self.native_leaves_flush();
         struck
@@ -841,7 +882,7 @@ mod tests {
     /// `LightningBolt.spawnFire` places nothing, and draws no extra sources,
     /// unless `canSpreadFireAround` passes at the bolt (#11376).
     #[test]
-    #[ignore = "needs prepared resources (HORIZON_TEST_RESOURCES)"]
+    #[ignore = "daily"]
     fn a_bolt_away_from_players_starts_no_fire() {
         use horizon_client::gamerules::Value;
         super::super::native_entity_refs::tests::with_game(|game| {
@@ -897,7 +938,7 @@ mod tests {
     /// in front of the rod whether or not redstone experiments are on (#14371):
     /// a wire beside that block is strongly powered by the struck rod.
     #[test]
-    #[ignore = "needs prepared resources (HORIZON_TEST_RESOURCES)"]
+    #[ignore = "daily"]
     fn a_struck_rod_updates_the_wire_beside_the_block_behind_it() {
         let mut resources = None;
         let mut game = crate::game::game_tests::tests::server_game(&mut resources);
@@ -943,7 +984,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "daily"]
     fn conversion_post_reads_original_and_lightning_outcome() {
         use mod_api::{
             EntityJoinLevelEvent, EquipmentSlot, Flow, Hooks, LivingConversionPostEvent,
@@ -995,7 +1036,7 @@ mod tests {
             ) {
                 let old = host
                     .entity(event.entity)
-                    .and_then(|entity| entity.kind(host));
+                    .and_then(|entity| entity.kind(host).map(|kind| kind.id(host)));
                 let outcome = host.entity(event.converted);
                 let weapon = outcome
                     .and_then(|entity| host.living(entity))
@@ -1022,7 +1063,7 @@ mod tests {
                     .count();
                 self.seen.lock().unwrap().push(SeenConversion {
                     old,
-                    outcome: outcome.and_then(|entity| entity.kind(host)),
+                    outcome: outcome.and_then(|entity| entity.kind(host).map(|kind| kind.id(host))),
                     weapon,
                     mushrooms,
                 });
@@ -1060,6 +1101,7 @@ mod tests {
                     &old,
                     "minecraft:zombified_piglin",
                     horizon_client::mobs::conversion::Params::KEEP_ALL,
+                    false,
                     |_, _| {},
                 )
                 .unwrap();
@@ -1150,6 +1192,7 @@ mod tests {
                     &old,
                     "minecraft:cow",
                     horizon_client::mobs::conversion::Params::KEEP_ALL,
+                    false,
                     |_, _| {}
                 )
                 .is_none()
@@ -1204,6 +1247,7 @@ mod tests {
     fn a_baby_pig_hit_by_lightning_becomes_a_baby_zombified_piglin() {
         let make_pig = |baby: bool| {
             let kind = Arc::new(MobType {
+                shadow: None,
                 id: "minecraft:pig".into(),
                 species: Species::Pig,
                 width: 0.9,
@@ -1223,6 +1267,7 @@ mod tests {
                 jump_strength: 0.42,
                 attributes: Default::default(),
                 item_stack_limits: Default::default(),
+                attribute_bounds: Default::default(),
                 gravity: 0.08,
                 safe_fall_distance: 3.0,
                 fall_damage_multiplier: 1.0,
@@ -1302,7 +1347,7 @@ mod tests {
     /// the spared one stays a pig, the other becomes a zombified piglin, and
     /// both still count as hit.
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "daily"]
     fn a_mod_spares_one_pig_from_the_bolt() {
         let heard = Arc::default();
         let (spared, struck) = (900, 901);
@@ -1359,3 +1404,8 @@ mod tests {
         });
     }
 }
+
+// A conversion keeps the old mob's state; lives here for the lightning's.
+#[cfg(test)]
+#[path = "tests/mob_conversion_state_tests.rs"]
+mod mob_conversion_state_tests;

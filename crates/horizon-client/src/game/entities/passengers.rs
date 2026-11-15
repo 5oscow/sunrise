@@ -359,10 +359,14 @@ impl Game<'_> {
                 {
                     // Built-in and content seats follow the rider's actual
                     // place in getPassengers, including retained objects.
-                    let seat = self.mobs[..i]
-                        .iter()
-                        .filter(|r| r.extra.mount == Some(v))
-                        .count();
+                    // `Entity.addPassenger` puts a player first, so a mob that
+                    // boards after one sits at index 1.
+                    let player_aboard = vehicle.rider.is_some() || self.riding == Some(v);
+                    let seat = usize::from(player_aboard)
+                        + self.mobs[..i]
+                            .iter()
+                            .filter(|r| r.extra.mount == Some(v))
+                            .count();
                     let seat = if self.persist.off_level.is_empty() {
                         seat
                     } else {
@@ -735,7 +739,7 @@ mod off_level_tests {
     use horizon_client::mobs::Mob;
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn dying_riding_edges_do_not_depend_on_unrelated_retained_objects() {
         for retained in [false, true] {
             for dying_vehicle in [false, true] {
@@ -774,7 +778,7 @@ mod off_level_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn first_rider_order_does_not_depend_on_unrelated_retained_objects() {
         for retained in [false, true] {
             crate::game::native_entity_refs::tests::with_game(|game| {
@@ -805,7 +809,7 @@ mod off_level_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn content_seat_positioning_counts_retained_passengers() {
         crate::game::native_entity_refs::tests::with_game(|game| {
             let mut kind = game.res.mob_types().get("minecraft:cow").unwrap().clone();
@@ -836,7 +840,7 @@ mod off_level_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn dismounted_retained_multiseat_vehicle_snaps_each_frozen_passenger() {
         for name in ["minecraft:camel", "minecraft:happy_ghast"] {
             crate::game::native_entity_refs::tests::with_game(|game| {
@@ -917,7 +921,7 @@ mod off_level_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn destroyed_resident_vehicles_keep_canceled_rejected_edges() {
         use std::sync::{
             Arc,
@@ -955,7 +959,13 @@ mod off_level_tests {
                     child.age = 19;
                     game.mobs.push(child);
                     if cart {
-                        game.hurt_cart(0, 5.0, true, false);
+                        game.hurt_cart(
+                            0,
+                            5.0,
+                            true,
+                            false,
+                            crate::game::minecarts::CartHit::default(),
+                        );
                     } else {
                         assert!(game.hurt_boat(0, 5.0, true));
                     }
@@ -992,7 +1002,7 @@ mod off_level_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn invalid_retained_mount_uses_cancellable_dismount() {
         for cancel in [false, true] {
             let mods: mod_api::Mods = if cancel {
@@ -1050,7 +1060,7 @@ mod off_level_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn dying_objects_keep_passenger_links_until_removal() {
         crate::game::native_entity_refs::tests::with_game(|game| {
             let pig = game.res.mob_types().get("minecraft:pig").unwrap().clone();
@@ -1080,7 +1090,7 @@ mod off_level_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn synchronization_preserves_retained_controller_and_frozen_descendant() {
         crate::game::native_entity_refs::tests::with_game(|game| {
             let pig = game.res.mob_types().get("minecraft:pig").unwrap().clone();
@@ -1200,12 +1210,12 @@ mod nested_vehicle_discard_tests {
         });
     }
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn nested_vehicle_discard_notifies_a_boat_dismount_once() {
         discard_during_dismount(false);
     }
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn nested_vehicle_discard_notifies_a_cart_dismount_once() {
         discard_during_dismount(true);
     }
@@ -1242,6 +1252,9 @@ mod nested_vehicle_discard_tests {
             child.extra.mount = Some(72);
             child.age = 19;
             game.mobs.push(child);
+            // These manually installed owners bypass the normal allocator.
+            // Destruction drops must not reuse the removed vehicle's ID.
+            game.next_entity = game.next_entity.max(73);
             test(game);
         });
     }
@@ -1290,7 +1303,7 @@ mod nested_vehicle_discard_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and a scratch HORIZON_HOME"]
+    #[ignore = "daily"]
     fn removed_vehicle_resident_retry_requires_an_eligible_uncanceled_entity_tick() {
         for cart in [false, true] {
             let cancel_mount = Arc::new(AtomicBool::new(true));
@@ -1332,7 +1345,13 @@ mod nested_vehicle_discard_tests {
                     assert!(game.entity_ticking_area()(2, 3));
                     assert!(!game.entity_ticking_area()(136, 3));
                     if cart {
-                        game.hurt_cart(0, 5.0, false, false);
+                        game.hurt_cart(
+                            0,
+                            5.0,
+                            false,
+                            false,
+                            crate::game::minecarts::CartHit::default(),
+                        );
                     } else {
                         assert!(game.hurt_boat(0, 5.0, false));
                     }
@@ -1393,7 +1412,7 @@ mod nested_vehicle_discard_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and a scratch HORIZON_HOME"]
+    #[ignore = "daily"]
     fn removed_vehicle_is_owned_by_canceled_player_until_player_leaves() {
         for cart in [false, true] {
             let cancel = Arc::new(AtomicBool::new(true));
@@ -1420,7 +1439,13 @@ mod nested_vehicle_discard_tests {
                     game.riding = Some(71);
                     let vehicle = game.entity(71).unwrap();
                     if cart {
-                        game.hurt_cart(0, 5.0, false, false);
+                        game.hurt_cart(
+                            0,
+                            5.0,
+                            false,
+                            false,
+                            crate::game::minecarts::CartHit::default(),
+                        );
                     } else {
                         assert!(game.hurt_boat(0, 5.0, false));
                     }
@@ -1444,7 +1469,7 @@ mod nested_vehicle_discard_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and a scratch HORIZON_HOME"]
+    #[ignore = "daily"]
     fn guest_vehicle_tick_retries_canceled_removed_vehicle_without_losing_edge() {
         for cart in [false, true] {
             let cancel = Arc::new(AtomicBool::new(true));
@@ -1468,7 +1493,13 @@ mod nested_vehicle_discard_tests {
                         .guests
                         .update(0, |guest| guest.vehicle = Some(71));
                     if cart {
-                        game.hurt_cart(0, 5.0, false, false);
+                        game.hurt_cart(
+                            0,
+                            5.0,
+                            false,
+                            false,
+                            crate::game::minecarts::CartHit::default(),
+                        );
                     } else {
                         assert!(game.hurt_boat(0, 5.0, false));
                     }
@@ -1511,7 +1542,7 @@ mod nested_vehicle_discard_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and a scratch HORIZON_HOME"]
+    #[ignore = "daily"]
     fn canceled_dismount_keeps_callback_reposition_for_later_removed_vehicle_dismount() {
         for cart in [false, true] {
             let calls = Arc::new(AtomicUsize::new(0));
@@ -1527,7 +1558,13 @@ mod nested_vehicle_discard_tests {
                     game.set_allow_commands(true);
                     game.persist.uuids.insert(72, [160, 0, 0, 72]);
                     if cart {
-                        game.hurt_cart(0, 5.0, false, false);
+                        game.hurt_cart(
+                            0,
+                            5.0,
+                            false,
+                            false,
+                            crate::game::minecarts::CartHit::default(),
+                        );
                     } else {
                         assert!(game.hurt_boat(0, 5.0, false));
                     }
@@ -1665,7 +1702,7 @@ mod nested_vehicle_discard_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and a scratch HORIZON_HOME"]
+    #[ignore = "daily"]
     fn every_vehicle_removal_boundary_hides_queries_and_retires_once() {
         // Damage, burning TNT, command kill, and deferred native removal
         // share the same visibility/retention contract for both vehicle lists.
@@ -1714,9 +1751,15 @@ mod nested_vehicle_discard_tests {
                         0 => {
                             assert!(game.hurt_boat(0, 5.0, false));
                         }
-                        1 => game.hurt_cart(0, 5.0, false, false),
+                        1 => game.hurt_cart(
+                            0,
+                            5.0,
+                            false,
+                            false,
+                            crate::game::minecarts::CartHit::default(),
+                        ),
                         2 => {
-                            game.arrow_hits_cart(0, 1.0, Vec3::ZERO, true, false);
+                            game.arrow_hits_cart(0, 1.0, Vec3::ZERO, true, false, None, None);
                         }
                         3 | 4 => {
                             assert!(game.run_command(&format!("kill @e[type=minecraft:{kind}]")));
@@ -1821,7 +1864,7 @@ mod nested_vehicle_discard_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and a scratch HORIZON_HOME"]
+    #[ignore = "daily"]
     fn retained_destroyed_vehicle_spills_contents_exactly_once() {
         for cart in [false, true] {
             for mode in 0..3 {
@@ -1861,7 +1904,13 @@ mod nested_vehicle_discard_tests {
                             });
                         }
                         match mode {
-                            0 if cart => game.hurt_cart(0, 5.0, false, false),
+                            0 if cart => game.hurt_cart(
+                                0,
+                                5.0,
+                                false,
+                                false,
+                                crate::game::minecarts::CartHit::default(),
+                            ),
                             0 => {
                                 assert!(game.hurt_boat(0, 5.0, false));
                             }
@@ -1930,7 +1979,7 @@ mod nested_vehicle_discard_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and a scratch HORIZON_HOME"]
+    #[ignore = "daily"]
     fn destroyed_vehicle_is_already_invisible_inside_dismount_callback() {
         for cart in [false, true] {
             let calls = Arc::new(AtomicUsize::new(0));
@@ -1959,7 +2008,13 @@ mod nested_vehicle_discard_tests {
                         1
                     );
                     if cart {
-                        game.hurt_cart(0, 5.0, false, false);
+                        game.hurt_cart(
+                            0,
+                            5.0,
+                            false,
+                            false,
+                            crate::game::minecarts::CartHit::default(),
+                        );
                     } else {
                         assert!(game.hurt_boat(0, 5.0, false));
                     }
@@ -1971,7 +2026,7 @@ mod nested_vehicle_discard_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and a scratch HORIZON_HOME"]
+    #[ignore = "daily"]
     fn retained_vehicle_is_not_visible_to_selectors_or_attachment_queries() {
         for cart in [false, true] {
             let cancel = Arc::new(AtomicBool::new(true));
@@ -1998,7 +2053,13 @@ mod nested_vehicle_discard_tests {
                     assert_eq!(batch.query(&VEHICLE_VALUE).unwrap().iter().count(), 1);
                     let vehicle = game.entity(71).unwrap();
                     if cart {
-                        game.hurt_cart(0, 5.0, false, false);
+                        game.hurt_cart(
+                            0,
+                            5.0,
+                            false,
+                            false,
+                            crate::game::minecarts::CartHit::default(),
+                        );
                     } else {
                         assert!(game.hurt_boat(0, 5.0, false));
                     }
@@ -2015,7 +2076,7 @@ mod nested_vehicle_discard_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and a scratch HORIZON_HOME"]
+    #[ignore = "daily"]
     fn destroyed_vehicles_preserve_canceled_rejected_edges_until_explicit_dismount() {
         for mode in 0..3 {
             let cancel = Arc::new(AtomicBool::new(true));
@@ -2037,11 +2098,17 @@ mod nested_vehicle_discard_tests {
                     if mode == 0 {
                         assert!(game.hurt_boat(0, 5.0, false));
                     } else if mode == 1 {
-                        game.hurt_cart(0, 5.0, false, false);
+                        game.hurt_cart(
+                            0,
+                            5.0,
+                            false,
+                            false,
+                            crate::game::minecarts::CartHit::default(),
+                        );
                     } else {
                         game.carts
                             .update(0, |cart| cart.kind = super::super::minecarts::CartKind::Tnt);
-                        game.arrow_hits_cart(0, 1.0, Vec3::ZERO, true, false);
+                        game.arrow_hits_cart(0, 1.0, Vec3::ZERO, true, false, None, None);
                     }
                     assert_eq!(calls.load(Ordering::Relaxed), 1);
                     assert!(game.entity(71).is_none());
@@ -2084,7 +2151,7 @@ mod nested_vehicle_discard_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and a scratch HORIZON_HOME"]
+    #[ignore = "daily"]
     fn removed_vehicle_dismount_snaps_each_recursive_multiseat_passenger() {
         for cart in [false, true] {
             let cancel = Arc::new(AtomicBool::new(true));
@@ -2115,7 +2182,13 @@ mod nested_vehicle_discard_tests {
                     grandchild.extra.mount = Some(73);
                     game.mobs.push(grandchild);
                     if cart {
-                        game.hurt_cart(0, 5.0, false, false);
+                        game.hurt_cart(
+                            0,
+                            5.0,
+                            false,
+                            false,
+                            crate::game::minecarts::CartHit::default(),
+                        );
                     } else {
                         assert!(game.hurt_boat(0, 5.0, false));
                     }
@@ -2137,7 +2210,7 @@ mod nested_vehicle_discard_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and a scratch HORIZON_HOME"]
+    #[ignore = "daily"]
     fn resident_passenger_can_later_leave_removed_vehicle_via_native_handle() {
         for cart in [false, true] {
             let cancel = Arc::new(AtomicBool::new(true));
@@ -2155,7 +2228,13 @@ mod nested_vehicle_discard_tests {
                     let vehicle = game.entity(71).unwrap();
                     let rider = game.entity(72).unwrap();
                     if cart {
-                        game.hurt_cart(0, 5.0, false, false);
+                        game.hurt_cart(
+                            0,
+                            5.0,
+                            false,
+                            false,
+                            crate::game::minecarts::CartHit::default(),
+                        );
                     } else {
                         assert!(game.hurt_boat(0, 5.0, false));
                     }
@@ -2202,7 +2281,7 @@ mod nested_vehicle_discard_tests {
         }
     }
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn kill_and_discard_notify_rejected_edges_once_without_changing_membership() {
         for cart in [false, true] {
             for discard in [false, true] {
@@ -2271,7 +2350,7 @@ mod nested_vehicle_discard_tests {
         }
     }
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn destruction_preserves_later_rider_reparenting_without_an_extra_notification() {
         for mode in 0..5 {
             let cart = mode >= 2;
@@ -2295,12 +2374,18 @@ mod nested_vehicle_discard_tests {
                             assert!(game.hurt_boat(0, 5.0, false));
                         }
                         2 => game.kill_target_in_level(super::super::commands::Target::Cart(71)),
-                        3 => game.hurt_cart(0, 5.0, false, false),
+                        3 => game.hurt_cart(
+                            0,
+                            5.0,
+                            false,
+                            false,
+                            crate::game::minecarts::CartHit::default(),
+                        ),
                         _ => {
                             game.carts.update(0, |cart| {
                                 cart.kind = super::super::minecarts::CartKind::Tnt
                             });
-                            game.arrow_hits_cart(0, 1.0, Vec3::ZERO, true, false);
+                            game.arrow_hits_cart(0, 1.0, Vec3::ZERO, true, false, None, None);
                         }
                     }
                     assert_eq!(game.mob_object(72).unwrap().extra.mount, Some(71));
@@ -2367,17 +2452,17 @@ mod nested_vehicle_discard_tests {
         });
     }
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn independent_live_cancellations_both_notify_and_retain_the_relationship() {
         live_cancels(false);
     }
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn scoped_cross_level_callbacks_restore_context_and_clear_notification_keys() {
         live_cancels(true);
     }
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn review_cycle_through_retained_object_is_refused() {
         with_vehicle_tree(false, true, |game| {
             let kind = game.res.mob_types().get("minecraft:pig").unwrap().clone();
@@ -2412,7 +2497,7 @@ mod nested_vehicle_discard_tests {
         }
     }
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn dismount_preserves_its_own_riders_callback_replacement() {
         let count = Arc::new(AtomicUsize::new(0));
         let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
@@ -2453,7 +2538,7 @@ mod nested_vehicle_discard_tests {
         }
     }
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn review_mount_callback_must_not_link_removed_vehicle() {
         let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
             "review",
@@ -2502,7 +2587,7 @@ mod content_seat_tests {
     use super::*;
 
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "daily"]
     fn content_seats_keep_independent_offsets() {
         super::super::native_entity_refs::tests::with_game(|game| {
             use std::sync::Arc;
@@ -2541,7 +2626,7 @@ mod trap_scatter_tests {
     /// additional horses' horizontal velocity scatter from the original trap
     /// horse's own `random` after each rider is created.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn spring_skeleton_trap_draws_scatter_from_trap_horse_after_each_rider() {
         use horizon_client::chunk::Chunk;
         use std::sync::Arc;
@@ -2587,7 +2672,7 @@ mod trap_scatter_tests {
     /// `EnchantmentsByCostWithDifficulty.enchant` reads the stack the mob
     /// holds: an empty slot draws nothing from the world's random.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn enchant_item_on_an_empty_slot_draws_nothing() {
         let mut resources = None;
         let mut game = super::super::game_tests::tests::server_game(&mut resources);

@@ -45,8 +45,8 @@ TemplateStructurePiece.move	inline	crates/horizon-world/src/worldgen/structure/j
 RandomSpreadStructurePlacement.validate	port	crates/horizon-world/src/worldgen/structure/start.rs::StructureRegistry::new	spacing must exceed separation and both stay in 0..=4096, or the set fails to decode; frequency is checked against floatRange(0, 1) beside it
 RandomSpreadStructurePlacement.isPlacementChunk	port	crates/horizon-world/src/worldgen/structure/start.rs::StructureRegistry::structure_chunk	candidate chunk equals the source chunk; exclusion zones are a separate flag
 StructurePlacement.getLocatePos	port	crates/horizon-world/src/worldgen/generator_structures.rs::StructureState::locate	the chunk's minimum block x and z at y 0, moved by the set's locate_offset (buried treasure's 9 0 9); start.rs::StructureSet::locate_pos
-JigsawPlacement.isStartTooCloseToWorldHeightLimits	inline	crates/horizon-world/src/worldgen/structure/jigsaw.rs::assemble_drawing	padding check on the centre piece box, same test
-JigsawPlacement.getRandomNamedJigsaw	inline	crates/horizon-world/src/worldgen/structure/jigsaw.rs::assemble_drawing	first shuffled jigsaw with the start jigsaw name anchors the centre piece
+JigsawPlacement.isStartTooCloseToWorldHeightLimits	inline	crates/horizon-world/src/worldgen/structure/jigsaw.rs::place_start	padding check on the centre piece box, same test
+JigsawPlacement.getRandomNamedJigsaw	inline	crates/horizon-world/src/worldgen/structure/jigsaw.rs::place_start	first shuffled jigsaw with the start jigsaw name anchors the centre piece; palette chosen at the sampled position
 JigsawPlacement.Placer.tryPlacingChildren	port	crates/horizon-world/src/worldgen/structure/jigsaw.rs::Placer::children	per jigsaw: target pool and fallback, candidates, rotations, expansion hack and bounds
 SinglePoolElement.encodeTemplate	skip:java		codec encode of the template id
 SinglePoolElement.getTemplate	port	crates/horizon-world/src/worldgen/structure.rs::StructureResources::template	cached template lookup by id
@@ -142,5 +142,6 @@ OceanMonumentPieces.OceanMonumentPiece.generateBoxOnFillOnly	port	crates/horizon
 OceanMonumentPieces.OceanMonumentPiece.chunkIntersects	port	crates/horizon-world/src/worldgen/structure/monument.rs::W::hits
 OceanMonumentStructure.findGenerationPoint	inline	crates/horizon-world/src/worldgen/structure/start.rs::try_generate	surrounding biome check around the chunk centre, then the top-of-chunk stub
 OceanMonumentStructure.createTopPiece	inline	crates/horizon-world/src/worldgen/structure/start.rs::try_generate	MonumentBuilding::new at the chunk corner minus 29 with a random direction
+OceanMonumentStructure.regeneratePiecesAfterLoad	port	crates/horizon-world/src/worldgen/structure/monument.rs::MonumentBuilding::regenerate_after_load	the first saved piece's box and orientation are read and its rooms are built again from the seed; the other saved pieces are thrown away
 OceanRuinPieces.archyRuleProcessor	inline	crates/horizon-world/src/worldgen/structure/ocean_ruin.rs::processors	sand to suspicious sand with loot and a cap of 5 in the warm branch, cold bricks in the other
 OceanRuinPieces.allPositions	inline	crates/horizon-world/src/worldgen/structure/ocean_ruin.rs::pieces	eight cluster offsets drawn inline before the ruins count

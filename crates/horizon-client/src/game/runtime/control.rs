@@ -362,6 +362,10 @@ impl Game<'_> {
             game.control_command_inner(line, reply, event_loop)
         });
         self.settle_title_mode();
+        // After handling, as the window's: the mods' mappings and `input_key` hear the key.
+        if let Some((key, action)) = socket_key(line) {
+            self.with_user_input(true, |game| game.socket_key_input(key, action));
+        }
         if let Some(key) = released {
             self.press_modifier_key(key, false);
         }
@@ -561,6 +565,26 @@ impl Game<'_> {
                     Some(other) => return Err(format!("unknown section sides mode {other}").into()),
                 }
                 Ok(Some(json!({ "ok": true, "sides": r.section_sides() })))
+            }
+            "parallel-tick" => {
+                use horizon_client::graphics::ParallelTickMode as Mode;
+                match words.get(1).copied() {
+                    None => {}
+                    Some(mode @ ("off" | "auto" | "on")) => {
+                        // The setting, as its switch sets it; not saved here (as `gpu-culling`).
+                        self.settings.horizon.parallel_tick = match mode {
+                            "on" => Mode::On,
+                            "auto" => Mode::Auto,
+                            _ => Mode::Off,
+                        };
+                        horizon_client::parallel::set_setting(self.settings.horizon.parallel_tick);
+                    }
+                    Some(other) => return Err(format!("unknown parallel tick mode {other}").into()),
+                }
+                let (setting, on, auto) = horizon_client::parallel::status();
+                Ok(Some(
+                    json!({ "ok": true, "setting": setting, "on": on, "auto": auto }),
+                ))
             }
             "gpu-culling" => {
                 let r = self.renderer.as_mut().ok_or("no renderer")?;
@@ -843,6 +867,7 @@ impl Game<'_> {
             "release" => {
                 self.keys.clear();
                 self.physical_keys.clear();
+                self.native_input.mappings.set_all_up();
                 self.modifiers = winit::keyboard::ModifiersState::empty();
                 // Sneak and sprint pressed through `key` live in the toggle
                 // mappings: release them as their key's release would (a
@@ -883,7 +908,14 @@ impl Game<'_> {
                 if arg(2)? != "up" {
                     self.pad_radial_cancel();
                 }
-                match arg(2)? {
+                let action = arg(2)?;
+                if matches!(action, "down" | "click") {
+                    self.mod_mappings_button(button, true);
+                }
+                if matches!(action, "up" | "click") {
+                    self.mod_mappings_button(button, false);
+                }
+                match action {
                     "down" => {
                         self.extras_mouse(button, true);
                         self.mouse_mapping(button, true, Source::Agent)?
@@ -1644,6 +1676,9 @@ impl Game<'_> {
                 .map(|e| self.shown_name_tags(glam::DVec3::from_array(e))),
         });
         status["lod"] = lod;
+        // Parallel Tick: the setting, whether the next tick shares its work, and Auto's state.
+        let (setting, on, auto) = horizon_client::parallel::status();
+        status["parallel_tick"] = json!({ "setting": setting, "on": on, "auto": auto });
         let (target, sampled) = self.lod.as_ref().map_or((0, 0), |lod| lod.progress());
         status["lod"]["target_tiles"] = target.into();
         status["lod"]["sampled_target_tiles"] = sampled.into();
@@ -1704,6 +1739,17 @@ fn vendor_name(id: u32) -> String {
 }
 
 /// The key a `key <name> tap|up` command releases, whatever its handler does.
+/// A `key KEY down|up|tap|repeat` line's key and action.
+fn socket_key(line: &str) -> Option<(KeyCode, &str)> {
+    let mut words = line.split_whitespace();
+    match (words.next(), words.next(), words.next()) {
+        (Some("key"), Some(key), Some(action @ ("down" | "up" | "tap" | "repeat"))) => {
+            Some((key_code(key)?, action))
+        }
+        _ => None,
+    }
+}
+
 fn released_modifier(line: &str) -> Option<KeyCode> {
     let mut words = line.split_whitespace();
     match (words.next(), words.next(), words.next()) {

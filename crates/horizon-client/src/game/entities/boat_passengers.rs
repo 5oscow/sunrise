@@ -9,7 +9,7 @@ use horizon_client::{
     camera::wrap_degrees,
     fast_hash::FxHashMap,
     join_seq::ListStamp,
-    mobs::{BoxReach, Mob, Species, Who, drops::is_animal, equine, riders, seen_grid::SeenGrid},
+    mobs::{BoxReach, Mob, Species, Who, drops::is_animal, riders, seen_grid::SeenGrid},
     scoreboard::pushable_by,
 };
 use horizon_core::geometry::{Aabb, Vec3};
@@ -62,11 +62,9 @@ fn carries(m: &Mob) -> bool {
 }
 /// `isPushable`, as `pushableBy` and `canVehicleCollide` ask it:
 /// `Mob::pushable` plus the shulkers it leaves out (they take no push, but
-/// count), less a ridden horse (`AbstractHorse.isPushable`).
+/// count).
 fn pushable(m: &Mob) -> bool {
-    !m.removed
-        && (m.pushable() || m.species() == Species::Shulker && m.alive())
-        && !(equine::is_equine(m.species()) && carries(m))
+    !m.removed && (m.pushable() || m.species() == Species::Shulker && m.alive())
 }
 /// Whether `Entity.push` moves the mob: it is pushable and carries no one.
 fn moved_by_push(m: &Mob) -> bool {
@@ -228,24 +226,6 @@ impl Game<'_> {
             }
         }
         self.vehicle_mobs.near.set(near);
-    }
-    /// The slots, ascending, of the mobs whose box may meet a cart, read from the mobs' grid
-    /// once per cart. None when the mobs are the fewer (asking the carts' grid once per mob
-    /// is then the shorter way) or the grid does not answer.
-    pub(in crate::game) fn mobs_near_carts(&self) -> Option<Vec<u32>> {
-        if self.mobs.len() <= self.carts.len() {
-            return None;
-        }
-        let (mut slots, mut near) = (Vec::new(), Vec::new());
-        for c in self.carts.iter() {
-            if !self.vehicle_mobs_near(c.bounds(), &mut near) {
-                return None;
-            }
-            slots.extend_from_slice(&near);
-        }
-        slots.sort_unstable();
-        slots.dedup();
-        Some(slots)
     }
     /// Whether mob `m`, whose box `reach` bounds, may touch a cart: the carts' grid (`cells`)
     /// names the carts near it, or every cart when the grid cannot (a superset either way).
@@ -700,6 +680,10 @@ impl Game<'_> {
             Target::Cart(_) => {
                 self.release_vehicle_container(id);
                 if let Some(i) = self.carts.iter().position(|c| c.id == id) {
+                    self.unpack_loot(
+                        super::container_loot::LootTarget::Cart(self.carts[i].id),
+                        None,
+                    );
                     let cart = self.carts.remove(i);
                     self.drop_vehicle_contents(cart.position.components(), &cart.items);
                     self.retain_removed_vehicle(id, RemovedVehicle::Cart(cart));
@@ -808,7 +792,7 @@ mod tests {
     use super::*;
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn rejected_boat_passengers_fill_actual_capacity_without_becoming_resident() {
         super::super::native_entity_refs::tests::with_game(|game| {
             let kind = game.res.mob_types().get("minecraft:pig").unwrap().clone();
@@ -852,7 +836,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_mod_growing_a_mob_during_vehicle_ticks_keeps_it_in_collision_queries() {
         use super::super::native_entity_refs::tests::with_game;
 
@@ -898,7 +882,7 @@ mod tests {
     /// asked once per mob while the mobs are the fewer) or, in a crowd, the mobs' (asked once
     /// per cart).
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn only_the_mob_touching_a_cart_pushes_it() {
         use super::super::minecarts::{CartKind, Minecart};
         let pushed = [0, 12].map(|crowd: u32| {
@@ -935,7 +919,7 @@ mod tests {
     /// every box names, in the same order, also right after a mob moved into the box (a
     /// push or a pick-up writes the mob list in the middle of a stretch).
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_vehicles_box_query_matches_a_walk_over_every_mob() {
         let mut resources = None;
         let mut game = super::super::game_tests::tests::server_game(&mut resources);
@@ -992,7 +976,7 @@ mod tests {
     /// boards counts from then on, one removed no longer does, and a dead one still makes
     /// its cart a vehicle but is no passenger of a boat.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_vehicle_knows_its_mob_riders_as_soon_as_they_board() {
         let mut resources = None;
         let mut game = super::super::game_tests::tests::server_game(&mut resources);
@@ -1022,7 +1006,7 @@ mod off_level_tests {
     use super::*;
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn retained_boat_passenger_occupies_a_seat_without_being_positioned() {
         crate::game::native_entity_refs::tests::with_game(|game| {
             let pig = game.res.mob_types().get("minecraft:pig").unwrap().clone();
@@ -1086,7 +1070,7 @@ mod boat_callback_review_tests {
         }
     }
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn boat_ejection_preserves_a_later_passengers_callback_reparenting() {
         let heard = Arc::new(Mutex::new(Vec::new()));
         let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
@@ -1129,7 +1113,7 @@ mod boat_callback_review_tests {
         });
     }
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn boat_ejection_does_not_snap_a_rider_discarded_by_its_callback() {
         let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
             "mutate_rider",
