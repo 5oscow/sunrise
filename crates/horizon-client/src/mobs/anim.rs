@@ -874,6 +874,7 @@ fn swim(p: &mut Poses, pos: f32, h: &Hum) {
 pub use horizon_hooks::players::{BODY_PARTS, BodyPose};
 
 /// Apply the mob's model animation to `p` (at rest), then the pose laid over it, if any.
+#[horizon_mod_api_macros::replaceable]
 pub fn setup(
     m: &Mob,
     s: &State,
