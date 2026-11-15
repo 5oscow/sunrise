@@ -17,11 +17,11 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 /// Where the registry publishes its index (the launcher's `INDEX_URL`).
-pub const INDEX_URL: &str = "https://horizon-rust.github.io/horizon-mods/index.json";
+pub const INDEX_URL: &str = "";
 /// The Minecraft version this game is: the registry's `game`.
 pub const GAME: &str = horizon_core::version::VERSION_ID;
 /// The registry's pages on the website, `<SITE>/<id>`.
-pub const SITE: &str = "https://playhorizon.dev/mods";
+pub const SITE: &str = "";
 /// The last index fetched, beside `options.txt`: the launcher keeps its own copy there too.
 pub const CACHE: &str = "mod-browser/horizon-index.json";
 /// What the launcher's browser installed (`installed::MANIFEST`).
@@ -54,6 +54,9 @@ fn is_local(at: &str) -> bool {
 /// The index from `at`, kept in `home`'s [`CACHE`]; the kept copy when the
 /// registry can't be reached.
 pub fn load_index(home: &Path, at: &str) -> Result<Index, String> {
+    if at.is_empty() {
+        return Err("The Sunrise mod registry is not available yet.".into());
+    }
     let local = is_local(at);
     let parse = |text: &str| match local {
         true => Index::parse_local(text),

@@ -7,8 +7,8 @@
 
 /// Horizon's official survival server (SMP), offered once at the top of the server list by the
 /// game and the launcher (`launcher/links.json` may name another). Its SRV record leads to the
-/// port.
-pub const OFFICIAL_SERVER: &str = "play.playhorizon.dev";
+/// port. Empty for Sunrise until an official server exists.
+pub const OFFICIAL_SERVER: &str = "";
 
 /// The official server's earlier addresses: the game and the launcher move a server list's
 /// entries for them to [`OFFICIAL_SERVER`], once. A move appends the old address here (and to
@@ -21,7 +21,7 @@ pub const WITHDRAWN_PARTNER_SERVER: &str = "afri-network.co.za";
 
 /// [`OFFICIAL_SERVER`] with the port its SRV record gives, for askers that don't look SRV up
 /// (the telemetry server's status checks).
-pub const OFFICIAL_SERVER_STATUS: &str = "play.playhorizon.dev:24454";
+pub const OFFICIAL_SERVER_STATUS: &str = "";
 
 /// Horizon's website, where the launcher is downloaded: the game started without its prepared
 /// files sends the player there.
@@ -34,8 +34,8 @@ pub const AGENT_DOCS: &str = "https://playsunrise.net/docs/agents";
 pub const MOD_POLICY: &str = "https://playsunrise.net/mods/policy";
 
 /// The cosmetics service: cosmetics, emotes, "Show me as a Horizon player"
-/// (`HORIZON_COSMETICS_API` overrides it).
-pub const COSMETICS_API: &str = "https://cosmetics.playhorizon.dev";
+/// (`HORIZON_COSMETICS_API` overrides it). Empty until Sunrise runs this service.
+pub const COSMETICS_API: &str = "";
 
 /// The telemetry ingest server (`crates/horizon-telemetry-server`): opt-in telemetry, the
 /// "I'm playing" ping, benchmark uploads (`HORIZON_TELEMETRY_URL` overrides it).
@@ -45,24 +45,24 @@ pub const TELEMETRY: &str = "https://telemetry.playsunrise.net";
 pub const PERF_VIEWER: &str = "https://playsunrise.net/perf";
 
 /// The capture upload API behind Share (`HORIZON_PERF_CAPTURES` overrides it).
-pub const PERF_CAPTURES: &str = "https://playhorizon.dev/api/perf/captures";
+pub const PERF_CAPTURES: &str = "https://playsunrise.net/api/perf/captures";
 
-/// Public STUN servers for Play with Friends' NAT discovery: two independent operators, so one
-/// outage doesn't break discovery (`HORIZON_STUN_SERVERS` overrides them).
-pub const STUN_SERVERS: &[&str] = &["stun.cloudflare.com:3478", "stun.l.google.com:19302"];
+/// STUN servers for Play with Friends' NAT discovery (`HORIZON_STUN_SERVERS` overrides them).
+/// Empty until Sunrise runs a STUN service.
+pub const STUN_SERVERS: &[&str] = &[];
 
 /// Play with Friends' troubleshooting page, shown to hosts nobody can reach.
 pub const FRIENDS_HELP: &str =
     "https://github.com/sunrise-org/sunrise/blob/main/docs/play-with-friends.md#troubleshooting";
 
 /// Horizon community invite used by launcher defaults.
-pub const COMMUNITY_DISCORD: &str = "https://discord.gg/playhorizon";
+pub const COMMUNITY_DISCORD: &str = "https://discord.gg/eswQcHfRKC";
 
 /// The sponsoring hosting provider’s referral page.
-pub const HOSTING_PARTNER: &str = "https://my.sculkhosting.com/ref/horizon";
+pub const HOSTING_PARTNER: &str = "";
 
-/// The official cosmetics shop.
-pub const SHOP: &str = "https://playhorizon.dev/shop";
+/// The cosmetics shop. Empty until Sunrise runs one.
+pub const SHOP: &str = "";
 
 /// The GitHub profile of who made the launcher's look, credited in Settings' About (its picture is
 /// `<this>.png`).

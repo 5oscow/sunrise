@@ -45,7 +45,7 @@ pub use pose::{Pose, pose_matrix};
 /// cosmetic (`prefs::Others::effective`, the same day: a player who owns none sees a vanilla game
 /// and the game asks nothing about other players, as CONTRIBUTING.md asks), until the player
 /// chooses. `HORIZON_COSMETICS=0` turns everything off.
-pub const ON_BY_DEFAULT: bool = true;
+pub const ON_BY_DEFAULT: bool = false;
 
 /// The cosmetics service (`HORIZON_COSMETICS_API` overrides it).
 pub const API: &str = horizon_addresses::COSMETICS_API;

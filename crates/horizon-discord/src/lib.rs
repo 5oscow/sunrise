@@ -89,9 +89,9 @@ const KEY: &str = "discordPresence";
 const LABEL: &str = "horizon.extras.discord_presence";
 const ABOUT: &str = "horizon.extras.discord_presence.tooltip";
 
-/// The switch (on by default). One presence per computer: the first splitscreen player's
+/// The switch (off until Sunrise has a Discord application). One presence per computer: the first splitscreen player's
 /// switch, in their settings, on their Extras page; the other players have none.
-static ON: AtomicBool = AtomicBool::new(true);
+static ON: AtomicBool = AtomicBool::new(false);
 
 /// Whether the player whose turn it is owns the switch: the first one.
 fn first_player() -> bool {
@@ -147,7 +147,7 @@ impl Store for Setting {
         }
     }
     fn is_default(&self) -> bool {
-        enabled() || !first_player()
+        !enabled() || !first_player()
     }
 }
 
@@ -736,11 +736,11 @@ mod tests {
         let mut lines = Vec::new();
         Setting.save(&mut |k, v| lines.push(format!("{k}:{v}")));
         assert_eq!(lines, ["discordPresence:false"]);
-        assert!(!Setting.is_default());
+        assert!(Setting.is_default());
         // On from the page: what the game said last is shown at once.
         SECTION.act(0, Act::Press);
         assert_eq!(wanted(), Status::Menus);
-        assert!(Setting.is_default());
+        assert!(!Setting.is_default());
         SECTION.act(0, Act::Press);
         assert_eq!(wanted(), Status::Off);
         SECTION.act(0, Act::Press);
