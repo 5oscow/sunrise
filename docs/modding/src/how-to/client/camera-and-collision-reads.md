@@ -114,8 +114,8 @@ These read the local player as the client sees it. They take no mod-controlled n
   `ClientTabList { entries, header, footer }`. Each `ClientTabListEntry` has the profile `name`,
   `uuid`, `game_mode`, `latency` and the `display` text as drawn (`getNameForDisplay`: the display
   name the server set, else the name with its team's prefix, suffix and colour; italic for a
-  spectator). Entries come in the overlay's order (`getPlayerInfos`: list order, spectators last,
-  team name, name) and stop at the 80 it draws. Header and footer are `None` when empty. It is what
+  spectator). Entries come in the overlay's order (`getPlayerInfos`: higher list order first,
+  then, among equal list orders, spectators last, team name and name) and stop at the 80 it draws. Header and footer are `None` when empty. It is what
   this client has been sent and changes as the server updates the list; `None` outside a world.
   There is no NeoForge call for this: it is Horizon's own read.
 - `ClientHost::local_item_use()` is the item in use: `ItemUse { hand, ticks_used, ticks_remaining }`
