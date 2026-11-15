@@ -67,9 +67,19 @@ impl Game<'_> {
             // commandSuggestionsProvider.tick: one answer a tick, to the latest request.
             play.suggestion_budget = true;
             self.guest_try_suggestions(conn);
-            self.guest_player_tick(gi, conn, mod_api::HookId::PlayerTickPre, |game, player| {
-                game.native_player_tick_pre(mod_api::__private::PlayerTickPreCall { player })
-            });
+            // ServerPlayer.doTick runs the body (`super.tick()`: Player.tick,
+            // where NeoForge posts PlayerTickEvent.Pre/Post) unless the player
+            // is a spectator touching an unloaded chunk. Decided once, before
+            // the body, as vanilla's `if` is.
+            let body = self
+                .lan
+                .as_ref()
+                .is_some_and(|host| self.guest_body_ticks(&host.hub.guests[gi]));
+            if body {
+                self.guest_player_tick(gi, conn, mod_api::HookId::PlayerTickPre, |game, player| {
+                    game.native_player_tick_pre(mod_api::__private::PlayerTickPreCall { player })
+                });
+            }
             self.guest_sleep_tick(gi);
             let Some(host) = self.lan.as_mut() else {
                 return;
@@ -81,16 +91,18 @@ impl Game<'_> {
                 if let Some(host) = self.lan.as_ref() {
                     refresh_building_player(host, conn);
                 }
-                self.guest_player_tick(
-                    gi,
-                    conn,
-                    mod_api::HookId::PlayerTickPost,
-                    |game, player| {
-                        game.native_player_tick_post(mod_api::__private::PlayerTickPostCall {
-                            player,
-                        })
-                    },
-                );
+                if body {
+                    self.guest_player_tick(
+                        gi,
+                        conn,
+                        mod_api::HookId::PlayerTickPost,
+                        |game, player| {
+                            game.native_player_tick_post(mod_api::__private::PlayerTickPostCall {
+                                player,
+                            })
+                        },
+                    );
+                }
                 continue;
             }
             if self.on_server_trip(conn) {
@@ -101,16 +113,18 @@ impl Game<'_> {
                 if let Some(host) = self.lan.as_ref() {
                     refresh_building_player(host, conn);
                 }
-                self.guest_player_tick(
-                    gi,
-                    conn,
-                    mod_api::HookId::PlayerTickPost,
-                    |game, player| {
-                        game.native_player_tick_post(mod_api::__private::PlayerTickPostCall {
-                            player,
-                        })
-                    },
-                );
+                if body {
+                    self.guest_player_tick(
+                        gi,
+                        conn,
+                        mod_api::HookId::PlayerTickPost,
+                        |game, player| {
+                            game.native_player_tick_post(mod_api::__private::PlayerTickPostCall {
+                                player,
+                            })
+                        },
+                    );
+                }
                 continue;
             }
             // ServerPlayerGameMode.tick stops an active destroy when its block is air.
@@ -141,7 +155,10 @@ impl Game<'_> {
                 };
                 self.as_guest(conn, |g| {
                     let outer = std::mem::replace(&mut g.stab_players, players);
-                    g.attack_ticks = g.attack_ticks.saturating_add(1);
+                    // Player.tick's attackStrengthTicker, part of the body.
+                    if body {
+                        g.attack_ticks = g.attack_ticks.saturating_add(1);
+                    }
                     if let Some((pos, face)) = digging {
                         g.forced_hit = Some(Hit {
                             pos,
@@ -176,35 +193,37 @@ impl Game<'_> {
                     play.digging = None;
                 }
             }
-            // Player.tick's ItemCooldowns.tick, once a tick for each player
-            // (the shield an axe disabled, a thrown pearl), after
-            // LivingEntity.tick's use: an entry a finished use starts has 20
-            // ticks left when the next tick's packets are handled, as the
-            // guest's own client counts.
-            let Some(host) = self.lan.as_mut() else {
-                return;
-            };
-            let play = host.play.entry(conn).or_default();
-            play.shield_cooldown = play.shield_cooldown.saturating_sub(1);
-            // ServerItemCooldowns.onCooldownEnded: a finished entry is told to
-            // the guest (a duration of 0 removes it).
-            for group in play.cooldowns.tick() {
-                host.hub.send_to(
-                    conn,
-                    &C::Cooldown(play::Cooldown {
-                        group: group.to_string(),
-                        duration: 0,
-                    }),
-                );
-            }
-            // Player.tick: a different main-hand item resets the attack
-            // strength, and detectEquipmentUpdates gives the guest its modifiers.
-            let g = &host.hub.guests[gi];
-            let held = crate::game::held_items::held_attack_item(&g.inventory, g.selected);
-            let play = host.play.entry(conn).or_default();
-            if play.attack_item.as_ref() != held {
-                play.attack_ticks = 0;
-                play.attack_item = held.cloned();
+            if body {
+                // Player.tick's ItemCooldowns.tick, once a tick for each player
+                // (the shield an axe disabled, a thrown pearl), after
+                // LivingEntity.tick's use: an entry a finished use starts has 20
+                // ticks left when the next tick's packets are handled, as the
+                // guest's own client counts.
+                let Some(host) = self.lan.as_mut() else {
+                    return;
+                };
+                let play = host.play.entry(conn).or_default();
+                play.shield_cooldown = play.shield_cooldown.saturating_sub(1);
+                // ServerItemCooldowns.onCooldownEnded: a finished entry is told to
+                // the guest (a duration of 0 removes it).
+                for group in play.cooldowns.tick() {
+                    host.hub.send_to(
+                        conn,
+                        &C::Cooldown(play::Cooldown {
+                            group: group.to_string(),
+                            duration: 0,
+                        }),
+                    );
+                }
+                // Player.tick: a different main-hand item resets the attack
+                // strength, and detectEquipmentUpdates gives the guest its modifiers.
+                let g = &host.hub.guests[gi];
+                let held = crate::game::held_items::held_attack_item(&g.inventory, g.selected);
+                let play = host.play.entry(conn).or_default();
+                if play.attack_item.as_ref() != held {
+                    play.attack_ticks = 0;
+                    play.attack_item = held.cloned();
+                }
             }
             self.guest_delayed_destroy(conn);
             self.guest_server_tick(conn);
@@ -220,10 +239,13 @@ impl Game<'_> {
                 std::mem::take(&mut host.play.entry(conn).or_default().score_recorded);
             self.as_guest(conn, |g| {
                 g.tick_fishing();
-                g.tick_maps();
-                g.tick_lodestone_compasses();
-                g.native_inventory_ticks();
-                g.count_tick_stats(sleeping);
+                // Player.aiStep's Inventory.tick and doTick's statistics are the body's.
+                if body {
+                    g.tick_maps();
+                    g.tick_lodestone_compasses();
+                    g.native_inventory_ticks();
+                    g.count_tick_stats(sleeping);
+                }
                 g.tick_advancements();
                 g.update_player_attributes();
                 g.record_player_scores(&mut recorded);
@@ -250,10 +272,32 @@ impl Game<'_> {
             if let Some(host) = self.lan.as_ref() {
                 refresh_building_player(host, conn);
             }
-            self.guest_player_tick(gi, conn, mod_api::HookId::PlayerTickPost, |game, player| {
-                game.native_player_tick_post(mod_api::__private::PlayerTickPostCall { player })
-            });
+            if body {
+                self.guest_player_tick(
+                    gi,
+                    conn,
+                    mod_api::HookId::PlayerTickPost,
+                    |game, player| {
+                        game.native_player_tick_post(mod_api::__private::PlayerTickPostCall {
+                            player,
+                        })
+                    },
+                );
+            }
         }
+    }
+
+    /// Whether guest `g`'s body ticks this tick: `ServerPlayer.doTick`'s
+    /// `!isSpectator() || !touchingUnloadedChunk()`. A spectator whose box,
+    /// inflated by one block, reaches a chunk the level hasn't loaded skips
+    /// `super.tick()` (Player.tick: its effects, cooldowns, attack strength,
+    /// inventory ticks and PlayerTickEvent.Pre/Post) and doTick's food tick
+    /// and statistics; everything else the server does for it still runs.
+    pub(super) fn guest_body_ticks(&self, g: &horizon_client::lan::guest::Guest) -> bool {
+        !g.spectator()
+            || !touching_unloaded_chunk(g.position, g.dimensions(), |x, z| {
+                self.world.chunks.contains_key(&(x, z))
+            })
     }
 
     /// Only listeners pay for a guest swap; reuse the loop's resolved index.
@@ -358,3 +402,7 @@ mod building_cache_tests;
 #[cfg(test)]
 #[path = "tests/fall_sound_tests.rs"]
 mod fall_sound_tests;
+
+#[cfg(test)]
+#[path = "tests/spectator_body_tick_tests.rs"]
+mod spectator_body_tick_tests;
