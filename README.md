@@ -6,9 +6,9 @@
 </p>
 
 <p align="center">
-  <a href="https://playhorizon.dev"><b>Website</b></a> ·
+  <a href="https://playsunrise.net"><b>Website</b></a> ·
   <a href="#download"><b>Download</b></a> ·
-  <a href="https://playhorizon.dev/docs/"><b>Docs</b></a> ·
+  <a href="https://playsunrise.net/docs/"><b>Docs</b></a> ·
   <a href="ROADMAP.md"><b>Roadmap</b></a> ·
   <a href="#contributing"><b>Contributing</b></a>
 </p>
@@ -17,7 +17,7 @@
   <a href="#project-status"><img src="https://img.shields.io/badge/player--visible%20gaps-0%20open-F0795A" alt="Player-visible gaps open"></a>
 </p>
 
-# Horizon
+# Sunrise
 
 **Minecraft: Java Edition 26.3, rewritten in Rust.** Your worlds, the same rules and the same terrain as the Java game, checked against it by hundreds of differential tests, in one native program with no Java. Free, public source and unofficial: you play it with your own copy of Java Edition.
 
@@ -30,8 +30,8 @@
 Everything below is in the current release.
 
 - **The game.** Survival, creative, hardcore and spectator; vanilla world generation in all three dimensions, mobs, villagers, raids, redstone, every command, the HUD and the recipe book. Vanilla saves open as they are, and worlds from 1.8 to 26.2 are upgraded.
-- **Multiplayer.** Join vanilla and Horizon servers (online mode included), open a world to LAN, or invite friends with a code from the launcher's Home page.
-- **Graphics.** Distant terrain up to 1,024 chunks, graphics presets, HDR and controllers, all off by default where they would change the vanilla look ([settings](https://playhorizon.dev/docs/settings)).
+- **Multiplayer.** Join vanilla and Sunrise servers (online mode included), open a world to LAN, or invite friends with a code from the launcher's Home page.
+- **Graphics.** Distant terrain up to 1,024 chunks, graphics presets, HDR and controllers, all off by default where they would change the vanilla look ([settings](https://playsunrise.net/docs/settings)).
 - **Packs.** Resource packs, data packs and shader packs ([below](#mods-and-shader-packs)).
 - **Mods.** Content mods and native Rust mods, installed from the launcher ([below](#mods-and-shader-packs)).
 - **Servers.** Host one from the launcher, or run `horizon-server` on a VPS ([below](#host-a-server)).
@@ -52,7 +52,7 @@ Everything below is in the current release.
 
 ## Performance
 
-**Horizon draws more frames per second than Java Edition, and loads faster, on the same machine, world and path.** `tools/perf_bench.py` runs each game in turn, from a fresh world (seed 1234), waiting for the terrain and then flying it over a village, a forest, an ocean and a mountain. Measured on 2026-10-29/30 on an idle Windows 11 machine (Ryzen 7 9800X3D, RTX 5080), Horizon v0.2.97 as the launcher installs it, 1280x720 in a window, VSync off, three games per figure. Frames per second, mean of the four scenes, with the slowest 1% of frames in brackets:
+**Sunrise draws more frames per second than Java Edition, and loads faster, on the same machine, world and path.** `tools/perf_bench.py` runs each game in turn, from a fresh world (seed 1234), waiting for the terrain and then flying it over a village, a forest, an ocean and a mountain. Measured on 2026-10-29/30 on an idle Windows 11 machine (Ryzen 7 9800X3D, RTX 5080), Horizon v0.2.97 as the launcher installs it, 1280x720 in a window, VSync off, three games per figure. Frames per second, mean of the four scenes, with the slowest 1% of frames in brackets:
 
 | Render distance | Horizon v0.2.97 | Vanilla 26.3 | Vanilla + mods |
 | --- | --- | --- | --- |
@@ -60,11 +60,11 @@ Everything below is in the current release.
 | 16 chunks | 2,074 (598) | 1,661 (375) | 1,586 (432) |
 | 32 chunks | 1,207 (333) | 1,031 (176) | 879 (264) |
 
-"Vanilla + mods" is Sodium, Lithium, FerriteCore and ImmediatelyFast. Horizon reaches the title screen in 2.9–3.2 s against vanilla's 7.5–7.7 s (the modded client's 10.8–11.1 s), loads a scene's chunks 2.9–3.8 times faster, and playing holds a steady working set of 1.1–1.7 GB against 1.9–2.9 GB. Every scene with its confidence interval and the run's load log: [the 2026-10-29 reports](benchmarks/perf/windows-9800x3d-5080-2026-10-29.md). Method, and how to measure your own machine: [docs/benchmark.md](docs/benchmark.md). [playhorizon.dev/benchmarks](https://playhorizon.dev/benchmarks) puts these runs beside a 2016 laptop, a Mac mini and a gaming desktop.
+"Vanilla + mods" is Sodium, Lithium, FerriteCore and ImmediatelyFast. Sunrise reaches the title screen in 2.9–3.2 s against vanilla's 7.5–7.7 s (the modded client's 10.8–11.1 s), loads a scene's chunks 2.9–3.8 times faster, and playing holds a steady working set of 1.1–1.7 GB against 1.9–2.9 GB. Every scene with its confidence interval and the run's load log: [the 2026-10-29 reports](benchmarks/perf/windows-9800x3d-5080-2026-10-29.md). Method, and how to measure your own machine: [docs/benchmark.md](docs/benchmark.md). [playhorizon.dev/benchmarks](https://playsunrise.net/benchmarks) puts these runs beside a 2016 laptop, a Mac mini and a gaming desktop.
 
 ## Download
 
-Get **the Horizon launcher** from [playhorizon.dev](https://playhorizon.dev), or from [the launcher releases](https://github.com/horizon-rust/horizon/releases?q=launcher&expanded=true):
+Get **the Sunrise launcher** from [playsunrise.net](https://playsunrise.net):
 
 | Platform | File | Needs |
 | --- | --- | --- |
@@ -74,7 +74,7 @@ Get **the Horizon launcher** from [playhorizon.dev](https://playhorizon.dev), or
 | macOS, Intel | `horizon-launcher-macos-x64.dmg` | macOS 12 or later |
 | Linux x86-64 | `horizon-launcher-linux-x86_64.AppImage` or `.tar.gz` | a glibc distribution, X11 or Wayland, a GPU with Vulkan or OpenGL 3.3 |
 
-**You also need a Microsoft account that owns Minecraft: Java Edition.** You sign in with it in the launcher, which plays only with an account that owns the game ([why](docs/microsoft-account.md)). Horizon contains no Minecraft code or assets: an existing install (official launcher, Prism, MultiMC...) is reused, and without one the launcher downloads 26.3 from Mojang for your account. Step by step: [Install and first launch](https://playhorizon.dev/docs/install).
+**You also need a Microsoft account that owns Minecraft: Java Edition.** You sign in with it in the launcher, which plays only with an account that owns the game ([why](docs/microsoft-account.md)). Sunrise contains no Minecraft code or assets: an existing install (official launcher, Prism, MultiMC...) is reused, and without one the launcher downloads 26.3 from Mojang for your account. Step by step: [Install and first launch](https://playsunrise.net/docs/install).
 
 <table>
   <tr>
@@ -87,18 +87,18 @@ Get **the Horizon launcher** from [playhorizon.dev](https://playhorizon.dev), or
 
 - **Content mods** (`.hmod`): blocks, items, recipes, loot, models and textures, with no code.
 - **Native mods** (`.hnmod`): Rust that the launcher compiles into the game for you, with nothing to install.
-- **Java mods** (Fabric, NeoForge, Forge) don't run: Horizon has no Java. The launcher carries over the data and assets inside their jars, and imports modpacks (`.mrpack`, CurseForge zips, Prism instances) the same way ([modpacks](https://playhorizon.dev/docs/modpacks)).
-- **Shader packs**: Iris/OptiFine-format packs (`shaders/` folders) and Horizon's own WGSL packs, under Video Settings → Shader Packs ([pack format](docs/shaders.md)).
+- **Java mods** (Fabric, NeoForge, Forge) don't run: Sunrise has no Java. The launcher carries over the data and assets inside their jars, and imports modpacks (`.mrpack`, CurseForge zips, Prism instances) the same way ([modpacks](https://playsunrise.net/docs/modpacks)).
+- **Shader packs**: Iris/OptiFine-format packs (`shaders/` folders) and Sunrise's own WGSL packs, under Video Settings → Shader Packs ([pack format](docs/shaders.md)).
 
-Mods are off by default: a fresh install plays exactly like vanilla 26.3. The launcher's Mods page browses Horizon's registry and Modrinth. [Mods](https://playhorizon.dev/docs/mods) · [make a mod](docs/mods.md).
+Mods are off by default: a fresh install plays exactly like vanilla 26.3. The launcher's Mods page browses Sunrise's registry and Modrinth. [Mods](https://playsunrise.net/docs/mods) · [make a mod](docs/mods.md).
 
 ## Host a server
 
-The launcher's **Servers** page creates, starts, backs up and updates a server, and invites friends. On a VPS, `horizon-server` installs with one command, needs no Java, and takes vanilla 26.3 and Horizon players alike. [Host a server](https://playhorizon.dev/docs/hosting) ([reference](docs/hosting.md)).
+The launcher's **Servers** page creates, starts, backs up and updates a server, and invites friends. On a VPS, `horizon-server` installs with one command, needs no Java, and takes vanilla 26.3 and Sunrise players alike. [Host a server](https://playsunrise.net/docs/hosting) ([reference](docs/hosting.md)).
 
 ## Agent control
 
-AI agents and scripts can play Horizon. `horizon-ctl`, shipped with the game, reads its state as JSON and acts like a player; `horizon-ctl mcp` serves the same commands over MCP.
+AI agents and scripts can play Sunrise. `horizon-ctl`, shipped with the game, reads its state as JSON and acts like a player; `horizon-ctl mcp` serves the same commands over MCP.
 
 ```sh
 horizon-ctl launch --world Survival --seed 5 --wait   # finds the version the launcher installed
@@ -113,12 +113,12 @@ horizon-ctl break -1 65 -3                              # mines it; replies with
 
 Needs Rust 1.90+, Python 3.11+, JDK 25, and on Linux `libasound2-dev libudev-dev`. `horizon-prepare` builds the game's resources from **your own copy** of Java Edition 26.3 (checked against `research-lock.json`) and never downloads it:
 
-1. **Client:** play 26.3 once in the official launcher. Horizon reads `~/.minecraft` (or `--minecraft-dir` / `HORIZON_MINECRAFT_DIR`).
+1. **Client:** play 26.3 once in the official launcher. Sunrise reads `~/.minecraft` (or `--minecraft-dir` / `HORIZON_MINECRAFT_DIR`).
 2. **Server jar:** the 26.3 server jar (`downloads.server.url` in `versions/26.3/26.3.json`), passed once with `--server-jar` or `HORIZON_SERVER_JAR`.
 
 ```sh
-git clone https://github.com/horizon-rust/horizon.git
-cd horizon
+git clone https://github.com/sunrise-org/sunrise.git
+cd sunrise
 cargo run --release -p horizon-prepare -- --prepare --server-jar ~/Downloads/server.jar   # needs JDK 25
 cargo run --release -p horizon-prepare -- sounds   # optional: sounds from your launcher install
 cargo run --release -p horizon-game
@@ -141,7 +141,7 @@ How Horizon is run (the council, theme groups and their leads, the Horizon Team,
 
 ## Project status
 
-**Player-visible gaps: 0 open** of the 833 the [port ledger](tools/port_ledger.py) found, reading every vanilla 26.3 method against Horizon's code: vanilla behaviour a player would notice that Horizon doesn't have yet. By area: Animals [0](https://github.com/horizon-rust/horizon/issues/3512); Monsters and bosses [0](https://github.com/horizon-rust/horizon/issues/3513); Entities, projectiles, vehicles and decorations [0](https://github.com/horizon-rust/horizon/issues/3514); Items, enchantments and inventories [0](https://github.com/horizon-rust/horizon/issues/3515); Blocks, redstone and fluids [0](https://github.com/horizon-rust/horizon/issues/3516); World, world generation and saves [0](https://github.com/horizon-rust/horizon/issues/3517); Screens, HUD and client packets [0](https://github.com/horizon-rust/horizon/issues/3518); Entity and block rendering, models [0](https://github.com/horizon-rust/horizon/issues/3519); Server and players on the server [0](https://github.com/horizon-rust/horizon/issues/3520); Mob AI, villagers and raids [0](https://github.com/horizon-rust/horizon/issues/3521). This number goes down as gaps close (`tools/parity_gaps.py`); the table below says what the harnesses compare.
+**Player-visible gaps: 0 open** of the 833 the [port ledger](tools/port_ledger.py) found, reading every vanilla 26.3 method against Sunrise's code: vanilla behaviour a player would notice that Sunrise doesn't have yet. By area: Animals [0](https://github.com/horizon-rust/horizon/issues/3512); Monsters and bosses [0](https://github.com/horizon-rust/horizon/issues/3513); Entities, projectiles, vehicles and decorations [0](https://github.com/horizon-rust/horizon/issues/3514); Items, enchantments and inventories [0](https://github.com/horizon-rust/horizon/issues/3515); Blocks, redstone and fluids [0](https://github.com/horizon-rust/horizon/issues/3516); World, world generation and saves [0](https://github.com/horizon-rust/horizon/issues/3517); Screens, HUD and client packets [0](https://github.com/horizon-rust/horizon/issues/3518); Entity and block rendering, models [0](https://github.com/horizon-rust/horizon/issues/3519); Server and players on the server [0](https://github.com/horizon-rust/horizon/issues/3520); Mob AI, villagers and raids [0](https://github.com/horizon-rust/horizon/issues/3521). This number goes down as gaps close (`tools/parity_gaps.py`); the table below says what the harnesses compare.
 
 The table is the project's own audit of what the harnesses compare, subsystem by subsystem: a score says how much of that subsystem the harnesses cover and pass, not that nothing else differs from vanilla. What players still run into: [known issues](docs/known-issues.md).
 
