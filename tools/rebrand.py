@@ -10,7 +10,7 @@ from pathlib import Path
 DRY = "--dry-run" in sys.argv
 os.chdir(Path(__file__).resolve().parent.parent)
 
-SKIP_FILES = re.compile(r"(^|/)(LICENSE[^/]*|LICENSES/.*|NOTICE[^/]*|COPYING[^/]*|CLA\.md|GOVERNANCE\.md)$|^tools/rebrand\.py$")
+SKIP_FILES = re.compile(r"(^|/)(LICENSE[^/]*|LICENSES/.*|NOTICE[^/]*|COPYING[^/]*|CLA\.md|GOVERNANCE\.md)$|^tools/rebrand\.py$|^tests/fixtures/launcher-upstream/identity\.json$")
 
 PROTECT = [
     # Real repositories and their pages.
@@ -39,7 +39,7 @@ LICENCE_LINE = re.compile(r"(?i)copyright|MIT[- ]licen[cs]e|MIT licensed|MIT-Hor
 KEEP_LINE = re.compile(r'through the rename|Horizon\'s name, kept|before the Sunrise rename|"playhorizon\.dev": "playsunrise\.net"|^\s+"mods/horizon/src/", "mods/horizon-lab/src/"\)\):|sunriselab/" in path or "/dev/horizonlab/"')
 LICENCE_PATH = re.compile(r"(^|/)(LICENSES/[^/]*|[^/]*LICEN[CS]E[^/]*)$")
 # Files whose strings and comments name the earlier launchers themselves: only their code is renamed.
-KEEP_STRINGS = {"launcher/src/identity.rs"}
+KEEP_STRINGS = {"launcher/src/identity.rs", "launcher/src/setup_args.rs"}
 STRING = re.compile(r'"(?:[^"\\\n]|\\.)*"|//[^\n]*')
 
 
@@ -86,10 +86,15 @@ for old, new in [("horizon", "sunrise"), ("Horizon", "Sunrise"), ("HORIZON", "SU
     SPELLED.append((old.encode().hex().upper(), new.encode().hex().upper()))
 
 
+# The biome region salt as a saved world file spells it, in hex: kept like the salt itself.
+SALT_HEX = "horizon:biome_region".encode().hex()
+
+
 def convert_rust(text):
+    text = text.replace(SALT_HEX, "\x03")
     for old, new in SPELLED:
         text = text.replace(old, new)
-    return text
+    return text.replace("\x03", SALT_HEX)
 
 
 def convert_path(path):
