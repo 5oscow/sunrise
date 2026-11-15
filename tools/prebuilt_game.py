@@ -485,6 +485,30 @@ def build(out: Path, server: bool) -> None:
     check(out)
 
 
+def developer_tools(out: Path) -> None:
+    """Stage the existing source SDK assets beside a developer prebuilt, without changing its slices."""
+    check(out)
+    identity = json.loads((out / IDENTITY).read_text())
+    if identity["commit"] != head():
+        sys.exit(f"{out} is not this checkout's commit; rebuild the developer SDK")
+    destination = out.with_name(out.name + ".developer-tools")
+    if destination.exists():
+        sys.exit(f"{destination} already exists; remove it before rebuilding developer tools")
+    with tempfile.TemporaryDirectory(dir=out.parent, prefix=".developer-tools-") as temporary:
+        temporary = Path(temporary)
+        source = temporary / "api"
+        assets = temporary / "assets"
+        assets.mkdir()
+        run([sys.executable, str(ROOT / "tools/sdk_api_source.py"), "build", str(source)], cwd=ROOT)
+        run([sys.executable, str(ROOT / "tools/sdk_api_source.py"), "archive",
+             str(source), str(assets / "api-source.tar.xz")], cwd=ROOT)
+        tar_xz(out, [".", *BUILD_DATA], assets / BUILD_DATA_ARCHIVE)
+        run(["cargo", "run", "--locked", "--release", "-q", "-p", "horizon-mod-api-gen",
+             "--bin", "horizon-stage", "--", "surface", str(ROOT), str(assets / SURFACE)], cwd=ROOT)
+        index(assets, None)
+        assets.rename(destination)
+
+
 def carry_patches(staged: Path, out: Path) -> dict:
     """Carry only game-owned registry patch crates, never the rest of the game source."""
     patches = tomllib.loads((staged / "Cargo.toml").read_text()).get("patch", {})
@@ -936,6 +960,8 @@ def main() -> None:
     build_parser = commands.add_parser("build")
     build_parser.add_argument("out", type=Path)
     build_parser.add_argument("--server", action="store_true", help="the dedicated server's features")
+    build_parser.add_argument("--developer", action="store_true",
+                              help="also stage the standalone API source and tooling assets beside OUT")
     smoke_parser = commands.add_parser("smoke")
     smoke_parser.add_argument("out", type=Path)
     start_parser = commands.add_parser("start")
@@ -956,6 +982,8 @@ def main() -> None:
     args = parser.parse_args()
     if args.command == "build":
         build(args.out.resolve(), args.server)
+        if args.developer:
+            developer_tools(args.out.resolve())
     elif args.command == "exports":
         exports(args.out.resolve())
     elif args.command == "start":

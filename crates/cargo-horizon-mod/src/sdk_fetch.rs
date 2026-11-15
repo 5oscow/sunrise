@@ -55,6 +55,9 @@ pub(crate) struct PinnedSdk {
 /// missing or holds another build.
 pub(crate) fn ensure_sdk(project: &Path) -> Result<PinnedSdk, String> {
     let build = pin(project)?;
+    if let Some(sdk) = developer(project, &build)? {
+        return Ok(sdk);
+    }
     fetch(&Base::from_env(), &keys(), &build, &project.join(DIR), true)
 }
 
@@ -365,6 +368,9 @@ fn pinned(index: &Index, dir: &Path) -> PinnedSdk {
 /// `text` (a Nightly name or a sha)'s build, its small files only (`sdk.json`, `surface.json`),
 /// in the project's `.horizon/cache/<build>/`, verified as the pinned SDK is, without repinning.
 pub(crate) fn fetch_build(project: &Path, text: &str) -> Result<PinnedSdk, String> {
+    if let Some(sdk) = developer(project, text)? {
+        return Ok(sdk);
+    }
     let base = Base::from_env();
     let build = resolve(&base, text)?;
     fetch(
@@ -381,6 +387,10 @@ pub(crate) fn fetch_build(project: &Path, text: &str) -> Result<PinnedSdk, Strin
 /// nothing else is read. Each build's folder stays after a repin, so an update can still show the
 /// old pin's signatures once its release is gone.
 pub(crate) fn build_data(project: &Path, build: &str) -> Result<PathBuf, String> {
+    if developer_enabled(project)? {
+        developer(project, build)?.ok_or("developer SDK was not selected")?;
+        return developer_folder();
+    }
     build_data_from(&Base::from_env(), &keys(), project, build)
 }
 
@@ -409,6 +419,212 @@ fn build_data_from(
         BUILD_DATA_LIMIT,
     )?;
     Ok(into)
+}
+
+/// An unsigned SDK requires a project opt-in as well as an explicit folder. The environment
+/// variable alone must never change a published project's trust boundary.
+fn developer_enabled(project: &Path) -> Result<bool, String> {
+    let path = project.join("Cargo.toml");
+    let text = match fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(e) => return Err(format!("{}: {e}", path.display())),
+    };
+    let cargo: toml::Table = text
+        .parse()
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    match cargo
+        .get("package")
+        .and_then(|p| p.get("metadata"))
+        .and_then(|m| m.get("horizon"))
+        .and_then(|h| h.get("developer-sdk"))
+    {
+        None => Ok(false),
+        Some(value) => value
+            .as_bool()
+            .ok_or("package.metadata.horizon.developer-sdk must be a boolean".into()),
+    }
+}
+
+fn developer_folder() -> Result<PathBuf, String> {
+    std::env::var_os("HORIZON_LAUNCHER_DEVELOPER_SDK").map(PathBuf::from)
+        .ok_or("developer-sdk = true requires HORIZON_LAUNCHER_DEVELOPER_SDK; build it with tools/prebuilt_game.py build SDK_FOLDER --developer".into())
+}
+
+fn developer(project: &Path, requested: &str) -> Result<Option<PinnedSdk>, String> {
+    if !developer_enabled(project)? {
+        return Ok(None);
+    }
+    let folder = developer_folder()?;
+    let compiler = std::process::Command::new("rustc")
+        .arg("-vV")
+        .output()
+        .map_err(|e| format!("reading rustc identity: {e}"))?;
+    if !compiler.status.success() {
+        return Err(format!(
+            "reading rustc identity: {}",
+            String::from_utf8_lossy(&compiler.stderr)
+        ));
+    }
+    let compiler = String::from_utf8(compiler.stdout).map_err(|e| e.to_string())?;
+    developer_from(project, requested, &folder, &compiler).map(Some)
+}
+
+fn developer_from(
+    project: &Path,
+    requested: &str,
+    folder: &Path,
+    compiler: &str,
+) -> Result<PinnedSdk, String> {
+    let build = if requested == "nightly" {
+        pin(project)?
+    } else {
+        requested.to_owned()
+    };
+    let read = |path: &Path| fs::read(path).map_err(|e| format!("{}: {e}", path.display()));
+    let identity: serde_json::Value =
+        serde_json::from_slice(&read(&folder.join("horizon-prebuilt.json"))?)
+            .map_err(|e| format!("developer SDK identity: {e}"))?;
+    let field = |name: &str| compiler.lines().find_map(|line| line.strip_prefix(name));
+    let host = field("host: ").ok_or("rustc identity has no host")?;
+    let release = field("release: ").ok_or("rustc identity has no release")?;
+    let built_rustc = identity
+        .get("rustc")
+        .and_then(|v| v.as_str())
+        .ok_or("developer SDK has no rustc identity")?;
+    if identity["commit"].as_str() != Some(build.as_str())
+        || identity["target"].as_str() != Some(host)
+        || !matches!(identity["side"].as_str(), Some("client" | "server"))
+        || identity["package_format"].as_u64() != Some(u64::from(sdk::PACKAGE_FORMAT))
+        || !built_rustc
+            .lines()
+            .any(|line| line.strip_prefix("release: ") == Some(release))
+    {
+        return Err(format!(
+            "developer SDK is incompatible with pin {build}, target {host}, Rust {release}: {}",
+            folder.display()
+        ));
+    }
+    // Check the actual build-data headers before creating or replacing project files.
+    for name in build_data::FILES {
+        let bytes = read(&folder.join(name))?;
+        let text = std::str::from_utf8(&bytes).map_err(|e| format!("{name}: {e}"))?;
+        let (header, _): (_, serde_json::Value) = build_data::read(name, text)?;
+        if header.commit != build {
+            return Err(format!(
+                "developer SDK {name} describes {}, not pin {build}",
+                header.commit
+            ));
+        }
+    }
+    let tools = folder.with_file_name(format!(
+        "{}.developer-tools",
+        folder
+            .file_name()
+            .ok_or("developer SDK folder has no name")?
+            .to_string_lossy()
+    ));
+    let bytes = read(&tools.join(sdk::INDEX))?;
+    let index = Index::read(&bytes, &build)
+        .map_err(|e| format!("developer SDK: {e}; rebuild with --developer"))?;
+    if index.toolchain.rust != release {
+        return Err(format!(
+            "developer SDK sources were built with Rust {}, not {release}",
+            index.toolchain.rust
+        ));
+    }
+    let surface = read(&tools.join(SURFACE))?;
+    index
+        .verify(SURFACE, surface.as_slice())
+        .map_err(|e| e.to_string())?;
+    let parsed_surface =
+        mod_surface::Surface::read(&surface).map_err(|e| format!("developer SDK surface: {e}"))?;
+    if parsed_surface.hash != index.surface.hash {
+        return Err("developer SDK surface hash differs from its index".into());
+    }
+    index
+        .verify(
+            API_SOURCE,
+            fs::File::open(tools.join(API_SOURCE))
+                .map_err(|e| format!("developer API source: {e}; rebuild with --developer"))?,
+        )
+        .map_err(|e| e.to_string())?;
+    let dir = project.join(DIR);
+    let fingerprint = format!("{:x}", Sha256::digest(&bytes));
+    if fs::read_to_string(dir.join("developer-build")).is_ok_and(|stamp| stamp == fingerprint)
+        && dir.join("api/crates/horizon-mod-api/Cargo.toml").is_file()
+        && !dir.join(STAMP).exists()
+    {
+        return Ok(pinned(&index, &dir));
+    }
+    // Developer output deliberately never writes the signed resolver's `build` stamp.
+    // Switching the opt-in off therefore requires signed verification again.
+    let staging = std::env::temp_dir().join(format!(
+        "horizon-developer-sdk-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|e| e.to_string())?
+            .as_nanos()
+    ));
+    fs::create_dir(&staging).map_err(|e| format!("{}: {e}", staging.display()))?;
+    let result = (|| {
+        sdk::unpack(
+            &index,
+            API_SOURCE,
+            &tools.join(API_SOURCE),
+            &staging.join("api"),
+            API_LIMIT,
+        )
+        .map_err(|e| e.to_string())?;
+        if !staging
+            .join("api/crates/horizon-mod-api/Cargo.toml")
+            .is_file()
+        {
+            return Err(
+                "developer SDK has no horizon-mod-api sources; rebuild with --developer".into(),
+            );
+        }
+        fs::write(staging.join(sdk::INDEX), &bytes).map_err(|e| e.to_string())?;
+        fs::write(staging.join(SURFACE), &surface).map_err(|e| e.to_string())?;
+        fs::write(staging.join("developer-build"), &fingerprint).map_err(|e| e.to_string())?;
+        let dir = project.join(DIR);
+        fs::create_dir_all(dir.parent().expect("SDK has parent")).map_err(|e| e.to_string())?;
+        if dir.exists() {
+            fs::remove_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        }
+        match fs::rename(&staging, &dir) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::CrossesDevices => {
+                copy_developer_tree(&staging, &dir)?;
+            }
+            Err(e) => return Err(format!("{}: {e}", dir.display())),
+        }
+        Ok(pinned(&index, &dir))
+    })();
+    match fs::remove_dir_all(&staging) {
+        Ok(()) => result,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => result,
+        Err(e) => match result {
+            Ok(_) => Err(format!("cleaning {}: {e}", staging.display())),
+            Err(why) => Err(format!("{why}; cleaning {}: {e}", staging.display())),
+        },
+    }
+}
+
+fn copy_developer_tree(from: &Path, into: &Path) -> Result<(), String> {
+    fs::create_dir_all(into).map_err(|e| format!("{}: {e}", into.display()))?;
+    for entry in fs::read_dir(from).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let path = entry.path();
+        let destination = into.join(entry.file_name());
+        if entry.file_type().map_err(|e| e.to_string())?.is_dir() {
+            copy_developer_tree(&path, &destination)?;
+        } else {
+            fs::copy(&path, &destination).map_err(|e| format!("{}: {e}", path.display()))?;
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

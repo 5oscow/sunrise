@@ -223,3 +223,190 @@ fn the_pin_is_the_native_tables_or_the_cargo_metadata() {
     assert_eq!(pin(project.path()).unwrap(), other);
     assert!(!project.path().join(DIR).exists());
 }
+
+const COMPILER: &str = "release: 1.99.1\nhost: x86_64-unknown-linux-gnu\n";
+
+fn developer_fixture() -> (tempfile::TempDir, PathBuf) {
+    use base64::Engine;
+    let root = tempfile::tempdir().unwrap();
+    let folder = root.path().join("game");
+    let tools = root.path().join("game.developer-tools");
+    fs::create_dir(&folder).unwrap();
+    fs::create_dir(&tools).unwrap();
+    fs::write(
+        folder.join("horizon-prebuilt.json"),
+        serde_json::to_vec(&serde_json::json!({
+            "package_format": sdk::PACKAGE_FORMAT, "commit": BUILD,
+            "target": "x86_64-unknown-linux-gnu", "side": "client", "rustc": COMPILER,
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    for name in build_data::FILES {
+        fs::write(
+            folder.join(name),
+            format!(r#"{{"schema":1,"build":{{"commit":"{BUILD}"}}}}"#),
+        )
+        .unwrap();
+    }
+    // A real relocatable API workspace, not the compiled-metadata archive used by release tests.
+    let archive = base64::engine::general_purpose::STANDARD.decode(
+        "/Td6WFoAAATm1rRGAgAhARYAAAB0L+Wj4Cf/AP5dACGYSkaJbpAz0o/RGPX7rZuIUSFVHNO96Zguj16jPJ1d+OyVXLRnu6KMcR5WjymNJQaFFqCzZERZlNdh1l2YuzLgRLTPvTRVG0DWrTt1Jnac02ZpMjT81JhdKF/63JmB285L+KE3SX1uwq+W2YlXkpOF3NIMf4+1UurkYabt5i38d1luPO6432ep1V7Y1eXL04M7r2bobAuHCH8foaE8hO7tlpGaDrefTAMFmXsyjjnXVB6p8ypGTMh8uPED8+Q84XTRwZdwQVjXJReYhKXSz2iJuQEsPau2KKaiE2OGalB45C6urZuDkhMUqgq2D2MMcFI/DAVvR9Ej8qZo6Y8AAAAAin25uCuKtKUAAZoCgFAAABMqjYSxxGf7AgAAAAAEWVo="
+    ).unwrap();
+    fs::write(tools.join(API_SOURCE), archive).unwrap();
+    fs::write(
+        tools.join(SURFACE),
+        format!(r#"{{"schema":{},"hash":"developer"}}"#, mod_surface::SCHEMA),
+    )
+    .unwrap();
+    let index = Index::of_folder(
+        &tools,
+        sdk::Build {
+            commit: BUILD.into(),
+            game: sdk::GAME.into(),
+            date: "2026-11-13".into(),
+            nightly: None,
+        },
+        "1.99.1".into(),
+    )
+    .unwrap();
+    fs::write(tools.join(sdk::INDEX), index.to_json()).unwrap();
+    (root, folder)
+}
+
+#[test]
+fn developer_sources_are_available_without_a_signed_cache_stamp() {
+    let (_root, folder) = developer_fixture();
+    let project = tempfile::tempdir().unwrap();
+    let sdk = developer_from(project.path(), BUILD, &folder, COMPILER).unwrap();
+    let manifest: toml::Table =
+        fs::read_to_string(sdk.dir.join("api/crates/horizon-mod-api/Cargo.toml"))
+            .unwrap()
+            .parse()
+            .unwrap();
+    assert_eq!(manifest["lib"]["name"].as_str(), Some("mod_api"));
+    assert_eq!(
+        fs::read_to_string(sdk.dir.join("api/crates/horizon-mod-api/src/lib.rs")).unwrap(),
+        "pub struct Host;\n"
+    );
+    assert!(!sdk.dir.join(STAMP).exists());
+    fs::write(project.path().join(MANIFEST), format!(
+        "id='m'\nname='m'\nversion='1'\napi='0.2'\ncapabilities=['registries']\n[native]\ngame='26.3'\nhorizon='{BUILD}'\nmixins='{BUILD}'\n"
+    )).unwrap();
+    assert_eq!(
+        developer_from(project.path(), "nightly", &folder, COMPILER)
+            .unwrap()
+            .build,
+        BUILD
+    );
+    // Disabling developer mode cannot make the unsigned folder a cached signed SDK.
+    assert!(
+        fetch(
+            &Base::Folder(project.path().join("no-release")),
+            &[],
+            BUILD,
+            &sdk.dir,
+            true
+        )
+        .unwrap_err()
+        .contains("no signed SDK")
+    );
+}
+
+#[test]
+fn incompatible_developer_build_target_and_missing_sources_leave_the_project_unchanged() {
+    let (_root, folder) = developer_fixture();
+    let project = tempfile::tempdir().unwrap();
+    let dir = project.path().join(DIR);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("keep"), b"previous SDK").unwrap();
+    let other = "89abcdef0123456789abcdef0123456789abcdef";
+    assert!(
+        developer_from(project.path(), other, &folder, COMPILER)
+            .unwrap_err()
+            .contains("incompatible")
+    );
+    assert!(
+        developer_from(
+            project.path(),
+            BUILD,
+            &folder,
+            "release: 1.99.1\nhost: aarch64-apple-darwin\n"
+        )
+        .unwrap_err()
+        .contains("incompatible")
+    );
+    let points = fs::read(folder.join(build_data::POINTS)).unwrap();
+    fs::write(
+        folder.join(build_data::POINTS),
+        format!(r#"{{"schema":1,"build":{{"commit":"{other}"}}}}"#),
+    )
+    .unwrap();
+    assert!(
+        developer_from(project.path(), BUILD, &folder, COMPILER)
+            .unwrap_err()
+            .contains("describes")
+    );
+    fs::write(folder.join(build_data::POINTS), points).unwrap();
+    fs::remove_file(
+        folder
+            .with_file_name("game.developer-tools")
+            .join(API_SOURCE),
+    )
+    .unwrap();
+    assert!(
+        developer_from(project.path(), BUILD, &folder, COMPILER)
+            .unwrap_err()
+            .contains("developer API source")
+    );
+    assert_eq!(fs::read(dir.join("keep")).unwrap(), b"previous SDK");
+}
+
+#[test]
+fn compiled_metadata_is_not_a_substitute_for_api_sources() {
+    let (_root, folder) = developer_fixture();
+    let project = tempfile::tempdir().unwrap();
+    let tools = folder.with_file_name("game.developer-tools");
+    fs::write(
+        tools.join(API_SOURCE),
+        include_bytes!("../../../horizon-mod-package/src/sdk/fixture.tar.xz"),
+    )
+    .unwrap();
+    let index = Index::of_folder(
+        &tools,
+        sdk::Build {
+            commit: BUILD.into(),
+            game: sdk::GAME.into(),
+            date: "2026-11-13".into(),
+            nightly: None,
+        },
+        "1.99.1".into(),
+    )
+    .unwrap();
+    fs::write(tools.join(sdk::INDEX), index.to_json()).unwrap();
+    assert!(
+        developer_from(project.path(), BUILD, &folder, COMPILER)
+            .unwrap_err()
+            .contains("no horizon-mod-api sources")
+    );
+    assert!(!project.path().join(DIR).exists());
+}
+
+#[test]
+fn unsigned_routing_requires_explicit_project_metadata() {
+    let project = tempfile::tempdir().unwrap();
+    fs::write(project.path().join("Cargo.toml"), "[package]\nname='mod'\n").unwrap();
+    assert!(developer(project.path(), BUILD).unwrap().is_none());
+    fs::write(
+        project.path().join("Cargo.toml"),
+        "[package.metadata.horizon]\ndeveloper-sdk=true\n",
+    )
+    .unwrap();
+    assert!(developer_enabled(project.path()).unwrap());
+    fs::write(
+        project.path().join("Cargo.toml"),
+        "[package.metadata.horizon]\ndeveloper-sdk=false\n",
+    )
+    .unwrap();
+    assert!(developer(project.path(), BUILD).unwrap().is_none());
+}

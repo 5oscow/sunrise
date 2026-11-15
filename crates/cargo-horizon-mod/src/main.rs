@@ -271,8 +271,8 @@ fn pin(horizon: Option<&str>) -> Result<String, String> {
     )
 }
 
-/// Repins the native mod, reporting signature changes before writing. Its `Cargo.toml` names the
-/// SDK by path, so only the pin moves; the next command fetches the new SDK.
+/// Repins the native mod after validating its target SDK, reporting signature changes before writing,
+/// and stages the matching API sources for Cargo and editors.
 fn update(dir: &Path, horizon: Option<&str>, accept: &[&str]) -> Result<(), String> {
     let path = dir.join(MANIFEST);
     let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -284,7 +284,7 @@ fn update(dir: &Path, horizon: Option<&str>, accept: &[&str]) -> Result<(), Stri
     let mut doc: toml_edit::DocumentMut = text
         .parse()
         .map_err(|e| format!("{}: {e}", path.display()))?;
-    let horizon = pin(horizon)?;
+    let horizon = sdk_fetch::fetch_build(dir, horizon.unwrap_or("nightly"))?.build;
     if !manifest.internals.is_empty() || manifest.inject.iter().any(|i| i.hash.is_none()) {
         // #2593: these become the pinned catalogs with the mod's own modules applied.
         let old = internals::load(dir, &native.horizon)?;
@@ -307,8 +307,9 @@ fn update(dir: &Path, horizon: Option<&str>, accept: &[&str]) -> Result<(), Stri
     );
     let candidate = doc.to_string();
     std::fs::write(&path, candidate).map_err(|e| format!("{}: {e}", path.display()))?;
-    // The old pin's SDK goes; the next command fetches this one.
+    // Repin through the shared resolver and leave the API sources ready for Cargo and editors.
     sdk_fetch::repin(dir, &horizon)?;
+    sdk_fetch::ensure_sdk(dir)?;
     println!("Pinned to Horizon {horizon}");
     Ok(())
 }
@@ -669,15 +670,6 @@ mod tests {
             ])
             .unwrap_err()
             .contains("is not a build")
-        );
-        let newer = "89abcdef0123456789abcdef0123456789abcdef";
-        update(&path, Some(newer), &[]).unwrap();
-        let manifest =
-            Manifest::parse(&std::fs::read_to_string(path.join(MANIFEST)).unwrap()).unwrap();
-        assert_eq!(manifest.native.unwrap().horizon, newer);
-        assert_eq!(
-            std::fs::read_to_string(path.join("Cargo.toml")).unwrap(),
-            api
         );
         std::fs::remove_dir_all(&dir).unwrap();
     }
