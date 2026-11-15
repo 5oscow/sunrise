@@ -13,6 +13,22 @@ impl Mob {
         mut input: Vec3,
         events: &mut Vec<MobEvent>,
     ) {
+        // The living_travel hook (#2414): one decision at travel's entry,
+        // on the authoritative side, one branch with no listener. A cancel
+        // skips the invocation - this branch family and its nested move
+        // included; nothing the tick already did is undone.
+        let mut velocity = self.velocity;
+        if !crate::travel_gate::decide(
+            w.loop_context,
+            self.id,
+            &self.kind.id,
+            || self.travel_mode(w),
+            &mut input,
+            &mut velocity,
+        ) {
+            return;
+        }
+        self.velocity = velocity;
         // Camel.travel: on the ground, a camel that sits or changes pose keeps
         // the vertical part of its motion and drops the horizontal input.
         if super::super::camel::is_camel(self.species())
@@ -42,6 +58,35 @@ impl Mob {
             self.travel_fall_flying(w, level, input, events);
         } else {
             self.travel_in_air(w, level, input, events);
+        }
+    }
+    /// The branch this travel is about to run, as the `living_travel` hook
+    /// of #2414 hears it (its `mode`, built only when a listener asks): the
+    /// same branch the selection in [`travel`] picks, a flying kind first,
+    /// then the fluid it moves through, then the glide.
+    fn travel_mode(&self, w: &MobWorld) -> horizon_world::travel::TravelMode {
+        use horizon_world::travel::TravelMode;
+        if self.kind.flags.flying {
+            return TravelMode::Flying;
+        }
+        // shouldTravelInFluid: not where the fluid at its feet holds it up.
+        let (x, y, z) = (
+            self.position.x.floor() as i32,
+            self.position.y.floor() as i32,
+            self.position.z.floor() as i32,
+        );
+        let stands_on_fluid = self.kind.flags.lava_walker && w.fluid(x, y, z) == Fluid::Lava;
+        if self.is_in_liquid() && self.affected_by_fluids() && !stands_on_fluid {
+            // `travel_in_fluid` picks water first.
+            if self.fluids.in_water {
+                TravelMode::Water
+            } else {
+                TravelMode::Lava
+            }
+        } else if self.extra.fall_flying {
+            TravelMode::Glide
+        } else {
+            TravelMode::Air
         }
     }
     /// `LivingEntity.travelFallFlying`: use the mob's existing authoritative move

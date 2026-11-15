@@ -33,6 +33,24 @@ impl MotionWorld<'_, '_, '_> {
             }
         }
         let flying_y = self.player.flying.then_some(self.player.velocity.y);
+        // The living_travel hook (#2414): one decision before the branch
+        // selection, on the authoritative side, one branch with no listener.
+        // A cancel skips the invocation - the branch, its nested move and
+        // the flying damping below included; the swim steering above, part
+        // of the tick's earlier processing, is not undone.
+        let mut input = input;
+        let mut velocity = self.player.velocity;
+        if !crate::travel_gate::decide(
+            self.loop_context,
+            self.player.entity_id as u32,
+            "minecraft:player",
+            || self.travel_mode(),
+            &mut input,
+            &mut velocity,
+        ) {
+            return Ok(());
+        }
+        self.player.velocity = velocity;
         if !self.player.flying
             && (self.player.fluids.was_touching_water || self.player.is_in_lava())
         {
@@ -53,6 +71,29 @@ impl MotionWorld<'_, '_, '_> {
             self.player.velocity.y = y * 0.6;
         }
         Ok(())
+    }
+    /// The branch this travel is about to run, as the `living_travel` hook
+    /// of #2414 hears it (its `mode`, built only when a listener asks): the
+    /// same branch the selection below picks, fluid first, then the glide,
+    /// with the flying damping riding the air branch.
+    fn travel_mode(&self) -> horizon_world::travel::TravelMode {
+        use horizon_world::travel::TravelMode;
+        if !self.player.flying
+            && (self.player.fluids.was_touching_water || self.player.is_in_lava())
+        {
+            // `travel_in_fluid` picks water first.
+            if self.player.fluids.was_touching_water {
+                TravelMode::Water
+            } else {
+                TravelMode::Lava
+            }
+        } else if self.player.fall_flying {
+            TravelMode::Glide
+        } else if self.player.flying {
+            TravelMode::Flying
+        } else {
+            TravelMode::Air
+        }
     }
     /// LivingEntity.travelFallFlying with updateFallFlyingMovement.
     pub(super) fn travel_fall_flying(&mut self, gate: &mut MoveGate) -> Result<()> {
