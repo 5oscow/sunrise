@@ -834,16 +834,25 @@ fn join(o: &Options, name: &str) -> Result<Connection, String> {
             login::Clientbound::Unknown(..) => {}
         }
     }
+    configure(c, o.view_distance, o.brand.as_deref())
+}
+
+/// The configuration phase as a client: brand, known packs and the Horizon mod and content checks.
+fn configure(
+    mut c: Connection,
+    view_distance: i8,
+    brand: Option<&str>,
+) -> Result<Connection, String> {
     use ids::configuration::clientbound as cb;
     c.send(
         &configuration::Serverbound::ClientInformation(configuration::ClientInformation::new(
-            o.view_distance,
+            view_distance,
         ))
         .encode(),
     )
     .map_err(err)?;
     // ClientBrandRetriever: vanilla's client says "vanilla", Horizon's "horizon".
-    if let Some(brand) = &o.brand {
+    if let Some(brand) = brand {
         let mut w = Writer::new();
         w.string(brand);
         c.send(
@@ -855,6 +864,11 @@ fn join(o: &Options, name: &str) -> Result<Connection, String> {
         )
         .map_err(err)?;
     }
+    // A Horizon server lists its both-side mods after our brand and refuses a known-packs answer that comes
+    // before ours, so the bot holds that answer until it has echoed the list.
+    let mut server_is_horizon = false;
+    let mut mods_declared = false;
+    let mut held_packs = None;
     loop {
         let (id, body) = c.recv().map_err(err)?;
         let reply = match id {
@@ -868,10 +882,29 @@ fn join(o: &Options, name: &str) -> Result<Connection, String> {
             | cb::FINISH_CONFIGURATION => {
                 match configuration::Clientbound::decode(id, &body).map_err(err)? {
                     configuration::Clientbound::CustomPayload(p) => {
-                        let Some(answer) = raw_protocol_answer(o.brand.as_deref(), &p)? else {
+                        server_is_horizon |= is_horizon_brand(&p);
+                        let Some(answer) = raw_protocol_answer(brand, &p)? else {
                             continue;
                         };
-                        configuration::Serverbound::CustomPayload(answer)
+                        let declares_mods = answer.channel == horizon_protocol::mod_list::CHANNEL;
+                        c.send(&configuration::Serverbound::CustomPayload(answer).encode())
+                            .map_err(err)?;
+                        if declares_mods {
+                            mods_declared = true;
+                            if let Some(packs) = held_packs.take() {
+                                c.send(
+                                    &configuration::Serverbound::SelectKnownPacks(packs).encode(),
+                                )
+                                .map_err(err)?;
+                            }
+                        }
+                        continue;
+                    }
+                    configuration::Clientbound::SelectKnownPacks(p)
+                        if brand == Some("horizon") && server_is_horizon && !mods_declared =>
+                    {
+                        held_packs = Some(p);
+                        continue;
                     }
                     configuration::Clientbound::SelectKnownPacks(p) => {
                         configuration::Serverbound::SelectKnownPacks(p)
@@ -907,13 +940,32 @@ fn join(o: &Options, name: &str) -> Result<Connection, String> {
     }
 }
 
-/// Only a bot claiming Horizon support answers the fork's raw-protocol Query.
+/// `horizon-client`'s `content_identity::CHANNEL`; this crate does not depend on the client.
+const BLOCK_REGISTRY: &str = "horizon:block_registry";
+
+/// Whether a server's configuration payload is its `minecraft:brand` saying "horizon".
+fn is_horizon_brand(payload: &configuration::CustomPayload) -> bool {
+    payload.channel == "minecraft:brand"
+        && horizon_protocol::buf::Reader::new(&payload.data)
+            .string(32767)
+            .is_ok_and(|brand| brand == "horizon")
+}
+
+/// Only a bot claiming Horizon support answers a Horizon server's configuration payloads: the raw-protocol
+/// Query with an empty offer, and the mod list and the content-registry digest by echoing them, since the bot
+/// stands for a client that has exactly the server's mods and content.
 fn raw_protocol_answer(
     brand: Option<&str>,
     payload: &configuration::CustomPayload,
 ) -> Result<Option<configuration::CustomPayload>, String> {
     use horizon_protocol::payload_negotiation::{CHANNEL, Control, Manifest};
-    if brand != Some("horizon") || payload.channel != CHANNEL {
+    if brand != Some("horizon") {
+        return Ok(None);
+    }
+    if payload.channel == horizon_protocol::mod_list::CHANNEL || payload.channel == BLOCK_REGISTRY {
+        return Ok(Some(payload.clone()));
+    }
+    if payload.channel != CHANNEL {
         return Ok(None);
     }
     match Control::decode(&payload.data).map_err(err)? {
@@ -1694,6 +1746,134 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+        for channel in [horizon_protocol::mod_list::CHANNEL, BLOCK_REGISTRY] {
+            payload.channel = channel.into();
+            payload.data = vec![3, 1, 2];
+            assert_eq!(
+                raw_protocol_answer(Some("horizon"), &payload).unwrap(),
+                Some(payload.clone())
+            );
+            for brand in [None, Some("vanilla")] {
+                assert!(raw_protocol_answer(brand, &payload).unwrap().is_none());
+            }
+        }
+    }
+
+    fn config_payload(channel: &str, data: Vec<u8>) -> Vec<u8> {
+        configuration::Clientbound::CustomPayload(configuration::CustomPayload {
+            channel: channel.into(),
+            data,
+        })
+        .encode()
+    }
+
+    fn brand_payload(brand: &str) -> Vec<u8> {
+        let mut w = Writer::new();
+        w.string(brand);
+        config_payload("minecraft:brand", w.data)
+    }
+
+    /// Runs `configure` against a scripted server over a pipe: its brand and known packs come first, as
+    /// `lan/conn.rs` sends them, and the test reads what the bot sends back.
+    fn configuring(
+        bot_brand: Option<&'static str>,
+        server_brand: &str,
+    ) -> (Connection, thread::JoinHandle<Result<Connection, String>>) {
+        use horizon_protocol::connection::Pipe;
+        let (client, server) = Pipe::pair();
+        let mut server = Connection::local(server);
+        server
+            .reader
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let handle = thread::spawn(move || configure(Connection::local(client), 10, bot_brand));
+        server.send(&brand_payload(server_brand)).unwrap();
+        server
+            .send(
+                &configuration::Clientbound::SelectKnownPacks(configuration::SelectKnownPacks {
+                    packs: Vec::new(),
+                })
+                .encode(),
+            )
+            .unwrap();
+        (server, handle)
+    }
+
+    fn next(server: &mut Connection) -> configuration::Serverbound {
+        let (id, body) = server.recv().unwrap();
+        configuration::Serverbound::decode(id, &body).unwrap()
+    }
+
+    #[test]
+    fn horizon_bot_echoes_the_mod_list_before_answering_known_packs() {
+        use horizon_protocol::mod_list::{CHANNEL, Entry, Side, decode, encode};
+        let (mut server, handle) = configuring(Some("horizon"), "horizon");
+        assert!(matches!(
+            next(&mut server),
+            configuration::Serverbound::ClientInformation(_)
+        ));
+        assert!(
+            matches!(next(&mut server), configuration::Serverbound::CustomPayload(p) if p.channel == "minecraft:brand")
+        );
+        let list = encode(&[Entry {
+            id: "ruby".into(),
+            version: "1.0".into(),
+            side: Side::Both,
+        }]);
+        server.send(&config_payload(CHANNEL, list.clone())).unwrap();
+        let configuration::Serverbound::CustomPayload(echo) = next(&mut server) else {
+            panic!("the mod list comes before the known packs answer");
+        };
+        assert_eq!((echo.channel.as_str(), &echo.data), (CHANNEL, &list));
+        assert_eq!(decode(&echo.data).unwrap().len(), 1);
+        assert!(matches!(
+            next(&mut server),
+            configuration::Serverbound::SelectKnownPacks(_)
+        ));
+        let digest = vec![7; 32];
+        server
+            .send(&config_payload(BLOCK_REGISTRY, digest.clone()))
+            .unwrap();
+        let configuration::Serverbound::CustomPayload(echo) = next(&mut server) else {
+            panic!("the content digest is echoed");
+        };
+        assert_eq!(
+            (echo.channel.as_str(), &echo.data),
+            (BLOCK_REGISTRY, &digest)
+        );
+        server
+            .send(&configuration::Clientbound::FinishConfiguration(Empty).encode())
+            .unwrap();
+        assert!(matches!(
+            next(&mut server),
+            configuration::Serverbound::FinishConfiguration(_)
+        ));
+        handle.join().unwrap().unwrap();
+    }
+
+    #[test]
+    fn known_packs_are_not_held_unless_both_sides_are_horizon() {
+        for (bot_brand, server_brand) in [
+            (Some("horizon"), "vanilla"),
+            (Some("vanilla"), "horizon"),
+            (None, "horizon"),
+        ] {
+            let (mut server, handle) = configuring(bot_brand, server_brand);
+            let sent = loop {
+                match next(&mut server) {
+                    configuration::Serverbound::ClientInformation(_) => {}
+                    configuration::Serverbound::CustomPayload(p)
+                        if p.channel == "minecraft:brand" => {}
+                    other => break other,
+                }
+            };
+            assert!(matches!(
+                sent,
+                configuration::Serverbound::SelectKnownPacks(_)
+            ));
+            server.writer.shutdown();
+            assert!(handle.join().unwrap().is_err());
+        }
     }
 
     /// Exercise the production reader over framed connections. Pings are barriers
