@@ -2869,9 +2869,8 @@ mod tests {
             "id='srv'\nname='srv'\nversion='1'\napi='0.2'\nside='server'\ncapabilities=['registries']\n",
         );
         write("data/srv/horizon/item/gem.json", "{ not json");
-        let base = f.0.join("resources");
-        std::fs::create_dir_all(&base).unwrap();
-        std::fs::write(base.join("horizon-resources.json"), "{}").unwrap();
+        // Merging a mod's assets reads the prepared root's block reports, so this is the real one.
+        let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let mut sources = ModsState {
             dev: vec![package.clone()],
             ..Default::default()
