@@ -61,6 +61,66 @@ def stashed(pattern, text, convert, mark):
     return re.sub(f"{mark}(\\d+){mark}", lambda m: keep[int(m.group(1))], text)
 
 
+FORK_IF = re.compile(r"cfg!\((?:horizon|sunrise)_fork_launcher\)")
+
+
+def block_end(text, start):
+    depth, i, quote = 0, start, False
+    while i < len(text):
+        c = text[i]
+        if quote:
+            if c == "\\":
+                i += 1
+            elif c == '"':
+                quote = False
+        elif c == '"':
+            quote = True
+        elif c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                return i + 1
+        i += 1
+    return len(text)
+
+
+def fork_branches(text):
+    spans, found = [], FORK_IF.search(text)
+    while found:
+        at = found.start()
+        then_open = text.find("{", at)
+        then_close = block_end(text, then_open)
+        spans.append((then_open, then_close))
+        rest = text[then_close:]
+        stripped = rest.lstrip()
+        if stripped.startswith("else") and stripped[4:].lstrip().startswith("{"):
+            else_open = text.find("{", then_close + (len(rest) - len(stripped)) + 4)
+            spans.append((else_open, block_end(text, else_open)))
+        found = FORK_IF.search(text, then_close)
+    return spans
+
+
+# Both branches of `if cfg!(horizon_fork_launcher) { .. } else { .. }` name Sunrise's and Horizon's real launchers.
+def keep_fork_branches(text, convert):
+    spans = fork_branches(text)
+    if not spans:
+        return convert(text)
+    keep = []
+
+    def stash(m):
+        keep.append(m.group(0))
+        return f"\x04{len(keep) - 1}\x04"
+
+    out, last = [], 0
+    for start, end in spans:
+        out.append(text[last:start])
+        out.append(STRING.sub(stash, text[start:end]))
+        last = end
+    out.append(text[last:])
+    return re.sub("\x04(\\d+)\x04", lambda m: keep[int(m.group(1))], convert("".join(out)))
+
+
 def convert_line(text):
     def brand(t):
         t = BRAND.sub(case, t.replace("playhorizon.dev", "playsunrise.net"))
@@ -129,7 +189,7 @@ def main():
             text = raw.decode("utf-8")
         except UnicodeDecodeError:
             continue
-        out = stashed(STRING, text, convert, "\x01") if f in KEEP_STRINGS else convert(text)
+        out = stashed(STRING, text, convert, "\x01") if f in KEEP_STRINGS else keep_fork_branches(text, convert)
         if f.endswith(".rs"):
             out = convert_rust(out)
         if out != text:
