@@ -81,7 +81,7 @@ impl Game<'_> {
                     game.native_player_tick_pre(mod_api::__private::PlayerTickPreCall { player })
                 });
             }
-            self.guest_sleep_tick(gi);
+            self.guest_sleep_tick(gi, body);
             let Some(host) = self.lan.as_mut() else {
                 return;
             };

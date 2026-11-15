@@ -195,3 +195,39 @@ fn a_dead_spectator_touching_an_unloaded_chunk_does_not_tick_its_death() {
         })
     });
 }
+
+#[test]
+#[ignore = "daily"]
+fn leftover_sleep_countdown_waits_at_the_unloaded_edge_then_resumes() {
+    mod_platform::testing::with_mods(Vec::new().into(), || {
+        with_game(|game| {
+            open_to_lan(game);
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let mut loaded = placed(1, 8.5, SPECTATOR);
+            let mut edge = placed(2, 15.5, SPECTATOR);
+            loaded.sleep_timer = 105;
+            edge.sleep_timer = 105;
+            assert!(loaded.bed.is_none() && edge.bed.is_none());
+            game.lan.as_mut().unwrap().hub.guests.extend([loaded, edge]);
+            game.tick_guests();
+            let timers = |game: &Game<'_>| -> Vec<u32> {
+                game.lan
+                    .as_ref()
+                    .unwrap()
+                    .hub
+                    .guests
+                    .iter()
+                    .map(|g| g.sleep_timer)
+                    .collect()
+            };
+            assert_eq!(timers(game), [106, 105]);
+            game.world
+                .chunks
+                .insert((1, 0), Arc::new(Chunk::empty(1, 0)));
+            game.tick_guests();
+            assert_eq!(timers(game), [107, 106]);
+        });
+    });
+}
