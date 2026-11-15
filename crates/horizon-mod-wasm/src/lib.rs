@@ -558,6 +558,12 @@ pub struct Loaded {
 }
 
 impl Loaded {
+    /// The loaded modules, in the order of [`Self::mods`]: one process initializes a
+    /// package's points once (the registry seals), so a caller that re-enters mod
+    /// dispatch later rebuilds its entries from these instead of loading again.
+    pub fn modules(&self) -> &[WasmMod] {
+        &self.modules
+    }
     /// Initializes programmatically loaded mods with the final inventory, then installs
     /// their point listeners. Call once, before sealing the point registry.
     pub fn initialize(

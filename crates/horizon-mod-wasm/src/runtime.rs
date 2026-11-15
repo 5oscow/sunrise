@@ -811,6 +811,14 @@ impl WasmMod {
     pub(crate) fn is_stopped(&self) -> bool {
         self.running.poisoned.load(Ordering::Relaxed)
     }
+    /// Re-arm a module its dependency group stopped, so the next test in the
+    /// same process gets a working fixture: the points table seals once per
+    /// process, so a test process cannot load a fresh instance instead. Test
+    /// support only — the game never re-enables a stopped group.
+    #[doc(hidden)]
+    pub fn rearm_after_a_test(&self) {
+        self.running.poisoned.store(false, Ordering::Relaxed);
+    }
     pub(crate) fn disable(&self) {
         // Publish stop before destroying native resources. Never wait on a store
         // loaned to native code: the outermost FrameScope clears it on return.
