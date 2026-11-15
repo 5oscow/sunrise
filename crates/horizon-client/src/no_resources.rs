@@ -304,7 +304,7 @@ mod tests {
             .chain(&screen.paragraphs)
             .chain(screen.buttons.iter().map(|(label, _)| label));
         for text in all {
-            assert!(!text.to_lowercase().contains("playhorizon"), "{text}");
+            assert!(!text.to_lowercase().contains("playsunrise"), "{text}");
             assert!(!text.contains("launcher"), "{text}");
         }
         assert!(screen.paragraphs[0].contains("horizon-prepare --prepare"));

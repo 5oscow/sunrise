@@ -541,7 +541,7 @@ class ReleaseTrainTests(unittest.TestCase):
         self.assertTrue(body.startswith(train.PLAYERS + "\n\n"))
         self.assertTrue(body.endswith("\n\n" + train.PLAYERS_FOOTER + "\n\n---\n" + train.DISCLAIMER + "\n"), body)
         self.assertNotIn("\n", train.PLAYERS, "one line: one HTML block, which ends at the blank line after it")
-        self.assertEqual(body.count("playhorizon.dev"), 2, "said at the top and the bottom")
+        self.assertEqual(body.count("playsunrise.net"), 2, "said at the top and the bottom")
         _, body = train.notes("game", "v0.2.51", [], [])
         self.assertTrue(body.startswith(train.PLAYERS + "\n\nRebuilt from the latest main."))
 

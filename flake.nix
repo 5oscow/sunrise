@@ -134,7 +134,7 @@
 
             meta = with pkgs.lib; {
               description = "Launcher for Horizon, Minecraft: Java Edition rewritten in Rust";
-              homepage = "https://playhorizon.dev";
+              homepage = "https://playsunrise.net";
               license = licenses.mit;
               platforms = [ "x86_64-linux" "aarch64-linux" ];
               mainProgram = pname;

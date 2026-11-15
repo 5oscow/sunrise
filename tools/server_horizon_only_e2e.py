@@ -5,7 +5,7 @@
 
 - off (the default): a client that sends no brand joins, as on vanilla.
 - on (`horizon-clients-only=true`): a client with no brand, or with vanilla's "vanilla", is disconnected during
-  configuration with "This server is for the Horizon client: playhorizon.dev", and the console says why; a
+  configuration with "This server is for the Horizon client: playsunrise.net", and the console says why; a
   client whose `minecraft:brand` is "horizon" joins. (Any client can send that brand: the gate keeps out
   players who didn't install Horizon, not cheaters.)
 
@@ -28,7 +28,7 @@ import lab  # noqa: E402
 from server_bench import DONE, Server  # noqa: E402
 
 EXE = '.exe' if os.name == 'nt' else ''
-REASON = 'This server is for the Horizon client: playhorizon.dev'
+REASON = 'This server is for the Horizon client: playsunrise.net'
 PROPERTIES = {
     'online-mode': 'false',
     'white-list': 'false',

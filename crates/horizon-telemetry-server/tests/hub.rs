@@ -314,7 +314,7 @@ async fn the_website_may_post_from_the_browser() {
     let res = router(hub.app.clone())
         .oneshot(
             Request::options("/hub/report")
-                .header("origin", "https://playhorizon.dev")
+                .header("origin", "https://playsunrise.net")
                 .header("access-control-request-method", "POST")
                 .body(Body::empty())
                 .unwrap(),
@@ -325,7 +325,7 @@ async fn the_website_may_post_from_the_browser() {
     let header = |name: &str| res.headers()[name].to_str().unwrap().to_owned();
     assert_eq!(
         header("access-control-allow-origin"),
-        "https://playhorizon.dev"
+        "https://playsunrise.net"
     );
     assert_eq!(header("access-control-allow-methods"), "POST");
     assert_eq!(header("access-control-allow-headers"), "content-type");

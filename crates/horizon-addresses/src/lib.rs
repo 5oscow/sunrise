@@ -25,7 +25,13 @@ pub const OFFICIAL_SERVER_STATUS: &str = "play.playhorizon.dev:24454";
 
 /// Horizon's website, where the launcher is downloaded: the game started without its prepared
 /// files sends the player there.
-pub const WEBSITE: &str = "https://playhorizon.dev";
+pub const WEBSITE: &str = "https://playsunrise.net";
+
+/// The players' page on connecting an AI agent (the website's docs/agents.md).
+pub const AGENT_DOCS: &str = "https://playsunrise.net/docs/agents";
+
+/// The mod registry's policy, which the launcher's mod pages link.
+pub const MOD_POLICY: &str = "https://playsunrise.net/mods/policy";
 
 /// The cosmetics service: cosmetics, emotes, "Show me as a Horizon player"
 /// (`HORIZON_COSMETICS_API` overrides it).
@@ -33,10 +39,10 @@ pub const COSMETICS_API: &str = "https://cosmetics.playhorizon.dev";
 
 /// The telemetry ingest server (`crates/horizon-telemetry-server`): opt-in telemetry, the
 /// "I'm playing" ping, benchmark uploads (`HORIZON_TELEMETRY_URL` overrides it).
-pub const TELEMETRY: &str = "https://telemetry.playhorizon.dev";
+pub const TELEMETRY: &str = "https://telemetry.playsunrise.net";
 
 /// The performance viewer page a saved capture opens in (`HORIZON_PERF_VIEWER` overrides it).
-pub const PERF_VIEWER: &str = "https://playhorizon.dev/perf";
+pub const PERF_VIEWER: &str = "https://playsunrise.net/perf";
 
 /// The capture upload API behind Share (`HORIZON_PERF_CAPTURES` overrides it).
 pub const PERF_CAPTURES: &str = "https://playhorizon.dev/api/perf/captures";
@@ -59,7 +65,7 @@ pub const HOSTING_PARTNER: &str = "https://my.sculkhosting.com/ref/horizon";
 pub const SHOP: &str = "https://playhorizon.dev/shop";
 
 /// The official launcher installer's product home.
-pub const LAUNCHER_ABOUT: &str = "https://playhorizon.dev";
+pub const LAUNCHER_ABOUT: &str = "https://playsunrise.net";
 
 /// The separately branded arismoko fork launcher installer's product home.
 pub const FORK_LAUNCHER_ABOUT: &str = "https://github.com/sunrise-org/sunrise";

@@ -286,6 +286,7 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "flate2",
+ "horizon-addresses",
  "horizon-telemetry",
  "http-body-util",
  "rusqlite",

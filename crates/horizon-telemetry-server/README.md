@@ -5,7 +5,7 @@ This server receives what players choose to send (performance summaries, crash a
     cargo run --release                     # in this folder: its own workspace, like the launcher's
     PORT=8080 HORIZON_TELEMETRY_DB=/data/telemetry.sqlite3 horizon-telemetry-server
 
-It runs at **https://telemetry.playhorizon.dev** (`DEFAULT_ENDPOINT` in `crates/horizon-telemetry`). The game and the launcher use it unless `HORIZON_TELEMETRY_URL` names another server, or is `off` (tests and automated runs send nothing).
+It runs at **https://telemetry.playsunrise.net** (`DEFAULT_ENDPOINT` in `crates/horizon-telemetry`). The game and the launcher use it unless `HORIZON_TELEMETRY_URL` names another server, or is `off` (tests and automated runs send nothing).
 
 ## Endpoints
 
@@ -82,7 +82,7 @@ All are environment variables:
 - `HORIZON_TELEMETRY_REQUESTS_PER_HOUR` per address (60, bursts of 6)
 - `HORIZON_TELEMETRY_ITEMS_PER_DAY` per install (100)
 - `HORIZON_TELEMETRY_TRUST_PROXY=1` behind a proxy, with `HORIZON_TELEMETRY_CLIENT_IP_HEADER` naming the one header the proxy overwrites with the client's address (`x-real-ip` on Railway; its last comma-separated entry is used). No other header is read. The address is used only for the rate limits, in memory, and never stored or logged. `TRUST_PROXY=1` without the header would count the TCP peer, which behind a proxy is the proxy, so every client would share one bucket: the server refuses to start instead.
-- `HORIZON_TELEMETRY_ALLOW_ORIGIN` (`https://playhorizon.dev`)
+- `HORIZON_TELEMETRY_ALLOW_ORIGIN` (`https://playsunrise.net`)
 - `HORIZON_TELEMETRY_LIVE_PER_HOUR` per address, pings and reads (600, bursts of 60: ten players behind one address)
 - `HORIZON_TELEMETRY_LIVE_WINDOW_SECONDS` (120)
 - `HORIZON_TELEMETRY_LIVE_MAX_SESSIONS` (200 000)
@@ -108,9 +108,9 @@ On Railway it is a service of the same project as the website:
 
 - Source: this repository, root directory `/` (the Dockerfile needs the shared crate), config file `/crates/horizon-telemetry-server/railway.json` (Dockerfile build, health check `/healthz`, one replica in `europe-west4`, Amsterdam: one SQLite file can't be shared).
 - A volume mounted at `/data`. The Dockerfile already sets `HORIZON_TELEMETRY_DB=/data/telemetry.sqlite3`, `HORIZON_TELEMETRY_TRUST_PROXY=1` and `HORIZON_TELEMETRY_CLIENT_IP_HEADER=x-real-ip`; Railway sets `PORT`.
-- The custom domain `telemetry.playhorizon.dev`: a `CNAME` at Porkbun to the target Railway gives.
+- The custom domain `telemetry.playsunrise.net`: a `CNAME` at Porkbun to the target Railway gives.
 
-Check it with `curl https://telemetry.playhorizon.dev/healthz`.
+Check it with `curl https://telemetry.playsunrise.net/healthz`.
 
 At Railway's prices (RAM $10/GB-month, CPU $20/vCPU-month, volumes $0.15/GB-month, egress $0.05/GB), one more service with a 1 GB volume uses about $0.35 a month:
 

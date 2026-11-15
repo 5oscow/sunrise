@@ -96,14 +96,14 @@ LAUNCHER_IGNORED = ["launcher/links.json", "launcher/docs/", "launcher/tests/"]
 # notes view and one-line summary skip (pulldown-cmark's HTML events), so launchers never tell players to get
 # themselves. The site's Releases page leaves it out too.
 # The same warning closes the notes, above the disclaimer, for whoever scrolls past the changes to the files.
-PLAYERS_FOOTER = ('<h1>Want to play? Download the <a href="https://playhorizon.dev">Horizon launcher</a>.</h1>'
+PLAYERS_FOOTER = ('<h1>Want to play? Download the <a href="https://playsunrise.net">Horizon launcher</a>.</h1>'
                   '<h1>Do NOT run the files below. They will not work on their own.</h1>')
 PLAYERS = (PLAYERS_FOOTER + '<p>The launcher installs this version and keeps it up to date. You need your own copy of '
            'Minecraft: Java Edition. The files below are what the launcher installs, and the dedicated server for '
            'people who host one.</p>')
 LAUNCHER_FOOTER = ("Your launcher updates itself. New here? On Linux take the .AppImage below, make it executable "
                    "and run it; on Windows and macOS download the archive, extract it and run `horizon-launcher` "
-                   "(Horizon.app on macOS). Website: https://playhorizon.dev")
+                   "(Horizon.app on macOS). Website: https://playsunrise.net")
 DISCLAIMER = "Not an official Minecraft product. Not approved by or associated with Mojang or Microsoft."
 # An open issue with this label holds every game release (docs/release-flow.md). Only people who can triage the
 # repository can add it, and the issue's text is never read: its author could edit it afterwards.

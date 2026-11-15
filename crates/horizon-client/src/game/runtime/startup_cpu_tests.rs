@@ -10,7 +10,7 @@ fn a_folder_without_prepared_files_is_named_before_loading() {
     assert!(missing.contains("horizon-unprepared-"), "{missing}");
     assert!(missing.contains("horizon-prepare --prepare"), "{missing}");
     // No hook: no site, no launcher.
-    assert!(!missing.contains("playhorizon"), "{missing}");
+    assert!(!missing.contains("playsunrise"), "{missing}");
     assert!(!missing.contains("launcher"), "{missing}");
     let get = horizon_hooks::GetTheGame {
         address: "https://example.org/get",

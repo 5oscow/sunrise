@@ -59,7 +59,7 @@ rustPlatform.buildRustPackage {
 
   meta = {
     description = "Horizon, Minecraft: Java Edition 26.3 rewritten in Rust, and horizon-ctl";
-    homepage = "https://playhorizon.dev";
+    homepage = "https://playsunrise.net";
     license = lib.licenses.mit;
     mainProgram = "horizon-client";
     platforms = lib.platforms.linux ++ lib.platforms.darwin;
