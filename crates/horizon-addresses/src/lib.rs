@@ -47,9 +47,9 @@ pub const PERF_VIEWER: &str = "https://playsunrise.net/perf";
 /// The capture upload API behind Share (`HORIZON_PERF_CAPTURES` overrides it).
 pub const PERF_CAPTURES: &str = "https://playsunrise.net/api/perf/captures";
 
-/// STUN servers for Play with Friends' NAT discovery (`HORIZON_STUN_SERVERS` overrides them).
-/// Empty until Sunrise runs a STUN service.
-pub const STUN_SERVERS: &[&str] = &[];
+/// Public STUN servers for Play with Friends' NAT discovery: two independent operators, so one
+/// outage doesn't break discovery (`HORIZON_STUN_SERVERS` overrides them).
+pub const STUN_SERVERS: &[&str] = &["stun.cloudflare.com:3478", "stun.l.google.com:19302"];
 
 /// Play with Friends' troubleshooting page, shown to hosts nobody can reach.
 pub const FRIENDS_HELP: &str =
