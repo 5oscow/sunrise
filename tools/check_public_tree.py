@@ -38,8 +38,10 @@ def prohibited(path):
     if path in ORIGINAL_JDK_TOOLS:
         return False
     # Original Sunrise mod sources may also be tracked.
-    if parsed.suffix == ".java" and path.startswith(("mods/sunrise/src/", "mods/sunrise-lab/src/")):
-        return not ("/dev/sunriselab/" in path)
+    # History keeps the paths from before the Sunrise rename (mods/horizon, dev.horizonlab).
+    if parsed.suffix == ".java" and path.startswith(("mods/sunrise/src/", "mods/sunrise-lab/src/",
+                                                     "mods/horizon/src/", "mods/horizon-lab/src/")):
+        return not ("/dev/sunriselab/" in path or "/dev/horizonlab/" in path)
     return (
         bool(parsed.parts and parsed.parts[0] in PRIVATE_ROOTS)
         or parsed.suffix.lower() in PRIVATE_EXTENSIONS

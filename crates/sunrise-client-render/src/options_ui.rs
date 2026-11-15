@@ -5369,7 +5369,7 @@ mod tests {
         }));
         s.mods.installed.push(crate::mod_list::Installed {
             id: "native".into(),
-            title: "Native 1.0".into(),
+            title: "Trails 1.0".into(),
             description: String::new(),
             problem: None,
             dev: false,
@@ -5392,7 +5392,7 @@ mod tests {
             vec![Event::ButtonClick, Event::OpenModFolder]
         );
         // Config does nothing until a native mod with settings is picked from the list
-        // (Sunrise, Minecraft, then Native).
+        // (Minecraft, Sunrise, then Trails).
         assert!(click(&mut ui, &mut s, 397.0, 192.0).is_empty());
         assert!(click(&mut ui, &mut s, 61.0, 104.0).is_empty());
         let events = click(&mut ui, &mut s, 397.0, 192.0);

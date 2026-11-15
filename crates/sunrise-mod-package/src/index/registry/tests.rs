@@ -2,9 +2,9 @@
 //! builds the sample index (`tests/index/index-v1.json`) exactly.
 use super::*;
 
-const HMOD: &str = "f891bde88f4b841fd35c4f3305bc8904b671ebe9d5ad28d5aecc57e8b23fc3ce";
-const HPACK: &str = "4ad64fdf094fe3d4a52d7b0d22ee8ea5889d0b76cc3f12c588db501a0ad0c4bd";
-const HSHADER: &str = "331cfe29a666a0de804e9a9ff3d19d246eebcfbfa70b4f49bba8482d30ad9f02";
+const HMOD: &str = "cb6e658445269b2a4d2eb104e83e4b993586bc2e56814fd56454244139f08364";
+const HPACK: &str = "ca9a0207d5a9df142962a2dd7563a639eea6774e7f144b6ef239eb6eaf753f58";
+const HSHADER: &str = "a23c5fe9fd173243704dd51160f20f35927c6e0060c5541ce1823f25db8c7961";
 
 fn fixtures() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/index")
@@ -33,7 +33,7 @@ license = "MIT"
 source = "https://github.com/horizon-rust/horizon"
 icon = "icons/coords_hud.png"
 categories = ["utility"]
-key = "RWS/AoT50ekAULLFG7HiTPTE4eTQEONCCMbKsPE7JBxt3XJ37BY4w7bp"
+key = "RWTVDqAKF4nm3+eZIK4SeLU6R6sSdJyNgrG/8bdFuTPpXlGK0I8+7wmc"
 
 [[versions]]
 version = "0.1.0"
@@ -63,7 +63,7 @@ version = "1.0.0"
 published = "2026-10-24"
 game = "26.3"
 file = "cozy-1.0.0.hpack"
-sha256 = "4ad64fdf094fe3d4a52d7b0d22ee8ea5889d0b76cc3f12c588db501a0ad0c4bd"
+sha256 = "ca9a0207d5a9df142962a2dd7563a639eea6774e7f144b6ef239eb6eaf753f58"
 "#;
 
 const GLOW: &str = r#"id = "glow"
@@ -83,7 +83,7 @@ version = "1.0.0"
 published = "2026-10-26"
 game = "26.3"
 file = "glow-1.0.0.hshader"
-sha256 = "331cfe29a666a0de804e9a9ff3d19d246eebcfbfa70b4f49bba8482d30ad9f02"
+sha256 = "a23c5fe9fd173243704dd51160f20f35927c6e0060c5541ce1823f25db8c7961"
 "#;
 
 const REVOKED_TOML: &str = r#"[[revoked]]

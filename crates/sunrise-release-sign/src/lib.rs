@@ -113,6 +113,7 @@ pub fn parse_keys(text: &str) -> Result<Vec<PublicKey>, String> {
 
 /// What a signature covers: the tag, then the checksum list.
 pub fn message(tag: &str, sums: &[u8]) -> Vec<u8> {
+    // The signed prefix stays "horizon release" through the rename: verifiers outside this repo check these bytes.
     let mut message = format!("horizon release {tag}\n").into_bytes();
     message.extend_from_slice(sums);
     message

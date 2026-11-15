@@ -193,7 +193,7 @@ fn default_components_reader_baseline() -> client::Result<()> {
     );
     assert_eq!(
         identity,
-        "0df20aa03226c10182811a27c1cbcd9ad9ba957e48b1713a5ebc6ee8156af0aa"
+        "6853606353c84d0e38b0c56e739ab8f6190596666396277794ecfc30f7545239"
     );
     fs::remove_dir_all(&root)?;
     Ok(())

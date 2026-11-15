@@ -21,7 +21,7 @@ use sunrise_mod_registry::{App, Config, github, router};
 use tower::ServiceExt;
 
 const PUBLIC: &str = "https://playsunrise.test";
-const HMOD_SHA: &str = "f891bde88f4b841fd35c4f3305bc8904b671ebe9d5ad28d5aecc57e8b23fc3ce";
+const HMOD_SHA: &str = "cb6e658445269b2a4d2eb104e83e4b993586bc2e56814fd56454244139f08364";
 
 #[derive(Default)]
 struct Mock {

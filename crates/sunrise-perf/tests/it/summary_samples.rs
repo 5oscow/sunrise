@@ -29,11 +29,11 @@ fn hot_functions_list_self_and_total_per_tick_with_their_ids() {
     // 45 own and 90 inclusive samples of 10 ms over 50 ticks.
     assert_eq!(
         row(&text, "Waypoints::tick_level"),
-        ["Waypoints::tick_level", "9.00", "18.00", "[f:yg3ymj0d]"]
+        ["Waypoints::tick_level", "9.00", "18.00", "[f:rgmpykz9]"]
     );
     assert_eq!(
         row(&text, "Hub::track_entities"),
-        ["Hub::track_entities", "4.00", "4.00", "[f:bvz9skmm]"]
+        ["Hub::track_entities", "4.00", "4.00", "[f:a4axv99g]"]
     );
     let order: Vec<usize> = [
         "Waypoints::tick_level",
@@ -78,7 +78,7 @@ fn slow_summaries_rank_the_slow_ticks_samples() {
             "Waypoints::update_or_create",
             "20.00",
             "20.00",
-            "[f:57zvmm9s]"
+            "[f:qxhqgxxx]"
         ]
     );
 }
@@ -89,7 +89,7 @@ fn next_points_at_the_callers_of_the_hottest_function() {
     let next = text.lines().last().unwrap();
     assert!(next.starts_with("next"), "{text}");
     assert!(
-        next.contains("sunrise-perf query callers f:yg3ymj0d"),
+        next.contains("sunrise-perf query callers f:rgmpykz9"),
         "{next}"
     );
 }

@@ -56,9 +56,9 @@ def metadata():
 class ClosureTests(unittest.TestCase):
     def test_normal_and_proc_macro_dependencies_only(self):
         self.assertEqual(api_source.closure(metadata()), [
-            Crate("sunrise-mod-api", "crates/sunrise-mod-api", True),
             Crate("macros", "crates/macros", False),
             Crate("shape", "crates/shape", False),
+            Crate("sunrise-mod-api", "crates/sunrise-mod-api", True),
             Crate("vocab", "crates/nested/vocab", False),
         ])
 

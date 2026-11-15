@@ -9,6 +9,7 @@ tools/addresses.json says where each host may be:
 - `homes`: the files that hold the Sunrise layer's addresses; anything goes there;
 - `vanilla`: the endpoints vanilla itself contacts; allowed anywhere;
 - `not_addresses`: strings that look like hosts but are not contacted (a suffix matcher, a translation key);
+- `renamed_hosts`: a host's old name to its new one, so renaming a domain doesn't count as adding a host;
 - `allowed`: today's addresses outside a home, "path host". They only go away: with --base, a branch may move
   an entry to another file but may not add a host nor grow the list. A changed sync-baseline declaration,
   verified by merge_base.sync_provenance, may restore exact rows from that upstream commit's inventory;
@@ -243,7 +244,9 @@ def check(config, found, base=None, upstream_rows=frozenset()):
         problems.append(f"{rel}: {host} is a built-in address outside the address list. A vanilla endpoint goes in "
                         f"'vanilla', anything else in the Sunrise layer's address home ({DOC})")
     if base is not None:
-        before = {tuple(entry.split(" ", 1)) for entry in base.get("allowed", [])}
+        renamed = config.get("renamed_hosts", {})
+        before = {(rel, renamed.get(host, host)) for rel, host in
+                  (tuple(entry.split(" ", 1)) for entry in base.get("allowed", []))}
         restored = (allowed - before) & upstream_rows
         effective = allowed - restored
         new_hosts = {host for _, host in effective} - {host for _, host in before}

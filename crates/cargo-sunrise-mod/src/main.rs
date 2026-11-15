@@ -646,7 +646,7 @@ mod tests {
         let bundle = sunrise_mod_package::index::native::Bundle::read(&hmod).unwrap();
         assert_eq!(bundle.manifest.id, "machine_mod");
         let names: Vec<_> = bundle.files.keys().map(String::as_str).collect();
-        assert_eq!(names, ["Cargo.toml", "sunrise-mod.toml", "src/lib.rs"]);
+        assert_eq!(names, ["Cargo.toml", "src/lib.rs", "sunrise-mod.toml"]);
         assert!(path.join("sunrise-mod.toml").is_file());
         for old in [
             "api",

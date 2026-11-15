@@ -482,7 +482,7 @@ mod tests {
         // Independently encoded with Java UUID.nameUUIDFromBytes using UTF-8.
         assert_eq!(
             modifier_uuid("sunrise:custom"),
-            0x3e28e6c2e6603577b8e69e191403de58
+            0x15c1bf22eb443aad899d946adf6bb2fa
         );
     }
 }

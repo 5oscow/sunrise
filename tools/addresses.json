@@ -1,5 +1,8 @@
 {
   "_doc": "docs/layers.md#built-in-addresses. Where each built-in outside address may be (tools/check_addresses.py). 'allowed' lists today's addresses outside a home: entries only go away or move with their code.",
+  "renamed_hosts": {
+    "playhorizon.dev": "playsunrise.net"
+  },
   "homes": [
     "crates/sunrise-addresses/src/lib.rs"
   ],

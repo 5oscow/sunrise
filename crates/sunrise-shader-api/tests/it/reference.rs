@@ -92,28 +92,28 @@ fn every_stage_compiles_with_vanilla_s_function() {
 const PINNED_0_1: [(StageKind, &str, &str); 5] = [
     (
         StageKind::Sky,
-        "5a12b39ea8b56ad8deead04aa848671ceebde05cdd35af029d1bca5fe1e4cb51",
-        "8fa92b1f28b48f70f7704cd1db183d5720484c1c92f779542a5805cd8d540fbc",
+        "1ff46a47e01b634f73249b6743de7567ec936ac41c9cfc8e086b2c06b0d31399",
+        "3a42f8c9cc3216ae7754335fbfcbd104351d5daf08646ef5e58f5490e6251dd7",
     ),
     (
         StageKind::Vertex,
-        "1ba03e6acd07fc26e267f58fe65aaa607976faab1834d16f55c694e15eacf885",
-        "0c512329404218b074bd5140c2dcb4268721ad2b280d5d516a8066ffc2a78f97",
+        "2295b7f480edd68a043082a279e9e2aa4dc75201453e24af7e955ea16324f9f6",
+        "e8c380a2e1a5a8fb8727b6a8a34b2c023b13b481a7937ec79990add67a171ffb",
     ),
     (
         StageKind::Material,
-        "1f165861a0f74fa58bab41d9770798fd80ccbc12b61fa8ede7bb4804bcbea24e",
-        "9dfaf3b191390a268a43bb3ecb8cbc1739e083b4e7c1783b58c76b332afe88cc",
+        "29c6f30be560c6099b8ef2dc8ce8abecad1395e4cdf1c5703571038dc0a35ecf",
+        "77bd3366d1292a1166022b0861a679c5f1ae3fc20e69813c488270a27d8a6bb0",
     ),
     (
         StageKind::Weather,
-        "174ad066203226f4b28848d6cc2037df75c9ea68481bbff8b73eca469d9b5bb7",
-        "6fd42fe9ab23d5aca1ca0bb61d9021cad149e795574d892fcd8178a3dae15032",
+        "c4345cb53837d6a0adf38ff5675b33aa6346da7764e3e2e69125b6c74b7c6728",
+        "73851f10f2a08d73f3074804ebb2348714c0c7400fe784035417c8a6471d41b9",
     ),
     (
         StageKind::Post,
-        "4b1b7b6c7b1149657965a178a879535975ed76d09524c294d4350c6c06db83ab",
-        "a1d88de49274e1d9aed65d2a7fd500e9e385a7a7c9fbb6f9064d4bdbd3a8d6da",
+        "a3d09e9106d1946df159e7b6fb610546995ae4a3271b102e797f6091f5cec1c6",
+        "3a8f48dc3d9518d4a998dc98acb3a657a4f83fe1dcb642493bfdbf6de5d2688e",
     ),
 ];
 

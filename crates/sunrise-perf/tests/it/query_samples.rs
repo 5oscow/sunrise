@@ -183,7 +183,7 @@ fn tree_of_a_function_merges_its_occurrences_and_folds_small_children() {
             .iter()
             .map(|c| (c.id.as_str(), c.total))
             .collect::<Vec<_>>(),
-        [(UPDATE_ID, 7.0), ("p:bkrz8s6r", 2.0)]
+        [(UPDATE_ID, 7.0), ("p:ws9t2hmg", 2.0)]
     );
     let folded = owned(tree_rows(&query(&[
         "tree",
@@ -201,8 +201,8 @@ fn tree_of_a_function_merges_its_occurrences_and_folds_small_children() {
 fn tree_of_a_call_path_and_of_the_whole_thread() {
     let dir = TempDir::new("tree-p");
     let file = standard(&dir);
-    let path = owned(tree_rows(&query(&["tree", "p:8hhyycyv", &file])));
-    assert_eq!(path[0].id, "p:8hhyycyv");
+    let path = owned(tree_rows(&query(&["tree", "p:x383kfvk", &file])));
+    assert_eq!(path[0].id, "p:x383kfvk");
     // Only the lan's tick_level: 80 samples, its update_or_create 30.
     assert_eq!((path[0].total, path[0].samples), (16.0, 80));
     assert_eq!(
@@ -211,24 +211,24 @@ fn tree_of_a_call_path_and_of_the_whole_thread() {
             .iter()
             .map(|c| (c.id.as_str(), c.total))
             .collect::<Vec<_>>(),
-        [("p:104ng1nz", 6.0), ("p:bkrz8s6r", 2.0)]
+        [("p:y6v51c57", 6.0), ("p:ws9t2hmg", 2.0)]
     );
     let root = owned(tree_rows(&query(&["tree", "--depth", "2", &file])));
     let [main] = root.as_slice() else {
         panic!("{root:?}")
     };
-    assert_eq!((main.id.as_str(), main.total), ("p:s66b9tzf", 24.0));
+    assert_eq!((main.id.as_str(), main.total), ("p:5n90v933", 24.0));
     let [server] = main.children.as_slice() else {
         panic!("{main:?}")
     };
-    assert_eq!(server.id, "p:79gfmx25");
+    assert_eq!(server.id, "p:a6cctdmh");
     assert_eq!(
         server
             .children
             .iter()
             .map(|c| (c.id.as_str(), c.total))
             .collect::<Vec<_>>(),
-        [("p:wm3e6jmv", 20.0), (BLOCKS_ID_PATH, 2.0)]
+        [("p:s05ftvc3", 20.0), (BLOCKS_ID_PATH, 2.0)]
     );
     assert!(
         server.children[0].children.is_empty(),
@@ -236,7 +236,7 @@ fn tree_of_a_call_path_and_of_the_whole_thread() {
     );
 }
 
-const BLOCKS_ID_PATH: &str = "p:0nm0y52m";
+const BLOCKS_ID_PATH: &str = "p:70x47pqw";
 
 #[test]
 fn split_by_entity_sums_to_the_functions_total() {
@@ -641,7 +641,7 @@ fn monomorphizations_and_hashes_normalize_to_one_function_with_a_known_id() {
     let reply = query(&["hot", &save(&dir, "n.hzperf", &b.fields())]);
     let rows = hot_rows(&reply);
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].id, "f:m8r50yj8");
+    assert_eq!(rows[0].id, "f:vmmx09nc");
     assert_eq!(rows[0].name, "Sim::set_block_limit");
     assert_eq!(rows[0].full, "sunrise_world::level::Sim::set_block_limit");
     // 7 samples of 10 ms over 10 ticks.
@@ -665,7 +665,7 @@ fn ids_do_not_depend_on_the_order_of_the_string_and_function_tables() {
         |file: &str| -> Vec<TreeRow> { owned(tree_rows(&query(&["tree", "--depth", "9", file]))) };
     assert_eq!(tree(&plain), tree(&shifted));
     assert_eq!(
-        tree_rows(&query(&["tree", "p:8hhyycyv", &shifted]))[0].total,
+        tree_rows(&query(&["tree", "p:x383kfvk", &shifted]))[0].total,
         16.0
     );
 }

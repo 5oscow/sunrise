@@ -95,7 +95,7 @@ def main(argv=None):
             return 1
         fork_point = merge_base.git("merge-base", base, "HEAD").strip()
         # The root's path at the merge base: its own, or the one it was renamed from since.
-        renames = merge_base.git("diff", "--name-status", "-M", "--diff-filter=R", fork_point, "HEAD")
+        renames = merge_base.git("diff", "--name-status", "-M", "-l0", "--diff-filter=R", fork_point, "HEAD")
         old = next((line.split("\t")[1] for line in renames.splitlines() if line.split("\t")[-1] == ROOT_FILE),
                    ROOT_FILE)
         shown = subprocess.run(["git", "show", f"{fork_point}:{old}"], capture_output=True, encoding="utf-8", cwd=ROOT)

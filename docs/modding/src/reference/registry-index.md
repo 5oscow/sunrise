@@ -108,7 +108,7 @@ game = "26.3"
 [[mods]]
 id = "coords_hud"
 version = "0.1.0"
-sha256 = "f891bde88f4b841fd35c4f3305bc8904b671ebe9d5ad28d5aecc57e8b23fc3ce"
+sha256 = "cb6e658445269b2a4d2eb104e83e4b993586bc2e56814fd56454244139f08364"
 on = true                   # optional, default true: turned on in the profile's sunrise-mods.txt
 ```
 

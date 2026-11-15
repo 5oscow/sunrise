@@ -1217,12 +1217,12 @@ mod tests {
         let m = Measure(&atlas.font);
         let mut screen =
             ModsScreen::new(427, 240, false, &mods(&[installed("zoom", "Zoom", None)]));
-        assert_eq!(names(&screen), ["Sunrise", "Minecraft", "Zoom"]);
+        assert_eq!(names(&screen), ["Minecraft", "Sunrise", "Zoom"]);
         // The sort button reverses the order.
         let (action, sound) =
             screen.click(&m, centre(screen.geo().sort).0, centre(screen.geo().sort).1);
         assert_eq!((action, sound), (Action::None, true));
-        assert_eq!(names(&screen), ["Zoom", "Minecraft", "Sunrise"]);
+        assert_eq!(names(&screen), ["Zoom", "Sunrise", "Minecraft"]);
         // The search keeps the names that contain it, in any case.
         let (x, y) = centre(screen.geo().search);
         screen.click(&m, x, y);
@@ -1363,16 +1363,16 @@ mod tests {
             .collect();
         let mut screen = ModsScreen::new(427, 240, false, &mods(&list));
         screen.step(1);
-        assert_eq!(screen.current().map(|e| e.name.as_str()), Some("Sunrise"));
+        assert_eq!(screen.current().map(|e| e.name.as_str()), Some("Minecraft"));
         for _ in 0..21 {
             screen.step(1);
         }
-        assert_eq!(screen.current().map(|e| e.name.as_str()), Some("Mod 19"));
+        assert_eq!(screen.current().map(|e| e.name.as_str()), Some("Sunrise"));
         assert!(screen.list.amount > 0.0);
         screen.step(1);
-        assert_eq!(screen.current().map(|e| e.name.as_str()), Some("Mod 19"));
-        screen.step(-30);
         assert_eq!(screen.current().map(|e| e.name.as_str()), Some("Sunrise"));
+        screen.step(-30);
+        assert_eq!(screen.current().map(|e| e.name.as_str()), Some("Minecraft"));
         assert_eq!(screen.list.amount, 0.0);
     }
 

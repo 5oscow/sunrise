@@ -425,16 +425,16 @@
       ]
     },
     {
-      "id": "macro:sunrise_mod",
-      "hash": "*",
-      "doc": "Marks the mod.",
-      "kind": "attribute"
-    },
-    {
       "id": "macro:key",
       "hash": "*",
       "doc": "Makes a key.",
       "kind": "declarative"
+    },
+    {
+      "id": "macro:sunrise_mod",
+      "hash": "*",
+      "doc": "Marks the mod.",
+      "kind": "attribute"
     }
   ],
   "types": [
