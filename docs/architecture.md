@@ -25,6 +25,13 @@ Because the probe library does not compile gameplay, its dep-info does not inclu
 or `game/`. Exact harness counts still depend on refreshed records and reachability; use the
 command above to inspect the selection rather than relying on historical counts.
 
+Item component values live in `W/component_value.rs`; the protocol's
+`item/persistent.rs` and generic `item/hash/ops.rs` share their source/stream schema.
+Templates retain their own patches and dense container holes. Persistent encoding
+is fallible: a valid stream-only holder or native count need not fit the saved codec.
+Check this seam with `cargo test -p horizon-world --lib component_value::` and
+`cargo test -p horizon-protocol --lib item::`.
+
 | # | Area (commits) | Files | Checks |
 |---|---|---|---|
 | 1 | Game loop, tick order, frame pacing (554) | `L/game.rs` (`fn tick`, `fn tick_world`, `fn render`), `G/runtime/window_handler.rs` (`about_to_wait`), `L/clock.rs`, `N/window.rs`, `R/spans.rs` | game_loop, frame_limiter, interaction_input, tick |

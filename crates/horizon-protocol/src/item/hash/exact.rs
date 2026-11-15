@@ -105,41 +105,39 @@ fn units(key: &[u16]) -> String {
 /// `DataComponentExactPredicate.CODEC` (or, for `stacks`, a
 /// `DataComponentPatch.CODEC`, whose `!name` entries remove a component) as a
 /// map of the component's name to its value.
-fn components(map: &Compound, names: &dyn Names) -> Option<HashCode> {
+fn components_with<O: Ops>(map: &Compound, names: &dyn Names) -> Option<O::Value> {
     let mut entries = Vec::with_capacity(map.len());
     for (key, value) in map.iter() {
         let key = units(&key.0);
         let hashed = match key.strip_prefix('!') {
-            Some(_) => HashOps::empty_map(),
+            Some(_) => O::empty_map(),
             None => {
                 let short = key.strip_prefix("minecraft:")?;
                 match (short, value) {
                     // `enchantment_glint_override` is a bare `Codec.BOOL`.
-                    ("enchantment_glint_override", Tag::Byte(b)) => {
-                        HashOps::create_boolean(*b != 0)
-                    }
-                    _ => walk(value, &shape(short)?, names)?,
+                    ("enchantment_glint_override", Tag::Byte(b)) => O::create_boolean(*b != 0),
+                    _ => walk_with::<O>(value, &shape(short)?, names)?,
                 }
             }
         };
-        entries.push((string(&key), hashed));
+        entries.push((string_with::<O>(&key), hashed));
     }
-    Some(HashOps::create_map(entries))
+    Some(O::create_map(entries))
 }
 
 /// A partial predicate's NBT: its booleans, and the `components` of the item
 /// predicates inside it.
-pub(super) fn predicate(tag: &Tag, names: &dyn Names) -> Option<HashCode> {
-    walk(tag, &Shape::of(&PREDICATE_BOOLS).stacks(), names)
+pub(super) fn predicate_with<O: Ops>(tag: &Tag, names: &dyn Names) -> Option<O::Value> {
+    walk_with::<O>(tag, &Shape::of(&PREDICATE_BOOLS).stacks(), names)
 }
 
 /// `tag` as the hash of the value its codec encoded, by `shape`.
-fn walk(tag: &Tag, shape: &Shape, names: &dyn Names) -> Option<HashCode> {
+fn walk_with<O: Ops>(tag: &Tag, shape: &Shape, names: &dyn Names) -> Option<O::Value> {
     Some(match tag {
-        Tag::List(items) => HashOps::create_list(
+        Tag::List(items) => O::create_list(
             items
                 .iter()
-                .map(|t| walk(t, shape, names))
+                .map(|t| walk_with::<O>(t, shape, names))
                 .collect::<Option<Vec<_>>>()?,
         ),
         Tag::Compound(map) => {
@@ -148,23 +146,23 @@ fn walk(tag: &Tag, shape: &Shape, names: &dyn Names) -> Option<HashCode> {
                 let name = units(&key.0);
                 let hashed = match value {
                     Tag::Compound(inner) if shape.stacks && name == "components" => {
-                        components(inner, names)?
+                        components_with::<O>(inner, names)?
                     }
                     Tag::Byte(b) if shape.bools.contains(&name.as_str()) => {
-                        HashOps::create_boolean(*b != 0)
+                        O::create_boolean(*b != 0)
                     }
                     Tag::List(items) if shape.bool_lists.contains(&name.as_str()) => {
-                        HashOps::create_list(items.iter().map(|t| match t {
-                            Tag::Byte(b) => HashOps::create_boolean(*b != 0),
-                            other => HashOps::from_nbt(other, &[]),
+                        O::create_list(items.iter().map(|t| match t {
+                            Tag::Byte(b) => O::create_boolean(*b != 0),
+                            other => O::from_nbt(other, &[]),
                         }))
                     }
-                    _ => walk(value, shape, names)?,
+                    _ => walk_with::<O>(value, shape, names)?,
                 };
-                entries.push((HashOps::create_string_units(&key.0), hashed));
+                entries.push((O::create_string_units(&key.0), hashed));
             }
-            HashOps::create_map(entries)
+            O::create_map(entries)
         }
-        other => HashOps::from_nbt(other, &[]),
+        other => O::from_nbt(other, &[]),
     })
 }

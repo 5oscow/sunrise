@@ -79,73 +79,8 @@ impl Cache {
     }
 }
 
-const DYES: &[&str] = &[
-    "white",
-    "orange",
-    "magenta",
-    "light_blue",
-    "yellow",
-    "lime",
-    "pink",
-    "gray",
-    "light_gray",
-    "cyan",
-    "purple",
-    "blue",
-    "brown",
-    "green",
-    "red",
-    "black",
-];
 const SLOTS: &[&str] = &[
     "any", "mainhand", "offhand", "hand", "feet", "legs", "chest", "head", "armor", "body",
-];
-const KINDS: &[(&str, i32)] = &[
-    ("custom_data", 0),
-    ("max_stack_size", 1),
-    ("max_damage", 2),
-    ("damage", 3),
-    ("unbreakable", 4),
-    ("custom_name", 6),
-    ("item_name", 9),
-    ("lore", 11),
-    ("enchantments", 13),
-    ("can_place_on", 14),
-    ("can_break", 15),
-    ("attribute_modifiers", 16),
-    ("custom_model_data", 17),
-    ("tooltip_display", 18),
-    ("repair_cost", 19),
-    ("enchantment_glint_override", 21),
-    ("stored_enchantments", 45),
-    ("dyed_color", 47),
-    ("map_id", 48),
-    ("map_decorations", 49),
-    ("charged_projectiles", 51),
-    ("bundle_contents", 52),
-    ("potion_contents", 53),
-    ("suspicious_stew_effects", 55),
-    ("writable_book_content", 56),
-    ("written_book_content", 57),
-    ("trim", 58),
-    ("debug_stick_state", 59),
-    ("entity_data", 60),
-    ("bucket_entity_data", 61),
-    ("block_entity_data", 62),
-    ("instrument", 63),
-    ("recipes", 68),
-    ("lodestone_tracker", 69),
-    ("firework_explosion", 70),
-    ("fireworks", 71),
-    ("profile", 72),
-    ("banner_patterns", 74),
-    ("base_color", 75),
-    ("pot_decorations", 76),
-    ("container", 77),
-    ("block_state", 78),
-    ("bees", 79),
-    ("lock", 81),
-    ("container_loot", 82),
 ];
 pub(super) fn reading() -> bool {
     matches!(ids::active(),Some((ids,ids::Way::Up)) if ids.quirks.legacy_item_nbt)
@@ -153,47 +88,13 @@ pub(super) fn reading() -> bool {
 pub(super) fn writing() -> bool {
     matches!(ids::active(),Some((ids,ids::Way::Down)) if ids.quirks.legacy_item_nbt)
 }
-fn component_id(name: &str) -> Option<i32> {
-    let name = name.strip_prefix("minecraft:")?;
-    KINDS.iter().find(|(n, _)| *n == name).map(|(_, id)| *id)
-}
 fn text(value: Option<&Tag>) -> Option<String> {
     d::as_str(value)
-}
-fn number(value: Option<&Tag>, default: i32) -> i32 {
-    d::as_int(value, default)
-}
-fn list(value: Option<&Tag>) -> &[Tag] {
-    match value {
-        Some(Tag::List(values)) => values,
-        _ => &[],
-    }
-}
-fn int_array(value: Option<&Tag>) -> Vec<i32> {
-    match value {
-        Some(Tag::IntArray(values)) => values.clone(),
-        _ => list(value).iter().map(|v| number(Some(v), 0)).collect(),
-    }
-}
-fn registry_id(registry: &str, name: &str) -> Result<i32> {
-    ids::legacy_registry_id(registry, name)
-        .ok_or_else(|| Error::new(format!("legacy item entry missing from {registry}")))
 }
 fn registry_name(registry: &str, id: i32) -> Result<String> {
     ids::legacy_registry_name(registry, id)
         .filter(|name| !name.is_empty())
         .ok_or_else(|| Error::new(format!("legacy item id missing from {registry}")))
-}
-fn id_tag(registry: &str, value: Option<&Tag>) -> Result<i32> {
-    registry_id(
-        registry,
-        &text(value).ok_or_else(|| Error::new("missing legacy item identifier"))?,
-    )
-}
-fn raw_nbt(value: &Tag) -> Component {
-    let mut w = Writer::new();
-    w.nbt(value);
-    Component::Raw(w.data)
 }
 pub(super) fn read_stack(r: &mut Reader) -> Result<Option<Stack>> {
     if !r.bool()? {
@@ -220,462 +121,40 @@ pub(super) fn read_stack(r: &mut Reader) -> Result<Option<Stack>> {
         return Err(Error::new("missing legacy item data version"));
     }
     datafix::update(Ty::ItemStack, &mut saved, from, datafix::CURRENT);
-    let stack = from_tag(&saved, Some((item, count)))?;
+    let stack = from_tag(&saved, item, count)?;
     if let Some(cache) = ids::legacy_item_cache() {
         cache.lock().unwrap().remember(&stack, tag);
     }
     Ok(Some(stack))
 }
 
-fn from_tag(saved: &Tag, known: Option<(i32, i32)>) -> Result<Stack> {
+/// Upgrade output uses the common pure source codec with this connection's real registries.
+fn from_tag(saved: &Tag, item: i32, count: i32) -> Result<Stack> {
     let _nested = super::Nested::enter()?;
-    let _pinned = ids::unrenumbered();
-    let (item, count) = match known {
-        Some(values) => values,
-        None => (
-            id_tag("minecraft:item", saved.get("id"))?,
-            number(saved.get("count"), 1),
-        ),
-    };
     let mut stack = Stack::new(item, count);
-    let Some(Tag::Compound(components)) = saved.get("components") else {
-        return Ok(stack);
+    let components = match saved.get("components") {
+        None => return Ok(stack),
+        Some(Tag::Compound(components)) => components,
+        Some(_) => return Err(Error::new("upgraded item components are not a map")),
     };
+    let registries = |registry: &str, name: &str| ids::legacy_registry_id(registry, name);
     for (name, value) in components {
         let name = name.to_string_lossy();
-        if let Some(removed) = name.strip_prefix('!') {
-            if let Some(kind) = component_id(removed) {
-                stack.removed.push(kind);
-            }
-            continue;
+        let (removed, name) = name
+            .strip_prefix('!')
+            .map_or((false, name.as_str()), |name| (true, name));
+        let kind = super::persistent::component_id(name)
+            .ok_or_else(|| Error::new(format!("unknown upgraded component {name}")))?;
+        if removed {
+            stack.removed.push(kind);
+        } else {
+            stack.added.push((
+                kind,
+                super::persistent::component_from_upgraded_tag(kind, value, &registries)?,
+            ));
         }
-        let Some(kind) = component_id(&name) else {
-            continue;
-        };
-        let value = match kind {
-            0 => Component::Nbt(value.clone()),
-            1..=3 | 19 | 48 => Component::Int(number(Some(value), 0)),
-            4 => Component::Unit,
-            6 | 9 => Component::Text(text_component(value)),
-            11 => Component::Lore(list(Some(value)).iter().map(text_component).collect()),
-            13 | 45 => {
-                let levels = value.get("levels").unwrap_or(value);
-                let mut out = Vec::new();
-                if let Tag::Compound(levels) = levels {
-                    for (name, level) in levels {
-                        if let Some(id) = ids::legacy_registry_id(
-                            "minecraft:enchantment",
-                            &name.to_string_lossy(),
-                        ) {
-                            out.push((id, number(Some(level), 0)));
-                        }
-                    }
-                }
-                Component::Enchantments(out)
-            }
-            14 | 15 => predicates(value)?,
-            16 => attributes(value)?,
-            17 => Component::CustomModelData {
-                floats: list(value.get("floats"))
-                    .iter()
-                    .map(|v| d::as_number(v).map_or(0.0, |v| v.float_value()))
-                    .collect(),
-                flags: list(value.get("flags"))
-                    .iter()
-                    .map(|v| d::as_bool(Some(v), false))
-                    .collect(),
-                strings: list(value.get("strings"))
-                    .iter()
-                    .filter_map(|v| text(Some(v)))
-                    .collect(),
-                colors: int_array(value.get("colors")),
-            },
-            18 => Component::TooltipDisplay {
-                hide: d::as_bool(value.get("hide_tooltip"), false),
-                hidden: list(value.get("hidden_components"))
-                    .iter()
-                    .filter_map(|v| component_id(&text(Some(v))?))
-                    .collect(),
-            },
-            21 => Component::Bool(d::as_bool(Some(value), false)),
-            47 => Component::Int(number(Some(value), 0)),
-            49 => {
-                let mut value = value.clone();
-                if let Tag::Compound(entries) = &mut value {
-                    for entry in entries.values_mut() {
-                        if let Some(name) = text(entry.get("type")) {
-                            d::set(entry, "type", d::string(&d::namespaced(&name)));
-                        }
-                    }
-                }
-                raw_nbt(&value)
-            }
-            59 | 61 | 68 | 81 | 82 => raw_nbt(value),
-            51 | 52 => Component::Stacks(
-                list(Some(value))
-                    .iter()
-                    .map(|v| from_tag(v, None))
-                    .collect::<Result<_>>()?,
-            ),
-            53 => potion(value)?,
-            55 => Component::StewEffects(
-                list(Some(value))
-                    .iter()
-                    .map(|v| {
-                        Ok((
-                            id_tag("minecraft:mob_effect", v.get("id"))?,
-                            number(v.get("duration"), 160),
-                        ))
-                    })
-                    .collect::<Result<_>>()?,
-            ),
-            56 => {
-                let pages = list(value.get("pages"));
-                let filtered = pages.iter().any(|p| p.get("filtered").is_some());
-                Component::WritableBook {
-                    pages: pages
-                        .iter()
-                        .map(|p| text(p.get("raw").or(Some(p))).unwrap_or_default())
-                        .collect(),
-                    filtered: if filtered {
-                        pages.iter().map(|p| text(p.get("filtered"))).collect()
-                    } else {
-                        Vec::new()
-                    },
-                }
-            }
-            57 => {
-                let title = value.get("title").unwrap_or(&Tag::End);
-                let pages = list(value.get("pages"));
-                let filtered = pages.iter().any(|p| p.get("filtered").is_some());
-                Component::WrittenBook(WrittenBook {
-                    title: text(title.get("raw").or(Some(title))).unwrap_or_default(),
-                    title_filtered: text(title.get("filtered")),
-                    author: text(value.get("author")).unwrap_or_default(),
-                    generation: number(value.get("generation"), 0),
-                    resolved: d::as_bool(value.get("resolved"), false),
-                    pages: pages
-                        .iter()
-                        .map(|p| text_component(p.get("raw").unwrap_or(p)))
-                        .collect(),
-                    pages_filtered: if filtered {
-                        pages
-                            .iter()
-                            .map(|p| p.get("filtered").map(text_component))
-                            .collect()
-                    } else {
-                        Vec::new()
-                    },
-                })
-            }
-            58 => Component::Trim {
-                material: id_tag("minecraft:trim_material", value.get("material"))?,
-                pattern: id_tag("minecraft:trim_pattern", value.get("pattern"))?,
-            },
-            60 => typed_data(value, "minecraft:entity_type")?,
-            62 => typed_data(value, "minecraft:block_entity_type")?,
-            63 => Component::Instrument(id_tag("minecraft:instrument", Some(value))?),
-            69 => {
-                let target = if let Some(target) = value.get("target") {
-                    let coords = int_array(target.get("pos"));
-                    if coords.len() == 3 {
-                        Some((
-                            text(target.get("dimension"))
-                                .unwrap_or_else(|| "minecraft:overworld".into()),
-                            [coords[0], coords[1], coords[2]],
-                        ))
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
-                Component::LodestoneTracker {
-                    target,
-                    tracked: d::as_bool(value.get("tracked"), true),
-                }
-            }
-            70 => Component::FireworkExplosion(explosion(value)),
-            71 => Component::Fireworks {
-                flight: number(value.get("flight_duration"), 0),
-                explosions: list(value.get("explosions"))
-                    .iter()
-                    .map(explosion)
-                    .collect(),
-            },
-            72 => Component::Profile(profile(value)),
-            74 => Component::BannerPatterns(
-                list(Some(value))
-                    .iter()
-                    .map(|v| {
-                        Ok((
-                            id_tag("minecraft:banner_pattern", v.get("pattern"))?,
-                            dye(v.get("color")),
-                        ))
-                    })
-                    .collect::<Result<_>>()?,
-            ),
-            75 => Component::Int(dye(Some(value))),
-            76 => decorations(value)?,
-            77 => container(value)?,
-            78 => {
-                let mut w = Writer::new();
-                let Tag::Compound(map) = value else {
-                    return Err(Error::new("block state is not a map"));
-                };
-                w.varint(map.len() as i32);
-                for (k, v) in map {
-                    w.string(&k.to_string_lossy());
-                    w.string(&text(Some(v)).unwrap_or_default());
-                }
-                Component::Raw(w.data)
-            }
-            79 => bees(value)?,
-            _ => continue,
-        };
-        stack.added.push((kind, value));
     }
     Ok(stack)
-}
-
-fn dye(value: Option<&Tag>) -> i32 {
-    text(value)
-        .and_then(|s| DYES.iter().position(|v| *v == s))
-        .map_or(0, |i| i as i32)
-}
-fn text_component(value: &Tag) -> Tag {
-    match value {
-        Tag::Compound(map) if map.len() == 1 => {
-            value.get("text").cloned().unwrap_or_else(|| value.clone())
-        }
-        Tag::List(values) if values.len() == 1 => text_component(&values[0]),
-        _ => value.clone(),
-    }
-}
-fn explosion(value: &Tag) -> FireworkExplosion {
-    FireworkExplosion {
-        shape: text(value.get("shape"))
-            .and_then(|s| {
-                ["small_ball", "large_ball", "star", "creeper", "burst"]
-                    .iter()
-                    .position(|v| *v == s)
-            })
-            .unwrap_or(0) as i32,
-        colors: int_array(value.get("colors")),
-        fade: int_array(value.get("fade_colors")),
-        trail: d::as_bool(value.get("has_trail"), false),
-        twinkle: d::as_bool(value.get("has_twinkle"), false),
-    }
-}
-fn uuid(value: Option<&Tag>) -> Option<u128> {
-    let parts = int_array(value);
-    (parts.len() == 4).then(|| {
-        parts
-            .iter()
-            .fold(0u128, |n, part| (n << 32) | u128::from(*part as u32))
-    })
-}
-fn profile(value: &Tag) -> Profile {
-    Profile {
-        name: text(value.get("name")),
-        id: uuid(value.get("id")),
-        skin: SkinPatch::default(),
-        properties: list(value.get("properties"))
-            .iter()
-            .map(|v| {
-                (
-                    text(v.get("name")).unwrap_or_default(),
-                    text(v.get("value")).unwrap_or_default(),
-                    text(v.get("signature")),
-                )
-            })
-            .collect(),
-    }
-}
-fn typed_data(value: &Tag, registry: &str) -> Result<Component> {
-    let mut data = value.clone();
-    let id = id_tag(registry, data.get("id"))?;
-    d::remove(&mut data, "id");
-    let mut w = Writer::new();
-    w.varint(id);
-    w.nbt(&data);
-    Ok(Component::Raw(w.data))
-}
-fn container(value: &Tag) -> Result<Component> {
-    let mut contents = Vec::new();
-    for entry in list(Some(value)) {
-        let slot = number(entry.get("slot"), -1);
-        if (0..256).contains(&slot)
-            && let Some(item) = entry.get("item")
-        {
-            contents.push((slot as usize, from_tag(item, None)?));
-        }
-    }
-    let mut w = Writer::new();
-    let n = contents.iter().map(|(slot, _)| slot + 1).max().unwrap_or(0);
-    w.varint(n as i32);
-    for slot in 0..n {
-        let item = contents.iter().find(|(i, _)| *i == slot);
-        w.bool(item.is_some());
-        if let Some((_, item)) = item {
-            Template::write(item, &mut w);
-        }
-    }
-    Ok(Component::Raw(w.data))
-}
-fn decorations(value: &Tag) -> Result<Component> {
-    let mut w = Writer::new();
-    for side in ["back", "left", "right", "front"] {
-        let entry = value.get(side);
-        w.bool(entry.is_some());
-        if let Some(entry) = entry {
-            let item = if let Tag::String(_) = entry {
-                Stack::new(id_tag("minecraft:item", Some(entry))?, 1)
-            } else {
-                from_tag(entry, None)?
-            };
-            Template::write(&item, &mut w);
-        }
-    }
-    Ok(Component::Raw(w.data))
-}
-
-fn attributes(value: &Tag) -> Result<Component> {
-    let entries = list(value.get("modifiers").or(Some(value)));
-    let mut w = Writer::new();
-    w.varint(entries.len() as i32);
-    for entry in entries {
-        w.varint(id_tag("minecraft:attribute", entry.get("type"))?);
-        w.string(&text(entry.get("id")).ok_or_else(|| Error::new("attribute modifier has no id"))?);
-        w.f64(d::as_double(entry.get("amount"), 0.0));
-        w.varint(match text(entry.get("operation")).as_deref() {
-            Some("add_multiplied_base") => 1,
-            Some("add_multiplied_total") => 2,
-            _ => 0,
-        });
-        w.varint(
-            text(entry.get("slot"))
-                .and_then(|s| SLOTS.iter().position(|v| *v == s))
-                .unwrap_or(0) as i32,
-        );
-        w.varint(0);
-    }
-    Ok(Component::Raw(w.data))
-}
-fn predicates(value: &Tag) -> Result<Component> {
-    let predicates = list(value.get("predicates").or(Some(value)));
-    let mut w = Writer::new();
-    w.varint(predicates.len() as i32);
-    for predicate in predicates {
-        let blocks = predicate.get("blocks");
-        w.bool(blocks.is_some());
-        if let Some(blocks) = blocks {
-            if let Some(tag) =
-                text(Some(blocks)).and_then(|s| s.strip_prefix('#').map(str::to_owned))
-            {
-                w.varint(0);
-                w.string(&tag);
-            } else {
-                let names = if matches!(blocks, Tag::String(_)) {
-                    vec![blocks]
-                } else {
-                    list(Some(blocks)).iter().collect()
-                };
-                w.varint(names.len() as i32 + 1);
-                for name in names {
-                    w.varint(id_tag("minecraft:block", Some(name))?);
-                }
-            }
-        }
-        let properties = predicate.get("state");
-        w.bool(properties.is_some());
-        if let Some(Tag::Compound(properties)) = properties {
-            w.varint(properties.len() as i32);
-            for (name, matcher) in properties {
-                w.string(&name.to_string_lossy());
-                let exact = text(Some(matcher));
-                w.bool(exact.is_some());
-                if let Some(exact) = exact {
-                    w.string(&exact);
-                } else {
-                    for field in ["min", "max"] {
-                        let bound = text(matcher.get(field));
-                        w.bool(bound.is_some());
-                        if let Some(bound) = bound {
-                            w.string(&bound);
-                        }
-                    }
-                }
-            }
-        } else if properties.is_some() {
-            return Err(Error::new("invalid predicate properties"));
-        }
-        let nbt = predicate.get("nbt");
-        w.bool(nbt.is_some());
-        if let Some(nbt) = nbt {
-            let parsed;
-            let nbt = if let Some(snbt) = text(Some(nbt)) {
-                let (value, used) = horizon_core::nbt::parse_snbt(&snbt).map_err(Error::new)?;
-                if used != snbt.len() {
-                    return Err(Error::new("trailing predicate SNBT"));
-                }
-                parsed = value;
-                &parsed
-            } else {
-                nbt
-            };
-            w.nbt(nbt);
-        }
-        w.varint(0);
-        w.varint(0); // No component matchers existed in legacy predicates.
-    }
-    Ok(Component::Raw(w.data))
-}
-fn effect(value: &Tag, w: &mut Writer) -> Result<()> {
-    w.varint(id_tag("minecraft:mob_effect", value.get("id"))?);
-    let mut current = value;
-    loop {
-        w.varint(number(current.get("amplifier"), 0).clamp(0, 255));
-        w.varint(number(current.get("duration"), 0));
-        w.bool(d::as_bool(current.get("ambient"), false));
-        let particles = d::as_bool(current.get("show_particles"), true);
-        w.bool(particles);
-        w.bool(d::as_bool(current.get("show_icon"), particles));
-        let hidden = current.get("hidden_effect");
-        w.bool(hidden.is_some());
-        let Some(hidden) = hidden else {
-            break;
-        };
-        current = hidden;
-    }
-    Ok(())
-}
-fn potion(value: &Tag) -> Result<Component> {
-    let potion = value
-        .get("potion")
-        .map(|v| id_tag("minecraft:potion", Some(v)))
-        .transpose()?;
-    let color = value.get("custom_color").map(|v| number(Some(v), 0));
-    let effects = list(value.get("custom_effects"));
-    let name = text(value.get("custom_name"));
-    let mut w = Writer::new();
-    w.varint(effects.len() as i32);
-    for entry in effects {
-        effect(entry, &mut w)?;
-    }
-    w.bool(name.is_some());
-    if let Some(name) = &name {
-        w.string(name);
-    }
-    Ok(Component::Potion {
-        potion,
-        color,
-        rest: if effects.is_empty() && name.is_none() {
-            Vec::new()
-        } else {
-            w.data
-        },
-    })
 }
 
 pub(super) fn write_stack(stack: Option<&Stack>, w: &mut Writer) {
@@ -1096,23 +575,6 @@ fn legacy_effect(r: &mut Reader) -> Result<Tag> {
     Ok(result)
 }
 
-fn bees(value: &Tag) -> Result<Component> {
-    let entries = list(Some(value));
-    let mut w = Writer::new();
-    w.varint(entries.len() as i32);
-    for entry in entries {
-        let data = entry
-            .get("entity_data")
-            .ok_or_else(|| Error::new("bee has no entity data"))?;
-        let Component::Raw(data) = typed_data(data, "minecraft:entity_type")? else {
-            unreachable!();
-        };
-        w.bytes(&data);
-        w.varint(number(entry.get("ticks_in_hive"), 0));
-        w.varint(number(entry.get("min_ticks_in_hive"), 0));
-    }
-    Ok(Component::Raw(w.data))
-}
 fn legacy_raw(tag: &mut Tag, kind: i32, bytes: &[u8]) -> Result<()> {
     let mut r = Reader::new(bytes);
     match kind {
@@ -1875,20 +1337,25 @@ mod tests {
         let mut bundle = read(&bytes(
             "01fa06010a0900054974656d730a000000010800026964000f6d696e6563726166743a6772617373010005436f756e74020000",
         ));
-        let Component::Stacks(items) =
-            &mut bundle.added.iter_mut().find(|(id, _)| *id == 52).unwrap().1
-        else {
-            panic!("bundle")
-        };
-        items[0].count = 3;
-        let wire = write(&bundle);
-        let (_, _, tag) = legacy_parts(&wire).unwrap();
-        let Tag::List(items) = tag.get("Items").unwrap() else {
-            panic!("items")
-        };
-        assert_eq!(items[0].get("id"), Some(&d::string("minecraft:grass")));
-        assert_eq!(items[0].get("Count"), Some(&Tag::Byte(3)));
-        assert_eq!(normalized(Some(read(&wire))), normalized(Some(bundle)));
+        for count in [3, 127] {
+            let Component::Stacks(items) =
+                &mut bundle.added.iter_mut().find(|(id, _)| *id == 52).unwrap().1
+            else {
+                panic!("bundle")
+            };
+            items[0].count = count;
+            let wire = write(&bundle);
+            let (_, _, tag) = legacy_parts(&wire).unwrap();
+            let Tag::List(items) = tag.get("Items").unwrap() else {
+                panic!("items")
+            };
+            assert_eq!(items[0].get("id"), Some(&d::string("minecraft:grass")));
+            assert_eq!(items[0].get("Count"), Some(&Tag::Byte(count as i8)));
+            assert_eq!(
+                normalized(Some(read(&wire))),
+                normalized(Some(bundle.clone()))
+            );
+        }
 
         let mut pickaxe = read(&bytes(
             "019f06010a03000644616d6167650000000009000a43616e506c6163654f6e0800000001000f6d696e6563726166743a677261737309000a43616e44657374726f790800000001000f6d696e6563726166743a677261737300",

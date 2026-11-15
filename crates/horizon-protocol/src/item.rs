@@ -12,6 +12,7 @@ use std::sync::Arc;
 #[doc(hidden)]
 pub mod custom;
 mod hash;
+pub mod persistent;
 mod skip;
 mod trim;
 pub(crate) mod v1_20_3;
@@ -343,6 +344,29 @@ impl Component {
         if kind == component::CONTAINER && ids::quirks().count_first_templates {
             return Ok(Self::Raw(read_legacy_container(r)?));
         }
+        use component::*;
+        match kind {
+            CHARGED_PROJECTILES | BUNDLE_CONTENTS => {
+                let n = r.count(1024)?;
+                let mut stacks = Vec::with_capacity(n);
+                for _ in 0..n {
+                    stacks.push(Template::read(r)?);
+                }
+                Ok(Self::Stacks(stacks))
+            }
+            CAN_PLACE_ON | CAN_BREAK | USE_REMAINDER | SULFUR_CUBE_CONTENT | POT_DECORATIONS
+            | CONTAINER => Self::read_raw(kind, r),
+            _ => Self::read_flat(kind, r),
+        }
+    }
+    fn read_raw(kind: i32, r: &mut Reader) -> Result<Self> {
+        let start = r.position();
+        skip::component(kind, r)?;
+        Ok(Self::Raw(r.since(start).to_vec()))
+    }
+    // Keep the large typed decoder's locals off every recursive template/predicate frame.
+    #[inline(never)]
+    fn read_flat(kind: i32, r: &mut Reader) -> Result<Self> {
         if kind == component::PROFILE && ids::quirks().optional_profile_fields {
             return read_optional_profile(r).map(Self::Profile);
         }
@@ -385,10 +409,6 @@ impl Component {
                     pages_filtered,
                     resolved: r.bool()?,
                 })
-            }
-            CHARGED_PROJECTILES | BUNDLE_CONTENTS => {
-                let n = r.count(1024)?;
-                Self::Stacks((0..n).map(|_| Template::read(r)).collect::<Result<_>>()?)
             }
             DYED_COLOR => Self::Int(r.i32()?),
             UNBREAKABLE | CREATIVE_SLOT_LOCK => Self::Unit,
@@ -584,11 +604,7 @@ impl Component {
                 }
             }
             other if custom::contains(other) => Self::Nbt(r.nbt()?),
-            other => {
-                let start = r.position();
-                skip::component(other, r)?;
-                Self::Raw(r.since(start).to_vec())
-            }
+            other => Self::read_raw(other, r)?,
         })
     }
     /// The layers of encoded `BannerPatternLayers` whose patterns are all
@@ -1377,6 +1393,11 @@ impl Codec<Stack> for Template {
         }
         let item = ids::item(r.varint()?);
         let count = r.varint()?;
+        if item <= 0 || count == 0 {
+            return Err(crate::Error::new(
+                "item template must have a non-air item and nonzero count",
+            ));
+        }
         let positive = r.count(65536)?;
         let negative = r.count(65536)?;
         let mut added = Vec::with_capacity(positive.min(64));

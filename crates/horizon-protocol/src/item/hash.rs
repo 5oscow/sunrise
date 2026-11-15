@@ -11,9 +11,11 @@
 //! resyncs that slot.
 mod exact;
 mod gameplay;
+pub(crate) mod ops;
 mod raw;
 use super::{Component, FireworkExplosion, Hashed, Stack, WirePatch, component as kind};
-use crate::hash_ops::{HashCode, HashOps, RecordHash};
+use crate::hash_ops::{HashCode, HashOps};
+use ops::{Ops, Record};
 
 /// Registry names for the ids a component holds.
 pub trait Names {
@@ -61,140 +63,154 @@ const TEXT_BOOLS: [&str; 7] = [
     "plain",
 ];
 
-fn string(s: &str) -> HashCode {
-    HashOps::create_string(s)
+fn string_with<O: Ops>(s: &str) -> O::Value {
+    O::create_string(s)
 }
 /// `Identifier.CODEC` of registry entry `id`.
-fn entry(names: &dyn Names, registry: &str, id: i32) -> Option<HashCode> {
-    names.name(registry, id).map(|n| string(&n))
+fn entry_with<O: Ops>(names: &dyn Names, registry: &str, id: i32) -> Option<O::Value> {
+    if id < 0 {
+        return None;
+    }
+    names
+        .name(registry, id)
+        .map(|n| string_with::<O>(&n))
+        .or_else(|| {
+            (registry == "minecraft:data_component_type")
+                .then(|| super::persistent::component_name(id))
+                .flatten()
+                .map(O::create_string)
+        })
 }
-fn pick(table: &[&str], id: i32) -> Option<HashCode> {
+fn pick_with<O: Ops>(table: &[&str], id: i32) -> Option<O::Value> {
     usize::try_from(id)
         .ok()
         .and_then(|i| table.get(i))
-        .map(|n| string(n))
+        .map(|n| string_with::<O>(n))
 }
 /// `ComponentSerialization.CODEC`.
-fn text(tag: &horizon_core::nbt::Tag) -> HashCode {
-    HashOps::from_nbt(tag, &TEXT_BOOLS)
+fn text_with<O: Ops>(tag: &horizon_core::nbt::Tag) -> O::Value {
+    O::from_nbt(
+        horizon_world::component_value::compact_text_tag(tag),
+        &TEXT_BOOLS,
+    )
 }
 /// `Filterable.codec`: the full record (`Codec.withAlternative` encodes with
 /// the first codec), the filtered variant absent when there is none.
-fn filterable(raw: HashCode, filtered: Option<HashCode>) -> HashCode {
-    RecordHash::new()
+fn filterable_with<O: Ops>(raw: O::Value, filtered: Option<O::Value>) -> O::Value {
+    Record::<O>::new()
         .field("raw", raw)
         .optional("filtered", filtered)
         .build()
 }
 /// `Codec.xxx.optionalFieldOf(name, default)`: absent when equal to the default.
-fn or_default<T: PartialEq>(
-    rec: RecordHash,
+fn or_default_with<O: Ops, T: PartialEq>(
+    rec: Record<O>,
     name: &str,
     v: T,
     default: T,
-    hash: HashCode,
-) -> RecordHash {
+    hash: O::Value,
+) -> Record<O> {
     if v == default {
         rec
     } else {
         rec.field(name, hash)
     }
 }
-fn int_list(values: &[i32]) -> HashCode {
-    HashOps::create_list(values.iter().map(|v| HashOps::create_int(*v)))
+fn int_list_with<O: Ops>(values: &[i32]) -> O::Value {
+    O::create_list(values.iter().map(|v| O::create_int(*v)))
 }
-fn explosion(e: &FireworkExplosion) -> Option<HashCode> {
-    let rec = RecordHash::new().field("shape", pick(&SHAPE, e.shape)?);
-    let rec = or_default(
+fn explosion_with<O: Ops>(e: &FireworkExplosion) -> Option<O::Value> {
+    let rec = Record::<O>::new().field("shape", pick_with::<O>(&SHAPE, e.shape)?);
+    let rec = or_default_with::<O, _>(
         rec,
         "colors",
         e.colors.is_empty(),
         true,
-        int_list(&e.colors),
+        int_list_with::<O>(&e.colors),
     );
-    let rec = or_default(
+    let rec = or_default_with::<O, _>(
         rec,
         "fade_colors",
         e.fade.is_empty(),
         true,
-        int_list(&e.fade),
+        int_list_with::<O>(&e.fade),
     );
-    let rec = or_default(
-        rec,
-        "has_trail",
-        e.trail,
-        false,
-        HashOps::create_boolean(e.trail),
-    );
+    let rec = or_default_with::<O, _>(rec, "has_trail", e.trail, false, O::create_boolean(e.trail));
     Some(
-        or_default(
+        or_default_with::<O, _>(
             rec,
             "has_twinkle",
             e.twinkle,
             false,
-            HashOps::create_boolean(e.twinkle),
+            O::create_boolean(e.twinkle),
         )
         .build(),
     )
 }
 /// `ItemEnchantments.CODEC`: an identifier-keyed map of levels.
-fn enchantments(list: &[(i32, i32)], names: &dyn Names) -> Option<HashCode> {
+fn enchantments_with<O: Ops>(list: &[(i32, i32)], names: &dyn Names) -> Option<O::Value> {
     let mut entries = Vec::with_capacity(list.len());
     for (id, level) in list {
         entries.push((
-            entry(names, "minecraft:enchantment", *id)?,
-            HashOps::create_int(*level),
+            entry_with::<O>(names, "minecraft:enchantment", *id)?,
+            O::create_int(*level),
         ));
     }
-    Some(HashOps::create_map(entries))
+    Some(O::create_map(entries))
 }
 /// `ItemStackTemplate.CODEC` (the map form): the item, a count that is absent
 /// at 1 and a `DataComponentPatch.CODEC` that is absent when empty.
-fn template(s: &Stack, names: &dyn Names) -> Option<HashCode> {
-    let rec = RecordHash::new().field("id", entry(names, "minecraft:item", s.item)?);
-    let rec = or_default(rec, "count", s.count, 1, HashOps::create_int(s.count));
+fn template_record_with<O: Ops>(s: &Stack, names: &dyn Names) -> Option<O::Value> {
+    let rec = Record::<O>::new().field("id", entry_with::<O>(names, "minecraft:item", s.item)?);
+    let rec = or_default_with::<O, _>(rec, "count", s.count, 1, O::create_int(s.count));
     let mut patch = Vec::new();
     for (k, c) in &s.added {
         patch.push((
-            entry(names, "minecraft:data_component_type", *k)?,
-            c.code(*k, names)?,
+            entry_with::<O>(names, "minecraft:data_component_type", *k)?,
+            c.code_with::<O>(*k, names)?,
         ));
     }
     for k in &s.removed {
         let name = names.name("minecraft:data_component_type", *k)?;
-        patch.push((string(&format!("!{name}")), HashOps::empty_map()));
+        patch.push((string_with::<O>(&format!("!{name}")), O::empty_map()));
     }
     Some(
         if patch.is_empty() {
             rec
         } else {
-            rec.field("components", HashOps::create_map(patch))
+            rec.field("components", O::create_map(patch))
         }
         .build(),
     )
 }
 
 impl Component {
+    pub fn code(&self, id: i32, names: &dyn Names) -> Option<HashCode> {
+        self.code_with::<HashOps>(id, names)
+    }
     /// The component's `Codec` form hashed (`TypedDataComponent.encodeValue(hashOps)`),
     /// or `None` when Horizon cannot build that form.
-    pub fn code(&self, id: i32, names: &dyn Names) -> Option<HashCode> {
+    pub(crate) fn code_with<O: Ops>(&self, id: i32, names: &dyn Names) -> Option<O::Value> {
+        if let Some(value) = O::special_component(id, self, names) {
+            return value;
+        }
         Some(match self {
             Self::Int(v) => match id {
-                kind::RARITY => pick(&RARITY, *v)?,
-                kind::BASE_COLOR => pick(&DYE, *v)?,
+                kind::RARITY => pick_with::<O>(&RARITY, *v)?,
+                kind::BASE_COLOR => pick_with::<O>(&DYE, *v)?,
                 // MapPostProcessing has no persistent codec.
                 kind::MAP_POST_PROCESSING => return None,
-                _ => HashOps::create_int(*v),
+                _ => O::create_int(*v),
             },
             // `Unit.CODEC` is an empty map; creative_slot_lock has no codec.
             Self::Unit if id == kind::CREATIVE_SLOT_LOCK => return None,
-            Self::Unit => HashOps::empty_map(),
-            Self::Bool(v) => HashOps::create_boolean(*v),
-            Self::Text(t) => text(t),
-            Self::Nbt(t) => HashOps::from_nbt(t, &[]),
-            Self::Ident(s) => string(s),
-            Self::Lore(lines) => HashOps::create_list(lines.iter().map(text)),
-            Self::Enchantments(list) => enchantments(list, names)?,
+            Self::Unit => O::empty_map(),
+            Self::Bool(v) => O::create_boolean(*v),
+            Self::Text(t) => text_with::<O>(t),
+            Self::Nbt(t) => O::from_nbt(t, &[]),
+            Self::Ident(s) => string_with::<O>(s),
+            Self::Lore(lines) => O::create_list(lines.iter().map(text_with::<O>)),
+            Self::Enchantments(list) => enchantments_with::<O>(list, names)?,
             Self::AttackRange(v) => {
                 const FIELDS: [(&str, f32); 6] = [
                     ("min_reach", 0.0),
@@ -204,14 +220,14 @@ impl Component {
                     ("hitbox_margin", 0.3),
                     ("mob_factor", 1.0),
                 ];
-                let mut rec = RecordHash::new();
+                let mut rec = Record::<O>::new();
                 for ((name, default), v) in FIELDS.iter().zip(v) {
-                    rec = or_default(
+                    rec = or_default_with::<O, _>(
                         rec,
                         name,
                         v.to_bits(),
                         default.to_bits(),
-                        HashOps::create_f32(*v),
+                        O::create_f32(*v),
                     );
                 }
                 rec.build()
@@ -221,20 +237,20 @@ impl Component {
                 color,
                 rest,
             } => {
-                let rec = RecordHash::new()
+                let rec = Record::<O>::new()
                     .optional(
                         "potion",
                         match potion {
-                            Some(p) => Some(entry(names, "minecraft:potion", *p)?),
+                            Some(p) => Some(entry_with::<O>(names, "minecraft:potion", *p)?),
                             None => None,
                         },
                     )
-                    .optional("custom_color", color.map(HashOps::create_int));
+                    .optional("custom_color", color.map(O::create_int));
                 // An empty tail is no custom effects and no name.
                 if rest.is_empty() {
                     rec
                 } else {
-                    raw::potion_tail(rec, rest, names)?
+                    raw::potion_tail_with::<O>(rec, rest, names)?
                 }
                 .build()
             }
@@ -244,193 +260,211 @@ impl Component {
                 strings,
                 colors,
             } => {
-                let list = |rec: RecordHash, name: &str, items: Vec<HashCode>| {
+                let list = |rec: Record<O>, name: &str, items: Vec<O::Value>| {
                     if items.is_empty() {
                         rec
                     } else {
-                        rec.field(name, HashOps::create_list(items))
+                        rec.field(name, O::create_list(items))
                     }
                 };
                 let rec = list(
-                    RecordHash::new(),
+                    Record::<O>::new(),
                     "floats",
-                    floats.iter().map(|f| HashOps::create_f32(*f)).collect(),
+                    floats.iter().map(|f| O::create_f32(*f)).collect(),
                 );
                 let rec = list(
                     rec,
                     "flags",
-                    flags.iter().map(|f| HashOps::create_boolean(*f)).collect(),
+                    flags.iter().map(|f| O::create_boolean(*f)).collect(),
                 );
-                let rec = list(rec, "strings", strings.iter().map(|s| string(s)).collect());
+                let rec = list(
+                    rec,
+                    "strings",
+                    strings.iter().map(|s| string_with::<O>(s)).collect(),
+                );
                 list(
                     rec,
                     "colors",
-                    colors.iter().map(|c| HashOps::create_int(*c)).collect(),
+                    colors.iter().map(|c| O::create_int(*c)).collect(),
                 )
                 .build()
             }
             Self::TooltipDisplay { hide, hidden } => {
-                let rec = or_default(
-                    RecordHash::new(),
+                let rec = or_default_with::<O, _>(
+                    Record::<O>::new(),
                     "hide_tooltip",
                     *hide,
                     false,
-                    HashOps::create_boolean(*hide),
+                    O::create_boolean(*hide),
                 );
                 let mut list = Vec::with_capacity(hidden.len());
                 for h in hidden {
-                    list.push(entry(names, "minecraft:data_component_type", *h)?);
+                    list.push(entry_with::<O>(names, "minecraft:data_component_type", *h)?);
                 }
                 if list.is_empty() {
                     rec
                 } else {
-                    rec.field("hidden_components", HashOps::create_list(list))
+                    rec.field("hidden_components", O::set(list))
                 }
                 .build()
             }
             Self::WritableBook { pages, filtered } => if pages.is_empty() {
-                RecordHash::new()
+                Record::<O>::new()
             } else {
-                RecordHash::new().field(
+                Record::<O>::new().field(
                     "pages",
-                    HashOps::create_list(pages.iter().enumerate().map(|(i, p)| {
-                        filterable(
-                            string(p),
-                            filtered.get(i).and_then(Option::as_ref).map(|f| string(f)),
+                    O::create_list(pages.iter().enumerate().map(|(i, p)| {
+                        filterable_with::<O>(
+                            string_with::<O>(p),
+                            filtered
+                                .get(i)
+                                .and_then(Option::as_ref)
+                                .map(|f| string_with::<O>(f)),
                         )
                     })),
                 )
             }
             .build(),
             Self::WrittenBook(b) => {
-                let rec = RecordHash::new()
+                let rec = Record::<O>::new()
                     .field(
                         "title",
-                        filterable(string(&b.title), b.title_filtered.as_deref().map(string)),
+                        filterable_with::<O>(
+                            string_with::<O>(&b.title),
+                            b.title_filtered.as_deref().map(string_with::<O>),
+                        ),
                     )
-                    .field("author", string(&b.author));
-                let rec = or_default(
+                    .field("author", string_with::<O>(&b.author));
+                let rec = or_default_with::<O, _>(
                     rec,
                     "generation",
                     b.generation,
                     0,
-                    HashOps::create_int(b.generation),
+                    O::create_int(b.generation),
                 );
                 let rec = if b.pages.is_empty() {
                     rec
                 } else {
                     rec.field(
                         "pages",
-                        HashOps::create_list(b.pages.iter().enumerate().map(|(i, p)| {
-                            filterable(
-                                text(p),
-                                b.pages_filtered.get(i).and_then(Option::as_ref).map(text),
+                        O::create_list(b.pages.iter().enumerate().map(|(i, p)| {
+                            filterable_with::<O>(
+                                text_with::<O>(p),
+                                b.pages_filtered
+                                    .get(i)
+                                    .and_then(Option::as_ref)
+                                    .map(text_with::<O>),
                             )
                         })),
                     )
                 };
-                or_default(
+                or_default_with::<O, _>(
                     rec,
                     "resolved",
                     b.resolved,
                     false,
-                    HashOps::create_boolean(b.resolved),
+                    O::create_boolean(b.resolved),
                 )
                 .build()
             }
             Self::Stacks(stacks) => {
                 let mut list = Vec::with_capacity(stacks.len());
                 for s in stacks {
-                    list.push(template(s, names)?);
+                    list.push(O::template(s, names)?);
                 }
-                HashOps::create_list(list)
+                O::create_list(list)
             }
             Self::Fireworks { flight, explosions } => {
                 // `ExtraCodecs.UNSIGNED_BYTE` is `Codec.BYTE`: a byte tag.
-                let rec = or_default(
-                    RecordHash::new(),
+                let rec = or_default_with::<O, _>(
+                    Record::<O>::new(),
                     "flight_duration",
                     *flight,
                     0,
-                    HashOps::create_byte(*flight as i8),
+                    O::create_byte(*flight as i8),
                 );
                 let mut list = Vec::with_capacity(explosions.len());
                 for e in explosions {
-                    list.push(explosion(e)?);
+                    list.push(explosion_with::<O>(e)?);
                 }
                 if list.is_empty() {
                     rec
                 } else {
-                    rec.field("explosions", HashOps::create_list(list))
+                    rec.field("explosions", O::create_list(list))
                 }
                 .build()
             }
-            Self::FireworkExplosion(e) => explosion(e)?,
+            Self::FireworkExplosion(e) => explosion_with::<O>(e)?,
             Self::LodestoneTracker { target, tracked } => {
                 let target = target.as_ref().map(|(dimension, pos)| {
-                    RecordHash::new()
-                        .field("dimension", string(dimension))
-                        .field("pos", HashOps::create_int_list(pos))
+                    Record::<O>::new()
+                        .field("dimension", string_with::<O>(dimension))
+                        .field("pos", O::create_int_list(pos))
                         .build()
                 });
-                or_default(
-                    RecordHash::new().optional("target", target),
+                or_default_with::<O, _>(
+                    Record::<O>::new().optional("target", target),
                     "tracked",
                     *tracked,
                     true,
-                    HashOps::create_boolean(*tracked),
+                    O::create_boolean(*tracked),
                 )
                 .build()
             }
-            Self::Trim { material, pattern } => RecordHash::new()
+            Self::Trim { material, pattern } => Record::<O>::new()
                 .field(
                     "material",
-                    entry(names, "minecraft:trim_material", *material)?,
+                    entry_with::<O>(names, "minecraft:trim_material", *material)?,
                 )
-                .field("pattern", entry(names, "minecraft:trim_pattern", *pattern)?)
+                .field(
+                    "pattern",
+                    entry_with::<O>(names, "minecraft:trim_pattern", *pattern)?,
+                )
                 .build(),
             Self::StewEffects(list) => {
                 let mut out = Vec::with_capacity(list.len());
                 for (effect, duration) in list {
-                    let rec = RecordHash::new()
-                        .field("id", entry(names, "minecraft:mob_effect", *effect)?);
+                    let rec = Record::<O>::new().field(
+                        "id",
+                        entry_with::<O>(names, "minecraft:mob_effect", *effect)?,
+                    );
                     out.push(
-                        or_default(
+                        or_default_with::<O, _>(
                             rec,
                             "duration",
                             *duration,
                             160,
-                            HashOps::create_int(*duration),
+                            O::create_int(*duration),
                         )
                         .build(),
                     );
                 }
-                HashOps::create_list(out)
+                O::create_list(out)
             }
-            Self::Instrument(i) => entry(names, "minecraft:instrument", *i)?,
+            Self::Instrument(i) => entry_with::<O>(names, "minecraft:instrument", *i)?,
             Self::BannerPatterns(layers) => {
                 let mut out = Vec::with_capacity(layers.len());
                 for (pattern, color) in layers {
                     out.push(
-                        RecordHash::new()
+                        Record::<O>::new()
                             .field(
                                 "pattern",
-                                entry(names, "minecraft:banner_pattern", *pattern)?,
+                                entry_with::<O>(names, "minecraft:banner_pattern", *pattern)?,
                             )
-                            .field("color", pick(&DYE, *color)?)
+                            .field("color", pick_with::<O>(&DYE, *color)?)
                             .build(),
                     );
                 }
-                HashOps::create_list(out)
+                O::create_list(out)
             }
-            Self::PaintingVariant(i) => entry(names, "minecraft:painting_variant", *i)?,
-            Self::Profile(p) => raw::profile(p),
+            Self::PaintingVariant(i) => entry_with::<O>(names, "minecraft:painting_variant", *i)?,
+            Self::Profile(p) => raw::profile_with::<O>(p),
             Self::TrimDirect { .. } => {
                 let mut writer = crate::buf::Writer::new();
                 self.write(id, &mut writer);
-                raw::code(id, &writer.data, names)?
+                raw::code_with::<O>(id, &writer.data, names)?
             }
-            Self::Raw(bytes) => raw::code(id, bytes, names)?,
+            Self::Raw(bytes) => raw::code_with::<O>(id, bytes, names)?,
         })
     }
 
