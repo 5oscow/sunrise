@@ -201,6 +201,7 @@ fn a_dead_spectator_touching_an_unloaded_chunk_does_not_tick_its_death() {
 fn leftover_sleep_countdown_waits_at_the_unloaded_edge_then_resumes() {
     mod_platform::testing::with_mods(Vec::new().into(), || {
         with_game(|game| {
+            game.world_root = game.save.root.clone();
             open_to_lan(game);
             game.world
                 .chunks
@@ -253,6 +254,7 @@ fn pre_teleport_to_unloaded_edge_keeps_the_resolved_body_tick() {
         vec![mod_api::ModEntry::new("move", Box::new(Move))].into(),
         || {
             with_game(|game| {
+                game.world_root = game.save.root.clone();
                 open_to_lan(game);
                 game.world
                     .chunks
