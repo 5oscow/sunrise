@@ -31,6 +31,7 @@ pub(crate) mod menu_slot_place;
 // hidden: owned trading values are re-exported at the API root
 #[doc(hidden)]
 pub mod merchant;
+pub(crate) mod potions;
 // hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod recipe_book;
