@@ -8,7 +8,7 @@ end = s.index('    runs-on:', start)
 s = s[:start] + '      matrix: ${{ fromJSON(needs.decide.outputs.matrix) }}\n' + s[end:]
 s = s.replace('  HORIZON_TELEMETRY_URL: "off"', '''  HORIZON_TELEMETRY_URL: "off"
   HORIZON_LAUNCHER_REPOSITORY: ${{ github.repository }}
-  LAUNCHER_PREFIX: ${{ github.repository == 'sunrise-org/sunrise' && 'horizon-fork-launcher' || 'horizon-launcher' }}
+  LAUNCHER_PREFIX: ${{ github.repository == 'sunrise-org/sunrise' && 'sunrise-launcher' || 'horizon-launcher' }}
   LAUNCHER_INSTALL_FOLDER: ${{ github.repository == 'sunrise-org/sunrise' && 'Sunrise Launcher' || 'Horizon Launcher' }}
   LAUNCHER_PACKAGING: ${{ github.repository == 'sunrise-org/sunrise' && '../.local/fork-launcher-packaging' || '../packaging' }}''')
 s = s.replace('      release: ${{ steps.decide.outputs.release }}', '      matrix: ${{ steps.matrix.outputs.matrix }}\n      release: ${{ steps.decide.outputs.release }}')
