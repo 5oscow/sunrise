@@ -40,7 +40,6 @@
 - [Items, recipes and loot](how-to/items.md)
 - [Entities, players and commands](how-to/entities.md)
 - [Client, rendering and sound](how-to/client.md)
-  - [Sending vanilla play packets](how-to/client/packets.md)
 
 # Reference
 
