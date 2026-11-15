@@ -1,9 +1,12 @@
 //! Private custom-book connection state and client network services.
 use super::Game;
+#[path = "native_net/packet_hold.rs"]
+mod packet_hold;
 use mod_api::{SendPacketError, ServerboundPlayPacket};
 use std::collections::HashMap;
 #[derive(Default)]
 pub(super) struct NativeNet {
+    pub(super) holds: std::cell::RefCell<packet_hold::Holds>,
     pub(super) placement: super::native_book_placement::State,
     pub(super) book_connections:
         HashMap<u32, horizon_client::recipe_book::settings_connection::Connection>,
@@ -70,8 +73,9 @@ impl Game<'_> {
         if !remote.joined || remote.reconfiguring.is_some() {
             return Err(SendPacketError::NotInPlay);
         }
+        let body = packet.clone();
         let prepared = remote.session.prepare_mod_packet(packet)?;
-        self.after_commit(super::transactions::After::Packet(prepared));
+        self.after_commit(super::transactions::After::Packet(prepared, body));
         Ok(())
     }
 }

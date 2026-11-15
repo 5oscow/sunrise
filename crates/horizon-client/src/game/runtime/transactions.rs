@@ -249,7 +249,10 @@ pub(super) enum After {
     /// Reserved raw bytes publish only when their connection incarnation is still live.
     Payload(super::payload_transport::Deferred),
     /// A mod's validated vanilla packet, bound to its physical protocol incarnation.
-    Packet(horizon_client::net::PreparedPacket),
+    Packet(
+        horizon_client::net::PreparedPacket,
+        mod_api::ServerboundPlayPacket,
+    ),
     Cauldron(super::cauldron_interactions::Effects),
     Composter(super::composter::Effects),
     /// A mod's world pickup or placement of fluid, its block already set: what is left of it
@@ -931,7 +934,7 @@ impl Game<'_> {
     fn run_after(&mut self, after: After) {
         match after {
             After::Payload(payload) => payload.publish(),
-            After::Packet(packet) => packet.publish(),
+            After::Packet(packet, body) => self.publish_mod_held(packet, body),
             After::Cauldron(effects) => self.commit_cauldron_effects(effects),
             After::Composter(effects) => self.commit_composter_effects(effects),
             After::FluidWrite(written) => self.commit_fluid_write(*written),

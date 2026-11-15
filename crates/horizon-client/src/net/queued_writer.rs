@@ -78,17 +78,37 @@ pub struct PreparedPacket {
     payload: PreparedPayload,
 }
 impl PreparedPacket {
+    /// Whether this reservation still belongs to the current physical play incarnation.
+    pub fn is_current(&self) -> bool {
+        self.writer.upgrade().is_some_and(|writer| {
+            let phase = writer.phase.lock().unwrap();
+            phase.0 == self.generation
+                && phase.1 == Phase::Play
+                && writer.alive.load(Ordering::Acquire)
+        })
+    }
+
     pub fn publish(self) {
-        let Some(writer) = self.writer.upgrade() else {
-            return;
-        };
+        let _ = self.try_publish();
+    }
+    pub fn try_publish(self) -> std::result::Result<(), SendPacketError> {
+        let writer = self.writer.upgrade().ok_or(SendPacketError::NotConnected)?;
         let phase = writer.phase.lock().unwrap();
-        if phase.0 == self.generation && phase.1 == Phase::Play {
-            let _ = self.payload.publish();
+        if phase.0 != self.generation || phase.1 != Phase::Play {
+            return Err(SendPacketError::NotInPlay);
         }
+        self.payload.publish().map_err(|error| match error {
+            PayloadSendError::Backpressure => SendPacketError::Backpressure,
+            _ => SendPacketError::NotConnected,
+        })
     }
 }
 impl QueuedWriter {
+    pub(crate) fn play_incarnation(&self) -> Option<u64> {
+        let phase = self.phase.lock().unwrap();
+        (phase.1 == Phase::Play && self.alive.load(Ordering::Acquire)).then_some(phase.0)
+    }
+
     #[cfg(any(test, feature = "test-payload-probe"))]
     pub(crate) fn diagnostics(&self) -> String {
         let stats = match self.sender.try_lock() {

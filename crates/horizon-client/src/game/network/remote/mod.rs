@@ -1554,6 +1554,7 @@ impl Game<'_> {
         if self.remote.is_some() {
             self.native_client_disconnecting();
         }
+        self.native_net.holds.borrow_mut().clear();
         if let Some(mut r) = self.remote.take() {
             r.session.disconnect();
         }
@@ -1657,15 +1658,6 @@ impl Game<'_> {
             }
             self.send_play(packet);
         }
-    }
-    /// `Connection.send` for the game's play packets: a mod may cancel one
-    /// (`client_packet_send`), and the server never hears of it. True when queued.
-    pub(super) fn send_play(&self, packet: S) -> bool {
-        let queued = self.remote.is_some() && !self.client_packet_send_canceled(&packet);
-        if let (true, Some(r)) = (queued, &self.remote) {
-            r.session.send(packet);
-        }
-        queued
     }
     fn send_action(&self, action: i32) {
         self.send(S::PlayerAction(play::PlayerAction {
@@ -2305,6 +2297,7 @@ impl Game<'_> {
                     self.native_lifecycle_world_closed();
                     let ticks = self.ticks;
                     if let Some(r) = self.remote.as_mut() {
+                        self.native_net.holds.borrow_mut().clear();
                         r.reconfiguring = Some(ticks);
                         r.chat_tree_received = false;
                     }

@@ -41,6 +41,20 @@ pub trait NetworkClientHost {
     /// state required by a packet remain the mod's responsibility. API 409.
     #[access(WorldOnly)]
     fn send_packet(&mut self, packet: ServerboundPlayPacket) -> Result<(), SendPacketError>;
+    /// Side: client. Starts an ordered hold of uncancelled outgoing play packets.
+    /// A second hold is refused with Limit while one is active. The limits are 256 packets
+    /// and 1,048,576 encoded bytes. Overflow ends and flushes the hold oldest first;
+    /// its next release or drop returns Limit. Network-thread replies bypass holds.
+    #[access(WorldOnly)]
+    fn hold_packets(&mut self) -> Result<HoldId, HoldError>;
+    /// Side: client. Sends the queue oldest first and ends the hold. On failure,
+    /// Send reports the number published and the remaining packets are dropped.
+    /// Disconnect, protocol changes and aborted travel invalidate the id.
+    #[access(WorldOnly)]
+    fn release_held(&mut self, hold: HoldId) -> Result<usize, HoldError>;
+    /// Side: client. Ends the hold and discards its packets without publication.
+    #[access(WorldOnly)]
+    fn drop_held(&mut self, hold: HoldId) -> Result<(), HoldError>;
     /// Side: client.
     /// Leaves the server or the single-player world (NeoForge's
     /// `IClientCommonPacketListenerExtension.disconnect(Component)`), at the end of this frame,

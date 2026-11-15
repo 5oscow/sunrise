@@ -2598,7 +2598,7 @@ mod tests {
             *game.world.random = horizon_core::random::LegacyRandom::new(12345);
             let item = ItemStack::new("minecraft:apple", 1);
             game.inventory[game.selected] = Some(item.clone());
-            game.drop_held(true);
+            game.drop_held_item(true);
             let key_velocity = game.dropped.last().unwrap().velocity;
             *game.world.random = horizon_core::random::LegacyRandom::new(12345);
             crate::game::native_entity_refs::tests::bind_local_player(game, 42, 123);

@@ -50,7 +50,7 @@ fn a_thrown_item_takes_the_throwers_random_not_the_levels() {
     game.pitch = 0.0;
     game.inventory[game.selected] = Some(ItemStack::new("minecraft:stone", 4));
     let level = game.world.random.state();
-    game.drop_held(false);
+    game.drop_held_item(false);
     let thrown = game.dropped.last().expect("the drop key threw the stack");
     let velocity = thrown.velocity;
     assert!(
@@ -65,7 +65,7 @@ fn a_thrown_item_takes_the_throwers_random_not_the_levels() {
         "the throw drew from the level's random"
     );
     // The next throw scatters differently: the thrower's stream is live.
-    game.drop_held(false);
+    game.drop_held_item(false);
     assert_ne!(game.dropped.last().unwrap().velocity, velocity);
     assert_eq!(game.world.random.state(), level);
 }
