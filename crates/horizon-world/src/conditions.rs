@@ -561,10 +561,21 @@ fn evaluate(
             Some("neoforge:true") => Some(true),
             Some("neoforge:false") => Some(false),
             Some("neoforge:feature_flags_enabled") => match &context.features {
-                Some(enabled) => Some(c["flags"].as_array().into_iter().flatten().all(|flag| {
-                    flag.as_str()
-                        .is_some_and(|flag| enabled.contains(&qualified(flag)))
-                })),
+                Some(enabled) => {
+                    let Some(flags) = c["flags"].as_array() else {
+                        unknown("neoforge:feature_flags_enabled (invalid flags)");
+                        return Ok(None);
+                    };
+                    let mut answer = true;
+                    for flag in flags {
+                        let Some(flag) = flag.as_str() else {
+                            unknown("neoforge:feature_flags_enabled (invalid flags)");
+                            return Ok(None);
+                        };
+                        answer &= enabled.contains(&qualified(flag));
+                    }
+                    Some(answer)
+                }
                 None => {
                     unknown("neoforge:feature_flags_enabled (no feature flags in this load)");
                     None
@@ -582,11 +593,13 @@ fn evaluate(
                 }
             },
             Some("neoforge:tag_empty") => match &context.tags {
-                Some(tags) => Some(
-                    !c["tag"]
-                        .as_str()
-                        .is_some_and(|tag| tags.contains(&registry(), &qualified(tag))),
-                ),
+                Some(tags) => match c["tag"].as_str() {
+                    Some(tag) => Some(!tags.contains(&registry(), &qualified(tag))),
+                    None => {
+                        unknown("neoforge:tag_empty (invalid tag)");
+                        None
+                    }
+                },
                 None => {
                     unknown("neoforge:tag_empty (tags not loaded yet)");
                     None
@@ -832,6 +845,31 @@ mod tests {
         let with_tin = candidate.with_tags([("minecraft:item", vec!["c:ingots/tin"])]);
         assert!(empty.allows_file(&tin, "data/a/recipe/b.json"));
         assert!(!with_tin.allows_file(&tin, "data/a/recipe/b.json"));
+    }
+
+    #[test]
+    fn malformed_flags_and_tags_stay_unsupported_under_not() {
+        for malformed in [
+            json!({"type": "neoforge:feature_flags_enabled"}),
+            json!({"type": "neoforge:feature_flags_enabled", "flags": null}),
+            json!({"type": "neoforge:feature_flags_enabled", "flags": "vanilla"}),
+            json!({"type": "neoforge:feature_flags_enabled", "flags": [false]}),
+            json!({"type": "neoforge:feature_flags_enabled", "flags": ["test:missing", 1]}),
+            json!({"type": "neoforge:tag_empty"}),
+            json!({"type": "neoforge:tag_empty", "tag": null}),
+            json!({"type": "neoforge:tag_empty", "tag": []}),
+            json!({"type": "neoforge:tag_empty", "tag": 1}),
+        ] {
+            let not = json!({"type": "neoforge:not", "value": malformed.clone()});
+            let twice = json!({"type": "neoforge:not", "value": not.clone()});
+            for condition in [malformed, not, twice] {
+                let conditions = LoadConditions::new([])
+                    .with_features(["vanilla"])
+                    .with_tags([("item", Vec::<&str>::new())]);
+                assert!(!conditions.allows_file(&file(condition), "data/test/recipe/bad.json"));
+                assert!(conditions.check_resource_errors("recipe").is_err());
+            }
+        }
     }
 
     #[test]
