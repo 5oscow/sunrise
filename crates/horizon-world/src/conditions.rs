@@ -27,6 +27,7 @@ impl LoadConditions {
             registered: None,
             context: Context {
                 features: None,
+                feature_fingerprint: None,
                 registries: None,
                 tags: None,
             },
@@ -117,6 +118,10 @@ impl LoadConditions {
         if flags.is_empty() {
             flags.insert("minecraft:vanilla".to_owned());
         }
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::hash::DefaultHasher::new();
+        flags.hash(&mut hasher);
+        self.context.feature_fingerprint = Some(hasher.finish());
         self.context.features = Some(Arc::new(flags));
         self
     }
@@ -415,6 +420,7 @@ impl std::hash::Hash for Diagnostics {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 struct Context {
     features: Option<Arc<BTreeSet<String>>>,
+    feature_fingerprint: Option<u64>,
     registries: Option<Arc<Names>>,
     tags: Option<Arc<Names>>,
 }
@@ -423,7 +429,7 @@ impl Context {
     fn key(&self) -> u64 {
         use std::hash::{Hash, Hasher};
         let mut hasher = std::hash::DefaultHasher::new();
-        self.hash(&mut hasher);
+        (&self.feature_fingerprint, &self.registries, &self.tags).hash(&mut hasher);
         hasher.finish()
     }
 }
