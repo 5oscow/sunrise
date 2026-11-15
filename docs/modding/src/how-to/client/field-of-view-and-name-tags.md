@@ -44,9 +44,14 @@ let _ = event.draw.name_tag([x + 0.5, y + 1.0, z + 0.5], &Text::literal("Furnace
 
 | `NameTagOptions` field | Meaning |
 | --- | --- |
-| `see_through` | Also draw a faded copy over everything, walls included |
-| `background` | The black backdrop, at the player's text background opacity |
-| `light` | The light at the label: sky light in the high four bits, block light in the low four |
+| `see_through` | Off: drawn once, faded and translucent, hidden behind walls (a sneaking name). On: opaque in the world and a faded copy over everything, walls included |
+| `background` | The black backdrop behind the faded text, at the player's text background opacity |
+| `light` | The light at the label: sky light in the high four bits, block light in the low four (`0xF0` full sky, `0x0F` full block) |
+
+Without `see_through` the label is drawn in exactly `light`. With it, the copy in the world raises the sky and block
+levels to at least 2 each, and the copy over everything is unlit. The backdrop's alpha is 255 times the player's text
+background opacity (0.25 when the background is for chat only), and the faded text's is 255 times the larger of
+(opacity + 0.75) / 2 and 0.5: 0x3F and 0x7F at the defaults. Labels are drawn with the world's name tags, far to near.
 
 A label is 0.025 blocks a font pixel, so it shrinks with distance; scale by distance yourself for a constant size.
 Its quads share the view's 4,096 with `quads`. A position that is not finite, text deeper than 512 component nodes
