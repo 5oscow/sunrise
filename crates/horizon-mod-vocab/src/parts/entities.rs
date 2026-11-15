@@ -70,6 +70,23 @@ impl HookParts {
     }
 }
 
+/// The refusal a wasm mod's entity part earns by overriding a native-only
+/// method: the part crosses with its [`general_entity_tick`] alone (#792 stage
+/// 4b), so the override would be silently never called. The subscription macro
+/// records the overrides as [`EntityPart::entity_native_only`] capability
+/// metadata; the generated wasm attach wrapper consults it where the real part
+/// lives, and delivers this refusal through the registration refusal channel.
+// hidden: the generated wasm boundary's refusal, not a mod authoring surface.
+#[doc(hidden)]
+pub fn entity_part_native_only_refusal(part: &dyn EntityPart) -> Option<String> {
+    let native_only = part.entity_native_only();
+    let first = *native_only.first()?;
+    Some(format!(
+        "EntityPart::{first}: a wasm entity part crosses with its general_entity_tick alone \
+         (#792 stage 4b), so its native-only methods may not be overridden on wasm"
+    ))
+}
+
 /// Whether any mod registered a provider of entity capability `key`, for any entity type: one
 /// table lookup, no allocation, so the game's own lookups skip all their work where none did.
 pub fn has_entity_providers<T: ?Sized + 'static, C: 'static>(
