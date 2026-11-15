@@ -9568,6 +9568,13 @@ impl Game<'_> {
                         }
                         return Ok(());
                     }
+                    // The item panel beside a container screen pages on the
+                    // wheel over it, as JEI's cancelled MouseScrolled.Pre: the
+                    // screen underneath (bundle, creative tabs' list, station)
+                    // and the Post event hear nothing of that notch.
+                    if d != 0.0 && self.mod_browser_wheel(d) {
+                        return Ok(());
+                    }
                     let stick_scroll = self.pad_stick_scroll();
                     let step_scroll = self.pad_step_scroll();
                     if self.title_input_active()

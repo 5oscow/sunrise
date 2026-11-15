@@ -4,8 +4,10 @@
 //! in pages right of the screen's window, with a search box under them. The
 //! mod says what the panel holds; the game pages it and tells the mod what
 //! the player clicked, typed, and which keys went down over an item
-//! (`native_panel_event`). With no mod showing a panel, each hook here
-//! returns after one check.
+//! (`native_panel_event`). The mouse wheel over the panel pages it, items
+//! or recipes, one page per notch and stopping at both ends, and the screen
+//! underneath doesn't hear that notch. With no mod showing a panel, each
+//! hook here returns after one check.
 use super::{
     Game, Screen, native_hooks::PanelEvent as BrowserEvent, native_panel_recipes::RecipePage,
 };
@@ -317,6 +319,32 @@ fn icon_tint(on: bool, hovered: bool) -> u32 {
 
 pub(super) fn inside(p: (f32, f32), [x, y, w, h]: [f32; 4]) -> bool {
     p.0 >= x && p.1 >= y && p.0 < x + w && p.1 < y + h
+}
+
+/// A wheel notch `d` (positive is up, as winit's) with the pointer at
+/// `cursor`: the page of `pages` the panel in `area` turns to from `page`,
+/// one per notch, down forward and up back, stopping at both ends (it never
+/// wraps, even in the classic look); `None` when the pointer is off the
+/// panel, and the screen underneath hears the notch.
+pub(super) fn wheel_turn(
+    cursor: (f32, f32),
+    area: [f32; 4],
+    page: usize,
+    pages: usize,
+    d: f32,
+) -> Option<usize> {
+    if !inside(cursor, area) {
+        return None;
+    }
+    let last = pages.saturating_sub(1);
+    let page = page.min(last);
+    Some(if d < 0.0 {
+        (page + 1).min(last)
+    } else if d > 0.0 {
+        page.saturating_sub(1)
+    } else {
+        page
+    })
 }
 
 impl Game<'_> {
@@ -815,6 +843,31 @@ impl Game<'_> {
             return true;
         }
         inside(cursor, layout.area)
+    }
+
+    /// A wheel notch `d` on a container screen (positive is up): true when
+    /// the pointer is over the panel, which turns one page (`wheel_turn`;
+    /// its recipe pages too) and keeps the notch from the screen
+    /// underneath. With no panel shown, `browser_sync` returns at once.
+    pub(super) fn mod_browser_wheel(&mut self, d: f32) -> bool {
+        let Some(owner) = self.browser_sync() else {
+            return false;
+        };
+        let Some(batch) = self.browser_batch() else {
+            return false;
+        };
+        let Some(layout) = self.browser_layout(&batch) else {
+            return false;
+        };
+        if self.panel.recipes.is_some() {
+            return self.browser_recipes_wheel(&layout, &owner, d);
+        }
+        let pages = self.browser_pages(&layout);
+        let Some(to) = wheel_turn(self.cursor, layout.area, self.panel.page, pages, d) else {
+            return false;
+        };
+        self.panel.page = to;
+        true
     }
 
     /// Whether keys go to the panel's search box.

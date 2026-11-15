@@ -9,7 +9,7 @@ use super::{
         NativeRecipeLayout as BrowserLayout, NativeRecipeResult as BrowserResult,
         NativeRecipeView as BrowserRecipe, PanelEvent as BrowserEvent,
     },
-    native_panel::{Layout, Owner, browser_stack, inside},
+    native_panel::{Layout, Owner, browser_stack, inside, wheel_turn},
 };
 use horizon_client::{
     hud::{HudBatch, rgba},
@@ -749,6 +749,26 @@ impl Game<'_> {
     }
 
     /// A press on the recipes: true when it hit one of their parts.
+    /// A wheel notch `d` over the recipe pages: turns them as the arrows
+    /// do (`wheel_turn`, telling the mod of a turn); false off the panel.
+    pub(super) fn browser_recipes_wheel(&mut self, layout: &Layout, owner: &Owner, d: f32) -> bool {
+        let Some(pages) = &self.panel.recipes else {
+            return false;
+        };
+        let starts = Self::recipe_pages(pages, layout);
+        let page = pages.page.min(starts.len() - 1);
+        let Some(to) = wheel_turn(self.cursor, layout.area, page, starts.len(), d) else {
+            return false;
+        };
+        if to != page {
+            if let Some(p) = self.panel.recipes.as_mut() {
+                p.page = to;
+            }
+            self.panel_event(owner, BrowserEvent::Page(starts[to] as u32));
+        }
+        true
+    }
+
     pub(super) fn browser_recipes_press(
         &mut self,
         layout: &Layout,
