@@ -712,9 +712,8 @@ pub fn decode_end_gateway(tag: &Tag) -> crate::containers::EndGateway {
 }
 /// A mod's block entity: its compound without `id` and the position, and
 /// its `Items` as slots (`ContainerHelper.loadAllItems`; the game sizes them
-/// to the block's container when it uses them; each entry goes to its own
-/// `Slot`, in any list order). `Items` that are not an item list (and saved
-/// by slot, ascending, as we write them) stay the mod's own.
+/// to the block's container when it uses them). `Items` that do not re-encode
+/// exactly (compared in slot order) stay the mod's own.
 fn decode_mod_block_entity(id: String, tag: &Tag) -> Option<crate::containers::ModBlockEntity> {
     let Tag::Compound(map) = tag else {
         return None;
@@ -726,15 +725,16 @@ fn decode_mod_block_entity(id: String, tag: &Tag) -> Option<crate::containers::M
     // `Slot` is a byte: 256 slots at most.
     let mut items = decode_items(nbt.get(&"Items".into()), 256);
     // Compared in slot order, the order `encode_items` writes: vanilla loads by `Slot`.
-    let saved = nbt.get(&"Items".into()).map(|tag| match tag {
-        Tag::List(list) => {
-            let mut list = list.clone();
-            list.sort_by_key(|entry| number(entry.get("Slot")).unwrap_or(0) as u8);
-            Tag::List(list)
+    let encoded = encode_items(&items);
+    let matches = match (nbt.get(&"Items".into()), &encoded) {
+        (Some(Tag::List(saved)), Tag::List(encoded)) => {
+            let mut saved: Vec<&Tag> = saved.iter().collect();
+            saved.sort_by_key(|entry| number(entry.get("Slot")).unwrap_or(0) as u8);
+            saved.into_iter().eq(encoded.iter())
         }
-        other => other.clone(),
-    });
-    if saved == Some(encode_items(&items)) {
+        (saved, encoded) => saved == Some(encoded),
+    };
+    if matches {
         nbt.remove(&"Items".into());
         while items.last().is_some_and(Option::is_none) {
             items.pop();
