@@ -5009,19 +5009,9 @@ impl Game<'_> {
                         attack: (indicator == 2).then_some(strength),
                     };
                     let draws = hud_layout::hotbar(wi, hi, &inputs);
-                    hud_layout::paint(batch, &g.gui.atlas, &draws);
-                    for d in &draws {
-                        if let hud_layout::GuiDraw::Item { slot, x, y, .. } = *d {
-                            let stack = if slot == 40 {
-                                g.offhand.as_ref()
-                            } else {
-                                g.inventory[slot as usize].as_ref()
-                            };
-                            if let Some(stack) = stack {
-                                g.draw_item(batch, stack, x as f32, y as f32);
-                            }
-                        }
-                    }
+                    // `extractSlot` for each item, in order, on the path `gui_paint` takes.
+                    let mut items = crate::game::gui_paint_items::HotbarItems { game: g };
+                    hud_layout::paint_items(batch, &g.gui.atlas, &draws, &mut items);
                 }
             });
             self.gui_layer("minecraft:effects", &mut batch, |g, batch| {

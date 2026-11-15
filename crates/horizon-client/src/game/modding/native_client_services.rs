@@ -4,17 +4,12 @@
 use super::Game;
 use horizon_client::{
     hud::{HudBatch, rgba},
-    hud_layout::GuiDraw,
     text::Text,
 };
 use horizon_items::items::ItemStack as EngineStack;
 use mod_api::{TextFieldLayout, TextFieldView};
 
 impl Game<'_> {
-    /// Paint GUI extraction calls through this window's atlas, including player faces.
-    pub(super) fn native_gui_paint(&self, batch: &mut HudBatch, draws: &[GuiDraw]) {
-        horizon_client::hud_layout::paint(batch, &self.gui.atlas, draws);
-    }
     /// Vanilla's nine-slice widget rendering. `color` is ARGB, as `fill` uses.
     pub(super) fn native_gui_nine_slice(
         &self,
