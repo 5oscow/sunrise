@@ -816,6 +816,7 @@ impl WasmMod {
     /// process, so a test process cannot load a fresh instance instead. Test
     /// support only — the game never re-enables a stopped group.
     #[doc(hidden)]
+    #[cfg(feature = "runtime-fixture")]
     pub fn rearm_after_a_test(&self) {
         self.running.poisoned.store(false, Ordering::Relaxed);
     }
