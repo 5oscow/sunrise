@@ -39,6 +39,40 @@ def notes(chosen=None, picked=(), left_out=(), merged=(), issues=()):
 
 
 class NightlyTests(unittest.TestCase):
+    def test_release_keys_and_publishers_stay_on_github_hosted_runners(self):
+        import re
+        from tests.test_ci_concurrency import ROOT, yaml
+
+        workflows = ROOT / ".github/workflows"
+        for path in sorted(workflows.iterdir()):
+            if path.suffix not in (".yml", ".yaml"):
+                continue
+            workflow = yaml.load(path.read_text(), Loader=yaml.BaseLoader)
+            for name, job in workflow.get("jobs", {}).items():
+                environment = job.get("environment", "")
+                if isinstance(environment, dict):
+                    environment = environment.get("name", "")
+                permissions = job.get("permissions", workflow.get("permissions", {}))
+                writes_contents = permissions == "write-all" or (
+                    isinstance(permissions, dict) and permissions.get("contents") == "write")
+                definition = json.dumps(job)
+                publisher = writes_contents and (
+                    re.search(r"publish|release", name + " " + job.get("name", ""), re.I)
+                    or "gh release " in definition)
+                sensitive = (re.search(r"\brelease\b", environment)
+                             or "RELEASE_SIGNING_KEY" in definition or publisher)
+                if not sensitive:
+                    continue
+                with self.subTest(workflow=path.name, job=name):
+                    if "uses" in job:
+                        # Reusable calls have no runner. Their local concrete jobs are checked by this same scan.
+                        self.assertTrue(job["uses"].startswith("./.github/workflows/"),
+                                        "release publishing must use a local, inspectable workflow")
+                        self.assertTrue((ROOT / job["uses"]).is_file())
+                        continue
+                    self.assertEqual(job.get("runs-on"), "ubuntu-latest",
+                                     "release environments, signing keys and publishers must stay on GitHub")
+
     def test_only_old_dated_nightlies_are_pruned(self):
         tags = [{"tagName": "nightly", "isPrerelease": True},
                 {"tagName": "nightly-2026-10-20", "isPrerelease": True},
