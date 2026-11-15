@@ -100,6 +100,39 @@ pub trait DrawContext {
     fn text_width(&self, text: &str) -> f32 {
         unimplemented!("DrawContext::text_width")
     }
+    /// Lays `text` out as the lines a label shows, wrapped to `max_width` GUI pixels and placed by
+    /// `align`: measurement and layout only, nothing is drawn, and no widget, theme or state is
+    /// involved. Draw each line where it says, and the label is the mod's own.
+    ///
+    /// Wrapping is vanilla's (`Font.split`, as [`crate::ClientTextClientHost::text_split`] wraps):
+    /// a line breaks at a space that fits, a single word wider than `max_width` is broken at a
+    /// character rather than dropped, and an explicit `\n` starts a new line, so a trailing `\n`
+    /// leaves an empty last line. Styles and colours inside the component are kept in each line's
+    /// `Text`, and each line's `width` is what `Font.width` answers for it, styles included.
+    ///
+    /// A `max_width` of zero or less, or one that is not finite, means no wrapping: one line per
+    /// explicit newline, every line at `x` zero because there is no width to place them in.
+    /// A negative `line_spacing` overlaps lines; a huge one spaces them out.
+    ///
+    /// One line is `Font.lineHeight` high and `line_spacing` separates lines, so the last line's
+    /// `at[1]` plus one line height is exactly [`TextLines::height`]: a scroll container sizes its
+    /// content from it. Empty text has no line at all, and then `width` and `height` are zero.
+    ///
+    /// Each line's `Text` keeps its styles when it is drawn through
+    /// [`gui_paint`](Self::gui_paint)'s [`GuiDraw::Text`](crate::GuiDraw::Text); [`text`](Self::text)
+    /// draws plain characters, so a styled label is `GuiDraw::Text`'s. A line can still be wider
+    /// than `max_width` when one character alone is.
+    ///
+    /// Refuses text deeper than 512 component nodes before laying anything out.
+    fn text_lines(
+        &self,
+        text: &Text,
+        max_width: f32,
+        align: TextAlign,
+        line_spacing: f32,
+    ) -> Result<TextLines, TextFormError> {
+        unimplemented!("DrawContext::text_lines")
+    }
     /// Fluid `fluid` (`minecraft:water`, `mymod:oil`) drawn as a square with its top left at `at`, `size`
     /// GUI pixels wide (16 in a slot): the sprite its look names (`data/<mod>/sunrise/fluid/<name>.json`)
     /// tinted with its colour, else a flat square of the colour, which vanilla water and lava have. What a

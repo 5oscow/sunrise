@@ -74,3 +74,33 @@ It refuses, returning `false` and changing nothing, with no mod screen open, for
 `Screen::slots` or hidden there with `None`, and for an `x` or `y` that is NaN or infinite. It never panics.
 It moves only the slots a mod screen declares; the player's inventory stays under `inventory_x` and
 `inventory_y`, and showing or hiding a slot stays with `Screen::slots`.
+
+## Labels: wrapped text without a widget
+
+A label is text laid out in a box: measured, wrapped and placed, and nothing else. Call
+`DrawContext::text_lines` from a drawing hook with the component, the box's width, an alignment and the
+spacing between lines, and draw the lines it answers with where it says:
+
+```rust
+// From screen_render_post, gui_render_post or another drawing hook.
+let lines = draw.text_lines(&label, 120.0, TextAlign::Centre, 2.0)?;
+let mut draws = Vec::with_capacity(lines.lines.len());
+for line in &lines.lines {
+    draws.push(GuiDraw::Text {
+        text: line.text.clone(),
+        x: (x + line.at[0]) as i32,
+        y: (y + line.at[1]) as i32,
+        color: 0xFFFF_FFFF,
+        shadow: false,
+    });
+}
+draw.gui_paint(&draws)?;
+// lines.width and lines.height size the box you reserved for it.
+```
+
+Wrapping is vanilla's: a line breaks at a space that fits, a single word wider than the box is broken at
+a character rather than dropped, and an explicit `\n` starts a new line. A width of zero or less, or one
+that is not finite, means no wrapping at all. Each line keeps its styles, so `GuiDraw::Text` is what draws
+it; `DrawContext::text` draws plain characters only. `height` is the last line's `at[1]` plus one line
+height, so a scroll container sizes its content from it, and an empty component has no line at all. Text
+deeper than 512 component nodes is refused, as the other text-drawing methods refuse it.
