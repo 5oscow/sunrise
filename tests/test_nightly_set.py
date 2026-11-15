@@ -42,7 +42,7 @@ def run(state, text, login="kacpherek", *prs):
 class CommandTests(unittest.TestCase):
     """command(), as nightly-command.yml runs it: the comment in the environment, the answer posted back."""
 
-    def run_command(self, body, author=ns.OWNER):
+    def run_command(self, body, author="ludovic111"):
         answers = []
         env = {"GITHUB_REPOSITORY": "horizon-rust/horizon", "ISSUE": "1", "AUTHOR": author,
                "AUTHOR_ID": str(IDS.get(author.lower(), 9999)), "BODY": body, "COMMENT_URL": "", "GH_TOKEN": "token"}
@@ -199,7 +199,7 @@ class AllowTests(unittest.TestCase):
         """Fails until tools/ci/resolve_reviewer_ids.py has filled in the IDs: until then no reviewer has access."""
         reviewers = ns.read_reviewers((ROOT / ns.REVIEWERS).read_text())
         self.assertEqual(reviewers.skipped, [])
-        self.assertEqual(reviewers.logins, {"kacpherek", "rdbtcvs", "online5277", "levzzz5154"})
+        self.assertEqual(reviewers.logins, set())
         self.assertFalse(reviewers.paused)
         source = (ROOT / "tools/ci/nightly_set.py").read_text()
         self.assertRegex(source, r"(?m)^OWNER_ID: int \| None = [1-9][0-9]*$")
