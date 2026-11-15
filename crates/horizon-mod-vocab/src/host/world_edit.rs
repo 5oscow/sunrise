@@ -88,4 +88,31 @@ pub trait WorldEditServerHost {
         rotation: StructureRotation,
         mirror: StructureMirror,
     ) -> Option<StructureTemplateSnapshot>;
+    /// Side: server.
+    /// For a server mod: template `source` placed at `at` the way `/place template`
+    /// and a structure block's load place one, with `rotation`, `mirror` and
+    /// `pivot`, the level position the turn and the mirroring go around (`at`,
+    /// which `/place template` uses, turns the template about its own origin).
+    /// Blocks, block-entity data and the template's own entities come through
+    /// vanilla's placement, so states are mirrored then turned, block entities
+    /// keep their data and get the loot seed a placement gives them, and
+    /// entities are spawned as the game spawns them: no processor runs, nothing
+    /// is `strict`, and the neighbours of a replaced block are not told. A
+    /// template read from structure NBT is read by the game's own loader, within
+    /// vanilla's limits for a template file (a `structure/*.nbt` read under
+    /// `NbtAccounter.unlimitedHeap`, gzipped or plain). `Err` says why nothing
+    /// was placed: an id that doesn't parse or has a `.` or `..` part, a
+    /// template the game doesn't have, NBT that doesn't read or is past those
+    /// limits, a template that places nothing, a client of a server, a chunk of
+    /// the template's box not loaded, or the game's structure resources missing.
+    /// API @API:structure_template@.
+    #[access(WorldOnly)]
+    fn place_template(
+        &mut self,
+        source: &StructureTemplateSource,
+        at: [i32; 3],
+        pivot: [i32; 3],
+        rotation: StructureRotation,
+        mirror: StructureMirror,
+    ) -> Result<(), String>;
 }
