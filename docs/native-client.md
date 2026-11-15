@@ -359,7 +359,11 @@ says whether it arrived, `break` what dropped and what was picked up, `place`
 the block placed. `stop` cancels the running action. Every reply is one JSON
 line; errors are `{"error": "..."}` objects, and the exit status is 0 on
 success, 1 when the game replied with an error, 2 for a usage error and 3 when
-the game cannot be reached or started. `horizon-ctl script FILE` (or stdin)
+the game cannot be reached or started. A command the game ran that failed is
+not a game error: `command` replies `ok` (delivered) with `success` and `result`,
+the pair `execute store success|result` stores (`result` is `null` when the
+command never ran, a syntax error say; a joined server's reply has neither), so
+a script tests `success`, not the exit status. `horizon-ctl script FILE` (or stdin)
 runs one command per line with shell-like quoting and stops at the first error
 (`--keep-going` doesn't); `sleep S` waits. `horizon-ctl -` is the older form
 that reads stdin and keeps going.

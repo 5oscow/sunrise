@@ -203,6 +203,15 @@ pub(super) fn yaw_pitch(eye: [f64; 3], at: [f64; 3]) -> (f32, f32) {
     )
 }
 
+/// The reply of `command` when the game ran it: `ok` (the request was
+/// delivered), its feedback lines and, from the command's own result callback
+/// (`recording_command_outcome`), `success` and `result`. None when the command
+/// never reached a callback (syntax error, unknown command): `success` is
+/// false and `result` null.
+fn command_reply(chat: Vec<String>, outcome: Option<(bool, i32)>) -> Value {
+    let (success, result) = outcome.map_or((false, None), |(s, r)| (s, Some(r)));
+    json!({ "ok": true, "chat": chat, "success": success, "result": result })
+}
 fn counts(items: impl Iterator<Item = ItemStack>) -> BTreeMap<String, i64> {
     let mut map = BTreeMap::new();
     for s in items {
@@ -1799,17 +1808,20 @@ impl Game<'_> {
                 let command = format!("/{text}");
                 // Single player's console is its server thread's.
                 if let Some(server) = &self.integrated {
-                    let chat = server
+                    let (chat, outcome) = server
                         .call(move |g| g.owner_console_command(&command))
                         .ok_or(super::integrated::NO_ANSWER)?;
-                    return ok(json!({ "ok": true, "chat": chat }));
+                    return ok(command_reply(chat, outcome));
                 }
+                // A server we joined answers in the chat, not to this reply:
+                // no `success`, no `result`.
                 if self.remote.is_some() {
                     self.send_signed_chat_input(&command);
                     return ok(json!({ "ok": true }));
                 }
-                self.as_console(|g| g.handle_chat_input(&command));
-                ok(json!({ "ok": true, "chat": self.ui.chat.recent_lines(5) }))
+                let ((), outcome) = self
+                    .recording_command_outcome(|g| g.as_console(|g| g.handle_chat_input(&command)));
+                ok(command_reply(self.ui.chat.recent_lines(5), outcome))
             }
             "respawn" if self.remote.is_none() => {
                 if self.screen != Screen::Dead {
@@ -2482,6 +2494,25 @@ mod tests {
             assert_eq!(face_name(dir), name);
         }
         assert!(face_dir("sideways").is_err());
+    }
+
+    #[test]
+    fn command_reply_carries_the_commands_own_outcome() {
+        let chat = || vec!["Gave 4 Oak Log".to_owned()];
+        assert_eq!(
+            command_reply(chat(), Some((true, 4))),
+            json!({"ok": true, "chat": ["Gave 4 Oak Log"], "success": true, "result": 4})
+        );
+        // `/clear` of nothing: the command ran and failed, with result 0.
+        assert_eq!(
+            command_reply(vec![], Some((false, 0))),
+            json!({"ok": true, "chat": [], "success": false, "result": 0})
+        );
+        // Never reached its callback: delivered, not successful, no result.
+        assert_eq!(
+            command_reply(vec![], None),
+            json!({"ok": true, "chat": [], "success": false, "result": null})
+        );
     }
 
     #[test]

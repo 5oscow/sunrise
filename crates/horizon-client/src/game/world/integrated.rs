@@ -1117,15 +1117,20 @@ impl Game<'_> {
     /// The window's agent runs a command as single player's console does
     /// (`as_console`, as without a server thread): as the world's owner, in
     /// the owner's level, at the owner permission level. The feedback goes to
-    /// the owner's chat and is returned.
-    pub(super) fn owner_console_command(&mut self, command: &str) -> Vec<String> {
+    /// the owner's chat and is returned, with the command's outcome
+    /// (`recording_command_outcome`; None when nothing ran).
+    pub(super) fn owner_console_command(
+        &mut self,
+        command: &str,
+    ) -> (Vec<String>, Option<(bool, i32)>) {
         let Some(owner) = self.serving.as_ref().map(|s| s.owner) else {
-            return Vec::new();
+            return (Vec::new(), None);
         };
         let Some(host) = self.lan.as_ref() else {
-            return Vec::new();
+            return (Vec::new(), None);
         };
         let mut out = Vec::new();
+        let mut outcome = None;
         if let Some(g) = host.hub.guests.iter().find(|g| g.uuid == owner && g.placed) {
             let conn = g.conn;
             // Commands.performCommand runs in the player's level.
@@ -1133,16 +1138,19 @@ impl Game<'_> {
             let entered = theirs == back || self.enter_level(theirs).is_ok();
             if entered && let Some(swap) = self.enter_guest_in_dimension(conn, back) {
                 let command = command.strip_prefix('/').unwrap_or(command).to_owned();
-                let lines = self.as_console(|g| {
-                    g.chat_capture = Some(Vec::new());
-                    // A command a native mod registered goes to the mods
-                    // first, as the owner's own chat does (the console is
-                    // level 4, so every registered usage is allowed).
-                    if !g.perform_native_command(conn, 4, command.trim()) {
-                        g.run_command(&command);
-                    }
-                    g.chat_capture.take().unwrap_or_default()
+                let (lines, ran) = self.recording_command_outcome(|game| {
+                    game.as_console(|g| {
+                        g.chat_capture = Some(Vec::new());
+                        // A command a native mod registered goes to the mods
+                        // first, as the owner's own chat does (the console is
+                        // level 4, so every registered usage is allowed).
+                        if !g.perform_native_command(conn, 4, command.trim()) {
+                            g.run_command(&command);
+                        }
+                        g.chat_capture.take().unwrap_or_default()
+                    })
                 });
+                outcome = ran;
                 self.leave_guest(swap);
                 if let Some(host) = self.lan.as_mut() {
                     host.hub.sync_all_effects();
@@ -1175,7 +1183,7 @@ impl Game<'_> {
                 log::error!("could not reopen {}: {e}", back.id());
             }
         }
-        out
+        (out, outcome)
     }
 
     /// Run `f` with the owner's level in place (the server holds one per

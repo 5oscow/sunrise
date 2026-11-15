@@ -290,6 +290,19 @@ impl Game<'_> {
         self.command_source = outer;
         ok
     }
+    /// Runs `f` and reports the last command it ran as a source's
+    /// `CommandResultCallback` sees it: whether it succeeded and its integer
+    /// result, the pair `execute store` stores. None when no command reached
+    /// its callback (a syntax error, an unknown command).
+    pub(in crate::game) fn recording_command_outcome<T>(
+        &mut self,
+        f: impl FnOnce(&mut Self) -> T,
+    ) -> (T, Option<(bool, i32)>) {
+        let outer = self.cmds.results.replace(Vec::new());
+        let out = f(self);
+        let results = std::mem::replace(&mut self.cmds.results, outer).unwrap_or_default();
+        (out, results.last().copied())
+    }
     pub(in crate::game) fn syntax_failure(&mut self, e: &CommandError, command: &str) {
         self.command_failure(e.message.clone());
         let Some(input) = &e.input else { return };
