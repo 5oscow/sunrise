@@ -28,20 +28,13 @@ pub(super) fn registry_versions(
             if bytes.len() > mod_api::MAX_DATAPACK_ENTRY_BYTES {
                 return Some((pack, bytes));
             }
-            let Ok(mut json) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+            let Ok(json) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
                 return Some((pack, bytes));
             };
             if !conditions.allows_file(&json, path) {
                 return None;
             }
-            // Element conditions (`decodeListWithElementConditions`) before the schema decodes.
-            // Bytes with no element conditions stay as they were read.
-            let read = json.clone();
-            conditions.filter_elements(&mut json, path);
-            if json == read {
-                return Some((pack, bytes));
-            }
-            Some((pack, serde_json::to_vec(&json).unwrap_or(bytes)))
+            Some((pack, bytes))
         })
         .collect()
 }
@@ -79,31 +72,5 @@ mod tests {
             ),
             vec![("first".into(), first)]
         );
-    }
-
-    /// A registry entry's list elements with failing `neoforge:conditions` are dropped before the
-    /// schema decodes; an entry without element conditions keeps its bytes as read.
-    #[test]
-    fn registry_entries_drop_failing_elements_and_keep_plain_bytes() {
-        let conditions = horizon_world::conditions::LoadConditions::new(["create"]);
-        let entry = serde_json::json!({"tiers": [
-            {"name": "zinc", "neoforge:conditions": [{"type": "neoforge:mod_loaded", "modid": "create"}]},
-            {"name": "tin", "neoforge:conditions": [{"type": "neoforge:mod_loaded", "modid": "ic2"}]},
-            {"name": "iron"}
-        ]})
-        .to_string()
-        .into_bytes();
-        let plain = br#"{ "tiers" : [ {"name":"iron"} ] }"#.to_vec();
-        let out = registry_versions(
-            vec![("a".into(), entry), ("b".into(), plain.clone())],
-            &conditions,
-            "data/test/mymod/metal/a.json",
-        );
-        let filtered: serde_json::Value = serde_json::from_slice(&out[0].1).unwrap();
-        assert_eq!(
-            filtered,
-            serde_json::json!({"tiers": [{"name": "zinc"}, {"name": "iron"}]})
-        );
-        assert_eq!(out[1].1, plain, "no element conditions: the bytes as read");
     }
 }

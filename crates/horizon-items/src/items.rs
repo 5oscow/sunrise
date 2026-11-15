@@ -683,14 +683,9 @@ pub(crate) fn load_tag_lists(
     // map is keyed by.
     for (id, files) in overlay.tag_kind(kind) {
         for bytes in files {
-            let Ok(mut v) = serde_json::from_slice::<Value>(bytes) else {
+            let Ok(v) = serde_json::from_slice::<Value>(bytes) else {
                 continue;
             };
-            // Element conditions on `values` and `remove` entries, before the fold reads them.
-            let (namespace, path) = id.split_once(':').unwrap_or(("minecraft", id.as_str()));
-            overlay
-                .conditions
-                .filter_elements(&mut v, &format!("data/{namespace}/tags/{kind}/{path}.json"));
             raw.entry(id.to_owned()).or_default().push(&v);
         }
     }

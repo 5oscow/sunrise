@@ -449,10 +449,6 @@ impl Names {
             fingerprint: hasher.finish(),
         }
     }
-    /// Whether the load supplied `registry` at all, even with nothing in it.
-    fn has(&self, registry: &str) -> bool {
-        self.by_registry.contains_key(registry)
-    }
     fn contains(&self, registry: &str, id: &str) -> bool {
         self.by_registry
             .get(registry)
@@ -563,10 +559,6 @@ fn evaluate(
                 }
             },
             Some("neoforge:registered") => match &context.registries {
-                Some(registries) if !registries.has(&registry()) => {
-                    unknown("neoforge:registered (that registry is not in this load)");
-                    None
-                }
                 Some(registries) => Some(
                     c["value"]
                         .as_str()
@@ -578,12 +570,6 @@ fn evaluate(
                 }
             },
             Some("neoforge:tag_empty") => match &context.tags {
-                // Only the registries whose tags this load bound answer: another's tags would
-                // read as empty when they are not.
-                Some(tags) if !tags.has(&registry()) => {
-                    unknown("neoforge:tag_empty (that registry's tags are not bound here)");
-                    None
-                }
                 Some(tags) => Some(
                     !c["tag"]
                         .as_str()
@@ -824,37 +810,6 @@ mod tests {
         let with_tin = before_tags.with_tags([("minecraft:item", vec!["c:ingots/tin"])]);
         assert!(!with_tin.allows(&tin));
         assert_ne!(empty, with_tin, "the tag view is part of cache identity");
-    }
-
-    /// A registry the load did not supply never reads as empty: its condition is unsupported
-    /// and the file is left out, for `tag_empty` and `registered` alike.
-    #[test]
-    fn a_registry_this_load_did_not_supply_is_unsupported_not_empty() {
-        let biome_tag = file(json!({"type": "neoforge:tag_empty",
-            "registry": "minecraft:worldgen/biome", "tag": "minecraft:is_ocean"}));
-        let item_tag = file(json!({"type": "neoforge:tag_empty", "tag": "c:ingots/tin"}));
-        let bound = LoadConditions::new([]).with_tags([
-            ("minecraft:item", Vec::<&str>::new()),
-            ("minecraft:block", vec!["minecraft:logs"]),
-        ]);
-        assert!(
-            bound.allows(&item_tag),
-            "a supplied registry with no such tag is empty"
-        );
-        assert!(
-            !bound.allows(&biome_tag),
-            "biome tags were not bound: left out"
-        );
-        let enchantment = file(json!({"type": "neoforge:registered",
-            "registry": "minecraft:enchantment", "value": "minecraft:sharpness"}));
-        let item = file(json!({"type": "neoforge:registered", "value": "minecraft:stone"}));
-        let registries =
-            LoadConditions::new([]).with_registries([("minecraft:item", vec!["minecraft:stone"])]);
-        assert!(registries.allows(&item));
-        assert!(
-            !registries.allows(&enchantment),
-            "no enchantment registry here: left out"
-        );
     }
 
     #[test]
