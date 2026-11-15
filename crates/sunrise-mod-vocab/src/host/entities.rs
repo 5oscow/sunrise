@@ -801,19 +801,28 @@ pub trait EntitiesBackendMut {
         y_offset: f32,
     ) -> Result<Option<EntityRef>, StackWriteError>;
     /// Side: server.
-    /// Attempts to board a vehicle through the shared server mount path.
+    /// Attempts to board a vehicle through the shared server mount path, and names the cause of
+    /// a refusal (`StartRidingRefusal`).
     ///
     /// Players and mobs can ride a mob, boat, minecart or generic seat entity
-    /// (an armor stand, display, marker or interaction). Returns false for
-    /// unsupported entity pairs, stale or held-out handles, a full stored
-    /// vehicle, a cycle, or a canceled mount or dismount. Mob vehicle capacity
+    /// (an armor stand, display, marker or interaction). Mob vehicle capacity
     /// follows its species; minecarts store one passenger and boats store one
     /// mob and up to two passengers in total. Generic seats admit one passenger unless forced.
     /// `force` bypasses normal admission checks, not these storage limits.
     /// Player boarding cooldown and the strider's
     /// eye-in-lava admission check are not represented by the game.
+    /// A player vehicle is refused as `StartRidingRefusal::PlayerVehicle`, forced or not:
+    /// vanilla's `Entity.startRiding` refuses a vehicle whose entity type is not saved with the
+    /// level before it reads `force`, and the player type is one, as a player's save keeps no
+    /// passengers. `entity_mount` fires only after every other check passed, and its cancel is
+    /// `StartRidingRefusal::Canceled`.
     #[access(WorldOnly)]
-    fn entity_start_riding(&mut self, entity: EntityRef, vehicle: EntityRef, force: bool) -> bool;
+    fn entity_start_riding(
+        &mut self,
+        entity: EntityRef,
+        vehicle: EntityRef,
+        force: bool,
+    ) -> Result<(), StartRidingRefusal>;
     /// Side: server.
     /// Gets the entity off its vehicle (`Entity.stopRiding`), where the
     /// vehicle lets it out, as `/ride ... dismount` does. False when it rode

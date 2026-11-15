@@ -1675,7 +1675,7 @@ mod nested_vehicle_discard_tests {
                 let level = host.level("minecraft:overworld").unwrap();
                 let removed = mod_api::EntityRef::new(level.epoch(), 71);
                 assert!(removed.position(host).is_none());
-                assert!(!host.entity(73).unwrap().start_riding(host, removed, true));
+                assert!(host.entity(73).unwrap().start_riding(host, removed, true).is_err());
                 if self.cancel.load(Ordering::Relaxed) {
                     return mod_api::Flow::Cancel;
                 }
@@ -2343,7 +2343,7 @@ mod nested_vehicle_discard_tests {
             if !event.mounting && event.entity == 72 {
                 let later = host.entity(73).unwrap();
                 let replacement = host.entity(74).unwrap();
-                assert!(later.start_riding(host, replacement, true));
+                assert!(later.start_riding(host, replacement, true).is_ok());
                 return mod_api::Flow::Cancel;
             }
             mod_api::Flow::Continue
@@ -2491,7 +2491,7 @@ mod nested_vehicle_discard_tests {
                 host.entity(71).unwrap().discard(host);
                 let rider = host.entity(72).unwrap();
                 let replacement = host.entity(74).unwrap();
-                assert!(rider.start_riding(host, replacement, true));
+                assert!(rider.start_riding(host, replacement, true).is_ok());
             }
             mod_api::Flow::Continue
         }

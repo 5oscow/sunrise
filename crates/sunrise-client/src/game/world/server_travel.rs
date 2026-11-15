@@ -622,7 +622,7 @@ impl Game<'_> {
             {
                 // Reject callback topology changes: the shared mount path
                 // checks live handles, dimension, cycles and vehicle capacity.
-                self.entity_start_riding(rider, entity, true);
+                let _ = self.entity_start_riding(rider, entity, true);
             }
         }
         self.native_entity_target(mod_api::EntityRef::new(epoch, id))
