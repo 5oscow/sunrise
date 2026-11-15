@@ -402,7 +402,7 @@ class ReleaseTrainTests(unittest.TestCase):
                          "the commit the published nightly was built on: nothing to publish")
         self.assertFalse(train.decision("game", fresh, NOW, blockers=[4], daily=True)[0])
 
-    def test_fork_channels_check_daily_green_or_the_gate(self):
+    def test_fork_channels_check_the_main_push_gate(self):
         with tempfile.TemporaryDirectory() as folder:
             def git(*args):
                 return subprocess.check_output(["git", *args], cwd=folder, text=True, stderr=subprocess.DEVNULL).strip()
@@ -413,40 +413,31 @@ class ReleaseTrainTests(unittest.TestCase):
             for n in range(3):
                 git("commit", "-q", "--allow-empty", "-m", str(n))
                 commits.append(git("rev-parse", "HEAD"))
-            git("tag", "daily-green", commits[1])
             with mock.patch.object(train, "ROOT", Path(folder)):
-                self.assertEqual(train.channel_head("nightly", ""), commits[1], "the default is daily-green itself")
-                self.assertEqual(train.channel_head("nightly", "daily-green"), commits[1])
-                for other in (commits[0], commits[2]):
-                    with self.assertRaisesRegex(SystemExit, "is not the commit `daily-green` points to"):
-                        train.channel_head("nightly", other)
-                git("tag", "-d", "daily-green")
-                with self.assertRaisesRegex(SystemExit, "no `daily-green` tag yet"):
-                    train.channel_head("nightly", "")
-                # A snapshot: main's head by default, or any commit of main, with the gate green on it.
-                git("update-ref", "refs/remotes/origin/main", commits[1])
-                head = commits[1]
-                green = {"workflow_runs": [dict(head_sha=head, head_branch="main", event="push", id=7)]}
-                done = dict(status="completed", conclusion="success")
-                gates = [{"jobs": [dict(name=name, **done) for name in ("lint", "verify", "verify-static", "launcher")]}]
-                with mock.patch.object(train, "REPO", "sunrise-org/sunrise"), \
-                        mock.patch.object(train, "gh_json", side_effect=[[green], gates]):
-                    self.assertEqual(train.channel_head("snapshot", ""), head, "a snapshot needs the gate only")
-                with mock.patch.object(train, "REPO", "sunrise-org/sunrise"), \
-                        mock.patch.object(train, "gh_json", side_effect=[[green], [{"jobs": gates[0]["jobs"][:3]}]]):
-                    with self.assertRaisesRegex(SystemExit, "a snapshot needs the gate green"):
-                        train.channel_head("snapshot", head)
-                pending = [{"jobs": gates[0]["jobs"][:3] + [dict(name="launcher", status="in_progress", conclusion=None)]}]
-                with mock.patch.object(train, "REPO", "sunrise-org/sunrise"), \
-                        mock.patch.object(train, "gh_json", side_effect=[[green], pending]):
-                    with self.assertRaisesRegex(SystemExit, "a snapshot needs the gate green"):
-                        train.channel_head("snapshot", head)
-                # Not on main (newer than main's head here), or not a commit: refused before any gate lookup.
-                with mock.patch.object(train, "gh_json", side_effect=AssertionError("no lookup")):
-                    with self.assertRaisesRegex(SystemExit, "is not on main"):
-                        train.channel_head("snapshot", commits[2])
-                    with self.assertRaisesRegex(SystemExit, "not a commit of this repository"):
-                        train.channel_head("snapshot", "f" * 40)
+                for channel in ("snapshot", "nightly"):
+                    git("update-ref", "refs/remotes/origin/main", commits[1])
+                    head = commits[1]
+                    green = {"workflow_runs": [dict(head_sha=head, head_branch="main", event="push", id=7)]}
+                    done = dict(status="completed", conclusion="success")
+                    gates = [{"jobs": [dict(name=name, **done) for name in ("lint", "verify", "verify-static", "launcher")]}]
+                    with mock.patch.object(train, "REPO", "sunrise-org/sunrise"), \
+                            mock.patch.object(train, "gh_json", side_effect=[[green], gates]):
+                        self.assertEqual(train.channel_head(channel, ""), head, "a snapshot needs the gate only")
+                    with mock.patch.object(train, "REPO", "sunrise-org/sunrise"), \
+                            mock.patch.object(train, "gh_json", side_effect=[[green], [{"jobs": gates[0]["jobs"][:3]}]]):
+                        with self.assertRaisesRegex(SystemExit, f"a {channel} needs the gate green"):
+                            train.channel_head(channel, head)
+                    pending = [{"jobs": gates[0]["jobs"][:3] + [dict(name="launcher", status="in_progress", conclusion=None)]}]
+                    with mock.patch.object(train, "REPO", "sunrise-org/sunrise"), \
+                            mock.patch.object(train, "gh_json", side_effect=[[green], pending]):
+                        with self.assertRaisesRegex(SystemExit, f"a {channel} needs the gate green"):
+                            train.channel_head(channel, head)
+                    # Not on main (newer than main's head here), or not a commit: refused before any gate lookup.
+                    with mock.patch.object(train, "gh_json", side_effect=AssertionError("no lookup")):
+                        with self.assertRaisesRegex(SystemExit, "is not on main"):
+                            train.channel_head(channel, commits[2])
+                        with self.assertRaisesRegex(SystemExit, "not a commit of this repository"):
+                            train.channel_head(channel, "f" * 40)
 
     def test_a_snapshot_is_tagged_by_kind_date_and_commit(self):
         sha = "0c02067" + "a" * 33

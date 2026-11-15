@@ -70,7 +70,7 @@ on:
         type: string
         default: ''
       base:
-        description: The commit of main to build on (default main's newest with green checks; on the fork the daily-green commit, and only it)
+        description: The commit of main to build on (default main's newest with green checks; on Sunrise main's head with its dyna-checks gate green)
         type: string
         default: ''
       urgent:
@@ -215,17 +215,17 @@ jobs:
           else echo "::warning::horizon-windows-arm64.zip is missing: SHA256SUMS goes out without it"; fi
           musl=(); if [[ -f dist/horizon-linux-musl-x86_64.tar.gz ]]; then musl=(dist/horizon-linux-musl-x86_64.tar.gz)
           else echo "::warning::horizon-linux-musl-x86_64.tar.gz is missing: SHA256SUMS goes out without it"; fi
-          macos_x64=(dist/horizon-macos-x64.zip)
-          if [[ "$KIND" == snapshot && ! -f dist/horizon-macos-x64.zip ]]; then
-            macos_x64=()
-            echo "::warning::horizon-macos-x64.zip is missing: the snapshot goes out without it"
-          fi
-          # The fork's Nightly carries its SDK's index (the pick job fetched it); upstream's has no SDK.
-          # A snapshot's dry run of a commit whose SDK is not published yet has none (nightly.py pick_snapshot warns).
-          sdk=(); if [[ "$GITHUB_REPOSITORY" == sunrise-org/sunrise && ( "$KIND" == nightly || -f dist/sdk.json ) ]]; then sdk=(dist/sdk.json); fi
+          macos=()
+          for archive in horizon-macos-arm64.zip horizon-macos-x64.zip; do
+            if [[ -f "dist/$archive" ]]; then macos+=("dist/$archive")
+            elif [[ "$GITHUB_REPOSITORY" == sunrise-org/sunrise || ( "$KIND" == snapshot && "$archive" == horizon-macos-x64.zip ) ]]; then
+              echo "::warning::$archive is missing: SHA256SUMS goes out without it"
+            else echo "::error::Required archive $archive is missing"; exit 1; fi
+          done
+          sdk=(); if [[ -f dist/sdk.json ]]; then sdk=(dist/sdk.json); fi
           bash tools/ci/sign_release.sh "$KIND" dist/horizon-linux-x86_64.tar.gz dist/horizon-windows-x64.zip \
             ${arm64[@]+"${arm64[@]}"} ${musl[@]+"${musl[@]}"} ${sdk[@]+"${sdk[@]}"} \
-            dist/horizon-macos-arm64.zip ${macos_x64[@]+"${macos_x64[@]}"} dist/horizon-server-linux-x86_64.tar.gz \
+            ${macos[@]+"${macos[@]}"} dist/horizon-server-linux-x86_64.tar.gz \
             dist/horizon-source.tar.gz
       - uses: actions/upload-artifact@v7
         with:
@@ -292,7 +292,7 @@ jobs:
           SOURCE_TAG: ${{ needs.pick.outputs.source_tag }}
         run: |
           set -euo pipefail
-          python3 tools/ci/nightly.py require-sdk "$SHA"
+          if [[ -f dist/sdk.json ]]; then python3 tools/ci/nightly.py require-sdk "$SHA"; fi
           python3 tools/ci/nightly.py rotate
           signature=(); [[ -f dist/SHA256SUMS.sig ]] && signature=(dist/SHA256SUMS.sig)
           [[ -f dist/SHA256SUMS.v2.sig ]] && signature+=(dist/SHA256SUMS.v2.sig)
@@ -305,7 +305,7 @@ jobs:
           else
             echo "::warning::horizon-windows-arm64.zip is missing: the Nightly goes out without it (ARM64 launchers install the x64 build)"
           fi
-          sdk=(); if [[ "$GITHUB_REPOSITORY" == sunrise-org/sunrise ]]; then sdk=("dist/sdk.json#The mod SDK of this build (sdk.json; its files are the release sdk-$SHA)"); fi
+          sdk=(); if [[ -f dist/sdk.json ]]; then sdk=("dist/sdk.json#The mod SDK of this build (sdk.json; its files are the release sdk-$SHA)"); fi
           musl=()
           if [[ -f dist/horizon-linux-musl-x86_64.tar.gz ]]; then
             musl=("dist/horizon-linux-musl-x86_64.tar.gz#Game files for musl Linux (horizon-linux-musl-x86_64.tar.gz)")
@@ -314,15 +314,19 @@ jobs:
           fi
           # A pre-release, never GitHub's latest: the latest stays the last vX.Y.Z, which launchers and servers from
           # before the Nightly-only switch keep (they don't read Nightlies).
-          python3 tools/ci/nightly.py require-sdk "$SHA"
+          if [[ -f dist/sdk.json ]]; then python3 tools/ci/nightly.py require-sdk "$SHA"; fi
+          macos=()
+          for archive in horizon-macos-arm64.zip horizon-macos-x64.zip; do
+            if [[ -f "dist/$archive" ]]; then macos+=("dist/$archive")
+            else printf '\n- macOS archive unavailable: `%s`.\n' "$archive" >> dist/nightly-notes.md; fi
+          done
           gh release create nightly --prerelease --latest=false --target "$SHA" \
             --title "Nightly $DATE · ${SHA:0:7}" --notes-file dist/nightly-notes.md \
             "dist/horizon-linux-x86_64.tar.gz#Game files the launcher installs (Nightly): Linux (horizon-linux-x86_64.tar.gz)" \
             ${musl[@]+"${musl[@]}"} \
             "dist/horizon-windows-x64.zip#Game files the launcher installs (Nightly): Windows (horizon-windows-x64.zip)" \
             ${arm64[@]+"${arm64[@]}"} ${sdk[@]+"${sdk[@]}"} \
-            "dist/horizon-macos-arm64.zip#Game files the launcher installs (Nightly): macOS on Apple Silicon (horizon-macos-arm64.zip)" \
-            "dist/horizon-macos-x64.zip#Game files the launcher installs (Nightly): macOS on Intel (horizon-macos-x64.zip)" \
+            ${macos[@]+"${macos[@]}"} \
             "dist/horizon-server-linux-x86_64.tar.gz#Nightly dedicated server for Linux (horizon-server-linux-x86_64.tar.gz)" \
             "dist/horizon-source.tar.gz#Source of this Nightly, commit ${SHA:0:7} (horizon-source.tar.gz; kept for good as the tag $SOURCE_TAG)" \
             dist/SHA256SUMS "${signature[@]}" dist/smoke-test.json

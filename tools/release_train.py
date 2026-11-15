@@ -584,25 +584,15 @@ def fork_gate_passed(sha):
 
 def channel_head(channel, head):
     """The commit a fork channel builds, or exits naming the check it failed."""
-    if channel == "nightly":
-        green = daily_green_commit()
-        if not green:
-            raise SystemExit(f"::error::refused: no `{DAILY_GREEN}` tag yet; a nightly ships only a commit whose "
-                             "daily run was fully green")
-        sha = run("git", "rev-parse", "--verify", "--quiet", f"{head}^{{commit}}", check=False).strip() if head else green
-        if sha != green:
-            raise SystemExit(f"::error::refused: {head} is not the commit `{DAILY_GREEN}` points to ({green}); "
-                             "a nightly ships only the commit of the newest fully green daily run, with its SDK")
-        return sha
     sha = run("git", "rev-parse", "--verify", "--quiet", f"{head or 'refs/remotes/origin/main'}^{{commit}}",
               check=False).strip()
     if not sha:
         raise SystemExit(f"::error::refused: {head} is not a commit of this repository")
     if subprocess.run(["git", "merge-base", "--is-ancestor", sha, "refs/remotes/origin/main"], cwd=ROOT).returncode:
-        raise SystemExit(f"::error::refused: {sha} is not on main; a snapshot builds only a commit of main")
+        raise SystemExit(f"::error::refused: {sha} is not on main; a {channel} builds only a commit of main")
     if not fork_gate_passed(sha):
         raise SystemExit(f"::error::refused: dyna-checks' gate jobs ({', '.join(sorted(SNAPSHOT_GATE))}) "
-                         f"did not all pass on a main push of {sha}; a snapshot needs the gate green on its commit")
+                         f"did not all pass on a main push of {sha}; a {channel} needs the gate green on its commit")
     return sha
 
 

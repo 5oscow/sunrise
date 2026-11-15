@@ -202,8 +202,8 @@ def build_set(main: Ref, prs: list[dict], left_out: list[str], today: str, force
         state, _, _ = ns.load_state()
         asked_in = issue or next((x["issue"] for x in reversed(state.get("log", [])) if x.get("issue")), "")
         stop(repo, asked_in, f"the build stopped: {c.text()}")
-    if repo == "sunrise-org/sunrise" and (sha != main.sha or not sdk_ready(sha)):
-        stop(repo, issue, f"the build stopped: final source {sha} is not the SDK-paired main commit.")
+    if repo == "sunrise-org/sunrise" and sha != main.sha:
+        stop(repo, issue, f"the build stopped: final source {sha} is not the gate-checked main commit.")
     previous = git("ls-remote", "--tags", "origin", "refs/tags/nightly").split("\t")[0] or None
     build = force or previous != sha
     name = "(unchanged)"
@@ -230,10 +230,14 @@ def build_set(main: Ref, prs: list[dict], left_out: list[str], today: str, force
         if not dry_run:
             ns.update_state(lambda st, builds: (st, builds + json.dumps(record) + "\n", f"build {name}"), token)
     chosen = Ref(name, sha, dt.datetime.now(dt.timezone.utc))
+    sdk = repo != "sunrise-org/sunrise" or sdk_ready(sha)
+    issues = train.known_issues()
+    if not sdk:
+        issues.append("- Native mods cannot be built for this build: its SDK is not published.")
     with open("nightly-notes.md", "w") as f:
-        f.write(notes(today, chosen, main, kept, left_out, merged_since(previous, main.sha), train.known_issues()))
+        f.write(notes(today, chosen, main, kept, left_out, merged_since(previous, main.sha), issues))
     output(build=str(build).lower(), sha=sha, short=sha[:7], source=name, date=today, version=f"nightly-{today}",
-           nightly=f"{today} {sha[:7]}", source_tag=source_tag(today, sha))
+           nightly=f"{today} {sha[:7]}", source_tag=source_tag(today, sha), sdk=str(sdk).lower())
     print(f"{'build' if build else 'skip (unchanged since the last nightly)'}: {name} {sha}, main {main.sha[:7]}"
           + "".join(f" + #{e['number']}" for e in kept))
 
@@ -351,25 +355,15 @@ def green_base(repo: str, issue: str) -> Ref:
     """NIGHTLY_BASE, else a green main commit from this repository's checks
     (dyna-checks on the fork, checks plus parity-main upstream), never an untested fallback."""
     explicit = os.environ.get("NIGHTLY_BASE", "").strip()
-    fork = repo == "sunrise-org/sunrise"
-    if explicit:
-        sha = explicit
-    elif fork:
-        sha = train.daily_green_commit()
+    if repo == "sunrise-org/sunrise":
+        sha = train.channel_head("nightly", explicit)
     else:
-        sha = train.green_main_head(parity=True)
-    if not sha:
-        checks = "every leg of a daily run (no `daily-green` tag yet)" if fork else "checks and parity-main"
-        stop(repo, issue, f"the build stopped: no recent commit of main passed {checks}, so "
-                          "none is green to build on. The next build after they pass takes it.")
-    if not is_ancestor(sha, "refs/remotes/origin/main"):
-        stop(repo, issue, f"the build stopped: {sha[:9]} is not on main.")
-    sha = git("rev-parse", sha)
-    if fork and explicit and sha != train.daily_green_commit():
-        stop(repo, issue, f"the build stopped: {sha} is not the commit `daily-green` points to; a nightly builds "
-                          "only the newest fully green daily run's commit, never an older one without its own daily run.")
-    if fork and not sdk_ready(sha):
-        stop(repo, issue, f"the build stopped: {sha} has no complete published sdk-{sha} release.")
+        sha = explicit or train.green_main_head(parity=True)
+        if not sha:
+            stop(repo, issue, "the build stopped: no recent commit of main passed checks and parity-main.")
+        if not is_ancestor(sha, "refs/remotes/origin/main"):
+            stop(repo, issue, f"the build stopped: {sha[:9]} is not on main.")
+        sha = git("rev-parse", sha)
     return Ref("main", sha, dt.datetime.fromisoformat(git("show", "-s", "--format=%cI", sha)))
 
 
@@ -386,7 +380,7 @@ def pick(force: bool) -> None:
     dry_run = os.environ.get("DRY_RUN") == "true"
     if repo == "sunrise-org/sunrise":
         if os.environ.get("NIGHTLY_PRS", "").strip():
-            stop(repo, os.environ.get("NIGHTLY_ISSUE", ""), "fork Nightlies require an SDK-paired main commit, not PR picks")
+            stop(repo, os.environ.get("NIGHTLY_ISSUE", ""), "Sunrise Nightlies require a gate-checked main commit, not PR picks")
         return build_set(main, [], [], today, force, dry_run)
     if spec := os.environ.get("NIGHTLY_PRS", "").strip():  # a dry run's own set; the saved one stays
         return build_set(main, requested(spec, ns.lookup(repo)), [], today, force, dry_run)

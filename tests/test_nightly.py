@@ -269,59 +269,45 @@ class SdkPairTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 nightly.sdk_ready("a" * 40)
 
-    def test_explicit_missing_sdk_stops_without_selecting_another_base(self):
-        with mock.patch.dict(nightly.os.environ, {"NIGHTLY_BASE": "a" * 40}), \
-                mock.patch.object(nightly, "is_ancestor", return_value=True), \
-                mock.patch.object(nightly, "git", return_value="a" * 40), \
-                mock.patch.object(nightly, "sdk_ready", return_value=False), \
-                mock.patch.object(nightly.train, "daily_green_commit", return_value="a" * 40), \
-                mock.patch.object(nightly.train, "green_main_head") as automatic:
-            with self.assertRaises(SystemExit):
+    def test_nightly_selection_reuses_the_main_push_channel_gate(self):
+        for explicit in ("", "a" * 40):
+            with self.subTest(explicit=explicit), \
+                    mock.patch.dict(nightly.os.environ, {"NIGHTLY_BASE": explicit}), \
+                    mock.patch.object(nightly.train, "channel_head", return_value="a" * 40) as gate, \
+                    mock.patch.object(nightly, "git", return_value=NOW), \
+                    mock.patch.object(nightly, "sdk_ready", side_effect=AssertionError("SDK is optional")):
+                self.assertEqual(nightly.green_base("sunrise-org/sunrise", "").sha, "a" * 40)
+                gate.assert_called_once_with("nightly", explicit)
+        with mock.patch.object(nightly.train, "channel_head", side_effect=SystemExit("gate failed")):
+            with self.assertRaisesRegex(SystemExit, "gate failed"):
                 nightly.green_base("sunrise-org/sunrise", "")
-            automatic.assert_not_called()
 
-    def test_an_explicit_base_must_be_the_daily_green_commit_itself(self):
-        # "a" is an ancestor of daily-green ("b"), but had no daily run of its own.
-        with mock.patch.dict(nightly.os.environ, {"NIGHTLY_BASE": "a" * 40}), \
-                mock.patch.object(nightly, "is_ancestor", return_value=True), \
-                mock.patch.object(nightly, "git", return_value="a" * 40), \
-                mock.patch.object(nightly, "sdk_ready", return_value=True), \
-                mock.patch.object(nightly.train, "daily_green_commit", return_value="b" * 40), \
-                mock.patch.object(nightly, "stop", side_effect=SystemExit) as stop:
+    def test_final_sha_change_stops_before_pushing(self):
+        with mock.patch.dict(nightly.os.environ, {"GITHUB_REPOSITORY": "sunrise-org/sunrise"}), \
+                mock.patch.object(nightly.ns, "fetch_heads", return_value=[]), \
+                mock.patch.object(nightly.ns, "assemble", return_value="b" * 40), \
+                mock.patch.object(nightly.ns, "push") as push:
             with self.assertRaises(SystemExit):
-                nightly.green_base("sunrise-org/sunrise", "")
-        self.assertIn("is not the commit `daily-green` points to", stop.call_args.args[2])
+                nightly.build_set(nightly.Ref("main", "a" * 40, T), [], [], "2026-11-11", True, False)
+            push.assert_not_called()
 
-    def test_final_sha_change_or_disappearing_sdk_stops_before_pushing(self):
-        for sha, sdk_ready in (("a" * 40, False), ("b" * 40, True)):
-            with mock.patch.dict(nightly.os.environ, {"GITHUB_REPOSITORY": "sunrise-org/sunrise"}), \
+    def test_nightly_without_sdk_builds_and_names_native_mod_limit(self):
+        import io
+        for ready in (False, True):
+            document = io.StringIO()
+            with self.subTest(ready=ready), \
+                    mock.patch.dict(nightly.os.environ, {"GITHUB_REPOSITORY": "sunrise-org/sunrise"}), \
                     mock.patch.object(nightly.ns, "fetch_heads", return_value=[]), \
-                    mock.patch.object(nightly.ns, "assemble", return_value=sha), \
-                    mock.patch.object(nightly, "sdk_ready", return_value=sdk_ready), \
-                    mock.patch.object(nightly.ns, "push") as push:
-                with self.assertRaises(SystemExit):
-                    nightly.build_set(nightly.Ref("main", "a" * 40, T), [], [], "2026-11-11", True, False)
-                push.assert_not_called()
-
-    def test_automatic_selection_takes_the_daily_green_commit_with_its_sdk(self):
-        with mock.patch.dict(nightly.os.environ, {"NIGHTLY_BASE": ""}), \
-                mock.patch.object(nightly.train, "daily_green_commit", return_value="a" * 40), \
-                mock.patch.object(nightly, "sdk_ready", return_value=True), \
-                mock.patch.object(nightly.train, "green_main_head") as automatic, \
-                mock.patch.object(nightly, "is_ancestor", return_value=True), \
-                mock.patch.object(nightly, "git", side_effect=["a" * 40, NOW]):
-            self.assertEqual(nightly.green_base("sunrise-org/sunrise", "").sha, "a" * 40)
-            automatic.assert_not_called()
-        for green, ready in (("", True), ("a" * 40, False)):
-            with self.subTest(green=green, ready=ready), \
-                    mock.patch.dict(nightly.os.environ, {"NIGHTLY_BASE": ""}), \
-                    mock.patch.object(nightly.train, "daily_green_commit", return_value=green), \
+                    mock.patch.object(nightly.ns, "assemble", return_value="a" * 40), \
                     mock.patch.object(nightly, "sdk_ready", return_value=ready), \
-                    mock.patch.object(nightly, "is_ancestor", return_value=True), \
                     mock.patch.object(nightly, "git", return_value="a" * 40), \
-                    mock.patch.object(nightly, "stop", side_effect=SystemExit):
-                with self.assertRaises(SystemExit):
-                    nightly.green_base("sunrise-org/sunrise", "")
+                    mock.patch.object(nightly, "merged_since", return_value=[]), \
+                    mock.patch.object(nightly.train, "known_issues", return_value=[]), \
+                    mock.patch("builtins.open", return_value=mock.MagicMock(__enter__=lambda _: document)), \
+                    mock.patch.object(nightly, "output") as output:
+                nightly.build_set(nightly.Ref("main", "a" * 40, T), [], [], "2026-11-11", False, False)
+                self.assertEqual(output.call_args.kwargs["sdk"], str(ready).lower())
+                self.assertEqual("Native mods cannot be built" in document.getvalue(), not ready)
 
     def test_publication_checks_fresh_inventory_and_leaves_upstream_unchanged(self):
         with mock.patch.dict(nightly.os.environ, {"GITHUB_REPOSITORY": "sunrise-org/sunrise"}), \

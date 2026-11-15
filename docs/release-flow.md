@@ -208,7 +208,7 @@ Three kinds of game build (CI tiers, owner 2026-11-13):
 | Build | Who starts it | What it needs | Published as |
 |---|---|---|---|
 | [Snapshot](#snapshot) | root, by dispatching `release.yml -f kind=snapshot -f dry_run=false` on main | the gate (`lint`, `verify`, `verify-static`, `launcher`) green on that commit | pre-release `snapshot-<date>-<short>`; no launcher offers it |
-| Nightly | the [daily run](#daily-run), when every leg is green | `daily-green` on that commit, with its SDK | pre-release `nightly`, every launcher's update |
+| Nightly | dispatch, or the [daily run](#daily-run) | main’s head or an explicit commit of main, with its dyna-checks gate green; SDK when published | pre-release `nightly`, every launcher's update |
 | Release (`v*`) | by hand, from a Nightly | | the release |
 
 ### Snapshot
@@ -265,7 +265,7 @@ summary (`tools/ci/daily_summary.py`) reads each leg's result and its sanitised 
   to follow the API change and its pin to move.
 
 Only a run on `main` with `dry_run` false moves the tag, files issues or publishes; any other run prints what it
-would do. A Nightly ships only the commit `daily-green` points to, with its SDK (`release.yml`, `nightly build`).
+would do. On Sunrise a Nightly ships a commit of main with its dyna-checks gate green; a published SDK is optional.
 A [snapshot](#snapshot) (`release.yml -f kind=snapshot`) needs only dyna-checks' gate on its commit of main.
 
 ```mermaid
@@ -306,7 +306,7 @@ commits) since the commit the published Nightly was built on:
   `force=true`.
 - A scheduled run takes main's newest commit where `checks` and `parity-main` passed (a later failed
   parity-main batch doesn't change it); after a run of either, the commit it passed on, once both passed there.
-  On the fork the commit is the daily run's (`daily-green` by default), never a scheduled pick.
+  On Sunrise the commit is main's head or an explicit base, with its dyna-checks main-push gate green.
 
 ### Nightly only
 
@@ -472,9 +472,10 @@ of downloads or caches belong to #3009; retaining a release does not authenticat
 
 ### Current publication contract
 
-The fork's [Nightly workflow](../.github/workflows/nightly-build.yml) selects an SDK-paired source through
-[`tools/ci/nightly.py`](../tools/ci/nightly.py), then calls `require-sdk` before rotation and again before
-publication. A complete SDK means a published, non-draft `sdk-<40 lowercase hex SHA>` release holding every asset
+The fork's [Nightly workflow](../.github/workflows/nightly-build.yml) selects a gate-checked commit of main through
+[`tools/ci/nightly.py`](../tools/ci/nightly.py). When its complete SDK is published, it carries `sdk.json` and
+checks `require-sdk` before rotation and again before publication. Otherwise it omits `sdk.json` and adds a
+known issue: native mods cannot be built for this build. A complete SDK means a published, non-draft `sdk-<40 lowercase hex SHA>` release holding every asset
 `nightly.py sdk-assets` names: `sdk.json`, `SHA256SUMS` signed for `sdk-<sha>` (`SHA256SUMS.sig`), `surface.json`,
 `build-data.tar.xz` and the `runtime`, `api` and `engine` slices of the four packages (Linux client, Linux server,
 Windows GNU and macOS ARM64); its `sdk.json` must match those sums and name that build and this package format. The
@@ -655,6 +656,14 @@ launcher and the website read: both then look the newest launcher tags up one by
 (`git/matching-refs/tags/launcher@`, then `launcher-v` if there is none, then `releases/tags/<tag>`).
 
 ## Nightly channel
+
+On Sunrise, Nightly builds main's head (or an explicit `base` on main) only after its dyna-checks main-push
+gate passes, using the same selection check as Snapshot. No daily-green tag is required. A complete published
+`sdk-<sha>` is verified and carried when available; without it, notes say native mods cannot be built for this
+build and no `sdk.json` is signed or published. Linux and Windows x64 are required. macOS, Windows ARM64 and
+musl Linux are optional: failed archives are omitted from signed checksums and publication with a warning.
+
+The upstream Nightly selection machinery below describes Horizon's picked-PR channel, not Sunrise's selection.
 
 `.github/workflows/nightly-build.yml` builds and publishes the Nightly, the only build players get since
 2026-10-28: when the batch train decides ([Game releases](#game-releases), with the commit as `base`), once a night
