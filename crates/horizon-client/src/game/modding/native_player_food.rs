@@ -138,7 +138,7 @@ impl Game<'_> {
         self.native_player_write(player, |game| game.experience.level = levels)
     }
     /// `Player.totalExperience`: sets the total as it is, keeping the level
-    /// and the progress. A negative total is refused, as
+    /// and the progress. A negative total is refused: a mod-API policy, as
     /// `Player.giveExperiencePoints` never takes it below 0.
     pub(super) fn player_set_total_experience(&mut self, player: PlayerRef, total: i32) -> bool {
         total >= 0 && self.native_player_write(player, |game| game.experience.total = total)

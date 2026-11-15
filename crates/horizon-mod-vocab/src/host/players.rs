@@ -846,13 +846,14 @@ pub trait PlayersBackendMut {
     #[access(WorldOnly)]
     fn player_set_experience_levels(&mut self, player: PlayerRef, levels: i32) -> bool;
     /// Side: server.
-    /// Sets `Player.totalExperience`, the points `player_experience` reports
-    /// as `total`, keeping the level and the progress toward the next level.
-    /// `Player.giveExperiencePoints` adds to it and never takes it below 0;
-    /// a negative `total` is refused with nothing written, as the other writes
-    /// refuse. A mod that moves experience between a player and a block sets
-    /// the level and progress with `player_set_experience_levels` and
-    /// `player_set_experience_points`, and the total with this.
+    /// Sets `Player.totalExperience`, the `total` that `PlayerRef::experience`
+    /// reports, keeping the level and the progress toward the next level.
+    /// Generated as `PlayerRef::set_total_experience`. A mod that moves
+    /// experience between a player and a block sets the level and progress
+    /// with `PlayerRef::set_experience_levels` and
+    /// `PlayerRef::set_experience_points`, and the total with this. False,
+    /// and nothing written, for a negative `total` or a stale or unavailable
+    /// player.
     #[access(WorldOnly)]
     fn player_set_total_experience(&mut self, player: PlayerRef, total: i32) -> bool;
     /// Side: server.
