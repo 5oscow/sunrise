@@ -136,3 +136,62 @@ fn a_spectator_touching_an_unloaded_chunk_skips_its_tick_and_its_hooks() {
         })
     });
 }
+
+/// A dead spectator touching an unloaded chunk skips `LivingEntity.baseTick`'s `tickDeath` with
+/// the rest of `super.tick()`: its death clock waits and it hears no player tick hook, while a
+/// dead spectator in loaded chunks counts on (vanilla's death time runs to 20, then the body goes).
+#[test]
+#[ignore = "daily"]
+fn a_dead_spectator_touching_an_unloaded_chunk_does_not_tick_its_death() {
+    let heard = Arc::new(Mutex::new(Vec::new()));
+    let mods = vec![mod_api::ModEntry::new(
+        "log",
+        Box::new(Log(Arc::clone(&heard))),
+    )]
+    .into();
+    mod_platform::testing::with_mods(mods, || {
+        with_game(|game| {
+            open_to_lan(game);
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let dead = |conn, x| {
+                let mut g = placed(conn, x, SPECTATOR);
+                g.health = 0.0;
+                g.dead = true;
+                g
+            };
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .guests
+                .extend([dead(1, 8.5), dead(2, 15.5)]);
+            let death_times = |game: &Game<'_>| -> Vec<u32> {
+                let host = game.lan.as_ref().unwrap();
+                host.hub.guests.iter().map(|g| g.death_time).collect()
+            };
+
+            game.tick_guests();
+            assert_eq!(
+                death_times(game),
+                [1, 0],
+                "the edge spectator's death waits"
+            );
+            assert_eq!(
+                std::mem::take(&mut *heard.lock().unwrap()),
+                [("pre", 123), ("post", 123)]
+            );
+
+            game.world
+                .chunks
+                .insert((1, 0), Arc::new(Chunk::empty(1, 0)));
+            game.tick_guests();
+            assert_eq!(death_times(game), [2, 1]);
+            assert_eq!(
+                std::mem::take(&mut *heard.lock().unwrap()),
+                [("pre", 123), ("post", 123), ("pre", 124), ("post", 124)]
+            );
+        })
+    });
+}

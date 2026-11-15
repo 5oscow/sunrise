@@ -87,7 +87,10 @@ impl Game<'_> {
             if host.hub.guests[gi].dead
                 || (host.hub.guests[gi].health <= 0.0 && host.hub.guests[gi].death_canceled)
             {
-                self.guest_tick_death(gi);
+                // LivingEntity.baseTick's tickDeath is part of the body vanilla skips.
+                if body {
+                    self.guest_tick_death(gi);
+                }
                 if let Some(host) = self.lan.as_ref() {
                     refresh_building_player(host, conn);
                 }
@@ -290,8 +293,8 @@ impl Game<'_> {
     /// Whether guest `g`'s body ticks this tick: `ServerPlayer.doTick`'s
     /// `!isSpectator() || !touchingUnloadedChunk()`. A spectator whose box,
     /// inflated by one block, reaches a chunk the level hasn't loaded skips
-    /// `super.tick()` (Player.tick: its effects, cooldowns, attack strength,
-    /// inventory ticks and PlayerTickEvent.Pre/Post) and doTick's food tick
+    /// `super.tick()` (Player.tick: its effects, death ticks, cooldowns, attack
+    /// strength, inventory ticks and PlayerTickEvent.Pre/Post) and doTick's food tick
     /// and statistics; everything else the server does for it still runs.
     pub(super) fn guest_body_ticks(&self, g: &horizon_client::lan::guest::Guest) -> bool {
         !g.spectator()
