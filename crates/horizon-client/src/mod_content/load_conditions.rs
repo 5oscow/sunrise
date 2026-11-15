@@ -563,6 +563,8 @@ pub fn resource_root_with_conditions(
     if inventory.is_empty() && !has_content {
         return Ok(base.to_owned());
     }
+    // Resolved once: the stamp and the build must name the same directory.
+    let base = &real_base(base)?;
     let mut stamp = stamp(base, jar_store, mods, inventory)?;
     if conditions.has_registered() {
         use std::hash::{Hash, Hasher};
@@ -603,8 +605,7 @@ pub fn resource_root_with_conditions(
     } else {
         // Code-only packages still own an inventory generation, but need no
         // registry-table rewrite or content scan. Existing tables stay linked.
-        let base = real_base(base)?;
-        let overlay = Overlay::new(&base, &out)?;
+        let overlay = Overlay::new(base, &out)?;
         overlay.write(
             horizon_mod_package::enabled::MARKER,
             &serde_json::to_vec(inventory)?,
