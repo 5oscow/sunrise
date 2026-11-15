@@ -364,6 +364,9 @@ pub struct Hub {
     /// The players' own state waits for the game to tell the mods of the pass
     /// (`finish_tracking_pass`).
     players_after_tracking: bool,
+    /// Stops whose removal waits for a captured sound (`hold_sound_removals`): the game tells
+    /// them once `finish_captured_sounds` has sent it, so what a mod sends follows the removal.
+    pub tracking_after_sounds: Vec<TrackingBatch>,
     /// The holders players started seeing, for the game to send their synced
     /// attachments (`flush_attachment_sync`).
     pub attachment_snapshots: Vec<AttachmentSnapshot>,
@@ -858,6 +861,7 @@ impl Hub {
             transfers: None,
             native_tracking: Vec::new(),
             players_after_tracking: false,
+            tracking_after_sounds: Vec::new(),
             attachment_snapshots: Vec::new(),
             sync_attachments: false,
             native_advancement_grants: Vec::new(),

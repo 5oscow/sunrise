@@ -17,16 +17,19 @@ pub(super) fn tracking_listened() -> bool {
 
 impl Hub {
     /// Send part of a pass's output kept for the game (`TrackingBatch::held`) to the player on
-    /// `conn`, as the pass would have: a removal a sound still needs waits for it.
-    pub fn send_tracking_out(&self, conn: u32, mut bodies: Vec<Body>) {
+    /// `conn`, as the pass would have: a removal a sound still needs waits for it, sent by
+    /// `finish_captured_sounds`. Gives back the ids whose removal waits, so the game tells their
+    /// stops after it (`tracking_after_sounds`).
+    pub fn send_tracking_out(&self, conn: u32, mut bodies: Vec<Body>) -> Vec<i32> {
         if bodies.is_empty() {
-            return;
+            return Vec::new();
         }
         let Some(g) = self.guest(conn) else {
-            return;
+            return Vec::new();
         };
-        self.hold_sound_removals(conn, &mut bodies);
+        let waiting = self.hold_sound_removals(conn, &mut bodies);
         g.sender.send_many(bodies);
+        waiting
     }
 
     /// After the game told the mods of the level's pass, or where nothing tells them (a client's
@@ -45,7 +48,7 @@ impl Hub {
             })
             .collect();
         for (conn, bodies) in kept {
-            self.send_tracking_out(conn, bodies);
+            let _ = self.send_tracking_out(conn, bodies);
         }
         if std::mem::take(&mut self.players_after_tracking) {
             self.sync_players();

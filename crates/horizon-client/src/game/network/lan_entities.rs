@@ -154,23 +154,56 @@ impl Game<'_> {
             batch.events.sort_by_key(|e| e.at.unwrap_or(0));
             let mut held = std::mem::take(&mut batch.held).into_iter();
             let mut sent = 0;
-            for e in &batch.events {
+            // Removals a captured sound still needs go out after it (`finish_captured_sounds`):
+            // their stops are told then, from `lan_broadcast_effects`.
+            let mut waiting = Vec::new();
+            let mut after_sounds = Vec::new();
+            for mut e in std::mem::take(&mut batch.events) {
                 if let Some(at) = e.at.filter(|&at| at > sent) {
                     let part = held.by_ref().take(at - sent).collect();
-                    self.send_tracking_out(batch.conn, part);
+                    waiting.extend(self.send_tracking_out(batch.conn, part));
                     sent = at;
                 }
-                if tell {
-                    self.tell_tracking(batch.player, &batch.name, e);
+                if !e.start && waiting.contains(&e.entity) {
+                    e.at = None;
+                    after_sounds.push(e);
+                } else if tell {
+                    self.tell_tracking(batch.player, &batch.name, &e);
                 }
             }
-            self.send_tracking_out(batch.conn, held.collect());
+            let _ = self.send_tracking_out(batch.conn, held.collect());
+            if !after_sounds.is_empty()
+                && let Some(host) = self.lan.as_mut()
+            {
+                host.hub
+                    .tracking_after_sounds
+                    .push(horizon_client::lan::hub::TrackingBatch {
+                        events: after_sounds,
+                        held: Vec::new(),
+                        ..batch
+                    });
+            }
         }
     }
 
-    fn send_tracking_out(&self, conn: u32, part: Vec<horizon_client::lan::Body>) {
-        if let Some(host) = self.lan.as_ref() {
-            host.hub.send_tracking_out(conn, part);
+    /// The stops whose removal waited for a captured sound, told once `finish_captured_sounds`
+    /// has sent that removal.
+    pub(in crate::game) fn run_tracking_after_sounds(&mut self) {
+        let Some(host) = self.lan.as_mut() else {
+            return;
+        };
+        if host.hub.tracking_after_sounds.is_empty() {
+            return;
+        }
+        let later = std::mem::take(&mut host.hub.tracking_after_sounds);
+        host.hub.native_tracking.extend(later);
+        self.run_native_tracking();
+    }
+
+    fn send_tracking_out(&self, conn: u32, part: Vec<horizon_client::lan::Body>) -> Vec<i32> {
+        match self.lan.as_ref() {
+            Some(host) => host.hub.send_tracking_out(conn, part),
+            None => Vec::new(),
         }
     }
 
