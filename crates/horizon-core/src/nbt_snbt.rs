@@ -343,7 +343,9 @@ impl<'a> Parser<'a> {
                     self.bump();
                     name.push(char::from(c));
                 }
-                if name.is_empty() && self.peek() == Some(0x7d) {
+                // `GreedyPatternParseRule` needs at least one name character and offers
+                // no completion when it fails, so `\N{` suggests nothing, not `}`.
+                if name.is_empty() {
                     return Err(self.error("snbt.parser.invalid_character_name"));
                 }
                 self.expect(b'}')?;
@@ -799,6 +801,20 @@ mod tests {
         assert_eq!(
             crate::text::parse_java_uuid("١-１-1-1-1"),
             Some(0x00000001_00010001_00010000_00000001)
+        );
+    }
+
+    /// `GreedyPatternParseRule` for the name fails without suggestions, so an
+    /// unfinished `\N{` offers nothing; the closing brace is only expected after a name.
+    #[test]
+    fn unfinished_unicode_name_escape_suggestions() {
+        assert_eq!(snbt_suggestions("\"\\N{"), (4, Vec::new()));
+        assert_eq!(snbt_suggestions("\"\\N{LATIN"), (9, vec!["}".to_owned()]));
+        let finished = "\"\\N{LATIN SMALL LETTER A}\"";
+        assert_eq!(snbt_suggestions(finished), (finished.len(), Vec::new()));
+        assert_eq!(
+            parse_snbt_argument("'\\N{!}'").unwrap_err().key,
+            "snbt.parser.invalid_character_name"
         );
     }
 }
