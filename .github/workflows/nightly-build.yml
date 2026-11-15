@@ -216,9 +216,9 @@ jobs:
           musl=(); if [[ -f dist/horizon-linux-musl-x86_64.tar.gz ]]; then musl=(dist/horizon-linux-musl-x86_64.tar.gz)
           else echo "::warning::horizon-linux-musl-x86_64.tar.gz is missing: SHA256SUMS goes out without it"; fi
           macos=()
-          for archive in horizon-macos-arm64.zip horizon-macos-x64.zip; do
-            if [[ -f "dist/$archive" ]]; then macos+=("dist/$archive")
-            elif [[ "$GITHUB_REPOSITORY" == sunrise-org/sunrise || ( "$KIND" == snapshot && "$archive" == horizon-macos-x64.zip ) ]]; then
+          for archive in dist/horizon-macos-arm64.zip dist/horizon-macos-x64.zip; do
+            if [[ -f "$archive" ]]; then macos+=("$archive")
+            elif [[ "$GITHUB_REPOSITORY" == sunrise-org/sunrise || ( "$KIND" == snapshot && "$archive" == dist/horizon-macos-x64.zip ) ]]; then
               echo "::warning::$archive is missing: SHA256SUMS goes out without it"
             else echo "::error::Required archive $archive is missing"; exit 1; fi
           done
@@ -316,8 +316,8 @@ jobs:
           # before the Nightly-only switch keep (they don't read Nightlies).
           if [[ -f dist/sdk.json ]]; then python3 tools/ci/nightly.py require-sdk "$SHA"; fi
           macos=()
-          for archive in horizon-macos-arm64.zip horizon-macos-x64.zip; do
-            if [[ -f "dist/$archive" ]]; then macos+=("dist/$archive")
+          for archive in dist/horizon-macos-arm64.zip dist/horizon-macos-x64.zip; do
+            if [[ -f "$archive" ]]; then macos+=("$archive")
             else printf '\n- macOS archive unavailable: `%s`.\n' "$archive" >> dist/nightly-notes.md; fi
           done
           gh release create nightly --prerelease --latest=false --target "$SHA" \

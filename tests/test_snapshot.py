@@ -92,19 +92,23 @@ class NightlyBuildSnapshotTests(unittest.TestCase):
         self.assertIn('--tag "${KIND}-${DATE}-${SHORT}"', verify)
         self.assertEqual(self.workflow["on"]["workflow_dispatch"]["inputs"]["kind"]["default"], "nightly")
 
-    def test_snapshot_optional_platforms_keep_nightly_and_release_requirements(self):
+    def test_optional_platforms_follow_repository_and_channel(self):
         game = load("game-build.yml")
         build = game["jobs"]["build"]
         expression = build["continue-on-error"].removeprefix("${{").removesuffix("}}").strip()
         self.assertEqual(game["on"]["workflow_call"]["inputs"]["kind"]["default"], "release")
         self.assertEqual(self.workflow["jobs"]["build"]["with"]["kind"], "${{ inputs.kind }}")
-        for kind in ("snapshot", "nightly", "release"):
-            optional = set()
-            for row in build["strategy"]["matrix"]["include"]:
-                condition = expression.replace("matrix.name", repr(row["name"])).replace("inputs.kind", repr(kind))
-                if eval(condition.replace("||", "or").replace("&&", "and"), {"__builtins__": {}}):
-                    optional.add(row["name"])
-            self.assertEqual(optional, {"windows-arm64", "linux-musl"} | ({"macos-x64"} if kind == "snapshot" else set()))
+        for repo in ("sunrise-org/sunrise", "example/test"):
+            for kind in ("snapshot", "nightly", "release"):
+                optional = set()
+                for row in build["strategy"]["matrix"]["include"]:
+                    condition = (expression.replace("matrix.name", repr(row["name"]))
+                                 .replace("inputs.kind", repr(kind)).replace("github.repository", repr(repo))
+                                 .replace("matrix.mac", str(row.get("mac") == "true")).replace("true", "True"))
+                    if eval(condition.replace("||", "or").replace("&&", "and"), {"__builtins__": {}}):
+                        optional.add(row["name"])
+                macs = {"macos", "macos-x64"} if repo == "sunrise-org/sunrise" else ({"macos-x64"} if kind == "snapshot" else set())
+                self.assertEqual(optional, {"windows-arm64", "linux-musl"} | macs)
         self.assertEqual(game["jobs"]["linux-smoke"]["needs"], ["runner-configuration", "build"])
         self.assertEqual(self.workflow["jobs"]["sign"]["needs"], ["pick", "build"])
         self.assertEqual(self.workflow["jobs"]["publish"]["needs"], ["pick", "build", "sign"])
@@ -121,7 +125,7 @@ class NightlyBuildSnapshotTests(unittest.TestCase):
             for name in ("horizon-linux-x86_64.tar.gz", "horizon-windows-x64.zip", "horizon-macos-arm64.zip",
                          "horizon-server-linux-x86_64.tar.gz", "horizon-source.tar.gz"):
                 (root / "dist" / name).touch()
-            for kind, code in (("snapshot", 0), ("nightly", 9)):
+            for kind, code in (("snapshot", 0), ("nightly", 1)):
                 result = subprocess.run(["bash", "-e", "-o", "pipefail", "-c", sign], cwd=root,
                                         env=dict(os.environ, KIND=kind, GITHUB_REPOSITORY="example/test"),
                                         capture_output=True, text=True)
