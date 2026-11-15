@@ -25,13 +25,14 @@ ENGINE = {
     "horizon_assets", "horizon_mod_package", "horizon_mods", "horizon_core",
 }
 # Shared Minecraft vocabulary: plain, engine-independent values, parity RNG,
-# and the JSON/NBT format converter. Never allow all of horizon-core.
+# and the JSON/NBT format converter (JavaString is the key and string type of
+# nbt::Compound and nbt::Tag, a plain UTF-16 vector). Never allow all of horizon-core.
 LEAVES = {
     "arm_pose::ArmPose", "game_mode::GameMode", "geometry::Direction",
     "position::BlockPos", "position::ChunkPos", "random::LegacyRandom",
     "random::RandomSource", "bounding_box::BoundingBox",
     "equipment_slot::EquipmentSlot", "identifier::Identifier", "nbt::Compound",
-    "nbt::Tag", "use_animation::UseAnimation", "connection_kind::ConnectionKind",
+    "nbt::JavaString", "nbt::Tag", "use_animation::UseAnimation", "connection_kind::ConnectionKind",
     "dimension::Dimension", "neighbour_update::NeighbourUpdate",
 }
 # Owner-approved JSON source-file parser exceptions, not arbitrary JSON carriers.
