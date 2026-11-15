@@ -21,6 +21,7 @@ static VALUE: AttachmentType<i32> = AttachmentType {
 fn values(game: &Game<'_>) -> Vec<i32> {
     let host: &dyn Host = game;
     host.attachment_query("mirror", "value")
+        .unwrap()
         .query(&VALUE)
         .unwrap()
         .iter()
@@ -75,7 +76,7 @@ fn synced_client_queries_follow_replacement_retirement_and_level_changes() {
         client(game).attachments.clear();
         sync(game, Holder::Level, 41);
         assert_eq!(values(game), [41]);
-        let captured = game.attachment_query("mirror", "value");
+        let captured = game.attachment_query("mirror", "value").unwrap();
         let query = captured.query(&VALUE).unwrap();
         let row = query.iter().next().unwrap().unwrap();
         assert_eq!(

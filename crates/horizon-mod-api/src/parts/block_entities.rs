@@ -447,8 +447,8 @@ impl BlockEntitiesRegistrar for PartRegistrar {
 
 impl PartRegistrar {
     /// Checks a Part state declaration of either holder and records its key: see
-    /// `PartStateDeclaration::check`, a key outside this mod's namespaces, or one declared
-    /// with another Wire layout.
+    /// `PartStateDeclaration::check` or a key used with another Wire layout.
+    /// Owner declarations are checked after all packages have registered.
     pub(crate) fn check_part_state(
         &mut self,
         declaration: crate::PartStateDeclaration,
@@ -456,17 +456,14 @@ impl PartRegistrar {
         let key = (declaration.namespace, declaration.name);
         declaration
             .check(self.mod_wasm)
-            .and_then(|()| {
-                self.owned_declaration_id(&format!("{}:{}", key.0, key.1))
-                    .map(drop)
-                    .map_err(|_| crate::PartStateRefusal::UnownedNamespace)
-            })
             .and_then(|()| match self.part_states.get(&key) {
                 Some(&(layout, declared)) if layout != declaration.layout => {
                     Err(crate::PartStateRefusal::Incompatible { declared })
                 }
                 _ => Ok(()),
             })?;
+        self.attachment_uses
+            .push((self.mod_id.into(), key.0.into(), key.1.into()));
         self.part_states
             .insert(key, (declaration.layout, declaration.data_name));
         Ok(())

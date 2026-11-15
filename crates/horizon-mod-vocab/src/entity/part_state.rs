@@ -51,7 +51,7 @@ use std::fmt;
 pub trait EntityPartState: EntityPart + Sized {
     /// The value each entity of the Part's type keeps.
     type Data: Clone + Send + Sync + crate::wire::Wire + 'static;
-    /// Its attachment key, default and codec. The key is in a namespace the mod owns;
+    /// Its attachment key, default and codec. The owner declares the key at registration;
     /// without a codec the value is kept for the session only.
     const DATA: &'static AttachmentType<Self::Data>;
 

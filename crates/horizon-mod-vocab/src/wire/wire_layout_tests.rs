@@ -999,6 +999,13 @@ fn every_attachment_error_and_write_case_has_declared_tag_type() {
         AttachmentError::UnsupportedHolder("dragonpart"),
         (8u32, "dragonpart"),
     );
+    fields(
+        AttachmentError::Undeclared {
+            package_id: "test_pkg".into(),
+            attachment_id: "test_pkg:mana".into(),
+        },
+        (9u32, "test_pkg".to_owned(), "test_pkg:mana".to_owned()),
+    );
     fields(AttachmentRowError::HolderBusy, (2u32,));
     fields(
         AttachmentRowError::UnsupportedHolder("dragonpart"),

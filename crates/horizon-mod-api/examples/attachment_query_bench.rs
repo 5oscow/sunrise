@@ -84,9 +84,15 @@ impl BenchHost {
 impl Host for BenchHost {}
 mod_api::impl_host_areas!(BenchHost, except(mod_state));
 impl ModStateHost for BenchHost {
-    fn attachment_query(&self, namespace: &str, name: &str) -> AttachmentBatch {
-        runtime::AttachmentBatch::new(self.index.lock().unwrap().snapshot_named(namespace, name))
-            .into()
+    fn attachment_query(
+        &self,
+        namespace: &str,
+        name: &str,
+    ) -> Result<AttachmentBatch, AttachmentError> {
+        Ok(runtime::AttachmentBatch::new(
+            self.index.lock().unwrap().snapshot_named(namespace, name),
+        )
+        .into())
     }
     fn attachments(&mut self) -> &mut dyn AttachmentStore {
         self
@@ -103,6 +109,15 @@ impl ModStateServerHost for BenchHost {
     }
 }
 impl AttachmentHost for BenchHost {
+    fn validate_attachment(
+        &self,
+        namespace: &str,
+        name: &str,
+        sync: bool,
+    ) -> Result<(), AttachmentError> {
+        let _ = (namespace, name, sync);
+        Ok(())
+    }
     fn attachments(
         &mut self,
         holder: Holder,

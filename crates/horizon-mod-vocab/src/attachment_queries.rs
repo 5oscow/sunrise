@@ -15,7 +15,7 @@ pub trait AttachmentQueries: Host {
         &self,
         key: &'key AttachmentType<T>,
     ) -> Result<AttachmentQuery<'key, T>, AttachmentError> {
-        self.attachment_query(key.namespace, key.name).query(key)
+        self.attachment_query(key.namespace, key.name)?.query(key)
     }
 }
 impl<H: Host + ?Sized> AttachmentQueries for H {}

@@ -34,12 +34,13 @@ impl Game<'_> {
         &self,
         namespace: &str,
         name: &str,
-    ) -> mod_api::AttachmentBatch {
+    ) -> Result<mod_api::AttachmentBatch, mod_api::AttachmentError> {
+        mod_api::__private::validate_attachment_use(namespace, name, false)?;
         let Some(index) = self.attachment_indexes.get(&self.dim) else {
-            return horizon_mod_runtime::attachments::AttachmentBatch::empty().into();
+            return Ok(horizon_mod_runtime::attachments::AttachmentBatch::empty().into());
         };
         let rows = index.lock().unwrap().snapshot_named(namespace, name);
-        horizon_mod_runtime::attachments::AttachmentBatch::new(rows).into()
+        Ok(horizon_mod_runtime::attachments::AttachmentBatch::new(rows).into())
     }
 
     pub(in crate::game) fn attachment_validate_write(
