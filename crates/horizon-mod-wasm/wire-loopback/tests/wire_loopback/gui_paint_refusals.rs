@@ -15,7 +15,12 @@ fn refusals() -> Vec<GuiPaintError> {
         GuiPaintError::BlitSize { index: u32::MAX },
         GuiPaintError::Sprite {
             index: 2,
-            sprite: "test:missing".into(),
+            sprite: "test:mob_effect/missing".into(),
+        },
+        GuiPaintError::SpriteRegion { index: 4 },
+        GuiPaintError::SpriteBlend {
+            index: 5,
+            blend: mod_api::client::hud_layout::Blend::Vignette,
         },
     ]
 }
@@ -73,11 +78,11 @@ fn wire_loopback_a_guests_paint_gets_the_games_named_refusal_back() {
         scale: [2.0, 2.0],
         pivot: [28.0, 28.0],
     };
-    let answers: Vec<_> = (0..7).map(|_| guest::Guest.gui_paint(&[item.clone()])).collect();
+    let answers: Vec<_> = (0..9).map(|_| guest::Guest.gui_paint(&[item.clone()])).collect();
     guest::set_transport(None);
     drop(cx);
     let mut want: Vec<_> = refusals().into_iter().map(Err).collect();
     want.push(Ok(()));
     assert_eq!(answers, want);
-    assert_eq!(draw.painted, vec![vec![item]; 7]);
+    assert_eq!(draw.painted, vec![vec![item]; 9]);
 }

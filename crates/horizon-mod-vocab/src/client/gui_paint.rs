@@ -34,13 +34,25 @@ pub enum GuiPaintError {
         /// The op's place in the buffer.
         index: u32,
     },
-    /// A `GuiDraw::Sprite` or `GuiDraw::AtlasSprite` the GUI atlas does not hold (a mob effect
-    /// sprite draws the missing texture instead, as vanilla's).
+    /// A `GuiDraw::Sprite` or `GuiDraw::AtlasSprite` the GUI atlas does not hold, a mob effect
+    /// sprite (`mob_effect/...`, namespaced or not) included.
     Sprite {
         /// The op's place in the buffer.
         index: u32,
         /// The sprite it named.
         sprite: String,
+    },
+    /// A `GuiDraw::Sprite` whose `region` has a sprite width or height of zero (or less).
+    SpriteRegion {
+        /// The op's place in the buffer.
+        index: u32,
+    },
+    /// A `GuiDraw::Sprite` with a blend sprites cannot be drawn with (`Nausea`, `Vignette`).
+    SpriteBlend {
+        /// The op's place in the buffer.
+        index: u32,
+        /// The blend it named.
+        blend: crate::client::hud_layout::Blend,
     },
 }
 impl From<TextFormError> for GuiPaintError {
@@ -66,6 +78,12 @@ impl std::fmt::Display for GuiPaintError {
             }
             Self::Sprite { index, sprite } => {
                 write!(f, "gui_paint: op {index}: unknown sprite {sprite}")
+            }
+            Self::SpriteRegion { index } => {
+                write!(f, "gui_paint: op {index}: Sprite region width or height not positive")
+            }
+            Self::SpriteBlend { index, blend } => {
+                write!(f, "gui_paint: op {index}: Sprite cannot draw with blend {blend:?}")
             }
         }
     }

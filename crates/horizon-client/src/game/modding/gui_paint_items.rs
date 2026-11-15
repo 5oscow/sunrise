@@ -44,6 +44,8 @@ pub(crate) fn paint_error((index, why): (usize, Undrawable)) -> GuiPaintError {
         Undrawable::BlitTexture(texture) => GuiPaintError::BlitTexture { index, texture },
         Undrawable::BlitSize => GuiPaintError::BlitSize { index },
         Undrawable::Sprite(sprite) => GuiPaintError::Sprite { index, sprite },
+        Undrawable::SpriteRegion => GuiPaintError::SpriteRegion { index },
+        Undrawable::SpriteBlend(blend) => GuiPaintError::SpriteBlend { index, blend },
     }
 }
 

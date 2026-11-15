@@ -1,7 +1,7 @@
 //! Painting a whole command buffer, items and every blit blend included: the hotbar's items and
 //! a mod's `gui_paint`. A mod's buffer is checked first ([`undrawable`]): one op the paint
 //! cannot draw refuses the buffer, and nothing of it is drawn.
-use super::{GuiDraw, paint_with};
+use super::{Blend, GuiDraw, paint_with};
 use crate::hud::{HudAtlas, HudBatch};
 
 /// What draws a `GuiDraw::Item`: the stack of hotbar slot `slot` (0-8, 40 = the off hand).
@@ -25,8 +25,12 @@ pub enum Undrawable {
     BlitTexture(String),
     /// A `Blit` whose texture size is not positive, or whose `uv` is NaN or infinite.
     BlitSize,
-    /// A `Sprite` or `AtlasSprite` the GUI atlas does not hold.
+    /// A `Sprite` or `AtlasSprite` the GUI atlas does not hold, a mob effect sprite included.
     Sprite(String),
+    /// A `Sprite` whose `region` has a zero (or negative) sprite width or height.
+    SpriteRegion,
+    /// A `Sprite` with a blend the sprite painter cannot draw (`Nausea`, `Vignette`).
+    SpriteBlend(Blend),
 }
 
 /// Whether `slot` names a hotbar slot or the off hand, as `GuiDraw::Item` takes it.
@@ -68,16 +72,31 @@ fn refusal(atlas: &HudAtlas, draw: &GuiDraw, name: &mut String) -> Option<Undraw
                 None
             }
         }
-        GuiDraw::Sprite { sprite, .. } => {
-            // As `paint` looks it up: a mob effect sprite draws the missing texture when absent.
+        GuiDraw::Sprite {
+            sprite,
+            region,
+            blend,
+            ..
+        } => {
+            if matches!(blend, Blend::Nausea | Blend::Vignette) {
+                return Some(Undrawable::SpriteBlend(*blend));
+            }
+            if region.is_some_and(|[sw, sh, ..]| sw <= 0 || sh <= 0) {
+                return Some(Undrawable::SpriteRegion);
+            }
+            // As `paint` looks it up: a mob effect sprite (namespaced or not) by its own name,
+            // the others under `gui/sprites/`. A mod's missing effect sprite is refused, not
+            // drawn as the missing texture.
             let effect = sprite.starts_with("mob_effect/")
                 || sprite
                     .split_once(':')
                     .is_some_and(|(_, path)| path.starts_with("mob_effect/"));
             name.clear();
-            name.push_str("gui/sprites/");
+            if !effect {
+                name.push_str("gui/sprites/");
+            }
             name.push_str(sprite);
-            let known = effect || atlas.sprites.contains_key(name.as_str());
+            let known = atlas.sprites.contains_key(name.as_str());
             (!known).then(|| Undrawable::Sprite(sprite.to_string()))
         }
         GuiDraw::AtlasSprite { sprite, .. } => {

@@ -45,6 +45,19 @@ fn item(slot: u32, x: i32, y: i32, scale: [f32; 2], pivot: [f32; 2]) -> GuiDraw 
     }
 }
 
+fn sprite(name: &'static str, region: Option<[i32; 4]>, blend: Blend) -> GuiDraw {
+    GuiDraw::Sprite {
+        sprite: name.into(),
+        x: 0,
+        y: 0,
+        w: 4,
+        h: 4,
+        region,
+        color: 0xFFFF_FFFF,
+        blend,
+    }
+}
+
 fn blit(texture: &'static str, blend: Blend, tex: [i32; 2]) -> GuiDraw {
     GuiDraw::Blit {
         texture: texture.into(),
@@ -130,13 +143,6 @@ fn every_blit_blend_draws_with_its_blend() {
 #[test]
 fn an_op_the_paint_cannot_draw_refuses_the_buffer_and_draws_nothing_of_it() {
     let atlas = atlas();
-    let fill = GuiDraw::Fill {
-        x0: 0,
-        y0: 0,
-        x1: 4,
-        y1: 4,
-        color: 0xFFFF_FFFF,
-    };
     let sprite = GuiDraw::Sprite {
         sprite: "test:missing".into(),
         x: 0,
@@ -168,17 +174,84 @@ fn an_op_the_paint_cannot_draw_refuses_the_buffer_and_draws_nothing_of_it() {
         (sprite, Undrawable::Sprite("test:missing".into())),
         (atlas_sprite, Undrawable::Sprite("test:missing".into())),
     ];
+    assert_eq!(refused_alone(&atlas, cases.to_vec()), cases.len());
+}
+
+/// Each case refused after a fill and an item, at index 2, with nothing of the buffer drawn;
+/// answers how many were checked.
+fn refused_alone(atlas: &HudAtlas, cases: Vec<(GuiDraw, Undrawable)>) -> usize {
+    let fill = GuiDraw::Fill {
+        x0: 0,
+        y0: 0,
+        x1: 4,
+        y1: 4,
+        color: 0xFFFF_FFFF,
+    };
+    let checked = cases.len();
     for (op, why) in cases {
         let mut batch = HudBatch::scratch([854, 480]);
         let mut items = Items::default();
         let draws = [fill.clone(), item(0, 0, 0, [1.0, 1.0], [0.0, 0.0]), op];
         assert_eq!(
-            paint_checked(&mut batch, &atlas, &draws, &mut items),
+            paint_checked(&mut batch, atlas, &draws, &mut items),
             Err((2, why))
         );
         assert!(batch.vertices.is_empty());
         assert!(items.calls.is_empty());
     }
+    checked
+}
+
+#[test]
+fn a_sprite_region_of_zero_width_or_height_is_refused_before_anything_divides_by_it() {
+    let atlas = atlas();
+    let cases = vec![
+        (
+            sprite("hud/heart/full", Some([0, 9, 0, 0]), Blend::Textured),
+            Undrawable::SpriteRegion,
+        ),
+        (
+            sprite("hud/heart/full", Some([9, 0, 0, 0]), Blend::Textured),
+            Undrawable::SpriteRegion,
+        ),
+        (
+            sprite("hud/heart/full", Some([-1, 9, 0, 0]), Blend::Crosshair),
+            Undrawable::SpriteRegion,
+        ),
+    ];
+    assert_eq!(refused_alone(&atlas, cases), 3);
+}
+
+#[test]
+fn a_sprite_with_a_screen_effect_blend_is_refused_not_drawn_plain() {
+    let atlas = atlas();
+    let cases = vec![
+        (
+            sprite("hud/heart/full", None, Blend::Nausea),
+            Undrawable::SpriteBlend(Blend::Nausea),
+        ),
+        (
+            sprite("hud/heart/full", Some([9, 9, 0, 0]), Blend::Vignette),
+            Undrawable::SpriteBlend(Blend::Vignette),
+        ),
+    ];
+    assert_eq!(refused_alone(&atlas, cases), 2);
+}
+
+#[test]
+fn a_missing_mob_effect_sprite_plain_or_namespaced_is_refused_as_unknown() {
+    let atlas = atlas();
+    let cases = vec![
+        (
+            sprite("mob_effect/test_missing", None, Blend::Textured),
+            Undrawable::Sprite("mob_effect/test_missing".into()),
+        ),
+        (
+            sprite("test:mob_effect/missing", None, Blend::Textured),
+            Undrawable::Sprite("test:mob_effect/missing".into()),
+        ),
+    ];
+    assert_eq!(refused_alone(&atlas, cases), 2);
 }
 
 #[test]
