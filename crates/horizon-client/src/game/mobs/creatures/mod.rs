@@ -25,6 +25,12 @@ mod residency;
 #[cfg(test)]
 mod retained_limits_tests;
 mod section_steps;
+#[cfg(test)]
+#[path = "../../creatures/spawn_egg_mob_tests.rs"]
+mod spawn_egg_mob_tests;
+#[cfg(test)]
+#[path = "../../creatures/spectator_view_tests.rs"]
+mod spectator_view_tests;
 mod world_view;
 use super::api_values::{TryIntoApi, TryIntoEngine};
 use super::level_sounds::LevelSound;
@@ -1460,7 +1466,7 @@ impl Game<'_> {
                 .map(|e| e.id.trim_start_matches("minecraft:"))
                 .collect();
             let bounds = m.bounds();
-            self.effects_on_death(&names, bounds, false, Some(m.id), Some(&mut m.random));
+            self.effects_on_death(&names, bounds, m.silent, Some(m.id), Some(&mut m.random));
         }
         self.deliver_pending_mob_actions(level_id)?;
         self.finish_creature_entities(&mut laps, &primable)
@@ -2349,10 +2355,9 @@ impl Game<'_> {
                     let ctx = self.who_context(Some(Who::Mob(source)), None);
                     self.post_game_event(event, at, ctx);
                 }
-                // A mob's own `gameEvent(..)` calls: Armadillo.rollUp/rollOut's
-                // ENTITY_ACTION, Creeper.tick's PRIME_FUSE, Mob.ate's EAT, a fox's
-                // DRINK, the shulker's lid, an evoker's vexes (ENTITY_PLACE),
-                // Enderman.teleport's TELEPORT, onEquipItem's EQUIP/UNEQUIP.
+                // A mob's own `gameEvent(..)` calls: Armadillo.rollUp/rollOut's ENTITY_ACTION,
+                // PRIME_FUSE, EAT, a fox's DRINK, the shulker's lid, an evoker's vexes
+                // (ENTITY_PLACE), TELEPORT, EQUIP/UNEQUIP, updateFallFlying's ELYTRA_GLIDE.
                 MobEvent::GameEvent {
                     event, at, source, ..
                 } if matches!(
@@ -2367,6 +2372,7 @@ impl Game<'_> {
                         | "minecraft:teleport"
                         | "minecraft:equip"
                         | "minecraft:unequip"
+                        | "minecraft:elytra_glide"
                 ) =>
                 {
                     let ctx = self.who_context(Some(Who::Mob(source)), None);
@@ -4621,7 +4627,7 @@ impl Game<'_> {
                         return;
                     }
                     // AbstractWindCharge.tick: out of the world's top it bursts.
-                    if wind && keep && p.position.y > 350.0 {
+                    if wind && keep && super::wind::above_the_top(self.world.shape, p.position.y) {
                         hits.push((
                             p.clone(),
                             Hit::Block {
@@ -6363,6 +6369,8 @@ impl Game<'_> {
         let Some(index) = self.mob_interaction_target(target) else {
             return Ok(false);
         };
+        // CamelHusk.interact: any click on it keeps it (`setPersistenceRequired`).
+        horizon_client::mobs::camel::keep_on_interact(&mut self.mobs[index]);
         // PlayerInteractTrigger: the name tag as it was before it named the mob.
         let used = self.held().cloned();
         if self.name_mob(index) {
@@ -7472,6 +7480,21 @@ impl Game<'_> {
         );
         let (species, variant, color) =
             (parent.species(), parent.extra.variant, parent.extra.color);
+        // `MushroomCow.getBreedOffspring(level, this)`: the egg's mate is the
+        // parent itself, so the colour always rolls `nextInt(1024) == 0` to
+        // flip, and every other roll spends the coin flip that can only pick
+        // that same colour again. Both come from the parent's own random.
+        let variant = if species == Species::Mooshroom {
+            let random = &mut self.mobs[index].random;
+            if random.next_int_bound(1024).unwrap_or(1) == 0 {
+                if variant == 1 { 0 } else { 1 }
+            } else {
+                let _ = random.next_boolean();
+                variant
+            }
+        } else {
+            variant
+        };
         let target = self.mob_entity(&self.mobs[index]);
         // SpawnEggItem.spawnOffspringFromSpawnEgg: `type.create(level, SPAWN_ITEM_USE)`
         // creates the baby without finalizeSpawn, and `snapTo(pos, 0, 0)` faces
@@ -7497,6 +7520,10 @@ impl Game<'_> {
         }
         self.trigger_item_entity("minecraft:player_interacted_with_entity", &stack, &target);
         self.consume_held();
+        // `Mob.interact`: the egg's `SUCCESS_SERVER` consumes the click, so the
+        // interaction posts `ENTITY_INTERACT` with the player, at the mob.
+        let ctx = self.who_context(Some(Who::Player), None);
+        self.post_game_event("minecraft:entity_interact", at, ctx);
         true
     }
     /// `SpawnEggItem.use`: the SOURCE_ONLY ray must hit a liquid block.
@@ -7529,6 +7556,11 @@ impl Game<'_> {
             return Ok(false);
         };
         let kind = stack.item.trim_end_matches("_spawn_egg").to_owned();
+        // ItemStack.useOn in adventure mode: an egg used on a block without a
+        // matching `can_place_on` passes to `use`, whose fluid ray finds none.
+        if !fluid && !self.may_use_on(hit.pos) {
+            return Ok(false);
+        }
         if !self.spawn_egg_allowed(&stack.item) {
             self.use_failed = true;
             return Ok(true);
@@ -7809,6 +7841,8 @@ impl Game<'_> {
         let atlas = &self.gui.atlas;
         let lookup = |name: &str| atlas.sprites.get(name).map(|r| [r.u0, r.v0, r.u1, r.v1]);
         let scale = self.view_scale();
+        // Who watches (`Entity.isInvisibleTo`): the local player's team.
+        let viewer = self.player_team();
         self.rendered_mobs.set(0);
         let (skinning, listened) = (self.skinning(), self.mob_render_listened());
         // What custom entity model animations read of the frame.
@@ -7863,12 +7897,23 @@ impl Game<'_> {
                 }
             }
             let outline = self.mob_outline(mob);
-            // Entity.DATA_SHARED_FLAGS_ID invisible: only the name tag draws (and
-            // the outline of a glowing mob, LivingEntityRenderer.getRenderType).
-            // A player keeps its armour, elytra and held items
-            // (`LivingEntityRenderer.submit` skips only the body).
-            let layers_only = mob.invisible && outline.is_none() && is_player;
-            if mob.invisible && outline.is_none() && !layers_only {
+            // Entity.DATA_SHARED_FLAGS_ID invisible (the flag the invisibility
+            // effect sets): only the name tag draws (and the outline of a
+            // glowing mob, LivingEntityRenderer.getRenderType). A player keeps
+            // its armour, elytra and held items (`LivingEntityRenderer.submit`
+            // skips only the body).
+            let invisible = mob.is_invisible();
+            // Entity.isInvisibleTo(viewer): a spectator sees it anyway, the
+            // body forced translucent (`LivingEntityRenderer.submit`).
+            let seen_invisible = invisible
+                && !horizon_client::scoreboard::invisible_to(
+                    self.mob_team_of(mob),
+                    viewer,
+                    self.spectator(),
+                    true,
+                );
+            let layers_only = invisible && outline.is_none() && is_player && !seen_invisible;
+            if invisible && outline.is_none() && !layers_only && !seen_invisible {
                 continue;
             }
             let culling = if PRECHECK
@@ -7927,10 +7972,11 @@ impl Game<'_> {
             // (a player's, the HDR tiers below, the sulfur cube's shell). A glowing mob's
             // silhouette is posed too (`SkinFrame::outline_since`), unless it is invisible:
             // then only the outline draws.
-            let silhouette_on_gpu = outline.is_none() || !mob.invisible;
+            let silhouette_on_gpu = outline.is_none() || !invisible;
             let posable = skinning
                 && !(is_player || modded)
                 && !layers_only
+                && !seen_invisible
                 && silhouette_on_gpu
                 && armor.is_empty()
                 && !matches!(
@@ -7957,7 +8003,20 @@ impl Game<'_> {
                 );
                 skinned = Some((mark, skin.bounds));
             } else if !modded {
-                if layers_only {
+                if seen_invisible {
+                    horizon_client::mobs::render::render_seen_invisible(
+                        mob,
+                        alpha as f32,
+                        camera,
+                        &lookup,
+                        packed,
+                        self.res.mob_data(),
+                        &armor,
+                        hidden,
+                        (listened || added.is_some()).then_some(&mut parts),
+                        out,
+                    );
+                } else if layers_only {
                     horizon_client::mobs::render::render_layers(
                         mob,
                         alpha as f32,
@@ -8002,13 +8061,15 @@ impl Game<'_> {
                 // and SpinAttackEffectLayer. Only the cape hides with the body;
                 // the others have no `isInvisible` check.
                 let chest = mob.extra.slot_id(horizon_items::equipment::CHEST);
-                if !layers_only {
+                // `CapeLayer` and `Deadmau5EarsLayer`: `!state.isInvisible`, whoever sees the body.
+                if !invisible {
                     self.player_cape_geometry(mob, chest, camera, alpha as f32, packed, out);
                 }
-                if let Some((_, name)) = self
-                    .remote_player_names()
-                    .into_iter()
-                    .find(|(id, _)| *id == mob.id)
+                if !invisible
+                    && let Some((_, name)) = self
+                        .remote_player_names()
+                        .into_iter()
+                        .find(|(id, _)| *id == mob.id)
                 {
                     self.player_ears_geometry(mob, &name, camera, alpha as f32, packed, out);
                 }
@@ -8052,7 +8113,7 @@ impl Game<'_> {
                     let color = horizon_client::mobs::render::abgr(rgb);
                     self.skin_frame.borrow_mut().outline_since(first, color);
                 }
-                if mob.invisible {
+                if invisible && !seen_invisible {
                     out.truncate(entity_start);
                     continue;
                 }
@@ -8488,55 +8549,6 @@ pub(super) fn from_loot(stack: &horizon_world::loot::LootStack) -> ItemStack {
     }
     item
 }
-impl Game<'_> {
-    /// The rest of `NetherPortalBlock.randomTick` after a won roll: with a
-    /// player close enough for spawning, a zombified piglin spawns on the block
-    /// under the portal column when it is a valid spawn.
-    pub(super) fn portal_spawn(&mut self, pos: [i32; 3]) {
-        // ChunkMap.anyPlayerCloseEnoughForSpawning: a non-spectator within 128
-        // blocks of the chunk centre.
-        let centre = [
-            f64::from((pos[0] >> 4) * 16 + 8),
-            f64::from((pos[2] >> 4) * 16 + 8),
-        ];
-        let close = self.level_players().iter().any(|p| {
-            let (dx, dz) = (p.position.x - centre[0], p.position.z - centre[1]);
-            !p.spectator && dx * dx + dz * dz < 16384.0
-        });
-        if !close {
-            return;
-        }
-        let mut y = pos[1];
-        while &*self
-            .res
-            .facts()
-            .get(self.world.block(pos[0], y, pos[2]))
-            .name
-            == "minecraft:nether_portal"
-        {
-            y -= 1;
-        }
-        // isValidSpawn: a sturdy top face (portal frames emit no light).
-        let below = self.res.facts().get(self.world.block(pos[0], y, pos[2]));
-        if below.sturdy_full & (1 << 1) == 0 {
-            return;
-        }
-        let at = [
-            f64::from(pos[0]) + 0.5,
-            f64::from(y + 1),
-            f64::from(pos[2]) + 0.5,
-        ];
-        // setPortalCooldown: the new piglin does not travel at once.
-        if let Some(id) = self.spawn_mob(
-            "minecraft:zombified_piglin",
-            at,
-            false,
-            SpawnSite::Finalizing(horizon_client::mobs::spawn_rules::Reason::Structure),
-        ) {
-            self.set_portal_cooldown(id);
-        }
-    }
-}
 /// The instance a mob effect gives the player; `None` for a creative or
 /// spectator player (`immune`) unless it is ambient (the nautilus's Breath).
 fn mob_effect_instance(
@@ -8637,7 +8649,7 @@ mod living_visibility_tests {
     /// `LivingVisibilityEvent` for a guest a mob targets: the mod gets the
     /// guest, the mob and vanilla's percent, and its answer is the percent.
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "daily"]
     fn a_mod_halves_a_guests_visibility() {
         let heard = Arc::default();
         let mods = vec![mod_api::ModEntry::new(
@@ -8747,7 +8759,7 @@ mod enchanted_entity_loot_tests {
     /// zombie and the attacker as live handles, the attacker's own level, and
     /// the level it answers decides the drops.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_kills_loot_uses_the_level_a_mod_answers() {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let mods = vec![mod_api::ModEntry::new(
@@ -8834,7 +8846,7 @@ mod enchanted_entity_loot_tests {
 
     /// The host's own kill names the host: its id, not the 0 of no attacker.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn the_hosts_kill_hands_the_host_as_the_attacker() {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let mods = vec![mod_api::ModEntry::new(
@@ -8877,7 +8889,7 @@ mod enchanted_entity_loot_tests {
     /// No attacker at all: `getAttacker` is `@Nullable`, and the read is
     /// asked from a level of 0.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_death_with_no_attacker_is_asked_at_level_0() {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let mods = listening(&seen, 1000);
@@ -8902,7 +8914,7 @@ mod enchanted_entity_loot_tests {
     /// source names nobody, and the attacker is the command's source. Both
     /// readers ask, with the source's level, and the answer decides the drops.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn loot_kill_asks_with_the_commands_source_as_the_attacker() {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let mods = listening(&seen, 1000);
@@ -8957,7 +8969,7 @@ mod enchanted_entity_loot_tests {
     /// level of 0; a source with no entity is no attacker. The zombie's rare
     /// drops read no kill then, so only the flesh asks.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn loot_kill_asks_with_a_non_living_source_and_with_none() {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let mods = listening(&seen, 3);
@@ -9016,7 +9028,7 @@ mod enchanted_entity_loot_tests {
     /// A draw the listener makes from the level's random during `/loot ... kill`
     /// stays made: the roll's sequence is its own, and the level random moves.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_draw_made_during_loot_kill_stays_in_the_level_random() {
         struct Drawing;
         #[mod_api::__subscriptions]
@@ -9059,7 +9071,7 @@ mod enchanted_entity_loot_tests {
     /// A listener that leaves the level as it came changes nothing: the same
     /// deaths drop the same as with no mod, one question each.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn an_answer_of_the_same_level_leaves_the_drops_alone() {
         let deaths = |mods: mod_api::Mods| {
             let mut counts = Vec::new();
@@ -9117,7 +9129,7 @@ mod enderman_anger_tests {
     /// `EnderManAngerEvent`: a guest stares straight at two endermen; the
     /// mod keeps one calm, the other still counts the stare.
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "daily"]
     fn a_mod_keeps_one_stared_at_enderman_calm() {
         let heard = Arc::default();
         let (calm, angry) = (900, 901);
@@ -9168,7 +9180,7 @@ mod local_sound_event_tests {
     use horizon_client::mobs::MobEvent;
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn local_mob_events_play_without_entering_the_shared_capture() {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
@@ -9254,7 +9266,7 @@ mod tests {
     use horizon_client::camera::CameraType;
 
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "daily"]
     fn conversion_transfers_tags_and_team() {
         use super::super::commands::Target;
         use horizon_client::{
@@ -9298,7 +9310,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn wolf_owner_rejoining_receives_the_kill_statistic() {
         use horizon_client::advancements::{Advancement, Criterion, Rewards, Tree};
         use horizon_client::mobs::{Damage, Mob};
@@ -9423,7 +9435,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn ender_pearl_clears_impulse_before_next_fall() {
         use super::{Game, Hit, Projectile, Vec3, Who};
         use crate::game::{Audio, Options, Progress, Settings, load_resources};
@@ -9652,7 +9664,7 @@ fn breeding_credit(
 #[cfg(test)]
 mod mob_subscription_tests {
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "daily"]
     fn empty_mod_never_defers_taming_or_block_destruction() {
         use mod_api::{self, Hooks};
         struct Empty;
@@ -9877,7 +9889,7 @@ mod breeding_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "daily"]
     fn equine_breeding_inheritance_precedes_same_tick_healing_and_grazing() {
         super::super::native_entity_refs::tests::with_game(|game| {
             // java.util.Random(42), Horse/Donkey/Llama.getBreedOffspring,
@@ -9956,7 +9968,7 @@ mod breeding_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "daily"]
     fn wolf_breeding_selects_either_coat_from_the_parent_stream() {
         super::super::native_entity_refs::tests::with_game(|game| {
             // Computed with an independent implementation of the documented java.util.Random
@@ -9975,7 +9987,7 @@ mod breeding_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "daily"]
     fn camel_breeding_leaves_the_parent_stream_unchanged() {
         super::super::native_entity_refs::tests::with_game(|game| {
             let kind = "minecraft:camel";
@@ -9987,7 +9999,7 @@ mod breeding_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "daily"]
     fn breeding_announces_the_orb_before_the_lower_id_child() {
         use mod_api::{self, BabyEntitySpawnEvent, EntityJoinLevelEvent, Flow, Hooks};
         use std::sync::{
@@ -10183,7 +10195,7 @@ mod breeding_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "daily"]
     fn first_chicken_breed_matches_without_mods_and_with_an_empty_mod() {
         use horizon_client::mobs::{BreedExperience, MobEvent, goals::Breed};
         use horizon_core::random::LegacyRandom;
@@ -10243,7 +10255,7 @@ mod breeding_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "daily"]
     fn empty_mod_never_defers_breeding_xp() {
         use mod_api::{self, Hooks};
         struct Empty;
@@ -10490,7 +10502,7 @@ mod projectile_batch_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn no_impact_expiration_retires_only_the_expired_owner() {
         super::super::native_entity_refs::tests::with_game(|game| {
             game.options.dedicated = Some(Vec::new());
@@ -10538,7 +10550,7 @@ mod projectile_batch_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn canceled_impacts_keep_projectile_batch_joins_and_survivor_order() {
         with_batch(false, |game, ids, joins, spawned, buffered| {
             let list = &mut game.creatures.projectiles;
@@ -10566,7 +10578,7 @@ mod projectile_batch_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_projectile_removed_in_its_impact_hook_stays_removed_after_replay() {
         with_batch(true, |game, ids, joins, spawned, buffered| {
             // Pending removal refuses the handle already, even before the physical sweep.
@@ -10599,7 +10611,7 @@ mod breeze_random_tests {
     use super::*;
 
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "daily"]
     fn projectile_handle_pierce_level_changes_real_hits() {
         super::super::native_entity_refs::tests::with_game(|game| {
             game.options.dedicated = Some(Vec::new());
@@ -10638,7 +10650,7 @@ mod breeze_random_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "daily"]
     fn breeze_deflection_does_not_draw_from_level_random() {
         super::super::native_entity_refs::tests::with_game(|game| {
             let breeze = game
@@ -11053,7 +11065,7 @@ mod conversion_subscriber_tests {
     use std::sync::Mutex;
 
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "daily"]
     fn post_only_listener_is_subscribed_without_a_pre_listener() {
         struct DefaultMod;
         #[mod_api::__subscriptions]
@@ -11133,7 +11145,7 @@ mod living_drops_tests {
     /// rest of its drops and can cancel it, and an armor stand's break
     /// fires it with an empty list.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn the_golems_preserved_equipment_and_a_broken_stand_reach_living_drops() {
         use mod_api::{self, Flow, Hooks, LivingDropsEvent};
         use std::sync::{
@@ -11238,7 +11250,7 @@ mod armor_destroy_tests {
     use horizon_client::items::ItemStack;
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn body_armor_guards_and_break_event_are_preserved() {
         use horizon_client::mobs::Mob;
         use horizon_core::equipment_slot::EquipmentSlot;
@@ -11340,7 +11352,7 @@ mod armor_destroy_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn sun_protection_uses_mob_draw_and_broadcasts_break() {
         use horizon_client::mobs::Mob;
         use horizon_core::equipment_slot::EquipmentSlot;
@@ -11408,7 +11420,7 @@ mod armor_destroy_tests {
     /// Without a canceled break the effects play; with no break applied the
     /// `otherwise` events do (a canceled break plays no sound and the ravager jumps).
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_break_effect_follows_only_an_applied_break() {
         with_game(|game| {
             let id = game
@@ -11459,7 +11471,7 @@ mod armor_destroy_tests {
 
     /// An enderman's pick-up is refused when the block is no longer the one decided on.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn an_enderman_does_not_take_a_changed_block() {
         with_game(|game| {
             let id = game
@@ -11521,7 +11533,7 @@ mod conversion_tag_tests {
     use horizon_core::nbt::Tag;
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn converted_mobs_keep_command_tags_at_the_new_id_and_on_save() {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
@@ -11794,7 +11806,7 @@ mod mob_pearl_hook_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources and an isolated native-mod process"]
+    #[ignore = "daily"]
     fn player_pearl_keeps_acting_context_cancellation_and_mutable_damage() {
         use horizon_client::motion::PlayerMotion;
         let mode = Arc::new(AtomicU8::new(0));
@@ -11864,7 +11876,7 @@ mod mob_pearl_hook_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources and an isolated native-mod process"]
+    #[ignore = "daily"]
     fn mob_pearls_use_the_hook_and_recheck_listener_writes_without_player_side_effects() {
         let mode = Arc::new(AtomicU8::new(0));
         let owners = Arc::new(Mutex::new(Vec::new()));
@@ -11955,7 +11967,7 @@ mod breeding_orb_tests {
     /// `Animal.finalizeSpawnChildFromBreeding`: one fresh orb of the parent's
     /// 1-to-7 roll, never split (4 is not 3 + 1) or merged (#11388).
     #[test]
-    #[ignore = "needs prepared resources (HORIZON_TEST_RESOURCES)"]
+    #[ignore = "daily"]
     fn breeding_drops_one_orb_of_the_whole_roll() {
         super::super::native_entity_refs::tests::with_game(|game| {
             let kind = game.res.mob_types().get("minecraft:cow").unwrap().clone();
@@ -12014,7 +12026,7 @@ mod enchanted_block_loot_breaker_tests {
     /// nobody. Vanilla's tables for those three read no level, so a data pack
     /// makes them read one.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and an isolated process for native mods"]
+    #[ignore = "daily"]
     fn the_entity_destroy_block_names_reaches_the_listener() {
         let root = std::env::temp_dir().join(format!("block-loot-{}", std::process::id()));
         let dir = root.join("data/minecraft/loot_table/blocks");
@@ -12171,7 +12183,7 @@ mod chorus_projectile_drop_tests {
         assert_eq!(game.dropped[0].stack.count, 1);
     }
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_registered_arrow_collision_keeps_the_actual_projectile_for_chorus_loot() {
         with_game(|game| {
             source(game, 4, 4, "chorus_flower");
@@ -12197,7 +12209,7 @@ mod chorus_projectile_drop_tests {
         });
     }
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_registered_snowball_collision_keeps_the_actual_projectile_for_chorus_loot() {
         with_game(|game| {
             source(game, 4, 4, "chorus_flower");
@@ -12209,7 +12221,7 @@ mod chorus_projectile_drop_tests {
         });
     }
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn denied_hits_other_blocks_and_direct_destroy_keep_their_drop_contracts() {
         with_game(|game| {
             source(game, 4, 4, "chorus_flower");
@@ -12259,7 +12271,7 @@ mod chorus_projectile_drop_tests {
         });
     }
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn default_drop_rng_continues_identically_with_table_sequence_or_level_fallback() {
         for named in [false, true] {
             with_game(|game| {
@@ -12341,7 +12353,7 @@ mod chorus_projectile_drop_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn breaker_context_is_target_only_and_does_not_escape_its_level_call() {
         with_game(|game| {
             source(game, 4, 4, "chorus_flower");
@@ -12487,7 +12499,7 @@ mod loaded_arrow_shot_tests {
     /// `projectile_shoot` on its first tick, once; one loaded shot posts none.
     /// `FireworkRocketEntity.tick`'s launch sound skips a silent one.
     #[test]
-    #[ignore = "prepared resources; actual registered load, Game tick and posted events"]
+    #[ignore = "daily"]
     fn a_rocket_posts_its_shot_once_and_a_silent_one_launches_quietly() {
         with_game(|game| {
             let launch = "minecraft:entity.firework_rocket.launch";
@@ -12523,7 +12535,7 @@ mod loaded_arrow_shot_tests {
     /// after a fall posts HIT_GROUND and forgets the fall (`Entity.checkFallDamage`);
     /// in water the drop adds nothing, so a landing posts nothing.
     #[test]
-    #[ignore = "prepared resources; actual registered load, Game tick and posted events"]
+    #[ignore = "daily"]
     fn a_landing_orb_posts_hit_ground_after_a_fall() {
         use horizon_client::entities::OrbMove;
         with_game(|game| {
@@ -12581,7 +12593,7 @@ mod loaded_arrow_shot_tests {
     /// splashes once (`Entity.doWaterSplashEffect`: the sound and SPLASH) and lands
     /// with no fall.
     #[test]
-    #[ignore = "prepared resources; actual registered load, Game tick and posted events"]
+    #[ignore = "daily"]
     fn a_falling_rocket_hits_the_ground_and_one_in_water_splashes() {
         with_game(|game| {
             assert!(game.run_command("setblock 20 200 10 water"));
@@ -12620,7 +12632,7 @@ mod loaded_arrow_shot_tests {
     }
 
     #[test]
-    #[ignore = "prepared resources; actual registered load, Game tick and posted events"]
+    #[ignore = "daily"]
     fn loaded_arrow_first_tick_dispatches_once_with_its_real_owner() {
         with_game(|game| {
             let owner = owner(game);
@@ -12766,22 +12778,22 @@ mod loaded_arrow_shot_tests {
         });
     }
     #[test]
-    #[ignore = "prepared resources; actual bow release and Game ticks"]
+    #[ignore = "daily"]
     fn bow_launch_uses_only_the_first_tick_event() {
         natural("bow")
     }
     #[test]
-    #[ignore = "prepared resources; actual charged crossbow use and Game ticks"]
+    #[ignore = "daily"]
     fn crossbow_launch_uses_only_the_first_tick_event() {
         natural("crossbow")
     }
     #[test]
-    #[ignore = "prepared resources; actual Mob launch adapter and Game ticks"]
+    #[ignore = "daily"]
     fn mob_launch_uses_only_the_first_tick_event() {
         natural("mob")
     }
     #[test]
-    #[ignore = "prepared resources; actual rocket and mob trident ticks"]
+    #[ignore = "daily"]
     fn rocket_and_mob_trident_post_only_on_their_first_tick() {
         with_game(|game| {
             assert!(game.run_command("item replace entity @s weapon.mainhand with crossbow[charged_projectiles=[{id:\"minecraft:firework_rocket\",count:1}]]"));
@@ -12838,7 +12850,7 @@ mod loaded_arrow_shot_tests {
         });
     }
     #[test]
-    #[ignore = "prepared resources; real loaded owner and finish-hit source"]
+    #[ignore = "daily"]
     fn finish_hit_dispatches_once_and_the_next_tick_does_not_repeat_it() {
         with_game(|game| {
             assert!(game.run_command("summon arrow 6.5 201.5 10.5 {UUID:[I;114,0,0,20],NoGravity:1b,Motion:[0d,0d,0d],Owner:[I;114,0,0,99]}"));
@@ -12878,7 +12890,7 @@ mod loaded_arrow_shot_tests {
         });
     }
     #[test]
-    #[ignore = "prepared resources; registered Guest context and finish-hit source"]
+    #[ignore = "daily"]
     fn finish_hit_uses_registered_guest_context_and_restores_the_host() {
         use horizon_client::lan::{Joined, NetConfig, PlayerSender, guest::Guest, hub::HubConfig};
         use horizon_protocol::packets::configuration::ClientInformation;
@@ -12907,6 +12919,7 @@ mod loaded_arrow_shot_tests {
                     max_players: 2,
                     integrated: false,
                     levels: Default::default(),
+                    level_seeds: Default::default(),
                 },
             )
             .unwrap();
@@ -12992,7 +13005,7 @@ mod loaded_mob_arrow_permission_tests {
     }
 
     #[test]
-    #[ignore = "prepared resources; actual registered summon, collision, permission and drops"]
+    #[ignore = "daily"]
     fn loaded_mob_arrow_predicate_survives_model_and_controls_actual_block_hit() {
         with_game(|game| {
             game.build_registries();
@@ -13249,7 +13262,7 @@ mod h169_glide_travel_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn h169_registered_eligible_husk_actually_travels_as_a_glider() {
         with_game(|game| {
             game.world.game_time = 0;
@@ -13314,7 +13327,7 @@ mod h169_glide_travel_tests {
 
     // Added source/unit control, not part of the frozen dry-air Java runtime pair.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn h169_added_actual_wall_collision_uses_mob_damage_source() {
         with_game(|game| {
             assert!(game.run_command("fill 6 298 7 6 303 10 stone"));
@@ -13398,7 +13411,7 @@ mod breeding_heart_tests {
     /// never runs `finalizeSpawnChildFromBreeding`'s heart burst (entity event
     /// 18); `Frog.spawnChildFromBreeding` still does.
     #[test]
-    #[ignore = "needs prepared resources (HORIZON_TEST_RESOURCES)"]
+    #[ignore = "daily"]
     fn a_bred_turtle_posts_no_heart_burst_but_a_bred_frog_does() {
         let mut resources = None;
         let mut game = crate::game::game_tests::tests::server_game(&mut resources);

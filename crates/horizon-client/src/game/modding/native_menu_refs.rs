@@ -122,7 +122,7 @@ impl Game<'_> {
         )
     }
 
-    fn native_client_menu_name(&self, menu: MenuRef) -> Option<&str> {
+    pub(super) fn native_client_menu_name(&self, menu: MenuRef) -> Option<&str> {
         let remote = self.remote.as_ref().filter(|remote| remote.logged_in)?;
         let epoch = self.native_lifecycle.epoch()?;
         (menu.fields().player.fields().entity.epoch() == epoch
@@ -229,6 +229,7 @@ impl Game<'_> {
     pub(super) fn menu_slot_count(&self, menu: MenuRef) -> Option<usize> {
         if self.remote.is_some() {
             let name = self.native_client_menu_name(menu)?;
+            Self::inventory_screen_slot(name, 0)?;
             return Some(
                 (0..)
                     .map_while(|slot| Self::inventory_screen_slot(name, slot))
@@ -498,7 +499,7 @@ mod tests {
     };
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn inventory_boxes_follow_menu_indices_and_the_input_layout() {
         super::super::native_entity_refs::tests::with_client_game(|game| {
             game.screen = super::super::Screen::Inventory;
@@ -654,7 +655,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "daily"]
     fn a_server_closes_a_guests_menu_and_sets_their_selected_slot() {
         with_game(|game| {
             let config = HubConfig {
@@ -670,6 +671,7 @@ mod tests {
                 max_players: 10,
                 integrated: true,
                 levels: game.level_shapes,
+                level_seeds: game.levels.runtime.seeds(),
             };
             let mut net = NetConfig::lan(0, "test".into(), 10);
             net.listen = false;
@@ -737,7 +739,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "daily"]
     fn a_stack_is_thrown_from_the_eyes_as_player_drop_does() {
         use horizon_client::motion::PlayerMotion;
         use horizon_core::geometry::Vec3;
@@ -763,7 +765,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "daily"]
     fn menus_read_storage_and_invalidate_on_replacement_wrap_and_reconnect() {
         with_game(|game| {
             let config = HubConfig {
@@ -779,6 +781,7 @@ mod tests {
                 max_players: 10,
                 integrated: true,
                 levels: game.level_shapes,
+                level_seeds: game.levels.runtime.seeds(),
             };
             let mut net = NetConfig::lan(0, "test".into(), 10);
             net.listen = false;

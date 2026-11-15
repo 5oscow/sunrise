@@ -503,6 +503,25 @@ impl Game<'_> {
         }
         self.default_execute((pos[0], pos[1], pos[2]), facing, stack)
     }
+    /// `dispense_with_remainder`: `consume_with_remainder` for a mod's dispense answer, in the
+    /// level in place; `stack` unchanged off it, as `dispense_default` keeps it.
+    pub(super) fn dispense_with_remainder(
+        &mut self,
+        dimension: &str,
+        pos: [i32; 3],
+        facing: Direction,
+        stack: ItemStack,
+        remainder: ItemStack,
+    ) -> Option<ItemStack> {
+        if !(self.serving.is_some() || self.options.dedicated.is_some())
+            || dimension != self.dim.id()
+            || !self.world.chunks.contains_key(&(pos[0] >> 4, pos[2] >> 4))
+            || stack.count == 0
+        {
+            return Some(stack).filter(|stack| stack.count > 0);
+        }
+        self.consume_with_remainder((pos[0], pos[1], pos[2]), facing, stack, remainder)
+    }
     /// `new DefaultDispenseItemBehavior().dispense(..)` including its events.
     pub(super) fn dispense_default_in_level(
         &mut self,
@@ -1103,7 +1122,7 @@ impl Game<'_> {
         true
     }
     /// After `EntityType.spawn` / `MobBucketItem.spawn`: `mob.playAmbientSound()`.
-    fn mob_ambient(&mut self, id: u32) -> Result<()> {
+    pub(super) fn mob_ambient(&mut self, id: u32) -> Result<()> {
         if self.dragon_spawn_ambient(id) {
             return Ok(());
         }
@@ -2510,7 +2529,7 @@ mod tests {
     /// answers first and wins for any item; with no answer from it the item's
     /// part decides; with neither, vanilla drops one item as before.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn the_faced_block_answers_before_the_item_and_vanilla_stands_when_no_part_listens() {
         use horizon_client::chunk::Chunk;
         use std::sync::Arc;
@@ -2702,7 +2721,7 @@ mod tests {
     /// one stands through its `Host`. An item with no part is as vanilla, and a handle that
     /// names no live entity is refused without asking the part.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_can_equip_part_decides_which_entity_a_dispenser_dresses() {
         let fits = Fits::new("minecraft:armor_stand");
         fits.installed(|| {
@@ -2755,7 +2774,7 @@ mod tests {
     /// feet, `allowed_entities` naming only armour stands skips the zombie for the stand, an
     /// explicitly empty list allows nobody, and `dispensable: false` keeps the dispenser out.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_dispenser_reads_the_stacks_own_equippable() {
         use horizon_core::nbt::Tag;
         super::super::native_entity_refs::tests::with_game(|game| {
@@ -2801,9 +2820,23 @@ mod tests {
     /// keeps it off; and with no part, a stack whose `allowed_entities` leaves the player out is
     /// not dispensed onto them.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_can_equip_part_decides_whether_a_dispenser_dresses_a_guest() {
         use horizon_core::nbt::Tag;
+        // Before any part is installed: `install_parts` outlives `installed`, and a leftover part
+        // that accepts players would answer for the stack in place of its component.
+        {
+            let mut resources = None;
+            let mut game = server_with_guest(&mut resources);
+            let zombies = vec![Tag::String("zombie".into())];
+            let fields = vec![
+                ("slot", Tag::String("head".into())),
+                ("allowed_entities", Tag::List(zombies)),
+            ];
+            let mut stack = helmet_with(Some(fields));
+            assert!(!game.dispense_equipment((8, 201, 8), Direction::Down, &mut stack));
+            assert!(game.lan.as_ref().unwrap().hub.guest(2).unwrap().armor[0].is_none());
+        }
         let fits = Fits::new("minecraft:armor_stand");
         fits.installed(|| {
             let mut resources = None;
@@ -2830,20 +2863,10 @@ mod tests {
             );
             assert_eq!(fits.asked(), [(asked.0, asked.1, asked.2, at)]);
         });
-        let mut resources = None;
-        let mut game = server_with_guest(&mut resources);
-        let zombies = vec![Tag::String("zombie".into())];
-        let fields = vec![
-            ("slot", Tag::String("head".into())),
-            ("allowed_entities", Tag::List(zombies)),
-        ];
-        let mut stack = helmet_with(Some(fields));
-        assert!(!game.dispense_equipment((8, 201, 8), Direction::Down, &mut stack));
-        assert!(game.lan.as_ref().unwrap().hub.guest(2).unwrap().armor[0].is_none());
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn bucket_ambient_extraction_keeps_the_bound_mob_owner() {
         use horizon_mod_runtime::attachments::{
             AttachmentType, Attachments, HasAttachmentLifetime, Holder, index::AttachmentIndex,
@@ -2892,7 +2915,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn dispenser_stack_damage_preserves_break_remainder() {
         super::super::native_entity_refs::tests::with_game(|game| {
             let mut shears = ItemStack::new("minecraft:shears", 2);
@@ -2908,7 +2931,7 @@ mod tests {
     /// brushing) whose part halves it loses 8, one whose part cancels it keeps its durability, and
     /// the shears, which have no part, lose the whole point.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES; process-wide parts, run this test alone"]
+    #[ignore = "daily"]
     fn a_damage_item_part_changes_the_wear_of_a_dispensed_tool() {
         use crate::game::damage_item_tests::{Rule, with_wear_part};
         with_wear_part("minecraft:brush", Rule::Halve, |game, wear| {
@@ -2928,7 +2951,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn sulfur_cube_dispenser_replacement_drops_the_full_old_stack() {
         super::super::native_entity_refs::tests::with_game(|game| {
             let kind = game
@@ -2959,7 +2982,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn mod_dispenser_answers_preserve_fallback_and_own_consumption() {
         use super::super::api_values::{StackReadError, TryIntoApi};
         super::super::native_entity_refs::tests::with_game(|game| {
@@ -3031,6 +3054,7 @@ mod tests {
                 max_players: 2,
                 integrated: false,
                 levels: Default::default(),
+                level_seeds: Default::default(),
             },
         )
         .unwrap();
@@ -3069,7 +3093,7 @@ mod tests {
     /// `EquipmentDispenseItemBehavior`: a server's player, the integrated
     /// owner or a guest, takes the piece (a server has no player of its own).
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_dispenser_equips_a_server_player_in_front() {
         let mut resources = None;
         let mut game = server_with_guest(&mut resources);
@@ -3096,7 +3120,7 @@ mod tests {
 
     /// A spectator is not a target (`canEquipWithDispenser`: `!isSpectator()`).
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_dispenser_skips_a_spectator_and_a_dead_player() {
         let mut resources = None;
         let mut game = server_with_guest(&mut resources);
@@ -3115,7 +3139,7 @@ mod tests {
     /// that can wear the piece gets it. Bit `1 << filterBit` locks a slot
     /// (head 4, chest 3, legs 2, feet 1); a hand needs arms.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_dispenser_skips_an_armor_stand_whose_slot_is_locked() {
         use horizon_client::entities::ArmorStand;
         let mut resources = None;
@@ -3158,7 +3182,7 @@ mod tests {
     /// respawned, no ServerboundPlayerLoadedPacket yet) is in the level all the
     /// same: `getEntitiesOfClass` finds it and it wears the piece.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_dispenser_equips_a_player_whose_client_is_still_loading() {
         let mut resources = None;
         let mut game = server_with_guest(&mut resources);
@@ -3175,7 +3199,7 @@ mod tests {
     /// Players are entities of the level: in one section they go in join
     /// order (entity ids) with the mobs and stands, not after them.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_player_and_a_stand_in_front_go_in_join_order() {
         // (stand id, guest id) -> who wears the helmet: the lower id joined first.
         for (stand_id, guest_id, guest_first) in [(7, 5, true), (3, 5, false)] {
@@ -3205,7 +3229,7 @@ mod tests {
     /// a stand whose feet are in section x 1 but whose box reaches into block
     /// x 15 comes after one in section x 0, even with the lower id.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_dispenser_walks_entity_sections_before_ids() {
         let mut resources = None;
         let mut game = server_with_guest(&mut resources);

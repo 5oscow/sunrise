@@ -15,6 +15,28 @@ impl Game<'_> {
     pub(super) fn native_gui_paint(&self, batch: &mut HudBatch, draws: &[GuiDraw]) {
         horizon_client::hud_layout::paint(batch, &self.gui.atlas, draws);
     }
+    /// `GuiGraphics.fillGradient` for [`mod_api::DrawContext::fill_gradient`]: `rect` is
+    /// `[x, y, w, h]` and `top` / `bottom` are ARGB at `y` / `y + h`. Zero area,
+    /// one-axis inversion or non-finite input draws nothing; both axes inverted flips the colours.
+    pub(super) fn native_fill_gradient(
+        &self,
+        batch: &mut HudBatch,
+        rect: [f32; 4],
+        top: u32,
+        bottom: u32,
+    ) {
+        let [x, y, w, h] = rect;
+        if !rect.iter().all(|v| v.is_finite()) || w == 0.0 || h == 0.0 || (w > 0.0) != (h > 0.0) {
+            return;
+        }
+        let ((x, y, w, h), top, bottom) = if w < 0.0 {
+            ((x + w, y + h, -w, -h), bottom, top)
+        } else {
+            ((x, y, w, h), top, bottom)
+        };
+        let abgr = horizon_client::hud_layout::abgr;
+        batch.fill_gradient(&self.gui.atlas, (x, y, w, h), abgr(top), abgr(bottom));
+    }
     /// Vanilla's nine-slice widget rendering. `color` is ARGB, as `fill` uses.
     pub(super) fn native_gui_nine_slice(
         &self,
@@ -110,7 +132,7 @@ mod tests {
     use super::*;
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn tooltip_helpers_read_live_keys_and_draw_count_overrides() {
         super::super::native_entity_refs::tests::with_client_game(|game| {
             use winit::keyboard::KeyCode;
@@ -140,7 +162,7 @@ mod tests {
     /// field as `ui::EditBox` draws it, answering where each shown character ends so a press
     /// lands on it, and scrolling on to keep the cursor in view.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn mod_widgets_draw_as_the_games_own() {
         use mod_api::client::widgets::{TextField, Widgets};
         super::super::native_entity_refs::tests::with_client_game(|game| {

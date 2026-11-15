@@ -20,9 +20,12 @@ pub mod item_data;
 pub mod item_nbt;
 pub mod items;
 pub mod kinetic_weapon;
+#[cfg(test)]
+mod loot_predicate_tests;
 mod loot_tags;
 pub mod mining;
 pub mod native_enchantment_hooks;
+pub mod primary_items;
 pub mod properties;
 pub mod random_sequences;
 pub mod recipe_filters;

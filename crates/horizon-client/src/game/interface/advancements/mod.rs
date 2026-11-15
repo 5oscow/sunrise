@@ -1139,15 +1139,15 @@ impl Game<'_> {
     }
     /// `AdvancementRewards.grant`'s pickup: volume 0.2 at the player's feet,
     /// pitch `(nextFloat - nextFloat) * 0.7 + 1`, times 2. `playSound(null, …)`
-    /// so the player hears it. The draws are the level random, which is the
-    /// stream item pickup already uses for this pitch.
+    /// so the player hears it. The draws are the player's own random
+    /// (`player.getRandom()`), which no level draw shares.
     fn advancement_pickup_sound(&mut self) {
         let Some(p) = self.player.as_ref() else {
             return;
         };
         let at = [p.position.x, p.position.y, p.position.z];
-        let pitch =
-            ((self.world.random.next_float() - self.world.random.next_float()) * 0.7 + 1.0) * 2.0;
+        let mut random = horizon_client::random_source::entity();
+        let pitch = ((random.next_float() - random.next_float()) * 0.7 + 1.0) * 2.0;
         self.audio
             .play("minecraft:entity.item.pickup", Some(at), 0.2, pitch);
     }
@@ -1565,7 +1565,7 @@ impl Game<'_> {
     }
     /// `DistanceTrigger`: the player's `player` condition, `start_position`
     /// at `start`, and the `distance` from `start` to the player.
-    fn trigger_distance(&mut self, name: &str, start: [f64; 3]) {
+    pub(super) fn trigger_distance(&mut self, name: &str, start: [f64; 3]) {
         let me = self.player_entity_for(name);
         self.trigger(name, move |c, w| {
             let pctx = adv::Entities {
@@ -2696,7 +2696,7 @@ mod tests {
     use super::*;
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn helmet_wear_reports_the_old_stack_and_the_unclamped_damage() {
         const ID: &str = "testmod:wear";
         let scratch = std::env::temp_dir().join(format!("helmet-wear-{}", std::process::id()));
@@ -2738,7 +2738,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn toast_admission_cancels_edits_and_preserves_queue_behavior() {
         use mod_api::{ClientHost, Flow, Hooks, ModEntry, ToastAddEvent, ToastKind};
         struct Listener;
@@ -2827,7 +2827,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn mob_name_components_read_live_text_without_saved_nbt() {
         use crate::game::{Audio, Options, Settings, commands::Target, load_resources};
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
@@ -2915,7 +2915,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn mob_predicate_view_reads_active_effect_instances() {
         use crate::game::{Audio, Options, Settings, commands::Target, load_resources};
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
@@ -3293,7 +3293,7 @@ mod structure_tag_tests {
     /// `worldgen/structure` tags, and with a world's data packs theirs over
     /// the game's.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn location_structure_tags_hold_their_structures() {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
@@ -3398,7 +3398,7 @@ mod random_chance_command_tests {
     use crate::game::commands::Target;
     use horizon_core::nbt::Tag;
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn registered_named_random_chance_uses_real_source_and_world_draws() {
         use crate::game::{Audio, Options, Settings, load_resources};
         use std::time::Instant;
@@ -3537,7 +3537,7 @@ mod custom_data_equipment_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and scratch homes/cwd"]
+    #[ignore = "daily"]
     fn actual_mob_equipment_projects_typed_custom_data_into_named_predicate_evaluation() {
         crate::game::native_entity_refs::tests::with_game(|game| {
             game.build_registries();
@@ -3669,7 +3669,7 @@ mod movement_predicate_tests {
     use serde_json::json;
 
     #[test]
-    #[ignore = "requires prepared resources and scratch cwd/homes"]
+    #[ignore = "daily"]
     fn actual_registered_movement_predicate_uses_admitted_mob() {
         let mut resources = None;
         let mut game = server_game(&mut resources);

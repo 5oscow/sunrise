@@ -747,7 +747,10 @@ impl Game<'_> {
                 .hub
                 .guests
                 .iter()
-                .filter(|g| g.participates_online() && lan.hub.singleplayer_owner != Some(g.uuid))
+                .filter(|g| {
+                    (g.participates_online() || g.is_fake())
+                        && lan.hub.singleplayer_owner != Some(g.uuid)
+                })
                 .filter(|g| match &s.player_name {
                     Some(name) => g.name.eq_ignore_ascii_case(name),
                     None => s.kind == 'a' || s.kind == 'e',
@@ -816,7 +819,7 @@ impl Game<'_> {
         }
         if ctx.literals.iter().any(|l| l == "id") {
             let id = match ctx.get("id") {
-                Some(Arg::Str(s)) => horizon_client::command::selector::java_uuid(s),
+                Some(Arg::Str(s)) => horizon_core::text::parse_java_uuid(s),
                 _ => None,
             }
             .unwrap_or_default();

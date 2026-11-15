@@ -4266,7 +4266,7 @@ mod tests {
         assert!(resampled_over(&ready, &FxHashSet::default(), (40, 40)).is_empty());
     }
     #[test]
-    #[ignore = "requires prepared models/textures in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn slab_materials_survive_chunk_summaries_and_draw_far_faces() -> crate::Result<()> {
         use crate::{assets::Assets, biome::Biomes, light::LightTables, mesher::MeshTables};
         let root = std::path::PathBuf::from(
@@ -4289,6 +4289,7 @@ mod tests {
             render,
             biomes: Arc::new(Biomes::load(&resource_root)?),
             hidden_states: Arc::from([]),
+            part_tables: Default::default(),
         };
         let kinds = state_kinds(&facts);
         let mut chunk = Chunk::empty(0, 0);
@@ -4336,7 +4337,7 @@ mod tests {
         Ok(())
     }
     #[test]
-    #[ignore = "requires prepared models/textures in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn real_mesh_clips_near_chunks_and_preserves_water_and_edited_surfaces() -> crate::Result<()> {
         use crate::{
             assets::Assets, biome::Biomes, light::LightTables, mesher::MeshTables,
@@ -4367,6 +4368,7 @@ mod tests {
             render,
             biomes: biomes.clone(),
             hidden_states: Arc::from([]),
+            part_tables: Default::default(),
         });
         let source = Arc::new(TestTerrain::new(assets.registry, &biomes)?);
         let mut lod = Lod::new(source, context);
@@ -5576,6 +5578,7 @@ mod tests {
             render,
             biomes,
             hidden_states: Arc::from([]),
+            part_tables: Default::default(),
         });
         Ok((context, facts))
     }
@@ -5711,7 +5714,7 @@ mod tests {
         }
     }
     #[test]
-    #[ignore = "requires prepared models/textures in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn chunks_a_server_dropped_stay_drawn_as_far_terrain() -> crate::Result<()> {
         let mut far = ServerLod::new("lod-dropped")?;
         // A server's view distance of 10 (it sends a ring more), drawn to a
@@ -5755,7 +5758,7 @@ mod tests {
         Ok(())
     }
     #[test]
-    #[ignore = "requires prepared models/textures in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn far_cells_sampled_before_their_chunks_were_kept_fill_in() -> crate::Result<()> {
         let mut far = ServerLod::new("lod-late")?;
         // Seen from 5000 blocks: cells of 32 blocks and wider over them.
@@ -5846,7 +5849,7 @@ mod tests {
         }
     }
     #[test]
-    #[ignore = "requires prepared models/textures in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn coarser_stand_ins_keep_the_ring_past_the_near_chunks_drawn() -> crate::Result<()> {
         let arrived = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let mut far = ServerLod::with("lod-waiting", |_| {

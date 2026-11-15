@@ -49,6 +49,7 @@ use horizon_client::{
     sprint::Keys,
     streaming::{ChunkGenerator, Proto, Streaming},
     tab_list::SPECTATOR,
+    text::Text,
 };
 use horizon_core::{geometry::Vec3, random::RandomSource};
 use horizon_protocol::{
@@ -88,6 +89,7 @@ mod entity_section_steps;
 mod item_use;
 mod queued_keys;
 mod remote_attributes;
+mod tab_entries;
 mod tables;
 
 pub(super) use super::villager_client::builtin_registries;
@@ -1512,7 +1514,7 @@ impl Game<'_> {
     }
 
     /// Disconnect and return to the multiplayer screen (DisconnectedScreen).
-    pub(super) fn leave_server(&mut self, reason: Option<String>) -> Result<()> {
+    pub(super) fn leave_server(&mut self, reason: Option<Text>) -> Result<()> {
         if reason.is_none() && self.integrated.as_ref().is_some_and(|s| !s.stopped()) {
             return self.begin_closing_save(false);
         }
@@ -1993,9 +1995,8 @@ impl Game<'_> {
             return Ok(());
         };
         let Some(signature) = r.signatures.unpack(packed) else {
-            let reason =
-                horizon_client::text::Text::translate("multiplayer.disconnect.invalid_packet", &[]);
-            return self.leave_server(Some(reason.plain()));
+            let reason = Text::translate("multiplayer.disconnect.invalid_packet", &[]);
+            return self.leave_server(Some(reason));
         };
         r.secure_chat.ignore_pending(&signature);
         let queued = r.chat_queue.len();
@@ -2158,260 +2159,6 @@ impl Game<'_> {
             self.sync_moving_pistons();
         }
         polled
-    }
-    fn poll_remote_events(&mut self) -> Result<()> {
-        let Some(r) = self.remote.as_mut() else {
-            return Ok(());
-        };
-        let mut events = std::mem::take(&mut r.backlog);
-        r.receive_credited_backlog(&mut events);
-        let overdue = r
-            .backlog_since
-            .is_some_and(|since| since.elapsed() >= BACKLOG_LIMIT);
-        let mut chunks = Duration::ZERO;
-        // A run of ForgetLevelChunk (thousands when the server's view moves far: a
-        // teleport at 32 chunks) is forgotten at once, before whatever follows it.
-        let mut forgotten = horizon_client::fast_hash::FxHashSet::default();
-        let mut forgotten_credits = Vec::new();
-        while let Some(item) = events.pop_front() {
-            if let Received::Event(Event::Packet(packet), _) = &item
-                && let C::ForgetLevelChunk(p) = &**packet
-            {
-                self.observe_client_packet(packet);
-                forgotten.insert((p.pos[0], p.pos[1]));
-                forgotten_credits.push(item.into_event_credit());
-                continue;
-            }
-            horizon_client::spans::time("pr_forget", || {
-                self.forget_remote_columns(&mut forgotten, true)
-            });
-            forgotten_credits.clear();
-            let chunk = matches!(item, Received::Chunk(_, _));
-            if chunk && !overdue && chunks >= CHUNK_PACKETS_PER_FRAME {
-                events.push_front(item);
-                break;
-            }
-            let started = chunk.then(Instant::now);
-            let (event, _credit) = match item {
-                Received::Event(event, credit) => (event, credit),
-                Received::Chunk(format, credit) => {
-                    // A column still decoding waits for the next frame, with
-                    // what came after it, overdue or not.
-                    let Some(next) = self.remote.as_ref().map(|r| r.decoder.next()) else {
-                        break;
-                    };
-                    let (packet, column) = match next {
-                        Next::Ready(decoded) => decoded,
-                        Next::Decoding => {
-                            events.push_front(Received::Chunk(format, credit));
-                            break;
-                        }
-                        Next::Lost => {
-                            log::warn!("Horizon: the chunk decoder stopped; a column is missing");
-                            continue;
-                        }
-                    };
-                    self.observe_client_packet(&packet);
-                    if let C::LevelChunkWithLight(p) = *packet {
-                        horizon_client::spans::time("pr_chunk", || {
-                            self.remote_chunk(&p, Some((&format, column)))
-                        });
-                    }
-                    chunks += started.map_or(Duration::ZERO, |t| t.elapsed());
-                    continue;
-                }
-            };
-            match event {
-                Event::Status(s) => {
-                    if let Some(r) = self.remote.as_mut() {
-                        r.status = s;
-                    }
-                }
-                Event::Joined {
-                    registries,
-                    name,
-                    uuid,
-                } => {
-                    self.set_registries(registries);
-                    self.extras_joined();
-                    self.close_dialogs();
-                    if let Some(r) = self.remote.as_mut() {
-                        r.joined = true;
-                        r.profile = uuid;
-                        r.profile_name = name.clone();
-                        r.status = horizon_client::lang::get_or(
-                            "multiplayer.downloadingTerrain",
-                            "Loading terrain...",
-                        );
-                    }
-                    self.begin_book_negotiation();
-                }
-                Event::Features(features) => {
-                    if let Some(remote) = &mut self.remote {
-                        remote.features = features.into();
-                    }
-                }
-                Event::Brand(brand) => {
-                    if let Some(remote) = &mut self.remote {
-                        remote.brand = brand;
-                    }
-                }
-                Event::QuietCommands => {
-                    if let Some(remote) = &mut self.remote {
-                        remote.quiet_commands = true;
-                    }
-                }
-                Event::CustomBooks => {
-                    if let Some(remote) = &mut self.remote {
-                        remote.custom_books = true;
-                    }
-                }
-                Event::FarTerrain(offer) => {
-                    if let Some(remote) = &mut self.remote {
-                        remote.far_terrain = Some(offer);
-                    }
-                }
-                Event::Reconfiguring => {
-                    self.reset_book_view();
-                    // handleConfigurationStart: the held-back chat shows, then
-                    // clearClientLevel opens ServerReconfigScreen over no level.
-                    self.flush_chat_queue();
-                    self.send_chat_acknowledgement();
-                    self.close_dialogs();
-                    // The server configuring us now (a proxy's next one)
-                    // offers its own far terrain, or none, and announces its
-                    // own features again.
-                    if let Some(remote) = &mut self.remote {
-                        remote.viewed.clear();
-                        remote.far_terrain = None;
-                        remote.quiet_commands = false;
-                        remote.custom_books = false;
-                    }
-                    self.clear_lod();
-                    if let Some(remote) = &self.remote {
-                        remote.session.reset_far_terrain();
-                    }
-                    self.remove_local_player_body();
-                    self.set_screen(Screen::Playing);
-                    self.capture(false);
-                    // clearClientLevel drops the client level now, so its
-                    // unload comes before the configuration screen, not
-                    // after the next login's load.
-                    self.forget_all_remote_columns();
-                    if let Some(old) = self.remote.as_mut().and_then(|r| r.heard_level.take()) {
-                        self.native_client_level_unload(&old);
-                    }
-                    self.native_lifecycle.begin_close();
-                    self.native_lifecycle_world_closed();
-                    let ticks = self.ticks;
-                    if let Some(r) = self.remote.as_mut() {
-                        r.reconfiguring = Some(ticks);
-                        r.chat_tree_received = false;
-                    }
-                }
-                Event::Reconfigured(registries) => {
-                    // handleConfigurationStart → clearClientLevel, and the next
-                    // ClientPacketListener starts with no players or scoreboard,
-                    // no waypoints (its own ClientWaypointManager: a proxy's next
-                    // server never untracks the last one's), and its new
-                    // ClientSuggestionProvider with no custom chat completions.
-                    // clearClientLevel clears the narrator.
-                    self.clear_narrator();
-                    self.hud_disconnected();
-                    self.score.board = Default::default();
-                    self.clear_waypoints();
-                    if let Some(r) = self.remote.as_mut() {
-                        r.attachments.clear();
-                        r.players.clear();
-                        r.tab_players.clear();
-                        r.listed.clear();
-                        r.signatures = Default::default();
-                        r.custom_completions.clear();
-                    }
-                    self.ui.registries.custom_completions.clear();
-                    self.set_registries(registries);
-                }
-                // handleTransfer: "Cannot transfer to server from
-                // singleplayer" (no ServerData), so the world just closes.
-                Event::Transfer { host, port } => {
-                    if let Some(r) = self.remote.as_mut()
-                        && r.session.address != "local"
-                    {
-                        r.transfer = Some(format!("{host}:{port}"));
-                    }
-                }
-                Event::PackPush(p) => self.handle_pack_push(p),
-                Event::PackPop(id) => self.handle_pack_pop(id),
-                Event::ServerLinks(links) => {
-                    if let Some(r) = self.remote.as_mut() {
-                        r.server_links = super::server_links::trusted(links);
-                    }
-                }
-                Event::ShowDialog(dialog) => self.show_dialog(&dialog),
-                Event::ClearDialog => self.clear_dialog(),
-                Event::CodeOfConduct(text) => self.handle_code_of_conduct(text),
-                Event::DecodeError(e) => {
-                    if let Some(r) = self.remote.as_mut() {
-                        r.decode_errors += 1;
-                        if r.decode_errors <= 20 {
-                            log::warn!("Horizon: skipped undecodable packet {e}");
-                        }
-                    }
-                }
-                Event::Disconnected {
-                    reason,
-                    key,
-                    from_server,
-                } => {
-                    self.reset_book_view();
-                    log::info!("Horizon: disconnected: {reason}");
-                    // ClientboundTransferPacket left a target: connect there
-                    // instead of showing the disconnect, the stored cookies
-                    // carried over (ClientCommonPacketListenerImpl.
-                    // handleTransfer → ConnectScreen.startConnecting).
-                    let transfer = self.remote.as_mut().and_then(|r| {
-                        r.transfer.take().map(|address| {
-                            (address, r.session.name.clone(), r.session.cookies.clone())
-                        })
-                    });
-                    if let Some((address, name, cookies)) = transfer {
-                        self.leave_server(None)?;
-                        self.connect_server_with_cookies(&address, &name, Some(cookies))?;
-                        return Ok(());
-                    }
-                    let retry = self.reconnect_after(&reason, key.as_deref(), from_server);
-                    self.leave_server(Some(reason))?;
-                    self.offer_reconnect(retry);
-                    return Ok(());
-                }
-                Event::RawPayload(incoming) => self.receive_client_payload(*incoming)?,
-                Event::Packet(packet) => match *packet {
-                    C::CustomPayload(p) if p.channel == horizon_client::perf_net::CHANNEL => {
-                        self.remote_perf_reply(&p.data)
-                    }
-                    packet => self.handle_packet(packet)?,
-                },
-            }
-            chunks += started.map_or(Duration::ZERO, |t| t.elapsed());
-            if self.remote.is_none() {
-                break;
-            }
-        }
-        if self.remote.is_some() {
-            horizon_client::spans::time("pr_forget", || {
-                self.forget_remote_columns(&mut forgotten, true)
-            });
-        }
-        if let Some(r) = self.remote.as_mut() {
-            r.backlog_since = if events.is_empty() {
-                None
-            } else {
-                Some(r.backlog_since.unwrap_or_else(Instant::now))
-            };
-            r.backlog = events;
-        }
-        self.send_suggestion_request();
-        Ok(())
     }
     /// ClientSuggestionProvider.customSuggestion: the chat's completion
     /// request for an `ask_server` node goes to the server.
@@ -4374,10 +4121,11 @@ impl Game<'_> {
                     }
                     (None, None) => None,
                 };
+                // `ClientPacketListener.random`, the listener's own stream: a
+                // pickup pitch is never a draw of the level's.
                 if let Some(o) = orb_at {
-                    let pitch = (self.world.random.next_float() - self.world.random.next_float())
-                        * 0.35
-                        + 0.9;
+                    let mut r = horizon_client::random_source::create();
+                    let pitch = (r.next_float() - r.next_float()) * 0.35 + 0.9;
                     self.audio.play(
                         "minecraft:entity.experience_orb.pickup",
                         Some([o.x, o.y, o.z]),
@@ -4385,10 +4133,8 @@ impl Game<'_> {
                         pitch,
                     );
                 } else if let Some(at) = at {
-                    let pitch = ((self.world.random.next_float() - self.world.random.next_float())
-                        * 0.7
-                        + 1.0)
-                        * 2.0;
+                    let mut r = horizon_client::random_source::create();
+                    let pitch = ((r.next_float() - r.next_float()) * 0.7 + 1.0) * 2.0;
                     self.audio
                         .play("minecraft:entity.item.pickup", Some(at), 0.2, pitch);
                 }
@@ -5112,11 +4858,8 @@ impl Game<'_> {
                         "Missing or out-of-order chat message from server, expected index {expected} but got {}",
                         p.global_index
                     );
-                    let reason = horizon_client::text::Text::translate(
-                        "multiplayer.disconnect.bad_chat_index",
-                        &[],
-                    );
-                    return self.leave_server(Some(reason.plain()));
+                    let reason = Text::translate("multiplayer.disconnect.bad_chat_index", &[]);
+                    return self.leave_server(Some(reason));
                 }
                 let last_seen: Option<Vec<Signature>> =
                     p.last_seen.iter().map(|s| r.signatures.unpack(s)).collect();
@@ -5125,11 +4868,8 @@ impl Game<'_> {
                         "Message from player with ID {:032x} referenced unrecognized signature id",
                         p.sender
                     );
-                    let reason = horizon_client::text::Text::translate(
-                        "multiplayer.disconnect.invalid_packet",
-                        &[],
-                    );
-                    return self.leave_server(Some(reason.plain()));
+                    let reason = Text::translate("multiplayer.disconnect.invalid_packet", &[]);
+                    return self.leave_server(Some(reason));
                 };
                 let signature = p
                     .signature
@@ -6094,10 +5834,10 @@ impl Game<'_> {
         let at = Vec3::new(p[0], p[1], p[2]);
         // ItemEntity's constructor draws bobOffs from the item's own random.
         let mut random = horizon_client::mobs::entity_random(id as u32, at);
-        let bob_offset = random.next_float() * std::f32::consts::PI * 2.0;
+        let bob = super::item_entities::bob_offset(at, random.next_float(), self.clock.still());
         self.dropped.push(ItemEntity {
             random,
-            ..ItemEntity::new(id as u32, stack, at, velocity, bob_offset)
+            ..ItemEntity::new(id as u32, stack, at, velocity, bob)
         });
     }
     /// `Entity.lerpMotion` (and `recreateFromPacket`'s motion) for the
@@ -8208,7 +7948,11 @@ impl Game<'_> {
     /// firework rocket wherever it may be used, and the server launches it.
     /// Whether the item's use succeeded, which ends the click.
     /// The caller has selected Item.useOn after cooldown and adventure gates.
-    fn predict_item_on_block(&mut self, stack: &ItemStack, hit: &super::Hit) -> bool {
+    pub(in crate::game) fn predict_item_on_block(
+        &mut self,
+        stack: &ItemStack,
+        hit: &super::Hit,
+    ) -> bool {
         // FireworkRocketItem.useOn: SUCCESS unless gliding, when Item.use
         // boosts instead. The phase's cooldown/adventure gates already ran.
         if &*stack.item == "minecraft:firework_rocket" {
@@ -8486,20 +8230,21 @@ impl Game<'_> {
     /// Run BlockItem.place on a disposable level: where it placed and the
     /// blocks it set. The real level supplies collision shapes and
     /// building-blocking entities; random draws, scheduled ticks and events
-    /// stay in the preview.
+    /// stay in the preview. `ItemStack.useOn` runs it in adventure mode only
+    /// when the used stack's `can_place_on` names the clicked block.
     pub(super) fn remote_can_place(
         &mut self,
         hit: &super::Hit,
         stack: &ItemStack,
     ) -> Option<DryPlace> {
-        if !self.may_build() {
+        if !self.may_build() && !self.stack_can_place_on_in_adventure(stack, hit.pos) {
             return None;
         }
         let ctx = horizon_world::level::PlaceContext {
             clicked_pos: horizon_core::position::BlockPos::new(hit.pos[0], hit.pos[1], hit.pos[2]),
             face: horizon_core::geometry::Direction::ALL[face_direction(hit.face) as usize],
             hit: Vec3::new(hit.point[0], hit.point[1], hit.point[2]),
-            inside: hit.face == [0; 3],
+            inside: hit.inside,
             yaw: self.yaw,
             pitch: self.pitch,
             sneaking: self.remote_shift_down(),
@@ -9628,10 +9373,10 @@ impl Game<'_> {
         if let Some(r) = self.remote.as_mut() {
             r.menu
                 .set(Some((container, "minecraft:merchant".to_owned())));
-            r.set_menu_title(Some(text));
+            r.set_menu_title(Some(text.clone()));
         }
         let session = horizon_client::merchant::Session::new(Vec::new(), true);
-        self.open_remote_merchant(session, (!title.is_empty()).then_some(title));
+        self.open_remote_merchant(session, (!title.is_empty()).then_some(text));
     }
     /// ClientboundMerchantOffersPacket.
     fn remote_merchant_offers(&mut self, p: play::MerchantOffers) {
@@ -11038,7 +10783,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn menu_title_snapshot_tracks_open_replacement_and_close() {
         super::super::native_entity_refs::tests::with_client_game(|game| {
             let (client, _server) = horizon_protocol::connection::Pipe::pair();
@@ -11054,7 +10799,7 @@ pub(crate) mod tests {
         });
     }
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn menu_title_snapshot_follows_packet_and_close_paths() {
         use horizon_core::nbt::Tag;
         use horizon_protocol::packets::play::{self, Clientbound as C};
@@ -11169,7 +10914,7 @@ pub(crate) mod tests {
         });
     }
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn stopping_a_retained_client_dig_aborts_only_once() {
         use crate::game::{Hit, native_entity_refs::tests::with_client_game};
         use horizon_client::{chunk::Chunk, motion::PlayerMotion};
@@ -11270,7 +11015,7 @@ pub(crate) mod tests {
     }
     /// The remote player animation uses the scoped item answer once per tick.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn remote_player_use_animation_dispatches_once() {
         use mod_api::{ClientHost, Hooks, ItemPart, ModEntry, Mods, Registrar, UseAnimationEvent};
         use std::sync::{
@@ -11337,7 +11082,7 @@ pub(crate) mod tests {
     /// keeps no attribute state of its own on the client, so its reads are
     /// `None` there.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn update_attributes_answers_the_local_players_living_reads() {
         use super::super::native_entity_refs::tests::with_client_game;
         use horizon_client::{mobs::Mob, motion::PlayerMotion};
@@ -11427,7 +11172,7 @@ pub(crate) mod tests {
     /// a red-bed constant. Missing client data must not replace a server pose
     /// or decide to wake the player.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn client_sleep_metadata_and_tick_preserve_shape_and_authoritative_positions() {
         use super::super::{execution_role::ExecutionRole, native_entity_refs::tests::with_game};
         use horizon_client::{chunk::Chunk, mobs::Mob, motion::PlayerMotion};
@@ -11617,7 +11362,7 @@ pub(crate) mod tests {
     /// shows, a cancelled system line never shows, and a cancelled message
     /// held by Chat Delay lets the next one through in the same tick.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn mods_replace_and_cancel_received_chat() {
         use super::super::{execution_role::ExecutionRole, native_entity_refs::tests::with_game};
         use horizon_core::nbt::Tag;
@@ -11704,7 +11449,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn mod_chat_needs_a_joined_player_and_what_the_chat_option_allows() {
         use super::super::{execution_role::ExecutionRole, native_entity_refs::tests::with_game};
         use horizon_protocol::connection::Pipe;
@@ -11732,7 +11477,7 @@ pub(crate) mod tests {
     /// `ChatComponent.addClientSystemMessage`: the line joins this client's
     /// chat history and no packet leaves for the server.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_mod_chat_line_shows_locally_and_sends_nothing() {
         use super::super::{execution_role::ExecutionRole, native_entity_refs::tests::with_game};
         use horizon_protocol::connection::{Connection, Pipe};
@@ -11771,7 +11516,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn rejected_menu_packets_retire_the_previous_client_menu() {
         use super::super::{
             Screen, execution_role::ExecutionRole, native_entity_refs::tests::with_game,
@@ -11817,7 +11562,7 @@ pub(crate) mod tests {
     /// `LivingEntity.handleEntityEvent(55)` is `swapHandItems`: the whole
     /// stacks trade hands, not just their ids.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn the_hand_swap_event_keeps_whole_stacks() {
         use super::super::native_entity_refs::tests::with_game;
         use horizon_client::{items::ItemStack, mobs::Mob};
@@ -11900,7 +11645,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn transactional_bucket_hands_reach_the_owning_client() {
         use super::super::{
             native_entity_refs::tests::with_client_game, native_guest_turn_tests::with_guests,
@@ -12063,7 +11808,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn dimension_transition_screen_is_selected_at_entry_drawn_and_dropped() {
         use super::super::{execution_role::ExecutionRole, native_entity_refs::tests::with_game};
         use horizon_client::{hud::HudBatch, level_loading::Reason};
@@ -12178,7 +11923,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn client_menu_reads_follow_packets_and_lifetimes() {
         use super::super::{
             Screen, execution_role::ExecutionRole, native_entity_refs::tests::with_game,
@@ -12510,7 +12255,7 @@ pub(crate) mod tests {
     /// `MenuRef::close` and `click_button` go through the screen's own close
     /// and the button packet, and refuse a menu that is not open or stale.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn client_menu_close_and_button_click_reach_the_server() {
         use super::super::{
             Screen, execution_role::ExecutionRole, native_entity_refs::tests::with_game,
@@ -12606,7 +12351,7 @@ pub(crate) mod tests {
     /// A client names the level it shows by the server's key, even where `Dim` has
     /// no name for it.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn client_handles_reach_a_custom_level() {
         use super::super::{execution_role::ExecutionRole, native_entity_refs::tests::with_game};
         use horizon_client::level_loading::Reason;
@@ -12778,7 +12523,7 @@ pub(crate) mod tests {
     /// player's health, effects, equipment and last death, the blocks and time
     /// of day of the level it shows and the entities it tracks.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn client_handle_reads_answer_from_the_clients_copy() {
         use super::super::{execution_role::ExecutionRole, native_entity_refs::tests::with_game};
         use horizon_client::{
@@ -12993,7 +12738,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn client_day_time_reads_overworld_clock_across_packets_and_levels() {
         use super::super::{execution_role::ExecutionRole, native_entity_refs::tests::with_game};
         use horizon_protocol::{
@@ -13218,7 +12963,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn client_camera_entity_returns_to_player_after_removal() {
         use super::super::{
             Game, native_entity_refs::tests::with_client_game, native_lifecycle::NativeLifecycle,
@@ -13344,7 +13089,7 @@ pub(crate) mod tests {
     /// The local player's own state reads answer on a client from what the
     /// server sent it (`LocalPlayer`); another player reads None there.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn client_player_reads_answer_from_the_local_players_copy() {
         use super::super::{execution_role::ExecutionRole, native_entity_refs::tests::with_game};
         use horizon_client::{level_loading::Reason, motion::PlayerMotion};
@@ -13463,7 +13208,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn client_epochs_follow_level_replacement_and_logout() {
         use super::super::{
             execution_role::ExecutionRole, native_entity_refs::tests::with_game,
@@ -13568,7 +13313,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn connection_and_dimension_replacement_clear_every_particle_group() {
         use super::super::{
             execution_role::ExecutionRole, native_entity_refs::tests::with_game,
@@ -13614,7 +13359,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn forgetting_and_closing_remote_columns_clear_their_data() {
         use super::super::native_entity_refs::tests::with_game;
         use horizon_client::{chunk::Chunk, containers::BlockEntity};
@@ -13674,7 +13419,7 @@ pub(crate) mod tests {
     /// is a chunk packet's doing (`remote_chunk`), not the streaming
     /// level's.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn every_free_route_returns_the_columns_it_freed_once() {
         use super::super::native_entity_refs::tests::with_game;
         use horizon_client::chunk::Chunk;
@@ -13710,7 +13455,7 @@ pub(crate) mod tests {
     /// again (`remote_chunk`), never an unload and a load — so a forget
     /// returns exactly it.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn streaming_adoption_and_resend_stay_resident_until_the_forget() {
         use super::super::native_entity_refs::tests::with_game;
         use horizon_client::chunk::Chunk;
@@ -13728,7 +13473,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn joining_a_server_empties_the_off_hand_too() {
         // ClientPacketListener.handleLogin makes a new LocalPlayer, whose whole Inventory is
         // empty: a server that never sends slot 45 must not leave the last server's item.
@@ -13804,7 +13549,7 @@ pub(crate) mod tests {
     };
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and scratch homes/cwd"]
+    #[ignore = "daily"]
     fn tracking_emitters_follow_the_packet_target() {
         use crate::game::{
             Audio, Game, Options, Progress, Settings, execution_role::ExecutionRole,
@@ -13974,7 +13719,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn block_alias_survival_consumption_and_client_prediction() {
         use crate::game::{Audio, Game, Options, Progress, Settings, World, load_resources};
         use horizon_client::{
@@ -14126,7 +13871,7 @@ pub(crate) mod tests {
     /// runs fast (a potion drunk starts the same way). A client a tick off is what GrimAC's
     /// Simulation flagged.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_servers_client_takes_its_speed_from_the_attributes_not_the_effect() {
         use crate::game::{Audio, Game, Options, Progress, Settings, load_resources};
         use horizon_client::motion::PlayerMotion;
@@ -14274,7 +14019,7 @@ pub(crate) mod tests {
     /// A mod's pre-filled chat opens only over the world, with its text
     /// typed in and nothing sent.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn mod_open_chat_fills_the_box_only_over_the_world() {
         use super::super::{
             Audio, Game, Options, Progress, Screen, Settings, execution_role::ExecutionRole,
@@ -14342,7 +14087,7 @@ pub(crate) mod tests {
     /// sit plugin can use an area-effect cloud, whose server position stops updating
     /// while it rides a player, with a player or marker stand as its own passenger.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn plugin_player_stack_follows_network_moves_and_local_carriers() {
         use super::super::{
             Audio, Game, Options, Progress, Settings, execution_role::ExecutionRole, load_resources,
@@ -14555,7 +14300,7 @@ pub(crate) mod tests {
     /// getSituationalMusic is MENU, and ServerReconfigScreen (no
     /// LevelLoadingScreen) lets MusicManager.tick start it.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_reconfiguring_client_plays_menu_music_and_never_indexes_past_the_biomes() {
         use crate::game::{Audio, Game, Options, Progress, Settings, load_resources};
         use horizon_client::{chunk::Chunk, music::Music};
@@ -15619,7 +15364,7 @@ pub(crate) mod tests {
     /// click (returning true), so when held with an unusable off-hand item, the
     /// click does not fall through to UseItem or try the off hand.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn flint_and_steel_use_on_ends_the_click() {
         use super::super::{
             Audio, Game, Options, Progress, Settings, execution_role::ExecutionRole, load_resources,

@@ -114,7 +114,7 @@ pub(in crate::game) mod tests {
     use horizon_protocol::{
         buf::Reader,
         packets::play::Clientbound as C,
-        viewed_levels::{CHANNEL, Message},
+        viewed_levels::{CHANNEL, Level::Index, Message, REVISION_3},
     };
     use std::time::{Duration, Instant};
 
@@ -174,8 +174,8 @@ pub(in crate::game) mod tests {
         game
     }
 
-    /// Opens the world to the network with one player in the Overworld whose client views 2
-    /// levels; its packets.
+    /// Opens the world to the network with one player in the Overworld whose client, of revision
+    /// 3, views 2 levels; its packets.
     pub(in crate::game) fn host_a_viewer(
         game: &mut Game<'_>,
     ) -> std::sync::mpsc::Receiver<horizon_client::lan::Out> {
@@ -202,12 +202,15 @@ pub(in crate::game) mod tests {
             max_players: 2,
             integrated: false,
             levels: Default::default(),
+            level_seeds: Default::default(),
         };
         game.lan_host(settings, net, hub).unwrap();
         let (tx, rx) = std::sync::mpsc::channel();
         let mut sender = PlayerSender::new(tx, std::sync::Arc::default());
+        // Revision 3, still served, names a viewed level by its Login index: the Overworld 0, the
+        // Nether 2.
         sender.viewed_levels = horizon_protocol::viewed_levels::Answer {
-            revision: horizon_protocol::viewed_levels::REVISION,
+            revision: horizon_protocol::viewed_levels::REVISION_3,
             max_levels: 2,
         };
         let joined = Joined {
@@ -264,10 +267,13 @@ pub(in crate::game) mod tests {
             if p.channel != CHANNEL {
                 continue;
             }
-            match Message::decode(&p.data).unwrap() {
-                Message::Open { level, .. } => sent.opened |= level == 2,
-                Message::Close { level } => sent.closed |= level == 2,
-                Message::Run { level: 2, packets } => {
+            match Message::decode_in(&p.data, REVISION_3).unwrap() {
+                Message::Open { level, .. } => sent.opened |= level == Index(2),
+                Message::Close { level } => sent.closed |= level == Index(2),
+                Message::Run {
+                    level: Index(2),
+                    packets,
+                } => {
                     for (id, body) in packets {
                         match C::decode(id, body) {
                             Ok(C::LevelChunkWithLight(c)) => sent.chunks.push((c.x, c.z)),
@@ -357,7 +363,7 @@ pub(in crate::game) mod tests {
     /// is in, keeps them loaded across ticks (`lan_update_streaming`'s rebuild keeps the area), never ticks
     /// the level, and sends its game time, the server's, every 20 ticks.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and a scratch HORIZON_HOME"]
+    #[ignore = "daily"]
     fn a_loaded_area_in_a_level_nobody_is_in_is_streamed_and_sent_without_ticking() {
         let mut resources = None;
         let (mut game, rx, mut all) = stream_the_nether(&mut resources, "view-pass");
@@ -392,7 +398,7 @@ pub(in crate::game) mod tests {
     /// no ticket and no loading square, until its chunks are forgotten 52 ticks later and it is
     /// closed on the client; then the passes stop.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and a scratch HORIZON_HOME"]
+    #[ignore = "daily"]
     fn a_withdrawn_last_area_is_forgotten_and_closed_through_tick_server() {
         let mut resources = None;
         let (mut game, rx, all) = stream_the_nether(&mut resources, "view-pass-withdraw");
@@ -486,7 +492,7 @@ pub(in crate::game) mod tests {
     /// then its fall onto the bedrock roof (y 128) as wrapped moves, and once killed its death
     /// event (3) and, its death animation over, its removal.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and a scratch HORIZON_HOME"]
+    #[ignore = "daily"]
     fn an_entity_in_a_ticking_viewed_area_is_added_moved_and_removed_wrapped() {
         use horizon_client::lan::viewed_levels::areas::ChunkAreaMode;
         let mut resources = None;
@@ -531,7 +537,7 @@ pub(in crate::game) mod tests {
     /// An entity in a viewed `Loaded` Nether area is added, wrapped, and stands still in the air:
     /// nothing ticks there, and a position sync, if any, gives the same place.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and a scratch HORIZON_HOME"]
+    #[ignore = "daily"]
     fn an_entity_in_a_loaded_viewed_area_is_added_and_stands_still() {
         let mut resources = None;
         let (mut game, rx, _) = stream_the_nether(&mut resources, "view-entities-loaded");
@@ -580,14 +586,15 @@ pub(in crate::game) mod tests {
             if p.channel != CHANNEL {
                 continue;
             }
-            match Message::decode(&p.data).unwrap() {
-                Message::Open { level, .. } => got.push(Got::Open(level)),
-                Message::Close { level } => got.push(Got::Close(level)),
+            match Message::decode_in(&p.data, REVISION_3).unwrap() {
+                Message::Open { level, .. } => got.push(Got::Open(level.number())),
+                Message::Close { level } => got.push(Got::Close(level.number())),
                 Message::Run { level, packets } => got.extend(
                     (packets.into_iter())
                         .filter_map(|(id, body)| C::decode(id, body).ok())
-                        .map(|packet| Got::Wrapped(level, packet)),
+                        .map(|packet| Got::Wrapped(level.number(), packet)),
                 ),
+                Message::Swap { .. } => unreachable!("no swap below revision 4"),
             }
         }
         got
@@ -628,7 +635,7 @@ pub(in crate::game) mod tests {
     /// are a view of level 0 instead of being forgotten: no plain forget, no `open`; nothing
     /// covers them, so 52 ticks on they are forgotten wrapped and the level is closed.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and a scratch HORIZON_HOME"]
+    #[ignore = "daily"]
     fn a_travel_into_the_viewed_nether_sends_no_chunk_again_and_keeps_the_overworld_viewed() {
         let mut resources = None;
         let (mut game, rx, all) = stream_the_nether(&mut resources, "view-travel");
@@ -653,7 +660,7 @@ pub(in crate::game) mod tests {
             .expect("the Overworld, viewed");
         let mut kept_sent: Vec<(i32, i32)> = kept.sent.iter().copied().collect();
         kept_sent.sort_unstable();
-        assert_eq!((kept.level, kept_sent), (0, overworld.clone()));
+        assert_eq!((kept.level, kept_sent), (Index(0), overworld.clone()));
         let mut got = every(&rx);
         for _ in 0..70 {
             game.tick_server(false).unwrap();
@@ -702,7 +709,7 @@ pub(in crate::game) mod tests {
     /// without `close` and, its area still asking for it, opened again after the Respawn and its
     /// chunks sent again; the Overworld left is not kept.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and a scratch HORIZON_HOME"]
+    #[ignore = "daily"]
     fn a_travel_into_a_level_not_viewed_drops_the_views() {
         let mut resources = None;
         let (mut game, rx, all) = stream_the_nether(&mut resources, "view-travel-end");
@@ -767,7 +774,7 @@ pub(in crate::game) mod tests {
     /// The server's clocks reach a viewer of a level nobody is in when they change, not only at
     /// `open`: `time set`, `time add` and the day stopping each send the clocks, wrapped.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and a scratch HORIZON_HOME"]
+    #[ignore = "daily"]
     fn clock_changes_reach_the_viewer_of_a_level_nobody_is_in() {
         let mut resources = None;
         let (mut game, rx, _) = stream_the_nether(&mut resources, "view-clocks");
@@ -801,7 +808,7 @@ pub(in crate::game) mod tests {
     /// A mod's sound in the Nether, a level nobody is in, reaches the viewer whose client holds
     /// its chunk, wrapped, through `tick_server` (#3983).
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and a scratch HORIZON_HOME"]
+    #[ignore = "daily"]
     fn a_sound_in_a_viewed_level_reaches_its_viewer_through_tick_server() {
         let mut resources = None;
         let (mut game, rx, all) = stream_the_nether(&mut resources, "view-pass-sound");
@@ -825,7 +832,7 @@ pub(in crate::game) mod tests {
     /// A mod's sound bound to a pig in the viewed Nether reaches the viewer whose view tracks the
     /// pig, wrapped, bound to the same entity, through `tick_server` (#3983).
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and a scratch HORIZON_HOME"]
+    #[ignore = "daily"]
     fn a_sound_bound_to_a_viewed_entity_reaches_the_view_tracking_it() {
         let mut resources = None;
         let (mut game, rx, _) = stream_the_nether(&mut resources, "view-pass-bound-sound");

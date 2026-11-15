@@ -80,7 +80,11 @@ fn finish(
     Ok(())
 }
 impl IPayloadHandler for Handler {
-    fn handle(&self, bytes: PayloadBytes, context: &mut dyn IPayloadContext) -> Result<(), String> {
+    fn handle(
+        &self,
+        bytes: PayloadBytes,
+        context: &mut dyn IPayloadContext,
+    ) -> Result<(), mod_api::PayloadHandleError> {
         assert_eq!(
             &bytes.0,
             self.expected.as_ref(),
@@ -124,6 +128,7 @@ impl IPayloadHandler for Handler {
             Ok(())
         } else {
             finish(bytes, context, self.server, &self.hits)
+                .map_err(mod_api::PayloadHandleError::Failed)
         }
     }
 }
@@ -158,7 +163,7 @@ impl Hooks for Probe {
 
 // A controlled peer holds known packs while the real server executor replies.
 #[test]
-#[ignore = "needs HORIZON_TEST_RESOURCES; starts a real integrated server and TCP peer"]
+#[ignore = "daily"]
 fn tcp_configuration_reply_precedes_finish() {
     super::tests::require_resources();
     if super::super::native_entity_refs::tests::run_fresh_cases(

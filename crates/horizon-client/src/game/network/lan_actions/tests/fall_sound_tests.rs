@@ -53,7 +53,7 @@ fn run(distance: f64, expected: usize) {
                 C::Sound(s) => s.sound,
                 _ => unreachable!(),
             };
-            game.guest_server_tick(1);
+            game.guest_server_tick(1, true);
             let sounds = |rx: mpsc::Receiver<Out>| {
                 rx.try_iter()
                     .flat_map(|out| match out {
@@ -79,12 +79,12 @@ fn run(distance: f64, expected: usize) {
 }
 
 #[test]
-#[ignore = "requires prepared resources"]
+#[ignore = "daily"]
 fn five_block_fall_sends_stone_once_except_guest() {
     run(5.0, 1);
 }
 #[test]
-#[ignore = "requires prepared resources"]
+#[ignore = "daily"]
 fn three_block_fall_sends_no_stone_sound() {
     run(3.0, 0);
 }

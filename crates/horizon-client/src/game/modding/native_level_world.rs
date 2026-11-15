@@ -242,6 +242,17 @@ impl Game<'_> {
             .rules
             .bool_slot(mod_api::__private::game_rule_bool_slot(key)?)
     }
+    /// Read a registered integer game rule.
+    pub(super) fn level_game_rule_int(
+        &self,
+        level: LevelRef,
+        key: mod_api::IntGameRuleKey,
+    ) -> Option<i32> {
+        self.native_level_world(level)?;
+        self.ui
+            .rules
+            .int_slot(mod_api::__private::game_rule_int_slot(key)?)
+    }
     /// Game rule `rule` (`minecraft:keep_inventory` or `keep_inventory`), as
     /// `/gamerule` queries it: None for an unknown rule.
     pub(super) fn level_game_rule(
@@ -391,7 +402,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn dimension_shape_reads_current_parked_and_stale_levels() {
         use super::super::Dim;
         use horizon_client::chunk::LevelShape;
@@ -433,7 +444,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn rain_at_a_position_checks_sky_roof_and_biome() {
         with_game(|game| {
             game.install_live_features();
@@ -487,7 +498,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn enabled_features_default_to_vanilla_and_follow_the_world() {
         with_game(|game| {
             let level = game.level(game.dim.id()).unwrap();
@@ -515,7 +526,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn native_mod_reads_registered_bool_rule_by_key() {
         use std::sync::OnceLock;
         static KEY: OnceLock<mod_api::BoolGameRuleKey> = OnceLock::new();
@@ -542,6 +553,51 @@ mod tests {
                 game.ui.rules = gamerules::GameRules::with_registry(registry, &[]);
                 let level = game.level("minecraft:overworld").unwrap();
                 assert_eq!(level.game_rule_bool(game, *KEY.get().unwrap()), Some(true));
+            })
+        });
+    }
+
+    /// #3316's case: `example:cap` (8, 0..=64) refuses `/gamerule example:cap 70`, takes 12, and
+    /// keeps 12 through a save and load of the rules.
+    #[test]
+    #[ignore = "daily"]
+    fn a_mod_int_rule_is_range_checked_by_gamerule_and_saved() {
+        use std::sync::OnceLock;
+        static KEY: OnceLock<mod_api::IntGameRuleKey> = OnceLock::new();
+        struct RuleMod;
+        #[mod_api::__subscriptions]
+        impl Hooks for RuleMod {
+            fn register(
+                &self,
+                registrar: &mut dyn mod_api::Registrar,
+                _: &mod_api::RegistrationContext,
+            ) {
+                registrar.game_rule_category("machines").unwrap();
+                let key = registrar
+                    .game_rule_int("cap", "example:machines", 8, 0, 64)
+                    .unwrap();
+                let _ = KEY.set(key);
+            }
+        }
+        let mods: mod_api::Mods = vec![ModEntry::new("example", Box::new(RuleMod))].into();
+        with_mods(mods, || {
+            with_game(|game| {
+                let registry = Arc::new(crate::game::api_values::game_rule_registry());
+                game.level.rule_registry = registry.clone();
+                game.ui.rules = gamerules::GameRules::with_registry(registry.clone(), &[]);
+                game.load_world_state().unwrap();
+                game.set_allow_commands(true);
+                game.build_registries();
+                let key = *KEY.get().unwrap();
+                let level = game.level("minecraft:overworld").unwrap();
+                assert_eq!(level.game_rule_int(game, key), Some(8));
+                assert!(!game.run_command("gamerule example:cap 70"));
+                assert_eq!(level.game_rule_int(game, key), Some(8));
+                assert!(game.run_command("gamerule example:cap 12"));
+                assert_eq!(level.game_rule_int(game, key), Some(12));
+                let saved = game.ui.rules.to_nbt().tag;
+                game.ui.rules = gamerules::GameRules::from_nbt_with_registry(&saved, &[], registry);
+                assert_eq!(level.game_rule_int(game, key), Some(12));
             })
         });
     }
@@ -581,7 +637,7 @@ mod tests {
     /// A listener of a change no player made reads every server rule through its host: the new
     /// value and the others as they stand.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_game_rule_listener_reads_the_whole_rule_set() {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let mods: mod_api::Mods = vec![ModEntry::new(
@@ -619,7 +675,7 @@ mod tests {
     /// `level_set_game_rule` writes what `/gamerule` accepts, refuses what it refuses, and
     /// `level_set_clock_time` moves the level's clock as `/time set` does.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_mod_sets_game_rules_and_the_clock() {
         use mod_api::WorldEpoch;
         with_game(|game| {
@@ -753,7 +809,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn rule_reads_distinguish_unknown_stale_and_unavailable_and_snapshot_values() {
         use super::super::execution_role::ExecutionRole;
         use mod_api::{LevelReadError, WorldEpoch};
@@ -814,7 +870,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn weather_read_resolves_levels_and_refuses_stale_or_unavailable_handles() {
         use super::super::execution_role::ExecutionRole;
         use mod_api::{LevelRef, WorldEpoch};

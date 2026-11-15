@@ -58,6 +58,52 @@ pub(crate) fn ensure_sdk(project: &Path) -> Result<PinnedSdk, String> {
     fetch(&Base::from_env(), &keys(), &build, &project.join(DIR), true)
 }
 
+/// The game checkout the project at `project` builds against, when its `horizon-mod-api`
+/// dependency is a path to `crates/horizon-mod-api` of a game workspace the project itself lies in
+/// (the game's own wasm fixtures): such a project builds against that tree and fetches no SDK. A
+/// project whose dependency points anywhere else, its own `.horizon/sdk/` included, gets `None`.
+pub(crate) fn game_tree(project: &Path) -> Result<Option<PathBuf>, String> {
+    let read = |path: &Path| -> Result<toml::Table, String> {
+        fs::read_to_string(path)
+            .map_err(|e| format!("{}: {e}", path.display()))?
+            .parse()
+            .map_err(|e| format!("{}: {e}", path.display()))
+    };
+    let cargo = read(&project.join("Cargo.toml"))?;
+    let Some(dependency) = cargo
+        .get("dependencies")
+        .and_then(|d| d.get("horizon-mod-api"))
+        .and_then(|d| d.get("path"))
+        .and_then(toml::Value::as_str)
+    else {
+        return Ok(None);
+    };
+    let (Ok(dependency), Ok(project)) = (
+        project.join(dependency).canonicalize(),
+        project.canonicalize(),
+    ) else {
+        return Ok(None);
+    };
+    let Some(root) = dependency
+        .ends_with("crates/horizon-mod-api")
+        .then(|| dependency.parent().and_then(Path::parent))
+        .flatten()
+        .filter(|root| project.starts_with(root))
+    else {
+        return Ok(None);
+    };
+    let member = read(&root.join("Cargo.toml"))?
+        .get("workspace")
+        .and_then(|w| w.get("members"))
+        .and_then(toml::Value::as_array)
+        .is_some_and(|members| {
+            members
+                .iter()
+                .any(|m| m.as_str() == Some("crates/horizon-mod-api"))
+        });
+    Ok(member.then(|| root.to_path_buf()))
+}
+
 /// The build the project pins: a native mod's `[native] horizon`, any other code mod's
 /// `[package.metadata.horizon] sdk` in `Cargo.toml`.
 pub(crate) fn pin(project: &Path) -> Result<String, String> {
@@ -187,9 +233,9 @@ pub(crate) fn resolve(base: &Base, text: &str) -> Result<String, String> {
     ))
 }
 
-/// The release keys an SDK must be signed with.
+/// The keys an SDK must be signed with: the release keys, and in a debug-assertions build the one in `HORIZON_SDK_TRUSTED_KEY`.
 pub(crate) fn keys() -> Vec<PublicKey> {
-    horizon_release_sign::trusted_keys_for(native::PREBUILT_REPO)
+    horizon_release_sign::sdk_keys_for(native::PREBUILT_REPO)
 }
 
 /// Where SDK releases are read from.

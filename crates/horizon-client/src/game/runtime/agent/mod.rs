@@ -726,7 +726,7 @@ impl Game<'_> {
             Mode::Multiplayer(horizon_client::multiplayer::Screen::Disconnected {
                 reason, ..
             }) => {
-                json!({ "mode": "multiplayer", "disconnected": reason })
+                json!({ "mode": "multiplayer", "disconnected": reason.plain() })
             }
             Mode::Multiplayer(_) => json!({ "mode": "multiplayer" }),
             Mode::Realms(_) => json!({ "mode": "realms" }),
@@ -1786,8 +1786,8 @@ impl Game<'_> {
                     .trim_start()
                     .strip_prefix("command")
                     .unwrap_or("")
-                    .trim()
-                    .trim_start_matches('/');
+                    .trim();
+                let text = text.strip_prefix('/').unwrap_or(text);
                 if text.is_empty() {
                     return Err("command TEXT".into());
                 }
@@ -2395,7 +2395,7 @@ mod tests {
     use super::*;
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and scratch homes"]
+    #[ignore = "daily"]
     fn region_adoption_agent_state_reports_the_actual_title_mode() {
         crate::game::native_entity_refs::tests::with_game(|game| {
             use horizon_client::title::{Mode, Title, list_worlds};

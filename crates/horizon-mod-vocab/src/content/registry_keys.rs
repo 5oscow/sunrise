@@ -46,7 +46,8 @@ impl ItemKey {
     }
 }
 
-fn resolved_items() -> &'static std::sync::OnceLock<horizon_mod_runtime::registry_keys::Names> {
+pub(crate) fn resolved_items()
+-> &'static std::sync::OnceLock<horizon_mod_runtime::registry_keys::Names> {
     static EMPTY: std::sync::OnceLock<horizon_mod_runtime::registry_keys::Names> =
         std::sync::OnceLock::new();
     crate::parts::installed().map_or(&EMPTY, |installed| &installed.resolved_items)
@@ -121,16 +122,16 @@ pub fn item_key_by_identifier(id: &crate::Identifier) -> Option<ItemKey> {
 }
 
 /// Entity types use the same requested-slot and immutable resolved-table lifecycle as items.
-fn resolved_entity_types() -> &'static std::sync::OnceLock<horizon_mod_runtime::registry_keys::Names>
-{
+pub(crate) fn resolved_entity_types()
+-> &'static std::sync::OnceLock<horizon_mod_runtime::registry_keys::Names> {
     static EMPTY: std::sync::OnceLock<horizon_mod_runtime::registry_keys::Names> =
         std::sync::OnceLock::new();
     crate::parts::installed().map_or(&EMPTY, |installed| &installed.resolved_entity_types)
 }
-static MENUS: std::sync::LazyLock<
+pub(crate) static MENUS: std::sync::LazyLock<
     std::sync::RwLock<Option<horizon_mod_runtime::registry_keys::Names>>,
 > = std::sync::LazyLock::new(|| std::sync::RwLock::new(None));
-static ENCHANTMENTS: std::sync::LazyLock<
+pub(crate) static ENCHANTMENTS: std::sync::LazyLock<
     std::sync::RwLock<Option<horizon_mod_runtime::registry_keys::Names>>,
 > = std::sync::LazyLock::new(|| std::sync::RwLock::new(None));
 
@@ -383,6 +384,18 @@ pub fn dimension_id(key: DimensionKey) -> Option<&'static str> {
     horizon_mod_runtime::registry_keys::dimension_id(key.0)
 }
 
+/// Look up an already-issued dimension key without minting a slot for unknown names.
+pub(crate) fn existing_dimension_slot(id: &crate::Identifier) -> Option<u32> {
+    let mut slot = 0;
+    while let Some(name) = horizon_mod_runtime::registry_keys::dimension_id(slot) {
+        if name.split_once(':') == Some((id.namespace(), id.path())) {
+            return Some(slot);
+        }
+        slot = slot.checked_add(1)?;
+    }
+    None
+}
+
 // no wire: process-local registration diagnostic retains a static hook or mod identity.
 /// A fluid requested by a mod but absent from the completed registry.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -588,5 +601,60 @@ impl crate::BoolGameRuleKey {
         )
         .unwrap_or_else(|| crate::parts::requested_keys().game_rules.id(slot).is_some());
         known.then_some(Self(slot)).ok_or("unknown bool rule slot")
+    }
+}
+
+impl crate::IntGameRuleKey {
+    #[cfg(any(not(target_arch = "wasm32"), test))]
+    pub(crate) fn from_slot(slot: u32) -> Result<Self, &'static str> {
+        let known = crate::parts::registration_membership(
+            crate::parts::RegistrationKeyKind::GameRule,
+            slot,
+        )
+        .unwrap_or_else(|| crate::parts::requested_keys().game_rules.id(slot).is_some());
+        known.then_some(Self(slot)).ok_or("unknown int rule slot")
+    }
+}
+
+/// Complete startup game events in builtin registration order.
+pub fn resolve_game_events<'a>(ids: impl IntoIterator<Item = &'a str>) -> Result<(), Vec<String>> {
+    let names = crate::parts::requested_keys()
+        .game_events
+        .complete(ids, |mod_id, id| {
+            format!("mod {mod_id} requested unknown game event {id}")
+        })?;
+    if let Some(installed) = crate::parts::installed() {
+        let _ = installed.resolved_game_events.set(names);
+    }
+    Ok(())
+}
+/// Resolve an exact id in the installed load.
+pub fn game_event_key(id: &str) -> Option<crate::GameEventKey> {
+    let names = crate::parts::installed()?.resolved_game_events.get()?;
+    Some(crate::GameEventKey(*names.slots.get(id)?))
+}
+/// Read an installed slot without trusting a retained mod key.
+pub fn game_event_key_id(key: crate::GameEventKey) -> Option<String> {
+    crate::parts::registration_name(crate::parts::RegistrationKeyKind::GameEvent, key.0).or_else(
+        || {
+            crate::parts::installed()?
+                .resolved_game_events
+                .get()?
+                .id(key.0)
+                .map(str::to_owned)
+        },
+    )
+}
+impl crate::GameEventKey {
+    #[cfg(any(not(target_arch = "wasm32"), test))]
+    pub(crate) fn from_slot(slot: u32) -> Result<Self, &'static str> {
+        crate::parts::registration_membership(crate::parts::RegistrationKeyKind::GameEvent, slot)
+            .unwrap_or_else(|| {
+                crate::parts::installed()
+                    .and_then(|installed| installed.resolved_game_events.get())
+                    .is_some_and(|names| names.id(slot).is_some())
+            })
+            .then_some(Self(slot))
+            .ok_or("unknown GameEventKey slot")
     }
 }

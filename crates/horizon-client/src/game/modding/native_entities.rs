@@ -6,7 +6,7 @@
 //! `dimension` (`minecraft:overworld`) as `native_set_block` does.
 use super::{
     Game,
-    commands::{Target, place_summoned},
+    commands::{Target, place_summoned, strip_finalize_tree},
 };
 use horizon_core::geometry::Vec3;
 use horizon_core::nbt::{Compound, Tag};
@@ -93,9 +93,13 @@ impl Game<'_> {
         }
         let mut tag = nbt;
         tag.insert("id".into(), Tag::String(kind.into()));
+        // As `/summon <kind> <pos> <nbt>` takes it: with an NBT argument vanilla
+        // does not finalize the mob (`SummonCommand.createEntity`), so a
+        // `horizon:finalize` in it is not the caller's to set.
+        let mut tag = Tag::Compound(tag);
+        strip_finalize_tree(&mut tag);
         // As `/summon` does: every entity of the stack, passengers included,
         // stands at `pos`.
-        let mut tag = Tag::Compound(tag);
         place_summoned(&mut tag, pos);
         let from = self.mobs.len();
         let first = self.next_entity + 1;
@@ -520,7 +524,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "daily"]
     fn pending_ids_keep_counter_order_and_assign_zero_only_once() {
         super::super::native_entity_refs::tests::with_game(|game| {
             for (kind, nbt) in [
@@ -581,7 +585,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "daily"]
     fn native_roots_keep_the_loaded_id_and_do_not_allocate_twice() {
         use horizon_client::chunk::Chunk;
         for (kind, nbt) in [
@@ -649,7 +653,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "daily"]
     fn portal_ids_follow_only_the_existing_moving_entity_filters() {
         super::super::native_entity_refs::tests::with_game(|game| {
             for _ in 0..3 {
@@ -694,7 +698,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "daily"]
     fn pending_assignment_refuses_a_bound_zero_owner_before_consuming_an_id() {
         use horizon_mod_runtime::attachments::{
             AttachmentType, Attachments, Holder, index::AttachmentIndex,
@@ -747,7 +751,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources and an isolated process for native mods"]
+    #[ignore = "daily"]
     fn joins_follow_insertion_order_and_canceled_entities_never_leave() {
         use horizon_client::mobs::Mob;
         use horizon_core::geometry::Vec3;

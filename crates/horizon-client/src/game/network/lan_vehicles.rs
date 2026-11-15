@@ -585,6 +585,8 @@ impl Game<'_> {
             &self.lan.as_ref().unwrap().hub.encoder,
         );
         self.lan.as_mut().unwrap().hub.guests.update(gi, |g| {
+            // `ServerChunkCache.move` after `absSnapTo` of the accepted move.
+            g.release_tickets();
             g.vehicle_good = Some([target.x, target.y, target.z]);
             let rested = std::mem::replace(
                 &mut g.vehicle_rests,
@@ -802,7 +804,7 @@ mod controller_tests {
     /// seat's client, which still sends where it sees the boat, used to put
     /// the boat back every tick (#11541).
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn the_first_rider_in_drives_the_boat() {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
@@ -883,6 +885,7 @@ mod controller_tests {
                 max_players: 3,
                 integrated: false,
                 levels: Default::default(),
+                level_seeds: Default::default(),
             },
         )
         .unwrap();
@@ -941,6 +944,40 @@ mod controller_tests {
             game.boats[0].fall_distance, 0.0,
             "a guest's boat on the ground"
         );
+        // `AbstractBoat.tick` still runs `applyEffectsFromBlocks` on the server
+        // for the boat its guest drives: `WebBlock.entityInside` resets the fall
+        // (`Entity.makeStuckInBlock`).
+        let cobweb = game
+            .pack
+            .assets
+            .registry
+            .default_state("minecraft:cobweb")
+            .unwrap();
+        let p = game.boats[0].position;
+        game.world
+            .set(
+                p.x.floor() as i32,
+                p.y.floor() as i32,
+                p.z.floor() as i32,
+                cobweb,
+            )
+            .unwrap();
+        game.boats.update(0, |b| b.fall_distance = 4.0);
+        game.guest_move_vehicle(
+            3,
+            &play::MoveVehicleRequest {
+                position: [p.x, p.y, p.z],
+                yaw: 0.0,
+                pitch: 0.0,
+                on_ground: false,
+            },
+        );
+        assert_eq!(game.boats[0].fall_distance, 4.0, "still falling");
+        game.tick_boats();
+        assert_eq!(
+            game.boats[0].fall_distance, 0.0,
+            "a cobweb resets the fall of a boat its guest drives"
+        );
     }
 
     /// handleMoveVehicle for a horse its guest's client moves: `vehicle.move`
@@ -949,7 +986,7 @@ mod controller_tests {
     /// on the ground, lands the horse: `AbstractHorse.causeFallDamage` of the
     /// whole fall. The horse used to keep no fall at all (#13042).
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_guests_horse_falls_and_lands() {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
@@ -1047,6 +1084,7 @@ mod controller_tests {
                 max_players: 3,
                 integrated: false,
                 levels: Default::default(),
+                level_seeds: Default::default(),
             },
         )
         .unwrap();

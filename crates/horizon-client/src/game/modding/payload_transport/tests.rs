@@ -262,7 +262,11 @@ fn finish(
     Ok(())
 }
 impl IPayloadHandler for Handler {
-    fn handle(&self, bytes: PayloadBytes, context: &mut dyn IPayloadContext) -> Result<(), String> {
+    fn handle(
+        &self,
+        bytes: PayloadBytes,
+        context: &mut dyn IPayloadContext,
+    ) -> Result<(), mod_api::PayloadHandleError> {
         assert_eq!(
             &bytes.0,
             self.expected.as_ref(),
@@ -306,6 +310,7 @@ impl IPayloadHandler for Handler {
             Ok(())
         } else {
             finish(bytes, context, self.server, &self.hits, &self.timeline)
+                .map_err(mod_api::PayloadHandleError::Failed)
         }
     }
 }
@@ -341,7 +346,7 @@ impl Hooks for Probe {
 }
 
 #[test]
-#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES; starts a real integrated server"]
+#[ignore = "daily"]
 fn integrated_memory_delivers_registered_raw_payload_and_reply() {
     super::tests::require_resources();
     if super::super::native_entity_refs::tests::run_fresh_cases(

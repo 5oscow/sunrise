@@ -19,6 +19,17 @@ use horizon_client::{
 use horizon_core::geometry::Vec3;
 use std::ops::Range;
 
+#[cfg(test)]
+#[path = "native_projectiles/impact_probe.rs"]
+pub(in crate::game) mod impact_probe;
+
+/// The hit target state an independent projectile decided against before a hook.
+#[derive(PartialEq)]
+pub(super) enum ImpactTarget {
+    Block(horizon_world::registry::BlockStateId),
+    Entity(mod_api::EntityRef, [f64; 3]),
+}
+
 /// A projectile's impact in one tick of `tick_projectiles`.
 pub(super) struct Impact {
     /// Where the projectile was in the tick's list.
@@ -54,6 +65,62 @@ impl Drop for ProjectileDispatch<'_, '_> {
 }
 
 impl Game<'_> {
+    /// Snapshot the hit precondition so listener writes can invalidate its
+    /// application without rerunning the collision decision.
+    pub(super) fn native_impact_target(&self, hit: Hit) -> Option<ImpactTarget> {
+        let (entity, block, _, _) = self.pearl_hit(hit);
+        if let Some(id) = entity {
+            let entity = self.entity(id)?;
+            Some(ImpactTarget::Entity(entity, self.entity_position(entity)?))
+        } else if matches!(hit, Hit::Block { .. }) {
+            Some(ImpactTarget::Block(
+                self.world.block(block[0], block[1], block[2]),
+            ))
+        } else {
+            None
+        }
+    }
+
+    /// Dispatch a hit for a projectile ticked outside the shared projectile list.
+    /// The caller checks the server opt-in gate and exposes the live projectile
+    /// before calling; misses never dispatch.
+    pub(super) fn native_separate_projectile_impact(
+        &mut self,
+        projectile: u32,
+        kind: &str,
+        owner: Option<Who>,
+        hit: Hit,
+    ) -> bool {
+        if matches!(hit, Hit::None) {
+            return false;
+        }
+        let owner = match owner {
+            Some(Who::Mob(id)) => self.native_impact_entity_id(id),
+            Some(Who::Player) => self.own_entity_id() as u32,
+            None => 0,
+        };
+        let (entity, block, face, at) = self.pearl_hit(hit);
+        let entity_kind = entity
+            .and_then(|id| self.entity(id))
+            .and_then(|entity| self.entity_kind(entity))
+            .map(|kind| kind.id(self))
+            .unwrap_or_default();
+        let mut canceled = false;
+        self.native_projectile_impact(mod_api::__private::ProjectileImpactCall {
+            dimension: self.dim.id(),
+            projectile,
+            kind,
+            owner,
+            entity,
+            entity_kind: &entity_kind,
+            block,
+            face,
+            at,
+            canceled: &mut canceled,
+        });
+        canceled
+    }
+
     /// Guard just the dispatch: normal completion returns the still-owned pass
     /// to its caller, which restores explicitly at the established tick boundary.
     pub(super) fn with_projectile_dispatch(
@@ -493,19 +560,19 @@ mod nested_spawn_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn impact_handoff_balances_the_active_owner() {
         impact_handoff_balances_the_pass(false);
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn impact_handoff_balances_the_parked_owner() {
         impact_handoff_balances_the_pass(true);
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn impact_exposure_retains_the_existing_spawn_buffer_for_the_next_pass() {
         crate::game::native_entity_refs::tests::with_game(|game| {
             fn shot(id: u32) -> Projectile {
@@ -570,7 +637,7 @@ mod pearl_hit_tests {
     /// `ender_pearl_teleport`'s hit fields: a block and its face normal, or an
     /// entity with the cell of its hit point and no face.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_pearl_tells_the_block_face_or_the_entity_it_hit() {
         crate::game::native_entity_refs::tests::with_game(|game| {
             let wall = Hit::Block {
@@ -595,7 +662,7 @@ mod pearl_hit_tests {
 
     /// A dragon part is the dragon and the local player is its own entity.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_pearl_names_the_dragon_for_a_part_and_the_local_player_by_its_own_id() {
         use crate::game::dragon::Dragon;
         crate::game::native_entity_refs::tests::with_game(|game| {
@@ -623,7 +690,7 @@ mod pearl_hit_tests {
 
     /// A listener hears the hit through `native_pearl_teleport` and its write comes back.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_listening_mod_hears_the_pearls_hit_and_its_target_comes_back() {
         use crate::game::dragon::Dragon;
         use mod_api::{EnderPearlTeleportEvent, Flow, Hooks, ModEntry, ServerHost};

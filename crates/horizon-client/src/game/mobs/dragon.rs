@@ -443,7 +443,7 @@ pub(in crate::game) struct Dragon {
     /// after (`strafe_after_crystal`), taken on its next tick.
     strafe_request: Option<FightWho>,
     /// `Mob.isNoAi` (`NoAI`): it flaps in place, with no phase or flight.
-    no_ai: bool,
+    pub(super) no_ai: bool,
     random: LegacyRandom,
 }
 /// A player in the fight: the window's own player, or a guest by
@@ -4589,7 +4589,7 @@ impl Game<'_> {
     }
     /// The dragon is the End fight's own (`EnderDragon.dragonFight`, set
     /// only for the dragon whose UUID is the fight's `dragonUUID`).
-    fn is_fight_dragon(&mut self) -> bool {
+    pub(super) fn is_fight_dragon(&mut self) -> bool {
         if !self.dimension_type().has_ender_dragon_fight {
             return false;
         }
@@ -5068,7 +5068,7 @@ mod tests {
     use super::*;
 
     #[test]
-    #[ignore = "needs prepared resources and an isolated process for native mods"]
+    #[ignore = "daily"]
     fn a_spawn_egg_dragon_joins_once_and_a_canceled_spawn_fails() {
         use mod_api::{EntityJoinLevelEvent, Flow, Hooks, ModEntry, ServerHost};
         use std::sync::{
@@ -5146,7 +5146,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources and an isolated process for native mods"]
+    #[ignore = "daily"]
     fn dragon_finalization_preserves_the_site_and_both_cancels() {
         use horizon_client::mobs::spawn_rules::Reason;
         use mod_api::{FinalizeSpawnEvent, Flow, Hooks, Host, ModEntry};
@@ -5223,7 +5223,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources and an isolated process for native mods"]
+    #[ignore = "daily"]
     fn dragon_summon_command_finalizes_only_without_nbt() {
         use horizon_client::mobs::spawn_rules::Reason;
         use mod_api::{
@@ -5991,7 +5991,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn carry_dragon_dispatches_only_after_phase_and_source_guards() {
         use std::sync::{
             Arc,
@@ -6320,7 +6320,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn the_tracked_dragon_lists_its_data_defaults() {
         use horizon_protocol::entity_data::serializer;
         super::super::native_entity_refs::tests::with_game(|game| {

@@ -12,6 +12,7 @@ struct Frame {
     group: wgpu::BindGroup,
     bindings: wgpu::BindGroupLayout,
     atlas: wgpu::TextureView,
+    atlas_texture: wgpu::Texture,
 }
 
 /// The software Vulkan adapter (lavapipe, llvmpipe) the pixel tests draw on.
@@ -172,6 +173,7 @@ fn software_frame(
         group,
         bindings,
         atlas: atlas_view,
+        atlas_texture,
     })
 }
 
@@ -747,7 +749,7 @@ mod instance_run {
     }
 
     #[test]
-    #[ignore = "needs software Vulkan"]
+    #[ignore = "daily"]
     fn an_instanced_run_matches_per_copy_pixels_with_hdr() {
         let per_copy = render(true, true).expect("per-copy software Vulkan draw");
         let instanced = render(false, true).expect("instanced software Vulkan draw");
@@ -1026,7 +1028,7 @@ fn probe_frame(hud: &HudBatch) -> super::Frame<'_> {
 #[cfg(test)]
 mod scrgb {
     #[test]
-    #[ignore = "needs software Vulkan"]
+    #[ignore = "daily"]
     fn an_instanced_lit_texel_matches_cpu_scrgb() {
         let _gpu = crate::gfx::test_gpu::lock();
         let dark =
@@ -1078,6 +1080,9 @@ pub fn render_hud(
         false,
     )
     .map_err(|error| error.to_string())?;
+    // As the game's renderer has it (gfx.rs): the batch's atlas patches, a map's or a mod's
+    // image, upload before the draw.
+    hud.atlas_texture = Some(frame.atlas_texture.clone());
     let mut uploads = super::upload::Uploads::new(&frame.device);
     let mut encoder = frame.device.create_command_encoder(&Default::default());
     let color = frame.color.create_view(&Default::default());

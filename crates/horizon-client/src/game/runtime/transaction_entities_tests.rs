@@ -218,6 +218,45 @@ fn a_spawn_then_abort_leaves_no_entity_map_or_hook() {
 
 #[test]
 #[ignore = "daily"]
+fn a_mob_removed_in_a_transaction_leaves_once_at_the_root_commit() {
+    const NAME: &str = "game::transaction_entities_tests::a_mob_removed_in_a_transaction_leaves_once_at_the_root_commit";
+    with_observer(NAME, |game| {
+        let pig = summon(game, "minecraft:pig", "{}").unwrap();
+        game.native_joins_flush(false, 0);
+        assert_eq!(heard().joined, [pig]);
+
+        // A removal the transaction takes back never leaves.
+        let seal = game.transaction_open();
+        assert!(game.entity_discard(game.entity(pig).unwrap()));
+        assert!(
+            heard().left.is_empty(),
+            "the leave waits for the root commit"
+        );
+        game.transaction_close(&seal, false);
+        assert!(game.entity(pig).is_some(), "the abort brings it back");
+        game.native_leaves_flush();
+        assert!(heard().left.is_empty(), "an aborted removal is never told");
+
+        // A committed one leaves at the root commit, and once.
+        let seal = game.transaction_open();
+        assert!(game.entity_discard(game.entity(pig).unwrap()));
+        assert!(
+            heard().left.is_empty(),
+            "the leave waits for the root commit"
+        );
+        game.transaction_close(&seal, true);
+        assert_eq!(game.entity(pig), None);
+        assert_eq!(heard().left, [pig], "told at the root commit");
+        game.native_leaves_flush();
+        assert!(
+            heard().left.is_empty(),
+            "the later sweep does not tell it again"
+        );
+    });
+}
+
+#[test]
+#[ignore = "daily"]
 fn a_spawn_joins_at_the_root_commit() {
     const NAME: &str = "game::transaction_entities_tests::a_spawn_joins_at_the_root_commit";
     with_observer(NAME, |game| {
@@ -963,6 +1002,12 @@ fn a_nested_commit_from_a_join_listener_tells_its_join_before_its_removal() {
 fn a_level_commit_told_inside_another_levels_commit_keeps_its_own_batch() {
     const NAME: &str = "game::transaction_entities_tests::a_level_commit_told_inside_another_levels_commit_keeps_its_own_batch";
     with_observer(NAME, |game| {
+        game.set_allow_commands(true);
+        game.build_registries();
+        assert!(game.run_command("difficulty normal"));
+        let _rx = super::lan::world_spawn_sync_tests::host_for(game);
+        game.lan.as_mut().unwrap().hub.guests.clear();
+        heard();
         game.enter_level(Dim::Nether).unwrap();
         game.world
             .chunks

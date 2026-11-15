@@ -72,14 +72,10 @@ pub type ModMenuTypeEntry = (
     Option<ModLinks>,
 );
 
-/// registers the content mods' menu types, a list set once per process
-/// (false when it already was).
-pub fn register_mod_menu_types(menus: impl IntoIterator<Item = ModMenuTypeEntry>) -> bool {
-    if MOD_MENU_TYPES.get().is_some() {
-        return false;
-    }
-    let menus =
-        menus.into_iter().map(
+fn menu_types(menus: impl IntoIterator<Item = ModMenuTypeEntry>) -> Vec<ModMenuType> {
+    menus
+        .into_iter()
+        .map(
             |(id, slots, data_slots, results, crafting, links)| ModMenuType {
                 id: Box::leak(id.into_boxed_str()),
                 slots,
@@ -88,12 +84,50 @@ pub fn register_mod_menu_types(menus: impl IntoIterator<Item = ModMenuTypeEntry>
                 crafting,
                 links,
             },
-        );
-    MOD_MENU_TYPES.set(menus.collect()).is_ok()
+        )
+        .collect()
+}
+
+/// registers the content mods' menu types, a list set once per process
+/// (false when it already was).
+pub fn register_mod_menu_types(menus: impl IntoIterator<Item = ModMenuTypeEntry>) -> bool {
+    if MOD_MENU_TYPES.get().is_some() {
+        return false;
+    }
+    MOD_MENU_TYPES.set(menu_types(menus)).is_ok()
+}
+
+#[cfg(feature = "test-support")]
+thread_local! {
+    static SCOPED_MOD_MENU_TYPES: std::cell::Cell<Option<&'static [ModMenuType]>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// Runs `test` with `menus` as this thread's menu types, whatever the process-wide table holds
+/// (and without touching it), so a test needs neither to register first nor a process of its
+/// own. Only the calling thread sees them, and only for the call.
+#[cfg(feature = "test-support")]
+pub fn with_mod_menu_types<R>(
+    menus: impl IntoIterator<Item = ModMenuTypeEntry>,
+    test: impl FnOnce() -> R,
+) -> R {
+    struct Restore(Option<&'static [ModMenuType]>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            SCOPED_MOD_MENU_TYPES.with(|scoped| scoped.set(self.0));
+        }
+    }
+    let menus: &'static [ModMenuType] = Vec::leak(menu_types(menus));
+    let _restore = Restore(SCOPED_MOD_MENU_TYPES.with(|scoped| scoped.replace(Some(menus))));
+    test()
 }
 
 /// the content mods' menu types, in registry order.
 pub fn mod_menu_types() -> &'static [ModMenuType] {
+    #[cfg(feature = "test-support")]
+    if let Some(scoped) = SCOPED_MOD_MENU_TYPES.with(std::cell::Cell::get) {
+        return scoped;
+    }
     MOD_MENU_TYPES.get().map_or(&[], Vec::as_slice)
 }
 

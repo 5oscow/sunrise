@@ -1466,12 +1466,11 @@ impl Game<'_> {
     ) {
         self.fire_menu_quick_move(pos, entity, container_slots, slot, stack, handled);
     }
-    /// The commands native mods add to the server's command tree: push
-    /// yours. Asked once when a world opens to players (a dedicated
-    /// server, a LAN host, single player's server thread); every player's
-    /// chat box then completes them as vanilla's, within their level. A
-    /// name vanilla has is left out. Asked again after a mod calls
-    /// `native_refresh_commands`. API 8.
+    /// The commands native mods add to the session's tree: push the complete current set.
+    /// Asked at world open before functions compile, on each reload and data pack change,
+    /// and after `native_refresh_commands`. No player or hub needs to exist yet; starting
+    /// the hub reuses the session registration. Every player's chat box completes them
+    /// within their level. A name vanilla has is left out.
     pub(in crate::game) fn native_register_commands(
         &mut self,
         commands: &mut Vec<mod_api::Command>,
@@ -3151,7 +3150,7 @@ impl Game<'_> {
     pub(in crate::game) fn native_player_jump(&mut self, player: u128, name: &str) {
         self.fire_player_jump(player, name);
     }
-    /// A guest was disconnected by a server kick, after the hub recorded the rendered `reason`. The guest's state is
+    /// A network or fake guest was kicked, after the hub recorded the rendered `reason`. The guest's state is
     /// swapped in unless they were already removed in the same poll.
     pub(in crate::game) fn native_player_kicked(&mut self, player: u128, name: &str, reason: &str) {
         self.fire_player_kicked(player, name, reason);
@@ -3604,7 +3603,9 @@ impl Game<'_> {
     }
     /// `player` (`name`) left the game (NeoForge's `PlayerLoggedOutEvent`), by
     /// any path: a lost connection, a kick, the server stopping or failing.
-    /// Once for each player `native_player_logged_in` told of. They've already
+    /// Once for each player `native_player_logged_in` told of, and also for a
+    /// kicked fake without a preceding login. Silent `remove_fake` sends no logout.
+    /// They've already
     /// left `native_server_players`, except when the server stops, which tells
     /// before it saves, with them still listed and able to get a last message.
     /// Server-side.
@@ -4183,14 +4184,14 @@ impl Game<'_> {
     /// `[0, 1, 0]` for the top), at the point `at`. Set `canceled` and the impact
     /// does not happen: no damage, no knockback, no sound, no block reaction, the
     /// arrow does not stick, a pearl does not teleport, a potion or a fireball
-    /// does not burst. The projectile flies on and is not discarded, so a mod
-    /// that cancels also decides what becomes of it. It continues through its
-    /// whole motion and may hit something on a later tick. Covers what
-    /// `tick_projectiles` flies: arrows, tridents, snowballs,
-    /// eggs, pearls, potions, fireballs, wither skulls, wind charges, llama spit and
-    /// shulker bullets, from players, mobs and dispensers. It does not fire for
-    /// a breeze's deflection, for a hit on a wind charge, for fireworks or for
-    /// fishing bobbers. A dragon part or End crystal is told by the id of the
+    /// does not burst. Cancellation leaves the projectile alive. A flying bobber
+    /// skips hooking and redirection to the hit point, but its ordinary move
+    /// still stops against solid blocks. Water is not an impact. Bobbers notify
+    /// before vanilla's entity deflection and world-border bounce; rockets notify
+    /// after deflection and cancellation skips their impact explosion only.
+    /// Covers arrows, tridents, thrown items, fireballs, wither skulls, wind
+    /// charges, llama spit, shulker bullets, bobbers and rockets. Other families
+    /// skip breeze deflections and hits on wind charges. A dragon part or End crystal is told by the id of the
     /// dragon or crystal. Heard only when a mod also sets
     /// `native_hears_projectile_impacts`. Server-side.
     pub(in crate::game) fn native_projectile_impact(
@@ -4884,17 +4885,18 @@ mod text_tests {
     /// `DrawContext::text` takes ARGB as vanilla's `GuiGraphics` does: the alpha reaches the
     /// vertices, and fully transparent text draws nothing.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn text_takes_argb_and_skips_transparent_text() {
         use mod_api::DrawContext;
         crate::game::native_entity_refs::tests::with_game(|game| {
             let drawn = |argb: u32| {
                 let mut batch = HudBatch::scratch([640, 480]);
-                crate::game::host::draw::GameDrawContext {
-                    game,
-                    surface: &mut batch,
-                }
-                .text("Hi", [4.0, 4.0], argb, false);
+                crate::game::host::draw::GameDrawContext::new(game, &mut batch).text(
+                    "Hi",
+                    [4.0, 4.0],
+                    argb,
+                    false,
+                );
                 batch.vertices
             };
             let opaque = drawn(0xFFFF_FFFF);
@@ -4912,7 +4914,7 @@ mod text_tests {
 #[cfg(test)]
 mod held_break_slot_tests {
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn held_durability_retains_the_stack_hand_and_explicit_break_slot() {
         use crate::game::{Audio, Game, Hand, Options, Progress, Settings, load_resources};
         use horizon_client::{items::ItemStack, motion::PlayerMotion};

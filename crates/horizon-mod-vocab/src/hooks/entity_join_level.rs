@@ -7,6 +7,8 @@ pub trait Hooks {
     /// `player` identifies the ticked player; on the server their state is
     /// acting. Fires before sleep, cooldowns and body work. Players still tick
     /// under `/tick freeze`, but not while the level is paused.
+    /// On the server, neither player tick hook fires for a spectator whose
+    /// bounds touch an unloaded chunk; that player's body tick is skipped.
     #[hook(side = "both", contract = "listen", neoforge = "PlayerTickEvent.Pre")]
     fn player_tick_pre(player: PlayerRef);
     /// After a player's tick on both logical sides (NeoForge 26.3
@@ -15,6 +17,8 @@ pub trait Hooks {
     /// their state is acting. Runs after body work and server-side item,
     /// arrow and XP pickups, so reads see the completed tick. Client reads
     /// see only the state available to that client, not future server updates.
+    /// On the server, neither player tick hook fires for a spectator whose
+    /// bounds touch an unloaded chunk; that player's body tick is skipped.
     #[hook(side = "both", contract = "listen", neoforge = "PlayerTickEvent.Post")]
     fn player_tick_post(player: PlayerRef);
     /// An entity joins the server level `dimension` (NeoForge's
