@@ -838,6 +838,24 @@ mod tests {
     }
 
     #[test]
+    fn an_unsupplied_registry_is_empty_without_a_diagnostic() {
+        let conditions = LoadConditions::new([])
+            .with_registries([("item", ["stone"])])
+            .with_tags([("item", ["planks"])]);
+        for registry in ["minecraft:worldgen/biome", "test:missing"] {
+            let registered = json!({"type": "neoforge:registered",
+                "registry": registry, "value": "test:entry"});
+            let empty = json!({"type": "neoforge:tag_empty",
+                "registry": registry, "tag": "test:tag"});
+            assert!(!conditions.allows_file(&file(registered.clone()), "data/test/recipe/a.json"));
+            assert!(conditions.allows_file(&file(empty.clone()), "data/test/recipe/b.json"));
+            assert!(conditions.allows(&file(json!({"type": "neoforge:not", "value": registered}))));
+            assert!(!conditions.allows(&file(json!({"type": "neoforge:not", "value": empty}))));
+        }
+        assert_eq!(conditions.check_resource_errors("recipe"), Ok(()));
+    }
+
+    #[test]
     fn a_retained_candidate_does_not_reuse_an_answer_across_tag_views() {
         let tin = file(json!({"type": "neoforge:tag_empty", "tag": "c:ingots/tin"}));
         let candidate = LoadConditions::new([]).with_lookup(BTreeMap::new(), |_, _| None);
