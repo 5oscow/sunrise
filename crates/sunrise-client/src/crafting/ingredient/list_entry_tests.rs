@@ -31,7 +31,6 @@ fn load_with(items: &Items, ingredient: Value) -> Result<crate::crafting::Recipe
 
 #[test]
 fn a_list_entry_that_is_not_an_item_id_fails_the_file() {
-    crate::test_log::install();
     for ingredient in [
         json!(["minecraft:stone", 5]),
         json!(["minecraft:stone", {}]),
@@ -40,13 +39,11 @@ fn a_list_entry_that_is_not_an_item_id_fails_the_file() {
         json!(["minecraft:stone", "air"]),
         json!("minecraft:air"),
     ] {
-        crate::test_log::clear();
         let Err(error) = load(ingredient.clone()) else {
             panic!("{ingredient} loaded");
         };
         assert!(error.contains("data/fixture/recipe/recipe.json"), "{error}");
         assert!(error.contains("invalid ingredient"), "{error}");
-        assert!(crate::test_log::records().is_empty(), "{ingredient}");
     }
 }
 

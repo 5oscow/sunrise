@@ -290,12 +290,21 @@ fn empty_ingredient_load_diagnostics_distinguish_errors_and_warnings() {
                     || error.contains("ingredient kind fixture:predicate"),
                 "{error}"
             );
-            assert!(levels.is_empty());
+            // One Error record, the refusal naming the file.
+            let errors: Vec<_> = levels
+                .iter()
+                .filter(|(level, _)| *level == log::Level::Error)
+                .collect();
+            assert_eq!(errors.len(), 1, "{levels:?}");
+            assert!(
+                errors[0].1.contains("data/fixture/recipe/recipe.json"),
+                "{levels:?}"
+            );
         } else {
             assert_eq!(recipes.unwrap().crafting.len(), 1);
             assert!(levels.iter().any(|(level, _)| *level == log::Level::Warn));
+            assert!(!levels.iter().any(|(level, _)| *level == log::Level::Error));
         }
-        assert!(!levels.iter().any(|(level, _)| *level == log::Level::Error));
     }
 }
 
@@ -355,7 +364,13 @@ fn unclaimed_custom_kind_refuses_load_but_an_empty_answer_only_warns() {
         "{error}"
     );
     assert!(error.contains("ingredient kind absent:kind"), "{error}");
-    assert!(logs.is_empty());
+    // The refusal is logged once at Error, naming the file.
+    assert_eq!(logs.len(), 1, "{logs:?}");
+    assert_eq!(logs[0].0, log::Level::Error);
+    assert!(
+        logs[0].1.contains("data/fixture/recipe/needs_mod.json"),
+        "{logs:?}"
+    );
     // A listener with an empty answer: kept, with a warning naming both.
     let (recipes, logs) = run(vec![mod_api::ModEntry::new(
         "empty",
