@@ -49,6 +49,8 @@ pub struct PartRegistrar {
     pub(crate) recipe_book_fields: HashMap<String, (String, String)>,
     pub(crate) game_rule_categories: Vec<String>,
     pub(crate) game_rules: Vec<crate::GameRuleDecl>,
+    pub(crate) attachment_uses: Vec<(String, String, String)>,
+    pub(crate) attachment_types: HashMap<String, HashMap<String, bool>>,
     pub(crate) custom_stats: Vec<String>,
     pub(crate) mod_id: &'static str,
     pub(crate) mod_index: usize,
@@ -99,6 +101,8 @@ impl PartRegistrar {
             recipe_book_fields: HashMap::new(),
             game_rule_categories: Vec::new(),
             game_rules: Vec::new(),
+            attachment_uses: Vec::new(),
+            attachment_types: HashMap::new(),
             custom_stats: Vec::new(),
             mod_id,
             mod_index: 0,
@@ -273,6 +277,7 @@ pub(crate) fn install_registrar(
     if !registrar.refused.is_empty() {
         return Err(registrar.refused);
     }
+    registrar.validate_attachment_admission()?;
     let game_rule_slots = slots.expect("every schema refusal was collected");
     let installed = Installed {
         biome_modifiers: registrar.biome_modifiers,
@@ -288,6 +293,7 @@ pub(crate) fn install_registrar(
         game_rule_slots,
         game_rules: registrar.game_rules,
         game_rule_categories: registrar.game_rule_categories,
+        attachment_types: registrar.attachment_types,
         custom_stats: registrar.custom_stats,
         keys: registrar.parts,
         tags: registrar.tags,

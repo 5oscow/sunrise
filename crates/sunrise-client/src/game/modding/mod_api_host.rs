@@ -480,6 +480,14 @@ impl mod_api::LevelHost for super::GameLevel<'_> {
 }
 
 impl mod_api::AttachmentHost for Game<'_> {
+    fn validate_attachment(
+        &self,
+        namespace: &str,
+        name: &str,
+        sync: bool,
+    ) -> Result<(), mod_api::AttachmentError> {
+        mod_api::__private::validate_attachment_use(namespace, name, sync)
+    }
     fn attachments(
         &mut self,
         holder: mod_api::Holder,
@@ -490,6 +498,14 @@ impl mod_api::AttachmentHost for Game<'_> {
 }
 
 impl mod_api::AttachmentHost for super::GameLevel<'_> {
+    fn validate_attachment(
+        &self,
+        namespace: &str,
+        name: &str,
+        sync: bool,
+    ) -> Result<(), mod_api::AttachmentError> {
+        mod_api::__private::validate_attachment_use(namespace, name, sync)
+    }
     fn attachments(
         &mut self,
         holder: mod_api::Holder,
@@ -578,6 +594,14 @@ impl mod_api::LevelHost for super::native_hooks::HitLevel<'_> {
 }
 
 impl mod_api::AttachmentHost for super::native_hooks::HitLevel<'_> {
+    fn validate_attachment(
+        &self,
+        namespace: &str,
+        name: &str,
+        sync: bool,
+    ) -> Result<(), mod_api::AttachmentError> {
+        mod_api::__private::validate_attachment_use(namespace, name, sync)
+    }
     fn attachments(
         &mut self,
         holder: mod_api::Holder,

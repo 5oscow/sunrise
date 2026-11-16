@@ -50,7 +50,16 @@ static BLOB: AttachmentType<Vec<u8>> = AttachmentType {
 /// A mod with no hooks: with a mod loaded, the server sends joining players snapshots.
 pub(super) struct Route;
 #[mod_api::__subscriptions]
-impl mod_api::Hooks for Route {}
+impl mod_api::Hooks for Route {
+    fn register(&self, registrar: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
+        registrar
+            .register_attachment_type("sync_route:value", true)
+            .unwrap();
+        registrar
+            .register_attachment_type("sync_route:blob", true)
+            .unwrap();
+    }
+}
 
 /// The server's own attachment store.
 pub(super) fn store<'a>(server: &'a mut Game<'_>) -> &'a mut dyn AttachmentStore {
@@ -76,6 +85,7 @@ fn window_value(game: &mut Game<'_>) -> Option<i32> {
     let host: &dyn Host = game;
     let rows = host
         .attachment_query("sync_route", "value")
+        .unwrap()
         .query(&VALUE)
         .ok()?;
     rows.iter().next().map(|row| *row.unwrap().value)

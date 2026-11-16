@@ -171,8 +171,13 @@ only the server needs: it installs and runs like any mod (in single player and o
 server), but it is never compared at join, so players joining need not have it. A server mod is refused by name at
 load when it carries what every joining client must know: registry declarations (`data/<id>/sunrise/`, or blocks,
 items, block entity types and fluids its code declares), a listener on a client-side hook, a part that listens to one,
-or a required payload the server sends to clients. Assets, lang and data vanilla syncs itself (recipes, loot, tags)
-are allowed. Where a hook runs is still the hook's own side: the manifest says what a client must have, not where a
+a required payload the server sends to clients, or a synced attachment type it declares.
+For attachments, “carries” means **declares**: a server package may use another loaded package A's synced
+attachment, because clients compare A and decode the value through A. If A is itself a server package, A is the
+declarer refused by name. Attachment load checks declaration conflicts (including foreign namespaces) first,
+then undeclared uses naming the calling package and id, then server-package declarations; no content is admitted
+after a refusal. See [attachments](../concepts/attachments.md) for the shared native and wasm declaration API.
+Assets, lang and data vanilla syncs itself (recipes, loot, tags) are allowed. Where a hook runs is still the hook's own side: the manifest says what a client must have, not where a
 hook runs. A vanilla or other
 non-Sunrise client is refused when the server needs both-side mods, with their names and versions and an English
 fallback for clients without Sunrise translations. The content registry identity check remains separate; the

@@ -34,6 +34,14 @@ struct Store {
     stores: usize,
 }
 impl mod_api::AttachmentStore for Store {
+    fn validate_attachment(
+        &mut self,
+        _: &str,
+        _: &str,
+        _: bool,
+    ) -> Result<(), mod_api::AttachmentError> {
+        Ok(())
+    }
     fn holds(
         &mut self,
         holder: mod_api::Holder,
