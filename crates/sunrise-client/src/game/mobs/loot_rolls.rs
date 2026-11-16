@@ -213,3 +213,59 @@ impl Game<'_> {
         }
     }
 }
+
+impl Game<'_> {
+    /// What a loot table reads of `target` as `THIS_ENTITY`: a mob's facts, a
+    /// player's worn and held items, and the entity's type for the rest.
+    pub(in crate::game) fn target_loot_entity(
+        &mut self,
+        target: Target,
+    ) -> sunrise_world::loot::LootEntity {
+        match target {
+            Target::Mob(id) => {
+                if let Some(mob) = self.mobs.iter().find(|mob| mob.id == id) {
+                    return sunrise_client::mobs::drops::loot_entity(mob, None);
+                }
+            }
+            Target::Player => return self.killer_loot_entity(None),
+            Target::Guest(conn) => return self.killer_loot_entity(Some(conn)),
+            _ => {}
+        }
+        sunrise_world::loot::LootEntity::new(&self.target_type(target))
+    }
+
+    /// One roll of `table` (`LootTable.getRandomItems`) at `origin`, with `held` as
+    /// TOOL and `this` as THIS_ENTITY when given, from the table's random
+    /// sequence, else the level random. The stacks come split to their stack
+    /// sizes; None for a missing table.
+    pub(in crate::game) fn roll_table_at(
+        &mut self,
+        table: &str,
+        origin: [f64; 3],
+        held: Option<&ItemStack>,
+        this: Option<&sunrise_world::loot::LootEntity>,
+    ) -> Option<Vec<ItemStack>> {
+        let loot = self.server_loot.get();
+        let matcher = |predicate: &serde_json::Value, entity: &sunrise_world::loot::LootEntity| {
+            loot.as_ref()
+                .is_some_and(|data| data.entity_matches(predicate, Some(entity)))
+        };
+        let this = this.map(|entity| {
+            (
+                entity,
+                &matcher as &dyn Fn(&serde_json::Value, &sunrise_world::loot::LootEntity) -> bool,
+            )
+        });
+        let place = self.loot_place_at(origin, None);
+        sunrise_world::loot::with_native_loot_place(place, || {
+            let items = world_items!(self);
+            match items.loot_sequence(table) {
+                Some(sequence) => {
+                    let random = self.rand_sequences.get(&sequence, self.level.seed);
+                    items.roll_loot_table(table, held, this, random)
+                }
+                None => items.roll_loot_table(table, held, this, &mut self.world.random),
+            }
+        })
+    }
+}
