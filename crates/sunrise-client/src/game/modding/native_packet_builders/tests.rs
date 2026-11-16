@@ -1,4 +1,6 @@
 use crate::game::native_entity_refs::tests::{run_fresh_cases, with_client_game};
+use mod_api::prelude::NetworkClientHost;
+use mod_api::{ContainerClickRequest, PacketBuildError};
 use sunrise_core::nbt::{Compound, Tag};
 use sunrise_protocol::{
     buf::Reader,
@@ -7,8 +9,6 @@ use sunrise_protocol::{
     packets::play::{ContainerClick, Serverbound},
     registry::Builtin,
 };
-use mod_api::prelude::NetworkClientHost;
-use mod_api::{ContainerClickRequest, PacketBuildError};
 
 #[test]
 #[ignore = "daily"]

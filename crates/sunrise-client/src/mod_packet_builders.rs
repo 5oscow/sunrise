@@ -1,12 +1,12 @@
 //! Host-owned container packet construction; the protocol owns stack codecs and hashes.
+use mod_api::{ContainerClickRequest, PacketBuildError, ServerboundPlayPacket};
+use std::cell::RefCell;
 use sunrise_protocol::{
     buf::{Codec, Writer},
     item::{Hashed, Stack},
     packets::play::ContainerClick,
     registry::{Builtin, Dynamic, SyncedNames},
 };
-use mod_api::{ContainerClickRequest, PacketBuildError, ServerboundPlayPacket};
-use std::cell::RefCell;
 
 fn component_error(field: impl Into<String>) -> PacketBuildError {
     PacketBuildError::ComponentCannotEncode {
