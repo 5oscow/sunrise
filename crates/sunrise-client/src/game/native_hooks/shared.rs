@@ -4000,6 +4000,7 @@ mod tests {
                     pos,
                     game.world.block_entities.get(&pos).unwrap(),
                     block,
+                    &Default::default(),
                 );
                 assert_eq!(saved.get("energy"), Some(&Tag::Long(6301)));
                 let (saved_pos, restored) =
@@ -4013,6 +4014,7 @@ mod tests {
                     pos,
                     game.world.block_entities.get(&pos).unwrap(),
                     block,
+                    &Default::default(),
                 );
                 assert_eq!(saved.get("energy"), Some(&Tag::Long(6302)));
             }
@@ -4135,7 +4137,8 @@ mod tests {
             assert_eq!(machine.data, [7]);
             assert_ne!(machine.revision(), made);
             assert!(game.world.modified.contains(&(0, 0)));
-            let saved = block_entity_encode::encode(pos, entity, "minecraft:stone");
+            let saved =
+                block_entity_encode::encode(pos, entity, "minecraft:stone", &Default::default());
             let (saved_pos, loaded) = decode_block_entity(&saved).unwrap();
             assert_eq!(saved_pos, pos);
             assert_eq!(loaded.id(), "test:machine");

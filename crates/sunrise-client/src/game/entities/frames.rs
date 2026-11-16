@@ -250,7 +250,8 @@ impl Game<'_> {
         // `entity_data` merged over the frame (`TypedEntityData.loadInto`), before
         // `survives` runs on the configured frame.
         let kind = frame.kind();
-        let own = sunrise_client::entity_nbt::item_frame_to_nbt(&frame, [0; 4], None);
+        let own =
+            sunrise_client::entity_nbt::item_frame_to_nbt(&frame, [0; 4], None, self.res.items());
         let configured =
             sunrise_client::block_entity_item::stack_configured_entity(stack, kind, &own);
         if let Some(mut loaded) =

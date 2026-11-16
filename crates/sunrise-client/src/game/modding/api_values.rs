@@ -2173,7 +2173,7 @@ mod stack_limit_tests {
         let engine = explicit.try_into_engine(&items).unwrap();
         assert!(engine.carries_component(None, "minecraft:damage"));
         assert_eq!(
-            sunrise_items::item_data::encode_components(&engine)
+            sunrise_items::item_data::component_snapshot(&engine)
                 .unwrap()
                 .get("minecraft:damage"),
             Some(&Tag::Int(0))
@@ -2367,8 +2367,8 @@ mod stack_limit_tests {
             );
             let back = api.try_into_engine(&items).unwrap();
             assert_eq!(
-                sunrise_items::item_data::encode_components(&original),
-                sunrise_items::item_data::encode_components(&back),
+                sunrise_items::item_data::component_snapshot(&original),
+                sunrise_items::item_data::component_snapshot(&back),
                 "write {patch:?}"
             );
             assert_eq!(original, back, "round trip {patch:?}");

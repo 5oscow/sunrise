@@ -555,7 +555,8 @@ impl Game<'_> {
         // `EntityType.createDefaultStackConfig`: the item's `custom_data`, then its
         // `entity_data` merged over the stand; `ArmorStandItem.useOn` then snaps it
         // to the placement yaw with pitch 0.
-        let own = sunrise_client::entity_nbt::armor_stand_to_nbt(&stand, [0; 4], None);
+        let own =
+            sunrise_client::entity_nbt::armor_stand_to_nbt(&stand, [0; 4], None, self.res.items());
         let mut raw = sunrise_client::block_entity_item::stack_configured_entity(
             stack,
             "minecraft:armor_stand",
@@ -2849,7 +2850,12 @@ mod stand_lodestone_inventory_tick_tests {
                     mismatches.push((n, slot, present));
                 }
             }
-            let saved = sunrise_client::entity_nbt::armor_stand_to_nbt(a, [42321, 0, 0, n], None);
+            let saved = sunrise_client::entity_nbt::armor_stand_to_nbt(
+                a,
+                [42321, 0, 0, n],
+                None,
+                &Default::default(),
+            );
             assert!(
                 saved.get("equipment").is_some(),
                 "actual no-raw model writer"
@@ -2994,7 +3000,7 @@ mod postbaseline_lodestone_controls {
                     .unwrap()
                     .equipment[slot]
                     .as_ref()
-                    .map(sunrise_items::item_nbt::item_to_nbt)
+                    .map(sunrise_core::nbt::Tag::from)
             })
             .collect();
         assert!(has_target(stack(&game, mixed, 0)));
@@ -3048,7 +3054,7 @@ mod postbaseline_lodestone_controls {
                     .unwrap()
                     .equipment[slot]
                     .as_ref()
-                    .map(sunrise_items::item_nbt::item_to_nbt)
+                    .map(sunrise_core::nbt::Tag::from)
             })
             .collect();
         assert_eq!(

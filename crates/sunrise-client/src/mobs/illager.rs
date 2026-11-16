@@ -1124,7 +1124,8 @@ mod tests {
         );
         // `Vindicator.addAdditionalSaveData` writes the flag, false or true.
         let types = [("minecraft:vindicator".into(), m.kind.clone())].into();
-        let saved = crate::entity_nbt::mob_to_nbt(&m, [0; 4], None, None, |_| None);
+        let saved =
+            crate::entity_nbt::mob_to_nbt(&m, [0; 4], None, None, |_| None, &Default::default());
         assert_eq!(saved.get("Johnny"), Some(&Tag::Byte(1)));
         let back = crate::entity_nbt::mob_from_nbt(&saved, &types, 2, None).unwrap();
         assert_eq!(i8::from(back.extra.johnny), 1, "the reloaded flag");
@@ -1149,7 +1150,14 @@ mod tests {
         if let Tag::Compound(c) = &mut silent {
             c.insert("Johnny".into(), Tag::Byte(0));
         }
-        let saved = crate::entity_nbt::mob_to_nbt(&loaded, [0; 4], Some(&silent), None, |_| None);
+        let saved = crate::entity_nbt::mob_to_nbt(
+            &loaded,
+            [0; 4],
+            Some(&silent),
+            None,
+            |_| None,
+            &Default::default(),
+        );
         assert_eq!(saved.get("Johnny"), None);
     }
     /// `EvokerWololoSpellGoal` finds blue sheep with

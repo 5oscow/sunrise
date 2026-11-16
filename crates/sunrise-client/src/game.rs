@@ -696,7 +696,7 @@ struct WorldCore {
 }
 
 struct WorldRest {
-    items: Items,
+    items: Arc<Items>,
     recipes: Recipes,
     transformers: sunrise_client::block_transform::Transformers,
     mob_types: HashMap<String, Arc<MobType>>,
@@ -2596,7 +2596,10 @@ impl Game<'_> {
         let key = (pos[0], pos[1], pos[2]);
         match self.world.block_entities.get(&key) {
             Some(entity) => Some(sunrise_client::save::block_entity_encode::encode(
-                key, entity, block,
+                key,
+                entity,
+                block,
+                self.res.items(),
             )),
             None => spill::saved_entity(&self.world, pos),
         }
@@ -4060,7 +4063,7 @@ impl Game<'_> {
         let live = self.live_block_entity(key, &facts.name);
         if let Some((entity, _)) = &live {
             self.pending
-                .record_from(&self.world, pos, entity, &facts.name);
+                .record_from(&self.world, pos, entity, &facts.name, self.res.items());
         } else if let Some(tag) = spill::saved_entity(&self.world, pos) {
             self.pending.record_saved(pos, &tag);
         }
@@ -10561,6 +10564,7 @@ impl<'a> Game<'a> {
                 .join("saves")
                 .join(".sunrise-title"),
             sunrise_client::save::LevelShape::OVERWORLD,
+            None,
         ));
         let prepared = prepared.map(Ok).unwrap_or_else(|| {
             GameCpuResources::load(
@@ -11617,9 +11621,10 @@ fn write_level_for_role(
     level: &mut Level,
     dir: &std::path::Path,
     role: execution_role::ExecutionRole,
+    items: &crate::items::Items,
 ) -> Result<()> {
     if role.writes_singleplayer_player() {
-        level.write(dir)
+        level.write(dir, items)
     } else {
         level.write_without_player(dir)
     }

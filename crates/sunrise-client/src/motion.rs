@@ -3301,7 +3301,7 @@ mod tests {
             ..Default::default()
         };
         // Through the player compound as the file holds it.
-        let tag = level.player_tag();
+        let tag = level.player_tag(&Default::default());
         level = crate::save::Level::default();
         level.read_player(&tag);
         level.player_extra = Some(tag);

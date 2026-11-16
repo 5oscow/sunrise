@@ -402,7 +402,7 @@ mod tests {
             ));
             let _ = std::fs::remove_dir_all(&root);
             let shape = game.save.shape;
-            game.save = Arc::new(SaveDir::new(root.clone(), shape));
+            game.save = Arc::new(SaveDir::new(root.clone(), shape, Some(Default::default())));
             game.world
                 .chunks
                 .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
@@ -424,7 +424,9 @@ mod tests {
             game.persist.raw.insert(12, Tag::Compound(tag));
             game.save_entities(true).unwrap();
             assert_eq!(
-                SaveDir::new(root.clone(), shape).load_entities(0, 0).len(),
+                SaveDir::new(root.clone(), shape, None)
+                    .load_entities(0, 0)
+                    .len(),
                 1
             );
             let entity = game.entity(12).unwrap();
@@ -434,7 +436,7 @@ mod tests {
             assert!(!game.persist.raw.contains_key(&12));
             game.save_entities(true).unwrap();
             assert!(
-                SaveDir::new(root.clone(), shape)
+                SaveDir::new(root.clone(), shape, None)
                     .load_entities(0, 0)
                     .is_empty()
             );

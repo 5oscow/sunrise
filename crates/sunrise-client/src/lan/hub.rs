@@ -5272,7 +5272,8 @@ mod tests {
                 .clone(),
         );
         let states = ["minecraft:air", "test:machine"].map(|n| (Arc::<str>::from(n), false, None));
-        hub.encoder = ChunkEncoder::with_types(states, &builtin, &[], &[], Some(&types));
+        hub.encoder =
+            ChunkEncoder::with_types(states, &builtin, &[], &[], Some(&types), Default::default());
         hub.encoder.mod_update_tag = Some(|_, entity| {
             BUILT.fetch_add(1, Ordering::Relaxed);
             Some(entity.nbt.clone())
@@ -5782,6 +5783,7 @@ mod tests {
             &sunrise_protocol::registry::Builtin::default(),
             &[],
             &[],
+            Default::default(),
         );
         let hub_config = HubConfig {
             default_game_mode: 0,

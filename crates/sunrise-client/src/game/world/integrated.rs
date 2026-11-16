@@ -1735,6 +1735,7 @@ pub(super) mod tests {
             game.save = Arc::new(sunrise_client::save::SaveDir::new(
                 root.clone(),
                 sunrise_client::save::LevelShape::OVERWORLD,
+                Some(Default::default()),
             ));
             // Crash shutdown only saves an adopted world whose storage is owned.
             game.session_lock = Some(sunrise_client::save::SessionLock::acquire(&root).unwrap());

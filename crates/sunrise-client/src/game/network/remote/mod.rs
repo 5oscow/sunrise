@@ -1041,6 +1041,7 @@ impl Game<'_> {
         self.save = Arc::new(SaveDir::new(
             std::env::temp_dir().join("sunrise-remote-unused"),
             sunrise_client::save::LevelShape::OVERWORLD,
+            None,
         ));
         self.inventory = vec![None; 36];
         self.offhand = None;
@@ -1308,6 +1309,7 @@ impl Game<'_> {
         self.save = Arc::new(SaveDir::new(
             std::env::temp_dir().join("sunrise-replay-unused"),
             sunrise_client::save::LevelShape::OVERWORLD,
+            None,
         ));
         self.inventory = vec![None; 36];
         self.offhand = None;

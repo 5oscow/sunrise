@@ -272,7 +272,12 @@ impl Boat {
     }
     /// `Entity.saveWithoutId` with `AbstractChestBoat`'s items: the loaded
     /// compound `raw` under the live fields.
-    pub(super) fn to_nbt(&self, uuid: [i32; 4], raw: Option<&Tag>) -> Tag {
+    pub(super) fn to_nbt(
+        &self,
+        uuid: [i32; 4],
+        raw: Option<&Tag>,
+        items: &crate::items::Items,
+    ) -> Tag {
         let mut tag = sunrise_client::entity_nbt::boat_to_nbt(
             &self.entity_type(),
             self.position,
@@ -282,6 +287,7 @@ impl Boat {
             uuid,
             raw,
             self.chest.then_some(&self.items[..]),
+            items,
         );
         sunrise_client::entity_nbt::write_saved_flags(&mut tag, self.on_ground, self.no_gravity);
         if let Tag::Compound(map) = &mut tag {
@@ -2385,13 +2391,21 @@ mod tests {
             Vec3::new(0.0, 64.0, 0.0),
             0.0,
         );
-        assert_eq!(b.to_nbt([0; 4], None).get("TicksFrozen"), None);
+        assert_eq!(
+            b.to_nbt([0; 4], None, &Default::default())
+                .get("TicksFrozen"),
+            None
+        );
         b.ticks_frozen = 6;
-        let saved = b.to_nbt([0; 4], None);
+        let saved = b.to_nbt([0; 4], None, &Default::default());
         assert_eq!(saved.get("TicksFrozen"), Some(&Tag::Int(6)));
         assert_eq!(saved_ticks_frozen(&saved), 6);
         b.ticks_frozen = 0;
-        assert_eq!(b.to_nbt([0; 4], Some(&saved)).get("TicksFrozen"), None);
+        assert_eq!(
+            b.to_nbt([0; 4], Some(&saved), &Default::default())
+                .get("TicksFrozen"),
+            None
+        );
     }
     /// `PowderSnowBlock.entityInside`'s snowflake: only for an entity that moved sideways, and
     /// then only when a coin falls so.

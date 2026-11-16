@@ -3579,7 +3579,7 @@ impl Game<'_> {
             .strip_prefix('[')
             .and_then(|t| t.strip_suffix(']'))
             .unwrap_or("");
-        let components = match sunrise_client::item_data::encode_components(stack) {
+        let components = match sunrise_client::item_data::component_snapshot(stack) {
             Some(sunrise_core::nbt::Tag::Compound(c)) => c,
             _ => Default::default(),
         };
@@ -5772,7 +5772,7 @@ mod item_damage_range_tests {
                     .any(|c| c == "minecraft:damage")
             );
             let removed =
-                sunrise_client::item_data::encode_components(stacks[5].as_ref().unwrap()).unwrap();
+                sunrise_client::item_data::component_snapshot(stacks[5].as_ref().unwrap()).unwrap();
             assert!(
                 removed.get("!minecraft:damage").is_some(),
                 "actual removal patch must survive load before evaluating it"

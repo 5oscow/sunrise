@@ -1067,7 +1067,14 @@ mod tests {
             // Raw Peek loads independently of saved covered, not through the setter.
             m.extra.counter = 30;
             let types = [(m.kind.id.clone(), m.kind.clone())].into_iter().collect();
-            let tag = crate::entity_nbt::mob_to_nbt(&m, [0; 4], None, None, |_| None);
+            let tag = crate::entity_nbt::mob_to_nbt(
+                &m,
+                [0; 4],
+                None,
+                None,
+                |_| None,
+                &Default::default(),
+            );
             let loaded = crate::entity_nbt::mob_from_nbt(&tag, &types, 2, None).unwrap();
             assert_eq!(loaded.extra.counter, 30);
             assert!(loaded.extra.live.built().is_none());

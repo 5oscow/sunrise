@@ -198,6 +198,7 @@ impl Game<'_> {
             key,
             &BlockEntity::Brushable(b.clone()),
             "minecraft:brushable_block",
+            self.res.items(),
         );
         self.trigger_loot_table(&table);
         let loot = self.server_loot.get();
@@ -212,6 +213,7 @@ impl Game<'_> {
                 &mut self.world.random,
                 &mut self.rand_sequences,
                 self.level.seed,
+                self.res.items(),
                 sunrise_world::loot::ContainerLootContext {
                     luck,
                     entity: Some(&brusher),
