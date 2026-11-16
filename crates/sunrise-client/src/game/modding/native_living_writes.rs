@@ -629,7 +629,7 @@ mod tests {
     #[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
     fn an_item_part_can_extend_the_last_tick_or_shorten_a_use() {
         with_uses(|game, uses, player| {
-            for (start, replacement) in [(1, 3), (20, 1)] {
+            for (start, replacement, effects) in [(1, 3, 3), (20, 1, 1), (20, 0, 1), (20, -7, 1)] {
                 *uses.lock().unwrap() = Uses {
                     start_duration: Some(start),
                     remaining_on_use_tick: Some((player, replacement)),
@@ -648,7 +648,7 @@ mod tests {
                 }
                 assert_eq!(game.using, None);
                 let uses = uses.lock().unwrap();
-                assert_eq!(uses.effects, replacement as usize);
+                assert_eq!(uses.effects, effects);
                 assert_eq!(uses.finishes, 1);
                 assert!(uses.stops.is_empty());
                 assert!(uses.releases.is_empty());
