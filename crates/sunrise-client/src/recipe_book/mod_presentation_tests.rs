@@ -139,7 +139,8 @@ fn a_category_tab_carries_its_secondary_icon() {
     two_icons.secondary_icon = Some("demo:sauce".into());
     let plain = category("demo:first", "demo:b", "demo:two");
     let index = ModBookIndex::build(vec![two_icons, plain], &Resources).unwrap();
-    let panel = index.panel("demo:menu", &key("demo:first")).unwrap();
+    let book = key("demo:first");
+    let panel = index.panel("demo:menu", &book).unwrap();
     let view = panel
         .prepare(&Resolver)
         .presentation(None, "", false, 0, &Resolver);
