@@ -4236,6 +4236,11 @@ impl HitLevel<'_> {
     /// other source with no direct entity, even during that projectile's impact), and
     /// where it comes from (`getSourcePosition`). `victim` is where the entity stands and
     /// looks, and `weapon` the direct entity's weapon (`getWeaponItem`) when it is known.
+    /// `causing_weapon` is the causing living entity's current main-hand weapon
+    /// (`getEntity().getWeaponItem`), read at hit time, not a projectile's saved
+    /// weapon; None for an absent, unknown or non-living cause, or once the shooter
+    /// is gone. It is an addition: NeoForge's `LivingIncomingDamageEvent` doesn't
+    /// carry it, and mods there read the source entity's main hand themselves.
     /// `container` holds the damage before any reduction: change its `new_damage`, or the
     /// invulnerability ticks a fresh hit leaves (vanilla's 20), or set `canceled` and nothing
     /// of `hurtServer` happens (no damage, hurt sound, knockback, cooldown, statistics or
