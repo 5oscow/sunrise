@@ -754,6 +754,63 @@ impl Game<'_> {
             }
             let entity_start = out.len();
             self.mark_motion(entity_start, Self::MOTION_OBJECT | u64::from(f.id));
+            if let Some(resolved) = super::native_entity_renderers::item_frame_renderer(f.glow) {
+                let step = f.step().map(f64::from);
+                let at = glam::DVec3::new(
+                    f64::from(f.pos[0]) + 0.5 - step[0] * 0.46875,
+                    f64::from(f.pos[1]) + 0.5 - step[1] * 0.46875,
+                    f64::from(f.pos[2]) + 0.5 - step[2] * 0.46875,
+                );
+                let (yaw, pitch) = match f.facing {
+                    0 => (0.0, 90.0),
+                    1 => (0.0, -90.0),
+                    2 => (180.0, 0.0),
+                    4 => (90.0, 0.0),
+                    5 => (270.0, 0.0),
+                    _ => (0.0, 0.0),
+                };
+                let facing = mod_api::Direction::ALL[usize::from(f.facing.min(5))];
+                let entity: mod_api::EntityRenderState =
+                    mod_api::__private::built::EntityRenderState {
+                        id: f.id,
+                        partial: 0.0,
+                        age: 0.0,
+                        yaw,
+                        pitch,
+                        living: None,
+                        item_frame: Some(
+                            mod_api::__private::built::ItemFrameRenderState {
+                                facing,
+                                glow: f.glow,
+                                invisible: f.invisible,
+                                rotation: f.rotation,
+                                has_item: f.item.is_some(),
+                                has_map: map.is_some(),
+                            }
+                            .into(),
+                        ),
+                    }
+                    .into();
+                let light = self.world.light(f.pos[0], f.pos[1], f.pos[2]);
+                let frame_light = if f.glow {
+                    (light & 0xF0) | (light & 15).max(5)
+                } else {
+                    light
+                };
+                let packed =
+                    (u32::from(frame_light >> 4) * 16) | ((u32::from(frame_light & 15) * 16) << 8);
+                if self.mod_entity_renderer_geometry(
+                    &resolved,
+                    &entity,
+                    at - camera,
+                    f.pos,
+                    packed,
+                    out,
+                ) {
+                    self.finish_entity_occlusion(culling, f, out, entity_start);
+                    continue;
+                }
+            }
             let s = f.step();
             // Pose: to the block centre, then X/Y rotation by facing.
             let (x_rot, y_rot) = if s[1] == 0 {

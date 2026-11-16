@@ -482,6 +482,7 @@ pub struct EntityRenderState {
     pub yaw: f32,
     pub pitch: f32,
     pub living: Option<super::LivingRenderState>,
+    pub item_frame: Option<ItemFrameRenderState>,
 }
 impl From<EntityRenderState> for super::EntityRenderState {
     fn from(v: EntityRenderState) -> Self {
@@ -492,6 +493,7 @@ impl From<EntityRenderState> for super::EntityRenderState {
             yaw,
             pitch,
             living,
+            item_frame,
         } = v;
         Self {
             id,
@@ -500,6 +502,7 @@ impl From<EntityRenderState> for super::EntityRenderState {
             yaw,
             pitch,
             living,
+            item_frame: item_frame.map(Into::into),
         }
     }
 }
@@ -554,6 +557,36 @@ impl From<LivingRenderState> for super::LivingRenderState {
             has_red_overlay,
             pose,
             bed_orientation,
+        }
+    }
+}
+// exhaustive: the game builds it with a literal; mods only read it
+#[derive(sunrise_mod_api_macros::Wire)]
+pub struct ItemFrameRenderState {
+    pub facing: Direction,
+    pub glow: bool,
+    pub invisible: bool,
+    pub rotation: i8,
+    pub has_item: bool,
+    pub has_map: bool,
+}
+impl From<ItemFrameRenderState> for super::ItemFrameRenderState {
+    fn from(v: ItemFrameRenderState) -> Self {
+        let ItemFrameRenderState {
+            facing,
+            glow,
+            invisible,
+            rotation,
+            has_item,
+            has_map,
+        } = v;
+        Self {
+            facing,
+            glow,
+            invisible,
+            rotation,
+            has_item,
+            has_map,
         }
     }
 }

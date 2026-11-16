@@ -27,6 +27,9 @@ pub struct EntityRenderState {
     pub pitch: f32,
     /// A living entity's own frame (`LivingEntityRenderState`); none for any other entity.
     pub living: Option<LivingRenderState>,
+    /// An item frame or glow item frame's own frame ([`ItemFrameRenderState`]); none for any
+    /// other entity.
+    pub item_frame: Option<ItemFrameRenderState>,
 }
 
 /// What a living entity's frame adds to [`EntityRenderState`], as
@@ -68,6 +71,27 @@ pub struct LivingRenderState {
     pub pose: crate::Pose,
     /// `bedOrientation`: the way the bed it sleeps in faces, while it sleeps in one.
     pub bed_orientation: Option<crate::Direction>,
+}
+
+/// What an item frame's frame adds to [`EntityRenderState`]: the way it faces, whether it is a
+/// glow frame, whether the frame model is hidden, its item rotation, and whether it holds an
+/// item or a filled map. The stack itself is not here: the state is only plain numbers, so a
+/// renderer that needs the item reads it in a hook and keeps what it read.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, sunrise_mod_api_macros::Wire)]
+pub struct ItemFrameRenderState {
+    /// The face it hangs on (`Direction.get3DDataValue`: down, up, north, south, west, east).
+    pub facing: crate::Direction,
+    /// A glow item frame (`minecraft:glow_item_frame`).
+    pub glow: bool,
+    /// The frame model is hidden (`Entity.isInvisible`); the item may still be drawn.
+    pub invisible: bool,
+    /// `ItemRotation`, in 45-degree steps (`-7..=7`).
+    pub rotation: i8,
+    /// Whether the frame holds an item.
+    pub has_item: bool,
+    /// Whether that item is a filled map (vanilla draws the map on the face).
+    pub has_map: bool,
 }
 
 /// A mod's entity renderer: NeoForge's `EntityRenderer`, held by the game for every entity of the
@@ -167,6 +191,7 @@ mod tests {
             yaw: 0.0,
             pitch: 0.0,
             living: None,
+            item_frame: None,
         };
         let (mut bolt, mut dart) = (Light::default(), Light::default());
         renderers["mymod:bolt"].submit(&state, &mut bolt).unwrap();
