@@ -13,6 +13,7 @@ pub(in crate::game) struct FramePick {
     epoch: Option<mod_api::WorldEpoch>,
     dimension: Option<Dim>,
     origin: [f64; 3],
+    entity_reach: f64,
     result: Option<CrosshairTarget>,
     dispatching: bool,
 }
@@ -78,7 +79,7 @@ impl Game<'_> {
                 }
                 (hit.point, self.block_reach)
             }
-            CrosshairTarget::Entity { point, .. } => (point, self.frame_entity_pick_reach()),
+            CrosshairTarget::Entity { point, .. } => (point, self.frame_pick.entity_reach),
             _ => return false,
         };
         point.iter().all(|v| v.is_finite())
@@ -147,6 +148,9 @@ impl Game<'_> {
         if !mod_api::__private::listened(mod_api::HookId::ClientFramePick) {
             return;
         }
+        // Capture the same forward-movement envelope as the vanilla item ray,
+        // before listeners can change the player or held item.
+        self.frame_pick.entity_reach = self.frame_entity_pick_reach(direction);
         let seal = self.transaction_open();
         self.frame_pick.dispatching = true;
         let mut result = original;
@@ -160,8 +164,14 @@ impl Game<'_> {
         self.frame_pick.dispatching = false;
         let valid_context = self.frame_pick.epoch == self.native_lifecycle.epoch()
             && self.frame_pick.dimension == Some(self.dim);
-        self.frame_pick.result =
-            result.filter(|&result| valid_context && self.accept_frame_pick(result));
+        self.frame_pick.result = result.filter(|&result| {
+            valid_context
+                && if Some(result) == original {
+                    self.frame_pick_live(result)
+                } else {
+                    self.accept_frame_pick(result)
+                }
+        });
         self.transaction_close(&seal, true);
     }
 

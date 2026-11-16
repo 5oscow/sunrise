@@ -99,11 +99,12 @@ impl Game<'_> {
         if !mod_api::__private::listened(mod_api::HookId::ClientAttackTarget) {
             return false;
         }
-        let selected = match self.crosshair_target() {
-            Some(CrosshairTarget::Entity { entity, .. }) => Some(entity),
+        let committed = self.crosshair_target();
+        let selected = match committed {
+            Some(CrosshairTarget::Entity { entity, point }) => Some((entity, point)),
             _ => None,
         };
-        let mut targets: Vec<_> = selected.into_iter().collect();
+        let mut targets: Vec<_> = selected.map(|(entity, _)| entity).into_iter().collect();
         let mut canceled = false;
         self.native_client_attack_target(&mut targets, &mut canceled);
         if canceled {
@@ -114,7 +115,16 @@ impl Game<'_> {
             if !seen.insert(entity) {
                 continue;
             }
-            if let Some((_, distance)) = self.targeting_entity_hit(entity) {
+            let distance =
+                if let Some((_, point)) = selected.filter(|(selected, _)| *selected == entity) {
+                    // This is the stored pick, not an independently requested batch target.
+                    // Preserve its point and occlusion policy, but refuse a stale decision.
+                    (self.crosshair_target() == committed).then(|| self.frame_pick_distance(point))
+                } else {
+                    self.targeting_entity_hit(entity)
+                        .map(|(_, distance)| distance)
+                };
+            if let Some(distance) = distance {
                 self.remote_attack_entity(entity.id() as i32, distance);
             }
         }

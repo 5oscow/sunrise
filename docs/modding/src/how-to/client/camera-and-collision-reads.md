@@ -202,8 +202,9 @@ attribute updates. Replacing the client pick does not grant extra server reach.
 (spear jabs use their existing path). It starts with the crosshair entity. Replace it
 for redirection, append for multiple hits, or clear it to suppress an entity attack.
 `Flow::Cancel` cancels the batch. There is no batch cap; duplicates are sent once
-in first-occurrence order. Each target is checked again against live handles,
-attackability, reach, held-item range and ordinary block occlusion. Clearing an entity hit
+in first-occurrence order. The selected entry keeps its committed frame-pick point
+and client occlusion policy, unless it becomes stale. Additional targets are checked
+against live handles, attackability, reach, held-item range and ordinary block occlusion. Clearing an entity hit
 does not mine the block behind it; an empty list on a block or miss keeps the ordinary
 path. Each accepted hit uses normal attack packets and prediction. Server validation
 and cooldowns apply. Native and wasm mods use the same typed API.

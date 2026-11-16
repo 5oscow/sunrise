@@ -377,10 +377,12 @@ impl Game<'_> {
         })
     }
 
-    pub(super) fn frame_entity_pick_reach(&self) -> f64 {
+    pub(super) fn frame_entity_pick_reach(&self, direction: [f64; 3]) -> f64 {
         self.active_attack_range()
             .map_or(self.entity_reach, |range| {
-                f64::from(attack_reach(&range, self.creative).1).max(self.entity_reach)
+                (f64::from(attack_reach(&range, self.creative).1)
+                    + self.known_player_movement().dot(v3(direction)).max(0.0))
+                .max(self.entity_reach)
             })
     }
 
@@ -806,6 +808,24 @@ impl Game<'_> {
     /// `Minecraft.crosshairPickEntity` when it is a `LivingEntity`: whether
     /// it is alive (the nearest entity under the crosshair, before any block).
     pub(super) fn crosshair_living(&self) -> Option<bool> {
+        if let Some(hit) = self.cached_entity_pick() {
+            let (entity, distance, _) = hit?;
+            if !self.mobs.iter().any(|mob| mob.id == entity.id())
+                && !self
+                    .armor_stands
+                    .iter()
+                    .any(|stand| stand.id == entity.id())
+            {
+                return None;
+            }
+            if self
+                .active_attack_range()
+                .is_some_and(|range| !attack_range_contains(&range, distance, self.creative))
+            {
+                return None;
+            }
+            return Some(true);
+        }
         let nearest = |hits: &[Option<f64>]| hits.iter().flatten().copied().reduce(f64::min);
         let other = nearest(&[
             self.painting_hit().map(|h| h.1),
