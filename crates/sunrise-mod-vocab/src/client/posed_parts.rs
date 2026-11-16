@@ -265,6 +265,7 @@ impl PosedParts {
 /// Scale and visibility are deliberately not writable through this view.
 #[derive(Clone, Copy, Debug, PartialEq, sunrise_mod_api_macros::Wire)]
 #[wire(via = HumanoidPartsWire)]
+#[non_exhaustive]
 pub struct HumanoidParts {
     parts: [Option<[[f32; 3]; 2]>; 7],
 }
