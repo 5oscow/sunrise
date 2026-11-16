@@ -907,6 +907,37 @@ pub trait LevelsBackendMut {
         flags: BlockUpdateFlags,
     ) -> Result<bool, LevelWriteError>;
     /// Side: server.
+    /// The state `state` takes at `pos` once it is fitted to the blocks around it
+    /// (`Block.updateFromNeighbourShapes`): a fence gets its connections, a stair its corner, a
+    /// water-logged block its fluid tick. Nothing is written, so a state placed by code is
+    /// fitted before `level_set_block` writes it; the ticks the neighbours' shapes ask for
+    /// are queued, as vanilla's do. Neighbours that are not loaded read as air. Stale or
+    /// unavailable levels and invalid states return typed errors; a position outside the
+    /// world or not loaded gives `state` back unchanged.
+    #[access(WorldOnly)]
+    fn level_update_from_neighbour_shapes(
+        &mut self,
+        level: LevelRef,
+        pos: [i32; 3],
+        state: BlockState,
+    ) -> Result<BlockState, LevelWriteError>;
+    /// Side: server.
+    /// Write `state` at `pos` as a placement does and run `Block.setPlacedBy` for it, with no
+    /// player: a bed places its head, a door its upper half, a tall plant its top. The write
+    /// is `level_set_block`'s with `NEIGHBORS | CLIENTS` (plus `KNOWN_SHAPE` when
+    /// `update_neighbour_shapes` is false; without it the neighbours' shapes update, so fences
+    /// and walls connect). `setPlacedBy` gets no placer and no item. Nothing else of
+    /// `BlockItem.place` runs: no survival or obstruction check, no sound, no game event, no
+    /// advancement. Errors and `Ok(false)` are `level_set_block`'s.
+    #[access(WorldOnly)]
+    fn level_place_block(
+        &mut self,
+        level: LevelRef,
+        pos: [i32; 3],
+        state: BlockState,
+        update_neighbour_shapes: bool,
+    ) -> Result<bool, LevelWriteError>;
+    /// Side: server.
     /// Remove a block in place (`Level.removeBlock`), preserving its fluid.
     #[access(WorldOnly)]
     fn level_remove_block(&mut self, level: LevelRef, pos: [i32; 3], moved: bool) -> bool;
@@ -1235,6 +1266,18 @@ pub trait LevelsBackendMut {
     /// 3008) when `data` isn't one.
     #[access(WorldOnly)]
     fn level_level_event(&mut self, level: LevelRef, id: i32, pos: [i32; 3], data: i32) -> bool;
+    /// Side: server.
+    /// Plays the break effect of `state` at `pos`: the particles and the sound of a block of
+    /// that state breaking, for the players near it (`Level.levelEvent(2001, pos,
+    /// Block.getId(state))`). Nothing is written: the block at `pos` stays. False off the level
+    /// in place, for a stale handle and on a client.
+    #[access(WorldOnly)]
+    fn level_block_break_effect(
+        &mut self,
+        level: LevelRef,
+        pos: [i32; 3],
+        state: BlockState,
+    ) -> bool;
     /// Side: server.
     /// Plays level event `id` at `pos` with `data` for every player on the
     /// server, in every level and at any distance (`ServerLevel.globalLevelEvent`).

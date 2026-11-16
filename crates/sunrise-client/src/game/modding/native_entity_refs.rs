@@ -442,6 +442,24 @@ impl Game<'_> {
         }
         Ok(self.native_set_block(level.dimension_id(), pos, state, flags.bits()))
     }
+    /// `Block.updateFromNeighbourShapes` for `state` at `pos`, nothing written: the state
+    /// fitted to the loaded blocks around it. A position that is not loaded or outside the
+    /// world gives `state` back.
+    pub(super) fn level_update_from_neighbour_shapes(
+        &mut self,
+        level: LevelRef,
+        pos: [i32; 3],
+        state: BlockStateId,
+    ) -> Result<BlockStateId, mod_api::LevelWriteError> {
+        if !self.native_level_write_position(level, pos)? {
+            return Ok(state);
+        }
+        let at = sunrise_core::position::BlockPos::new(pos[0], pos[1], pos[2]);
+        let fitted = self
+            .with_level(|b, level, ticks| b.update_from_neighbour_shapes(level, ticks, at, state));
+        let _ = self.process_level_events();
+        Ok(fitted)
+    }
     /// Remove a block in place (`Level.removeBlock`), preserving its fluid.
     pub(super) fn level_remove_block(
         &mut self,
