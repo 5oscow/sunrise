@@ -800,6 +800,7 @@ impl Game<'_> {
                         living: None,
                         tnt_fuse: None,
                         orb_value: None,
+                        painting: None,
                         item_frame: Some(
                             mod_api::__private::built::ItemFrameRenderState {
                                 facing,
