@@ -142,8 +142,13 @@ impl Game<'_> {
     }
 
     /// The answer for the destination `exit` of `plan` in the loaded level of `plan.dim`.
-    fn nether_exit(&self, level: LevelRef, plan: &Plan, exit: FoundRectangle) -> PortalExit {
-        let side = self.in_place_or_parked(plan.dim);
+    fn nether_exit(
+        &self,
+        level: LevelRef,
+        plan: &Plan,
+        exit: FoundRectangle,
+    ) -> Result<PortalExit, PortalError> {
+        let side = self.portal_side(plan.dim).ok_or(PortalError::Unavailable)?;
         let (at, yaw_turn) = self.arrival_in(&side, plan, exit);
         let corner = exit.min_corner;
         let x_axis = self
@@ -157,17 +162,12 @@ impl Game<'_> {
             width: exit.axis1_size,
             height: exit.axis2_size,
         });
-        PortalExit::new(
+        Ok(PortalExit::new(
             self.level_ref(level.epoch(), plan.dim.key()),
             [at.x, at.y, at.z],
             yaw_turn,
             Some(shape),
-        )
-    }
-
-    fn in_place_or_parked(&self, dim: Dim) -> PortalSide<'_> {
-        self.portal_side(dim)
-            .expect("the side was loaded when the plan was made")
+        ))
     }
 
     fn fixed_exit(&self, level: LevelRef, dim: Dim, at: Vec3) -> PortalExit {
@@ -180,18 +180,17 @@ impl Game<'_> {
     }
 
     /// Where an entity of `size` arrives through the portal at `portal_pos`, changing nothing
-    /// (`getPortalDestination`). The direction the entity faces does not move it: vanilla
-    /// places the exit from the two portals' axes alone.
+    /// (`getPortalDestination`). Vanilla places the exit from the two portals' axes
+    /// alone.
     pub(super) fn level_portal_destination(
         &self,
         level: LevelRef,
         portal_pos: [i32; 3],
-        _facing: mod_api::Direction,
         size: [f64; 2],
     ) -> Result<PortalExit, PortalError> {
         match self.probe_portal(level, portal_pos, size)? {
             Probe::Fixed(dim, at) => Ok(self.fixed_exit(level, dim, at)),
-            Probe::Nether(plan, Some(exit)) => Ok(self.nether_exit(level, &plan, exit)),
+            Probe::Nether(plan, Some(exit)) => self.nether_exit(level, &plan, exit),
             Probe::Nether(_, None) => Err(PortalError::NoExit),
         }
     }
@@ -202,7 +201,6 @@ impl Game<'_> {
         &mut self,
         level: LevelRef,
         portal_pos: [i32; 3],
-        facing: mod_api::Direction,
         size: [f64; 2],
     ) -> Result<PortalExit, PortalError> {
         if !self.transactions.is_empty() {
@@ -210,7 +208,7 @@ impl Game<'_> {
         }
         let plan = match self.probe_portal(level, portal_pos, size)? {
             Probe::Nether(plan, None) => plan,
-            _ => return self.level_portal_destination(level, portal_pos, facing, size),
+            _ => return self.level_portal_destination(level, portal_pos, size),
         };
         // Building works on the level in place: the destination goes in place for it, and the
         // level that was in place comes back.
@@ -219,10 +217,11 @@ impl Game<'_> {
             .map_err(|_| PortalError::LevelMissing)?;
         let built = self.create_exit_portal(&plan);
         let answer = built.map(|exit| self.nether_exit(level, &plan, exit));
-        if let Err(e) = self.enter_level(source) {
-            log::error!("could not reopen {}: {e}", source.id());
-        }
-        answer.ok_or(PortalError::NoExit)
+        // The source level was parked by the swap above, so entering it again only swaps back:
+        // opening a level is the one way `enter_level` fails.
+        let back = self.enter_level(source);
+        debug_assert!(back.is_ok(), "the parked source level re-enters");
+        answer.unwrap_or(Err(PortalError::NoExit))
     }
 }
 
@@ -230,7 +229,6 @@ impl Game<'_> {
 mod tests {
     use super::*;
     use crate::game::native_entity_refs::tests::with_game;
-    use mod_api::Direction;
     use sunrise_client::chunk::Chunk;
 
     const SIZE: [f64; 2] = [0.98, 0.98];
@@ -267,9 +265,7 @@ mod tests {
                 .set(ENTRY[0], ENTRY[1], ENTRY[2], portal)
                 .unwrap();
             let overworld = game.level("minecraft:overworld").unwrap();
-            let ask = |game: &Game<'_>| {
-                game.level_portal_destination(overworld, ENTRY, Direction::North, SIZE)
-            };
+            let ask = |game: &Game<'_>| game.level_portal_destination(overworld, ENTRY, SIZE);
             // The Nether is not open.
             assert_eq!(ask(game), Err(PortalError::ChunksNotLoaded));
             // Open with none of the chunks the search reads.
@@ -289,19 +285,19 @@ mod tests {
             assert_eq!(nether_portal_blocks(game), 0);
             // A block that is no portal.
             assert_eq!(
-                game.level_portal_destination(overworld, [9, 70, 9], Direction::North, SIZE),
+                game.level_portal_destination(overworld, [9, 70, 9], SIZE),
                 Err(PortalError::NotAPortal)
             );
             // Not inside a transaction.
             let seal = game.transaction_open();
             assert_eq!(
-                game.level_find_or_create_portal_exit(overworld, ENTRY, Direction::North, SIZE),
+                game.level_find_or_create_portal_exit(overworld, ENTRY, SIZE),
                 Err(PortalError::InTransaction)
             );
             game.transaction_close(&seal, false);
             // Find or create builds one, and the read then finds it.
             let built = game
-                .level_find_or_create_portal_exit(overworld, ENTRY, Direction::North, SIZE)
+                .level_find_or_create_portal_exit(overworld, ENTRY, SIZE)
                 .expect("the exit is built");
             assert_eq!(game.dim, Dim::Overworld);
             assert!(nether_portal_blocks(game) > 0);

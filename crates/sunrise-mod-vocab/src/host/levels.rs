@@ -770,7 +770,7 @@ pub trait LevelsBackend {
     fn level_capability_generation(&self, level: LevelRef, pos: [i32; 3]) -> Option<u64>;
     /// Side: server.
     /// Where an entity of box `size` (width, height), not a player, centred in the portal block
-    /// at `portal_pos` of this level and facing `facing`, arrives through it
+    /// at `portal_pos` of this level arrives through it
     /// (`getPortalDestination`), changing nothing. Nether portals search the closest portal
     /// around the scaled, border-clamped exit; End portals answer the End's fixed spawn point or
     /// the Overworld's shared spawn; End gateways answer their stored exit. No platform, ticket,
@@ -782,7 +782,6 @@ pub trait LevelsBackend {
         &self,
         level: LevelRef,
         portal_pos: [i32; 3],
-        facing: Direction,
         size: [f64; 2],
     ) -> Result<PortalExit, PortalError>;
 }
@@ -1588,7 +1587,6 @@ pub trait LevelsBackendMut {
         &mut self,
         level: LevelRef,
         portal_pos: [i32; 3],
-        facing: Direction,
         size: [f64; 2],
     ) -> Result<PortalExit, PortalError>;
     /// Side: server.

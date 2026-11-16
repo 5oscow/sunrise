@@ -8,13 +8,12 @@ exit portal built when none stands there yet. Two calls on `LevelRef` share one 
 | Know where a portal leads, changing nothing | `LevelRef::portal_destination` | Server |
 | Reach the exit, building a nether portal when none exists | `LevelRef::find_or_create_portal_exit` | Server |
 
-Both take the portal block's position, the direction the entity faces going in, and the entity's box as
-`[width, height]`. They answer for an entity that is not a player, centred in the portal block, as an item or a mob
+Both take the portal block's position and the entity's box as `[width, height]`. They answer for an entity that is not a player, centred in the portal block, as an item or a mob
 travels. Vanilla sends a player to an End portal's destination through the respawn search, which these calls do not run.
 
 ```rust
 let size = [0.98, 0.98];
-match level.find_or_create_portal_exit(host, portal_pos, Direction::North, size) {
+match level.find_or_create_portal_exit(host, portal_pos, size) {
     Ok(exit) => {
         // `exit.level` is the destination level, `exit.pos` the bottom centre of the box there and
         // `exit.yaw_turn` the degrees to add to the entity's yaw (0 or 90).
@@ -30,8 +29,7 @@ match level.find_or_create_portal_exit(host, portal_pos, Direction::North, size)
   two dimensions' scales and clamped to the destination's world border), then the closest portal within 16 blocks
   into the Nether or 128 blocks out of it. `pos` and `yaw_turn` follow vanilla's placement in that portal's rectangle:
   the entity keeps its relative place, and the yaw turns 90 degrees when the two portals' axes differ.
-  `exit_portal` is the lower corner of the portal found or built and `axis` its axis. The answer does not depend on
-  `facing`; the direction is part of the call so a caller states how the entity enters.
+  `exit_portal` is the lower corner of the portal found or built and `axis` its axis.
 - **An End portal:** into the End, the End's fixed spawn point; out of it, the Overworld's shared spawn. The
   obsidian platform is not rebuilt.
 - **An End gateway:** the exit stored in the gateway, when it has one. A gateway that has not found its exit yet gives
