@@ -156,6 +156,7 @@ fn authoritative_custom_book_rebuilds_cached_geometry_without_observe_screen() {
                     own_background: false,
                     recipe_book: Some(key.clone()),
                     recipe_book_toggle: None,
+                    recipe_book_big_result: false,
                 },
             });
             // A snapshot may precede the first draw. The build itself must

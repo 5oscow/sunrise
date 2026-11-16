@@ -7,6 +7,9 @@ pub use placement::PlacementInfo;
 #[path = "recipe_book_layout.rs"]
 mod layout;
 pub use layout::RecipeBookLayout;
+#[path = "recipe_book_ghost.rs"]
+mod ghost;
+pub use ghost::GhostSlot;
 #[path = "recipe_display.rs"]
 mod display;
 #[path = "recipe_book_settings.rs"]

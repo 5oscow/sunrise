@@ -121,3 +121,35 @@ room for the cleared items) changes nothing and says why. A recipe never reaches
 given. The whole answer is one action: a write the part makes to the player's inventory, cursor or the
 menu's storage through the `Host`, or a change to a block behind the menu, refuses it and undoes the
 placement. A menu with no part that listens refuses every click.
+
+## Drawing the ghosts yourself
+
+When a click finds items missing, the server tells the client and the client draws the recipe's ghosts in
+the menu's slots. The `recipe_book_ghost` hook of your `MenuPart` is asked just before, where vanilla
+calls the book component's `fillGhostRecipe`:
+
+```rust,ignore
+fn recipe_book_ghost(
+    &self,
+    host: &dyn mod_api::ClientHost,
+    event: &mut mod_api::RecipeBookGhostEvent<'_>,
+) {
+    // A pot: the meal preview in slot 6 and the inputs in slots 0 and up.
+    if let mod_api::RecipeBookDisplay::Custom { slots, result, .. } = event.display {
+        event.ghosts.clear();
+        event.ghosts.push(mod_api::GhostSlot { slot: 6, display: result.clone(), result: true });
+        for (index, slot) in slots.iter().enumerate() {
+            event.ghosts.push(mod_api::GhostSlot { slot: index as u16, display: slot.clone(), result: false });
+        }
+    }
+}
+```
+
+`display` is the alternative the player clicked. `ghosts` arrives holding the game's own ghosts for the
+menu's layout (the crafting, furnace, stonecutter and smithing layouts map the display to their slots; a
+`Mod` layout arrives empty); add, change or clear them. A ghost whose `display` resolves to no stack, or that
+sits in a slot the menu's screen does not show, is dropped, and at most 256 are kept. The hook fires on the
+client only, once per answer, for the open menu's book, and only for a menu whose type has a part that listens.
+
+`Screen::recipe_book_big_result` gives the result ghost vanilla's 24 by 24 frame
+(`isBiggerResultSlot`). It is off by default.

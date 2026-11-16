@@ -1,5 +1,28 @@
 //! Placement state is discarded before a new catalogue or menu can be shown.
 use super::*;
+/// Ghosts kept from the game and a menu part together, as many as a menu may have slots.
+const MAX_GHOSTS: usize = 256;
+/// The ghosts to draw: at most `MAX_GHOSTS`, in order, without one in a slot the screen lacks or one
+/// that resolves to no stack (`GhostSlots.setSlot` keeps only ghosts with a stack).
+fn shown_ghosts(
+    ghosts: Vec<mod_api::GhostSlot>,
+    has_slot: impl Fn(u16) -> bool,
+    resolve: impl Fn(&mod_api::RecipeSlotDisplay) -> Vec<ItemStack>,
+) -> Vec<super::super::Ghost> {
+    ghosts
+        .into_iter()
+        .take(MAX_GHOSTS)
+        .filter(|ghost| has_slot(ghost.slot))
+        .filter_map(|ghost| {
+            let items = resolve(&ghost.display);
+            (!items.is_empty()).then(|| super::super::Ghost {
+                slot: 300 + usize::from(ghost.slot),
+                items,
+                result: ghost.result,
+            })
+        })
+        .collect()
+}
 pub(super) struct PlacementOverlay {
     pub(super) view: OverlayView,
     pub(super) recipe: String,
@@ -99,9 +122,8 @@ impl Game<'_> {
             mod_api::RecipeBookLayout::Crafting { result, .. }
             | mod_api::RecipeBookLayout::Furnace { result, .. }
             | mod_api::RecipeBookLayout::Stonecutter { result, .. }
-            | mod_api::RecipeBookLayout::Smithing { result, .. } => *result,
-            // The mod draws its own ghosts; the game maps no display to a slot here.
-            mod_api::RecipeBookLayout::Mod => return,
+            | mod_api::RecipeBookLayout::Smithing { result, .. } => Some(*result),
+            mod_api::RecipeBookLayout::Mod => None,
         };
         let fuel_empty = match layout.declaration() {
             mod_api::RecipeBookLayout::Furnace { fuel, .. } => {
@@ -109,29 +131,87 @@ impl Game<'_> {
             }
             _ => true,
         };
-        let Ok(mapped) = layout.map(&display, fuel_empty) else {
-            return;
-        };
-        let mut ghosts = Vec::with_capacity(mapped.len());
-        for (slot, display) in mapped {
-            if self.native_screen_slot(usize::from(slot)).is_none() {
-                return;
-            }
-            let items = self.resolve_mod_book_declaration_slot(&display);
-            if !items.is_empty() {
-                ghosts.push(super::super::Ghost {
-                    slot: 300 + usize::from(slot),
-                    items,
-                    result: slot == result,
-                });
-            }
+        // The game's own ghosts for the layout (none for `Mod`), then the menu part's say.
+        let mut ghosts: Vec<mod_api::GhostSlot> = layout
+            .map(&display, fuel_empty)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(slot, display)| mod_api::GhostSlot {
+                slot,
+                display,
+                result: Some(slot) == result,
+            })
+            .collect();
+        let menu = selection.catalog.menu.as_str();
+        if mod_api::__private::menu_listens(mod_api::HookId::RecipeBookGhost, menu) {
+            self.native_recipe_book_ghost(mod_api::__private::RecipeBookGhostCall {
+                menu,
+                recipe: selection.display.recipe.as_str(),
+                display: &display,
+                ghosts: &mut ghosts,
+            });
         }
-        self.recipe_ui.ghost = ghosts;
+        let shown = shown_ghosts(
+            ghosts,
+            |slot| self.native_screen_slot(usize::from(slot)).is_some(),
+            |display| self.resolve_mod_book_declaration_slot(display),
+        );
+        self.recipe_ui.ghost = shown;
     }
     pub(in crate::game) fn reset_mod_book_placement_ui(&mut self) {
         self.recipe_ui.ghost.clear();
         self.recipe_ui.custom.prepared = None;
         self.recipe_ui.custom.presentation = None;
         self.recipe_ui.custom.overlay = None;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ghost(slot: u16, item: &str, result: bool) -> mod_api::GhostSlot {
+        mod_api::GhostSlot {
+            slot,
+            display: mod_api::RecipeSlotDisplay::Item(item.into()),
+            result,
+        }
+    }
+
+    #[test]
+    fn ghosts_without_a_slot_or_a_stack_are_dropped_and_the_rest_keep_their_order() {
+        let shown = shown_ghosts(
+            vec![
+                ghost(6, "demo:meal", true),
+                ghost(40, "demo:a", false),
+                ghost(0, "demo:none", false),
+                ghost(1, "demo:b", false),
+            ],
+            |slot| slot < 10,
+            |display| match display {
+                mod_api::RecipeSlotDisplay::Item(id) if id != "demo:none" => {
+                    vec![ItemStack::new(id, 1)]
+                }
+                _ => Vec::new(),
+            },
+        );
+        let seen: Vec<_> = shown
+            .iter()
+            .map(|g| (g.slot, g.items[0].item.to_string(), g.result))
+            .collect();
+        assert_eq!(
+            seen,
+            [
+                (306, "demo:meal".to_owned(), true),
+                (301, "demo:b".to_owned(), false)
+            ]
+        );
+    }
+
+    #[test]
+    fn no_more_than_the_cap_are_kept() {
+        let many = (0..300).map(|n| ghost(n % 10, "demo:a", false)).collect();
+        let shown = shown_ghosts(many, |_| true, |_| vec![ItemStack::new("demo:a", 1)]);
+        assert_eq!(shown.len(), MAX_GHOSTS);
     }
 }
