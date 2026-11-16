@@ -442,6 +442,16 @@ fn uncached_import_body(types: &Types<'_>, m: &Method, id: usize, prefix: &str) 
     }
     let mut put = String::new();
     let mut back = Vec::new();
+    // A wasm entity part that overrides a native-only method is refused by
+    // name at load (#792 stage 4b): the real part is here, guest-side, so the
+    // wrapper reads the macro's entity_native_only metadata and delivers the
+    // refusal through the registration refusal channel, never attaching the
+    // part it would then silently never call.
+    let native_only_check = if m.name == "attach_entity_part" {
+        "if let Some(reason)=crate::__private::entity_part_native_only_refusal(p2.as_ref()){crate::RegistrationRefusalRegistrar::registration_refusal(self,reason);return;}"
+    } else {
+        ""
+    };
     for (i, (_, ty)) in m.params.iter().enumerate() {
         if mutable_scalar(ty) {
             back.push((i, held(types, ty).unwrap()));
@@ -527,7 +537,7 @@ fn uncached_import_body(types: &Types<'_>, m: &Method, id: usize, prefix: &str) 
         )
     };
     format!(
-        "{sig} {{ let mut w = {guest}::begin(); {prefix} {put} let r = {guest}::host({id}u32, w); {take} }}"
+        "{sig} {{ {native_only_check} let mut w = {guest}::begin(); {prefix} {put} let r = {guest}::host({id}u32, w); {take} }}"
     )
 }
 

@@ -56,20 +56,6 @@ pub(crate) fn call_refused<E: From<(mod_api::Identifier, String)>>() -> E {
     ))
 }
 
-/// A hook a wasm mod may name but cannot be served yet: the load refuses by
-/// name with the reason, as `alter_ground`'s inline check does, never a
-/// silent skip past a subscription nothing would ever call.
-pub(crate) fn native_only_hook(name: &str) -> Option<&'static str> {
-    match name {
-        // Stage 4a of #792 ships the general entity tick's native dispatch
-        // only; the wasm adapter is stage 4b.
-        "general_entity_tick" => Some(
-            "general_entity_tick: general entity ticks are not yet available to wasm mods (the wasm adapter is #792's stage 4b)",
-        ),
-        _ => None,
-    }
-}
-
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::OnceLock;
@@ -606,6 +592,12 @@ pub struct Loaded {
 }
 
 impl Loaded {
+    /// The loaded modules, in the order of [`Self::mods`]: one process initializes a
+    /// package's points once (the registry seals), so a caller that re-enters mod
+    /// dispatch later rebuilds its entries from these instead of loading again.
+    pub fn modules(&self) -> &[WasmMod] {
+        &self.modules
+    }
     /// Initializes programmatically loaded mods with the final inventory, then installs
     /// their point listeners. Call once, before sealing the point registry.
     pub fn initialize(
@@ -815,12 +807,6 @@ fn load_with_cache(
                             .into(),
                     ));
                     }
-                    // A hook the wasm side cannot serve yet refuses the load by
-                    // name with its reason, never a silent skip past a dead
-                    // subscription.
-                    if let Some(reason) = names.iter().find_map(|name| native_only_hook(name)) {
-                        return Err(Refusal::Runtime(reason.into()));
-                    }
                     module.subscribed = boundary::subscriptions_of("wasm mod", names);
                     checked.push(module);
                 }
@@ -851,17 +837,6 @@ fn load_with_cache(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_wasm_mod_using_the_general_entity_tick_is_refused_by_name() {
-        // The reason names the hook and the follow-up, as `alter_ground`'s
-        // inline refusal does; nothing else the API names refuses here.
-        let reason = native_only_hook("general_entity_tick").unwrap();
-        assert!(reason.starts_with("general_entity_tick:"));
-        assert!(reason.contains("stage 4b"));
-        assert_eq!(native_only_hook("entity_tick_pre"), None);
-        assert_eq!(native_only_hook("alter_ground"), None);
-    }
 
     #[test]
     fn point_layout_refusal_reports_both_layouts_to_console() {

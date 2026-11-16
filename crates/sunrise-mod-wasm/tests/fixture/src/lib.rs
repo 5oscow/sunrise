@@ -322,6 +322,7 @@ impl Hooks for Mod {
         cauldron::register(registrar);
         tick_reply::register(registrar);
         part_state::register(registrar);
+        entity_parts::register(registrar);
         registrar.register_custom_stat("steps").unwrap();
         if cx.mods().get("wasm_storage_attempt_observer").is_some() {
             storage_attempts::register(registrar);
