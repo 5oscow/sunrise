@@ -3742,14 +3742,19 @@ impl Game<'_> {
     }
     /// A client started tracking an entity (NeoForge's
     /// `PlayerEvent.StartTracking`, posted at the end of
-    /// `ServerEntity.addPairing`): `player` (`name`) is now sent `entity`
-    /// (its ID, `uuid` its UUID, `kind` its type, `minecraft:zombie`) and its
-    /// changes. It comes into range, its client's chunks reach it, or it is
-    /// put in the level; another player is an entity too, and a player never
-    /// tracks their own. A mod sends the player what they need to show it
-    /// (`PlayerRef::send_payload`). The entity is as it was last tick: it
-    /// may be gone by now. Heard after the tick's players and entities have
-    /// moved, in order, with no player's state swapped in. Server-side.
+    /// `ServerEntity.addPairing`): `player` (`name`) has just been sent the
+    /// spawn bundle of `entity` (its ID, `uuid` its UUID, `kind` its type,
+    /// `minecraft:zombie`) and counts as tracking it. It came into range, its
+    /// client's chunks reached it, or it was put in the level; another player
+    /// is an entity too, and a player never tracks their own. The entity is
+    /// still in the level. What a listener sends the player
+    /// (`PlayerRef::send_payload`) reaches it right after that bundle, before
+    /// the entity's next changes. Heard in the tick's tracking pass, after the
+    /// pass has built every player's packets: the player already counts as
+    /// tracking the other entities the same pass paired. The engine is still
+    /// walking its tracker: read the game and send payloads, but don't spawn,
+    /// remove or teleport entities from here. No player's state is swapped in.
+    /// Server-side. Named injections request `hook_version = 2`.
     pub(in crate::game) fn native_player_start_tracking(
         &mut self,
         player: u128,
@@ -3762,13 +3767,19 @@ impl Game<'_> {
     }
     /// A client stopped tracking an entity (NeoForge's
     /// `PlayerEvent.StopTracking`, posted at the end of
-    /// `ServerEntity.removePairing`): it went out of range, left the level or
-    /// died, or `player` (`name`) left, changed level or respawned, which
-    /// stops everything they tracked. `entity`, `uuid` and `kind` are as
-    /// `native_player_start_tracking` told. Once for each start, a leaving
-    /// player's after `native_player_logged_out`. The entity is not
-    /// necessarily still there, and a player who left is gone: no player's
-    /// state is swapped in. Server-side.
+    /// `ServerEntity.removePairing`): `entity` went out of range, left the
+    /// level or died, or `player` (`name`) left, changed level or respawned,
+    /// which stops everything they tracked. `entity`, `uuid` and `kind` are as
+    /// `native_player_start_tracking` told, once for each start; the player no longer counts as tracking
+    /// it. A stop of the tracking pass is heard right after the removal
+    /// packet, and what a listener sends the player reaches it after that
+    /// removal. A leaving player's stops come after `native_player_logged_out`; those
+    /// of a respawn or a level change, which send their own removals, at the
+    /// next tracking pass. The entity is not necessarily still there, and a
+    /// player who left is gone. As in `player_start_tracking`, the engine is
+    /// walking its tracker: don't spawn, remove or teleport entities from
+    /// here. No player's state is swapped in. Server-side. Named injections
+    /// request `hook_version = 2`.
     pub(in crate::game) fn native_player_stop_tracking(
         &mut self,
         player: u128,
@@ -4225,6 +4236,11 @@ impl HitLevel<'_> {
     /// other source with no direct entity, even during that projectile's impact), and
     /// where it comes from (`getSourcePosition`). `victim` is where the entity stands and
     /// looks, and `weapon` the direct entity's weapon (`getWeaponItem`) when it is known.
+    /// `causing_weapon` is the causing living entity's current main-hand weapon
+    /// (`getEntity().getWeaponItem`), read at hit time, not a projectile's saved
+    /// weapon; None for an absent, unknown or non-living cause, or once the shooter
+    /// is gone. It is an addition: NeoForge's `LivingIncomingDamageEvent` doesn't
+    /// carry it, and mods there read the source entity's main hand themselves.
     /// `container` holds the damage before any reduction: change its `new_damage`, or the
     /// invulnerability ticks a fresh hit leaves (vanilla's 20), or set `canceled` and nothing
     /// of `hurtServer` happens (no damage, hurt sound, knockback, cooldown, statistics or

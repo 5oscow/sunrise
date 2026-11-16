@@ -18,13 +18,13 @@ vanilla-parity, jfr-analysis) run only on dispatch:
 
 | Job | Runs on | What | Time |
 | --- | --- | --- | --- |
-| `verify` | Our checks runners (label `sunrise-checks`, the desktop's) for this repository's own pull requests whose number ends in 0 or 1; GitHub `ubuntu-latest` for the others, forks' pull requests (they see no repository variable, so no switch could move them off a machine that is off) and main's pushes. `SELF_HOSTED_CI` moves them: `all` all to ours, `light` or `off` all to GitHub ([CI runners](ci-runners.md)) | Three jobs side by side: the public-tree check and Python tests (`verify (tree and tools)`), rustfmt and clippy with warnings denied (`verify (format and lint)`), the Rust tests (`verify (Rust tests)`); `verify` waits for them and passes when each passed or had nothing to do. Dependencies and the workspace build come from a cache saved by main's runs (GitHub) or the runner's own build folder (ours) | ~8 min |
+| `verify` | Our checks runners (label `sunrise-checks`, the desktop's) for this repository's own pull requests whose number ends in 0 or 1; GitHub `ubuntu-latest` for the others, forks' pull requests (they see no repository variable, so no switch could move them off a machine that is off) and scheduled runs on main. `SELF_HOSTED_CI` moves them: `all` all to ours, `light` or `off` all to GitHub ([CI runners](ci-runners.md)) | Three jobs side by side: the public-tree check and Python tests (`verify (tree and tools)`), rustfmt and clippy with warnings denied (`verify (format and lint)`), the Rust tests (`verify (Rust tests)`); `verify` waits for them and passes when each passed or had nothing to do. Dependencies and the workspace build come from a cache saved by scheduled runs on main (GitHub) or the runner's own build folder (ours) | ~8 min |
 
 A pull request's harnesses run by dispatch on Dyna's runners: `gh workflow run dyna-ci.yml -f pr=<N> -f parity=true`.
 
 `verify` runs even in a cancelled run of `checks`, so it fails there instead of being skipped. A pull request that
 changes no Rust (docs, tools) runs only its quick steps and finishes in about a minute. A pull request's public-tree check reads only
-its own commits (`--range base..head`); main's pushes read every ref's history.
+its own commits (`--range base..head`); scheduled runs on main read every ref's history.
 
 ### The parity job
 

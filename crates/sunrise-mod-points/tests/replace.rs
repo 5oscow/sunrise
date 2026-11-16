@@ -151,7 +151,7 @@ fn a_replace_owns_the_function_and_only_one_may() {
 static __REPLACE: [std::sync::atomic::AtomicPtr<()>; 4] =
     [const { std::sync::atomic::AtomicPtr::new(std::ptr::null_mut()) }; 4];
 fn __fnr_read_slot_0() -> Option<fn(&mut Option<String>, String)> {
-    let pointer = crate::__REPLACE[0].load(std::sync::atomic::Ordering::Relaxed);
+    let pointer = crate::__REPLACE[0].load(std::sync::atomic::Ordering::Acquire);
     if pointer.is_null() {
         None
     } else {
@@ -159,7 +159,7 @@ fn __fnr_read_slot_0() -> Option<fn(&mut Option<String>, String)> {
     }
 }
 fn __fnr_read_body_0() -> Option<fn(&mut Option<String>, String)> {
-    let pointer = crate::__REPLACE[1].load(std::sync::atomic::Ordering::Relaxed);
+    let pointer = crate::__REPLACE[1].load(std::sync::atomic::Ordering::Acquire);
     if pointer.is_null() {
         None
     } else {
@@ -167,7 +167,7 @@ fn __fnr_read_body_0() -> Option<fn(&mut Option<String>, String)> {
     }
 }
 fn __fnr_read_slot_2() -> Option<fn(u32, u32) -> u32> {
-    let pointer = crate::__REPLACE[2].load(std::sync::atomic::Ordering::Relaxed);
+    let pointer = crate::__REPLACE[2].load(std::sync::atomic::Ordering::Acquire);
     if pointer.is_null() {
         None
     } else {
@@ -175,7 +175,7 @@ fn __fnr_read_slot_2() -> Option<fn(u32, u32) -> u32> {
     }
 }
 fn __fnr_read_body_2() -> Option<fn(u32, u32) -> u32> {
-    let pointer = crate::__REPLACE[3].load(std::sync::atomic::Ordering::Relaxed);
+    let pointer = crate::__REPLACE[3].load(std::sync::atomic::Ordering::Acquire);
     if pointer.is_null() {
         None
     } else {

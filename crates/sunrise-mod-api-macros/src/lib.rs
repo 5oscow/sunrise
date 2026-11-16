@@ -215,6 +215,20 @@ fn expand(mut implementation: ItemImpl, export: bool) -> TokenStream {
                 &[#(#(#hooked_cfgs)* mod_api::#ids::#hooked),*]
             }
         });
+        // The plain methods subscribe nothing, but their override is capability
+        // metadata (#792 stage 4b): the wasm side reads it where the real part
+        // lives, and a mod overriding one is refused by name at load.
+        let native: Vec<_> = methods
+            .iter()
+            .zip(&plain)
+            .filter(|(_, plain)| **plain)
+            .map(|(method, _)| proc_macro2::Literal::string(&method.to_string()))
+            .collect();
+        implementation.items.push(syn::parse_quote! {
+            fn entity_native_only(&self) -> &'static [&'static str] {
+                &[#(#native),*]
+            }
+        });
         // A part impl carries no `#[listener]` (refused above) and no guest
         // export (Hooks only), so the shared tail has nothing left to add.
         return quote!(#implementation).into();
@@ -373,7 +387,8 @@ pub fn sunrise_part(_attribute: TokenStream, input: TokenStream) -> TokenStream 
 /// or wasm, gets the side's host (on a `Game` method) and a record holding a copy of every
 /// parameter as an API value (an engine type `mirror(…)` names as its `mod_api` mirror): the
 /// function runs with the record's by-value and `&T` values, and a `&mut T` parameter's place
-/// gets the record's value back.
+/// gets the record's value back. A type or const parameter is refused, naming it (lifetimes are
+/// allowed): the cell holds one function pointer, which can't stand for every instantiation.
 #[proc_macro_attribute]
 pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
     point::expand(attribute.into(), parse_macro_input!(input as ImplItemFn)).into()

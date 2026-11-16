@@ -70,9 +70,7 @@ impl LootData {
             entity: entity.as_ref(),
             enchanted_level: None,
         };
-        let mut items = Vec::new();
-        c.table_raw(table, json, &mut |c, stack| c.data.split(stack, &mut items));
-        c.query.finish(Some(table));
+        let items = c.roll_root(Some(table), json);
         *random = c.random;
         Some(items)
     }

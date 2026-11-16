@@ -171,8 +171,13 @@ only the server needs: it installs and runs like any mod (in single player and o
 server), but it is never compared at join, so players joining need not have it. A server mod is refused by name at
 load when it carries what every joining client must know: registry declarations (`data/<id>/sunrise/`, or blocks,
 items, block entity types and fluids its code declares), a listener on a client-side hook, a part that listens to one,
-or a required payload the server sends to clients. Assets, lang and data vanilla syncs itself (recipes, loot, tags)
-are allowed. Where a hook runs is still the hook's own side: the manifest says what a client must have, not where a
+a required payload the server sends to clients, or a synced attachment type it declares.
+For attachments, “carries” means **declares**: a server package may use another loaded package A's synced
+attachment, because clients compare A and decode the value through A. If A is itself a server package, A is the
+declarer refused by name. Attachment load checks declaration conflicts (including foreign namespaces) first,
+then undeclared uses naming the calling package and id, then server-package declarations; no content is admitted
+after a refusal. See [attachments](../concepts/attachments.md) for the shared native and wasm declaration API.
+Assets, lang and data vanilla syncs itself (recipes, loot, tags) are allowed. Where a hook runs is still the hook's own side: the manifest says what a client must have, not where a
 hook runs. A vanilla or other
 non-Sunrise client is refused when the server needs both-side mods, with their names and versions and an English
 fallback for clients without Sunrise translations. The content registry identity check remains separate; the
@@ -439,6 +444,23 @@ Each non-finite angle leaves the base model component unchanged. The transform r
 only for selected registered poses, on local players, remote players and humanoid mobs;
 swing and mob-specific animations run afterward and can change those angles.
 Native and wasm mods use the same registration, token and Wire angle value.
+
+For a change to an intermediate vanilla pose (including `item`), listen to
+`humanoid_setup_anim` instead. This client hook runs inside each actual humanoid
+setup-animation invocation, after head, walk and riding setup but before arm
+priority and posing. Its read-only `ClientHost` and `event.humanoid` provide both
+held stacks, selected poses and `is_using_item`. `event.partial_tick` and optional
+`event.game_time` are captured for that draw; game time is absent outside a level.
+Use `event.parts.get(HumanoidPart::RightArm)` to read `[position, rotation]`, then
+`set_rotation` or `set_position` to change it. Positions are local texels and
+rotations are radians. A non-finite component is refused while other finite
+components apply; scale and visibility are not changed. Later ITEM, attack,
+crouch, bob and swim animation still apply. Armor stands then replace rotations
+with their saved pose, preserving position edits. Their armor models run the same
+setup independently. A model can animate more than
+once per frame, so listeners must not treat this as a once-per-entity frame
+notification or advance simulation from it. Native and wasm use the same finite
+part snapshot, with no callback or stack snapshot when nobody subscribes.
 
 ```json
 { "template": "minecraft:stick", "arm_pose": "toot_horn" }

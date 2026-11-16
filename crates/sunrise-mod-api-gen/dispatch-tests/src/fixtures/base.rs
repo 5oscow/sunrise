@@ -454,6 +454,10 @@ fn incoming_damage_carries_the_attack_data() {
             event: &mut LivingIncomingDamageEvent<'_>,
         ) -> Flow {
             assert_eq!(event.source.damage_type, "minecraft:player_attack");
+            assert_eq!(event.causing_weapon.unwrap().item.as_ref(), "test:sword");
+            if let Some(weapon) = event.weapon {
+                assert_eq!(weapon.item.as_ref(), "test:crossbow");
+            }
             let (from, at, look) = (
                 event.source.position.unwrap(),
                 event.victim.position,
@@ -471,7 +475,14 @@ fn incoming_damage_carries_the_attack_data() {
     let mods: Vec<ModEntry> = vec![ModEntry::new("backstab-9", Box::new(Backstab))];
     let mods: Arc<[ModEntry]> = mods.into();
     install(mods.clone());
-    let held = ItemStack::default();
+    let held = ItemStack {
+        item: "test:crossbow".into(),
+        count: 1,
+    };
+    let causing = ItemStack {
+        item: "test:sword".into(),
+        count: 1,
+    };
     for (source_z, weapon, expected) in [
         (-1.0, Some(&held), 12.0),
         (1.0, Some(&held), 4.0),
@@ -494,6 +505,7 @@ fn incoming_damage_carries_the_attack_data() {
                 source: &source,
                 victim: &victim,
                 weapon,
+                causing_weapon: Some(&causing),
                 container: &mut container,
                 canceled: &mut canceled,
             },
@@ -558,6 +570,8 @@ fn dispatch_contracts() {
             );
             assert_eq!(event.source.damage_type, "minecraft:player_attack");
             assert!(event.attacker_main.is_none() && event.attacker_off.is_none());
+            assert_eq!(event.kill_credit, 19);
+            assert!(event.kill_credit_main.is_none());
             assert_eq!(event.entry, KnockbackEntry::Full);
             assert_eq!(event.strength, 0.4);
             event.strength *= 2.0;
@@ -582,6 +596,8 @@ fn dispatch_contracts() {
             attacker: 7,
             attacker_main: None,
             attacker_off: None,
+            kill_credit: 19,
+            kill_credit_main: None,
             entry: KnockbackEntry::Full,
             strength: &mut strength,
             x: &mut x,
@@ -652,6 +668,7 @@ fn dispatch_contracts() {
             source: &source,
             victim: &victim,
             weapon: None,
+            causing_weapon: None,
             container: &mut container,
             canceled: &mut canceled,
         },
@@ -682,6 +699,7 @@ fn dispatch_contracts() {
             source: &source,
             victim: &victim,
             weapon: None,
+            causing_weapon: None,
             container: &mut container,
             canceled: &mut canceled,
         },

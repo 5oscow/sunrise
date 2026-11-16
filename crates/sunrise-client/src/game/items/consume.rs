@@ -23,15 +23,14 @@ use {
 
 type ItemConsumable = Consumable<String, ConsumeEffect>;
 
-/// Capture once per effect, not once per attempted destination. A consuming stack
-/// is nonempty and registry-resolved; an invalid snapshot is an engine invariant
-/// violation, never permission to silently omit a promised listener callback.
+/// Capture once per effect, not once per attempted destination. If the stack
+/// cannot cross the API boundary (for example, an unregistered saved item), skip
+/// the listener for this consumption and let the vanilla teleport proceed.
 fn consumed_snapshot(stack: &ItemStack) -> Option<mod_api::ItemStack> {
-    mod_api::__private::listened(mod_api::HookId::ItemConsumptionTeleport).then(|| {
-        stack
-            .try_into_api()
-            .expect("a consumed stack must have a complete public API snapshot")
-    })
+    if !mod_api::__private::listened(mod_api::HookId::ItemConsumptionTeleport) {
+        return None;
+    }
+    stack.try_into_api().ok()
 }
 
 /// `EntityEvent.USE_ITEM_COMPLETE`: the server finished the player's use.
@@ -233,7 +232,11 @@ impl Game<'_> {
                         }
                     } else if let Some(mob) = game.mobs.iter_mut().find(|m| m.id == decision.mob) {
                         mob.apply_consume_effect(
-                            crate::game::entity::damage_level_of!(game),
+                            crate::game::entity::damage_level_of!(
+                                game,
+                                &sunrise_client::health::NO_ATTACK,
+                                no_push
+                            ),
                             effect,
                         );
                     }
@@ -831,6 +834,29 @@ mod teleport_hook_tests {
             }
             Flow::Cancel
         }
+    }
+
+    #[test]
+    fn unregistered_consumed_stack_skips_the_snapshot() {
+        let heard = Arc::new(Mutex::new(Vec::new()));
+        let mods = vec![ModEntry::new(
+            "consumed-stack-proof",
+            Box::new(ConsumptionProbe(
+                Arc::clone(&heard),
+                Arc::new(AtomicBool::new(false)),
+            )),
+        )]
+        .into();
+        mod_platform::testing::with_mods(mods, || {
+            assert!(mod_api::__private::listened(
+                mod_api::HookId::ItemConsumptionTeleport
+            ));
+            let stack = ItemStack::new("missing:saved_fruit", 1);
+            assert!(consumed_snapshot(&stack).is_none());
+            assert_eq!(stack.item.as_ref(), "missing:saved_fruit");
+            assert_eq!(stack.count, 1);
+            assert!(heard.lock().unwrap().is_empty());
+        });
     }
 
     #[test]

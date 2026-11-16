@@ -5,16 +5,11 @@ use super::Game;
 use mod_api::{TextFieldLayout, TextFieldView};
 use sunrise_client::{
     hud::{HudBatch, rgba},
-    hud_layout::GuiDraw,
     text::Text,
 };
 use sunrise_items::items::ItemStack as EngineStack;
 
 impl Game<'_> {
-    /// Paint GUI extraction calls through this window's atlas, including player faces.
-    pub(super) fn native_gui_paint(&self, batch: &mut HudBatch, draws: &[GuiDraw]) {
-        sunrise_client::hud_layout::paint(batch, &self.gui.atlas, draws);
-    }
     /// `GuiGraphics.fillGradient` for [`mod_api::DrawContext::fill_gradient`]: `rect` is
     /// `[x, y, w, h]` and `top` / `bottom` are ARGB at `y` / `y + h`. Zero area,
     /// one-axis inversion or non-finite input draws nothing; both axes inverted flips the colours.

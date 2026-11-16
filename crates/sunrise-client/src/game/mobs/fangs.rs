@@ -251,32 +251,35 @@ impl Game<'_> {
         } else {
             Vec::new()
         };
+        let attacker = owner.map(sunrise_client::mobs::Who::Mob);
         for index in 0..self.mobs.len() {
-            let m = &mut self.mobs[index];
+            let m = &self.mobs[index];
             let id = m.id;
-            if id != f.owner
-                && !allies.contains(&id)
-                && m.alive()
-                && m.bounds().intersects(b)
-                && m.damage(
-                    crate::game::entity::damage_level_of!(self),
-                    6.0,
-                    sunrise_client::mobs::Damage {
-                        kind: if owner.is_some() {
-                            sunrise_client::mobs::DamageKind::IndirectMagic
-                        } else {
-                            sunrise_client::mobs::DamageKind::Magic
-                        },
-                        attacker: owner.map(sunrise_client::mobs::Who::Mob),
-                        from: Some(f.pos),
-                        attacker_species: None,
+            if id == f.owner || allies.contains(&id) || !m.alive() || !m.bounds().intersects(b) {
+                continue;
+            }
+            // So `living_knockback` sees who the fangs' owner is and what they hold.
+            let attack = self.attack_of_who(attacker);
+            let plan = self.prepare_knockback_credit(id as i32, attacker, &attack);
+            let mut credit = plan.lend(&mut self.last_hurt_by_player);
+            if self.mobs[index].damage(
+                crate::game::entity::damage_level_of!(self, &attack, &mut credit),
+                6.0,
+                sunrise_client::mobs::Damage {
+                    kind: if owner.is_some() {
+                        sunrise_client::mobs::DamageKind::IndirectMagic
+                    } else {
+                        sunrise_client::mobs::DamageKind::Magic
                     },
-                )
-                && owner.is_some()
+                    attacker,
+                    from: Some(f.pos),
+                    attacker_species: None,
+                },
+            ) && owner.is_some()
             {
                 self.mob_post_attack(
                     id,
-                    owner.map(sunrise_client::mobs::Who::Mob),
+                    attacker,
                     Some("minecraft:evoker_fangs"),
                     Some("minecraft:indirect_magic"),
                 );

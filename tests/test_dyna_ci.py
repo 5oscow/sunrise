@@ -36,28 +36,44 @@ class DynaRoutingTests(unittest.TestCase):
             self.assertEqual(self.route("push", lease=lease), "self_hosted=false")
 
     @unittest.skipUnless(POSIX_BASH, "needs a bash that is not WSL's")
-    def test_live_and_snapshot_lease_routing_on_main(self):
-        from test_ci_runners import jobs
-        import textwrap
-        route = dict(jobs((ROOT / ".github/workflows/dyna-ci.yml").read_text()))["changes"]
-        script = textwrap.dedent(route.split('        run: |\n          if [ "$SAME_REPO"', 1)[1]
-                                .split("      - id: hosted", 1)[0])
-        script = 'if [ "$SAME_REPO" ' + script
-        script = script.replace("${{ inputs.github-fallback }}", "false")
+    def test_route_reads_the_lease_live_else_judges_the_snapshot_at_the_runs_creation(self):
+        now = int(time.time())
+        # live lease, snapshot lease, the run's age in seconds, expected
+        cases = (("9999999999", "0", 60, "true"),
+                 ("0", "9999999999", 60, "false"),
+                 # The token can't read Variables: a run that waited 55 minutes keeps the lease it was created with.
+                 ("", str(now - 55 * 60 + 12 * 60), 55 * 60, "true"),
+                 ("", str(now - 55 * 60 - 1), 55 * 60, "false"),
+                 ("", "9999999999", 3601, "false"))
         with tempfile.TemporaryDirectory() as directory:
-            output = Path(directory) / "output"
-            for live, snapshot, expected in (("9999999999", "0", "true"),
-                                              ("", "9999999999", "true"),
-                                              ("", "1794272194", "false"),
-                                              ("0", "9999999999", "false")):
-                stub = 'gh() { case "$*" in *SELF_HOSTED*) echo true;; *created_at*) date -u +%FT%TZ;; *) echo "$LIVE";; esac; };\n'
-                env = dict(os.environ, EVENT="push", SAME_REPO="true", VARS_ENABLED="true",
-                           VARS_LEASE=snapshot, LIVE=live, GITHUB_REPOSITORY="sunrise-org/sunrise",
-                           GITHUB_OUTPUT=str(output), GITHUB_RUN_ID="1")
-                subprocess.run(["bash", "-e", "-c", stub + script], env=env, cwd=ROOT,
-                               capture_output=True, text=True, check=True)
-                self.assertIn(f"self_hosted={expected}\n", output.read_text())
-                output.unlink()
+            gh = Path(directory) / "gh"
+            gh.write_text('#!/usr/bin/env bash\ncase "$*" in *SELF_HOSTED*) echo "$LIVE_ENABLED";; '
+                          '*POOL_UNTIL*) echo "$LIVE";; *runs/7*) echo "$CREATED_AT";; *) exit 1;; esac\n')
+            gh.chmod(0o755)
+            for live, snapshot, age, expected in cases:
+                with self.subTest(live=live, snapshot=snapshot, age=age):
+                    created = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now - age))
+                    env = dict(os.environ, PATH=f"{directory}:{os.environ['PATH']}", EVENT="workflow_dispatch",
+                               SAME_REPO="true", VARS_ENABLED="true", VARS_LEASE=snapshot, LIVE=live,
+                               LIVE_ENABLED="true" if live else "", CREATED_AT=created,
+                               GITHUB_REPOSITORY="sunrise-org/sunrise", GITHUB_RUN_ID="7", NOW=str(now))
+                    env.pop("GITHUB_OUTPUT", None)
+                    result = subprocess.run(["bash", ROOT / "tools/ci/dyna_ci_route.sh"], env=env,
+                                            capture_output=True, text=True, check=True)
+                    self.assertEqual(result.stdout, f"self_hosted={expected}\n")
+
+    def test_every_workflow_routes_through_the_route_script(self):
+        # A job that handed the run's lease snapshot straight to dyna_ci_runner.sh judged it against the time the job
+        # started: a daily run that waited for GitHub's runners sent its data shards off the pool (2026-11-16).
+        for workflow in sorted((ROOT / ".github/workflows").glob("*.yml")):
+            text = workflow.read_text()
+            if "vars.DYNA_CI_POOL_UNTIL" not in text:
+                continue
+            with self.subTest(workflow=workflow.name):
+                self.assertNotIn("dyna_ci_runner.sh", text)
+                self.assertIn('bash tools/ci/dyna_ci_route.sh >> "$GITHUB_OUTPUT"', text)
+                self.assertIn("VARS_LEASE: ${{ vars.DYNA_CI_POOL_UNTIL }}", text)
+                self.assertIn("actions: read", text)
 
     @unittest.skipUnless(POSIX_BASH, "needs a bash that is not WSL's")
     def test_snapshot_lease_is_bounded_by_run_age(self):
@@ -211,7 +227,7 @@ class DynaRoutingTests(unittest.TestCase):
         blocks = dict(jobs(workflow))
         route = blocks["changes"]
         for item in ("vars.DYNA_CI_SELF_HOSTED", "vars.DYNA_CI_POOL_UNTIL", "github.event_name",
-                     "github.event.pull_request.head.repo.full_name == github.repository", "dyna_ci_runner.sh"):
+                     "github.event.pull_request.head.repo.full_name == github.repository", "dyna_ci_route.sh"):
             self.assertIn(item, route)
         for name, label in (("verify", "dyna-large"), ("verify-static", "dyna-large"), ("launcher", "dyna-medium")):
             block = blocks[name]
@@ -219,7 +235,9 @@ class DynaRoutingTests(unittest.TestCase):
             self.assertIn(f"needs.changes.outputs.self_hosted == 'true' && '{label}'", block)
             self.assertNotIn("secrets.", block)
             self.assertNotIn("permissions:", block)
-        self.assertIn("runs-on: ubuntu-latest", blocks["pool-watch"])
+        # The watch for a dead pool runs off the pool, as one scheduled sweep, never as a job of each run.
+        self.assertNotIn("pool-watch", blocks)
+        self.assertIn("runs-on: ubuntu-latest", (ROOT / ".github/workflows/dyna-pool-watch.yml").read_text())
         self.assertIn("permissions:\n  contents: read", workflow)
 
     def test_split_jobs_are_independent_fail_closed_and_share_routing(self):
@@ -245,14 +263,19 @@ class DynaRoutingTests(unittest.TestCase):
                          if line.startswith("        ") and ":" in line)
             self.assertEqual(guard["if"].strip(), "needs.changes.result != 'success'")
             self.assertEqual(guard["run"].strip(), "exit 1")
-        # verify-static routes as verify does, except that a contributor's pull request stays on GitHub's runners.
-        for field, fork in (("runs-on", "needs.changes.outputs.trusted != 'true' && 'ubuntu-latest' || "),
-                            ("RUNNER_KIND", "needs.changes.outputs.trusted != 'true' && 'github' || ")):
+        # verify-static routes as verify does, except that a pull request outside the gate and a contributor's
+        # pull request stay on GitHub's runners.
+        for field, outside, fork in (
+                ("runs-on", "needs.changes.outputs.heavy != 'true' && 'ubuntu-latest' || ",
+                 "needs.changes.outputs.trusted != 'true' && 'ubuntu-latest' || "),
+                ("RUNNER_KIND", "needs.changes.outputs.heavy != 'true' && 'github' || ",
+                 "needs.changes.outputs.trusted != 'true' && 'github' || ")):
             shared = runtime.split(f"{field}:", 1)[1].split("\n", 1)[0]
             if field == "runs-on":
                 shared = shared.replace("'ubuntu-latest') || ", "'ubuntu-latest') || " + fork, 1)
             else:
                 shared = shared.replace("${{ ", "${{ " + fork, 1)
+            shared = shared.replace("${{ ", "${{ " + outside, 1)
             self.assertEqual(static.split(f"{field}:", 1)[1].split("\n", 1)[0], shared)
         self.assertIn("- name: No Rust work selected", runtime)
         self.assertNotIn("--unshallow", runtime)
@@ -501,6 +524,8 @@ class DynaRoutingTests(unittest.TestCase):
         parity = dict(jobs((ROOT / ".github/workflows/dyna-ci.yml").read_text()))["vanilla-parity"]
         # The helper comes from the workflow's revision: nothing on PATH is taken from the checkout.
         self.assertNotIn("$GITHUB_WORKSPACE/tools", parity)
+        # A link an older job left on the persistent slot is replaced, never written through.
+        self.assertLess(parity.index('rm -f "$DYNA_CI_BUILD/bin/python"'), parity.index('cat > "$DYNA_CI_BUILD/bin/python"'))
         helper = textwrap.dedent(parity.split("<<'SH'\n", 1)[1].split("\n          SH\n", 1)[0])
         with tempfile.TemporaryDirectory() as temporary:
             build, tree = Path(temporary, "build"), Path(temporary, "tree")
@@ -515,7 +540,13 @@ class DynaRoutingTests(unittest.TestCase):
             (tree / "tools" / "parity.py").write_text(
                 "import sys\nprint('PASS loot_a 3s')\nprint('vanilla 0.7231')\n"
                 "print('FAIL loot_b 2s  (log)')\nprint('    vanilla 9')\nsys.exit(1)\n")
-            env = {**os.environ, "DYNA_CI_BUILD": str(build)}
+            # tools/parity.py's own log of each harness; the failing one's is kept past the slot's reuse.
+            logs = tree / ".local" / "parity-runner" / "logs"
+            logs.mkdir(parents=True)
+            (logs / "loot_a.log").write_text("passed\n")
+            (logs / "loot_b.log").write_text("vanilla 9\n")
+            env = {**os.environ, "DYNA_CI_BUILD": str(build), "GITHUB_RUN_ID": "77", "GITHUB_RUN_ATTEMPT": "1",
+                   "RUNNER_NAME": "slot-1", "GITHUB_WORKSPACE": str(tree)}
             harness = subprocess.run([str(shim), "tools/test_old_parity.py"], cwd=tree, env=env,
                                      capture_output=True, text=True)
             runner = subprocess.run([str(shim), "tools/parity.py", "loot_a", "loot_b"], cwd=tree, env=env,
@@ -527,6 +558,14 @@ class DynaRoutingTests(unittest.TestCase):
             self.assertIn("FAIL test_old_parity (exit 3", harness.stdout)
             self.assertEqual(runner.stdout.splitlines()[:2], ["PASS loot_a", "FAIL loot_b"])
             self.assertIn("mismatch: vanilla 0.7231", (build / "parity-logs" / "test_old_parity.log").read_text())
+            kept = build / "parity-keep" / "77-1"
+            self.assertEqual(sorted(p.name for p in kept.iterdir()), ["loot_b.log", "parity.log", "test_old_parity.log"])
+            self.assertIn(f"kept on runner slot-1 in {kept}", harness.stdout)
+            # A rerun keeps the run id: the second attempt's logs go beside the first's, not over them.
+            subprocess.run([str(shim), "tools/parity.py", "loot_b"], cwd=tree, env={**env, "GITHUB_RUN_ATTEMPT": "2"},
+                           capture_output=True, text=True)
+            self.assertEqual(sorted(p.name for p in (build / "parity-keep").iterdir()), ["77-1", "77-2"])
+            self.assertEqual(sorted(p.name for p in kept.iterdir()), ["loot_b.log", "parity.log", "test_old_parity.log"])
 
 
 if __name__ == "__main__":

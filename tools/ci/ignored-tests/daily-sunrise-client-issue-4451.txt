@@ -45,6 +45,7 @@ sunrise-client game::attachment_index::player_tests::saved_placement_respawn_rem
 sunrise-client game::attachment_index::player_tests::travel_moves_rows_before_guest_callbacks_and_keeps_captured_values lib daily resources
 sunrise-client game::attachment_index::query_tests::query_snapshot_dimension_and_stale_writes lib daily resources
 sunrise-client game::attachment_index::query_tests::query_writes_join_transaction_journal_without_implicit_commit lib daily resources
+sunrise-client game::attachment_index::saved_entity_tests::saved_binding_family_first_stores_publish_to_queries lib daily resources
 sunrise-client game::attachment_index::saved_entity_tests::saved_entity_loaders_publish_and_retire_the_authoritative_owner lib daily resources
 sunrise-client game::attachment_index::saved_entity_tests::saved_spit_and_bullet_query_before_access_and_round_trip lib daily resources
 sunrise-client game::attachment_index::tests::chunk_residency_uses_the_owning_level_through_cow_and_swaps lib daily resources
@@ -2367,7 +2368,7 @@ sunrise-client game::server_reload::tests::data_maps_updated_fires_for_each_regi
 sunrise-client game::server_reload::tests::datapack_publication_tests::datapack_game_delivery_tests::datapack_game_reload_delivers_only_successful_generations_and_disconnects_refused_guests lib daily resources
 sunrise-client game::server_reload::tests::datapack_publication_tests::datapack_host_read_tests::native_datapack_host_reads_enforce_level_session_and_generation lib daily resources
 sunrise-client game::server_reload::tests::missing_original_at_reload_preserves_the_published_data_and_reports_its_owners lib daily child-process
-sunrise-client game::server_reload::tests::reload_command_uses_applied_listener_state_and_preserves_tables_on_refusal lib daily resources
+sunrise-client game::server_reload::tests::reload_command_prepares_world_before_applying_listeners_and_preserves_tables_on_refusal lib daily resources
 sunrise-client game::server_reload::tests::server_completion_reads_published_data_without_world_access_on_first_open lib daily resources
 sunrise-client game::server_reload::tests::server_reload_delivers_mod_files_overrides_and_preserves_all_data_on_failure lib daily resources
 sunrise-client game::server_reload::tests::server_reload_registration_failure_stops_world_open_and_quiet_mods_never_listen lib daily resources

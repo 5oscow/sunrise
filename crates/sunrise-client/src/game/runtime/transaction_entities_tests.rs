@@ -186,7 +186,7 @@ fn boat_with_rider(game: &mut Game<'_>) -> (EntityRef, EntityRef) {
     let boat = summon(game, "minecraft:oak_boat", "{}").unwrap();
     let cow = summon(game, "minecraft:cow", "{}").unwrap();
     let (boat, cow) = (game.entity(boat).unwrap(), game.entity(cow).unwrap());
-    assert!(game.entity_start_riding(cow, boat, true));
+    assert!(game.entity_start_riding(cow, boat, true).is_ok());
     heard();
     (boat, cow)
 }

@@ -44,8 +44,12 @@ listener's removal or dismount takes effect mid-pass), and a transaction
 plus catch around each row's dispatch so a panic or trap rolls the row's
 writes back. The moment fires only for general rows: vanilla families tick
 their own paths, and bringing them to one walk is #6509's, extendable
-later if Ari wants it wider. Wasm crossing is stage 4b; a wasm mod naming
-the hook is refused at load with that reason, never silently skipped.
+later if Ari wants it wider. Stage 4b crosses the tick to wasm: a wasm part
+is a handler the host calls back, each row keeps its own attachments, and a
+trap rolls the row's writes back and stops the mod's dependency group. A wasm
+part that overrides a native-only method (`register_goals`,
+`register_behaviors`, `spawn_cluster_size`, `is_shearable`, `on_sheared`) is
+refused at load by name, never silently skipped.
 
 The remaining sections describe the wider design, not shipped lifecycle support.
 

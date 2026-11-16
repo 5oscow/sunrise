@@ -190,6 +190,20 @@ impl Hooks for Mod {
     ) {
         lending::Lender.menu_links(host, event);
     }
+    fn chunk_data_save(
+        &self,
+        host: &dyn mod_api::ChunkDiskHost,
+        event: &mut mod_api::ChunkDataSaveEvent<'_>,
+    ) {
+        chunk_disk::save(host, event.data);
+    }
+    fn chunk_data_load(
+        &self,
+        host: &dyn mod_api::ChunkDiskHost,
+        event: &mut mod_api::ChunkDataLoadEvent<'_>,
+    ) {
+        chunk_disk::load(host, event.data);
+    }
 
     fn living_entity_use_item_tick(
         &self,
@@ -322,6 +336,10 @@ impl Hooks for Mod {
         cauldron::register(registrar);
         tick_reply::register(registrar);
         part_state::register(registrar);
+        entity_parts::register(registrar);
+        // A command argument type whose arguments declare a suggestion provider: the game asks the
+        // provider through the nested handle (tests/fixture/src/suggestion_provider.rs).
+        registrar.register_command_argument("warps", suggestion_provider::WarpsArgument);
         registrar.register_custom_stat("steps").unwrap();
         if cx.mods().get("wasm_storage_attempt_observer").is_some() {
             storage_attempts::register(registrar);

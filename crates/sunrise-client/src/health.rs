@@ -29,6 +29,9 @@ pub(crate) type State = HurtState<DamageTypeId>;
 pub use crate::world::HealthRules;
 mod accepted_hit;
 mod attack;
+mod kill_credit;
+use kill_credit::Credit;
+pub use kill_credit::KnockbackCredit;
 mod hit_attempt;
 pub use accepted_hit::AcceptedHit;
 pub use attack::{damage_type, melee, mob_source, source_damage_type};
@@ -126,6 +129,9 @@ pub struct DamageLevel<'a> {
     /// Which entry of `LivingEntity.knockback` a push in progress came through, for
     /// `living_knockback` ([`Self::through_short_knockback`]).
     knock_entry: mod_api::KnockbackEntry,
+    /// Who a push credits: the site's per-victim loan, or [`KnockbackCredit`]'s memory
+    /// resolution where the level was built without one.
+    credit: Credit<'a>,
 }
 impl<'a> DamageLevel<'a> {
     /// The level of `world`, whose blocks `registry` names.
@@ -159,6 +165,7 @@ impl<'a> DamageLevel<'a> {
             attack: &NO_ATTACK,
             client_side: false,
             knock_entry: mod_api::KnockbackEntry::Full,
+            credit: Credit::Memory,
         }
     }
     /// The level of `world`, with the random and attachments `lent` took out of it.
@@ -184,6 +191,7 @@ impl<'a> DamageLevel<'a> {
             attack: &NO_ATTACK,
             client_side: false,
             knock_entry: mod_api::KnockbackEntry::Full,
+            credit: Credit::Memory,
         }
     }
     /// The same level, for a shorter borrow.
@@ -202,6 +210,7 @@ impl<'a> DamageLevel<'a> {
             attack: self.attack,
             client_side: self.client_side,
             knock_entry: self.knock_entry,
+            credit: self.credit.reborrow(),
         }
     }
     /// The same level with a task-local random, retaining its typed hook and attachment context.
@@ -223,8 +232,43 @@ impl<'a> DamageLevel<'a> {
             attack: self.attack,
             client_side: self.client_side,
             knock_entry: self.knock_entry,
+            credit: self.credit.reborrow(),
         }
     }
+    /// Lend the narrow credit context at a site that can make a living push.
+    pub fn with_knockback_credit(mut self, credit: &'a mut dyn KnockbackCredit) -> Self {
+        self.credit = Credit::Loan(credit);
+        self
+    }
+    /// Name a site that never makes a living push (a damage type tagged `no_knockback`, or a
+    /// check that pushes nothing).
+    pub fn no_push(mut self) -> Self {
+        self.credit = Credit::NoPush;
+        self
+    }
+    /// Commit this accepted hit's responsibility at vanilla's pre-push memory point.
+    pub fn accepted_mob_hit(&mut self, mob: &mut crate::mobs::Mob) {
+        if let Credit::Loan(credit) = &mut self.credit {
+            credit.accepted_mob_hit(mob);
+        }
+    }
+    /// Only the game bridge calls this after checking for a knockback subscriber. Without a
+    /// site's loan the credit comes from the pushed entity's own hurt memories and this hit's
+    /// attack ([`kill_credit::from_memory`]).
+    pub fn knockback_credit(
+        &self,
+        pushed: &Hurting<'_>,
+    ) -> (i32, Option<&crate::items::ItemStack>) {
+        match &self.credit {
+            Credit::Loan(credit) => credit.snapshot(pushed, self.attack),
+            Credit::Memory => kill_credit::from_memory(pushed, self.attack),
+            Credit::NoPush => {
+                debug_assert!(false, "living_knockback push from a no_push damage site");
+                kill_credit::from_memory(pushed, self.attack)
+            }
+        }
+    }
+
     /// Runs `push` as the short entry of `LivingEntity.knockback` (power and direction), which
     /// delegates to the full entry: the knockback hook, fired once inside the full entry, tells
     /// its listener the push came in as [`mod_api::KnockbackEntry::Short`]. A direct call of the
@@ -1902,15 +1946,10 @@ impl HurtWorld for Environment<'_> {
         Ok(())
     }
     fn damage_post(&mut self, _: &mut State, container: &DamageContainer) -> io::Result<()> {
-        let source = HurtSource {
-            damage_type: &self.source.definition().name,
-            causing: self.causing,
-            direct: self
-                .level
-                .attack()
-                .projectile_direct(&self.source.definition().name),
-            position: None,
-        };
+        let source = self
+            .level
+            .attack()
+            .player_source(&self.source.definition().name, self.causing);
         self.level
             .damage_post(Hurting::Player(self.entity, source), container);
         Ok(())

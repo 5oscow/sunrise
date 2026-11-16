@@ -69,6 +69,9 @@ use {
 
 pub const VERSION_NAME: &str = sunrise_core::VANILLA_VERSION;
 
+mod chunk_disk;
+#[cfg(test)]
+mod chunk_disk_tests;
 #[cfg(test)]
 mod compression_bench;
 mod compression_pool;
@@ -77,6 +80,8 @@ mod compression_tests;
 mod gateway;
 #[cfg(test)]
 mod loot_tests;
+mod record;
+use record::{Encoding, Record};
 
 /// Snapshot live block entities and custom names for a save batch without
 /// mutating the world. Each map is visited once, retaining its iteration order
@@ -2097,57 +2102,6 @@ fn region_path(root: &Path, folder: &str, rx: i32, rz: i32) -> PathBuf {
     root.join(format!("{folder}/r.{rx}.{rz}.mca"))
 }
 
-/// A record waiting for the writer thread.
-#[derive(Clone)]
-enum Record {
-    Tag(Arc<NamedTag>),
-    /// A chunk to encode on the writer thread.
-    /// The old chunk's calculated blending data is taken when the save is
-    /// requested ([`SaveDir::calculated_blending`]): a snapshot of that save.
-    Chunk(Arc<Chunk>, Arc<Encoding>, Option<Arc<BlendingData>>),
-    Proto(Arc<SavedProto>, Arc<Encoding>),
-    /// A chunk's points of interest, made on the writer thread against the
-    /// saved ones (`resolve_poi`).
-    Poi(
-        Arc<Chunk>,
-        Arc<SaveTables>,
-        Option<Arc<crate::mobs::villager::ResolvedProfessions>>,
-    ),
-    Delete,
-}
-/// What encoding a chunk needs, captured when it is queued.
-struct Encoding {
-    registry: &'static BlockRegistry,
-    biomes: Arc<Biomes>,
-    tables: Option<Arc<SaveTables>>,
-    shape: LevelShape,
-}
-impl Record {
-    fn tag(&self) -> Option<Arc<NamedTag>> {
-        match self {
-            Record::Tag(t) => Some(t.clone()),
-            Record::Chunk(c, e, blending) => Some(Arc::new(encode_saved(
-                c,
-                e.registry,
-                &e.biomes,
-                e.tables.as_deref(),
-                e.shape,
-                blending.as_deref(),
-            ))),
-            Record::Proto(p, e) => Some(Arc::new(encode_proto(
-                p,
-                e.registry,
-                &e.biomes,
-                e.tables.as_deref(),
-                e.shape,
-            ))),
-            Record::Poi(c, t, professions) => {
-                encode_poi(c, t, professions.as_deref()).map(Arc::new)
-            }
-            Record::Delete => None,
-        }
-    }
-}
 /// A queued POI record as it is written: claims kept from the saved one, and
 /// a chunk that lost its last POI gets an empty one, as vanilla trusts a
 /// saved section. None when the chunk never had any.
@@ -2308,6 +2262,7 @@ pub struct SaveDir {
     poi_regions: Arc<RegionCache>,
     pending: Arc<PendingWrites>,
     sequence: AtomicU64,
+    disk: OnceLock<Arc<chunk_disk::DiskRuntime>>,
     writer: Mutex<Option<Writer>>,
     outstanding: Arc<Outstanding>,
     /// Set by `Persistent` before the first load.
@@ -2469,6 +2424,7 @@ impl SaveDir {
             poi_regions: Default::default(),
             pending: Default::default(),
             sequence: AtomicU64::new(0),
+            disk: OnceLock::new(),
             writer: Mutex::new(None),
             outstanding: Default::default(),
             tables: OnceLock::new(),
@@ -2807,6 +2763,9 @@ impl SaveDir {
         };
         load_light(&root.tag, &mut chunk, self.shape.sky_light);
         chunk.entities = sunrise_world::chunk::legacy_entities(&root.tag);
+        // A failing load listener does not fail the load: the chunk keeps its stored attachments.
+        self.load_disk_attachments(&mut chunk, mod_api::ChunkDiskKind::Full)
+            .map_err(|_| ())?;
         Ok(Some(chunk))
     }
     /// A saved full chunk read for a player's far ring (`lan::far`), as `load` but past the gameplay
@@ -2839,7 +2798,10 @@ impl SaveDir {
     ) -> Option<SavedProto> {
         let root = self.read_record("region", x, z)?;
         let tables = self.tables.get().map(|t| &**t);
-        decode_proto(&root, registry, biomes, tables, self.shape.column())
+        let mut proto = decode_proto(&root, registry, biomes, tables, self.shape.column())?;
+        self.load_disk_attachments(&mut proto.column, mod_api::ChunkDiskKind::Proto)
+            .ok()?;
+        Some(proto)
     }
     /// Queue proto chunks for the writer thread; loads see them meanwhile.
     pub fn save_protos(
@@ -2884,6 +2846,9 @@ impl SaveDir {
         biomes: &Biomes,
     ) -> Result<usize> {
         biomes.ensure_saveable()?;
+        if let Some(result) = self.save_disk_sync(chunks, registry, biomes) {
+            return result;
+        }
         let tables = self.tables.get().map(|t| &**t);
         let records = chunks
             .iter()

@@ -50,7 +50,7 @@
 - [The mod SDK](reference/sdk.md)
 <!-- The hook-notes preprocessor supplies this chapter and its published URL from catalog notes. -->
 - [Hook notes]()
-<!-- The counterparts preprocessor renders the current declarations at the published URL. -->
+<!-- The counterparts preprocessor supplies this chapter and its published URL from catalog declarations. -->
 - [NeoForge counterparts]()
 - [The process, versions and game tests](reference/process-environment.md)
 - [Maths and network NBT](reference/maths-and-network-nbt.md)

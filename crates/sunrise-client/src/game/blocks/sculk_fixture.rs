@@ -748,9 +748,16 @@ impl Game<'_> {
                         .as_ref()
                         .map(|p| [p.position.x, p.position.y, p.position.z])
                         .unwrap_or_default();
+                    let attack = self.attack_of_who(Some(sunrise_client::mobs::Who::Player));
+                    let plan = self.prepare_knockback_credit(
+                        id as i32,
+                        Some(sunrise_client::mobs::Who::Player),
+                        &attack,
+                    );
+                    let mut credit = plan.lend(&mut self.last_hurt_by_player);
                     if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
                         m.damage(
-                            crate::game::entity::damage_level_of!(self),
+                            crate::game::entity::damage_level_of!(self, &attack, &mut credit),
                             amount,
                             sunrise_client::mobs::Damage::player(at),
                         );

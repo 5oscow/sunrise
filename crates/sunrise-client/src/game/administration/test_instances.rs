@@ -601,6 +601,7 @@ impl Game<'_> {
         let settings = TemplateSettings {
             mirror: Mirror::None,
             rotation,
+            pivot: [0; 3],
             ignore_entities: block.data.ignore_entities,
             known_shape: true,
             integrity: 1.0,

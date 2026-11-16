@@ -49,6 +49,29 @@ class GateTests(unittest.TestCase):
         for event in ("push", "schedule", "workflow_dispatch"):
             self.assertEqual(pr_gate.outputs(event, False, "", never_read)["heavy"], "true")
 
+    def test_checks_skips_exactly_the_pull_requests_the_heavy_gate_takes(self):
+        # Each pull request gets checks (ci.yml) or dyna-checks' heavy gate: never both, never neither.
+        import yaml
+
+        jobs = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())["jobs"]
+        conditions = {job["if"] for job in jobs.values() if "'pull_request'" in job.get("if", "")}
+        self.assertEqual(len(conditions), 1, "every pull-request job of checks skips the same pull requests")
+        condition = conditions.pop()
+        self.assertIn("!(github.event.pull_request.head.repo.full_name == github.repository && (", condition)
+        # dyna-checks' selection job takes a Dyna runner for exactly those pull requests, and GitHub's for the rest.
+        heavy = condition.split("!(", 1)[1].rsplit(")", 1)[0]
+        dyna = yaml.safe_load((ROOT / ".github/workflows/dyna-ci.yml").read_text())["jobs"]["changes"]["runs-on"]
+        self.assertIn(" ".join(heavy.split()), " ".join(dyna.split()))
+        prefixes = re.findall(r"startsWith\(github\.head_ref, '([^']+)'\)", condition)
+        labels = re.findall(r"contains\(github\.event\.pull_request\.labels\.\*\.name, '([^']+)'\)", condition)
+        refs = ["work", "rollupx", "sync/arismoko-pr-2886", "cfix-hooks-rollup-76"]
+        refs += [prefix + "9" for prefix in prefixes]
+        for same, label_set, ref in itertools.product((True, False), ([], ["rollup"], ["sync"], ["bug"]), refs):
+            with self.subTest(same=same, labels=label_set, ref=ref):
+                skipped = same and (ref.startswith(tuple(prefixes)) or bool(set(labels) & set(label_set)))
+                heavy = pr_gate.outputs("pull_request", same, "", never_read, labels=label_set, head_ref=ref)["heavy"]
+                self.assertEqual(skipped, heavy == "true")
+
     def test_a_dispatch_with_pr_runs_that_head_and_keeps_a_fork_off_our_runners(self):
         fork = pr_gate.outputs("workflow_dispatch", True, "3665", lambda n: {"sha": SHA, "same_repository": False})
         self.assertEqual(fork, {"heavy": "true", "pr_sha": SHA, "trusted": "false"})
@@ -79,7 +102,8 @@ class WorkflowTests(unittest.TestCase):
             self.assertIn("!inputs.pr", self.job(name), name)
 
     def test_cheap_jobs_run_without_the_heavy_gate(self):
-        self.assertNotIn("outputs.heavy", self.job("verify-static"))
+        # verify-static runs outside the gate too: only where it runs depends on the gate.
+        self.assertNotIn("outputs.heavy", self.job("verify-static").split("\n", 2)[1])
         self.assertIn("needs.changes.outputs.heavy != 'true'", self.job("format"))
         self.assertNotRegex(self.job("format"), r"cargo (clippy|build|test|check)")
 
@@ -120,15 +144,24 @@ class WorkflowTests(unittest.TestCase):
             for rust, forced, label, pool in itertools.product(("true", "false"), ("true", "false"),
                                                                ("", "boat"), ("all", "")):
                 outputs = {"rust_required": rust, "forced_github": forced, "hosted_label": label,
-                           "self_hosted": "false", "trusted": "false"}
+                           "self_hosted": "false", "trusted": "false", "heavy": "true"}
                 with self.subTest(job=name, outputs=outputs, pool=pool):
                     runner = self.runs_on(name, outputs, pool)
                     # verify-static, one of a contributor's two checks, never waits on a paid pool either.
                     self.assertIn(runner, ("ubuntu-latest",) if name == "verify-static" else ("ubuntu-latest", "boat"))
         # The control: the same expressions do reach our runners for a trusted head.
         trusted = {"rust_required": "true", "forced_github": "false", "hosted_label": "",
-                   "self_hosted": "true", "trusted": "true"}
+                   "self_hosted": "true", "trusted": "true", "heavy": "true"}
         self.assertEqual(self.runs_on("verify", trusted, "all"), "dyna-large")
+        self.assertEqual(self.runs_on("verify-static", trusted, "all"), "dyna-large")
+
+    def test_a_pull_request_outside_the_gate_gets_githubs_runner_for_verify_static(self):
+        # Our own branch, Rust changed, every switch pointing at our runners or boat: still GitHub's runner.
+        for rust, label, pool in itertools.product(("true", "false"), ("", "boat-large"), ("all", "")):
+            outputs = {"rust_required": rust, "forced_github": "false", "hosted_label": label,
+                       "self_hosted": "false", "trusted": "true", "heavy": "false"}
+            with self.subTest(rust=rust, label=label, pool=pool):
+                self.assertEqual(self.runs_on("verify-static", outputs, pool), "ubuntu-latest")
 
     def test_the_runner_script_hears_the_gates_trust(self):
         self.assertIn("SAME_REPO: ${{ steps.gate.outputs.trusted || (", self.job("changes"))
@@ -140,14 +173,20 @@ class WorkflowTests(unittest.TestCase):
                                     text=True, check=True)
             self.assertEqual(result.stdout.strip(), expected, same_repo)
 
-    def test_a_contributors_cheap_checks_run_on_githubs_runners(self):
-        # format and verify-static are all a fork pull request gets; a paid pool's balance must not fail them.
-        # format goes to Dyna only for this repository's code (trusted); a fork's stays on GitHub's runners.
-        self.assertIn("runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && needs.changes.outputs.trusted == 'true' "
-                      "&& 'dyna-small' || 'ubuntu-latest' }}\n", self.job("format"))
+    def test_a_pull_requests_cheap_checks_run_on_githubs_runners(self):
+        # format and verify-static are all a pull request outside the gate gets: nothing gates on them, so they leave
+        # Dyna's counted runners to the gates, and a paid pool's balance must not fail them.
+        self.assertIn("runs-on: ubuntu-latest\n", self.job("format"))
+        self.assertIn("self_hosted: ${{ steps.gate.outputs.heavy == 'true' && ", self.job("changes"))
+        # Outside the gate, the first term decides (Actions' || and && short-circuit): no switch, paid pool or boat
+        # label reached through the later terms can move verify-static, and boat's watcher never starts.
         static = self.job("verify-static")
+        self.assertIn("runs-on: ${{ needs.changes.outputs.heavy != 'true' && 'ubuntu-latest' || ", static)
+        self.assertIn("RUNNER_KIND: ${{ needs.changes.outputs.heavy != 'true' && 'github' || ", static)
+        self.assertIn("if: needs.changes.outputs.heavy == 'true' && ", self.job("boat-watch"))
+        # A contributor's dispatched pull request is heavy but untrusted: GitHub's runner too.
         self.assertIn("needs.changes.outputs.trusted != 'true' && 'ubuntu-latest' ||", static)
-        self.assertIn("RUNNER_KIND: ${{ needs.changes.outputs.trusted != 'true' && 'github' ||", static)
+        self.assertIn("|| needs.changes.outputs.trusted != 'true' && 'github' ||", static)
 
     def test_windows_jobs_run_daily_and_by_dispatch_only(self):
         import yaml

@@ -1,6 +1,15 @@
 # Entity parts and mob goals
 
-Use entity Parts in native mods. `r.entity_part` is absent from wasm builds.
+Entity Parts run in native mods in full. A wasm mod may also register one with `r.entity_part`, but
+only the part's `general_entity_tick` crosses: the goal, behavior, spawn-size and shear methods
+(`register_goals`, `register_behaviors`, `spawn_cluster_size`, `is_shearable`, `on_sheared`) are native-only.
+A wasm part that overrides one of them is refused at load by name, as
+`EntityPart::<method>: a wasm entity part crosses with its general_entity_tick alone`, instead of the
+override being silently never called.
+
+On wasm each general row keeps its own attachments, so two rows of one type share the part but not
+their state. A trap in a row's tick rolls that row's writes back and stops the mod's dependency group (the
+mod and the mods linked to it); the game keeps it stopped, and mods outside that group go on ticking.
 
 `r.entity_part("minecraft:zombie", ZombieGoals)` attaches an `EntityPart` to one entity type, a mod's
 own or vanilla's. Its method `register_goals` runs at every `Mob` construction of that type —

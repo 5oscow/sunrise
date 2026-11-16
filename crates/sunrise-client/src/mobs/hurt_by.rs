@@ -22,6 +22,16 @@ impl Ai {
         self.last_hurt_by_time = tick;
     }
 }
+impl Mob {
+    /// The last hurting entity within vanilla's inclusive hundred-tick credit window.
+    /// Resolving the reference and remembered-player precedence belong to the game.
+    pub fn recent_hurt_by(&self) -> Option<Who> {
+        self.ai
+            .last_hurt_by
+            .filter(|_| (self.age as i32).wrapping_sub(self.ai.last_hurt_by_time) <= 100)
+    }
+}
+
 /// `LivingEntity.resolveMobResponsibleForDamage` and
 /// `resolvePlayerResponsibleForDamage` after a hit landed: a mob's hit names
 /// its attacker, unless the type is in `#no_anger` (`DamageTypeTagsProvider`

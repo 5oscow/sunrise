@@ -15,7 +15,10 @@ pub trait Hooks {
     /// this scoped tick path, dispatch reads the entities available in the game
     /// host rather than this snapshot.
     /// A stale or invalid replacement, including a fake player, is refused.
-    /// Authoritative server only.
+    /// Authoritative server only. When piglins turn on a player who took guarded
+    /// gold, the game reads the end of its mob list again at each step and finds each
+    /// piglin again by its entity id after the hook; a piglin that is removed is
+    /// skipped.
     #[hook(
         side = "server",
         contract = "cancel",

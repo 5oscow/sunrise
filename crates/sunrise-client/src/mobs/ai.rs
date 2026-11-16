@@ -4,7 +4,9 @@
 pub(crate) use freezing::in_powder_snow;
 pub use freezing::{can_freeze, wears_gaze_disguise};
 mod feeding;
+mod flower_contact;
 mod freezing;
+use flower_contact::flower_contact_effects;
 
 pub use feeding::takes_food;
 
@@ -1393,33 +1395,15 @@ pub(crate) fn effects_from_blocks(
         level,
         events: &mut *events,
     };
-    let lo = start_box.min_position();
-    let hi = start_box.max_position();
-    for x in lo.x.floor() as i32..=hi.x.floor() as i32 {
-        for y in lo.y.floor() as i32..=hi.y.floor() as i32 {
-            for z in lo.z.floor() as i32..=hi.z.floor() as i32 {
-                let at = sunrise_core::position::BlockPos::new(x, y, z);
-                let state = w.world.block(x, y, z);
-                let solid = w.registry.state(state).is_none_or(|d| {
-                    !matches!(
-                        d.name.as_str(),
-                        "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air"
-                    )
-                });
-                if solid
-                    && visited.insert(at.pack())
-                    && let Ok(()) = crate::block_contact::InsideWalk::entity_inside(
-                        &mut inside,
-                        at,
-                        state,
-                        0,
-                        false,
-                        &mut effects,
-                    )
-                {}
-            }
-        }
-    }
+    // The shared decision's stationary pass: the step stays 0 and rough, the
+    // pass's moments share the walk's first step.
+    let _ = crate::block_contact::visit_box_cells(
+        &mut inside,
+        start_box,
+        start,
+        &mut visited,
+        &mut effects,
+    );
     let _ =
         crate::block_contact::sweep_movements(&mut inside, &movements, &mut visited, &mut effects);
     let MobInside { m, level, .. } = inside;
@@ -1484,6 +1468,7 @@ struct MobInside<'a, 'w, 'l> {
 }
 
 impl crate::block_contact::InsideWalk for MobInside<'_, '_, '_> {
+    type Effects = mod_api::InsideEffects;
     type Error = ();
     fn bounds_at(&self, at: Vec3) -> sunrise_core::geometry::Aabb {
         self.m.bounds_at(at)
@@ -3722,51 +3707,6 @@ pub fn custom_travel(
         Family::Nautilus => super::nautilus::travel(m, w, level, input, events),
         _ => false,
     }
-}
-
-/// `Entity.applyEffectsFromBlocks` for the flowers that give an effect:
-/// `WitherRoseBlock.entityInside` (wither for 40 ticks on a living mob that
-/// can take it, not in peaceful) and `EyeblossomBlock.entityInside` (poison
-/// for 25 ticks on a bee, when the open flower attracts bees). The blocks are
-/// the ones the mob's box passes through along this tick's move, as
-/// `Entity.checkInsideBlocks` sweeps it, so a mob falling past a flower is
-/// inside it on the way.
-fn flower_contact_effects(m: &mut Mob, w: &MobWorld) {
-    if !m.alive() {
-        return;
-    }
-    let box_at_end = m
-        .bounds_at(m.position)
-        .deflate(Vec3::new(1.0e-5, 1.0e-5, 1.0e-5));
-    let _ = sunrise_core::geometry::sweep_intersected_blocks(
-        m.previous,
-        m.position,
-        box_at_end,
-        1 << 22,
-        |p, _| {
-            match w.block_name(p.x, p.y, p.z) {
-                "minecraft:wither_rose" => {
-                    // World difficulty, not the regional one, and
-                    // isInvulnerableTo(wither) (the invulnerable
-                    // flag, not the hit timer); a wither and a wither
-                    // skeleton refuse the effect in `addEffect`.
-                    if w.difficulty.base != 0 && !m.invulnerable_flag {
-                        m.add_effect("minecraft:wither", 40, 0);
-                    }
-                }
-                "minecraft:open_eyeblossom"
-                    if m.species() == Species::Bee
-                        && super::bee::attracts_bees(w, [p.x, p.y, p.z])
-                        && !m.has_effect("minecraft:poison") =>
-                {
-                    m.add_effect("minecraft:poison", 25, 0);
-                }
-                _ => {}
-            }
-            // `checkInsideBlocks` stops the sweep once the entity is dead.
-            m.alive()
-        },
-    );
 }
 
 /// MobEffect ticking for the effects mobs receive (poison, wither,

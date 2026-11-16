@@ -135,6 +135,8 @@ impl Game<'_> {
         if let Some(host) = self.lan.as_ref() {
             host.hub.finish_captured_sounds();
         }
+        // A stop whose removal waited for these sounds follows that removal (#4522).
+        self.run_tracking_after_sounds();
     }
 
     pub(super) fn send_captured_level_sound(

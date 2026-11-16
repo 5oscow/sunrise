@@ -4,6 +4,9 @@ impl<R: RandomSource> Context<'_, R> {
     /// the table has a mod's kind, so the random stays untouched without.
     pub(super) fn native_ctx(&mut self) -> LootContext<'_> {
         let seed = self.random.next_long();
+        self.roll_facts(seed)
+    }
+    pub(super) fn roll_facts(&self, seed: i64) -> LootContext<'_> {
         LootContext {
             queried_table_id: self.query.id(),
             queried_stack: self.query.queried_stack.clone(),
@@ -56,9 +59,7 @@ impl LootData {
             entity: None,
             enchanted_level: None,
         };
-        let mut items = Vec::new();
-        c.table_raw(table, json, &mut |c, stack| c.data.split(stack, &mut items));
-        c.query.finish(Some(table));
+        let items = c.roll_root(Some(table), json);
         *random = c.random;
         items
     }
@@ -80,11 +81,7 @@ impl LootData {
             entity: None,
             enchanted_level: None,
         };
-        let mut items = Vec::new();
-        c.table_raw("<root>", table, &mut |c, stack| {
-            c.data.split(stack, &mut items)
-        });
-        c.query.finish(None);
+        let items = c.roll_root(None, table);
         *random = c.random;
         items
     }

@@ -1,6 +1,6 @@
 //! Entities that join a level between tracking passes (`ChunkMap.addEntity`): paired as they
 //! joined, before their first tick.
-use super::{Hub, entity_type};
+use super::{Hub, entity_type, take_tracking, tracking_pass};
 use crate::lan::entity::EntityState;
 
 impl Hub {
@@ -46,8 +46,25 @@ impl Hub {
             entity_type(types, sync, kind)
         });
         drop(viewers);
-        for (g, out) in self.guests.iter().filter(|g| self.here(g)).zip(&mut outs) {
-            g.sender.send_many(out.drain(..));
+        // As a tracking pass's: held for the game while a mod listens (`tracking_pass`).
+        let hold = tracking_pass::tracking_listened();
+        let here: Vec<usize> = (0..self.guests.len())
+            .filter(|&i| self.here(&self.guests[i]))
+            .collect();
+        for (i, out) in here.into_iter().zip(&mut outs) {
+            if hold && self.guests[i].tracker.cut() {
+                self.guests.update(i, |g| {
+                    take_tracking(
+                        g,
+                        &mut self.native_tracking,
+                        &mut self.attachment_snapshots,
+                        self.sync_attachments,
+                        Some(std::mem::take(out)),
+                    );
+                });
+            } else {
+                self.guests[i].sender.send_many(out.drain(..));
+            }
         }
     }
 }

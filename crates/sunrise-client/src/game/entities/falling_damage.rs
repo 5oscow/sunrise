@@ -29,13 +29,27 @@ impl Game<'_> {
                     position: Some([block.position.x, block.position.y, block.position.z]),
                     ..Default::default()
                 };
-                falling_block::hurt_mobs_with_kind(
-                    crate::game::entity::damage_level_of!(self, &attack),
-                    &mut self.mobs,
-                    block.position,
-                    impact.amount,
-                    mob_kind,
-                );
+                for index in 0..self.mobs.len() {
+                    if !self.mobs[index].alive()
+                        || !falling_block::bounds(block.position)
+                            .intersects(self.mobs[index].bounds())
+                    {
+                        continue;
+                    }
+                    let plan = self.prepare_knockback_credit(
+                        self.mobs[index].id as i32,
+                        None,
+                        self.combat.attack(),
+                    );
+                    let mut credit = plan.lend(&mut self.last_hurt_by_player);
+                    falling_block::hurt_mobs_with_kind(
+                        crate::game::entity::damage_level_of!(self, &attack, &mut credit),
+                        [&mut self.mobs[index]],
+                        block.position,
+                        impact.amount,
+                        mob_kind,
+                    );
+                }
                 // Enderman.hurtServer: a falling block is no living attacker.
                 if let Err(e) = self.settle_hurt_teleports() {
                     log::warn!("Sunrise: falling block: enderman teleport: {e}");

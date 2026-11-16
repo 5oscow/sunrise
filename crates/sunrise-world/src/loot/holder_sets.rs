@@ -242,7 +242,7 @@ impl Binding {
         }
         for (kind, entries) in [
             ("item_modifier", &mut data.modifiers),
-            ("predicate", &mut data.predicates),
+            ("predicate", Arc::make_mut(&mut data.predicates)),
         ] {
             for (id, value) in entries {
                 self.walk(&format!("{kind} {id}"), value, &data.tags)?;

@@ -27,6 +27,9 @@ env:
 jobs:
   route:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read  # the run's creation time (tools/ci/dyna_ci_route.sh)
     timeout-minutes: 5
     outputs:
       self_hosted: ${{ steps.runner.outputs.self_hosted }}
@@ -34,13 +37,17 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      # The pool's switch and lease (tools/ci/dyna_ci_route.sh): a snapshot is judged at the run's creation, so a
+      # run that waited in a concurrency group or GitHub's queue is not sent off the pool by a lease that lapsed
+      # meanwhile.
       - id: runner
         env:
-          ENABLED: ${{ vars.DYNA_CI_SELF_HOSTED }}
-          LEASE: ${{ vars.DYNA_CI_POOL_UNTIL }}
+          GH_TOKEN: ${{ github.token }}
+          VARS_ENABLED: ${{ vars.DYNA_CI_SELF_HOSTED }}
+          VARS_LEASE: ${{ vars.DYNA_CI_POOL_UNTIL }}
           SAME_REPO: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
           EVENT: ${{ github.event_name }}
-        run: bash tools/ci/dyna_ci_runner.sh >> "$GITHUB_OUTPUT"
+        run: bash tools/ci/dyna_ci_route.sh >> "$GITHUB_OUTPUT"
   build:
     needs: route
     # Dyna's large runner, as lint used, when the pool is up; GitHub's otherwise.

@@ -1699,7 +1699,7 @@ impl Game<'_> {
             direct: direct_entity,
             position: from.map(|p| [p.x, p.y, p.z]),
         };
-        let level = super::entity::damage_level_of!(self, scoped);
+        let level = super::entity::damage_level_of!(self, self.combat.attack(), no_push);
         let reaches_base = self.dragon.as_ref().is_some_and(|d| {
             d.reaches_base_check(
                 BODY,
@@ -1720,7 +1720,7 @@ impl Game<'_> {
                 let Some(d) = self.dragon.as_mut().filter(|d| d.id == id) else {
                     return false;
                 };
-                let level = super::entity::damage_level_of!(self, scoped);
+                let level = super::entity::damage_level_of!(self, self.combat.attack(), no_push);
                 return matches!(
                     d.hurt_from(
                         level,
@@ -1892,7 +1892,7 @@ impl Game<'_> {
             let creative = self.creative_source_of(attacker);
             let vanilla =
                 self.saved_refuses_damage(id, hit_source.damage_type, creative) || is_fire(kind);
-            let level = super::entity::damage_level_of!(self, scoped);
+            let level = super::entity::damage_level_of!(self, self.combat.attack(), no_push);
             if level.invulnerability_check(
                 sunrise_client::health::Hurting::Dragon(id as i32, hit_source),
                 vanilla,
@@ -1900,12 +1900,18 @@ impl Game<'_> {
                 return Hurt::Refused;
             }
         }
+        let plan = self.prepare_knockback_credit(
+            self.dragon.as_ref().map_or(0, |d| d.id) as i32,
+            None,
+            self.combat.attack(),
+        );
+        let mut credit = plan.lend(&mut self.last_hurt_by_player);
         let Some(d) = self.dragon.as_mut() else {
             return Hurt::Refused;
         };
         let was_down = d.down();
         let (cooldown, last_hurt) = (d.invulnerable, d.last_hurt);
-        let level = super::entity::damage_level_of!(self, scoped);
+        let level = super::entity::damage_level_of!(self, self.combat.attack(), &mut credit);
         let hurt = d.hurt_part_from(
             level,
             part,
@@ -2995,8 +3001,18 @@ impl Game<'_> {
             // part's list in turn, so Thorns' level and dragon draws follow it.
             for part in 0..4 {
                 for (index, &allowed) in allowed.iter().enumerate() {
+                    let plan = self.prepare_knockback_credit(
+                        self.mobs[index].id as i32,
+                        Some(Who::Mob(frame.dragon_id)),
+                        self.combat.attack(),
+                    );
+                    let mut credit = plan.lend(&mut self.last_hurt_by_player);
                     if sunrise_client::mobs::dragon_contacts::contact_part(
-                        crate::game::entity::damage_level_of!(self),
+                        crate::game::entity::damage_level_of!(
+                            self,
+                            &sunrise_client::health::NO_ATTACK,
+                            &mut credit
+                        ),
                         &mut self.mobs[index],
                         &frame,
                         allowed,
@@ -3375,7 +3391,9 @@ impl Game<'_> {
             else {
                 return true;
             };
-            let bar = bar.try_into_api().unwrap();
+            let Ok(bar) = bar.try_into_api() else {
+                return true;
+            };
             let mut cancel = false;
             self.native_customize_boss_event_progress(
                 &bar,

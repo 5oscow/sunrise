@@ -277,10 +277,16 @@ pub(crate) fn install_client_hooks() {
             }
             let reader = sunrise_client_render::api_context::LoopReader(context);
             let context = reader.context();
-            let username = username.try_into_api().unwrap();
-            let mut converted = displayname.try_into_api().unwrap();
+            let Ok(username) = username.try_into_api() else {
+                return;
+            };
+            let Ok(mut converted) = displayname.try_into_api() else {
+                return;
+            };
             mod_api::dispatch_player_name_format(&context, &username, &mut converted);
-            *displayname = converted.try_into_engine(&()).unwrap();
+            if let Ok(converted) = converted.try_into_engine(&()) {
+                *displayname = converted;
+            }
         },
         player_tab_list_name_format: |context, player, name, display_name| {
             use game::api_values::{TryIntoApi, TryIntoEngine};
@@ -289,9 +295,13 @@ pub(crate) fn install_client_hooks() {
             }
             let reader = sunrise_client_render::api_context::LoopReader(context);
             let context = reader.context();
-            let mut converted = display_name.try_into_api().unwrap();
+            let Ok(mut converted) = display_name.try_into_api() else {
+                return;
+            };
             mod_api::dispatch_player_tab_list_name_format(&context, player, name, &mut converted);
-            *display_name = converted.try_into_engine(&()).unwrap();
+            if let Ok(converted) = converted.try_into_engine(&()) {
+                *display_name = converted;
+            }
         },
         living_drown: |context, entity, kind, is_drowning, damage_amount, bubble_count, cancel| {
             if !mod_api::__private::listened(mod_api::HookId::LivingDrown) {
@@ -449,5 +459,139 @@ mod installation_tests {
             ]
         );
         assert!(super::installation_refusals(&[]).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod name_conversion_tests {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+    use sunrise_client_core::text::Text;
+    use sunrise_world::native_load_context::{DataLoadOrigin, LoadContext, LoadInputs, LoopSide};
+
+    // Both crossing directions reject a component tree deeper than 512 nodes.
+    fn deep_engine_text() -> Text {
+        let mut value = serde_json::json!({"text": "leaf"});
+        for _ in 0..mod_api::text::MAX_TEXT_DEPTH {
+            let mut parent = serde_json::Map::new();
+            parent.insert("text".into(), "parent".into());
+            parent.insert("extra".into(), serde_json::Value::Array(vec![value]));
+            value = serde_json::Value::Object(parent);
+        }
+        Text::empty().with_component(value)
+    }
+
+    fn deep_api_text() -> mod_api::Text {
+        let mut value = mod_api::Text::literal("leaf");
+        for _ in 0..mod_api::text::MAX_TEXT_DEPTH {
+            value = mod_api::Text::literal("parent").append(value);
+        }
+        value
+    }
+
+    struct InvalidNames(Arc<AtomicUsize>);
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for InvalidNames {
+        fn player_name_format(
+            &self,
+            _: &dyn mod_api::LoopContext,
+            event: &mut mod_api::PlayerNameFormatEvent<'_>,
+        ) {
+            self.0.fetch_add(1, Ordering::Relaxed);
+            *event.displayname = deep_api_text();
+        }
+        fn player_tab_list_name_format(
+            &self,
+            _: &dyn mod_api::LoopContext,
+            event: &mut mod_api::PlayerTabListNameFormatEvent<'_>,
+        ) {
+            self.0.fetch_add(1, Ordering::Relaxed);
+            *event.display_name = Some(deep_api_text());
+        }
+    }
+
+    fn with_names(
+        test: impl FnOnce(&sunrise_world::native_load_context::LoopContext, &AtomicUsize),
+    ) {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mods = vec![mod_api::ModEntry::new(
+            "invalid-names",
+            Box::new(InvalidNames(calls.clone())),
+        )]
+        .into();
+        mod_platform::testing::with_mods(mods, || {
+            super::install_client_hooks();
+            let inputs = Arc::new(LoadInputs::new(Default::default(), Default::default()));
+            let context = LoadContext::new(DataLoadOrigin::ServerDataLoad, inputs, [])
+                .loop_context(LoopSide::Server, []);
+            test(&context, &calls);
+        });
+    }
+
+    #[test]
+    fn player_name_conversion_failure_keeps_the_engine_name() {
+        with_names(|context, calls| {
+            let username = Text::literal("Steve");
+            let original = Text::literal("Original");
+            let deep = deep_engine_text();
+            let mut display = original.clone();
+            sunrise_client_lib::lan::hub::native_player_name_format(context, &deep, &mut display);
+            assert_eq!(display.component(), original.component());
+            assert_eq!(calls.load(Ordering::Relaxed), 0);
+
+            display = deep.clone();
+            sunrise_client_lib::lan::hub::native_player_name_format(
+                context,
+                &username,
+                &mut display,
+            );
+            assert_eq!(display.component_view(), deep.component_view());
+            assert_eq!(calls.load(Ordering::Relaxed), 0);
+
+            display = original.clone();
+            sunrise_client_lib::lan::hub::native_player_name_format(
+                context,
+                &username,
+                &mut display,
+            );
+            assert_eq!(calls.load(Ordering::Relaxed), 1);
+            assert_eq!(display.component(), original.component());
+        });
+    }
+
+    #[test]
+    fn tab_list_name_conversion_failure_keeps_the_engine_name() {
+        with_names(|context, calls| {
+            let deep = deep_engine_text();
+            let mut display = Some(deep.clone());
+            sunrise_client_lib::lan::hub::native_player_tab_list_name_format(
+                context,
+                1,
+                "Steve",
+                &mut display,
+            );
+            assert_eq!(
+                display.as_ref().unwrap().component_view(),
+                deep.component_view()
+            );
+            assert_eq!(calls.load(Ordering::Relaxed), 0);
+
+            for original in [None, Some(Text::literal("Original"))] {
+                display = original.clone();
+                sunrise_client_lib::lan::hub::native_player_tab_list_name_format(
+                    context,
+                    1,
+                    "Steve",
+                    &mut display,
+                );
+                assert_eq!(
+                    display.as_ref().map(Text::component),
+                    original.as_ref().map(Text::component)
+                );
+            }
+            assert_eq!(calls.load(Ordering::Relaxed), 2);
+        });
     }
 }

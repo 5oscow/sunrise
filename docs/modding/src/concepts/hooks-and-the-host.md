@@ -114,6 +114,12 @@ fn living_incoming_damage(
 }
 ```
 
+For incoming damage, `event.weapon` is the direct entity's weapon, including a projectile's
+saved firing weapon. `event.causing_weapon` is instead the causing living entity's current
+main-hand weapon (`DamageSource.getEntity().getWeaponItem()`): an off-hand crossbow shot can
+name the saved crossbow in `weapon` and the shooter's main-hand sword in `causing_weapon`.
+An absent, unknown or non-living cause has no `causing_weapon`.
+
 The event is a generated struct named after the catalog hook, in CamelCase plus `Event`, with
 the hook point's arguments as public fields: values as values and borrowed ones as references (`event.kind`). A
 number or `bool` a mod may change is a plain field, written back once every mod has run, even after a `Cancel`;
@@ -186,6 +192,18 @@ in `mod_api`. Raw GPU access is native-only, unstable and outside that API, in
 `mod_render::render` (`sunrise-mod-render`). Replace its frame functions with native HEAD mixins compiled against the prebuilt game.
 `render_needs` collects requests; `world_drawn` runs before the hand and HUD, and
 `hand_drawn` runs after the hand, on the render thread. Use API draw contexts for API-typed drawing.
+
+## After a hook that can change the world
+
+A listener of a hook that gets a mutable host may remove, move or change objects. After such a hook
+returns without cancelling, the game does not use the list position or the state it worked out before
+the hook. It finds the object again by its entity id, checks the facts the action was decided on, and
+abandons the action if the object is gone or a fact changed; it never works the action out again. The
+hook still fires at its usual moment, and the check runs straight after it returns, before anything
+moves. Stack checks are shallow: they compare the item id and the count, not components. Each hook's
+doc names what it checks (`armor_stand_manipulate`, `entity_mount`, `cauldron_level_changed`,
+`hanging_break`, `player_shear_entity`, `living_change_target`). The effect writes on a living handle
+treat a mob that is marked removed but still listed as absent: they return false and change nothing.
 
 ## Hooks and injections
 

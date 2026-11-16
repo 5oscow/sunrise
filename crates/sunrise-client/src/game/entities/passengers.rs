@@ -1705,6 +1705,7 @@ mod nested_vehicle_discard_tests {
         );
         assert_eq!(
             host.attachment_query("vehicle_boundary", "value")
+                .unwrap()
                 .query(&VEHICLE_VALUE)
                 .unwrap()
                 .iter()
@@ -1722,6 +1723,16 @@ mod nested_vehicle_discard_tests {
     }
     #[mod_api::__subscriptions]
     impl mod_api::Hooks for RemovalBoundaryObserver {
+        fn register(
+            &self,
+            registrar: &mut dyn mod_api::Registrar,
+            _: &mod_api::RegistrationContext,
+        ) {
+            registrar
+                .register_attachment_type("vehicle_boundary:value", false)
+                .unwrap();
+        }
+
         fn entity_mount(
             &self,
             host: &mut dyn mod_api::ServerHost,
@@ -1735,7 +1746,12 @@ mod nested_vehicle_discard_tests {
                 let level = host.level("minecraft:overworld").unwrap();
                 let removed = mod_api::EntityRef::new(level.epoch(), 71);
                 assert!(removed.position(host).is_none());
-                assert!(!host.entity(73).unwrap().start_riding(host, removed, true));
+                assert!(
+                    host.entity(73)
+                        .unwrap()
+                        .start_riding(host, removed, true)
+                        .is_err()
+                );
                 if self.cancel.load(Ordering::Relaxed) {
                     return mod_api::Flow::Cancel;
                 }
@@ -1780,7 +1796,7 @@ mod nested_vehicle_discard_tests {
             let leaves = Arc::new(AtomicUsize::new(0));
             let destroys = Arc::new(AtomicUsize::new(0));
             let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
-                "removal_boundary",
+                "vehicle_boundary",
                 Box::new(RemovalBoundaryObserver {
                     kind,
                     cancel: cancel.clone(),
@@ -2018,6 +2034,16 @@ mod nested_vehicle_discard_tests {
     }
     #[mod_api::__subscriptions]
     impl mod_api::Hooks for ObserveDestroyedVehicle {
+        fn register(
+            &self,
+            registrar: &mut dyn mod_api::Registrar,
+            _: &mod_api::RegistrationContext,
+        ) {
+            registrar
+                .register_attachment_type("vehicle_boundary:value", false)
+                .unwrap();
+        }
+
         fn entity_mount(
             &self,
             host: &mut dyn mod_api::ServerHost,
@@ -2030,7 +2056,7 @@ mod nested_vehicle_discard_tests {
                     "execute if entity @e[type=minecraft:{}]",
                     self.kind
                 )));
-                let batch = host.attachment_query("vehicle_boundary", "value");
+                let batch = host.attachment_query("vehicle_boundary", "value").unwrap();
                 assert_eq!(batch.query(&VEHICLE_VALUE).unwrap().iter().count(), 0);
                 return mod_api::Flow::Cancel;
             }
@@ -2045,7 +2071,7 @@ mod nested_vehicle_discard_tests {
             let calls = Arc::new(AtomicUsize::new(0));
             let kind = if cart { "minecart" } else { "oak_boat" };
             let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
-                "observe_destroyed_vehicle",
+                "vehicle_boundary",
                 Box::new(ObserveDestroyedVehicle {
                     kind,
                     calls: calls.clone(),
@@ -2061,6 +2087,7 @@ mod nested_vehicle_discard_tests {
                     bind_vehicle_test_attachment(game, cart);
                     assert_eq!(
                         game.attachment_query("vehicle_boundary", "value")
+                            .unwrap()
                             .query(&VEHICLE_VALUE)
                             .unwrap()
                             .iter()
@@ -2109,7 +2136,7 @@ mod nested_vehicle_discard_tests {
                     let command = format!("execute if entity @e[type=minecraft:{kind}]");
                     assert!(game.run_command(&command));
                     bind_vehicle_test_attachment(game, cart);
-                    let batch = game.attachment_query("vehicle_boundary", "value");
+                    let batch = game.attachment_query("vehicle_boundary", "value").unwrap();
                     assert_eq!(batch.query(&VEHICLE_VALUE).unwrap().iter().count(), 1);
                     let vehicle = game.entity(71).unwrap();
                     if cart {
@@ -2128,7 +2155,7 @@ mod nested_vehicle_discard_tests {
                     assert!(game.native_entity_target(vehicle).is_none());
                     assert!(game.entity_passengers(vehicle).is_none());
                     assert!(!game.run_command(&command));
-                    let batch = game.attachment_query("vehicle_boundary", "value");
+                    let batch = game.attachment_query("vehicle_boundary", "value").unwrap();
                     assert_eq!(batch.query(&VEHICLE_VALUE).unwrap().iter().count(), 0);
                 });
             });
@@ -2403,7 +2430,7 @@ mod nested_vehicle_discard_tests {
             if !event.mounting && event.entity == 72 {
                 let later = host.entity(73).unwrap();
                 let replacement = host.entity(74).unwrap();
-                assert!(later.start_riding(host, replacement, true));
+                assert!(later.start_riding(host, replacement, true).is_ok());
                 return mod_api::Flow::Cancel;
             }
             mod_api::Flow::Continue
@@ -2551,7 +2578,7 @@ mod nested_vehicle_discard_tests {
                 host.entity(71).unwrap().discard(host);
                 let rider = host.entity(72).unwrap();
                 let replacement = host.entity(74).unwrap();
-                assert!(rider.start_riding(host, replacement, true));
+                assert!(rider.start_riding(host, replacement, true).is_ok());
             }
             mod_api::Flow::Continue
         }

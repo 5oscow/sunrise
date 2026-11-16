@@ -13,10 +13,10 @@ use crate::{
     projectiles::{Hit, Projectile, ProjectileKind},
     world::World,
 };
-use std::{collections::HashSet, fmt};
+use std::fmt;
 use sunrise_core::nbt::Tag;
 use sunrise_core::{
-    geometry::{Aabb, Direction, Vec3, sweep_intersected_blocks},
+    geometry::{Aabb, Direction, Vec3},
     position::BlockPos,
     random::RandomSource,
 };
@@ -558,20 +558,56 @@ pub fn arrow_bounds(at: Vec3) -> Aabb {
 /// (`Entity.checkInsideBlocks`: the sweep of its box, 16 steps at most), for
 /// the blocks that react to it (`entityInside`).
 pub fn blocks_inside(from: Vec3, to: Vec3) -> Vec<BlockPos> {
-    let deflated = bounds(to).deflate(Vec3::new(
-        f64::from(1.0e-5f32),
-        f64::from(1.0e-5f32),
-        f64::from(1.0e-5f32),
-    ));
-    let mut inside = Vec::new();
-    let _ = sweep_intersected_blocks(from, to, deflated, 1_000_000, |p, iteration| {
-        if iteration >= 16 {
-            return false;
-        }
-        inside.push(p);
+    let mut cells = ArrowCells(Vec::new());
+    let _ = crate::block_contact::sweep_inside_blocks(
+        &mut cells,
+        from,
+        to,
+        &mut crate::fast_hash::FxHashSet::default(),
+        &mut NoSteps,
+        16,
+    );
+    cells.0
+}
+/// A collector that queues nothing: the cells alone are asked for.
+struct NoSteps;
+impl crate::block_contact::StepCollector for NoSteps {
+    fn advance_step(&mut self, _: i32) {}
+}
+/// The shared walk over every cell an arrow's box sweeps, air included, each
+/// the whole block, for the blocks that react to it.
+struct ArrowCells(Vec<BlockPos>);
+impl crate::block_contact::InsideWalk for ArrowCells {
+    type Effects = NoSteps;
+    type Error = std::convert::Infallible;
+    const DEFLATE: f64 = 1.0e-5_f32 as f64;
+    fn bounds_at(&self, at: Vec3) -> Aabb {
+        bounds(at)
+    }
+    fn is_alive(&self) -> bool {
         true
-    });
-    inside
+    }
+    fn block(&self, _: BlockPos) -> BlockStateId {
+        BlockStateId(0)
+    }
+    fn is_air(&self, _: BlockStateId) -> bool {
+        // Every swept cell is reported, whatever is in it.
+        false
+    }
+    fn inside_shape(&mut self, _: BlockStateId, _: BlockPos) -> crate::block_contact::InsideShape {
+        crate::block_contact::InsideShape::Full
+    }
+    fn entity_inside(
+        &mut self,
+        at: BlockPos,
+        _: BlockStateId,
+        _: i32,
+        _: bool,
+        _: &mut NoSteps,
+    ) -> Result<(), std::convert::Infallible> {
+        self.0.push(at);
+        Ok(())
+    }
 }
 /// `Projectile.lerpRotation`.
 pub fn lerp_rotation(mut old: f32, new: f32) -> f32 {
@@ -1284,12 +1320,24 @@ impl ArrowScene<'_, '_> {
         mut visit: impl FnMut(BlockStateId, BlockPos, bool),
     ) -> (i32, bool) {
         let previous_fire = fire_ticks;
-        let mut visited = HashSet::new();
+        let mut visited = crate::fast_hash::FxHashSet::default();
         let mut effects = Collector::default();
-        let used = self.check_inside_blocks(from, to, &mut visited, &mut effects, 16, &mut visit);
-        if 16 - used <= 0 {
-            self.check_inside_blocks(to, to, &mut visited, &mut effects, 1, &mut visit);
-        }
+        let mut walk = ArrowInside {
+            scene: self,
+            visit: &mut visit,
+        };
+        // The shared walk: one movement with no original, its 16-iteration
+        // budget, then the target alone when the budget ran out.
+        let _ = crate::block_contact::sweep_movements(
+            &mut walk,
+            &[sunrise_world::entity_move::MovementRecord {
+                from,
+                to,
+                original: None,
+            }],
+            &mut visited,
+            &mut effects,
+        );
         for effect in effects.finish() {
             match effect {
                 Effect::ClearFreeze => {}
@@ -1317,74 +1365,6 @@ impl ArrowScene<'_, '_> {
         }
         (fire_ticks, extinguished)
     }
-    /// `Entity.checkInsideBlocks(from, to, ...)`: returns the iterations used.
-    fn check_inside_blocks(
-        &self,
-        from: Vec3,
-        to: Vec3,
-        visited: &mut HashSet<BlockPos>,
-        effects: &mut Collector,
-        max_iterations: i32,
-        visit: &mut impl FnMut(BlockStateId, BlockPos, bool),
-    ) -> i32 {
-        let deflated = bounds(to).deflate(Vec3::new(
-            f64::from(1.0e-5f32),
-            f64::from(1.0e-5f32),
-            f64::from(1.0e-5f32),
-        ));
-        let far = from.distance_squared(to) > 0.999_990_000_000_252_6f64 * 0.999_990_000_000_252_6;
-        let mut hits = Vec::new();
-        let mut iterations = 0;
-        let _ = sweep_intersected_blocks(from, to, deflated, 1_000_000, |p, iteration| {
-            if iteration >= max_iterations {
-                return false;
-            }
-            iterations = iteration;
-            hits.push((p, iteration));
-            true
-        });
-        for (p, step) in hits {
-            let state = self.block(p);
-            if self.is_air(state) {
-                continue;
-            }
-            // getEntityInsideCollisionShape: the whole block for these.
-            let inside_block = true;
-            let fluid = self.fluids.fluid(state);
-            let inside_fluid = self.collided_with_fluid(fluid, p, from, to);
-            if !(inside_block || inside_fluid) || !visited.insert(p) {
-                continue;
-            }
-            effects.advance(step);
-            let name = &*self.facts.get(state).name;
-            let precise = far
-                || deflated.intersects(Aabb::new(
-                    Vec3::new(f64::from(p.x), f64::from(p.y), f64::from(p.z)),
-                    Vec3::new(f64::from(p.x + 1), f64::from(p.y + 1), f64::from(p.z + 1)),
-                ));
-            visit(state, p, precise);
-            if matches!(name, "minecraft:fire" | "minecraft:soul_fire") {
-                // BaseFireBlock.entityInside (its inFire hurt does nothing to arrows).
-                effects.apply(Effect::ClearFreeze);
-                effects.apply(Effect::FireIgnite);
-            }
-            if inside_fluid {
-                effects.advance(step);
-                match fluid.kind() {
-                    // WaterFluid.entityInside.
-                    FluidKind::Water | FluidKind::FlowingWater => effects.apply(Effect::Extinguish),
-                    // LavaFluid.entityInside (lavaHurt does nothing to arrows).
-                    FluidKind::Lava | FluidKind::FlowingLava => {
-                        effects.apply(Effect::ClearFreeze);
-                        effects.apply(Effect::LavaIgnite);
-                    }
-                    // A mod's fluid does nothing to an entity inside it.
-                    FluidKind::Empty | FluidKind::Mod(_) | FluidKind::ModFlowing(_) => {}
-                }
-            }
-        }
-        iterations + 1
-    }
     /// `Entity.collidedWithFluid`: the fluid's box swept from `from` to `to`.
     fn collided_with_fluid(&self, fluid: FluidState, p: BlockPos, from: Vec3, to: Vec3) -> bool {
         if fluid.kind() == FluidKind::Empty {
@@ -1403,6 +1383,78 @@ impl ArrowScene<'_, '_> {
             ),
         );
         bounds(from).collided_along_vector(to.subtract(from), &[b])
+    }
+}
+/// An arrow's view of the shared inside walk: the scene's blocks, every block
+/// the whole block, the bubble column and contact hooks through `visit`, the
+/// fire's and the fluid's own effects queued into the arrow's collector.
+struct ArrowInside<'s, 'a, 'b, F> {
+    scene: &'s ArrowScene<'a, 'b>,
+    visit: &'s mut F,
+}
+impl<F: FnMut(BlockStateId, BlockPos, bool)> crate::block_contact::InsideWalk
+    for ArrowInside<'_, '_, '_, F>
+{
+    type Effects = Collector;
+    type Error = std::convert::Infallible;
+    const DEFLATE: f64 = 1.0e-5_f32 as f64;
+    fn bounds_at(&self, at: Vec3) -> Aabb {
+        bounds(at)
+    }
+    fn is_alive(&self) -> bool {
+        true
+    }
+    fn block(&self, at: BlockPos) -> BlockStateId {
+        self.scene.block(at)
+    }
+    fn is_air(&self, state: BlockStateId) -> bool {
+        self.scene.is_air(state)
+    }
+    fn inside_shape(&mut self, _: BlockStateId, _: BlockPos) -> crate::block_contact::InsideShape {
+        // getEntityInsideCollisionShape: the whole block for these.
+        crate::block_contact::InsideShape::Full
+    }
+    fn collided_with_fluid(&self, at: BlockPos, from: Vec3, to: Vec3) -> bool {
+        let fluid = self.scene.fluids.fluid(self.scene.block(at));
+        self.scene.collided_with_fluid(fluid, at, from, to)
+    }
+    fn entity_inside(
+        &mut self,
+        at: BlockPos,
+        state: BlockStateId,
+        _: i32,
+        precise: bool,
+        effects: &mut Collector,
+    ) -> Result<(), std::convert::Infallible> {
+        (self.visit)(state, at, precise);
+        if matches!(
+            &*self.scene.facts.get(state).name,
+            "minecraft:fire" | "minecraft:soul_fire"
+        ) {
+            // BaseFireBlock.entityInside (its inFire hurt does nothing to arrows).
+            effects.apply(Effect::ClearFreeze);
+            effects.apply(Effect::FireIgnite);
+        }
+        Ok(())
+    }
+    fn fluid_inside(
+        &mut self,
+        at: BlockPos,
+        _: i32,
+        effects: &mut Collector,
+    ) -> Result<(), std::convert::Infallible> {
+        match self.scene.fluids.fluid(self.scene.block(at)).kind() {
+            // WaterFluid.entityInside.
+            FluidKind::Water | FluidKind::FlowingWater => effects.apply(Effect::Extinguish),
+            // LavaFluid.entityInside (lavaHurt does nothing to arrows).
+            FluidKind::Lava | FluidKind::FlowingLava => {
+                effects.apply(Effect::ClearFreeze);
+                effects.apply(Effect::LavaIgnite);
+            }
+            // A mod's fluid does nothing to an entity inside it.
+            FluidKind::Empty | FluidKind::Mod(_) | FluidKind::ModFlowing(_) => {}
+        }
+        Ok(())
     }
 }
 impl FluidHeightWorld for &ArrowScene<'_, '_> {
@@ -1448,13 +1500,15 @@ impl Default for Collector {
         }
     }
 }
-impl Collector {
-    fn advance(&mut self, step: i32) {
+impl crate::block_contact::StepCollector for Collector {
+    fn advance_step(&mut self, step: i32) {
         if self.last_step != step {
             self.last_step = step;
             self.flush();
         }
     }
+}
+impl Collector {
     fn apply(&mut self, effect: Effect) {
         self.step[effect as usize] = true;
     }

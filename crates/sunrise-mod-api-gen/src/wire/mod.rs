@@ -51,10 +51,12 @@ pub(super) const IMPORTS: &[&str] = &[
     "DataLoadContext",
     "LoopContext",
     "WorldgenHost",
+    "ChunkDiskHost",
     "GenerationContext",
     "PieceContext",
     "StructureRandom",
     "AttachmentStore",
+    "AttachmentDeclarations",
     "ServerReloadListeners",
     "GameTests",
     "ClientReloadListeners",
@@ -90,6 +92,12 @@ pub(super) const REACHED: &[(&str, &str, &str)] = &[
     ("ClientSession", "client_host", "Ok(h.client_session())"),
     ("RenderAssets", "client_host", "Ok(h.render_assets())"),
     ("InstanceGroups", "client_host", "Ok(h.instance_groups())"),
+    // Type metadata belongs to load, so retained snapshots need no live world host.
+    (
+        "AttachmentDeclarations",
+        "",
+        "Ok(crate::__private::attachment_declarations())",
+    ),
     // A level hook's host first: inside a level write it is the one the call hands over.
     (
         "AttachmentStore",
@@ -143,6 +151,7 @@ const EXPORTS: &[&str] = &[
     "ItemPart",
     "MenuPart",
     "FluidPart",
+    "EntityPart",
     "ServerReloadListener",
     "LoadCondition",
     "GameTestFunction",
@@ -205,7 +214,7 @@ const WORKERS: &[&str] = &[
 /// What a call of `method` is to the runtime, for its limits and its wait. A method given the
 /// worldgen context (`alter_ground`, a worldgen Part method) runs on the worldgen workers too.
 pub(super) fn call_class(types: &ty::Types<'_>, method: &Method) -> &'static str {
-    if WORKERS.contains(&method.owner) || takes(types, method, &["WorldgenHost"]) {
+    if WORKERS.contains(&method.owner) || takes(types, method, &["WorldgenHost", "ChunkDiskHost"]) {
         "super::Call::Worker"
     } else if takes(types, method, LOAD_CONTEXTS) {
         "super::Call::Load"
@@ -273,6 +282,7 @@ pub(super) const SUBSCRIBED: &[(&str, &str)] = &[
     ("ItemPart", "item_subscribed"),
     ("MenuPart", "menu_subscribed"),
     ("FluidPart", "fluid_subscribed"),
+    ("EntityPart", "entity_subscribed"),
 ];
 
 /// One trait method as it crosses.
@@ -1106,6 +1116,62 @@ mod tests {
                     page.contains("Required gap total: 0."),
                     "required boundary methods must not silently lose coverage"
                 );
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+    /// #792 stage 4b: an entity part crosses to wasm with its tick alone — the
+    /// five native-only methods are excused off the surface, and the registrar
+    /// call that attaches a wasm mod's part crosses.
+    #[test]
+    #[ignore = "daily"]
+    fn entity_part_crosses_to_wasm_with_its_tick_alone() {
+        std::thread::Builder::new()
+            .stack_size(64 << 20)
+            .spawn(|| {
+                let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+                let generated = crate::sources(&root, crate::FillMode::Require).unwrap();
+                let included = [
+                    ("mod_api_generated.rs", generated.hooks.as_str()),
+                    ("mod_api_generated_host.rs", generated.host.as_str()),
+                    ("mod_api_host_areas.rs", generated.areas.as_str()),
+                ];
+                let providers = crate::capability_providers::generate(&root, &included)
+                    .unwrap()
+                    .0;
+                let mut surface_included = included.to_vec();
+                surface_included.push(("capability_providers_generated.rs", providers.as_str()));
+                let surface = super::surface(&root, &surface_included).unwrap();
+                let crosses = |owner: &str, name: &str| {
+                    surface
+                        .methods
+                        .iter()
+                        .any(|m| m.owner == owner && m.name == name)
+                };
+                assert!(
+                    crosses("EntityPart", "general_entity_tick"),
+                    "the general entity tick crosses"
+                );
+                assert!(
+                    crosses("Registrar", "attach_entity_part"),
+                    "a wasm mod's part registers"
+                );
+                for name in [
+                    "register_goals",
+                    "register_behaviors",
+                    "spawn_cluster_size",
+                    "is_shearable",
+                    "on_sheared",
+                ] {
+                    assert!(
+                        surface
+                            .dropped
+                            .iter()
+                            .any(|m| m.owner == "EntityPart" && m.name == name),
+                        "EntityPart::{name} stays off wasm"
+                    );
+                }
             })
             .unwrap()
             .join()

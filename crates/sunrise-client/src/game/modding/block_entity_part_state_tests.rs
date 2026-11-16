@@ -67,6 +67,8 @@ struct StateMod;
 #[mod_api::__subscriptions]
 impl Hooks for StateMod {
     fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
+        r.register_attachment_type("part_state:progress", false)
+            .unwrap();
         let kind = r
             .block_entity_type("press")
             .blocks(&["part_state:press"])
@@ -225,7 +227,7 @@ fn part_state_is_per_block_entity_through_ticks_transactions_and_replacement() {
             name: "progress",
             error: AttachmentError::Decode,
         };
-        assert_eq!(Press::state(game, b), Err(decode));
+        assert_eq!(Press::state(game, b), Err(decode.clone()));
         let mut ran = false;
         game.world.modified.clear();
         assert_eq!(Press::edit_state(game, b, |_, _| ran = true), Err(decode));

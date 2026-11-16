@@ -711,6 +711,7 @@ impl Game<'_> {
                 .clone(),
             generate.as_ref(),
         )?;
+        self.bind_chunk_disk_worker(&save, dim);
         save.install_profession_snapshot(self.stations().professions.clone());
         if let Some(terrain) = &locator {
             terrain.set_mob_maps(self.mob_map_snapshot());

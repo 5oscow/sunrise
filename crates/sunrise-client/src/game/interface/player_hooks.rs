@@ -301,7 +301,8 @@ impl PlayerDraw for DrawPlayer<'_, '_> {
             let mut poses = Poses::pooled();
             poses.reset(self.body());
             let data = self.game.res.mob_data();
-            let state = anim::state(self.m, self.alpha);
+            let state = anim::state(self.m, self.alpha)
+                .observed(self.m, render::RenderDataSource::humanoid_setup(self.game));
             anim::setup(self.m, &state, &mut poses, &data.animations);
             self.body = Some(poses);
         }

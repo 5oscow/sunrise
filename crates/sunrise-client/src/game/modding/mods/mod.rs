@@ -80,6 +80,8 @@ pub(super) struct ModsState {
         Arc<std::sync::OnceLock<Result<crate::game::load_conditions::ConditionTable, String>>>,
     pub(super) profession_declarations:
         Arc<std::sync::OnceLock<Vec<(String, mod_api::ProfessionDefinition)>>>,
+    pub(super) loot_modifier_serializers:
+        Arc<std::sync::OnceLock<super::global_loot_modifiers::Serializers>>,
     /// Saved switches gate the first data inventory while registration keeps
     /// its existing startup ordering. Runtime dispatch owns later switches.
     pub(super) code_switches: Option<Arc<CodeSwitches>>,
@@ -544,7 +546,11 @@ fn register_special_model_renderers() {
     );
     super::native_special_renderers::register(
         kept.into_iter()
-            .filter_map(|kind| renderers.remove(&kind).map(|renderer| (kind, renderer)))
+            .filter_map(|kind| {
+                renderers
+                    .remove(&kind)
+                    .map(|(policy, renderer)| (kind, policy, renderer))
+            })
             .collect(),
     );
 }
@@ -989,7 +995,10 @@ mod particle_registry_reload_tests {
 /// The content root with everything the mods declare registered against the
 /// process: block entities, mob effects, entity and menu types, fluid looks,
 /// and the protocol's local mod list, each set once.
-pub(super) fn content_root(
+///
+/// `pub(in crate::game)`: the general entity tick's wasm tests
+/// (`game::entities::general::tick_tests`) build the fixture's game the same way.
+pub(in crate::game) fn content_root(
     root: &std::path::Path,
     sources: &ModsState,
 ) -> sunrise_client::Result<sunrise_assets::resource_source::ResourceRoot> {
