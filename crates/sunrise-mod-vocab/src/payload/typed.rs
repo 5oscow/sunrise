@@ -203,10 +203,7 @@ impl<T: PayloadCodec> ToClient<T> {
         player: PlayerRef,
         value: &T,
     ) -> Result<PayloadAccepted, PayloadSendError> {
-        self.token
-            .claims(self.value_schema, PayloadDirection::ToClient)?;
-        host.check_payload_token(&self.token)?;
-        let body = self.token.body(value)?;
+        let body = self.encode(host, value)?;
         player.send_payload(host, &self.token.id, body)
     }
 
