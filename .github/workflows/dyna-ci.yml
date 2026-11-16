@@ -1133,7 +1133,9 @@ jobs:
         run: bash tools/ci/dyna_ci_deps.sh
       # Written from this workflow's own revision, never from the tested tree: an older head's helper would stream a
       # harness's output (vanilla's values) into the public log. Every `python` this job's steps run goes to a log on
-      # the runner's slot; the job log gets the harness names with PASS or FAIL, and the exit status is kept.
+      # the runner's slot; the job log gets the harness names with PASS or FAIL, and the exit status is kept. A failure's
+      # logs (a failing script's, and each failing harness's from tools/parity.py) are copied to the slot's parity-keep,
+      # which the next job's setup does not wipe, so they can still be read on the host after the slot is reused.
       - name: Keep harness output on the runner
         run: |
           mkdir -p "$DYNA_CI_BUILD/bin"
@@ -1149,7 +1151,16 @@ jobs:
           status=$?
           rm -rf "$DYNA_CI_BUILD"/parity-out/rust-*
           if [ "$name" = parity ]; then grep -aoE '^(PASS|FAIL|RETRIED|FLAKY) [a-z0-9_#]+' "$log" || true; fi
-          if [ "$status" -eq 0 ]; then echo "PASS $name"; else echo "FAIL $name (exit $status; its log stays on the runner: $log)"; fi
+          if [ "$status" -eq 0 ]; then echo "PASS $name"; exit 0; fi
+          keep="$DYNA_CI_BUILD/parity-keep/$GITHUB_RUN_ID"
+          mkdir -p "$keep"
+          cp "$log" "$keep/"
+          if [ "$name" = parity ]; then
+            for harness in $(grep -aoE '^FAIL [a-z0-9_#]+' "$log" | cut -d' ' -f2 | sort -u); do
+              cp "$GITHUB_WORKSPACE/.local/parity-runner/logs/$harness.log" "$keep/" 2>/dev/null || true
+            done
+          fi
+          echo "FAIL $name (exit $status; its logs are kept on runner $RUNNER_NAME in $keep)"
           exit "$status"
           SH
           chmod +x "$DYNA_CI_BUILD/bin/python"
@@ -1504,3 +1515,13 @@ jobs:
       - name: Compare float logarithms at domain and rounding boundaries
         if: inputs.harnesses == ''
         run: python tools/test_float_log_parity.py
+      # Failure logs kept on the slot (see "Keep harness output on the runner") stay three days, then go.
+      - name: Prune kept failure logs
+        if: always()
+        run: |
+          keep="$DYNA_CI_BUILD/parity-keep"
+          [ -d "$keep" ] || exit 0
+          find "$keep" -mindepth 1 -maxdepth 1 -type d -mmin +4320 -exec rm -rf {} +
+          if [ -d "$keep/$GITHUB_RUN_ID" ]; then
+            echo "Failure logs of run $GITHUB_RUN_ID are kept on runner $RUNNER_NAME in $keep/$GITHUB_RUN_ID" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
