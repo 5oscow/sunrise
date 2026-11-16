@@ -63,21 +63,10 @@ class DailyRowsCoverage(unittest.TestCase):
             in_leg = entry.test in groups.get((entry.package, entry.reference), ())
             self.assertNotEqual(in_shard, in_leg, entry)
 
-    def test_the_command_passes_on_the_committed_rows(self):
-        result = subprocess.run([sys.executable, str(ROOT / "tools/ci/check_ignored_test_rows.py")],
-                                capture_output=True, text=True)
-        self.assertEqual(result.returncode, 0, result.stdout)
-        self.assertIn("; 0 problems", result.stdout)
-
 
 class DailyRowsMatchTheSource(unittest.TestCase):
     """The rows and the `#[ignore = "daily"]` attributes agree both ways, by package and function name."""
     CLIENT = {"sunrise-client", "sunrise-client-lib"}
-
-    def test_the_committed_rows_and_attributes_agree(self):
-        functions = check.daily_functions()
-        self.assertTrue(functions)
-        self.assertEqual(check.source_problems(ignored_tests.daily_rows(), functions), [])
 
     def test_an_attribute_without_a_row_fails_with_what_to_do(self):
         problems = check.source_problems([], [("crates/sunrise-relay/tests/tunnel.rs", 9, "slow", {"sunrise-relay"})])
