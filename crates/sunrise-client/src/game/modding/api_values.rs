@@ -1073,6 +1073,30 @@ impl TryIntoApi for crate::crafting::FireworkShapeIngredient {
         ))
     }
 }
+/// A recipe listing crosses one entry at a time: one unrepresentable recipe must not
+/// hide the rest of its type. Other collection conversions remain all-or-nothing.
+#[derive(Default)]
+pub(in crate::game) struct RecipeListing(pub std::sync::Arc<[crate::crafting::RecipeSnapshot]>);
+impl TryIntoApi for RecipeListing {
+    type Api = std::sync::Arc<[mod_api::Recipe]>;
+    type Error = std::convert::Infallible;
+    fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
+        Ok(self
+            .0
+            .iter()
+            .filter_map(|recipe| match recipe.try_into_api() {
+                Ok(recipe) => Some(recipe),
+                Err(reason) => {
+                    log::debug!(
+                        "Skipping recipe {} in the mod API listing: {reason:?}",
+                        recipe.id
+                    );
+                    None
+                }
+            })
+            .collect())
+    }
+}
 impl TryIntoApi for crate::crafting::RecipeSnapshot {
     type Api = mod_api::Recipe;
     type Error = StackReadError;
@@ -1633,6 +1657,39 @@ fn prepare_stack_boundary_tests() {
         "minecraft:potion",
     ])
     .unwrap();
+}
+
+#[cfg(test)]
+mod recipe_listing_tests {
+    use super::*;
+    #[test]
+    fn a_bad_recipe_does_not_hide_the_good_recipe_of_its_type() {
+        let mut registries = mod_api::testing::FakeRegistries::default();
+        registries
+            .resolve_items([mod_api::Identifier::parse("minecraft:stick").unwrap()])
+            .unwrap();
+        let mut good = crate::crafting::RecipeSnapshot::new(
+            "example:good",
+            "example:machine",
+            serde_json::json!({}).into(),
+        );
+        good.results = vec![EngineStack::new("minecraft:stick", 1)];
+        let mut bad = crate::crafting::RecipeSnapshot::new(
+            "example:bad",
+            "example:machine",
+            serde_json::json!({}).into(),
+        );
+        bad.results = vec![EngineStack::new("example:unknown", 1)];
+        let entries = RecipeListing(vec![good, bad].into())
+            .try_into_api()
+            .unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].id, "example:good");
+        assert_eq!(
+            mod_api::__private::item_key_id(entries[0].results[0].item()),
+            Some("minecraft:stick")
+        );
+    }
 }
 
 #[cfg(test)]
