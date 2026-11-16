@@ -1478,7 +1478,7 @@ mod tests {
     }
 
     #[test]
-    fn a_recipe_with_an_unknown_ingredient_kind_stays_out_of_the_book() {
+    fn a_recipe_with_an_unknown_ingredient_kind_refuses_the_load_before_the_book() {
         let root = resources(
             "mymod_kind",
             &[(
@@ -1489,25 +1489,20 @@ mod tests {
                 "result":{"id":"minecraft:copper_ingot"}}"#,
             )],
         );
-        let defaults = sunrise_world::item_defaults::read(&root).unwrap();
-        let sync = SyncData::load(
+        // No mod registers `mymod:x`, so the source load refuses, naming the file and
+        // the kind, and no sources reach SyncData or the book.
+        let error = crate::crafting::ResolvedSources::load(
             &root,
             &sunrise_world::loot::PackOverlay::NONE,
-            &defaults,
-            &crate::test_resources::server_sources(&root, &sunrise_world::loot::PackOverlay::NONE),
+            &crate::test_resources::server_load(),
         )
-        .unwrap();
+        .err()
+        .unwrap()
+        .to_string();
+        assert!(error.contains("mymod_kind.json"), "{error}");
         assert!(
-            !sync
-                .advancements
-                .recipes
-                .contains_key("minecraft:mymod_kind"),
-            "the network copy drops the recipe"
-        );
-        assert!(
-            sync.advancements
-                .book_entries("minecraft:mymod_kind", &sync, NOTIFY_AND_HIGHLIGHT)
-                .is_empty()
+            error.contains("ingredient kind mymod:x is not registered by any mod"),
+            "{error}"
         );
         let _ = std::fs::remove_dir_all(&root);
     }
