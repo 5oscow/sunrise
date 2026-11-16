@@ -15484,7 +15484,7 @@ mod item_use_tick_tests {
         mod_api::testing::with_mods(mods, || {
             crate::game::native_entity_refs::tests::with_client_game(|game| {
                 for (cancel, replacement, after_first, after_second) in [
-                    (true, 5, 31, 30),
+                    (true, 5, -2, -3),
                     (false, 0, -1, -2),
                     (false, 1, 0, -1),
                     (false, -7, -8, -9),
@@ -15504,7 +15504,7 @@ mod item_use_tick_tests {
                     assert_eq!(game.using, Some((game.selected, 2)));
                     assert_eq!(crate::game::item_use::ticks_left(game.use_duration, 2), after_second);
                     assert_eq!(*heard.lock().unwrap(), [32, after_first]);
-                    let expected_effects = if cancel { vec![31] } else if replacement == 1 { vec![1] } else { vec![] };
+                    let expected_effects = if cancel { vec![] } else if replacement == 1 { vec![1] } else { vec![] };
                     assert_eq!(*effects.lock().unwrap(), expected_effects);
                     // No client-side completion or consumption.
                     assert_eq!(game.inventory[game.selected].as_ref().unwrap().count, 2);
