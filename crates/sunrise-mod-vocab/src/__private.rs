@@ -386,6 +386,7 @@ pub mod game {
         }
     }
 
+    #[non_exhaustive]
     pub struct ObjectiveRefFields {
         pub epoch: WorldEpoch,
         pub id: u64,
