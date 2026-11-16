@@ -194,9 +194,9 @@ struct RuleAnswer {
     menu: String,
     slot: usize,
     stack: ItemStack,
-    question: (bool, u32),
+    question: (bool, bool, u32),
     context: ContextKey,
-    answer: (bool, u32),
+    answer: (bool, bool, u32),
 }
 
 /// The parts of a [`SlotContext`] that can change during one click: an answer is reused only
@@ -235,9 +235,9 @@ impl RuleAnswers {
         menu: &str,
         slot: usize,
         stack: &ItemStack,
-        question: (bool, u32),
+        question: (bool, bool, u32),
         context: &ContextKey,
-    ) -> Option<(bool, u32)> {
+    ) -> Option<(bool, bool, u32)> {
         self.answers
             .borrow()
             .iter()
@@ -269,16 +269,17 @@ impl SlotRules for PlanningRules<'_> {
         stack: &ItemStack,
         context: SlotContext<'_>,
         may_place: &mut bool,
+        may_pickup: &mut bool,
         max_stack: &mut u32,
     ) {
-        let question = (*may_place, *max_stack);
+        let question = (*may_place, *may_pickup, *max_stack);
         let key = ContextKey::of(&context);
         if let Some(found) = self.answers.find(menu, slot, stack, question, &key) {
-            (*may_place, *max_stack) = found;
+            (*may_place, *may_pickup, *max_stack) = found;
             return;
         }
         if let Some(rules) = self.rules {
-            rules.rule(menu, slot, stack, context, may_place, max_stack);
+            rules.rule(menu, slot, stack, context, may_place, may_pickup, max_stack);
         }
         self.answers.asked.set(self.answers.asked.get() + 1);
         self.answers.answers.borrow_mut().push(RuleAnswer {
@@ -287,7 +288,7 @@ impl SlotRules for PlanningRules<'_> {
             stack: stack.clone(),
             question,
             context: key,
-            answer: (*may_place, *max_stack),
+            answer: (*may_place, *may_pickup, *max_stack),
         });
     }
 }
@@ -307,14 +308,18 @@ impl SlotRules for StoredRules<'_> {
         stack: &ItemStack,
         context: SlotContext<'_>,
         may_place: &mut bool,
+        may_pickup: &mut bool,
         max_stack: &mut u32,
     ) {
         let key = ContextKey::of(&context);
-        match self
-            .0
-            .find(menu, slot, stack, (*may_place, *max_stack), &key)
-        {
-            Some(found) => (*may_place, *max_stack) = found,
+        match self.0.find(
+            menu,
+            slot,
+            stack,
+            (*may_place, *may_pickup, *max_stack),
+            &key,
+        ) {
+            Some(found) => (*may_place, *may_pickup, *max_stack) = found,
             None => self.0.missed.set(self.0.missed.get() + 1),
         }
     }

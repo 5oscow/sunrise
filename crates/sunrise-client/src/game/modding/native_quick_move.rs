@@ -469,7 +469,7 @@ impl Game<'_> {
         if applied {
             Some((handled.get(), asked))
         } else {
-            untaken.get().then(|| (false, asked))
+            untaken.get().then_some((false, asked))
         }
     }
 }
