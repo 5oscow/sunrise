@@ -577,6 +577,21 @@ fn with_detached_credit(
 }
 
 fn credit_pig(game: &mut super::Game<'_>) {
+    game.world.health_rules.difficulty = sunrise_world::food::Difficulty::Normal;
+    game.world
+        .chunks
+        .insert((0, 0), Arc::new(sunrise_client::chunk::Chunk::empty(0, 0)));
+    game.tickets
+        .update(Some(sunrise_client::ticket_levels::Sources {
+            players: vec![(0, 0)],
+            forced: Vec::new(),
+            portal: Vec::new(),
+            dragon: None,
+            viewed: Vec::new(),
+            view_distance: 2,
+            simulation_distance: 2,
+        }));
+    assert!(game.entity_ticking_area()(0, 0));
     let kind = game.res.mob_types().get("minecraft:pig").unwrap().clone();
     let mut pig = Mob::new(100, kind, Vec3::ZERO, 0.0);
     pig.no_ai = true;
