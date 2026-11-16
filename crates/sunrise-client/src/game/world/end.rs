@@ -1041,6 +1041,16 @@ impl Game<'_> {
 
     /// TheEndGatewayBlockEntity.findTallestBlock.
     fn tallest_block(&self, around: [i32; 3], dist: i32, allow_bedrock: bool) -> [i32; 3] {
+        self.tallest_block_in(&self.world, around, dist, allow_bedrock)
+    }
+    /// [`Self::tallest_block`] in the loaded level `world`.
+    pub(in crate::game) fn tallest_block_in(
+        &self,
+        world: &sunrise_client::world::World,
+        around: [i32; 3],
+        dist: i32,
+        allow_bedrock: bool,
+    ) -> [i32; 3] {
         let mut tallest: Option<[i32; 3]> = None;
         for xd in -dist..=dist {
             for zd in -dist..=dist {
@@ -1051,7 +1061,7 @@ impl Game<'_> {
                 let mut y = 255;
                 while y > floor {
                     let p = [around[0] + xd, y, around[2] + zd];
-                    let f = self.res.facts().get(self.world.block(p[0], p[1], p[2]));
+                    let f = self.res.facts().get(world.block(p[0], p[1], p[2]));
                     if f.full_collision && (allow_bedrock || &*f.name != "minecraft:bedrock") {
                         tallest = Some(p);
                         break;
