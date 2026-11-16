@@ -8,8 +8,9 @@ no edit to SUMMARY.md, and check every page's links.
 - A page directly in one of FOLDERS that SUMMARY.md doesn't list joins the end of its part, by title.
 - Every relative link, reference destination and `{{#include}}` must reach a file (or a generated
   chapter) and, for a page, an existing heading anchor; root-relative links are refused.
-- An absolute URL naming the game's repository or the book's site names `sunrise-org`; Horizon's own
-  projects (the machine sample, the mixins tool, the registry) keep their links.
+- An absolute URL naming the game's repository or the book's `/sunrise` site names `sunrise-org`;
+  Horizon's own projects (the machine sample, the mixins tool, the registry and its
+  `horizon-rust.github.io/horizon-mods` page) keep their links.
 - A page the book doesn't render, or one titled as a design, a plan or a work list, fails the build.
 """
 import argparse
@@ -27,11 +28,13 @@ SRC = ROOT / "docs/modding/src"
 LINK = re.compile(r"(\!?\[[^\n]*?\]\()([^\s)]+)(\))")
 REFERENCE = re.compile(r"^( {0,3}\[[^\]\n]+\]:[ \t]*<?)([^\s>]+)(>?)", re.MULTILINE)
 INCLUDE = re.compile(r"(\{\{#(?:rustdoc_)?include )([^ }]+)(\s*\}\})")
-# The game repository and the book's Pages site are this repository's. A sub-project under another owner
-# (`horizon-machine-sample`, `horizon-mixins`, `horizon-mods`) is an upstream project and keeps its link.
+# The game repository and the book's Pages site are this repository's. The site's pages are the ones under
+# `/sunrise`: a page beside them (`horizon-rust.github.io/horizon-mods`) belongs to an upstream project and
+# keeps its link, as does a sub-project under another owner (`horizon-machine-sample`, `horizon-mixins`,
+# `horizon-mods`).
 STALE_URL = re.compile(
     r"https?://(?:github\.com/(?:arismoko|horizon-rust)/horizon(?![\w.-])"
-    r"|(?:arismoko|horizon-rust)\.github\.io/)"
+    r"|(?:arismoko|horizon-rust)\.github\.io/sunrise(?![\w.-]))"
 )
 # Each page directly in one of these folders is a chapter of the part: the pages SUMMARY.md lists keep
 # their place, the rest follow in title order.

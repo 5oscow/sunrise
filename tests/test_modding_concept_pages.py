@@ -142,6 +142,7 @@ class ConceptPages(unittest.TestCase):
         for url in ("https://github.com/arismoko/horizon-machine-sample",
                     "https://github.com/horizon-rust/horizon-mixins/blob/main/docs/mixin-api.md",
                     "https://github.com/horizon-rust/horizon-mods/releases/download/x/y.hmod",
+                    "https://horizon-rust.github.io/horizon-mods/icons/coords_hud.png",
                     "https://github.com/OWNER/REPO/releases/download/<tag>/<name>"):
             with self.subTest(url=url):
                 pages.validate(f"[x]({url})", "concepts/parts/a-item.md", self.src, {})

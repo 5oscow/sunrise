@@ -10,7 +10,13 @@ from pathlib import Path
 DRY = "--dry-run" in sys.argv
 os.chdir(Path(__file__).resolve().parent.parent)
 
-SKIP_FILES = re.compile(r"(^|/)(LICENSE[^/]*|LICENSES/.*|NOTICE[^/]*|COPYING[^/]*|CLA\.md|GOVERNANCE\.md)$|^tools/rebrand\.py$|^tests/fixtures/launcher-upstream/identity\.json$")
+# Files whose strings name an old URL on purpose: the modding book's stale-URL guard and its fixtures. A run
+# that rewrote them would leave a guard that passes because it no longer recognises what it refuses.
+SKIP_FILES = re.compile(
+    r"(^|/)(LICENSE[^/]*|LICENSES/.*|NOTICE[^/]*|COPYING[^/]*|CLA\.md|GOVERNANCE\.md)$"
+    r"|^tools/rebrand\.py$|^tests/fixtures/launcher-upstream/identity\.json$"
+    r"|^tools/modding_concept_pages\.py$|^tests/test_modding_concept_pages\.py$"
+    r"|^tests/test_modding_book_links\.py$")
 
 PROTECT = [
     # Real repositories and their pages. Horizon's own projects (the machine sample, the mixins tool,

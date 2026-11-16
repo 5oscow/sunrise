@@ -8,7 +8,8 @@ BOOK = ROOT / "docs" / "modding"
 AUTHORING_GUIDE = ROOT / "docs" / "modding-book.md"
 
 GAME_REPO = re.compile(r"https://github\.com/(?:arismoko|horizon-rust)/horizon(?![\w.-])")
-STALE_SITE = re.compile(r"https://(?:arismoko|horizon-rust)\.github\.io/")
+# The book's pages are the ones under `/sunrise`; `horizon-rust.github.io/horizon-mods` is the registry's.
+STALE_SITE = re.compile(r"https://(?:arismoko|horizon-rust)\.github\.io/sunrise(?![\w.-])")
 INSTALL = re.compile(r"cargo\s+(?:install|binstall)\b[^\n]*\bcargo-sunrise-mod\b")
 GIT_SOURCE = re.compile(r"--git\s+(\S+)")
 UPSTREAM_PROJECTS = (
@@ -38,6 +39,12 @@ class BookLinkTests(unittest.TestCase):
             for url in STALE_SITE.findall(line):
                 with self.subTest(page=page.relative_to(ROOT), line=number):
                     self.fail(f"stale book site URL {url}")
+
+    def test_the_registry_page_beside_the_book_is_not_the_book_site(self):
+        for url in ("https://horizon-rust.github.io/horizon-mods/", "https://sunrise-org.github.io/sunrise/start/"):
+            with self.subTest(url=url):
+                self.assertIsNone(STALE_SITE.search(url))
+        self.assertIsNotNone(STALE_SITE.search("https://arismoko.github.io/sunrise/start/"))
 
     def test_cargo_sunrise_mod_installs_from_sunrise_org(self):
         found = 0
