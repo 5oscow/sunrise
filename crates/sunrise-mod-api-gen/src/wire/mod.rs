@@ -208,6 +208,9 @@ pub(super) struct Method {
     pub(super) syntax: Option<Syntax>,
 }
 
+/// The ids below this are the transport's own (`mod_api::wire::RESERVED_IDS`).
+const RESERVED_IDS: u64 = 0x1_0000;
+
 /// A method's types as the source writes them.
 #[derive(Debug)]
 pub(super) struct Syntax {
@@ -484,6 +487,10 @@ pub(super) fn fallible_frame_accessor(method: &Method) -> Option<(&str, bool, &T
 /// exports it as, and what the game's table lists it as.
 pub(super) struct Names {
     by_method: std::collections::HashMap<(String, String), mod_surface::call::Name>,
+    /// The calls a mod makes on a game object of an exported trait it holds (`held-` imports).
+    held: std::collections::HashMap<(String, String), mod_surface::call::Name>,
+    /// The three named entries of each prepared hook, by (hook, entry).
+    prepared: std::collections::HashMap<(String, String), mod_surface::call::Name>,
 }
 
 impl Names {
@@ -491,6 +498,60 @@ impl Names {
         self.by_method
             .get(&(owner.to_owned(), method.to_owned()))
             .unwrap_or_else(|| panic!("no name for {owner}::{method}"))
+    }
+
+    pub(super) fn held(&self, owner: &str, method: &str) -> &mod_surface::call::Name {
+        self.held
+            .get(&(owner.to_owned(), method.to_owned()))
+            .unwrap_or_else(|| panic!("no held name for {owner}::{method}"))
+    }
+
+    pub(super) fn prepared(&self, hook: &str, entry: &str) -> &mod_surface::call::Name {
+        self.prepared
+            .get(&(hook.to_owned(), entry.to_owned()))
+            .unwrap_or_else(|| panic!("no name for prepared {hook} entry {entry}"))
+    }
+
+    /// Every export a mod may implement, with the owner and method it is written as in
+    /// `__sunrise_mark!`, sorted: the methods of the exported traits, then the prepared entries.
+    pub(super) fn marked(&self) -> Vec<(&str, &str, &mod_surface::call::Name)> {
+        let mut out: Vec<_> = self
+            .by_method
+            .iter()
+            .filter(|((owner, _), _)| exports().contains(&owner.as_str()))
+            .map(|((owner, method), name)| (owner.as_str(), method.as_str(), name))
+            .chain(
+                self.prepared
+                    .iter()
+                    .map(|((_, entry), name)| ("ItemPart", entry.as_str(), name)),
+            )
+            .collect();
+        out.sort_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
+        out
+    }
+
+    /// Every export's id, which must be distinct.
+    pub(super) fn check_ids(&self) -> Result<(), String> {
+        let mut seen = std::collections::HashMap::new();
+        for name in self
+            .by_method
+            .iter()
+            .filter(|((owner, _), _)| exports().contains(&owner.as_str()))
+            .map(|(_, name)| name)
+            .chain(self.prepared.values())
+        {
+            if name.export_id() < RESERVED_IDS {
+                return Err(format!("{} has an id in the transport's block", name.text()));
+            }
+            if let Some(other) = seen.insert(name.export_id(), name.text()) {
+                return Err(format!(
+                    "{} and {} have one export id: widen the hash or rename one",
+                    other,
+                    name.text()
+                ));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -503,14 +564,19 @@ fn side_word(side: &crate::catalog::Side) -> &'static str {
     }
 }
 
-/// Names every method of the surface that crosses (see `surface::calls`).
+/// Names every method of the surface that crosses (see `surface::calls`), the calls a mod makes
+/// on objects it holds, and the entries of the prepared hooks.
 pub(super) fn call_names(
     surface: &mut Surface<'_>,
     hooks: &[crate::catalog::Hook],
+    prepared: &[(String, String)],
 ) -> Result<Names, String> {
+    use crate::surface::calls::Call;
     use mod_surface::call::Kind;
+    let parse = |text: &String| syn::parse_str::<syn::Type>(text).map_err(|e| e.to_string());
     let mut calls = Vec::new();
-    let mut keys = Vec::new();
+    // (table, owner, method) of each call, in order.
+    let mut keys: Vec<(u8, String, String)> = Vec::new();
     for m in &surface.methods {
         let syntax = m
             .syntax
@@ -526,30 +592,80 @@ pub(super) fn call_names(
         } else {
             Kind::Part
         };
-        let parse = |text: &String| syn::parse_str::<syn::Type>(text).map_err(|e| e.to_string());
-        calls.push(crate::surface::calls::Call {
-            kind,
-            owner: m.owner.to_owned(),
-            method: m.name.clone(),
-            receiver: m.receiver,
-            module: syntax.module,
-            params: syntax.params.iter().map(parse).collect::<Result<_, _>>()?,
-            ret: syntax.ret.as_ref().map(parse).transpose()?,
-            trait_params: syntax.trait_params.clone(),
-            owner_args: syntax
-                .owner_args
-                .iter()
-                .map(parse)
-                .collect::<Result<_, _>>()?,
-            extra: hook.map_or(String::new(), |h| side_word(&h.side).to_owned()),
-            version: hook.and_then(|h| u32::try_from(h.version).ok()),
-        });
-        keys.push((m.owner.to_owned(), m.name.clone()));
+        let call = |kind, owner: String, hook: Option<&crate::catalog::Hook>| -> Result<Call, String> {
+            Ok(Call {
+                kind,
+                owner,
+                method: m.name.clone(),
+                receiver: m.receiver,
+                module: syntax.module,
+                params: syntax.params.iter().map(parse).collect::<Result<_, _>>()?,
+                ret: syntax.ret.as_ref().map(parse).transpose()?,
+                trait_params: syntax.trait_params.clone(),
+                owner_args: syntax
+                    .owner_args
+                    .iter()
+                    .map(parse)
+                    .collect::<Result<_, _>>()?,
+                extra: hook.map_or(String::new(), |h| side_word(&h.side).to_owned()),
+                version: hook.and_then(|h| u32::try_from(h.version).ok()),
+            })
+        };
+        calls.push(call(kind, m.owner.to_owned(), hook)?);
+        keys.push((0, m.owner.to_owned(), m.name.clone()));
+        if held(m.owner) {
+            calls.push(call(Kind::Call, format!("held::{}", m.owner), None)?);
+            keys.push((1, m.owner.to_owned(), m.name.clone()));
+        }
+    }
+    let api = surface.types.index.module("mod_api", &[])?;
+    for abi in prepared::describe(&surface.methods, prepared)? {
+        for entry in &abi.entries {
+            let types = |parts: &[&str]| -> Result<Vec<syn::Type>, String> {
+                parts
+                    .iter()
+                    .map(|part| {
+                        let (_, ty) = part.split_once(':').ok_or("prepared argument has a role")?;
+                        syn::parse_str(ty).map_err(|e: syn::Error| e.to_string())
+                    })
+                    .collect()
+            };
+            let output = types(&entry.output)?;
+            calls.push(Call {
+                kind: Kind::Part,
+                owner: "ItemPart".to_owned(),
+                method: entry.name.clone(),
+                receiver: None,
+                module: api,
+                params: types(&entry.input)?,
+                ret: Some(syn::Type::Tuple(syn::TypeTuple {
+                    paren_token: Default::default(),
+                    elems: output.into_iter().collect(),
+                })),
+                trait_params: Vec::new(),
+                owner_args: Vec::new(),
+                extra: abi.hook.clone(),
+                version: None,
+            });
+            keys.push((2, abi.hook.clone(), entry.name.clone()));
+        }
     }
     let names = crate::surface::calls::names(&mut surface.types.index, &calls)?;
-    Ok(Names {
-        by_method: keys.into_iter().zip(names).collect(),
-    })
+    let mut table = Names {
+        by_method: Default::default(),
+        held: Default::default(),
+        prepared: Default::default(),
+    };
+    for ((which, owner, method), name) in keys.into_iter().zip(names) {
+        match which {
+            0 => &mut table.by_method,
+            1 => &mut table.held,
+            _ => &mut table.prepared,
+        }
+        .insert((owner, method), name);
+    }
+    table.check_ids()?;
+    Ok(table)
 }
 
 /// The coverage check: every method of the bound traits crosses to wasm, or its doc says why
@@ -691,42 +807,27 @@ pub fn generate(root: &Path, included: &[(&str, &str)]) -> Result<Generated, Str
     let providers = crate::capability_providers::generate(root, included)?.0;
     let mut with_providers = included.to_vec();
     with_providers.push(("capability_providers_generated.rs", providers.as_str()));
-    let surface = surface(root, &with_providers)?;
+    let mut surface = surface(root, &with_providers)?;
     coverage(&surface)?;
-    let mut wire = borrowed::calls(&surface.types);
+    let catalog = crate::Catalog::load(root)?;
+    let prepared = catalog
+        .hooks
+        .iter()
+        .filter_map(|hook| hook.prepared.clone().map(|field| (hook.name.clone(), field)))
+        .collect::<Vec<_>>();
+    let names = call_names(&mut surface, &catalog.hooks, &prepared)?;
+    let wire = borrowed::calls(&surface.types);
     let mut guest = calls::guest(
         &surface.types,
         &surface.methods,
         &surface.dropped,
         &surface.excused,
         &surface.parts,
+        &names,
     );
     guest.push_str(&calls::hook_names(&surface.hooks));
-    let prepared = crate::Catalog::load(root)?
-        .hooks
-        .into_iter()
-        .filter_map(|hook| hook.prepared.map(|field| (hook.name, field)))
-        .collect::<Vec<_>>();
-    guest.push_str(&calls::dispatch(&surface.types, &surface.methods, &prepared).0);
-    let abis = prepared::describe(&surface.methods, &prepared)?;
-    let _ = writeln!(
-        wire,
-        "#[doc(hidden)]\npub fn wire_core_layout() -> u64 {{ let mut hash = {:#x}; {layouts} hash }}",
-        layout(&surface),
-        layouts = surface.types.defs.iter().filter(|def| def.lifetimes == 0).map(|def| format!("hash = crate::wire::layout_mix(hash, <{} as crate::wire::Wire>::layout(&mut vec![]));", def.rust.replace("mod_api::", "crate::"))).collect::<String>()
-    );
-    writeln!(
-        wire,
-        "#[doc(hidden)] pub fn prepared_abi_layout() -> u64 {{ {} }}",
-        prepared::layout_code(&abis)
-    )
-    .unwrap();
-    let complete = if abis.is_empty() {
-        "wire_core_layout()"
-    } else {
-        "crate::wire::layout_mix(wire_core_layout(),prepared_abi_layout())"
-    };
-    writeln!(wire, "#[doc(hidden)] pub static WIRE_LAYOUT: ::std::sync::LazyLock<u64> = ::std::sync::LazyLock::new(|| {{ {complete} }});").unwrap();
+    guest.push_str(&calls::dispatch(&surface.types, &surface.methods, &prepared, &names).0);
+    guest.push_str(&calls::markers(&names));
     let sources = surface.types.index.read.take();
     Ok(Generated {
         wire,
@@ -900,42 +1001,6 @@ fn public_path(index: &Index<'_>, path: &str) -> bool {
     })
 }
 
-/// A hash of everything the two sides must agree on: every method's id and signature, and
-/// every type's shape (FNV-1a over their descriptions). This is the core seed;
-/// `generate` appends owned Wire layouts and the prepared marker/entry ABI layouts
-/// to the final WIRE_LAYOUT. wire_core_layout also supports refusal diagnostics:
-/// a guest presenting it without the prepared component is refused, never accepted.
-fn layout(surface: &Surface<'_>) -> u64 {
-    let mut hash = 0xcbf2_9ce4_8422_2325u64;
-    let mut feed = |text: &str| {
-        for byte in text.bytes() {
-            hash = (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3);
-        }
-    };
-    // Resource-control values are part of the interface even though they do not
-    // appear in a catalog signature. Older guests may have allocated identity zero.
-    feed(
-        "resource generation zero reserved; Any identity zero is Unsupported/cross-group capability",
-    );
-    // The group's mods share one handler table, which lives in a word of the std member.
-    feed(
-        "group state: 32 words in the std member's sunrise_group_state; 0 handler table, 1 cache budget, 2 eviction guard, 3.. eviction callbacks; members allocate through an evicting global allocator",
-    );
-    feed("static replies: bounded acknowledged ids or uncached text");
-    feed("ConfigFiles imports: u8 root selector, 0 config, 1 data, 2 world; other values refused");
-    feed("Hooks::subscribed: Vec<(hook name, i32 priority, bool receive_cancelled)>");
-    for method in &surface.methods {
-        feed(&format!("{method:?}"));
-    }
-    for def in &surface.types.defs {
-        // Private borrowed descriptors also define bytes and checked writeback policy.
-        // Hash the complete definition so private writeback contracts affect compatibility.
-        feed(&format!("{def:?}"));
-    }
-    feed(&format!("{:?}", surface.hooks));
-    hash
-}
-
 #[cfg(test)]
 mod tests {
     /// Every method that crosses gets a name, and no two share one: the table the guest imports
@@ -960,7 +1025,7 @@ mod tests {
                 with_providers.push(("capability_providers_generated.rs", providers.as_str()));
                 let mut surface = super::surface(&root, &with_providers).unwrap();
                 let hooks = crate::Catalog::load(&root).unwrap().hooks;
-                let names = super::call_names(&mut surface, &hooks).unwrap();
+                let names = super::call_names(&mut surface, &hooks, &[]).unwrap();
                 assert_eq!(names.by_method.len(), surface.methods.len());
                 let texts: std::collections::BTreeSet<String> =
                     names.by_method.values().map(|n| n.text()).collect();
