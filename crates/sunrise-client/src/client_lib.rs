@@ -79,6 +79,7 @@ pub mod dialog_screen;
 pub mod enchantment_levels;
 pub mod end_crystal;
 pub mod end_gateway;
+pub mod colliders;
 pub mod entities;
 pub mod entity_nbt;
 pub mod entity_rules;

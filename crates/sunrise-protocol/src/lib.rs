@@ -6,6 +6,7 @@
 pub mod adapter;
 pub mod anvil_cost;
 pub mod attachment_sync;
+pub mod collider_sync;
 pub mod buf;
 pub mod chunk;
 pub mod connection;
