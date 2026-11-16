@@ -114,6 +114,12 @@ fn living_incoming_damage(
 }
 ```
 
+For incoming damage, `event.weapon` is the direct entity's weapon, including a projectile's
+saved firing weapon. `event.causing_weapon` is instead the causing living entity's current
+main-hand weapon (`DamageSource.getEntity().getWeaponItem()`): an off-hand crossbow shot can
+name the saved crossbow in `weapon` and the shooter's main-hand sword in `causing_weapon`.
+An absent, unknown or non-living cause has no `causing_weapon`.
+
 The event is a generated struct named after the catalog hook, in CamelCase plus `Event`, with
 the hook point's arguments as public fields: values as values and borrowed ones as references (`event.kind`). A
 number or `bool` a mod may change is a plain field, written back once every mod has run, even after a `Cancel`;

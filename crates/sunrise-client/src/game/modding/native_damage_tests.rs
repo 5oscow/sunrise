@@ -10,6 +10,7 @@ use mod_api::{
 };
 use std::sync::{Arc, Mutex};
 use sunrise_client::command::args::GameMode;
+use sunrise_client::items::ItemStack;
 use sunrise_client::mobs::{Damage, DamageKind, Mob};
 use sunrise_client::motion::PlayerMotion;
 use sunrise_core::{geometry::Vec3, random::RandomSource};
@@ -22,6 +23,7 @@ struct Heard {
     post: Vec<(i32, f32)>,
     post_values: Vec<(i32, f32, f32, f32)>,
     sources: Vec<HitSource>,
+    weapons: Vec<(Option<String>, Option<String>)>,
     side_effects: Vec<(i32, bool)>,
 }
 
@@ -59,6 +61,15 @@ impl Hooks for Probe {
             .lock()
             .unwrap()
             .source("incoming", event.entity, event.source);
+        let item_id = |stack: Option<&mod_api::ItemStack>| {
+            stack.and_then(|s| mod_api::__private::item_key_id(s.item()).map(str::to_owned))
+        };
+        let direct = item_id(event.weapon);
+        let causing = item_id(event.causing_weapon);
+        if causing.as_deref() == Some("minecraft:iron_sword") {
+            event.container.set_new_damage(1.0);
+        }
+        self.0.lock().unwrap().weapons.push((direct, causing));
         if event.entity == 225001 {
             event.container.set_new_damage(4.0);
         }
@@ -448,6 +459,11 @@ fn arrow_hits_name_the_projectile_on_players_mobs_and_the_dragon() {
             game.player = Some(player);
             game.set_game_mode(GameMode::Survival);
             game.mobs.push(mob(game, 42, "minecraft:skeleton"));
+            game.mobs[0]
+                .extra
+                .set_main_hand_stack(Some(ItemStack::new("minecraft:iron_sword", 1)));
+            *game.held_mut() = Some(ItemStack::new("minecraft:iron_sword", 1));
+            game.offhand = Some(ItemStack::new("minecraft:crossbow", 1));
             game.mobs.push(mob(game, 43, "minecraft:pig"));
             let mut dragon = Dragon::new(Vec3::ZERO, 0.0, 0);
             // Hover is a sitting phase and correctly shrugs off arrows.
@@ -464,6 +480,8 @@ fn arrow_hits_name_the_projectile_on_players_mobs_and_the_dragon() {
                 owner,
             );
             arrow.id = 912;
+            arrow.arrow.as_mut().unwrap().fired_from_weapon =
+                Some(ItemStack::new("minecraft:crossbow", 1));
             arrow.velocity = Vec3::new(0.0, 0.0, -2.0);
             game.projectile_hit(
                 &arrow,
@@ -475,9 +493,22 @@ fn arrow_hits_name_the_projectile_on_players_mobs_and_the_dragon() {
             .unwrap();
             assert_eq!(game.current_attack(), NO_ATTACK, "projectile scope leaked");
             match target {
-                Who::Player => assert!(game.player.as_ref().unwrap().health.health() < 20.0),
+                Who::Player => {
+                    let health = game.player.as_ref().unwrap().health.health();
+                    if owner.is_some() {
+                        assert_eq!(health, 19.0, "the causing-weapon rule changes real damage");
+                    } else {
+                        assert!(health < 19.0, "ownerless arrows do not use the weapon rule");
+                    }
+                }
                 Who::Mob(SPECIAL) => assert!(game.dragon.as_ref().unwrap().health < 200.0),
-                Who::Mob(_) => assert!(game.mobs[1].health < 10.0),
+                Who::Mob(_) => {
+                    if owner.is_some() {
+                        assert_eq!(game.mobs[1].health, 9.0);
+                    } else {
+                        assert!(game.mobs[1].health < 9.0);
+                    }
+                }
             }
         });
         let expected = ["incoming", "pre", "post"].map(|phase| HitSource {
@@ -489,6 +520,14 @@ fn arrow_hits_name_the_projectile_on_players_mobs_and_the_dragon() {
         assert_eq!(
             heard.sources, expected,
             "target {target:?}, owner {owner:?}"
+        );
+        assert_eq!(
+            heard.weapons,
+            [(
+                Some("minecraft:crossbow".into()),
+                owner.map(|_| "minecraft:iron_sword".into())
+            )],
+            "the saved projectile weapon and the current shooter's main hand are independent"
         );
     }
 }

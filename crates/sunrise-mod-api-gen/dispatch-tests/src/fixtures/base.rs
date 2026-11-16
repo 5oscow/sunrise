@@ -453,6 +453,7 @@ fn incoming_damage_carries_the_attack_data() {
             event: &mut LivingIncomingDamageEvent<'_>,
         ) -> Flow {
             assert_eq!(event.source.damage_type, "minecraft:player_attack");
+            assert!(event.causing_weapon.is_some());
             let (from, at, look) = (
                 event.source.position.unwrap(),
                 event.victim.position,
@@ -493,6 +494,7 @@ fn incoming_damage_carries_the_attack_data() {
                 source: &source,
                 victim: &victim,
                 weapon,
+                causing_weapon: Some(&held),
                 container: &mut container,
                 canceled: &mut canceled,
             },
@@ -651,6 +653,7 @@ fn dispatch_contracts() {
             source: &source,
             victim: &victim,
             weapon: None,
+            causing_weapon: None,
             container: &mut container,
             canceled: &mut canceled,
         },
@@ -681,6 +684,7 @@ fn dispatch_contracts() {
             source: &source,
             victim: &victim,
             weapon: None,
+            causing_weapon: None,
             container: &mut container,
             canceled: &mut canceled,
         },

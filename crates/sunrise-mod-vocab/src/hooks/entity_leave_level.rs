@@ -11,6 +11,9 @@ pub trait Hooks {
     /// other source with no direct entity, even during that projectile's impact), and
     /// where it comes from (`getSourcePosition`). `victim` is where the entity stands and
     /// looks, and `weapon` the direct entity's weapon (`getWeaponItem`) when it is known.
+    /// `causing_weapon` is the causing living entity's current main-hand weapon
+    /// (`getEntity().getWeaponItem`), not a projectile's saved weapon; None for an
+    /// absent, unknown or non-living cause.
     /// `container` is an API-owned snapshot before any reduction; engine sequencing
     /// remains game-owned. Change its `new_damage`, the invulnerability ticks a fresh hit
     /// leaves (vanilla's 20), or add an ordered reduction modifier with
@@ -22,6 +25,7 @@ pub trait Hooks {
     /// attachments; the hurt entity is in the middle of its hit.
     #[hook(
         side = "server",
+        version = 2,
         contract = "cancel",
         out = "canceled",
         host = "level",
@@ -34,6 +38,7 @@ pub trait Hooks {
         source: &HurtSource<'_>,
         victim: &Victim,
         weapon: Option<&ItemStack>,
+        causing_weapon: Option<&ItemStack>,
         container: &mut DamageContainer,
         canceled: &mut bool,
     );
