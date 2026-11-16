@@ -1,0 +1,301 @@
+//! A module's import table against the game's.
+//!
+//! A built wasm mod's imports of module `sunrise` are the exact list of what it uses of the game:
+//! each host call it keeps, each hook, Part or handler method and point it implements, and the
+//! shared protocol, named `<kind>:<owner>::<method>[@<version>]#<hash>`
+//! (`mod_surface::call`). The game's table is generated from the same source by the same
+//! function, so loading is a comparison of names: a name the game has binds, one it has with
+//! another hash is a changed item, one it lacks is a removed item. Nothing is hashed here and no
+//! guest code has run when [`check`] answers.
+use crate::boundary::{CALLS, EXPORT_CALLS};
+use mod_surface::call::{Kind, MODULE, Name, SHARED_PROTOCOL, protocol_name};
+use std::fmt;
+
+/// How many mismatches a refusal lists before it counts the rest.
+const LISTED: usize = 8;
+
+/// What the game serves a name with.
+pub(crate) enum Bound {
+    /// A host call: the generated function that answers it.
+    Call(crate::boundary::Invoke),
+    /// A marker of an export the mod implements: nothing to run.
+    Mark,
+    /// The shared protocol's words.
+    HostReply,
+    Release,
+    Log,
+}
+
+/// One import the game does not serve as the mod built it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Mismatch {
+    /// What the mod uses, as a refusal names it (`host:ServerHost::give_item`).
+    pub item: String,
+    pub why: Why,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Why {
+    /// The game has the item, with another signature (or hook version).
+    Changed {
+        built: Option<u32>,
+        game: Option<u32>,
+        built_hash: String,
+        game_hash: String,
+    },
+    /// The game has no such item.
+    Missing,
+    /// The name is not one the game's generator writes.
+    Malformed(String),
+}
+
+impl fmt::Display for Mismatch {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.why {
+            Why::Changed {
+                built,
+                game,
+                built_hash,
+                game_hash,
+            } => {
+                write!(f, "{} changed", self.item)?;
+                if let (Some(built), Some(game)) = (built, game)
+                    && built != game
+                {
+                    write!(f, " (version {built} → {game})")
+                } else {
+                    write!(
+                        f,
+                        " (mod #{}, game #{})",
+                        &built_hash[..8.min(built_hash.len())],
+                        &game_hash[..8.min(game_hash.len())]
+                    )
+                }
+            }
+            Why::Missing => write!(f, "{} is not in this game", self.item),
+            Why::Malformed(reason) => write!(f, "{}: {reason}", self.item),
+        }
+    }
+}
+
+/// Finds the entry of `table` (names, sorted) for `kind:path`, whatever its version and hash.
+fn find<'t>(table: impl Fn(usize) -> &'t str, len: usize, kind: Kind, path: &str) -> Option<usize> {
+    let head = format!("{}:{path}", kind.word());
+    let start = partition(&table, len, |name| name < head.as_str());
+    (start..len)
+        .take_while(|&i| table(i).starts_with(&head))
+        .find(|&i| matches!(table(i).as_bytes().get(head.len()), Some(b'@' | b'#')))
+}
+
+fn partition<'t>(
+    table: &impl Fn(usize) -> &'t str,
+    len: usize,
+    before: impl Fn(&str) -> bool,
+) -> usize {
+    let (mut low, mut high) = (0, len);
+    while low < high {
+        let mid = low + (high - low) / 2;
+        if before(table(mid)) {
+            low = mid + 1;
+        } else {
+            high = mid;
+        }
+    }
+    low
+}
+
+/// What `name`, an import of module `sunrise`, is to this game.
+pub(crate) fn resolve(name: &str) -> Result<Bound, Mismatch> {
+    let built = Name::parse(name).map_err(|error| Mismatch {
+        item: shown(name),
+        why: Why::Malformed(error.to_string()),
+    })?;
+    let changed = |game: &str| {
+        let game = Name::parse(game).expect("the game's table holds names");
+        Mismatch {
+            item: built.item(),
+            why: Why::Changed {
+                built: built.version,
+                game: game.version,
+                built_hash: built.hash.clone(),
+                game_hash: game.hash,
+            },
+        }
+    };
+    let missing = || Mismatch {
+        item: built.item(),
+        why: Why::Missing,
+    };
+    match built.kind {
+        Kind::Protocol => {
+            let expected = protocol_name(&built.path, SHARED_PROTOCOL);
+            let bound = match built.path.as_str() {
+                "host_reply" => Bound::HostReply,
+                "release" => Bound::Release,
+                "log" => Bound::Log,
+                _ => return Err(missing()),
+            };
+            if expected.text() == name {
+                Ok(bound)
+            } else {
+                Err(Mismatch {
+                    item: built.item(),
+                    why: Why::Changed {
+                        built: None,
+                        game: None,
+                        built_hash: built.hash.clone(),
+                        game_hash: expected.hash,
+                    },
+                })
+            }
+        }
+        Kind::Call => match find(|i| CALLS[i].name, CALLS.len(), Kind::Call, &built.path) {
+            Some(at) if CALLS[at].name == name => Ok(Bound::Call(CALLS[at].invoke)),
+            Some(at) => Err(changed(CALLS[at].name)),
+            None => Err(missing()),
+        },
+        Kind::Hook | Kind::Part => {
+            match find(
+                |i| EXPORT_CALLS[i],
+                EXPORT_CALLS.len(),
+                built.kind,
+                &built.path,
+            ) {
+                Some(at) if EXPORT_CALLS[at] == name => Ok(Bound::Mark),
+                Some(at) => Err(changed(EXPORT_CALLS[at])),
+                None => Err(missing()),
+            }
+        }
+        Kind::Point => {
+            let points = mod_points::POINT_CALLS;
+            match find(|i| points[i], points.len(), Kind::Point, &built.path) {
+                Some(at) if points[at] == name => Ok(Bound::Mark),
+                Some(at) => Err(changed(points[at])),
+                None => Err(missing()),
+            }
+        }
+    }
+}
+
+/// A name for a message: bounded, whatever the module wrote.
+fn shown(name: &str) -> String {
+    let mut text: String = name.chars().take(60).collect();
+    if text.len() < name.len() {
+        text.push('…');
+    }
+    format!("import \"{text}\"")
+}
+
+/// Reads one member's imports of the game's module; others are the group linker's.
+pub(crate) fn sunrise_imports(module: &[u8]) -> Result<Vec<String>, String> {
+    let mut found = Vec::new();
+    for payload in wasmparser::Parser::new(0).parse_all(module) {
+        match payload.map_err(|e| e.to_string())? {
+            wasmparser::Payload::ImportSection(section) => {
+                for import in section.into_imports() {
+                    let import = import.map_err(|e| e.to_string())?;
+                    if import.module == MODULE {
+                        found.push(import.name.to_owned());
+                    }
+                }
+                break;
+            }
+            wasmparser::Payload::CodeSectionStart { .. } => break,
+            _ => {}
+        }
+    }
+    Ok(found)
+}
+
+/// Every mismatch of the mod members of a group (the shared standard library has no imports of
+/// the game's), in import order, or none.
+pub(crate) fn check(members: &[crate::link::Member<'_>]) -> Result<(), crate::Refusal> {
+    let mut mismatches = Vec::new();
+    for member in members.iter().filter(|m| m.name != "libstd.so") {
+        let names = sunrise_imports(member.module)
+            .map_err(|e| crate::Refusal::Runtime(format!("{}: {e}", member.name)))?;
+        if !names.iter().any(|name| name.starts_with("protocol:log#")) {
+            mismatches.push(Mismatch {
+                item: "protocol".to_owned(),
+                why: Why::Malformed(
+                    "the module links no shared protocol: it was built for an older mod API"
+                        .to_owned(),
+                ),
+            });
+        }
+        for name in &names {
+            if let Err(mismatch) = resolve(name) {
+                mismatches.push(mismatch);
+            }
+        }
+    }
+    if mismatches.is_empty() {
+        return Ok(());
+    }
+    let omitted = mismatches.len().saturating_sub(LISTED);
+    mismatches.truncate(LISTED);
+    Err(crate::Refusal::Boundary {
+        mismatches,
+        omitted,
+    })
+}
+
+/// What a hand-written test module needs to call the game: every call the game serves as an
+/// import, the protocol words, and `$host`, which calls one by its place in the table.
+#[cfg(any(test, feature = "runtime-fixture"))]
+pub(crate) mod fixtures {
+    use crate::boundary::CALLS;
+    use mod_surface::call::{SHARED_PROTOCOL, protocol_name};
+
+    /// The id `$host` releases an object by.
+    pub(crate) fn release_id() -> u32 {
+        CALLS.len() as u32
+    }
+
+    /// The id `$host` sends the game a message by.
+    pub(crate) fn log_id() -> u32 {
+        CALLS.len() as u32 + 1
+    }
+
+    /// The one import every built module carries, for a module that calls nothing.
+    pub(crate) fn log_import() -> String {
+        format!(
+            "(import \"sunrise\" \"{}\" (func (param i32 i32 i32 i32) (result i32)))",
+            protocol_name("log", SHARED_PROTOCOL).text()
+        )
+    }
+
+    /// The WAT items a module declares before its functions.
+    pub(crate) fn wat() -> String {
+        let mut text = String::new();
+        let mut names: Vec<String> = CALLS.iter().map(|call| call.name.to_owned()).collect();
+        names.push(protocol_name("release", SHARED_PROTOCOL).text());
+        names.push(protocol_name("log", SHARED_PROTOCOL).text());
+        for (index, name) in names.iter().enumerate() {
+            text.push_str(&format!(
+                "(import \"sunrise\" \"{name}\" (func $c{index} (param i32 i32 i32 i32) (result i32)))\n"
+            ));
+        }
+        text.push_str(&format!(
+            "(import \"sunrise\" \"{}\" (func $reply (param i32)))\n",
+            protocol_name("host_reply", SHARED_PROTOCOL).text()
+        ));
+        // `$host(id, ptr, len, out, cap)` calls import `id`: a member declares no table of its own.
+        text.push_str("(func $host (param i32 i32 i32 i32 i32) (result i32)\n");
+        for index in (0..names.len()).rev() {
+            text.push_str(&format!("(block $b{index}\n"));
+        }
+        text.push_str("local.get 0 br_table");
+        for index in 0..names.len() {
+            text.push_str(&format!(" $b{index}"));
+        }
+        text.push_str(&format!(" $b{}\n", names.len() - 1));
+        for index in 0..names.len() {
+            text.push_str(&format!(
+                ")\nlocal.get 1 local.get 2 local.get 3 local.get 4 call $c{index} return\n"
+            ));
+        }
+        text.push_str("unreachable)\n");
+        text
+    }
+}
