@@ -101,6 +101,18 @@ pub fn game_home() -> PathBuf {
     }
 }
 
+/// The folder of the game's caches, `.sunrise-cache`: in the private home when `--home` or
+/// `SUNRISE_HOME` names one (a host whose game folder, such as a phone's shared storage, takes
+/// no links or code), else in the game folder, the working directory.
+pub fn cache_dir() -> PathBuf {
+    sunrise_mod_package::selection::cache_home_in(
+        &game_home(),
+        &std::env::current_dir().unwrap_or_default(),
+        |key| std::env::var_os(key),
+    )
+    .join(".sunrise-cache")
+}
+
 /// `logs/` and `crash-reports/` of a game folder.
 pub fn logs_dir(home: &Path) -> PathBuf {
     home.join("logs")

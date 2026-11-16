@@ -699,7 +699,6 @@ pub(super) fn content_overlay(
     jar_store: &std::path::Path,
 ) -> sunrise_client::Result<ContentOverlay> {
     use sunrise_client::mod_content::{self, ContentMod};
-    let here = std::env::current_dir().unwrap_or_default();
     let original_base = root.to_owned();
 
     let requirements = collect_jar_requirements(
@@ -891,7 +890,7 @@ pub(super) fn content_overlay(
         &overrides,
     )
     .map_err(|error| error.to_string())?;
-    let cache = here.join(".sunrise-cache");
+    let cache = sunrise_client::logging::cache_dir();
     // Content admission and the live code-dispatch boundary jointly determine
     // what loaded. Namespaces and raw startup metadata cannot answer this.
     let inventory = sources.enabled_inventory(|id| mods.iter().any(|loaded| loaded.id == id));
@@ -2065,8 +2064,8 @@ mod tests {
     }
 
     /// Runs `test` again in a child process whose working directory is its own
-    /// empty folder: the overlay's `.sunrise-cache` lives under the working
-    /// directory, so children sharing one (the temp dir) race on that cache.
+    /// empty folder: the overlay's `.sunrise-cache` lives under the home, set here to
+    /// the working directory, so children sharing one (the temp dir) race on that cache.
     fn run_in_child(test: &str, mode: &str) {
         let cwd = std::env::temp_dir().join(format!(
             "sunrise-game-mods-cwd-{}-{mode}",
@@ -2076,6 +2075,7 @@ mod tests {
         let status = std::process::Command::new(std::env::current_exe().unwrap())
             .current_dir(&cwd)
             .args(["--include-ignored", "--exact", test, "--nocapture"])
+            .env("SUNRISE_HOME", &cwd)
             .env(mode, "1")
             .status()
             .unwrap();
