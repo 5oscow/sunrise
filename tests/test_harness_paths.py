@@ -53,11 +53,14 @@ class HarnessPaths(unittest.TestCase):
                 if "cargo" not in words or not packages or None in packages:
                     continue
                 for flag, name in zip(words, words[1:]):
-                    # A tool that copies an example into place before building it (`examples/<name>.rs`) owns it.
-                    if flag not in kinds or name is None or f"examples/{name}.rs" in source:
+                    if flag not in kinds or name is None:
+                        continue
+                    owned = owners.get((kinds[flag], name), set())
+                    # An example no package has, which the tool copies into place itself before building it
+                    # (run_world_views.py stages examples/world_views.rs from a fixture).
+                    if not owned and flag == "--example" and f"examples/{name}.rs" in source:
                         continue
                     with self.subTest(tool=tool.name, line=node.lineno, target=name):
-                        owned = owners.get((kinds[flag], name), set())
                         self.assertTrue(owned & set(packages),
                                         f"{tool.relative_to(ROOT)}:{node.lineno} builds {flag} {name} from {packages}; "
                                         f"it is in {sorted(owned) or 'no package'}")
