@@ -9,7 +9,7 @@ use crate::game::{
     end::END_SPAWN,
     nether_portal::{Plan, PortalSide, end_portal_rotation},
 };
-use mod_api::{LevelRef, PortalError, PortalExit, PortalShape, PortalYaw};
+use mod_api::{LevelRef, PortalAngle, PortalError, PortalExit, PortalRotation, PortalShape};
 use sunrise_client::containers::BlockEntity;
 use sunrise_core::{geometry::Vec3, position::BlockPos};
 use sunrise_world::level::portal_travel::FoundRectangle;
@@ -23,7 +23,7 @@ const COLLISION: i32 = 5;
 /// What a probe of a portal block found.
 enum Probe {
     /// An End portal or gateway: the answer.
-    Fixed(Dim, Vec3, PortalYaw),
+    Fixed(Dim, Vec3, PortalRotation),
     /// A nether portal: the plan, and the exit portal when one stands.
     Nether(Plan, Option<FoundRectangle>),
 }
@@ -38,10 +38,12 @@ impl Game<'_> {
 
     /// Every chunk holding a block within `reach` blocks of column (`x`, `z`) is loaded in `side`.
     fn blocks_loaded(side: &PortalSide<'_>, x: i32, z: i32, reach: i32) -> bool {
-        ((z - reach) >> 4..=(z + reach) >> 4).all(|cz| {
-            ((x - reach) >> 4..=(x + reach) >> 4)
-                .all(|cx| side.world.chunks.contains_key(&(cx, cz)))
-        })
+        // `x` and `z` are a mod's: a sum past the ends of `i32` stops at them, in a chunk that
+        // is not loaded.
+        let (min_x, max_x) = (x.saturating_sub(reach) >> 4, x.saturating_add(reach) >> 4);
+        let (min_z, max_z) = (z.saturating_sub(reach) >> 4, z.saturating_add(reach) >> 4);
+        (min_z..=max_z)
+            .all(|cz| (min_x..=max_x).all(|cx| side.world.chunks.contains_key(&(cx, cz))))
     }
 
     /// Every chunk the search of `radius` around `at` reads is loaded in `side`.
@@ -120,11 +122,11 @@ impl Game<'_> {
             self.portal_side(Dim::End)
                 .ok_or(PortalError::ChunksNotLoaded)?;
             // Facing west, whatever the entity faced.
-            let [yaw, _] = end_portal_rotation(true, [0.0; 2], self.level.world_spawn_angle);
+            let [yaw, pitch] = end_portal_rotation(true, [0.0; 2], self.level.world_spawn_angle);
             return Ok(Probe::Fixed(
                 Dim::End,
                 Vec3::new(f64::from(x) + 0.5, f64::from(y), f64::from(z) + 0.5),
-                PortalYaw::Set(yaw),
+                PortalRotation::new(PortalAngle::Set(yaw), PortalAngle::Turn(pitch)),
             ));
         }
         let [x, _, z] = self.level.world_spawn.unwrap_or_else(|| {
@@ -138,11 +140,11 @@ impl Game<'_> {
             .ok_or(PortalError::ChunksNotLoaded)?;
         let y = self.motion_top_in(overworld.world, Dim::Overworld, x, z);
         // Turned by the world spawn's angle.
-        let [yaw, _] = end_portal_rotation(false, [0.0; 2], self.level.world_spawn_angle);
+        let [yaw, pitch] = end_portal_rotation(false, [0.0; 2], self.level.world_spawn_angle);
         Ok(Probe::Fixed(
             Dim::Overworld,
             Vec3::new(f64::from(x) + 0.5, f64::from(y), f64::from(z) + 0.5),
-            PortalYaw::Turn(yaw),
+            PortalRotation::new(PortalAngle::Turn(yaw), PortalAngle::Turn(pitch)),
         ))
     }
 
@@ -167,13 +169,18 @@ impl Game<'_> {
             if !loaded {
                 return Err(PortalError::ChunksNotLoaded);
             }
-            let p = self.tallest_block_in(source.world, [exit[0], exit[1] + 2, exit[2]], 5, false);
-            [p[0], p[1] + 1, p[2]]
+            let p = self.tallest_block_in(
+                source.world,
+                [exit[0], exit[1].saturating_add(2), exit[2]],
+                5,
+                false,
+            );
+            [p[0], p[1].saturating_add(1), p[2]]
         };
         Ok(Probe::Fixed(
             source.dim,
             sunrise_client::end_gateway::bottom_center(target),
-            PortalYaw::Turn(0.0),
+            PortalRotation::new(PortalAngle::Turn(0.0), PortalAngle::Turn(0.0)),
         ))
     }
 
@@ -201,16 +208,22 @@ impl Game<'_> {
         Ok(PortalExit::new(
             self.level_ref(level.epoch(), plan.dim.key()),
             [at.x, at.y, at.z],
-            PortalYaw::Turn(yaw_turn),
+            PortalRotation::new(PortalAngle::Turn(yaw_turn), PortalAngle::Turn(0.0)),
             Some(shape),
         ))
     }
 
-    fn fixed_exit(&self, level: LevelRef, dim: Dim, at: Vec3, yaw: PortalYaw) -> PortalExit {
+    fn fixed_exit(
+        &self,
+        level: LevelRef,
+        dim: Dim,
+        at: Vec3,
+        rotation: PortalRotation,
+    ) -> PortalExit {
         PortalExit::new(
             self.level_ref(level.epoch(), dim.key()),
             [at.x, at.y, at.z],
-            yaw,
+            rotation,
             None,
         )
     }
@@ -225,7 +238,7 @@ impl Game<'_> {
         size: [f64; 2],
     ) -> Result<PortalExit, PortalError> {
         match self.probe_portal(level, portal_pos, size)? {
-            Probe::Fixed(dim, at, yaw) => Ok(self.fixed_exit(level, dim, at, yaw)),
+            Probe::Fixed(dim, at, rotation) => Ok(self.fixed_exit(level, dim, at, rotation)),
             Probe::Nether(plan, Some(exit)) => self.nether_exit(level, &plan, exit),
             Probe::Nether(_, None) => Err(PortalError::NoExit),
         }
@@ -333,6 +346,17 @@ mod tests {
                 game.level_portal_destination(overworld, [9, 70, 9], SIZE),
                 Err(PortalError::NotAPortal)
             );
+            for pos in [
+                [i32::MAX, 70, 8],
+                [i32::MIN, 70, 8],
+                [8, 70, i32::MAX],
+                [8, 70, i32::MIN],
+            ] {
+                assert_eq!(
+                    game.level_portal_destination(overworld, pos, SIZE),
+                    Err(PortalError::ChunksNotLoaded)
+                );
+            }
             for size in [
                 [f64::NAN, 1.0],
                 [1.0, f64::INFINITY],
@@ -401,7 +425,10 @@ mod tests {
             // the middle of the 2-wide exit (0.5); forward 0.5 of the exit's z of 1.
             let [x, y, z] = exit.pos;
             assert!((x - 0.5).abs() < 1e-4 && (y - 70.0).abs() < 1e-4 && (z - 1.5).abs() < 1e-4);
-            assert_eq!(exit.yaw, PortalYaw::Turn(0.0));
+            assert_eq!(
+                exit.rotation,
+                PortalRotation::new(PortalAngle::Turn(0.0), PortalAngle::Turn(0.0))
+            );
             let shape = exit.exit_portal.expect("a nether portal");
             assert_eq!(
                 (shape.bottom_left, shape.width, shape.height, shape.x_axis),
@@ -416,7 +443,7 @@ mod tests {
         with_game(|game| {
             prepare(game);
             game.level.world_spawn = Some([4, 64, 4]);
-            game.level.world_spawn_angle = [30.0, 0.0];
+            game.level.world_spawn_angle = [30.0, 12.0];
             load_around(game, None);
             set(game, "minecraft:stone", [4, 63, 4]);
             set(game, "minecraft:end_portal", [8, 70, 8]);
@@ -432,14 +459,20 @@ mod tests {
                 .unwrap();
             assert_eq!(into.level, end);
             assert_eq!(into.pos, [100.5, 50.0, 0.5]);
-            assert_eq!(into.yaw, PortalYaw::Set(90.0));
+            assert_eq!(
+                into.rotation,
+                PortalRotation::new(PortalAngle::Set(90.0), PortalAngle::Turn(0.0))
+            );
             // Out of it: the top of the world spawn's column, turned by its angle.
             let out = game
                 .level_portal_destination(end, [0, 60, 0], SIZE)
                 .unwrap();
             assert_eq!(out.level, overworld);
             assert_eq!(out.pos, [4.5, 64.0, 4.5]);
-            assert_eq!(out.yaw, PortalYaw::Turn(30.0));
+            assert_eq!(
+                out.rotation,
+                PortalRotation::new(PortalAngle::Turn(30.0), PortalAngle::Turn(12.0))
+            );
         });
     }
 }

@@ -16,7 +16,7 @@ let size = [0.98, 0.98];
 match level.find_or_create_portal_exit(host, portal_pos, size) {
     Ok(exit) => {
         // `exit.level` is the destination level, `exit.pos` the bottom centre of the box there and
-        // `exit.yaw` what happens to the entity's yaw (see below).
+        // `exit.rotation` what happens to the entity's yaw and pitch (see below).
     }
     Err(PortalError::ChunksNotLoaded) => { /* retry on a later tick */ }
     Err(error) => { /* the other refusals are final for this call */ }
@@ -27,7 +27,7 @@ match level.find_or_create_portal_exit(host, portal_pos, size) {
 
 - **A nether portal:** the other of the Overworld and the Nether, the approximate exit (the coordinates scaled by the
   two dimensions' scales and clamped to the destination's world border), then the closest portal within 16 blocks
-  into the Nether or 128 blocks out of it. `pos` and `yaw` follow vanilla's placement in that portal's rectangle:
+  into the Nether or 128 blocks out of it. `pos` and `rotation` follow vanilla's placement in that portal's rectangle:
   the entity keeps its relative place, and the yaw turns 90 degrees when the two portals' axes differ.
   `exit_portal` contains the portal's `bottom_left`, `width`, `height` and `x_axis`.
 - **An End portal:** into the End, the End's fixed spawn point; out of it, the Overworld's shared spawn. The
@@ -37,11 +37,17 @@ match level.find_or_create_portal_exit(host, portal_pos, size) {
 
 The read has none of travel's side effects: no platform, no portal ticket, no sound, and no hook fires.
 
-## The yaw
+## The rotation
 
-`PortalExit::yaw` is a `PortalYaw`, and the pitch is always kept. `Turn(degrees)` adds to the entity's yaw: 0 or 90
-between nether portals, 0 through a gateway, and the world spawn's angle out of the End. `Set(degrees)` replaces it:
-west (90) into the End.
+`PortalExit::rotation` is a `PortalRotation` with a `yaw` and a `pitch`, each a `PortalAngle`: `Turn(degrees)` adds to
+the entity's angle, `Set(degrees)` replaces it. Clamp the resulting pitch to -90 to 90, as travel does.
+
+| Through | Yaw | Pitch |
+|---|---|---|
+| nether portal | `Turn(0)`, or `Turn(90)` when the two portals' axes differ | `Turn(0)` |
+| End gateway | `Turn(0)` | `Turn(0)` |
+| End portal into the End | `Set(90)`, west | `Turn(0)` |
+| End portal out of the End | `Turn` by the world spawn's yaw | `Turn` by the world spawn's pitch |
 
 ## Refusals
 

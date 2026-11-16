@@ -11,8 +11,8 @@ pub struct PortalExit {
     pub level: LevelRef,
     /// The bottom centre of its box there.
     pub pos: [f64; 3],
-    /// What happens to its yaw; its pitch is kept.
-    pub yaw: PortalYaw,
+    /// What happens to its yaw and pitch.
+    pub rotation: PortalRotation,
     /// The nether portal it arrives in (its bottom-left inside block, width, height and axis);
     /// None for an End portal and an End gateway.
     pub exit_portal: Option<PortalShape>,
@@ -23,28 +23,47 @@ impl PortalExit {
     pub fn new(
         level: LevelRef,
         pos: [f64; 3],
-        yaw: PortalYaw,
+        rotation: PortalRotation,
         exit_portal: Option<PortalShape>,
     ) -> Self {
         Self {
             level,
             pos,
-            yaw,
+            rotation,
             exit_portal,
         }
     }
 }
 
-/// How an entity's yaw changes through a portal, in degrees.
+/// How one angle of an entity changes through a portal, in degrees.
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[non_exhaustive]
 #[derive(sunrise_mod_api_macros::Wire)]
-pub enum PortalYaw {
-    /// Add to the entity's yaw: 0, or 90 between nether portals of different axes; the world
-    /// spawn's angle out of the End.
+pub enum PortalAngle {
+    /// Add to the entity's angle.
     Turn(f32),
-    /// Replace the entity's yaw: west into the End.
+    /// Replace the entity's angle.
     Set(f32),
+}
+
+/// How an entity's yaw and pitch change through a portal. The caller clamps the resulting pitch
+/// to -90 to 90, as dimension travel does.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
+#[derive(sunrise_mod_api_macros::Wire)]
+pub struct PortalRotation {
+    /// The yaw: turned 0 or 90 between nether portals, 0 through a gateway, the world spawn's
+    /// yaw out of the End, set to west (90) into it.
+    pub yaw: PortalAngle,
+    /// The pitch: turned by the world spawn's pitch out of the End, otherwise turned by 0.
+    pub pitch: PortalAngle,
+}
+
+impl PortalRotation {
+    /// A rotation.
+    pub fn new(yaw: PortalAngle, pitch: PortalAngle) -> Self {
+        Self { yaw, pitch }
+    }
 }
 
 /// Why a portal destination is not answered.
