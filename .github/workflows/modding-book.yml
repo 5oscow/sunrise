@@ -27,7 +27,18 @@ jobs:
         run: test -f docs/modding/book.toml && echo present=true >> "$GITHUB_OUTPUT" || true
       - name: The pinned Rust (tools/ci/rust-version)
         if: steps.book.outputs.present == 'true'
-        run: bash tools/ci/rustup_install.sh --profile minimal
+        env:
+          DYNA: ${{ runner.environment != 'github-hosted' }}
+        run: |
+          # Dyna's image has no rustup: the slot's CARGO_HOME keeps the one installed here, as dyna-checks' jobs do.
+          if [ "$DYNA" = true ]; then
+            if [ ! -x "$CARGO_HOME/bin/rustup" ]; then
+              curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal
+            fi
+            export PATH="$CARGO_HOME/bin:$PATH"
+            echo "$CARGO_HOME/bin" >> "$GITHUB_PATH"
+          fi
+          bash tools/ci/rustup_install.sh --profile minimal
       - if: steps.book.outputs.present == 'true'
         run: cargo install mdbook --locked --version 0.4.52
       - if: steps.book.outputs.present == 'true'
