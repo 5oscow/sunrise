@@ -31,10 +31,10 @@ pub use hud::{
     BossAction, BossEvent, NumberFormat, ResetScore, SetDisplayObjective, SetObjective,
     SetPlayerTeam, SetScore, TeamParameters,
 };
+pub use players::{ArgumentSignatures, FilterMask, Fixed3, PackedSignature, Signature};
 pub use players::{
-    ArgumentSignatures, Chat, ChatAck, ChatCommandSigned, ChatSessionUpdate, DeleteChat,
-    FilterMask, Fixed3, LastSeenUpdate, PackedSignature, PlayerChat, PlayerInfo, PlayerInfoRemove,
-    PlayerInfoUpdate, Signature,
+    Chat, ChatAck, ChatCommandSigned, ChatSessionUpdate, DeleteChat, LastSeenUpdate, PlayerChat,
+    PlayerInfo, PlayerInfoRemove, PlayerInfoUpdate,
 };
 
 // ---- shared structures -------------------------------------------------
