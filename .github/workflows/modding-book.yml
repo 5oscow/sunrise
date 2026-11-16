@@ -34,6 +34,10 @@ jobs:
           ln -s "$CARGO_TARGET_DIR" target
           python3 tools/ci/source_mtimes.py "$CARGO_TARGET_DIR/ci-source-mtimes-v2.json"
           echo "CARGO_INCREMENTAL=0" >> "$GITHUB_ENV"
+      # Every build and test in this job runs at the runner's size, not the host's (tools/ci/cargo_jobs.py).
+      - name: Cap build parallelism to the runner
+        if: steps.book.outputs.present == 'true'
+        run: python3 tools/ci/cargo_jobs.py --job-mib 3072 --cap
       - name: The pinned Rust (tools/ci/rust-version)
         if: steps.book.outputs.present == 'true'
         run: bash tools/ci/rustup_install.sh --profile minimal
