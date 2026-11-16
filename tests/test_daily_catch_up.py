@@ -1,23 +1,26 @@
 """A push to main starts the day's real daily only when it is due and none has started."""
 import datetime as dt
+import importlib.util
 from pathlib import Path
-import sys
 import unittest
 from unittest import mock
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools/ci"))
-import daily_catch_up  # noqa: E402
+SCRIPT = Path(__file__).resolve().parents[1] / "tools/ci/daily_catch_up.py"
+spec = importlib.util.spec_from_file_location("daily_catch_up", SCRIPT)
+daily_catch_up = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(daily_catch_up)
 
 UTC = dt.timezone.utc
 
 
-def run(title, branch="main", conclusion=None):
-    return {"head_branch": branch, "display_title": title, "conclusion": conclusion, "html_url": f"run/{title}"}
+def run(title, branch="main", conclusion=None, event="workflow_dispatch"):
+    return {"event": event, "head_branch": branch, "display_title": title, "conclusion": conclusion,
+            "html_url": f"run/{title}"}
 
 
 class CatchUpTests(unittest.TestCase):
     def catch_up(self, now, listings):
-        """main() at now, with the API listing listings in turn; returns (status, dispatches, queried created filters)."""
+        """main() at now, with the API listing listings in turn; returns (status, dispatches, queried paths)."""
         dispatched, queried = [], []
         listings = iter(listings)
 
@@ -44,8 +47,11 @@ class CatchUpTests(unittest.TestCase):
                 self.assertIn("created=%3E%3D2026-11-16T09%3A00%3A00Z", queried[0])
 
     def test_no_real_run_dispatches_as_the_schedule_would_and_waits_for_it(self):
-        # A dry run, another branch's run and a cancelled real run do not count.
-        none = [run("daily abc (dry run)"), run("daily abc", branch="topic"), run("daily abc", conclusion="cancelled")]
+        # A dry run, another branch's run, a cancelled real run and the schedule's own wrapper runs (which only
+        # dispatch: failed, queued or done) do not count.
+        none = [run("daily abc (dry run)"), run("daily abc", branch="topic"), run("daily abc", conclusion="cancelled"),
+                run("daily abc", event="schedule", conclusion="failure"), run("daily abc", event="schedule"),
+                run("daily abc", event="schedule", conclusion="success")]
         status, dispatched, queried = self.catch_up(dt.datetime(2026, 11, 16, 9, 0, tzinfo=UTC),
                                                      [none, none, none + [run("daily def")]])
         self.assertEqual(status, 0)

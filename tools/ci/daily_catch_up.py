@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Start the day's real daily run from a push to main when GitHub's schedule did not (.github/workflows/dyna-ci.yml).
+"""Start the day's real daily run from a push to main when GitHub's schedule did not
+(.github/workflows/daily-catch-up.yml).
 
 GitHub has delivered almost none of this repository's `schedule` events: daily.yml had no scheduled run from the day
 it landed (2026-11-14) to 2026-11-16, ci.yml's every-six-hours one none since 2026-11-07. So each push to main asks:
@@ -40,9 +41,10 @@ def slot(now):
 
 
 def real_runs(runs):
-    """The real (writing) daily runs among runs: main's, not a dry run (its title says so), not cancelled."""
-    return [run for run in runs if run["head_branch"] == "main" and not run["display_title"].endswith("(dry run)")
-            and run.get("conclusion") != "cancelled"]
+    """The real (writing) daily runs among runs: dispatched on main, not a dry run (its title says so), not cancelled.
+    A `schedule` run only dispatches the real one (daily.yml's schedule-dispatch), so it never counts itself."""
+    return [run for run in runs if run["event"] == "workflow_dispatch" and run["head_branch"] == "main"
+            and not run["display_title"].endswith("(dry run)") and run.get("conclusion") != "cancelled"]
 
 
 def runs_since(since):
