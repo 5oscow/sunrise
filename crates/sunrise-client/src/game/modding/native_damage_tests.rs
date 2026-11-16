@@ -22,6 +22,7 @@ struct Heard {
     post: Vec<(i32, f32)>,
     post_values: Vec<(i32, f32, f32, f32)>,
     sources: Vec<HitSource>,
+    positions: Vec<(&'static str, Option<[f64; 3]>)>,
     side_effects: Vec<(i32, bool)>,
 }
 
@@ -35,6 +36,7 @@ struct HitSource {
 
 impl Heard {
     fn source(&mut self, phase: &'static str, entity: i32, source: &HurtSource<'_>) {
+        self.positions.push((phase, source.position));
         self.sources.push(HitSource {
             phase,
             entity,
@@ -59,6 +61,9 @@ impl Hooks for Probe {
             .lock()
             .unwrap()
             .source("incoming", event.entity, event.source);
+        if event.entity == 225020 && event.source.position == Some([0.0, 0.0, -2.0]) {
+            event.container.set_new_damage(4.0);
+        }
         if event.entity == 225001 {
             event.container.set_new_damage(4.0);
         }
@@ -424,6 +429,60 @@ fn a_game_built_level_has_every_damage_hook() {
     });
 }
 
+#[test]
+#[ignore = "daily"]
+fn player_melee_hit_preserves_the_attackers_position_and_direct_entity() {
+    let heard = heard(|game| {
+        let mut player = PlayerMotion::new(game.motion, Vec3::ZERO).unwrap();
+        player.entity_id = 225020;
+        game.player = Some(player);
+        game.set_game_mode(GameMode::Survival);
+        let mut zombie = mob(game, 42, "minecraft:zombie");
+        zombie.position = Vec3::new(0.0, 0.0, -2.0);
+        game.mobs.push(zombie);
+        assert!(game.hurt_player_from(
+            8.0,
+            Some([0.0, 0.0, -2.0]),
+            "minecraft:mob_attack",
+            Some(Some(42)),
+            false,
+        ));
+        assert_eq!(
+            game.player.as_ref().unwrap().health.health(),
+            16.0,
+            "a position-based listener changes actual player damage"
+        );
+    });
+    assert_eq!(
+        heard
+            .sources
+            .iter()
+            .filter(|s| s.phase != "post")
+            .collect::<Vec<_>>(),
+        ["incoming", "pre"]
+            .map(|phase| HitSource {
+                phase,
+                entity: 225020,
+                causing: 42,
+                direct: 42,
+            })
+            .iter()
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        heard
+            .positions
+            .iter()
+            .filter(|(phase, _)| *phase != "post")
+            .copied()
+            .collect::<Vec<_>>(),
+        [
+            ("incoming", Some([0.0, 0.0, -2.0])),
+            ("pre", Some([0.0, 0.0, -2.0]))
+        ]
+    );
+}
+
 /// The real projectile hit routes (not hand-built HurtSources) preserve the direct
 /// entity through incoming, pre and post, independently of whether there is a shooter.
 #[test]
@@ -489,6 +548,19 @@ fn arrow_hits_name_the_projectile_on_players_mobs_and_the_dragon() {
         assert_eq!(
             heard.sources, expected,
             "target {target:?}, owner {owner:?}"
+        );
+        assert_eq!(
+            heard
+                .positions
+                .iter()
+                .filter(|(phase, _)| *phase != "post")
+                .copied()
+                .collect::<Vec<_>>(),
+            [
+                ("incoming", Some([0.0, 1.0, 0.5])),
+                ("pre", Some([0.0, 1.0, 0.5]))
+            ],
+            "known projectile position reaches the incoming and pre hooks"
         );
     }
 }
