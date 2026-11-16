@@ -497,7 +497,7 @@ impl GameLevel<'_> {
         self.fire_perform_bonemeal(ticks, dimension, pos, state);
     }
 
-    /// On an authoritative server, `CampfireBlock.isSmokeSource` for the
+    /// On both sides, `CampfireBlock.isSmokeSource` for the
     /// block `state` under a campfire, as the campfire is placed or the block
     /// under it changes: `Some(true)` for your own blocks makes the campfire a
     /// signal fire whose smoke rises higher, as over a hay bale. The level is
@@ -3299,9 +3299,10 @@ impl Game<'_> {
     ) {
         self.fire_use_animation(stack, animation);
     }
-    /// `Player.canEat` for held `stack` (None for an empty hand) for food and cake.
-    /// Cake uses `can_always_eat = false`; `vanilla_can_eat` is vanilla's answer (creative,
-    /// `can_always_eat`, or hungry). Answer `Some(false)` to refuse the food,
+    /// `Player.canEat` for a food `stack`, or None for cake and candle cake
+    /// regardless of the held item. Cake uses `can_always_eat = false`;
+    /// `vanilla_can_eat` is vanilla's answer (creative, `can_always_eat`, or hungry).
+    /// Answer `Some(false)` to refuse the food,
     /// `Some(true)` to let a full player eat; `can_eat` left `None` keeps
     /// `vanilla_can_eat`. Both sides (the client starts eating as the
     /// server does), so answer from the stack and the player alone.

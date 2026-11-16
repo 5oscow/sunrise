@@ -68,14 +68,17 @@ fn generic_entries_follow_real_server_tables_and_atomic_reload() {
     let fire = pack.join("data/registry_entry_test/registry_entry_test/spell/fire.json");
     let tag = pack.join("data/registry_entry_test/tags/registry_entry_test/spell/hot.json");
     write(&fire, r#"{"power":7}"#);
-    write(&tag, r#"{"values":["registry_entry_test:fire"]}"#);
+    write(
+        &tag,
+        r#"{"neoforge:conditions":[{"type":"neoforge:false"}],"values":["registry_entry_test:fire"]}"#,
+    );
     write(
         &pack.join("data/registry_entry_test/registry_entry_test/secret/shadow.json"),
         r#"{"power":3}"#,
     );
     write(
         &pack.join("data/registry_entry_test/registry_entry_test/spell/conditioned.json"),
-        r#"{"neoforge:conditions":[{"type":"neoforge:mod_loaded","modid":"absent_registry_fixture"}],"power":"not an integer"}"#,
+        r#"{"neoforge:conditions":[{"type":"neoforge:false"}],"power":"not an integer"}"#,
     );
     write(
         &pack.join("data/registry_entry_test/not_a_registry/fake.json"),

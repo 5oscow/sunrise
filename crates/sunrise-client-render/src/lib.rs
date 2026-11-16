@@ -8,6 +8,7 @@ pub mod atlas_sources;
 pub mod audio;
 pub mod auth;
 pub mod autotune;
+pub mod baked_model_views;
 pub mod ban_notice;
 pub mod bidi;
 pub mod biome;

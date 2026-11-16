@@ -73,7 +73,8 @@ fn register(r: &mut dyn Registrar) {
   (`ClientHost::send_payload_to_server`), `ToClient::send(host, player, &value)` from the server
   (`PlayerRef::send_payload`), and `reply(cx, &value)` on either answers on the connection a
   handler received on. They return the raw sends' results: `Queued` means accepted locally.
-  Sending the wrong direction does not compile.
+  Sending the wrong direction does not compile. To address the single-player owner,
+  use the ordinary player ref from the [players service](../entities/server-services-and-players.md).
 - **Schema negotiation.** The derive gives the value type a schema fingerprint (field types in
   order, variant positions; not names), and it is part of the negotiated version. A peer whose
   type has another shape is refused at join when the payload is required; when both sides

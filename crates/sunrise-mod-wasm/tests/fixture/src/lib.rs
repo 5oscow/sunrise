@@ -45,6 +45,14 @@ impl Hooks for Mod {
         movement::movement_input(event);
     }
 
+    fn render_level_stage(
+        &self,
+        _: &dyn mod_api::ClientHost,
+        event: &mut mod_api::RenderLevelStageEvent<'_>,
+    ) {
+        world_name_tags::render_level_stage(event);
+    }
+
     fn tick_target_millis(
         &self,
         host: &dyn mod_api::ClientHost,

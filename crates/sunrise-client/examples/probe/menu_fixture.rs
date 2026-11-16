@@ -134,6 +134,7 @@ pub fn main() -> sunrise_client::Result<()> {
         can_equip: None,
         known_recipes: None,
         slot_rules: None,
+        stacked: None,
     };
     // The mob effects' network ids (BeaconMenu.encodeEffect).
     let builtin = sunrise_protocol::registry::Builtin::find(root)

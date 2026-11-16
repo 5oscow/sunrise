@@ -19,8 +19,8 @@ Prefix **API** = `crates/sunrise-mod-vocab/src/`; **Game** = `crates/sunrise-cli
 ## Cake eligibility
 
 `can_eat` also supplies cake and candle cake's `Player.canEat(false)` answer.
-The event receives the currently held stack, or `None` for an empty
-hand, not a synthetic cake item. Answer `Some(false)` to refuse a bite even when
+For cake and candle cake, the event's `stack` is `None` regardless of what the
+hand holds, with `can_always_eat = false`. Answer `Some(false)` to refuse a bite even when
 hungry, or `Some(true)` to allow a full player to eat. Leaving the answer unset
 keeps vanilla hunger and creative-mode behavior.
 

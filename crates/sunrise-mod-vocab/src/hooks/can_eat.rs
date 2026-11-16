@@ -2,16 +2,18 @@
 // catalog-order: 0103
 
 pub trait Hooks {
-    /// `Player.canEat` for `stack`, from `Consumable.canConsume` when eating
-    /// starts and block interaction eligibility for cake and candle cake.
-    /// For cake, `stack` is the held stack (None for an empty hand), and
-    /// `can_always_eat` is false. `vanilla_can_eat` is vanilla's answer (creative,
+    /// `Player.canEat`, from `Consumable.canConsume` when eating starts
+    /// and block interaction eligibility for cake and candle cake.
+    /// For food items, `stack` is the food being consumed. For cake and candle
+    /// cake, `stack` is `None` regardless of the held item, and `can_always_eat`
+    /// is false. `vanilla_can_eat` is vanilla's answer (creative,
     /// `can_always_eat`, or hungry). Answer `Some(false)` to refuse the food,
     /// `Some(true)` to let a full player eat; `can_eat` left `None` keeps
     /// `vanilla_can_eat`. Both sides (the client starts eating as the
     /// server does), so answer from the stack and the player alone.
     #[hook(
         side = "both",
+        version = 2,
         contract = "replace",
         out = "can_eat",
         host = "read",

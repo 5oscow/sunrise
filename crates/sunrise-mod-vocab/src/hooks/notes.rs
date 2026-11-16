@@ -1312,7 +1312,7 @@ stock client shows as a chest (`generic_9x1` to `generic_9x6`); nothing is insta
 
 - `host.open_menu(uuid, rows, title, items, replace)` opens one in place of the player's open menu (its window id, a new one each time, as `ServerPlayer.openMenu` counts them); the old menu closes on the server as a close does, its cursor stack back to the inventory, and its window's packets are ignored. `MenuReplace::CloseFirst` first sends the client a close, vanilla's default; `MenuReplace::InPlace` doesn't (`MenuProvider.shouldTriggerClientSideContainerClosingOnOpen`), so the title and rows change without the mouse centring again. A title changes only this way. `host.close_menu(uuid)` closes it.
   `host.menu(uuid, window)` is the open one's `MenuRef` (None for another window or player): its slots are [menu slots](../concepts/capabilities/menu-slots.md), written in a transaction, and the tick's container sync sends each changed one (`ContainerSetSlot`). Change its items that way, not by opening it again.
-- **No click moves anything.** Each reaches `menu_clicked(uuid, window, slot, button, mode)`, and the client
+- **No click moves anything.** Each is heard raw by `menu_clicked(uuid, window, slot, button, mode)` (a single-slot drag once; menu-button clicks, recipe placement and creative set-slot never reach it; the hook cannot know whether a click would change anything and carries no pickup answer), inside an action for a connected player, and the client
   is sent the menu, its inventory and its cursor as they were. `slot` counts the menu's own slots first, then the
   player's inventory below it: `native_menu_inventory_slot(size, slot)` gives the inventory slot (0..9 the hotbar).
 - `menu_closed(uuid, window)`: the player closed it, another menu opened, or the player left.
@@ -1414,7 +1414,7 @@ clicks already.
 
 `dyn LoopContext` is the read-only view for a hook fired inside a menu, recipe or
 player-list loop, where no game is at hand (a catalog entry names it with
-`"context": "loop"`; `item_stacked_on_other`, `player_name_format`,
+`"context": "loop"`; `player_name_format`,
 `player_tab_list_name_format`, `living_jump_power`, `living_speed`, `living_flying_speed`, `living_heal`, `living_breathe`, `living_drown`, `living_fall`, `farmland_trample`, `living_jump`, `ender_entity_teleport`, `fluid_flow`, `player_stays_on_ground_surface`, `block_jump_factor`, `block_speed_factor`, `friction`, `ingredient_test` and the sound hooks below take it). `side()` is `LoopSide::Server` or
 `LoopSide::Client`, `registry(name)` borrows names in registry ID order,
 `setting(mod_id, key)` returns a loaded mod's setting captured when the context was
@@ -1425,10 +1425,10 @@ start and again after each resource reload, and a server builds one when it star
 mods and again on each `/reload`, so a reload captures fresh settings. A LAN or dedicated server's hub holds the server's
 current one, so its Tab list and chat names, and the clicks of its players, see it too.
 
-`item_stacked_on_other(context, event, canceled)` is NeoForge's `ItemStackedOnOtherEvent`, fired inside a pickup click on
-either side. The event no longer carries a side: `context.side()` says it. `player_name_format(context, username,
+`item_stacked_on_other(host, event, result, canceled)` is NeoForge's `ItemStackedOnOtherEvent`, fired inside a pickup click on
+the authoritative side only (the server: single player's server thread, a LAN host and its guests, a dedicated server) with the game's `Host` and the click frozen in `event`; see its hook documentation. `player_name_format(context, username,
 displayname)` and `player_tab_list_name_format(context, player, name, display_name)` format a player's name for chat and
-commands (both sides) and for the Tab list (server). All three are contract version `2`: a mod written for `1` takes the
+commands (both sides) and for the Tab list (server). The name hooks are contract version `2`: a mod written for `1` takes the
 context as a new first argument of the `Hooks` method, and reads the side from it instead of `event.side`.
 
 `ingredient_test(context, kind, data, stack, accept)` is the match-time half of a mod's own ingredient kind: it runs when recipe matching tests a concrete stack against the kind, with `accept` already true. `context` is the loop context of the side that matches: the server's for the server's crafting grids, furnaces, stations and recipe tables, the client's for the client's own grid prediction, recipe book and ghost recipes. It fires inside recipe matching, so it takes no `Host` (a deferred call would reorder matching). Matching passes the context explicitly from the game or menu environment that holds it; there is no global. A mod reads an ingredient with `Ingredient::test(host, stack)` (`&dyn Host`, as handle reads do): the game answers with its own loop context, a mod never builds one, and the old `test(stack)` is gone. `Ingredient` is plain data. `ingredient` (load, `DataLoadContext`) and `ingredient_test` stay separate hooks and the load path is unchanged. Contract version `2`: a mod written for `1` takes the context as a new first argument of the `Hooks` method. With no listener the cost is one `listened` branch per test; the context is one pointer, with no allocation. Recipe matching tests every slot change on both sides (per tick for a furnace) and on each click.
@@ -2325,15 +2325,15 @@ registration path.
   thunder), on a block broken by a player or an explosion and on a mob's death loot; None on the other rolls. The game sets it
   around a roll with `with_native_loot_place`.
 
-- How a mod block burns, and whether it makes a campfire over it a signal fire, on an authoritative server. `fire_odds(dimension, state, pos, face, odds)` answers
+- How a mod block burns on an authoritative server, and whether it makes a campfire over it a signal fire on either side. `fire_odds(dimension, state, pos, face, odds)` answers
   `FireBlock`'s flammability table (`FireBlock.setFlammable(block, igniteOdds, burnOdds)`) before vanilla's table, for the block at `pos` seen from its side `face` (the one facing the fire, or the air fire may take): put
   `(ignite, burn)` in `odds` for your own blocks. Ignite odds above zero let fire stand beside the block and spread
   to the air around it (planks 5, wool 30), so a face with ignite odds of zero isn't flammable; burn odds are how fast fire destroys it (planks 20, wool 60); `(0, 0)` never
   burns; negative answers become zero, burn odds cap at 300 and spread arithmetic saturates. A waterlogged state never burns and isn't asked. It runs hundreds of times per fire tick: keep it short. `is_fire_source`, `ignited_by_lava` and `on_caught_fire` are the block's other fire questions.
   `smoke_source(dimension, state, smoke)` answers `CampfireBlock.isSmokeSource` for the block under a campfire,
   as the campfire is placed or that block changes: `Some(true)` makes the campfire a signal fire, as a hay bale does.
-  Answer only for your own blocks and leave the answer empty otherwise; the level is read-only. The deprecated in-frame
-  path fires neither.
+  Answer only for your own blocks and leave the answer empty otherwise; the level is read-only. It is asked on both sides,
+  including the client's placement prediction, with a typed `LevelSide`: answer from the state and level alone.
 
 - A server player's game mode about to change: `Hooks::player_game_mode_changed` receives a `PlayerGameModeChangedEvent` before the change (NeoForge's `PlayerChangeGameModeEvent`) for the `/gamemode` command, the F3+F4 switcher and a hardcore world's respawn into spectator, once for each change to a different mode, on a server; not for the default mode a player joins with. Its `from` and `to` are `GameMode` values, the same type used by command parsing and `PlayerRef::game_mode`, `set_game_mode` and `previous_game_mode`. Write `*event.to` to redirect the change, or return `Flow::Cancel` to keep the old mode; numeric ids are only for network and save boundaries.
 

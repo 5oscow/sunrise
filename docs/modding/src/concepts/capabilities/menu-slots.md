@@ -222,6 +222,13 @@ host.transaction(|host, tx| {
 })
 ```
 
+`menu_clicked` and `menu_quick_move` (contract version 2) each run as one action: what a listener writes
+through the `Host` stays when it returns and is undone with the rest of the action when a listener fails. A
+`menu_quick_move` answer that is invalid, or a `Host` write to a player's inventory, cursor or menu storage,
+refuses the whole click instead of falling back to the game's routing. `menu_clicked` hears the raw slot, button
+and click type on a menu a mod opened (a single-slot drag once); menu-button clicks, recipe placement and creative
+set-slot never reach it, and it cannot know whether the click changes anything.
+
 Inside `menu_clicked`, `ItemPlace::MenuSlot` can take from and give to the clicking
 player's inventory and hotbar slots as well as the menu's own storage. Inserts fill
 only the named slot and return the amount that fits. Abort the transaction if a

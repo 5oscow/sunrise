@@ -50,15 +50,7 @@ impl BookType {
     }
     /// `RecipeBookSettings` keys in the player's `recipeBook` compound.
     fn keys(self) -> (&'static str, &'static str) {
-        match self {
-            Self::Crafting => ("isGuiOpen", "isFilteringCraftable"),
-            Self::Furnace => ("isFurnaceGuiOpen", "isFurnaceFilteringCraftable"),
-            Self::BlastFurnace => (
-                "isBlastingFurnaceGuiOpen",
-                "isBlastingFurnaceFilteringCraftable",
-            ),
-            Self::Smoker => ("isSmokerGuiOpen", "isSmokerFilteringCraftable"),
-        }
+        mod_api::item::recipe_book::saved_fields::VANILLA[self.index()]
     }
     /// The tab buttons of the book's screen, search first.
     pub fn tabs(self) -> Vec<Tab> {
@@ -1299,10 +1291,23 @@ impl Settings {
     /// both lists the compound does not decode and nothing is read.
     /// Mods' book flags are read on their own, so lists that do not decode keep them.
     pub fn read_valid(tag: Option<&Tag>, valid: &dyn Fn(&str) -> bool) -> Self {
+        Self::read_with_fields(
+            tag,
+            valid,
+            &mod_api::RecipeBookTypeKey::registered_save_fields(),
+        )
+    }
+
+    fn read_with_fields(
+        tag: Option<&Tag>,
+        valid: &dyn Fn(&str) -> bool,
+        fields: &[(String, (String, String))],
+    ) -> Self {
         let mut s = Self {
             custom: CustomBooks::read(tag),
             ..Self::default()
         };
+        s.custom.read_fields(tag, fields);
         let Some(tag) = tag else { return s };
         let ids = |key: &str| match tag.get(key) {
             Some(Tag::List(list)) => Some(
@@ -1323,7 +1328,10 @@ impl Settings {
             ),
             _ => None,
         };
-        let (Some(recipes), Some(to_be_displayed)) = (ids("recipes"), ids("toBeDisplayed")) else {
+        let (Some(recipes), Some(to_be_displayed)) = (
+            ids(mod_api::item::recipe_book::saved_fields::RECIPES),
+            ids(mod_api::item::recipe_book::saved_fields::TO_BE_DISPLAYED),
+        ) else {
             return s;
         };
         let flag = |k: &str| matches!(tag.get(k), Some(Tag::Byte(b)) if *b != 0);
@@ -1339,6 +1347,10 @@ impl Settings {
     /// The compound written to the player file (vanilla's lists follow an
     /// identity hash order; these are sorted).
     pub fn write(&self) -> Tag {
+        self.write_with_fields(&mod_api::RecipeBookTypeKey::registered_save_fields())
+    }
+
+    fn write_with_fields(&self, fields: &[(String, (String, String))]) -> Tag {
         let mut entries: Vec<(&str, Tag)> = Vec::new();
         for b in BookType::ALL {
             let (open, filter) = b.keys();
@@ -1353,9 +1365,24 @@ impl Settings {
         let list = |ids: &BTreeSet<String>| {
             Tag::List(ids.iter().map(|i| Tag::String(i.as_str().into())).collect())
         };
-        entries.push(("recipes", list(&self.recipes)));
-        entries.push(("toBeDisplayed", list(&self.to_be_displayed)));
-        if let Some(custom) = self.custom.write() {
+        entries.push((
+            mod_api::item::recipe_book::saved_fields::RECIPES,
+            list(&self.recipes),
+        ));
+        entries.push((
+            mod_api::item::recipe_book::saved_fields::TO_BE_DISPLAYED,
+            list(&self.to_be_displayed),
+        ));
+        for (id, (open, filtering)) in fields {
+            let flags = self.custom.get(id);
+            if flags.open {
+                entries.push((open, Tag::Byte(1)));
+            }
+            if flags.filtering {
+                entries.push((filtering, Tag::Byte(1)));
+            }
+        }
+        if let Some(custom) = self.custom.write_excluding(fields) {
             entries.push((custom_books::EXTENSION, custom));
         }
         Tag::compound(entries)

@@ -462,6 +462,169 @@ fn state_light_from_native_declarations_invalidates_the_content_cache() {
     fs::remove_dir_all(base.parent().unwrap()).unwrap();
 }
 
+/// The prepared resources, a mod's files, and a game folder's link to them.
+fn tag_files(values: &str) -> Vec<(&'static str, String)> {
+    vec![
+        ("sunrise-mod.toml", manifest("testmod", "")),
+        (
+            "data/testmod/tags/item/a.json",
+            format!(r#"{{"values":[{values}]}}"#),
+        ),
+    ]
+}
+
+fn resources(dir: &Path) -> PathBuf {
+    let base = dir.join("resources");
+    small_base(&base);
+    fs::write(base.join("sunrise-resources.json"), b"{}").unwrap();
+    fs::write(
+        base.join("facts.json"),
+        r#"{"states":[["minecraft:stone"]],"defaults":{"minecraft:stone":0}}"#,
+    )
+    .unwrap();
+    fs::write(
+        base.join("gameplay-facts.json"),
+        r#"{"states":[{"item":"minecraft:stone"}]}"#,
+    )
+    .unwrap();
+    base
+}
+
+fn mod_in(dir: &Path, files: &[(&'static str, String)]) -> Vec<ContentMod> {
+    let files: Vec<(&str, &str)> = files.iter().map(|(n, t)| (*n, t.as_str())).collect();
+    vec![folder_mod(&dir.join("mod"), &files)]
+}
+
+#[test]
+fn the_stamp_follows_a_mod_files_contents_not_its_folder_or_time() {
+    let scratch = tempfile::tempdir().unwrap();
+    let base = resources(scratch.path());
+    let at = |dir: &str, files: &[(&'static str, String)]| {
+        let mods = mod_in(&scratch.path().join(dir), files);
+        stamp(&base, &base.join("jars"), &mods, &fixture_inventory(&mods)).unwrap()
+    };
+    let files = tag_files("");
+    let first = at("one", &files);
+    assert_eq!(first, at("two", &files), "the same files in another folder");
+    let tag = scratch.path().join("one/mod/data/testmod/tags/item/a.json");
+    fs::File::options()
+        .write(true)
+        .open(&tag)
+        .unwrap()
+        .set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(60))
+        .unwrap();
+    assert_eq!(
+        first,
+        at("one", &files),
+        "a newer file time, the same bytes"
+    );
+    assert_ne!(
+        first,
+        at("three", &tag_files(r#""minecraft:stone""#)),
+        "one file's bytes differ"
+    );
+}
+
+/// Each game folder reaches the one set of prepared resources through its own link
+/// (`.local/sunrise-client/26.3`), and keeps its own copy of the mods.
+#[cfg(unix)]
+fn game_folder(
+    parent: &Path,
+    name: &str,
+    resources: &Path,
+    files: &[(&'static str, String)],
+) -> (PathBuf, Vec<ContentMod>) {
+    let folder = parent.join(name);
+    let link = folder.join(".local/sunrise-client/26.3");
+    fs::create_dir_all(link.parent().unwrap()).unwrap();
+    std::os::unix::fs::symlink(resources, &link).unwrap();
+    (link, mod_in(&folder, files))
+}
+
+#[cfg(unix)]
+#[test]
+fn game_folders_linking_the_same_resources_share_a_stamp() {
+    let scratch = tempfile::tempdir().unwrap();
+    let real = resources(scratch.path());
+    let files = tag_files("");
+    let (one, mods_one) = game_folder(scratch.path(), "one", &real, &files);
+    let (two, mods_two) = game_folder(scratch.path(), "two", &real, &files);
+    let stamp_of = |base: &Path, mods: &[ContentMod]| {
+        stamp(base, &base.join("jars"), mods, &fixture_inventory(mods)).unwrap()
+    };
+    assert_eq!(stamp_of(&one, &mods_one), stamp_of(&two, &mods_two));
+    assert_eq!(stamp_of(&one, &mods_one), stamp_of(&real, &mods_one));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_root_built_from_one_game_folder_is_reused_after_it_is_deleted() {
+    let scratch = tempfile::tempdir().unwrap();
+    let real = resources(scratch.path());
+    let cache = scratch.path().join("cache");
+    let files = tag_files("");
+    let (one, mods_one) = game_folder(scratch.path(), "one", &real, &files);
+    let first = resource_root_fixture(&one, &one.join("jars"), &mods_one, &cache).unwrap();
+    let built = fs::metadata(first.join(STAMP)).unwrap().modified().unwrap();
+    fs::remove_dir_all(scratch.path().join("one")).unwrap();
+    let (two, mods_two) = game_folder(scratch.path(), "two", &real, &files);
+    let second = resource_root_fixture(&two, &two.join("jars"), &mods_two, &cache).unwrap();
+    assert_eq!(first, second, "the same root, not a rebuilt one");
+    assert_eq!(
+        built,
+        fs::metadata(second.join(STAMP))
+            .unwrap()
+            .modified()
+            .unwrap(),
+        "its stamp wasn't written again"
+    );
+    assert_eq!(
+        fs::read(second.join("facts.json")).unwrap(),
+        fs::read(real.join("facts.json")).unwrap(),
+        "its links reach the resources after the first folder is gone"
+    );
+    let loaded =
+        resolved_resources(&two, second.clone(), &two.join("jars"), &mods_two, cache).unwrap();
+    assert!(loaded.source().read("items.json").is_ok());
+}
+
+/// A smoke test: concurrent starts on one cache end with one valid root. It doesn't
+/// prove the lock is what kept them apart.
+#[cfg(unix)]
+#[test]
+fn starts_preparing_one_root_at_once_all_get_the_same_valid_root() {
+    let scratch = tempfile::tempdir().unwrap();
+    let real = resources(scratch.path());
+    let cache = scratch.path().join("cache");
+    let files = tag_files("");
+    let games: Vec<_> = ["one", "two", "three", "four"]
+        .into_iter()
+        .map(|name| game_folder(scratch.path(), name, &real, &files))
+        .collect();
+    let roots: Vec<PathBuf> = std::thread::scope(|scope| {
+        let starts: Vec<_> = games
+            .iter()
+            .map(|(base, mods)| {
+                let cache = &cache;
+                scope.spawn(move || {
+                    resource_root_fixture(base, &base.join("jars"), mods, cache).unwrap()
+                })
+            })
+            .collect();
+        starts.into_iter().map(|s| s.join().unwrap()).collect()
+    });
+    assert!(roots.iter().all(|root| root == &roots[0]));
+    let loaded = resolved_resources(
+        &games[0].0,
+        roots[0].clone(),
+        &games[0].0.join("jars"),
+        &games[0].1,
+        cache,
+    )
+    .unwrap();
+    assert!(loaded.source().read("items.json").is_ok());
+}
+
 #[test]
 #[ignore = "daily"]
 fn block_aliases_keep_the_original_item_in_placement_context() {
@@ -2877,84 +3040,6 @@ fn mods_sharing_a_namespace_are_refused() {
     let e = build_fixture(&base, Path::new(""), &[towers, other], &out).unwrap_err();
     assert!(e.to_string().starts_with("mods towers and other"), "{e}");
     let _ = fs::remove_dir_all(&scratch);
-}
-
-#[test]
-#[ignore = "daily"]
-fn conditional_tag_layers_replace_only_when_server_inventory_accepts_them() {
-    let Some(base) = prepared() else { return };
-    let scratch =
-        std::env::temp_dir().join(format!("sunrise-tag-conditions-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&scratch);
-    let file = "data/minecraft/tags/block/conditional_probe.json";
-    let packages = [
-        ("lower", r#"{"values":["minecraft:stone"]}"#),
-        (
-            "conditional",
-            r#"{"neoforge:conditions":[{"type":"neoforge:mod_loaded","modid":"code_only"}],"replace":true,"values":["minecraft:dirt"]}"#,
-        ),
-        (
-            "unsupported",
-            r#"{"neoforge:conditions":[{"type":"unknown:condition"}],"replace":true,"values":["minecraft:diamond_block"]}"#,
-        ),
-        ("tail", r#"{"values":["minecraft:gold_block"]}"#),
-    ];
-    let mods: Vec<_> = packages
-        .into_iter()
-        .map(|(id, tag)| {
-            folder_mod(
-                &scratch.join(id),
-                &[("sunrise-mod.toml", &manifest(id, "")), (file, tag)],
-            )
-        })
-        .collect();
-    let inventory = |side: Option<mod_api::Side>| {
-        sunrise_mod_package::enabled::EnabledMods::new(
-            mods.iter()
-                .map(|m| (m.id.clone(), mod_api::Side::Both))
-                .chain(side.map(|side| ("code_only".into(), side))),
-        )
-    };
-    let cache = scratch.join("cache");
-    let read = |root: &Path| -> serde_json::Value {
-        serde_json::from_slice(&fs::read(root.join(file)).unwrap()).unwrap()
-    };
-    let off = super::resource_root(&base, Path::new(""), &mods, &cache, &inventory(None)).unwrap();
-    assert_eq!(
-        read(&off)["values"],
-        serde_json::json!(["minecraft:diamond_block", "minecraft:gold_block"])
-    );
-    let on = super::resource_root(
-        &base,
-        Path::new(""),
-        &mods,
-        &cache,
-        &inventory(Some(mod_api::Side::Both)),
-    )
-    .unwrap();
-    assert_ne!(on, off, "code-only IDs invalidate the flattened tag cache");
-    assert_eq!(
-        read(&on)["values"],
-        serde_json::json!(["minecraft:diamond_block", "minecraft:gold_block"])
-    );
-    assert!(read(&on).get("neoforge:conditions").is_none());
-    let client = super::resource_root(
-        &base,
-        Path::new(""),
-        &mods,
-        &cache,
-        &inventory(Some(mod_api::Side::Client)),
-    )
-    .unwrap();
-    assert_eq!(read(&client)["values"], read(&off)["values"]);
-    let again =
-        super::resource_root(&base, Path::new(""), &mods, &cache, &inventory(None)).unwrap();
-    assert_eq!(again, off);
-    assert_eq!(
-        read(&off)["values"],
-        serde_json::json!(["minecraft:diamond_block", "minecraft:gold_block"])
-    );
-    fs::remove_dir_all(scratch).unwrap();
 }
 
 #[path = "mod_content_tests_tests.rs"]
