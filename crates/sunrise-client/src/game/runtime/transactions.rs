@@ -201,6 +201,7 @@ struct Kept {
     name: Option<sunrise_core::nbt::Tag>,
     /// The container lock and loot table roll kept beside the model.
     extras: BlockEntityExtras,
+    contents_watches: Vec<(Pos, u64)>,
 }
 
 impl Kept {
@@ -216,6 +217,12 @@ impl Kept {
             hopper: hoppers.get(&pos).copied(),
             name: world.block_names.get(&pos).cloned(),
             extras: world.block_entity_extras(pos),
+            contents_watches: world
+                .block_entities
+                .identity(pos)
+                .map_or_else(Vec::new, |observer| {
+                    world.block_entities.contents_watches.snapshot(observer)
+                }),
         }
     }
 }
@@ -1163,6 +1170,14 @@ impl Game<'_> {
                 None => self.world.block_names.remove(&pos),
             };
             self.world.set_block_entity_extras(pos, kept.extras);
+            if let Some(observer) = self.world.block_entities.identity(pos)
+                && Some(observer.generation) == kept.generation
+            {
+                self.world
+                    .block_entities
+                    .contents_watches
+                    .restore(observer, kept.contents_watches);
+            }
             match kept.hopper {
                 Some(hopper) => self.hoppers.insert(pos, hopper),
                 None => self.hoppers.remove(&pos),
