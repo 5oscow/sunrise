@@ -66,7 +66,7 @@ impl Wires for LibraryWires<'_> {
                 return Shape::Opaque(written);
             };
             let record = surface.types.iter().find(|record| {
-                record.paths.iter().any(|path| *path == name)
+                record.paths.contains(&name)
                     || record.id.strip_prefix("type:") == Some(name.as_str())
             });
             return match record.and_then(|record| record.shape.as_deref()) {

@@ -199,8 +199,8 @@ hash = "pin"
         assert_eq!(
             native,
             concat!(
-                "        mod_points::listeners::tick(\"fixture\", 12, \"before\", mod_3::head),\n",
-                "        mod_points::listeners::tick_return(\"fixture\", 0, \"after\", mod_3::tail),\n"
+                "        { mod_points::__point_mark!(\"tick\"); mod_points::listeners::tick(\"fixture\", 12, \"before\", mod_3::head) },\n",
+                "        { mod_points::__point_mark!(\"tick_return\"); mod_points::listeners::tick_return(\"fixture\", 0, \"after\", mod_3::tail) },\n"
             )
         );
         // A replace owns the outcome, by the point's return and host, through one macro.
@@ -208,14 +208,14 @@ hash = "pin"
         replace.inject[0].kind = Kind::Replace;
         assert_eq!(
             api(&replace, &points, "mod_3::").unwrap()[0],
-            "mod_points::replace!(mod_points::listeners::tick, cancel, host, \"fixture\", 12, \"before\", mod_3::head)"
+            "{ mod_points::__point_mark!(\"tick\"); mod_points::replace!(mod_points::listeners::tick, cancel, host, \"fixture\", 12, \"before\", mod_3::head) }"
         );
         let mut free = points[0].clone();
         free.returns = "result".into();
         free.host = "none".into();
         assert_eq!(
             api(&replace, &[free], "original_mod::").unwrap()[0],
-            "mod_points::replace!(mod_points::listeners::tick, result, none, \"fixture\", 12, \"before\", original_mod::head)"
+            "{ mod_points::__point_mark!(\"tick\"); mod_points::replace!(mod_points::listeners::tick, result, none, \"fixture\", 12, \"before\", original_mod::head) }"
         );
         let mut opaque = points[0].clone();
         opaque.returns = "none".into();
@@ -241,7 +241,7 @@ hash = "pin"
         let wasm = api(&manifest, &points, "original_mod::").unwrap();
         assert_eq!(
             wasm[0],
-            "mod_points::listeners::tick(\"fixture\", 12, \"before\", original_mod::head)"
+            "{ mod_points::__point_mark!(\"tick\"); mod_points::listeners::tick(\"fixture\", 12, \"before\", original_mod::head) }"
         );
         let mut head_only = points[0].clone();
         head_only.at_return = false;
