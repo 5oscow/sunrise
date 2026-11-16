@@ -28,7 +28,7 @@ impl Game<'_> {
         self.remote_menu_type()
             .or_else(|| self.mod_menu_at(screen.key))
     }
-    pub(in crate::game) fn native_screen_toggle(&self) -> Option<[f32; 2]> {
+    pub(in crate::game) fn native_screen_toggle(&self) -> Option<mod_api::RecipeBookToggle> {
         self.shown_native_screen()?.screen.recipe_book_toggle
     }
     pub(in crate::game) fn native_screen_big_result(&self) -> bool {

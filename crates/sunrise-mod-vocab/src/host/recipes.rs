@@ -18,7 +18,9 @@ pub trait RecipesHost {
     /// types once per load/reload and match those in mod memory; those return
     /// RecipeLookupError::NotMatchable. These are the
     /// recipes in force (`RecipeManager.getAllRecipesFor`): data packs merged and
-    /// load conditions held, so a pack's override or removal shows. A data pack
+    /// load conditions held, so a pack's override or removal shows. A loaded recipe the API
+    /// cannot represent is left out of this listing and logged at debug level with its id
+    /// and reason; the rest remain in order. This does not change recipe loading. A data pack
     /// changes them on `/reload`, so look them up again when you need them. Empty
     /// for a type nobody uses and outside a world. These are the server's table on
     /// the server thread, a dedicated server or a LAN host; a client, the

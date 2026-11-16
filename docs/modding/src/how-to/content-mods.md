@@ -328,8 +328,14 @@ outline passes skylight without attenuation when dry, but attenuates it by 1 whe
 
 Movement collision is independently selectable with `collision_shapes`; it does not change the outline,
 render solidity, occlusion or lighting. Both take the same table format. Boxes are
-`[minX,minY,minZ,maxX,maxY,maxZ]` in block units (one block is 1), at most 16 per shape.
+`[minX,minY,minZ,maxX,maxY,maxZ]` in block units (one block is 1), any number per shape, as in vanilla.
 Coordinates must be finite and each minimum must not exceed its maximum. `[]` is an empty shape.
+
+A declared shape also decides the block's legacy solid bit (`BlockState.isSolid`, which attachment
+survival such as wall signs and torches reads): it is calculated from `collision_shapes`, else from
+`shapes`, as vanilla does for any block (bounding-box average size at least 0.7291666666666666, or at least a block tall). A
+template that forces solidity on or off keeps its answer, and a block that declares no shape keeps the
+template's. This is not render solidity and not sturdy-face support.
 
 ```json
 {
@@ -411,7 +417,9 @@ the first publish.
 This differs from NeoForge, where `getShape` is asked for on every query: here a shape is
 **published when it changes, not asked for per query**, and a port of a `getShape` override calls
 `set_shapes` wherever that state changes (a part attached, a lid opened). Physics, selection,
-ray casts and support read the published value at the position; nothing calls into the mod.
+ray casts (outline and collider, over a dynamic template's shape too), support, the floor a
+mob's path stands on and its move control's jump read the published value at the position;
+nothing calls into the mod.
 Face sturdiness and multiface attachment between neighbouring blocks (placement, survival,
 shape updates, as for lichen and sculk veins) still read the declared shape until #1654.
 Shapes that depend on the querying entity are not covered; `outline_context_shapes` and
@@ -420,8 +428,8 @@ Shapes that depend on the querying entity are not covered; `outline_context_shap
 - **Checks**, refused by name with a `BlockEntityShapesError` and never clamped: every
   coordinate finite and each minimum at most its maximum; at most 64 boxes in each list.
   Vanilla has no box limit; 64 bounds what a block entity makes every client receive and
-  keep, while a declared shape table (`shapes`, above) holds 16 boxes, a load-time limit of
-  its own. There is no coordinate range. A box under 1e-7 thick on an axis is an empty box,
+  keep, while a declared shape table (`shapes`, above) syncs nothing and has no box limit.
+  There is no coordinate range. A box under 1e-7 thick on an axis is an empty box,
   as in vanilla.
 - **Reach**: collision finds boxes only within one cell of the block, one axis at a time (a
   state that publishes is always scanned that way); a box beyond that is stored and sent but

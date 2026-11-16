@@ -2586,7 +2586,7 @@ impl Game<'_> {
         random: Option<spill::ItemRandom>,
     ) -> [f64; 3] {
         let velocity = self.push_item_entity(stack, position, velocity, pickup_delay, random);
-        self.join_item_entity(self.next_entity, position);
+        let _ = self.join_item_entity(self.next_entity, position);
         velocity
     }
     /// The block entity at `pos` saved with its id and position
@@ -6020,76 +6020,114 @@ impl Game<'_> {
         )
     }
 
-    fn orb_geometry<'a>(
+    pub(super) fn orb_geometry<'a>(
         &self,
         camera: glam::DVec3,
         orbs: impl Iterator<Item = (&'a sunrise_client::entities::ExperienceOrb, [f64; 3], f32)>,
         orb_view: Option<&sunrise_client::gfx::JoinedFrusta>,
         out: &mut Vec<Vertex>,
     ) {
-        if let Some(r) = self
+        let sprite = self
             .gui
             .atlas
             .sprites
             .get("entity/experience/experience_orb")
-            .copied()
-        {
-            let (yaw, pitch) = (self.yaw.to_radians(), self.pitch.to_radians());
-            let forward = glam::Vec3::new(
-                -yaw.sin() * pitch.cos(),
-                -pitch.sin(),
-                yaw.cos() * pitch.cos(),
-            );
-            let right = forward.cross(glam::Vec3::Y).normalize_or_zero();
-            let up = right.cross(forward).normalize_or_zero();
-            for (o, at, partial) in orbs {
-                let p = glam::DVec3::new(at[0], at[1] + 0.1, at[2]) - camera;
-                let c = p.as_vec3();
-                if orb_view.is_some_and(|view| {
-                    forward.dot(c) < 0.0 && !entity_culling::orb_in_view(view, c)
-                }) {
-                    continue;
-                }
-                let icon = o.icon();
-                let (du, dv) = ((r.u1 - r.u0) / 4.0, (r.v1 - r.v0) / 4.0);
-                let (u0, v0) = (r.u0 + (icon % 4) as f32 * du, r.v0 + (icon / 4) as f32 * dv);
-                let t = (o.age as f32 + partial) / 2.0;
-                let red = ((t.sin() + 1.0) * 0.5 * 255.0) as u32;
-                let blue = (((t + 4.188_79).sin() + 1.0) * 0.1 * 255.0) as u32;
-                let color = 0x8000_0000 | blue << 16 | 255 << 8 | red;
-                // `ExperienceOrbRenderer.getBlockLightLevel` (the block light
-                // plus 7, clamped) at the block the orb's eye is in.
+            .copied();
+        let (yaw, pitch) = (self.yaw.to_radians(), self.pitch.to_radians());
+        let forward = glam::Vec3::new(
+            -yaw.sin() * pitch.cos(),
+            -pitch.sin(),
+            yaw.cos() * pitch.cos(),
+        );
+        let right = forward.cross(glam::Vec3::Y).normalize_or_zero();
+        let up = right.cross(forward).normalize_or_zero();
+        for (o, at, partial) in orbs {
+            let p = glam::DVec3::new(at[0], at[1] + 0.1, at[2]) - camera;
+            let c = p.as_vec3();
+            if orb_view
+                .is_some_and(|view| forward.dot(c) < 0.0 && !entity_culling::orb_in_view(view, c))
+            {
+                continue;
+            }
+            if let Some(resolved) = native_entity_renderers::experience_orb_renderer() {
+                let entity: mod_api::EntityRenderState =
+                    mod_api::__private::built::EntityRenderState {
+                        id: o.id,
+                        partial,
+                        age: o.age as f32 + partial,
+                        yaw: o.rotation[0],
+                        pitch: o.rotation[1],
+                        living: None,
+                        tnt_fuse: None,
+                        orb_value: Some(o.value),
+                        painting: None,
+                    }
+                    .into();
                 let light = self.world.light(
                     o.position.x.floor() as i32,
                     o.light_probe_y().floor() as i32,
                     o.position.z.floor() as i32,
                 );
                 let packed = o.render_light(i32::from(light));
-                // `ExperienceOrbRenderer.submit`: the quad runs from
-                // (-0.5, -0.25) to (0.5, 0.75) and is scaled by 0.3, so the
-                // sprite hangs a quarter of its height below the orb's centre.
-                let s = sunrise_client::entities::ORB_QUAD_SCALE;
-                for (k, uv) in sunrise_client::entities::ORB_QUAD.iter().zip([
-                    [u0, v0 + dv],
-                    [u0 + du, v0 + dv],
-                    [u0 + du, v0],
-                    [u0, v0],
-                ]) {
-                    let v = c + right * (k[0] * s) + up * (k[1] * s);
-                    out.push(Vertex {
-                        normal: [0; 4],
-                        pos: v.to_array(),
-                        uv,
-                        // ExperienceOrbRenderer: `RenderTypes.entityTranslucent`; in HDR
-                        // output the orbs shine (entity.wgsl fs_hdr_mark).
-                        layer: sunrise_client::gfx::OIT_ENTITY
-                            | u32::from(sunrise_client::mesher::VERY_BRIGHT) << 16,
-                        color,
-                        light: packed,
-
-                        glint_uv: [0.0, 0.0],
-                    });
+                let block = [
+                    o.position.x.floor() as i32,
+                    o.light_probe_y().floor() as i32,
+                    o.position.z.floor() as i32,
+                ];
+                if self.mod_entity_renderer_geometry(
+                    &resolved,
+                    &entity,
+                    "minecraft:experience_orb",
+                    glam::DVec3::from_array(at) - camera,
+                    block,
+                    packed,
+                    out,
+                ) {
+                    continue;
                 }
+            }
+            let Some(r) = sprite else {
+                continue;
+            };
+            let icon = o.icon();
+            let (du, dv) = ((r.u1 - r.u0) / 4.0, (r.v1 - r.v0) / 4.0);
+            let (u0, v0) = (r.u0 + (icon % 4) as f32 * du, r.v0 + (icon / 4) as f32 * dv);
+            let t = (o.age as f32 + partial) / 2.0;
+            let red = ((t.sin() + 1.0) * 0.5 * 255.0) as u32;
+            let blue = (((t + 4.188_79).sin() + 1.0) * 0.1 * 255.0) as u32;
+            let color = 0x8000_0000 | blue << 16 | 255 << 8 | red;
+            // `ExperienceOrbRenderer.getBlockLightLevel` (the block light
+            // plus 7, clamped) at the block the orb's eye is in.
+            let light = self.world.light(
+                o.position.x.floor() as i32,
+                o.light_probe_y().floor() as i32,
+                o.position.z.floor() as i32,
+            );
+            let packed = o.render_light(i32::from(light));
+            // `ExperienceOrbRenderer.submit`: the quad runs from
+            // (-0.5, -0.25) to (0.5, 0.75) and is scaled by 0.3, so the
+            // sprite hangs a quarter of its height below the orb's centre.
+            let s = sunrise_client::entities::ORB_QUAD_SCALE;
+            for (k, uv) in sunrise_client::entities::ORB_QUAD.iter().zip([
+                [u0, v0 + dv],
+                [u0 + du, v0 + dv],
+                [u0 + du, v0],
+                [u0, v0],
+            ]) {
+                let v = c + right * (k[0] * s) + up * (k[1] * s);
+                out.push(Vertex {
+                    normal: [0; 4],
+                    pos: v.to_array(),
+                    uv,
+                    // ExperienceOrbRenderer: `RenderTypes.entityTranslucent`; in HDR
+                    // output the orbs shine (entity.wgsl fs_hdr_mark).
+                    layer: sunrise_client::gfx::OIT_ENTITY
+                        | u32::from(sunrise_client::mesher::VERY_BRIGHT) << 16,
+                    color,
+                    light: packed,
+
+                    glint_uv: [0.0, 0.0],
+                });
             }
         }
     }
@@ -6385,7 +6423,6 @@ impl Game<'_> {
         self.score = Default::default();
         let stack = self.open_world_datapacks(&level.enabled_features)?;
         let root = self.options.resources.clone();
-        self.open_world_tables(&stack, &root)?;
         self.damage_tag_generation = self.damage_tag_generation.wrapping_add(1);
         self.resolve_parts()?;
         // A code-mod switch can have rebuilt the root since `Game::new`.

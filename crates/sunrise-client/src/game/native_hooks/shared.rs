@@ -5063,6 +5063,7 @@ mod item_fall_on_tests {
         sync: false,
     };
 
+    use mod_api::RandomSource as _;
     use sunrise_core::random::RandomSource as _;
 
     struct LoanPart(std::sync::Arc<()>);

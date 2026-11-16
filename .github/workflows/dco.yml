@@ -20,7 +20,9 @@ jobs:
          || startsWith(github.event.pull_request.head.ref, 'sync/arismoko-')
          || startsWith(github.event.pull_request.head.ref, 'sunrise-review-rollup-'))
         && github.event.pull_request.head.repo.full_name == github.repository)
-    runs-on: ubuntu-latest
+    # It runs no code of the pull request. Ours go to Dyna's small runner while the repository's switch is on; a
+    # fork's, which Dyna's runners refuse, to GitHub's.
+    runs-on: ${{ vars.DYNA_CI_SELF_HOSTED == 'true' && github.event.pull_request.head.repo.full_name == github.repository && 'dyna-small' || 'ubuntu-latest' }}
     steps:
       # The checker comes from the base commit, never the pull request: a branch made before it existed still gets
       # checked, and a pull request can't change the check it is held to. Its commits are only read as git objects.

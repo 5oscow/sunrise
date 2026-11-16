@@ -770,6 +770,14 @@ impl Game<'_> {
     pub(in crate::game) fn sync_loot_table_ids(&mut self) {
         let mut ids: Vec<String> = self.items().loot_table_ids().map(str::to_owned).collect();
         ids.sort();
+        if let Some(entry) = self
+            .ui
+            .registries
+            .by_registry
+            .get_mut("minecraft:loot_table")
+        {
+            entry.ids.clone_from(&ids);
+        }
         self.ui.registries.loot_tables = ids;
     }
     /// Registry contents for argument parsing (built when a world opens).

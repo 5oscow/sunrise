@@ -498,6 +498,8 @@ impl Game<'_> {
                         yaw: f32::from(p.facing & 3) * 90.0,
                         pitch: 0.0,
                         living: None,
+                        tnt_fuse: None,
+                        orb_value: None,
                         painting: Some(
                             mod_api::__private::built::PaintingRenderState {
                                 facing,

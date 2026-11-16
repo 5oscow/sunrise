@@ -301,13 +301,12 @@ impl BlockShapes {
     fn check(&self) -> Result<(), String> {
         self.check_selection("shapes")?;
         for boxes in self.values.values().chain(self.default.iter()) {
-            if boxes.len() > 16
-                || boxes.iter().any(|bounds| {
-                    bounds.iter().any(|value| !value.is_finite())
-                        || (0..3).any(|axis| bounds[axis] > bounds[axis + 3])
-                })
-            {
-                return Err("shape needs at most 16 finite boxes with ordered bounds".into());
+            // Vanilla's shapes have no box limit, so neither does a declared one.
+            if boxes.iter().any(|bounds| {
+                bounds.iter().any(|value| !value.is_finite())
+                    || (0..3).any(|axis| bounds[axis] > bounds[axis + 3])
+            }) {
+                return Err("shape needs finite boxes with ordered bounds".into());
             }
         }
         Ok(())
@@ -1964,14 +1963,14 @@ capabilities = ["registries"]
                 "{value}"
             );
         }
-        let oversized = BlockShapes(StateValues {
+        let many = BlockShapes(StateValues {
             property: String::new(),
             properties: vec![],
             values: BTreeMap::new(),
-            default: Some(vec![[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]; 17]),
+            default: Some(vec![[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]; 100]),
         });
-        assert!(oversized.check().is_err());
-        let mut nonfinite = oversized;
+        assert_eq!(many.check(), Ok(()));
+        let mut nonfinite = many;
         nonfinite.default = Some(vec![[f64::NAN; 6]]);
         assert!(nonfinite.check().is_err());
     }

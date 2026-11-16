@@ -1277,7 +1277,7 @@ fn wire_loopback_returned_frame_resource_uses_source_permissions() {
     struct Start {
         draws: i64,
     }
-    impl mod_api::StructureRandom for Start {
+    impl mod_api::RandomSource for Start {
         fn next_long(&mut self) -> i64 {
             self.draws += 1;
             41 + self.draws
@@ -1294,12 +1294,18 @@ fn wire_loopback_returned_frame_resource_uses_source_permissions() {
         fn next_boolean(&mut self) -> bool {
             unreachable!()
         }
+        fn next_int(&mut self) -> i32 {
+            unreachable!()
+        }
+        fn next_gaussian(&mut self) -> f64 {
+            unreachable!()
+        }
     }
     impl mod_api::GenerationContext for Start {
         fn metadata(&self) -> &dyn mod_api::BlockMetadata {
             unreachable!()
         }
-        fn random(&mut self) -> &mut dyn mod_api::StructureRandom {
+        fn random(&mut self) -> &mut dyn mod_api::RandomSource {
             self
         }
         fn chunk(&self) -> mod_api::ChunkPos {
@@ -1342,7 +1348,7 @@ fn wire_loopback_returned_frame_resource_uses_source_permissions() {
     frame.set_generation_context_mut(&mut start);
     cx.frames.push(frame);
     let mut out = Writer::new();
-    let id = boundary::import_id("StructureRandom", "next_long").unwrap();
+    let id = boundary::import_id("RandomSource", "next_long").unwrap();
     unsafe { boundary::serve(id, &mut cx, &[], &mut out) }.unwrap();
     assert_eq!(Reader::decode::<i64>(out.bytes()).unwrap(), 42);
     assert_eq!(start.draws, 1);
@@ -1747,7 +1753,7 @@ fn wire_loopback_bad_import_bytes_are_typed_errors() {
     let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
     let mut cx = boundary::Cx::default();
     let mut out = Writer::new();
-    let id = boundary::import_id("StructureRandom", "next_int_bound").unwrap();
+    let id = boundary::import_id("RandomSource", "next_int_bound").unwrap();
     assert!(matches!(
         unsafe { boundary::serve(id, &mut cx, &[0xff], &mut out) },
         Err(boundary::ServeError::Decode(_))

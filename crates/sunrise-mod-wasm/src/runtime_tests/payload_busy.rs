@@ -50,7 +50,7 @@ impl IPayloadContext for UnusedContext {
 #[test]
 fn actual_guest_contention_returns_original_payload_without_encoding_or_waiting() {
     crate::test_stack::on_guest_stack(|| {
-        let random_id = crate::boundary::import_id("StructureRandom", "next_long").unwrap();
+        let random_id = crate::boundary::import_id("RandomSource", "next_long").unwrap();
         let holder_export = crate::boundary::export_id("PayloadWork", "run").unwrap();
         let mut success = Writer::new();
         success.put(&Result::<(), PayloadHandleError>::Ok(()));
@@ -98,7 +98,7 @@ fn actual_guest_contention_returns_original_payload_without_encoding_or_waiting(
                         7
                     });
                     let mut frame = Frame::default();
-                    frame.set_structure_random_mut(&mut random);
+                    frame.set_random_source_mut(&mut random);
                     holding.call(
                         CallClass::Load,
                         frame,
@@ -182,7 +182,7 @@ fn actual_guest_contention_returns_original_payload_without_encoding_or_waiting(
                     7
                 });
                 let mut frame = Frame::default();
-                frame.set_structure_random_mut(&mut random);
+                frame.set_random_source_mut(&mut random);
                 assert_eq!(
                     nested.call(CallClass::Load, frame, 0, None, |_| {}, |r| r.take::<i64>()),
                     Some(7)

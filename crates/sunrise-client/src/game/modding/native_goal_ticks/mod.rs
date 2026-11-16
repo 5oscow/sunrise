@@ -15,10 +15,11 @@ use crate::mobs::{
     part_goals::{BehaviorOp, GoalOp},
 };
 use mod_api::{
-    BehaviorCxBackend, EntityRef, GoalCxBackend, Host, LegacyRandom, LivingRef, MobRef, PlayerRef,
+    BehaviorCxBackend, EntityRef, GoalCxBackend, Host, LivingRef, MobRef, PlayerRef, RandomSource,
     content::crash::{ModCall, enter_native_mod},
 };
 use sunrise_core::geometry::Axis;
+use sunrise_core::random::RandomSource as EngineRandom;
 
 #[cfg(test)]
 mod interception_tests;
@@ -347,6 +348,32 @@ impl GoalCx<'_, '_> {
     }
 }
 
+/// The ticking mob's own random, as its goals draw from it: each draw is the engine's, in the
+/// mob's order.
+impl RandomSource for GoalCx<'_, '_> {
+    fn next_int(&mut self) -> i32 {
+        EngineRandom::next_int(&mut self.m.random)
+    }
+    fn next_int_bound(&mut self, bound: i32) -> i32 {
+        EngineRandom::next_int_bound(&mut self.m.random, bound).unwrap_or(0)
+    }
+    fn next_long(&mut self) -> i64 {
+        EngineRandom::next_long(&mut self.m.random)
+    }
+    fn next_boolean(&mut self) -> bool {
+        EngineRandom::next_boolean(&mut self.m.random)
+    }
+    fn next_float(&mut self) -> f32 {
+        EngineRandom::next_float(&mut self.m.random)
+    }
+    fn next_double(&mut self) -> f64 {
+        EngineRandom::next_double(&mut self.m.random)
+    }
+    fn next_gaussian(&mut self) -> f64 {
+        EngineRandom::next_gaussian(&mut self.m.random)
+    }
+}
+
 impl GoalCxBackend for GoalCx<'_, '_> {
     fn host(&self) -> &dyn Host {
         self
@@ -356,8 +383,8 @@ impl GoalCxBackend for GoalCx<'_, '_> {
         self.mob_handle()
     }
 
-    fn random(&mut self) -> &mut LegacyRandom {
-        &mut self.m.random
+    fn random(&mut self) -> &mut dyn RandomSource {
+        self
     }
 
     fn move_to(&mut self, at: [f64; 3], speed: f64) -> bool {

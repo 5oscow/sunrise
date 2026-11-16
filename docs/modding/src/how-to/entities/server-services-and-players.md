@@ -151,6 +151,11 @@ read the distances in chunks; `host.server_set_view_distance(d)` and
 dedicated server and return `false` otherwise. `server.properties` is not
 written.
 
+`host.tick_rate_is_frozen()` is `TickRateManager.isFrozen` (`/tick freeze`): `Some(true)` while the server's
+ticking is frozen, `None` on a client. A frozen server still runs the ticks `/tick step` asks for, so
+`server_tick_start`'s `world_running` can be true while it is frozen; read this to tell a frozen server from a
+paused level.
+
 ## World mutation: chunks, blocks shown and placed as a player
 
 For mods that write blocks by other means (an editor's own section writes, a schematic) and then have to make the game and the client agree. Server only. Each method returns `Result` and names every refusal; a refusal changes nothing.

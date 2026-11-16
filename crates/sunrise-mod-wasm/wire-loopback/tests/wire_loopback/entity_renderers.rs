@@ -98,6 +98,8 @@ fn wire_loopback_entity_renderers_register_and_draw_alike_for_native_and_guest_m
                     yaw: 90.0,
                     pitch: -10.0,
                     living: None,
+                    tnt_fuse: None,
+                    orb_value: None,
                     painting: None,
                 }
                 .into();
@@ -138,6 +140,8 @@ fn wire_loopback_entity_renderers_register_and_draw_alike_for_native_and_guest_m
                     yaw: 90.0,
                     pitch: -10.0,
                     living: Some(living.into()),
+                    tnt_fuse: None,
+                    orb_value: None,
                     painting: None,
                 }
                 .into();

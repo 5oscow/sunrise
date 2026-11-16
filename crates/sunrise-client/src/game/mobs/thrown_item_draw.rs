@@ -32,6 +32,8 @@ impl Game<'_> {
                 yaw: a.previous_yaw + partial * (a.yaw - a.previous_yaw),
                 pitch: a.previous_pitch + partial * (a.pitch - a.previous_pitch),
                 living: None,
+                tnt_fuse: None,
+                orb_value: None,
                 painting: None,
             }
             .into();
