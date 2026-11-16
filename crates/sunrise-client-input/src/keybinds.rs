@@ -269,16 +269,38 @@ pub fn mouse_name(button: MouseButton) -> String {
         MouseButton::Middle => "key.mouse.middle".into(),
         MouseButton::Back => "key.mouse.4".into(),
         MouseButton::Forward => "key.mouse.5".into(),
-        MouseButton::Other(n) => format!("key.mouse.{}", n + 1),
+        MouseButton::Other(n) => format!("key.mouse.{}", u32::from(n) + 1),
     }
 }
+/// `InputConstants.getKey` for a mouse button: the three named buttons, else
+/// the name's number in vanilla's numbering (`InputConstants$Type`, as
+/// [`crate::key_names::MOUSE`]: left 1, middle 2, right 3, then 4 and up). 6
+/// and up are the inverse of [`mouse_name`] for `Other(5)` and above;
+/// `Other(0)` to `Other(4)` share their names with vanilla's five numbered
+/// buttons. A number no button has resolves to none.
 pub fn mouse_button(name: &str) -> Option<MouseButton> {
+    if let Some(button) = named_mouse_button(name) {
+        return Some(button);
+    }
+    Some(
+        match name.strip_prefix("key.mouse.")?.parse::<i32>().ok()? {
+            n @ 1..=3 => crate::key_names::MOUSE
+                .iter()
+                .find(|(k, _)| *k == n)
+                .and_then(|(_, named)| named_mouse_button(named))?,
+            4 => MouseButton::Back,
+            5 => MouseButton::Forward,
+            n if n >= 6 => MouseButton::Other(u16::try_from(n - 1).ok()?),
+            _ => return None,
+        },
+    )
+}
+/// The three buttons vanilla names (`key.mouse.left`, `middle`, `right`).
+fn named_mouse_button(name: &str) -> Option<MouseButton> {
     Some(match name {
         "key.mouse.left" => MouseButton::Left,
         "key.mouse.right" => MouseButton::Right,
         "key.mouse.middle" => MouseButton::Middle,
-        "key.mouse.4" => MouseButton::Back,
-        "key.mouse.5" => MouseButton::Forward,
         _ => return None,
     })
 }
@@ -603,6 +625,64 @@ mod tests {
         assert!(!keys.middle_acts(z, true));
         assert!(keys.middle_acts(middle, true));
         assert!(!keys.middle_acts(middle, false));
+    }
+    /// #1646: the name `mouse_name` writes for each named button, and for
+    /// `Other(5)` up to the last button winit can name, reads back.
+    #[test]
+    fn every_saved_mouse_button_name_reads_back() {
+        use MouseButton::*;
+        for button in [
+            Left,
+            Right,
+            Middle,
+            Back,
+            Forward,
+            Other(5),
+            Other(6),
+            Other(99),
+            Other(u16::MAX),
+        ] {
+            assert_eq!(
+                mouse_button(&mouse_name(button)),
+                Some(button),
+                "{button:?}"
+            );
+        }
+        assert_eq!(mouse_name(Other(5)), "key.mouse.6");
+        assert_eq!(mouse_name(Other(u16::MAX)), "key.mouse.65536");
+    }
+    /// `InputConstants.getKey`: a name outside the named ones reads its number
+    /// with `Integer.parseInt` as the button, in vanilla's numbering
+    /// (`InputConstants$Type`: left 1, middle 2, right 3), and a number no
+    /// button has never resolves.
+    #[test]
+    fn a_numbered_mouse_name_reads_as_vanillas_button() {
+        use MouseButton::*;
+        for (name, button) in [
+            ("key.mouse.1", Left),
+            ("key.mouse.2", Middle),
+            ("key.mouse.3", Right),
+            ("key.mouse.4", Back),
+            ("key.mouse.5", Forward),
+            ("key.mouse.+7", Other(6)),
+            ("key.mouse.007", Other(6)),
+        ] {
+            assert_eq!(mouse_button(name), Some(button), "{name}");
+        }
+        for name in [
+            "key.mouse.0",
+            "key.mouse.-6",
+            "key.mouse.65537",
+            "key.mouse.2147483648",
+            "key.mouse.-2147483648",
+            "key.mouse.six",
+            "key.mouse.",
+            "key.mouse.6 ",
+            "key.mouse6",
+            "key.keyboard.6",
+        ] {
+            assert_eq!(mouse_button(name), None, "{name}");
+        }
     }
     #[test]
     fn container_mouse_hotkeys_follow_slot_bindings_and_pick_item_priority() {
