@@ -39,33 +39,7 @@ impl anim::HumanoidSetup for Game<'_> {
 }
 
 impl Game<'_> {
-    pub(super) fn armor_stand_setup_anim(
-        &self,
-        stand: &sunrise_client::entities::ArmorStand,
-        partial: f32,
-        poses: &mut anim::Poses,
-    ) {
-        use super::api_values::TryIntoApi;
-        let stacks = [0, 1].map(|slot| {
-            stand.equipment[slot]
-                .as_ref()
-                .and_then(|stack| stack.try_into_api().ok())
-        });
-        let humanoid = mod_api::HumanoidRenderState {
-            main_hand: stacks[0].as_ref(),
-            off_hand: stacks[1].as_ref(),
-            main_arm_left: false,
-            is_using_item: false,
-            use_hand: None,
-            ticks_using_item: 0,
-            use_animation: mod_api::UseAnimation::None,
-            main_arm_pose: mod_api::ArmPose::Empty,
-            off_arm_pose: mod_api::ArmPose::Empty,
-        };
-        self.setup_humanoid_parts(stand.id, "minecraft:armor_stand", &humanoid, partial, poses);
-    }
-
-    /// One adapter for mob, player and armor-stand models. Parts have a finite
+    /// One adapter for mob and player models. Parts have a finite
     /// value invariant, so applying the completed listener answer needs no second
     /// validation pass and cannot overwrite scale or visibility.
     pub(super) fn setup_humanoid_parts(

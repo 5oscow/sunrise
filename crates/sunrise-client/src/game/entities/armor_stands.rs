@@ -1674,10 +1674,10 @@ impl Game<'_> {
                 let mut frame = self.skin_frame.borrow_mut();
                 let mark = frame.mark();
                 let mut skin = sunrise_client::mobs::skin::Skin::new(&mut models, &mut frame);
-                self.armor_stand_vertices(a, alpha as f32, base, packed, Some(&mut skin), out);
+                self.armor_stand_vertices(a, base, packed, Some(&mut skin), out);
                 Some((mark, skin.bounds))
             } else {
-                self.armor_stand_vertices(a, alpha as f32, base, packed, None, out);
+                self.armor_stand_vertices(a, base, packed, None, out);
                 None
             };
             if !self.tracked_entity_glowing(a.id) {
@@ -1692,7 +1692,6 @@ impl Game<'_> {
     fn armor_stand_vertices(
         &self,
         a: &ArmorStand,
-        partial: f32,
         base: glam::Mat4,
         packed: u32,
         mut skin: Option<&mut sunrise_client::mobs::skin::Skin>,
@@ -1720,12 +1719,8 @@ impl Game<'_> {
             return;
         };
         let mut poses = Poses::new(model);
-        // ArmorStandArmorModel first runs the humanoid superclass, then its
-        // saved rotations replace the head/body/limb rotations the hook wrote.
-        let before = |poses: &mut Poses| self.armor_stand_setup_anim(a, partial, poses);
-        let before = mod_api::__private::listened(mod_api::HookId::HumanoidSetupAnim)
-            .then_some(&before as &dyn Fn(&mut Poses));
-        apply_pose(&mut poses, &a.pose, before);
+        // ArmorStandModel.setupAnim: the stand's pose and part visibility.
+        apply_pose(&mut poses, &a.pose);
         // Item layers pose from the hidden arms too (`visible` only skips drawing).
         let posed = poses.clone();
         let mut hide = |name: &str| {
@@ -1822,7 +1817,7 @@ impl Game<'_> {
             };
             // ArmorStandArmorModel.setupAnim: the same pose as the stand.
             layer_poses.reset(part);
-            apply_pose(&mut layer_poses, &a.pose, before);
+            apply_pose(&mut layer_poses, &a.pose);
             // EquipmentLayerRenderer: every layer of the asset, the leather overlay
             // too; the shader glint goes on the first layer only (renderShaderGlint).
             let cit = self.cit_worn_rule(Kind::Armor, stack);
@@ -1920,7 +1915,7 @@ impl Game<'_> {
             * glam::Mat4::from_scale(glam::Vec3::new(-1.0, -1.0, 1.0))
             * glam::Mat4::from_translation(glam::Vec3::new(0.0, -1.501, 0.0));
         let mut verts = Vec::new();
-        self.armor_stand_vertices(&stand, 1.0, base, 240 | 240 << 8, None, &mut verts);
+        self.armor_stand_vertices(&stand, base, 240 | 240 << 8, None, &mut verts);
         // ARMOR_STAND_ANGLE: rotationXYZ(0.43633232, 0, PI).
         let gui =
             glam::Mat4::from_translation(glam::Vec3::new((x0 + x1) / 2.0, (y0 + y1) / 2.0, 0.0))
@@ -1949,10 +1944,7 @@ fn preview_slot(equip: Option<&str>) -> usize {
 }
 /// The `Pose` rotations on the parts of an armor stand model or its armor
 /// (`ArmorStandArmorModel.setupAnim`); the body also turns the sticks.
-fn apply_pose(poses: &mut Poses, pose: &[[f32; 3]; 6], before: Option<&dyn Fn(&mut Poses)>) {
-    if let Some(before) = before {
-        before(poses);
-    }
+fn apply_pose(poses: &mut Poses, pose: &[[f32; 3]; 6]) {
     let parts: [&[&str]; 6] = [
         &["head"],
         &[
@@ -2304,42 +2296,6 @@ fn broken_armor_stand_equipment(a: ArmorStand) -> ([i32; 3], Vec<ItemStack>) {
 #[cfg(test)]
 mod swap_tests {
     use super::*;
-
-    #[test]
-    fn saved_stand_rotations_replace_the_mid_humanoid_writes() {
-        use std::cell::Cell;
-        let model = Part {
-            name: "right_arm".into(),
-            pose: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
-            polygons: Vec::new(),
-            children: Vec::new(),
-        };
-        let mut poses = Poses::new(&model);
-        let calls = Cell::new(0);
-        let before = |poses: &mut Poses| {
-            calls.set(calls.get() + 1);
-            poses.get("right_arm")[0] = 4.0;
-            poses.xrot("right_arm", -1.0);
-        };
-        let mut saved = [[0.0; 3]; 6];
-        saved[3] = [30.0, -45.0, 90.0];
-        for expected in 1..=2 {
-            apply_pose(&mut poses, &saved, Some(&before));
-            assert_eq!(calls.get(), expected);
-            assert_eq!(
-                poses.get("right_arm")[..6],
-                [
-                    4.0,
-                    0.0,
-                    0.0,
-                    std::f32::consts::PI / 6.0,
-                    -std::f32::consts::PI / 4.0,
-                    std::f32::consts::PI / 2.0
-                ]
-            );
-        }
-    }
-
     fn stack(item: &str, count: u32) -> ItemStack {
         ItemStack::new(item, count)
     }
@@ -3054,5 +3010,45 @@ mod postbaseline_lodestone_controls {
                 .collect::<std::collections::HashSet<_>>(),
             chunks
         );
+    }
+}
+
+#[cfg(test)]
+mod setup_anim_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static HEARD: AtomicUsize = AtomicUsize::new(0);
+    struct Listener;
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for Listener {
+        fn humanoid_setup_anim(
+            &self,
+            _: &dyn mod_api::ClientHost,
+            _: &mut mod_api::HumanoidSetupAnimEvent<'_>,
+        ) {
+            HEARD.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// Armor stands pose from their saved rotations, not the humanoid
+    /// setupAnim seam, so drawing one never dispatches `humanoid_setup_anim`.
+    #[test]
+    #[ignore = "daily"]
+    fn drawing_an_armor_stand_does_not_fire_humanoid_setup_anim() {
+        let mods = vec![mod_api::ModEntry::new("pose", Box::new(Listener))].into();
+        mod_platform::testing::with_mods(mods, || {
+            assert!(mod_api::__private::listened(
+                mod_api::HookId::HumanoidSetupAnim
+            ));
+            super::super::native_entity_refs::tests::with_client_game(|game| {
+                let mut stand = ArmorStand::new(0, Vec3::ZERO, 0.0);
+                stand.show_arms = true;
+                let mut verts = Vec::new();
+                game.armor_stand_vertices(&stand, glam::Mat4::IDENTITY, 0xf0f0, None, &mut verts);
+                assert!(!verts.is_empty());
+            });
+        });
+        assert_eq!(HEARD.load(Ordering::Relaxed), 0);
     }
 }

@@ -1,2 +1,3 @@
 # PACKAGE TEST TARGET daily REASON
 sunrise-client game::native_humanoid_setup_anim_tests::client_humanoid_setup_reaches_body_skinned_and_layer_routes lib daily resources
+sunrise-client game::armor_stands::setup_anim_tests::drawing_an_armor_stand_does_not_fire_humanoid_setup_anim lib daily resources
