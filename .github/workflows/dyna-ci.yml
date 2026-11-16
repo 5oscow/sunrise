@@ -44,12 +44,14 @@ defaults:
 permissions:
   contents: read
 concurrency:
-  # A new push to a pull request replaces its running checks. Each main push runs at once, beside any
-  # other: none of its jobs publishes or writes shared state, so a main run never waits behind another.
-  # A dispatch for a pull request (`pr`) is grouped by that pull request, never by main's head.
+  # A new push to a pull request replaces its running checks, and a new push to main replaces main's: only the newest
+  # main head needs a gate, and a burst of merges otherwise held a Dyna runner per job of every merge's run, ahead
+  # of the rollup gates queued behind them. None of its jobs publishes or writes shared state.
+  # A dispatch for a pull request (`pr`) is grouped by that pull request, never by main's head; any other dispatch
+  # (a snapshot's gate) by its commit, and it always finishes.
   # A parity dispatch has a group of its own, so it never replaces a waiting gate dispatch for the same head.
-  group: dyna-checks-${{ github.event.pull_request.number || inputs.pr && format('pr-{0}', inputs.pr) || github.sha }}${{ inputs.parity && '-parity' || '' }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: dyna-checks-${{ github.event.pull_request.number || inputs.pr && format('pr-{0}', inputs.pr) || github.event_name == 'push' && github.ref || github.sha }}${{ inputs.parity && '-parity' || '' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
 env:
   # Test runs never reach the telemetry server: no live-count ping, no uploads (docs/telemetry.md).
   SUNRISE_TELEMETRY_URL: "off"
@@ -72,11 +74,18 @@ jobs:
   # A draft pull request skips every check below (they all need this job); it runs when marked ready.
   changes:
     if: github.event_name != 'schedule' && !inputs.prepare-output-check && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
-    # Dyna's small runner while the repository's switch is on, so the gate never queues on GitHub's runners; a fork's
-    # pull request (Dyna refuses it) and a forced fallback stay on GitHub's. The routing below still reads the lease.
+    # Dyna's small runner for a gate (main, dispatches, this repository's rollups and syncs: the pull requests
+    # pr_gate.py marks heavy, and checks in ci.yml skips) while the repository's switch is on, so the gate never queues
+    # on GitHub's runners. Every other pull request runs this workflow on GitHub's runners, beside checks: nothing
+    # gates on it, and Dyna's runners are counted (16 on the host), so they are kept for the gates. A forced fallback
+    # stays on GitHub's. The routing below still reads the lease.
     runs-on: >-
       ${{ vars.DYNA_CI_SELF_HOSTED == 'true' && !inputs.github-fallback && (github.event_name != 'pull_request' ||
-      github.event.pull_request.head.repo.full_name == github.repository) && 'dyna-small' || 'ubuntu-latest' }}
+      github.event.pull_request.head.repo.full_name == github.repository && (
+      startsWith(github.head_ref, 'sunrise-review-rollup-') || startsWith(github.head_ref, 'fork-review-rollup-') ||
+      startsWith(github.head_ref, 'rollup-') || startsWith(github.head_ref, 'sync-') ||
+      contains(github.event.pull_request.labels.*.name, 'rollup') || contains(github.event.pull_request.labels.*.name, 'sync'))) &&
+      'dyna-small' || 'ubuntu-latest' }}
     # Selection normally finishes in two minutes; allow two bounded history fetches.
     timeout-minutes: 13
     permissions:
@@ -92,7 +101,8 @@ jobs:
       rust_required: ${{ steps.selection.outputs.rust_required || 'true' }}
       launcher_required: ${{ steps.selection.outputs.launcher_required || 'true' }}
       tooling_required: ${{ steps.selection.outputs.tooling_required || 'true' }}
-      self_hosted: ${{ !inputs.github-fallback && steps.hosted.outputs.forced_github != 'true' && steps.runner.outputs.self_hosted || 'false' }}
+      # Only a gate (heavy) uses Dyna's runners; a pull request outside it runs where a pool-down run would.
+      self_hosted: ${{ steps.gate.outputs.heavy == 'true' && !inputs.github-fallback && steps.hosted.outputs.forced_github != 'true' && steps.runner.outputs.self_hosted || 'false' }}
       # Where lint and verify run when they don't go to Dyna's pool: boat-large for listed outside contributors
       # while vars.BOAT_CI is on (boat refuses a public repository's run unless both its author and the user who
       # started it are on boat's own list, so the same list lives in vars.BOAT_CI_USERS), else GitHub's runner.
@@ -743,8 +753,8 @@ jobs:
   format:
     needs: changes
     if: needs.changes.result == 'success' && needs.changes.outputs.heavy != 'true' && !inputs.parity
-    # Dyna's small runner for this repository's pull requests while the pool is up; a fork's stays on GitHub's.
-    runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && needs.changes.outputs.trusted == 'true' && 'dyna-small' || 'ubuntu-latest' }}
+    # Only pull requests outside the gate run it, so it is never a gate job: GitHub's runner, leaving Dyna's to gates.
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -1061,7 +1071,8 @@ jobs:
   pr-status:
     needs: [changes, lint, verify, verify-static, launcher]
     if: always() && github.event_name == 'workflow_dispatch' && inputs.pr != '' && !inputs.parity && needs.changes.outputs.pr_sha != ''
-    runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna-small' || 'ubuntu-latest' }}
+    # Five seconds of status posts after the gate: nothing waits on it, so it takes none of Dyna's counted runners.
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       statuses: write

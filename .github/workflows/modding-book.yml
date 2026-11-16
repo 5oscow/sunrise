@@ -9,6 +9,10 @@ on:
     # mod API's surface and catalog.
     paths: ["docs/modding/**", "crates/sunrise-mod-api/**", "crates/sunrise-mod-api-gen/**", "xtask/**", "tools/*modding*", "tests/test_modding_*.py", "tools/ci/nightly.py", "crates/sunrise-mod-package/src/sdk/**", "crates/sunrise-mod-surface/**", ".github/workflows/modding-book.yml"]
   workflow_dispatch:
+# A newer push to a pull request or to main replaces the older run: only the newest head's book matters.
+concurrency:
+  group: modding-book-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 jobs:
   book:
     # A contributor's pull request (its head in a fork) skips what compiles; a reviewer dispatches it (tools/ci/pr_gate.py).

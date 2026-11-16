@@ -58,6 +58,10 @@ class GateTests(unittest.TestCase):
         self.assertEqual(len(conditions), 1, "every pull-request job of checks skips the same pull requests")
         condition = conditions.pop()
         self.assertIn("!(github.event.pull_request.head.repo.full_name == github.repository && (", condition)
+        # dyna-checks' selection job takes a Dyna runner for exactly those pull requests, and GitHub's for the rest.
+        heavy = condition.split("!(", 1)[1].rsplit(")", 1)[0]
+        dyna = yaml.safe_load((ROOT / ".github/workflows/dyna-ci.yml").read_text())["jobs"]["changes"]["runs-on"]
+        self.assertIn(" ".join(heavy.split()), " ".join(dyna.split()))
         prefixes = re.findall(r"startsWith\(github\.head_ref, '([^']+)'\)", condition)
         labels = re.findall(r"contains\(github\.event\.pull_request\.labels\.\*\.name, '([^']+)'\)", condition)
         refs = ["work", "rollupx", "sync/arismoko-pr-2886", "cfix-hooks-rollup-76"]
@@ -159,11 +163,11 @@ class WorkflowTests(unittest.TestCase):
                                     text=True, check=True)
             self.assertEqual(result.stdout.strip(), expected, same_repo)
 
-    def test_a_contributors_cheap_checks_run_on_githubs_runners(self):
-        # format and verify-static are all a fork pull request gets; a paid pool's balance must not fail them.
-        # format goes to Dyna only for this repository's code (trusted); a fork's stays on GitHub's runners.
-        self.assertIn("runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && needs.changes.outputs.trusted == 'true' "
-                      "&& 'dyna-small' || 'ubuntu-latest' }}\n", self.job("format"))
+    def test_a_pull_requests_cheap_checks_run_on_githubs_runners(self):
+        # format and verify-static are all a pull request outside the gate gets: nothing gates on them, so they leave
+        # Dyna's counted runners to the gates, and a paid pool's balance must not fail them.
+        self.assertIn("runs-on: ubuntu-latest\n", self.job("format"))
+        self.assertIn("self_hosted: ${{ steps.gate.outputs.heavy == 'true' && ", self.job("changes"))
         static = self.job("verify-static")
         self.assertIn("needs.changes.outputs.trusted != 'true' && 'ubuntu-latest' ||", static)
         self.assertIn("RUNNER_KIND: ${{ needs.changes.outputs.trusted != 'true' && 'github' ||", static)

@@ -75,17 +75,21 @@ def concurrency_for(path, event, sha, number=None, ref="refs/heads/main", inputs
 
 
 class ConcurrencyTests(unittest.TestCase):
-    def test_main_pushes_run_side_by_side_and_finish(self):
-        for path in WORKFLOWS:
+    def test_a_newer_main_push_replaces_the_older_and_a_main_dispatch_finishes(self):
+        for path in WORKFLOWS + [ROOT / ".github/workflows/modding-book.yml"]:
             with self.subTest(workflow=path.name):
                 first = concurrency_for(path, "push", "a" * 40)
                 next_push = concurrency_for(path, "push", "b" * 40)
-                self.assertNotEqual(first[0], next_push[0], "a main push must not wait behind another")
-                self.assertIs(first[1], False, "a main push must not cancel the running run")
-                self.assertIs(next_push[1], False)
+                self.assertEqual(first[0], next_push[0], "only the newest main head needs its checks")
+                self.assertIs(next_push[1], True, "a newer main push cancels the older run")
+        snapshot = concurrency_for(WORKFLOWS[0], "workflow_dispatch", "c" * 40)
+        snapshot_again = concurrency_for(WORKFLOWS[0], "workflow_dispatch", "d" * 40)
+        self.assertNotEqual(snapshot[0], snapshot_again[0], "a gate dispatched on a main commit is never replaced")
+        self.assertNotEqual(snapshot[0], concurrency_for(WORKFLOWS[0], "push", "c" * 40)[0])
+        self.assertIs(snapshot[1], False)
 
     def test_pr_updates_cancel_only_the_same_pr_group(self):
-        for path in WORKFLOWS:
+        for path in WORKFLOWS + [ROOT / ".github/workflows" / name for name in ("modding-book.yml", "dco.yml")]:
             with self.subTest(workflow=path.name):
                 first = concurrency_for(path, "pull_request", "a" * 40, 101)
                 update = concurrency_for(path, "pull_request", "b" * 40, 101)
