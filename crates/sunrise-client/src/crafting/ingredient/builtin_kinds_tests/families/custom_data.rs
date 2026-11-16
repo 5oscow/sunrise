@@ -412,7 +412,7 @@ fn custom_data_component_recipes_decode_and_match() {
 }
 
 #[test]
-fn custom_data_refusals_name_the_component_and_keep_a_valid_sibling() {
+fn custom_data_refusals_name_the_component_and_refuse_the_whole_load() {
     use crate::crafting::Recipes;
     let items = Items::empty();
     let load = load();
@@ -454,7 +454,8 @@ fn custom_data_refusals_name_the_component_and_keep_a_valid_sibling() {
         let error = components::validate_recipe_components(&malformed, &items).unwrap_err();
         assert!(error.contains(component), "{error}");
         let recipe = |ingredient| serde_json::json!({"type":"minecraft:crafting_shapeless","ingredients":[ingredient],"result":{"id":"minecraft:diamond"}});
-        let recipes = Recipes::from_sources(
+        // A malformed file of a supported type refuses the whole candidate load, naming the file.
+        let error = Recipes::from_sources(
             root.path(),
             &items,
             &sunrise_world::loot::PackOverlay::NONE,
@@ -464,9 +465,19 @@ fn custom_data_refusals_name_the_component_and_keep_a_valid_sibling() {
             ],
             &load,
         )
+        .err()
+        .unwrap()
+        .to_string();
+        assert!(error.contains("bad"), "{error}");
+        let recipes = Recipes::from_sources(
+            root.path(),
+            &items,
+            &sunrise_world::loot::PackOverlay::NONE,
+            vec![("valid".into(), recipe(valid.clone()))],
+            &load,
+        )
         .unwrap();
         assert!(recipes.recipe("valid").is_some());
-        assert!(recipes.recipe("bad").is_none());
     }
 }
 
