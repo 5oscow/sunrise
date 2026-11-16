@@ -1911,10 +1911,12 @@ impl Game<'_> {
         let aim = self.attacker_aim(source.attacker);
         // So `living_knockback` sees who hit and what they hold.
         let attack = self.attack_of_who(source.attacker);
+        let plan = self.prepare_knockback_credit(target as i32, source.attacker, &attack);
+        let mut credit = plan.lend(&mut self.last_hurt_by_player);
         if let Some(t) = self.mobs.iter_mut().find(|m| m.id == target) {
             let previous_invulnerable = t.invulnerable;
             let hit = t.damage_aimed(
-                crate::game::entity::damage_level_of!(self, &attack),
+                crate::game::entity::damage_level_of!(self, &attack, &mut credit),
                 amount,
                 source,
                 aim,
@@ -1941,9 +1943,6 @@ impl Game<'_> {
                     }
                 }
             }
-        }
-        if hurt {
-            self.resolve_player_responsible(target, source);
         }
         for (at, velocities) in infested {
             self.spawn_infested(at, velocities);
@@ -1973,28 +1972,15 @@ impl Game<'_> {
     /// in the world, gets the credit (`getKillCredit`); a tame wolf without an
     /// owner clears it. A player's own hits are recorded where they land.
     pub(super) fn resolve_player_responsible(&mut self, victim: u32, source: Damage) {
-        let Some(Who::Mob(attacker)) = source.attacker else {
+        if !matches!(source.attacker, Some(Who::Mob(_))) {
             return;
-        };
-        let Some(owner) = self
-            .mobs
-            .iter()
-            .find(|m| m.id == attacker && m.species() == Species::Wolf && m.extra.tame)
-            .map(|m| m.extra.owner)
-        else {
-            return;
-        };
-        let Some(m) = self.mobs.iter_mut().find(|m| m.id == victim) else {
-            return;
-        };
-        m.ai.last_hurt_by_player = if owner.is_some() { 100 } else { 0 };
-        match owner {
-            Some(uuid) => self.last_hurt_by_player.insert(
-                victim,
-                super::combat::PlayerCredit(sunrise_client::lan::playerdata::ints_uuid(uuid)),
-            ),
-            None => self.last_hurt_by_player.remove(&victim),
-        };
+        }
+        let plan =
+            self.prepare_knockback_credit(victim as i32, source.attacker, self.combat.attack());
+        let mut credit = plan.lend(&mut self.last_hurt_by_player);
+        if let Some(mob) = self.mobs.iter_mut().find(|mob| mob.id == victim) {
+            sunrise_client::health::KnockbackCredit::accepted_mob_hit(&mut credit, mob);
+        }
     }
     /// Remember the acting player for a mob's `lastHurtByPlayer`.
     pub(super) fn remember_mob_player_credit(&mut self, victim: u32) {
@@ -2495,8 +2481,12 @@ impl Game<'_> {
                     Who::Player => self.mob_pushes_player(power, x, z, source, apply_blocking),
                     Who::Mob(id) => {
                         let attack = self.attack_of_who(source.attacker);
+                        let plan =
+                            self.prepare_knockback_credit(id as i32, None, self.combat.attack());
+                        let mut credit = plan.lend(&mut self.last_hurt_by_player);
                         if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
-                            let level = crate::game::entity::damage_level_of!(self, &attack);
+                            let level =
+                                crate::game::entity::damage_level_of!(self, &attack, &mut credit);
                             m.knockback(level, power, x, z, &source, 0.0);
                         }
                     }
@@ -5484,6 +5474,14 @@ impl Game<'_> {
             attacker_species,
         };
         let aim = self.attacker_aim(source.attacker);
+        let victim = match &hit {
+            Hit::Entity {
+                who: Who::Mob(id), ..
+            } => *id as i32,
+            _ => 0,
+        };
+        let credit_plan =
+            self.prepare_knockback_credit(victim, source.attacker, self.combat.attack());
         match (&p.kind, hit) {
             // ThrownTrident.onHitEntity: 8 damage (Impaling on aquatic mobs),
             // dealt whether or not the hurt lands, then it bounces off.
@@ -5747,7 +5745,11 @@ impl Game<'_> {
                         0.0
                     };
                     if m.damage_projectile(
-                        crate::game::entity::damage_level_of!(self, scoped),
+                        crate::game::entity::damage_level_of!(
+                            self,
+                            self.combat.attack(),
+                            &mut credit_plan.lend(&mut self.last_hurt_by_player)
+                        ),
                         amount,
                         source,
                         aim,
@@ -5775,7 +5777,11 @@ impl Game<'_> {
                         let push = [p.velocity.x, p.velocity.z];
                         let hurt = self.mobs.iter_mut().find(|m| m.id == id).is_some_and(|m| {
                             m.damage_projectile(
-                                crate::game::entity::damage_level_of!(self, scoped),
+                                crate::game::entity::damage_level_of!(
+                                    self,
+                                    self.combat.attack(),
+                                    &mut credit_plan.lend(&mut self.last_hurt_by_player)
+                                ),
                                 t.damage,
                                 source,
                                 aim,
@@ -5827,7 +5833,11 @@ impl Game<'_> {
                     && let Some(m) = self.mobs.iter_mut().find(|m| m.id == id)
                 {
                     if m.damage_projectile(
-                        crate::game::entity::damage_level_of!(self, scoped),
+                        crate::game::entity::damage_level_of!(
+                            self,
+                            self.combat.attack(),
+                            &mut credit_plan.lend(&mut self.last_hurt_by_player)
+                        ),
                         0.0,
                         source,
                         aim,
@@ -5876,7 +5886,11 @@ impl Game<'_> {
                     && let Some(m) = self.mobs.iter_mut().find(|m| m.id == id)
                 {
                     if m.damage_projectile(
-                        crate::game::entity::damage_level_of!(self, scoped),
+                        crate::game::entity::damage_level_of!(
+                            self,
+                            self.combat.attack(),
+                            &mut credit_plan.lend(&mut self.last_hurt_by_player)
+                        ),
                         0.0,
                         source,
                         aim,
@@ -5977,7 +5991,11 @@ impl Game<'_> {
                                 m.ignite_for_ticks(100);
                             }
                             let hurt = m.damage_projectile(
-                                crate::game::entity::damage_level_of!(self, scoped),
+                                crate::game::entity::damage_level_of!(
+                                    self,
+                                    self.combat.attack(),
+                                    &mut credit_plan.lend(&mut self.last_hurt_by_player)
+                                ),
                                 5.0,
                                 source,
                                 aim,
@@ -6046,7 +6064,11 @@ impl Game<'_> {
                         Who::Mob(id) => {
                             if self.mobs.iter_mut().find(|m| m.id == id).is_some_and(|m| {
                                 m.damage_projectile(
-                                    crate::game::entity::damage_level_of!(self, scoped),
+                                    crate::game::entity::damage_level_of!(
+                                        self,
+                                        self.combat.attack(),
+                                        &mut credit_plan.lend(&mut self.last_hurt_by_player)
+                                    ),
                                     6.0,
                                     source,
                                     aim,
@@ -6152,7 +6174,11 @@ impl Game<'_> {
                 Who::Mob(id) => {
                     if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id)
                         && m.damage_projectile(
-                            crate::game::entity::damage_level_of!(self, scoped),
+                            crate::game::entity::damage_level_of!(
+                                self,
+                                self.combat.attack(),
+                                &mut credit_plan.lend(&mut self.last_hurt_by_player)
+                            ),
                             1.0,
                             source,
                             aim,
@@ -6178,7 +6204,11 @@ impl Game<'_> {
                 Who::Mob(id) => {
                     let hurt = if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
                         let hurt = m.damage_projectile(
-                            crate::game::entity::damage_level_of!(self, scoped),
+                            crate::game::entity::damage_level_of!(
+                                self,
+                                self.combat.attack(),
+                                &mut credit_plan.lend(&mut self.last_hurt_by_player)
+                            ),
                             4.0,
                             source,
                             aim,
@@ -6599,6 +6629,12 @@ impl Game<'_> {
             self.keys.held(Action::Sneak) || self.keys.raw(&winit::keyboard::KeyCode::ShiftRight);
         let held_damage = held.as_ref().map_or(0, |h| h.damage as i32);
         let held_extra = held.as_ref().and_then(|h| h.extra.clone());
+        let feeder = sunrise_client::health::Attack {
+            player_uuid: self.owner_damage_uuid(),
+            ..Default::default()
+        };
+        let credit_plan =
+            self.prepare_knockback_credit(self.mobs[index].id as i32, Some(Who::Player), &feeder);
         let m = &mut self.mobs[index];
         if !m.alive() {
             return Ok(false);
@@ -6984,7 +7020,11 @@ impl Game<'_> {
                 m.add_effect("minecraft:poison", 900, 0);
                 let id = m.id;
                 let hurt = m.damage(
-                    crate::game::entity::damage_level_of!(self),
+                    crate::game::entity::damage_level_of!(
+                        self,
+                        &sunrise_client::health::NO_ATTACK,
+                        &mut credit_plan.lend(&mut self.last_hurt_by_player)
+                    ),
                     f32::MAX,
                     sunrise_client::mobs::Damage::player(player_at.unwrap_or(center)),
                 );

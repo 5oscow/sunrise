@@ -1487,6 +1487,10 @@ pub(super) fn knockback(level: DamageLevel<'_>, pushed: Hurting<'_>, knock: &mut
             causing => causing,
         },
     };
+    let (kill_credit, credit_main) = level.knockback_credit(&pushed);
+    let Ok(credit_main) = credit_main.map(TryIntoApi::try_into_api).transpose() else {
+        return false;
+    };
     let (entity, kind, source) = hurt_server_args(pushed, level.attack());
     let mut canceled = false;
     let [main, off] = &attack.held;
@@ -1501,6 +1505,8 @@ pub(super) fn knockback(level: DamageLevel<'_>, pushed: Hurting<'_>, knock: &mut
         attacker,
         attacker_main: main.as_ref(),
         attacker_off: off.as_ref(),
+        kill_credit,
+        kill_credit_main: credit_main.as_ref(),
         entry,
         strength: &mut knock.strength,
         x: &mut knock.x,

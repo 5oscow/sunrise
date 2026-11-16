@@ -1900,12 +1900,18 @@ impl Game<'_> {
                 return Hurt::Refused;
             }
         }
+        let plan = self.prepare_knockback_credit(
+            self.dragon.as_ref().map_or(0, |d| d.id) as i32,
+            None,
+            self.combat.attack(),
+        );
+        let mut credit = plan.lend(&mut self.last_hurt_by_player);
         let Some(d) = self.dragon.as_mut() else {
             return Hurt::Refused;
         };
         let was_down = d.down();
         let (cooldown, last_hurt) = (d.invulnerable, d.last_hurt);
-        let level = super::entity::damage_level_of!(self, scoped);
+        let level = super::entity::damage_level_of!(self, self.combat.attack(), &mut credit);
         let hurt = d.hurt_part_from(
             level,
             part,
@@ -2995,8 +3001,18 @@ impl Game<'_> {
             // part's list in turn, so Thorns' level and dragon draws follow it.
             for part in 0..4 {
                 for (index, &allowed) in allowed.iter().enumerate() {
+                    let plan = self.prepare_knockback_credit(
+                        self.mobs[index].id as i32,
+                        Some(Who::Mob(frame.dragon_id)),
+                        self.combat.attack(),
+                    );
+                    let mut credit = plan.lend(&mut self.last_hurt_by_player);
                     if sunrise_client::mobs::dragon_contacts::contact_part(
-                        crate::game::entity::damage_level_of!(self),
+                        crate::game::entity::damage_level_of!(
+                            self,
+                            &sunrise_client::health::NO_ATTACK,
+                            &mut credit
+                        ),
                         &mut self.mobs[index],
                         &frame,
                         allowed,

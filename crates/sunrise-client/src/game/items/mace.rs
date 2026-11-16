@@ -301,6 +301,8 @@ impl Game<'_> {
     /// the weapon's `armor_effectiveness` enchantments (Breach) thin its armor.
     pub(super) fn hurt_by_player(&mut self, index: usize, amount: f32, source: Damage) -> bool {
         let attack = self.attack_of_who(Some(sunrise_client::mobs::Who::Player));
+        let plan =
+            self.prepare_knockback_credit(self.mobs[index].id as i32, source.attacker, &attack);
         let held = self.held().cloned();
         let aim = self.attacker_aim(source.attacker);
         let kind = self.mobs[index].kind.id.clone();
@@ -335,8 +337,9 @@ impl Game<'_> {
         self.mobs[index].creative_attacker = self.creative;
         self.mobs[index].attacker_aim = aim;
         self.mobs[index].dealt_absorbed = 0;
+        let mut credit = plan.lend(&mut self.last_hurt_by_player);
         let hurt = self.mobs[index].damage_with(
-            crate::game::entity::damage_level_of!(self, &attack),
+            crate::game::entity::damage_level_of!(self, &attack, &mut credit),
             amount,
             source,
             Some(&mut breach),
@@ -715,7 +718,9 @@ impl Game<'_> {
                     direct: attack.attacker,
                     position: None,
                 };
-                let level = crate::game::entity::damage_level_of!(self, &attack);
+                let plan = self.prepare_knockback_credit(id as i32, None, &attack);
+                let mut credit = plan.lend(&mut self.last_hurt_by_player);
+                let level = crate::game::entity::damage_level_of!(self, &attack, &mut credit);
                 let pushed = sunrise_client::health::Hurting::ArmorStand(id as i32, source);
                 // The smash pushes the armor stand through the short entry, as it pushes the mobs
                 // below (`knockback(power, x, z)`).
@@ -758,7 +763,9 @@ impl Game<'_> {
                 if old_health > 0.0 && !self.mobs[i].alive() {
                     self.native_kill_event(i);
                 }
-                let level = crate::game::entity::damage_level_of!(self, &attack);
+                let plan = self.prepare_knockback_credit(id as i32, None, &attack);
+                let mut credit = plan.lend(&mut self.last_hurt_by_player);
+                let level = crate::game::entity::damage_level_of!(self, &attack, &mut credit);
                 self.mobs[i].knockback(level, 0.4, xd, zd, &source, amount);
                 self.remember_mob_player_credit(self.mobs[i].id);
                 self.post_attack(i);

@@ -1324,6 +1324,17 @@ pub(crate) use list_borrows::{borrow_level_list, borrow_lists};
 /// tag tables, so a mob or the player beside them can take the hit. With `$attack` (an
 /// [`Attack`](sunrise_client::health::Attack) the site took first), the level of that attack.
 macro_rules! damage_level_of {
+    ($game:ident, $attack:expr, $credit:expr) => {
+        &mut sunrise_client::health::DamageLevel::of(
+            &mut $game.world,
+            $game.pack.assets.registry,
+            Some(world_items!($game)),
+            Some(&$game.pack.block_registries),
+            &$game.damage_hooks,
+        )
+        .attacked_by($attack)
+        .with_knockback_credit($credit)
+    };
     // The level of the hit inside `Game::with_attack`: the attack that scope lends.
     ($game:ident, scoped) => {
         &mut sunrise_client::health::DamageLevel::of(

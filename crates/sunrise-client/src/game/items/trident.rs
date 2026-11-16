@@ -1131,10 +1131,13 @@ impl Game<'_> {
                             )
                             .expect("registered vanilla trident damage"),
                         );
+                        let plan =
+                            self.prepare_knockback_credit(id as i32, Some(Who::Player), &attack);
+                        let mut credit = plan.lend(&mut self.last_hurt_by_player);
                         if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
                             let from = Some([t.position.x, t.position.y, t.position.z]);
                             let hurt = m.damage_projectile(
-                                crate::game::entity::damage_level_of!(self, &attack),
+                                crate::game::entity::damage_level_of!(self, &attack, &mut credit),
                                 damage,
                                 Damage {
                                     kind: trident_source,

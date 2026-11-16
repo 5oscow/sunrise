@@ -27,8 +27,15 @@ pub trait Hooks {
     /// with `LivingEntity.knockback` (the ender dragon's wings, Punch arrows, explosions, wind
     /// charges, a mace smash's area, a hoglin's throw), nor for the ones Sunrise makes another
     /// way (the ender dragon's). The level is the hit's: its blocks, random and own attachments.
+    /// `kill_credit` is the pushed living entity's kill credit at this pre-motion moment:
+    /// a remembered player takes precedence over its last hurting mob, even when that player
+    /// cannot resolve (then 0, without falling back). `kill_credit_main` is that entity's
+    /// current main-hand stack, or none. This is not the immediate damage-source attacker.
+    /// Accepted-hit memories, including a tame wolf's owner, are committed before this read.
+    #[notes = "Version 2 adds the pushed entity's kill credit and its current main-hand stack; remembered player precedence and expiry match LivingRef::kill_credit."]
     #[hook(
         side = "server",
+        version = 2,
         contract = "cancel",
         out = "canceled",
         host = "level",
@@ -42,6 +49,8 @@ pub trait Hooks {
         attacker: i32,
         attacker_main: Option<&ItemStack>,
         attacker_off: Option<&ItemStack>,
+        kill_credit: i32,
+        kill_credit_main: Option<&ItemStack>,
         entry: KnockbackEntry,
         strength: &mut f64,
         x: &mut f64,

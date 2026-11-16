@@ -718,9 +718,7 @@ impl Game<'_> {
                 .and_then(|id| self.entity(id)),
             Target::Mob(id) => {
                 let m = self.mobs.iter().find(|m| m.id == id && !m.removed)?;
-                let who =
-                    m.ai.last_hurt_by
-                        .filter(|_| m.age as i32 - m.ai.last_hurt_by_time <= 100)?;
+                let who = m.recent_hurt_by()?;
                 let attacker = match who {
                     Who::Mob(id) => Some(id),
                     // A player's hurt carries no id in `Who`: the hit's
