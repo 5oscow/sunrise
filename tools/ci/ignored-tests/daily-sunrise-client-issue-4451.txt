@@ -308,6 +308,7 @@ sunrise-client game::commands::teleport_level_tests::portal_arrival_effects_expl
 sunrise-client game::commands::teleport_level_tests::portal_arrival_effects_mod_items_merge_immediately lib daily resources
 sunrise-client game::commands::teleport_mob_tests::command_stops_navigation_and_dismounts lib daily resources
 sunrise-client game::commands::teleport_pitch_tests::teleport_and_rotate_resolve_pitch_at_their_own_boundary lib daily resources
+sunrise-client game::commands::teleport_pitch_tests::teleport_to_the_current_position_marks_the_player_for_sync lib daily resources
 sunrise-client game::commands::teleport_player_tests::command_moves_velocity_per_axis_and_keeps_fall_distance lib daily resources
 sunrise-client game::commands::teleport_rider_tests::a_vehicle_carries_its_riders_and_a_rider_leaves_its_vehicle lib daily resources
 sunrise-client game::commands::terrain_cmds::loot_kill_target_tests::loot_kill_uses_actual_sheep_state_without_killing_the_target lib daily resources

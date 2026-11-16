@@ -4,7 +4,7 @@ use crate::game::{Audio, Game, Options, Progress, Settings, load_resources};
 #[test]
 #[ignore = "daily"]
 fn teleport_and_rotate_resolve_pitch_at_their_own_boundary() {
-    let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+    let root = std::path::PathBuf::from(std::env::var_os("SUNRISE_TEST_RESOURCES").unwrap());
     let settings = Settings::default();
     let loaded = load_resources(
         sunrise_assets::resource_source::ResourceRoot::directory(root.clone()),
@@ -91,9 +91,7 @@ fn teleport_and_rotate_resolve_pitch_at_their_own_boundary() {
 
     game.mobs[0].head_pitch = 360.0;
     assert!(
-        game.run_command(
-            "tp @e[type=minecraft:zombie,limit=1] @e[type=minecraft:zombie,limit=1]"
-        )
+        game.run_command("tp @e[type=minecraft:zombie,limit=1] @e[type=minecraft:zombie,limit=1]")
     );
     assert_eq!(
         game.mobs[0].head_pitch, 0.0,
