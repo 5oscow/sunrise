@@ -32,16 +32,15 @@ pub(super) fn configure(
     c.reader
         .set_read_timeout(Some(READ_TIMEOUT))
         .map_err(|e| e.to_string())?;
-    result.map_err(|error| {
+    result.inspect_err(|error| {
         let reason = crate::text::Text::translate_with_fallback(
             "sunrise.configuration.error",
             crate::lang::Language::load(&[], crate::lang::DEFAULT)
                 .get("sunrise.configuration.error")
                 .unwrap(),
-            &[crate::text::Text::literal(&error)],
+            &[crate::text::Text::literal(error)],
         );
         c.disconnect(super::super::data::component_nbt(&reason.component()));
-        error
     })
 }
 fn wait(
