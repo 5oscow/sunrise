@@ -508,6 +508,8 @@ class DynaRoutingTests(unittest.TestCase):
         parity = dict(jobs((ROOT / ".github/workflows/dyna-ci.yml").read_text()))["vanilla-parity"]
         # The helper comes from the workflow's revision: nothing on PATH is taken from the checkout.
         self.assertNotIn("$GITHUB_WORKSPACE/tools", parity)
+        # A link an older job left on the persistent slot is replaced, never written through.
+        self.assertLess(parity.index('rm -f "$DYNA_CI_BUILD/bin/python"'), parity.index('cat > "$DYNA_CI_BUILD/bin/python"'))
         helper = textwrap.dedent(parity.split("<<'SH'\n", 1)[1].split("\n          SH\n", 1)[0])
         with tempfile.TemporaryDirectory() as temporary:
             build, tree = Path(temporary, "build"), Path(temporary, "tree")

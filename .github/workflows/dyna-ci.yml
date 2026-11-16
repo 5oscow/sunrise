@@ -1157,6 +1157,8 @@ jobs:
       - name: Keep harness output on the runner
         run: |
           mkdir -p "$DYNA_CI_BUILD/bin"
+          # The slot persists: an older job left bin/python as a link into its own checkout, which `cat >` would follow.
+          rm -f "$DYNA_CI_BUILD/bin/python"
           cat > "$DYNA_CI_BUILD/bin/python" <<'SH'
           #!/usr/bin/env bash
           set -uo pipefail
