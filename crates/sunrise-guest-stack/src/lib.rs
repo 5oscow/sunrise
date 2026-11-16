@@ -41,7 +41,11 @@ pub fn run_on_guest_stack(test: impl FnOnce() + Send + 'static) {
 /// Must run before compiler-child handling or any game initialization.
 pub fn prepare_main() {
     if let Err(error) = prepare() {
-        eprintln!("{error}");
+        let error = error.to_string();
+        let message = error
+            .strip_prefix("GuestStackUnavailable: ")
+            .unwrap_or(&error);
+        eprintln!("GuestStackUnavailable: {message}");
         std::process::exit(1);
     }
 }

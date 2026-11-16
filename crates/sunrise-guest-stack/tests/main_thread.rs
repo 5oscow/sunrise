@@ -11,7 +11,10 @@ fn main() {
             rlim_max: 0,
         };
         // SAFETY: limit is writable and getrlimit initializes it on success.
-        assert_eq!(unsafe { libc::getrlimit(libc::RLIMIT_STACK, &mut limit) }, 0);
+        assert_eq!(
+            unsafe { libc::getrlimit(libc::RLIMIT_STACK, &mut limit) },
+            0
+        );
         if limit.rlim_max < required {
             println!("skipped: the stack hard limit is below the guest's reservation");
             return;
