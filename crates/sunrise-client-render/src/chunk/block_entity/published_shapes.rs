@@ -8,7 +8,7 @@ use sunrise_core::{
 };
 
 /// The most boxes in one published list: a bound on what a block entity makes every client
-/// receive and keep (vanilla has no such limit; a declared shape table holds 16).
+/// receive and keep (vanilla has no such limit; a declared shape table has no box limit).
 pub const MAX_BOXES: usize = 64;
 /// Where a block entity's published shapes sit in its saved compound and its update tag, the
 /// name no mod's own fields can use (`ModBlockEntity::merge_update_tag` takes it out).

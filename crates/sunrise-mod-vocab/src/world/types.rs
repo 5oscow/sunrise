@@ -347,7 +347,7 @@ impl LevelRef {
     pub fn with_random<T>(
         self,
         host: &mut dyn ServerHost,
-        draw: impl FnOnce(&mut LegacyRandom) -> T,
+        draw: impl FnOnce(&mut dyn RandomSource) -> T,
     ) -> Option<T> {
         let mut random = self.random(host)?;
         let drawn = draw(&mut random);
@@ -1434,12 +1434,12 @@ pub trait LevelRandomHost: LevelHost {
     }
     /// A copy of the level's random stream through `native_level_random`, or None on a
     /// non-authoritative level. Draw with `with_random`, which stores it back.
-    fn random(&mut self) -> Option<LegacyRandom> {
+    fn random(&mut self) -> Option<LegacyRandomSource> {
         unimplemented!("LevelRandomHost::random")
     }
     /// Replace the level's random stream with `random`, one `random` gave and the mod drew from.
     /// False on a non-authoritative level.
-    fn set_random(&mut self, _random: LegacyRandom) -> bool {
+    fn set_random(&mut self, _random: LegacyRandomSource) -> bool {
         unimplemented!("LevelRandomHost::set_random")
     }
 }

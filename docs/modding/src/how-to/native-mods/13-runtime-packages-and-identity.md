@@ -23,6 +23,14 @@ the mapping's conflict context and modifiers are active; a screen opening drops 
 button sent through the control socket counts as the window's does, and a key fires `input_key` once per press,
 repeat and release, as the window's.
 
+A mod's own screen can change its bindings as the player does in Controls:
+`ClientHost::set_mod_key(mod_id, id, key, modifiers)` binds the mapping to a key or mouse button name
+(`key.keyboard.x`, `key.mouse.left`, `key.keyboard.unknown` for none) with shift (1), control (2) and alt (4),
+and `ClientHost::reset_mod_key(mod_id, id)` gives it its declared default back. The mapping answers to the new
+key from the next input and the binding is saved to `sunrise-mods.txt`; `ClientHost::mod_key` reads it. A
+native mod changes only its own mappings. Each refusal is a `ModKeyRefusal` (`NotRegistered`, `NotOwner`,
+`UnknownKey`, `UnknownModifiers`, `Unavailable`) and changes nothing.
+
 `native-mods.json` is provenance and rebuild status, not game identity, authentication, announcements
 or startup input. The launcher retains it for build/status displays. The separate `sunrise-server`
 supervisor may report the adjacent record as a provenance snapshot, not a query of the running engine.

@@ -1,7 +1,7 @@
 # Drawing an entity type with your own renderer
 
 You can draw content-defined thrown entities, living entity types (mobs, vanilla's or a content
-mod's) and item frames with your own renderer. This is the counterpart of
+mod's), primed TNT, experience orbs and item frames with your own renderer. This is the counterpart of
 NeoForge 26.3's `EntityRenderersEvent.RegisterRenderers` (`registerEntityRenderer`): the mod
 registers one renderer per entity type at start, and the game hands each entity of that type in
 view to it, once a frame. Native and wasm mods register and draw the same way.
@@ -38,8 +38,10 @@ impl EntityRenderer for Bolt {
 | `id` | The entity's network id, as mod messages name it. |
 | `partial` | The frame's partial tick, 0 to 1. |
 | `age` | Ticks lived plus the partial tick (`ageInTicks`). |
-| `yaw`, `pitch` | The way it faces, in degrees, interpolated to the frame (0 is south, positive pitch looks down). |
+| `yaw`, `pitch` | The way it faces, in degrees, interpolated to the frame, except for primed TNT and experience orbs, which supply their current rotation (0 is south, positive pitch looks down). |
 | `living` | A living entity's own frame (`LivingRenderState`, below); none for any other entity. |
+| `tnt_fuse` | Primed TNT's remaining fuse, in ticks, as vanilla draws it (`fuse - partial + 1`); none for any other entity. |
+| `orb_value` | An experience orb's value (`ExperienceOrb.DATA_VALUE`); none for any other entity. |
 | `item_frame` | An item frame or glow item frame's own frame (`ItemFrameRenderState`, below); none for any other entity. |
 
 The pose stack starts at the entity's interpolated position, in blocks, and is not turned. `draw`
@@ -129,6 +131,14 @@ Registered renderers draw these routes:
   instead of its flying item. Without a renderer, it draws its item;
 - living types drawn as mobs, vanilla's (`minecraft:zombie`) and the content mods' living types: the
   renderer draws instead of the model and its vanilla layers;
+- primed TNT (`minecraft:tnt`): the renderer draws instead of the flashing TNT cube, and reads
+  `tnt_fuse`. `age` is the unsaved `Entity.tickCount` plus the partial tick. Yaw and pitch are
+  the TNT's current rotation, not interpolated (it has no previous rotation). Without a
+  renderer, the cube is unchanged.
+- experience orbs (`minecraft:experience_orb`): the renderer draws instead of the billboarded orb
+  quad, and reads `orb_value`. `age` is ticks lived plus the partial tick. The pose stack starts at
+  the orb's interpolated position, not the 0.1-block lift vanilla's sprite uses. Without a
+  renderer, the quad is unchanged.
 - item frames and glow item frames (`minecraft:item_frame`, `minecraft:glow_item_frame`): the
   renderer draws instead of the frame model and the item or map on its face, and reads
   `item_frame`. `age` is the unsaved `Entity.tickCount` plus the partial tick. Yaw and pitch

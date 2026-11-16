@@ -10,7 +10,8 @@ use std::{collections::BTreeMap, sync::Arc};
 
 /// One entity's frame, as `EntityRenderer.extractRenderState` fills an `EntityRenderState`:
 /// what a renderer reads to place and turn its model. Angles are in degrees, interpolated to the
-/// frame's partial tick. Plain numbers, so a frame allocates nothing, and one value for native and
+/// frame's partial tick, except for primed TNT and experience orbs, which supply their current
+/// rotation. Plain numbers, so a frame allocates nothing, and one value for native and
 /// wasm mods alike.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, sunrise_mod_api_macros::Wire)]
@@ -27,6 +28,12 @@ pub struct EntityRenderState {
     pub pitch: f32,
     /// A living entity's own frame (`LivingEntityRenderState`); none for any other entity.
     pub living: Option<LivingRenderState>,
+    /// The remaining primed-TNT fuse, in ticks, as vanilla draws it (`fuse - partial + 1`);
+    /// `Some` for `minecraft:tnt`, none for any other entity.
+    pub tnt_fuse: Option<f32>,
+    /// An experience orb's value (`ExperienceOrb.DATA_VALUE`); some for an orb, none for
+    /// every other family.
+    pub orb_value: Option<i32>,
     /// An item frame or glow item frame's own frame ([`ItemFrameRenderState`]); none for any
     /// other entity.
     pub item_frame: Option<ItemFrameRenderState>,
@@ -191,6 +198,8 @@ mod tests {
             yaw: 0.0,
             pitch: 0.0,
             living: None,
+            tnt_fuse: None,
+            orb_value: None,
             item_frame: None,
         };
         let (mut bolt, mut dart) = (Light::default(), Light::default());

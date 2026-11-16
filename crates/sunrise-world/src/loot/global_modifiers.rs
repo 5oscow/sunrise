@@ -11,11 +11,13 @@ use sunrise_core::identifier::Identifier;
 /// another root, changes its parameters, or selects a different random sequence.
 pub trait ModifierRoll {
     fn facts(&self) -> LootContext<'_>;
+    fn next_int(&mut self) -> i32;
     fn next_int_bound(&mut self, bound: i32) -> i32;
     fn next_long(&mut self) -> i64;
     fn next_float(&mut self) -> f32;
     fn next_double(&mut self) -> f64;
     fn next_boolean(&mut self) -> bool;
+    fn next_gaussian(&mut self) -> f64;
     fn condition(&mut self, condition: &Value) -> bool;
     fn roll_raw(&mut self, table: &str) -> Result<Vec<LootStack>, String>;
 }

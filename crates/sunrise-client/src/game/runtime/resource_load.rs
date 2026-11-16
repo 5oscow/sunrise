@@ -271,7 +271,6 @@ pub(super) fn load_core(
                         resources.data_changes(),
                         registry,
                         biomes.clone(),
-                        item_data.clone(),
                         additional_data,
                     );
                 }
@@ -693,7 +692,6 @@ pub(super) fn load_resources(
             resolved.data_changes(),
             assets.registry,
             biomes.clone(),
-            item_data.clone(),
             &additional_data,
         );
     }

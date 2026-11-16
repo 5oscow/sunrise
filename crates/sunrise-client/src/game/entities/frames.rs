@@ -787,6 +787,8 @@ impl Game<'_> {
                         yaw,
                         pitch,
                         living: None,
+                        tnt_fuse: None,
+                        orb_value: None,
                         item_frame: Some(
                             mod_api::__private::built::ItemFrameRenderState {
                                 facing,

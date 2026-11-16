@@ -23,10 +23,13 @@ from a `ACTIONS_RUNNER_HOOK_JOB_STARTED` hook in the NixOS configuration.
 
 - **Every job that holds a secret, or whose token can push, tag, publish or start workflows** (`contents: write`,
   `actions: write`): `release`'s and `launcher`'s `decide` (they choose the commit a release builds and start the
-  build), `nightly build`'s `pick`, `sign` and `publish`, `launcher`'s `sign` and `publish`, `nightly command` (it
+  build), `nightly build`'s `sign` and `publish`, `launcher`'s `sign` and `publish`, `nightly command` (it
   writes the set of pull requests the Nightly holds), `native hook stamp` (it pushes a branch). playsunrise is a
   partner's server that the partner can reach, and a checks runner keeps what a fork's job left behind: neither may
-  decide or sign what players download. `tests/test_ci_runners.py` pins it.
+  decide or sign what players download. `tests/test_ci_runners.py` pins it. The exceptions run on Dyna's runners
+  (the owner's own server, one throwaway container per job): `nightly build`'s `pick` on `dyna-small` while
+  `DYNA_CI_SELF_HOSTED` is `true` (otherwise `ubuntu-latest`), so the Nightly never queues behind pull requests;
+  signing and publishing stay on GitHub.
 - **Release builds**: Linux on `ubuntu-22.04` (players' binaries must link against its older glibc; our Linux
   machines have newer ones), Windows on `windows-latest` (no Windows machine). macOS builds already run on the Mac
   mini.

@@ -349,7 +349,11 @@ fn warden_anger_to_nbt(
     uuid_of: &mut impl FnMut(u32) -> Option<[i32; 4]>,
 ) -> Tag {
     let loaded = anger.suspects().iter().filter_map(|who| {
-        let uuid = who_uuid(*who, uuid_of)?;
+        // A player suspect by the UUID its anger recorded (#486).
+        let uuid = match who {
+            Who::Player => anger.player_uuid()?,
+            Who::Mob(_) => who_uuid(*who, uuid_of)?,
+        };
         Some(suspect_anger(uuid, anger.anger_of(*who)))
     });
     let away = anger
@@ -9009,7 +9013,10 @@ mod warden_anger_tests {
         let mut m = warden(1);
         let away = [4, 0, 0, 42];
         let mut anger = AngerManagement::from_saved([(away, 12)]);
-        anger.increase(Who::Player, 95);
+        // The player's own UUID (vanilla's `ParityObserver` in #486), not
+        // `offline_uuid("Player")`.
+        let observer = [1100571785, 643185331, -1474652091, 687307347];
+        anger.increase_player(Some(observer), 95);
         anger.increase(Who::Mob(7), 41);
         m.extra.warden.as_mut().unwrap().anger = anger;
         let pig_uuid = [0, 0, 0, 7];
@@ -9033,11 +9040,7 @@ mod warden_anger_tests {
             pairs.iter().map(pair).collect::<Vec<_>>(),
             // The angry suspect first (`AngerManagement.Sorter`), then the
             // other one in the level, then the one that is away.
-            vec![
-                (player_uuid(), Some(95)),
-                (pig_uuid, Some(41)),
-                (away, Some(12)),
-            ]
+            vec![(observer, Some(95)), (pig_uuid, Some(41)), (away, Some(12)),]
         );
 
         // Loading puts every suspect in the UUID map: a warden may load long
@@ -9047,8 +9050,46 @@ mod warden_anger_tests {
         assert!(st.anger.suspects().is_empty());
         assert_eq!(
             st.anger.unloaded().collect::<Vec<_>>(),
-            vec![(player_uuid(), 95), (pig_uuid, 41), (away, 12)]
+            vec![(observer, 95), (pig_uuid, 41), (away, 12)]
         );
+    }
+
+    /// #486: after a named player and then an unnamed one anger the warden, the
+    /// save names the first under its own UUID and writes nothing for the second.
+    #[test]
+    fn a_named_then_unnamed_player_saves_only_the_named_one() {
+        let alice = [1, 2, 3, 4];
+        let mut m = warden(1);
+        let mut anger = AngerManagement::default();
+        anger.increase_player(Some(alice), 50);
+        anger.increase_player(None, 20);
+        m.extra.warden.as_mut().unwrap().anger = anger;
+        let tag = mob_to_nbt(&m, [9, 9, 9, 9], None, None, |_| None);
+        let Some(Tag::List(pairs)) = tag.get("anger").and_then(|t| t.get("suspects")) else {
+            panic!("the named player's anger is saved");
+        };
+        let pairs: Vec<_> = pairs
+            .iter()
+            .map(|t| {
+                (
+                    uuid_from_tag(t.get("uuid")).unwrap(),
+                    number(t.get("anger")),
+                )
+            })
+            .collect();
+        assert_eq!(pairs, vec![(alice, Some(50))]);
+    }
+
+    /// #486: a player suspect whose UUID the anger never learned writes no
+    /// pair, rather than a placeholder that names no player.
+    #[test]
+    fn an_unknown_player_suspect_writes_no_pair() {
+        let mut m = warden(1);
+        let mut anger = AngerManagement::default();
+        anger.increase_player(None, 35);
+        m.extra.warden.as_mut().unwrap().anger = anger;
+        let tag = mob_to_nbt(&m, [9, 9, 9, 9], None, None, |_| None);
+        assert!(tag.get("anger").and_then(|t| t.get("suspects")).is_none());
     }
 
     /// Anger at a suspect that is still away outlives the session: it decays

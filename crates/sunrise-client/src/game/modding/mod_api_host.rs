@@ -545,11 +545,14 @@ impl mod_api::LevelRandomHost for super::GameLevel<'_> {
     fn attachments(&mut self) -> &mut dyn mod_api::AttachmentStore {
         self
     }
-    fn random(&mut self) -> Option<mod_api::LegacyRandom> {
-        self.native_level_random().cloned()
+    fn random(&mut self) -> Option<mod_api::LegacyRandomSource> {
+        self.native_level_random()
+            .map(|r| super::api_values::random_to_api(r))
     }
-    fn set_random(&mut self, random: mod_api::LegacyRandom) -> bool {
-        self.native_level_random().map(|r| *r = random).is_some()
+    fn set_random(&mut self, random: mod_api::LegacyRandomSource) -> bool {
+        self.native_level_random()
+            .map(|r| *r = super::api_values::random_to_engine(&random))
+            .is_some()
     }
 }
 
@@ -638,11 +641,11 @@ impl mod_api::LevelRandomHost for super::native_hooks::HitLevel<'_> {
     fn attachments(&mut self) -> &mut dyn mod_api::AttachmentStore {
         self
     }
-    fn random(&mut self) -> Option<mod_api::LegacyRandom> {
-        Some(self.0.random().clone())
+    fn random(&mut self) -> Option<mod_api::LegacyRandomSource> {
+        Some(super::api_values::random_to_api(self.0.random()))
     }
-    fn set_random(&mut self, random: mod_api::LegacyRandom) -> bool {
-        *self.0.random() = random;
+    fn set_random(&mut self, random: mod_api::LegacyRandomSource) -> bool {
+        *self.0.random() = super::api_values::random_to_engine(&random);
         true
     }
 }
@@ -775,10 +778,10 @@ impl<'a: 'b, 'b> mod_api::LevelRandomHost for LevelTicks<'b, &mut super::GameLev
     fn attachments(&mut self) -> &mut dyn mod_api::AttachmentStore {
         mod_api::LevelRandomHost::attachments(&mut *self.level)
     }
-    fn random(&mut self) -> Option<mod_api::LegacyRandom> {
+    fn random(&mut self) -> Option<mod_api::LegacyRandomSource> {
         mod_api::LevelRandomHost::random(&mut *self.level)
     }
-    fn set_random(&mut self, random: mod_api::LegacyRandom) -> bool {
+    fn set_random(&mut self, random: mod_api::LegacyRandomSource) -> bool {
         mod_api::LevelRandomHost::set_random(&mut *self.level, random)
     }
 }

@@ -43,6 +43,7 @@ fn tnt(id: u32) -> PrimedTnt {
         previous: at,
         velocity: Vec3::ZERO,
         fuse: 80,
+        ticks: 0,
         on_ground: false,
         fall_distance: 0.0,
         stuck: Vec3::ZERO,

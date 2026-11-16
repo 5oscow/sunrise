@@ -8,7 +8,8 @@
 //! The routes that read the table so far: the content mods' thrown types
 //! (`ProjectileKind::Thrown`, by [`ThrownType::slot`]), the living types drawn as mobs (by
 //! their shared `MobType`, which the game's types never replace while it runs), whose renderer
-//! draws in place of the model and its vanilla layers, and item frames (`minecraft:item_frame`,
+//! draws in place of the model and its vanilla layers, primed TNT (`minecraft:tnt`), experience
+//! orbs (`minecraft:experience_orb`), and item frames (`minecraft:item_frame`,
 //! `minecraft:glow_item_frame`). Each other entity family becomes a route of its own; until then a
 //! registration for one of its types is kept and the type keeps its drawing.
 //! Each load also asks for the layers of the living renderers (`native_entity_layers`), which draw
@@ -46,6 +47,12 @@ static TABLE: RwLock<Option<EntityRendererTable>> = RwLock::new(None);
 /// each mob when none was registered.
 static ANY_LIVING: AtomicBool = AtomicBool::new(false);
 
+/// Whether the last load resolved a renderer for primed TNT: a frame checks only this when none
+/// was registered, so the vanilla TNT route stays off the table lock.
+static ANY_TNT: AtomicBool = AtomicBool::new(false);
+/// Whether the last load resolved a renderer for an experience orb: a frame checks only this when
+/// none was registered, so the vanilla orb route stays off the table lock.
+static ANY_EXPERIENCE_ORB: AtomicBool = AtomicBool::new(false);
 /// Whether the last load resolved a renderer for an item frame or a glow item frame: a frame
 /// checks only this when none was registered, so the vanilla frame route stays off the table lock.
 static ANY_ITEM_FRAME: AtomicBool = AtomicBool::new(false);
@@ -53,6 +60,10 @@ static ANY_ITEM_FRAME: AtomicBool = AtomicBool::new(false);
 /// The player's entity type: its model goes by its skin, not by entity type.
 const PLAYER: &str = "minecraft:player";
 
+/// Primed TNT's entity type.
+const TNT: &str = "minecraft:tnt";
+/// An experience orb's entity type.
+const EXPERIENCE_ORB: &str = "minecraft:experience_orb";
 /// An item frame's entity type.
 const ITEM_FRAME: &str = "minecraft:item_frame";
 
@@ -86,6 +97,10 @@ pub(super) struct EntityRendererTable {
     thrown: Vec<Option<Arc<Resolved<dyn EntityRenderer>>>>,
     /// By the address of the mob type the game shares with every mob of the type.
     living: FxHashMap<usize, Arc<Resolved<dyn EntityRenderer>>>,
+    /// Primed TNT (`minecraft:tnt`).
+    tnt: Option<Arc<Resolved<dyn EntityRenderer>>>,
+    /// An experience orb (`minecraft:experience_orb`).
+    experience_orb: Option<Arc<Resolved<dyn EntityRenderer>>>,
     /// An item frame (`minecraft:item_frame`).
     item_frame: Option<Arc<Resolved<dyn EntityRenderer>>>,
     /// A glow item frame (`minecraft:glow_item_frame`).
@@ -106,6 +121,8 @@ impl EntityRendererTable {
         let mut table = Self {
             thrown: thrown.iter().map(|_| None).collect(),
             living: FxHashMap::default(),
+            tnt: None,
+            experience_orb: None,
             item_frame: None,
             glow_item_frame: None,
         };
@@ -116,6 +133,10 @@ impl EntityRendererTable {
                 table.thrown[t.slot] = Some(resolved());
             } else if let Some(kind) = mobs.get(id).filter(|_| id != PLAYER) {
                 table.living.insert(Arc::as_ptr(kind) as usize, resolved());
+            } else if id == TNT {
+                table.tnt = Some(resolved());
+            } else if id == EXPERIENCE_ORB {
+                table.experience_orb = Some(resolved());
             } else if id == ITEM_FRAME {
                 table.item_frame = Some(resolved());
             } else if id == GLOW_ITEM_FRAME {
@@ -135,6 +156,16 @@ impl EntityRendererTable {
     /// The renderer of `mob`'s type, when a mod registered one for it.
     pub(super) fn living(&self, mob: &Mob) -> Option<&Arc<Resolved<dyn EntityRenderer>>> {
         self.living.get(&(Arc::as_ptr(&mob.kind) as usize))
+    }
+
+    /// The renderer of primed TNT, when a mod registered one for `minecraft:tnt`.
+    pub(super) fn tnt(&self) -> Option<&Arc<Resolved<dyn EntityRenderer>>> {
+        self.tnt.as_ref()
+    }
+
+    /// The renderer of an experience orb, when a mod registered one for `minecraft:experience_orb`.
+    pub(super) fn experience_orb(&self) -> Option<&Arc<Resolved<dyn EntityRenderer>>> {
+        self.experience_orb.as_ref()
     }
 
     /// The renderer of an item frame or glow item frame, when a mod registered one for that type.
@@ -163,6 +194,26 @@ pub(in crate::game) fn living_renderer(mob: &Mob) -> Option<Arc<Resolved<dyn Ent
     }
     let table = TABLE.read().unwrap_or_else(PoisonError::into_inner);
     table.as_ref()?.living(mob).cloned()
+}
+
+/// The renderer the last resource load resolved for primed TNT, when a mod registered one: with
+/// none registered, one flag check, with no lock.
+pub(in crate::game) fn tnt_renderer() -> Option<Arc<Resolved<dyn EntityRenderer>>> {
+    if !ANY_TNT.load(Ordering::Relaxed) {
+        return None;
+    }
+    let table = TABLE.read().unwrap_or_else(PoisonError::into_inner);
+    table.as_ref()?.tnt().cloned()
+}
+
+/// The renderer the last resource load resolved for an experience orb, when a mod registered one:
+/// with none registered, one flag check, with no lock.
+pub(in crate::game) fn experience_orb_renderer() -> Option<Arc<Resolved<dyn EntityRenderer>>> {
+    if !ANY_EXPERIENCE_ORB.load(Ordering::Relaxed) {
+        return None;
+    }
+    let table = TABLE.read().unwrap_or_else(PoisonError::into_inner);
+    table.as_ref()?.experience_orb().cloned()
 }
 
 /// The renderer the last resource load resolved for an item frame or glow item frame, when a mod
@@ -196,9 +247,13 @@ impl Game<'_> {
             );
         }
         let any_living = !table.living.is_empty();
+        let any_tnt = table.tnt.is_some();
+        let any_experience_orb = table.experience_orb.is_some();
         let any_item_frame = table.item_frame.is_some() || table.glow_item_frame.is_some();
         *TABLE.write().unwrap_or_else(PoisonError::into_inner) = Some(table);
         ANY_LIVING.store(any_living, Ordering::Relaxed);
+        ANY_TNT.store(any_tnt, Ordering::Relaxed);
+        ANY_EXPERIENCE_ORB.store(any_experience_orb, Ordering::Relaxed);
         ANY_ITEM_FRAME.store(any_item_frame, Ordering::Relaxed);
         self.resolve_entity_layers(&rows, registered);
     }

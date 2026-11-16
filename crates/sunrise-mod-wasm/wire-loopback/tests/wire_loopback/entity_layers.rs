@@ -145,6 +145,8 @@ fn wire_loopback_entity_layers_register_and_draw_alike_for_native_and_guest_mods
                     yaw: 30.0,
                     pitch: 0.0,
                     living: None,
+                    tnt_fuse: None,
+                    orb_value: None,
                     item_frame: None,
                 }
                 .into();

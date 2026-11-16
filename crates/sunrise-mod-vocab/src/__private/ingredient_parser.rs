@@ -130,6 +130,13 @@ impl WalkedIngredient {
                         return;
                     }
                 },
+                // `Ingredient.NON_AIR_HOLDER_SET_CODEC`: a directly named id is
+                // never air, or the file fails; a tag's members aren't checked,
+                // as vanilla checks only the direct list (#1273).
+                None if s == "minecraft:air" || s == "air" => {
+                    valid = false;
+                    return;
+                }
                 None => vec![s.to_owned()],
             };
             for i in more {
@@ -142,7 +149,13 @@ impl WalkedIngredient {
         };
         match v {
             Value::String(s) => add(s),
-            Value::Array(a) => a.iter().filter_map(Value::as_str).for_each(&mut add),
+            // `HolderSet`'s list: every entry is an id, so any other value
+            // fails the file rather than being dropped (#1273).
+            Value::Array(a) => {
+                for entry in a {
+                    add(entry.as_str()?);
+                }
+            }
             Value::Object(o) => {
                 return Self::walk_object(o, tags, block_tags, custom, convert, resolve);
             }
@@ -341,3 +354,7 @@ impl WalkedIngredient {
         })
     }
 }
+
+#[cfg(test)]
+#[path = "ingredient_parser_tests.rs"]
+mod tests;

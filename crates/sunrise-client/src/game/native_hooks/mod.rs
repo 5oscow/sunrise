@@ -102,7 +102,6 @@ use sunrise_core::{
     connection_kind::ConnectionKind,
     geometry::Direction,
     position::BlockPos,
-    random::LegacyRandom,
     ticks::{ScheduleResult, TickPriority},
 };
 use sunrise_world::level::{BonemealCheck, PlaceContext};
