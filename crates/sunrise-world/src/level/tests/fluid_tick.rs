@@ -63,6 +63,7 @@ fn refused_non_source_tick_keeps_exact_state_and_schedules_nothing() {
 /// block entity publishes a closed shape takes no water from any side, and once the shape opens
 /// and its neighbours are told, the water flows in.
 #[test]
+#[ignore = "daily"]
 fn a_published_closed_shape_keeps_water_out_until_it_opens() {
     let mut w = world!();
     w.floor(0, 10, "stone");

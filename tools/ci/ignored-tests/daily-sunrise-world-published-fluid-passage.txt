@@ -1,0 +1,2 @@
+# A published closed shape keeps water out: builds a level over the prepared block registry (`world!()`).
+sunrise-world level::tests::fluid_tick::a_published_closed_shape_keeps_water_out_until_it_opens lib daily resources
