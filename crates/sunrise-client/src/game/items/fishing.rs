@@ -40,16 +40,25 @@ fn fishing_loot(
     luck: f32,
     biome: Option<&str>,
     open_water: bool,
+    hook: &sunrise_world::loot::LootEntity,
 ) -> Vec<sunrise_world::loot::LootStack> {
     match loot.random_sequence(table) {
-        Some(sequence) => loot.roll(
+        Some(sequence) => loot.roll_as(
             table,
             sequences.get(sequence, world_seed),
             luck,
             biome,
             Some(open_water),
+            Some(hook),
         ),
-        None => loot.roll(table, level_random, luck, biome, Some(open_water)),
+        None => loot.roll_as(
+            table,
+            level_random,
+            luck,
+            biome,
+            Some(open_water),
+            Some(hook),
+        ),
     }
 }
 
@@ -657,16 +666,35 @@ impl Game<'_> {
                 .as_ref()
                 .and_then(|m| m.loot_table.as_deref())
                 .unwrap_or(FISHING_TABLE);
-            let items = fishing_loot(
-                &loot,
-                table,
-                &mut self.rand_sequences,
-                &mut self.world.random,
-                self.level.seed,
-                luck,
-                biome.as_deref(),
-                hook.open_water,
-            );
+            // `LootContextParamSets.FISHING`: the hook is THIS_ENTITY, the rod
+            // the TOOL, and the hook's position the ORIGIN.
+            let this = sunrise_world::loot::LootEntity {
+                living: false,
+                ..sunrise_world::loot::LootEntity::new("minecraft:fishing_bobber")
+            };
+            let query = std::rc::Rc::new(sunrise_world::loot::query::LootQuery::new(
+                None,
+                Some(super::creatures::to_loot(rod)),
+            ));
+            let place = sunrise_world::loot::LootPlace {
+                origin: Some([hook.position.x, hook.position.y, hook.position.z]),
+                ..self.loot_place_at([0.0; 3], None)
+            };
+            let items = sunrise_world::loot::query::with_query(query, || {
+                sunrise_world::loot::with_native_loot_place(place, || {
+                    fishing_loot(
+                        &loot,
+                        table,
+                        &mut self.rand_sequences,
+                        &mut self.world.random,
+                        self.level.seed,
+                        luck,
+                        biome.as_deref(),
+                        hook.open_water,
+                        &this,
+                    )
+                })
+            });
             let mut caught: Vec<ItemStack> = items
                 .into_iter()
                 .map(|stack| {
@@ -2210,6 +2238,7 @@ mod tests {
                 0.0,
                 None,
                 true,
+                &sunrise_world::loot::LootEntity::new("minecraft:fishing_bobber"),
             );
             let drops = row["drops"].as_array().unwrap();
             let expected_items: Vec<_> = drops.iter().filter(|d| d.get("item").is_some()).collect();

@@ -1380,22 +1380,24 @@ impl<R: RandomSource> Context<'_, R> {
                     .into_iter()
                     .flatten()
                     .any(|t| self.condition(t)),
+                // FishingHookPredicate: the only entity property a hook has.
+                "minecraft:entity_properties"
+                    if self.open_water.is_some()
+                        && c["predicate"].as_object().is_some_and(|o| {
+                            o.len() == 1
+                                && o.get("minecraft:type_specific/fishing_hook")
+                                    .is_some_and(Value::is_object)
+                        }) =>
+                {
+                    c["predicate"]["minecraft:type_specific/fishing_hook"]["in_open_water"]
+                        .as_bool()
+                        .is_none_or(|want| Some(want) == self.open_water)
+                }
                 "minecraft:entity_properties" if self.entity.is_some() => {
                     let target = self.target(c["entity"].as_str().unwrap_or("this"));
                     c["predicate"].is_null() || self.entity_matches(&c["predicate"], target)
                 }
-                // FishingHookPredicate: the only entity property a hook has.
-                "minecraft:entity_properties" => {
-                    let predicate = &c["predicate"];
-                    let fishing = &predicate["minecraft:type_specific/fishing_hook"];
-                    let only_hook = predicate.as_object().is_some_and(|o| o.len() == 1);
-                    match self.open_water {
-                        Some(open) if only_hook && fishing.is_object() => fishing["in_open_water"]
-                            .as_bool()
-                            .is_none_or(|want| want == open),
-                        _ => false,
-                    }
-                }
+                "minecraft:entity_properties" => false,
                 "minecraft:killed_by_player" => self.entity.is_some_and(|p| p.player.is_some()),
                 "minecraft:random_chance_with_enchanted_bonus" => {
                     let level = self.attacker_level(c["enchantment"].as_str().unwrap_or(""));

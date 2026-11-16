@@ -8495,7 +8495,7 @@ fn bucketable(species: Species) -> Option<(&'static str, &'static str)> {
 pub(super) use sunrise_client::health::{damage_type, melee, source_damage_type};
 /// A Sunrise item stack as a loot stack (id, count, damage, enchantments,
 /// and its custom data as SNBT for `minecraft:custom_data` predicates).
-fn to_loot(stack: &ItemStack) -> sunrise_world::loot::LootStack {
+pub(in crate::game) fn to_loot(stack: &ItemStack) -> sunrise_world::loot::LootStack {
     let components = stack
         .custom_data()
         .map(|data| {

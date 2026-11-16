@@ -376,3 +376,115 @@ fn modifiers_run_once_after_split_and_raw_subrolls_share_random_and_guards() {
         );
     }
 }
+
+/// What a root pass's modifier sees of a roll: THIS_ENTITY's type, the tool's
+/// item, the origin and the luck.
+type Seen = (Option<String>, Option<String>, Option<[f64; 3]>, f32);
+
+/// A `LootData` with `table` as `test:caller` and a modifier that records the
+/// facts of the one root pass.
+fn watched(table: Value) -> (LootData, Arc<std::sync::Mutex<Option<Seen>>>) {
+    use global_modifiers::{
+        DecodedModifier, GlobalLootModifiers, ModifierApply, ModifierFile, ModifierRoll,
+    };
+    struct Watch(Arc<std::sync::Mutex<Option<Seen>>>);
+    impl ModifierApply for Watch {
+        fn apply(
+            &self,
+            roll: &mut dyn ModifierRoll,
+            generated: &[LootStack],
+        ) -> Result<Vec<LootStack>, String> {
+            let facts = roll.facts();
+            *self.0.lock().unwrap() = Some((
+                facts.entity.map(|e| e.kind.clone()),
+                facts.tool.as_ref().map(|t| t.item.clone()),
+                facts.place.as_ref().and_then(|p| p.origin),
+                facts.luck,
+            ));
+            Ok(generated.to_vec())
+        }
+    }
+    let seen = Arc::new(std::sync::Mutex::new(None));
+    let mut data = data(vec![("test:caller", table)]);
+    let watch = seen.clone();
+    data.set_global_modifiers(Arc::new(GlobalLootModifiers::load(
+        [ModifierFile {
+            id: "test:watch".into(),
+            pack: "test".into(),
+            path: "watch.json".into(),
+            read: Box::new(|| Ok(br#"{"type":"test:watch"}"#.to_vec())),
+        }],
+        &crate::conditions::LoadConditions::vanilla(),
+        move |_, _, _| {
+            Ok(DecodedModifier {
+                priority: 1,
+                condition: None,
+                apply: Arc::new(Watch(watch.clone())),
+            })
+        },
+        |error| panic!("{error}"),
+    )));
+    (data, seen)
+}
+
+/// Runs `roll` with `tool` as the query's tool and `origin` as the place.
+fn as_caller<T>(tool: Option<&str>, origin: [f64; 3], roll: impl FnOnce() -> T) -> T {
+    let tool = tool.map(LootStack::new);
+    let place = LootPlace {
+        origin: Some(origin),
+        ..Default::default()
+    };
+    query::with_query(Rc::new(query::LootQuery::new(None, tool)), || {
+        with_native_loot_place(place, roll)
+    })
+}
+
+/// `LootContextParamSets.FISHING`: the hook is THIS_ENTITY, the rod the TOOL,
+/// the hook's position the ORIGIN, and the luck what the hook and its owner
+/// add. A hook predicate keeps reading whether the hook is in open water.
+#[test]
+fn a_fishing_roll_names_the_hook_the_rod_and_the_position() {
+    let table = json!({"pools":[{"rolls":1,
+        "condition":
+            {"type":"minecraft:entity_properties","entity":"this",
+             "predicate":{"minecraft:type_specific/fishing_hook":{"in_open_water":true}}},
+        "entries":[{"type":"minecraft:item","name":"minecraft:pufferfish"}]},
+        {"rolls":1,
+        "condition":
+            {"type":"minecraft:entity_properties","entity":"this",
+             "predicate":{"minecraft:entity_type":"minecraft:fishing_bobber"}},
+        "entries":[{"type":"minecraft:item","name":"minecraft:cod"}]}]});
+    let (data, seen) = watched(table);
+    let hook = LootEntity {
+        living: false,
+        ..LootEntity::new("minecraft:fishing_bobber")
+    };
+    for (open, expected) in [
+        (true, vec!["minecraft:pufferfish", "minecraft:cod"]),
+        (false, vec!["minecraft:cod"]),
+    ] {
+        let drops = as_caller(Some("minecraft:fishing_rod"), [4.5, 62.0, 9.5], || {
+            data.roll_as(
+                "test:caller",
+                &mut LegacyRandom::new(3),
+                2.0,
+                None,
+                Some(open),
+                Some(&hook),
+            )
+        });
+        assert_eq!(
+            drops.iter().map(|d| d.item.as_str()).collect::<Vec<_>>(),
+            expected
+        );
+        assert_eq!(
+            seen.lock().unwrap().take(),
+            Some((
+                Some("minecraft:fishing_bobber".into()),
+                Some("minecraft:fishing_rod".into()),
+                Some([4.5, 62.0, 9.5]),
+                2.0
+            ))
+        );
+    }
+}

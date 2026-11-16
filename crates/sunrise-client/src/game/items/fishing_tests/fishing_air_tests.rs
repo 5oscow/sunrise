@@ -75,6 +75,7 @@ fn cave_air_above_a_water_source_is_open_water_and_catches_treasure() {
                     0.0,
                     None,
                     open_water,
+                    &sunrise_world::loot::LootEntity::new("minecraft:fishing_bobber"),
                 )
             })
             .collect()

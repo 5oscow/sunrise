@@ -45,9 +45,29 @@ impl LootData {
         biome: Option<&str>,
         open_water: Option<bool>,
     ) -> Vec<LootStack> {
+        self.roll_as(table, random, luck, biome, open_water, None)
+    }
+
+    /// [`Self::roll`] with `this` as THIS_ENTITY (a fishing hook): the
+    /// entity predicates then read it, and a hook's `in_open_water` still
+    /// reads `open_water`.
+    pub fn roll_as<R: RandomSource + Clone>(
+        &self,
+        table: &str,
+        random: &mut R,
+        luck: f32,
+        biome: Option<&str>,
+        open_water: Option<bool>,
+        this: Option<&LootEntity>,
+    ) -> Vec<LootStack> {
         let Some(json) = self.tables.get(table) else {
             return Vec::new();
         };
+        let entity = this.map(|this| EntityLootParams {
+            this: this.clone(),
+            luck,
+            ..Default::default()
+        });
         let mut c = Context {
             query: query::current_query(),
             data: self,
@@ -56,7 +76,7 @@ impl LootData {
             visited: Vec::new(),
             luck,
             open_water,
-            entity: None,
+            entity: entity.as_ref(),
             enchanted_level: None,
         };
         let items = c.roll_root(Some(table), json);
