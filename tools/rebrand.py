@@ -11,15 +11,25 @@ from pathlib import Path
 DRY = "--dry-run" in sys.argv
 os.chdir(Path(__file__).resolve().parent.parent)
 
-SKIP_FILES = re.compile(r"(^|/)(LICENSE[^/]*|LICENSES/.*|NOTICE[^/]*|COPYING[^/]*|CLA\.md|GOVERNANCE\.md)$|^tools/rebrand\.py$|^tests/fixtures/launcher-upstream/identity\.json$")
+# Files whose strings name an old URL on purpose: the modding book's stale-URL guard and its fixtures. A run
+# that rewrote them would leave a guard that passes because it no longer recognises what it refuses.
+SKIP_FILES = re.compile(
+    r"(^|/)(LICENSE[^/]*|LICENSES/.*|NOTICE[^/]*|COPYING[^/]*|CLA\.md|GOVERNANCE\.md)$"
+    r"|^tools/rebrand\.py$|^tests/fixtures/launcher-upstream/identity\.json$"
+    r"|^tools/modding_concept_pages\.py$|^tests/test_modding_concept_pages\.py$"
+    r"|^tests/test_modding_book_links\.py$")
 
 PROTECT = [
-    # Real repositories and their pages.
+    # Real repositories and their pages. Horizon's own projects (the machine sample, the mixins tool,
+    # the registry) keep their links. Historical references to the old mod API repository
+    # also stay pinned: their issue numbers belong to that tracker, not this fork.
     r"(?:https?://)?(?:www\.)?github\.com/horizon-rust\b[\w./#?=&-]*",
     r"\bhorizon-rust\.github\.io[\w./#-]*",
     r"@?\bhorizon-rust(?:/[\w.-]+)?",
     r"(?:https?://)?(?:www\.)?github\.com/arismoko/horizon[\w./#?=&-]*",
     r"\barismoko/horizon[\w.-]*(?:/(?:issues|pull)/\d+)?(?:#\d+)?",
+    r"(?:https?://)?(?:www\.)?github\.com/arismoko/horizon-machine-sample[\w./#?=&-]*",
+    r"\barismoko/horizon-machine-sample[\w.-]*",
     # Vanilla's sky horizon, in prose and in its own names.
     r"\b(?:the|The|below|above|at|near|to|over|on|from|toward|towards|under|past|beyond) horizon\b(?![-_:]|\s+(?:client|repo|main|`))",
     r"\bhorizon_height\b|\b[gs]etHorizonHeight\b|\bhorizonHeight\b|\bHorizonHeight\b|\bnear_horizon\b",
@@ -136,6 +146,10 @@ def keep_fork_branches(text, convert):
 
 def convert_line(text):
     def brand(t):
+        # The fork's own repository and Pages site moved with the rename; the upstream projects stay
+        # protected above, and a later run of this tool names the new owner instead of `arismoko`.
+        t = re.sub(r"\barismoko/horizon(?![\w.-])", "sunrise-org/sunrise", t)
+        t = t.replace("arismoko.github.io/sunrise", "sunrise-org.github.io/sunrise")
         t = BRAND.sub(case, t.replace("playhorizon.dev", "playsunrise.net"))
         t = re.sub(r"([Pp]lay[Ss]unrise)\.dev\b", r"\1.net", t)
         return t.replace("upstream Sunrise", "upstream Horizon").replace("fork of Sunrise", "fork of Horizon")

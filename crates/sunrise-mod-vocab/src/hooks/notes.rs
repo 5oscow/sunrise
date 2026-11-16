@@ -968,7 +968,7 @@ handle, an entity the client doesn't track and a level it doesn't show:
   a stale handle or a client.
 - `level.block_shape(host, state, pos, kind)` reads a supplied state's block-local outline or collision boxes with an empty context, without changing the world's state; pass `level.block_state(host, pos)` for the stored state.
   `None` for a client, unknown state, stale handle or closed level; parked levels can be read.
-- `level.entities_in(host, min, max)` lists resolvable entities whose boxes intersect the given box in the active server level or the client's displayed level (other client players are omitted; arismoko/horizon#3033); see its method documentation for the kinds and tick-time visibility not yet covered.
+- `level.entities_in(host, min, max)` lists resolvable entities whose boxes intersect the given box in the active server level or the client's displayed level (other client players are omitted); see its method documentation for the kinds and tick-time visibility not yet covered.
 - `level.pop_resource(host, pos, stack)` drops a stack as a broken block does (`Block.popResource`), `spawn_item(host, x, y, z,
   stack, pickup_delay)` and `spawn_item_with_motion` spawn a plain item entity and give its handle, with the pickup delay
   vanilla's `ItemEntity.setPickupDelay` sets at construction (10 a block's drop, 40 a player's throw, 32767 never), and
@@ -1033,9 +1033,9 @@ for a stale handle, a client, the dragon, and a mob whose copy is held out — n
 as in vanilla: after a reload the mob has its species' set again, and a mod's `entity_join` adds its own back.
 
 These methods reuse built-in goal kinds; they do not define arbitrary goal callbacks or run at construction's
-`Mob.registerGoals` moment. [Custom mob goals at construction](https://github.com/arismoko/horizon/issues/1077)
-tracks a typed goal registrar and callbacks on `MobRef` and Parts, shared by native and wasm mods. NeoForge has
-no bus event at this moment. The upstream raw-`Mob` `register_goals` interface is not part of this fork's API.
+`Mob.registerGoals` moment. A typed goal registrar and callbacks on `MobRef` and Parts, shared by native and wasm
+mods, are not part of this API yet. NeoForge has no bus event at this moment. The upstream raw-`Mob`
+`register_goals` interface is not part of this fork's API.
 
 ### Mob AI controls
 
