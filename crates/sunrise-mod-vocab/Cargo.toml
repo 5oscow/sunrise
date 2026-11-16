@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 publish = false
 description = "Engine-owned mod interface vocabulary, host contracts and dispatch tables"
+# Hands its build output folder to sunrise-mod-api's build script (DEP_SUNRISE_MOD_VOCAB_OUT_DIR),
+# which reruns whenever this one does.
+links = "sunrise_mod_vocab"
 
 [lib]
 name = "mod_vocab"
