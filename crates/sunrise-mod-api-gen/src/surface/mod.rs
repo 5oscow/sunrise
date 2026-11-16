@@ -14,16 +14,17 @@ mod wire_forms;
 
 use crate::catalog::{self, Catalog};
 use crate::index::{Found, Index, ItemId};
+use mod_source::layouts::Layouts;
+use mod_source::layouts::{WireForm, derives, param_names};
 use mod_surface::shape::{ShapeError, Shapes};
 use mod_surface::*;
 use quote::ToTokens;
-use rust::{GameWires, Layouts, Paths, param_names, print};
+use rust::{GameWires, Paths, print};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
 use syn::visit_mut::VisitMut;
 use syn::{Item, Visibility};
 use walk::{attrs, compiled, hidden};
-use wire_forms::WireForm;
 
 /// The crates whose own `macro_rules!` calls the export expands: the API and the crates its
 /// public items come from.
@@ -305,23 +306,6 @@ fn not_on_wasm(attrs: &[syn::Attribute]) -> Option<String> {
 
 fn has_attr(attrs: &[syn::Attribute], name: &str) -> bool {
     attrs.iter().any(|attr| attr.path().is_ident(name))
-}
-
-/// The traits of `attrs`' `#[derive(…)]` lists, by last path segment, sorted.
-pub(super) fn derives(attrs: &[syn::Attribute]) -> Vec<String> {
-    let mut out = BTreeSet::new();
-    for attr in attrs.iter().filter(|a| a.path().is_ident("derive")) {
-        if let Ok(paths) = attr.parse_args_with(
-            syn::punctuated::Punctuated::<syn::Path, syn::Token![,]>::parse_terminated,
-        ) {
-            for path in paths {
-                if let Some(last) = path.segments.last() {
-                    out.insert(last.ident.to_string());
-                }
-            }
-        }
-    }
-    out.into_iter().collect()
 }
 
 /// Normalises types and signatures written in one module.
