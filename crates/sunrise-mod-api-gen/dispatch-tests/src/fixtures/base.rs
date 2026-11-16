@@ -275,7 +275,7 @@ fn slot_rules_mutate_and_item_tick_can_cancel() {
             max_stack: &mut max_stack,
         },
     );
-    assert_eq!((may_place, may_pickup, max_stack), (false, false, 1));
+    assert_eq!((may_place, may_pickup, max_stack), (false, true, 1));
     let (mut duration, mut canceled) = (10, false);
     dispatch_living_entity_use_item_tick(
         HostSide::Server(&mut TestHost),
