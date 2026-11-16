@@ -389,6 +389,9 @@ impl Game<'_> {
 
         let mut out = Vec::new();
         let mut changed: Vec<(i32, i32, i32)> = self.world.block_log.take().unwrap_or_default();
+        // Quiet edits such as a sapling advancing its stage do not send a client update.
+        // Compare the input cells too, rather than using network notifications as all edits.
+        changed.extend(before.keys().copied());
         changed.sort_unstable();
         changed.dedup();
         for p in changed {
