@@ -9,7 +9,7 @@ use super::RecipeBookTypeKey;
 /// namespace) of a 26 by 16 button. The tooltip is a translation key. It names the state the
 /// button switches to when it is on; the off state keeps vanilla's `gui.recipebook.toggleRecipes.all`.
 /// A book without a declared look keeps the crafting book's button and tooltip.
-#[derive(Clone, Debug, PartialEq, Eq, sunrise_mod_api_macros::Wire)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, sunrise_mod_api_macros::Wire)]
 // exhaustive: the four sprites and the tooltip are all that vanilla's filter button varies
 pub struct RecipeBookFilterLook {
     /// Filtering on, the cursor away.
