@@ -65,6 +65,14 @@ checks membership in this process's installed registry. No public unchecked
 constructor exists. Native and wasm share the same registrar method through
 the generated Wire boundary; the key explicitly derives `Wire`.
 
+For Java-compatible flat persistence, call
+`r.recipe_book_type_with_fields(id, open_field, filtering_field)` instead. Both
+methods return the same key and enforce the same ID rules. The explicit field
+names are case-sensitive nonempty strings of at most 256 UTF-8 bytes, with no
+character-set restriction. Reject equal names and collisions with vanilla's eight
+flag fields, `recipes`, `toBeDisplayed`, `sunrise:book_settings`, or another book's
+fields. Invalid field declarations refuse installation even if ignored.
+
 This registration does not create a category, settings handle, UI or network
 payload. Successful installation freezes the registry; resource reload does
 not reopen it. The settings and synchronization operations described here are
@@ -78,13 +86,20 @@ from validated key to a value `{ open: bool, filtering: bool }` alongside them i
 There is no fifth vanilla index. Use one shared map implementation for local,
 host and guest players, persistence and payload application.
 
-Persist the map inside `recipeBook` under `sunrise:book_settings`, a compound
+For books without explicit fields, persist the map inside `recipeBook` under `sunrise:book_settings`, a compound
 whose keys are book ids and whose values contain byte booleans `open` and
 `filtering`. Write both flags, including zero, and sort keys for stable output.
 Missing extension means an empty map. Preserve well-formed entries even when
 the owning mod is absent; registration is required for live access and sync,
 not for retention. Parse the extension independently of vanilla recipe-list
 validation so an invalid recipe list does not erase retained custom flags.
+
+Books declaring explicit fields instead read their flags directly from those
+fields in `recipeBook`. Save each true flag as Byte(1) and omit each false flag,
+as vanilla's `TypeSettings` codec does. Do not also write those books to the
+extension and do not fall back to extension entries for them. Like existing custom
+flags, read the flat fields independently of recipe-list validation. In-memory
+state and synchronization continue to use the book ID, not its saved field names.
 
 Bound the extension to 1024 entries, 256 bytes per key and 512 KiB encoded data.
 Check lengths before allocating or iterating nested values. Accept only a

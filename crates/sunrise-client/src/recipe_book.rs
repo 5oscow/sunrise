@@ -1299,10 +1299,23 @@ impl Settings {
     /// both lists the compound does not decode and nothing is read.
     /// Mods' book flags are read on their own, so lists that do not decode keep them.
     pub fn read_valid(tag: Option<&Tag>, valid: &dyn Fn(&str) -> bool) -> Self {
+        Self::read_with_fields(
+            tag,
+            valid,
+            &mod_api::RecipeBookTypeKey::registered_save_fields(),
+        )
+    }
+
+    fn read_with_fields(
+        tag: Option<&Tag>,
+        valid: &dyn Fn(&str) -> bool,
+        fields: &[(String, (String, String))],
+    ) -> Self {
         let mut s = Self {
             custom: CustomBooks::read(tag),
             ..Self::default()
         };
+        s.custom.read_fields(tag, fields);
         let Some(tag) = tag else { return s };
         let ids = |key: &str| match tag.get(key) {
             Some(Tag::List(list)) => Some(
@@ -1339,6 +1352,10 @@ impl Settings {
     /// The compound written to the player file (vanilla's lists follow an
     /// identity hash order; these are sorted).
     pub fn write(&self) -> Tag {
+        self.write_with_fields(&mod_api::RecipeBookTypeKey::registered_save_fields())
+    }
+
+    fn write_with_fields(&self, fields: &[(String, (String, String))]) -> Tag {
         let mut entries: Vec<(&str, Tag)> = Vec::new();
         for b in BookType::ALL {
             let (open, filter) = b.keys();
@@ -1355,7 +1372,16 @@ impl Settings {
         };
         entries.push(("recipes", list(&self.recipes)));
         entries.push(("toBeDisplayed", list(&self.to_be_displayed)));
-        if let Some(custom) = self.custom.write() {
+        for (id, (open, filtering)) in fields {
+            let flags = self.custom.get(id);
+            if flags.open {
+                entries.push((open, Tag::Byte(1)));
+            }
+            if flags.filtering {
+                entries.push((filtering, Tag::Byte(1)));
+            }
+        }
+        if let Some(custom) = self.custom.write_excluding(fields) {
             entries.push((custom_books::EXTENSION, custom));
         }
         Tag::compound(entries)

@@ -91,13 +91,28 @@ impl RecipeBookTypeKey {
         keys
     }
 
+    /// Explicit saved field pairs by book id, in unspecified order. Books without a
+    /// pair use the engine extension. Intended for player-file persistence, not ticks.
+    pub fn registered_save_fields() -> Vec<(String, (String, String))> {
+        crate::parts::installed()
+            .map(|registry| {
+                registry
+                    .recipe_book_fields
+                    .iter()
+                    .map(|(id, pair)| (id.clone(), pair.clone()))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     /// Whether this process has installed this identity in its frozen registry.
     pub fn is_registered(&self) -> bool {
         crate::parts::installed()
             .is_some_and(|registry| registry.recipe_book_types.contains_key(self.as_str()))
     }
 
-    /// The stable namespaced identity used in saves and negotiated payloads.
+    /// The stable namespaced identity used in negotiated payloads and, unless explicit
+    /// save fields were declared, as the key in the saved engine extension.
     pub fn as_str(&self) -> &str {
         &self.id
     }
