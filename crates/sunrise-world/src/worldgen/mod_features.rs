@@ -11,7 +11,8 @@
 //! a failure, a panic or an exhausted budget anywhere in the root discards every call's writes,
 //! so a failed root leaves nothing of the mod's behind. A failure or a panic also disables the
 //! type for the rest of the run, and every later placement of it fails by name. The features
-//! of the same root that are not a mod's read the level as it was before the root's mod writes.
+//! of the same root that are not a mod's read the level as it was before the root's mod writes,
+//! and the mod writes are applied after theirs: on a block both write, the mod's wins.
 use crate::heightmap::HeightmapType;
 use crate::registry::{BlockRegistry, BlockStateId};
 use std::any::Any;

@@ -64,7 +64,8 @@ Your writes are staged: `context.block` reads them back, and so do the later cal
 root placement. The level sees them, in order, only when the whole root answers `Ok`: a failure, a
 panic or running out of work in any call of the root discards the writes of all of its mod calls,
 so a failed root leaves nothing of yours behind. The game's own features in the same root read the
-level as it was before your writes are published. A failure or a panic also disables your type for the rest of
+level as it was before your writes are published, and your writes are applied after theirs, so
+where a root mixes your feature and a built-in one on the same block, yours wins. A failure or a panic also disables your type for the rest of
 the run: each later placement of it fails by name without calling it.
 
 There is no `Host` in a feature. Decoration runs on worker threads, so your type must be
