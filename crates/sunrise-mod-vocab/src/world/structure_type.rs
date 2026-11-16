@@ -149,7 +149,7 @@ pub trait StructurePiece: std::fmt::Debug + Send + Sync {
 
 /// The random a structure type or piece draws from, in vanilla's order: the
 /// chunk's `WorldgenRandom` for a start, the piece's `RandomSource` for a piece.
-pub trait StructureRandom {
+pub trait RandomSource {
     /// `nextInt(bound)`; 0 for a bound below 1.
     fn next_int_bound(&mut self, bound: i32) -> i32;
     /// `nextLong`.
@@ -261,7 +261,7 @@ pub trait GenerationContext {
     fn max_y(&self) -> i32;
     /// The random vanilla's types draw from, seeded for this chunk
     /// (`WorldgenRandom.setLargeFeatureSeed` of the seed, chunk X and Z).
-    fn random(&mut self) -> &mut dyn StructureRandom;
+    fn random(&mut self) -> &mut dyn RandomSource;
     /// `ChunkGenerator.getBaseHeight`: the first free height at (x, z) by the
     /// heightmap kind.
     fn base_height(&mut self, x: i32, z: i32, kind: HeightmapType) -> i32;
@@ -291,7 +291,7 @@ pub trait PieceContext {
     /// The writable box: a `set_block` outside it is dropped silently.
     fn chunk_box(&self) -> BoundingBox;
     /// The piece's random (`RandomSource` of `postProcess`).
-    fn random(&mut self) -> &mut dyn StructureRandom;
+    fn random(&mut self) -> &mut dyn RandomSource;
     /// The block's default state; resolve it once when constructing or loading a piece.
     fn state(&self, block: BlockKey) -> BlockState;
     /// A block state with partial properties; missing properties keep defaults.

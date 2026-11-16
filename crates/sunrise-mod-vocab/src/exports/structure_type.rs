@@ -1,6 +1,6 @@
 pub use world::structure_type::{
     BiomeId, ChunkPos, FoundStructure, GenerationContext, HeightmapType, NoiseBlock, NoiseColumn,
-    PieceBeardifier, PieceContext, StructureError, StructurePiece, StructureRandom, StructureType,
+    PieceBeardifier, PieceContext, StructureError, StructurePiece, RandomSource, StructureType,
     TerrainAdjustment,
 };
 mod __private {

@@ -55,7 +55,7 @@ pub(super) const IMPORTS: &[&str] = &[
     "ChunkDiskHost",
     "GenerationContext",
     "PieceContext",
-    "StructureRandom",
+    "RandomSource",
     "AttachmentStore",
     "AttachmentDeclarations",
     "ServerReloadListeners",

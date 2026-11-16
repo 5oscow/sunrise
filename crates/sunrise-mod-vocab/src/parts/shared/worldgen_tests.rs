@@ -5,7 +5,7 @@ use super::*;
 use crate::*;
 
 struct Draws;
-impl StructureRandom for Draws {
+impl RandomSource for Draws {
     fn next_int_bound(&mut self, _: i32) -> i32 {
         0
     }

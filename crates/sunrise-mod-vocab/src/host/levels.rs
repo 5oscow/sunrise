@@ -603,7 +603,7 @@ pub trait LevelsBackend {
     /// the End open when someone first goes there and close after 300 ticks
     /// with nobody in them (`close_idle_levels`).
     #[access(WorldOnly)]
-    fn level_random(&self, level: LevelRef) -> Option<LegacyRandom>;
+    fn level_random(&self, level: LevelRef) -> Option<LegacyRandomSource>;
     /// Side: server.
     /// `Raids.get(id)`: the raid saved under `id` in the requested level, if
     /// `Raids` still holds it (a stopped raid goes at its next tick).
@@ -1517,7 +1517,7 @@ pub trait LevelsBackendMut {
     /// a stream `native_level_random` gave and the mod drew from. False where
     /// that gives `None`.
     #[access(WorldOnly)]
-    fn level_set_random(&mut self, level: LevelRef, random: LegacyRandom) -> bool;
+    fn level_set_random(&mut self, level: LevelRef, random: LegacyRandomSource) -> bool;
     /// Side: both.
     /// Apply bone meal to the block at `pos` as a dispenser does (`BoneMealItem.growCrop`, then
     /// `growWaterPlant`), with no player and no item: the mods' `bonemeal` hook first, level event

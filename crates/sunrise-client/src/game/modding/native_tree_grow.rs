@@ -4,7 +4,7 @@
 //! It reads what the server published (`native_worldgen_parts`), never a game thread's tables.
 use super::api_values::block_state::Index;
 use super::native_worldgen_parts;
-use mod_api::{BlockState, HookId, StructureRandom};
+use mod_api::{BlockState, HookId, RandomSource};
 use sunrise_world::native_worldgen_hooks::TreeGrowAccess;
 use sunrise_world::registry::BlockStateId as EngineState;
 
@@ -61,7 +61,7 @@ fn placed(
 
 /// The tree's own random, as a part draws from it.
 struct Random<'a>(&'a mut dyn TreeGrowAccess);
-impl StructureRandom for Random<'_> {
+impl RandomSource for Random<'_> {
     fn next_int_bound(&mut self, bound: i32) -> i32 {
         self.0.next_int_bound(bound)
     }
