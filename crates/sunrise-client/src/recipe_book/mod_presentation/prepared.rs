@@ -159,7 +159,11 @@ fn ingredients(
     resolver: &dyn DisplayResolver,
 ) -> Vec<crate::crafting::Ingredient> {
     let slots: Vec<&Slot> = match display {
-        Display::Shaped { ingredients, .. } | Display::Shapeless { ingredients, .. } => ingredients
+        Display::Shaped { ingredients, .. }
+        | Display::Shapeless { ingredients, .. }
+        | Display::Custom {
+            slots: ingredients, ..
+        } => ingredients
             .iter()
             .filter(|slot| !matches!(slot, Slot::Empty))
             .collect(),

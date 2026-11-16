@@ -252,3 +252,16 @@ fn storage_agreement_and_existing_menu_limit() {
     let mapped = layout.map(&display, false).unwrap();
     assert_eq!(mapped, vec![(127, item("oak")), (255, item("stick"))]);
 }
+
+#[test]
+fn built_in_layouts_map_no_custom_display() {
+    let custom = RecipeBookDisplay::Custom {
+        slots: vec![item("a")],
+        result: item("out"),
+        station: RecipeSlotDisplay::Empty,
+    };
+    assert_eq!(
+        grid().map(&custom, true),
+        Err(LayoutError::IncompatibleDisplay)
+    );
+}

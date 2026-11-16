@@ -133,6 +133,27 @@ fn five_layouts_have_independent_expected_cells() {
     }
 }
 #[test]
+fn custom_display_shows_its_non_empty_slots_in_order() {
+    let custom = Display::Custom {
+        slots: vec![item("a"), Slot::Empty, item("b"), item("bowl")],
+        result: item("meal"),
+        station: item("station"),
+    };
+    let shown: Vec<_> = cells(&custom, &Resolver)
+        .iter()
+        .map(|(x, y, s)| (*x, *y, s[0].item.to_string()))
+        .collect();
+    assert_eq!(
+        shown,
+        [
+            (0, 0, "demo:a".to_owned()),
+            (2, 0, "demo:b".to_owned()),
+            (0, 1, "demo:bowl".to_owned())
+        ]
+    );
+    assert_eq!(result(&custom), &item("meal"));
+}
+#[test]
 fn panel_search_selection_and_inventory_filter_are_isolated() {
     let index = ModBookIndex::build(
         vec![
