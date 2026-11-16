@@ -54,19 +54,7 @@ impl PartRegistrar {
                 return Err("registry exceeds 1024 custom books".into());
             }
             if let Some((open, filtering)) = fields {
-                const RESERVED: &[&str] = &[
-                    "isGuiOpen",
-                    "isFilteringCraftable",
-                    "isFurnaceGuiOpen",
-                    "isFurnaceFilteringCraftable",
-                    "isBlastingFurnaceGuiOpen",
-                    "isBlastingFurnaceFilteringCraftable",
-                    "isSmokerGuiOpen",
-                    "isSmokerFilteringCraftable",
-                    "recipes",
-                    "toBeDisplayed",
-                    "sunrise:book_settings",
-                ];
+                use crate::item::recipe_book::saved_fields;
                 if open == filtering {
                     return Err("open and filtering fields must differ".into());
                 }
@@ -74,7 +62,16 @@ impl PartRegistrar {
                     if field.is_empty() || field.len() > 256 {
                         return Err("save fields must be nonempty and at most 256 bytes".into());
                     }
-                    if RESERVED.contains(&field) {
+                    if saved_fields::VANILLA
+                        .iter()
+                        .flat_map(|&(a, b)| [a, b])
+                        .chain([
+                            saved_fields::RECIPES,
+                            saved_fields::TO_BE_DISPLAYED,
+                            saved_fields::EXTENSION,
+                        ])
+                        .any(|reserved| field == reserved)
+                    {
                         return Err(format!("reserved save field {field:?}"));
                     }
                     if let Some((other, _)) = self

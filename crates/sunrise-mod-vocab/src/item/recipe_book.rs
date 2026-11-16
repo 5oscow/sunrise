@@ -1,6 +1,8 @@
 //! Recipe book declarations supplied by a custom recipe type.
 #[path = "placement_info.rs"]
 mod placement;
+#[path = "recipe_book_saved_fields.rs"]
+pub mod saved_fields;
 pub use placement::PlacementInfo;
 #[path = "recipe_book_layout.rs"]
 mod layout;
