@@ -487,6 +487,25 @@ mod listener_lease_tests {
 
     #[test]
     fn entering_a_different_hook_expires_a_retained_pending_child() {
+        struct Listener;
+        #[mod_api::__subscriptions]
+        impl crate::Hooks for Listener {
+            fn mob_split(
+                &self,
+                _: &mut dyn crate::ServerHost,
+                _: &mut crate::MobSplitEvent<'_>,
+            ) -> Flow {
+                Flow::Continue
+            }
+            fn baby_entity_spawn(
+                &self,
+                _: &mut dyn crate::ServerHost,
+                _: &mut crate::BabyEntitySpawnEvent<'_>,
+            ) -> Flow {
+                Flow::Continue
+            }
+        }
+        install(vec![ModEntry::new("lease-test", Box::new(Listener))].into());
         let mut arena = PendingChildren::default();
         arena
             .run(
@@ -494,12 +513,13 @@ mod listener_lease_tests {
                 1,
                 vec![7u32],
                 |arena, action| {
-                    let enter = |_: generated::HookId| bump_listener_serial();
-                    enter(generated::HookId::MobSplit);
+                    let _outer = listening(generated::HookId::MobSplit).next().unwrap();
                     arena.sync_listener(listener_serial()).unwrap();
                     let child = arena.borrow(action, 0).unwrap();
                     assert_eq!(arena.get(child), Ok(&7));
-                    enter(generated::HookId::BabyEntitySpawn);
+                    let _nested = listening(generated::HookId::BabyEntitySpawn)
+                        .next()
+                        .unwrap();
                     arena.sync_listener(listener_serial()).unwrap();
                     assert_eq!(arena.get(child), Err(Error::Expired));
                     let fresh = arena.borrow(action, 0).unwrap();
