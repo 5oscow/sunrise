@@ -47,6 +47,9 @@ displays and markers have zero-sized boxes at their positions; interactions use 
 saved width and height. Face-only contact does not intersect. A handle expires when its
 entity unloads, so find it again when the saved entity rejoins.
 
+`level_entities_in(level, min, max)` lists item frames and paintings whose boxes meet the box too, with
+handles that resolve, after the ordinary entities and before the players.
+
 ## Walking every entity in a level
 
 `host.level_all_entities(level)` returns the authoritative level's available

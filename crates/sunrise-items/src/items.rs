@@ -197,6 +197,8 @@ pub fn parse_consume_effect(effect: &serde_json::Value) -> Option<ConsumeEffect>
 #[derive(Clone, Debug)]
 pub struct ItemInfo {
     pub id: Arc<str>,
+    /// Default components decoded once, for schema-aware saved patch equality.
+    pub component_prototype: ItemStack,
     pub max_stack: u32,
     pub max_damage: u32,
     /// Prototype damage, cached when default components are loaded.
@@ -955,10 +957,19 @@ impl Items {
                 .and_then(|f| f.get("can_always_eat"))
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
+            let prototype = sunrise_core::json_nbt::json_to_tag(c)?;
+            let (damage, extra) = crate::item_data::decode_components(Some(&prototype));
+            let component_prototype = ItemStack {
+                item: id.clone(),
+                count: 1,
+                damage,
+                extra,
+            };
             items.insert(
                 id.clone(),
                 ItemInfo {
                     id: id.clone(),
+                    component_prototype,
                     max_stack: c["minecraft:max_stack_size"].as_u64().unwrap_or(64) as u32,
                     max_damage: c["minecraft:max_damage"].as_u64().unwrap_or(0) as u32,
                     damage: c["minecraft:damage"].as_i64().unwrap_or(0).max(0) as i32,

@@ -1,6 +1,7 @@
 //! Levels, chunks, dimensions, spawning, fluids as world state and the vocabulary the world speaks.
 
 pub(crate) mod advancement_progress;
+pub(crate) mod scoreboard;
 // hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod biome;
@@ -20,6 +21,7 @@ pub(crate) mod datapack_snapshot;
 pub(crate) mod dimension;
 pub(crate) mod dimension_transition;
 pub(crate) mod explosion_settings;
+pub(crate) mod fluid_interaction;
 pub(crate) mod game_rule_value;
 pub(crate) mod place_feature_refusal;
 // hidden: a module of game-side types; mods use their re-exports

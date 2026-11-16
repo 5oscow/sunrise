@@ -98,6 +98,34 @@ fn root_owner(mut owner: [i32; 4], pet_owner: impl Fn([i32; 4]) -> Option<[i32; 
     owner
 }
 
+/// The id of a target whose scoreboard name is a UUID it is given when first asked for (an
+/// orb's registered identity included).
+fn gives_uuid(t: Target) -> Option<u32> {
+    match t {
+        Target::Mob(id)
+        | Target::Item(id)
+        | Target::Stand(id)
+        | Target::Frame(id)
+        | Target::Painting(id)
+        | Target::Boat(id)
+        | Target::Cart(id)
+        | Target::Crystal(id)
+        | Target::Dragon(id)
+        | Target::Tnt(id)
+        | Target::Cushion(id)
+        | Target::Falling(id)
+        | Target::Rocket(id)
+        | Target::Trident(id)
+        | Target::Other(id)
+        | Target::Fangs(id)
+        | Target::Cloud(id)
+        | Target::General(id)
+        | Target::Hook(id)
+        | Target::Orb(id) => Some(id),
+        _ => None,
+    }
+}
+
 impl Game<'_> {
     fn scoreboard_path(&self) -> std::path::PathBuf {
         self.world_root.join("data/minecraft/scoreboard.dat")
@@ -137,7 +165,7 @@ impl Game<'_> {
         }
     }
     /// `ScoreboardSaveData` read from `data/minecraft/scoreboard.dat`.
-    pub(super) fn load_scoreboard(&mut self) {
+    pub(in crate::game) fn load_scoreboard(&mut self) {
         if self.score.loaded || self.remote.is_some() {
             return;
         }
@@ -175,7 +203,7 @@ impl Game<'_> {
         }
     }
     /// The names commands complete: objectives, teams and tracked holders.
-    pub(super) fn sync_score_registries(&mut self) {
+    pub(in crate::game) fn sync_score_registries(&mut self) {
         let board = &self.score.board;
         let reg = &mut self.ui.registries;
         reg.objectives = board.objectives.iter().map(|o| o.name.clone()).collect();
@@ -204,43 +232,36 @@ impl Game<'_> {
     // ---- score holders ---------------------------------------------------
 
     /// `ScoreHolder.getScoreboardName`: the player's name, an entity's UUID.
-    pub(super) fn holder_name(&mut self, t: Target) -> Option<String> {
+    pub(in crate::game) fn holder_name(&mut self, t: Target) -> Option<String> {
+        match gives_uuid(t) {
+            Some(id) => Some(uuid_text(self.uuid_for(id))),
+            None => self.existing_holder_name(t),
+        }
+    }
+    /// [`holder_name`](Self::holder_name) without giving a UUID to an entity that has none: its
+    /// name on the board, if it could have a score yet.
+    pub(in crate::game) fn existing_holder_name(&self, t: Target) -> Option<String> {
         match t {
             Target::Player => Some(self.acting_player_name().to_owned()),
             Target::Guest(conn) => self.command_guest(conn).map(|g| g.name.clone()),
-            Target::Mob(id)
-            | Target::Item(id)
-            | Target::Stand(id)
-            | Target::Frame(id)
-            | Target::Painting(id)
-            | Target::Boat(id)
-            | Target::Cart(id)
-            | Target::Crystal(id)
-            | Target::Dragon(id)
-            | Target::Tnt(id)
-            | Target::Cushion(id)
-            | Target::Falling(id)
-            | Target::Rocket(id)
-            | Target::Trident(id)
-            | Target::Other(id)
-            | Target::Fangs(id)
-            | Target::Cloud(id)
-            | Target::General(id)
-            | Target::Hook(id) => Some(uuid_text(self.uuid_for(id))),
             // It keeps its UUID with itself.
             Target::Spawner(id) => self
                 .ominous_spawners
                 .iter()
                 .find(|s| s.id == id)
                 .map(|s| uuid_text(s.uuid)),
-            // An orb's registered identity, as its saved UUID reads.
-            Target::Orb(id) => Some(uuid_text(self.uuid_for(id))),
+            Target::Knot(id) => self.persist.uuids.get(&id).map(|&u| uuid_text(u)),
             // Projectiles have no UUID here.
             Target::Projectile(_) | Target::DragonPart(_) => None,
-            Target::Knot(id) => self.persist.uuids.get(&id).map(|&u| uuid_text(u)),
+            other => {
+                let id = gives_uuid(other)?;
+                self.known_resident_entity_uuid_at(self.dim.key(), id)
+                    .or_else(|| self.persist.uuids.get(&id).copied())
+                    .map(uuid_text)
+            }
         }
     }
-    fn holder_for(&mut self, t: Target) -> Option<Holder> {
+    pub(in crate::game) fn holder_for(&mut self, t: Target) -> Option<Holder> {
         let name = self.holder_name(t)?;
         let shown = feedback_name(self.target_name(t), &name);
         Some(Holder {

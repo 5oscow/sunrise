@@ -1,4 +1,4 @@
-use super::{block_entity_id, encode_items, item_to_nbt, string, uuid_tag};
+use super::{block_entity_id, item_to_nbt, string, uuid_tag};
 use crate::{
     beehive::BeehiveExt,
     mobs::{spawner::SpawnerExt, trial_spawner::TrialSpawnerExt},
@@ -6,7 +6,31 @@ use crate::{
 use sunrise_core::nbt::{Compound, Tag};
 
 pub fn encode(p: (i32, i32, i32), e: &crate::containers::BlockEntity, block: &str) -> Tag {
+    encode_using(p, e, block, item_to_nbt)
+}
+
+/// Save block-entity stacks against the world's loaded item prototypes.
+pub fn encode_with_items(
+    p: (i32, i32, i32),
+    e: &crate::containers::BlockEntity,
+    block: &str,
+    items: &crate::items::Items,
+) -> Tag {
+    encode_using(p, e, block, |stack| {
+        sunrise_items::item_nbt::item_to_nbt_with_items(stack, items)
+    })
+}
+
+fn encode_using(
+    p: (i32, i32, i32),
+    e: &crate::containers::BlockEntity,
+    block: &str,
+    item_to_nbt: impl Fn(&crate::items::ItemStack) -> Tag,
+) -> Tag {
     use crate::containers::BlockEntity;
+    let encode_items = |slots: &[Option<crate::items::ItemStack>]| {
+        sunrise_items::item_nbt::encode_items_using(slots, &item_to_nbt)
+    };
     if let BlockEntity::Mod(m) = e {
         let mut map = m.nbt.clone();
         if let Some((key, shapes)) = m.shapes_tag() {

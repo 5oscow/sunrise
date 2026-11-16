@@ -7,6 +7,8 @@
 //! them: [`gui`] into the HUD batch with the GUI item lighting, [`WorldSink`]
 //! into entity vertices with the level's lighting.
 use sunrise_assets::resource_source::{ResourceRoot, ResourceSource};
+#[cfg(test)]
+mod block_light_tests;
 pub mod cit;
 mod glint_atlas;
 #[cfg(test)]

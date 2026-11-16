@@ -152,6 +152,13 @@ pub trait EntitiesBackend {
     #[access(WorldOnly)]
     fn entity_position(&self, entity: EntityRef) -> Option<[f64; 3]>;
     /// Side: server.
+    /// The players this entity is sent to (`ChunkMap.TrackedEntity.seenBy`), in the order the
+    /// server keeps its players: those in the entity's level whose client has the entity from
+    /// its tracking pass. A player is not among its own trackers. Fake players track nothing.
+    /// None on a client, and for a stale handle or an entity that is not in the level in place.
+    #[access(WorldOnly)]
+    fn entity_trackers(&self, entity: EntityRef) -> Option<Vec<PlayerRef>>;
+    /// Side: server.
     /// The block the entity's position is in (`Entity.blockPosition`). API
     /// 373.
     #[access(WorldOnly)]
@@ -646,6 +653,30 @@ pub trait EntitiesBackendMut {
         pos: [f64; 3],
         rotation: Option<[f32; 2]>,
     ) -> bool;
+    /// Side: server.
+    /// Moves the entity by `delta` blocks as `Entity.move(cause, delta)` does: the block,
+    /// entity and world border collision scan stops it at what is in the way, it steps up what
+    /// its step height allows, and its ground flag follows the move. It is not a teleport
+    /// (nothing is skipped over) and not a velocity: the entity's velocity is left as it is,
+    /// blocked components included. The `entity_move` hook fires for it with `cause`, once, so
+    /// a listener may replace or cancel the delta as for any other move; a cancelled move is
+    /// `Some([0.0; 3])`. A body with no physics (a marker or `NoGravity` armor stand, or one a
+    /// mod set) moves the whole delta with no collision. `MoveCause::Piston` also applies a
+    /// piston's per-tick limit, 0.51 blocks per axis, on the first non-zero axis only; a
+    /// mob's budget carries across calls in a tick, any other kind's lasts the call. Returns how far
+    /// the entity moved, `delta` less what the collisions took. None for a stale handle, on a
+    /// client, for a player (its client owns its position; teleport it instead), for an entity
+    /// outside the game's entity walk (a display, a painting, an item frame, an End crystal, a
+    /// dragon part) and for a delta that is not finite or has a component beyond 64 blocks. The
+    /// entity's own tick still does what follows a move: fall damage, block effects and
+    /// triggers.
+    #[access(WorldOnly)]
+    fn entity_move_by(
+        &mut self,
+        entity: EntityRef,
+        delta: [f64; 3],
+        cause: MoveCause,
+    ) -> Option<[f64; 3]>;
     /// Side: server.
     /// Sends the entity to `pos` in the level `dimension` (`minecraft:the_nether`,
     /// or a level a mod registered), as `Entity.teleport` does with a portal's

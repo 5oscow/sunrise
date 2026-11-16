@@ -533,6 +533,16 @@ impl Game<'_> {
         let [x, y, z] = pos;
         world.is_loaded_at(x, y, z).then(|| world.block(x, y, z))
     }
+    /// `BlockState.isRedstoneConductor(level, pos)` of the block at `pos`. None for a stale
+    /// handle, a client or an unloaded `pos`.
+    pub(super) fn level_is_redstone_conductor(
+        &self,
+        level: LevelRef,
+        pos: [i32; 3],
+    ) -> Option<bool> {
+        let state = self.level_block_state(level, pos)?;
+        Some(self.res.behaviours().is_redstone_conductor(state))
+    }
     /// Preview a held tool's transformation without changing the block or stack. The existing
     /// block-tool hook fires with `simulated` true; listeners must not mutate the level in a
     /// simulation. The player must be live in the level in place, and the block must be loaded;

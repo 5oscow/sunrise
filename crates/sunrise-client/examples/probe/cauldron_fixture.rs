@@ -7,7 +7,7 @@ use std::{fs, path::Path};
 use sunrise_client::{
     cauldron::{Outcome, Player, interact, removes_dye},
     crafting::Recipes,
-    item_data::{canon_stack, parse_stack},
+    item_data::{canon_stack_with_items, parse_stack},
     items::{ItemStack, Items},
     menu::{Env, Kind, Menu},
 };
@@ -44,8 +44,10 @@ impl Player for Stand<'_> {
                 .is_some_and(|h| h.same_item_same_components(stack))
     }
     fn drop_stack(&mut self, stack: ItemStack) {
-        self.events
-            .push(format!("drop {}", canon_stack(Some(&stack))));
+        self.events.push(format!(
+            "drop {}",
+            canon_stack_with_items(Some(&stack), self.env.items)
+        ));
     }
 }
 
@@ -160,7 +162,7 @@ pub fn main() -> sunrise_client::Result<()> {
                 stand
                     .menu
                     .player_item(i)
-                    .map(|s| format!("{i}={}", canon_stack(Some(s))))
+                    .map(|s| format!("{i}={}", canon_stack_with_items(Some(s), &items)))
             })
             .collect();
         out += &format!(
