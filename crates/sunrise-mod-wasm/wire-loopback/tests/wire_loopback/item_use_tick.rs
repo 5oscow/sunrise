@@ -1,7 +1,7 @@
 use super::*;
 pub(super) struct ItemUseTickHooks;
 impl ItemUseTickHooks {
-    fn living_entity_use_item_tick(
+    pub(super) fn living_entity_use_item_tick(
         &self,
         _: mod_api::HostSide,
         event: &mut mod_api::LivingEntityUseItemTickEvent<'_>,
