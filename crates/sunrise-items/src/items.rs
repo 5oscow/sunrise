@@ -4296,6 +4296,35 @@ mod tests {
         );
     }
 
+    /// A valid empty banner-pattern list is a set component too: it replaces
+    /// an earlier removal, and the stack saves and reloads the empty list.
+    #[test]
+    fn an_empty_banner_pattern_list_replaces_a_removal() {
+        let mut stack = ItemStack::new("minecraft:white_banner", 1);
+        stack
+            .data_mut()
+            .set_other("!minecraft:banner_patterns", removal_marker());
+        let before = loot_of(&stack);
+        let mut after = before.clone();
+        after.components.push((
+            "minecraft:banner_patterns".into(),
+            Some(sunrise_core::nbt::Tag::List(Vec::new())),
+        ));
+        apply_loot(&before, &after, &mut stack, |_, _| Some(true));
+        let saved = crate::item_data::encode_components(&stack);
+        let Some(sunrise_core::nbt::Tag::Compound(saved)) = saved else {
+            panic!("the empty list is saved");
+        };
+        assert_eq!(saved.get(&"!minecraft:banner_patterns".into()), None);
+        assert_eq!(
+            saved.get(&"minecraft:banner_patterns".into()),
+            Some(&sunrise_core::nbt::Tag::List(Vec::new()))
+        );
+        let (_, back) =
+            crate::item_data::decode_components(Some(&sunrise_core::nbt::Tag::Compound(saved)));
+        assert!(back.is_some_and(|d| d.sets_component("minecraft:banner_patterns")));
+    }
+
     /// The prototype that decides is the final item's: a hook that turns the
     /// stack into a stick and removes its rarity leaves the stick's marker.
     #[test]

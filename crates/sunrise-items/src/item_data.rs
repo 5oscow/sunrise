@@ -77,6 +77,9 @@ pub use trim::Trim;
 pub struct StackData {
     /// An explicit zero damage component overriding a damaged prototype.
     damage_set: bool,
+    /// An explicit empty `minecraft:banner_patterns`: the component is set
+    /// (and saved) though `banner_patterns` holds no layer.
+    banner_patterns_set: bool,
     /// `minecraft:enchantments`.
     pub enchantments: Levels,
     /// `minecraft:stored_enchantments` (enchanted books).
@@ -269,7 +272,9 @@ impl StackData {
             "minecraft:potion_contents" => self.potion.is_some() || !self.potion_extra.is_empty(),
             "minecraft:trim" => self.trim.is_some(),
             "minecraft:map_id" => self.map_id.is_some(),
-            "minecraft:banner_patterns" => self.ominous_banner || !self.banner_patterns.is_empty(),
+            "minecraft:banner_patterns" => {
+                self.ominous_banner || self.banner_patterns_set || !self.banner_patterns.is_empty()
+            }
             "minecraft:base_color" => self.base_color.is_some(),
             "minecraft:writable_book_content" => !self.writable_pages.is_empty(),
             "minecraft:written_book_content" => self.written.is_some(),
@@ -307,6 +312,7 @@ impl StackData {
             // from `banner_patterns`, not from a tag in `other`.
             "minecraft:banner_patterns" => {
                 self.banner_patterns = crate::banner_layer::layers_from_nbt(tag.as_ref());
+                self.banner_patterns_set = tag.is_some() && self.banner_patterns.is_empty();
             }
             // `set_book_cover` (and `set_components`) write the book's title,
             // author, generation and pages as one component: the fields the
@@ -1431,7 +1437,7 @@ fn components_tag_inner(
         if let Some(id) = d.map_id {
             entries.push(("minecraft:map_id", Tag::Int(id)));
         }
-        if !d.banner_patterns.is_empty() {
+        if !d.banner_patterns.is_empty() || d.banner_patterns_set {
             entries.push((
                 "minecraft:banner_patterns",
                 crate::banner_layer::layers_to_nbt(&d.banner_patterns),
@@ -1713,6 +1719,7 @@ pub fn decode_components(components: Option<&Tag>) -> (u32, Option<Box<StackData
             .map(crate::kinetic_weapon::KineticComponent::new),
         map_id: seen.map_id.and_then(crate::properties::component_int),
         banner_patterns: crate::banner_layer::layers_from_nbt(c.get("minecraft:banner_patterns")),
+        banner_patterns_set: matches!(c.get("minecraft:banner_patterns"), Some(Tag::List(l)) if l.is_empty()),
         base_color: c
             .get("minecraft:base_color")
             .and_then(string)
@@ -3075,6 +3082,10 @@ mod tests {
             map_id: c.get("minecraft:map_id").and_then(int).map(|v| v as i32),
             banner_patterns: crate::banner_layer::layers_from_nbt(
                 c.get("minecraft:banner_patterns"),
+            ),
+            banner_patterns_set: matches!(
+                c.get("minecraft:banner_patterns"),
+                Some(Tag::List(l)) if l.is_empty()
             ),
             base_color: c
                 .get("minecraft:base_color")
