@@ -403,8 +403,9 @@ jobs:
   # (.github/workflows/parity-main.yml; releases wait for it). A pull request still runs them itself when it changes
   # a harness, an oracle, a probe or the runner, or carries the run-parity label (run-parity.yml, when it is added).
   parity-scope:
-    if: >-
-      github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && !(startsWith(github.head_ref, 'sunrise-review-rollup-') ||
+    # Our light runner takes only this repository's pull requests: the fork guard stays on the `if:` line.
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository &&
+      !(startsWith(github.head_ref, 'sunrise-review-rollup-') ||
       startsWith(github.head_ref, 'fork-review-rollup-') || startsWith(github.head_ref, 'rollup-') ||
       startsWith(github.head_ref, 'sync/') || startsWith(github.head_ref, 'sync-') ||
       contains(github.event.pull_request.labels.*.name, 'rollup') || contains(github.event.pull_request.labels.*.name, 'sync'))
