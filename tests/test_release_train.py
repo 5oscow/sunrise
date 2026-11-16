@@ -526,6 +526,13 @@ class ReleaseTrainTests(unittest.TestCase):
         self.assertEqual(shlex.split(clone)[3], tag)
         self.assertNotIn("{tag}", body)
 
+    def test_the_first_fork_launcher_release_lists_no_pull_requests(self):
+        _, body = train.notes("launcher", "launcher@1.0.0", [pr(3, "CI: a runner change")], [],
+                              repository="sunrise-org/sunrise")
+        self.assertIn("The first release of Sunrise's launcher.", body)
+        self.assertNotIn("(#3)", body)
+        self.assertNotIn("Thanks to", body)
+
     def test_a_game_release_opens_with_the_way_to_the_launcher(self):
         # GitHub's latest is a game release: whoever lands on it is sent to the launcher first (#1647).
         _, body = train.notes("game", "v0.2.50", [pr(1)], ["- Sound cuts out after an hour."])

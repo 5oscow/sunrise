@@ -451,14 +451,16 @@ def line_intro(kind, version, previous):
 
 def notes(kind, version, prs, issues, previous=None, repository="horizon-rust/horizon"):
     """(title, body) of a release. previous: the release before it, for a line's first release."""
-    shown = [pr for pr in prs if pr["paths"] and "skip-release" not in pr["labels"]]
+    fork_launcher = kind == "launcher" and repository == "sunrise-org/sunrise"
+    # Sunrise's first launcher release lists no pull requests: before it, every merge of the fork's history counts.
+    first_fork_launcher = fork_launcher and previous is None
+    shown = [] if first_fork_launcher else [pr for pr in prs if pr["paths"] and "skip-release" not in pr["labels"]]
     new = [pr for pr in shown if "feature" in pr["labels"]]
     fixed = [pr for pr in shown if "feature" not in pr["labels"]]
     if kind == "game":
         title = f"Sunrise {version.removeprefix(GAME_PREFIX)}" + (f": {summary(new, fixed)}" if shown else "")
     else:
         title = f"Sunrise launcher {version.removeprefix(OLD_LAUNCHER_PREFIX).removeprefix(LAUNCHER_PREFIX)}"
-    fork_launcher = kind == "launcher" and repository == "sunrise-org/sunrise"
     intro = None if fork_launcher else line_intro(kind, version, previous)
     parts = [PLAYERS] if kind == "game" else []
     if fork_launcher:
@@ -466,7 +468,9 @@ def notes(kind, version, prs, issues, previous=None, repository="horizon-rust/ho
         parts.append((ROOT / "packaging/fork-launcher-release-notes.md").read_text().replace("{tag}", version).strip())
     if intro:
         parts.append(intro)
-    if not shown:
+    if first_fork_launcher:
+        parts.append("The first release of Sunrise's launcher.")
+    elif not shown:
         parts.append("Rebuilt from the latest main.")
     if new:
         parts.append("### New\n" + "\n".join(map(bullet, new)))
