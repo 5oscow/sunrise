@@ -3,6 +3,11 @@
 Global loot modifiers are registered serializer types with data-enabled instances, not per-roll
 listeners. A type with no instance file never runs. Native and wasm use the same interfaces.
 
+> **Not active yet.** This page describes the registration and resource API, which is in place. The
+> game does not yet read `data/<namespace>/loot_modifiers/` files, run the ordered modifier pass on
+> top-level rolls, provide the built-in `neoforge:add_table` type or reload instances. Until that
+> lands, a registered serializer is accepted but never decodes or applies anything.
+
 Register a `GlobalLootModifierSerializer` in `Hooks::register`:
 
 ```rust,ignore
