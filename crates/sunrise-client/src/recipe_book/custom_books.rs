@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use sunrise_core::nbt::{self, JavaString, Limits, NamedTag, Tag};
 
 /// The key of the map inside `recipeBook`.
-pub const EXTENSION: &str = "sunrise:book_settings";
+pub use mod_api::item::recipe_book::saved_fields::EXTENSION;
 /// At most this many books, saved or registered.
 pub const MAX_BOOKS: usize = 1024;
 /// At most this many UTF-8 bytes in a book's id.

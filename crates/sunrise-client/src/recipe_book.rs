@@ -50,15 +50,7 @@ impl BookType {
     }
     /// `RecipeBookSettings` keys in the player's `recipeBook` compound.
     fn keys(self) -> (&'static str, &'static str) {
-        match self {
-            Self::Crafting => ("isGuiOpen", "isFilteringCraftable"),
-            Self::Furnace => ("isFurnaceGuiOpen", "isFurnaceFilteringCraftable"),
-            Self::BlastFurnace => (
-                "isBlastingFurnaceGuiOpen",
-                "isBlastingFurnaceFilteringCraftable",
-            ),
-            Self::Smoker => ("isSmokerGuiOpen", "isSmokerFilteringCraftable"),
-        }
+        mod_api::item::recipe_book::saved_fields::VANILLA[self.index()]
     }
     /// The tab buttons of the book's screen, search first.
     pub fn tabs(self) -> Vec<Tab> {
@@ -1336,7 +1328,10 @@ impl Settings {
             ),
             _ => None,
         };
-        let (Some(recipes), Some(to_be_displayed)) = (ids("recipes"), ids("toBeDisplayed")) else {
+        let (Some(recipes), Some(to_be_displayed)) = (
+            ids(mod_api::item::recipe_book::saved_fields::RECIPES),
+            ids(mod_api::item::recipe_book::saved_fields::TO_BE_DISPLAYED),
+        ) else {
             return s;
         };
         let flag = |k: &str| matches!(tag.get(k), Some(Tag::Byte(b)) if *b != 0);
@@ -1370,8 +1365,14 @@ impl Settings {
         let list = |ids: &BTreeSet<String>| {
             Tag::List(ids.iter().map(|i| Tag::String(i.as_str().into())).collect())
         };
-        entries.push(("recipes", list(&self.recipes)));
-        entries.push(("toBeDisplayed", list(&self.to_be_displayed)));
+        entries.push((
+            mod_api::item::recipe_book::saved_fields::RECIPES,
+            list(&self.recipes),
+        ));
+        entries.push((
+            mod_api::item::recipe_book::saved_fields::TO_BE_DISPLAYED,
+            list(&self.to_be_displayed),
+        ));
         for (id, (open, filtering)) in fields {
             let flags = self.custom.get(id);
             if flags.open {
