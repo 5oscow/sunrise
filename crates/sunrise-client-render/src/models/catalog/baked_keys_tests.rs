@@ -47,9 +47,17 @@ fn an_unbound_or_corrupt_selection_lists_nothing() {
     let mut models = catalog(r#"{"variants":{"":{"model":"sunrise:a"}}}"#);
     assert_eq!(models.state_slots(BlockStateId(1)), None, "past the table");
     models.states[0] = None;
-    assert_eq!(models.state_slots(BlockStateId(0)), None, "no definition binds it");
+    assert_eq!(
+        models.state_slots(BlockStateId(0)),
+        None,
+        "no definition binds it"
+    );
     models.states[0] = Some((0, SelectedModels::Variant(5)));
-    assert_eq!(models.state_slots(BlockStateId(0)), None, "a selection past its choices");
+    assert_eq!(
+        models.state_slots(BlockStateId(0)),
+        None,
+        "a selection past its choices"
+    );
     assert_eq!(StateModels::default().state_slots(BlockStateId(0)), None);
 }
 

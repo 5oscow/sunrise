@@ -229,7 +229,10 @@ fn handle_records_have_declared_field_bytes() {
         (UnspawnedMobRef::pending(epoch, 62, 63, 7),),
     );
     fields(ModelRef::from_parts(31, 7).unwrap(), (31u64, 7u32));
-    fields(crate::BakedModelKey::from_parts(43, 11).unwrap(), (43u64, 11u32));
+    fields(
+        crate::BakedModelKey::from_parts(43, 11).unwrap(),
+        (43u64, 11u32),
+    );
     fields(InstanceGroupRef::from_parts(37, 9).unwrap(), (37u64, 9u32));
     fields(RenderPipelineRef::from_parts(41, 5).unwrap(), (41u64, 5u32));
     fields(AttachmentHolder::Entity(entity), (0u32, entity));

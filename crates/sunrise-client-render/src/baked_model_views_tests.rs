@@ -37,7 +37,11 @@ fn a_view_copies_each_quad_and_names_the_particle_sprite() {
         particle: Some(3),
         faces: vec![
             BakedFace::new(
-                quad(FaceDirection::Up, Some(FaceDirection::Up), "minecraft:block/stone"),
+                quad(
+                    FaceDirection::Up,
+                    Some(FaceDirection::Up),
+                    "minecraft:block/stone",
+                ),
                 3,
                 true,
                 false,

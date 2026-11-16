@@ -64,7 +64,11 @@ fn a_client_mod_reads_a_block_states_baked_models_once_per_load() {
                     panic!("stone's model: {:?}", read.views);
                 };
                 assert_eq!(view.quads.len(), 6, "a full cube");
-                assert!(view.quads.iter().all(|q| q.sprite == "minecraft:block/stone"));
+                assert!(
+                    view.quads
+                        .iter()
+                        .all(|q| q.sprite == "minecraft:block/stone")
+                );
                 assert_eq!(read.past_the_table, [Err(ModelError::UnknownModel)]);
                 (keys[0], view.clone())
             };
@@ -74,7 +78,11 @@ fn a_client_mod_reads_a_block_states_baked_models_once_per_load() {
                 panic!("stone's keys after reload: {:?}", read.keys);
             };
             assert_ne!(keys[0], first.0, "a new generation's key");
-            assert_eq!(read.views[1][0].as_ref(), Ok(&first.1), "untouched: the same quads");
+            assert_eq!(
+                read.views[1][0].as_ref(),
+                Ok(&first.1),
+                "untouched: the same quads"
+            );
             assert_eq!(
                 game.pack.render.baked_model(first.0),
                 Err(ModelError::StaleModel),

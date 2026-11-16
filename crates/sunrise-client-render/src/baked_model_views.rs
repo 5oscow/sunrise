@@ -2,10 +2,10 @@
 //! `RenderAssets::block_state_models` and `RenderAssets::baked_model` answer a mod. The store is
 //! engine-owned and immutable for its resource generation; a mod only ever gets copies.
 use crate::{assets::RenderAssets, models::catalog::BakedModel};
+use mod_api::{BakedModelKey, BakedModelView, BakedQuad, ModelError};
 use sunrise_assets::model::Direction as FaceDirection;
 use sunrise_core::geometry::Direction;
 use sunrise_world::registry::BlockStateId;
-use mod_api::{BakedModelKey, BakedModelView, BakedQuad, ModelError};
 
 impl RenderAssets {
     /// Keys of every baked model `state` can select in this store, in bake order. Empty for a

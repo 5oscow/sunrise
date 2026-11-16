@@ -62,7 +62,10 @@ fn baked_model_keys_round_trip_as_generation_and_slot_and_refuse_generation_zero
     let mut expected = 5u64.to_le_bytes().to_vec();
     expected.extend(2u32.to_le_bytes());
     assert_eq!(out.bytes(), expected);
-    assert_eq!(Reader::decode::<BakedModelKey>(out.bytes()).unwrap(), key(5, 2));
+    assert_eq!(
+        Reader::decode::<BakedModelKey>(out.bytes()).unwrap(),
+        key(5, 2)
+    );
     let mut zero = Writer::new();
     zero.put(&0u64);
     zero.put(&2u32);

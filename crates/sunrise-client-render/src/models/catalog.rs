@@ -1014,8 +1014,8 @@ mod tests {
 mod bounds_tests;
 
 #[cfg(test)]
-#[path = "catalog/standalone_tests.rs"]
-mod standalone_tests;
-#[cfg(test)]
 #[path = "catalog/baked_keys_tests.rs"]
 mod baked_keys_tests;
+#[cfg(test)]
+#[path = "catalog/standalone_tests.rs"]
+mod standalone_tests;
