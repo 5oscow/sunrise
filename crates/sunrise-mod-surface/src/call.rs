@@ -209,7 +209,19 @@ impl Spec<'_> {
         );
         Name {
             kind: self.kind,
-            path: format!("{}::{}", self.owner, self.method),
+            // A generic owner is written as the source writes it, a character no path has as `_`.
+            path: format!(
+                "{}::{}",
+                self.owner
+                    .chars()
+                    .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '_' | ':' | '<' | '>' | ',') {
+                        c
+                    } else {
+                        '_'
+                    })
+                    .collect::<String>(),
+                self.method
+            ),
             version: self.version,
             hash: digest(&text),
         }
