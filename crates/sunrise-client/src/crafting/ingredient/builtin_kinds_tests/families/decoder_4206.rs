@@ -1,9 +1,9 @@
 use super::*;
 #[test]
 fn damage_resistant_component_recipes_use_loaded_holder_sets() {
+    use serde_json::json;
     use sunrise_world::damage_source::Catalog;
     use sunrise_world::loot::PackOverlay;
-    use serde_json::json;
 
     let root = tempfile::tempdir().unwrap();
     std::fs::write(

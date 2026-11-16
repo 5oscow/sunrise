@@ -548,9 +548,9 @@ fn lodestone_tracker_component_recipes_decode_validate_and_match() {
 #[test]
 fn tooltip_display_recipe_uses_registered_component_sets_and_numeric_booleans() {
     use crate::crafting::{Recipe, Recipes};
-    use sunrise_world::loot::PackOverlay;
     use serde_json::json;
     use std::sync::Arc;
+    use sunrise_world::loot::PackOverlay;
 
     let mut items = Items::empty();
     let registry = Arc::make_mut(&mut items.component_registry);

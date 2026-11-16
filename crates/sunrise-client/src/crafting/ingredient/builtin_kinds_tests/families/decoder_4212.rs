@@ -2,9 +2,9 @@ use super::*;
 #[test]
 fn attack_range_persistent_codec_matches_recipes_without_candidate_allocations() {
     use crate::crafting::{Recipe, Recipes};
-    use sunrise_world::loot::PackOverlay;
     use serde_json::{Value, json};
     use std::sync::Arc;
+    use sunrise_world::loot::PackOverlay;
 
     fn file(patch: Value, strict: bool, item: &str) -> Value {
         json!({

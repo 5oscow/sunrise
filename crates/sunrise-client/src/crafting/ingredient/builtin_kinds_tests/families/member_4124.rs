@@ -2,8 +2,8 @@ use super::*;
 
 #[test]
 fn villager_food_codec_compiles_recipes_and_matches_borrowed_nutrition() {
-    use sunrise_command::item::decoded_component_value;
     use std::sync::Arc;
+    use sunrise_command::item::decoded_component_value;
 
     let mut items = Items::empty();
     items.component_defaults = Arc::new(std::collections::HashMap::from([(

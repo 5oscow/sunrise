@@ -2,8 +2,8 @@ use super::*;
 #[test]
 fn use_effects_component_recipe_decodes_defaults_bounds_and_matches() {
     use crate::crafting::{Recipes, ResolvedRecipe, ResolvedSources};
-    use sunrise_world::loot::PackOverlay;
     use std::sync::Arc;
+    use sunrise_world::loot::PackOverlay;
 
     let mut items = Items::empty();
     items.component_defaults = Arc::new(std::collections::HashMap::from([(

@@ -1267,10 +1267,10 @@ fn optional_codec_json_null_uses_defaults_without_weakening_required_fields() {
 #[test]
 fn custom_model_data_recipe_decodes_ordered_lists_and_matches_without_allocating() {
     use crate::crafting::{Recipes, ResolvedRecipe, ResolvedSources};
-    use sunrise_core::nbt::JavaString;
-    use sunrise_world::loot::PackOverlay;
     use serde_json::json;
     use std::sync::Arc;
+    use sunrise_core::nbt::JavaString;
+    use sunrise_world::loot::PackOverlay;
 
     let items = Items::empty();
     let payload = json!({
@@ -1863,8 +1863,8 @@ fn mob_visibility_component_recipe_codec_and_borrowed_matching() {
 #[test]
 fn recipes_component_cooking_decodes_keys_and_matches_without_allocations() {
     use crate::crafting::Recipes;
-    use sunrise_world::loot::PackOverlay;
     use serde_json::json;
+    use sunrise_world::loot::PackOverlay;
 
     let mut items = Items::empty();
     items.component_defaults = std::sync::Arc::new(std::collections::HashMap::from([(

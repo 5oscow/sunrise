@@ -168,8 +168,8 @@ fn cooking_fuel_recipe_compiles_and_matches_decoded_live_and_prototype_values() 
 
 #[test]
 fn brewing_fuel_codec_compiles_recipes_and_borrows_live_values() {
-    use sunrise_core::nbt::JavaString;
     use serde_json::json;
+    use sunrise_core::nbt::JavaString;
     let mut items = Items::empty();
     items.component_defaults = std::sync::Arc::new(std::collections::HashMap::from([(
         "minecraft:blaze_powder".into(),
@@ -619,8 +619,8 @@ fn compostable_layers_compile_real_recipes_and_match_borrowed_values() {
 
 #[test]
 fn food_codec_compiles_recipes_and_matches_borrowed_values() {
-    use sunrise_world::loot::PackOverlay;
     use serde_json::json;
+    use sunrise_world::loot::PackOverlay;
     const COMPONENT: &str = "minecraft:food";
     let mut items = Items::empty();
     items.component_defaults = std::sync::Arc::new(std::collections::HashMap::from([(
