@@ -398,6 +398,27 @@ class DailySummaryTests(unittest.TestCase):
         self.assertIn("green=true", out)
         self.assertIn(("PATCH", "issues/77"), [(m, p) for m, p, _ in api.writes])
 
+    def test_a_leg_cancelled_before_it_started_files_and_closes_nothing(self):
+        # Run 43900023409: every leg job still waited for a runner when the cancel came, with no step run.
+        def waiting(name):
+            return {"name": name, "conclusion": "cancelled", "steps": []}
+        jobs = [j for j in GREEN_JOBS if not j["name"].startswith(("machine-sample / ", "linkage / "))]
+        jobs += [waiting("machine-sample / route"), waiting("machine-sample / build"), waiting("linkage / route"),
+                 waiting("linkage / linkage x86_64-unknown-linux-gnu")]
+        issue = [{"number": 77, "title": "Daily: update the machine sample for the mod API change", "body": "> filed"}]
+        api = Api(jobs, issues=issue)
+        _, out = self.run_summary(api, [shard_report()], results=dict(
+            LEGS, **{"machine-sample": {"result": "cancelled"}, "linkage": {"result": "cancelled"}}))
+        self.assertIn("green=false", out, "a leg that never ran is not green either")
+        self.assertEqual(api.writes, [])
+        # A leg cancelled after it started (a time limit, a lost runner) did run: it is still red.
+        jobs = [j for j in GREEN_JOBS if j["name"] != "machine-sample / build"] + [
+            job("machine-sample / build", "cancelled", ["The machine sample builds against this API"])]
+        api = Api(jobs)
+        self.run_summary(api, [shard_report()], results=dict(LEGS, **{"machine-sample": {"result": "cancelled"}}))
+        self.assertEqual([body["title"] for _, path, body in api.writes if path == "issues"],
+                         ["Daily: update the machine sample for the mod API change"])
+
     def test_a_skipped_sdk_build_is_green_only_when_fresh_found_the_release(self):
         jobs = [j for j in GREEN_JOBS if not j["name"].startswith("sdk / ")] + [
             job("sdk / fresh", "cancelled"), job("sdk / build linux", "skipped")]
@@ -520,6 +541,9 @@ class DailyWorkflowTests(unittest.TestCase):
                                         " && needs.resolve.outputs.dry_run == 'false' && needs.sdk.outputs.needed == 'true'")
         self.assertEqual(jobs["summary"]["outputs"]["sdk_green"], "${{ steps.summary.outputs.sdk_green }}")
         self.assertIn("needs.summary.outputs.sdk_green == 'true'", jobs["sdk-publish-report"]["if"])
+        for name in ("summary", "sdk-publish-report"):
+            self.assertTrue(jobs[name]["if"].startswith("${{ !cancelled() && "),
+                            f"{name} reports nothing from a run cancelled by hand")
         # The one publish step, signed only on main through the called workflow's `release` environment.
         self.assertEqual(publish["uses"], "./.github/workflows/sdk-publish.yml")
         self.assertEqual(publish["with"], {"commit": "${{ needs.resolve.outputs.commit }}", "publish": "true"})
