@@ -154,3 +154,112 @@ fn a_control_socket_key_counts_as_a_window_key() {
         assert!(!click(game, "missing"));
     });
 }
+
+/// A mod rebinds its own mapping as Controls does: the new key counts from the next input, the
+/// binding is saved, a reset gives the default back, and each refusal changes nothing.
+#[test]
+#[ignore = "daily"]
+fn a_mod_rebinds_and_resets_its_own_mapping() {
+    if run_fresh_cases(
+        "game::native_key_mappings_tests::a_mod_rebinds_and_resets_its_own_mapping",
+        "SUNRISE_MOD_KEYS_REBIND_CHILD",
+        &["game"],
+    ) {
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("sunrise-mod-keys-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    // The settings save to options.txt in the player folder and sunrise-mods.txt in the game
+    // folder (the working directory): both are this child process's temporary folder.
+    std::env::set_current_dir(&dir).unwrap();
+    sunrise_client::logging::set_player_dir(dir.clone());
+    let mods: Mods = vec![ModEntry::new("keys", Box::new(Keys))].into();
+    mod_platform::__private::install(mods.clone());
+    crate::game::api_values::install_parts(&mods).unwrap();
+    with_client_game(|game| {
+        game.apply_settings();
+        game.set_screen(Screen::Playing);
+        let key = |game: &Game<'_>, id: &str| ClientInputClientHost::mod_key(game, "keys", id);
+
+        // Rebound to X with control: Z no longer counts; X counts only with control held.
+        assert_eq!(
+            ClientInputClientHost::set_mod_key(
+                game,
+                "keys",
+                "zoom",
+                "key.keyboard.x",
+                ClientModifiers::new(2)
+            ),
+            Ok(())
+        );
+        assert_eq!(
+            key(game, "zoom"),
+            Some(("key.keyboard.x".into(), ClientModifiers::new(2)))
+        );
+        line(game, "key z tap");
+        line(game, "key x tap");
+        assert!(!click(game, "zoom"));
+        line(game, "key control down");
+        line(game, "key x tap");
+        line(game, "key control up");
+        assert!(click(game, "zoom"));
+        // Saved as Controls saves it.
+        let saved = std::fs::read_to_string(dir.join("sunrise-mods.txt")).unwrap_or_default();
+        assert!(saved.contains("key.keyboard.x"), "{saved}");
+
+        // A modifier key bound on its own is the key, not a modifier held with itself.
+        assert_eq!(
+            ClientInputClientHost::set_mod_key(
+                game,
+                "keys",
+                "boost",
+                "key.keyboard.left.shift",
+                ClientModifiers::new(1)
+            ),
+            Ok(())
+        );
+        assert_eq!(
+            key(game, "boost"),
+            Some(("key.keyboard.left.shift".into(), ClientModifiers::new(0)))
+        );
+
+        // Reset: the declared default is back, and Z counts again.
+        assert_eq!(ClientInputClientHost::reset_mod_key(game, "keys", "zoom"), Ok(()));
+        assert_eq!(
+            key(game, "zoom"),
+            Some(("key.keyboard.z".into(), ClientModifiers::new(0)))
+        );
+        line(game, "key z tap");
+        assert!(click(game, "zoom"));
+
+        // Refusals change nothing.
+        let before = key(game, "zoom");
+        assert_eq!(
+            ClientInputClientHost::set_mod_key(game, "keys", "missing", "key.keyboard.x", ClientModifiers::new(0)),
+            Err(ModKeyRefusal::NotRegistered)
+        );
+        assert_eq!(
+            ClientInputClientHost::set_mod_key(game, "keys", "zoom", "key.keyboard.nope", ClientModifiers::new(0)),
+            Err(ModKeyRefusal::UnknownKey)
+        );
+        assert_eq!(
+            ClientInputClientHost::set_mod_key(game, "keys", "zoom", "key.keyboard.x", ClientModifiers::new(8)),
+            Err(ModKeyRefusal::UnknownModifiers)
+        );
+        assert_eq!(
+            ClientInputClientHost::reset_mod_key(game, "other", "zoom"),
+            Err(ModKeyRefusal::NotRegistered)
+        );
+        assert_eq!(key(game, "zoom"), before);
+        // A mouse button and "no key" are bindings too.
+        assert_eq!(
+            ClientInputClientHost::set_mod_key(game, "keys", "grab", "key.mouse.right", ClientModifiers::new(0)),
+            Ok(())
+        );
+        assert_eq!(
+            ClientInputClientHost::set_mod_key(game, "keys", "grab", "key.keyboard.unknown", ClientModifiers::new(0)),
+            Ok(())
+        );
+    });
+    let _ = std::fs::remove_dir_all(&dir);
+}
