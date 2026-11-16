@@ -2,7 +2,7 @@
 //! intact, and the answer comes back as the backend gave it.
 use super::*;
 use mod_api::__private::game::{BackendMutRefOf, BackendRefOf};
-use mod_api::{BlockState, BlockStateRecord, Host};
+use mod_api::{BlockState, BlockStateRecord, HostBlockStates};
 
 thread_local! {
     static ASKED: std::cell::RefCell<Vec<u16>> = const { std::cell::RefCell::new(Vec::new()) };
