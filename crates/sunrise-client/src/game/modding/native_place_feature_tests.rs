@@ -80,7 +80,11 @@ fn an_unknown_feature_is_refused_by_name() {
             );
         }
         assert_eq!(
-            game.res.facts().get(game.world.block(AT[0], AT[1], AT[2])).name.as_ref(),
+            game.res
+                .facts()
+                .get(game.world.block(AT[0], AT[1], AT[2]))
+                .name
+                .as_ref(),
             "minecraft:air"
         );
     });
