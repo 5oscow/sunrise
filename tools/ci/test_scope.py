@@ -29,6 +29,7 @@ SUNRISE_CLIENT = [
     # The build script and the native hook tests read the hook targets' sources.
     "crates/sunrise-client-render/src", "crates/sunrise-world/src", "crates/sunrise-items/src",
     "crates/sunrise-guest-stack/src/guest_stack_constants.rs", "crates/sunrise-mod-wasm/tests/fixture/src",
+    "crates/sunrise-mod-wasm/tests/hook-fixture/src/pending_children.rs",
     "docs/api/launch-reference.md", "docs/sunrise-ctl-commands.md", "docs/modding/examples/src/worldgen.rs",
     "docs/parity/random-chance-seeded.jsonl", "packaging/executable_link.rs", "packaging/windows/exe.rs",
     "research-lock.json", "tests/fixture_support/item_resource_properties.rs", "tests/fixtures",

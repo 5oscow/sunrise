@@ -5,4 +5,3 @@ sunrise-client game::native_living_writes::tests::a_zero_start_begins_but_a_canc
 sunrise-client game::native_living_writes::tests::a_tick_replaces_the_remaining_counter_rather_than_the_original_duration lib daily resources
 sunrise-client game::native_living_writes::tests::an_item_part_can_extend_the_last_tick_or_shorten_a_use lib daily resources
 sunrise-client game::remote::item_use_tick_tests::client_tick_cancellation_skips_one_tick_and_countdown_continues lib daily resources
-sunrise-client game::remote::item_use_tick_tests::client_tick_cancellation_skips_one_tick_and_countdown_continues lib daily resources
