@@ -75,6 +75,7 @@ fn entering_inventory_requests_catalogue_for_preinstalled_bound_screen() {
             game.screen = Screen::Playing;
             game.container = Some((i32::MIN, 0, 0));
             game.mod_screen = Some(OpenNativeScreen {
+                slot_moves: Default::default(),
                 layout_revision: 4,
                 key: (i32::MIN, 0, 0),
                 window: 1,
@@ -140,6 +141,7 @@ fn authoritative_custom_book_rebuilds_cached_geometry_without_observe_screen() {
             game.title = None;
             game.container = Some((i32::MIN, 0, 0));
             game.mod_screen = Some(OpenNativeScreen {
+                slot_moves: Default::default(),
                 layout_revision: 0,
                 key: (i32::MIN, 0, 0),
                 window: 1,
@@ -296,6 +298,63 @@ fn authoritative_custom_book_rebuilds_cached_geometry_without_observe_screen() {
             assert_eq!(geometry(game), opened);
             game.reset_book_view();
             assert_eq!(geometry(game), closed);
+        });
+    });
+}
+
+#[test]
+#[ignore = "daily"]
+fn a_moved_slot_takes_its_hover_box_and_position_from_the_next_frame() {
+    let mods: mod_api::Mods = Vec::<mod_api::ModEntry>::new().into();
+    mod_platform::testing::with_mods(mods, || {
+        crate::game::native_entity_refs::tests::with_client_game(|game| {
+            game.settings.gui_scale = 1;
+            game.recipe_ui.test_viewport = Some([1280, 720]);
+            game.screen = Screen::Inventory;
+            game.title = None;
+            game.container = Some((i32::MIN, 0, 0));
+            game.mod_screen = Some(OpenNativeScreen {
+                slot_moves: Default::default(),
+                layout_revision: 0,
+                key: (i32::MIN, 0, 0),
+                window: 1,
+                block: "minecraft:stone".into(),
+                data: Vec::new(),
+                extra: None,
+                screen: mod_api::Screen {
+                    width: 176.0,
+                    height: 166.0,
+                    slots: vec![Some([8.0, 18.0]), Some([26.0, 18.0]), None],
+                    inventory_y: 84.0,
+                    inventory_x: 8.0,
+                    ..Default::default()
+                },
+            });
+            game.build_screen();
+            let before = geometry(game);
+            // Origin (552, 277): slot 0's 18 by 18 box starts one pixel up and left of it.
+            assert_eq!(before.0, (552.0, 277.0));
+            assert!(before.1.contains(&(300, [559.0, 294.0, 18.0, 18.0])));
+            let batch =
+                sunrise_client::hud::HudBatch::new([1280, 720], game.settings.gui_scale_inputs());
+            assert_eq!(game.slot_at(&batch, 600.0, 340.0), None);
+
+            assert!(game.set_screen_slot_position(0, 48.0, 60.0));
+            assert_eq!(game.slot_position(300), (48.0, 60.0));
+            game.build_screen();
+            let after = geometry(game);
+            assert!(after.1.contains(&(300, [599.0, 336.0, 18.0, 18.0])));
+            // The 18 by 18 box holds the pointer at its first pixel and not past its last.
+            assert_eq!(game.slot_at(&batch, 599.0, 336.0), Some(300));
+            assert_eq!(game.slot_at(&batch, 616.0, 353.0), Some(300));
+            assert_eq!(game.slot_at(&batch, 617.0, 340.0), None);
+            // Nothing else moved, and the old place no longer hovers it.
+            assert_eq!(game.slot_position(301), (26.0, 18.0));
+            assert_ne!(game.slot_at(&batch, 560.0, 295.0), Some(300));
+
+            assert!(!game.set_screen_slot_position(2, 1.0, 1.0));
+            assert!(!game.set_screen_slot_position(9, 1.0, 1.0));
+            assert_eq!(geometry(game), after);
         });
     });
 }

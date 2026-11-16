@@ -21,14 +21,15 @@ pub(super) struct SlotInputs {
     crafter: bool,
     mount: Option<(usize, bool, bool)>,
     rows: Option<usize>,
-    native: Option<(u64, Option<f32>, Option<f32>)>,
+    native: Option<(u64, u32, Option<f32>, Option<f32>)>,
 }
 
 impl Game<'_> {
-    fn native_slot_inputs(&self) -> Option<(u64, Option<f32>, Option<f32>)> {
+    fn native_slot_inputs(&self) -> Option<(u64, u32, Option<f32>, Option<f32>)> {
         self.shown_native_screen().map(|s| {
             (
                 s.layout_revision,
+                s.slot_move_count(),
                 self.native_screen_inventory_x(),
                 self.native_screen_inventory_y(),
             )

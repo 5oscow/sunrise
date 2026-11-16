@@ -500,6 +500,7 @@ fn shake_pose(shake: Shake) -> glam::Mat4 {
 /// (`sunrise:menu_extra`), when it did.
 pub(super) struct OpenNativeScreen {
     pub(super) layout_revision: u64,
+    slot_moves: SlotMoves,
     key: Pos,
     window: i32,
     block: String,
@@ -508,7 +509,44 @@ pub(super) struct OpenNativeScreen {
     extra: Option<sunrise_protocol::menu_extra::Message>,
 }
 
+/// Where a mod moved the open screen's slots after it opened, over the
+/// positions its `Screen` declared. Interior state, as the screen hooks that
+/// move slots hold `&self`.
+#[derive(Default)]
+pub(super) struct SlotMoves {
+    to: std::cell::RefCell<std::collections::HashMap<usize, [f32; 2]>>,
+    /// How many moves changed a position, for the layout build's cache key.
+    count: std::cell::Cell<u32>,
+}
+
+impl SlotMoves {
+    /// Slot `slot`'s position: where it was moved, else `declared`.
+    fn position(&self, slot: usize, declared: [f32; 2]) -> [f32; 2] {
+        self.to.borrow().get(&slot).copied().unwrap_or(declared)
+    }
+    /// Moves slot `slot` of a screen that declared `slots`. False, changing
+    /// nothing, for a slot the screen does not show or a position that is
+    /// not finite.
+    fn set(&self, slots: &[Option<[f32; 2]>], slot: u32, x: f32, y: f32) -> bool {
+        let shown = usize::try_from(slot)
+            .ok()
+            .filter(|&i| slots.get(i).is_some_and(Option::is_some));
+        let Some(slot) = shown.filter(|_| x.is_finite() && y.is_finite()) else {
+            return false;
+        };
+        if self.to.borrow_mut().insert(slot, [x, y]) != Some([x, y]) {
+            self.count.set(self.count.get().wrapping_add(1));
+        }
+        true
+    }
+}
+
 impl OpenNativeScreen {
+    /// How many slot moves changed a position, so a layout built before the
+    /// last one is rebuilt.
+    pub(in crate::game) fn slot_move_count(&self) -> u32 {
+        self.slot_moves.count.get()
+    }
     /// The block the menu is of: where the server said, else the clicked
     /// block its slots are under (a server without `sunrise:menu_extra`).
     fn pos(&self) -> Option<[i32; 3]> {
@@ -2980,15 +3018,21 @@ impl Game<'_> {
             .as_mut()
             .is_some_and(|s| s.set_data(window, id, value))
     }
-    /// Where the open mod screen puts container slot `slot`.
+    /// Where the open mod screen puts container slot `slot`: where a mod last
+    /// moved it, else where the screen declared it.
     pub(super) fn native_screen_slot(&self, slot: usize) -> Option<(f32, f32)> {
         let s = self.shown_native_screen()?;
-        s.screen
-            .slots
-            .get(slot)
-            .copied()
-            .flatten()
-            .map(|p| (p[0], p[1]))
+        let declared = s.screen.slots.get(slot).copied().flatten()?;
+        let [x, y] = s.slot_moves.position(slot, declared);
+        Some((x, y))
+    }
+    /// Moves container slot `slot` of the open mod screen to `x`, `y`
+    /// (relative to the screen's origin) from the next frame. False, changing
+    /// nothing, with no mod screen open, for a slot the screen does not show
+    /// or a position that is not finite.
+    pub(in crate::game) fn set_screen_slot_position(&self, slot: u32, x: f32, y: f32) -> bool {
+        self.shown_native_screen()
+            .is_some_and(|s| s.slot_moves.set(&s.screen.slots, slot, x, y))
     }
     /// The container slots the open mod screen shows (300.. ids).
     pub(super) fn native_screen_slots(&self) -> Option<Vec<usize>> {
@@ -4667,6 +4711,7 @@ mod tests {
     #[test]
     fn mod_screen_data_is_its_windows_only() {
         let mut s = super::OpenNativeScreen {
+            slot_moves: Default::default(),
             layout_revision: 0,
             key: (0, 0, 0),
             window: 4,
@@ -4678,6 +4723,33 @@ mod tests {
         assert!(s.set_data(4, 1, 7));
         assert!(!s.set_data(3, 1, 99));
         assert_eq!(s.data, [0, 7]);
+    }
+
+    /// A slot move changes only a shown slot, to a finite position, and counts
+    /// only what changed a position (an unchanged repeat keeps the layout).
+    #[test]
+    fn slot_moves_refuse_what_the_screen_does_not_show() {
+        let declared = [Some([8.0, 18.0]), None, Some([26.0, 18.0])];
+        let moves = super::SlotMoves::default();
+        assert!(moves.set(&declared, 2, 100.5, -4.0));
+        assert_eq!(moves.position(2, [26.0, 18.0]), [100.5, -4.0]);
+        assert_eq!(moves.position(0, [8.0, 18.0]), [8.0, 18.0]);
+        let moved = moves.count.get();
+        for (slot, x, y) in [
+            (1, 0.0, 0.0),
+            (3, 0.0, 0.0),
+            (u32::MAX, 0.0, 0.0),
+            (0, f32::NAN, 0.0),
+            (0, 0.0, f32::INFINITY),
+        ] {
+            assert!(!moves.set(&declared, slot, x, y), "{slot} {x} {y}");
+        }
+        assert_eq!(moves.position(0, [8.0, 18.0]), [8.0, 18.0]);
+        assert_eq!(moves.count.get(), moved);
+        assert!(moves.set(&declared, 2, 100.5, -4.0));
+        assert_eq!(moves.count.get(), moved);
+        assert!(moves.set(&declared, 2, 100.5, -3.0));
+        assert_eq!(moves.count.get(), moved + 1);
     }
 
     #[test]
