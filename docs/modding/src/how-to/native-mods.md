@@ -28,7 +28,8 @@ kill credit and that entity's current main-hand stack, read after accepted-hit m
 are committed and before the push. A remembered player takes precedence over the last
 hurting mob, including a tame wolf's owner. An unresolved remembered player yields 0 and
 no stack, not a fallback to the mob. After the remembered player expires, the recent mob
-may receive credit. This context is distinct from `attacker` and its captured source weapon.
+may receive credit. This context is distinct from `attacker` and its captured source weapon. Both fields are additions: NeoForge's
+`LivingKnockBackEvent` doesn't carry them.
 
 ## Living death contract version 2
 

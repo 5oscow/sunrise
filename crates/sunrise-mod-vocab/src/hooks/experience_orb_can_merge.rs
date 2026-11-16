@@ -32,6 +32,8 @@ pub trait Hooks {
     /// cannot resolve (then 0, without falling back). `kill_credit_main` is that entity's
     /// current main-hand stack, or none. This is not the immediate damage-source attacker.
     /// Accepted-hit memories, including a tame wolf's owner, are committed before this read.
+    /// Both are additions: NeoForge's `LivingKnockBackEvent` doesn't carry them, and mods
+    /// there read the pushed entity's kill credit and its holder's main hand themselves.
     #[notes = "Version 2 adds the pushed entity's kill credit and its current main-hand stack; remembered player precedence and expiry match LivingRef::kill_credit."]
     #[hook(
         side = "server",
