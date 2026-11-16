@@ -42,7 +42,6 @@ sunrise-client-lib menu::place::custom::tests::noncontiguous_roles_place_one_inc
 sunrise-client-lib menu::place::custom::tests::per_slot_caps_limit_max_and_policy_refusal_is_not_a_missing_ingredient_ghost lib daily resources
 sunrise-client-lib menu::tests::dfa::dfa_baseline_recipe_placement lib daily resources
 sunrise-client-lib menu::tests::dfa::dfa_baseline_recipe_take_consumes_one_per_cell lib daily resources
-sunrise-client-lib menu::tests::staged_slot_refusal_restores_contents_and_on_take_side_effects lib daily resources
 sunrise-client-lib mobs::ai::bed_wake_tests::loaded_sleeping_position_refreshes_in_actual_mob_tick lib daily resources
 sunrise-client-lib mobs::ai::breathing_effect_tests::breathing_effects_and_bubble_columns_preserve_mob_air lib daily resources
 sunrise-client-lib mobs::ai::burn_and_rose_tests::lava_ignites_to_the_full_time_and_hits_after_the_timers_count_down lib daily resources
