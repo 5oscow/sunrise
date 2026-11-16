@@ -42,19 +42,40 @@ pub trait ClientRenderClientHost {
     #[access(WorldOnly)]
     fn refresh_biome_colors(&mut self);
     /// Side: client.
-    /// A mod's own RGBA image, uploaded into the HUD atlas slot
-    /// `MOD_IMAGE_SPRITE` and drawn with
-    /// `native_sprite`: its own source rectangle crops and stretches it. `rgba`
-    /// is `width * height` pixels of four bytes, each side at most
-    /// `MOD_IMAGE_SIZE`; false when it is not that
-    /// size. The upload costs a texture patch of the image, so send one when the
-    /// image changed, not every frame.
+    /// Vanilla's `TextureManager.register` of a `DynamicTexture`, then its `upload`: the calling
+    /// mod's RGBA image `id`, in its own namespace (`mymod:dynamic/panel`), made by the first
+    /// upload and given new pixels, at any size, by each later one. `rgba` is `width * height`
+    /// pixels of four bytes, row by row from the top left. From the next draw on,
+    /// [`DrawContext::sprite`] with the id draws it (`src` in the image's own pixels), before
+    /// a GUI sprite of the same name, as a registered texture shadows the file of its id. The
+    /// image is a texture of its own, sampled nearest and repeated, not a GUI atlas sprite:
+    /// a resource reload keeps it, and [`gui_sprite`](Self::gui_sprite) does not name it. It lasts
+    /// until [`release_dynamic_texture`](Self::release_dynamic_texture) or the game's end.
     ///
-    /// The slot exists whenever a client mod, native or wasm, is loaded: the atlas packs it at
-    /// load and on a resource reload, with no mixin and no opt-in. It is one image for all mods
-    /// together: a second mod's write replaces the first's.
-    #[access(WorldOnly)]
-    fn mod_image(&mut self, width: u32, height: u32, rgba: &[u8]) -> bool;
+    /// Each mod holds its own textures and never reaches another's. Refused by name, with
+    /// nothing changed, as [`DynamicTextureError`] lists: an id outside the mod's namespace, a
+    /// size past [`DYNAMIC_TEXTURE_MAX_SIDE`] or pixels that do not match it, a mod past
+    /// [`DYNAMIC_TEXTURE_MOD_COUNT`] textures or [`DYNAMIC_TEXTURE_MOD_BYTES`], every mod together
+    /// past [`DYNAMIC_TEXTURE_TOTAL_BYTES`], and on a server. An upload copies the pixels and
+    /// costs the GPU a new texture when it is next drawn, so send one when the image changed,
+    /// not every frame. It takes `&self`, so a HUD or screen hook can upload as it draws.
+    /// Available from client setup on, on native and wasm alike.
+    #[access(ClientSetup)]
+    fn upload_dynamic_texture(
+        &self,
+        id: &Identifier,
+        width: u32,
+        height: u32,
+        rgba: &[u8],
+    ) -> Result<(), DynamicTextureError>;
+    /// Side: client.
+    /// Vanilla's `TextureManager.release`: frees the calling mod's texture `id`, its pixels at
+    /// once and its GPU texture after the frame that last drew it. [`DrawContext::sprite`] with
+    /// the id draws nothing from then on, or the GUI sprite of that name if the atlas has one.
+    /// Refused with [`DynamicTextureError::NotOwned`] for an id outside the mod's namespace and
+    /// [`DynamicTextureError::Unknown`] for one with no texture.
+    #[access(ClientSetup)]
+    fn release_dynamic_texture(&self, id: &Identifier) -> Result<(), DynamicTextureError>;
     /// Side: client.
     /// For a client mod drawing a block's faces itself (a copycat drawing its material's, from
     /// `block_sprites`): the 0xRRGGBB colour a face of `state` with tint index `tint_index`

@@ -4491,41 +4491,11 @@ impl Game<'_> {
         let [a, r, g, b] = argb.to_be_bytes();
         batch.fill(&self.gui.atlas, x, y, w, h, rgba(r, g, b, a));
     }
-    /// A mod's own RGBA image, uploaded into the HUD atlas slot
-    /// `MOD_IMAGE_SPRITE` and drawn with
-    /// `native_sprite`: its own source rectangle crops and stretches it. `rgba`
-    /// is `width * height` pixels of four bytes, each side at most
-    /// `MOD_IMAGE_SIZE`; false when it is not that
-    /// size. The upload costs a texture patch of the image, so send one when the
-    /// image changed, not every frame.
-    pub(in crate::game) fn mod_image(&mut self, width: u32, height: u32, rgba: &[u8]) -> bool {
-        let Some(rect) = self
-            .gui
-            .atlas
-            .sprites
-            .get(crate::hud::MOD_IMAGE_SPRITE)
-            .copied()
-        else {
-            return false;
-        };
-        if !mod_image_fits(width, height, rgba.len(), rect.w, rect.h) {
-            return false;
-        }
-        let (w, h) = (self.gui.atlas.width as f32, self.gui.atlas.height as f32);
-        self.map_patches.push(sunrise_client::font::Patch {
-            x: (rect.u0 * w).round() as u32,
-            y: (rect.v0 * h).round() as u32,
-            width,
-            height,
-            rgba: rgba.to_vec(),
-        });
-        true
-    }
     /// Part `src` (`[x, y, w, h]` in the sprite's own pixels) of sprite
-    /// `name` (vanilla's `gui/...`, or a content mod's GUI texture
-    /// `mymod:gui/...`), drawn stretched into `dst` (`[x, y, w, h]` in GUI
-    /// pixels), every texel multiplied by `tint` (`0xAARRGGBB`, a fluid's colour)
-    /// when there is one. False when there is no such sprite.
+    /// `name` (vanilla's `gui/...`, a content mod's GUI texture `mymod:gui/...`, or
+    /// a dynamic texture, `upload_dynamic_texture`), drawn stretched into `dst`
+    /// (`[x, y, w, h]` in GUI pixels), every texel multiplied by `tint` (`0xAARRGGBB`,
+    /// a fluid's colour) when there is one. False when there is no such sprite.
     pub(in crate::game) fn native_sprite(
         &self,
         batch: &mut HudBatch,
@@ -4534,6 +4504,14 @@ impl Game<'_> {
         dst: [f32; 4],
         tint: Option<u32>,
     ) -> bool {
+        let [a, red, green, blue] = tint.unwrap_or(u32::MAX).to_be_bytes();
+        let tint = rgba(red, green, blue, a);
+        // A dynamic texture shadows the GUI sprite of its name, as a texture registered
+        // in vanilla's `TextureManager` shadows the file of its id.
+        if let Some(picture) = self.dynamic_texture(name) {
+            batch.picture_part(&picture, src, dst, tint);
+            return true;
+        }
         let Some(mut r) = self.gui.atlas.sprites.get(name).copied() else {
             return false;
         };
@@ -4542,8 +4520,7 @@ impl Game<'_> {
         r.v0 += src[1] * dv;
         r.u1 = r.u0 + src[2] * du;
         r.v1 = r.v0 + src[3] * dv;
-        let [a, red, green, blue] = tint.unwrap_or(u32::MAX).to_be_bytes();
-        batch.rect_uv(dst[0], dst[1], dst[2], dst[3], r, rgba(red, green, blue, a));
+        batch.rect_uv(dst[0], dst[1], dst[2], dst[3], r, tint);
         true
     }
     /// Item `item`'s icon (`mymod:machine`) with its top left at `at`,

@@ -3476,16 +3476,6 @@ impl Game<'_> {
     }
 }
 
-/// Whether `rgba` is a whole `width` x `height` image that fits a
-/// `slot_width` x `slot_height` atlas slot (a native mod's `mod_image`).
-fn mod_image_fits(width: u32, height: u32, rgba: usize, slot_width: u32, slot_height: u32) -> bool {
-    width > 0
-        && height > 0
-        && width <= slot_width
-        && height <= slot_height
-        && rgba == width as usize * height as usize * 4
-}
-
 /// Whether F3's debug screen, open when `debug`, covers `corner`
 /// (`DebugScreenOverlay.extractRenderState`): its left and right columns
 /// the top corners, and its charts the bottom corners `charts` (bottom left,
@@ -5006,18 +4996,6 @@ mod tests {
         assert!(debug_takes(Corner::BottomLeft, true, [true, false]));
         assert!(!debug_takes(Corner::BottomRight, true, [true, false]));
         assert!(debug_takes(Corner::BottomRight, true, [false, true]));
-    }
-
-    /// An image is taken whole, and only when it fits its slot.
-    #[test]
-    fn a_mod_image_is_taken_whole_and_only_when_it_fits() {
-        use super::mod_image_fits;
-        assert!(mod_image_fits(4, 2, 32, 1024, 1024));
-        assert!(mod_image_fits(1024, 1024, 1024 * 1024 * 4, 1024, 1024));
-        assert!(!mod_image_fits(0, 2, 0, 1024, 1024));
-        assert!(!mod_image_fits(4, 2, 31, 1024, 1024));
-        assert!(!mod_image_fits(4, 2, 33, 1024, 1024));
-        assert!(!mod_image_fits(2048, 1, 2048 * 4, 1024, 1024));
     }
 }
 

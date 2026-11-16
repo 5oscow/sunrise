@@ -17,6 +17,7 @@ use model_reducing::reducible_model_sprites;
 mod animate;
 pub mod cit_glint;
 mod clip_corner;
+pub mod dynamic_textures;
 mod gui_sprite;
 pub use gui_sprite::atlas_key_of_gui_sprite;
 mod menu_pictures;
@@ -145,10 +146,6 @@ pub fn map_slot_sprite(slot: usize) -> Option<&'static str> {
 }
 /// The atlas slot the minimap extra draws into.
 pub const MINIMAP_SPRITE: &str = "sunrise/minimap";
-/// A mod's own image (`mod_image`), drawn with `native_sprite`; big
-/// enough for a world map's 1024 blocks at a block a pixel.
-pub const MOD_IMAGE_SPRITE: &str = "sunrise/modimage";
-pub const MOD_IMAGE_SIZE: u32 = 1024;
 /// Atlas slots for downloaded player skins (`skins/<sha1>`), 64x64 each.
 /// Vanilla registers a texture per skin. Here the slots are shared
 /// (`skins::SkinSlots`): skins drawn in the last frame keep theirs, and a
@@ -869,18 +866,7 @@ impl HudAtlas {
     /// The atlas of a resource root that layers packs over `defaults` (the
     /// game's own resources), whose textures give the sprites' GUI sizes.
     pub fn build_over(root: &ResourceSource, defaults: &ResourceSource) -> Result<Self> {
-        Self::build_over_with_image(root, defaults, false)
-    }
-    /// The atlas above, with a slot for a client mod's own image
-    /// (`sunrise/modimage`) only when `mod_image` says a client mod is loaded,
-    /// native or wasm: the slot costs 4 MiB of pixels, so a game without
-    /// mods holds none of them.
-    pub fn build_over_with_image(
-        root: &ResourceSource,
-        defaults: &ResourceSource,
-        mod_image: bool,
-    ) -> Result<Self> {
-        let mut atlas = Self::pack(root, defaults, WALKED_TEXTURE_FOLDERS, true, mod_image)?;
+        let mut atlas = Self::pack(root, defaults, WALKED_TEXTURE_FOLDERS, true)?;
         pack_text::load_shaders(&mut atlas, root, defaults);
         atlas.sprite_modifiers = std::sync::Arc::new(sprite_modifiers::SpriteModifiers::read(
             root,
@@ -889,11 +875,11 @@ impl HudAtlas {
         Ok(atlas)
     }
     /// Empty slots written at run time: map textures (game/blocks/maps/mod.rs), the
-    /// minimap, a native mod's own image, downloaded skins, world and pack
-    /// icons and the on-screen keyboard's text. Their pixels are already zero
-    /// in the destination atlas, so keep the source buffers empty and avoid
-    /// duplicating the atlas-sized allocation during packing.
-    fn slots(images: &mut Vec<PackedImage>, trim: (u32, u32), mod_image: bool) {
+    /// minimap, downloaded skins, world and pack icons and the on-screen keyboard's
+    /// text. Their pixels are already zero in the destination atlas, so keep the
+    /// source buffers empty and avoid duplicating the atlas-sized allocation during
+    /// packing.
+    fn slots(images: &mut Vec<PackedImage>, trim: (u32, u32)) {
         for i in 0..MAP_SLOTS {
             let name = map_slot_sprite(i).unwrap_or_default();
             images.push((name.into(), 128, 128, Vec::new()));
@@ -905,15 +891,6 @@ impl HudAtlas {
             crate::minimap::SIZE as u32,
             Vec::new(),
         ));
-        // A mod's own image (`mod_image`), only when a client mod is loaded.
-        if mod_image {
-            images.push((
-                MOD_IMAGE_SPRITE.into(),
-                MOD_IMAGE_SIZE,
-                MOD_IMAGE_SIZE,
-                Vec::new(),
-            ));
-        }
         // Downloaded skins (game/interface/scoreboard/mod.rs).
         for i in 0..SKIN_SLOTS {
             images.push((format!("sunrise/skin{i}"), 64, 64, Vec::new()));
@@ -1111,7 +1088,6 @@ impl HudAtlas {
         defaults: &ResourceSource,
         folders: &[&str],
         full: bool,
-        mod_image: bool,
     ) -> Result<Self> {
         let textures = "assets/minecraft/textures";
         let mut files = Vec::new();
@@ -1377,7 +1353,7 @@ impl HudAtlas {
                 let (width, height, rgba) = decode_bytes(png)?;
                 images.push((format!("sunrise/jei/{name}"), width, height, rgba));
             }
-            Self::slots(&mut images, crate::trims::slot_size(root), mod_image);
+            Self::slots(&mut images, crate::trims::slot_size(root));
             // MissingTextureAtlasSprite.generateMissingImage: 16x16, magenta
             // and black quarters.
             let missing = (0..256)
@@ -3115,24 +3091,6 @@ mod tests {
         atlas.clear_object_skins();
         assert_ne!(atlas.object_skins_revision, revision);
         assert!(atlas.object_skins.is_empty());
-    }
-
-    /// The mod image slot is paid only by a game with a client mod loaded.
-    #[test]
-    fn the_mod_image_slot_exists_only_when_a_mod_is_loaded() {
-        let root = Path::new("/nonexistent/sunrise-test-assets");
-        let plain = HudAtlas::build(&sunrise_assets::resource_source::ResourceSource::directory(
-            root.to_path_buf(),
-        ))
-        .unwrap();
-        assert!(!plain.sprites.contains_key(MOD_IMAGE_SPRITE));
-        let with_mod = HudAtlas::build_over_with_image(
-            &sunrise_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
-            &sunrise_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
-            true,
-        )
-        .unwrap();
-        assert!(with_mod.sprites.contains_key(MOD_IMAGE_SPRITE));
     }
 
     #[test]

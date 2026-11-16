@@ -14,6 +14,26 @@ pub struct Picture {
     pub(super) flags: TextureFlags,
 }
 
+impl Picture {
+    /// A picture of `pixels` (`width * height` RGBA texels), sampled as `flags` say: one a pack
+    /// gives, or one made at run time (a client mod's dynamic texture). Each picture has an id
+    /// of its own, so the renderer makes it a texture of its own.
+    pub fn new(width: u32, height: u32, pixels: Vec<u8>, flags: TextureFlags) -> Arc<Self> {
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        Arc::new(Self {
+            id: NEXT.fetch_add(1, Ordering::Relaxed),
+            width,
+            height,
+            pixels,
+            flags,
+        })
+    }
+    /// Its width and height in texels.
+    pub fn size(&self) -> [u32; 2] {
+        [self.width, self.height]
+    }
+}
+
 #[derive(Default)]
 pub(super) struct Cache {
     roots: Vec<crate::resource_source::ResourceSource>,
@@ -51,16 +71,7 @@ impl Cache {
                     .unwrap_or_default();
                 Some((image, flags))
             })
-            .map(|((width, height, pixels), flags)| {
-                static NEXT: AtomicU64 = AtomicU64::new(1);
-                Arc::new(Picture {
-                    id: NEXT.fetch_add(1, Ordering::Relaxed),
-                    width,
-                    height,
-                    pixels,
-                    flags,
-                })
-            });
+            .map(|((width, height, pixels), flags)| Picture::new(width, height, pixels, flags));
         self.entries
             .insert(name.into(), image.as_ref().map(Arc::downgrade));
         image
@@ -82,17 +93,30 @@ impl HudBatch {
         let Some(picture) = atlas.pictures.lock().unwrap().get(name) else {
             return;
         };
+        let [width, height] = picture.size().map(|side| side as f32);
+        self.picture_part(&picture, [0.0, 0.0, width, height], [x, y, w, h], tint);
+    }
+    /// Draw part `src` (`[x, y, w, h]` in the picture's own texels) of `picture`, stretched
+    /// into `dst` (`[x, y, w, h]` in GUI pixels), at its exact place in the HUD's ordered runs.
+    pub fn picture_part(
+        &mut self,
+        picture: &Arc<Picture>,
+        src: [f32; 4],
+        dst: [f32; 4],
+        tint: u32,
+    ) {
+        let (width, height) = (picture.width as f32, picture.height as f32);
         let start = self.vertices.len();
         self.rect_uv(
-            x,
-            y,
-            w,
-            h,
+            dst[0],
+            dst[1],
+            dst[2],
+            dst[3],
             Rect {
-                u0: 0.0,
-                v0: 0.0,
-                u1: 1.0,
-                v1: 1.0,
+                u0: src[0] / width,
+                v0: src[1] / height,
+                u1: (src[0] + src[2]) / width,
+                v1: (src[1] + src[3]) / height,
                 w: picture.width,
                 h: picture.height,
             },
@@ -100,7 +124,7 @@ impl HudBatch {
         );
         self.blend_since(start, Blend::Picture(picture.id));
         if !self.pictures.iter().any(|p| p.id == picture.id) {
-            self.pictures.push(picture);
+            self.pictures.push(picture.clone());
         }
     }
 }
