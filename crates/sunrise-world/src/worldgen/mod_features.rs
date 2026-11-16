@@ -394,9 +394,12 @@ fn entries(types: ModFeatureTypes) -> Entries {
         .collect()
 }
 
-/// Install the process-wide table once; a second installation keeps the first.
-pub fn install_mod_feature_types(types: ModFeatureTypes) -> Result<(), ()> {
-    MOD_TYPES.set(entries(types)).map_err(|_| ())
+/// Install the process-wide table once; a second installation keeps the first and hands its
+/// own types back.
+pub fn install_mod_feature_types(types: ModFeatureTypes) -> Result<(), ModFeatureTypes> {
+    let mut offered = Some(types);
+    MOD_TYPES.get_or_init(|| entries(offered.take().unwrap_or_default()));
+    offered.map_or(Ok(()), Err)
 }
 
 /// The installed feature type `id`: none until the executable installs the mods', and a test's
