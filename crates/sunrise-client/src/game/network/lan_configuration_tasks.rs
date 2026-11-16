@@ -55,8 +55,16 @@ impl Game<'_> {
                 });
                 request.session.register(tasks);
             }
-            let sessions = self.lan.as_mut()?.hub.lan.configuration_tasks.running();
-            for (connection, session) in sessions {
+            let mut after = None;
+            while let Some((connection, session)) = self
+                .lan
+                .as_mut()?
+                .hub
+                .lan
+                .configuration_tasks
+                .next_running(after)
+            {
+                after = Some(connection);
                 while let Some(turn) = session.turn() {
                     self.configuration_callback(&session, |game| {
                         if turn.start {

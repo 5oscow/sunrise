@@ -41,17 +41,27 @@ impl Tasks {
         self.sessions
             .get(&mod_api::__private::configuration_connection_id(connection))
     }
-    pub fn running(&mut self) -> Vec<(ConfigurationConnection, Arc<Session>)> {
-        self.sessions.retain(|_, session| !session.closed());
+    /// Visit the next session without retaining a borrow across a hook callback.
+    pub fn next_running(
+        &mut self,
+        after: Option<ConfigurationConnection>,
+    ) -> Option<(ConfigurationConnection, Arc<Session>)> {
+        use std::ops::Bound::{Excluded, Unbounded};
+        if after.is_none() {
+            self.sessions.retain(|_, session| !session.closed());
+        }
+        let lower = after.map_or(Unbounded, |connection| {
+            Excluded(mod_api::__private::configuration_connection_id(connection))
+        });
         self.sessions
-            .iter()
+            .range((lower, Unbounded))
+            .next()
             .map(|(&id, session)| {
                 (
                     mod_api::__private::configuration_connection(id),
                     session.clone(),
                 )
             })
-            .collect()
     }
 }
 #[derive(Default)]
