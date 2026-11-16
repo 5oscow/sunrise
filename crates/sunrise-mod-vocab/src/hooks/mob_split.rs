@@ -34,6 +34,7 @@ pub trait Hooks {
 - Not fired for a parent of size 1, nor for a primed sulfur cube (it makes no children). With no listener the split runs exactly as vanilla and allocates nothing for the list."#]
     #[hook(
         side = "server",
+        version = 2,
         contract = "cancel",
         out = "cancel",
         neoforge = "MobSplitEvent",

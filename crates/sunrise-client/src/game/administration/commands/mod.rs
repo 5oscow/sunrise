@@ -34,7 +34,7 @@ use super::{Dim, Game, Screen, chat::PLAYER_NAME, vehicle_teleport::TeleportMoti
 use sunrise_client::{
     command::{
         Arg, CommandError, Context, Reader,
-        args::{BlockInput, Coordinates, GameMode, ItemInput, Selector, Sort},
+        args::{BlockInput, Coordinates, GameMode, ItemInput, Selector},
         vanilla::DIFFICULTIES,
     },
     gamerules::{self, Value},
@@ -5827,7 +5827,8 @@ mod vehicle_kill_tests;
 
 #[cfg(test)]
 mod global_selector_order_tests {
-    use super::{Selector, Sort, Target};
+    use super::{Selector, Target};
+    use sunrise_client::command::args::Sort;
     use sunrise_client::join_seq::Joined;
     use sunrise_core::nbt::Tag;
     use sunrise_core::position::ChunkPos;

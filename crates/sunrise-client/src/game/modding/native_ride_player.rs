@@ -10,11 +10,11 @@
 //! vehicle player's own `SetPassengers` (`tell_vehicle_players`) all start by
 //! finding a player behind that id, and find none in a vanilla game.
 use super::{Game, commands::Target};
+use mod_api::{EntityRef, RidePlayerRefusal};
 use sunrise_client::lan::entity::Riding;
 use sunrise_client::mobs::{Species, riders};
 use sunrise_core::geometry::{Aabb, Vec3};
 use sunrise_protocol::packets::play;
-use mod_api::{EntityRef, RidePlayerRefusal};
 
 impl Game<'_> {
     /// The server player whose entity id is `id`, in the level in place: the
@@ -149,11 +149,19 @@ impl Game<'_> {
             .mobs
             .iter()
             .filter(|m| !m.removed)
-            .filter_map(|m| m.extra.mount.filter(|&v| is_player(self, v)).map(|v| (m.id, v)))
+            .filter_map(|m| {
+                m.extra
+                    .mount
+                    .filter(|&v| is_player(self, v))
+                    .map(|v| (m.id, v))
+            })
             .collect();
         for (id, v) in riders {
             self.dismount_mob(id);
-            if self.mob_object(id).is_some_and(|m| m.extra.mount == Some(v)) {
+            if self
+                .mob_object(id)
+                .is_some_and(|m| m.extra.mount == Some(v))
+            {
                 self.dismount_mob_reentrant(id);
             }
         }
@@ -192,7 +200,10 @@ impl Game<'_> {
             return false;
         };
         let width = (high[0] - low[0]) as f32;
-        let player_box = Aabb::new(Vec3::new(low[0], low[1], low[2]), Vec3::new(high[0], high[1], high[2]));
+        let player_box = Aabb::new(
+            Vec3::new(low[0], low[1], low[2]),
+            Vec3::new(high[0], high[1], high[2]),
+        );
         let m = &mut self.mobs[index];
         let offset = riders::vehicle_attachment(m, width);
         m.seated(vehicle, offset, player_box);
@@ -251,12 +262,12 @@ impl Game<'_> {
 
 #[cfg(test)]
 mod tests {
-    use sunrise_client::lan::entity::Riding;
-    use sunrise_client::mobs::{Mob, riders};
-    use sunrise_core::geometry::Vec3;
     use mod_api::RidePlayerRefusal as Refusal;
     use mod_api::{EntityMountEvent, Flow, Hooks, ServerHost};
     use std::sync::{Arc, Mutex};
+    use sunrise_client::lan::entity::Riding;
+    use sunrise_client::mobs::{Mob, riders};
+    use sunrise_core::geometry::Vec3;
 
     /// The `entity_mount` calls a test heard: rider, vehicle, mounting.
     type Heard = Arc<Mutex<Vec<(u32, u32, bool)>>>;
@@ -270,7 +281,11 @@ mod tests {
                 .lock()
                 .unwrap()
                 .push((event.entity, event.vehicle, event.mounting));
-            if self.1 && !event.mounting { Flow::Cancel } else { Flow::Continue }
+            if self.1 && !event.mounting {
+                Flow::Cancel
+            } else {
+                Flow::Continue
+            }
         }
     }
 
@@ -279,8 +294,11 @@ mod tests {
     fn ejected(case: impl Fn(&mut super::Game<'_>, u32)) {
         for keep in [false, true] {
             let heard = Heard::default();
-            let mods: mod_api::Mods =
-                vec![mod_api::ModEntry::new("mounts", Box::new(Mounts(heard.clone(), keep)))].into();
+            let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+                "mounts",
+                Box::new(Mounts(heard.clone(), keep)),
+            )]
+            .into();
             mod_platform::testing::with_mods(mods, || {
                 super::super::native_entity_refs::tests::with_game(|game| {
                     // `entity_mount` is heard on a server thread.
@@ -295,7 +313,10 @@ mod tests {
                     case(game, conn);
                     // The unload save takes the pig away with its chunk; every other case keeps it.
                     let mount = |game: &super::Game<'_>| {
-                        game.mobs.iter().find(|m| m.id == 80 && !m.removed).map(|m| m.extra.mount)
+                        game.mobs
+                            .iter()
+                            .find(|m| m.id == 80 && !m.removed)
+                            .map(|m| m.extra.mount)
                     };
                     assert!(
                         matches!(mount(game), None | Some(None)),
@@ -316,7 +337,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_save_ejects_a_mob_riding_a_player() {
         ejected(|game, _| {
             let _ = game.save_entities(false);
@@ -324,7 +345,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_level_save_ejects_a_mob_riding_a_player() {
         ejected(|game, _| {
             let _ = game.save_level(true);
@@ -332,7 +353,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn an_autosave_ejects_a_mob_riding_a_player() {
         ejected(|game, _| {
             let _ = game.save_game_with(false);
@@ -342,32 +363,36 @@ mod tests {
     /// `save-all` from the control channel: the save staged across event-loop turns,
     /// whose entity stage snapshots one chunk at a time.
     #[test]
-    #[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_staged_save_ejects_a_mob_riding_a_player() {
         ejected(|game, _| {
             let (reply, _answer) = std::sync::mpsc::channel();
             game.begin_control_save(true, reply).unwrap();
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
             while game.pending_save.is_some() {
-                assert!(std::time::Instant::now() < deadline, "the save did not finish");
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "the save did not finish"
+                );
                 let _ = game.poll_closing_save();
             }
         });
     }
 
     #[test]
-    #[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn an_unload_save_ejects_a_mob_riding_a_player() {
         ejected(|game, _| {
-            let chunk = game.world.chunks.get(&(0, 0)).cloned().unwrap_or_else(|| {
-                std::sync::Arc::new(sunrise_client::chunk::Chunk::empty(0, 0))
-            });
+            let chunk =
+                game.world.chunks.get(&(0, 0)).cloned().unwrap_or_else(|| {
+                    std::sync::Arc::new(sunrise_client::chunk::Chunk::empty(0, 0))
+                });
             game.unload_entities(&[chunk]);
         });
     }
 
     #[test]
-    #[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_logout_ejects_a_mob_riding_the_player() {
         ejected(|game, _| {
             let host = game.lan.as_mut().unwrap();
@@ -381,16 +406,21 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_death_ejects_a_mob_riding_the_player() {
         ejected(|game, conn| {
-            game.lan.as_mut().unwrap().hub.guests.update(0, |g| g.health = 0.0);
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .guests
+                .update(0, |g| g.health = 0.0);
             game.guest_die(0, conn);
         });
     }
 
     #[test]
-    #[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_dimension_change_ejects_a_mob_riding_the_player() {
         ejected(|game, conn| {
             game.start_server_trip(conn, super::super::Dim::Nether, None, false);
@@ -415,14 +445,26 @@ mod tests {
             game.lan_riding(&[], &mut riding);
             assert!(riding.told_self.is_empty());
 
-            assert_eq!(game.entity_ride_player(player, first, false), Err(Refusal::NotAPlayer));
-            assert_eq!(game.entity_ride_player(player, player, false), Err(Refusal::SameEntity));
+            assert_eq!(
+                game.entity_ride_player(player, first, false),
+                Err(Refusal::NotAPlayer)
+            );
+            assert_eq!(
+                game.entity_ride_player(player, player, false),
+                Err(Refusal::SameEntity)
+            );
             assert_eq!(game.entity_ride_player(first, player, false), Ok(()));
             assert_eq!(game.mobs[0].extra.mount, Some(player.id()));
             assert_eq!(game.entity_vehicle(first), Some(player));
             assert_eq!(game.entity_passengers(player), Some(vec![first]));
-            assert_eq!(game.entity_ride_player(first, player, false), Err(Refusal::AlreadyRiding));
-            assert_eq!(game.entity_ride_player(second, player, false), Err(Refusal::Full));
+            assert_eq!(
+                game.entity_ride_player(first, player, false),
+                Err(Refusal::AlreadyRiding)
+            );
+            assert_eq!(
+                game.entity_ride_player(second, player, false),
+                Err(Refusal::Full)
+            );
 
             // The seat: the top of the player's box, less the pig's attachment.
             game.sync_riders();
@@ -430,8 +472,15 @@ mod tests {
             let [low, high] = game.entity_bounding_box(player).unwrap();
             let m = &game.mobs[0];
             let offset = riders::vehicle_attachment(m, (high[0] - low[0]) as f32);
-            assert_eq!(m.extra.mount, Some(player.id()), "a player vehicle stays valid");
-            assert_eq!([m.position.x, m.position.y, m.position.z], [x, high[1] - offset, z]);
+            assert_eq!(
+                m.extra.mount,
+                Some(player.id()),
+                "a player vehicle stays valid"
+            );
+            assert_eq!(
+                [m.position.x, m.position.y, m.position.z],
+                [x, high[1] - offset, z]
+            );
             assert!(m.extra.passenger);
 
             // The guest's own client is told, once.
@@ -450,7 +499,10 @@ mod tests {
 
             // Off a vehicle, the boarding cooldown runs; ride_player forces it on. The plain
             // start_riding keeps refusing a player vehicle, forced or not.
-            assert_eq!(game.entity_ride_player(first, player, false), Err(Refusal::CannotRide));
+            assert_eq!(
+                game.entity_ride_player(first, player, false),
+                Err(Refusal::CannotRide)
+            );
             assert!(!game.entity_start_riding(first, player, true));
             assert!(!game.entity_start_riding(first, player, false));
             assert_eq!(game.entity_vehicle(first), None);
@@ -464,16 +516,14 @@ mod tests {
                 .hub
                 .guests
                 .update(0, |guest| guest.vehicle = Some(81));
-            assert_eq!(game.entity_ride_player(second, player, true), Err(Refusal::Cycle));
-            game.lan
-                .as_mut()
-                .unwrap()
-                .hub
-                .guests
-                .update(0, |guest| {
-                    guest.vehicle = None;
-                    guest.dimension = "minecraft:the_nether".into();
-                });
+            assert_eq!(
+                game.entity_ride_player(second, player, true),
+                Err(Refusal::Cycle)
+            );
+            game.lan.as_mut().unwrap().hub.guests.update(0, |guest| {
+                guest.vehicle = None;
+                guest.dimension = "minecraft:the_nether".into();
+            });
             // The player left the level: its passenger gets off.
             game.sync_riders();
             assert_eq!(game.mobs[0].extra.mount, None);

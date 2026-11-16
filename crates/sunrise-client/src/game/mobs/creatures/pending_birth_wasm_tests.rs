@@ -126,7 +126,7 @@ fn trap(mods: mod_api::Mods, baby: bool) {
 }
 
 #[test]
-#[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn native_pending_children_shared_matrix() {
     matrix(vec![mod_api::ModEntry::new("wasm_fixture", Box::new(Native))].into());
 }
@@ -159,20 +159,20 @@ fn load_wasm() -> mod_api::Mods {
 }
 
 #[test]
-#[ignore = "needs SUNRISE_TEST_RESOURCES, SUNRISE_WASM_FIXTURE and SUNRISE_WASM_STD; build with sunrise-mod-wasm/listener-fixture"]
+#[ignore = "daily"]
 fn wasm_pending_children_shared_matrix() {
     // Enters the guest: libtest's thread is smaller than the guest stack policy requires.
     sunrise_guest_stack::run_on_guest_stack(|| matrix(load_wasm()));
 }
 
 #[test]
-#[ignore = "needs SUNRISE_TEST_RESOURCES, SUNRISE_WASM_FIXTURE and SUNRISE_WASM_STD; build with sunrise-mod-wasm/listener-fixture"]
+#[ignore = "daily"]
 fn wasm_trapped_split_listener_commits_nothing() {
     sunrise_guest_stack::run_on_guest_stack(|| trap(load_wasm(), false));
 }
 
 #[test]
-#[ignore = "needs SUNRISE_TEST_RESOURCES, SUNRISE_WASM_FIXTURE and SUNRISE_WASM_STD; build with sunrise-mod-wasm/listener-fixture"]
+#[ignore = "daily"]
 fn wasm_trapped_baby_listener_commits_nothing() {
     sunrise_guest_stack::run_on_guest_stack(|| trap(load_wasm(), true));
 }

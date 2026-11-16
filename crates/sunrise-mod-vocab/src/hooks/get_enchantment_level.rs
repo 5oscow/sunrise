@@ -11,7 +11,7 @@ pub trait Hooks {
     /// the anvil, the grindstone, the enchanting table, saves and the network
     /// keep the stack's own component. Asked on every such read, often many
     /// times a tick, on the server and on a client (its tooltip modifiers).
-    /// A client without this mod predicts vanilla here; the server corrects it.
+    /// A client without this mod keeps its vanilla tooltip; server gameplay uses the modded levels.
     #[hook(
         side = "both",
         contract = "listen",

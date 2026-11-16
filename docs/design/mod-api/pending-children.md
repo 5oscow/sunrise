@@ -1,6 +1,6 @@
 # Design: pending children
 
-Provisional answer to [#825](https://github.com/arismoko/horizon/issues/825): the engine owns an action-local ordered collection of fully constructed, unspawned children. Listeners borrow editors; the engine validates and consumes the final collection exactly once at the original insertion boundary. This is a proposal, not an implemented API or an issue decision. Ari's side posts the decision on the issue. No implementation stages have been filed.
+Implemented collection contract for [#825](https://github.com/arismoko/horizon/issues/825): the engine owns an action-local ordered collection of fully constructed, unspawned children. Listeners borrow editors; the engine validates and consumes the final collection exactly once at the original insertion boundary. The implementation status below distinguishes the shipped collection from the transaction-coordinator work still outstanding. The evidence and acceptance matrix record the original design investigation, not executed verification of the implementation.
 
 ## Evidence and limits
 
@@ -39,7 +39,7 @@ Paths and line numbers are inspected Sunrise owners at this note's base. Vanilla
 | Sniffer egg | Same file:4004–4008 finalizes then lays an egg. Reference Sniffer.spawnChildFromBreeding; no live-child callback. |
 | Turtle hatch | Same file:3789 hatch_turtles, reference TurtleEggBlock.randomTick. Hatching is independent spawning, outside breeding callback. |
 | Spawn egg offspring | Same file:7696 spawn_egg_offspring, reference SpawnEggItem spawning behavior. Excluded from this breeding moment. |
-| Villager/armadillo | Existing baby_entity_spawn declaration explicitly excludes their own paths. Exact owners and vanilla methods remain unverified; implementation must trace these before claiming full live-breeding coverage. Recommend include only if public counterpart and vanilla moment agree, otherwise document the distinct moment. |
+| Villager/armadillo | Armadillos use the ordinary animal breeding route. Villagers retain their separate `villager_birth` moment and do not fire `baby_entity_spawn`. |
 | Native pending lend | `crates/sunrise-client/src/game/modding/native_unspawned_mob.rs:107` lend_unspawned already owns scoped lending and unwind restoration. Extend its ownership discipline; do not treat the stand-in clone as a child. |
 
 Change mob_split and baby_entity_spawn in place, once per vanilla moment. Delete count/kind-only transport, obsolete helpers and the stale “handle does not exist” prose in both declarations, hook notes, generated native/wasm bindings and samples together. Retain parent/player metadata. Do not add parallel legacy hooks or a second post-construction hook.
@@ -91,7 +91,7 @@ What is built:
 - **Operations.** `len`, `child`, `construct`, `append`, `replace` and `remove`, plus `set_position`,
   `set_yaw`, `set_baby` and `set_size` on a child, with `Expired`, `Ownership`, `Capacity` and `Invalid`
   refusals. A split holds at most 64 children, breeding one baby that must stay a baby.
-- **One listener per lease.** Entering the next listener of the hook (or a nested dispatch of it) ends the
+- **One listener per lease.** Entering any next listener (including a different nested hook) ends the
   previous listener's leases, so a list, child or ownership token kept from an earlier listener answers
   `Expired`. This holds for native and wasm listeners alike.
 - **Consumed once.** After dispatch the list is frozen and validated (kind, dimension, finite position and
@@ -117,11 +117,11 @@ Not done, and why:
   waits (they cannot be withheld without the coordinator's rollback).
 - Equipment and attribute edits of a pending child: only position, yaw, baby state and size are editable.
 
-## Proposed stages
+## Historical proposed stages
 
 File none. First verify the public counterpart and remaining vanilla routes and decide the questions below. Then extend the shared pending ownership boundary and native/wasm operations together. Next migrate both hooks and all authoritative routes, coordinate recovery foundations, and delete obsolete transport. Finally add oracle-backed species, reentrancy, transaction and fault fixtures plus no-listener measurements. These are proposed stages, not filed issues or authorized Rust changes.
 
-## Open questions
+## Historical investigation questions
 
 - Exact NeoForge 26.3 cancellation and null-child behavior? Recommend verify public Javadoc before implementation; retain the explicit proposed parent/RNG policy until Ari decides.
 - Are all live births in scope, including villager and armadillo paths? Recommend trace exact owners and counterpart call moments first; do not quietly inherit today's exclusions as proven parity.

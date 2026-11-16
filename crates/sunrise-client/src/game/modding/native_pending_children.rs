@@ -2,17 +2,17 @@
 //! arena objects. No resident entity ID, attachment holder or join is published here.
 
 use super::Game;
+use mod_api::{
+    PendingChildrenEdits, PendingChildrenRef, PendingMobSpec, UnattachedMob, UnspawnedMobError,
+    UnspawnedMobRef, WorldEpoch,
+};
+use std::{cell::RefCell, rc::Rc};
 use sunrise_client::mobs::{Mob, Species, finalize};
 use sunrise_core::geometry::Vec3;
 use sunrise_mod_runtime::{
     attachments::Attachments,
     pending_children::{Action, Borrow, Error, Owned, PendingChildren},
 };
-use mod_api::{
-    PendingChildrenEdits, PendingChildrenRef, PendingMobSpec, UnattachedMob, UnspawnedMobError,
-    UnspawnedMobRef, WorldEpoch,
-};
-use std::{cell::RefCell, rc::Rc};
 
 /// All unpublished per-object data travels with its actual Mob. A route must move its
 /// existing UUID and attachments here, then install them only at residency commit.
@@ -34,15 +34,15 @@ pub(super) fn pending_error(error: Error) -> UnspawnedMobError {
     }
 }
 
-/// Ends the previous listener's leases when a new listener of the dispatching hook has begun.
+/// Ends the previous listener's leases when any new listener has begun.
 pub(super) fn sync_listener(
     arena: &RefCell<PendingChildren<PendingMob>>,
     hook: &std::cell::Cell<Option<mod_api::HookId>>,
 ) {
-    if let Some(hook) = hook.get() {
+    if hook.get().is_some() {
         let _ = arena
             .borrow_mut()
-            .sync_listener(mod_api::__private::listener_serial(hook));
+            .sync_listener(mod_api::__private::listener_serial());
     }
 }
 
