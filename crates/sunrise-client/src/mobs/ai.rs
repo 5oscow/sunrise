@@ -1280,9 +1280,13 @@ pub fn finish_tick(
     events: &mut Vec<MobEvent>,
 ) -> bool {
     count_fall_fly_ticks(m);
+    // `isInPowderSnow`: `Entity.baseTick` clears it and the block walk's FREEZE
+    // effect sets it for a powder snow cell on the tick's path, so a hurt that
+    // teleports the mob during the walk keeps it.
+    m.in_powder_snow = false;
     effects_from_blocks(m, w, level, events);
     if m.alive() {
-        freeze_tick(m, w, level);
+        freeze_tick(m, w, level, events);
     }
     extinguish_if_wet(m, w, was_on_fire, events);
     m.reset_unlit_fire();
@@ -1426,7 +1430,12 @@ pub(crate) fn effects_from_blocks(
     );
     let _ =
         crate::block_contact::sweep_movements(&mut inside, &movements, &mut visited, &mut effects);
-    let MobInside { m, level, .. } = inside;
+    let MobInside {
+        m,
+        w,
+        level,
+        events,
+    } = inside;
     // `applyAndClear` for the part's queued writes, in the collector's order,
     // in this mob's tick, until it dies.
     for planned in effects.take_planned() {
@@ -1434,15 +1443,24 @@ pub(crate) fn effects_from_blocks(
             break;
         }
         if let mod_api::PlannedInside::Write(write) = planned {
-            apply_entity_write(m, level, write);
+            apply_entity_write(m, w, level, events, write);
         }
     }
 }
 
 /// A typed entity write an `entity_inside` part queued for a mob, applied in
 /// its own tick. `Hurt` uses the generic damage kind: the block's own hurts
-/// keep their named kinds in the walk's arms above.
-fn apply_entity_write(m: &mut Mob, level: &mut DamageLevel<'_>, write: mod_api::EntityWrite) {
+/// keep their named kinds in the walk's arms above. Its `source` is not
+/// resolved to an attacker, so an enderman always draws its teleport chance,
+/// where `Enderman.hurtServer` skips it for a living attacker. The hurt's
+/// teleport is settled inside it.
+fn apply_entity_write(
+    m: &mut Mob,
+    w: &MobWorld,
+    level: &mut DamageLevel<'_>,
+    events: &mut Vec<MobEvent>,
+    write: mod_api::EntityWrite,
+) {
     let triple = |v: [f64; 3]| Vec3::new(v[0], v[1], v[2]);
     match write {
         mod_api::EntityWrite::Push(v) => {
@@ -1455,6 +1473,8 @@ fn apply_entity_write(m: &mut Mob, level: &mut DamageLevel<'_>, write: mod_api::
         }
         mod_api::EntityWrite::Hurt { amount, .. } => {
             m.damage(level, amount, Damage::of(DamageKind::Generic));
+            // The hurt's own teleport, inside it (#1697).
+            hurt_teleports(m, w, events);
         }
         mod_api::EntityWrite::ResetFallDistance => m.fall_distance = 0.0,
         mod_api::EntityWrite::SetFireTicks(ticks) => m.fire_ticks = ticks,
@@ -1553,6 +1573,8 @@ impl crate::block_contact::InsideWalk for MobInside<'_, '_, '_> {
         // PowderSnowBlock.entityInside: a burning mob destroys the
         // block (`canEntityGrief` for the mob), then EXTINGUISH puts it out.
         if self.w.block_name(x, y, z) == "minecraft:powder_snow" {
+            // InsideBlockEffectType.FREEZE: `setIsInPowderSnow(true)`.
+            self.m.in_powder_snow = true;
             if self.m.is_on_fire() && self.w.can_grief(self.m.id) {
                 self.events.push(MobEvent::BreakBlock {
                     pos: p,
@@ -1567,6 +1589,8 @@ impl crate::block_contact::InsideWalk for MobInside<'_, '_, '_> {
             "minecraft:cactus" => {
                 self.m
                     .damage(self.level, 1.0, Damage::of(DamageKind::Cactus));
+                // The hurt's own teleport, inside it, as magma's (#1697).
+                hurt_teleports(self.m, self.w, self.events);
             }
             // CampfireBlock.entityInside: a lit campfire hurts a
             // living entity by its fire damage (1, soul 2).
@@ -1580,6 +1604,8 @@ impl crate::block_contact::InsideWalk for MobInside<'_, '_, '_> {
                 };
                 self.m
                     .damage(self.level, damage, Damage::of(DamageKind::Campfire));
+                // The hurt's own teleport, inside it, as magma's (#1697).
+                hurt_teleports(self.m, self.w, self.events);
             }
             // WebBlock.entityInside -> makeStuckInBlock, which a
             // spider ignores for cobwebs and a wither always.
@@ -1612,6 +1638,8 @@ impl crate::block_contact::InsideWalk for MobInside<'_, '_, '_> {
                 {
                     self.m
                         .damage(self.level, 1.0, Damage::of(DamageKind::SweetBerryBush));
+                    // The hurt's own teleport, inside it, as magma's (#1697).
+                    hurt_teleports(self.m, self.w, self.events);
                 }
             }
             // PowderSnowBlock.entityInside: a living entity is stuck
@@ -2060,7 +2088,7 @@ fn base_tick(
     };
     block_contact_damage(m, w, level, fire, lava);
     // Enderman.hurtServer and Shulker.hurtServer teleport inside the hurt
-    // (fire, lava, a block).
+    // (fire, lava).
     hurt_teleports(m, w, events);
     if !m.alive() {
         m.death_time += 1;
@@ -2081,10 +2109,10 @@ fn base_tick(
     super::leash::tick(m, w, events);
     was_on_fire
 }
-/// Freezing runs after movement and block effects.
-fn freeze_tick(m: &mut Mob, w: &MobWorld, level: &mut DamageLevel<'_>) {
-    let in_snow = in_powder_snow(m, w);
-    m.in_powder_snow = in_snow;
+/// `LivingEntity.aiStep`'s freezing, after movement and the block walk, on
+/// `isInPowderSnow` as the tick's block walk left it (`m.in_powder_snow`).
+fn freeze_tick(m: &mut Mob, w: &MobWorld, level: &mut DamageLevel<'_>, events: &mut Vec<MobEvent>) {
+    let in_snow = m.in_powder_snow;
     if !in_snow && m.ticks_frozen == 0 {
         return;
     }
@@ -2097,6 +2125,8 @@ fn freeze_tick(m: &mut Mob, w: &MobWorld, level: &mut DamageLevel<'_>) {
     }
     if m.age.is_multiple_of(40) && m.is_fully_frozen() && can_freeze {
         m.damage(level, 1.0, Damage::of(DamageKind::Freeze));
+        // Enderman.hurtServer and Shulker.hurtServer teleport inside the hurt (#1697).
+        hurt_teleports(m, w, events);
     }
 }
 /// Whether the mob's box (shrunk by `1.0E-5`) touches a lava block: the
@@ -2438,9 +2468,10 @@ fn hurt_by_water(
     }
 }
 /// A hurt the mob's own tick deals (`Entity.baseTick`, `tickEffects`, a
-/// block's touch, cramming), with the teleport `Enderman.hurtServer` or
-/// `Shulker.hurtServer` makes inside it: a second hurt of the same tick draws
-/// after the first one's teleport and sees where it landed.
+/// block's touch or a mod part's queued hurt, freezing, cramming), with the
+/// teleport `Enderman.hurtServer` or `Shulker.hurtServer` makes inside it: a
+/// second hurt of the same tick draws after the first one's teleport and sees
+/// where it landed.
 #[cfg(test)]
 fn hurt(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>, amount: f32, source: Damage) {
     m.damage(
@@ -2536,6 +2567,8 @@ fn push_entities(
         && targets.iter().filter(|t| !t.2).count() as i64 > i64::from(limit) - 1
     {
         m.damage(level, 6.0, Damage::of(DamageKind::Cramming));
+        // The hurt's own teleport, inside it (#1697).
+        hurt_teleports(m, w, events);
     }
     // The server's collision cap, after the cramming check above, which counts every entity.
     let mut cap = Cap::new(m, w);
@@ -7377,7 +7410,14 @@ mod freeze_tests {
                     // The freeze damage falls on a tick that is a multiple of 40.
                     m.age = 40;
                     let start = m.health;
-                    freeze_tick(&mut m, w, &mut crate::health::TestLevel::new(0).level());
+                    // The block walk's FREEZE effect for the snow it stands in.
+                    m.in_powder_snow = in_powder_snow(&m, w);
+                    freeze_tick(
+                        &mut m,
+                        w,
+                        &mut crate::health::TestLevel::new(0).level(),
+                        &mut Vec::new(),
+                    );
                     (m.ticks_frozen, start - m.health)
                 };
                 let frozen = |id: &str, ticks_frozen: i32| frozen_with(id, ticks_frozen, None);
