@@ -29,6 +29,13 @@ plays at the requested position; only a genuinely entity-bound sound
 | Block-breaking/level-event effects, explosions, pickup packets | None | Client-level `playLocalSound` or direct sound manager playback |
 | Dragon/fang/sniffer local effects, ticking ambience, UI | None | Entity-local effects, sound instances or widgets, not `playSeededSound` |
 
+## Playing a level sound from a server mod
+
+`LevelRef::play_sound(host, sound, at, source, volume, pitch, except)` is `ServerLevel.playSound(except, ...)`:
+every player in range hears it, except the player in `except`. Pass the player whose own client already played the
+sound for its action; pass `None` to play it to everyone. The game finds that player's connection itself. A fake
+player has no client, so it leaves no one out; a stale player handle queues nothing and the call returns `false`.
+
 ## Engine playback and live parameters
 
 `play_sound` also observes transient playback updates. `event.starting` is true for a

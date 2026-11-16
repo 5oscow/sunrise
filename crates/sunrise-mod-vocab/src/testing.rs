@@ -881,8 +881,11 @@ impl crate::prelude::LevelsBackendMut for FakeHost {
         source: crate::SoundSource,
         volume: f32,
         pitch: f32,
+        except: Option<PlayerRef>,
     ) -> bool {
-        if level != self.level.level() {
+        if level != self.level.level()
+            || except.is_some_and(|p| self.players.get(p.uuid()).is_none())
+        {
             return false;
         }
         self.sounds.push(FakeSound {
