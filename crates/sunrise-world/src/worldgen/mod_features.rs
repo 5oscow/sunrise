@@ -5,14 +5,17 @@
 //! growth, bone meal, `/place feature` and `LevelRef::place_feature`. Runs on worker threads,
 //! so a type keeps no mutable state and its target carries no `Host`.
 //!
-//! A call's writes are staged ([`Staging`]): the feature reads its own writes, and the level
-//! sees them, in order, only when the call answers `Ok`. A failure, a panic or an exhausted
-//! budget discards them, so a failed callback leaves nothing behind; a failure or a panic also
-//! disables the type for the rest of the run, and every later placement of it fails by name.
+//! A call's writes are staged ([`Staging`]): the feature reads its own writes and those of the
+//! root's earlier calls. A call that answers `Ok` hands its writes to its root
+//! ([`Provisional`]), and the level sees them, in order, only when the whole root answers `Ok`;
+//! a failure, a panic or an exhausted budget anywhere in the root discards every call's writes,
+//! so a failed root leaves nothing of the mod's behind. A failure or a panic also disables the
+//! type for the rest of the run, and every later placement of it fails by name. The features
+//! of the same root that are not a mod's read the level as it was before the root's mod writes.
 use crate::heightmap::HeightmapType;
 use crate::registry::{BlockRegistry, BlockStateId};
 use std::any::Any;
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
@@ -98,13 +101,56 @@ impl<R: RandomSource> ModFeatureRandom for Draws<'_, R> {
     }
 }
 
-/// One call's view of a placement world: reads see the call's own staged writes, writes and
-/// block entities wait for [`commit`](Self::commit), and every operation is charged to the
-/// root's custom budget. An operation past the budget answers `None` or `false` and marks
-/// the call exhausted.
+/// The writes of a root's successful mod calls, in order, waiting for the root's answer.
+#[derive(Default)]
+pub(crate) struct Provisional {
+    writes: Vec<([i32; 3], BlockStateId, i32)>,
+    entities: Vec<([i32; 3], Compound)>,
+}
+impl Provisional {
+    /// A successful call's writes join the root's: a block entity of an earlier call is dropped
+    /// with the block this call replaces.
+    fn push(
+        &mut self,
+        writes: Vec<([i32; 3], BlockStateId, i32)>,
+        entities: Vec<([i32; 3], Compound)>,
+    ) {
+        for (position, ..) in &writes {
+            self.entities.retain(|(p, _)| p != position);
+        }
+        self.writes.extend(writes);
+        self.entities.extend(entities);
+    }
+    /// The root answered `Ok`: the writes, in order, then the block entities of the blocks among
+    /// them the level took. A write the level refuses now drops its block entity with it.
+    pub(crate) fn commit<W>(self, world: &mut W)
+    where
+        W: super::feature::FeatureWorld + super::placement::PlacementContext,
+    {
+        let mut written: Vec<[i32; 3]> = Vec::new();
+        for (position, state, flags) in self.writes {
+            if world.set_block(position, state, flags).unwrap_or(false) {
+                written.push(position);
+            } else {
+                written.retain(|p| *p != position);
+            }
+        }
+        for (position, nbt) in self.entities {
+            if written.contains(&position) {
+                let _ = world.set_block_entity(position, nbt);
+            }
+        }
+    }
+}
+
+/// One call's view of a placement world: reads see the call's own staged writes and those of
+/// the root's earlier calls, writes and block entities wait for the root
+/// ([`finish`](Self::finish)), and every operation is charged to the root's custom budget. An
+/// operation past the budget answers `None` or `false` and marks the call exhausted.
 pub(crate) struct Staging<'a, W> {
     world: &'a mut W,
     budget: &'a Cell<u32>,
+    earlier: &'a RefCell<Provisional>,
     writes: Vec<([i32; 3], BlockStateId, i32)>,
     entities: Vec<([i32; 3], Compound)>,
     pub(crate) exhausted: bool,
@@ -113,10 +159,15 @@ impl<'a, W> Staging<'a, W>
 where
     W: super::feature::FeatureWorld + super::placement::PlacementContext,
 {
-    pub(crate) fn new(world: &'a mut W, budget: &'a Cell<u32>) -> Self {
+    pub(crate) fn new(
+        world: &'a mut W,
+        budget: &'a Cell<u32>,
+        earlier: &'a RefCell<Provisional>,
+    ) -> Self {
         Self {
             world,
             budget,
+            earlier,
             writes: Vec::new(),
             entities: Vec::new(),
             exhausted: false,
@@ -135,11 +186,14 @@ where
         }
     }
     fn staged(&self, position: [i32; 3]) -> Option<BlockStateId> {
-        self.writes
-            .iter()
-            .rev()
-            .find(|write| write.0 == position)
-            .map(|write| write.1)
+        let state = |writes: &[([i32; 3], BlockStateId, i32)]| {
+            writes
+                .iter()
+                .rev()
+                .find(|write| write.0 == position)
+                .map(|write| write.1)
+        };
+        state(&self.writes).or_else(|| state(&self.earlier.borrow().writes))
     }
     fn current(&mut self, position: [i32; 3]) -> Option<BlockStateId> {
         match self.staged(position) {
@@ -147,26 +201,9 @@ where
             None => self.world.block(position).ok(),
         }
     }
-    /// The staged writes, in order, then the block entities of the blocks among them the level
-    /// took. A write the level refuses now drops its block entity with it.
-    pub(crate) fn commit(self) {
-        let mut written: Vec<[i32; 3]> = Vec::new();
-        for (position, state, flags) in self.writes {
-            if self
-                .world
-                .set_block(position, state, flags)
-                .unwrap_or(false)
-            {
-                written.push(position);
-            } else {
-                written.retain(|p| *p != position);
-            }
-        }
-        for (position, nbt) in self.entities {
-            if written.contains(&position) {
-                let _ = self.world.set_block_entity(position, nbt);
-            }
-        }
+    /// The call answered `Ok`: its writes wait with its root's.
+    pub(crate) fn finish(self) {
+        self.earlier.borrow_mut().push(self.writes, self.entities);
     }
 }
 impl<W> ModFeatureTarget for Staging<'_, W>
@@ -227,7 +264,7 @@ where
         self.world.height(kind, x, z).ok()
     }
     fn set_block_entity(&mut self, position: [i32; 3], nbt: Compound) -> bool {
-        if !self.charge() || self.staged(position).is_none() {
+        if !self.charge() || !self.writes.iter().any(|write| write.0 == position) {
             return false;
         }
         self.entities.retain(|(p, _)| *p != position);
@@ -295,14 +332,15 @@ impl std::fmt::Display for ModFeatureError {
 }
 
 impl ModFeature {
-    /// One call of the type at `origin` over `world`, charged to `budget`: its writes reach
-    /// the world only on `Ok`.
+    /// One call of the type at `origin` over `world`, charged to `budget`: its writes join the
+    /// root's `provisional` on `Ok` and reach the world when the root answers `Ok`.
     pub(crate) fn place<W>(
         &self,
         world: &mut W,
         random: &mut impl RandomSource,
         origin: [i32; 3],
         budget: &Cell<u32>,
+        provisional: &RefCell<Provisional>,
     ) -> Result<bool, ModFeatureError>
     where
         W: super::feature::FeatureWorld + super::placement::PlacementContext,
@@ -310,7 +348,7 @@ impl ModFeature {
         if self.entry.disabled() {
             return Err(ModFeatureError::Disabled);
         }
-        let mut staging = Staging::new(world, budget);
+        let mut staging = Staging::new(world, budget, provisional);
         let mut draws = Draws(random);
         let called = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             self.entry
@@ -328,7 +366,7 @@ impl ModFeature {
             }
             Ok(Ok(_)) if staging.exhausted => Err(ModFeatureError::WorkLimit),
             Ok(Ok(placed)) => {
-                staging.commit();
+                staging.finish();
                 Ok(placed)
             }
         }

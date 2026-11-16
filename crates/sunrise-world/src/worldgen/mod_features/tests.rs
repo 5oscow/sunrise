@@ -84,6 +84,8 @@ fn blocks() -> FeatureBlocks {
 /// - `Column` writes its config's height of state 1 upward, then answers false;
 /// - `Fails` writes once, then fails; `Panics` writes once, then panics;
 /// - `Flood` reads the origin 70,000 times;
+/// - `SecondFails` and `SecondFloods` write once and answer `Ok`, as `Marks` does, but their
+///   second call (of a run's log) fails, or floods;
 /// - `Chest` writes state 5 at the origin with block-entity data there, and tries block-entity
 ///   data next to it (not placed by it) and far outside the world.
 #[derive(Clone, Copy)]
@@ -94,6 +96,8 @@ enum Kind {
     Panics,
     Flood,
     Chest,
+    SecondFails,
+    SecondFloods,
 }
 type Log = Arc<Mutex<Vec<([i32; 3], i32)>>>;
 struct Test(Kind, Log);
@@ -145,6 +149,25 @@ impl ModFeatureType for Test {
                 }
                 Ok(true)
             }
+            Kind::SecondFails | Kind::SecondFloods => {
+                let calls = {
+                    let mut log = self.1.lock().unwrap();
+                    log.push((origin, 0));
+                    log.len()
+                };
+                let placed = target.set_block(origin, BlockStateId(1), 3);
+                if calls == 2 {
+                    match self.0 {
+                        Kind::SecondFails => return Err("second call".into()),
+                        _ => {
+                            for _ in 0..70_000 {
+                                target.block(origin);
+                            }
+                        }
+                    }
+                }
+                Ok(placed)
+            }
             Kind::Chest => {
                 let nbt = Compound::from([("id".into(), Tag::String("minecraft:chest".into()))]);
                 let placed = target.set_block(origin, BlockStateId(5), 3);
@@ -168,6 +191,8 @@ fn types(log: &Log) -> ModFeatureTypes {
         ("test:panics", Kind::Panics),
         ("test:flood", Kind::Flood),
         ("test:chest", Kind::Chest),
+        ("test:second_fails", Kind::SecondFails),
+        ("test:second_floods", Kind::SecondFloods),
     ]
     .into_iter()
     .map(|(id, kind)| {
@@ -323,10 +348,7 @@ fn failures_discard_their_writes_and_disable_the_type() {
             r#"{"type":"minecraft:random_selector","features":[],
                 "default":{"feature":{"type":"test:panics"},"placement":[]}}"#,
         );
-        let quiet = std::panic::take_hook();
-        std::panic::set_hook(Box::new(|_| {}));
         let first = place(&nested, &mut world, [0, 1, 0]);
-        std::panic::set_hook(quiet);
         assert_eq!(
             first,
             Err("mod feature failed: test:panics: panicked".into())
@@ -343,6 +365,54 @@ fn failures_discard_their_writes_and_disable_the_type() {
             Ok(true)
         );
     });
+}
+
+/// A root's successful calls reach the level only when the whole root answers `Ok`: a count-2
+/// root whose second call fails, or runs the shared budget out, publishes nothing of its first
+/// call's, and one whose calls all succeed publishes them together, in order.
+#[test]
+fn a_roots_calls_publish_together_or_not_at_all() {
+    let rooted = |ty: &str| PlacedFeatureDefinition {
+        feature: Box::new(feature(&format!(r#"{{"type":"{ty}"}}"#))),
+        placement: vec![
+            PlacementModifier::Count(IntProvider::Constant(2)),
+            PlacementModifier::InSquare,
+        ],
+    };
+    let run = |ty: &str| {
+        let log = Log::default();
+        let mut world = World::default();
+        let answer = with_test_feature_types(&types(&log), || {
+            rooted(ty)
+                .place(
+                    &mut world,
+                    &mut LegacyRandom::new(42),
+                    [16, 4, 32],
+                    blocks(),
+                )
+                .map_err(|error| error.to_string())
+        });
+        let calls = log.lock().unwrap().len();
+        (answer, calls, world)
+    };
+
+    let (answer, calls, world) = run("test:second_fails");
+    assert_eq!(calls, 2, "the second call ran");
+    assert!(answer.unwrap_err().ends_with("second call"));
+    assert!(world.writes.is_empty() && world.entities.is_empty());
+
+    let (answer, calls, world) = run("test:second_floods");
+    assert_eq!(calls, 2);
+    assert!(answer.unwrap_err().contains("custom work budget"));
+    assert!(world.writes.is_empty() && world.entities.is_empty());
+
+    let (answer, calls, world) = run("test:marks");
+    assert_eq!(answer, Ok(true));
+    assert_eq!(calls, 2);
+    assert_eq!(
+        world.writes.iter().map(|w| w.0).collect::<Vec<_>>(),
+        [[27, 4, 32], [16, 4, 36]]
+    );
 }
 
 /// A call past the root's custom budget places nothing and fails by name, without disabling
