@@ -506,6 +506,9 @@ jobs:
     name: start the Intel macOS archive on Intel
     needs: build
     if: ${{ !cancelled() }}
+    # Optional where the leg is (build's continue-on-error): a failure here drops x64 without turning the run red;
+    # legs decides from the marker.
+    continue-on-error: ${{ github.repository == 'sunrise-org/sunrise' || inputs.kind == 'snapshot' }}
     runs-on: macos-15-intel
     timeout-minutes: 15
     permissions:
