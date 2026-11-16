@@ -698,7 +698,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let placement = BlockPlacementBindings::new(
         &registry,
         &properties,
-        &serde_json::from_value(definitions["double_plants"].clone())?,
+        &definitions,
         &serde_json::from_value(definitions["mossy_carpets"].clone())?,
     )?;
     let feature_bindings =
@@ -713,7 +713,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
                 BlockPlacementBindings::new(
                     &registry,
                     &properties,
-                    &serde_json::from_value(definitions["double_plants"].clone())?,
+                    &definitions,
                     &serde_json::from_value(definitions["mossy_carpets"].clone())?,
                 )?,
             )?;

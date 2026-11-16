@@ -274,9 +274,13 @@ mod ceiling_tests {
         let providers =
             StateProviderBindings::new(&registry, BTreeSet::new(), &BTreeMap::new()).unwrap();
         let catalog = StateProviderCatalog::from_resources(&BTreeMap::new()).unwrap();
-        let placement =
-            BlockPlacementBindings::new(&registry, &properties, &BTreeSet::new(), &BTreeSet::new())
-                .unwrap();
+        let placement = BlockPlacementBindings::new(
+            &registry,
+            &properties,
+            &serde_json::json!({"blocks":[]}),
+            &BTreeSet::new(),
+        )
+        .unwrap();
         let bindings = FeatureBlockBindings::new(&registry, BTreeSet::new())
             .unwrap()
             .with_state_providers(providers, catalog, placement)

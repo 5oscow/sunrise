@@ -23,7 +23,7 @@ pub(super) struct BlockBehavior {
     pub(super) support: Arc<BlockSupportRegistry<'static>>,
     pub(super) collision: Arc<BlockCollisionRegistry<'static>>,
     pub(super) survival: BlockSurvivalRegistry<'static>,
-    pub(super) double_plants: BTreeSet<String>,
+    pub(super) behaviours: Value,
     pub(super) mossy_carpets: BTreeSet<String>,
 }
 fn resource(message: impl Into<String>) -> GeneratorError {
@@ -156,8 +156,11 @@ impl BlockBehavior {
             fluid_tags,
         )?;
         let placement = json("placement-definitions.json")?;
+        // Placement needs only the registered class chains, not per-state facts.
+        let behaviours = json("block-behaviours.json")?;
+        let behaviours = serde_json::json!({"blocks": behaviours["blocks"]});
         Ok(Some(Self {
-            double_plants: serde_json::from_value(placement["double_plants"].clone())?,
+            behaviours,
             mossy_carpets: serde_json::from_value(placement["mossy_carpets"].clone())?,
             properties,
             support,

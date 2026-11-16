@@ -126,6 +126,9 @@ public final class VanillaSimpleBlockOracle {
    VanillaBlockSurvivalOracle.main(args);
    var data=new JsonObject();var doubles=new JsonArray();var moss=new JsonArray();
    for(var block:BuiltInRegistries.BLOCK){String name=BuiltInRegistries.BLOCK.getKey(block).toString();if(block instanceof DoublePlantBlock)doubles.add(name);if(block instanceof MossyCarpetBlock)moss.add(name);}
+   var blocks=new JsonArray();
+   for(var block:BuiltInRegistries.BLOCK){var entry=new JsonObject();entry.addProperty("name",BuiltInRegistries.BLOCK.getKey(block).toString());var classes=new JsonArray();for(Class<?> cls=block.getClass();cls!=null;cls=cls.getSuperclass())classes.add(cls.getSimpleName());entry.add("class",classes);blocks.add(entry);}
+   data.add("blocks",blocks);
    data.add("double_plants",doubles);data.add("mossy_carpets",moss);Files.writeString(dir.resolve("placement-definitions.json"),data.toString());return;
   }
   VanillaHeightmapOracle.bindTags(JsonParser.parseString(Files.readString(dir.resolve("tags.json"))).getAsJsonObject());

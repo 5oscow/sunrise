@@ -130,7 +130,7 @@ impl LiveFeatures {
                     BlockPlacementBindings::new(
                         registry,
                         &blocks.properties,
-                        &blocks.double_plants,
+                        &blocks.behaviours,
                         &blocks.mossy_carpets,
                     )?,
                 )?;
