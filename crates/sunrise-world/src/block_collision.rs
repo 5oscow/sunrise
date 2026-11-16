@@ -97,11 +97,15 @@ impl<'r> BlockCollisionRegistry<'r> {
         for index in 0..cached.registry().len() {
             let id = BlockStateId(index as u32);
             let state = cached.registry().state(id).unwrap();
-            let mut large = cached.cached_shape(id)?.is_none_or(|shape| {
-                Axis::ALL
-                    .into_iter()
-                    .any(|axis| shape.min(axis) < 0.0 || shape.max(axis) > 1.0)
-            });
+            let published = cached.publishes_shapes(id);
+            // A block entity's shape can leave the cell, so a state that may publish is
+            // always scanned for in the cells around its own, as vanilla's dynamic shapes are.
+            let mut large = published
+                || cached.cached_shape(id)?.is_none_or(|shape| {
+                    Axis::ALL
+                        .into_iter()
+                        .any(|axis| shape.min(axis) < 0.0 || shape.max(axis) > 1.0)
+                });
             if let Some(rule) = ScaffoldingCollision::from_state(state)? {
                 contextual.insert(id, ContextualRule::Scaffolding(rule));
             } else if let Some(rule) = LiquidCollision::from_state(state)? {
@@ -119,14 +123,16 @@ impl<'r> BlockCollisionRegistry<'r> {
                     .any(|axis| shape.min(axis) < 0.0 || shape.max(axis) > 1.0);
             }
             // No contextual rule and an empty cached shape: empty everywhere.
-            let empty = !declared_nonempty
+            let empty = !published
+                && !declared_nonempty
                 && !contextual.contains_key(&id)
                 && cached.cached_shape(id)?.is_some_and(VoxelShape::is_empty);
             scan_flags.push(
                 u8::from(large)
                     | (u8::from(state.name == "minecraft:moving_piston") << 1)
                     | (u8::from(empty) << 2)
-                    | (u8::from(contextual.contains_key(&id) || declared_collision) << 3),
+                    | (u8::from(contextual.contains_key(&id) || declared_collision) << 3)
+                    | (u8::from(published) << 4),
             );
             if cached.cached_shape(id)?.is_none()
                 && let Some(rule) =
@@ -167,6 +173,22 @@ impl<'r> BlockCollisionRegistry<'r> {
             empty_shape: flags & 4 != 0,
         })
     }
+    /// Whether the block entity of `state`'s block publishes the block's shapes
+    /// (`shapes_from_block_entity`). States outside the registry do not.
+    pub fn publishes_shapes(&self, state: BlockStateId) -> bool {
+        self.scan_flags
+            .get(state.0 as usize)
+            .is_some_and(|flags| flags & 16 != 0)
+    }
+    /// The state's cached shape, unless it may publish its own: a cached shape of such a state
+    /// stands only when its block entity holds none, so callers that read the cache go through
+    /// [`Self::collision_shape`] for it.
+    pub fn static_shape(&self, state: BlockStateId) -> io::Result<Option<&VoxelShape>> {
+        if self.publishes_shapes(state) {
+            return Ok(None);
+        }
+        self.cached.cached_shape(state)
+    }
     /// Whether `state` can have a collision shape: false for states whose shape is always
     /// empty, whatever the context. States outside the registry count.
     pub fn may_collide(&self, state: BlockStateId) -> bool {
@@ -195,6 +217,13 @@ impl<'r> BlockCollisionRegistry<'r> {
         state: BlockStateId,
         position: [i32; 3],
     ) -> Result<VoxelShape, CollisionQueryError<W::Error>> {
+        if self.publishes_shapes(state)
+            && let Some(shape) = world
+                .published_collision_shape(position)
+                .map_err(|e| CollisionQueryError::Dynamic(DynamicSupportError::World(e)))?
+        {
+            return Ok(shape);
+        }
         if let Some(shape) = self
             .cached
             .cached_shape(state)
@@ -225,6 +254,14 @@ impl<'r> BlockCollisionRegistry<'r> {
             + LiquidCollisionWorld<Error = E>
             + PowderSnowWorld<Error = E>,
     {
+        // A published shape stands over every declared one, whatever the entity.
+        if self.publishes_shapes(state)
+            && let Some(shape) = world
+                .published_collision_shape([position.x, position.y, position.z])
+                .map_err(|e| CollisionQueryError::Dynamic(DynamicSupportError::World(e)))?
+        {
+            return Ok(shape);
+        }
         // Most states have no contextual rule: their flag spares the lookup.
         let contextual = self
             .scan_flags

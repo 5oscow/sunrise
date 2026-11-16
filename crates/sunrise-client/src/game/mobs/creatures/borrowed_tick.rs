@@ -152,6 +152,8 @@ impl Game<'_> {
             }
         }
         let mut cursor = 0;
+        // Sounds the tick's hits queued, appended to the level's queue once the level is dropped.
+        let mut hit_sounds: Vec<super::NativeSound> = Vec::new();
         let mut resuming = false;
         // An invalid removed vehicle is retried once at this rider's own
         // eligible entity tick, never from the later global positioning pass.
@@ -192,7 +194,12 @@ impl Game<'_> {
                     Some(world_items!(self)),
                     Some(&self.pack.block_registries),
                     &self.damage_hooks,
-                );
+                )
+                .with_effects(crate::game::entity::hit_effects_of!(
+                    self,
+                    None,
+                    in hit_sounds
+                ));
                 let path_changes = sunrise_client::mobs::collision_changes(&base, &path_writes);
                 laps.lap("creature_prepare");
                 let mut cached_difficulty: Option<((i32, i32), spawning::LocalDifficulty)> = None;
@@ -681,6 +688,7 @@ impl Game<'_> {
                     }
                 }
             }
+            self.creatures.lan_sounds.append(&mut hit_sounds);
             if pause.is_none() && retry_rider.is_none() && !section_yield {
                 break;
             }

@@ -21,6 +21,7 @@ pub(crate) mod dimension;
 pub(crate) mod dimension_transition;
 pub(crate) mod explosion_settings;
 pub(crate) mod game_rule_value;
+pub(crate) mod place_feature_refusal;
 // hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod ground;

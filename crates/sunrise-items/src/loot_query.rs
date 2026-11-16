@@ -98,7 +98,7 @@ impl<R: RandomSource> LootContext<'_, R> {
         sunrise_world::loot::LootContext {
             queried_table_id: self.query.id(),
             queried_stack: self.query.queried_stack.clone(),
-            entity: None,
+            entity: self.target.map(|(entity, _)| entity),
             damage: None,
             player: None,
             block: (!self.block.is_empty()).then_some(self.block),

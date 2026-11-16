@@ -64,6 +64,37 @@ impl LootData {
         items
     }
 
+    /// [`Self::roll`] with the entity parameters of `params` (a fishing hook
+    /// as `this` and its owner as the attacker), and `params.luck` as the
+    /// luck. The entity predicates read them, and a hook's `in_open_water`
+    /// still reads `open_water`.
+    pub fn roll_as<R: RandomSource + Clone>(
+        &self,
+        table: &str,
+        random: &mut R,
+        biome: Option<&str>,
+        open_water: Option<bool>,
+        params: &EntityLootParams,
+    ) -> Vec<LootStack> {
+        let Some(json) = self.tables.get(table) else {
+            return Vec::new();
+        };
+        let mut c = Context {
+            query: query::current_query(),
+            data: self,
+            random: random.clone(),
+            biome,
+            visited: Vec::new(),
+            luck: params.luck,
+            open_water,
+            entity: Some(params),
+            enchanted_level: None,
+        };
+        let items = c.roll_root(Some(table), json);
+        *random = c.random;
+        items
+    }
+
     /// Roll an unnamed root, sharing any caller-supplied queried parameters.
     pub fn roll_inline<R: RandomSource + Clone>(
         &self,

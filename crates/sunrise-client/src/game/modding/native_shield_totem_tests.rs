@@ -3,8 +3,7 @@
 use super::entity::damage_level_of;
 use super::native_entity_refs::tests::with_game;
 use mod_api::{
-    self, Hand, Hooks, LevelRandomHost, LivingDamagePostEvent, LivingShieldBlockEvent,
-    LivingUseTotemEvent,
+    self, Hand, HitHost, Hooks, LivingDamagePostEvent, LivingShieldBlockEvent, LivingUseTotemEvent,
 };
 use std::sync::{Arc, Mutex};
 use sunrise_client::mobs::{Damage, DamageKind, Mob};
@@ -27,11 +26,7 @@ struct Probe(Arc<Mutex<Heard>>);
 
 #[mod_api::__subscriptions]
 impl Hooks for Probe {
-    fn living_shield_block(
-        &self,
-        level: &mut dyn LevelRandomHost,
-        event: &mut LivingShieldBlockEvent<'_>,
-    ) {
+    fn living_shield_block(&self, level: &mut dyn HitHost, event: &mut LivingShieldBlockEvent<'_>) {
         let mut heard = self.0.lock().unwrap();
         heard.order.push("shield");
         heard
@@ -45,12 +40,12 @@ impl Hooks for Probe {
             level.with_random(|random| random.next_int());
         }
     }
-    fn living_damage_post(&self, _: &mut dyn LevelRandomHost, _: &mut LivingDamagePostEvent<'_>) {
+    fn living_damage_post(&self, _: &mut dyn HitHost, _: &mut LivingDamagePostEvent<'_>) {
         self.0.lock().unwrap().order.push("post");
     }
     fn living_use_totem(
         &self,
-        _: &mut dyn LevelRandomHost,
+        _: &mut dyn HitHost,
         event: &mut LivingUseTotemEvent<'_>,
     ) -> mod_api::Flow {
         let mut heard = self.0.lock().unwrap();
@@ -93,7 +88,7 @@ fn the_shield_hook_sees_the_hit_before_armor_and_enchantment_reductions() {
         let mut hit = zombie(game, 226001);
         // A mob's attack: its armor takes a share of the 10 later, in `actuallyHurt`.
         assert!(hit.damage(
-            damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push),
+            damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push, None),
             10.0,
             Damage::mob(226002, [2.0, 0.0, 2.0])
         ));
@@ -113,7 +108,7 @@ fn a_blocked_damage_above_the_hit_is_clamped_to_it() {
         let mut hit = zombie(game, 226003);
         let before = hit.health;
         hit.damage(
-            damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push),
+            damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push, None),
             6.0,
             Damage::of(DamageKind::Generic),
         );
@@ -134,7 +129,7 @@ fn setting_blocked_false_blocks_nothing() {
         let mut hit = zombie(game, 226004);
         let before = hit.health;
         hit.damage(
-            damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push),
+            damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push, None),
             6.0,
             Damage::of(DamageKind::Generic),
         );
@@ -155,7 +150,7 @@ fn the_totem_hook_fires_after_the_health_is_gone_and_a_cancel_lets_the_mob_die()
         hit.extra
             .set_main_hand(Some("minecraft:totem_of_undying".into()));
         hit.damage(
-            damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push),
+            damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push, None),
             1000.0,
             Damage::of(DamageKind::Generic),
         );
@@ -177,7 +172,7 @@ fn an_uncanceled_totem_saves_the_mob() {
         hit.extra
             .set_main_hand(Some("minecraft:totem_of_undying".into()));
         hit.damage(
-            damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push),
+            damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push, None),
             1000.0,
             Damage::of(DamageKind::Generic),
         );
@@ -203,7 +198,7 @@ fn the_shield_hook_draws_from_the_hits_random() {
                 *game.world.random = sunrise_core::random::LegacyRandom::new(5);
                 let mut hit = zombie(game, 226007);
                 hit.damage(
-                    damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push),
+                    damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push, None),
                     1.0,
                     Damage::of(DamageKind::Generic),
                 );

@@ -512,6 +512,27 @@ pub trait PlayersClientBackendMut {
 #[doc(hidden)]
 #[sunrise_mod_api_macros::host_area]
 pub trait PlayersBackendMut {
+    /// Side: both.
+    /// `Player.hasCorrectToolForDrops(state, level, pos)` and `IBlockExtension.canHarvestBlock`
+    /// in one answer: whether the tool in `player`'s selected hotbar slot (never the offhand)
+    /// harvests `state` at `pos` in `level`, the answer the game itself uses for the dig's
+    /// progress, the break's drops and a door's break. It is vanilla's rule (true when the block
+    /// needs no tool, else the held stack's `minecraft:tool` rules), then the block's
+    /// `can_harvest_block` parts, then the global `player_harvest_check`, so it **runs those
+    /// hooks** with this player. Sunrise's sites all share this one answer, unlike NeoForge's
+    /// break progress, which skips the block override. Nothing requires `pos` to hold `state`. On
+    /// a server any online player can be asked; on a client only the local player. None for a
+    /// stale handle or player, a dead server player, a level other than the one in place, a
+    /// player the client has no state for, and a call from inside the harvest hooks themselves
+    /// (`can_harvest_block`, `player_harvest_check`), which would recurse.
+    #[access(WorldOnly)]
+    fn player_has_correct_tool_for_drops(
+        &mut self,
+        player: PlayerRef,
+        level: LevelRef,
+        pos: [i32; 3],
+        state: BlockState,
+    ) -> Option<bool>;
     /// Side: server.
     /// Set a registered custom book's authoritative pair and synchronize an
     /// accepted change. Returns false for an unavailable player, unknown key

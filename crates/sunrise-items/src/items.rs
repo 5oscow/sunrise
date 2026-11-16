@@ -1647,22 +1647,22 @@ impl Items {
         random: &mut R,
         keep_empty: bool,
     ) -> Vec<ItemStack> {
-        self.table_root(id, killed_by_player, held, false, random, keep_empty)
+        self.table_root(id, killed_by_player, held, None, random, keep_empty)
             .unwrap_or_default()
     }
     /// `LootTable.getRandomItems(LootParams)` of table `id` with an ORIGIN,
-    /// `held` as the TOOL and, when `this_entity`, a THIS_ENTITY: the context
-    /// `/loot … fish` gives (`LootContextParamSets.FISHING`). The stacks come
+    /// `held` as the TOOL and, when `this` is given, that entity as THIS_ENTITY
+    /// (the origin is the place the caller set). The stacks come
     /// after the stack splitter, each at most its item's stack size, empties
     /// left out. None when there is no such table.
     pub fn roll_loot_table<R: RandomSource>(
         &self,
         id: &str,
         held: Option<&ItemStack>,
-        this_entity: bool,
+        this: Option<EntityTarget<'_>>,
         random: &mut R,
     ) -> Option<Vec<ItemStack>> {
-        self.table_root(id, false, held, this_entity, random, false)
+        self.table_root(id, false, held, this, random, false)
     }
     /// A named root with no block; command replacement may retain emitted empties.
     fn table_root<R: RandomSource>(
@@ -1670,7 +1670,7 @@ impl Items {
         id: &str,
         killed_by_player: bool,
         held: Option<&ItemStack>,
-        this_entity: bool,
+        target: Option<EntityTarget<'_>>,
         random: &mut R,
         keep_empty: bool,
     ) -> Option<Vec<ItemStack>> {
@@ -1684,10 +1684,10 @@ impl Items {
             held,
             killed_by_player,
             explosion_radius: None,
-            this_entity,
+            this_entity: false,
             entity_levels: None,
             block_levels: None,
-            target: None,
+            target,
             location: None,
             keep_empty,
         };
@@ -1960,7 +1960,8 @@ pub struct BlockLootRoll<'a> {
     /// read, in the roll's order; none keeps the tool's.
     pub levels: Option<&'a BlockLootLevels<'a>>,
 }
-type EntityTarget<'a> = (
+/// An entity a roll names as `this`, with the predicate matcher for its conditions.
+pub type EntityTarget<'a> = (
     &'a sunrise_world::loot::LootEntity,
     &'a dyn Fn(&Value, &sunrise_world::loot::LootEntity) -> bool,
 );

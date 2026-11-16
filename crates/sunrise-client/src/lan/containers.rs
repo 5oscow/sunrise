@@ -152,6 +152,10 @@ impl Hub {
             seed,
         })
     }
+    /// Replace the server sound-seed stream, for a probe that needs its draws known.
+    pub fn set_sound_seeds(&self, random: sunrise_core::random::LegacyRandom) {
+        *self.sound_seeds.lock().unwrap() = random;
+    }
     /// Draw the next seed from the server sound source.
     pub fn next_sound_seed(&self) -> i64 {
         next_sound_seed(&mut *self.sound_seeds.lock().unwrap())

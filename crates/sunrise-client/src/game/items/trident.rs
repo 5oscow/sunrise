@@ -1137,7 +1137,12 @@ impl Game<'_> {
                         if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
                             let from = Some([t.position.x, t.position.y, t.position.z]);
                             let hurt = m.damage_projectile(
-                                crate::game::entity::damage_level_of!(self, &attack, &mut credit),
+                                crate::game::entity::damage_level_of!(
+                                    self,
+                                    &attack,
+                                    &mut credit,
+                                    None
+                                ),
                                 damage,
                                 Damage {
                                     kind: trident_source,
@@ -1178,7 +1183,8 @@ impl Game<'_> {
                             if !crate::game::entity::damage_level_of!(
                                 self,
                                 self.combat.attack(),
-                                no_push
+                                no_push,
+                                None
                             )
                             .invulnerability_check(
                                 sunrise_client::health::Hurting::Entity(id as i32, &kind, source),
@@ -1191,7 +1197,8 @@ impl Game<'_> {
                             if !crate::game::entity::damage_level_of!(
                                 self,
                                 self.combat.attack(),
-                                no_push
+                                no_push,
+                                None
                             )
                             .invulnerability_check(
                                 sunrise_client::health::Hurting::Entity(id as i32, kind, source),

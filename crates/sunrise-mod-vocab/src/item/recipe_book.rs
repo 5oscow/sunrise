@@ -10,6 +10,9 @@ pub use layout::RecipeBookLayout;
 #[path = "recipe_book_filter.rs"]
 mod filter;
 pub use filter::RecipeBookFilterLook;
+#[path = "recipe_book_ghost.rs"]
+mod ghost;
+pub use ghost::GhostSlot;
 #[path = "recipe_display.rs"]
 mod display;
 #[path = "recipe_book_settings.rs"]

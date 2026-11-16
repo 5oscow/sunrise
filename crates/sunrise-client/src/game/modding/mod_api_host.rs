@@ -647,6 +647,61 @@ impl mod_api::LevelRandomHost for super::native_hooks::HitLevel<'_> {
     }
 }
 
+impl mod_api::HitHost for super::native_hooks::HitLevel<'_> {
+    fn play_sound_at(
+        &mut self,
+        sound: &str,
+        at: [f64; 3],
+        source: mod_api::SoundSource,
+        volume: f32,
+        pitch: f32,
+    ) -> bool {
+        super::native_hooks::mod_sound_ok(sound, at, source.index(), volume, pitch)
+            && self
+                .0
+                .hit_effects()
+                .is_some_and(|hit| hit.play(sound, at, source, volume, pitch, None))
+    }
+    fn play_sound_from(
+        &mut self,
+        entity: mod_api::EntityRef,
+        sound: &str,
+        source: mod_api::SoundSource,
+        volume: f32,
+        pitch: f32,
+    ) -> bool {
+        let Some(hit) = self.0.hit_effects() else {
+            return false;
+        };
+        let Some((id, at, _)) = hit.entity(entity) else {
+            return false;
+        };
+        super::native_hooks::mod_sound_ok(sound, at, source.index(), volume, pitch)
+            && hit.play(sound, at, source, volume, pitch, Some(id))
+    }
+    fn entity_next_float(&mut self, entity: mod_api::EntityRef) -> Option<f32> {
+        use sunrise_core::random::RandomSource;
+        Some(self.0.hit_effects()?.entity(entity)?.2.next_float())
+    }
+    fn entity_next_double(&mut self, entity: mod_api::EntityRef) -> Option<f64> {
+        use sunrise_core::random::RandomSource;
+        Some(self.0.hit_effects()?.entity(entity)?.2.next_double())
+    }
+    fn entity_next_bool(&mut self, entity: mod_api::EntityRef) -> Option<bool> {
+        use sunrise_core::random::RandomSource;
+        Some(self.0.hit_effects()?.entity(entity)?.2.next_boolean())
+    }
+    fn entity_next_int(&mut self, entity: mod_api::EntityRef, bound: i32) -> Option<i32> {
+        use sunrise_core::random::RandomSource;
+        self.0
+            .hit_effects()?
+            .entity(entity)?
+            .2
+            .next_int_bound(bound)
+            .ok()
+    }
+}
+
 pub(super) struct LevelTicks<'a, L> {
     pub level: L,
     pub ticks: &'a mut Ticks,

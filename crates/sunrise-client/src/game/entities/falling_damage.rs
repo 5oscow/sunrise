@@ -43,7 +43,7 @@ impl Game<'_> {
                     );
                     let mut credit = plan.lend(&mut self.last_hurt_by_player);
                     falling_block::hurt_mobs_with_kind(
-                        crate::game::entity::damage_level_of!(self, &attack, &mut credit),
+                        crate::game::entity::damage_level_of!(self, &attack, &mut credit, None),
                         [&mut self.mobs[index]],
                         block.position,
                         impact.amount,
@@ -265,8 +265,8 @@ impl Game<'_> {
 mod tests {
     use crate::game::{Game, native_entity_refs::tests::with_game};
     use mod_api::{
-        ArmorHurtEvent, DamageItemEvent, Flow, Hooks, ItemPart, LevelRandomHost,
-        LivingIncomingDamageEvent, Registrar, RegistrationContext, ServerHost,
+        ArmorHurtEvent, DamageItemEvent, Flow, HitHost, Hooks, ItemPart, LivingIncomingDamageEvent,
+        Registrar, RegistrationContext, ServerHost,
     };
     use std::sync::{Arc, Mutex};
     use sunrise_client::{items::ItemStack, motion::PlayerMotion};
@@ -296,7 +296,7 @@ mod tests {
         }
         fn living_incoming_damage(
             &self,
-            _: &mut dyn LevelRandomHost,
+            _: &mut dyn HitHost,
             _: &mut LivingIncomingDamageEvent<'_>,
         ) -> Flow {
             let mut log = self.0.lock().unwrap();

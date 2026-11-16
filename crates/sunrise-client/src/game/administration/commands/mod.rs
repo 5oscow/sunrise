@@ -2230,7 +2230,10 @@ impl Game<'_> {
         ))
         .then(|| self.target_position(t))
         .flatten();
-        let mut context = self.who_context(None, None);
+        let mut context = self
+            .network_entity_id(t)
+            .map(|id| self.entity_event_context(id as u32, None))
+            .unwrap_or_default();
         context.living = matches!(t, Target::Stand(_));
         if let Target::Item(id) = t {
             context.dampens = self.dropped.iter().find(|i| i.id == id).is_some_and(|i| {

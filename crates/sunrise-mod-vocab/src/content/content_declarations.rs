@@ -170,6 +170,10 @@ pub struct Block {
     pub collision_context_shapes: BTreeMap<ShapeEntityKind, BlockShapes>,
     /// Ray-face override, without replacing the outline hit point or creating a hit.
     pub interaction_shapes: Option<BlockShapes>,
+    /// Whether the block's block entity publishes the block's outline and collision shapes
+    /// (`BlockEntityRef::set_shapes`), which then replace the declared ones until cleared.
+    /// Refused at load, by name, on a block that no block entity type owns. False when unset.
+    pub shapes_from_block_entity: bool,
     /// State properties of its own, which its template does not have.
     pub state_properties: BTreeMap<String, BlockStateProperty>,
     /// State properties overlaid on the template default.
@@ -275,6 +279,7 @@ impl Default for Block {
             outline_context_shapes: BTreeMap::new(),
             collision_context_shapes: BTreeMap::new(),
             interaction_shapes: None,
+            shapes_from_block_entity: false,
             state_properties: BTreeMap::new(),
             default_state: BTreeMap::new(),
             item: true,

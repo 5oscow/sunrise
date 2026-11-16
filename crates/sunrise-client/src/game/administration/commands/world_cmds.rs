@@ -457,7 +457,7 @@ impl Game<'_> {
             direct: entity_id(direct),
             position,
         };
-        if crate::game::entity::damage_level_of!(self, self.combat.attack(), no_push)
+        if crate::game::entity::damage_level_of!(self, self.combat.attack(), no_push, None)
             .invulnerability_check(
                 sunrise_client::health::Hurting::Entity(id as i32, &entity_kind, source),
                 vanilla,
@@ -497,7 +497,7 @@ impl Game<'_> {
             let queued = m.outbox.len();
             let old_health = m.health;
             let hurt = m.damage(
-                crate::game::entity::damage_level_of!(self, attack, &mut credit),
+                crate::game::entity::damage_level_of!(self, attack, &mut credit, None),
                 amount,
                 damage,
             );

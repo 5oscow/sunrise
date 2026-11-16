@@ -195,6 +195,73 @@ mod tests {
         });
     }
 
+    /// A door's break asks the same harvest answer as every other block: the selected hotbar
+    /// slot, never the offhand. Breaking an iron door's upper half with the pickaxe in the main
+    /// hand takes both halves (the lower by the neighbour update); with the pickaxe only in the
+    /// offhand (and acting) the tool is not the correct one, so the lower half goes at once and
+    /// nothing drops.
+    #[test]
+    #[ignore = "daily"]
+    fn a_door_breaks_by_the_selected_slot_not_the_offhand() {
+        with_game(|game| {
+            game.world.chunks.insert(
+                (0, 0),
+                std::sync::Arc::new(sunrise_client::chunk::Chunk::empty(0, 0)),
+            );
+            let pickaxe = ItemStack::new("minecraft:iron_pickaxe", 1);
+            let player = with_player(game, pickaxe.clone());
+            let (lower, upper) = ([6, 64, 4], [6, 65, 4]);
+            let door = |game: &mut Game<'_>, half: &str, pos: [i32; 3]| {
+                let state = game
+                    .pack
+                    .assets
+                    .registry
+                    .resolve(&sunrise_world::chunk::BlockState {
+                        name: "minecraft:iron_door".into(),
+                        properties: [
+                            ("facing", "north"),
+                            ("half", half),
+                            ("hinge", "left"),
+                            ("open", "false"),
+                            ("powered", "false"),
+                        ]
+                        .into_iter()
+                        .map(|(k, v)| (k.into(), v.into()))
+                        .collect(),
+                    })
+                    .unwrap();
+                game.world.set(pos[0], pos[1], pos[2], state).unwrap();
+            };
+            door(game, "lower", lower);
+            door(game, "upper", upper);
+            assert!(game.player_destroy_block(player, upper, false));
+            assert_eq!(block(game, upper), "minecraft:air");
+            // Vanilla takes the lower half out in the same call, by the neighbour update.
+            game.process_level_events().unwrap();
+            assert_eq!(
+                block(game, lower),
+                "minecraft:air",
+                "main hand: correct tool"
+            );
+
+            game.dropped.clear();
+            game.inventory[game.selected] = None;
+            game.offhand = Some(pickaxe);
+            game.hand = sunrise_client::first_person::Hand::Off;
+            door(game, "lower", lower);
+            door(game, "upper", upper);
+            assert_eq!(block(game, lower), "minecraft:iron_door");
+            assert!(game.player_destroy_block(player, upper, false));
+            assert_eq!(block(game, upper), "minecraft:air");
+            assert_eq!(
+                block(game, lower),
+                "minecraft:air",
+                "offhand: not the correct tool"
+            );
+            assert!(!popped(game, "minecraft:iron_door"));
+        });
+    }
+
     /// Into the inventory: silk touch keeps the stone whole, and a diamond
     /// ore gives its diamond and still its experience (3 to 7 points).
     #[test]

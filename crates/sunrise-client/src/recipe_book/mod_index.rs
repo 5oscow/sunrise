@@ -159,7 +159,9 @@ impl ModBookIndex {
                 }
                 for display in &recipe.displays {
                     validate_display(display, &recipe.recipe, resources)?;
-                    if let Some(layout) = index.layouts.get(&category.target_menu) {
+                    if let Some(layout) = index.layouts.get(&category.target_menu)
+                        && !matches!(layout.declaration(), mod_api::RecipeBookLayout::Mod)
+                    {
                         layout.map(display, true).map_err(|error| {
                             DisplayLoadError::InvalidLayout(format!(
                                 "menu {} recipe {}: {error:?}",
