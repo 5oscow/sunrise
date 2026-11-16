@@ -20,6 +20,10 @@ pub mod biome_regions;
 pub mod block_entity_encode;
 mod block_entity_order;
 mod far_regions;
+mod horizon_names;
+pub(crate) use horizon_names::adopt_in_player as adopt_horizon_player;
+#[cfg(test)]
+mod horizon_names_tests;
 pub mod level_mods;
 mod respawn;
 mod writes;
@@ -2209,6 +2213,7 @@ fn upgrade_record<'a>(
     context: impl FnOnce() -> Option<&'a DatafixContext>,
 ) -> Result<()> {
     use sunrise_world::datafix::{self, schema::Ty};
+    horizon_names::adopt_in_record(folder, &mut record.tag);
     let default = if folder == Folder::Poi { 1945 } else { -1 };
     if number(record.tag.get("DataVersion")).unwrap_or(default) >= i64::from(DATA_VERSION) {
         return Ok(());
@@ -2373,8 +2378,14 @@ impl SaveDir {
     /// a warning, and the level opens without them (as vanilla's `SavedDataStorage` starts a
     /// saved data over when its file is broken), so the next save can't overwrite it.
     pub fn load_attachments(&self) -> sunrise_mod_runtime::attachments::Attachments {
-        let path = self.attachments_path();
-        let data = match try_read_dat(&path) {
+        let mut path = self.attachments_path();
+        let mut read = try_read_dat(&path);
+        if matches!(read, Err(DatIssue::Missing)) {
+            // A dimension Horizon saved: its file, written under Sunrise's name at the next save.
+            path = horizon_names::horizon_attachments_path(&self.root);
+            read = try_read_dat(&path);
+        }
+        let data = match read {
             Err(DatIssue::Missing) => return Default::default(),
             Ok(root) => match root.get("data") {
                 Some(Tag::Compound(data)) => Ok(data.clone()),
@@ -2402,7 +2413,11 @@ impl SaveDir {
     ) -> Result<()> {
         let path = self.attachments_path();
         let data = attachments.to_nbt();
-        if data.is_empty() && !path.exists() {
+        // Emptied after a Horizon file was read: an empty file under Sunrise's name keeps it unread.
+        if data.is_empty()
+            && !path.exists()
+            && !horizon_names::horizon_attachments_path(&self.root).exists()
+        {
             return Ok(());
         }
         write_dat(
@@ -3738,7 +3753,10 @@ impl Level {
                 .or_else(|| read_dat(&player_dir.join(format!("{name}.dat_old"))))
         });
         level.singleplayer_file = owner.is_some();
-        let player = owner.or_else(|| data.get("Player").cloned());
+        let mut player = owner.or_else(|| data.get("Player").cloned());
+        if let Some(player) = &mut player {
+            horizon_names::adopt_in_player(player);
+        }
         level.player_uuid = uuid_from_tag(player.as_ref().and_then(|p| p.get("UUID"))).or(uuid);
         let spawn = level
             .world_spawn
