@@ -240,6 +240,199 @@ pub(crate) fn check(members: &[crate::link::Member<'_>]) -> Result<(), crate::Re
     })
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Refusal, runtime};
+
+    /// A module with these imports of `sunrise` (each `(name, signature)`) and the guest entries.
+    fn module(imports: &[(String, &str)]) -> Vec<u8> {
+        let imports: String = imports
+            .iter()
+            .map(|(name, signature)| {
+                format!("(import \"sunrise\" \"{name}\" (func {signature}))\n")
+            })
+            .collect();
+        wat::parse_str(format!(
+            r#"(module (@custom "dylink.0" "\01\04\00\00\00\00")
+            (import "env" "memory" (memory 1))
+            {imports}
+            (func (export "sunrise_in") (param i32) (result i32) i32.const 0)
+            (func (export "sunrise_hook") (param i64) (result i64) i64.const 0))"#
+        ))
+        .unwrap()
+    }
+
+    const CALL: &str = "(param i32 i32 i32 i32) (result i32)";
+
+    fn log() -> (String, &'static str) {
+        (protocol_name("log", SHARED_PROTOCOL).text(), CALL)
+    }
+
+    fn load(imports: &[(String, &str)]) -> Result<(), Refusal> {
+        let bytes = module(imports);
+        crate::test_stack::on_guest_stack(|| {
+            runtime::WasmMod::instantiate(
+                &runtime::engine().unwrap(),
+                runtime::DEFAULT_GROUP_MEMORY_MIB,
+                &[crate::link::Member {
+                    name: "built",
+                    module: &bytes,
+                }],
+                None,
+            )
+            .map(|_| ())
+        })
+    }
+
+    fn mismatches(imports: &[(String, &str)]) -> (Vec<Mismatch>, usize) {
+        match load(imports).unwrap_err() {
+            Refusal::Boundary {
+                mismatches,
+                omitted,
+            } => (mismatches, omitted),
+            other => panic!("{other}"),
+        }
+    }
+
+    /// `name` with its hash's last digit changed.
+    fn changed(name: &str) -> String {
+        let mut name = name.to_owned();
+        let last = name.pop().unwrap();
+        name.push(if last == '0' { '1' } else { '0' });
+        name
+    }
+
+    #[test]
+    fn a_module_that_imports_part_of_the_table_loads() {
+        // The game's table has thousands more rows than this module uses: they are no concern of it.
+        let first = CALLS[0].name.to_owned();
+        let last = CALLS[CALLS.len() - 1].name.to_owned();
+        let hook = EXPORT_CALLS[0].to_owned();
+        load(&[log(), (first, CALL), (last, CALL), (hook, "")]).unwrap();
+    }
+
+    #[test]
+    fn a_changed_call_is_refused_naming_it_and_both_hashes() {
+        let name = CALLS[CALLS.len() / 2].name;
+        let (list, omitted) = mismatches(&[log(), (changed(name), CALL)]);
+        assert_eq!(omitted, 0);
+        assert_eq!(list.len(), 1);
+        let Why::Changed {
+            built_hash,
+            game_hash,
+            ..
+        } = &list[0].why
+        else {
+            panic!("{:?}", list[0]);
+        };
+        assert_ne!(built_hash, game_hash);
+        assert!(name.contains(game_hash.as_str()));
+        assert!(list[0].item.starts_with("host:"), "{}", list[0].item);
+        assert!(list[0].to_string().contains("changed"));
+    }
+
+    #[test]
+    fn a_removed_item_is_refused_as_missing() {
+        let name = Name {
+            kind: Kind::Call,
+            path: "NoSuchHost::gone".into(),
+            version: None,
+            hash: "0".repeat(32),
+        }
+        .text();
+        let (list, _) = mismatches(&[log(), (name, CALL)]);
+        assert_eq!(list[0].why, Why::Missing);
+        assert!(
+            list[0]
+                .to_string()
+                .contains("NoSuchHost::gone is not in this game")
+        );
+    }
+
+    #[test]
+    fn a_hook_version_bump_is_refused_as_version_two_to_three() {
+        let versioned = EXPORT_CALLS
+            .iter()
+            .find(|name| name.starts_with("hook:") && name.contains('@'))
+            .expect("a hook with a version");
+        let built = Name::parse(versioned).unwrap();
+        let older = Name {
+            version: Some(built.version.unwrap().saturating_sub(1)),
+            ..built.clone()
+        }
+        .text();
+        let (list, _) = mismatches(&[log(), (older, "")]);
+        let text = list[0].to_string();
+        assert!(
+            text.contains(&format!(
+                "version {} → {}",
+                built.version.unwrap().saturating_sub(1),
+                built.version.unwrap()
+            )),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn every_mismatch_is_listed_up_to_a_cap_and_the_rest_counted() {
+        let imports: Vec<_> = std::iter::once(log())
+            .chain((0..LISTED + 3).map(|n| {
+                (
+                    Name {
+                        kind: Kind::Call,
+                        path: format!("Gone{n}::x"),
+                        version: None,
+                        hash: "0".repeat(32),
+                    }
+                    .text(),
+                    CALL,
+                )
+            }))
+            .collect();
+        let (list, omitted) = mismatches(&imports);
+        assert_eq!((list.len(), omitted), (LISTED, 3));
+    }
+
+    #[test]
+    fn a_name_the_generator_does_not_write_is_refused_by_kind_of_fault() {
+        for bad in [
+            "host:#00".to_owned(),
+            "host:Host::x#zz".to_owned(),
+            "mystery:Host::x#00112233445566778899aabbccddeeff".to_owned(),
+            format!(
+                "host:{}::x#00112233445566778899aabbccddeeff",
+                "A".repeat(300)
+            ),
+            "host".to_owned(),
+        ] {
+            let (list, _) = mismatches(&[log(), (bad.clone(), CALL)]);
+            assert!(
+                matches!(list[0].why, Why::Malformed(_)),
+                "{bad}: {:?}",
+                list[0]
+            );
+        }
+    }
+
+    #[test]
+    fn a_module_without_the_shared_protocol_is_refused() {
+        let (list, _) = mismatches(&[(CALLS[0].name.to_owned(), CALL)]);
+        assert!(matches!(list[0].why, Why::Malformed(_)));
+        assert_eq!(list[0].item, "protocol");
+    }
+
+    #[test]
+    fn another_protocol_number_is_a_changed_item() {
+        let other = protocol_name("log", SHARED_PROTOCOL + 1).text();
+        let (list, _) = mismatches(&[(other, CALL)]);
+        assert!(
+            list.iter().any(|m| matches!(m.why, Why::Changed { .. })),
+            "{list:?}"
+        );
+    }
+}
+
 /// What a hand-written test module needs to call the game: every call the game serves as an
 /// import, the protocol words, and `$host`, which calls one by its place in the table.
 #[cfg(any(test, feature = "runtime-fixture"))]
