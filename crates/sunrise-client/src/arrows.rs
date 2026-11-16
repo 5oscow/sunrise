@@ -32,7 +32,6 @@ use sunrise_world::{
     registry::BlockStateId,
     water_splash::{self, SplashParticle, WaterSplashWorld},
 };
-use std::fmt;
 
 /// `EntityType.ARROW` (and tipped/spectral arrows): 0.5 x 0.5, eyes at 0.13.
 pub const WIDTH: f32 = 0.5;
