@@ -124,6 +124,7 @@ pub struct SpecialModelContext {
 
 impl SpecialModelContext {
     /// The context of one drawn item; only the game builds one, mods read it.
+    // hidden: the game's constructor for a received struct, not a mod authoring surface.
     #[doc(hidden)]
     pub const fn new(
         display: ItemDisplayContext,
