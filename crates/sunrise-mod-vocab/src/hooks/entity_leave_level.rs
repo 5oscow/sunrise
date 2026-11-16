@@ -23,7 +23,7 @@ pub trait Hooks {
         side = "server",
         contract = "listen",
         neoforge = "EntityLeaveLevelEvent",
-        version = 2
+        version = 3
     )]
     fn entity_leave_level();
 }

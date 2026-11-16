@@ -11,6 +11,37 @@ use super::{
 use sunrise_core::geometry::Vec3;
 use sunrise_core::nbt::{Compound, Tag};
 
+impl super::commands::OtherEntity {
+    /// Physical query bounds, not display rendering/culling dimensions.
+    pub(in crate::game) fn display_marker_or_interaction_bounds(
+        &self,
+    ) -> Option<sunrise_core::geometry::Aabb> {
+        if !matches!(
+            self.kind.as_str(),
+            "minecraft:block_display"
+                | "minecraft:item_display"
+                | "minecraft:text_display"
+                | "minecraft:marker"
+                | "minecraft:interaction"
+        ) {
+            return None;
+        }
+        Some(if let Some(settings) = self.interaction {
+            super::interactions::RemoteInteraction {
+                position: self.position,
+                width: settings.width,
+                height: settings.height,
+                response: settings.response,
+                vehicle: None,
+            }
+            .bounds()
+        } else {
+            // Display and Marker have zero-sized physical dimensions.
+            sunrise_core::geometry::Aabb::new(self.position, self.position)
+        })
+    }
+}
+
 /// Whether a position is one `/summon` takes.
 fn position_ok(pos: [f64; 3]) -> bool {
     pos.iter().all(|v| v.is_finite())
@@ -159,6 +190,7 @@ enum Apart {
     Cushion(usize),
     Painting(usize),
     Frame(usize),
+    Other(usize),
     Dragon,
 }
 
@@ -171,7 +203,7 @@ enum Slot {
 
 /// Entities joining and leaving the level (`native_entity_join_level`,
 /// `native_entity_leave_level`), for every kind in the entity walk and the
-/// five kept apart from it. Kept out of `native_hooks.rs`, whose lines may not hold macros.
+/// families kept apart from it. Kept out of `native_hooks.rs`, whose lines may not hold macros.
 impl Game<'_> {
     /// Whether an entity may have joined since the last announcement. A join
     /// in another level may cause one harmless walk of this level.
@@ -357,6 +389,14 @@ impl Game<'_> {
         if let Some(d) = self.dragon.as_ref() {
             offer(Slot::Apart(Apart::Dragon), d.id, d.join);
         }
+        for (i, other) in self
+            .others
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| !super::general::quarantined_kind(&e.kind))
+        {
+            offer(Slot::Apart(Apart::Other(i)), other.id, other.join);
+        }
         // A toss still being asked (`item_toss`) ends the flush: it and what joined after wait.
         best.filter(|&(_, id, _)| !self.native_lifecycle.held_joins.contains(&id))
     }
@@ -401,6 +441,9 @@ impl Game<'_> {
                 };
                 (kind.into(), block(f.pos))
             }
+            Slot::Apart(Apart::Other(i)) => {
+                (self.others[i].kind.clone().into(), self.others[i].position)
+            }
             Slot::Apart(Apart::Dragon) => (
                 "minecraft:ender_dragon".into(),
                 self.dragon.as_ref().map_or(Vec3::ZERO, |d| d.position),
@@ -416,6 +459,7 @@ impl Game<'_> {
             Slot::Apart(Apart::Painting(i)) => drop(self.paintings.remove(i)),
             Slot::Apart(Apart::Frame(i)) => drop(self.item_frames.remove(i)),
             Slot::Apart(Apart::Dragon) => self.discard_resident_dragon(),
+            Slot::Apart(Apart::Other(i)) => drop(self.others.remove(i)),
         }
     }
     /// Entities that were moved, not added (a portal's arrival keeps being
@@ -497,6 +541,7 @@ impl Game<'_> {
         self.cushions.iter().for_each(|c| seen(c.id));
         self.paintings.iter().for_each(|p| seen(p.id));
         self.item_frames.iter().for_each(|f| seen(f.id));
+        self.others.iter().for_each(|e| seen(e.id));
         if let Some(d) = self.dragon.as_ref() {
             seen(d.id);
         }
@@ -513,6 +558,141 @@ impl Game<'_> {
 mod tests {
     use super::*;
     use mod_api::ServerHost;
+
+    #[test]
+    #[ignore = "daily"]
+    fn saved_display_and_utility_entities_join_once_and_are_queryable() {
+        use mod_api::{EntityJoinLevelEvent, Flow, Hooks};
+        use std::sync::{Arc, Mutex};
+        let joins = Arc::new(Mutex::new(Vec::new()));
+        struct Observer(Arc<Mutex<Vec<(String, bool)>>>);
+        #[mod_api::__subscriptions]
+        impl Hooks for Observer {
+            fn entity_join_level(
+                &self,
+                host: &mut dyn ServerHost,
+                event: &mut EntityJoinLevelEvent<'_>,
+            ) -> Flow {
+                let entity = host.entity(event.entity).expect("joining handle");
+                assert_eq!(
+                    entity.kind(host).map(|kind| kind.id(host)).as_deref(),
+                    Some(event.kind)
+                );
+                assert_eq!(entity.position(host), Some(event.pos));
+                let level = host.level(event.dimension).unwrap();
+                if event.kind != "minecraft:eye_of_ender" {
+                    assert!(
+                        level
+                            .entities_in(host, [4.0, 63.0, 4.0], [6.0, 66.0, 6.0])
+                            .unwrap()
+                            .contains(&entity)
+                    );
+                }
+                self.0
+                    .lock()
+                    .unwrap()
+                    .push((event.kind.to_owned(), event.loaded_from_disk));
+                Flow::Continue
+            }
+        }
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+            "saved-display-joins",
+            Box::new(Observer(joins.clone())),
+        )]
+        .into();
+        mod_platform::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                game.native_joins_skip();
+                let kinds = [
+                    "minecraft:block_display",
+                    "minecraft:item_display",
+                    "minecraft:text_display",
+                    "minecraft:marker",
+                    "minecraft:interaction",
+                ];
+                for kind in kinds {
+                    game.summon_with_nbt(kind, [5.0, 64.0, 5.0], "{}").unwrap();
+                }
+                game.native_joins_flush(false, 0);
+                assert_eq!(
+                    *joins.lock().unwrap(),
+                    kinds.map(|kind| (kind.to_owned(), false))
+                );
+                let level = game.level("minecraft:overworld").unwrap();
+                let handles = level
+                    .entities_in(game, [4.0, 63.0, 4.0], [6.0, 66.0, 6.0])
+                    .unwrap();
+                assert_eq!(handles.len(), 5);
+                let mut chunks =
+                    game.entity_chunks(&std::collections::HashSet::from([(0, 0)]), true);
+                assert_eq!(chunks.len(), 1);
+                let (_, saved) = chunks.pop().unwrap();
+                assert_eq!(saved.len(), 5);
+                game.native_leaves_flush();
+                assert!(
+                    level
+                        .entities_in(game, [4.0, 63.0, 4.0], [6.0, 66.0, 6.0])
+                        .unwrap()
+                        .is_empty()
+                );
+                game.world.queue_entity_nbt((0, 0), saved);
+                game.spawn_loaded_entities();
+                game.native_joins_flush(true, 0);
+                game.native_leaves_flush();
+                assert_eq!(
+                    *joins.lock().unwrap(),
+                    kinds
+                        .into_iter()
+                        .map(|k| (k.to_owned(), false))
+                        .chain(kinds.into_iter().map(|k| (k.to_owned(), true)))
+                        .collect::<Vec<_>>()
+                );
+                let reloaded = level
+                    .entities_in(game, [4.0, 63.0, 4.0], [6.0, 66.0, 6.0])
+                    .unwrap();
+                assert_eq!(reloaded.len(), 5);
+                assert!(handles.iter().all(|e| e.kind(game).is_none()));
+                assert!(
+                    reloaded
+                        .iter()
+                        .all(|e| e.position(game) == Some([5.0, 64.0, 5.0]))
+                );
+                assert_eq!(
+                    game.persist.live.len(),
+                    5,
+                    "resident utilities must not spuriously leave"
+                );
+                // The join moment covers the fallback store, not a fixed list of kinds.
+                game.summon_with_nbt("minecraft:eye_of_ender", [5.0, 64.0, 5.0], "{}")
+                    .unwrap();
+                game.native_joins_flush(false, 0);
+                assert_eq!(joins.lock().unwrap().len(), 11);
+                assert_eq!(
+                    joins.lock().unwrap().last(),
+                    Some(&("minecraft:eye_of_ender".to_owned(), false))
+                );
+                // A quarantined missing-mod record shares storage, not level membership.
+                game.next_entity += 1;
+                let record = Tag::compound([(
+                    "Pos",
+                    Tag::List(
+                        [5.0_f64, 64.0, 5.0]
+                            .map(|n| Tag::Double(n.to_bits()))
+                            .to_vec(),
+                    ),
+                )]);
+                let opaque =
+                    Game::other_from_nbt(&record, game.next_entity, "missing:object").unwrap();
+                game.others.push(opaque);
+                game.native_joins_flush(true, 0);
+                assert_eq!(
+                    joins.lock().unwrap().len(),
+                    11,
+                    "opaque saved data must not join"
+                );
+            });
+        });
+    }
 
     // NBT loads assign ids; reinstall an unbound payload as a pending owner.
     macro_rules! pending {
