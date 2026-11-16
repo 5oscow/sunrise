@@ -22,7 +22,7 @@ impl Game<'_> {
         level: LevelRef,
         pos: BlockPos,
         state: BlockStateId,
-        observer: Option<mod_api::BlockEntityRef>,
+        observer: Option<BlockEntityRef>,
     ) {
         if self.contents_changing.contains(&(level, pos)) {
             return;
