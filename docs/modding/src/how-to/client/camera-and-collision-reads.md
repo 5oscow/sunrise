@@ -12,6 +12,10 @@ by one. `ClientHost::gui_options().gui_scale` is only that option. The framebuff
 `native_physical_window_size()`; divide it by this scale, rounding up, for the GUI-scaled width and
 height (`Window.getGuiScaledWidth/Height`).
 
+`LevelRef::brightness(host, layer, pos)` (`getBrightness`, the stored light 0 to 15) reads on a client too: the
+light of the level the client shows, as the server sent it for a chunk the client holds. It is `None` for a
+chunk the client does not hold and before login; `can_see_sky` stays a server read.
+
 `ClientHost::playing()` is true while the player is in the world with nothing over it: no screen, title, sign
 editor or book, so keys and zoom apply. `ClientHost::mapping(name)` reads a vanilla key mapping (`key.forward`,
 `key.left`, `key.back`, `key.right`, `key.jump`, `key.sneak`, `key.sprint`, `key.attack`, `key.use`) as a
