@@ -1029,19 +1029,6 @@ mod tests {
     }
 }
 
-/// The whole generator, through its own constructor, which masks the state to 48 bits.
-impl Wire for crate::LegacyRandomSource {
-    layout_fields!("seed" => u64, "gaussian" => Option<f64>);
-    const LAYOUT_SEED: u64 = crate::wire::layout_seed(stringify!(crate::LegacyRandomSource));
-    const MIN: usize = 9;
-    fn put(&self, out: &mut Writer) {
-        out.put(&<(u64, Option<f64>)>::from(self));
-    }
-    fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
-        Ok(Self::from(input.take::<(u64, Option<f64>)>()?))
-    }
-}
-
 #[cfg(test)]
 mod java_string_tests {
     use super::*;
