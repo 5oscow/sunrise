@@ -74,8 +74,11 @@ No declaration conversion runs per tick.
 
 Implement `BlockPart::remove_block` for a block that leaves a support or another
 state behind when removed. This server-only replacement receives the dimension,
-position, removed state and `moved_by_piston`. Answer `Some(state)` to choose the
-replacement, or `None` to keep vanilla's fluid block (air when dry). Only the
+position, removed state, `moved_by_piston` and `replacement`: the exact state
+written if the listener leaves `answer` unanswered, the fluid's legacy block
+(air when dry, water for a waterlogged block). Answer `Some(state)` to choose a
+different state, or `None` to keep `replacement`. Named injections request
+`hook_version = 2`; native and wasm mods rebuild against this signature. Only the
 removed block's own Part is called, not the replacement block's Part.
 
 The chosen state goes through the normal `setBlock` effects with flags 3, plus
