@@ -273,8 +273,9 @@ pub trait LevelsBackend {
     /// is in entity-list order followed by players. Every entity list is walked
     /// once per call: O(entities) regardless of the box. Each overlapping mob
     /// resolves through a mob-list scan: O(K*N) for K overlapping mobs and N mobs. Tridents do not
-    /// resolve. On the server displays, markers and interactions are included using
-    /// their physical boxes (zero-sized for displays and markers), not display culling bounds.
+    /// resolve. On the server block displays, item displays, text displays, markers and
+    /// interactions are included using physical boxes (zero-sized for displays and markers),
+    /// not display culling bounds. Eyes of ender and leash knots are not yet returned.
     /// Frames, paintings and other special entities
     /// are not on the entity-list walk. The dragon follows ordinary entities;
     /// its eight intersecting parts follow players in vanilla hash-table order (`Level.getEntities`).
