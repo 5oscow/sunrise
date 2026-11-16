@@ -179,7 +179,12 @@ mod tests;
 /// The immutable modifier instances of one successful server reload, sorted by
 /// descending priority. Equal-priority ordering has no specified meaning.
 /// Read it through `ServerHost::reload_resources` using `Self::key()`.
+///
+/// Not on wasm: the manager is a retained, process-local reload listener and does not
+/// cross Wire. The serializer, the prepared modifier and the roll context do cross,
+/// through resource dispatch.
 #[derive(Default)]
+#[non_exhaustive]
 pub struct GlobalLootModifierManager {
     contents: std::sync::OnceLock<Arc<ManagerContents>>,
 }
