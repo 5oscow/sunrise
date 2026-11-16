@@ -83,8 +83,8 @@ fn a_declared_interaction_runs_after_vanillas_and_a_veto_stops_it() {
         game.install_fluid_interactions().unwrap();
         // Lava at (x, 64, z) with `beside` to its east; the beside block's placement tells
         // its neighbours, as a block set does.
-        let meet = |game: &mut super::Game<'_>, z: i32, beside| {
-            game.world.set(4, 64, z, lava).unwrap();
+        let meet_with = |game: &mut super::Game<'_>, z: i32, liquid, beside| {
+            game.world.set(4, 64, z, liquid).unwrap();
             game.world.set(5, 64, z, beside).unwrap();
             let at = BlockPos::new(5, 64, z);
             game.with_level(|b, level, ticks| {
@@ -93,11 +93,32 @@ fn a_declared_interaction_runs_after_vanillas_and_a_veto_stops_it() {
             game.world.block(4, 64, z)
         };
 
+        let meet = |game: &mut super::Game<'_>, z: i32, beside| meet_with(game, z, lava, beside);
+        let flowing_lava = registry
+            .resolve(&sunrise_world::chunk::BlockState {
+                name: "minecraft:lava".into(),
+                properties: [("level".to_string(), "1".to_string())].into(),
+            })
+            .unwrap();
+
         // The mod's fluid and a source of lava: glass, the block the mod declared.
         VETO.store(false, Ordering::Relaxed);
         assert_eq!(meet(game, 2, honey), glass);
         // Vanilla's rule still comes first and still makes obsidian of a lava source.
         assert_eq!(meet(game, 6, water), obsidian);
+
+        // Flowing lava is the same fluid: cobblestone beside water, basalt over soul soil beside
+        // blue ice, glass beside the mod's fluid.
+        let cobblestone = state("minecraft:cobblestone");
+        assert_eq!(meet_with(game, 22, flowing_lava, water), cobblestone);
+        game.world
+            .set(4, 63, 26, state("minecraft:soul_soil"))
+            .unwrap();
+        assert_eq!(
+            meet_with(game, 26, flowing_lava, state("minecraft:blue_ice")),
+            state("minecraft:basalt")
+        );
+        assert_eq!(meet_with(game, 30, flowing_lava, honey), glass);
 
         // The hook vetoes what the table decided: nothing is written.
         VETO.store(true, Ordering::Relaxed);

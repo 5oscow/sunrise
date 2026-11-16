@@ -165,53 +165,64 @@ impl Behaviours {
     }
     /// Install the open world's table, replacing the last load's.
     pub fn set_fluid_interactions(&self, table: FluidInteractions) {
-        let slot = &self.fluid_interactions;
-        let has = |filter: fn(FluidKind) -> bool| {
-            table.by_source.iter().any(|(source, _)| filter(*source))
-        };
-        slot.vanilla.store(
-            table
-                .by_source
-                .iter()
-                .fold(0, |mask, (source, _)| mask | source.mask()),
-            Ordering::Release,
-        );
-        slot.mods.store(
-            has(|source| source.mod_fluid().is_some()),
-            Ordering::Release,
-        );
-        *slot
-            .table
-            .write()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Arc::new(table);
+        self.fluid_interactions.install(table);
     }
     /// The interactions of `kind`'s fluid, taken once per update: none for a fluid without any,
     /// which answers from two atomic loads, with no lock.
     pub(crate) fn fluid_interactions(&self, kind: FluidKind) -> Option<Arc<[FluidInteraction]>> {
         let slot = &self.fluid_interactions;
-        let may_have = match kind.mod_fluid() {
-            Some(_) => slot.mods.load(Ordering::Acquire),
-            None => kind.mask() & slot.vanilla.load(Ordering::Acquire) != 0,
-        };
-        if !may_have {
-            return None;
-        }
-        slot.table
-            .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .of(kind)
-            .cloned()
+        slot.may_have(kind).then(|| slot.of(kind)).flatten()
     }
 }
 
+/// Every vanilla fluid of `source`'s family, source and flowing form, as bits of `FluidKind::mask`.
+fn family_mask(source: FluidKind) -> u8 {
+    FluidKind::ALL
+        .into_iter()
+        .filter(|kind| kind.same_family(source))
+        .fold(0, |mask, kind| mask | kind.mask())
+}
+
 /// The open world's table on [`Behaviours`]: replaced whole by each data load. Which fluids
-/// have entries is also kept as atomics (vanilla kinds by mask, mod fluids as one flag), so a
+/// have entries is also kept as atomics (vanilla families by mask, mod fluids as one flag), so a
 /// fluid without any is told apart without taking the lock.
 #[derive(Default)]
 pub(super) struct Slot {
     table: RwLock<Arc<FluidInteractions>>,
     vanilla: AtomicU8,
     mods: AtomicBool,
+}
+impl Slot {
+    fn install(&self, table: FluidInteractions) {
+        let vanilla = table
+            .by_source
+            .iter()
+            .fold(0, |mask, (source, _)| mask | family_mask(*source));
+        let mods = table
+            .by_source
+            .iter()
+            .any(|(source, _)| source.mod_fluid().is_some());
+        self.vanilla.store(vanilla, Ordering::Release);
+        self.mods.store(mods, Ordering::Release);
+        *self
+            .table
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Arc::new(table);
+    }
+    /// Whether `kind`'s fluid may have entries, from the atomics alone.
+    fn may_have(&self, kind: FluidKind) -> bool {
+        match kind.mod_fluid() {
+            Some(_) => self.mods.load(Ordering::Acquire),
+            None => kind.mask() & self.vanilla.load(Ordering::Acquire) != 0,
+        }
+    }
+    fn of(&self, kind: FluidKind) -> Option<Arc<[FluidInteraction]>> {
+        self.table
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .of(kind)
+            .cloned()
+    }
 }
 
 #[cfg(test)]
@@ -339,6 +350,36 @@ mod tests {
         assert_eq!(made(&rules, beside, AIR, false), Some(COBBLESTONE.0));
         let water = around(&[(1, cell(FluidKind::Water, STONE))]);
         assert_eq!(made(&rules, water, AIR, true), Some(OBSIDIAN.0));
+    }
+
+    #[test]
+    fn the_gate_answers_for_both_forms_of_a_fluid_with_entries_and_for_no_other() {
+        let entry = |source| {
+            (
+                source,
+                FluidInteraction {
+                    neighbour: Neighbour::Blocks(BlockMatch::Block(STONE)),
+                    below: None,
+                    source: Some(MOD_STONE),
+                    flowing: Some(MOD_STONE),
+                },
+            )
+        };
+        let slot = Slot::default();
+        for kind in FluidKind::ALL {
+            assert!(!slot.may_have(kind), "an empty slot has nothing");
+        }
+        slot.install(FluidInteractions::new([entry(FluidKind::Lava)]));
+        assert!(slot.may_have(FluidKind::Lava));
+        assert!(slot.may_have(FluidKind::FlowingLava));
+        assert!(slot.of(FluidKind::FlowingLava).is_some());
+        for other in [FluidKind::Water, FluidKind::FlowingWater, FluidKind::Empty] {
+            assert!(!slot.may_have(other));
+        }
+        slot.install(FluidInteractions::new([entry(FluidKind::Water)]));
+        assert!(slot.may_have(FluidKind::FlowingWater));
+        assert!(slot.may_have(FluidKind::Water));
+        assert!(!slot.may_have(FluidKind::FlowingLava));
     }
 
     #[test]
