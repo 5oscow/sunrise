@@ -2690,9 +2690,13 @@ fn patch_loot_component(
     };
     let marker = format!("!{base}");
     if !removal {
+        // The owning setter validates the value; only one it took replaces
+        // the removal, so a refused value leaves the `!id` as it was.
         let data = stack.data_mut();
-        data.set_other(&marker, None);
         data.set_loot_component(base, value);
+        if data.sets_component(base) {
+            data.set_other(&marker, None);
+        }
         return;
     }
     stack.data_mut().set_loot_component(base, &None);
@@ -4267,6 +4271,29 @@ mod tests {
                 marker
             );
         }
+    }
+
+    /// A value the component's setter refuses (custom data that isn't a
+    /// compound) changes nothing: an earlier removal and its marker survive.
+    #[test]
+    fn a_refused_replacement_keeps_the_removal() {
+        let mut stack = ItemStack::new("minecraft:stick", 1);
+        stack
+            .data_mut()
+            .set_other("!minecraft:custom_data", removal_marker());
+        let before = loot_of(&stack);
+        let mut after = before.clone();
+        after.components.push((
+            "minecraft:custom_data".into(),
+            Some(sunrise_core::nbt::Tag::Int(7)),
+        ));
+        apply_loot(&before, &after, &mut stack, |_, _| Some(true));
+        let data = stack.data().expect("the marker is stack data");
+        assert_eq!(data.other("minecraft:custom_data"), None);
+        assert_eq!(
+            data.other("!minecraft:custom_data").cloned(),
+            removal_marker()
+        );
     }
 
     /// The prototype that decides is the final item's: a hook that turns the
