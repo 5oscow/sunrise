@@ -21,5 +21,15 @@ mod generated {
     include!(concat!(env!("OUT_DIR"), "/mod_api_generated.rs"));
 }
 
+// The crate's own tests implement hooks with `#[mod_api::__subscriptions]`, which marks each
+// through the generated `__sunrise_mark!`; a macro the generated code exports can't be named by
+// absolute path inside its own crate, so a test build has this no-op instead.
+#[cfg(test)]
+macro_rules! __sunrise_mark {
+    ($owner:literal $method:ident) => {};
+}
+#[cfg(test)]
+pub(crate) use __sunrise_mark;
+
 include!(concat!(env!("OUT_DIR"), "/mod_api_exports_root.rs"));
 include!(concat!(env!("OUT_DIR"), "/wire_generated.rs"));
