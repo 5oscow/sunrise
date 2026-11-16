@@ -638,16 +638,22 @@ impl Game<'_> {
         index: usize,
         source: Option<super::commands::Target>,
     ) -> bool {
-        let (id, kind, pos) = (
+        let (id, kind, pos, was_empty) = (
             self.item_frames[index].id,
             self.item_frames[index].kind(),
             self.item_frames[index].pos,
+            self.item_frames[index].item.is_none(),
         );
         if self.hanging_break_cancelled(kind, pos, false) {
             return false;
         }
-        // Found again by id after the listener: gone, nothing breaks.
-        let Some(index) = self.item_frames.iter().position(|f| f.id == id) else {
+        // Found again by id after the listener: gone, or empty before and
+        // filled now, nothing breaks.
+        let Some(index) = self
+            .item_frames
+            .iter()
+            .position(|f| f.id == id && !(was_empty && f.item.is_some()))
+        else {
             return false;
         };
         let mut f = self.item_frames.remove(index);
@@ -682,10 +688,14 @@ impl Game<'_> {
                 if !self.frame_survives(&f) && !self.hanging_break_cancelled(f.kind(), f.pos, false)
                 {
                     // Found again by id after the listener: gone, nothing is
-                    // removed.
+                    // removed; empty before and filled now, it stays.
                     let Some(now) = self.item_frames.iter().position(|g| g.id == f.id) else {
                         continue;
                     };
+                    if f.item.is_none() && self.item_frames[now].item.is_some() {
+                        i = now + 1;
+                        continue;
+                    }
                     i = now;
                     let mut f = self.item_frames.remove(i);
                     // BlockAttachedEntity.tick discards without a death event.
