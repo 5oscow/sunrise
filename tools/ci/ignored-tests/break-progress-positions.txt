@@ -1,0 +1,1 @@
+sunrise-client game::client_cracks::tests::crack_positions_are_scoped_stored_bounded_and_cleared_for_both_sources lib daily resources

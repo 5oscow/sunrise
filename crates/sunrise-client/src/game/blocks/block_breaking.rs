@@ -94,8 +94,25 @@ impl Game<'_> {
     pub(crate) fn destroy_block_progress(&mut self, breaker: i32, pos: [i32; 3], progress: i32) {
         self.expire_client_cracks();
         if (0..10).contains(&progress) {
-            self.destroying
-                .insert(breaker, (pos, progress as u8, self.world.game_time));
+            let stage = progress as u8;
+            if let Some(crack) = self.destroying.get_mut(&breaker)
+                && crack.pos == pos
+                && crack.stage == stage
+            {
+                crack.updated_at = self.world.game_time;
+                return;
+            }
+            self.with_break_progress_positions(pos, stage, |game, positions| {
+                game.destroying.insert(
+                    breaker,
+                    crate::game::client_cracks::ClientCrack {
+                        pos,
+                        stage,
+                        updated_at: game.world.game_time,
+                        positions,
+                    },
+                );
+            });
         } else {
             self.destroying.remove(&breaker);
         }

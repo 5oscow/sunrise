@@ -466,12 +466,13 @@ impl Game<'_> {
             self.hotbar_presses.clear();
         }
         let d = &self.clicks.destroying;
-        self.mining = d.active.then_some(Mining {
+        self.set_client_mining(d.active.then_some(Mining {
             pos: d.pos,
             progress: d.progress,
             per_tick: 0.0,
             ticks: d.ticks as u32,
-        });
+            crack: None,
+        }));
         if let Some(mining) = &self.mining {
             let pos = mining.pos;
             let progress = mining.progress;

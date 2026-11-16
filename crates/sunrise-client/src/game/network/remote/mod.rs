@@ -1037,7 +1037,7 @@ impl Game<'_> {
         streaming.remote = true;
         streaming.radius = self.settings.render_distance;
         self.streaming = streaming;
-        self.world = Game::world_for_mods(self.res.facts().air, 0);
+        self.reset_client_world(0);
         self.save = Arc::new(SaveDir::new(
             std::env::temp_dir().join("sunrise-remote-unused"),
             sunrise_client::save::LevelShape::OVERWORLD,
@@ -1304,7 +1304,7 @@ impl Game<'_> {
         streaming.remote = true;
         streaming.radius = self.settings.render_distance;
         self.streaming = streaming;
-        self.world = Game::world_for_mods(self.res.facts().air, 0);
+        self.reset_client_world(0);
         self.save = Arc::new(SaveDir::new(
             std::env::temp_dir().join("sunrise-replay-unused"),
             sunrise_client::save::LevelShape::OVERWORLD,
@@ -7805,12 +7805,13 @@ impl Game<'_> {
             // startDestroyBlock plays the first hit and crack itself; the
             // server's level events 2019 and 2020 do the rest.
             self.breaking_block_effects(hit.pos, hit.face, true);
-            self.mining = Some(Mining {
+            self.set_client_mining(Some(Mining {
                 pos: hit.pos,
                 progress: 0.0,
                 per_tick: 0.0,
                 ticks: 0,
-            });
+                crack: None,
+            }));
             return true;
         }
         let Some((pos, last_face, done)) = self.remote.as_ref().and_then(|r| r.destroying) else {
@@ -7856,12 +7857,13 @@ impl Game<'_> {
             if let Some(r) = self.remote.as_mut() {
                 r.destroying = Some((pos, face, done));
             }
-            self.mining = Some(Mining {
+            self.set_client_mining(Some(Mining {
                 pos,
                 progress: done,
                 per_tick: 0.0,
                 ticks,
-            });
+                crack: None,
+            }));
         }
         true
     }
