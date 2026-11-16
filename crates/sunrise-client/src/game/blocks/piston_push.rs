@@ -1332,11 +1332,6 @@ fn shulker_lid(facing: u8, lid: [f64; 6]) -> (Vec3, Aabb) {
     )
 }
 
-/// `Entity.move(MoverType.PISTON, movement)` for a pushed body: the movement
-/// it makes. The world's blocks stop it, and so does the world border:
-/// `Entity.collectCollidersIgnoringWorldBorder` adds the border's walls when
-/// the body is inside close to the border, as ordinary movement does. The
-/// `gate` is the push's armed move gate (#2414); the resolve goes through it.
 /// The direction of a movement's first non-zero axis, the one `limitPistonMovement` keeps.
 fn first_axis_direction(movement: Vec3) -> Option<Direction> {
     if movement.x != 0.0 {
@@ -1362,6 +1357,11 @@ fn first_axis_direction(movement: Vec3) -> Option<Direction> {
     }
 }
 
+/// `Entity.move(MoverType.PISTON, movement)` for a pushed body: the movement
+/// it makes. The world's blocks stop it, and so does the world border:
+/// `Entity.collectCollidersIgnoringWorldBorder` adds the border's walls when
+/// the body is inside close to the border, as ordinary movement does. The
+/// `gate` is the push's armed move gate (#2414); the resolve goes through it.
 fn pushed_movement<W>(
     gate: &mut MoveGate,
     blocks: W,
