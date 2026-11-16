@@ -825,7 +825,12 @@ impl Game<'_> {
             if !spectator
                 && hurtable
                 && let Ok(o) = p.hurt_caused_by(
-                    crate::game::entity::damage_level_of!(self, self.combat.attack(), no_push),
+                    crate::game::entity::damage_level_of!(
+                        self,
+                        self.combat.attack(),
+                        no_push,
+                        None
+                    ),
                     &self.motion.health,
                     rules,
                     id,
@@ -1071,7 +1076,7 @@ impl Game<'_> {
                 };
                 let creative = self.creative_damage_source_id(source.causing);
                 let vanilla = self.saved_refuses_damage($id as u32, damage_type, creative);
-                crate::game::entity::damage_level_of!(self, self.combat.attack(), no_push)
+                crate::game::entity::damage_level_of!(self, self.combat.attack(), no_push, None)
                     .invulnerability_check(
                         sunrise_client::health::Hurting::Entity($id, $kind, source),
                         vanilla,
@@ -1178,7 +1183,8 @@ impl Game<'_> {
                             crate::game::entity::damage_level_of!(
                                 self,
                                 self.combat.attack(),
-                                no_push
+                                no_push,
+                                None
                             ),
                             m,
                             hurtable,
@@ -1465,7 +1471,7 @@ impl Game<'_> {
                 };
                 let creative = self.creative_damage_source_id(source.causing);
                 let vanilla = self.saved_refuses_damage(id, damage_type, creative);
-                if crate::game::entity::damage_level_of!(self, self.combat.attack(), no_push)
+                if crate::game::entity::damage_level_of!(self, self.combat.attack(), no_push, None)
                     .invulnerability_check(
                         sunrise_client::health::Hurting::ArmorStand(id as i32, source),
                         vanilla,

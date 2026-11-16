@@ -33,6 +33,7 @@ pub(super) const IMPORTS: &[&str] = &[
     "CameraDrawContext",
     "LevelHost",
     "LevelRandomHost",
+    "HitHost",
     "LevelTicksHost",
     "LevelWriteHost",
     "ConfigFiles",

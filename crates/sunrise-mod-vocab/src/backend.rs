@@ -271,6 +271,7 @@ host_attachment_store!(
     ServerHost,
     ClientHost,
     LevelRandomHost,
+    HitHost,
     LevelWriteHost
 );
 
@@ -288,4 +289,4 @@ macro_rules! level_random_draws {
         }
     )+ };
 }
-level_random_draws!(LevelRandomHost, LevelWriteHost);
+level_random_draws!(LevelRandomHost, HitHost, LevelWriteHost);

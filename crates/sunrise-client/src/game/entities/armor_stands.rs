@@ -912,7 +912,7 @@ impl Game<'_> {
             direct: attacker,
             position: None,
         };
-        if super::entity::damage_level_of!(self, self.combat.attack(), no_push)
+        if super::entity::damage_level_of!(self, self.combat.attack(), no_push, None)
             .invulnerability_check(
                 sunrise_client::health::Hurting::ArmorStand(id as i32, source),
                 vanilla,

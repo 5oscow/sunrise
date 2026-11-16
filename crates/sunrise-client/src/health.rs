@@ -105,6 +105,145 @@ impl DamageHooks {
         }
     }
 }
+/// A sound a hit's listener queued, with the seed drawn at the call.
+pub struct HitSound<'s> {
+    pub dimension: &'static str,
+    pub sound: &'s str,
+    pub at: [f64; 3],
+    pub source: i32,
+    pub volume: f32,
+    pub pitch: f32,
+    pub seed: i64,
+    /// The entity the sound follows (`Level.playSound(null, entity, ...)`), if any.
+    pub emitter: Option<i32>,
+}
+/// Where a hit's sounds are queued until the host is free: the game's own level sound queue.
+pub trait SoundQueue {
+    fn queue(&mut self, sound: HitSound<'_>);
+}
+impl<S: for<'s> From<HitSound<'s>>> SoundQueue for Vec<S> {
+    fn queue(&mut self, sound: HitSound<'_>) {
+        self.push(sound.into());
+    }
+}
+/// The entity a hit's site lends its listeners: the live borrow of its id, position and own
+/// random. The site names who (the attacker it holds a `&mut` to); nothing is looked up.
+pub struct HitLend<'a> {
+    id: i32,
+    position: [f64; 3],
+    random: &'a mut sunrise_core::random::LegacyRandom,
+}
+impl<'a> HitLend<'a> {
+    pub fn mob(mob: &'a mut crate::mobs::Mob) -> Option<Self> {
+        Some(Self {
+            id: mob.id as i32,
+            position: [mob.position.x, mob.position.y, mob.position.z],
+            random: &mut mob.random,
+        })
+    }
+    /// `player`, if it is the attacker `attacker` (an entity id).
+    pub fn attacking_player(player: Option<&'a mut PlayerMotion>, attacker: i32) -> Option<Self> {
+        let player = player.filter(|p| p.entity_id == attacker)?;
+        Some(Self {
+            id: player.entity_id,
+            position: [player.position.x, player.position.y, player.position.z],
+            random: &mut player.random,
+        })
+    }
+    /// The mob among `mobs` with id `attacker`, if it is there to borrow.
+    pub fn attacking_mob(
+        mut mobs: impl Iterator<Item = &'a mut crate::mobs::Mob>,
+        attacker: i32,
+    ) -> Option<Self> {
+        Self::mob(mobs.find(|m| m.id as i32 == attacker)?)
+    }
+    fn reborrow(&mut self) -> HitLend<'_> {
+        HitLend {
+            id: self.id,
+            position: self.position,
+            random: &mut *self.random,
+        }
+    }
+}
+/// What a hit lends its listeners beyond the level's blocks and random: the level sound queue
+/// and sound-seed stream, and the own random of the entity its site lends ([`HitLend`]). The
+/// site builds it from borrows it already holds ([`DamageLevel::with_effects`]); a level built
+/// without one refuses every request.
+pub struct HitEffects<'a> {
+    sounds: &'a mut (dyn SoundQueue + 'a),
+    /// The seed stream of `Level.playSound`; no host, no sound can be sent.
+    hub: Option<&'a crate::lan::hub::Hub>,
+    dimension: &'static str,
+    /// The open of the world the lent entity belongs to, to refuse a stale handle.
+    epoch: Option<mod_api::WorldEpoch>,
+    lent: Option<HitLend<'a>>,
+}
+impl<'a> HitEffects<'a> {
+    pub fn new(
+        sounds: &'a mut (dyn SoundQueue + 'a),
+        hub: Option<&'a crate::lan::hub::Hub>,
+        dimension: &'static str,
+        epoch: Option<mod_api::WorldEpoch>,
+        lent: Option<HitLend<'a>>,
+    ) -> Self {
+        Self {
+            sounds,
+            hub,
+            dimension,
+            epoch,
+            lent,
+        }
+    }
+    fn reborrow(&mut self) -> HitEffects<'_> {
+        HitEffects {
+            sounds: &mut *self.sounds,
+            hub: self.hub,
+            dimension: self.dimension,
+            epoch: self.epoch,
+            lent: self.lent.as_mut().map(HitLend::reborrow),
+        }
+    }
+    /// Queue `sound` (already validated) at `at`, drawing its seed from the level's sound-seed
+    /// stream now (`Level.soundSeedGenerator.nextLong`), never from the level's random. False
+    /// where no host can send it.
+    pub fn play(
+        &mut self,
+        sound: &str,
+        at: [f64; 3],
+        source: mod_api::SoundSource,
+        volume: f32,
+        pitch: f32,
+        emitter: Option<i32>,
+    ) -> bool {
+        let Some(hub) = self.hub else {
+            return false;
+        };
+        self.sounds.queue(HitSound {
+            dimension: self.dimension,
+            sound,
+            at,
+            source: source.index() as i32,
+            volume,
+            pitch,
+            seed: hub.next_sound_seed(),
+            emitter,
+        });
+        true
+    }
+    /// The lent entity `entity` names: its id, position and own random. None for a stale
+    /// handle or an entity the hit does not lend.
+    pub fn entity(
+        &mut self,
+        entity: mod_api::EntityRef,
+    ) -> Option<(i32, [f64; 3], &mut sunrise_core::random::LegacyRandom)> {
+        if self.epoch != Some(entity.epoch()) {
+            return None;
+        }
+        let lent = self.lent.as_mut()?;
+        (i32::try_from(entity.id()).ok()? == lent.id)
+            .then_some((lent.id, lent.position, &mut *lent.random))
+    }
+}
 /// The level a hit lands in, as damage code sees it: its blocks, its random
 /// (`Level.random`) and its own attachments, lent to the damage hooks as their level host.
 /// Built from the level's world, or, in the mob tick, which reads the world while mobs
@@ -132,6 +271,9 @@ pub struct DamageLevel<'a> {
     /// Who a push credits: the site's per-victim loan, or [`KnockbackCredit`]'s memory
     /// resolution where the level was built without one.
     credit: Credit<'a>,
+    /// What the hit's listeners may queue and draw ([`HitEffects`]); none for a level built
+    /// outside a game's hit.
+    effects: Option<HitEffects<'a>>,
 }
 impl<'a> DamageLevel<'a> {
     /// The level of `world`, whose blocks `registry` names.
@@ -166,6 +308,7 @@ impl<'a> DamageLevel<'a> {
             client_side: false,
             knock_entry: mod_api::KnockbackEntry::Full,
             credit: Credit::Memory,
+            effects: None,
         }
     }
     /// The level of `world`, with the random and attachments `lent` took out of it.
@@ -192,6 +335,7 @@ impl<'a> DamageLevel<'a> {
             client_side: false,
             knock_entry: mod_api::KnockbackEntry::Full,
             credit: Credit::Memory,
+            effects: None,
         }
     }
     /// The same level, for a shorter borrow.
@@ -211,6 +355,7 @@ impl<'a> DamageLevel<'a> {
             client_side: self.client_side,
             knock_entry: self.knock_entry,
             credit: self.credit.reborrow(),
+            effects: self.effects.as_mut().map(HitEffects::reborrow),
         }
     }
     /// The same level with a task-local random, retaining its typed hook and attachment context.
@@ -233,7 +378,19 @@ impl<'a> DamageLevel<'a> {
             client_side: self.client_side,
             knock_entry: self.knock_entry,
             credit: self.credit.reborrow(),
+            effects: self.effects.as_mut().map(HitEffects::reborrow),
         }
+    }
+    /// The same level whose hit lends `effects`.
+    pub fn with_effects(self, effects: HitEffects<'a>) -> Self {
+        Self {
+            effects: Some(effects),
+            ..self
+        }
+    }
+    /// What this hit lends its listeners: level sounds and an entity's random.
+    pub fn hit_effects(&mut self) -> Option<&mut HitEffects<'a>> {
+        self.effects.as_mut()
     }
     /// Lend the narrow credit context at a site that can make a living push.
     pub fn with_knockback_credit(mut self, credit: &'a mut dyn KnockbackCredit) -> Self {

@@ -7,7 +7,7 @@ use crate::game::Game;
 use crate::game::native_entity_refs::tests::{bind_local_player, run_on_guest_stack, with_game};
 use mod_api::{
     EntityRef, ExplodeError, ExplosionCalculator, ExplosionDetonateEvent, ExplosionInteraction,
-    ExplosionSettings, ExplosionStartEvent, Flow, Hooks, LevelRandomHost, LivingDamagePostEvent,
+    ExplosionSettings, ExplosionStartEvent, Flow, HitHost, Hooks, LivingDamagePostEvent,
     LivingDeathEvent, ModEntry, ServerHost,
     wire::{Reader, Writer},
 };
@@ -526,11 +526,7 @@ impl Hooks for Listener {
     fn explosion_detonate(&self, _: &mut dyn ServerHost, _: &mut ExplosionDetonateEvent<'_>) {
         self.0.lock().unwrap().detonates += 1;
     }
-    fn living_damage_post(
-        &self,
-        _: &mut dyn LevelRandomHost,
-        event: &mut LivingDamagePostEvent<'_>,
-    ) {
+    fn living_damage_post(&self, _: &mut dyn HitHost, event: &mut LivingDamagePostEvent<'_>) {
         let heard = (i64::from(event.entity), event.source.damage_type.to_owned());
         self.0.lock().unwrap().damage.push(heard);
     }

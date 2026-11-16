@@ -202,7 +202,7 @@ impl mod_api::Hooks for Hooks {
     }
     fn living_incoming_damage(
         &self,
-        host: &mut dyn mod_api::LevelRandomHost,
+        host: &mut dyn mod_api::HitHost,
         event: &mut mod_api::LivingIncomingDamageEvent<'_>,
     ) -> mod_api::Flow {
         if event.kind == "minecraft:player" {
@@ -213,7 +213,7 @@ impl mod_api::Hooks for Hooks {
     }
     fn living_shield_block(
         &self,
-        host: &mut dyn mod_api::LevelRandomHost,
+        host: &mut dyn mod_api::HitHost,
         event: &mut mod_api::LivingShieldBlockEvent<'_>,
     ) {
         self.0.progress(Family::Shield, event.entity == 72, host);
@@ -234,7 +234,7 @@ impl mod_api::Hooks for Hooks {
     }
     fn living_use_totem(
         &self,
-        host: &mut dyn mod_api::LevelRandomHost,
+        host: &mut dyn mod_api::HitHost,
         event: &mut mod_api::LivingUseTotemEvent<'_>,
     ) -> mod_api::Flow {
         self.0.progress(Family::Totem, event.entity == 72, host);

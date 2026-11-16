@@ -18,14 +18,16 @@ pub trait Hooks {
     /// of `hurtServer` happens (no damage, hurt sound, knockback, cooldown, statistics or
     /// criteria); a canceled hit on the ender dragon still counts as landed (`EnderDragon.hurt`
     /// returns true whatever `reallyHurt` did). It fires on every damage route, for players,
-    /// mobs and the ender dragon. The level is the hit's: its blocks, random and own
-    /// attachments; the hurt entity is in the middle of its hit.
+    /// mobs and the ender dragon. The host is the hit's (`HitHost`): its blocks, random and own
+    /// attachments, level sounds, and the own random of the entities the hit lends; the hurt entity
+    /// is in the middle of its hit.
     #[hook(
         side = "server",
         contract = "cancel",
         out = "canceled",
-        host = "level",
+        host = "hit",
         neoforge = "LivingIncomingDamageEvent",
+        version = 2,
         target = "sunrise_client::game::native_hooks::base::HitLevel<'_>::native_living_incoming_damage"
     )]
     fn living_incoming_damage(

@@ -318,7 +318,7 @@ mod tests {
             }
             fn living_damage_post(
                 &self,
-                _: &mut dyn mod_api::LevelRandomHost,
+                _: &mut dyn mod_api::HitHost,
                 event: &mut mod_api::LivingDamagePostEvent<'_>,
             ) {
                 if let Ok(id) = u32::try_from(event.entity) {

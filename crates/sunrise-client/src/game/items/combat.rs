@@ -204,7 +204,7 @@ impl CombatTracker {
         self.blast_hit_list.is_none() || self.blast_hit_ids.contains(&id)
     }
 
-    /// The attack lent by the enclosing [`Game::with_attack`] (`damage_level_of!(game, game.combat.attack(), ..)`).
+    /// The attack lent by the enclosing [`Game::with_attack`] (`damage_level_of!(game, game.combat.attack(), .., ..)`).
     pub(super) fn attack(&self) -> &Attack {
         &self.attack
     }

@@ -852,6 +852,34 @@ mod tests {
             param("&mut dyn LevelRandomHost", "self")
         );
         super::host_param::validate(&hit, "test", true, Some(true), false).unwrap();
+        // The hit capability: a server hit with a `&mut self` receiver only.
+        let capable = Hook {
+            host: Some(HostAccess::Hit),
+            ..hit.clone()
+        };
+        assert!(super::host_param::is_level(&capable));
+        assert_eq!(
+            host_param(&capable, Some(true), false),
+            param("&mut dyn HitHost", "self")
+        );
+        super::host_param::validate(&capable, "test", true, Some(true), false).unwrap();
+        for (hook, mutable, ticks) in [
+            (capable.clone(), Some(false), false),
+            (capable.clone(), Some(true), true),
+            (
+                Hook {
+                    side: Side::Both,
+                    ..capable.clone()
+                },
+                Some(false),
+                false,
+            ),
+        ] {
+            assert_eq!(
+                super::host_param::validate(&hook, "test", true, mutable, ticks).unwrap_err(),
+                "test: this entry takes no host marker"
+            );
+        }
         // On both sides a hit's level reads, and its host says which side it is.
         let hit_both = Hook {
             side: Side::Both,
