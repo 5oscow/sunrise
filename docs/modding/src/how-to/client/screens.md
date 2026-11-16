@@ -79,12 +79,14 @@ It moves only the slots a mod screen declares; the player's inventory stays unde
 
 A label is text laid out in a box: measured, wrapped and placed, and nothing else. Call
 `DrawContext::text_lines` from a drawing hook with the component, the box's width, an alignment and the
-spacing between lines, and draw the lines it answers with where it says:
+scale the label is drawn at, and draw the lines it answers with where it says:
 
 ```rust
 // From screen_render_post, gui_render_post or another drawing hook.
-let lines = draw.text_lines(&label, 120.0, TextAlign::Centre, 2.0)?;
-let mut draws = Vec::with_capacity(lines.lines.len());
+let scale = 2.0;
+let lines = draw.text_lines(&label, 120.0, TextAlign::Centre, scale)?;
+let mut draws = Vec::with_capacity(lines.lines.len() + 2);
+draws.push(GuiDraw::Push(vec![PoseOp::Scale(scale, scale)]));
 for line in &lines.lines {
     draws.push(GuiDraw::Text {
         text: line.text.clone(),
@@ -94,13 +96,31 @@ for line in &lines.lines {
         shadow: false,
     });
 }
+draws.push(GuiDraw::Pop);
 draw.gui_paint(&draws)?;
 // lines.width and lines.height size the box you reserved for it.
 ```
 
+The layout is measured unscaled and answered scaled: the text wraps at `120 / scale` GUI pixels, and
+every dimension and position `text_lines` answers — each line's `at` and `width`, the block's `width`
+and `height` — is in scaled GUI pixels, which is why the lines are drawn inside the same
+`PoseOp::Scale`. A `scale` of one is the text at its own size.
+
 Wrapping is vanilla's: a line breaks at a space that fits, a single word wider than the box is broken at
-a character rather than dropped, and an explicit `\n` starts a new line. A width of zero or less, or one
-that is not finite, means no wrapping at all. Each line keeps its styles, so `GuiDraw::Text` is what draws
-it; `DrawContext::text` draws plain characters only. `height` is the last line's `at[1]` plus one line
-height, so a scroll container sizes its content from it, and an empty component has no line at all. Text
-deeper than 512 component nodes is refused, as the other text-drawing methods refuse it.
+a character rather than dropped, and an explicit `\n` starts a new line, so a trailing `\n` leaves an
+empty last line. A width below one pixel still wraps, at one pixel, as `Font.split` does: too narrow a
+box gives one character a line rather than none, and one character alone can still make a line wider
+than the box. Leading spaces are characters like any other and stay in the line.
+
+Each line keeps its styles, and its legacy `§` codes are applied to those styles and dropped, so a line
+drawn alone draws exactly what it measured: `§r` goes back to no style even when the code sat in a span
+with a style of its own. Draw the line through `GuiDraw::Text`; `DrawContext::text` draws plain
+characters only. A centred line sits at `wrapping width / 2 - floor(line width / 2)`, as vanilla's
+`TextAlignment.CENTER.calculateLeft` floors the half line width. `height` is the last line's `at[1]`
+plus one line height, so a scroll container sizes its content from it, and an empty component has no
+line at all.
+
+It refuses, answering no line at all, a `TextLinesRefusal` naming why: a width that is not finite (or
+that dividing by `scale` overflows), a `scale` that is not finite or is zero or less, text that wraps
+into more than 512 lines, lines holding more than 8192 characters together, and text deeper than 512
+component nodes — which the other text-drawing methods refuse too.
