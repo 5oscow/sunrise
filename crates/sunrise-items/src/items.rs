@@ -456,6 +456,27 @@ thread_local! {
     /// inside itself (`LootContext.pushVisitedElement`).
     static NESTED_ROLLS: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
 }
+struct NestedRoll;
+impl NestedRoll {
+    fn enter(name: &str) -> Option<Self> {
+        NESTED_ROLLS.with(|visited| {
+            let mut visited = visited.borrow_mut();
+            if visited.iter().any(|current| current == name) {
+                return None;
+            }
+            visited.push(name.to_owned());
+            Some(Self)
+        })
+    }
+}
+impl Drop for NestedRoll {
+    fn drop(&mut self) {
+        NESTED_ROLLS.with(|visited| {
+            visited.borrow_mut().pop();
+        });
+    }
+}
+
 #[derive(Clone)]
 pub struct Items {
     pub items: HashMap<Arc<str>, ItemInfo>,
@@ -486,6 +507,7 @@ pub struct Items {
     /// Fluid tags in the same order.
     pub fluid_tag_order: HashMap<String, Vec<String>>,
     loot: Arc<sunrise_world::loot::LootTables>,
+    global_modifiers: Arc<sunrise_world::loot::global_modifiers::GlobalLootModifiers>,
     /// `Registries.PREDICATE`: what a table's string condition names, which a
     /// pack replaces or adds to (`LootItemCondition.CODEC`).
     predicates: Arc<HashMap<String, Value>>,
@@ -1123,11 +1145,18 @@ impl Items {
             block_tag_order: load_tag_lists(root, "block", overlay)?,
             fluid_tag_order: load_tag_lists(root, "fluid", overlay)?,
             loot,
+            global_modifiers: Arc::default(),
             predicates: Arc::new(predicates),
             songs: load_songs(root, overlay),
             instruments: load_instruments(root, overlay),
             enchantments,
         })
+    }
+    /// Bind tables, predicates and prepared instances from the same candidate.
+    pub fn set_loot_data(&mut self, data: &sunrise_world::loot::LootData) {
+        self.loot = data.tables().clone();
+        self.predicates = data.predicates().clone();
+        self.global_modifiers = data.global_modifiers().clone();
     }
     /// Use the server's loaded loot-table snapshot for item and block drops.
     pub fn set_loot_tables(&mut self, tables: Arc<sunrise_world::loot::LootTables>) {
@@ -1189,6 +1218,7 @@ impl Items {
             block_tag_order: HashMap::new(),
             fluid_tag_order: HashMap::new(),
             loot: Default::default(),
+            global_modifiers: Arc::default(),
             predicates: Default::default(),
             songs: HashMap::new(),
             instruments: HashMap::new(),
@@ -1566,20 +1596,7 @@ impl Items {
         random: &mut impl RandomSource,
         sequences: Option<(&mut crate::random_sequences::RandomSequences, i64)>,
     ) -> Vec<ItemStack> {
-        let drops = self.scoped_block_roll(registry, state, roll, random, sequences);
-        if !drops.iter().any(|d| d.item.starts_with(DYNAMIC)) {
-            return drops;
-        }
-        drops
-            .into_iter()
-            .flat_map(|d| {
-                if d.item.starts_with(DYNAMIC) {
-                    self.split_loot_stacks(roll.dynamic.to_vec())
-                } else {
-                    vec![d]
-                }
-            })
-            .collect()
+        self.scoped_block_roll(registry, state, roll, random, sequences)
     }
 
     fn roll_block_table<R: RandomSource>(
@@ -1607,7 +1624,8 @@ impl Items {
             location: roll.location,
             keep_empty: roll.keep_empty,
         };
-        ctx.roll_root(Some(id), table, random)
+        let raw = ctx.evaluate(table, random);
+        ctx.complete_root(Some(id), raw, random, Some(roll.dynamic))
     }
     /// Evaluate an entity's loot table (`minecraft:entities/<name>`).
     /// Evaluate any loot table by id (e.g. `minecraft:gameplay/chicken_lay`).
@@ -1674,10 +1692,11 @@ impl Items {
             keep_empty,
         };
         // LootTable.getRandomItemsRaw visits the table itself first.
-        NESTED_ROLLS.with(|v| v.borrow_mut().push(id.to_owned()));
-        let out = ctx.roll_root(Some(id), table, random);
-        NESTED_ROLLS.with(|v| v.borrow_mut().pop());
-        Some(out)
+        let raw = {
+            let _guard = NestedRoll::enter(id)?;
+            ctx.evaluate(table, random)
+        };
+        Some(ctx.complete_root(Some(id), raw, random, None))
     }
     /// The server random sequence a loot table draws from (`random_sequence`):
     /// vanilla's `LootContext.Builder.create` uses it instead of the level random.
@@ -2309,19 +2328,12 @@ impl<R: RandomSource> LootContext<'_, R> {
             _ => return,
         };
         let Some(table) = table else { return };
-        let entered = NESTED_ROLLS.with(|v| {
-            let mut v = v.borrow_mut();
-            let fresh = !v.iter().any(|n| n == name);
-            if fresh {
-                v.push(name.to_owned());
-            }
-            fresh
-        });
-        if !entered {
-            return;
-        }
-        let stacks = self.evaluate(table, random);
-        NESTED_ROLLS.with(|v| v.borrow_mut().pop());
+        let stacks = {
+            let Some(_guard) = NestedRoll::enter(name) else {
+                return;
+            };
+            self.evaluate(table, random)
+        };
         for mut stack in stacks {
             self.modifiers(&entry["modifier"], &mut stack, random);
             produced.push((stack, true));

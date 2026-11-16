@@ -109,8 +109,15 @@ fn compiled_guest_capability_registration_order_and_proxy_metadata() {
         )
         .unwrap();
         let mut host = mod_api::testing::FakeHost::new();
+        // Every item key the guest asks for at registration must resolve, not only this test's:
+        // its prediction part (`predicted_use`) asks for paper.
         host.registries
-            .resolve_items(fixture::ITEMS.map(|id| mod_api::Identifier::parse(id).unwrap()))
+            .resolve_items(
+                fixture::ITEMS
+                    .into_iter()
+                    .chain(["minecraft:paper"])
+                    .map(|id| mod_api::Identifier::parse(id).unwrap()),
+            )
             .unwrap();
         for index in 0..4 {
             host.level

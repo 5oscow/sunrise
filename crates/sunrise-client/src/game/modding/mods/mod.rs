@@ -80,6 +80,8 @@ pub(super) struct ModsState {
         Arc<std::sync::OnceLock<Result<crate::game::load_conditions::ConditionTable, String>>>,
     pub(super) profession_declarations:
         Arc<std::sync::OnceLock<Vec<(String, mod_api::ProfessionDefinition)>>>,
+    pub(super) loot_modifier_serializers:
+        Arc<std::sync::OnceLock<super::global_loot_modifiers::Serializers>>,
     /// Saved switches gate the first data inventory while registration keeps
     /// its existing startup ordering. Runtime dispatch owns later switches.
     pub(super) code_switches: Option<Arc<CodeSwitches>>,
@@ -544,7 +546,11 @@ fn register_special_model_renderers() {
     );
     super::native_special_renderers::register(
         kept.into_iter()
-            .filter_map(|kind| renderers.remove(&kind).map(|renderer| (kind, renderer)))
+            .filter_map(|kind| {
+                renderers
+                    .remove(&kind)
+                    .map(|(policy, renderer)| (kind, policy, renderer))
+            })
             .collect(),
     );
 }

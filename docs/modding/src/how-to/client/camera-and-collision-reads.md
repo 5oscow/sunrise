@@ -67,6 +67,31 @@ vanilla camera. Requests from later render callbacks apply at the next frame's e
 Setting a type never emits `camera_type_cycle`; F5 alone cycles, and its final event choice
 wins over requests made inside the cycle callback.
 
+## The fluid the camera is in
+
+The `camera_submersion` hook answers which fluid the camera is in, as vanilla's
+`Camera.getFluidInCamera` does, given as the fog type at the camera: `Atmospheric`, `Water`, `Lava` or
+`PowderSnow`. It comes in as the game's answer, after the `state_at_viewpoint` parts of the blocks it reads,
+with the camera's position. Set it to `Atmospheric` to clear underwater, lava and powder snow submersion,
+or to a fluid to force it; listeners run in the usual hook order, each seeing the previous one's value. A
+free camera that passes through water, for one, keeps the air's fog:
+
+```rust,ignore
+fn camera_submersion(&self, _host: &dyn ClientHost, event: &mut CameraSubmersionEvent<'_>) {
+    if self.detached() {
+        *event.fog_type = FogType::Atmospheric;
+    }
+}
+```
+
+Every client reader of the camera's fluid reads the answer: the field of view in a fluid, the frame's
+fog, the sky pass and the overworld sky's dark disc (skipped under water), the screen overlays, water
+vision and conduit power's underwater vision, and a shader pack's `isEyeInWater`. The hook fires once per
+reader, several times a frame, and not always at the same point: the fog asks at the camera, the overlays
+at the eye. Nothing keeps the first answer, so answer from the event alone, the same way for the same
+position. The position can't be changed. Server and gameplay fluid checks (an entity in water, drowning,
+swimming, the sculk vibrations' water test) don't read it.
+
 ## Viewed levels
 
 A server can open other levels for a client to view besides the one the player is in (`sunrise:levels`,

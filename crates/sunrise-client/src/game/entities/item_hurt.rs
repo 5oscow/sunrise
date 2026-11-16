@@ -36,10 +36,12 @@ impl Game<'_> {
             direct: entity_id(direct),
             position,
         };
-        if crate::game::entity::damage_level_of!(self, scoped).invulnerability_check(
-            sunrise_client::health::Hurting::Entity(id as i32, "minecraft:item", source),
-            vanilla,
-        ) {
+        if crate::game::entity::damage_level_of!(self, self.combat.attack(), no_push)
+            .invulnerability_check(
+                sunrise_client::health::Hurting::Entity(id as i32, "minecraft:item", source),
+                vanilla,
+            )
+        {
             return false;
         }
         let registry = &self.motion.health.damage;

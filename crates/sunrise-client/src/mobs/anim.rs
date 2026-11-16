@@ -693,6 +693,18 @@ fn pose_arm(p: &mut Poses, pose: ArmPose, right: bool, h: &Hum) {
 }
 /// `HumanoidModel.setupAnim` (and `ZombieModel.setupAttackAnimation`).
 pub(super) fn humanoid(p: &mut Poses, s: &State, h: &Hum) {
+    humanoid_with_setup(p, s, h, |p| {
+        if let Some(observation) = s.observer {
+            observation
+                .observer
+                .before_arm_pose(observation.source, s, p);
+        }
+    });
+}
+
+/// Run the shared humanoid animation, observing the prepared pose before arm
+/// posing. Specialized adapters can supply their own entity view at this seam.
+pub fn humanoid_with_setup(p: &mut Poses, s: &State, h: &Hum, setup: impl FnOnce(&mut Poses)) {
     head(p, s);
     if h.fall_flying {
         p.xrot("head", -std::f32::consts::FRAC_PI_4);
@@ -716,11 +728,7 @@ pub(super) fn humanoid(p: &mut Poses, s: &State, h: &Hum) {
         p.yrot("left_leg", -PI / 10.0);
         p.zrot("left_leg", -0.078_539_82);
     }
-    if let Some(observation) = s.observer {
-        observation
-            .observer
-            .before_arm_pose(observation.source, s, p);
-    }
+    setup(p);
     // The main arm is the right one: the off-hand pose goes first unless it
     // needs both hands.
     for right in sunrise_core::arm_pose::application_order(h.right, h.left)
@@ -1920,6 +1928,31 @@ mod flight_pose_tests {
             setup(&mob, &state, &mut make(), &HashMap::new());
             assert_eq!(observer.0.get(), before + 1, "{animation:?}");
         }
+    }
+
+    #[test]
+    fn swimming_setup_returns_after_a_listener_writes_the_largest_finite_head_angle() {
+        use std::cell::Cell;
+        struct Listener(Cell<bool>);
+        impl HumanoidSetup for Listener {
+            fn before_arm_pose(&self, _: &Mob, _: &State<'_>, poses: &mut Poses) {
+                self.0.set(true);
+                poses.xrot("head", f32::MAX);
+            }
+        }
+        let listener = Listener(Cell::new(false));
+        let mut mob = player();
+        mob.extra.swim.old = 1.0;
+        mob.extra.swim.amount = 1.0;
+        mob.extra.swim.visually = true;
+        let state = state(&mob, 0.5).observed(&mob, Some(&listener));
+        let mut poses = Poses::default();
+        poses
+            .map
+            .insert(key("head"), [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0]);
+        setup(&mob, &state, &mut poses, &HashMap::new());
+        assert!(listener.0.get());
+        assert!(poses.get("head")[3].is_finite());
     }
 
     #[test]

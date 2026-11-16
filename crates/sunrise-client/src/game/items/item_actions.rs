@@ -87,6 +87,17 @@ impl Game<'_> {
         list.iter().position(|e| id(e) as i32 == target)
     }
 
+    /// Whether `now` is still the stack `before` was: the same item and the
+    /// same count, or both empty. The check after a hook that may change the
+    /// world is this shallow on purpose; components are not compared.
+    pub(super) fn same_item_and_count(now: Option<&ItemStack>, before: Option<&ItemStack>) -> bool {
+        match (now, before) {
+            (None, None) => true,
+            (Some(a), Some(b)) => a.item == b.item && a.count == b.count,
+            _ => false,
+        }
+    }
+
     /// `Player.interactOn` with the acting hand: whether it took the click. A
     /// guest's interact packet names its entity (`target`), which the helpers
     /// use as it is; the local player picks from the crosshair instead, the

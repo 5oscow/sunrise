@@ -4,6 +4,9 @@ impl<R: RandomSource> Context<'_, R> {
     /// the table has a mod's kind, so the random stays untouched without.
     pub(super) fn native_ctx(&mut self) -> LootContext<'_> {
         let seed = self.random.next_long();
+        self.roll_facts(seed)
+    }
+    pub(super) fn roll_facts(&self, seed: i64) -> LootContext<'_> {
         LootContext {
             queried_table_id: self.query.id(),
             queried_stack: self.query.queried_stack.clone(),

@@ -53,7 +53,7 @@ fn a_client_mod_reads_a_block_states_baked_models_once_per_load() {
                 .default_state("minecraft:stone")
                 .expect("stone");
             read.lock().unwrap().state = Some(BlockStateId(stone.0));
-            game.publish_initial_client_models();
+            game.publish_initial_client_models().unwrap();
             let first = {
                 let read = read.lock().unwrap();
                 let Ok(keys) = &read.keys[0] else {

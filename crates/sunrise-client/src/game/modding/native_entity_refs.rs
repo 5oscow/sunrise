@@ -2814,7 +2814,7 @@ pub(super) mod tests {
             ));
             let guest = game.entity(12).unwrap();
             let vehicle = game.entity(21).unwrap();
-            assert!(game.entity_start_riding(guest, vehicle, true));
+            assert!(game.entity_start_riding(guest, vehicle, true).is_ok());
             assert_eq!(game.command_guest(12).unwrap().vehicle, Some(21));
             assert!(game.entity_stop_riding(guest));
             assert_eq!(game.command_guest(12).unwrap().vehicle, None);
@@ -2824,8 +2824,8 @@ pub(super) mod tests {
                 .hub
                 .update_guest(12, |guest| guest.dimension = "minecraft:the_nether".into())
                 .unwrap();
-            assert!(!game.entity_start_riding(guest, vehicle, true));
-            assert!(!game.entity_start_riding(vehicle, guest, true));
+            assert!(game.entity_start_riding(guest, vehicle, true).is_err());
+            assert!(game.entity_start_riding(vehicle, guest, true).is_err());
             let _ = std::fs::remove_dir_all(root);
         });
     }

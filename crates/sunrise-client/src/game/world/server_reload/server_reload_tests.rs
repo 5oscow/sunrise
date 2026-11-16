@@ -139,7 +139,7 @@ fn install_mod_resources(
 
 #[test]
 #[ignore = "daily"]
-fn reload_command_uses_applied_listener_state_and_preserves_tables_on_refusal() {
+fn reload_command_prepares_world_before_applying_listeners_and_preserves_tables_on_refusal() {
     use mod_api::{DataPackFilesEvent, Registrar, RegistrationContext, ServerHost};
     use std::sync::atomic::AtomicUsize;
     struct Listener(Arc<AtomicUsize>);
@@ -214,8 +214,9 @@ fn reload_command_uses_applied_listener_state_and_preserves_tables_on_refusal() 
                 state.store(0, Ordering::SeqCst);
                 assert!(game.run_command("reload"));
                 assert_eq!(state.load(Ordering::SeqCst), 1);
+                // World preparation sees the previous listener generation.
                 assert!(
-                    game.items().block_tags["reload_order:derived"].contains("minecraft:stone")
+                    game.items().block_tags["reload_order:derived"].contains("minecraft:diamond")
                 );
                 assert!(mod_api::Tags::blocks(game, class).unwrap().contains(&fence));
                 let old_bound = crate::game::native_world_read::installed_block_tag_snapshot();
@@ -228,13 +229,13 @@ fn reload_command_uses_applied_listener_state_and_preserves_tables_on_refusal() 
                 )])
                 .unwrap();
                 assert!(!game.run_command("reload"));
-                assert_eq!(state.load(Ordering::SeqCst), 2);
+                assert_eq!(state.load(Ordering::SeqCst), 1);
                 assert_eq!(
                     old,
                     game.world_tables.as_ref().map(|tables| tables as *const _)
                 );
                 assert!(
-                    game.items().block_tags["reload_order:derived"].contains("minecraft:stone")
+                    game.items().block_tags["reload_order:derived"].contains("minecraft:diamond")
                 );
                 assert_eq!(
                     crate::game::native_world_read::installed_block_tag_snapshot(),

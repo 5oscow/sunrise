@@ -5,8 +5,9 @@ fn data(tables: Vec<(&str, Value)>) -> LootData {
     LootData {
         holder_sets: Default::default(),
         tables: Arc::new(tables.into_iter().map(|(k, v)| (k.into(), v)).collect()),
+        global_modifiers: Arc::default(),
         modifiers: HashMap::new(),
-        predicates: HashMap::new(),
+        predicates: Arc::default(),
         items: HashMap::new(),
         enchantments: vec![],
         tags: HashMap::new(),
@@ -249,4 +250,129 @@ fn queried_ability_tags_use_prepared_world_sets() {
     assert!(!reloaded.contains("item", "minecraft:swords", "minecraft:diamond_sword"));
     assert!(reloaded.contains("item", "minecraft:swords", "minecraft:stick"));
     assert!(data.contains("item", "minecraft:swords", "minecraft:diamond_sword"));
+}
+
+#[test]
+fn modifiers_run_once_after_split_and_raw_subrolls_share_random_and_guards() {
+    use global_modifiers::{
+        DecodedModifier, GlobalLootModifiers, ModifierApply, ModifierFile, ModifierRoll,
+    };
+    struct Observe;
+    impl ModifierApply for Observe {
+        fn apply(
+            &self,
+            roll: &mut dyn ModifierRoll,
+            generated: &[LootStack],
+        ) -> Result<Vec<LootStack>, String> {
+            assert_eq!(
+                generated
+                    .iter()
+                    .map(|stack| stack.count)
+                    .collect::<Vec<_>>(),
+                [64, 64, 2]
+            );
+            assert!(matches!(
+                roll.facts().table_id(),
+                "test:root" | "neoforge:unknown_loot_table"
+            ));
+            assert_eq!(roll.next_long(), LegacyRandom::new(31).next_long());
+            let raw = roll.roll_raw("test:raw")?;
+            assert_eq!(raw.len(), 1);
+            assert_eq!(raw[0].count, 200); // raw never runs this pass or the splitter
+            let mut empty = generated[0].clone();
+            empty.count = -3;
+            empty
+                .components
+                .push(("minecraft:custom_data".into(), Some(Tag::Int(42))));
+            Ok(vec![raw[0].clone(), empty])
+        }
+    }
+    struct Refuse;
+    impl ModifierApply for Refuse {
+        fn apply(
+            &self,
+            roll: &mut dyn ModifierRoll,
+            _: &[LootStack],
+        ) -> Result<Vec<LootStack>, String> {
+            roll.next_long();
+            roll.roll_raw("test:missing")
+        }
+    }
+    struct Skipped;
+    impl ModifierApply for Skipped {
+        fn apply(
+            &self,
+            _: &mut dyn ModifierRoll,
+            _: &[LootStack],
+        ) -> Result<Vec<LootStack>, String> {
+            panic!("a false base condition must skip application")
+        }
+    }
+    let root = json!({"pools":[{"rolls":1,"entries":[{"type":"minecraft:item","name":"minecraft:diamond"}]}],
+        "modifier":{"type":"minecraft:set_count","count":130}});
+    let raw = json!({"pools":[
+        {"rolls":1,"entries":[{"type":"minecraft:loot_table","value":"test:raw"}]},
+        {"rolls":1,"entries":[{"type":"minecraft:item","name":"minecraft:gold_ingot","modifier":{"type":"minecraft:set_count","count":200}}]}
+    ]});
+    let mut data = data(vec![("test:root", root.clone()), ("test:raw", raw)]);
+    data.set_global_modifiers(Arc::new(GlobalLootModifiers::load(
+        ["test:observe", "test:refuse", "test:skip"]
+            .into_iter()
+            .map(|id| ModifierFile {
+                id: id.into(),
+                pack: "test".into(),
+                path: format!("{id}.json"),
+                read: Box::new(|| Ok(br#"{"type":"test:observe"}"#.to_vec())),
+            }),
+        &crate::conditions::LoadConditions::vanilla(),
+        |id, _, _| {
+            let (priority, condition, apply): (_, _, Arc<dyn ModifierApply>) = match id {
+                "test:observe" => (1001, None, Arc::new(Observe)),
+                "test:refuse" => (1000, None, Arc::new(Refuse)),
+                _ => (
+                    999,
+                    Some(json!({"type":"neoforge:loot_table_id","loot_table_id":"test:never"})),
+                    Arc::new(Skipped),
+                ),
+            };
+            Ok(DecodedModifier {
+                priority,
+                condition,
+                apply,
+            })
+        },
+        |error| panic!("{error}"),
+    )));
+    let mut expected_random = LegacyRandom::new(31);
+    expected_random.next_long();
+    expected_random.next_long();
+    for adapter in 0..6 {
+        let mut random = LegacyRandom::new(31);
+        let params = EntityLootParams::default();
+        let output = match adapter {
+            0 => data.roll("test:root", &mut random, 0.0, None, None),
+            1 => data.roll_inline(&root, &mut random),
+            2 => data.roll_entity("test:root", &mut random, &params),
+            3 => data.roll_death_entity("test:root", &mut random, &params, &mut |_, _, _| {
+                panic!("no enchantments")
+            }),
+            4 => data
+                .roll_container_with("test:root", &mut random, Default::default())
+                .unwrap(),
+            _ => data.roll_split("test:root", &mut random),
+        };
+        assert_eq!(
+            output.iter().map(|stack| stack.count).collect::<Vec<_>>(),
+            [200, -3],
+            "adapter {adapter}"
+        );
+        assert_eq!(
+            output[1].components,
+            [("minecraft:custom_data".into(), Some(Tag::Int(42)))]
+        );
+        assert_eq!(
+            <(u64, Option<f64>)>::from(&random),
+            <(u64, Option<f64>)>::from(&expected_random)
+        );
+    }
 }

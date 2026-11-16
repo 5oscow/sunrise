@@ -1440,7 +1440,7 @@ impl Game<'_> {
             .as_ref()
             .is_some_and(|p| p.entity_id == attacker)
         {
-            self.owner_damage_uuid()
+            self.player_uuid_of(self.lan_acting)
         } else {
             self.lan
                 .as_ref()
@@ -1462,11 +1462,7 @@ impl Game<'_> {
     /// the attack the enclosing [`Self::with_attack`] lends.
     pub(super) fn attack_of_who(&self, attacker: Option<Who>) -> Attack {
         match attacker {
-            Some(Who::Player) => {
-                let mut attack = self.attack_of(self.player.as_ref().map_or(0, |p| p.entity_id));
-                attack.player_uuid = self.owner_damage_uuid();
-                attack
-            }
+            Some(Who::Player) => self.attack_of(self.player.as_ref().map_or(0, |p| p.entity_id)),
             Some(Who::Mob(id)) => self.attack_of(id as i32),
             None => self.current_attack(),
         }
@@ -1494,6 +1490,10 @@ pub(super) fn knockback(level: DamageLevel<'_>, pushed: Hurting<'_>, knock: &mut
             causing => causing,
         },
     };
+    let (kill_credit, credit_main) = level.knockback_credit(&pushed);
+    let Ok(credit_main) = credit_main.map(TryIntoApi::try_into_api).transpose() else {
+        return false;
+    };
     let (entity, kind, source) = hurt_server_args(pushed, level.attack());
     let mut canceled = false;
     let [main, off] = &attack.held;
@@ -1508,6 +1508,8 @@ pub(super) fn knockback(level: DamageLevel<'_>, pushed: Hurting<'_>, knock: &mut
         attacker,
         attacker_main: main.as_ref(),
         attacker_off: off.as_ref(),
+        kill_credit,
+        kill_credit_main: credit_main.as_ref(),
         entry,
         strength: &mut knock.strength,
         x: &mut knock.x,

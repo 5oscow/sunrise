@@ -12,6 +12,8 @@ mod combat_adaptations;
 mod conversion_identity;
 mod death_tail;
 mod hoglin_target;
+mod living_draw;
+use living_draw::LivingFrame;
 #[path = "../../creatures/mob_conversion.rs"]
 mod mob_conversion;
 #[cfg(test)]
@@ -1899,10 +1901,12 @@ impl Game<'_> {
         let aim = self.attacker_aim(source.attacker);
         // So `living_knockback` sees who hit and what they hold.
         let attack = self.attack_of_who(source.attacker);
+        let plan = self.prepare_knockback_credit(target as i32, source.attacker, &attack);
+        let mut credit = plan.lend(&mut self.last_hurt_by_player);
         if let Some(t) = self.mobs.iter_mut().find(|m| m.id == target) {
             let previous_invulnerable = t.invulnerable;
             let hit = t.damage_aimed(
-                crate::game::entity::damage_level_of!(self, &attack),
+                crate::game::entity::damage_level_of!(self, &attack, &mut credit),
                 amount,
                 source,
                 aim,
@@ -1929,9 +1933,6 @@ impl Game<'_> {
                     }
                 }
             }
-        }
-        if hurt {
-            self.resolve_player_responsible(target, source);
         }
         for (at, velocities) in infested {
             self.spawn_infested(at, velocities);
@@ -1961,28 +1962,15 @@ impl Game<'_> {
     /// in the world, gets the credit (`getKillCredit`); a tame wolf without an
     /// owner clears it. A player's own hits are recorded where they land.
     pub(super) fn resolve_player_responsible(&mut self, victim: u32, source: Damage) {
-        let Some(Who::Mob(attacker)) = source.attacker else {
+        if !matches!(source.attacker, Some(Who::Mob(_))) {
             return;
-        };
-        let Some(owner) = self
-            .mobs
-            .iter()
-            .find(|m| m.id == attacker && m.species() == Species::Wolf && m.extra.tame)
-            .map(|m| m.extra.owner)
-        else {
-            return;
-        };
-        let Some(m) = self.mobs.iter_mut().find(|m| m.id == victim) else {
-            return;
-        };
-        m.ai.last_hurt_by_player = if owner.is_some() { 100 } else { 0 };
-        match owner {
-            Some(uuid) => self.last_hurt_by_player.insert(
-                victim,
-                super::combat::PlayerCredit(sunrise_client::lan::playerdata::ints_uuid(uuid)),
-            ),
-            None => self.last_hurt_by_player.remove(&victim),
-        };
+        }
+        let plan =
+            self.prepare_knockback_credit(victim as i32, source.attacker, self.combat.attack());
+        let mut credit = plan.lend(&mut self.last_hurt_by_player);
+        if let Some(mob) = self.mobs.iter_mut().find(|mob| mob.id == victim) {
+            sunrise_client::health::KnockbackCredit::accepted_mob_hit(&mut credit, mob);
+        }
     }
     /// Remember the acting player for a mob's `lastHurtByPlayer`.
     pub(super) fn remember_mob_player_credit(&mut self, victim: u32) {
@@ -2483,8 +2471,12 @@ impl Game<'_> {
                     Who::Player => self.mob_pushes_player(power, x, z, source, apply_blocking),
                     Who::Mob(id) => {
                         let attack = self.attack_of_who(source.attacker);
+                        let plan =
+                            self.prepare_knockback_credit(id as i32, None, self.combat.attack());
+                        let mut credit = plan.lend(&mut self.last_hurt_by_player);
                         if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
-                            let level = crate::game::entity::damage_level_of!(self, &attack);
+                            let level =
+                                crate::game::entity::damage_level_of!(self, &attack, &mut credit);
                             m.knockback(level, power, x, z, &source, 0.0);
                         }
                     }
@@ -2823,9 +2815,16 @@ impl Game<'_> {
                 MobEvent::Infested { at, velocities } => self.spawn_infested(at, velocities),
                 MobEvent::Gift { target, item } => self.receive_gift(target, item),
                 MobEvent::HurtSelf { mob, kind, amount } => {
+                    let plan =
+                        self.prepare_knockback_credit(mob as i32, None, self.combat.attack());
+                    let mut credit = plan.lend(&mut self.last_hurt_by_player);
                     if let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob) {
                         m.damage(
-                            crate::game::entity::damage_level_of!(self, scoped),
+                            crate::game::entity::damage_level_of!(
+                                self,
+                                self.combat.attack(),
+                                &mut credit
+                            ),
                             amount,
                             sunrise_client::mobs::Damage::of(kind),
                         );
@@ -4205,6 +4204,21 @@ impl Game<'_> {
         // early (invulnerable, or inside the hurt cooldown).
         // A hit a native mod canceled records no damage (hurtServer never ran).
         self.combat.forget_noted(outcome.canceled);
+        // Player motion queues accepted-hit memory events; the normal drain runs after
+        // this function returns. A knockback listener must see those memories already
+        // committed, including absorbed/blocked hits that still reach Criterion.
+        if mod_api::__private::listened(mod_api::HookId::LivingKnockback)
+            && self.player.as_ref().is_some_and(|player| {
+                player.events[events_before..].iter().any(|event| {
+                    matches!(
+                        event,
+                        sunrise_client::motion::MotionEvent::Health(HealthEvent::Criterion { .. })
+                    )
+                })
+            })
+        {
+            self.commit_pending_hurt_memories(damage_type, Some(&attack));
+        }
         if outcome.hurt || outcome.sound {
             let source = attacker
                 .or(owner)
@@ -4868,10 +4882,11 @@ impl Game<'_> {
             _ => false,
         };
         let vanilla = self.saved_refuses_damage(id, damage_type, creative);
-        crate::game::entity::damage_level_of!(self, scoped).invulnerability_check(
-            sunrise_client::health::Hurting::Entity(id as i32, kind, source),
-            vanilla,
-        )
+        crate::game::entity::damage_level_of!(self, self.combat.attack(), no_push)
+            .invulnerability_check(
+                sunrise_client::health::Hurting::Entity(id as i32, kind, source),
+                vanilla,
+            )
     }
     /// `BellBlock.onProjectileHit`: a projectile that strikes the bell proper
     /// rings it, and a player's shot counts as the player's ring.
@@ -5450,6 +5465,14 @@ impl Game<'_> {
             attacker_species,
         };
         let aim = self.attacker_aim(source.attacker);
+        let victim = match &hit {
+            Hit::Entity {
+                who: Who::Mob(id), ..
+            } => *id as i32,
+            _ => 0,
+        };
+        let credit_plan =
+            self.prepare_knockback_credit(victim, source.attacker, self.combat.attack());
         match (&p.kind, hit) {
             // ThrownTrident.onHitEntity: 8 damage (Impaling on aquatic mobs),
             // dealt whether or not the hurt lands, then it bounces off.
@@ -5713,7 +5736,11 @@ impl Game<'_> {
                         0.0
                     };
                     if m.damage_projectile(
-                        crate::game::entity::damage_level_of!(self, scoped),
+                        crate::game::entity::damage_level_of!(
+                            self,
+                            self.combat.attack(),
+                            &mut credit_plan.lend(&mut self.last_hurt_by_player)
+                        ),
                         amount,
                         source,
                         aim,
@@ -5741,7 +5768,11 @@ impl Game<'_> {
                         let push = [p.velocity.x, p.velocity.z];
                         let hurt = self.mobs.iter_mut().find(|m| m.id == id).is_some_and(|m| {
                             m.damage_projectile(
-                                crate::game::entity::damage_level_of!(self, scoped),
+                                crate::game::entity::damage_level_of!(
+                                    self,
+                                    self.combat.attack(),
+                                    &mut credit_plan.lend(&mut self.last_hurt_by_player)
+                                ),
                                 t.damage,
                                 source,
                                 aim,
@@ -5793,7 +5824,11 @@ impl Game<'_> {
                     && let Some(m) = self.mobs.iter_mut().find(|m| m.id == id)
                 {
                     if m.damage_projectile(
-                        crate::game::entity::damage_level_of!(self, scoped),
+                        crate::game::entity::damage_level_of!(
+                            self,
+                            self.combat.attack(),
+                            &mut credit_plan.lend(&mut self.last_hurt_by_player)
+                        ),
                         0.0,
                         source,
                         aim,
@@ -5842,7 +5877,11 @@ impl Game<'_> {
                     && let Some(m) = self.mobs.iter_mut().find(|m| m.id == id)
                 {
                     if m.damage_projectile(
-                        crate::game::entity::damage_level_of!(self, scoped),
+                        crate::game::entity::damage_level_of!(
+                            self,
+                            self.combat.attack(),
+                            &mut credit_plan.lend(&mut self.last_hurt_by_player)
+                        ),
                         0.0,
                         source,
                         aim,
@@ -5943,7 +5982,11 @@ impl Game<'_> {
                                 m.ignite_for_ticks(100);
                             }
                             let hurt = m.damage_projectile(
-                                crate::game::entity::damage_level_of!(self, scoped),
+                                crate::game::entity::damage_level_of!(
+                                    self,
+                                    self.combat.attack(),
+                                    &mut credit_plan.lend(&mut self.last_hurt_by_player)
+                                ),
                                 5.0,
                                 source,
                                 aim,
@@ -6012,7 +6055,11 @@ impl Game<'_> {
                         Who::Mob(id) => {
                             if self.mobs.iter_mut().find(|m| m.id == id).is_some_and(|m| {
                                 m.damage_projectile(
-                                    crate::game::entity::damage_level_of!(self, scoped),
+                                    crate::game::entity::damage_level_of!(
+                                        self,
+                                        self.combat.attack(),
+                                        &mut credit_plan.lend(&mut self.last_hurt_by_player)
+                                    ),
                                     6.0,
                                     source,
                                     aim,
@@ -6118,7 +6165,11 @@ impl Game<'_> {
                 Who::Mob(id) => {
                     if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id)
                         && m.damage_projectile(
-                            crate::game::entity::damage_level_of!(self, scoped),
+                            crate::game::entity::damage_level_of!(
+                                self,
+                                self.combat.attack(),
+                                &mut credit_plan.lend(&mut self.last_hurt_by_player)
+                            ),
                             1.0,
                             source,
                             aim,
@@ -6144,7 +6195,11 @@ impl Game<'_> {
                 Who::Mob(id) => {
                     let hurt = if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
                         let hurt = m.damage_projectile(
-                            crate::game::entity::damage_level_of!(self, scoped),
+                            crate::game::entity::damage_level_of!(
+                                self,
+                                self.combat.attack(),
+                                &mut credit_plan.lend(&mut self.last_hurt_by_player)
+                            ),
                             4.0,
                             source,
                             aim,
@@ -6332,7 +6387,7 @@ impl Game<'_> {
     /// crosshair or on the one a guest's interact packet named: returns true
     /// when consumed.
     pub(super) fn interact_mob(&mut self, target: Option<InteractTarget>) -> Result<bool> {
-        let Some(index) = self.mob_interaction_target(target) else {
+        let Some(mut index) = self.mob_interaction_target(target) else {
             return Ok(false);
         };
         // CamelHusk.interact: any click on it keeps it (`setPersistenceRequired`).
@@ -6347,10 +6402,16 @@ impl Game<'_> {
             return Ok(true);
         }
         // Shears ask the mob's entity parts first, then fire `player_shear_entity`.
-        if self.held_shears()
-            && let Some(consumed) = self.player_shear(index)
-        {
-            return Ok(consumed);
+        if self.held_shears() {
+            let id = self.mobs[index].id;
+            if let Some(consumed) = self.player_shear(index) {
+                return Ok(consumed);
+            }
+            // The shear hook may have moved the list: the mob by its id.
+            match self.mobs.iter().position(|m| m.id == id) {
+                Some(now) => index = now,
+                None => return Ok(true),
+            }
         }
         if self.spawn_egg_offspring(index) {
             self.swing_arm();
@@ -6565,6 +6626,12 @@ impl Game<'_> {
             self.keys.held(Action::Sneak) || self.keys.raw(&winit::keyboard::KeyCode::ShiftRight);
         let held_damage = held.as_ref().map_or(0, |h| h.damage as i32);
         let held_extra = held.as_ref().and_then(|h| h.extra.clone());
+        let feeder = sunrise_client::health::Attack {
+            player_uuid: self.player_uuid_of(self.lan_acting),
+            ..Default::default()
+        };
+        let credit_plan =
+            self.prepare_knockback_credit(self.mobs[index].id as i32, Some(Who::Player), &feeder);
         let m = &mut self.mobs[index];
         if !m.alive() {
             return Ok(false);
@@ -6950,7 +7017,11 @@ impl Game<'_> {
                 m.add_effect("minecraft:poison", 900, 0);
                 let id = m.id;
                 let hurt = m.damage(
-                    crate::game::entity::damage_level_of!(self),
+                    crate::game::entity::damage_level_of!(
+                        self,
+                        &sunrise_client::health::NO_ATTACK,
+                        &mut credit_plan.lend(&mut self.last_hurt_by_player)
+                    ),
                     f32::MAX,
                     sunrise_client::mobs::Damage::player(player_at.unwrap_or(center)),
                 );
@@ -7804,8 +7875,6 @@ impl Game<'_> {
         alpha: f64,
         out: &mut Vec<Vertex>,
     ) {
-        let atlas = &self.gui.atlas;
-        let lookup = |name: &str| atlas.sprites.get(name).map(|r| [r.u0, r.v0, r.u1, r.v1]);
         let scale = self.view_scale();
         // Who watches (`Entity.isInvisibleTo`): the local player's team.
         let viewer = self.player_team();
@@ -7830,287 +7899,16 @@ impl Game<'_> {
                 == sunrise_client::camera::CameraType::ThirdPersonFront,
             ..Default::default()
         });
+        let frame = LivingFrame {
+            camera,
+            alpha,
+            scale,
+            viewer,
+            skinning,
+            listened,
+        };
         for mob in &self.mobs {
-            // LevelRenderer: the entity the view looks out of is not drawn
-            // in first person.
-            if self.hides_as_camera(mob.id) {
-                continue;
-            }
-            let is_player = &*mob.kind.id == "minecraft:player";
-            let d = glam::DVec3::new(mob.position.x, mob.position.y, mob.position.z) - camera;
-            // Entity.shouldRenderAtSqrDistance: 64 times the bounding box's
-            // mean edge, scaled by the view scale. RemotePlayer's box counts
-            // ten times.
-            let (w, h, _) = mob.dims();
-            let edge = (w + h + w) / 3.0 * if is_player { 10.0 } else { 1.0 };
-            let range = edge * 64.0 * scale;
-            if d.length_squared() >= range * range {
-                continue;
-            }
-            let beam = sunrise_client::mobs::guardian::beam(mob, alpha as f32);
-            // EntityRenderer.shouldRender: the renderer's interpolated culling box,
-            // grown by 0.5 (GuardianRenderer also draws while its beam is out).
-            if let Some(view) = &self.view_frustum
-                && beam.is_none()
-            {
-                let (lo, hi) = super::entity_culling::cull_box(mob, alpha);
-                let (lo, hi) = (
-                    (lo - camera - glam::DVec3::splat(0.5)).as_vec3(),
-                    (hi - camera + glam::DVec3::splat(0.5)).as_vec3(),
-                );
-                if !view.intersects(lo, hi) {
-                    continue;
-                }
-            }
-            let outline = self.mob_outline(mob);
-            // Entity.DATA_SHARED_FLAGS_ID invisible (the flag the invisibility
-            // effect sets): only the name tag draws (and the outline of a
-            // glowing mob, LivingEntityRenderer.getRenderType). A player keeps
-            // its armour, elytra and held items (`LivingEntityRenderer.submit`
-            // skips only the body).
-            let invisible = mob.is_invisible();
-            // Entity.isInvisibleTo(viewer): a spectator sees it anyway, the
-            // body forced translucent (`LivingEntityRenderer.submit`).
-            let seen_invisible = invisible
-                && !sunrise_client::scoreboard::invisible_to(
-                    self.mob_team_of(mob),
-                    viewer,
-                    self.spectator(),
-                    true,
-                );
-            let layers_only = invisible && outline.is_none() && is_player && !seen_invisible;
-            if invisible && outline.is_none() && !layers_only && !seen_invisible {
-                continue;
-            }
-            let culling = if PRECHECK
-                && outline.is_none()
-                && !is_player
-                && mob.kind.id.starts_with("minecraft:")
-                && (0..6).all(|slot| mob.extra.slot_stack(slot).is_none())
-                && beam.is_none()
-            {
-                self.entity_cull_decision(mob, alpha)
-            } else {
-                EntityCullDecision::CheckVertices
-            };
-            if culling.hides_entity() {
-                continue;
-            }
-            let entity_start = out.len();
-            self.mark_motion(entity_start, (1 << 32) | u64::from(mob.id));
-            self.mark_entity(entity_start, &mob.kind.id);
-            self.rendered_mobs.set(self.rendered_mobs.get() + 1);
-            let packed = self.mob_packed_light(mob, alpha);
-            // The mods' pre hooks (a player's `render_player_pre`, then `render_living_pre`),
-            // before any of the vanilla model's parts (a sulfur cube's swallowed block) are
-            // drawn. A cancel skips the rest of the entity's drawing and its post hooks; the
-            // frame's later passes (flames, name tag, shadow, leash) leave it out too.
-            let who = is_player
-                .then(|| self.remote_player_name(mob.id))
-                .flatten()
-                .map(|name| PlayerRender { name, local: false });
-            let pre = self.mod_render_pre(mob, who, listened, alpha as f32, camera, packed, out);
-            let Some(hidden) = pre else {
-                // What the mods drew in its place is culled as the entity's own would be.
-                self.cull_entity_vertices(out, entity_start);
-                continue;
-            };
-            // A mod's renderer for the type (`register_entity_renderers`) draws in place of its
-            // model and vanilla layers; the mods' layers and post hooks still follow.
-            let modded = self.mod_living_renderer_geometry(mob, alpha as f32, camera, packed, out);
-            if mob.species() == Species::SulfurCube && !mob.is_invisible() && !modded {
-                self.sulfur_cube_body_geometry(
-                    mob,
-                    alpha as f32,
-                    sunrise_client::mobs::render::base_transform(mob, alpha as f32, camera),
-                    packed,
-                    out,
-                );
-            }
-            // Other players on a server: PlayerRenderer's HumanoidArmorLayer.
-            let armor = if is_player {
-                self.worn_armor_layers(mob)
-            } else {
-                Vec::new()
-            };
-            let body = out.len();
-            // The GPU path: an ordinary mob, no layers the CPU path changes after drawing them
-            // (a player's, the HDR tiers below, the sulfur cube's shell). A glowing mob's
-            // silhouette is posed too (`SkinFrame::outline_since`), unless it is invisible:
-            // then only the outline draws.
-            let silhouette_on_gpu = outline.is_none() || !invisible;
-            let posable = skinning
-                && !(is_player || modded)
-                && !layers_only
-                && !seen_invisible
-                && silhouette_on_gpu
-                && armor.is_empty()
-                && !matches!(
-                    mob.species(),
-                    Species::Blaze | Species::MagmaCube | Species::GlowSquid | Species::SulfurCube
-                );
-            let (mut skinned, mut parts, added) = (None, None, self.mod_layers(mob));
-            if posable {
-                let mut models = self.skin_models.borrow_mut();
-                let mut frame = self.skin_frame.borrow_mut();
-                let mark = frame.mark();
-                let mut skin = sunrise_client::mobs::skin::Skin::new(&mut models, &mut frame);
-                sunrise_client::mobs::render::render_skinned(
-                    mob,
-                    alpha as f32,
-                    camera,
-                    &lookup,
-                    packed,
-                    self,
-                    hidden,
-                    (listened || added.is_some()).then_some(&mut parts),
-                    out,
-                    &mut skin,
-                );
-                skinned = Some((mark, skin.bounds));
-            } else if !modded {
-                if seen_invisible {
-                    sunrise_client::mobs::render::render_seen_invisible(
-                        mob,
-                        alpha as f32,
-                        camera,
-                        &lookup,
-                        packed,
-                        self,
-                        &armor,
-                        hidden,
-                        (listened || added.is_some()).then_some(&mut parts),
-                        out,
-                    );
-                } else if layers_only {
-                    sunrise_client::mobs::render::render_layers(
-                        mob,
-                        alpha as f32,
-                        camera,
-                        &lookup,
-                        packed,
-                        self,
-                        &armor,
-                        (listened || added.is_some()).then_some(&mut parts),
-                        out,
-                    );
-                } else {
-                    sunrise_client::mobs::render::render_with_hidden(
-                        mob,
-                        alpha as f32,
-                        camera,
-                        &lookup,
-                        packed,
-                        self,
-                        &armor,
-                        hidden,
-                        (listened || added.is_some()).then_some(&mut parts),
-                        out,
-                    );
-                }
-            }
-            // HDR output: mobs that are light shine by their kind, as blocks do (entity.wgsl
-            // fs_hdr_mark); a tier's window lifts only their bright texels.
-            if let Some(tier) = match mob.species() {
-                Species::Blaze => Some(sunrise_client::mesher::BRIGHT),
-                Species::MagmaCube | Species::GlowSquid => Some(sunrise_client::mesher::LOW),
-                _ => None,
-            } {
-                for v in &mut out[body..] {
-                    v.layer |= u32::from(tier) << 16;
-                }
-            }
-            // AvatarRenderer.shouldRenderLayers: a spectator draws no layers.
-            let layers = sunrise_client::mobs::render::layers_shown(mob);
-            if is_player && layers {
-                // PlayerRenderer's CapeLayer, WingsLayer, ParrotOnShoulderLayer
-                // and SpinAttackEffectLayer. Only the cape hides with the body;
-                // the others have no `isInvisible` check.
-                let chest = mob.extra.slot_id(sunrise_items::equipment::CHEST);
-                // `CapeLayer` and `Deadmau5EarsLayer`: `!state.isInvisible`, whoever sees the body.
-                if !invisible {
-                    self.player_cape_geometry(mob, chest, camera, alpha as f32, packed, out);
-                }
-                if !invisible
-                    && let Some((_, name)) = self
-                        .remote_player_names()
-                        .into_iter()
-                        .find(|(id, _)| *id == mob.id)
-                {
-                    self.player_ears_geometry(mob, &name, camera, alpha as f32, packed, out);
-                }
-                self.player_elytra_geometry(mob, chest, camera, alpha as f32, packed, out);
-                self.shoulder_parrots_geometry(mob, camera, alpha as f32, packed, out);
-                self.spin_attack_geometry(mob, camera, alpha as f32, packed, out);
-                self.stuck_in_body_geometry(mob, mob.id as i32, camera, alpha as f32, packed, out);
-            }
-            // What a hook draws on a player (`Hooks::player_layers`), posed on the GPU with the
-            // mob's own jobs: culled with it.
-            if !(layers_only || modded)
-                && sunrise_hooks::engine::any()
-                && (is_player || &*mob.kind.id == "minecraft:mannequin")
-            {
-                let mark = self.skin_frame.borrow().mark();
-                let base = sunrise_client::mobs::render::base_transform(mob, alpha as f32, camera);
-                let gpu = skinning;
-                if let Some((lo, hi)) =
-                    self.player_layers_geometry(mob, base, camera, alpha as f32, packed, gpu, out)
-                {
-                    skinned = Some(match skinned {
-                        Some((first, Some((l, h)))) => (first, Some((l.min(lo), h.max(hi)))),
-                        Some((first, None)) => (first, Some((lo, hi))),
-                        None => (mark, Some((lo, hi))),
-                    });
-                }
-            }
-            // CustomHeadLayer (a pumpkin, skull or head item) included.
-            if layers {
-                if !modded {
-                    // Held items join the GPU path's draws, their silhouette too.
-                    let skin = (skinning && silhouette_on_gpu).then_some(&mut skinned);
-                    self.mob_block_geometry(mob, camera, alpha, packed, skin, out);
-                }
-                self.mod_layer_geometry(mob, who, parts, added, alpha as f32, camera, packed, out);
-            }
-            self.mod_render_post(mob, who, parts, alpha as f32, camera, packed, out);
-            if let Some(rgb) = outline {
-                self.mark_outline(&out[entity_start..], rgb);
-                if let Some(((first, _, _), _)) = skinned {
-                    let color = sunrise_client::mobs::render::abgr(rgb);
-                    self.skin_frame.borrow_mut().outline_since(first, color);
-                }
-                if invisible && !seen_invisible {
-                    out.truncate(entity_start);
-                    continue;
-                }
-            }
-            // Glowing outlines and a guardian's beam remain visible independently
-            // of whether the body is hidden behind terrain.
-            if outline.is_none() && culling.checks_vertices() && beam.is_none() {
-                // What the GPU draws of the mob counts by its bounds' corners.
-                self.cull_skinned(out, entity_start, skinned);
-            }
-            // GuardianRenderer: the laser to the locked target.
-            if let Some((time, scale)) = beam
-                && !modded
-                && let Some(target) = self.beam_target(mob.ai.target, alpha)
-                && let Some(uv) = lookup("entity/guardian/guardian_beam")
-            {
-                let a = alpha;
-                let eye = glam::DVec3::new(
-                    mob.previous.x + (mob.position.x - mob.previous.x) * a,
-                    mob.previous.y + (mob.position.y - mob.previous.y) * a + mob.eye_height(),
-                    mob.previous.z + (mob.position.z - mob.previous.z) * a,
-                ) - camera;
-                sunrise_client::mobs::guardian::beam_geometry(
-                    eye.as_vec3(),
-                    (target - camera).as_vec3(),
-                    time,
-                    scale,
-                    uv,
-                    out,
-                );
-            }
+            self.living_geometry::<PRECHECK>(mob, &frame, out);
         }
         // What follows isn't a tracked mob: close the last one's span.
         self.mark_motion(out.len(), 0);
