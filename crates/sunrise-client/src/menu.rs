@@ -35,10 +35,12 @@ pub use container_items::fits_inside_container_items;
 mod click;
 mod storage;
 pub use storage::{MutationStamp, Snapshot};
+mod asked;
 mod equip_movement;
 mod equippable;
 pub mod place;
 mod remainder;
+pub use asked::Asked;
 
 /// `ServerPlayer.getRecipeBook`: whether the player knows a recipe.
 pub trait KnownRecipes {
@@ -440,6 +442,7 @@ const OFFHAND: usize = 40;
 pub struct Menu {
     state: storage::State,
     stamp: storage::MutationStamp,
+    planning: asked::Planning,
 }
 
 /// `AnvilMenu`'s state besides its slots and `cost`.
@@ -843,6 +846,7 @@ impl Menu {
         containers[RESULT] = vec![None; 1];
         Self {
             stamp: storage::MutationStamp::fresh(),
+            planning: Default::default(),
             state: storage::State {
                 kind,
                 registry_id: match kind {
@@ -1621,9 +1625,7 @@ impl Menu {
         if self.state.slots[s].role == Role::Hidden {
             return false;
         }
-        let own = self.vanilla_may_place(env, s, stack);
-        self.slot_rules(env, s, stack, own, self.vanilla_slot_max(s, stack))
-            .0
+        self.slot_rules(env, s, stack).0
     }
 
     fn vanilla_may_place(&self, env: &Env, s: usize, stack: &ItemStack) -> bool {
@@ -1687,7 +1689,22 @@ impl Menu {
         stack.item.ends_with("_banner")
     }
 
+    /// `Slot.mayPickup`: the slot's own answer, then, on a mod menu type and only for a stack
+    /// the slot holds, the parts' (`menu_slot_rules`).
     fn may_pickup(&self, env: &Env, s: usize) -> bool {
+        self.vanilla_may_pickup(env, s)
+            && match self.slot(s) {
+                Some(held) if self.asks_pickup(s) => self.slot_rules(env, s, held).1,
+                _ => true,
+            }
+    }
+
+    /// The parts answer `mayPickup` on a mod menu type's slots that its screen shows.
+    fn asks_pickup(&self, s: usize) -> bool {
+        matches!(self.state.kind, Kind::Mod(_)) && self.state.slots[s].role != Role::Hidden
+    }
+
+    fn vanilla_may_pickup(&self, env: &Env, s: usize) -> bool {
         match self.state.slots[s].role {
             Role::Inert | Role::Hidden => false,
             Role::CraftResult => self.crafting_result_is_current(env, s),
@@ -1787,27 +1804,16 @@ impl Menu {
         partial
     }
 
-    fn slot_rules(
-        &self,
-        env: &Env,
-        s: usize,
-        stack: &ItemStack,
-        own: bool,
-        max: u32,
-    ) -> (bool, u32) {
+    /// Slot `s`'s `mayPlace`, the parts' `mayPickup` (true unless they refuse) and
+    /// `getMaxStackSize` for `stack`: its own answers, then the parts' on a registered menu
+    /// type, all from one ask.
+    fn slot_rules(&self, env: &Env, s: usize, stack: &ItemStack) -> (bool, bool, u32) {
+        let place = self.vanilla_may_place(env, s, stack);
+        let (max, item_max) = (self.vanilla_slot_max(s, stack), Self::max_stack(env, stack));
         let Some(id) = self.registry_id() else {
-            return (own, max.min(Self::max_stack(env, stack)));
+            return (place, true, max.min(item_max));
         };
-        apply_menu_slot_rules(
-            env.slot_rules,
-            id,
-            self.state.slots[s].index,
-            stack,
-            self.slot_context(env, s),
-            own,
-            max,
-            Self::max_stack(env, stack),
-        )
+        self.ask_slot_rules(env, id, s, stack, (place, true, max), item_max)
     }
 
     /// Capacity overrides for the backing container slots, refreshed before each server edit.
@@ -1818,15 +1824,7 @@ impl Menu {
 
     /// `Slot.getMaxStackSize(stack)`.
     fn slot_max(&self, env: &Env, s: usize, stack: &ItemStack) -> u32 {
-        let max = self
-            .slot_rules(
-                env,
-                s,
-                stack,
-                self.vanilla_may_place(env, s, stack),
-                self.vanilla_slot_max(s, stack),
-            )
-            .1;
+        let max = self.slot_rules(env, s, stack).2;
         self.limit_slot_max(s, max)
     }
 
@@ -2123,12 +2121,10 @@ impl Menu {
         Some(result)
     }
 
+    /// `Slot.allowModification`: `mayPickup` and `mayPlace` of what the slot holds, the click's
+    /// one ask for that stack.
     fn allow_modification(&self, env: &Env, s: usize) -> bool {
-        self.may_pickup(env, s)
-            && match self.slot(s) {
-                Some(stack) => self.may_place(env, s, stack),
-                None => true,
-            }
+        self.may_pickup(env, s) && self.slot(s).is_none_or(|held| self.may_place(env, s, held))
     }
 
     fn safe_take(
@@ -3080,7 +3076,8 @@ pub(crate) mod tests {
             &items,
             &PackOverlay::NONE,
             &crate::test_resources::server_load(),
-        );
+        )
+        .unwrap();
         let enchantments = crate::enchant::Enchantments::default();
         let names = crate::creative::Names::default();
         let env = Env {
@@ -3416,7 +3413,8 @@ pub(crate) mod tests {
                     &PackOverlay::NONE,
                     &defaults,
                     &crate::test_resources::server_load(),
-                );
+                )
+                .unwrap();
                 assert_eq!(stations.brewing.is_reagent(&apple), added);
                 assert_eq!(
                     env.station_recipes
@@ -3537,6 +3535,7 @@ pub(crate) mod tests {
             _: &ItemStack,
             context: SlotContext<'_>,
             may_place: &mut bool,
+            _: &mut bool,
             max_stack: &mut u32,
         ) {
             // `test:context` slot 1 takes a stack only for player 7 at its block, beside an
@@ -4134,19 +4133,19 @@ pub(crate) mod tests {
             let mut menu = Menu::new(kind);
             menu.set_registry_id(Some("test:context"));
             // No block: the rule refuses.
-            assert!(!menu.slot_rules(env, 1, &stack, true, CONTAINER_MAX).0);
+            assert!(!menu.slot_rules(env, 1, &stack).0);
             menu.set_block_pos(Some([4, 5, 6]));
-            assert!(menu.slot_rules(env, 1, &stack, true, CONTAINER_MAX).0);
+            assert!(menu.slot_rules(env, 1, &stack).0);
             // What slot 0 holds is seen by the ask about slot 1.
             menu.set_slot(env, 0, Some(ItemStack::new("minecraft:dirt", 1)));
-            assert!(!menu.slot_rules(env, 1, &stack, true, CONTAINER_MAX).0);
+            assert!(!menu.slot_rules(env, 1, &stack).0);
             // Another player's menu (player 8) is refused even at the block.
             let other = Env {
                 player: Some(8),
                 ..*env
             };
             menu.set_slot(env, 0, None);
-            assert!(!menu.slot_rules(&other, 1, &stack, true, CONTAINER_MAX).0);
+            assert!(!menu.slot_rules(&other, 1, &stack).0);
         });
     }
 
@@ -4175,18 +4174,12 @@ pub(crate) mod tests {
         let before = load.loop_context(LoopSide::Server, []);
         assert_eq!(before.setting("rules_mod", "stack"), None);
         bare_env_in(&before, |env| {
-            assert_eq!(
-                menu.slot_rules(env, 0, &stack, true, CONTAINER_MAX),
-                (true, 7)
-            );
+            assert_eq!(menu.slot_rules(env, 0, &stack), (true, true, 7));
         });
         std::fs::write(&file, "3").unwrap();
         let after = load.loop_context(LoopSide::Server, ["rules_mod"]);
         bare_env_in(&after, |env| {
-            assert_eq!(
-                menu.slot_rules(env, 0, &stack, true, CONTAINER_MAX),
-                (true, 3)
-            );
+            assert_eq!(menu.slot_rules(env, 0, &stack), (true, true, 3));
             // Slot 28 is hotbar 0 in this one-slot mod menu; both indices
             // refer to inventory cell 0 and the rule caps that cell at three.
             menu.set_player_item(0, Some(ItemStack::new("minecraft:stone", 8)));
@@ -4213,10 +4206,7 @@ pub(crate) mod tests {
             );
         });
         bare_env_in(&before, |env| {
-            assert_eq!(
-                menu.slot_rules(env, 0, &stack, true, CONTAINER_MAX),
-                (true, 7)
-            );
+            assert_eq!(menu.slot_rules(env, 0, &stack), (true, true, 7));
         });
         // The other loop hooks read the same context: before the reload the
         // setting is missing, after it every one sees it.

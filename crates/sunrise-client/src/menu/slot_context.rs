@@ -96,22 +96,30 @@ impl Menu {
     }
 }
 
-/// Apply the scoped rule to a slot's own answers, then enforce its item cap. The rules are asked
-/// here, while the click plans, and only for a menu type a part answers; with none lent the
-/// slot's answers stand.
-#[allow(clippy::too_many_arguments)]
+/// Apply the scoped rule to a slot's own answers (`may_place`, `may_pickup` and the maximum, in
+/// that order), then enforce its item cap. The rules are asked here, while the click plans, and
+/// only for a menu type a part answers; with none lent the slot's answers stand.
 pub fn apply_menu_slot_rules(
     rules: Option<&dyn SlotRules>,
     menu: &str,
     slot: usize,
     stack: &ItemStack,
     context: SlotContext<'_>,
-    mut may_place: bool,
-    mut max_stack: u32,
+    own: (bool, bool, u32),
     item_max: u32,
-) -> (bool, u32) {
+) -> (bool, bool, u32) {
+    let (mut may_place, mut may_pickup, mut max_stack) = own;
     if let Some(rules) = rules.filter(|rules| rules.listens(menu)) {
-        rules.rule(menu, slot, stack, context, &mut may_place, &mut max_stack);
+        rules.rule(
+            menu,
+            slot,
+            stack,
+            context,
+            &mut may_place,
+            &mut may_pickup,
+            &mut max_stack,
+        );
     }
-    (may_place, max_stack.clamp(1, CONTAINER_MAX).min(item_max))
+    let max_stack = max_stack.clamp(1, CONTAINER_MAX).min(item_max);
+    (may_place, may_pickup, max_stack)
 }
