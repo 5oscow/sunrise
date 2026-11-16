@@ -403,6 +403,19 @@ impl Game<'_> {
         vehicle: Target,
         force: bool,
     ) -> bool {
+        self.start_riding_with(rider, vehicle, force, false)
+    }
+
+    /// `start_riding_target`, where `onto_player` admits a player vehicle for a mob rider:
+    /// only `entity_ride_player` passes true, so every other call keeps refusing one, as
+    /// vanilla's `startRiding` callers and `/ride` do.
+    pub(super) fn start_riding_with(
+        &mut self,
+        rider: Target,
+        vehicle: Target,
+        force: bool,
+        onto_player: bool,
+    ) -> bool {
         if let Target::Guest(conn) = rider {
             if self
                 .command_guest(conn)
@@ -412,11 +425,12 @@ impl Game<'_> {
             }
             return self
                 .for_player(rider, |game| {
-                    game.start_riding_target(Target::Player, vehicle, force)
+                    game.start_riding_with(Target::Player, vehicle, force, onto_player)
                 })
                 .unwrap_or(false);
         }
-        let Some(vehicle_id) = self.native_riding_preconditions(rider, vehicle, force) else {
+        let Some(vehicle_id) = self.native_riding_preconditions(rider, vehicle, force, onto_player)
+        else {
             return false;
         };
         let previous_vehicle = self.native_vehicle_id(rider);
@@ -428,7 +442,7 @@ impl Game<'_> {
         if !allowed
             || self.native_vehicle_id(rider) != previous_vehicle
             || self
-                .native_riding_preconditions(rider, vehicle, force)
+                .native_riding_preconditions(rider, vehicle, force, onto_player)
                 .is_none()
         {
             return false;
@@ -458,7 +472,7 @@ impl Game<'_> {
         }
         // Dismount dispatch can also discard, remount or fill the target vehicle.
         if self
-            .native_riding_preconditions(rider, vehicle, force)
+            .native_riding_preconditions(rider, vehicle, force, onto_player)
             .is_none()
         {
             return false;
@@ -505,6 +519,7 @@ impl Game<'_> {
         rider: Target,
         vehicle: Target,
         force: bool,
+        onto_player: bool,
     ) -> Option<u32> {
         let vehicle_id = match vehicle {
             Target::Mob(id)
@@ -512,6 +527,11 @@ impl Game<'_> {
             | Target::Cart(id)
             | Target::Stand(id)
             | Target::Other(id) => id,
+            // Only `ride_player` seats a mob on a player (`native_ride_player.rs`), at each
+            // re-check too: the plain call refuses a player vehicle.
+            Target::Player | Target::Guest(_) if onto_player && matches!(rider, Target::Mob(_)) => {
+                self.player_vehicle_id(vehicle)?
+            }
             _ => return None,
         };
         if self.entity(vehicle_id).is_none()
@@ -529,7 +549,11 @@ impl Game<'_> {
             if rider == Target::Mob(id) {
                 return None;
             }
-            current = self.native_vehicle_id(Target::Mob(id));
+            current = if matches!(vehicle, Target::Player | Target::Guest(_)) {
+                self.vehicle_of_any(id)
+            } else {
+                self.native_vehicle_id(Target::Mob(id))
+            };
         }
         if current.is_some() {
             return None;
@@ -590,6 +614,12 @@ impl Game<'_> {
                     return None;
                 }
             }
+            // `Player` keeps `Entity.canAddPassenger`: one passenger unless forced.
+            Target::Player | Target::Guest(_) => {
+                if !force && !self.seated_passengers(vehicle_id).is_empty() {
+                    return None;
+                }
+            }
             _ => return None,
         }
         Some(vehicle_id)
@@ -597,7 +627,8 @@ impl Game<'_> {
 
     /// Attempts to board a vehicle through the shared server mount path.
     ///
-    /// Players and mobs can ride a mob, boat, minecart or generic seat entity. Returns false for
+    /// Players and mobs can ride a mob, boat, minecart or generic seat entity; a player vehicle is
+    /// refused, forced or not (only `entity_ride_player` seats a mob on one). Returns false for
     /// unsupported entity pairs, stale or held-out handles, a full stored
     /// vehicle, a cycle, or a canceled mount or dismount. Normal mob capacity
     /// follows its species and is bypassed by force; minecarts store one passenger and boats store one

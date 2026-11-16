@@ -804,7 +804,9 @@ pub trait EntitiesBackendMut {
     /// Attempts to board a vehicle through the shared server mount path.
     ///
     /// Players and mobs can ride a mob, boat, minecart or generic seat entity
-    /// (an armor stand, display, marker or interaction). Returns false for
+    /// (an armor stand, display, marker or interaction). A player vehicle is
+    /// refused, forced or not: only `entity_ride_player` seats a mob on one.
+    /// Returns false for
     /// unsupported entity pairs, stale or held-out handles, a full stored
     /// vehicle, a cycle, or a canceled mount or dismount. Mob vehicle capacity
     /// follows its species; minecarts store one passenger and boats store one
@@ -814,6 +816,29 @@ pub trait EntitiesBackendMut {
     /// eye-in-lava admission check are not represented by the game.
     #[access(WorldOnly)]
     fn entity_start_riding(&mut self, entity: EntityRef, vehicle: EntityRef, force: bool) -> bool;
+    /// Side: server.
+    /// Seats the mob `entity` on the server player `player`
+    /// (`Entity.startRiding(player, force)`), as Tinkers' Construct's piggyback
+    /// pack does: the mob sits at the player's passenger point (the top of its
+    /// box for its pose, less the mob's own vehicle attachment), follows it
+    /// every tick, and leaves a vehicle it rode first. Every client is told:
+    /// those who track the player by the tracker, and the player's own client,
+    /// which no tracker tells of its own entity, as the pack sends it
+    /// `ClientboundSetPassengersPacket` itself. `force` bypasses `canRide` and
+    /// the player's one-passenger limit (`Entity.canAddPassenger`), as in
+    /// vanilla. `entity_mount` hears the mount, and the dismount from an old
+    /// vehicle, and may cancel either. `entity_stop_riding` and
+    /// `entity_eject_passengers` take it off again. It also gets off, with
+    /// `entity_mount` told, at every save of the level or its entities and when
+    /// the player logs out, dies or changes level, so it is saved standing where
+    /// it is: a player's save keeps no passengers.
+    #[access(WorldOnly)]
+    fn entity_ride_player(
+        &mut self,
+        entity: EntityRef,
+        player: EntityRef,
+        force: bool,
+    ) -> Result<(), RidePlayerRefusal>;
     /// Side: server.
     /// Gets the entity off its vehicle (`Entity.stopRiding`), where the
     /// vehicle lets it out, as `/ride ... dismount` does. False when it rode

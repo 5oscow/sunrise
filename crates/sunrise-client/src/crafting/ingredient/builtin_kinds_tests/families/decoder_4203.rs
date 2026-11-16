@@ -1,9 +1,9 @@
 use super::*;
 #[test]
 fn attack_animation_codec_matches_recipes_and_rejects_malformed_siblings() {
-    use sunrise_core::nbt::Compound;
     use serde_json::json;
     use std::{collections::HashMap, sync::Arc};
+    use sunrise_core::nbt::Compound;
 
     const ID: &str = "minecraft:attack_animation";
     fn record(kind: &str, duration: Tag) -> Tag {
@@ -18,7 +18,7 @@ fn attack_animation_codec_matches_recipes_and_rejects_malformed_siblings() {
     }
     fn stack(value: Tag) -> ItemStack {
         let mut stack = ItemStack::new("minecraft:diamond_sword", 3);
-        stack.data_mut().other.push((ID.into(), value));
+        stack.data_mut().set_other(ID, Some(value));
         stack
     }
     let ingredient = |patch: Value, strict| {
@@ -166,15 +166,14 @@ fn attack_animation_codec_matches_recipes_and_rejects_malformed_siblings() {
     let mut extra = inherited.clone();
     extra
         .data_mut()
-        .other
-        .push(("minecraft:rarity".into(), Tag::String("rare".into())));
+        .set_other("minecraft:rarity", Some(Tag::String("rare".into())));
     assert!(matches("fixture:valid_0", &extra));
     assert!(!matches("fixture:strict", &extra));
     let mut removed = inherited.clone();
-    removed.data_mut().other.push((
-        "!minecraft:attack_animation".into(),
-        Tag::Compound(Compound::new()),
-    ));
+    removed.data_mut().set_other(
+        "!minecraft:attack_animation",
+        Some(Tag::Compound(Compound::new())),
+    );
     assert!(!matches("fixture:valid_0", &removed));
     assert!(matches("fixture:removed", &removed));
     assert!(!matches(
