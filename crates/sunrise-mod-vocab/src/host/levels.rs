@@ -1543,6 +1543,23 @@ pub trait LevelsBackendMut {
         feature: &str,
         pos: [i32; 3],
     ) -> Result<bool, PlaceFeatureRefusal>;
+    /// Side: server.
+    /// Place the placed feature `placed_feature` (a `minecraft:worldgen/placed_feature` id,
+    /// `minecraft:oak_checked` or `mymod:ender_tree_checked`) at `pos`, as `PlacedFeature.place`
+    /// does with the level's random and chunk generator: its placement modifiers run in order from
+    /// `pos`, depth first, and its feature is placed at every position they give. There is no
+    /// biome check from code, so a biome filter modifier passes. `Ok(true)` when any feature
+    /// invocation reports success, `Ok(false)` when no positions remain or every invocation
+    /// reports failure. Blocks set before a feature reports failure are kept. Refusals are
+    /// checked before placement and change nothing, as for `level_place_feature`, with
+    /// `UnknownFeature` for an id the placed-feature registry lacks.
+    #[access(WorldOnly)]
+    fn level_place_placed_feature(
+        &mut self,
+        level: LevelRef,
+        placed_feature: &str,
+        pos: [i32; 3],
+    ) -> Result<bool, PlaceFeatureRefusal>;
     /// Side: both.
     /// Set the biome of the 4x4x4 cell holding `pos` to `biome` (`minecraft:plains`), as
     /// `/fillbiome` does for one cell. False for a refused write, a stale or parked handle, a
