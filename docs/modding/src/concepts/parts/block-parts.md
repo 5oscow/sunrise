@@ -106,7 +106,7 @@ template block writes still call the rotation Part at their placed world positio
 `BlockPart::fall_on` runs at vanilla's landing moment on a read-only level random host.
 Hook version 2 exposes writable `event.distance` and `event.damage_multiplier`, not calculated
 damage. Vanilla blocks supply their own pair: hay uses 0.2, beds 0.5, slime 0,
-and pointed dripstone adds 2 to distance and uses 2.0. Other blocks start at 1.0.
+and pointed dripstone adds 2.5 to distance and uses 2.0. Other blocks start at 1.0.
 The engine applies `floor((distance + 1e-6 - safe_fall_distance) * damage_multiplier * fall_damage_multiplier_attribute)`.
 The safe fall distance attribute defaults to 3: halving distance is not halving damage.
 A zero multiplier or distance within the safe fall means no damage or generic fall sounds.
