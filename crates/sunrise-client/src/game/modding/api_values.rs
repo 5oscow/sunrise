@@ -1616,15 +1616,15 @@ mod recipe_listing_tests {
     fn a_bad_recipe_does_not_hide_the_good_recipe_of_its_type() {
         prepare_stack_boundary_tests();
         let mut good = crate::crafting::RecipeSnapshot::new(
-            "example:good".into(),
-            "example:machine".into(),
-            serde_json::json!({}),
+            "example:good",
+            "example:machine",
+            serde_json::json!({}).into(),
         );
         good.results = vec![EngineStack::new("minecraft:stick", 1)];
         let mut bad = crate::crafting::RecipeSnapshot::new(
-            "example:bad".into(),
-            "example:machine".into(),
-            serde_json::json!({}),
+            "example:bad",
+            "example:machine",
+            serde_json::json!({}).into(),
         );
         bad.results = vec![EngineStack::new("example:unknown", 1)];
         let entries = RecipeListing(vec![good, bad].into())
