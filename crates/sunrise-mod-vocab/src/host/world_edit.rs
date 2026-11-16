@@ -55,6 +55,21 @@ pub trait WorldEditServerHost {
         heightmap: Heightmap,
     ) -> Result<Vec<Option<i32>>, String>;
     /// Side: server.
+    /// Read the level generator before features, without creating, holding or loading chunks.
+    /// One optional answer per input column, in order, independent of loaded chunks and previous calls.
+    /// Height counts from the level top: the Nether returns its roof, not a floor. The top block
+    /// omits slope rules and may differ even from an undecorated chunk. Trees, ores and other
+    /// features are absent. Void columns and worlds without their own generator return None.
+    /// Refuses before reading on a client, for a dimension other than the one being ticked,
+    /// or for more than [`MAX_TERRAIN_COLUMNS`] inputs. One noise sample per column on the server
+    /// tick; slow calls log the column count when the slow-call threshold is enabled.
+    #[access(WorldOnly)]
+    fn terrain_surface(
+        &self,
+        dimension: &str,
+        columns: &[(i32, i32)],
+    ) -> Result<Vec<Option<TerrainColumn>>, String>;
+    /// Side: server.
     /// For a server mod: `below` blocks under and `above` blocks from each column's height by `heightmap`, as a
     /// palette of complete `BlockState` values and indexes, with biome tints (air outside the column and in columns
     /// not loaded). The tints are the biome's at the column's top, not blended over the biome blend radius as the
