@@ -426,7 +426,7 @@ impl Game<'_> {
             }
             None => None,
         };
-        self.roll_table_at(table, origin, tool, this.as_ref())
+        self.roll_table_at(table, Some(origin), tool, this.as_ref())
     }
     /// Set a block through Level.setBlock. Typed errors distinguish stale/unavailable
     /// levels; Ok(false) preserves vanilla's position/no-change refusal.

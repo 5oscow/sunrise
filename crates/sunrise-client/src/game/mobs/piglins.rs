@@ -488,12 +488,17 @@ impl Game<'_> {
         if !barter {
             return;
         }
-        let items = world_items!(self).loot_table(
-            "minecraft:gameplay/piglin_bartering",
-            false,
-            None,
-            &mut self.world.random,
-        );
+        // `LootContextParamSets.PIGLIN_BARTER`: the piglin is THIS_ENTITY, and
+        // nothing else is supplied.
+        let piglin = sunrise_client::mobs::drops::loot_entity(&self.mobs[i], None);
+        let items = self
+            .roll_table_at(
+                "minecraft:gameplay/piglin_bartering",
+                None,
+                None,
+                Some(&piglin),
+            )
+            .unwrap_or_default();
         self.piglin_throw_items(i, items);
     }
     /// `PiglinAi.throwItems`: barters and a baby's unwanted main-hand item

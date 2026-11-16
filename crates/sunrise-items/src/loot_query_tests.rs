@@ -796,3 +796,17 @@ fn a_mod_roll_names_the_entity_it_was_given() {
     assert_eq!(stacks, 0);
     assert_eq!(seen, (None, None, None));
 }
+
+/// `LootContextParamSets.PIGLIN_BARTER`: THIS_ENTITY is the piglin and nothing
+/// else is supplied (no tool, no origin).
+#[test]
+fn a_barter_roll_names_the_piglin_and_nothing_else() {
+    let (stacks, seen) = roll_as_caller(
+        table_for_this("minecraft:piglin"),
+        Some("minecraft:piglin"),
+        None,
+        None,
+    );
+    assert_eq!(stacks, 1);
+    assert_eq!(seen, (Some("minecraft:piglin".into()), None, None));
+}

@@ -234,14 +234,15 @@ impl Game<'_> {
         sunrise_world::loot::LootEntity::new(&self.target_type(target))
     }
 
-    /// One roll of `table` (`LootTable.getRandomItems`) at `origin`, with `held` as
+    /// One roll of `table` (`LootTable.getRandomItems`) with `origin` as ORIGIN (a
+    /// parameter set without one passes None), with `held` as
     /// TOOL and `this` as THIS_ENTITY when given, from the table's random
     /// sequence, else the level random. The stacks come split to their stack
     /// sizes; None for a missing table.
     pub(in crate::game) fn roll_table_at(
         &mut self,
         table: &str,
-        origin: [f64; 3],
+        origin: Option<[f64; 3]>,
         held: Option<&ItemStack>,
         this: Option<&sunrise_world::loot::LootEntity>,
     ) -> Option<Vec<ItemStack>> {
@@ -256,7 +257,10 @@ impl Game<'_> {
                 &matcher as &dyn Fn(&serde_json::Value, &sunrise_world::loot::LootEntity) -> bool,
             )
         });
-        let place = self.loot_place_at(origin, None);
+        let place = sunrise_world::loot::LootPlace {
+            origin,
+            ..self.loot_place_at([0.0; 3], None)
+        };
         sunrise_world::loot::with_native_loot_place(place, || {
             let items = world_items!(self);
             match items.loot_sequence(table) {
