@@ -2945,9 +2945,22 @@ mod tests {
         });
     }
 
-    struct FoodEffectMod;
+    struct FoodEffectMod(std::sync::Arc<std::sync::atomic::AtomicBool>);
     #[mod_api::__subscriptions]
     impl mod_api::Hooks for FoodEffectMod {
+        fn mob_effect_expired(
+            &self,
+            _: &dyn mod_api::Host,
+            event: &mut mod_api::MobEffectExpiredEvent,
+        ) -> mod_api::Flow {
+            if self.0.load(std::sync::atomic::Ordering::SeqCst)
+                && event.effect == mod_api::__private::effect_key("minecraft:regeneration").unwrap()
+            {
+                mod_api::Flow::Cancel
+            } else {
+                mod_api::Flow::Continue
+            }
+        }
         fn should_apply_effect_tick_this_tick(
             &self,
             _: &dyn mod_api::Host,
@@ -3018,139 +3031,191 @@ mod tests {
         ) {
             return;
         }
-        mod_platform::__private::install(std::sync::Arc::from([
-            mod_api::ModEntry::new("effect-owner", Box::new(FoodEffectMod)),
-            mod_api::ModEntry::new("other-mod", Box::new(OtherEffectMod)),
-        ]));
-        assert!(brewing::register_mod_effects(
-            ["test:comfort", "test:nourishment"].map(|id| (
-                id.into(),
-                0,
-                brewing::Category::Beneficial,
-                None,
-                "effect-owner".into(),
-            ))
-        ));
-        super::super::native_entity_refs::tests::with_game(|game| {
-            game.options.dedicated = Some(Vec::new());
-            game.player = Some(PlayerMotion::new(game.motion, Vec3::new(0.5, 64.0, 0.5)).unwrap());
-            game.player
-                .as_mut()
-                .unwrap()
-                .set_health(10.0, false)
-                .unwrap();
-            game.player.as_mut().unwrap().health.food.saturation = 0.0;
-            game.potions
-                .effects
-                .add(EffectInstance::new("test:comfort", 80, 0));
-            game.tick_mob_effects();
-            assert_eq!(game.player.as_ref().unwrap().health.health(), 11.0);
-            game.tick_mob_effects();
-            assert_eq!(
-                game.player.as_ref().unwrap().health.health(),
-                11.0,
-                "only each 80 ticks"
-            );
-            game.potions.effects = PlayerEffects::default();
-            game.potions
-                .effects
-                .add(EffectInstance::new("regeneration", 100, 0));
-            game.potions
-                .effects
-                .add(EffectInstance::new("test:comfort", 80, 0));
-            game.tick_mob_effects();
-            assert_eq!(
-                game.player.as_ref().unwrap().health.health(),
-                12.0,
-                "regeneration alone healed"
-            );
-            game.potions.effects = PlayerEffects::default();
-            game.potions
-                .effects
-                .add(EffectInstance::new("regeneration", 1, 0));
-            game.potions
-                .effects
-                .add(EffectInstance::new("test:comfort", 80, 0));
-            game.tick_mob_effects();
-            assert_eq!(
-                game.player.as_ref().unwrap().health.health(),
-                13.0,
-                "an earlier expired regeneration is no longer present"
-            );
-            game.potions.effects = PlayerEffects::default();
-            game.player.as_mut().unwrap().health.food.saturation = 1.0;
-            game.potions
-                .effects
-                .add(EffectInstance::new("test:comfort", 80, 0));
-            game.tick_mob_effects();
-            assert_eq!(
-                game.player.as_ref().unwrap().health.health(),
-                13.0,
-                "saturated players skip comfort"
-            );
+        let cancel_expiry = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        mod_platform::testing::with_dispatch(
+            std::sync::Arc::from([
+                mod_api::ModEntry::new(
+                    "effect-owner",
+                    Box::new(FoodEffectMod(cancel_expiry.clone())),
+                ),
+                mod_api::ModEntry::new("other-mod", Box::new(OtherEffectMod)),
+            ]),
+            || {
+                assert!(brewing::register_mod_effects(
+                    ["test:comfort", "test:nourishment"].map(|id| (
+                        id.into(),
+                        0,
+                        brewing::Category::Beneficial,
+                        None,
+                        "effect-owner".into(),
+                    ))
+                ));
+                super::super::native_entity_refs::tests::with_game(|game| {
+                    game.options.dedicated = Some(Vec::new());
+                    game.player =
+                        Some(PlayerMotion::new(game.motion, Vec3::new(0.5, 64.0, 0.5)).unwrap());
+                    game.player
+                        .as_mut()
+                        .unwrap()
+                        .set_health(10.0, false)
+                        .unwrap();
+                    game.player.as_mut().unwrap().health.food.saturation = 0.0;
+                    game.potions
+                        .effects
+                        .add(EffectInstance::new("test:comfort", 80, 0));
+                    game.tick_mob_effects();
+                    assert_eq!(game.player.as_ref().unwrap().health.health(), 11.0);
+                    game.tick_mob_effects();
+                    assert_eq!(
+                        game.player.as_ref().unwrap().health.health(),
+                        11.0,
+                        "only each 80 ticks"
+                    );
+                    game.potions.effects = PlayerEffects::default();
+                    game.potions
+                        .effects
+                        .add(EffectInstance::new("regeneration", 100, 0));
+                    game.potions
+                        .effects
+                        .add(EffectInstance::new("test:comfort", 80, 0));
+                    game.tick_mob_effects();
+                    assert_eq!(
+                        game.player.as_ref().unwrap().health.health(),
+                        12.0,
+                        "regeneration alone healed"
+                    );
+                    game.potions.effects = PlayerEffects::default();
+                    game.potions
+                        .effects
+                        .add(EffectInstance::new("regeneration", 1, 0));
+                    game.potions
+                        .effects
+                        .add(EffectInstance::new("test:comfort", 80, 0));
+                    game.tick_mob_effects();
+                    assert_eq!(
+                        game.player.as_ref().unwrap().health.health(),
+                        13.0,
+                        "an earlier expired regeneration is no longer present"
+                    );
+                    game.potions.effects = PlayerEffects::default();
+                    game.player.as_mut().unwrap().health.food.saturation = 1.0;
+                    game.potions
+                        .effects
+                        .add(EffectInstance::new("test:comfort", 80, 0));
+                    game.tick_mob_effects();
+                    assert_eq!(
+                        game.player.as_ref().unwrap().health.health(),
+                        13.0,
+                        "saturated players skip comfort"
+                    );
 
-            game.potions.effects = PlayerEffects::default();
-            game.potions
-                .effects
-                .add(EffectInstance::new("test:nourishment", 20, 0));
-            let food = &mut game.player.as_mut().unwrap().health.food;
-            food.food = 18;
-            food.exhaustion = 6.0;
-            game.tick_mob_effects();
-            assert_eq!(
-                game.player.as_ref().unwrap().health.food.exhaustion,
-                6.0,
-                "natural regeneration keeps its exhaustion"
-            );
-            assert!(game.ui.rules.set(
-                "natural_health_regeneration",
-                sunrise_client::gamerules::Value::Bool(false)
-            ));
-            game.tick_mob_effects();
-            assert_eq!(game.player.as_ref().unwrap().health.food.exhaustion, 2.0);
-            game.tick_mob_effects();
-            assert_eq!(
-                game.player.as_ref().unwrap().health.food.exhaustion,
-                0.0,
-                "subtract up to four"
-            );
-            game.potions.effects = PlayerEffects::default();
-            game.potions
-                .effects
-                .add(EffectInstance::new("test:nourishment", 20, 1));
-            game.player.as_mut().unwrap().health.food.exhaustion = 1.0;
-            game.tick_mob_effects();
-            assert_eq!(
-                game.player.as_ref().unwrap().health.food.exhaustion,
-                -4.0,
-                "no exhaustion floor"
-            );
+                    game.potions.effects = PlayerEffects::default();
+                    game.potions
+                        .effects
+                        .add(EffectInstance::new("test:nourishment", 20, 0));
+                    let food = &mut game.player.as_mut().unwrap().health.food;
+                    food.food = 18;
+                    food.exhaustion = 6.0;
+                    game.tick_mob_effects();
+                    assert_eq!(
+                        game.player.as_ref().unwrap().health.food.exhaustion,
+                        6.0,
+                        "natural regeneration keeps its exhaustion"
+                    );
+                    assert!(game.ui.rules.set(
+                        "natural_health_regeneration",
+                        sunrise_client::gamerules::Value::Bool(false)
+                    ));
+                    game.tick_mob_effects();
+                    assert_eq!(game.player.as_ref().unwrap().health.food.exhaustion, 2.0);
+                    game.tick_mob_effects();
+                    assert_eq!(
+                        game.player.as_ref().unwrap().health.food.exhaustion,
+                        0.0,
+                        "subtract up to four"
+                    );
+                    game.potions.effects = PlayerEffects::default();
+                    game.potions
+                        .effects
+                        .add(EffectInstance::new("test:nourishment", 20, 1));
+                    game.player.as_mut().unwrap().health.food.exhaustion = 1.0;
+                    game.tick_mob_effects();
+                    assert_eq!(
+                        game.player.as_ref().unwrap().health.food.exhaustion,
+                        -4.0,
+                        "no exhaustion floor"
+                    );
 
-            game.world.chunks.insert(
-                (0, 0),
-                std::sync::Arc::new(sunrise_client::chunk::Chunk::empty(0, 0)),
-            );
-            let kind = game.res.mob_types().get("minecraft:pig").unwrap().clone();
-            let mut mob = Mob::new(12, kind, Vec3::new(0.5, 64.0, 0.5), 0.0);
-            mob.no_ai = true;
-            mob.health = 5.0;
-            mob.add_effect("test:comfort", 80, 0);
-            mob.add_effect("test:nourishment", 20, 0);
-            game.mobs.push(mob);
-            game.tick_creature_entities().unwrap();
-            assert_eq!(
-                game.mobs[0].health, 6.0,
-                "comfort heals a mob; nourishment has no food to change"
-            );
-            game.mobs[0].retain_effects(|_| false);
-            game.mobs[0].add_effect("minecraft:regeneration", 99, 0);
-            game.mobs[0].add_effect("test:comfort", 80, 0);
-            game.tick_creature_entities().unwrap();
-            assert_eq!(
-                game.mobs[0].health, 6.0,
-                "active regeneration suppresses comfort on a mob"
-            );
-        });
+                    game.world.chunks.insert(
+                        (0, 0),
+                        std::sync::Arc::new(sunrise_client::chunk::Chunk::empty(0, 0)),
+                    );
+                    let kind = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+                    let mut mob = Mob::new(12, kind, Vec3::new(0.5, 64.0, 0.5), 0.0);
+                    mob.no_ai = true;
+                    mob.health = 5.0;
+                    mob.add_effect("test:comfort", 80, 0);
+                    mob.add_effect("test:nourishment", 20, 0);
+                    game.mobs.push(mob);
+                    game.tick_creature_entities().unwrap();
+                    assert_eq!(
+                        game.mobs[0].health, 6.0,
+                        "comfort heals a mob; nourishment has no food to change"
+                    );
+                    game.mobs[0].retain_effects(|_| false);
+                    game.mobs[0].add_effect("minecraft:regeneration", 99, 0);
+                    game.mobs[0].add_effect("test:comfort", 80, 0);
+                    game.tick_creature_entities().unwrap();
+                    assert_eq!(
+                        game.mobs[0].health, 6.0,
+                        "active regeneration suppresses comfort on a mob"
+                    );
+                    game.mobs[0].retain_effects(|_| false);
+                    game.mobs[0].add_effect("minecraft:regeneration", 1, 0);
+                    game.mobs[0].add_effect("test:comfort", 80, 0);
+                    game.tick_creature_entities().unwrap();
+                    assert_eq!(
+                        game.mobs[0].health, 7.0,
+                        "earlier mob expiry is visible to comfort"
+                    );
+
+                    game.mobs[0].retain_effects(|_| false);
+                    game.mobs[0].add_effect("minecraft:regeneration", 1, 0);
+                    game.mobs[0].add_effect("test:comfort", 80, 0);
+                    cancel_expiry.store(true, std::sync::atomic::Ordering::SeqCst);
+                    game.tick_creature_entities().unwrap();
+                    assert_eq!(
+                        game.mobs[0].health, 7.0,
+                        "cancelled expiry still suppresses comfort at duration zero"
+                    );
+                    assert!(game.mobs[0].has_effect("minecraft:regeneration"));
+                    cancel_expiry.store(false, std::sync::atomic::Ordering::SeqCst);
+                    game.mobs[0].add_effect("test:comfort", 80, 0);
+                    game.tick_creature_entities().unwrap();
+                    assert_eq!(
+                        game.mobs[0].health, 8.0,
+                        "a previously cancelled expiry is asked again before comfort"
+                    );
+
+                    game.mobs[0].retain_effects(|_| false);
+                    game.mobs[0].add_effect("minecraft:regeneration", 200, 0);
+                    game.mobs[0].add_effect("minecraft:regeneration", 1, 1);
+                    game.mobs[0].add_effect("test:comfort", 80, 0);
+                    game.tick_creature_entities().unwrap();
+                    assert_eq!(
+                        game.mobs[0].health, 8.0,
+                        "a promoted hidden regeneration still suppresses comfort"
+                    );
+                    let regen = game.mobs[0]
+                        .extra
+                        .effects
+                        .iter()
+                        .find(|effect| effect.id == "minecraft:regeneration")
+                        .unwrap();
+                    assert_eq!((regen.duration, regen.amplifier), (199, 0));
+                });
+            },
+        );
     }
 
     fn effect_test_mod() {
