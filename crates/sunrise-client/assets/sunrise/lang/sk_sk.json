@@ -497,7 +497,7 @@
   "sunrise.mods.browse.title": "Prehliadať mody",
   "sunrise.mods.browse.update": "Aktualizovať",
   "sunrise.mods.dev": " (Dev)",
-  "sunrise.mods.empty": "Žiadne mody: vložte súbory .hmod do priečinka sunrise-mods",
+  "sunrise.mods.empty": "Žiadne mody: vložte súbory .smod do priečinka sunrise-mods",
   "sunrise.mods.in_world": " (nechaj svet zmeniť)",
   "sunrise.mods.not_built": " (Nepostavené)",
   "sunrise.mods.open_folder": "Otvorte priečinok Mod",

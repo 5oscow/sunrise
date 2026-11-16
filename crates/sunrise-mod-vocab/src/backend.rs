@@ -274,6 +274,7 @@ host_attachment_store!(
     ServerHost,
     ClientHost,
     LevelRandomHost,
+    HitHost,
     LevelWriteHost
 );
 
@@ -282,7 +283,7 @@ macro_rules! level_random_draws {
         impl dyn $host + '_ {
             /// Draw from the level's own random stream, in vanilla's order: `draw` gets the
             /// stream and the level keeps it after. None on a non-authoritative level.
-            pub fn with_random<T>(&mut self, draw: impl FnOnce(&mut LegacyRandom) -> T) -> Option<T> {
+            pub fn with_random<T>(&mut self, draw: impl FnOnce(&mut dyn RandomSource) -> T) -> Option<T> {
                 let mut random = self.random()?;
                 let drawn = draw(&mut random);
                 self.set_random(random);
@@ -291,4 +292,4 @@ macro_rules! level_random_draws {
         }
     )+ };
 }
-level_random_draws!(LevelRandomHost, LevelWriteHost);
+level_random_draws!(LevelRandomHost, HitHost, LevelWriteHost);

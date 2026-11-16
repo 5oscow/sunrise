@@ -12,6 +12,10 @@ by one. `ClientHost::gui_options().gui_scale` is only that option. The framebuff
 `native_physical_window_size()`; divide it by this scale, rounding up, for the GUI-scaled width and
 height (`Window.getGuiScaledWidth/Height`).
 
+`LevelRef::brightness(host, layer, pos)` (`getBrightness`, the stored light 0 to 15) reads on a client too: the
+light of the level the client shows, as the server sent it for a chunk the client holds. It is `None` for a
+chunk the client does not hold and before login; `can_see_sky` stays a server read.
+
 `ClientHost::playing()` is true while the player is in the world with nothing over it: no screen, title, sign
 editor or book, so keys and zoom apply. `ClientHost::mapping(name)` reads a vanilla key mapping (`key.forward`,
 `key.left`, `key.back`, `key.right`, `key.jump`, `key.sneak`, `key.sprint`, `key.attack`, `key.use`) as a
@@ -66,6 +70,55 @@ The pose hook runs only once: its explicit position or angle overrides survive a
 vanilla camera. Requests from later render callbacks apply at the next frame's extraction.
 Setting a type never emits `camera_type_cycle`; F5 alone cycles, and its final event choice
 wins over requests made inside the cycle callback.
+
+## The fluid the camera is in
+
+The `camera_submersion` hook answers which fluid the camera is in, as vanilla's
+`Camera.getFluidInCamera` does, given as the fog type at the camera: `Atmospheric`, `Water`, `Lava` or
+`PowderSnow`. It comes in as the game's answer, after the `state_at_viewpoint` parts of the blocks it reads,
+with the camera's position. Set it to `Atmospheric` to clear underwater, lava and powder snow submersion,
+or to a fluid to force it; listeners run in the usual hook order, each seeing the previous one's value. A
+free camera that passes through water, for one, keeps the air's fog:
+
+```rust,ignore
+fn camera_submersion(&self, _host: &dyn ClientHost, event: &mut CameraSubmersionEvent<'_>) {
+    if self.detached() {
+        *event.fog_type = FogType::Atmospheric;
+    }
+}
+```
+
+Every client reader of the camera's fluid reads the answer: the field of view in a fluid, the frame's
+fog, the sky pass and the overworld sky's dark disc (skipped under water), the screen overlays, water
+vision and conduit power's underwater vision, and a shader pack's `isEyeInWater`. The hook fires once per
+reader, several times a frame, and not always at the same point: the fog asks at the camera, the overlays
+at the eye. Nothing keeps the first answer, so answer from the event alone, the same way for the same
+position. The position can't be changed. Server and gameplay fluid checks (an entity in water, drowning,
+swimming, the sculk vibrations' water test) don't read it.
+
+## Block changes in the client level
+
+A client map or minimap keeps its own picture of the terrain and only has to redraw what changed.
+`client_chunk_load(dimension, chunk)` and `client_chunk_unload(dimension, chunk)` tell whole columns
+arriving and leaving; `client_block_changed(dimension, pos, old, new, predicted)` tells each block of a
+held column that changes state, after the write, so `host.level(dimension)` already reads `new` there:
+
+```rust
+fn client_block_changed(&self, _host: &dyn ClientHost, event: &mut ClientBlockChangedEvent<'_>) {
+    // The chunk to redraw: [x, z], in chunks.
+    self.stale(event.dimension, [event.pos.x >> 4, event.pos.z >> 4]);
+}
+```
+
+Every route a client writes a block by tells it: the server's block update, each block of a batched
+section update, the client's own predictions (a break, a placement, a use; `predicted` is true) and,
+when the server acknowledges them, each block that takes the server's state back (`predicted` false). A
+server update for a block still under a pending prediction is held, as in vanilla, and told when the
+acknowledgement applies it. A write that keeps the state is not told, so nothing has to rescan the
+loaded terrain. It needs no mod on the server: it runs on a client of any server, a LAN guest included.
+An integrated world's own blocks are the server's `block_changed`, and a level a server opens for
+viewing (below) is not told. A section update tells each of its blocks, so keep the listener cheap:
+mark the chunk and redraw it later.
 
 ## Viewed levels
 

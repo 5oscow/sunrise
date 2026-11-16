@@ -4,6 +4,10 @@
 #[path = "api_values/ingredient.rs"]
 mod ingredient_values;
 use mod_api::item::item_stack::{ItemStack as ApiStack, StackWriteError};
+use std::sync::Arc;
+#[cfg(test)]
+use sunrise_client::parallel::ListenSnapshot;
+use sunrise_client::parallel::TickThread;
 use sunrise_core::nbt::{Compound, JavaString, Tag};
 use sunrise_items::items::{ItemStack as EngineStack, Items};
 #[path = "api_values/aggregates.rs"]
@@ -12,6 +16,20 @@ pub(in crate::game) mod aggregates;
 pub(in crate::game) mod block_edit;
 #[path = "api_values/block_state.rs"]
 pub(in crate::game) mod block_state;
+
+/// The engine's generator as the API's owned source: the same state and cached gaussian, so it
+/// draws on as the engine's would.
+pub(crate) fn random_to_api(
+    random: &sunrise_core::random::LegacyRandom,
+) -> mod_api::LegacyRandomSource {
+    <(u64, Option<f64>)>::from(random).into()
+}
+/// The API's owned source as the engine's generator, state and cached gaussian kept.
+pub(crate) fn random_to_engine(
+    source: &mod_api::LegacyRandomSource,
+) -> sunrise_core::random::LegacyRandom {
+    <(u64, Option<f64>)>::from(source).into()
+}
 
 pub(crate) fn block_jump_factor(
     context: &sunrise_world::native_load_context::LoopContext,
@@ -87,7 +105,30 @@ pub(crate) fn behavior_block(
 }
 pub(crate) use super::native_ground::alter_ground;
 pub(in crate::game) use super::native_worldgen::prepare as prepare_block_states;
-pub(in crate::game) use block_state::install as install_block_states;
+
+/// Publish the block state index prepared for this game. Between a tick's phases only: the
+/// token is the tick thread's, which a phase's work can't take or capture.
+pub(in crate::game) fn install_block_states(_tick: &TickThread, prepared: Arc<block_state::Index>) {
+    block_state::install(prepared);
+}
+
+/// Publish the parts table prepared for this game, and with it its listen index. Between a tick's
+/// phases only, like [`install_block_states`]: a phase keeps the `ListenSnapshot` it captured.
+pub(in crate::game) fn install_resolved_parts(_tick: &TickThread, parts: Option<mod_api::Parts>) {
+    mod_api::__private::install_resolved_parts(parts);
+}
+
+/// Who listens, as the tick thread holds it now, for a phase view to keep: None before this
+/// game's block states are bound.
+#[cfg(test)]
+pub(in crate::game) fn listen_snapshot(tick: &TickThread) -> Option<ListenSnapshot> {
+    let index = block_state::current().ok()?;
+    Some(ListenSnapshot::capture(
+        tick,
+        mod_api::__private::game_listen_index(),
+        index.blocks(),
+    ))
+}
 #[path = "api_values/inside_write.rs"]
 mod inside_write;
 #[path = "api_values/landing_write.rs"]
@@ -133,6 +174,8 @@ pub(in crate::game) fn resolve_block_definitions(
         mod_platform::__private::part_tests::install_parts_fixture(&[])
             .map_err(|errors| errors.join("\n"))?;
     }
+    // A load entry point, not a phase's: the mint refuses a worker by name.
+    let _tick = TickThread::mint();
     block_state::clear();
     if mod_api::__private::block_definitions().is_some() {
         return bind_worker_blocks(registry);
@@ -475,6 +518,19 @@ where
         .map_err(|error| error.into_write_error().into())
 }
 
+/// Convert a successful block-state write answer; a state the registry cannot name is the
+/// write's own `InvalidState` error.
+pub(in crate::game) fn call_state_write<W>(
+    call: impl FnOnce() -> W,
+) -> Result<<W::Value as TryIntoApi>::Api, W::Error>
+where
+    W: IntoWriteResult,
+    W::Value: TryIntoApi,
+    W::Error: From<<W::Value as TryIntoApi>::Error>,
+{
+    call_write(call)?.try_into_api().map_err(Into::into)
+}
+
 macro_rules! scalar_values {
     ($($ty:ty),* $(,)?) => { $(
         impl TryIntoApi for $ty {
@@ -658,22 +714,28 @@ impl TryIntoEngine for mod_api::ItemDisplayContext {
     type Engine = sunrise_assets::item_model::DisplayContext;
     type Error = ();
     fn try_into_engine(&self, _: &Items) -> Result<Self::Engine, Self::Error> {
-        use mod_api::ItemDisplayContext as Api;
-        use sunrise_assets::item_model::DisplayContext as Engine;
-        Ok(match self {
-            Api::None => Engine::None,
-            Api::ThirdPersonLeftHand => Engine::ThirdPersonLeftHand,
-            Api::ThirdPersonRightHand => Engine::ThirdPersonRightHand,
-            Api::FirstPersonLeftHand => Engine::FirstPersonLeftHand,
-            Api::FirstPersonRightHand => Engine::FirstPersonRightHand,
-            Api::Head => Engine::Head,
-            Api::Gui => Engine::Gui,
-            Api::Ground => Engine::Ground,
-            Api::Fixed => Engine::Fixed,
-            Api::OnShelf => Engine::OnShelf,
-            _ => return Err(()),
-        })
+        engine_display_context(*self).ok_or(())
     }
+}
+/// The engine's display context for the API's, `None` for one this game doesn't have.
+pub(in crate::game) fn engine_display_context(
+    context: mod_api::ItemDisplayContext,
+) -> Option<sunrise_assets::item_model::DisplayContext> {
+    use mod_api::ItemDisplayContext as Api;
+    use sunrise_assets::item_model::DisplayContext as Engine;
+    Some(match context {
+        Api::None => Engine::None,
+        Api::ThirdPersonLeftHand => Engine::ThirdPersonLeftHand,
+        Api::ThirdPersonRightHand => Engine::ThirdPersonRightHand,
+        Api::FirstPersonLeftHand => Engine::FirstPersonLeftHand,
+        Api::FirstPersonRightHand => Engine::FirstPersonRightHand,
+        Api::Head => Engine::Head,
+        Api::Gui => Engine::Gui,
+        Api::Ground => Engine::Ground,
+        Api::Fixed => Engine::Fixed,
+        Api::OnShelf => Engine::OnShelf,
+        _ => return None,
+    })
 }
 
 impl TryIntoApi for sunrise_client::merchant::ItemCost {
@@ -1009,6 +1071,30 @@ impl TryIntoApi for crate::crafting::FireworkShapeIngredient {
             self.shape.try_into_api().unwrap(),
             self.ingredient.try_into_api()?,
         ))
+    }
+}
+/// A recipe listing crosses one entry at a time: one unrepresentable recipe must not
+/// hide the rest of its type. Other collection conversions remain all-or-nothing.
+#[derive(Default)]
+pub(in crate::game) struct RecipeListing(pub std::sync::Arc<[crate::crafting::RecipeSnapshot]>);
+impl TryIntoApi for RecipeListing {
+    type Api = std::sync::Arc<[mod_api::Recipe]>;
+    type Error = std::convert::Infallible;
+    fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
+        Ok(self
+            .0
+            .iter()
+            .filter_map(|recipe| match recipe.try_into_api() {
+                Ok(recipe) => Some(recipe),
+                Err(reason) => {
+                    log::debug!(
+                        "Skipping recipe {} in the mod API listing: {reason:?}",
+                        recipe.id
+                    );
+                    None
+                }
+            })
+            .collect())
     }
 }
 impl TryIntoApi for crate::crafting::RecipeSnapshot {
@@ -1571,6 +1657,39 @@ fn prepare_stack_boundary_tests() {
         "minecraft:potion",
     ])
     .unwrap();
+}
+
+#[cfg(test)]
+mod recipe_listing_tests {
+    use super::*;
+    #[test]
+    fn a_bad_recipe_does_not_hide_the_good_recipe_of_its_type() {
+        let mut registries = mod_api::testing::FakeRegistries::default();
+        registries
+            .resolve_items([mod_api::Identifier::parse("minecraft:stick").unwrap()])
+            .unwrap();
+        let mut good = crate::crafting::RecipeSnapshot::new(
+            "example:good",
+            "example:machine",
+            serde_json::json!({}).into(),
+        );
+        good.results = vec![EngineStack::new("minecraft:stick", 1)];
+        let mut bad = crate::crafting::RecipeSnapshot::new(
+            "example:bad",
+            "example:machine",
+            serde_json::json!({}).into(),
+        );
+        bad.results = vec![EngineStack::new("example:unknown", 1)];
+        let entries = RecipeListing(vec![good, bad].into())
+            .try_into_api()
+            .unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].id, "example:good");
+        assert_eq!(
+            mod_api::__private::item_key_id(entries[0].results[0].item()),
+            Some("minecraft:stick")
+        );
+    }
 }
 
 #[cfg(test)]

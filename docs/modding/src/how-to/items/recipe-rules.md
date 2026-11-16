@@ -18,7 +18,10 @@ require empty slots. Trim patterns are registry references or inline definitions
 `recipes_of_type` returns recipes after pack overrides, conditions and filters,
 in file order. Read them again after a data reload. On the server, you read the
 server's table. A client reads vanilla and content-mod recipes unless the server
-sends the recipe type through `datapack_sync`.
+sends the recipe type through `datapack_sync`. A loaded recipe the API cannot
+represent is left out of this listing and logged at debug level with its id and
+reason; the rest remain in order. This affects only the API listing boundary,
+not recipe loading.
 
 One malformed recipe of a known type refuses the **whole recipe load**, with an
 error naming its file and the reason. A failed reload keeps the previous active

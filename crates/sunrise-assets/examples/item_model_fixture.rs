@@ -354,7 +354,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     json!({"special":model.to_json(),"argument":argument}),
                 ),
             };
-            let matrix: Mat4 = baked.layer_matrix(context, &layer.transform);
+            let matrix: Mat4 =
+                baked.layer_matrix(layer.display_transform, context, &layer.transform);
             let mut value = json!({
                 "kind":kind,
                 "tints":layer.tints,

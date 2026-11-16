@@ -735,7 +735,12 @@ mod tests {
             ));
             assert!(game.living_set_equipment(zombie, EquipmentSlot::Chest, None));
             assert_eq!(values(game), (8.0, 0.0));
-            let level = crate::game::entity::damage_level_of!(game);
+            let level = crate::game::entity::damage_level_of!(
+                game,
+                &sunrise_client::health::NO_ATTACK,
+                no_push,
+                None
+            );
             let m = game.mobs.iter_mut().find(|m| m.id == 12).unwrap();
             m.health = 20.0;
             assert!(m.damage(level, 4.0, Damage::of(DamageKind::Cactus)));

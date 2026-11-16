@@ -229,7 +229,7 @@ class DynaRoutingTests(unittest.TestCase):
         for item in ("vars.DYNA_CI_SELF_HOSTED", "vars.DYNA_CI_POOL_UNTIL", "github.event_name",
                      "github.event.pull_request.head.repo.full_name == github.repository", "dyna_ci_route.sh"):
             self.assertIn(item, route)
-        for name, label in (("verify", "dyna-large"), ("verify-static", "dyna-large"), ("launcher", "dyna-medium")):
+        for name, label in (("verify", "dyna-large"), ("verify-static", "dyna-medium"), ("launcher", "dyna-medium")):
             block = blocks[name]
             self.assertIn("needs: changes", block)
             self.assertIn(f"needs.changes.outputs.self_hosted == 'true' && '{label}'", block)
@@ -264,7 +264,7 @@ class DynaRoutingTests(unittest.TestCase):
             self.assertEqual(guard["if"].strip(), "needs.changes.result != 'success'")
             self.assertEqual(guard["run"].strip(), "exit 1")
         # verify-static routes as verify does, except that a pull request outside the gate and a contributor's
-        # pull request stay on GitHub's runners.
+        # pull request stay on GitHub's runners, and our pool gives it a medium runner (it compiles nothing heavy).
         for field, outside, fork in (
                 ("runs-on", "needs.changes.outputs.heavy != 'true' && 'ubuntu-latest' || ",
                  "needs.changes.outputs.trusted != 'true' && 'ubuntu-latest' || "),
@@ -273,13 +273,15 @@ class DynaRoutingTests(unittest.TestCase):
             shared = runtime.split(f"{field}:", 1)[1].split("\n", 1)[0]
             if field == "runs-on":
                 shared = shared.replace("'ubuntu-latest') || ", "'ubuntu-latest') || " + fork, 1)
+                shared = shared.replace("needs.changes.outputs.self_hosted == 'true' && 'dyna-large'",
+                                        "needs.changes.outputs.self_hosted == 'true' && 'dyna-medium'", 1)
             else:
                 shared = shared.replace("${{ ", "${{ " + fork, 1)
             shared = shared.replace("${{ ", "${{ " + outside, 1)
             self.assertEqual(static.split(f"{field}:", 1)[1].split("\n", 1)[0], shared)
         self.assertIn("- name: No Rust work selected", runtime)
-        self.assertNotIn("--unshallow", runtime)
-        self.assertIn("--unshallow", static)
+        self.assertNotIn("history_fetch.sh", runtime)
+        self.assertIn("run: bash tools/ci/history_fetch.sh", static)
         self.assertNotIn("cargo test", static)
         self.assertNotIn("Swatinem/rust-cache", static)
         self.assertNotIn("runner-packages.txt", static)
@@ -562,10 +564,15 @@ class DynaRoutingTests(unittest.TestCase):
             self.assertEqual(sorted(p.name for p in kept.iterdir()), ["loot_b.log", "parity.log", "test_old_parity.log"])
             self.assertIn(f"kept on runner slot-1 in {kept}", harness.stdout)
             # A rerun keeps the run id: the second attempt's logs go beside the first's, not over them.
-            subprocess.run([str(shim), "tools/parity.py", "loot_b"], cwd=tree, env={**env, "GITHUB_RUN_ATTEMPT": "2"},
-                           capture_output=True, text=True)
+            first = {name: (kept / name).read_bytes() for name in ("parity.log", "loot_b.log")}
+            (tree / "tools" / "parity.py").write_text("import sys\nprint('FAIL loot_b 4s  (log)')\nsys.exit(1)\n")
+            (logs / "loot_b.log").write_text("second attempt\n")
+            rerun = subprocess.run([str(shim), "tools/parity.py", "loot_b"], cwd=tree,
+                                   env={**env, "GITHUB_RUN_ATTEMPT": "2"}, capture_output=True, text=True)
+            self.assertEqual(rerun.returncode, 1)
             self.assertEqual(sorted(p.name for p in (build / "parity-keep").iterdir()), ["77-1", "77-2"])
-            self.assertEqual(sorted(p.name for p in kept.iterdir()), ["loot_b.log", "parity.log", "test_old_parity.log"])
+            self.assertEqual({name: (kept / name).read_bytes() for name in first}, first)
+            self.assertEqual((build / "parity-keep" / "77-2" / "loot_b.log").read_text(), "second attempt\n")
 
 
 if __name__ == "__main__":

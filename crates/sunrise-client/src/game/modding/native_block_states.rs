@@ -230,6 +230,11 @@ impl Game<'_> {
         self.pack.assets.registry.state(state)?;
         Some(self.res.facts().get(state).hardness)
     }
+    /// `BlockState.requiresCorrectToolForDrops()`. None for an unknown state.
+    pub(super) fn block_state_requires_correct_tool(&self, state: BlockStateId) -> Option<bool> {
+        self.pack.assets.registry.state(state)?;
+        Some(self.res.facts().get(state).requires_tool)
+    }
     /// The explosion resistance the block of this state declares (`Block.getExplosionResistance`):
     /// stone 6, obsidian 1200, bedrock 3,600,000. None for an unknown state.
     pub(super) fn block_state_explosion_resistance(&self, state: BlockStateId) -> Option<f32> {

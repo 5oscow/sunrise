@@ -71,6 +71,16 @@ impl sunrise_world::level::LevelAccess for DryLevel<'_> {
         }
         self.base.shulker_is_closed(pos)
     }
+    fn published_collision_shape(
+        &self,
+        pos: sunrise_core::position::BlockPos,
+        state: sunrise_world::registry::BlockStateId,
+    ) -> Option<sunrise_core::geometry::VoxelShape> {
+        if self.changed.contains_key(&pos) {
+            return None;
+        }
+        self.base.published_collision_shape(pos, state)
+    }
     fn min_y(&self) -> i32 {
         self.base.min_y()
     }

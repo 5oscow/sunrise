@@ -58,7 +58,7 @@ impl Goal for Counter {
     }
     fn start(&mut self, cx: &mut GoalContext<'_>) {
         record(cx.mob().entity().id(), "start");
-        self.draw = cx.random().next_int_bound(1000).unwrap_or(0);
+        self.draw = cx.random().next_int_bound(1000);
     }
     fn tick(&mut self, cx: &mut GoalContext<'_>) {
         self.ticks += 1;

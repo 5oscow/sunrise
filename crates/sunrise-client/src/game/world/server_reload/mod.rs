@@ -22,6 +22,14 @@ use mod_api::__private::reload::PreparedStep;
 pub(super) struct PreparedServerReload {
     pub(super) steps: Vec<PreparedReload>,
     pub(super) resources: mod_api::RetainedListeners,
+    pub(super) loot: std::sync::Arc<mod_api::GlobalLootModifierManager>,
+}
+impl PreparedServerReload {
+    pub(super) fn bind_loot(&self, world: &super::PreparedWorldReload) {
+        if let Some(tables) = &world.tables {
+            self.loot.bind_from(&tables.loot_modifier_manager);
+        }
+    }
 }
 
 /// Loads the vanilla function library from `stack`, logging per-file failures.
@@ -77,18 +85,9 @@ impl Game<'_> {
                 &super::functions::content_overlay(stack),
             )
             .map_err(ReloadStageError::DataSource)?;
-        // Nobody listens: no registration graph, only the vanilla function library.
-        if !mod_api::__private::listened(mod_api::HookId::AddServerReloadListeners) {
-            let store = functions_store(stack, &conditions);
-            conditions
-                .check_errors()
-                .map_err(ReloadStageError::DataSource)?;
-            return Ok(PreparedServerReload {
-                steps: vec![PreparedStep::Vanilla(Box::new(store))],
-                resources: mod_api::RetainedListeners::default(),
-            });
-        }
         let mut listeners = <mod_api::ServerListenerRegistry as mod_api::__private::game::ServerReloadListenersOrder>::new();
+        let loot = super::global_loot_modifiers::register_anchor(&mut listeners)
+            .map_err(ReloadStageError::Order)?;
         self.native_add_server_reload_listeners(&mut listeners);
         let mut resources = mod_api::RetainedListeners::default();
         let ordered = listeners.finish().map_err(ReloadStageError::Order)?;
@@ -106,7 +105,11 @@ impl Game<'_> {
         conditions
             .check_errors()
             .map_err(ReloadStageError::DataSource)?;
-        Ok(PreparedServerReload { steps, resources })
+        Ok(PreparedServerReload {
+            steps,
+            resources,
+            loot,
+        })
     }
     pub(super) fn apply_server_reload_callbacks(
         &mut self,
@@ -123,6 +126,7 @@ impl Game<'_> {
         PreparedServerReload {
             steps: vanilla,
             resources: prepared.resources,
+            loot: prepared.loot,
         }
     }
     pub(super) fn apply_server_reload(
@@ -137,6 +141,9 @@ impl Game<'_> {
         apply_listeners(prepared.steps, "server_reload_apply", |store| {
             self.admit_store(*store, stack);
         });
+        if let Some(tables) = &self.world_tables {
+            prepared.loot.bind_from(&tables.loot_modifier_manager);
+        }
         self.reload_resources = prepared.resources;
         self.structure_templates.clear();
     }

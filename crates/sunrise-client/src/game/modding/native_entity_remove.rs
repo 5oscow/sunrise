@@ -369,7 +369,7 @@ mod tests {
                 game.native_joins_flush(false, 0);
                 let boat = game.entity(boat_id).unwrap();
                 let mob = game.entity(mob_id).unwrap();
-                assert!(game.entity_start_riding(mob, boat, true));
+                assert!(game.entity_start_riding(mob, boat, true).is_ok());
                 assert_eq!(game.entity_vehicle(mob), Some(boat));
 
                 assert!(boat.discard(game));

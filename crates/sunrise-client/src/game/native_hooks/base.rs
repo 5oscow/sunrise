@@ -4772,7 +4772,7 @@ impl Game<'_> {
     }
     /// The recipes of type `kind` (`minecraft:smelting`, `mymod:crusher`), vanilla's
     /// types and mods' own alike, from `data/<namespace>/recipe/*.json` of vanilla,
-    /// the content mods (`.hmod`) and the world's data packs, in file order: each
+    /// the content mods (`.smod`) and the world's data packs, in file order: each
     /// one typed (`Recipe`: its ingredients, results, group, cooking time and
     /// experience, or its stonecutting, smithing or special crafting rule),
     /// with its file as JSON for a mod's own type. Dynamic rules are not fixed
@@ -4788,15 +4788,17 @@ impl Game<'_> {
     pub(in crate::game) fn recipes_of_type(
         &self,
         kind: &str,
-    ) -> Arc<[crate::crafting::RecipeSnapshot]> {
+    ) -> crate::game::api_values::RecipeListing {
         if self.outside_world() {
             return Default::default();
         }
-        self.recipes()
-            .by_type
-            .get(kind)
-            .cloned()
-            .unwrap_or_default()
+        crate::game::api_values::RecipeListing(
+            self.recipes()
+                .by_type
+                .get(kind)
+                .cloned()
+                .unwrap_or_default(),
+        )
     }
     /// An ingredient as a recipe's JSON names it: an item, a `#tag`, or a list
     /// of them, a bare id as `minecraft:` (as vanilla reads it); `test` says

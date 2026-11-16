@@ -8,15 +8,15 @@ registry for Sunrise's own mods, modpacks, resource packs and shader packs; see 
 
 Sunrise doesn't run Java code ([mods.md](modding/src/how-to/content-mods.md)). It ports what a Java mod
 carries as data (blocks, items, recipes, loot tables, tags, worldgen, textures, names) with `sunrise-port-pack`, and
-says before install which of the mod's features that leaves out. Sunrise's own mods (content mods, `.hmod`, and native
-mods, `.hmod`) aren't on Modrinth or CurseForge yet (Modrinth has no `sunrise` loader).
+says before install which of the mod's features that leaves out. Sunrise's own mods (content mods, `.smod`, and native
+mods, `.smod`) aren't on Modrinth or CurseForge yet (Modrinth has no `sunrise` loader).
 
 | Kind | Goes to | How well it runs |
 |---|---|---|
 | Java mods (Fabric, NeoForge, Forge, Quilt) | ported into `sunrise-mods/<mod id>/` and turned on | Checked from its jar before install: **Works**, **Partly** or **Doesn't run** ([below](#java-mods)) |
 | Resource packs | `resourcepacks/` beside `options.txt` | **Works** when made for 26.3 ([resource-packs.md](resource-packs.md) lists what Sunrise reads). Older packs are **Partly**: they load with vanilla's compatibility warning |
 | Modpacks (`.mrpack`, CurseForge zip) | the Modpacks page's import | **Partly**: Sunrise runs the mods it can port, from the player's own downloads ([modpacks.md](modpacks.md)) |
-| Shader packs (`.hshader` and `shaders/`-format zips, Sunrise's registry only) | `shaderpacks/` beside `options.txt` | **Works** when made for 26.3: checked against the registry's index before install (a `.hshader` by the game's own check, [shaders.md](shaders.md)). The `shaders/`-format packs on Modrinth and CurseForge are not offered |
+| Shader packs (`.sshader` and `shaders/`-format zips, Sunrise's registry only) | `shaderpacks/` beside `options.txt` | **Works** when made for 26.3: checked against the registry's index before install (a `.sshader` by the game's own check, [shaders.md](shaders.md)). The `shaders/`-format packs on Modrinth and CurseForge are not offered |
 | Data packs (Sunrise's registry, Modrinth) | `datapacks/` of the world picked on the **Data packs** tab (`mods install <pack> --world <world>`); not in the Installed list: each world's list on Home has them | **Partly**: Sunrise runs a data pack's functions, function tags, predicates and item modifiers, not yet its recipes, loot tables, advancements, other tags or worldgen. The install reads the zip and says what of it runs; a pack with none of those (worldgen only, such as Tectonic) is refused |
 
 Mods, resource packs and shader packs go into the game folder of the instance selected in the sidebar, and the
@@ -185,25 +185,25 @@ sunrise-launcher mods remove faithful-32x
 
 ## Sources
 
-**Sunrise's registry.** Content mods (`.hmod`), native mods (`.hmod`), modpacks (`.hpack`), resource packs and shader packs (`.hshader`) made for Sunrise, reviewed as pull requests in
+**Sunrise's registry.** Content mods (`.smod`), native mods (`.smod`), modpacks (`.spack`), resource packs and shader packs (`.sshader`) made for Sunrise, reviewed as pull requests in
 [horizon-rust/horizon-mods](https://github.com/horizon-rust/horizon-mods) ([modding/src/reference/registry-index.md](modding/src/reference/registry-index.md)). The
 launcher reads its `index.json` (`browser/sunrise.rs`; `SUNRISE_MOD_INDEX=<file or https address>` reads a test
 registry instead, whose files may then be on disk) at most every ten minutes, and keeps the last copy in
 `mod-browser/sunrise-index.json`. Before a result is installed it shows whether its files are signed and, for a mod,
 what it may do, in the words of the game's Options > Mods. A download goes to `mod-browser/downloads/` and is moved
 into place only after `sunrise_mod_package::index::check_file` passes (size, SHA-256, the author's signature when the project
-has a key, the file's own manifest against the index). A content mod becomes `sunrise-mods/<id>.hmod`, turned on; a native mod becomes
-`sunrise-native-mods/<id>.hmod`, and the launcher builds it into the game ([modding/src/how-to/native-mods.md](modding/src/how-to/native-mods.md));
+has a key, the file's own manifest against the index). A content mod becomes `sunrise-mods/<id>.smod`, turned on; a native mod becomes
+`sunrise-native-mods/<id>.smod`, and the launcher builds it into the game ([modding/src/how-to/native-mods.md](modding/src/how-to/native-mods.md));
 `mods disable` and `mods enable` switch it in `sunrise-mods.txt`. When the index takes a file down, the launcher turns
 it off the next time it reads the index or starts the game, says why, and refuses to install it or turn it back on.
-A Sunrise modpack (`.hpack`) installs as its own profile (`browser/sunrise/pack.rs`): `sunrise-packs/<id>/` holds the
+A Sunrise modpack (`.spack`) installs as its own profile (`browser/sunrise/pack.rs`): `sunrise-packs/<id>/` holds the
 checked pack, `pack.json` and `home/`, the profile's game folder, where each of the pack's mods is downloaded and checked
 like any registry mod and turned on or off as the pack says; its overrides (settings, resource packs, a mod's saved
 settings) are copied in on the first install only, so the player's changes survive updates. A pack whose mod was taken
 down installs nothing. It is listed on the Modpacks tab with **Play** and **Remove**, and plays like an imported pack
 (`modpacks::apply_profile`). A shader pack goes to `shaderpacks/<file>` once `check_file` has run the game's own
 check on it (`sunrise_shader_api::check`); a taken-down one is named, for the player to remove.
-A registry `.hmod` with any capability besides `registries` is neither listed nor installed alone. A modpack that
+A registry `.smod` with any capability besides `registries` is neither listed nor installed alone. A modpack that
 requires one still installs, and the launcher lists the mod as not running, with that reason, and leaves out its code.
 
 ```sh

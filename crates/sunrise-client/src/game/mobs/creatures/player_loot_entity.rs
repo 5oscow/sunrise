@@ -33,4 +33,11 @@ impl Game<'_> {
         }
         own(self)
     }
+    /// `Player.getLuck`: the luck attribute (the Luck and Bad Luck effects).
+    pub(in crate::game) fn acting_luck(&mut self) -> f32 {
+        self.player
+            .as_mut()
+            .and_then(|p| p.attribute("minecraft:luck").ok())
+            .unwrap_or(0.0) as f32
+    }
 }

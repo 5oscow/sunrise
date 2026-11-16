@@ -1327,7 +1327,11 @@ pub use sunrise_items::recipe_sources::qualified;
 fn recipe_refused(name: &str, reason: &str) -> Box<dyn std::error::Error> {
     let id = qualified(name);
     let (namespace, path) = id.split_once(':').unwrap();
-    format!("recipes: data/{namespace}/recipe/{path}.json refused: {reason}").into()
+    let message = format!("recipes: data/{namespace}/recipe/{path}.json refused: {reason}");
+    // The error-level diagnostic naming the file (#1273); the load returns the
+    // same message, which its caller may log again at its own level.
+    log::error!("{message}");
+    message.into()
 }
 
 /// The keys of a minecraft-typed recipe that hold an ingredient: one entry

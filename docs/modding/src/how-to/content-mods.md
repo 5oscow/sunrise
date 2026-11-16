@@ -7,14 +7,14 @@ Create a project, edit its JSON files, then build and run it.
 
 ```sh
 # A prebuilt binary for Linux x86_64/aarch64, macOS x86_64/arm64 or Windows x86_64:
-cargo binstall --git https://github.com/arismoko/horizon cargo-sunrise-mod
+cargo binstall --git https://github.com/sunrise-org/sunrise cargo-sunrise-mod
 # Or build it from source, without cargo-binstall:
-cargo install --git https://github.com/arismoko/horizon cargo-sunrise-mod
+cargo install --git https://github.com/sunrise-org/sunrise cargo-sunrise-mod
 cargo sunrise-mod new my-mod        # a content mod: manifest, one block with its model, loot and recipe
 cd my-mod
-cargo sunrise-mod run               # build my-mod.hmod, then start the game with it turned on
-cargo sunrise-mod build             # only build: target/sunrise-mod/my_mod.hmod
-cargo sunrise-mod check target/sunrise-mod/my_mod.hmod   # the registry's checks; --json for JSON
+cargo sunrise-mod run               # build my-mod.smod, then start the game with it turned on
+cargo sunrise-mod build             # only build: target/sunrise-mod/my_mod.smod
+cargo sunrise-mod check target/sunrise-mod/my_mod.smod   # the registry's checks; --json for JSON
 ```
 
 - `new <path> [--name "Name"]` writes the content template. `--template native` writes
@@ -34,16 +34,16 @@ cargo sunrise-mod check target/sunrise-mod/my_mod.hmod   # the registry's checks
   ([the SDK in a mod project](../reference/sdk/03-in-a-project.md)). Its root `impl Hooks` uses
   `#[mod_api::sunrise_mod]`. Compile it with `sunrise-launcher native-build <path> --trust-native-code`
   ([writing hooks](../start/writing-hooks.md)). Any other `--template` is refused.
-- `build` packs the checked project into `target/sunrise-mod/<id>.hmod`: `sunrise-mod.toml`, `assets/`,
+- `build` packs the checked project into `target/sunrise-mod/<id>.smod`: `sunrise-mod.toml`, `assets/`,
   `data/`, optional `icon.png` and, for code, the root Cargo project. It validates content with the same
   checks as the game; without `--wasm`, it does not compile code. Native code requires both `Cargo.toml` and `[native]`; inconsistent
   declarations and a manifest without capability `registries` are refused.
 - `run` builds, then starts `sunrise-client` (on `PATH`, or `--game PATH`, or `SUNRISE_CLIENT`) with
-  `--dev-mod target/sunrise-mod/<id>.hmod`, always on. Arguments after `--` go to the game. The game reads content once
+  `--dev-mod target/sunrise-mod/<id>.smod`, always on. Arguments after `--` go to the game. The game reads content once
   at start, so rebuild and run again after an edit.
 - `check <file>` runs what the registry runs: the file's size and SHA-256, its manifest and content, and a signature
-  with `--key <public key> --signature <file>.minisig`. It reads `.hmod`, `.hpack`, resource pack `.zip`
-  and `.hshader` files.
+  with `--key <public key> --signature <file>.minisig`. It reads `.smod`, `.spack`, resource pack `.zip`
+  and `.sshader` files.
 - `registry build|review|check|list|release|page` is the registry repository's CI ([the registry index](../reference/registry-index.md)).
 - `use-jar <path>` records an original Java jar as an external asset/data source, without copying it into the mod
   ([Java jars as external assets](#java-jars-as-external-assets)).
@@ -141,14 +141,14 @@ The list is ordered: new references are appended, not sorted.
 
 Jar bytes stay external. The launcher finds the exact hash locally or asks before downloading that exact file from
 Modrinth. Its `assets/` and `data/` are passive pack layers below the Sunrise mod's own files; a player-local runtime
-cache is not part of the mod package. Do not copy a jar or its extracted files into the mod's source or `.hmod`.
+cache is not part of the mod package. Do not copy a jar or its extracted files into the mod's source or `.smod`.
 A jar reference supplies assets and data, not the original Java behavior: port that behavior through the mod API.
 
 ### Content mods (API 0.2)
 
-A content mod has capability `registries` and carries `assets/` and `data/` in the `.hmod`. It adds blocks and items
+A content mod has capability `registries` and carries `assets/` and `data/` in the `.smod`. It adds blocks and items
 by declaring them in `data/<id>/sunrise/block/*.json` and `data/<id>/sunrise/item/*.json`, each copying a vanilla
-template ([modpacks.md](https://github.com/arismoko/horizon/blob/main/docs/modpacks.md#registries-02-data-driven-blocks-items-and-mob-effects)), and creative tabs, mob
+template ([modpacks.md](https://github.com/sunrise-org/sunrise/blob/main/docs/modpacks.md#registries-02-data-driven-blocks-items-and-mob-effects)), and creative tabs, mob
 effects, entity types and menu types (each below) in `creative_tab/`, `mob_effect/`, `entity_type/` and `menu/` beside
 them. `fluid/` gives a fluid a client look (`sprite`, an atlas sprite id, and `tint`, `0xAARRGGBB`, both optional), as
 NeoForge's `IClientFluidTypeExtensions`; the fluid needs no block, and a recipe page draws its well from it. Its `world`
@@ -328,8 +328,14 @@ outline passes skylight without attenuation when dry, but attenuates it by 1 whe
 
 Movement collision is independently selectable with `collision_shapes`; it does not change the outline,
 render solidity, occlusion or lighting. Both take the same table format. Boxes are
-`[minX,minY,minZ,maxX,maxY,maxZ]` in block units (one block is 1), at most 16 per shape.
+`[minX,minY,minZ,maxX,maxY,maxZ]` in block units (one block is 1), any number per shape, as in vanilla.
 Coordinates must be finite and each minimum must not exceed its maximum. `[]` is an empty shape.
+
+A declared shape also decides the block's legacy solid bit (`BlockState.isSolid`, which attachment
+survival such as wall signs and torches reads): it is calculated from `collision_shapes`, else from
+`shapes`, as vanilla does for any block (bounding-box average size at least 0.7291666666666666, or at least a block tall). A
+template that forces solidity on or off keeps its answer, and a block that declares no shape keeps the
+template's. This is not render solidity and not sturdy-face support.
 
 ```json
 {
@@ -398,6 +404,48 @@ and player selection uses its own outline channel. Callers without a captured
 entity class retain ordinary shapes. These declarations select state/class-only
 geometry, not arbitrary world-dependent block behavior or native callbacks.
 
+### Shapes a block entity publishes
+
+A block whose geometry depends on what is inside it (a cable bus with attached parts, a table
+showing its tools) sets `"shapes_from_block_entity": true` (`Block::shapes_from_block_entity`).
+Loading refuses it, naming the block, when no block entity type owns the block. Its block entity
+then publishes the block's shapes: `BlockEntityRef::set_shapes(host, Some(BlockEntityShapes {
+outline, collision }))`, boxes in block units as in `shapes`, or `None` to clear them. The
+declared `shapes` and `collision_shapes` apply while it holds none, which is also the case until
+the first publish.
+
+This differs from NeoForge, where `getShape` is asked for on every query: here a shape is
+**published when it changes, not asked for per query**, and a port of a `getShape` override calls
+`set_shapes` wherever that state changes (a part attached, a lid opened). Physics, selection,
+ray casts (outline and collider, over a dynamic template's shape too), support, the floor a
+mob's path stands on and its move control's jump read the published value at the position;
+nothing calls into the mod.
+Face sturdiness and multiface attachment between neighbouring blocks (placement, survival,
+shape updates, as for lichen and sculk veins) still read the declared shape until #1654.
+Shapes that depend on the querying entity are not covered; `outline_context_shapes` and
+`collision_context_shapes` stay declared, and a published shape stands over them.
+
+- **Checks**, refused by name with a `BlockEntityShapesError` and never clamped: every
+  coordinate finite and each minimum at most its maximum; at most 64 boxes in each list.
+  Vanilla has no box limit; 64 bounds what a block entity makes every client receive and
+  keep, while a declared shape table (`shapes`, above) syncs nothing and has no box limit.
+  There is no coordinate range. A box under 1e-7 thick on an axis is an empty box,
+  as in vanilla.
+- **Reach**: collision finds boxes only within one cell of the block, one axis at a time (a
+  state that publishes is always scanned that way); a box beyond that is stored and sent but
+  inert, as in vanilla. An outline can be hit past its cell once the ray enters the owning
+  cell. A debug build warns once per block when a publish holds a box beyond one cell.
+- **Timing**: the server applies a publish at once, to the queries that follow in the same
+  tick. A client applies it when the block entity update arrives, which may be a tick later, as
+  with any block change. An entity the new shape now overlaps is treated as vanilla treats a
+  block that appears inside it: nothing pushes it out.
+- **Lifetime**: the shapes are saved with the block entity, restored when its chunk loads before
+  anything ticks, and sent with the block entity in the chunk and in its updates, so a part
+  need not publish again after a load or a chunk receive: a publish is an update, never a
+  repair. They are dropped when the block entity is removed or its block changes. The key they
+  are kept under is the engine's: `replace_data` and `merge_data` leave them alone, and a
+  payload that carries it has it ignored.
+
 An item copies its template's data components, with `max_stack_size` and
 `rarity` changed, and any other 26.3 component set or removed in
 `components`, written as a data component patch is: `minecraft:<type>` sets
@@ -455,8 +503,9 @@ Use `event.parts.get(HumanoidPart::RightArm)` to read `[position, rotation]`, th
 `set_rotation` or `set_position` to change it. Positions are local texels and
 rotations are radians. A non-finite component is refused while other finite
 components apply; scale and visibility are not changed. Later ITEM, attack,
-crouch, bob and swim animation still apply. Armor stands do not fire this hook;
-they pose from their saved rotations. A model can animate more than
+crouch, bob and swim animation still apply. Armor stands then replace rotations
+with their saved pose, preserving position edits. Their armor models run the same
+setup independently. A model can animate more than
 once per frame, so listeners must not treat this as a once-per-entity frame
 notification or advance simulation from it. Native and wasm use the same finite
 part snapshot, with no callback or stack snapshot when nobody subscribes.
@@ -775,8 +824,8 @@ container's faces and `inputs`, so leave result slots out of `inputs`. The data 
 mod's own screen (`screen`); without one it closes again. Clients join a server only with the same mods' menu
 types, as with its blocks, and a client that isn't Sunrise's is never sent one: the block opens nothing for it. Its
 clicks run on the server's vanilla menu engine (`menu::Kind::Mod`), shift-clicks routed as `ChestMenu`'s, and a native
-mod can decide what a slot takes in code with `menu_slot_rules` ([hook notes](https://github.com/arismoko/horizon/blob/main/crates/horizon-mod-vocab/src/hooks/menu_slot_rules.rs))
-and how far away the menu stays open with `menu_still_valid` ([hook notes](https://github.com/arismoko/horizon/blob/main/crates/horizon-mod-vocab/src/hooks/menu_still_valid.rs)).
+mod can decide what a slot takes in code with `menu_slot_rules` ([hook notes](https://github.com/sunrise-org/sunrise/blob/main/crates/sunrise-mod-vocab/src/hooks/menu_slot_rules.rs))
+and how far away the menu stays open with `menu_still_valid` ([hook notes](https://github.com/sunrise-org/sunrise/blob/main/crates/sunrise-mod-vocab/src/hooks/menu_still_valid.rs)).
 The declaration specifies per-slot rules through `results`; clicks are handled by the server.
 
 ##### Lending ingredients and linking containers
@@ -848,7 +897,7 @@ The namespace collision fence applies. `minecraft`, `c` and
 the other's): the game keeps the first in load order and leaves the other's content out, with "mods A and B both use
 the namespace N; turn one of them off" in the log. Paths use vanilla's resource characters, at most 65,536 files, 16
 MiB each and 512 MiB in all. A mod whose content is refused is left out, with the reason in the log. The game reads
-this content into its block and item tables (`sunrise_client::mod_content`, [modpacks.md](https://github.com/arismoko/horizon/blob/main/docs/modpacks.md)). A tag entry
+this content into its block and item tables (`sunrise_client::mod_content`, [modpacks.md](https://github.com/sunrise-org/sunrise/blob/main/docs/modpacks.md)). A tag entry
 naming an id nobody registers (a block a port left out, another mod's item) is dropped, so the rest of the tag
 loads; vanilla would drop the whole tag.
 
@@ -991,7 +1040,7 @@ file and attribute. A client plays these from the biome data the server sends. I
 three ambient sound fields together make the one `ambient_sounds` value, and a value out of range refuses the mods at
 startup.
 
-**When they apply.** Modifiers are applied while the world's worldgen data is loaded, before any chunk is generated: the content build writes the modified biomes into the content root, and when a world opens, `sunrise_client::vanillagen::biome_modifiers_over_packs` applies them again over the world's data packs (`shared_data_with` for the generator, `packed_biomes` for the game's biome table), so a pack that replaces a vanilla biome keeps the mods' changes and a pack's own biome a tag selects gets them. Modifiers a mod declares in code (`Registrar::declare_biome_modifier`) register before any world opens and are read at the same moment. The generator's data is loaded once per bundle and set of packs and shared by the world's dimensions, so a modifier never applies halfway through a world. The dedicated server is the same game run headless (`sunrise-client --dedicated`, [server.md](https://github.com/arismoko/horizon/blob/main/docs/server.md)), so it takes this path too; `sunrise-server` only supervises it.
+**When they apply.** Modifiers are applied while the world's worldgen data is loaded, before any chunk is generated: the content build writes the modified biomes into the content root, and when a world opens, `sunrise_client::vanillagen::biome_modifiers_over_packs` applies them again over the world's data packs (`shared_data_with` for the generator, `packed_biomes` for the game's biome table), so a pack that replaces a vanilla biome keeps the mods' changes and a pack's own biome a tag selects gets them. Modifiers a mod declares in code (`Registrar::declare_biome_modifier`) register before any world opens and are read at the same moment. The generator's data is loaded once per bundle and set of packs and shared by the world's dimensions, so a modifier never applies halfway through a world. The dedicated server is the same game run headless (`sunrise-client --dedicated`, [server.md](https://github.com/sunrise-org/sunrise/blob/main/docs/server.md)), so it takes this path too; `sunrise-server` only supervises it.
 
 A biome holder set can also use Sunrise's own `sunrise:climate` type, alone or nested in those boolean sets; it is not
 a NeoForge format. It filters each biome's base `temperature` and `downfall` (the names in

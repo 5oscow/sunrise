@@ -127,6 +127,23 @@ pub trait BlockStatesBackend {
     #[access(Metadata)]
     fn block_state_destroy_speed(&self, state: BlockState) -> Option<f32>;
     /// Side: both.
+    /// `ItemStack.isCorrectToolForDrops(state)`: whether `stack`'s `minecraft:tool` component has a
+    /// rule that sets `correct_for_drops` and names the block of `state`, and the first such rule
+    /// says yes. A stack with no tool component, or no matching rule, is not the correct tool. Only
+    /// the stack is asked: not whether the block requires a tool, the player, the position or any
+    /// mod's hooks (`PlayerRef::has_correct_tool_for_drops` asks those). None for an unknown state.
+    #[access(Metadata)]
+    fn block_state_correct_tool_for_drops(
+        &self,
+        stack: &ItemStack,
+        state: BlockState,
+    ) -> Option<bool>;
+    /// Side: both.
+    /// `BlockState.requiresCorrectToolForDrops()`: whether the block drops its loot only when
+    /// mined with a correct tool (stone and ores yes, dirt and logs no). None for an unknown state.
+    #[access(Metadata)]
+    fn block_state_requires_correct_tool(&self, state: BlockState) -> Option<bool>;
+    /// Side: both.
     /// The explosion resistance the block of this state declares (`Block.getExplosionResistance`,
     /// `BlockBehaviour.Properties.explosionResistance`): stone 6, obsidian 1200, bedrock 3,600,000,
     /// water 100. Not what a blast meets at a position, which parts, fluids and the blast's own

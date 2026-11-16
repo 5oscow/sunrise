@@ -49,28 +49,15 @@ class GateTests(unittest.TestCase):
         for event in ("push", "schedule", "workflow_dispatch"):
             self.assertEqual(pr_gate.outputs(event, False, "", never_read)["heavy"], "true")
 
-    def test_checks_skips_exactly_the_pull_requests_the_heavy_gate_takes(self):
-        # Each pull request gets checks (ci.yml) or dyna-checks' heavy gate: never both, never neither.
+    def test_checks_runs_only_for_a_forks_pull_request(self):
+        # checks (ci.yml) is a fork's free full check on GitHub's runners; this repository's pull requests get
+        # dyna-checks' cheap checks, and its rollups and syncs the heavy gate (root, 2026-11-16).
         import yaml
 
         jobs = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())["jobs"]
-        conditions = {job["if"] for job in jobs.values() if "'pull_request'" in job.get("if", "")}
-        self.assertEqual(len(conditions), 1, "every pull-request job of checks skips the same pull requests")
-        condition = conditions.pop()
-        self.assertIn("!(github.event.pull_request.head.repo.full_name == github.repository && (", condition)
-        # dyna-checks' selection job takes a Dyna runner for exactly those pull requests, and GitHub's for the rest.
-        heavy = condition.split("!(", 1)[1].rsplit(")", 1)[0]
-        dyna = yaml.safe_load((ROOT / ".github/workflows/dyna-ci.yml").read_text())["jobs"]["changes"]["runs-on"]
-        self.assertIn(" ".join(heavy.split()), " ".join(dyna.split()))
-        prefixes = re.findall(r"startsWith\(github\.head_ref, '([^']+)'\)", condition)
-        labels = re.findall(r"contains\(github\.event\.pull_request\.labels\.\*\.name, '([^']+)'\)", condition)
-        refs = ["work", "rollupx", "sync/arismoko-pr-2886", "cfix-hooks-rollup-76"]
-        refs += [prefix + "9" for prefix in prefixes]
-        for same, label_set, ref in itertools.product((True, False), ([], ["rollup"], ["sync"], ["bug"]), refs):
-            with self.subTest(same=same, labels=label_set, ref=ref):
-                skipped = same and (ref.startswith(tuple(prefixes)) or bool(set(labels) & set(label_set)))
-                heavy = pr_gate.outputs("pull_request", same, "", never_read, labels=label_set, head_ref=ref)["heavy"]
-                self.assertEqual(skipped, heavy == "true")
+        conditions = {" ".join(job["if"].split()) for job in jobs.values() if "'pull_request'" in job.get("if", "")}
+        self.assertEqual(conditions, {"github.event_name == 'schedule' || github.event_name == 'pull_request' && "
+                                      "github.event.pull_request.head.repo.full_name != github.repository"})
 
     def test_a_dispatch_with_pr_runs_that_head_and_keeps_a_fork_off_our_runners(self):
         fork = pr_gate.outputs("workflow_dispatch", True, "3665", lambda n: {"sha": SHA, "same_repository": False})
@@ -153,7 +140,7 @@ class WorkflowTests(unittest.TestCase):
         trusted = {"rust_required": "true", "forced_github": "false", "hosted_label": "",
                    "self_hosted": "true", "trusted": "true", "heavy": "true"}
         self.assertEqual(self.runs_on("verify", trusted, "all"), "dyna-large")
-        self.assertEqual(self.runs_on("verify-static", trusted, "all"), "dyna-large")
+        self.assertEqual(self.runs_on("verify-static", trusted, "all"), "dyna-medium")
 
     def test_a_pull_request_outside_the_gate_gets_githubs_runner_for_verify_static(self):
         # Our own branch, Rust changed, every switch pointing at our runners or boat: still GitHub's runner.

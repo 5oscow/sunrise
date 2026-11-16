@@ -55,7 +55,7 @@ Every engine serializer is registered too, including serializers in the
 `minecraft:` namespace. An **unregistered serializer refuses the entire recipe
 load**, naming the file and ID. Dedicated startup stops; a failed `/reload`
 retains the old recipe table. There is no raw fallback for unknown IDs.
-Content mods (`.hmod`) shipping mod recipe JSON need the corresponding registered
+Content mods (`.smod`) shipping mod recipe JSON need the corresponding registered
 serializer. Optional-mod recipes must use load conditions: a false condition
 skips a file quietly **before** serializer lookup. Unknown condition types retain
 the existing fatal load behavior. Malformed recipes of a known serializer retain

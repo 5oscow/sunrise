@@ -8,6 +8,7 @@ use std::{
     path::PathBuf,
     sync::OnceLock,
 };
+use sunrise_core::geometry::VoxelShape;
 use sunrise_core::random::RandomSource;
 pub(super) struct Fixture {
     pub(super) registry: BlockRegistry,
@@ -103,6 +104,7 @@ pub(crate) struct TestLevel {
     /// `ShulkerBoxBlockEntity.isClosed` at a position: `true` for a shut lid,
     /// `false` for an open box. Positions not listed have no block entity.
     pub shulker_closed: HashMap<BlockPos, bool>,
+    pub published: HashMap<BlockPos, VoxelShape>,
     /// The containers `container_open` reports as open.
     pub opened: HashSet<BlockPos>,
     /// `Level.getWorldBorder`, for `within_world_border`: centred on the
@@ -150,6 +152,7 @@ impl TestLevel {
             note_players: std::cell::RefCell::new(Vec::new()),
             refuse_portals: false,
             shulker_closed: HashMap::new(),
+            published: HashMap::new(),
             opened: HashSet::new(),
             border: sunrise_core::geometry::border::BorderGeometry::new(
                 [0.0, 0.0],
@@ -185,6 +188,9 @@ impl LevelAccess for TestLevel {
     }
     fn shulker_is_closed(&self, pos: BlockPos) -> Option<bool> {
         self.shulker_closed.get(&pos).copied()
+    }
+    fn published_collision_shape(&self, pos: BlockPos, _: BlockStateId) -> Option<VoxelShape> {
+        self.published.get(&pos).cloned()
     }
     fn adjust_has_analog_output(&self, state: BlockStateId, vanilla: bool) -> bool {
         vanilla || self.analog_states.contains(&state)
@@ -3237,6 +3243,74 @@ fn using_storage_and_interactable_blocks_succeeds() {
         w.use_block(pos),
         InteractionResult::Pass,
         "an empty jukebox passes"
+    );
+}
+
+#[test]
+#[ignore = "daily"]
+fn a_published_shape_decides_support_over_the_declared_one() {
+    use sunrise_core::geometry::{Aabb, Vec3};
+    let mut w = world!();
+    let pos = BlockPos::new(0, 1, 0);
+    let torch_pos = BlockPos::new(0, 2, 0);
+    w.put(torch_pos, w.id("torch", &[]));
+    let torch = w.get(torch_pos);
+    let slab = VoxelShape::from_box(Aabb::new(Vec3::ZERO, Vec3::new(1.0, 0.25, 1.0))).unwrap();
+    // A full block that publishes a slab loses its support.
+    w.put(pos, w.id("stone", &[]));
+    let sim = w.b().sim(&mut w.level, &mut w.ticks);
+    assert!(sim.sturdy(pos, Direction::Up) && sim.can_support_center(pos, Direction::Up));
+    assert!(sim.can_survive(torch, torch_pos));
+    w.level.published.insert(pos, slab.clone());
+    let sim = w.b().sim(&mut w.level, &mut w.ticks);
+    assert!(!sim.sturdy(pos, Direction::Up));
+    assert!(!sim.can_support_rigid_block(pos));
+    assert!(!sim.can_survive(torch, torch_pos));
+    // A slab that publishes a full cube gains it.
+    w.level.published.clear();
+    w.put(pos, w.id("stone_slab", &[("type", "bottom")]));
+    let sim = w.b().sim(&mut w.level, &mut w.ticks);
+    assert!(!sim.sturdy(pos, Direction::Up));
+    w.level.published.insert(pos, VoxelShape::block());
+    let sim = w.b().sim(&mut w.level, &mut w.ticks);
+    assert!(sim.sturdy(pos, Direction::Up));
+    assert!(sim.can_survive(torch, torch_pos));
+}
+
+#[test]
+#[ignore = "daily"]
+fn a_published_shape_decides_whether_snow_stands() {
+    let mut w = world!();
+    let pos = BlockPos::new(0, 1, 0);
+    let snow_pos = BlockPos::new(0, 2, 0);
+    w.put(snow_pos, w.id("snow", &[("layers", "1")]));
+    let snow = w.get(snow_pos);
+    w.put(pos, w.id("stone", &[]));
+    assert!(
+        w.b()
+            .sim(&mut w.level, &mut w.ticks)
+            .can_survive(snow, snow_pos)
+    );
+    // A full block that publishes an empty shape no longer holds snow.
+    w.level.published.insert(pos, VoxelShape::empty());
+    assert!(
+        !w.b()
+            .sim(&mut w.level, &mut w.ticks)
+            .can_survive(snow, snow_pos)
+    );
+    // A slab that publishes a full cube does.
+    w.level.published.clear();
+    w.put(pos, w.id("stone_slab", &[("type", "bottom")]));
+    assert!(
+        !w.b()
+            .sim(&mut w.level, &mut w.ticks)
+            .can_survive(snow, snow_pos)
+    );
+    w.level.published.insert(pos, VoxelShape::block());
+    assert!(
+        w.b()
+            .sim(&mut w.level, &mut w.ticks)
+            .can_survive(snow, snow_pos)
     );
 }
 

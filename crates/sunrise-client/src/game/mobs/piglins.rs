@@ -488,12 +488,17 @@ impl Game<'_> {
         if !barter {
             return;
         }
-        let items = world_items!(self).loot_table(
-            "minecraft:gameplay/piglin_bartering",
-            false,
-            None,
-            &mut self.world.random,
-        );
+        // `LootContextParamSets.PIGLIN_BARTER`: the piglin is THIS_ENTITY, and
+        // nothing else is supplied.
+        let piglin = sunrise_client::mobs::drops::loot_entity(&self.mobs[i], None);
+        let items = self
+            .roll_table_at(
+                "minecraft:gameplay/piglin_bartering",
+                None,
+                None,
+                Some(&piglin),
+            )
+            .unwrap_or_default();
         self.piglin_throw_items(i, items);
     }
     /// `PiglinAi.throwItems`: barters and a baby's unwanted main-hand item
@@ -598,7 +603,11 @@ impl Game<'_> {
             .ui
             .rules
             .bool_at(sunrise_client::gamerules::vanilla::UNIVERSAL_ANGER);
-        for i in 0..self.mobs.len() {
+        // The target hook may remove mobs, so the list's end is read at each step.
+        let mut next = 0;
+        while next < self.mobs.len() {
+            let i = next;
+            next += 1;
             let m = &self.mobs[i];
             if m.species() != Species::Piglin
                 || m.is_baby()
@@ -639,6 +648,10 @@ impl Game<'_> {
                     )
             } else {
                 sunrise_client::mobs::TargetChange::Set(Some(sunrise_client::mobs::Who::Player))
+            };
+            // The piglin again by its id: one a listener removed is skipped.
+            let Some(i) = self.mobs.iter().position(|m| m.id == id && !m.removed) else {
+                continue;
             };
             let m = &mut self.mobs[i];
             let previous = m.ai.target;

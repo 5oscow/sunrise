@@ -457,10 +457,12 @@ impl Game<'_> {
             direct: entity_id(direct),
             position,
         };
-        if crate::game::entity::damage_level_of!(self, scoped).invulnerability_check(
-            sunrise_client::health::Hurting::Entity(id as i32, &entity_kind, source),
-            vanilla,
-        ) {
+        if crate::game::entity::damage_level_of!(self, self.combat.attack(), no_push, None)
+            .invulnerability_check(
+                sunrise_client::health::Hurting::Entity(id as i32, &entity_kind, source),
+                vanilla,
+            )
+        {
             return false;
         }
         match target {
@@ -486,14 +488,16 @@ impl Game<'_> {
     /// `Zombie.hurtServer`'s reinforcement requests before the command returns.
     /// Health-changing hits also raise their damage vibration before return.
     fn command_damage_mob(&mut self, id: u32, amount: f32, damage: Damage) -> bool {
+        let plan = self.prepare_knockback_credit(id as i32, damage.attacker, self.combat.attack());
         let attack = self.combat.attack();
+        let mut credit = plan.lend(&mut self.last_hurt_by_player);
         let mut reinforcements = Vec::new();
         let mut health_changed = false;
         let hurt = self.mobs.iter_mut().find(|m| m.id == id).is_some_and(|m| {
             let queued = m.outbox.len();
             let old_health = m.health;
             let hurt = m.damage(
-                crate::game::entity::damage_level_of!(self, attack),
+                crate::game::entity::damage_level_of!(self, attack, &mut credit, None),
                 amount,
                 damage,
             );
@@ -504,7 +508,6 @@ impl Game<'_> {
             hurt
         });
         if hurt {
-            self.resolve_player_responsible(id, damage);
             if damage.attacker == Some(Who::Player) {
                 self.remember_mob_player_credit(id);
                 if let Some(host) = self.lan.as_mut() {
@@ -2247,24 +2250,28 @@ mod allay_owner_damage_tests {
             game.build_registries();
             let actual = [101, 102, 103, 104];
             let other = [10, 20, 30, 40];
+            let mut player =
+                sunrise_client::motion::PlayerMotion::new(game.motion, Vec3::ZERO).unwrap();
+            player.entity_id = 7;
+            game.player = Some(player);
             game.level.player_uuid = Some(actual);
-            game.lan_acting_uuid = Some(sunrise_client::lan::playerdata::ints_uuid(actual));
-            assert_eq!(game.owner_damage_uuid(), Some(actual));
+            assert_eq!(game.attack_of(7).player_uuid, Some(actual));
+            game.lan_acting = Some(12);
             game.lan_acting_uuid = Some(sunrise_client::lan::playerdata::ints_uuid(other));
             assert_eq!(
-                game.owner_damage_uuid(),
-                None,
-                "a guest is not the owner route"
+                game.attack_of(7).player_uuid,
+                Some(other),
+                "the acting guest is the causing player"
             );
             game.lan_acting_uuid = None;
             game.level.player_uuid = None;
             assert_eq!(
-                game.owner_damage_uuid(),
+                game.attack_of(7).player_uuid,
                 None,
                 "no invented UUID for an unknown source"
             );
             game.level.player_uuid = Some(actual);
-            game.lan_acting_uuid = Some(sunrise_client::lan::playerdata::ints_uuid(actual));
+            game.lan_acting = None;
             let kind = game.res.mob_types().get("minecraft:allay").unwrap().clone();
             let before = game.world.game_time;
             for melee in [true, false] {

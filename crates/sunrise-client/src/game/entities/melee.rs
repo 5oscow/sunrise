@@ -292,7 +292,11 @@ impl Game<'_> {
                     m.velocity = Vec3::new(x, y, z);
                     m.needs_sync = true;
                 } else {
-                    let level = crate::game::entity::damage_level_of!(self, &attack);
+                    let plan =
+                        self.prepare_knockback_credit(self.mobs[index].id as i32, None, &attack);
+                    let mut credit = plan.lend(&mut self.last_hurt_by_player);
+                    let level =
+                        crate::game::entity::damage_level_of!(self, &attack, &mut credit, None);
                     self.mobs[index].knockback_full(
                         level,
                         f64::from(knockback),

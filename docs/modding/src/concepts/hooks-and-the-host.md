@@ -103,7 +103,7 @@ Each hook method takes its host, where it has one, and one event:
 ```rust,ignore
 fn living_incoming_damage(
     &self,
-    _level: &mut dyn LevelRandomHost,
+    _level: &mut dyn HitHost,
     event: &mut LivingIncomingDamageEvent<'_>,
 ) -> Flow {
     if event.kind == "minecraft:pig" {
@@ -174,6 +174,14 @@ mod draws come in vanilla's order. `LevelTicksHost` adds scheduling through
 `schedule_block_tick` and `schedule_fluid_tick`, while
 `LevelWriteHost` adds random access, `set_block`, `set_block_property`, `play_sound` and
 `send_particles` and `level_event` (`levelEvent`, queued in order with the write's own events).
+A damage hit's listeners (`living_incoming_damage`, `living_damage_pre`, `living_damage_post`,
+`living_shield_block`, `living_use_totem`) are given a `HitHost`: a `LevelRandomHost` that also plays level
+sounds and draws from an entity's own random, and writes no block. `host.play_sound_at(sound, at, source,
+volume, pitch)` is `Level.playSound(null, x, y, z, ...)` and `host.play_sound_from(entity, ...)` is
+`Level.playSound(null, entity, ...)`: every player in range hears it, and a cancelled hit still plays what was
+queued. The seed is drawn at the call from the level's sound-seed stream, not from the level's random.
+`entity.next_float(host)`, `next_double`, `next_bool` and `next_int(host, bound)` draw from the entity's actual
+random stream, in listener order. A hit lends its attacker where the game applies a melee hit (the attacking player or mob, for player → mob, mob → mob and mob → player) and no entity at any other damage site (environment, projectiles, explosions, potions and the like); the attacking mob's own random is the one its AI draws from, and a hit built inside a mob's own tick lends none. Any other entity, a stale handle, a client and an out-of-range `bound` answer `None` (`false` for a sound).
 Outside a write, a `LevelRef` plays level events, and their global form for every player on the server
 ([Playing level events](../how-to/world/level-events.md)).
 `set_block(pos, state, flags)` is `Level.setBlock` on a whole state, as `LevelRef::set_block` takes it: it
@@ -192,6 +200,18 @@ in `mod_api`. Raw GPU access is native-only, unstable and outside that API, in
 `mod_render::render` (`sunrise-mod-render`). Replace its frame functions with native HEAD mixins compiled against the prebuilt game.
 `render_needs` collects requests; `world_drawn` runs before the hand and HUD, and
 `hand_drawn` runs after the hand, on the render thread. Use API draw contexts for API-typed drawing.
+
+## After a hook that can change the world
+
+A listener of a hook that gets a mutable host may remove, move or change objects. After such a hook
+returns without cancelling, the game does not use the list position or the state it worked out before
+the hook. It finds the object again by its entity id, checks the facts the action was decided on, and
+abandons the action if the object is gone or a fact changed; it never works the action out again. The
+hook still fires at its usual moment, and the check runs straight after it returns, before anything
+moves. Stack checks are shallow: they compare the item id and the count, not components. Each hook's
+doc names what it checks (`armor_stand_manipulate`, `entity_mount`, `cauldron_level_changed`,
+`hanging_break`, `player_shear_entity`, `living_change_target`). The effect writes on a living handle
+treat a mob that is marked removed but still listed as absent: they return false and change nothing.
 
 ## Hooks and injections
 

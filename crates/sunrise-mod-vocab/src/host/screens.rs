@@ -45,6 +45,20 @@ pub trait ScreensClientHost {
     #[access(ClientSetup)]
     fn screen_hovered_item(&self) -> Option<ItemKey>;
     /// Side: client.
+    /// Moves container slot `slot` of the open mod screen to `x`, `y` in GUI
+    /// pixels from the screen's top-left, the item's top-left corner, taking
+    /// effect from the next frame for the hovered slot (the 18 by 18 box
+    /// around it), its highlight, its contents, its empty-slot icon and the
+    /// recipe book's ghost items, as a vanilla slot at that position. `slot`
+    /// indexes the menu's slots as the screen's `Screen::slots` does. Nothing
+    /// is sent to the server. A position outside the image is allowed. False,
+    /// changing nothing, with no mod screen open, for an index the screen
+    /// does not show (out of range or hidden with `None`) or a position that
+    /// is not finite. The new position lasts until the screen closes; it is
+    /// safe to call every frame from the screen hooks.
+    #[access(ClientSetup)]
+    fn set_screen_slot_position(&self, slot: u32, x: f32, y: f32) -> bool;
+    /// Side: client.
     /// Requests vanilla's menu background blur for this frame, with a per-frame guard
     /// so blur is applied at most once per frame. Returns true if blur was newly
     /// requested this frame, or false if it was already applied/requested this frame.

@@ -20,6 +20,9 @@ pub fn encode(
     };
     if let BlockEntity::Mod(m) = e {
         let mut map = m.nbt.clone();
+        if let Some((key, shapes)) = m.shapes_tag() {
+            map.insert(key.into(), shapes);
+        }
         map.insert("id".into(), string(m.id()));
         if m.items.iter().any(Option::is_some) {
             map.insert("Items".into(), encode_items(&m.items));

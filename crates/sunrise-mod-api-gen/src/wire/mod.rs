@@ -19,68 +19,6 @@ use std::path::Path;
 use syn::{FnArg, Item, Pat, ReturnType, TraitItem};
 use ty::{Ty, Types};
 
-/// Traits a mod calls: their methods are the world's imports.
-pub(super) const IMPORTS: &[&str] = &[
-    "Host",
-    "ServerHost",
-    "ClientHost",
-    "Backend",
-    "BackendMut",
-    "ClientBackendMut",
-    "DrawContext",
-    "BlockEntityDrawContext",
-    "WorldDrawContext",
-    "CameraDrawContext",
-    "LevelHost",
-    "LevelRandomHost",
-    "LevelTicksHost",
-    "LevelWriteHost",
-    "ConfigFiles",
-    "Commands",
-    "Levels",
-    "Messages",
-    "Players",
-    "RuntimeLevels",
-    "ClientSession",
-    "RenderAssets",
-    "InstanceGroups",
-    "Tags",
-    "Registrar",
-    "CapabilityProviders",
-    "TicketValidation",
-    "DataLoadContext",
-    "LoopContext",
-    "WorldgenHost",
-    "ChunkDiskHost",
-    "GenerationContext",
-    "PieceContext",
-    "StructureRandom",
-    "AttachmentStore",
-    "AttachmentDeclarations",
-    "ServerReloadListeners",
-    "GameTests",
-    "ClientReloadListeners",
-    "PackFinders",
-    "ColorResolvers",
-    "BlockTintSources",
-    "CauldronInteractions",
-    "SectionGeometryRenderers",
-    "SectionGeometryContext",
-    "ParticleProviders",
-    "EnchantmentDamageEffects",
-    "PoiTypeExtensions",
-    "VillagerProfessions",
-    "LoadConditions",
-    "CauldronFluidContents",
-    "BlockAndTintGetter",
-    "GroundLevel",
-    "BlockMetadata",
-    "ServerReloadResources",
-    "CriterionContext",
-    "UnspawnedMobEdits",
-    "PendingChildrenEdits",
-];
-
 /// Imported traits a call never hands over, each reached through another's method instead.
 pub(super) const REACHED: &[(&str, &str, &str)] = &[
     ("ConfigFiles", "", ""),
@@ -138,46 +76,14 @@ pub(super) const FILE_ROOTS: &[(u8, &str, &str)] = &[
     (2, "ServerHost", "world_data_files"),
 ];
 
-/// Traits a mod implements: their methods are the world's exports. The handler traits the
-/// capability keys name join them (`exports`).
-const EXPORTS: &[&str] = &[
-    "Hooks",
-    "ReloadApply",
-    "BlockEntityTransform",
-    "StructureType",
-    "StructurePiece",
-    "BlockPart",
-    "BlockEntityPart",
-    "ItemPart",
-    "MenuPart",
-    "FluidPart",
-    "EntityPart",
-    "ServerReloadListener",
-    "LoadCondition",
-    "GameTestFunction",
-    "ClientReloadListener",
-    "BiomeColorResolver",
-    "BlockTintSource",
-    "Interaction",
-    "SectionGeometry",
-    "ParticleProvider",
-    "EnchantmentDamageEffect",
-    "CommandArgumentType",
-    "EntitySelectorType",
-    "GroundStateProvider",
-    "PlaceProvider",
-    "TooltipAppender",
-    "CriterionTest",
-];
-
-/// Every exported trait: [`EXPORTS`], then the handler traits `mod_api`'s capability keys name
-/// (`ResourceHandler<ItemResource>`), each instance of a generic one its own export. Set once,
-/// by `surface`.
+/// Every exported trait: the `.export` and `.held` role files, then the handler traits `mod_api`'s
+/// capability keys name (`ResourceHandler<ItemResource>`), each instance of a generic one its own
+/// export. Set once, by `surface`.
 pub(super) fn exports() -> &'static [&'static str] {
     trait_roles::exports()
 }
 
-/// All imported traits, including discovered per-item declarations.
+/// Every imported trait: the `.import` role files.
 pub(super) fn imports() -> &'static [&'static str] {
     trait_roles::imports()
 }
@@ -186,7 +92,7 @@ pub(super) fn imports() -> &'static [&'static str] {
 /// another mod's provider): the mod calls one through the `held-<interface>` imports, by the
 /// index the game keeps it under.
 pub(super) fn held(owner: &str) -> bool {
-    owner == "PlaceProvider" || (exports().contains(&owner) && !EXPORTS.contains(&owner))
+    owner == "PlaceProvider" || trait_roles::held().contains(&owner)
 }
 
 /// The contexts of the load phase: the catalog's registration and data-load contexts and a
@@ -363,16 +269,21 @@ pub(super) fn surface_reading<'a>(
 ) -> Result<Surface<'a>, String> {
     let mut types = Types::new(Index::new(root, included))?;
     let api = types.index.module("mod_api", &[])?;
-    let (imported, mut exported, paths) = trait_roles::declared(root)?;
-    types.index.read.borrow_mut().extend(paths);
+    let mut declared = trait_roles::declared(root)?;
+    types
+        .index
+        .read
+        .borrow_mut()
+        .extend(std::mem::take(&mut declared.paths));
     for shape in key_shapes(&mut types.index)? {
         for owner in [shape.handler.clone(), shape.provider()] {
-            if !exported.contains(&owner) {
-                exported.push(owner);
+            if !declared.exports.contains(&owner) {
+                declared.held.push(owner.clone());
+                declared.exports.push(owner);
             }
         }
     }
-    trait_roles::select(imported, exported);
+    trait_roles::select(&declared);
     let mut methods = Vec::new();
     let mut unbound = Vec::new();
     let mut excused = Vec::new();
@@ -437,6 +348,16 @@ pub(super) fn surface_reading<'a>(
             let name = function.sig.ident.to_string();
             let subscription = SUBSCRIBED.iter().any(|(o, n)| o == owner && *n == name);
             if hidden(&function.attrs) && !subscription {
+                continue;
+            }
+            if computed_in_mod(&function.attrs) {
+                if function.default.is_none() {
+                    unbound.push(Unbound {
+                        owner,
+                        name,
+                        why: "is computed in the mod but has no default body".into(),
+                    });
+                }
                 continue;
             }
             if not_on_wasm(&function.attrs) {
@@ -625,6 +546,17 @@ fn method(
         receiver,
         params,
         ret,
+    })
+}
+
+/// A provided method marked `#[computed_in_mod]`: it gets no call of its own, and its default body
+/// runs wherever the trait object lives, calling the methods that do cross.
+fn computed_in_mod(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|attr| {
+        attr.path()
+            .segments
+            .last()
+            .is_some_and(|segment| segment.ident == "computed_in_mod")
     })
 }
 
@@ -929,6 +861,78 @@ mod tests {
                     );
                 }
                 super::generate(&root, &included).unwrap();
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    /// The marker is the attribute, under any path; a doc line that only says so is not.
+    #[test]
+    fn a_method_is_computed_in_the_mod_only_by_its_attribute() {
+        let item: syn::ItemTrait = syn::parse_quote! {
+            trait Draws {
+                fn primitive(&mut self) -> i32;
+                #[sunrise_mod_api_macros::computed_in_mod]
+                fn qualified(&mut self) -> i32 { self.primitive() }
+                #[computed_in_mod]
+                fn bare(&mut self) -> i32 { self.primitive() }
+                /// Computed in the mod: but not marked.
+                fn prose(&mut self) -> i32 { self.primitive() }
+            }
+        };
+        let marked: Vec<String> = item
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                syn::TraitItem::Fn(function) if super::computed_in_mod(&function.attrs) => {
+                    Some(function.sig.ident.to_string())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(marked, ["qualified", "bare"]);
+    }
+
+    /// `RandomSource`'s range helpers are computed in the mod: only the primitive draws cross.
+    #[test]
+    #[ignore = "daily"]
+    fn only_the_primitive_draws_of_a_random_cross() {
+        std::thread::Builder::new()
+            .stack_size(64 << 20)
+            .spawn(|| {
+                let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+                let generated = crate::sources(&root, crate::FillMode::Require).unwrap();
+                let included = [
+                    ("mod_api_generated.rs", generated.hooks.as_str()),
+                    ("mod_api_generated_host.rs", generated.host.as_str()),
+                    ("mod_api_host_areas.rs", generated.areas.as_str()),
+                ];
+                let providers = crate::capability_providers::generate(&root, &included)
+                    .unwrap()
+                    .0;
+                let mut surface_included = included.to_vec();
+                surface_included.push(("capability_providers_generated.rs", providers.as_str()));
+                let surface = super::surface(&root, &surface_included).unwrap();
+                let mut crossing: Vec<&str> = surface
+                    .methods
+                    .iter()
+                    .filter(|method| method.owner == "RandomSource")
+                    .map(|method| method.name.as_str())
+                    .collect();
+                crossing.sort_unstable();
+                assert_eq!(
+                    crossing,
+                    [
+                        "next_boolean",
+                        "next_double",
+                        "next_float",
+                        "next_gaussian",
+                        "next_int",
+                        "next_int_bound",
+                        "next_long",
+                    ]
+                );
             })
             .unwrap()
             .join()

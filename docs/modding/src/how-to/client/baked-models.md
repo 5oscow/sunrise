@@ -4,8 +4,8 @@ Every successful resource load bakes each block state's models and the standalon
 into one store for that load. That store belongs to the game and never changes while it is
 published: the mesher, block entity drawing and a mod all read the same baked results. A mod
 holds keys into it and read-only copies of the geometry and metadata it lists, never the models
-themselves. The [design](https://github.com/arismoko/horizon/blob/main/docs/design/mod-api/baked-models.md)
-is #861; block-entity model data and editing a baking result are separate changes.
+themselves. The [design](https://github.com/sunrise-org/sunrise/blob/main/docs/design/mod-api/baked-models.md)
+covers it; block-entity model data and editing a baking result are separate changes.
 
 ## Keys
 

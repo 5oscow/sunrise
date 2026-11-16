@@ -5,6 +5,8 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'tools'))
 import lab
+
+PARITY_MANUAL = "a proof run by hand: --kind java --output DIR, then --kind native --output DIR2 --binary BIN"  # not a harness: tools/parity.py leaves it out
 META='{"pack":{"description":"H259 unused feature","min_format":[121,0],"max_format":[121,0]}}\n'
 
 def sha(b):return hashlib.sha256(b).hexdigest()

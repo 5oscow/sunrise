@@ -497,7 +497,7 @@
   "sunrise.mods.browse.title": "مرور مدها",
   "sunrise.mods.browse.update": "به‌روزرسانی",
   "sunrise.mods.dev": " (توسعه دهنده)",
-  "sunrise.mods.empty": "بدون مد: فایل های hmod را در پوشه sunrise-mods قرار دهید",
+  "sunrise.mods.empty": "بدون مد: فایل های smod را در پوشه sunrise-mods قرار دهید",
   "sunrise.mods.in_world": " (دنیا را رها کن تا تغییر کند)",
   "sunrise.mods.not_built": " (ساخته نشده)",
   "sunrise.mods.open_folder": "پوشه Mod را باز کنید",

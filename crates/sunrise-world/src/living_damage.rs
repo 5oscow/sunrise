@@ -280,23 +280,33 @@ impl DamageContainer {
         self.new_damage = damage;
     }
     /// The damage sequence, after `LivingDamageEvent.Pre`: the damage it left, which the
-    /// sequence goes on with (`captureInflictedDamage`). Below 0 is none; not a number is
+    /// sequence goes on with (`captureInflictedDamage`). An unchanged value preserves
+    /// vanilla's intermediate damage. A listener's edit below 0 is none; not a number is
     /// what Pre was told.
     #[doc(hidden)]
     pub fn capture_inflicted(&mut self) -> f32 {
-        if self.new_damage.is_nan() {
-            self.new_damage = self.entered_pre;
-        } else if self.new_damage < 0.0 {
-            self.new_damage = 0.0;
+        // An untouched Pre must preserve vanilla's arithmetic, even for negative or
+        // non-finite intermediate damage. Only listener changes are normalized.
+        if self.new_damage.to_bits() != self.entered_pre.to_bits() {
+            if self.new_damage.is_nan() {
+                self.new_damage = self.entered_pre;
+            } else if self.new_damage < 0.0 {
+                self.new_damage = 0.0;
+            }
         }
         self.inflicted = self.new_damage;
         self.inflicted
     }
     /// What `LivingDamageEvent.Pre` added to the damage (negative: took off). The damage
-    /// cooldown remembers the hit with it (`lastHurt`).
+    /// cooldown remembers the hit with it (`lastHurt`). An unchanged value adds nothing,
+    /// including when subtracting the intermediate value from itself would produce NaN.
     #[doc(hidden)]
     pub fn pre_change(&self) -> f32 {
-        self.inflicted - self.entered_pre
+        if self.inflicted.to_bits() == self.entered_pre.to_bits() {
+            0.0
+        } else {
+            self.inflicted - self.entered_pre
+        }
     }
     /// The damage sequence: the health the hit took.
     #[doc(hidden)]
@@ -709,6 +719,31 @@ mod tests {
         let mut second = DamageContainer::new(20.0);
         hit(&mut target, &mut second, 20.0);
         assert_eq!(reductions(&second), [10.0, 2.5, 3.75, 0.0, 0.0]);
+    }
+    #[test]
+    fn untouched_pre_preserves_non_finite_and_negative_damage() {
+        for damage in [
+            f32::NEG_INFINITY,
+            -1.0,
+            -0.0,
+            f32::INFINITY,
+            f32::NAN,
+            f32::MAX,
+        ] {
+            let mut container = DamageContainer::new(damage);
+            container.enter_pre(damage);
+            assert_eq!(container.capture_inflicted().to_bits(), damage.to_bits());
+            assert_eq!(container.pre_change(), 0.0);
+        }
+        // Listener edits still obey the Pre contract.
+        let mut container = DamageContainer::new(5.0);
+        container.enter_pre(5.0);
+        container.set_new_damage(-1.0);
+        assert_eq!(container.capture_inflicted(), 0.0);
+        assert_eq!(container.pre_change(), -5.0);
+        container.set_new_damage(f32::NAN);
+        assert_eq!(container.capture_inflicted(), 5.0);
+        assert_eq!(container.pre_change(), 0.0);
     }
     #[test]
     fn modifiers_cross_as_plain_values() {

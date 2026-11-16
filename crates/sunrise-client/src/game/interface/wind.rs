@@ -404,6 +404,9 @@ impl Game<'_> {
                     attacker_species: owner_breeze.then_some(Species::Breeze),
                 };
                 let mut hurt = false;
+                let plan =
+                    self.prepare_knockback_credit(id as i32, source.attacker, self.combat.attack());
+                let mut credit = plan.lend(&mut self.last_hurt_by_player);
                 if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
                     // Breeze.isInvulnerableTo: its own kind's charges.
                     if owner_breeze && m.species() == Species::Breeze {
@@ -415,7 +418,12 @@ impl Game<'_> {
                         return;
                     }
                     hurt = m.damage(
-                        crate::game::entity::damage_level_of!(self, scoped),
+                        crate::game::entity::damage_level_of!(
+                            self,
+                            self.combat.attack(),
+                            &mut credit,
+                            None
+                        ),
                         1.0,
                         source,
                     );
@@ -990,6 +998,7 @@ mod tests {
             previous: Vec3::ZERO,
             velocity: Vec3::ZERO,
             fuse: 80,
+            ticks: 0,
             on_ground: false,
             fall_distance: 0.0,
             stuck: Vec3::ZERO,

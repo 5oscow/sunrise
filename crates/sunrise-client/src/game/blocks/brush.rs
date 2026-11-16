@@ -165,7 +165,7 @@ impl Game<'_> {
             return false;
         }
         brush.cooldown_ends_at = time + 10;
-        self.unpack_brush_loot(pos);
+        self.unpack_brush_loot(pos, slot);
         let before = completion_state(brush.count);
         brush.count += 1;
         if brush.count >= 10 {
@@ -182,8 +182,10 @@ impl Game<'_> {
     }
 
     /// `BrushableBlockEntity.unpackLootTable`: the table's roll becomes the
-    /// block entity's item.
-    fn unpack_brush_loot(&mut self, pos: [i32; 3]) {
+    /// block entity's item. `LootContextParamSets.ARCHAEOLOGY`: the brusher is
+    /// THIS_ENTITY, the brush in `slot` the TOOL and the block's centre the
+    /// ORIGIN, with the brusher's luck.
+    fn unpack_brush_loot(&mut self, pos: [i32; 3], slot: usize) {
         let key = (pos[0], pos[1], pos[2]);
         let Some(BlockEntity::Brushable(b)) = self.world.block_entities.get(&key) else {
             return;
@@ -200,14 +202,25 @@ impl Game<'_> {
         );
         self.trigger_loot_table(&table);
         let loot = self.server_loot.get();
-        decorated_pot::unpack_loot(
-            &mut tag,
-            loot.as_deref(),
-            &mut self.world.random,
-            &mut self.rand_sequences,
-            self.level.seed,
-            self.res.items(),
-        );
+        let brusher = self.killer_loot_entity(None);
+        let luck = self.acting_luck();
+        let tool = self.stack_in(slot).map(super::creatures::to_loot);
+        let caller = self.caller_loot(Some(pos.map(|c| f64::from(c) + 0.5)), tool);
+        caller.with(|| {
+            decorated_pot::unpack_loot(
+                &mut tag,
+                loot.as_deref(),
+                &mut self.world.random,
+                &mut self.rand_sequences,
+                self.level.seed,
+                self.res.items(),
+                sunrise_world::loot::ContainerLootContext {
+                    luck,
+                    entity: Some(&brusher),
+                    ..Default::default()
+                },
+            )
+        });
         if let Some(BlockEntity::Brushable(b)) = self.world.block_entities.get_mut(&key) {
             b.loot_table = tag.get("LootTable").cloned();
             b.table_seed_tag = tag.get("LootTableSeed").cloned();

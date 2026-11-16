@@ -1,6 +1,6 @@
 # Native mods: building and shipping
 
-A native mod is Rust source in a `.hmod`. The launcher compiles it on the player's machine, with its own pinned Rust
+A native mod is Rust source in a `.smod`. The launcher compiles it on the player's machine, with its own pinned Rust
 toolchain, against the prebuilt game of the exact Sunrise build the mod pins in `[native]`. The game itself is never
 rebuilt for a mod: the mods are compiled and linked against that prebuilt game, and the instance then plays the
 result.
@@ -23,9 +23,17 @@ and 0.8 for `Full`. There is no second hook dispatch. Two non-commuting listener
 in dispatch order, each completing its rewrites before the next; this does not simulate
 two separate passes over the listener list. Cancellation still leaves motion unchanged.
 
+Version 2 also supplies `kill_credit` and `kill_credit_main`: the pushed living entity's
+kill credit and that entity's current main-hand stack, read after accepted-hit memories
+are committed and before the push. A remembered player takes precedence over the last
+hurting mob, including a tame wolf's owner. An unresolved remembered player yields 0 and
+no stack, not a fallback to the mob. After the remembered player expires, the recent mob
+may receive credit. This context is distinct from `attacker` and its captured source weapon. Both fields are additions: NeoForge's
+`LivingKnockBackEvent` doesn't carry them.
+
 ## Living death contract version 2
 
-[`living_death` version 2](https://github.com/arismoko/horizon/blob/main/docs/native-mods.md#living-death-version-2) supplies
+[`living_death` version 2](https://github.com/sunrise-org/sunrise/blob/main/docs/native-mods.md#living-death-version-2) supplies
 the accepted killing source and its captured weapon stack. Cancellation keeps the
 health a listener leaves, suppresses loot, experience and death messages, and does
 not heal the body. An unhealed cancelled body is removed at tick 20 without loot

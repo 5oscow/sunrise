@@ -2135,6 +2135,7 @@ impl Game<'_> {
             mouse: (cursor.0.floor() as i32, cursor.1.floor() as i32),
             index: self.swap_index(),
             filtering: self.book_filtering(book_type),
+            filter_look: None,
             search: &search,
             tabs: &tabs,
             buttons: &buttons,
@@ -2187,7 +2188,7 @@ impl Game<'_> {
                     }
                 }
                 Call::Sprite { id, x, y, w, h } => {
-                    let name = format!("gui/sprites/{id}");
+                    let name = sunrise_client::hud::atlas_key_of_gui_sprite(id);
                     let native = atlas
                         .sprites
                         .get(&name)
@@ -2403,6 +2404,7 @@ mod screen_room_tests {
                     mouse: (221, 50),
                     index: 0,
                     filtering: false,
+                    filter_look: None,
                     search: &search,
                     tabs: &tabs,
                     buttons: &[],

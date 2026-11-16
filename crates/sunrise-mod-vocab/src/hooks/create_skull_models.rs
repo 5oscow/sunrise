@@ -37,7 +37,7 @@ A registered kind is a name a `minecraft:head` item model can use, exactly as a 
 The head then draws wherever that item model draws: in hand, in a GUI, in an item frame and
 dropped. Worn in a head slot it draws as other head items do, in the item's `head` display
 transform; the skull's own placement on a head, like a placed skull, needs the item to be a mod
-skull block (arismoko/horizon#2529). The model's optional `texture` replaces the default as it does for
+skull block. The model's optional `texture` replaces the default as it does for
 vanilla's kinds. A kind nobody registered is refused when the item model loads, as an unknown
 vanilla kind is.
 
@@ -45,7 +45,7 @@ A kind in vanilla's namespace, not `<namespace>:<path>`, or registered already (
 logged and left out, as `registerSkullModel` refuses a type registered twice. So is an entry whose
 layer neither a mod nor vanilla has, or whose texture is empty. Skull types are frozen once at
 startup. Placed skull blocks of a mod type are not drawn by this hook: a mod block declaring that
-it is a skull is arismoko/horizon#2529."#]
+it is a skull is not covered yet."#]
     #[hook(
         side = "client",
         contract = "collect",

@@ -66,6 +66,9 @@ pub struct CachedCollisionRegistry<'r> {
     canonical_identities: bool,
     contexts: HashMap<BlockStateId, [Option<usize>; 9]>,
     outline_edges: HashMap<usize, Vec<[f64; 6]>>,
+    /// Whether each state's block entity may publish its shapes (`shapes_from_block_entity`);
+    /// empty when no state does.
+    published: Vec<bool>,
 }
 impl<'r> CachedCollisionRegistry<'r> {
     pub fn registry(&self) -> &'r BlockRegistry {
@@ -283,6 +286,19 @@ impl<'r> CachedCollisionRegistry<'r> {
                 }
             }
         }
+        let mut published = Vec::new();
+        if let Some(states) = tag.get("published_shapes") {
+            let Tag::IntArray(states) = states else {
+                return Err(invalid("published shape states is not an int array"));
+            };
+            published = vec![false; registry.len()];
+            for state in states {
+                *usize::try_from(*state)
+                    .ok()
+                    .and_then(|state| published.get_mut(state))
+                    .ok_or_else(|| invalid("published shape state outside registry"))? = true;
+            }
+        }
         Ok(Self {
             registry,
             shapes,
@@ -291,7 +307,16 @@ impl<'r> CachedCollisionRegistry<'r> {
             canonical_identities,
             contexts,
             outline_edges,
+            published,
         })
+    }
+    /// Whether the block entity of `state`'s block publishes the block's shapes
+    /// (`shapes_from_block_entity`), which then replace the cached ones while it holds some.
+    pub fn publishes_shapes(&self, state: BlockStateId) -> bool {
+        self.published
+            .get(state.0 as usize)
+            .copied()
+            .unwrap_or(false)
     }
     pub fn has_context_shapes(&self, state: BlockStateId) -> bool {
         self.contexts.contains_key(&state)

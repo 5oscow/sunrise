@@ -176,6 +176,7 @@ pub fn main() -> sunrise_client::Result<()> {
             mouse: (int(&case["mouse"][0]), int(&case["mouse"][1])),
             index: case["index"].as_u64().unwrap_or(0) as usize,
             filtering,
+            filter_look: None,
             search: &search,
             tabs: &tabs,
             buttons: &buttons,

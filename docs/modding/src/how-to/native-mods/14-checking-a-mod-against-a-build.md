@@ -8,7 +8,7 @@ In a mod folder, `cargo sunrise-mod` does this for you from the SDK it fetched i
 - `cargo sunrise-mod build` packs the list into the package as `uses.json`, with each item's fingerprint at the
   pinned build. A mod with a `[native.*]` table or internals is made for exactly one build and gets no list.
 - `cargo sunrise-mod fits` says, one line per build, whether the mod fits the current Nightly, or each build
-  `--build` names. `cargo sunrise-mod fits greeter.hmod --build nightly-2026-11-20` asks the same of a package.
+  `--build` names. `cargo sunrise-mod fits greeter.smod --build nightly-2026-11-20` asks the same of a package.
   It exits 0 when every build fits, 1 when one does not, and 2 when it cannot tell or the question does not
   apply (a mod made for one build, a content mod, or a package made by an older tool).
 - `cargo sunrise-mod update` prints what moving the pin breaks in this mod, item by item with the line that uses

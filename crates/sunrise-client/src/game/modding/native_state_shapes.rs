@@ -9,21 +9,26 @@ use sunrise_world::{collision_context::CollisionContext, registry::BlockStateId}
 
 impl Game<'_> {
     /// The same outline traversal without allocating a box list.
-    pub(super) fn outline_boxes_iter(
-        &self,
+    pub(super) fn outline_boxes_iter<'a>(
+        &'a self,
+        world: &'a World,
         state: BlockStateId,
         anims: &sunrise_client::block_entity_anim::BlockEntityAnims,
         pos: [i32; 3],
         player_context: bool,
-    ) -> impl Iterator<Item = [f64; 6]> + '_ {
-        let declared = self.collision.cached_shapes().context_outline_shape(
-            state,
-            if player_context {
-                self.outline_context_kind()
-            } else {
-                sunrise_world::collision_context::EntityContextKind::Other
-            },
-        );
+    ) -> impl Iterator<Item = [f64; 6]> + 'a {
+        let declared =
+            sunrise_client::collisions::published_outline(world, self.collision, state, pos)
+                .or_else(|| {
+                    self.collision.cached_shapes().context_outline_shape(
+                        state,
+                        if player_context {
+                            self.outline_context_kind()
+                        } else {
+                            sunrise_world::collision_context::EntityContextKind::Other
+                        },
+                    )
+                });
         let context = declared
             .is_none()
             .then(|| self.context_outline(pos, state, player_context, anims))
@@ -77,7 +82,7 @@ impl Game<'_> {
     ) -> Vec<[f64; 6]> {
         match kind {
             BlockShapeKind::Outline => self
-                .outline_boxes_iter(state, anims, pos, false)
+                .outline_boxes_iter(world, state, anims, pos, false)
                 .map(|bounds| std::array::from_fn(|i| bounds[i] - f64::from(pos[i % 3])))
                 .collect(),
             BlockShapeKind::Collision => {

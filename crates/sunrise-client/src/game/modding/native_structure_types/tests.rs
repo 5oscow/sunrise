@@ -498,6 +498,24 @@ fn structure_random_adapter_preserves_vanilla_scalar_draws() {
         0.730967787376657_f64.to_bits()
     );
     assert!(Draws(&mut LegacyRandom::new(0)).next_boolean());
+    // The unbounded int and the gaussian are the engine stream's own, cache and all.
+    let mut engine = LegacyRandom::new(0);
+    let expected = (
+        sunrise_core::random::RandomSource::next_int(&mut engine),
+        sunrise_core::random::RandomSource::next_gaussian(&mut engine),
+        sunrise_core::random::RandomSource::next_gaussian(&mut engine),
+    );
+    let mut random = LegacyRandom::new(0);
+    let mut draws = Draws(&mut random);
+    let random: &mut dyn mod_api::RandomSource = &mut draws;
+    assert_eq!(
+        (
+            random.next_int(),
+            random.next_gaussian(),
+            random.next_gaussian()
+        ),
+        expected
+    );
     let mut random = LegacyRandom::new(0);
     let mut draws = Draws(&mut random);
     assert_eq!(draws.next_int_bound(0), 0);

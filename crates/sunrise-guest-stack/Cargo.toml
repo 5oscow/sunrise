@@ -11,3 +11,8 @@ libc = "0.2"
 
 [lints]
 workspace = true
+
+# Runs on the process's main thread, which libtest's harness never gives a test.
+[[test]]
+name = "main_thread"
+harness = false

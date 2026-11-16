@@ -6,6 +6,7 @@ The declarations' parsing and row grouping are tested in Rust (`sunrise-mod-api-
 """
 from pathlib import Path
 import json
+import os
 import shlex
 import subprocess
 import sys
@@ -70,10 +71,23 @@ class Counterparts(unittest.TestCase):
         command = shlex.split(config["preprocessor"]["neoforge-counterparts"]["command"])
         context = {"root": str(ROOT / "docs/modding")}
         with tempfile.TemporaryDirectory() as elsewhere:
-            supported = subprocess.run([*command, "supports", "html"], cwd=elsewhere,
+            # A stand-in `cargo` answers for xtask, which would otherwise compile here: it renders the page only when
+            # asked from the checkout for `mod-api counterparts`. The real page is the Rust tests' (`counterparts`
+            # in sunrise-mod-api-gen) and the modding-book workflow's `mdbook build`, which runs this command.
+            cargo = Path(elsewhere, "bin", "cargo")
+            cargo.parent.mkdir()
+            cargo.write_text(f"""#!{sys.executable}
+import os, sys
+assert os.getcwd() == {str(ROOT)!r}, os.getcwd()
+assert sys.argv[1:] == ["run", "--quiet", "-p", "xtask", "--", "mod-api", "counterparts"], sys.argv
+print("# NeoForge counterparts\\n\\n| `item_decorations` | client | `IItemDecorator.render` |")
+""")
+            cargo.chmod(0o755)
+            env = {**os.environ, "PATH": f"{cargo.parent}{os.pathsep}{os.environ['PATH']}"}
+            supported = subprocess.run([*command, "supports", "html"], cwd=elsewhere, env=env,
                 check=True, capture_output=True, text=True)
             self.assertEqual(supported.stdout, "")
-            result = subprocess.run(command, cwd=elsewhere, check=True, capture_output=True,
+            result = subprocess.run(command, cwd=elsewhere, env=env, check=True, capture_output=True,
                 text=True, input=json.dumps([context, self.book()]))
         book = json.loads(result.stdout)
         chapter = book["sections"][0]["Chapter"]["sub_items"][0]["Chapter"]

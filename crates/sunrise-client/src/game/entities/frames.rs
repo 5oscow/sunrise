@@ -451,13 +451,19 @@ impl Game<'_> {
     /// (`BlockAttachedEntity.hurtServer`). `by_player`: the damage source's
     /// entity is the acting player, `creative` when they have infinite
     /// materials (no drops).
-    fn hit_frame(&mut self, i: usize, by_player: bool, creative: bool) {
+    fn hit_frame(&mut self, mut i: usize, by_player: bool, creative: bool) {
         let with_frame = self.item_frames[i].item.is_none();
         let entity_id = self.item_frames[i].id;
         if with_frame {
             let (kind, pos) = (self.item_frames[i].kind(), self.item_frames[i].pos);
             if self.hanging_break_cancelled(kind, pos, by_player) {
                 return;
+            }
+            // The listener had the game in its hands: find the frame again by
+            // its id, and it must still be empty. Otherwise nothing breaks.
+            match self.item_frames.iter().position(|f| f.id == entity_id) {
+                Some(now) if self.item_frames[now].item.is_none() => i = now,
+                _ => return,
             }
         }
         let old_item = self.item_frames[i]
@@ -484,8 +490,15 @@ impl Game<'_> {
             self.frame_output_changed(f.pos);
         }
         self.drop_frame_items(&mut f, with_frame, by_player, creative);
-        if !with_frame {
-            self.item_frames[i].random = f.random.clone();
+        // Drops run listeners: the random state goes back to the frame with
+        // this id, wherever it is now.
+        if !with_frame
+            && let Some(frame) = self
+                .item_frames
+                .iter_mut()
+                .find(|frame| frame.id == entity_id)
+        {
+            frame.random = f.random.clone();
         }
         // BLOCK_CHANGE by the attacker after the drops: ItemFrame.hurtServer
         // for the item, ItemFrame.dropItem(level, causedBy) for the frame.
@@ -626,10 +639,24 @@ impl Game<'_> {
         index: usize,
         source: Option<super::commands::Target>,
     ) -> bool {
-        let (kind, pos) = (self.item_frames[index].kind(), self.item_frames[index].pos);
+        let (id, kind, pos, was_empty) = (
+            self.item_frames[index].id,
+            self.item_frames[index].kind(),
+            self.item_frames[index].pos,
+            self.item_frames[index].item.is_none(),
+        );
         if self.hanging_break_cancelled(kind, pos, false) {
             return false;
         }
+        // Found again by id after the listener: gone, or empty before and
+        // filled now, nothing breaks.
+        let Some(index) = self
+            .item_frames
+            .iter()
+            .position(|f| f.id == id && !(was_empty && f.item.is_some()))
+        else {
+            return false;
+        };
         let mut f = self.item_frames.remove(index);
         self.entity_killed_event_by(center(&f), source);
         self.audio
@@ -658,10 +685,20 @@ impl Game<'_> {
             self.item_frames[i].check_interval += 1;
             if self.item_frames[i].check_interval >= 100 {
                 self.item_frames[i].check_interval = 0;
-                let mut f = self.item_frames[i].clone();
+                let f = self.item_frames[i].clone();
                 if !self.frame_survives(&f) && !self.hanging_break_cancelled(f.kind(), f.pos, false)
                 {
-                    self.item_frames.remove(i);
+                    // Found again by id after the listener: gone, nothing is
+                    // removed; empty before and filled now, it stays.
+                    let Some(now) = self.item_frames.iter().position(|g| g.id == f.id) else {
+                        continue;
+                    };
+                    if f.item.is_none() && self.item_frames[now].item.is_some() {
+                        i = now + 1;
+                        continue;
+                    }
+                    i = now;
+                    let mut f = self.item_frames.remove(i);
                     // BlockAttachedEntity.tick discards without a death event.
                     self.audio
                         .play(&sound(&f, "break"), Some(center(&f)), 1.0, 1.0);

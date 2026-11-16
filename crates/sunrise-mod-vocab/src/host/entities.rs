@@ -240,8 +240,8 @@ pub trait EntitiesBackend {
     fn entity_on_ground(&self, entity: EntityRef) -> Option<bool>;
     /// Side: both.
     /// The entity's box (`Entity.getBoundingBox`): its lowest and highest
-    /// corner. None for the kinds whose box Sunrise doesn't keep (displays,
-    /// markers, End crystals, the dragon); a dragon part's is its own. On a client, reads
+    /// corner. Displays and markers have zero-sized physical boxes; interactions use
+    /// their saved dimensions. None for End crystals and the dragon; a dragon part's is its own. On a client, reads
     /// its own copy of a tracked entity, or the local player's predicted box.
     #[access(WorldOnly)]
     fn entity_bounding_box(&self, entity: EntityRef) -> Option<[[f64; 3]; 2]>;
@@ -801,21 +801,30 @@ pub trait EntitiesBackendMut {
         y_offset: f32,
     ) -> Result<Option<EntityRef>, StackWriteError>;
     /// Side: server.
-    /// Attempts to board a vehicle through the shared server mount path.
+    /// Attempts to board a vehicle through the shared server mount path, and names the cause of
+    /// a refusal (`StartRidingRefusal`).
     ///
     /// Players and mobs can ride a mob, boat, minecart or generic seat entity
-    /// (an armor stand, display, marker or interaction). A player vehicle is
-    /// refused, forced or not: only `entity_ride_player` seats a mob on one.
-    /// Returns false for
-    /// unsupported entity pairs, stale or held-out handles, a full stored
-    /// vehicle, a cycle, or a canceled mount or dismount. Mob vehicle capacity
+    /// (an armor stand, display, marker or interaction). A successful mob mount drops its
+    /// lead as an item without a sound and emits `entity_unleash`; a refused mount leaves the
+    /// leash alone. Mob vehicle capacity
     /// follows its species; minecarts store one passenger and boats store one
     /// mob and up to two passengers in total. Generic seats admit one passenger unless forced.
     /// `force` bypasses normal admission checks, not these storage limits.
     /// Player boarding cooldown and the strider's
     /// eye-in-lava admission check are not represented by the game.
+    /// A player vehicle is refused as `StartRidingRefusal::PlayerVehicle`, forced or not:
+    /// vanilla's `Entity.startRiding` refuses a vehicle whose entity type is not saved with the
+    /// level before it reads `force`, and the player type is one, as a player's save keeps no
+    /// passengers. `entity_mount` fires only after every other check passed, and its cancel is
+    /// `StartRidingRefusal::Canceled`. Only `entity_ride_player` seats a mob on a player.
     #[access(WorldOnly)]
-    fn entity_start_riding(&mut self, entity: EntityRef, vehicle: EntityRef, force: bool) -> bool;
+    fn entity_start_riding(
+        &mut self,
+        entity: EntityRef,
+        vehicle: EntityRef,
+        force: bool,
+    ) -> Result<(), StartRidingRefusal>;
     /// Side: server.
     /// Seats the mob `entity` on the server player `player`
     /// (`Entity.startRiding(player, force)`), as Tinkers' Construct's piggyback
@@ -996,6 +1005,15 @@ pub trait EntitiesBackendMut {
     /// Sets the entity's shared invisibility flag (`Entity.setInvisible`). Returns false for players and guests.
     #[access(WorldOnly)]
     fn entity_set_invisible(&mut self, entity: EntityRef, invisible: bool) -> bool;
+    /// Side: server.
+    /// Sets whether the entity sprints (`Entity.setSprinting`): a player's flag with the
+    /// movement speed modifier `LivingEntity.setSprinting` adds or removes, or a mob's flag,
+    /// which the mob's movement speed reads as that same modifier (a mob's own AI, such as a
+    /// cat's, may set it again on its next step). It is not the player's sprint key: the
+    /// player's client sets its own flag again from its input. False for a stale handle, on a
+    /// client, and for kinds with no sprinting flag.
+    #[access(WorldOnly)]
+    fn entity_set_sprinting(&mut self, entity: EntityRef, sprinting: bool) -> bool;
     /// Side: server.
     /// `Level.playSound(null, entity, sound, source, volume, pitch)`: plays
     /// sound event `sound` bound to the entity, so that it follows it, for

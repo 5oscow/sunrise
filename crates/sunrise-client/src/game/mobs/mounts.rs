@@ -936,7 +936,12 @@ impl Game<'_> {
                 let mut events = Vec::new();
                 r.cause_fall_damage_from(
                     &self.loop_context,
-                    crate::game::entity::damage_level_of!(self),
+                    crate::game::entity::damage_level_of!(
+                        self,
+                        &sunrise_client::health::NO_ATTACK,
+                        no_push,
+                        None
+                    ),
                     distance,
                     modifier,
                     &mut events,

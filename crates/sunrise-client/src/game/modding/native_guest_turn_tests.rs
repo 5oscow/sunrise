@@ -1200,7 +1200,7 @@ struct PanicOnce(std::sync::Arc<std::sync::atomic::AtomicUsize>);
 impl mod_api::Hooks for PanicOnce {
     fn living_incoming_damage(
         &self,
-        _: &mut dyn mod_api::LevelRandomHost,
+        _: &mut dyn mod_api::HitHost,
         _: &mut mod_api::LivingIncomingDamageEvent<'_>,
     ) -> mod_api::Flow {
         if self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {

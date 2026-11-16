@@ -263,6 +263,7 @@ fn recipe_book_categories_accept_mod_declarations() {
                 id: "mymod:crushing".into(),
                 recipe_type: "mymod:crusher".into(),
                 icon: "minecraft:stone".into(),
+                secondary_icon: None,
                 target_menu: "mymod:crusher".into(),
                 book: crate::item::recipe_book::RecipeBookTypeKey {
                     id: "mymod:crusher".into(),

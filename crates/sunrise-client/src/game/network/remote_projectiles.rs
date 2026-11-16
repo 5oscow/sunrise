@@ -382,6 +382,7 @@ impl Game<'_> {
                 previous: at,
                 velocity,
                 fuse: 80,
+                ticks: 0,
                 on_ground: false,
                 fall_distance: 0.0,
                 stuck: Vec3::ZERO,

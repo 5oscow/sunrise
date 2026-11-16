@@ -2,7 +2,7 @@ use super::{HudAtlas, MISSING_SPRITE, Rect};
 
 /// The packed key of a GUI sprite id: `minecraft:boss_bar/pink_background` is
 /// `gui/sprites/boss_bar/pink_background`, another namespace's `ns:gui/sprites/...`.
-fn atlas_key_of_gui_sprite(id: &str) -> String {
+pub fn atlas_key_of_gui_sprite(id: &str) -> String {
     match id.split_once(':') {
         Some(("minecraft", path)) => format!("gui/sprites/{path}"),
         Some((namespace, path)) => format!("{namespace}:gui/sprites/{path}"),
@@ -37,5 +37,26 @@ impl HudAtlas {
             }
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::atlas_key_of_gui_sprite;
+
+    #[test]
+    fn vanilla_ids_drop_their_namespace_and_a_mods_keep_theirs() {
+        assert_eq!(
+            atlas_key_of_gui_sprite("minecraft:recipe_book/tab"),
+            "gui/sprites/recipe_book/tab"
+        );
+        assert_eq!(
+            atlas_key_of_gui_sprite("recipe_book/tab"),
+            "gui/sprites/recipe_book/tab"
+        );
+        assert_eq!(
+            atlas_key_of_gui_sprite("demo:book/on"),
+            "demo:gui/sprites/book/on"
+        );
     }
 }

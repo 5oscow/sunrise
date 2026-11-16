@@ -497,7 +497,7 @@
   "sunrise.mods.browse.title": "मॉड्स ब्राउज़ करें",
   "sunrise.mods.browse.update": "अपडेट करें",
   "sunrise.mods.dev": " (देव)",
-  "sunrise.mods.empty": "कोई मॉड नहीं: sunrise-mods फ़ोल्डर में .hmod फ़ाइलें रखें",
+  "sunrise.mods.empty": "कोई मॉड नहीं: sunrise-mods फ़ोल्डर में .smod फ़ाइलें रखें",
   "sunrise.mods.in_world": " (बदलने के लिए दुनिया से बाहर जाएं)",
   "sunrise.mods.not_built": " (निर्मित नहीं)",
   "sunrise.mods.open_folder": "मॉड फ़ोल्डर खोलें",

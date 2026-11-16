@@ -1876,11 +1876,12 @@ impl Game<'_> {
         };
         let vanilla =
             self.saved_refuses_damage(id as u32, "minecraft:player_attack", self.creative);
-        let invulnerable = crate::game::entity::damage_level_of!(self, scoped)
-            .invulnerability_check(
-                sunrise_client::health::Hurting::Entity(id, &kind, source),
-                vanilla,
-            );
+        let invulnerable =
+            crate::game::entity::damage_level_of!(self, self.combat.attack(), no_push, None)
+                .invulnerability_check(
+                    sunrise_client::health::Hurting::Entity(id, &kind, source),
+                    vanilla,
+                );
         let hurt = if invulnerable {
             None
         } else {

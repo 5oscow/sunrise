@@ -497,7 +497,7 @@
   "sunrise.mods.browse.title": "Parcourir les mods",
   "sunrise.mods.browse.update": "Mettre à jour",
   "sunrise.mods.dev": " (dév.)",
-  "sunrise.mods.empty": "Aucun mod : placez des fichiers .hmod dans le dossier sunrise-mods",
+  "sunrise.mods.empty": "Aucun mod : placez des fichiers .smod dans le dossier sunrise-mods",
   "sunrise.mods.extra": "Ces mods ne sont pas sur ce serveur :\n%s",
   "sunrise.mods.in_world": " (quittez le monde pour changer)",
   "sunrise.mods.mismatch": "Vos mods ne correspondent pas à ceux de ce serveur.",

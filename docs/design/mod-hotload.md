@@ -11,7 +11,7 @@ restart" to seconds. It builds on the registry v2 ([registry-v2.md](registry-v2.
 
 | | Install | Turn on or off | Change |
 |---|---|---|---|
-| Content mod (`.hmod`) | launcher, or by hand in `sunrise-mods/` | Options > Mods, then **restart** | rebuild the `.hmod`, restart |
+| Content mod (`.smod`) | launcher, or by hand in `sunrise-mods/` | Options > Mods, then **restart** | rebuild the `.smod`, restart |
 | Native mod (`.hnmod`) | launcher only | off: at once, if the mod checks `on`; on: **rebuild** | **rebuild** (minutes), restart |
 
 Three facts from the code shape the plan:
@@ -131,9 +131,9 @@ with the options screen's widgets (`options_ui`), every string through `Text::tr
   same dynamic-texture path as player skins (`skin_slots`), one at a time, loaded when the page opens.
 - **Install.** As the launcher's `install_version`: the newest version for this game that was not taken down, into
   `mod-browser/downloads/`, then `sunrise_mod_package::index::check_file` (size, SHA-256, the author's signature, the
-  file's manifest against the index), then moved to `sunrise-mods/<id>.hmod`, turned on in `sunrise-mods.txt`, and
+  file's manifest against the index), then moved to `sunrise-mods/<id>.smod`, turned on in `sunrise-mods.txt`, and
   recorded in `mod-browser.json` with the launcher's own fields, so the launcher lists it, updates it and removes
-  it. A file the index took down (`revoked.toml`) is refused. A `.hmod` with code (`needs_port`) is not offered.
+  it. A file the index took down (`revoked.toml`) is refused. A `.smod` with code (`needs_port`) is not offered.
 - **Kinds.** Content mods first. Resource packs, shader packs and data packs follow with the same page; each installs
   where the launcher puts it.
 - **Native mods.** Listed with the launcher's warning, word for word: they are native code with the player's rights,

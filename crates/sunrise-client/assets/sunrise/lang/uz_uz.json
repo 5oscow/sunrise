@@ -497,7 +497,7 @@
   "sunrise.mods.browse.title": "Modlarni ko'rib chiqish",
   "sunrise.mods.browse.update": "Yangilash",
   "sunrise.mods.dev": " (Ishlab chiqish)",
-  "sunrise.mods.empty": "Modlar yo'q: .hmod fayllarini sunrise-mods papkasiga qo'ying",
+  "sunrise.mods.empty": "Modlar yo'q: .smod fayllarini sunrise-mods papkasiga qo'ying",
   "sunrise.mods.in_world": " (dunyoni o'zgartirish uchun qoldiring)",
   "sunrise.mods.not_built": " (qurilmagan)",
   "sunrise.mods.open_folder": "Mod papkasini oching",

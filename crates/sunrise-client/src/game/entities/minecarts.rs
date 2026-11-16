@@ -3896,7 +3896,7 @@ mod hook_mutation_regressions {
                 } else {
                     let later = host.entity(73).unwrap();
                     let replacement = host.entity(74).unwrap();
-                    assert!(later.start_riding(host, replacement, true));
+                    assert!(later.start_riding(host, replacement, true).is_ok());
                 }
             }
             mod_api::Flow::Continue

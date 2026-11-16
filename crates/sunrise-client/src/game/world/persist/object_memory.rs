@@ -351,6 +351,7 @@ impl Game<'_> {
                 previous: position,
                 velocity: entity_nbt::motion(&tag),
                 fuse,
+                ticks: 0,
                 on_ground: entity_nbt::flag(&tag, "OnGround"),
                 fall_distance: sunrise_client::save::float(tag.get("fall_distance")).unwrap_or(0.0),
                 stuck: Vec3::ZERO,

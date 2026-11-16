@@ -94,12 +94,25 @@ impl RayWorld for ColliderRays<'_, '_> {
         mode: RayBlockMode,
     ) -> io::Result<VoxelShape> {
         if let Some(data) = &self.clip_data {
-            if data.behaviours.data(state).dynamic_shape {
+            // A block entity's published shapes stand over the declared ones, a
+            // dynamic template's included (#1666): the collider below reads them
+            // through the binding, the outline here.
+            let at = [p.x, p.y, p.z];
+            let published = sunrise_client::collisions::published_outline(
+                self.scene.world,
+                self.scene.binding,
+                state,
+                at,
+            );
+            if published.is_none() && data.behaviours.data(state).dynamic_shape {
                 return Err(io::Error::other("dynamic ray shape unsupported"));
             }
             if mode == RayBlockMode::Outline {
                 let facts = data.facts.get(state);
-                let shape = super::perspective::ray_shape_from_boxes(&facts.outline)?;
+                let shape = match published {
+                    Some(shape) => shape.clone(),
+                    None => super::perspective::ray_shape_from_boxes(&facts.outline)?,
+                };
                 let offset = super::perspective::outline_offset(
                     data.tables,
                     state,
@@ -825,7 +838,12 @@ impl Game<'_> {
             if !spectator
                 && hurtable
                 && let Ok(o) = p.hurt_caused_by(
-                    crate::game::entity::damage_level_of!(self, scoped),
+                    crate::game::entity::damage_level_of!(
+                        self,
+                        self.combat.attack(),
+                        no_push,
+                        None
+                    ),
                     &self.motion.health,
                     rules,
                     id,
@@ -1071,10 +1089,11 @@ impl Game<'_> {
                 };
                 let creative = self.creative_damage_source_id(source.causing);
                 let vanilla = self.saved_refuses_damage($id as u32, damage_type, creative);
-                crate::game::entity::damage_level_of!(self, scoped).invulnerability_check(
-                    sunrise_client::health::Hurting::Entity($id, $kind, source),
-                    vanilla,
-                )
+                crate::game::entity::damage_level_of!(self, self.combat.attack(), no_push, None)
+                    .invulnerability_check(
+                        sunrise_client::health::Hurting::Entity($id, $kind, source),
+                        vanilla,
+                    )
             }};
         }
         // The walk visits the storages in storage order, unless a listening
@@ -1174,7 +1193,12 @@ impl Game<'_> {
                         // ravagers are pushed.
                         let victim = m.id;
                         let hurt = hurt_mob(
-                            crate::game::entity::damage_level_of!(self, scoped),
+                            crate::game::entity::damage_level_of!(
+                                self,
+                                self.combat.attack(),
+                                no_push,
+                                None
+                            ),
                             m,
                             hurtable,
                             cause,
@@ -1460,10 +1484,12 @@ impl Game<'_> {
                 };
                 let creative = self.creative_damage_source_id(source.causing);
                 let vanilla = self.saved_refuses_damage(id, damage_type, creative);
-                if crate::game::entity::damage_level_of!(self, scoped).invulnerability_check(
-                    sunrise_client::health::Hurting::ArmorStand(id as i32, source),
-                    vanilla,
-                ) {
+                if crate::game::entity::damage_level_of!(self, self.combat.attack(), no_push, None)
+                    .invulnerability_check(
+                        sunrise_client::health::Hurting::ArmorStand(id as i32, source),
+                        vanilla,
+                    )
+                {
                     i += 1;
                     continue;
                 }

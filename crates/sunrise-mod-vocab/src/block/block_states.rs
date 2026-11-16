@@ -125,6 +125,26 @@ impl BlockStates<'_> {
     pub fn destroy_speed(&self, state: BlockState) -> Option<f32> {
         self.backend?.block_state_destroy_speed(state)
     }
+    /// `ItemStack.isCorrectToolForDrops(state)`: whether `stack`'s `minecraft:tool` rules call it
+    /// the correct tool for `state`'s block (the first rule that sets `correct_for_drops` and
+    /// names the block decides; no component or no such rule is false). Reads only the stack: for
+    /// the answer the game uses for a player, see `PlayerRef::has_correct_tool_for_drops`. None
+    /// as for `replaceable`.
+    pub fn is_correct_tool_for_drops(
+        &self,
+        stack: &crate::ItemStack,
+        state: BlockState,
+    ) -> Option<bool> {
+        self.backend?
+            .block_state_correct_tool_for_drops(stack, state)
+    }
+    /// Whether `state` drops its loot only when mined with a correct tool
+    /// (`BlockState.requiresCorrectToolForDrops()`): stone and ores yes, dirt and logs no. Which
+    /// tool is correct for a state is `BlockStates::is_correct_tool_for_drops`.
+    /// None as for `replaceable`.
+    pub fn requires_correct_tool(&self, state: BlockState) -> Option<bool> {
+        self.backend?.block_state_requires_correct_tool(state)
+    }
     /// The explosion resistance `state`'s block declares (`Block.getExplosionResistance`): stone
     /// 6, obsidian 1200, bedrock 3,600,000. What a blast meets at a position, parts and fluids
     /// included, is [`LevelRef::explosion_resistance`](crate::LevelRef::explosion_resistance).
@@ -185,6 +205,10 @@ mod tests {
         let state: BlockState = BlockStateRecord::new(crate::BlockKey(0), 0).into();
         assert_eq!(facts.replaceable(state), None);
         assert_eq!(facts.destroy_speed(state), None);
+        assert_eq!(
+            facts.is_correct_tool_for_drops(&crate::ItemStack::of(crate::ItemKey(0)), state),
+            None
+        );
         assert_eq!(facts.sound(state), None);
         assert_eq!(facts.has_block_entity(state), None);
         assert_eq!(facts.map_color(state), None);

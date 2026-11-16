@@ -9,6 +9,10 @@ impl MenuPlacement {
     pub fn cleared_slots(&self) -> &[usize] {
         &self.clear
     }
+    /// A `Mod` layout's plan before its part names the grid: only `for_mod` plans have no inputs.
+    pub fn awaits_grid(&self) -> bool {
+        self.inputs.is_empty()
+    }
     /// Authoritative ingredient predicates, never display examples.
     pub fn requirements(&self) -> &crate::crafting::Placement {
         &self.placement

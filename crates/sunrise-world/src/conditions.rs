@@ -152,47 +152,42 @@ impl LoadConditions {
         view
     }
 
-    /// `ConditionalOps.decodeListWithElementConditions`: in every list of an
-    /// admitted file, drop an element whose own `neoforge:conditions` fail and
-    /// strip the key from one whose conditions hold, before the file decodes.
-    pub fn filter_elements(&self, file: &mut Value, path: &str) {
-        self.filter_elements_context(file, &|| path.to_owned());
-    }
-
-    fn filter_elements_context(&self, file: &mut Value, path: &dyn Fn() -> String) {
-        match file {
-            Value::Array(elements) => elements.retain_mut(|element| {
-                if element.get("neoforge:conditions").is_some() {
-                    if !self.allows_context(element, path) {
-                        return false;
-                    }
-                    if let Some(fields) = element.as_object_mut() {
-                        fields.remove("neoforge:conditions");
-                    }
-                }
-                self.filter_elements_context(element, path);
-                true
-            }),
-            Value::Object(fields) => {
-                for (key, value) in fields.iter_mut() {
-                    if key != "neoforge:conditions" {
-                        self.filter_elements_context(value, path);
-                    }
-                }
+    /// `ConditionalOps.decodeListWithElementConditions` on one list: drop an
+    /// element whose own `neoforge:conditions` fail and strip the key from one
+    /// whose conditions hold. Only the lists NeoForge decodes that way carry
+    /// element conditions (a loot table's pools, data-map values, overlays and
+    /// atlas sources, each read by its own reader); anywhere else a nested
+    /// `neoforge:conditions` key is ordinary data and is never evaluated.
+    fn filter_list(&self, elements: &mut Vec<Value>, path: &dyn Fn() -> String) {
+        elements.retain_mut(|element| {
+            if element.get("neoforge:conditions").is_none() {
+                return true;
             }
-            _ => {}
-        }
+            if !self.allows_context(element, path) {
+                return false;
+            }
+            if let Some(fields) = element.as_object_mut() {
+                fields.remove("neoforge:conditions");
+            }
+            true
+        });
     }
 
-    /// `allows_id`, then `filter_elements` on an admitted file.
-    pub fn admit_id(&self, file: &mut Value, kind: &str, id: &str) -> bool {
-        if !self.allows_id(file, kind, id) {
+    /// `allows_id` for a loot table, then its `pools` filtered by their own
+    /// conditions: NeoForge decodes a table's pool list with element conditions
+    /// (a false pool is dropped, a passing one loses the key). A pool's
+    /// `entries` and `functions` and an entry's `children` are plain lists.
+    pub(crate) fn admit_loot_table(&self, file: &mut Value, id: &str) -> bool {
+        if !self.allows_id(file, "loot_table", id) {
             return false;
         }
-        self.filter_elements_context(file, &|| {
+        let path = || {
             let (namespace, path) = id.split_once(':').unwrap_or(("minecraft", id));
-            format!("data/{namespace}/{kind}/{path}.json")
-        });
+            format!("data/{namespace}/loot_table/{path}.json")
+        };
+        if let Some(pools) = file.get_mut("pools").and_then(Value::as_array_mut) {
+            self.filter_list(pools, &path);
+        }
         true
     }
 
@@ -249,6 +244,21 @@ impl LoadConditions {
     /// Evaluate once per entry and payload, outside the diagnostics mutex.
     pub fn allows_file(&self, file: &Value, path: &str) -> bool {
         self.allows_context(file, || path.to_owned())
+    }
+
+    /// Evaluate a per-file-skipping loader without poisoning the rest of its
+    /// owning data candidate. Registered lookups and bound inputs are shared,
+    /// but this file's cache and diagnostics belong only to this evaluation.
+    pub fn allows_file_isolated(&self, file: &Value, path: &str) -> Result<bool, String> {
+        let mut view = self.clone();
+        view.diagnostics = Diagnostics::default();
+        let allowed = view.allows_file(file, path);
+        view.check_errors()?;
+        let unknown = view.foreign_errors();
+        if !unknown.is_empty() {
+            return Err(unknown.join("; "));
+        }
+        Ok(allowed)
     }
 
     fn allows_context(&self, file: &Value, path: impl FnOnce() -> String) -> bool {
@@ -892,32 +902,33 @@ mod tests {
 
     #[test]
     fn unconditioned_elements_never_build_a_diagnostic_path() {
-        let mut value = json!({"pools": [{"entries": [1, {"name": "test:entry"}]}]});
-        let expected = value.clone();
-        LoadConditions::vanilla().filter_elements_context(&mut value, &|| {
+        let mut entries = vec![json!(1), json!({"name": "test:entry"})];
+        let expected = entries.clone();
+        LoadConditions::vanilla().filter_list(&mut entries, &|| {
             panic!("an unconditioned element has no diagnostic path")
         });
+        assert_eq!(entries, expected);
+    }
+
+    #[test]
+    fn unconditioned_loot_pools_are_kept_as_written() {
+        let mut value = json!({"pools": [{"rolls": 1, "entries": [1, {"name": "test:entry"}]}]});
+        let expected = value.clone();
+        assert!(LoadConditions::vanilla().admit_loot_table(&mut value, "test:table"));
         assert_eq!(value, expected);
     }
 
     #[test]
-    fn element_conditions_drop_failing_elements_and_strip_passing_keys() {
-        let mut recipe = json!({
-            "type": "minecraft:crafting_shapeless",
-            "ingredients": [
-                "minecraft:stick",
-                {"item": "create:zinc", "neoforge:conditions": [
-                    {"type": "neoforge:mod_loaded", "modid": "create"}]},
-                {"item": "ic2:tin", "neoforge:conditions": [
-                    {"type": "neoforge:mod_loaded", "modid": "ic2"}]}
-            ],
-            "result": {"id": "minecraft:stone"}
-        });
-        LoadConditions::new(["create"]).filter_elements(&mut recipe, "data/a/recipe/b.json");
-        assert_eq!(
-            recipe["ingredients"],
-            json!(["minecraft:stick", {"item": "create:zinc"}])
-        );
+    fn loot_pool_conditions_drop_failing_pools_and_strip_passing_keys() {
+        let mut table = json!({"pools": [
+            {"rolls": 1},
+            {"rolls": 2, "neoforge:conditions": [
+                {"type": "neoforge:mod_loaded", "modid": "create"}]},
+            {"rolls": 3, "neoforge:conditions": [
+                {"type": "neoforge:mod_loaded", "modid": "ic2"}]}
+        ]});
+        assert!(LoadConditions::new(["create"]).admit_loot_table(&mut table, "a:b"));
+        assert_eq!(table["pools"], json!([{"rolls": 1}, {"rolls": 2}]));
     }
 
     #[test]

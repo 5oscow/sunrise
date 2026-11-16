@@ -497,7 +497,7 @@
   "sunrise.mods.browse.title": "Sfoja i mod",
   "sunrise.mods.browse.update": "Ajorna",
   "sunrise.mods.dev": " (Dev)",
-  "sunrise.mods.empty": "No mod: metti i file .hmod nella cartella sunrise-mods",
+  "sunrise.mods.empty": "No mod: metti i file .smod nella cartella sunrise-mods",
   "sunrise.mods.in_world": " (lassa cambiar el mondo)",
   "sunrise.mods.not_built": " (No costruìo)",
   "sunrise.mods.open_folder": "Vèrxi ła cartèła mod",
