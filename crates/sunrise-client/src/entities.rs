@@ -1553,6 +1553,8 @@ pub struct Painting {
     pub height: i32,
     /// BlockAttachedEntity.checkInterval.
     pub check_interval: u32,
+    /// `Entity.tickCount`: starts at 0, +1 each entity tick, not saved.
+    pub ticks: u32,
 }
 impl Painting {
     pub fn step(&self) -> [i32; 3] {

@@ -106,6 +106,7 @@ impl Game<'_> {
                     width: 1,
                     height: 1,
                     check_interval: 0,
+                    ticks: 0,
                 });
                 let (lo, hi) = self.paintings[0].bounds();
                 Vec3::new(

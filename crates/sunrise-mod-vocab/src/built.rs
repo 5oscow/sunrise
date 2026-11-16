@@ -484,6 +484,7 @@ pub struct EntityRenderState {
     pub living: Option<super::LivingRenderState>,
     pub tnt_fuse: Option<f32>,
     pub orb_value: Option<i32>,
+    pub painting: Option<PaintingRenderState>,
 }
 impl From<EntityRenderState> for super::EntityRenderState {
     fn from(v: EntityRenderState) -> Self {
@@ -496,6 +497,7 @@ impl From<EntityRenderState> for super::EntityRenderState {
             living,
             tnt_fuse,
             orb_value,
+            painting,
         } = v;
         Self {
             id,
@@ -506,6 +508,7 @@ impl From<EntityRenderState> for super::EntityRenderState {
             living,
             tnt_fuse,
             orb_value,
+            painting: painting.map(Into::into),
         }
     }
 }
@@ -560,6 +563,27 @@ impl From<LivingRenderState> for super::LivingRenderState {
             has_red_overlay,
             pose,
             bed_orientation,
+        }
+    }
+}
+// exhaustive: the game builds it with a literal; mods only read it
+#[derive(sunrise_mod_api_macros::Wire)]
+pub struct PaintingRenderState {
+    pub facing: Direction,
+    pub width: i32,
+    pub height: i32,
+}
+impl From<PaintingRenderState> for super::PaintingRenderState {
+    fn from(v: PaintingRenderState) -> Self {
+        let PaintingRenderState {
+            facing,
+            width,
+            height,
+        } = v;
+        Self {
+            facing,
+            width,
+            height,
         }
     }
 }

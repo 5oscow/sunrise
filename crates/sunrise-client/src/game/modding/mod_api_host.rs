@@ -1107,6 +1107,7 @@ mod attachment_membership_tests {
                 width: 1,
                 height: 1,
                 check_interval: 0,
+                ticks: 0,
             });
             game.persist.removals.push(Target::Painting(420));
             assert_eq!(

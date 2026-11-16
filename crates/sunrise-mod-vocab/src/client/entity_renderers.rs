@@ -34,6 +34,8 @@ pub struct EntityRenderState {
     /// An experience orb's value (`ExperienceOrb.DATA_VALUE`); some for an orb, none for
     /// every other family.
     pub orb_value: Option<i32>,
+    /// A painting's own frame ([`PaintingRenderState`]); none for any other entity.
+    pub painting: Option<PaintingRenderState>,
 }
 
 /// What a living entity's frame adds to [`EntityRenderState`], as
@@ -75,6 +77,23 @@ pub struct LivingRenderState {
     pub pose: crate::Pose,
     /// `bedOrientation`: the way the bed it sleeps in faces, while it sleeps in one.
     pub bed_orientation: Option<crate::Direction>,
+}
+
+/// What a painting's frame adds to [`EntityRenderState`]: the way it faces out from the
+/// wall, and its size in blocks (`Painting.direction`, `PaintingVariant.width` /
+/// `height` as the entity already holds them). The variant id is not here: the state
+/// is only plain numbers, so a renderer that needs the variant reads it in a hook and
+/// keeps what it read.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, sunrise_mod_api_macros::Wire)]
+pub struct PaintingRenderState {
+    /// The way the painting faces out from the wall (`Direction.get2DDataValue`: south,
+    /// west, north, east).
+    pub facing: crate::Direction,
+    /// Width in blocks.
+    pub width: i32,
+    /// Height in blocks.
+    pub height: i32,
 }
 
 /// A mod's entity renderer: NeoForge's `EntityRenderer`, held by the game for every entity of the
@@ -176,6 +195,7 @@ mod tests {
             living: None,
             tnt_fuse: None,
             orb_value: None,
+            painting: None,
         };
         let (mut bolt, mut dart) = (Light::default(), Light::default());
         renderers["mymod:bolt"].submit(&state, &mut bolt).unwrap();

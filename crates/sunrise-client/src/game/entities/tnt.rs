@@ -799,6 +799,7 @@ impl Game<'_> {
                         living: None,
                         tnt_fuse: Some(fuse),
                         orb_value: None,
+                        painting: None,
                     }
                     .into();
                 let light = self.world.light(

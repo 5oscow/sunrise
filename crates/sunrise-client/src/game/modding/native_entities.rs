@@ -1042,6 +1042,7 @@ mod tests {
                     width: 1,
                     height: 1,
                     check_interval: 0,
+                    ticks: 0,
                 });
                 game.item_frames.push(sunrise_client::entities::ItemFrame {
                     attachment_lifetime: Default::default(),

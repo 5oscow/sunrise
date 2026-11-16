@@ -5950,7 +5950,7 @@ impl Game<'_> {
         self.tnt_geometry(camera, alpha, &mut out);
         self.mark_motion(out.len(), 0);
         self.mark_entity(out.len(), "minecraft:painting");
-        self.painting_geometry(camera, &mut out);
+        self.painting_geometry(camera, alpha, &mut out);
         self.mark_motion(out.len(), 0);
         self.mark_entity(out.len(), "minecraft:item_frame");
         self.frame_geometry(camera, &mut out);
@@ -6060,6 +6060,7 @@ impl Game<'_> {
                         living: None,
                         tnt_fuse: None,
                         orb_value: Some(o.value),
+                        painting: None,
                     }
                     .into();
                 let light = self.world.light(

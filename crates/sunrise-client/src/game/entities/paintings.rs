@@ -191,6 +191,7 @@ impl Game<'_> {
             width: 1,
             height: 1,
             check_interval: 0,
+            ticks: 0,
         };
         let mut any = false;
         for id in &self.painting_variants.placeable {
@@ -238,6 +239,7 @@ impl Game<'_> {
             width: 1,
             height: 1,
             check_interval: 0,
+            ticks: 0,
         };
         // Painting.create: the largest placeable variants that survive, one at random.
         let mut fitting: Vec<Variant> = Vec::new();
@@ -442,6 +444,8 @@ impl Game<'_> {
                 i += 1;
                 continue;
             }
+            // `Entity.tickCount` is raised before the rest of the tick, and is not saved.
+            self.paintings[i].ticks = self.paintings[i].ticks.saturating_add(1);
             self.paintings[i].check_interval += 1;
             if self.paintings[i].check_interval >= 100 {
                 self.paintings[i].check_interval = 0;
@@ -455,11 +459,9 @@ impl Game<'_> {
     }
     /// PaintingRenderer: the variant on the front, the back texture behind and
     /// on the edges.
-    pub(super) fn painting_geometry(&self, camera: glam::DVec3, out: &mut Vec<Vertex>) {
+    pub(super) fn painting_geometry(&self, camera: glam::DVec3, alpha: f64, out: &mut Vec<Vertex>) {
         let sprites = &self.gui.atlas.sprites;
-        let Some(back) = sprites.get("painting/back").copied() else {
-            return;
-        };
+        let partial = alpha as f32;
         for p in &self.paintings {
             // EntityRenderer.shouldRender: the default range and its box,
             // measured from the box's centre (HangingEntity's position).
@@ -473,6 +475,59 @@ impl Game<'_> {
             if culling.hides_entity() {
                 continue;
             }
+            if let Some(resolved) = super::native_entity_renderers::painting_renderer() {
+                let entity_start = out.len();
+                self.mark_motion(entity_start, Self::MOTION_OBJECT | u64::from(p.id));
+                let (lo, hi) = p.bounds();
+                let at = glam::DVec3::new(
+                    (lo[0] + hi[0]) / 2.0,
+                    (lo[1] + hi[1]) / 2.0,
+                    (lo[2] + hi[2]) / 2.0,
+                );
+                let facing = match p.facing & 3 {
+                    0 => mod_api::Direction::South,
+                    1 => mod_api::Direction::West,
+                    2 => mod_api::Direction::North,
+                    _ => mod_api::Direction::East,
+                };
+                let entity: mod_api::EntityRenderState =
+                    mod_api::__private::built::EntityRenderState {
+                        id: p.id,
+                        partial,
+                        age: p.ticks as f32 + partial,
+                        yaw: f32::from(p.facing & 3) * 90.0,
+                        pitch: 0.0,
+                        living: None,
+                        tnt_fuse: None,
+                        orb_value: None,
+                        painting: Some(
+                            mod_api::__private::built::PaintingRenderState {
+                                facing,
+                                width: p.width,
+                                height: p.height,
+                            }
+                            .into(),
+                        ),
+                    }
+                    .into();
+                let light = self.world.light(p.pos[0], p.pos[1], p.pos[2]);
+                let packed = (u32::from(light >> 4) * 16) | ((u32::from(light & 15) * 16) << 8);
+                if self.mod_entity_renderer_geometry(
+                    &resolved,
+                    &entity,
+                    "minecraft:painting",
+                    at - camera,
+                    p.pos,
+                    packed,
+                    out,
+                ) {
+                    self.finish_entity_occlusion(culling, p, out, entity_start);
+                    continue;
+                }
+            }
+            let Some(back) = sprites.get("painting/back").copied() else {
+                continue;
+            };
             let Some(v) = self.painting_variants.get(&p.variant) else {
                 continue;
             };
@@ -622,6 +677,7 @@ mod tests {
             width: 1,
             height: 1,
             check_interval: 0,
+            ticks: 0,
         };
         let mut f = ItemFrame {
             attachment_lifetime: Default::default(),

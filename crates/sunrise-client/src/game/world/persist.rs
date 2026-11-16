@@ -1139,6 +1139,7 @@ impl Game<'_> {
                 width: v.width,
                 height: v.height,
                 check_interval: 0,
+                ticks: 0,
             };
             self.bind_saved_entity_attachments(id, &mut painting.attachment_lifetime);
             self.paintings.push(painting);

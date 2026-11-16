@@ -157,6 +157,7 @@ impl Game<'_> {
                 width,
                 height,
                 check_interval: 0,
+                ticks: 0,
             });
         } else {
             return false;
