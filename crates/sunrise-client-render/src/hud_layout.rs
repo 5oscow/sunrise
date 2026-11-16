@@ -787,7 +787,19 @@ impl HealthHud {
 /// Draws the calls with the HUD batch under their poses; items are left to
 /// the caller (they need the item renderer) and so are the vignette and
 /// nausea blits (their blending needs the screen-effect pipeline).
+/// [`paint_items`] draws both.
 pub fn paint(batch: &mut crate::hud::HudBatch, atlas: &crate::hud::HudAtlas, draws: &[GuiDraw]) {
+    paint_with(batch, atlas, draws, None);
+}
+
+/// [`paint`], and with `items` also each `Item` (its stack, scaled about its pivot, then its
+/// decorations) and the blits of every blend. Without `items` those draw nothing, as `paint`.
+fn paint_with(
+    batch: &mut crate::hud::HudBatch,
+    atlas: &crate::hud::HudAtlas,
+    draws: &[GuiDraw],
+    mut items: Option<&mut dyn GuiItems>,
+) {
     let mut stack = vec![IDENTITY];
     // One buffer for the sprite keys, instead of a string per drawn sprite.
     let mut name = String::new();
@@ -865,9 +877,10 @@ pub fn paint(batch: &mut crate::hud::HudBatch, atlas: &crate::hud::HudAtlas, dra
                     abgr(*color),
                 );
             }
+            GuiDraw::Blit { blend, .. } if *blend != Blend::Textured && items.is_none() => {}
             GuiDraw::Blit {
                 texture,
-                blend: Blend::Textured,
+                blend,
                 x,
                 y,
                 w,
@@ -888,8 +901,28 @@ pub fn paint(batch: &mut crate::hud::HudBatch, atlas: &crate::hud::HudAtlas, dra
                 r.u0 = u0;
                 r.v0 = v0;
                 batch.rect_uv(*x as f32, *y as f32, *w as f32, *h as f32, r, abgr(*color));
+                match blend {
+                    Blend::Textured => {}
+                    Blend::Vignette => batch.blend_since(start, crate::hud::Blend::Vignette),
+                    Blend::Nausea => batch.blend_since(start, crate::hud::Blend::Additive),
+                    Blend::Crosshair => batch.invert_since(start),
+                }
             }
-            GuiDraw::Blit { .. } | GuiDraw::Item { .. } => {}
+            GuiDraw::Item {
+                slot,
+                x,
+                y,
+                seed,
+                scale,
+                pivot,
+            } => {
+                if let Some(items) = items.as_deref_mut() {
+                    // `extractSlot`: the item under the pop squeeze, its decorations outside it.
+                    items.item(batch, *slot, *x, *y, *seed);
+                    batch.scale_since(start, pivot[0], pivot[1], scale[0], scale[1]);
+                    items.decorations(batch, *slot, *x, *y);
+                }
+            }
             GuiDraw::Fill {
                 x0,
                 y0,
@@ -973,6 +1006,10 @@ fn opaque(color: u32) -> u32 {
         color
     }
 }
+
+#[path = "hud_layout_items.rs"]
+mod items;
+pub use items::{GuiItems, Undrawable, item_slot, paint_checked, paint_items, undrawable};
 
 #[cfg(test)]
 #[path = "hud_layout_gradient_tests.rs"]
