@@ -57,8 +57,6 @@ ACTIONS = {
                        "to the updated sample in a pull request here."),
 }
 HELPERS = ("plan", "route", "fresh", "gate")
-# Jobs of a called workflow that the daily run does not use: launcher-windows-check's push and pull-request tests.
-NOT_DAILY = ("windows-runtime-leases / test",)
 # The one green skip: the SDK build skips when sdk-<sha> already exists, which `sdk / fresh` found (it
 # succeeded). Any other skip of an expected job is red.
 FRESH = "sdk / fresh"
@@ -123,7 +121,7 @@ def leg_jobs(jobs):
     """This run's leg jobs (`<leg> / <job>`), without the called workflows' routing jobs."""
     return [job for job in jobs
             if job["name"].split(" / ", 1)[0] in LEGS and " / " in job["name"]
-            and job["name"].split(" / ", 1)[1] not in HELPERS and job["name"] not in NOT_DAILY]
+            and job["name"].split(" / ", 1)[1] not in HELPERS]
 
 
 def expected_shards():
