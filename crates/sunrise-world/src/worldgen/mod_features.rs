@@ -16,7 +16,7 @@ use crate::heightmap::HeightmapType;
 use crate::registry::{BlockRegistry, BlockStateId};
 use std::any::Any;
 use std::cell::{Cell, RefCell};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use sunrise_core::nbt::Compound;
@@ -101,25 +101,46 @@ impl<R: RandomSource> ModFeatureRandom for Draws<'_, R> {
     }
 }
 
-/// The writes of a root's successful mod calls, in order, waiting for the root's answer.
+/// Staged block writes and block entities, in order, with the latest state at each position
+/// kept apart so a read is one lookup however many writes came before it.
 #[derive(Default)]
-pub(crate) struct Provisional {
+pub(crate) struct Pending {
     writes: Vec<([i32; 3], BlockStateId, i32)>,
-    entities: Vec<([i32; 3], Compound)>,
+    latest: HashMap<[i32; 3], BlockStateId>,
+    /// Block entities in the order given; a replaced one leaves a hole.
+    entities: Vec<Option<([i32; 3], Compound)>>,
+    entity_at: HashMap<[i32; 3], usize>,
 }
-impl Provisional {
+impl Pending {
+    fn write(&mut self, position: [i32; 3], state: BlockStateId, flags: i32) {
+        self.writes.push((position, state, flags));
+        self.latest.insert(position, state);
+    }
+    fn state(&self, position: [i32; 3]) -> Option<BlockStateId> {
+        self.latest.get(&position).copied()
+    }
+    fn set_entity(&mut self, position: [i32; 3], nbt: Compound) {
+        self.drop_entity(position);
+        self.entity_at.insert(position, self.entities.len());
+        self.entities.push(Some((position, nbt)));
+    }
+    fn drop_entity(&mut self, position: [i32; 3]) {
+        if let Some(at) = self.entity_at.remove(&position) {
+            self.entities[at] = None;
+        }
+    }
     /// A successful call's writes join the root's: a block entity of an earlier call is dropped
     /// with the block this call replaces.
-    fn push(
-        &mut self,
-        writes: Vec<([i32; 3], BlockStateId, i32)>,
-        entities: Vec<([i32; 3], Compound)>,
-    ) {
-        for (position, ..) in &writes {
-            self.entities.retain(|(p, _)| p != position);
+    fn absorb(&mut self, call: Pending) {
+        for &(position, ..) in &call.writes {
+            self.drop_entity(position);
         }
-        self.writes.extend(writes);
-        self.entities.extend(entities);
+        for (position, state, flags) in call.writes {
+            self.write(position, state, flags);
+        }
+        for (position, nbt) in call.entities.into_iter().flatten() {
+            self.set_entity(position, nbt);
+        }
     }
     /// The root answered `Ok`: the writes, in order, then the block entities of the blocks among
     /// them the level took. A write the level refuses now drops its block entity with it.
@@ -127,21 +148,24 @@ impl Provisional {
     where
         W: super::feature::FeatureWorld + super::placement::PlacementContext,
     {
-        let mut written: Vec<[i32; 3]> = Vec::new();
+        let mut written: HashSet<[i32; 3]> = HashSet::new();
         for (position, state, flags) in self.writes {
             if world.set_block(position, state, flags).unwrap_or(false) {
-                written.push(position);
+                written.insert(position);
             } else {
-                written.retain(|p| *p != position);
+                written.remove(&position);
             }
         }
-        for (position, nbt) in self.entities {
+        for (position, nbt) in self.entities.into_iter().flatten() {
             if written.contains(&position) {
                 let _ = world.set_block_entity(position, nbt);
             }
         }
     }
 }
+
+/// The writes of a root's successful mod calls, waiting for the root's answer.
+pub(crate) type Provisional = Pending;
 
 /// One call's view of a placement world: reads see the call's own staged writes and those of
 /// the root's earlier calls, writes and block entities wait for the root
@@ -151,8 +175,7 @@ pub(crate) struct Staging<'a, W> {
     world: &'a mut W,
     budget: &'a Cell<u32>,
     earlier: &'a RefCell<Provisional>,
-    writes: Vec<([i32; 3], BlockStateId, i32)>,
-    entities: Vec<([i32; 3], Compound)>,
+    own: Pending,
     pub(crate) exhausted: bool,
 }
 impl<'a, W> Staging<'a, W>
@@ -168,8 +191,7 @@ where
             world,
             budget,
             earlier,
-            writes: Vec::new(),
-            entities: Vec::new(),
+            own: Pending::default(),
             exhausted: false,
         }
     }
@@ -186,14 +208,9 @@ where
         }
     }
     fn staged(&self, position: [i32; 3]) -> Option<BlockStateId> {
-        let state = |writes: &[([i32; 3], BlockStateId, i32)]| {
-            writes
-                .iter()
-                .rev()
-                .find(|write| write.0 == position)
-                .map(|write| write.1)
-        };
-        state(&self.writes).or_else(|| state(&self.earlier.borrow().writes))
+        self.own
+            .state(position)
+            .or_else(|| self.earlier.borrow().state(position))
     }
     fn current(&mut self, position: [i32; 3]) -> Option<BlockStateId> {
         match self.staged(position) {
@@ -203,7 +220,7 @@ where
     }
     /// The call answered `Ok`: its writes wait with its root's.
     pub(crate) fn finish(self) {
-        self.earlier.borrow_mut().push(self.writes, self.entities);
+        self.earlier.borrow_mut().absorb(self.own);
     }
 }
 impl<W> ModFeatureTarget for Staging<'_, W>
@@ -233,7 +250,7 @@ where
         {
             return false;
         }
-        self.writes.push((position, state, flags));
+        self.own.write(position, state, flags);
         true
     }
     fn block_in_tag(&mut self, position: [i32; 3], tag: &str) -> Option<bool> {
@@ -264,11 +281,10 @@ where
         self.world.height(kind, x, z).ok()
     }
     fn set_block_entity(&mut self, position: [i32; 3], nbt: Compound) -> bool {
-        if !self.charge() || !self.writes.iter().any(|write| write.0 == position) {
+        if !self.charge() || self.own.state(position).is_none() {
             return false;
         }
-        self.entities.retain(|(p, _)| *p != position);
-        self.entities.push((position, nbt));
+        self.own.set_entity(position, nbt);
         true
     }
 }

@@ -84,6 +84,7 @@ fn blocks() -> FeatureBlocks {
 /// - `Column` writes its config's height of state 1 upward, then answers false;
 /// - `Fails` writes once, then fails; `Panics` writes once, then panics;
 /// - `Flood` reads the origin 70,000 times;
+/// - `Fill` writes 8,000 blocks with block entities, then reads 8,000 positions it never wrote;
 /// - `SecondFails` and `SecondFloods` write once and answer `Ok`, as `Marks` does, but their
 ///   second call (of a run's log) fails, or floods;
 /// - `Chest` writes state 5 at the origin with block-entity data there, and tries block-entity
@@ -98,6 +99,7 @@ enum Kind {
     Chest,
     SecondFails,
     SecondFloods,
+    Fill,
 }
 type Log = Arc<Mutex<Vec<([i32; 3], i32)>>>;
 struct Test(Kind, Log);
@@ -149,6 +151,19 @@ impl ModFeatureType for Test {
                 }
                 Ok(true)
             }
+            Kind::Fill => {
+                let chest = Compound::from([("id".into(), Tag::String("minecraft:chest".into()))]);
+                let at = |i: i32| [i % 48, 1 + i / 2304, (i / 48) % 48];
+                for i in 0..8_000 {
+                    target.set_block(at(i), BlockStateId(5), 3);
+                    target.set_block_entity(at(i), chest.clone());
+                }
+                let missed = (8_000..16_000)
+                    .filter(|&i| target.block(at(i)) == Some(BlockStateId(0)))
+                    .count();
+                self.1.lock().unwrap().push((origin, missed as i32));
+                Ok(true)
+            }
             Kind::SecondFails | Kind::SecondFloods => {
                 let calls = {
                     let mut log = self.1.lock().unwrap();
@@ -191,6 +206,7 @@ fn types(log: &Log) -> ModFeatureTypes {
         ("test:panics", Kind::Panics),
         ("test:flood", Kind::Flood),
         ("test:chest", Kind::Chest),
+        ("test:fill", Kind::Fill),
         ("test:second_fails", Kind::SecondFails),
         ("test:second_floods", Kind::SecondFloods),
     ]
@@ -413,6 +429,24 @@ fn a_roots_calls_publish_together_or_not_at_all() {
         world.writes.iter().map(|w| w.0).collect::<Vec<_>>(),
         [[27, 4, 32], [16, 4, 36]]
     );
+}
+
+/// A call that writes thousands of blocks with block entities, then reads thousands of other
+/// positions, stays within the budget and publishes every write and entity once: the staged
+/// state of a position is one lookup, not a scan of all that came before.
+#[test]
+fn a_root_of_thousands_of_writes_publishes_them_all() {
+    let log = Log::default();
+    with_test_feature_types(&types(&log), || {
+        let mut world = World::default();
+        assert_eq!(
+            place(&feature(r#"{"type":"test:fill"}"#), &mut world, [0, 1, 0]),
+            Ok(true)
+        );
+        assert_eq!(*log.lock().unwrap(), [([0, 1, 0], 8_000)]);
+        assert_eq!(world.writes.len(), 8_000);
+        assert_eq!(world.entities.len(), 8_000);
+    });
 }
 
 /// A call past the root's custom budget places nothing and fails by name, without disabling
