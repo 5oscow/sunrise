@@ -200,3 +200,106 @@ impl ClientItemExtensionsHooks {
         register(event.extensions);
     }
 }
+
+#[test]
+fn refused_scalar_and_reference_callbacks_unwind_the_equipment_boundary() {
+    mod_api::__private::initialize().unwrap();
+    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+    install_counter();
+    mod_api::testing::with_mods(
+        vec![mod_api::ModEntry::new(
+            "wire_test",
+            Box::new(WasmMod {
+                group: 0,
+                subscribed: &[Some(mod_api::HookId::RegisterClientItemExtensions)],
+                listeners: &[],
+                corrupt: false,
+            }),
+        )]
+        .into(),
+        || {
+            let mut registry = Registry::default();
+            mod_api::dispatch_register_client_item_extensions(
+                &mod_api::RegistrationContext::new(),
+                &mut registry,
+            );
+            let provider = registry.provider.unwrap();
+            let stack = ItemStack::of(REGISTERED_ITEM.get().unwrap());
+            let layer = EquipmentLayer::__new(ArmorTextureRef::__new(7, 0), false, None, false);
+            for callback in 0..4 {
+                // One complete layer succeeds before the next call's reply is refused.
+                let dye = provider.default_dye_color(&Client, &stack);
+                assert_eq!(
+                    provider.armor_layer_tint_color(&Client, &stack, &layer, 0, dye),
+                    0xFFFFFFFF
+                );
+                assert_eq!(
+                    provider.armor_texture(
+                        &Client,
+                        &stack,
+                        EquipmentLayerType::Humanoid,
+                        &layer,
+                        layer.texture
+                    ),
+                    ArmorTextureRef::__new(7, 0)
+                );
+                assert_eq!(
+                    provider.armor_layer_model(
+                        &Client,
+                        &stack,
+                        EquipmentLayerType::Humanoid,
+                        &layer,
+                        0
+                    ),
+                    ArmorModelRef::__new(7, 0)
+                );
+                // Prepare the second layer's ordering before refusing a reference reply.
+                if callback >= 2 {
+                    provider.armor_layer_tint_color(&Client, &stack, &layer, 1, dye);
+                }
+                if callback == 3 {
+                    provider.armor_texture(
+                        &Client,
+                        &stack,
+                        EquipmentLayerType::Humanoid,
+                        &layer,
+                        layer.texture,
+                    );
+                }
+                APPEND_ATTACK.set(3);
+                let refused =
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match callback {
+                        0 => {
+                            provider.default_dye_color(&Client, &stack);
+                        }
+                        1 => {
+                            provider.armor_layer_tint_color(&Client, &stack, &layer, 1, dye);
+                        }
+                        2 => {
+                            provider.armor_texture(
+                                &Client,
+                                &stack,
+                                EquipmentLayerType::Humanoid,
+                                &layer,
+                                layer.texture,
+                            );
+                        }
+                        _ => {
+                            provider.armor_layer_model(
+                                &Client,
+                                &stack,
+                                EquipmentLayerType::Humanoid,
+                                &layer,
+                                1,
+                            );
+                        }
+                    }));
+                APPEND_ATTACK.set(0);
+                assert!(
+                    refused.is_err(),
+                    "callback {callback} must not supply a default answer"
+                );
+            }
+        },
+    );
+}

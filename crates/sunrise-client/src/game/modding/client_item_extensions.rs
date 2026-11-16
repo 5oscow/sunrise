@@ -273,7 +273,7 @@ impl Game<'_> {
             Ok(stack) => stack,
             Err(_) => {
                 refused("invalid equipped stack");
-                return Some(Vec::new());
+                return None;
             }
         };
         let bind = |name: &str| {
@@ -284,7 +284,7 @@ impl Game<'_> {
                 }
             })
         };
-        Some(dispatch_equipment(
+        let materials = dispatch_equipment(
             self,
             state,
             part,
@@ -296,7 +296,9 @@ impl Game<'_> {
                 binding: &bind,
                 emissive: &mut emissive,
             },
-        ))
+        );
+        // A refusal discards the whole piece and selects the vanilla draw this frame.
+        (!part.failed.load(Ordering::Relaxed)).then_some(materials)
     }
 }
 
@@ -315,6 +317,9 @@ fn dispatch_equipment<'a>(
     piece: &super::equipment_piece::EquipmentPiece<'_>,
     lookups: EquipmentBindings<'a, '_>,
 ) -> Vec<super::equipment_piece::EquipmentMaterial<'a>> {
+    if part.failed.load(Ordering::Relaxed) {
+        return Vec::new();
+    }
     use super::equipment_piece::ResolvedEquipmentLayer;
     use mod_api::{EquipmentLayer, EquipmentLayerType};
     let EquipmentBindings {
@@ -522,7 +527,7 @@ mod tests {
     }
     #[test]
     fn two_shapes_two_textures_tint_skip_and_one_trim_use_the_real_dispatch_boundary() {
-        mod_api::testing::with_dispatch(
+        mod_platform::testing::with_mods(
             vec![mod_api::ModEntry::new("armor_test", Box::new(Empty))].into(),
             || {
                 use mod_api::prelude::ItemsHost;
@@ -686,7 +691,7 @@ mod tests {
     }
     #[test]
     fn unknown_bindings_and_duplicate_providers_are_refused_by_name() {
-        mod_api::testing::with_dispatch(
+        mod_platform::testing::with_mods(
             vec![
                 mod_api::ModEntry::new("armor_test", Box::new(Empty)),
                 mod_api::ModEntry::new("other", Box::new(Empty)),
@@ -730,7 +735,7 @@ mod tests {
 
     #[test]
     fn stale_refs_fall_back_to_vanilla_bindings_once_without_panicking() {
-        mod_api::testing::with_dispatch(
+        mod_platform::testing::with_mods(
             vec![mod_api::ModEntry::new("armor_test", Box::new(Empty))].into(),
             || {
                 use mod_api::prelude::ItemsHost;
@@ -814,6 +819,89 @@ mod tests {
                 }
                 assert!(part.reported_stale.load(Ordering::Relaxed));
                 assert!(!part.failed.load(Ordering::Relaxed));
+            },
+        );
+    }
+    #[test]
+    fn callback_failure_discards_earlier_layers_and_disables_until_reload() {
+        mod_platform::testing::with_mods(
+            vec![mod_api::ModEntry::new("armor_test", Box::new(Empty))].into(),
+            || {
+                use mod_api::prelude::ItemsHost;
+                struct FailsOnSecond(Arc<std::sync::atomic::AtomicUsize>);
+                impl ClientItemExtensions for FailsOnSecond {
+                    fn armor_layer_tint_color(
+                        &self,
+                        _: &dyn ClientHost,
+                        _: &mod_api::ItemStack,
+                        _: &EquipmentLayer,
+                        index: u32,
+                        _: u32,
+                    ) -> u32 {
+                        self.0.fetch_add(1, Ordering::Relaxed);
+                        assert_ne!(index, 1, "callback refused");
+                        0xFFFFFFFF
+                    }
+                }
+                let mut host = mod_api::testing::FakeHost::new();
+                let id = mod_api::Identifier::parse("armor_test:chest").unwrap();
+                host.registries.resolve_items([id.clone()]).unwrap();
+                let item = host.item_key(&id).unwrap();
+                let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+                let layers = (0..2)
+                    .map(|_| EquipmentAssetLayer {
+                        texture: "original".into(),
+                        dyeable: false,
+                        use_player_texture: false,
+                        color_when_undyed: None,
+                    })
+                    .collect::<Vec<_>>();
+                let piece = EquipmentPiece {
+                    asset: "armor_test:chest".into(),
+                    slot: ArmorSlot::Chest,
+                    kind: "humanoid",
+                    layers: &layers,
+                    overlay: 0,
+                };
+                let binding = Binding {
+                    name: "original",
+                    uv: [0.0, 0.0, 1.0, 1.0],
+                };
+                // Reload replaces the failed Part rather than reviving it in place.
+                for reload in 0..2 {
+                    let mut registry = Registration {
+                        state: Default::default(),
+                        sprite_exists: &|_| true,
+                        refused: None,
+                    };
+                    let _owner = owner("armor_test");
+                    registry.register_texture("original").unwrap();
+                    registry
+                        .client_item_extensions(item, Arc::new(FailsOnSecond(calls.clone())))
+                        .unwrap();
+                    let part = &registry.state.items[&item];
+                    for _ in 0..2 {
+                        let out = dispatch_equipment(
+                            &host,
+                            &registry.state,
+                            part,
+                            &mod_api::ItemStack::of(item),
+                            &piece,
+                            EquipmentBindings {
+                                trim: None,
+                                default: &mut |_| Some(binding),
+                                binding: &|_| Some(binding),
+                                emissive: &mut |_| None,
+                            },
+                        );
+                        assert!(out.is_empty(), "no earlier layer escapes the failed piece");
+                        assert!(
+                            part.failed.load(Ordering::Relaxed),
+                            "caller selects vanilla"
+                        );
+                        assert_eq!(calls.load(Ordering::Relaxed), (reload + 1) * 2);
+                    }
+                }
             },
         );
     }

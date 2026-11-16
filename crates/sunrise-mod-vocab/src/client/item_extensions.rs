@@ -19,6 +19,7 @@ pub enum EquipmentLayerType {
 /// References from a previous load fall back to the vanilla model, with one diagnostic.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, sunrise_mod_api_macros::Wire)]
 #[wire(internal_field_layouts)]
+// exhaustive: only the engine constructs resource-load references
 pub struct ArmorModelRef {
     generation: u64,
     index: u32,
@@ -30,11 +31,13 @@ impl ArmorModelRef {
         index: 0,
     };
     /// Engine transport constructor; mods obtain references from the reload registrar.
+    // hidden: engine transport only; mods use the resource-load registrar
     #[doc(hidden)]
     pub const fn __new(generation: u64, index: u32) -> Self {
         Self { generation, index }
     }
     /// Engine transport identity.
+    // hidden: engine transport only; mods use the resource-load registrar
     #[doc(hidden)]
     pub const fn __parts(self) -> (u64, u32) {
         (self.generation, self.index)
@@ -45,17 +48,20 @@ impl ArmorModelRef {
 /// A stale reference falls back to the supplied vanilla/CIT texture, with one diagnostic.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, sunrise_mod_api_macros::Wire)]
 #[wire(internal_field_layouts)]
+// exhaustive: only the engine constructs resource-load references
 pub struct ArmorTextureRef {
     generation: u64,
     index: u32,
 }
 impl ArmorTextureRef {
     /// Engine transport constructor; mods obtain references from the reload registrar.
+    // hidden: engine transport only; mods use the resource-load registrar
     #[doc(hidden)]
     pub const fn __new(generation: u64, index: u32) -> Self {
         Self { generation, index }
     }
     /// Engine transport identity.
+    // hidden: engine transport only; mods use the resource-load registrar
     #[doc(hidden)]
     pub const fn __parts(self) -> (u64, u32) {
         (self.generation, self.index)
@@ -77,6 +83,7 @@ pub struct EquipmentLayer {
 }
 impl EquipmentLayer {
     /// Build a layer snapshot at the engine boundary.
+    // hidden: engine transport only; mods use the resource-load registrar
     #[doc(hidden)]
     pub fn __new(
         texture: ArmorTextureRef,
@@ -97,6 +104,8 @@ impl EquipmentLayer {
 /// Only visible equipped pieces which pass the equippable slot/asset gate are queried.
 /// Native and wasm use these same methods and reload-issued references; geometry never
 /// crosses Wire during a frame. Register trees and textures through the reload registrar.
+/// A panicking native callback or refused/trapped wasm callback discards every layer of
+/// the piece, draws it with vanilla behaviour, and disables the provider until reload.
 pub trait ClientItemExtensions: Send + Sync + 'static {
     /// Choose the tree for one material layer, after its nonzero tint and texture resolve.
     /// Humanoid pose and slot visibility are copied onto the registered tree.
@@ -122,9 +131,12 @@ pub trait ClientItemExtensions: Send + Sync + 'static {
         stack
             .components()
             .and_then(|c| {
-                static DYED_COLOR: std::sync::LazyLock<crate::JavaString> =
-                    std::sync::LazyLock::new(|| "minecraft:dyed_color".into());
-                c.as_nbt().get(&*DYED_COLOR)
+                c.as_nbt().iter().find_map(|(id, tag)| {
+                    id.0.iter()
+                        .copied()
+                        .eq("minecraft:dyed_color".encode_utf16())
+                        .then_some(tag)
+                })
             })
             .and_then(|tag| match tag {
                 crate::Tag::Int(rgb) => Some(*rgb as u32 | 0xFF00_0000),

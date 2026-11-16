@@ -63,7 +63,9 @@ is no trim, and on the trim otherwise.
 Model and texture references are scoped to the resource load. A stale reference
 returned during drawing uses vanilla's model or the supplied default texture,
 with one diagnostic per provider until reload, never a panic. A failed callback
-refuses the piece atomically and disables that provider until reload. Native and
+discards all of the piece's custom layers, draws the piece with vanilla behaviour,
+and disables that provider until reload, with one diagnostic. This includes refused
+or trapped wasm callbacks, even after an earlier layer succeeded. Native and
 wasm use the same Part, methods and handler tokens. Only references and layer
 values cross Wire during a frame: no geometry, rebakes or native-only escape path.
 
