@@ -1,6 +1,6 @@
 # Modding Sunrise
 
-> Sunrise is Minecraft: Java Edition 26.3 in Rust. A mod is one `.hmod`: content (`assets/`, `data/`) and, for a code mod, a Rust crate built natively by the launcher or to `mod.wasm`, against the `mod_api` crate (`sunrise-mod-api`).
+> Sunrise is Minecraft: Java Edition 26.3 in Rust. A mod is one `.smod`: content (`assets/`, `data/`) and, for a code mod, a Rust crate built natively by the launcher or to `mod.wasm`, against the `mod_api` crate (`sunrise-mod-api`).
 
 Rules for code: implement `mod_api::Hooks` at the crate root with `#[mod_api::sunrise_mod]`; prefer a hook or Part method; otherwise an `[[inject]]` listener at a published point (native and wasm); change the game's own code only through the native route (`[[native.mixin]]`, `[[native.loop]]`, `[[native.bridge]]`, `[[native.module]]`, native only). Hook names follow NeoForge 26.3; events are `&mut`; writes take a `ServerHost`. The id and version come only from `sunrise-mod.toml`; ids are `[a-z0-9_]`. A mod is `[native]` or `[wasm]`, never both; unknown manifest fields are refused.
 
@@ -28,7 +28,7 @@ Rules for code: implement `mod_api::Hooks` at the crate root with `#[mod_api::su
 ## Reference
 
 - [The manifest and the package](https://arismoko.github.io/sunrise/reference/manifest.html)
-- [The registry index and `.hpack`](https://arismoko.github.io/sunrise/reference/registry-index.html)
+- [The registry index and `.spack`](https://arismoko.github.io/sunrise/reference/registry-index.html)
 - [The mod API reference (rustdoc)](https://arismoko.github.io/sunrise/reference/api.html): every hook, event, Part and `Host` method.
 - [Hook notes](https://arismoko.github.io/sunrise/reference/hook-notes.html)
 - [NeoForge counterparts](https://arismoko.github.io/sunrise/reference/neoforge-counterparts.html)

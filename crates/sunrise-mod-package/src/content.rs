@@ -927,7 +927,7 @@ pub fn clash(a: (&str, &[String]), b: (&str, &[String])) -> Option<String> {
 }
 
 impl Content {
-    /// The content of the mod at `path` (a `.hmod` or a mod folder).
+    /// The content of the mod at `path` (a `.smod` or a mod folder).
     pub fn read(path: &Path, manifest: &Manifest) -> Result<Content, String> {
         Self::read_declaring(path, manifest, &[])
     }
@@ -1087,7 +1087,7 @@ impl Content {
         Ok(())
     }
 
-    /// Where the files are read from: the mod's folder or its `.hmod`.
+    /// Where the files are read from: the mod's folder or its `.smod`.
     pub fn source(&self) -> &Path {
         match &self.source {
             Source::Dir(path) => path,
@@ -1920,7 +1920,7 @@ capabilities = ["registries"]
     }
     #[test]
     fn shape_tables_validate_tuples_defaults_and_collision() {
-        let content = hmod("shape-tuples", MANIFEST_TEXT, &[(
+        let content = smod("shape-tuples", MANIFEST_TEXT, &[(
             "data/ruby/sunrise/block/a.json",
             br#"{"template":"minecraft:stone","shapes":{"properties":["facing","count"],"values":{"north,2":[[0,0,0,1,0.5,1]]},"default":[[0,0,0,1,1,1]]},"collision_shapes":{"default":[]}}"#,
         )]).unwrap();
@@ -1949,7 +1949,7 @@ capabilities = ["registries"]
             let declaration =
                 format!(r#"{{"template":"minecraft:stone","collision_shapes":{value}}}"#);
             assert!(
-                hmod(
+                smod(
                     "bad-collision",
                     MANIFEST_TEXT,
                     &[("data/ruby/sunrise/block/a.json", declaration.as_bytes(),)]
@@ -1970,9 +1970,9 @@ capabilities = ["registries"]
         assert!(nonfinite.check().is_err());
     }
 
-    fn hmod(name: &str, manifest: &str, files: &[(&str, &[u8])]) -> Result<Content, String> {
+    fn smod(name: &str, manifest: &str, files: &[(&str, &[u8])]) -> Result<Content, String> {
         let dir = scratch(name);
-        let path = dir.join("m.hmod");
+        let path = dir.join("m.smod");
         std::fs::write(&path, Package::write_files(manifest, files)?).unwrap();
         let package = Package::read(&path);
         let content = package.and_then(|p| Content::read(&path, &p.manifest));
@@ -1986,7 +1986,7 @@ capabilities = ["registries"]
             let declaration = format!(
                 r#"{{"template":"minecraft:stone","properties":{{"light":3}},"state_light":{table}}}"#
             );
-            hmod(
+            smod(
                 name,
                 MANIFEST_TEXT,
                 &[("data/ruby/sunrise/block/lamp.json", declaration.as_bytes())],
@@ -2033,7 +2033,7 @@ capabilities = ["registries"]
     fn place_block_checks_files_and_native_declarations() {
         for (i, target) in ["ruby:frame", "minecraft:stone"].iter().enumerate() {
             let text = format!(r#"{{"template":"minecraft:stick","block":"{target}"}}"#);
-            let content = hmod(
+            let content = smod(
                 &format!("place-block-{i}"),
                 MANIFEST_TEXT,
                 &[("data/ruby/sunrise/item/empty_frame.json", text.as_bytes())],
@@ -2047,7 +2047,7 @@ capabilities = ["registries"]
         {
             let text = format!(r#"{{"template":"minecraft:stick","block":"{target}"}}"#);
             assert!(
-                hmod(
+                smod(
                     &format!("bad-place-block-{i}"),
                     MANIFEST_TEXT,
                     &[("data/ruby/sunrise/item/empty_frame.json", text.as_bytes())]
@@ -2152,7 +2152,7 @@ capabilities = ["registries"]
     fn a_connecting_block_file_names_its_tag_with_a_hash() {
         let cable = br#"{"template": "minecraft:chorus_plant", "connects_to": "ruby:cables"}"#;
         let files: &[(&str, &[u8])] = &[("data/ruby/sunrise/block/cable.json", cable)];
-        let e = hmod("bare-tag", MANIFEST_TEXT, files).unwrap_err();
+        let e = smod("bare-tag", MANIFEST_TEXT, files).unwrap_err();
         assert!(e.contains("#namespace:path"), "{e}");
     }
 
@@ -2167,7 +2167,7 @@ capabilities = ["registries"]
             ("assets/ruby/textures/block/ruby_block.png", b"png"),
             ("assets/minecraft/atlases/blocks.json", b"{}"),
         ];
-        let content = hmod("ok", MANIFEST_TEXT, files).unwrap();
+        let content = smod("ok", MANIFEST_TEXT, files).unwrap();
         assert_eq!(content.files.len(), 7);
         assert_eq!(
             content.blocks,
@@ -2212,7 +2212,7 @@ capabilities = ["registries"]
     #[test]
     fn items_name_the_block_they_place() {
         let file = "data/ruby/sunrise/item/seeds.json";
-        let content = hmod(
+        let content = smod(
             "seeds",
             MANIFEST_TEXT,
             &[(
@@ -2222,7 +2222,7 @@ capabilities = ["registries"]
         )
         .unwrap();
         assert_eq!(content.items[0].block.as_deref(), Some("ruby:crop"));
-        let error = hmod(
+        let error = smod(
             "bad-block",
             MANIFEST_TEXT,
             &[(
@@ -2250,7 +2250,7 @@ capabilities = ["registries"]
             ),
             ("data/ruby/sunrise/item/c_flask.json", ITEM),
         ];
-        let content = hmod("remainder", MANIFEST_TEXT, files).unwrap();
+        let content = smod("remainder", MANIFEST_TEXT, files).unwrap();
         let rests: Vec<_> = content
             .items
             .iter()
@@ -2264,7 +2264,7 @@ capabilities = ["registries"]
         let item = |pose: &str| {
             let text = format!(r#"{{"template": "minecraft:stick", "arm_pose": "{pose}"}}"#);
             let files: &[(&str, &[u8])] = &[("data/ruby/sunrise/item/a.json", text.as_bytes())];
-            hmod("arm-pose", MANIFEST_TEXT, files)
+            smod("arm-pose", MANIFEST_TEXT, files)
         };
         assert_eq!(
             item("toot_horn").unwrap().items[0].arm_pose,
@@ -2276,7 +2276,7 @@ capabilities = ["registries"]
             "{refused}"
         );
         let files: &[(&str, &[u8])] = &[("data/ruby/sunrise/item/a.json", ITEM)];
-        let plain = hmod("arm-pose", MANIFEST_TEXT, files).unwrap();
+        let plain = smod("arm-pose", MANIFEST_TEXT, files).unwrap();
         assert_eq!(plain.items[0].arm_pose, None);
     }
 
@@ -2289,7 +2289,7 @@ capabilities = ["registries"]
         )];
         let read = |declared: &[String]| {
             let dir = scratch("declared-remainder");
-            let path = dir.join("m.hmod");
+            let path = dir.join("m.smod");
             std::fs::write(&path, Package::write_files(MANIFEST_TEXT, files).unwrap()).unwrap();
             let package = Package::read(&path).unwrap();
             let content = Content::read_declaring(&path, &package.manifest, declared);
@@ -2313,7 +2313,7 @@ capabilities = ["registries"]
                 "operation": "add_value", "slot": "mainhand"}],
             "!minecraft:repairable": {}}}"#;
         let files: &[(&str, &[u8])] = &[("data/ruby/sunrise/item/ruby_sword.json", sword)];
-        let content = hmod("components", MANIFEST_TEXT, files).unwrap();
+        let content = smod("components", MANIFEST_TEXT, files).unwrap();
         let components = &content.items[0].components;
         assert_eq!(
             components.keys().collect::<Vec<_>>(),
@@ -2338,7 +2338,7 @@ capabilities = ["registries"]
                 br#"{"category": "harmful", "color": 0}"#,
             ),
         ];
-        let content = hmod("effects", MANIFEST_TEXT, files).unwrap();
+        let content = smod("effects", MANIFEST_TEXT, files).unwrap();
         let effects: Vec<_> = content
             .effects
             .iter()
@@ -2375,7 +2375,7 @@ capabilities = ["registries"]
         ] {
             let files: &[(&str, &[u8])] =
                 &[("data/ruby/sunrise/mob_effect/a.json", file.as_bytes())];
-            let e = hmod(case, MANIFEST_TEXT, files).unwrap_err();
+            let e = smod(case, MANIFEST_TEXT, files).unwrap_err();
             assert!(e.contains(why), "{case}: {e}");
         }
     }
@@ -2393,7 +2393,7 @@ capabilities = ["registries"]
                 br#"{"slots": 16, "results": [11], "crafting": {"grid": 1, "result": 0}, "links": {"from": 12, "count": 4}}"#,
             ),
         ];
-        let content = hmod("menus", MANIFEST_TEXT, files).unwrap();
+        let content = smod("menus", MANIFEST_TEXT, files).unwrap();
         let menus: Vec<_> = content
             .menu_types
             .iter()
@@ -2502,7 +2502,7 @@ capabilities = ["registries"]
             ("menu-missing", r#"{"data_slots": 1}"#, "missing field"),
         ] {
             let files: &[(&str, &[u8])] = &[("data/ruby/sunrise/menu/a.json", file.as_bytes())];
-            let e = hmod(case, MANIFEST_TEXT, files).unwrap_err();
+            let e = smod(case, MANIFEST_TEXT, files).unwrap_err();
             assert!(e.contains(why), "{case}: {e}");
         }
     }
@@ -2521,7 +2521,7 @@ capabilities = ["registries"]
                 br#"{"template": "minecraft:snowball", "item": "ruby:dust"}"#,
             ),
         ];
-        let content = hmod("types", MANIFEST_TEXT, files).unwrap();
+        let content = smod("types", MANIFEST_TEXT, files).unwrap();
         let types: Vec<_> = content
             .entity_types
             .iter()
@@ -2581,7 +2581,7 @@ capabilities = ["registries"]
                 ("data/ruby/sunrise/item/gem.json", ITEM),
                 ("data/ruby/sunrise/entity_type/a.json", file.as_bytes()),
             ];
-            let e = hmod(case, MANIFEST_TEXT, files).unwrap_err();
+            let e = smod(case, MANIFEST_TEXT, files).unwrap_err();
             assert!(e.contains(why), "{case}: {e}");
         }
         let shared = snowball(r#", "item": "ruby:gem""#);
@@ -2590,7 +2590,7 @@ capabilities = ["registries"]
             ("data/ruby/sunrise/entity_type/a.json", shared.as_bytes()),
             ("data/ruby/sunrise/entity_type/b.json", shared.as_bytes()),
         ];
-        let e = hmod("type-shared", MANIFEST_TEXT, files).unwrap_err();
+        let e = smod("type-shared", MANIFEST_TEXT, files).unwrap_err();
         assert!(e.contains("already throws another entity type"), "{e}");
     }
 
@@ -2624,7 +2624,7 @@ capabilities = ["registries"]
                 br#"{"template": "minecraft:cat"}"#,
             ),
         ];
-        let content = hmod("living", MANIFEST_TEXT, files).unwrap();
+        let content = smod("living", MANIFEST_TEXT, files).unwrap();
         let types: Vec<_> = content
             .entity_types
             .iter()
@@ -2690,7 +2690,7 @@ capabilities = ["registries"]
                 ("data/ruby/sunrise/item/gem.json", ITEM),
                 ("data/ruby/sunrise/entity_type/a.json", file.as_bytes()),
             ];
-            let e = hmod(case, MANIFEST_TEXT, files).unwrap_err();
+            let e = smod(case, MANIFEST_TEXT, files).unwrap_err();
             assert!(e.contains(why), "{case}: {e}");
         }
     }
@@ -2711,7 +2711,7 @@ capabilities = ["registries"]
                 br#"{"template": "minecraft:wandering_trader", "passenger_attachments": 1.25}"#,
             ),
         ];
-        let content = hmod("passengers", MANIFEST_TEXT, files).unwrap();
+        let content = smod("passengers", MANIFEST_TEXT, files).unwrap();
         assert_eq!(
             content.entity_types[0].passenger_attachments,
             vec![[0.0, 0.7, -0.1]]
@@ -2734,7 +2734,7 @@ capabilities = ["registries"]
             );
             let files: &[(&str, &[u8])] =
                 &[("data/ruby/sunrise/block/panel.json", text.as_bytes())];
-            hmod("occludes", MANIFEST_TEXT, files)
+            smod("occludes", MANIFEST_TEXT, files)
         };
         let occludes = |c: Result<Content, String>| c.unwrap().blocks[0].properties.occludes;
         assert_eq!(occludes(block("false")), Some(false));
@@ -2749,7 +2749,7 @@ capabilities = ["registries"]
                 r#"{{"template": "minecraft:stone", "properties": {{"render_shape": {shape}}}}}"#
             );
             let files: &[(&str, &[u8])] = &[("data/ruby/sunrise/block/gear.json", text.as_bytes())];
-            hmod("render-shape", MANIFEST_TEXT, files)
+            smod("render-shape", MANIFEST_TEXT, files)
         };
         let shape = |c: Result<Content, String>| c.unwrap().blocks[0].properties.render_shape;
         assert_eq!(shape(block(r#""MODEL""#)), Some(RenderShape::Model));
@@ -2771,7 +2771,7 @@ capabilities = ["registries"]
                 r#"{{"template":"minecraft:stone","properties":{{"push_reaction":"{name}"}}}}"#
             );
             let files: &[(&str, &[u8])] = &[("data/ruby/sunrise/block/gear.json", text.as_bytes())];
-            let content = hmod("push-reaction", MANIFEST_TEXT, files).unwrap();
+            let content = smod("push-reaction", MANIFEST_TEXT, files).unwrap();
             assert_eq!(
                 content.blocks[0].properties.push_reaction.unwrap().name(),
                 name
@@ -2787,7 +2787,7 @@ capabilities = ["registries"]
                 r#"{{"template": "minecraft:dirt", {own}, "properties": {{"random_ticks": {ticks}}}}}"#
             );
             let files: &[(&str, &[u8])] = &[("data/ruby/sunrise/block/crop.json", text.as_bytes())];
-            hmod("random-ticks", MANIFEST_TEXT, files)
+            smod("random-ticks", MANIFEST_TEXT, files)
         };
         let ticks =
             |c: Result<Content, String>| c.unwrap().blocks[0].properties.random_ticks.clone();
@@ -2820,7 +2820,7 @@ capabilities = ["registries"]
         let block = br#"{"template": "minecraft:iron_block", "components": {
             "minecraft:max_stack_size": 16, "!minecraft:lore": {}}}"#;
         let files: &[(&str, &[u8])] = &[("data/ruby/sunrise/block/ruby_block.json", block)];
-        let content = hmod("block-components", MANIFEST_TEXT, files).unwrap();
+        let content = smod("block-components", MANIFEST_TEXT, files).unwrap();
         let components = &content.blocks[0].components;
         assert_eq!(
             components.keys().collect::<Vec<_>>(),
@@ -2838,7 +2838,7 @@ capabilities = ["registries"]
             ("data/ruby/sunrise/item/gem.json", ITEM),
             ("data/ruby/sunrise/block/ruby_block.json", BLOCK),
         ] {
-            let content = hmod("server-refused", &server, &[(file, bytes)]).unwrap();
+            let content = smod("server-refused", &server, &[(file, bytes)]).unwrap();
             assert_eq!(
                 content.server_only_refusal(&manifest).unwrap(),
                 format!(
@@ -2846,7 +2846,7 @@ capabilities = ["registries"]
                 )
             );
         }
-        let content = hmod(
+        let content = smod(
             "server-loads",
             &server,
             &[
@@ -2882,7 +2882,7 @@ capabilities = ["registries"]
         let block = |json: &str| {
             let files: &[(&str, &[u8])] =
                 &[("data/ruby/sunrise/block/cable.json", json.as_bytes())];
-            hmod("cable", MANIFEST_TEXT, files)
+            smod("cable", MANIFEST_TEXT, files)
         };
         let content = block(
             r##"{"template": "minecraft:chorus_plant", "connects_to": "#ruby:cable_joins"}"##,
@@ -2914,7 +2914,7 @@ capabilities = ["registries"]
     #[test]
     fn gate_sounds_need_a_fence_gate_and_sound_ids() {
         let block = |json: &str| {
-            hmod(
+            smod(
                 "gate",
                 MANIFEST_TEXT,
                 &[("data/ruby/sunrise/block/gate.json", json.as_bytes())],
@@ -2955,7 +2955,7 @@ capabilities = ["registries"]
     #[test]
     fn block_item_names_an_item_and_needs_item_false() {
         let block = |json: &str| {
-            hmod(
+            smod(
                 "blockitem",
                 MANIFEST_TEXT,
                 &[("data/ruby/sunrise/block/slab.json", json.as_bytes())],
@@ -2995,7 +2995,7 @@ capabilities = ["registries"]
     #[test]
     fn pick_item_names_an_item_whatever_the_blocks_own_is() {
         let block = |json: &str| {
-            hmod(
+            smod(
                 "pickitem",
                 MANIFEST_TEXT,
                 &[("data/ruby/sunrise/block/crop.json", json.as_bytes())],
@@ -3028,7 +3028,7 @@ capabilities = ["registries"]
     #[test]
     fn farmland_base_requires_farmland_and_a_block_id() {
         let block = |json: &str| {
-            hmod(
+            smod(
                 "farmland",
                 MANIFEST_TEXT,
                 &[("data/ruby/sunrise/block/farm.json", json.as_bytes())],
@@ -3052,7 +3052,7 @@ capabilities = ["registries"]
         let block = |json: &str| {
             let files: &[(&str, &[u8])] =
                 &[("data/ruby/sunrise/block/notice.json", json.as_bytes())];
-            hmod("sign", MANIFEST_TEXT, files)
+            smod("sign", MANIFEST_TEXT, files)
         };
         let files: &[(&str, &[u8])] = &[
             (
@@ -3064,7 +3064,7 @@ capabilities = ["registries"]
                 br#"{"template": "minecraft:oak_wall_sign", "item": false}"#,
             ),
         ];
-        let content = hmod("sign-pair", MANIFEST_TEXT, files).unwrap();
+        let content = smod("sign-pair", MANIFEST_TEXT, files).unwrap();
         assert_eq!(content.blocks[0].wood_type.as_deref(), Some("ruby:elm"));
         assert_eq!(
             content.blocks[0].wall_block.as_deref(),
@@ -3144,7 +3144,7 @@ capabilities = ["registries"]
             if wanted == "already paired" {
                 files.push(("data/ruby/sunrise/block/second.json", second.as_bytes()));
             }
-            let e = hmod("sign-wall", MANIFEST_TEXT, &files).unwrap_err();
+            let e = smod("sign-wall", MANIFEST_TEXT, &files).unwrap_err();
             assert!(e.contains(wanted), "{wanted}: {e}");
         };
         let wall = r#"{"template": "minecraft:oak_wall_sign", "item": false}"#;
@@ -3178,7 +3178,7 @@ capabilities = ["registries"]
                 ("data/ruby/sunrise/block/sign.json", sign.as_bytes()),
                 ("data/ruby/sunrise/block/wall.json", wall.as_bytes()),
             ];
-            hmod("sign-text", MANIFEST_TEXT, files)
+            smod("sign-text", MANIFEST_TEXT, files)
         };
         let white = r#", "sign_text_color": "white""#;
         assert!(pair(white, white).is_ok());
@@ -3230,7 +3230,7 @@ capabilities = ["registries"]
             ),
         ];
         assert!(
-            hmod("fluid-collision", MANIFEST_TEXT, files)
+            smod("fluid-collision", MANIFEST_TEXT, files)
                 .unwrap_err()
                 .contains("declared twice")
         );
@@ -3248,7 +3248,7 @@ capabilities = ["registries"]
                 br#"{"world":{"bucket":false}}"#,
             ),
         ];
-        let content = hmod("world-fluid", MANIFEST_TEXT, files).unwrap();
+        let content = smod("world-fluid", MANIFEST_TEXT, files).unwrap();
         let oil = content.fluids.iter().find(|f| f.id == "ruby:oil").unwrap();
         assert_eq!(oil.flowing_id(), "ruby:flowing_oil");
         assert_eq!(oil.world.unwrap().tick_delay, 20);
@@ -3274,7 +3274,7 @@ capabilities = ["registries"]
             br#"{"world":{"slope_find_distance":5}}"#,
         ] {
             let files: &[(&str, &[u8])] = &[("data/ruby/sunrise/fluid/oil.json", world)];
-            assert!(hmod("bad-world-fluid", MANIFEST_TEXT, files).is_err());
+            assert!(smod("bad-world-fluid", MANIFEST_TEXT, files).is_err());
         }
         let files: &[(&str, &[u8])] = &[
             ("data/ruby/sunrise/fluid/oil.json", br#"{"world":{}}"#),
@@ -3284,7 +3284,7 @@ capabilities = ["registries"]
             ),
         ];
         assert!(
-            hmod("clashing-world-fluid", MANIFEST_TEXT, files)
+            smod("clashing-world-fluid", MANIFEST_TEXT, files)
                 .unwrap_err()
                 .contains("declared twice")
         );
@@ -3299,7 +3299,7 @@ capabilities = ["registries"]
             ),
             ("data/ruby/sunrise/fluid/bare.json", b"{}"),
         ];
-        let content = hmod("fluid", MANIFEST_TEXT, files).unwrap();
+        let content = smod("fluid", MANIFEST_TEXT, files).unwrap();
         assert_eq!(
             content.fluids,
             [
@@ -3324,7 +3324,7 @@ capabilities = ["registries"]
             br#"{"sprite":"ruby:"}"#,
         ] {
             let bad: &[(&str, &[u8])] = &[("data/ruby/sunrise/fluid/x.json", sprite)];
-            let e = hmod("fluid", MANIFEST_TEXT, bad).unwrap_err();
+            let e = smod("fluid", MANIFEST_TEXT, bad).unwrap_err();
             assert!(e.contains("sprite"), "{e}");
         }
     }
@@ -3334,7 +3334,7 @@ capabilities = ["registries"]
         let tab = |json: &str| {
             let files: &[(&str, &[u8])] =
                 &[("data/ruby/sunrise/creative_tab/gems.json", json.as_bytes())];
-            hmod("tab", MANIFEST_TEXT, files)
+            smod("tab", MANIFEST_TEXT, files)
         };
         let content =
             tab(r#"{"title": "Ruby Gems", "icon": "ruby:ruby", "items": ["ruby:ruby", "minecraft:diamond"]}"#)
@@ -3355,7 +3355,7 @@ capabilities = ["registries"]
     #[test]
     fn refuses_content_outside_its_fence() {
         let refused = |name: &str, files: &[(&str, &[u8])]| {
-            let e = hmod(name, MANIFEST_TEXT, files).unwrap_err();
+            let e = smod(name, MANIFEST_TEXT, files).unwrap_err();
             assert!(!e.is_empty());
             e
         };
@@ -3543,12 +3543,12 @@ capabilities = ["registries"]
             ("data/kaisyn/structure/a.nbt", b"nbt"),
             ("assets/kaisyn/lang/en_us.json", b"{}"),
         ];
-        let content = hmod("listed", &manifest, files).unwrap();
+        let content = smod("listed", &manifest, files).unwrap();
         assert_eq!(content.files.len(), 3);
         assert_eq!(content.namespaces, ["ruby", "kaisyn"]);
         // Files and code share the manifest-owned namespace fence.
         let decl: &[(&str, &[u8])] = &[("data/kaisyn/sunrise/block/a.json", BLOCK)];
-        let content = hmod("listed-decl", &manifest, decl).unwrap();
+        let content = smod("listed-decl", &manifest, decl).unwrap();
         assert_eq!(content.blocks[0].id, "kaisyn:a");
         let mut code = Content::declared("ruby");
         code.namespaces.push("kaisyn".into());
@@ -3566,7 +3566,7 @@ capabilities = ["registries"]
         );
         // A namespace it does not list is still outside.
         let other: &[(&str, &[u8])] = &[("data/other/structure/a.nbt", b"nbt")];
-        assert!(hmod("listed-other", &manifest, other).is_err());
+        assert!(smod("listed-other", &manifest, other).is_err());
     }
 
     #[test]

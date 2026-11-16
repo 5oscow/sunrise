@@ -52,7 +52,7 @@ cargo build -p cargo-sunrise-mod
 "$ROOT/target/debug/cargo-sunrise-mod" sunrise-mod wasm-std "$ROOT/target/sunrise-wasm-std.wasm" --catalog points.json
 # From the repository root:
 cargo test -p sunrise-mod-wasm --features listener-fixture --test native_listener collect_positions_copy_in_and_out_natively_as_in_the_real_guest -- --exact
-SUNRISE_WASM_FIXTURE="$PWD/crates/sunrise-mod-wasm/tests/fixture/target/sunrise-mod/wasm_fixture.hmod" SUNRISE_WASM_STD="$PWD/target/sunrise-wasm-std.wasm" cargo test -p sunrise-mod-wasm --features listener-fixture --test real_member real_member -- --ignored --exact
+SUNRISE_WASM_FIXTURE="$PWD/crates/sunrise-mod-wasm/tests/fixture/target/sunrise-mod/wasm_fixture.smod" SUNRISE_WASM_STD="$PWD/target/sunrise-wasm-std.wasm" cargo test -p sunrise-mod-wasm --features listener-fixture --test real_member real_member -- --ignored --exact
 ```
 
 ### Victim ownership and hot path

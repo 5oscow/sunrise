@@ -84,7 +84,7 @@ mod tests {
 
     fn read(name: &str, manifest: &str, extras: &[(&str, &[u8])]) -> Result<Bundle, String> {
         let path =
-            std::env::temp_dir().join(format!("native-bundle-{name}-{}.hmod", std::process::id()));
+            std::env::temp_dir().join(format!("native-bundle-{name}-{}.smod", std::process::id()));
         let mut zip = zip::ZipWriter::new(std::fs::File::create(&path).unwrap());
         let options = zip::write::SimpleFileOptions::default();
         for (name, bytes) in [
@@ -174,7 +174,7 @@ mod tests {
         for (folder, native) in [("content", true), ("native", false)] {
             let dir = root.join(folder);
             std::fs::create_dir_all(&dir).unwrap();
-            let path = dir.join("test.hmod");
+            let path = dir.join("test.smod");
             let text = manifest();
             let (text, files) = if native {
                 (

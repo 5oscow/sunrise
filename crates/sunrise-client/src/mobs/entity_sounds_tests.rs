@@ -20,7 +20,7 @@ fn fixture(template: &str, sounds: serde_json::Value, run: impl FnOnce(&MobWorld
         return;
     }
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("bird.hmod");
+    let path = dir.path().join("bird.smod");
     let manifest = "id = \"bird\"\nname = \"Bird\"\nversion = \"1.0\"\napi = \"0.2\"\nside = \"both\"\ncapabilities = [\"registries\"]\n";
     let declaration = serde_json::json!({"template":template,"sounds":sounds}).to_string();
     std::fs::write(

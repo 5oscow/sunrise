@@ -8,7 +8,7 @@ pub trait RecipesHost {
     /// Published asset/data read: available in Setup, Reloading and World.
     /// The recipes of registered recipe type `kind` (`minecraft:crafting`, `mymod:crusher`), vanilla's
     /// types and mods' own alike, from `data/<namespace>/recipe/*.json` of vanilla,
-    /// the content mods (`.hmod`) and the world's data packs, in file order: each
+    /// the content mods (`.smod`) and the world's data packs, in file order: each
     /// one typed (`Recipe`: its ingredients, results, group, cooking time and
     /// experience, or its stonecutting, smithing or special crafting rule),
     /// with its file as JSON for a mod's own type. The file's type field names its

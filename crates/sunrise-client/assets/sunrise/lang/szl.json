@@ -497,7 +497,7 @@
   "sunrise.mods.browse.title": "Przeglōndanie modōw",
   "sunrise.mods.browse.update": "Aktualizuj",
   "sunrise.mods.dev": " (Dev)",
-  "sunrise.mods.empty": "Brak modōw: wkludź pliki .hmod do folderu modōw horyzōntu",
+  "sunrise.mods.empty": "Brak modōw: wkludź pliki .smod do folderu modōw horyzōntu",
   "sunrise.mods.in_world": " (ôpuścić świat, coby sie zmiynioł)",
   "sunrise.mods.not_built": " (Niy zbudowane)",
   "sunrise.mods.open_folder": "Ôtwōrz folder Mod",

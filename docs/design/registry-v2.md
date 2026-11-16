@@ -1,7 +1,7 @@
 # Mod registry v2
 
 > **Fork scope:** This is retained upstream design and research, not the fork specification. See the
-> [fork registry reference](../modding/src/reference/registry-index.md). `.hmod` is the only mod package;
+> [fork registry reference](../modding/src/reference/registry-index.md). `.smod` is the only mod package;
 > explicit native pins and update flow, and strict published-kind and owner checks, remain in force. This note
 > authorizes neither a `.hnmod` route nor implicit native repinning or rebuilding.
 
@@ -14,11 +14,11 @@ the launcher installs each one, the category lists and the rollout. The format i
 
 | Kind | File | What it is | The registry's check | The launcher installs it in |
 |---|---|---|---|---|
-| `mod` | `.hmod` | Content mod (and sandboxed code) | manifest + content (today) | `mods/<id>.hmod` |
+| `mod` | `.smod` | Content mod (and sandboxed code) | manifest + content (today) | `mods/<id>.smod` |
 | `native-mod` | `.hnmod` | Native source mod | bundle + pins (today) | the native build; rebuilt after an update |
-| `modpack` | `.hpack` | Registry mods played together | manifest + its mods in the index (today) | its own profile |
+| `modpack` | `.spack` | Registry mods played together | manifest + its mods in the index (today) | its own profile |
 | `resourcepack` | `.zip` | `pack.mcmeta` + `assets/` | plain paths + `pack.mcmeta` (today) | `resourcepacks/<file>` |
-| `shader` | `.hshader` | Sunrise's WGSL shader pack | `sunrise_shader_api::check` (today) | `shaderpacks/<file>` |
+| `shader` | `.sshader` | Sunrise's WGSL shader pack | `sunrise_shader_api::check` (today) | `shaderpacks/<file>` |
 | `shaderpack` | `.zip` | **new**: a `shaders/`-folder pack (the OptiFine/Iris format Sunrise loads with `sunrise-shaders`) | plain paths, a `shaders/` folder at the root | `shaderpacks/<file>` |
 | `datapack` | `.zip` | **new**: `pack.mcmeta` + `data/` | plain paths, `pack.mcmeta` with a `pack` object, a `data/` folder; its pack format | a world the player picks: `<world>/datapacks/<file>` |
 

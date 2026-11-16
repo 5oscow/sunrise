@@ -49,7 +49,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix='hz-native-particles-') as scratch:
         # Declare fixture providers before the load-owned particle registry freezes.
         import zipfile
-        fixture_mod = Path(scratch) / 'fixture.hmod'
+        fixture_mod = Path(scratch) / 'fixture.smod'
         with zipfile.ZipFile(fixture_mod, 'w') as package:
             package.writestr('sunrise-mod.toml', 'id = "fixture"\nname = "Fixture"\nversion = "0.1.0"\napi = "0.2"\nside = "both"\ncapabilities = ["registries"]\n')
             for provider in ('encoded', 'spark'):

@@ -48,7 +48,7 @@
   "sunrise.pages.open.sunrise_graphics": "Sunrise Grafikleri...",
   "sunrise.pages.open.controller_binds": "Kontrolcü Tuş Atamaları...",
   "sunrise.pages.open.sunrise_settings": "Sunrise Ayarları...",
-  "sunrise.mods.empty": "Henüz mod yok. .hmod dosyalarını sunrise-mods klasörüne yerleştirin.",
+  "sunrise.mods.empty": "Henüz mod yok. .smod dosyalarını sunrise-mods klasörüne yerleştirin.",
   "sunrise.mods.stopped": " (Durduruldu)",
   "sunrise.mods.not_built": " (Derlenmedi)",
   "sunrise.mods.dev": " (Geliştirici)",

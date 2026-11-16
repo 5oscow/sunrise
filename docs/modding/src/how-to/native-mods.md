@@ -1,6 +1,6 @@
 # Native mods: building and shipping
 
-A native mod is Rust source in a `.hmod`. The launcher compiles it on the player's machine, with its own pinned Rust
+A native mod is Rust source in a `.smod`. The launcher compiles it on the player's machine, with its own pinned Rust
 toolchain, against the prebuilt game of the exact Sunrise build the mod pins in `[native]`. The game itself is never
 rebuilt for a mod: the mods are compiled and linked against that prebuilt game, and the instance then plays the
 result.

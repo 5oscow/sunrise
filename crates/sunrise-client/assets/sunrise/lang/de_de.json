@@ -497,7 +497,7 @@
   "sunrise.mods.browse.title": "Mods durchsuchen",
   "sunrise.mods.browse.update": "Aktualisieren",
   "sunrise.mods.dev": " (Entwicklung)",
-  "sunrise.mods.empty": "Keine Mods: Lege .hmod-Dateien in den Ordner sunrise-mods",
+  "sunrise.mods.empty": "Keine Mods: Lege .smod-Dateien in den Ordner sunrise-mods",
   "sunrise.mods.in_world": " (Welt verlassen, um zu ändern)",
   "sunrise.mods.not_built": " (nicht gebaut)",
   "sunrise.mods.open_folder": "Modordner öffnen",
