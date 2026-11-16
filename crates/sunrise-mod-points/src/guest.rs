@@ -13,10 +13,12 @@ thread_local! {
 /// table: the host registers the subscribed places in its ordinary ordered listener list.
 pub fn register(listener: &SlotListener) -> Result<(), crate::RegisterError> {
     if let Some(ApiKind::Typed(function)) = listener.api_kind() {
+        let place = PointId::from_index(listener.place().index())
+            .ok_or(crate::RegisterError::Unsupported)?;
         LISTENERS.with(|slots| {
             slots
                 .borrow_mut()
-                .push((listener.place(), listener.injection().to_owned(), function))
+                .push((place, listener.injection().to_owned(), function))
         });
         mod_api::wire::guest::extend(POINT_TAG, POINT_TAG, crate::guest_dispatch);
         Ok(())
