@@ -2237,6 +2237,8 @@ fn large_generated_files_scan_in_linear_time() {
             "impl S { fn f() -> Self { Self } }\n".repeat(n / 2)
         ),
     ] {
+        // Off unix `now` is wall time, which already includes the scan's own parse thread.
+        #[cfg(unix)]
         let parse = std::thread::scope(|scope| {
             std::thread::Builder::new()
                 .stack_size(crate::syntax::PARSER_STACK)
@@ -2249,6 +2251,8 @@ fn large_generated_files_scan_in_linear_time() {
                 .join()
                 .unwrap()
         });
+        #[cfg(not(unix))]
+        let parse = std::time::Duration::ZERO;
         let started = now();
         assert!(ids(&scan_on(wider(), &source)).contains(&"type:Settings"));
         let took = now() - started + parse;
