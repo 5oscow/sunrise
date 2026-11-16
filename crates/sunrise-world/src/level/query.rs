@@ -469,7 +469,7 @@ impl<L: super::signal_access::SignalAccess + ?Sized> Signals<'_, L> {
         self.b.is_water_fluid(self.b.fluid(self.state(pos)).kind())
     }
     pub fn is_redstone_conductor(&self, state: BlockStateId, _pos: BlockPos) -> bool {
-        self.b.has_flag(state, state_flags::CONDUCTOR)
+        self.b.is_redstone_conductor(state)
     }
     pub(crate) fn above_state(&self, pos: BlockPos) -> BlockStateId {
         self.state(above(pos))

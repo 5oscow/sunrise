@@ -167,6 +167,24 @@ pub trait BlockStatesBackend {
     #[access(Metadata)]
     fn block_state_map_color(&self, state: BlockState) -> Option<u8>;
     /// Side: both.
+    /// `BlockState.getLightEmission()`: the light level the state gives off, 0 to 15 (a torch 14,
+    /// glowstone 15, stone 0). The state's own value: a block that declares `dynamic_light`
+    /// answers per cell through its parts, which this does not ask. None for an unknown state.
+    #[access(Metadata)]
+    fn block_state_light_emission(&self, state: BlockState) -> Option<u8>;
+    /// Side: both.
+    /// The friction of the state's block (`BlockBehaviour.getFriction`, as
+    /// `BlockState.getBlock().getFriction()` reads it): 0.6 for most blocks, 0.98 for ice, 0.8
+    /// for slime. None for an unknown state.
+    #[access(Metadata)]
+    fn block_state_friction(&self, state: BlockState) -> Option<f32>;
+    /// Side: both.
+    /// `BlockState.isSolidRender()`: whether the state is a full, occluding cube for rendering
+    /// and light (stone yes; glass, leaves and slabs no). Not `isSolid` and not full collision.
+    /// None for an unknown state.
+    #[access(Metadata)]
+    fn block_state_is_solid_render(&self, state: BlockState) -> Option<bool>;
+    /// Side: both.
     /// The states of `block` (`StateDefinition.getPossibleStates`) in immutable local ordinal
     /// order, independent of world numeric IDs. None for unavailable metadata or an unknown block.
     #[access(Metadata)]

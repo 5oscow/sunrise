@@ -1467,6 +1467,11 @@ impl Behaviours {
     pub fn is_solid(&self, state: BlockStateId) -> bool {
         self.has_flag(state, data::state_flags::SOLID)
     }
+    /// `BlockState.isRedstoneConductor(level, pos)`: the exported answer, which does not read the
+    /// position.
+    pub fn is_redstone_conductor(&self, state: BlockStateId) -> bool {
+        self.has_flag(state, data::state_flags::CONDUCTOR)
+    }
     pub fn is_replaceable(&self, state: BlockStateId) -> bool {
         self.has_flag(state, data::state_flags::REPLACEABLE)
     }
