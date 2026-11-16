@@ -49,13 +49,14 @@ class NightlyRoutingTests(unittest.TestCase):
         linux = next(row for row in rows if row["name"] == "linux")
         self.assertIn(f"name: {linux['asset']}", smoke, "smoke must download the hosted producer's archive")
         self.assertIn(f"/hosted-linux/{linux['dir']}", smoke)
-        self.assertIn("needs: [runner-configuration, build]", smoke)
+        self.assertIn("needs: [runner-configuration, legs]", smoke)
         script = """const fs = require('fs');
 const state = JSON.parse(fs.readFileSync(0, 'utf8'));
 // Actions returns an empty string for absent context properties, not undefined.
 const context = values => new Proxy(values, {get: (values, key) => values[key] ?? ''});
 const matrix = context(state.matrix), vars = context(state.vars), inputs = state.inputs, github = context(state.github);
 const expression = state.expression, fromJSON = JSON.parse, toJSON = JSON.stringify;
+const cancelled = () => false, needs = {legs: {result: 'success'}};
 console.log(JSON.stringify(eval(expression)));
 """
         def evaluate(expression, matrix, trusted, repository="sunrise-org/sunrise"):
@@ -103,6 +104,34 @@ console.log(JSON.stringify(eval(expression)));
                 else:
                     expected = 60 if row.get("mac") else 40
                 self.assertEqual(evaluate(timeout, row, trusted, repository), expected)
+
+    @unittest.skipUnless(shutil.which("node"), "Node evaluates GitHub's JavaScript-style expressions")
+    def test_a_missing_leg_holds_the_build_only_when_it_is_required(self):
+        workflow_jobs = dict(jobs(GAME.read_text()))
+        optional = re.search(r"^\s*continue-on-error:\s*\$\{\{(.*?)\}\}", workflow_jobs["build"], re.M).group(1)
+        decide = workflow_jobs["legs"].split("        run: |\n", 1)[1]
+        decide = textwrap.dedent(decide)
+        script = """const s = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+const matrix = s.matrix, inputs = s.inputs, github = s.github;
+console.log(JSON.stringify(Boolean(eval(s.expression))));
+"""
+        legs = {"linux": {}, "linux-musl": {}, "windows": {}, "windows-arm64": {}, "macos": {"mac": True}, "macos-x64": {"mac": True}}
+        for repository, kind in itertools.product(["sunrise-org/sunrise", "horizon-rust/horizon"], ["nightly", "snapshot", "release"]):
+            for absent in [None, *legs]:
+                if absent is None:
+                    expected = True
+                else:
+                    state = {"expression": optional, "matrix": {"name": absent, **legs[absent]}, "inputs": {"kind": kind}, "github": {"repository": repository}}
+                    expected = json.loads(subprocess.run(["node", "-e", script], input=json.dumps(state), text=True, capture_output=True, check=True).stdout)
+                with self.subTest(repository=repository, kind=kind, absent=absent), tempfile.TemporaryDirectory() as folder:
+                    for leg in legs:
+                        if leg != absent:
+                            os.makedirs(f"{folder}/legs/leg-{leg}")
+                    output = Path(folder, "output")
+                    ran = subprocess.run(["bash", "-c", decide], cwd=folder, capture_output=True, text=True,
+                                         env={**os.environ, "REPOSITORY": repository, "KIND": kind, "GITHUB_OUTPUT": str(output)})
+                    self.assertEqual(ran.returncode == 0, expected, ran.stdout)
+                    self.assertEqual(output.exists() and output.read_text() == "complete=true\n", expected)
 
     def test_every_shipped_glibc_program_is_checked_by_workflow_owned_tools(self):
         text = GAME.read_text()

@@ -183,6 +183,9 @@ jobs:
 
   sign:
     needs: [pick, build]
+    # build's result is `cancelled` when an optional leg timed out or was cancelled; its output says whether every
+    # required leg built (game-build.yml, legs).
+    if: ${{ !cancelled() && needs.build.outputs.complete == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # The key's only job: main's sign_release.sh hashes the archives and signs with the runner's OpenSSL.
@@ -242,6 +245,7 @@ jobs:
 
   publish:
     needs: [pick, build, sign]
+    if: ${{ !cancelled() && needs.build.outputs.complete == 'true' && needs.sign.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:

@@ -39,6 +39,10 @@ on:
         description: Sign the macOS programs with Developer ID and notarize the zip (the runner's keychain)
         type: boolean
         default: true
+    outputs:
+      complete:
+        description: '"true" once every required leg built (legs); an optional leg that failed, timed out or was cancelled is left out'
+        value: ${{ jobs.legs.outputs.complete }}
 permissions:
   contents: read
 jobs:
@@ -137,6 +141,8 @@ jobs:
     # Windows ARM64 and musl stay optional. Snapshots also leave Intel macOS optional: only the SDK's
     # platforms are required there. Nightlies and releases retain their existing Intel macOS requirement.
     # Optional failed legs still run; signing omits their absent archives, and snapshot notes name them.
+    # continue-on-error covers a failure only: a leg that times out or is cancelled ends `cancelled`, and so does
+    # this job's result. The legs job below decides from the legs that finished, so callers wait on it instead.
     continue-on-error: ${{ (github.repository == 'sunrise-org/sunrise' && matrix.mac == true) || matrix.name == 'windows-arm64' || matrix.name == 'linux-musl' || (inputs.kind == 'snapshot' && matrix.name == 'macos-x64') }}
     strategy:
       fail-fast: false
@@ -468,14 +474,59 @@ jobs:
           path: dist/${{ matrix.server_asset }}
           if-no-files-found: error
           retention-days: 3
+      # The leg's last step: legs below counts a leg as built only once this marker exists.
+      - name: This leg built
+        run: echo built > "$RUNNER_TEMP/leg-${{ matrix.name }}"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: leg-${{ matrix.name }}
+          path: ${{ runner.temp }}/leg-${{ matrix.name }}
+          if-no-files-found: error
+          retention-days: 3
       - name: The signing keychain, locked again
         if: always() && runner.os == 'macOS' && vars.MACOS_SIGN_IDENTITY != '' && inputs.developer_id
         run: packaging/macos/keychain.sh lock
 
+  # Whether the build is complete: every required leg left its marker. An optional leg (build's continue-on-error)
+  # that failed, timed out or was cancelled drops out alike; a cancelled run stops here.
+  legs:
+    needs: build
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      complete: ${{ steps.decide.outputs.complete }}
+    steps:
+      - uses: actions/download-artifact@v8
+        # No marker at all (every leg failed) is the next step's to report.
+        continue-on-error: true
+        with:
+          pattern: leg-*
+          path: legs
+      - name: Every required leg built
+        id: decide
+        env:
+          REPOSITORY: ${{ github.repository }}
+          KIND: ${{ inputs.kind }}
+        run: |
+          # The legs build's continue-on-error does not make optional.
+          required=(linux windows)
+          if [[ "$REPOSITORY" != sunrise-org/sunrise ]]; then
+            required+=(macos)
+            [[ "$KIND" == snapshot ]] || required+=(macos-x64)
+          fi
+          missing=()
+          for leg in "${required[@]}"; do [[ -d "legs/leg-$leg" ]] || missing+=("$leg"); done
+          for leg in linux linux-musl windows windows-arm64 macos macos-x64; do
+            [[ -d "legs/leg-$leg" ]] || echo "::warning::build $leg did not finish"
+          done
+          if (( ${#missing[@]} )); then echo "::error::required legs did not build: ${missing[*]}"; exit 1; fi
+          echo complete=true >> "$GITHUB_OUTPUT"
+
   linux-smoke:
     name: smoke hosted Linux artifact
-    needs: [runner-configuration, build]
-    if: ${{ !inputs.trusted && vars.DYNA_CI_SELF_HOSTED == 'true' && vars.NIGHTLY_LINUX_RUNNER != '' }}
+    needs: [runner-configuration, legs]
+    if: ${{ !cancelled() && needs.legs.result == 'success' && !inputs.trusted && vars.DYNA_CI_SELF_HOSTED == 'true' && vars.NIGHTLY_LINUX_RUNNER != '' }}
     # Dyna supplies private resources, never the libc used to compile shipped binaries.
     runs-on: ${{ fromJSON(vars.NIGHTLY_LINUX_RUNNER || '"ubuntu-latest"') }}
     timeout-minutes: 20
