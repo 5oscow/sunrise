@@ -267,7 +267,10 @@ fn custom_data_component_recipes_decode_and_match() {
     assert!(matches("removed", &stack));
     assert!(!matches("empty", &stack));
     assert!(!matches("compound", &stack));
-    let absent = parse(r#"{"type":"neoforge:components","items":"minecraft:stone","components":{"!minecraft:custom_data":{}}}"#, &items);
+    let absent = parse(
+        r#"{"type":"neoforge:components","items":"minecraft:stone","components":{"!minecraft:custom_data":{}}}"#,
+        &items,
+    );
     assert!(absent.test_in(&context, &ItemStack::new("minecraft:stone", 1)));
     let patch = Tag::compound([("!minecraft:custom_data", Tag::Compound(Default::default()))]);
     (_, stack.extra) = crate::item_data::decode_components(Some(&patch));
@@ -405,5 +408,64 @@ fn custom_data_component_recipes_decode_and_match() {
         b.data_mut()
             .set_other(ID, Some(Tag::compound([("zero", negative)])));
         assert!(!sunrise_items::item_data::ingredient_components::component_equal(ID, &a, &b));
+    }
+}
+
+#[test]
+fn custom_data_refusals_name_the_component_and_keep_a_valid_sibling() {
+    use crate::crafting::Recipes;
+    let items = Items::empty();
+    let load = load();
+    let context = load.loop_context(LoopSide::Server, []);
+    let root = tempfile::tempdir().unwrap();
+    let valid = serde_json::json!({"type":"neoforge:components","items":"minecraft:stick","components":{"minecraft:custom_data":{"answer":42}}});
+    let predicate = Ingredient::parse(&valid, &items).unwrap();
+    for payload in [
+        Tag::End,
+        Tag::Byte(0),
+        Tag::List(vec![]),
+        Tag::String(sunrise_core::nbt::JavaString(vec![0xd800])),
+    ] {
+        let rule = IngredientRule::Components {
+            patch: [("minecraft:custom_data".into(), payload.clone())]
+                .into_iter()
+                .collect(),
+            removed: vec![],
+            strict: false,
+        };
+        let error = components::validate(&rule, &items).unwrap_err();
+        assert!(error.contains("minecraft:custom_data"), "{error}");
+        let patch = Tag::compound([("minecraft:custom_data", payload)]);
+        let (damage, extra) = crate::item_data::decode_components(Some(&patch));
+        let candidate = ItemStack {
+            item: "minecraft:stick".into(),
+            count: 1,
+            damage,
+            extra,
+        };
+        assert!(!predicate.test_in(&context, &candidate));
+    }
+    for (component, payload) in [
+        ("minecraft:custom_data", serde_json::Value::Null),
+        ("minecraft:custom_data", serde_json::json!([])),
+        ("fixture:unknown", serde_json::json!({})),
+    ] {
+        let malformed = serde_json::json!({"type":"neoforge:components","items":"minecraft:stick","components":{component:payload}});
+        let error = components::validate_recipe_components(&malformed, &items).unwrap_err();
+        assert!(error.contains(component), "{error}");
+        let recipe = |ingredient| serde_json::json!({"type":"minecraft:crafting_shapeless","ingredients":[ingredient],"result":{"id":"minecraft:diamond"}});
+        let recipes = Recipes::from_sources(
+            root.path(),
+            &items,
+            &sunrise_world::loot::PackOverlay::NONE,
+            vec![
+                ("valid".into(), recipe(valid.clone())),
+                ("bad".into(), recipe(malformed)),
+            ],
+            &load,
+        )
+        .unwrap();
+        assert!(recipes.recipe("valid").is_some());
+        assert!(recipes.recipe("bad").is_none());
     }
 }
