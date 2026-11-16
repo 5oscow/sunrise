@@ -48,6 +48,35 @@ impl<T: 'static> MenuStep<T> {
         }
     }
 
+    /// Run a loop without growing the stack between completed steps. A suspended step owns
+    /// the loop state and continues with the same body after its take is handled.
+    pub fn repeat<S: 'static>(
+        menu: &mut Menu,
+        env: &Env<'_>,
+        mut state: S,
+        mut body: impl FnMut(&mut Menu, &Env<'_>, S) -> MenuStep<std::ops::ControlFlow<T, S>> + 'static,
+    ) -> Self {
+        use std::ops::ControlFlow;
+        loop {
+            match body(menu, env, state) {
+                MenuStep::Done(ControlFlow::Continue(next)) => state = next,
+                MenuStep::Done(ControlFlow::Break(value)) => return Self::Done(value),
+                MenuStep::Take { event, resume } => {
+                    return Self::Take {
+                        event,
+                        resume: Box::new(move |menu, env| {
+                            resume(menu, env).then(menu, env, move |menu, env, result| match result
+                            {
+                                ControlFlow::Continue(next) => Self::repeat(menu, env, next, body),
+                                ControlFlow::Break(value) => Self::Done(value),
+                            })
+                        }),
+                    };
+                }
+            }
+        }
+    }
+
     /// Run a data-only operation with no external take effects. This is the synchronous
     /// menu API: it retains the original caller's environment for the whole operation.
     pub fn finish(mut self, menu: &mut Menu, env: &Env<'_>) -> T {

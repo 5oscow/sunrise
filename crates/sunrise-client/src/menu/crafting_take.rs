@@ -1,6 +1,11 @@
 //! Result-slot take handling, including pre-take revalidation and remainders.
 use super::*;
 impl Menu {
+    pub(super) fn mod_take_slot(&self, slot: usize) -> bool {
+        matches!(self.kind(), Kind::Mod(_))
+            && matches!(self.state.slots[slot].role, Role::Mod | Role::ModResult)
+    }
+
     pub(super) fn on_take_step(
         &mut self,
         env: &Env,

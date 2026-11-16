@@ -230,16 +230,21 @@ impl Menu {
             && env.can_equip.is_some_and(|parts| parts.listens(stack))
     }
     /// Cursor pickup/replacement uses one source scope, including its capacity check.
-    pub(super) fn pickup_equip_carried(&mut self, env: &Env, s: usize, primary: bool) -> bool {
+    pub(super) fn pickup_equip_carried_step(
+        &mut self,
+        env: &Env,
+        s: usize,
+        primary: bool,
+    ) -> MenuStep<bool> {
         let Some(carried) = self.state.carried.as_ref() else {
-            return false;
+            return MenuStep::Done(false);
         };
         if !self.observed_equipment_input(env, s, carried) {
-            return false;
+            return MenuStep::Done(false);
         }
         let clicked = self.slot(s).cloned();
         if clicked.is_some() && !self.may_pickup(env, s) {
-            return true;
+            return MenuStep::Done(true);
         }
         let location = carried as *const _ as usize as u64;
         let mut input = self.state.carried.take();
@@ -250,7 +255,7 @@ impl Menu {
             "minecraft:player",
         ) {
             self.state.carried = source.remove();
-            return true;
+            return MenuStep::Done(true);
         }
         let proof = self.equip_placement(env, s, &source);
         match clicked {
@@ -267,13 +272,24 @@ impl Menu {
                     let carried = source.remove();
                     self.state.carried = Some(clicked);
                     self.set_by_player(env, s, carried);
-                    return true;
+                    return MenuStep::Done(true);
                 }
             }
             Some(clicked) if !proof.allowed && clicked.same_item_same_components(&source) => {
                 let room = Self::max_stack(env, &source).saturating_sub(source.count);
                 if let Some(mut taken) = self.try_remove(env, s, clicked.count, room) {
                     *source.count_mut().expect("pickup source retained") += taken.count;
+                    if self.mod_take_slot(s) {
+                        // The equipment source is a local borrow, not an owned continuation.
+                        // A mod slot has no built-in onTake override; publish its cursor and
+                        // retire the source scope before returning control to the coordinator.
+                        self.state.carried = source.remove();
+                        tidy(&mut self.state.carried);
+                        drop(source);
+                        return self
+                            .on_take_step(env, s, taken)
+                            .then(self, env, |_, _, _| MenuStep::Done(true));
+                    }
                     self.on_take(env, s, &mut taken);
                 }
             }
@@ -281,19 +297,24 @@ impl Menu {
         }
         self.state.carried = source.remove();
         tidy(&mut self.state.carried);
-        true
+        MenuStep::Done(true)
     }
     /// Number-key swaps have the same source ownership and single predicate ask.
-    pub(super) fn swap_equip_source(&mut self, env: &Env, target: usize, inv_slot: usize) -> bool {
+    pub(super) fn swap_equip_source_step(
+        &mut self,
+        env: &Env,
+        target: usize,
+        inv_slot: usize,
+    ) -> MenuStep<bool> {
         let Some(stack) = self.state.containers[PLAYER][inv_slot].as_ref() else {
-            return false;
+            return MenuStep::Done(false);
         };
         if !self.observed_equipment_input(env, target, stack) {
-            return false;
+            return MenuStep::Done(false);
         }
         let taken = self.slot(target).cloned();
         if taken.is_some() && !self.may_pickup(env, target) {
-            return true;
+            return MenuStep::Done(true);
         }
         let location = stack as *const _ as usize as u64;
         let mut input = self.state.containers[PLAYER][inv_slot].take();
@@ -304,18 +325,31 @@ impl Menu {
             "minecraft:player",
         ) {
             self.state.containers[PLAYER][inv_slot] = source.remove();
-            return true;
+            return MenuStep::Done(true);
         }
         let proof = self.equip_placement(env, target, &source);
         if !proof.can_apply(self, env, &source) {
             self.state.containers[PLAYER][inv_slot] = source.remove();
-            return true;
+            return MenuStep::Done(true);
         }
         if source.count > proof.max {
             let part = source.split(proof.max);
             self.state.containers[PLAYER][inv_slot] = source.remove();
             self.set_by_player(env, target, Some(part));
             if let Some(mut taken) = taken {
+                if self.mod_take_slot(target) {
+                    drop(source);
+                    return self.on_take_step(env, target, taken).then(
+                        self,
+                        env,
+                        |menu, env, mut taken| {
+                            if !menu.inventory_add(env, &mut taken) {
+                                menu.drop_stack(&taken);
+                            }
+                            MenuStep::Done(true)
+                        },
+                    );
+                }
                 self.on_take(env, target, &mut taken);
                 if !self.inventory_add(env, &mut taken) {
                     self.drop_stack(&taken);
@@ -325,10 +359,16 @@ impl Menu {
             self.state.containers[PLAYER][inv_slot] = taken.clone();
             self.set_by_player(env, target, source.remove());
             if let Some(mut taken) = taken {
+                if self.mod_take_slot(target) {
+                    drop(source);
+                    return self
+                        .on_take_step(env, target, taken)
+                        .then(self, env, |_, _, _| MenuStep::Done(true));
+                }
                 self.on_take(env, target, &mut taken);
             }
         }
-        true
+        MenuStep::Done(true)
     }
 }
 

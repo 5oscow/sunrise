@@ -9,7 +9,7 @@
 //! differs between runs of the game, and decides which of several fitting
 //! items fills an ingredient. `Stacked` keeps an explicit order: the order
 //! items were first counted, or one given (the harness passes the oracle's).
-use super::{Env, GRID, Kind, MAIN, Menu, PLAYER, RESULT, split, tidy};
+use super::{Env, GRID, Kind, MAIN, Menu, MenuStep, PLAYER, RESULT, split, tidy};
 use crate::{
     crafting::{Ingredient, Placement},
     items::ItemStack,
@@ -193,13 +193,13 @@ impl Menu {
     /// their `onQuickCraft` already saw the original). A
     /// crafting result reports the copy it takes (which Item.onCraftedBy may still change)
     /// minus what stayed behind: `ResultSlot.onQuickCraft` counts only the items that moved.
-    pub(super) fn take_after_quick_move(
+    pub(super) fn take_after_quick_move_step(
         &mut self,
         env: &Env,
         index: usize,
-        clicked: &mut ItemStack,
-        stack: &mut ItemStack,
-    ) {
+        mut clicked: ItemStack,
+        stack: ItemStack,
+    ) -> MenuStep<(ItemStack, ItemStack)> {
         let role = self.slots[index].role;
         let rest = matches!(
             role,
@@ -217,7 +217,11 @@ impl Menu {
                 let inputs = [0, 1, 2].map(|i| self.containers[super::MAIN][i].clone());
                 self.item_smithed.push((inputs, clicked.clone()));
             }
-            return self.on_take(env, index, stack);
+            return self
+                .on_take_step(env, index, stack)
+                .then(self, env, move |_, _, stack| {
+                    MenuStep::Done((clicked, stack))
+                });
         }
         let left = if self.slots[index].role == super::Role::CraftResult {
             stack.count
@@ -225,8 +229,11 @@ impl Menu {
             0
         };
         clicked.count -= left;
-        self.on_take(env, index, clicked);
-        clicked.count += left;
+        self.on_take_step(env, index, clicked)
+            .then(self, env, move |_, _, mut clicked| {
+                clicked.count += left;
+                MenuStep::Done((clicked, stack))
+            })
     }
 
     fn place_grid(&self) -> Option<Grid> {
