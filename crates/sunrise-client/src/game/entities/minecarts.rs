@@ -1960,7 +1960,7 @@ impl Game<'_> {
             for (j, attachment, offset) in seats {
                 let m = &mut self.mobs[j];
                 m.seated(id, attachment, cart_box);
-                m.position = cart_seat(pos, offset);
+                sunrise_client::mobs::living::teleports::set_pos(m, cart_seat(pos, offset));
                 m.previous = cart_seat(prev, offset);
                 m.velocity = Vec3::ZERO;
                 m.fall_distance = 0.0;

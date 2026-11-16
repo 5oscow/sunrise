@@ -1510,8 +1510,7 @@ impl Game<'_> {
                     if !m.extra.fall_flying {
                         m.on_ground = true;
                     }
-                    m.position = v;
-                    m.previous = v;
+                    sunrise_client::mobs::living::teleports::snap_to(m, v);
                     m.needs_sync = true;
                     // Entity.teleportSetPosition: setYRot, setYHeadRot, setXRot
                     // (clamped to -90..90), then setOldRot.
