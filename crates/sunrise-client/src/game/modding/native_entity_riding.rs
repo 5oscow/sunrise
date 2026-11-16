@@ -1519,7 +1519,7 @@ mod tests {
                 assert!(game.dropped.is_empty());
                 assert_eq!(*unleashed.lock().unwrap(), 0);
 
-                assert!(cow.start_riding(game, vehicle, true).is_ok());
+                assert_eq!(cow.start_riding(game, vehicle, true), Ok(()));
                 assert_eq!(cow.vehicle(game), Some(vehicle));
                 assert_eq!(
                     cow.leash_holder(game),
