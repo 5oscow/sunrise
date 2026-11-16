@@ -509,6 +509,8 @@ pub struct Items {
     /// Fluid tags in the same order.
     pub fluid_tag_order: HashMap<String, Vec<String>>,
     loot: Arc<sunrise_world::loot::LootTables>,
+    loot_types: sunrise_world::loot::types::Types,
+    loot_modifiers: HashMap<String, Value>,
     global_modifiers: Arc<sunrise_world::loot::global_modifiers::GlobalLootModifiers>,
     /// `Registries.PREDICATE`: what a table's string condition names, which a
     /// pack replaces or adds to (`LootItemCondition.CODEC`).
@@ -1131,8 +1133,11 @@ impl Items {
         // gameplay/chicken_lay, shearing/sheep/red...), of every namespace
         // (content mods' tables, docs/modpacks.md), with the packs' over the
         // game's own: one map with the loot data of the same root and packs.
-        let loot = sunrise_world::loot::shared_tables(root, overlay)?;
-        let predicates = sunrise_world::loot::load_predicates(root, overlay)?;
+        let loot_data = sunrise_world::loot::LootData::load(root, overlay, defaults)?;
+        let loot = loot_data.tables().clone();
+        let predicates = loot_data.predicates().clone();
+        let loot_modifiers = loot_data.modifiers().clone();
+        let loot_types = loot_data.types().clone();
         let registry_order = registry_order(root, &order);
         let enchantments = Arc::new(crate::enchant::Enchantments::load_with(
             root, overlay, defaults,
@@ -1156,8 +1161,10 @@ impl Items {
             block_tag_order: load_tag_lists(root, "block", overlay)?,
             fluid_tag_order: load_tag_lists(root, "fluid", overlay)?,
             loot,
+            loot_types,
+            loot_modifiers,
             global_modifiers: Arc::default(),
-            predicates: Arc::new(predicates),
+            predicates,
             songs: load_songs(root, overlay),
             instruments: load_instruments(root, overlay),
             enchantments,
@@ -1166,6 +1173,8 @@ impl Items {
     /// Bind tables, predicates and prepared instances from the same candidate.
     pub fn set_loot_data(&mut self, data: &sunrise_world::loot::LootData) {
         self.loot = data.tables().clone();
+        self.loot_types = data.types().clone();
+        self.loot_modifiers = data.modifiers().clone();
         self.predicates = data.predicates().clone();
         self.global_modifiers = data.global_modifiers().clone();
     }
@@ -1229,6 +1238,8 @@ impl Items {
             block_tag_order: HashMap::new(),
             fluid_tag_order: HashMap::new(),
             loot: Default::default(),
+            loot_types: sunrise_world::loot::types::Types::default(),
+            loot_modifiers: Default::default(),
             global_modifiers: Arc::default(),
             predicates: Default::default(),
             songs: HashMap::new(),
@@ -2191,12 +2202,17 @@ impl<R: RandomSource> LootContext<'_, R> {
                 .unwrap_or(true),
             // A mod's own kind: the condition hook answers.
             k if !c.is_null() && k.contains(':') && !k.starts_with("minecraft:") => {
-                let ctx = self.native_loot_context(random);
-                let mut holds = false;
-                sunrise_world::loot::native_invoke_loot_condition(
-                    k, c, &ctx, &mut holds, self.items,
-                );
-                holds
+                if !self.items.loot_types.contains(k, false) {
+                    return false;
+                }
+                let ctx = self.roll_facts(0);
+                match self.items.loot_types.test(k, c, &ctx, random, self.items) {
+                    Ok(holds) => holds,
+                    Err(reason) => {
+                        log::warn!("loot condition type {k}: {reason}");
+                        false
+                    }
+                }
             }
             _ => false,
         }
@@ -2365,13 +2381,29 @@ impl<R: RandomSource> LootContext<'_, R> {
         let list: Vec<&Value> = match m {
             Value::Array(a) => a.iter().collect(),
             Value::Object(_) => vec![m],
+            Value::String(id) => {
+                if let Some(modifier) = self.items.loot_modifiers.get(id) {
+                    self.modifiers(modifier, stack, random);
+                }
+                return;
+            }
             _ => return,
         };
         for f in list {
-            if !self.conditions(f, random) {
+            if self
+                .items
+                .loot_types
+                .conditional(f["type"].as_str().unwrap_or(""))
+                && !self.conditions(f, random)
+            {
                 continue;
             }
             match f["type"].as_str().or(f["function"].as_str()).unwrap_or("") {
+                "minecraft:sequence" if self.has_registered_function(f) => {
+                    for function in f["functions"].as_array().into_iter().flatten() {
+                        self.modifiers(function, stack, random);
+                    }
+                }
                 "minecraft:set_count" => {
                     let n = Self::int_number(&f["count"], random);
                     let base = if f["add"].as_bool() == Some(true) {
@@ -2569,12 +2601,28 @@ impl<R: RandomSource> LootContext<'_, R> {
                 // A mod's own kind: the function hook changes the stack, as it
                 // does in the main loot engine.
                 k if k.contains(':') && !k.starts_with("minecraft:") => {
-                    let ctx = self.native_loot_context(random);
-                    mod_function(k, f, &ctx, self.items, stack, |kind, data, ctx, stack| {
-                        sunrise_world::loot::native_invoke_loot_function(
-                            kind, data, ctx, stack, self.items,
-                        );
-                    });
+                    if !self.items.loot_types.contains(k, true) {
+                        continue;
+                    }
+                    let ctx = self.roll_facts(0);
+                    mod_function(
+                        k,
+                        f,
+                        &ctx,
+                        self.items,
+                        stack,
+                        |kind, data, ctx, stack| match self.items.loot_types.apply(
+                            kind,
+                            data,
+                            ctx,
+                            random,
+                            self.items,
+                            stack.clone(),
+                        ) {
+                            Ok(candidate) => *stack = candidate,
+                            Err(reason) => log::warn!("loot function type {kind}: {reason}"),
+                        },
+                    );
                 }
                 _ => {}
             }

@@ -153,6 +153,7 @@ pub fn start<G>(
     // Mod loading emits refusals; both client and dedicated logs must exist first.
     let (_ids, _loaded_code) = load(&native, &launch);
     crash::install(home.clone(), side);
+    let _ = sunrise_world::loot::types::install(crate::game::loot_types::capture);
     if sunrise_world::native_load_hooks::install(
         sunrise_world::native_load_hooks::NativeLoadHooks {
             item_ability_default: sunrise_items::item_abilities::vanilla_can_perform,

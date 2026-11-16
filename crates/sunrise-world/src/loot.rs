@@ -14,6 +14,8 @@ pub mod query;
 #[path = "loot_query.rs"]
 mod query_context;
 mod root;
+#[path = "loot_types.rs"]
+pub mod types;
 pub use fill::ContainerLootContext;
 #[path = "loot/tags.rs"]
 mod loot_tags;
@@ -339,6 +341,7 @@ mod holder_sets;
 /// Loot tables, items, enchantments and the tags they reference.
 pub struct LootData {
     holder_sets: holder_sets::Binding,
+    types: types::Types,
     tables: Arc<LootTables>,
     global_modifiers: Arc<global_modifiers::GlobalLootModifiers>,
     modifiers: HashMap<String, Value>,
@@ -739,9 +742,7 @@ pub fn shared_tables(root: &Path, overlay: &PackOverlay) -> io::Result<Arc<LootT
     if let Some(tables) = held(&mut LOADED.lock().unwrap_or_else(|e| e.into_inner())) {
         return Ok(tables);
     }
-    let mut tables = HashMap::new();
-    load_kind(&root.join("data"), "loot_table", &mut tables)?;
-    overlay_map(overlay, "loot_table", &mut tables);
+    let tables = types::load_files(root, overlay, "loot_table")?;
     let tables: LootTables = tables.into_iter().collect();
     let mut loaded = LOADED.lock().unwrap_or_else(|e| e.into_inner());
     // Another thread may have loaded the same tables meanwhile: keep one.
@@ -789,9 +790,7 @@ impl LootData {
     ) -> io::Result<Self> {
         let all = root.join("data");
         let tables = shared_tables(root, overlay)?;
-        let mut modifiers = HashMap::new();
-        load_kind(&all, "item_modifier", &mut modifiers)?;
-        overlay_map(overlay, "item_modifier", &mut modifiers);
+        let modifiers = types::load_files(root, overlay, "item_modifier")?;
         let predicates = load_predicates(root, overlay)?;
         let items = defaults
             .entries()
@@ -849,6 +848,8 @@ impl LootData {
             "instrument",
             "entity_type",
             "damage_type",
+            "predicate",
+            "item_modifier",
             // What `location_check`'s `biomes` names.
             "worldgen/biome",
         ] {
@@ -889,6 +890,7 @@ impl LootData {
         let binding = holder_sets::Binding::load(root, overlay, &items, &enchantments)?;
         let mut loaded = Self {
             holder_sets: Default::default(),
+            types: types::Types::capture(),
             tables,
             global_modifiers: Arc::default(),
             modifiers,
@@ -900,6 +902,7 @@ impl LootData {
         };
         binding.snapshot(&mut loaded)?;
         loaded.holder_sets = binding;
+        loaded.prepare_types()?;
         Ok(loaded)
     }
     /// Attach prepared instances to this private, not-yet-published snapshot.
@@ -939,6 +942,7 @@ impl LootData {
                 })
                 .collect::<io::Result<LootTables>>()?,
         );
+        self.prepare_types()?;
         Ok(())
     }
 
@@ -1466,10 +1470,7 @@ impl<R: RandomSource> Context<'_, R> {
                 // A mod's own kind: the hook answers; a bare type name is
                 // minecraft's own and an unknown one fails.
                 k if k.contains(':') && !k.starts_with("minecraft:") => {
-                    let mut holds = false;
-                    let tags = self.data;
-                    native_invoke_loot_condition(k, c, &self.native_ctx(), &mut holds, tags);
-                    holds
+                    self.registered_condition(k, c)
                 }
                 // An unknown type fails, as in items.rs `condition`.
                 _ => false,
@@ -1488,7 +1489,13 @@ impl<R: RandomSource> Context<'_, R> {
                 None => stack,
             },
             Value::Object(_) => {
-                if !m["condition"].is_null() && !self.condition(&m["condition"]) {
+                if self
+                    .data
+                    .types
+                    .conditional(m["type"].as_str().unwrap_or(""))
+                    && !m["condition"].is_null()
+                    && !self.condition(&m["condition"])
+                {
                     return stack;
                 }
                 self.run(m, stack)
@@ -1970,8 +1977,7 @@ impl<R: RandomSource> Context<'_, R> {
             }
             // A mod's own kind: the hook changes the stack.
             k if k.contains(':') && !k.starts_with("minecraft:") => {
-                let tags = self.data;
-                native_invoke_loot_function(k, f, &self.native_ctx(), &mut stack, tags);
+                stack = self.registered_function(k, f, stack);
             }
             // Lore and other data without random draws.
             _ => {}

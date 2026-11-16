@@ -1,6 +1,28 @@
 use super::*;
 
 impl<R: RandomSource> LootContext<'_, R> {
+    /// Extend sequence evaluation only for a subtree containing a registered type.
+    pub(super) fn has_registered_function(&self, value: &Value) -> bool {
+        match value {
+            Value::String(id) => self
+                .items
+                .loot_modifiers
+                .get(id)
+                .is_some_and(|value| self.has_registered_function(value)),
+            Value::Array(values) => values
+                .iter()
+                .any(|value| self.has_registered_function(value)),
+            Value::Object(_) => {
+                self.items
+                    .loot_types
+                    .contains(value["type"].as_str().unwrap_or(""), true)
+                    || value
+                        .get("functions")
+                        .is_some_and(|value| self.has_registered_function(value))
+            }
+            _ => false,
+        }
+    }
     pub(super) fn stock_condition(&self, c: &Value) -> Option<bool> {
         if !matches!(
             c["type"].as_str(),
@@ -88,13 +110,14 @@ impl<R: RandomSource> LootContext<'_, R> {
     /// the tool it has, and a seed from the roll's random. The entity, the
     /// damage, the player and the biome belong to the main loot engine's
     /// rolls; they are None here (docs/modding/src/how-to/native-mods.md).
+    #[cfg(test)]
     pub(super) fn native_loot_context(
         &self,
         random: &mut R,
     ) -> sunrise_world::loot::LootContext<'_> {
         self.roll_facts(random.next_long())
     }
-    fn roll_facts(&self, seed: i64) -> sunrise_world::loot::LootContext<'_> {
+    pub(super) fn roll_facts(&self, seed: i64) -> sunrise_world::loot::LootContext<'_> {
         sunrise_world::loot::LootContext {
             queried_table_id: self.query.id(),
             queried_stack: self.query.queried_stack.clone(),
