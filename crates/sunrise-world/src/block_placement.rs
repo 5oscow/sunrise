@@ -3,7 +3,6 @@ use crate::{
     block_properties::{BlockPropertiesRegistry, BlockProperty, BoundBlockProperty},
     compression::invalid,
     fluid::FluidStateTable,
-    level::classes::Class,
     registry::{BlockRegistry, BlockStateId},
     worldgen::{
         feature::FeatureWorld,
@@ -84,36 +83,15 @@ pub struct BlockPlacement {
     moss_default: BlockStateId,
 }
 impl<'r> BlockPlacementBindings<'r> {
-    /// Bind placement from the registered `block-behaviours.json` class chains,
-    /// including inherited classes, rather than a fixed vanilla block list.
     pub fn new(
         registry: &'r BlockRegistry,
         properties: &BlockPropertiesRegistry<'r>,
-        behaviours: &serde_json::Value,
+        double_plants: &BTreeSet<String>,
         mossy_carpets: &BTreeSet<String>,
     ) -> io::Result<Self> {
         if !std::ptr::eq(registry, properties.registry()) {
             return Err(invalid("placement properties use another registry"));
         }
-        // Use the same Java class chain as gameplay, including inherited
-        // DoublePlantBlock behaviour on registered mod blocks.
-        #[derive(serde::Deserialize)]
-        struct BlockClasses {
-            name: String,
-            class: Vec<String>,
-        }
-        let blocks: Vec<BlockClasses> = serde_json::from_value(behaviours["blocks"].clone())
-            .map_err(|error| invalid(format!("placement block classes: {error}")))?;
-        let double_plants: BTreeSet<_> = blocks
-            .into_iter()
-            .filter(|block| {
-                block
-                    .class
-                    .iter()
-                    .any(|name| Class::from_java(name) == Some(Class::DoublePlant))
-            })
-            .map(|block| block.name)
-            .collect();
         for name in double_plants.iter().chain(mossy_carpets) {
             if registry.default_state(name).is_none() {
                 return Err(invalid("unknown placement definition"));

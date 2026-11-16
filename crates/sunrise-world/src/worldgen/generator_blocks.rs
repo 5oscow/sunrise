@@ -23,7 +23,7 @@ pub(super) struct BlockBehavior {
     pub(super) support: Arc<BlockSupportRegistry<'static>>,
     pub(super) collision: Arc<BlockCollisionRegistry<'static>>,
     pub(super) survival: BlockSurvivalRegistry<'static>,
-    pub(super) behaviours: Value,
+    pub(super) double_plants: BTreeSet<String>,
     pub(super) mossy_carpets: BTreeSet<String>,
 }
 fn resource(message: impl Into<String>) -> GeneratorError {
@@ -88,10 +88,33 @@ fn rule(name: &str) -> Option<SurvivalRule> {
         _ => return None,
     })
 }
+/// Decode placement classes at the resource boundary. Mod registration copies
+/// the template's class chain into the resolved block-behaviour table.
+pub(super) fn double_plant_blocks(behaviours: &Value) -> Result<BTreeSet<String>, GeneratorError> {
+    #[derive(serde::Deserialize)]
+    struct BlockClasses {
+        name: String,
+        class: Vec<String>,
+    }
+    use crate::level::classes::Class;
+    let blocks: Vec<BlockClasses> = serde_json::from_value(behaviours["blocks"].clone())?;
+    Ok(blocks
+        .into_iter()
+        .filter(|block| {
+            block
+                .class
+                .iter()
+                .any(|name| Class::from_java(name) == Some(Class::DoublePlant))
+        })
+        .map(|block| block.name)
+        .collect())
+}
 impl BlockBehavior {
     /// Files: `block-properties.nbt`, `cached-collision.nbt`,
     /// `cached-support.nbt`, `survival-rules.json`,
     /// `survival-extra-definitions.json` and `placement-definitions.json`.
+    /// The resolved resource root above `worldgen/blocks` supplies
+    /// `block-behaviours.json`, including registered mod blocks.
     pub(super) fn load(
         dir: &Path,
         registry: &'static BlockRegistry,
@@ -156,11 +179,16 @@ impl BlockBehavior {
             fluid_tags,
         )?;
         let placement = json("placement-definitions.json")?;
-        // Placement needs only the registered class chains, not per-state facts.
-        let behaviours = json("block-behaviours.json")?;
-        let behaviours = serde_json::json!({"blocks": behaviours["blocks"]});
+        // `dir` is <resolved resources>/worldgen/blocks. Class chains live
+        // at that resolved root, where mod registration merges its blocks.
+        let root = dir
+            .parent()
+            .and_then(Path::parent)
+            .ok_or_else(|| resource("missing worldgen resource root"))?;
+        let behaviours: Value =
+            serde_json::from_str(&fs::read_to_string(root.join("block-behaviours.json"))?)?;
         Ok(Some(Self {
-            behaviours,
+            double_plants: double_plant_blocks(&behaviours)?,
             mossy_carpets: serde_json::from_value(placement["mossy_carpets"].clone())?,
             properties,
             support,

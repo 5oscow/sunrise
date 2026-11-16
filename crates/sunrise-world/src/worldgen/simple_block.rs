@@ -247,10 +247,13 @@ mod tests {
 
         let behaviours = serde_json::json!({"blocks":[
             {"name":"example:wild_crop", "class":["WildCropBlock", "DoublePlantBlock", "Block"]},
-            {"name":"minecraft:tall_grass", "class":["TallGrassBlock", "DoublePlantBlock", "Block"]}
+            {"name":"minecraft:tall_grass", "class":["TallGrassBlock", "DoublePlantBlock", "Block"]},
+            {"name":"minecraft:stone", "class":["Block"]}
         ]});
+        let double_plants =
+            super::super::generator_blocks::double_plant_blocks(&behaviours).unwrap();
         let placement =
-            BlockPlacementBindings::new(&registry, &properties, &behaviours, &BTreeSet::new())
+            BlockPlacementBindings::new(&registry, &properties, &double_plants, &BTreeSet::new())
                 .unwrap();
         let providers =
             StateProviderBindings::new(&registry, BTreeSet::new(), &BTreeMap::new()).unwrap();
