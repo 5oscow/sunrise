@@ -230,9 +230,16 @@ impl Game<'_> {
         );
         let block = [feet.x, feet.y, feet.z].map(|c| c.floor() as i32);
         for layer in layers.iter() {
-            self.guarded_entity_draw(&layer.failed, partial, block, pose, light, out, |draw| {
-                layer.inner.submit(&entity, parts, draw)
-            });
+            self.guarded_entity_draw(
+                &layer.failed,
+                partial,
+                &mob.kind.id,
+                block,
+                pose,
+                light,
+                out,
+                |draw| layer.inner.submit(&entity, parts, draw),
+            );
         }
     }
 }

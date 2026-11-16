@@ -242,7 +242,8 @@ impl Game<'_> {
     /// `client_entities_in`. The walk
     /// is in entity-list order followed by players; each overlap requires a
     /// handle lookup, so cost grows with the box's contents. Tridents cannot
-    /// yet resolve; frames, paintings and other special entities
+    /// yet resolve; displays, markers and interactions follow the listed entities.
+    /// Frames, paintings and other special entities
     /// are not on the entity-list walk. The dragon follows ordinary entities;
     /// its eight intersecting parts follow players (`Level.getEntities`).
     /// During `hears_projectile_impacts`, the projectile list is taken out of
@@ -268,6 +269,15 @@ impl Game<'_> {
         }
         let mut ids = self.listed_entities_in(bounds);
         self.append_dragon_query_ids(bounds, false, &mut ids);
+        ids.extend(
+            self.others
+                .iter()
+                .filter(|e| {
+                    e.display_marker_or_interaction_bounds()
+                        .is_some_and(|body| bounds.intersects(body))
+                })
+                .map(|e| e.id),
+        );
         ids.extend(
             self.fishing_hooks_here()
                 .filter(|(hook, _)| bounds.intersects(hook.bounds()))
@@ -441,6 +451,24 @@ impl Game<'_> {
             return Ok(false);
         }
         Ok(self.native_set_block(level.dimension_id(), pos, state, flags.bits()))
+    }
+    /// `Block.updateFromNeighbourShapes` for `state` at `pos`, nothing written: the state
+    /// fitted to the loaded blocks around it. A position that is not loaded or outside the
+    /// world gives `state` back.
+    pub(super) fn level_update_from_neighbour_shapes(
+        &mut self,
+        level: LevelRef,
+        pos: [i32; 3],
+        state: BlockStateId,
+    ) -> Result<BlockStateId, mod_api::LevelWriteError> {
+        if !self.native_level_write_position(level, pos)? {
+            return Ok(state);
+        }
+        let at = sunrise_core::position::BlockPos::new(pos[0], pos[1], pos[2]);
+        let fitted = self
+            .with_level(|b, level, ticks| b.update_from_neighbour_shapes(level, ticks, at, state));
+        let _ = self.process_level_events();
+        Ok(fitted)
     }
     /// Remove a block in place (`Level.removeBlock`), preserving its fluid.
     pub(super) fn level_remove_block(
@@ -718,8 +746,9 @@ impl Game<'_> {
     }
 
     /// Clip an empty-context ray against collider or outline shapes, without fluids, in the
-    /// world `native_level_view_world` reads. None on failed reads, dynamic shapes, invalid
-    /// rays or traversal limits.
+    /// world `native_level_view_world` reads. None on failed reads, dynamic shapes (unless
+    /// the block's entity published its shapes, which stand over them), invalid rays or
+    /// traversal limits.
     pub(super) fn level_clip(
         &self,
         level: LevelRef,

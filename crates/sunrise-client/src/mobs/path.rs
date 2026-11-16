@@ -82,9 +82,10 @@ impl MobWorld<'_> {
                     if let Some(adjacent) = adjacent {
                         return adjacent;
                     }
-                    // A declined block answer keeps this neighbour's fluid
-                    // contribution before the vanilla type mappings.
-                    if matches!(facts.fluid, Fluid::Water | Fluid::Modded) {
+                    // Custom fluids retain their default neighbour contribution.
+                    // Vanilla water contributes through its classified path type:
+                    // a solid waterlogged block is BLOCKED, not WATER.
+                    if facts.fluid == Fluid::Modded {
                         return PathType::WaterBorder;
                     }
                     if let Some(adjacent) = data::vanilla_adjacent(own) {
@@ -100,7 +101,26 @@ impl MobWorld<'_> {
     /// the same block instead of overflowing (#4443).
     pub fn floor_level(&self, x: i32, y: i32, z: i32) -> f64 {
         let below = y.saturating_sub(1);
-        f64::from(below) + f64::from(self.data.state(self.world.block(x, below, z)).top)
+        f64::from(below) + self.collision_top(x, below, z)
+    }
+    /// The block's collision top (0 for an empty shape), as `getFloorLevel` and
+    /// `MoveControl.tick` read it: for a state that takes its shapes from its block entity,
+    /// the published collision shape's, else the state's own (#1666).
+    pub fn collision_top(&self, x: i32, y: i32, z: i32) -> f64 {
+        let state = self.world.block(x, y, z);
+        if !self.collision.publishes_shapes(state) {
+            return f64::from(self.data.state(state).top);
+        }
+        let mut scene = crate::collisions::SceneCollisions {
+            world: self.world,
+            binding: self.collision,
+            subject: None,
+        };
+        self.collision
+            .collision_shape(&mut scene, state, [x, y, z])
+            .ok()
+            .filter(|shape| !shape.is_empty())
+            .map_or(0.0, |shape| shape.max(sunrise_core::geometry::Axis::Y))
     }
 }
 
@@ -436,9 +456,6 @@ impl<'a, 'w> Finder<'a, 'w> {
         self.path_type(x, y, z)
     }
     // --- world access -------------------------------------------------
-    fn state(&self, x: i32, y: i32, z: i32) -> data::StateData {
-        self.w.data.state(self.w.world.block(x, y, z))
-    }
     fn pathfindable(&self, x: i32, y: i32, z: i32, kind: PathComputationType) -> bool {
         self.w.data.pathfindable(self.w.world.block(x, y, z), kind)
     }
@@ -453,8 +470,7 @@ impl<'a, 'w> Finder<'a, 'w> {
     }
     /// WalkNodeEvaluator.getFloorLevel(level, pos).
     pub fn static_floor(&self, x: i32, y: i32, z: i32) -> f64 {
-        let below = y.saturating_sub(1);
-        f64::from(below) + f64::from(self.state(x, below, z).top)
+        self.w.floor_level(x, y, z)
     }
     fn floor_level(&self, x: i32, y: i32, z: i32) -> f64 {
         let amphibious = matches!(self.eval, Evaluator::Amphibious { .. });

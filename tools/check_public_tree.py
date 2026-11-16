@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reject local game artifacts even when somebody uses git add -f."""
+"""Reject local game artifacts and removed commercial features even when somebody uses git add -f."""
 
 import argparse
 import collections
@@ -30,6 +30,35 @@ RETIRED_TABLES = {"crates/sunrise-world/src/datafix/flat_tables.rs",
 # ItemStackTheFlatteningFix's `id.damage` keys, and BlockStateData's `id<TAB>name<TAB>` rows (raw or JSON-escaped).
 TABLE_FINGERPRINTS = [r"minecraft:[a-z_]+\.[0-9]+", "[0-9]+(\t|\\\\t)minecraft:[a-z_]+(\t|\\\\t)"]
 TABLE_ENTRIES = 50
+
+# Commercial features #1473 removed from this fork. A sync from a tree that still
+# has them must not bring the paths back. Checked on the current tree only, not
+# on --history/--range/--pre-push: the files remain in git history from before
+# the removal, and main's history scan would otherwise fail.
+REMOVED_COMMERCIAL_PREFIXES = (
+    "crates/sunrise-cosmetics",
+    "crates/sunrise-official-servers",
+    "launcher/src/partner",
+    "launcher/src/shop",
+    "launcher/src/wardrobe",
+    "launcher/src/wardrobe_page",
+)
+REMOVED_COMMERCIAL_ASSETS = "launcher/assets/sculk-"
+
+
+def commercial(path):
+    """True when `path` is a removed commercial crate, launcher page, or sculk ad asset."""
+    if path.startswith(REMOVED_COMMERCIAL_ASSETS):
+        return True
+    parsed = PurePosixPath(path)
+    for prefix in REMOVED_COMMERCIAL_PREFIXES:
+        if path == prefix or path.startswith(prefix + "/"):
+            return True
+        parent = PurePosixPath(prefix)
+        # partner.rs besides a partner/ folder, and the same for shop, wardrobe, wardrobe_page.
+        if parsed.parent == parent.parent and parsed.stem == parent.name:
+            return True
+    return False
 
 
 def prohibited(path):
@@ -103,12 +132,20 @@ def main():
                  else ["HEAD"] if args.history else None)
     history = args.history or args.pre_push or bool(args.range)
     # Millions of entries in a long history repeat a few thousand paths: judge each path once.
-    rejected = sorted(path for path in set(paths_in_repository(history, revisions)) if path and prohibited(path))
+    tracked = set(paths_in_repository(history, revisions))
+    rejected = sorted(path for path in tracked if path and prohibited(path))
     tables = [] if history else sorted(copied_tables())
+    # The current tree only: history still contains the pre-removal paths.
+    brought_back = [] if history else sorted(path for path in tracked if path and commercial(path))
     if tables:
         print("Vanilla's data fixer tables come from the player's jar (sunrise-prepare), not from Git:",
               file=sys.stderr)
         for path in tables:
+            print(f"  {path}", file=sys.stderr)
+        return 1
+    if brought_back:
+        print("Removed commercial features must not come back:", file=sys.stderr)
+        for path in brought_back:
             print(f"  {path}", file=sys.stderr)
         return 1
     if rejected:

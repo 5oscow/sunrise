@@ -331,6 +331,12 @@ render solidity, occlusion or lighting. Both take the same table format. Boxes a
 `[minX,minY,minZ,maxX,maxY,maxZ]` in block units (one block is 1), any number per shape, as in vanilla.
 Coordinates must be finite and each minimum must not exceed its maximum. `[]` is an empty shape.
 
+A declared shape also decides the block's legacy solid bit (`BlockState.isSolid`, which attachment
+survival such as wall signs and torches reads): it is calculated from `collision_shapes`, else from
+`shapes`, as vanilla does for any block (bounding-box average size at least 0.7291666666666666, or at least a block tall). A
+template that forces solidity on or off keeps its answer, and a block that declares no shape keeps the
+template's. This is not render solidity and not sturdy-face support.
+
 ```json
 {
   "template": "minecraft:stone",
@@ -411,7 +417,9 @@ the first publish.
 This differs from NeoForge, where `getShape` is asked for on every query: here a shape is
 **published when it changes, not asked for per query**, and a port of a `getShape` override calls
 `set_shapes` wherever that state changes (a part attached, a lid opened). Physics, selection,
-ray casts and support read the published value at the position; nothing calls into the mod.
+ray casts (outline and collider, over a dynamic template's shape too), support, the floor a
+mob's path stands on and its move control's jump read the published value at the position;
+nothing calls into the mod.
 Face sturdiness and multiface attachment between neighbouring blocks (placement, survival,
 shape updates, as for lichen and sculk veins) still read the declared shape until #1654.
 Shapes that depend on the querying entity are not covered; `outline_context_shapes` and

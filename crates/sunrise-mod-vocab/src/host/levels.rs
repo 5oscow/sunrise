@@ -273,7 +273,10 @@ pub trait LevelsBackend {
     /// is in entity-list order followed by players. Every entity list is walked
     /// once per call: O(entities) regardless of the box. Each overlapping mob
     /// resolves through a mob-list scan: O(K*N) for K overlapping mobs and N mobs. Tridents do not
-    /// resolve; frames, paintings and other special entities
+    /// resolve. On the server block displays, item displays, text displays, markers and
+    /// interactions are included using physical boxes (zero-sized for displays and markers),
+    /// not display culling bounds. Eyes of ender and leash knots are not yet returned.
+    /// Frames, paintings and other special entities
     /// are not on the entity-list walk. The dragon follows ordinary entities;
     /// its eight intersecting parts follow players in vanilla hash-table order (`Level.getEntities`).
     /// During `hears_projectile_impacts`, the projectile list is taken out of
@@ -345,9 +348,10 @@ pub trait LevelsBackend {
     /// (`ClientLevel.hasChunkAt`). API 381.
     #[access(WorldOnly)]
     fn level_is_loaded(&self, level: LevelRef, pos: [i32; 3]) -> bool;
-    /// Side: server.
+    /// Side: both.
     /// The stored light of one layer at `pos` (`BlockAndLightGetter.getBrightness`), 0 to 15.
-    /// None as for `block_state`: a position that isn't loaded has no light to read.
+    /// None as for `block_state`: a position that isn't loaded has no light to read. On a
+    /// client, the light of the level it shows, as the server sent it for a chunk it holds.
     #[access(WorldOnly)]
     fn level_brightness(&self, level: LevelRef, layer: LightLayer, pos: [i32; 3]) -> Option<i32>;
     /// Side: both.
@@ -603,7 +607,7 @@ pub trait LevelsBackend {
     /// the End open when someone first goes there and close after 300 ticks
     /// with nobody in them (`close_idle_levels`).
     #[access(WorldOnly)]
-    fn level_random(&self, level: LevelRef) -> Option<LegacyRandom>;
+    fn level_random(&self, level: LevelRef) -> Option<LegacyRandomSource>;
     /// Side: server.
     /// `Raids.get(id)`: the raid saved under `id` in the requested level, if
     /// `Raids` still holds it (a stopped raid goes at its next tick).
@@ -905,6 +909,37 @@ pub trait LevelsBackendMut {
         pos: [i32; 3],
         state: BlockState,
         flags: BlockUpdateFlags,
+    ) -> Result<bool, LevelWriteError>;
+    /// Side: server.
+    /// The state `state` takes at `pos` once it is fitted to the blocks around it
+    /// (`Block.updateFromNeighbourShapes`): a fence gets its connections, a stair its corner, a
+    /// water-logged block its fluid tick. Nothing is written, so a state placed by code is
+    /// fitted before `level_set_block` writes it; the ticks the neighbours' shapes ask for
+    /// are queued, as vanilla's do. Neighbours that are not loaded read as air. Stale or
+    /// unavailable levels and invalid states return typed errors; a position outside the
+    /// world or not loaded gives `state` back unchanged.
+    #[access(WorldOnly)]
+    fn level_update_from_neighbour_shapes(
+        &mut self,
+        level: LevelRef,
+        pos: [i32; 3],
+        state: BlockState,
+    ) -> Result<BlockState, LevelWriteError>;
+    /// Side: server.
+    /// Write `state` at `pos` as a placement does and run `Block.setPlacedBy` for it, with no
+    /// player: a bed places its head, a door its upper half, a tall plant its top. The write
+    /// is `level_set_block`'s with `NEIGHBORS | CLIENTS` (plus `KNOWN_SHAPE` when
+    /// `update_neighbour_shapes` is false; without it the neighbours' shapes update, so fences
+    /// and walls connect). `setPlacedBy` gets no placer and no item. Nothing else of
+    /// `BlockItem.place` runs: no survival or obstruction check, no sound, no game event, no
+    /// advancement. Errors and `Ok(false)` are `level_set_block`'s.
+    #[access(WorldOnly)]
+    fn level_place_block(
+        &mut self,
+        level: LevelRef,
+        pos: [i32; 3],
+        state: BlockState,
+        update_neighbour_shapes: bool,
     ) -> Result<bool, LevelWriteError>;
     /// Side: server.
     /// Remove a block in place (`Level.removeBlock`), preserving its fluid.
@@ -1236,6 +1271,18 @@ pub trait LevelsBackendMut {
     #[access(WorldOnly)]
     fn level_level_event(&mut self, level: LevelRef, id: i32, pos: [i32; 3], data: i32) -> bool;
     /// Side: server.
+    /// Plays the break effect of `state` at `pos`: the particles and the sound of a block of
+    /// that state breaking, for the players near it (`Level.levelEvent(2001, pos,
+    /// Block.getId(state))`). Nothing is written: the block at `pos` stays. False off the level
+    /// in place, for a stale handle and on a client.
+    #[access(WorldOnly)]
+    fn level_block_break_effect(
+        &mut self,
+        level: LevelRef,
+        pos: [i32; 3],
+        state: BlockState,
+    ) -> bool;
+    /// Side: server.
     /// Plays level event `id` at `pos` with `data` for every player on the
     /// server, in every level and at any distance (`ServerLevel.globalLevelEvent`).
     /// Vanilla's ids are the wither's spawn (`1023`), the dragon's death
@@ -1517,7 +1564,7 @@ pub trait LevelsBackendMut {
     /// a stream `native_level_random` gave and the mod drew from. False where
     /// that gives `None`.
     #[access(WorldOnly)]
-    fn level_set_random(&mut self, level: LevelRef, random: LegacyRandom) -> bool;
+    fn level_set_random(&mut self, level: LevelRef, random: LegacyRandomSource) -> bool;
     /// Side: both.
     /// Apply bone meal to the block at `pos` as a dispenser does (`BoneMealItem.growCrop`, then
     /// `growWaterPlant`), with no player and no item: the mods' `bonemeal` hook first, level event

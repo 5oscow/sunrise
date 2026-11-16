@@ -7,7 +7,12 @@ are removed, not compiled behind a switch.
 
 Cosmetics, emotes, the Wardrobe and the Shop, partner ads, sponsor links and the
 official server are not part of this fork: Sunrise has no paid features, shop or
-ads. No Cargo feature restores them. The Mods and
+ads. No Cargo feature restores them. CI's public-tree check
+(`tools/check_public_tree.py`, run by `verify-static`) fails a branch that
+brings back `crates/sunrise-cosmetics`, `crates/sunrise-official-servers`, the
+launcher's `partner`, `shop`, `wardrobe` and `wardrobe_page` sources, or
+`launcher/assets/sculk-*`. It looks at the current tree, not at history, so the
+commits from before the removal stay allowed. The Mods and
 Sunrise Settings pages remain available independently of the client's default
 features; disabling audio or controllers does not hide mod management.
 

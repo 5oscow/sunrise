@@ -17,6 +17,20 @@ pub(in crate::game) mod block_edit;
 #[path = "api_values/block_state.rs"]
 pub(in crate::game) mod block_state;
 
+/// The engine's generator as the API's owned source: the same state and cached gaussian, so it
+/// draws on as the engine's would.
+pub(crate) fn random_to_api(
+    random: &sunrise_core::random::LegacyRandom,
+) -> mod_api::LegacyRandomSource {
+    <(u64, Option<f64>)>::from(random).into()
+}
+/// The API's owned source as the engine's generator, state and cached gaussian kept.
+pub(crate) fn random_to_engine(
+    source: &mod_api::LegacyRandomSource,
+) -> sunrise_core::random::LegacyRandom {
+    <(u64, Option<f64>)>::from(source).into()
+}
+
 pub(crate) fn block_jump_factor(
     context: &sunrise_world::native_load_context::LoopContext,
     state: sunrise_world::registry::BlockStateId,
@@ -502,6 +516,19 @@ where
     call_write(call)?
         .try_into_api()
         .map_err(|error| error.into_write_error().into())
+}
+
+/// Convert a successful block-state write answer; a state the registry cannot name is the
+/// write's own `InvalidState` error.
+pub(in crate::game) fn call_state_write<W>(
+    call: impl FnOnce() -> W,
+) -> Result<<W::Value as TryIntoApi>::Api, W::Error>
+where
+    W: IntoWriteResult,
+    W::Value: TryIntoApi,
+    W::Error: From<<W::Value as TryIntoApi>::Error>,
+{
+    call_write(call)?.try_into_api().map_err(Into::into)
 }
 
 macro_rules! scalar_values {
@@ -1044,6 +1071,30 @@ impl TryIntoApi for crate::crafting::FireworkShapeIngredient {
             self.shape.try_into_api().unwrap(),
             self.ingredient.try_into_api()?,
         ))
+    }
+}
+/// A recipe listing crosses one entry at a time: one unrepresentable recipe must not
+/// hide the rest of its type. Other collection conversions remain all-or-nothing.
+#[derive(Default)]
+pub(in crate::game) struct RecipeListing(pub std::sync::Arc<[crate::crafting::RecipeSnapshot]>);
+impl TryIntoApi for RecipeListing {
+    type Api = std::sync::Arc<[mod_api::Recipe]>;
+    type Error = std::convert::Infallible;
+    fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
+        Ok(self
+            .0
+            .iter()
+            .filter_map(|recipe| match recipe.try_into_api() {
+                Ok(recipe) => Some(recipe),
+                Err(reason) => {
+                    log::debug!(
+                        "Skipping recipe {} in the mod API listing: {reason:?}",
+                        recipe.id
+                    );
+                    None
+                }
+            })
+            .collect())
     }
 }
 impl TryIntoApi for crate::crafting::RecipeSnapshot {
@@ -1606,6 +1657,39 @@ fn prepare_stack_boundary_tests() {
         "minecraft:potion",
     ])
     .unwrap();
+}
+
+#[cfg(test)]
+mod recipe_listing_tests {
+    use super::*;
+    #[test]
+    fn a_bad_recipe_does_not_hide_the_good_recipe_of_its_type() {
+        let mut registries = mod_api::testing::FakeRegistries::default();
+        registries
+            .resolve_items([mod_api::Identifier::parse("minecraft:stick").unwrap()])
+            .unwrap();
+        let mut good = crate::crafting::RecipeSnapshot::new(
+            "example:good",
+            "example:machine",
+            serde_json::json!({}).into(),
+        );
+        good.results = vec![EngineStack::new("minecraft:stick", 1)];
+        let mut bad = crate::crafting::RecipeSnapshot::new(
+            "example:bad",
+            "example:machine",
+            serde_json::json!({}).into(),
+        );
+        bad.results = vec![EngineStack::new("example:unknown", 1)];
+        let entries = RecipeListing(vec![good, bad].into())
+            .try_into_api()
+            .unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].id, "example:good");
+        assert_eq!(
+            mod_api::__private::item_key_id(entries[0].results[0].item()),
+            Some("minecraft:stick")
+        );
+    }
 }
 
 #[cfg(test)]
