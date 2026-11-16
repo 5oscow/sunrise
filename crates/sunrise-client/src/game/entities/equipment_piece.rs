@@ -4,7 +4,7 @@ use super::*;
 pub(super) struct EquipmentPiece<'a> {
     pub asset: String,
     pub kind: &'static str,
-    pub layers: &'a [(String, Option<u32>)],
+    pub layers: &'a [EquipmentAssetLayer],
     pub overlay: u32,
 }
 
@@ -44,7 +44,13 @@ impl Game<'_> {
     }
 }
 
-pub(super) type EquipmentAssets = HashMap<String, HashMap<String, Vec<(String, Option<u32>)>>>;
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct EquipmentAssetLayer {
+    pub texture: String,
+    pub dyeable: bool,
+    pub color_when_undyed: Option<u32>,
+}
+pub(super) type EquipmentAssets = HashMap<String, HashMap<String, Vec<EquipmentAssetLayer>>>;
 
 fn resolve_piece<'a>(
     equippable: sunrise_client::item_sync::Equippable,
@@ -196,8 +202,10 @@ impl EquipmentPiece<'_> {
         let trim = trim.filter(|_| self.kind != "humanoid_baby");
         let mut foil = if trim.is_some() { 0 } else { self.overlay };
         let mut out = Vec::new();
-        for (name, undyed) in self.layers {
-            let color = super::armor_stands::layer_color(*undyed, stack);
+        for layer in self.layers {
+            let name = &layer.texture;
+            let color =
+                super::armor_stands::layer_color(layer.dyeable, layer.color_when_undyed, stack);
             if color == 0 {
                 continue;
             }
@@ -240,6 +248,18 @@ mod tests {
         mobs::{Part, anim::Poses, render},
     };
 
+    pub(super) fn asset_layer(
+        texture: &str,
+        dyeable: bool,
+        color_when_undyed: Option<u32>,
+    ) -> EquipmentAssetLayer {
+        EquipmentAssetLayer {
+            texture: texture.into(),
+            dyeable,
+            color_when_undyed,
+        }
+    }
+
     fn equippable(slot: &str, asset: Option<&str>) -> Equippable {
         Equippable {
             slot: slot.into(),
@@ -251,15 +271,18 @@ mod tests {
     #[test]
     fn asset_slot_and_baby_layer_gate() {
         let layers = vec![
-            ("test:outer".into(), None),
-            ("test:inner".into(), Some(0xA06540)),
+            asset_layer("test:outer", false, None),
+            asset_layer("test:inner", true, Some(0xA06540)),
         ];
         let equipment = HashMap::from([(
             "test:chest".into(),
             HashMap::from([
                 ("humanoid".into(), layers.clone()),
                 ("humanoid_leggings".into(), vec![]),
-                ("humanoid_baby".into(), vec![("test:baby".into(), None)]),
+                (
+                    "humanoid_baby".into(),
+                    vec![asset_layer("test:baby", false, None)],
+                ),
             ]),
         )]);
         let resolve = |slot, leggings, baby| {
@@ -298,7 +321,7 @@ mod tests {
         );
         assert_eq!(resolve("chest", false, false).unwrap().layers, layers);
         assert_eq!(
-            resolve("chest", true, true).unwrap().layers[0].0,
+            resolve("chest", true, true).unwrap().layers[0].texture,
             "test:baby"
         );
     }
@@ -328,8 +351,8 @@ mod tests {
             HashMap::from([(
                 "humanoid".into(),
                 vec![
-                    ("test:base".into(), Some(0xA06540)),
-                    ("test:overlay".into(), None),
+                    asset_layer("test:base", true, Some(0xA06540)),
+                    asset_layer("test:overlay", false, None),
                 ],
             )]),
         )]);
@@ -392,13 +415,57 @@ mod tests {
 
 #[cfg(test)]
 mod material_tests {
+    use super::tests::asset_layer;
     use super::*;
+    #[test]
+    fn dyeable_without_default_uses_dye_or_skips_before_foil() {
+        let layers = vec![
+            asset_layer("dyed_only", true, None),
+            asset_layer("outer", false, None),
+        ];
+        let piece = EquipmentPiece {
+            asset: "test:dyed".into(),
+            kind: "humanoid",
+            layers: &layers,
+            overlay: 36,
+        };
+        let mut stack = ItemStack::new("test:equipment", 1);
+        let draw = |stack: &ItemStack| {
+            piece
+                .materials(
+                    Some(stack),
+                    None,
+                    |name| {
+                        let name = match name {
+                            "dyed_only" => "dyed_only",
+                            "outer" => "outer",
+                            _ => return None,
+                        };
+                        Some(MaterialBinding {
+                            name,
+                            uv: [0.0, 0.0, 1.0, 1.0],
+                        })
+                    },
+                    |_| None,
+                )
+                .into_iter()
+                .map(|m| (m.binding.name, m.color, m.overlay))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(draw(&stack), [("outer", 0xFFFFFFFF, 36)]);
+        stack.data_mut().dyed_color = Some(0x123456);
+        assert_eq!(
+            draw(&stack),
+            [("dyed_only", 0xFF563412, 36), ("outer", 0xFFFFFFFF, 0)]
+        );
+    }
+
     #[test]
     fn ordered_materials_first_drawn_foil_trim_and_babies() {
         let layers = vec![
-            ("missing".into(), None),
-            ("inner".into(), None),
-            ("outer".into(), None),
+            asset_layer("missing", false, None),
+            asset_layer("inner", false, None),
+            asset_layer("outer", false, None),
         ];
         let mut piece = EquipmentPiece {
             asset: "test:custom".into(),

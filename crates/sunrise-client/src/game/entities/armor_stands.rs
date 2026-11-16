@@ -140,19 +140,21 @@ fn armor_stand_cart_shove(
         stand_z: za / 4.0,
     })
 }
-/// `EquipmentLayerRenderer.getColorForLayer`: a dyeable layer (one with a
-/// colour when undyed) takes the stack's `minecraft:dyed_color`, else that
-/// colour; any other layer stays white, dyed or not. The result is in the
-/// renderer's byte order (R and B swapped).
-pub(super) fn layer_color(undyed: Option<u32>, stack: Option<&ItemStack>) -> u32 {
+/// `EquipmentLayerRenderer.getColorForLayer`: a dyeable layer takes the stack's
+/// `minecraft:dyed_color`, else its optional undyed colour, else zero to skip it.
+/// Nondyeable layers stay white. The result uses the renderer's byte order (R and B swapped).
+pub(super) fn layer_color(dyeable: bool, undyed: Option<u32>, stack: Option<&ItemStack>) -> u32 {
     let dyed = stack
         .and_then(|s| s.data())
         .and_then(|d| d.dyed_color)
         .map(|c| c as u32 & 0xFF_FFFF);
-    undyed.map_or(0xFFFF_FFFF, |undyed| {
-        let c = dyed.unwrap_or(undyed);
-        0xFF00_0000 | (c & 0xFF) << 16 | (c & 0xFF00) | (c >> 16) & 0xFF
-    })
+    if !dyeable {
+        return 0xFFFF_FFFF;
+    }
+    let Some(c) = dyed.or(undyed) else {
+        return 0;
+    };
+    0xFF00_0000 | (c & 0xFF) << 16 | (c & 0xFF00) | (c >> 16) & 0xFF
 }
 
 /// Armor stand models and the humanoid layers of every equipment asset.
@@ -164,7 +166,7 @@ pub(super) struct ArmorStandAssets {
     pub layers: HashMap<(&'static str, bool), Arc<Part>>,
     /// The player's armour models by slot (helmet, chestplate, leggings, boots).
     pub player: HashMap<&'static str, Part>,
-    /// asset id -> layer kind (humanoid / humanoid_leggings) -> each layer's (texture, undyed colour), in order.
+    /// Asset id -> layer kind -> ordered textures with dyeability and optional undyed colour.
     pub equipment: super::equipment_piece::EquipmentAssets,
     /// asset id -> `trim_overrides`.
     pub trim_overrides: HashMap<String, Vec<TrimOverride>>,
@@ -221,7 +223,8 @@ impl ArmorStandAssets {
                 let mut kinds = HashMap::new();
                 for kind in ["humanoid", "humanoid_leggings", "humanoid_baby", "wings"] {
                     // Every layer of the kind: leather's overlay is layer 1.
-                    let layers: Vec<(String, Option<u32>)> = v["layers"][kind]
+                    let layers: Vec<super::equipment_piece::EquipmentAssetLayer> = v["layers"]
+                        [kind]
                         .as_array()
                         .into_iter()
                         .flatten()
@@ -236,7 +239,13 @@ impl ArmorStandAssets {
                             let undyed = layer["dyeable"]["color_when_undyed"]
                                 .as_i64()
                                 .map(|c| c as u32 & 0xFF_FFFF);
-                            (sprite, undyed)
+                            super::equipment_piece::EquipmentAssetLayer {
+                                texture: sprite,
+                                dyeable: layer
+                                    .get("dyeable")
+                                    .is_some_and(serde_json::Value::is_object),
+                                color_when_undyed: undyed,
+                            }
                         })
                         .collect();
                     if !layers.is_empty() {
@@ -2460,14 +2469,14 @@ mod layer_color_tests {
         let mut dyed = ItemStack::new("minecraft:leather_helmet", 1);
         dyed.data_mut().dyed_color = Some(0x1E_90FF);
         // Dyed blue, R and B swapped into the renderer's order, opaque.
-        assert_eq!(layer_color(Some(0xA06540), Some(&dyed)), 0xFFFF_901E);
+        assert_eq!(layer_color(true, Some(0xA06540), Some(&dyed)), 0xFFFF_901E);
         // An undyed stack keeps the asset's brown.
         let plain = ItemStack::new("minecraft:leather_helmet", 1);
-        assert_eq!(layer_color(Some(0xA06540), Some(&plain)), 0xFF40_65A0);
+        assert_eq!(layer_color(true, Some(0xA06540), Some(&plain)), 0xFF40_65A0);
         // No dye and no undyed colour: white.
-        assert_eq!(layer_color(None, Some(&plain)), 0xFFFF_FFFF);
+        assert_eq!(layer_color(false, None, Some(&plain)), 0xFFFF_FFFF);
         // A layer that isn't dyeable stays white even on a dyed stack.
-        assert_eq!(layer_color(None, Some(&dyed)), 0xFFFF_FFFF);
+        assert_eq!(layer_color(false, None, Some(&dyed)), 0xFFFF_FFFF);
     }
 }
 
