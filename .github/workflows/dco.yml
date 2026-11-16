@@ -9,10 +9,12 @@ permissions:
 
 jobs:
   dco:
-    # Mirrored upstream PRs and ari-fork merges carry MIT commits their authors never submitted here, so they skip it.
+    # Mirrored upstream PRs, ari-fork merges and rollups (which merge those moved PRs unchanged) carry MIT commits their
+    # authors never submitted here, so they skip it.
     if: >-
       !((startsWith(github.event.pull_request.head.ref, 'upstream/pr-')
-         || startsWith(github.event.pull_request.head.ref, 'sync/arismoko-'))
+         || startsWith(github.event.pull_request.head.ref, 'sync/arismoko-')
+         || startsWith(github.event.pull_request.head.ref, 'sunrise-review-rollup-'))
         && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     steps:
