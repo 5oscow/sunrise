@@ -14,6 +14,7 @@ pub trait Hooks {
     #[hook(
         side = "client",
         contract = "listen",
+        version = 2,
         neoforge = "none (vanilla HumanoidModel.setupAnim; NeoForge has no mid-setupAnim event)"
     )]
     fn humanoid_setup_anim(
