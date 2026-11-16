@@ -888,7 +888,7 @@ impl Game<'_> {
             && let Some(level) = self.native_level_here()
         {
             let at = BlockPos::new(pos.0, pos.1, pos.2);
-            self.notify_contents_changed(level, at, self.world.block(pos.0, pos.1, pos.2));
+            self.native_contents_changed(level, at, self.world.block(pos.0, pos.1, pos.2), None);
         }
         self.chiseled_bookshelf_synced(pos);
         if matches!(

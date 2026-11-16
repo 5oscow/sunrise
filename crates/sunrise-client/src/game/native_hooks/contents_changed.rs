@@ -17,11 +17,12 @@ impl Game<'_> {
     /// the comparator refresh of its other half is not another notice. Replaces
     /// Create's positional `contents_changed` injection for depots, packages and
     /// schematic inventories; NeoForge has no corresponding bus event.
-    pub(in crate::game) fn notify_contents_changed(
+    pub(in crate::game) fn native_contents_changed(
         &mut self,
         level: LevelRef,
         pos: BlockPos,
         state: BlockStateId,
+        observer: Option<mod_api::BlockEntityRef>,
     ) {
         if self.contents_changing.contains(&(level, pos)) {
             return;
@@ -33,7 +34,9 @@ impl Game<'_> {
             .observers((pos.x, pos.y, pos.z));
         self.contents_changing.push((level, pos));
         let notice = ContentsChangedGuard { game: self };
-        notice.game.native_contents_changed(level, pos, state, None);
+        notice
+            .game
+            .fire_contents_changed(level, pos, state, observer);
         for observer in observers.iter() {
             let Some(entity) = notice.game.block_entity_identity(level, observer.position) else {
                 continue;
@@ -41,19 +44,8 @@ impl Game<'_> {
             if entity.fields().generation == observer.generation {
                 notice
                     .game
-                    .native_contents_changed(level, pos, state, Some(entity));
+                    .fire_contents_changed(level, pos, state, Some(entity));
             }
         }
-    }
-    /// One route of the existing notice. Routing selects observer Parts, but state
-    /// and position in the event keep naming the changed source.
-    pub(in crate::game) fn native_contents_changed(
-        &mut self,
-        level: LevelRef,
-        pos: BlockPos,
-        state: BlockStateId,
-        observer: Option<mod_api::BlockEntityRef>,
-    ) {
-        self.fire_contents_changed(level, pos, state, observer);
     }
 }

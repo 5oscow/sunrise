@@ -298,6 +298,22 @@ pub(super) fn emit<'a>(
                     param,
                 )
             });
+        // A block notice may identify a watching block entity. Its Parts receive
+        // the source payload without changing the declared source key.
+        let observer_routed = hook
+            .scope
+            .as_ref()
+            .is_some_and(|scope| scope.kind == PartKind::Block)
+            && args.iter().any(|(arg, ty)| {
+                arg == "observer"
+                    && ty
+                        .to_token_stream()
+                        .to_string()
+                        .replace("mod_api :: ", "")
+                        .split_whitespace()
+                        .collect::<String>()
+                        == "Option<BlockEntityRef>"
+            });
         // A scoped hook's parts: the trait its method goes on, and the lookup
         // of the parts attached to the thing its `key` argument names.
         let scoped = match &hook.scope {
@@ -321,8 +337,11 @@ pub(super) fn emit<'a>(
                     .ok_or_else(|| format!("key {key} is not an argument of {name}"))?;
                 let key_type = ty.to_token_stream().to_string().replace("mod_api :: ", "");
                 let lookup = match key_type.as_str() {
-                    "BlockState" if table == "block" && name == "contents_changed" => {
-                        let host = &host.as_ref().ok_or("contents observer needs a Host")?.0;
+                    "BlockState" if table == "block" && observer_routed => {
+                        let host = &host
+                            .as_ref()
+                            .ok_or("block observer routing needs a Host")?
+                            .0;
                         format!(
                             "block_key(match observer {{ Some(observer) => observer.level.block(&*{host}, observer.position), None => Some({key}.block()) }})"
                         )
@@ -680,7 +699,7 @@ pub(super) fn emit<'a>(
                     hook_id,
                     scoped.is_some(),
                     hook.scope.as_ref().and_then(|scope| match scope.kind {
-                        PartKind::Block if name != "contents_changed" => Some(scope.key.as_str()),
+                        PartKind::Block if !observer_routed => Some(scope.key.as_str()),
                         _ => None,
                     }),
                     &surface_calls,

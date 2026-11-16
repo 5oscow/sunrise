@@ -68,10 +68,7 @@ impl ContentsWatches {
                 return;
             }
             let order = self.next_order;
-            self.next_order = self
-                .next_order
-                .checked_add(1)
-                .expect("contents watch order exhausted");
+            self.next_order = self.next_order.wrapping_add(1);
             self.insert(source, Watch { observer, order });
         } else {
             if let Some(watches) = self.observers.get_mut(&pos) {
