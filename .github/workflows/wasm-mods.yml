@@ -115,7 +115,7 @@ jobs:
           verdict cargo test -p sunrise-mod-vocab --lib strict_math_seeded_reference_vectors_match_exact_bits
           verdict cargo test -p sunrise-mod-wasm --features listener-fixture --test strict_math -- --ignored --nocapture
           verdict cargo test -p sunrise-mod-points --features listener-fixture --test registry --test replace --test order
-          verdict cargo test -p sunrise-mod-wasm --features listener-fixture --no-fail-fast --test real_member --test unstaged --test self_refusal --test native_listener --test no_wire_registration --test capability_registration --test chunk_disk -- --include-ignored --nocapture
+          verdict cargo test -p sunrise-mod-wasm --features listener-fixture --no-fail-fast --test real_member --test unstaged --test self_refusal --test native_listener --test no_wire_registration --test capability_registration --test chunk_disk --test import_identity -- --include-ignored --nocapture
           verdict cargo test -p sunrise-mod-wasm --features listener-fixture --lib guest_input_pool_stays_flat_for_100k_no_import_calls -- --ignored --nocapture
           exit "$failed"
       - name: Build and test the isolated mixed-output boundary
