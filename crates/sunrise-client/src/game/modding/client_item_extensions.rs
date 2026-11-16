@@ -473,6 +473,7 @@ mod tests {
     struct TwoShapes {
         models: [ArmorModelRef; 2],
         textures: [ArmorTextureRef; 2],
+        original_first: ArmorTextureRef,
         calls: Arc<std::sync::Mutex<Vec<String>>>,
     }
     impl ClientItemExtensions for TwoShapes {
@@ -489,7 +490,11 @@ mod tests {
             _: u32,
         ) -> u32 {
             self.calls.lock().unwrap().push(format!("tint{index}"));
-            if index == 2 { 0 } else { 0xFFFFFFFF }
+            match index {
+                0 => 0xFF12_3456,
+                1 => 0xFFFF_FFFF,
+                _ => 0,
+            }
         }
         fn armor_texture(
             &self,
@@ -499,7 +504,7 @@ mod tests {
             layer: &EquipmentLayer,
             _: ArmorTextureRef,
         ) -> ArmorTextureRef {
-            let index = usize::from(layer.texture != self.textures[0]);
+            let index = usize::from(layer.texture != self.original_first);
             self.calls.lock().unwrap().push(format!("texture{index}"));
             self.textures[index]
         }
@@ -540,9 +545,11 @@ mod tests {
                         .register_model("armor_test:outer", &tree(16.0))
                         .unwrap(),
                 ];
+                let original_first = registry.register_texture("inner").unwrap();
+                registry.register_texture("outer").unwrap();
                 let textures = [
-                    registry.register_texture("inner").unwrap(),
-                    registry.register_texture("outer").unwrap(),
+                    registry.register_texture("custom_inner").unwrap(),
+                    registry.register_texture("custom_outer").unwrap(),
                 ];
                 let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
                 registry
@@ -551,6 +558,7 @@ mod tests {
                         Arc::new(TwoShapes {
                             models,
                             textures,
+                            original_first,
                             calls: calls.clone(),
                         }),
                     )
@@ -585,10 +593,18 @@ mod tests {
                 let bind = |name: &str| match name {
                     "inner" => Some(Binding {
                         name: "inner",
-                        uv: [0.0, 0.0, 0.25, 0.25],
+                        uv: [0.75, 0.75, 1.0, 1.0],
                     }),
                     "outer" => Some(Binding {
                         name: "outer",
+                        uv: [0.75, 0.75, 1.0, 1.0],
+                    }),
+                    "custom_inner" => Some(Binding {
+                        name: "custom_inner",
+                        uv: [0.0, 0.0, 0.25, 0.25],
+                    }),
+                    "custom_outer" => Some(Binding {
+                        name: "custom_outer",
                         uv: [0.25, 0.25, 0.5, 0.5],
                     }),
                     _ => None,
@@ -623,8 +639,13 @@ mod tests {
                         .iter()
                         .map(|m| (m.binding.name, m.overlay))
                         .collect::<Vec<_>>(),
-                    [("inner", 0), ("outer", 0), ("trim", 36)]
+                    [("custom_inner", 0), ("custom_outer", 0), ("trim", 36)]
                 );
+                assert_eq!(
+                    materials[0].color, 0xFF56_3412,
+                    "ARGB becomes renderer ABGR"
+                );
+                assert!(materials[0].final_texture && materials[1].final_texture);
                 let selected = materials
                     .iter()
                     .map(|m| m.model.unwrap())
