@@ -651,7 +651,7 @@ impl Game<'_> {
     /// `ArmorStand.interactAt` for the stand under the crosshair, or for the
     /// stand a guest's interact packet named (its client's click point).
     pub(super) fn interact_armor_stand(&mut self, target: Option<InteractTarget>) -> bool {
-        let Some((i, d, point)) = (match target {
+        let Some((mut i, d, point)) = (match target {
             // interactAt gets the packet's location, measured from the stand's
             // position, so getClickedSlot reads the height the client clicked.
             Some(t) => Self::named_entity(&self.armor_stands, t.id, |a| a.id).map(|i| {
@@ -767,6 +767,19 @@ impl Game<'_> {
             if cancel {
                 return true;
             }
+            // The listener had the game in its hands: find the stand again by
+            // its id and check the click's facts. A change spends the click.
+            let Some(now) = Self::named_entity(&self.armor_stands, stand, |a| a.id) else {
+                return true;
+            };
+            let stand = &self.armor_stands[now];
+            if !Self::same_item_and_count(stand.equipment[slot].as_ref(), current.as_ref())
+                || !Self::same_item_and_count(self.held(), held.as_ref())
+                || stand.swap_locked(slot)
+            {
+                return true;
+            }
+            i = now;
         }
         // ArmorStand.swapItem.
         match held {
