@@ -284,10 +284,10 @@ impl OrientedCollider {
         let axes = self.axes();
         for index in self.candidates_near(sweep) {
             let obb = self.obb(self.boxes.boxes[index as usize]);
-            if let Some(reach) = self.time_of_impact(&axes, mover, direction, &obb) {
-                if reach.abs() < allowed.abs() {
-                    allowed = reach;
-                }
+            if let Some(reach) = self.time_of_impact(&axes, mover, direction, &obb)
+                && reach.abs() < allowed.abs()
+            {
+                allowed = reach;
             }
         }
         allowed

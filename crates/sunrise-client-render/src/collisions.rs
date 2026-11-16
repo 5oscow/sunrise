@@ -590,6 +590,14 @@ impl EntityMovementWorld for SceneCollisions<'_, '_> {
     fn movement_border(&mut self, _: EntityIdentity, _: Aabb) -> io::Result<Option<VoxelShape>> {
         Ok(None)
     }
+    /// The moving colliders the game placed for this pass: every mover resolves through here.
+    fn moving_colliders(
+        &mut self,
+        entity: EntityIdentity,
+        bounds: Aabb,
+    ) -> io::Result<Vec<sunrise_core::geometry::oriented::OrientedCollider>> {
+        Ok(crate::moving_colliders::near(entity, bounds))
+    }
 }
 impl DynamicSupportWorld for SceneCollisions<'_, '_> {
     type Error = io::Error;
