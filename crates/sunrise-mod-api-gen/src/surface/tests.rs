@@ -333,7 +333,7 @@ fn export_fixture(edits: &[(&str, &str, &str)], hooks: &str) -> Export {
         std::fs::write(path, text).unwrap();
     }
     let catalog = Catalog::parse(&[("hooks/ping.rs".into(), hooks.into())]).unwrap();
-    let mut index = Index::new(root, &[]);
+    let mut index = crate::index::game(root, &[]);
     build(root, &mut index, &catalog.hooks, &boundary()).unwrap()
 }
 
@@ -950,7 +950,7 @@ fn a_listed_boundary_trait_an_older_tree_lacks_is_a_note() {
         std::fs::write(path, text).unwrap();
     }
     let catalog = Catalog::parse(&[("hooks/ping.rs".into(), HOOKS.into())]).unwrap();
-    let mut index = Index::new(root, &[]);
+    let mut index = crate::index::game(root, &[]);
     let mut listed = boundary();
     listed.roles.push(("FluidsHost".into(), Role::Call));
     let export = build(root, &mut index, &catalog.hooks, &listed).unwrap();
