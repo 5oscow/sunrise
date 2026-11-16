@@ -4,7 +4,7 @@ use crate::game::{Dim, pick_view_vector};
 use mod_api::CrosshairTarget;
 
 #[cfg(test)]
-#[path = "client_frame_pick_tests.rs"]
+#[path = "client_frame_pick/tests.rs"]
 mod tests;
 
 #[derive(Default)]
@@ -87,7 +87,11 @@ impl Game<'_> {
     }
 
     pub(in crate::game) fn refresh_frame_pick(&mut self, partial_tick: f32) {
-        if !self.native_window() || self.title.is_some() || self.player.is_none() {
+        if !self.native_window()
+            || self.title.is_some()
+            || self.player.is_none()
+            || self.native_lifecycle.epoch().is_none()
+        {
             return;
         }
         let Some(camera) = self

@@ -388,9 +388,13 @@ impl Game<'_> {
         &self,
         range: &serde_json::Value,
     ) -> Option<Option<(usize, f64, [f64; 3])>> {
-        let (origin, direction) = self.aim()?;
-        let eye = v3(origin);
-        let look = v3(direction);
+        let (eye, look) = match self.frame_pick.ray {
+            Some((origin, direction)) => (v3(origin), v3(direction)),
+            None => (
+                v3(self.eye_position()?),
+                v3(super::view_vector(self.yaw, self.pitch)),
+            ),
+        };
         let reach = attack_reach(range, self.creative);
         let camera = self.remote_camera_id();
         let boxes: Vec<(usize, Aabb)> = (self.mobs.iter().enumerate())
