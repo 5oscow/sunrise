@@ -125,13 +125,51 @@ fn a_declared_interaction_runs_after_vanillas_and_a_veto_stops_it() {
         assert_eq!(meet(game, 10, honey), lava);
         VETO.store(false, Ordering::Relaxed);
 
-        // The water tag is read again when the tables are installed again: lava no longer meets
-        // water once a pack empties the tag, and does again with the pack's tag back.
-        let mut edited = game.items().clone();
-        edited.set_tags(TagRegistry::Fluid, Default::default());
-        game.install_fluid_interactions_from(&edited).unwrap();
-        assert_eq!(meet(game, 14, water), lava);
+        // The tags are read again when the tables are installed again. A pack that empties the
+        // water tag ends lava meeting water, and the pack's tag back restores it.
+        let items = game.items().clone();
+        let tags = |lava: &[&str], water: &[&str]| {
+            let list = |names: &[&str]| names.iter().map(|n| n.to_string()).collect();
+            let mut edited = items.clone();
+            edited.set_tags(
+                TagRegistry::Fluid,
+                [
+                    ("minecraft:lava".to_string(), list(lava)),
+                    ("minecraft:water".to_string(), list(water)),
+                ]
+                .into(),
+            );
+            edited
+        };
+        let both_lava = ["minecraft:lava", "minecraft:flowing_lava"];
+        let both_water = ["minecraft:water", "minecraft:flowing_water"];
+        game.install_fluid_interactions_from(&tags(&both_lava, &[]))
+            .unwrap();
+        assert_eq!(meet(game, 12, water), lava);
         game.install_fluid_interactions().unwrap();
+        assert_eq!(meet(game, 14, water), obsidian);
+
+        // A tag matches exactly the fluids it lists: source water alone is not flowing water.
+        let flowing_water = registry
+            .resolve(&sunrise_world::chunk::BlockState {
+                name: "minecraft:water".into(),
+                properties: [("level".to_string(), "1".to_string())].into(),
+            })
+            .unwrap();
+        game.install_fluid_interactions_from(&tags(&both_lava, &["minecraft:water"]))
+            .unwrap();
+        assert_eq!(meet(game, 16, flowing_water), lava);
         assert_eq!(meet(game, 18, water), obsidian);
+
+        // Vanilla's rules follow the lava tag: lava taken out of it no longer meets water, and
+        // only the fluid it lists does.
+        game.install_fluid_interactions_from(&tags(&[], &both_water))
+            .unwrap();
+        assert_eq!(meet(game, 20, water), lava);
+        game.install_fluid_interactions_from(&tags(&["minecraft:lava"], &both_water))
+            .unwrap();
+        assert_eq!(meet(game, 24, water), obsidian);
+        assert_eq!(meet_with(game, 28, flowing_lava, water), flowing_lava);
+        game.install_fluid_interactions().unwrap();
     });
 }

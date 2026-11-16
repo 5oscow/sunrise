@@ -12,7 +12,7 @@ In code, at registration:
 ```rust,ignore
 let lava = registrar.fluid_key("minecraft:lava");
 let honey = registrar.fluid_key("ruby:honey");
-// `slag_state` is a `BlockState` of this mod's block (`BlockState::of`).
+let slag_state = PlacedState::of(registrar.block_key("ruby:slag"));
 registrar.fluid_interaction(FluidInteraction::new(
     lava,
     FluidNeighbour::Fluid(honey),
@@ -50,10 +50,14 @@ data pack reload, so a pack that edits `minecraft:water` changes what lava meets
 
 When a liquid block is placed (including by spreading into a cell) and when a neighbour of it
 changes, the first match over the neighbours, then over the interactions, wins; at most one
-runs. Vanilla's two rules come first (lava beside water: obsidian for a source, cobblestone for
-flowing lava; lava over soul soil beside blue ice: basalt). After them come native mods'
+runs. Vanilla's two rules come first, for each fluid of the `minecraft:lava` tag (lava beside a
+fluid of the `minecraft:water` tag: obsidian for a source, cobblestone for flowing lava; lava
+over soul soil beside blue ice: basalt), so a data pack that edits those tags changes them.
+A tag neighbour matches exactly the fluids the tag lists; a `fluid` neighbour matches its source
+and flowing form. After them come native mods'
 interactions in load order, then content mods' files in load order and file name. A fluid with no
-interaction pays nothing.
+interactions returns after a lookup of its own entries, which takes no lock; one with
+entries takes a read lock and indexes its slice, with no allocation.
 
 The result goes through the `fluid_place_block` hook, which may veto or replace
 it, then level event 1501 plays the fizz, and the liquid stops spreading. A veto writes nothing

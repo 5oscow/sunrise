@@ -7,7 +7,7 @@ use super::{Behaviours, data::BlockSet, states::BlockId};
 use crate::{fluid::FluidKind, registry::BlockStateId};
 use std::sync::{
     Arc, RwLock,
-    atomic::{AtomicBool, AtomicU8, Ordering},
+    atomic::{AtomicU8, AtomicUsize, Ordering},
 };
 
 /// A block, or every block of a tag.
@@ -25,12 +25,15 @@ impl BlockMatch {
     }
 }
 
-/// What has to be beside the liquid block.
+/// What has to be beside the liquid block. A fluid is read from the neighbour cell's fluid
+/// state, so a waterlogged block holds water.
 #[derive(Clone, Debug)]
 pub enum Neighbour {
-    /// A fluid, or every fluid of a tag, as the cell's fluid state says: a waterlogged block
-    /// holds water. Source and flowing form are one fluid.
-    Fluids(Arc<[FluidKind]>),
+    /// One fluid, source and flowing form alike.
+    Fluid(FluidKind),
+    /// The fluids a tag holds, each form as the tag lists it (`FluidState.is(TagKey)`): a tag of
+    /// source water alone does not match flowing water.
+    FluidTag(Arc<[FluidKind]>),
     Blocks(BlockMatch),
 }
 
@@ -65,7 +68,8 @@ impl FluidInteraction {
     }
     fn applies(&self, cell: Cell, below: BlockId) -> bool {
         let neighbour = match &self.neighbour {
-            Neighbour::Fluids(fluids) => fluids.iter().any(|fluid| fluid.same_family(cell.fluid)),
+            Neighbour::Fluid(fluid) => fluid.same_family(cell.fluid),
+            Neighbour::FluidTag(fluids) => fluids.contains(&cell.fluid),
             Neighbour::Blocks(blocks) => blocks.matches(cell.block),
         };
         neighbour && self.below.as_ref().is_none_or(|b| b.matches(below))
@@ -89,121 +93,167 @@ pub fn first_match(
     })
 }
 
-/// The interactions of every source fluid, in the order they were declared.
+/// Both forms of a fluid, source and flowing; none for the empty fluid.
+fn forms(kind: FluidKind) -> Vec<FluidKind> {
+    match kind {
+        FluidKind::Empty => Vec::new(),
+        FluidKind::Water | FluidKind::FlowingWater => {
+            vec![FluidKind::Water, FluidKind::FlowingWater]
+        }
+        FluidKind::Lava | FluidKind::FlowingLava => vec![FluidKind::Lava, FluidKind::FlowingLava],
+        FluidKind::Mod(fluid) | FluidKind::ModFlowing(fluid) => {
+            vec![FluidKind::Mod(fluid), FluidKind::ModFlowing(fluid)]
+        }
+    }
+}
+
+type Entries = Arc<[FluidInteraction]>;
+
+/// The interactions of every fluid, by the exact fluid of the liquid block: vanilla's kinds by
+/// their registry index, a mod fluid's two forms by its id. Within a fluid they keep the order
+/// they were declared in.
 #[derive(Clone, Debug, Default)]
 pub struct FluidInteractions {
-    by_source: Vec<(FluidKind, Arc<[FluidInteraction]>)>,
+    vanilla: [Entries; 5],
+    mods: Vec<[Entries; 2]>,
 }
 impl FluidInteractions {
-    /// Group `entries` by source fluid, keeping their order within each.
-    pub fn new(entries: impl IntoIterator<Item = (FluidKind, FluidInteraction)>) -> Self {
-        let mut grouped: Vec<(FluidKind, Vec<FluidInteraction>)> = Vec::new();
-        for (source, interaction) in entries {
-            match grouped.iter_mut().find(|(k, _)| k.same_family(source)) {
-                Some((_, list)) => list.push(interaction),
-                None => grouped.push((source, vec![interaction])),
+    /// `builtin` entries come first, each for exactly the fluid it names (vanilla's rules follow
+    /// the lava tag: one entry per fluid the tag lists). A `declared` entry's source names a
+    /// fluid, and the entry applies to its source and its flowing form alike.
+    pub fn new(
+        builtin: impl IntoIterator<Item = (FluidKind, FluidInteraction)>,
+        declared: impl IntoIterator<Item = (FluidKind, FluidInteraction)>,
+    ) -> Self {
+        let mut vanilla: [Vec<FluidInteraction>; 5] = Default::default();
+        let mut mods: Vec<[Vec<FluidInteraction>; 2]> = Vec::new();
+        let mut push = |kind: FluidKind, interaction: FluidInteraction| match kind.mod_fluid() {
+            Some(fluid) => {
+                if mods.len() <= fluid.index() {
+                    mods.resize_with(fluid.index() + 1, Default::default);
+                }
+                let flowing = matches!(kind, FluidKind::ModFlowing(_));
+                mods[fluid.index()][usize::from(flowing)].push(interaction);
+            }
+            None => {
+                if let Some(index) = kind.vanilla_index().filter(|_| kind != FluidKind::Empty) {
+                    vanilla[usize::from(index)].push(interaction);
+                }
+            }
+        };
+        for (kind, interaction) in builtin {
+            push(kind, interaction);
+        }
+        for (kind, interaction) in declared {
+            for form in forms(kind) {
+                push(form, interaction.clone());
             }
         }
         Self {
-            by_source: grouped
+            vanilla: vanilla.map(Into::into),
+            mods: mods
                 .into_iter()
-                .map(|(source, list)| (source, list.into()))
+                .map(|forms| forms.map(Into::into))
                 .collect(),
         }
     }
-    /// The interactions of `kind`'s fluid; none for a fluid that has none.
-    pub fn of(&self, kind: FluidKind) -> Option<&Arc<[FluidInteraction]>> {
-        self.by_source
-            .iter()
-            .find(|(source, _)| source.same_family(kind))
-            .map(|(_, list)| list)
+    /// The interactions of the liquid block of `kind`; none for a fluid that has none.
+    pub fn of(&self, kind: FluidKind) -> Option<&Entries> {
+        let entries = match kind.mod_fluid() {
+            Some(fluid) => {
+                let flowing = matches!(kind, FluidKind::ModFlowing(_));
+                &self.mods.get(fluid.index())?[usize::from(flowing)]
+            }
+            None => &self.vanilla[usize::from(kind.vanilla_index()?)],
+        };
+        (!entries.is_empty()).then_some(entries)
     }
 }
 
 impl Behaviours {
-    /// `LiquidBlock.shouldSpreadLiquid`'s two rules as the table's first entries. `water` is
-    /// the fluids of the `minecraft:water` tag, which a data pack may edit.
+    /// `LiquidBlock.shouldSpreadLiquid`'s two rules as the table's first entries, for each fluid
+    /// of the `minecraft:lava` tag (vanilla applies them to a liquid in that tag). `lava` and
+    /// `water` are the fluids of the `minecraft:lava` and `minecraft:water` tags, which a data
+    /// pack may edit.
     pub fn vanilla_fluid_interactions(
         &self,
+        lava: &[FluidKind],
         water: &[FluidKind],
     ) -> Vec<(FluidKind, FluidInteraction)> {
         let n = &self.named;
         let state = |block| Some(self.default_of(block));
-        vec![
-            (
-                FluidKind::Lava,
-                FluidInteraction {
-                    neighbour: Neighbour::Fluids(water.into()),
-                    below: None,
-                    source: state(n.obsidian),
-                    flowing: state(n.cobblestone),
-                },
-            ),
-            (
-                FluidKind::Lava,
-                FluidInteraction {
-                    neighbour: Neighbour::Blocks(BlockMatch::Block(n.blue_ice)),
-                    below: Some(BlockMatch::Block(n.soul_soil)),
-                    source: state(n.basalt),
-                    flowing: state(n.basalt),
-                },
-            ),
-        ]
+        lava.iter()
+            .flat_map(|&fluid| {
+                [
+                    (
+                        fluid,
+                        FluidInteraction {
+                            neighbour: Neighbour::FluidTag(water.into()),
+                            below: None,
+                            source: state(n.obsidian),
+                            flowing: state(n.cobblestone),
+                        },
+                    ),
+                    (
+                        fluid,
+                        FluidInteraction {
+                            neighbour: Neighbour::Blocks(BlockMatch::Block(n.blue_ice)),
+                            below: Some(BlockMatch::Block(n.soul_soil)),
+                            source: state(n.basalt),
+                            flowing: state(n.basalt),
+                        },
+                    ),
+                ]
+            })
+            .collect()
     }
-    /// The fluids of the `minecraft:water` fluid tag the prepared data gives.
-    pub fn water_fluids(&self) -> Vec<FluidKind> {
+    /// The fluids of the `minecraft:water` and `minecraft:lava` fluid tags the prepared data
+    /// gives.
+    pub fn tag_fluids(&self, mask: u8) -> Vec<FluidKind> {
         FluidKind::ALL
             .into_iter()
-            .filter(|kind| kind.mask() & self.fluid_tags.water != 0)
+            .filter(|kind| kind.mask() & mask != 0)
             .collect()
     }
     /// The table of the prepared data alone, which a world without data packs or mods keeps.
     pub(super) fn install_vanilla_fluid_interactions(&self) {
+        let lava = self.tag_fluids(self.fluid_tags.lava);
+        let water = self.tag_fluids(self.fluid_tags.water);
         self.set_fluid_interactions(FluidInteractions::new(
-            self.vanilla_fluid_interactions(&self.water_fluids()),
+            self.vanilla_fluid_interactions(&lava, &water),
+            [],
         ));
     }
     /// Install the open world's table, replacing the last load's.
     pub fn set_fluid_interactions(&self, table: FluidInteractions) {
         self.fluid_interactions.install(table);
     }
-    /// The interactions of `kind`'s fluid, taken once per update: none for a fluid without any,
-    /// which answers from two atomic loads, with no lock.
-    pub(crate) fn fluid_interactions(&self, kind: FluidKind) -> Option<Arc<[FluidInteraction]>> {
+    /// The interactions of the liquid block of `kind`, taken once per update. A fluid without
+    /// any answers from atomic loads alone, with no lock; one with some takes a read lock and
+    /// an `Arc` clone, and indexes its slice.
+    pub(crate) fn fluid_interactions(&self, kind: FluidKind) -> Option<Entries> {
         let slot = &self.fluid_interactions;
         slot.may_have(kind).then(|| slot.of(kind)).flatten()
     }
 }
 
-/// Every vanilla fluid of `source`'s family, source and flowing form, as bits of `FluidKind::mask`.
-fn family_mask(source: FluidKind) -> u8 {
-    FluidKind::ALL
-        .into_iter()
-        .filter(|kind| kind.same_family(source))
-        .fold(0, |mask, kind| mask | kind.mask())
-}
-
 /// The open world's table on [`Behaviours`]: replaced whole by each data load. Which fluids
-/// have entries is also kept as atomics (vanilla families by mask, mod fluids as one flag), so a
-/// fluid without any is told apart without taking the lock.
+/// have entries is also kept as atomics (a mask of vanilla kinds, and how many mod fluids the
+/// table reaches), so a fluid without any is told apart without taking the lock.
 #[derive(Default)]
 pub(super) struct Slot {
     table: RwLock<Arc<FluidInteractions>>,
     vanilla: AtomicU8,
-    mods: AtomicBool,
+    mods: AtomicUsize,
 }
 impl Slot {
     fn install(&self, table: FluidInteractions) {
-        let vanilla = table
-            .by_source
-            .iter()
-            .fold(0, |mask, (source, _)| mask | family_mask(*source));
-        let mods = table
-            .by_source
-            .iter()
-            .any(|(source, _)| source.mod_fluid().is_some());
+        let vanilla = FluidKind::ALL
+            .into_iter()
+            .filter(|kind| table.of(*kind).is_some())
+            .fold(0, |mask, kind| mask | kind.mask());
         self.vanilla.store(vanilla, Ordering::Release);
-        self.mods.store(mods, Ordering::Release);
+        self.mods.store(table.mods.len(), Ordering::Release);
         *self
             .table
             .write()
@@ -212,11 +262,11 @@ impl Slot {
     /// Whether `kind`'s fluid may have entries, from the atomics alone.
     fn may_have(&self, kind: FluidKind) -> bool {
         match kind.mod_fluid() {
-            Some(_) => self.mods.load(Ordering::Acquire),
+            Some(fluid) => fluid.index() < self.mods.load(Ordering::Acquire),
             None => kind.mask() & self.vanilla.load(Ordering::Acquire) != 0,
         }
     }
-    fn of(&self, kind: FluidKind) -> Option<Arc<[FluidInteraction]>> {
+    fn of(&self, kind: FluidKind) -> Option<Entries> {
         self.table
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -252,7 +302,7 @@ mod tests {
     fn vanilla() -> Vec<FluidInteraction> {
         vec![
             FluidInteraction {
-                neighbour: Neighbour::Fluids([FluidKind::Water, FluidKind::FlowingWater].into()),
+                neighbour: Neighbour::FluidTag([FluidKind::Water, FluidKind::FlowingWater].into()),
                 below: None,
                 source: Some(OBSIDIAN),
                 flowing: Some(COBBLESTONE),
@@ -352,55 +402,88 @@ mod tests {
         assert_eq!(made(&rules, water, AIR, true), Some(OBSIDIAN.0));
     }
 
+    fn stone_entry() -> FluidInteraction {
+        FluidInteraction {
+            neighbour: Neighbour::Blocks(BlockMatch::Block(STONE)),
+            below: None,
+            source: Some(MOD_STONE),
+            flowing: Some(MOD_STONE),
+        }
+    }
+
     #[test]
-    fn the_gate_answers_for_both_forms_of_a_fluid_with_entries_and_for_no_other() {
-        let entry = |source| {
-            (
-                source,
-                FluidInteraction {
-                    neighbour: Neighbour::Blocks(BlockMatch::Block(STONE)),
-                    below: None,
-                    source: Some(MOD_STONE),
-                    flowing: Some(MOD_STONE),
-                },
-            )
+    fn a_tag_matches_exactly_the_fluids_it_lists_and_a_fluid_both_forms() {
+        let rule = |neighbour| FluidInteraction {
+            neighbour,
+            below: None,
+            source: Some(OBSIDIAN),
+            flowing: Some(OBSIDIAN),
         };
+        let flowing = around(&[(1, cell(FluidKind::FlowingWater, AIR))]);
+        let source = around(&[(1, cell(FluidKind::Water, AIR))]);
+        let source_tag = [rule(Neighbour::FluidTag([FluidKind::Water].into()))];
+        assert_eq!(made(&source_tag, source, AIR, true), Some(OBSIDIAN.0));
+        assert_eq!(made(&source_tag, flowing, AIR, true), None);
+        let fluid = [rule(Neighbour::Fluid(FluidKind::Water))];
+        assert_eq!(made(&fluid, source, AIR, true), Some(OBSIDIAN.0));
+        assert_eq!(made(&fluid, flowing, AIR, true), Some(OBSIDIAN.0));
+    }
+
+    #[test]
+    fn a_declared_entry_applies_to_both_forms_and_a_builtin_to_the_fluid_it_names() {
+        let table = FluidInteractions::new(
+            // Vanilla's rules for flowing lava alone, as a lava tag holding only it would give.
+            vanilla().into_iter().map(|it| (FluidKind::FlowingLava, it)),
+            [
+                (FluidKind::Lava, stone_entry()),
+                (FluidKind::Water, stone_entry()),
+            ],
+        );
+        assert!(table.of(FluidKind::Lava).is_some_and(|l| l.len() == 1));
+        assert!(
+            table
+                .of(FluidKind::FlowingLava)
+                .is_some_and(|l| l.len() == 3)
+        );
+        assert!(table.of(FluidKind::Water).is_some_and(|l| l.len() == 1));
+        assert!(
+            table
+                .of(FluidKind::FlowingWater)
+                .is_some_and(|l| l.len() == 1)
+        );
+        assert!(table.of(FluidKind::Empty).is_none());
+        // A built-in comes before a declared entry of the same fluid.
+        let rules = table.of(FluidKind::FlowingLava).unwrap();
+        let ice = around(&[(0, cell(FluidKind::Empty, STONE))]);
+        assert_eq!(made(rules, ice, AIR, true), Some(MOD_STONE.0));
+        assert!(FluidInteractions::default().of(FluidKind::Lava).is_none());
+    }
+
+    #[test]
+    fn the_gate_answers_for_the_fluids_with_entries_and_no_other() {
         let slot = Slot::default();
         for kind in FluidKind::ALL {
             assert!(!slot.may_have(kind), "an empty slot has nothing");
         }
-        slot.install(FluidInteractions::new([entry(FluidKind::Lava)]));
+        slot.install(FluidInteractions::new(
+            [],
+            [(FluidKind::Lava, stone_entry())],
+        ));
         assert!(slot.may_have(FluidKind::Lava));
         assert!(slot.may_have(FluidKind::FlowingLava));
         assert!(slot.of(FluidKind::FlowingLava).is_some());
         for other in [FluidKind::Water, FluidKind::FlowingWater, FluidKind::Empty] {
             assert!(!slot.may_have(other));
         }
-        slot.install(FluidInteractions::new([entry(FluidKind::Water)]));
-        assert!(slot.may_have(FluidKind::FlowingWater));
+        slot.install(FluidInteractions::new(
+            [(FluidKind::Water, stone_entry())],
+            [],
+        ));
         assert!(slot.may_have(FluidKind::Water));
+        assert!(
+            !slot.may_have(FluidKind::FlowingWater),
+            "exactly the fluid named"
+        );
         assert!(!slot.may_have(FluidKind::FlowingLava));
-    }
-
-    #[test]
-    fn the_table_is_per_source_fluid_and_an_unlisted_fluid_has_none() {
-        let entries = vanilla()
-            .into_iter()
-            .map(|it| (FluidKind::Lava, it))
-            .chain([(
-                FluidKind::Water,
-                FluidInteraction {
-                    neighbour: Neighbour::Blocks(BlockMatch::Block(STONE)),
-                    below: None,
-                    source: Some(MOD_STONE),
-                    flowing: Some(MOD_STONE),
-                },
-            )]);
-        let table = FluidInteractions::new(entries);
-        assert_eq!(table.of(FluidKind::FlowingLava).map(|l| l.len()), Some(2));
-        assert_eq!(table.of(FluidKind::Lava).map(|l| l.len()), Some(2));
-        assert_eq!(table.of(FluidKind::FlowingWater).map(|l| l.len()), Some(1));
-        assert!(table.of(FluidKind::Empty).is_none());
-        assert!(FluidInteractions::default().of(FluidKind::Lava).is_none());
     }
 }

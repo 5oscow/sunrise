@@ -1,5 +1,5 @@
 //! What a liquid block turns into beside another fluid or block (NeoForge's
-//! `FluidInteractionRegistry`): vanilla's two lava rules, the interactions native mods declare
+//! `FluidInteractionRegistry`): vanilla's two lava rules for each fluid of the lava tag, the interactions native mods declare
 //! (`Registrar::fluid_interaction`) and the files of content mods
 //! (`data/<id>/sunrise/fluid_interaction/`), resolved against the open world's tags and
 //! installed on its behaviours for `LiquidBlock.shouldSpreadLiquid`.
@@ -88,10 +88,10 @@ fn declared(interaction: &mod_api::FluidInteraction) -> Result<FluidInteraction,
 
 impl Game<'_> {
     /// Install the open world's fluid interactions, replacing the last load's: vanilla's two
-    /// lava rules (water read from the world's `minecraft:water` tag, which a data pack may
-    /// edit), then native mods' declarations, then content mods' files in load order and file
-    /// name. Tags are read again on each call. An id that names no fluid or block refuses the
-    /// world by name.
+    /// lava rules for each fluid of the world's `minecraft:lava` tag (water read from its
+    /// `minecraft:water` tag; a data pack may edit both), then native mods' declarations, then
+    /// content mods' files in load order and file name. Tags are read again on each call. An
+    /// id that names no fluid or block refuses the world by name.
     pub(in crate::game) fn install_fluid_interactions(&self) -> Result<(), String> {
         let items = self
             .world_tables
@@ -111,12 +111,15 @@ impl Game<'_> {
             declarations.push(declared(interaction)?);
         }
         declarations.extend(sunrise_client::mod_content::fluid_interactions());
-        let mut entries =
-            behaviours.vanilla_fluid_interactions(&fluid_tag(items, "minecraft:water"));
-        for declaration in &declarations {
-            entries.push(self.resolve_fluid_interaction(behaviours, items, declaration)?);
-        }
-        behaviours.set_fluid_interactions(FluidInteractions::new(entries));
+        let builtin = behaviours.vanilla_fluid_interactions(
+            &fluid_tag(items, "minecraft:lava"),
+            &fluid_tag(items, "minecraft:water"),
+        );
+        let declared = declarations
+            .iter()
+            .map(|declaration| self.resolve_fluid_interaction(behaviours, items, declaration))
+            .collect::<Result<Vec<_>, _>>()?;
+        behaviours.set_fluid_interactions(FluidInteractions::new(builtin, declared));
         Ok(())
     }
 
@@ -161,8 +164,8 @@ impl Game<'_> {
             fluid(&declaration.source)?,
             Rule {
                 neighbour: match &declaration.neighbour {
-                    Neighbour::Fluid(name) => Walk::Fluids([fluid(name)?].into()),
-                    Neighbour::FluidTag(name) => Walk::Fluids(fluid_tag(items, name).into()),
+                    Neighbour::Fluid(name) => Walk::Fluid(fluid(name)?),
+                    Neighbour::FluidTag(name) => Walk::FluidTag(fluid_tag(items, name).into()),
                     Neighbour::Block(name) => Walk::Blocks(Resolved::Block(block(name)?)),
                     Neighbour::BlockTag(name) => Walk::Blocks(tag(name)),
                 },
