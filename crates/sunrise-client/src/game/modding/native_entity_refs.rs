@@ -1026,10 +1026,11 @@ pub(super) mod tests {
         if std::env::var_os(flag).is_some() {
             return false;
         }
-        let resources =
-            std::path::PathBuf::from(std::env::var_os("SUNRISE_TEST_RESOURCES").unwrap())
-                .canonicalize()
-                .unwrap();
+        let resources = std::path::PathBuf::from(std::env::var_os("SUNRISE_TEST_RESOURCES").expect(
+            "SUNRISE_TEST_RESOURCES must name the prepared resources (.local/sunrise-client/<version>)",
+        ))
+        .canonicalize()
+        .expect("SUNRISE_TEST_RESOURCES names a folder that does not exist");
         let scratch_owner = tempfile::tempdir().unwrap();
         let target = scratch_owner.path();
         let run = |case: &str| {
