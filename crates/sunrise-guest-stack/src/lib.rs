@@ -162,13 +162,27 @@ impl std::fmt::Display for StackError {
 
 fn inspect_current() -> Result<(), StackError> {
     let size = current_stack_size()?;
-    if size < GUEST_STACK_BYTES + HOST_HEADROOM {
+    if !fits(size, THREAD_STRUCTURE_ALLOWANCE) {
         return Err(StackError::Small(size));
     }
     Ok(())
 }
 
-#[cfg(target_os = "linux")]
+/// Bionic's `pthread_getattr_np` reports a thread's stack without the thread's own structure,
+/// which sits at its top: a few KiB short of what the thread was asked for, so 16 KiB is
+/// accepted there. Every other platform reports the full size.
+const THREAD_STRUCTURE_ALLOWANCE: usize = if cfg!(target_os = "android") {
+    16 * 1024
+} else {
+    0
+};
+
+/// Whether a stack of `size` bytes holds the guest's reservation, short by at most `allowance`.
+const fn fits(size: usize, allowance: usize) -> bool {
+    size + allowance >= GUEST_STACK_BYTES + HOST_HEADROOM
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
 fn current_stack_size() -> Result<usize, StackError> {
     // SAFETY: getpid and gettid take no arguments and always succeed.
     let main = unsafe { libc::getpid() as libc::c_long == libc::syscall(libc::SYS_gettid) };
@@ -224,7 +238,12 @@ fn current_stack_size() -> Result<usize, StackError> {
     Ok(high - low)
 }
 
-#[cfg(not(any(target_os = "linux", target_vendor = "apple", windows)))]
+#[cfg(not(any(
+    target_os = "linux",
+    target_os = "android",
+    target_vendor = "apple",
+    windows
+)))]
 fn current_stack_size() -> Result<usize, StackError> {
     Err(StackError::Uninspectable(
         "GuestStackUnavailable: stack inspection is unsupported on this platform",
@@ -288,6 +307,17 @@ fn audited_guest_workers_use_the_stack_policy() {
 
 #[cfg(test)]
 mod tests {
+    use super::fits;
+
+    #[test]
+    fn the_thread_structure_allowance_covers_a_few_kib_and_no_more() {
+        let required = 136 * 1024 * 1024;
+        assert!(fits(required, 0));
+        assert!(!fits(required - 4096, 0));
+        assert!(fits(required - 4096, 16 * 1024));
+        assert!(!fits(required - 1024 * 1024, 16 * 1024));
+    }
+
     #[test]
     fn small_worker_refuses_guest_entry() {
         std::thread::Builder::new()
