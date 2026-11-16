@@ -47,8 +47,9 @@ KEEP_STRINGS = {"launcher/src/identity.rs", "launcher/src/setup_args.rs"}
 STRING = re.compile(r'"(?:[^"\\\n]|\\.)*"|//[^\n]*')
 # Sunrise's package extensions, as a whole word in any spelling (`.hmod`, `"hmod"`, `hmod_path`, `HMOD`; never `chmod`).
 PACKAGE = re.compile(r"(?<![A-Za-z0-9])([Hh])(mod|pack|shader|MOD|PACK|SHADER)(?![A-Za-z0-9])")
-# The journal is history; the two launcher files name the earlier launchers and stay byte for byte.
-PACKAGE_SKIP = re.compile(r"^roadmap/journal/|^launcher/src/(identity|setup_args)\.rs$")
+# The journal is history, and roadmap.json is generated from it; the two launcher files name the earlier launchers
+# and stay byte for byte.
+PACKAGE_SKIP = re.compile(r"^roadmap/journal/|^roadmap/roadmap\.json$|^launcher/src/(identity|setup_args)\.rs$")
 
 
 def package(text):
