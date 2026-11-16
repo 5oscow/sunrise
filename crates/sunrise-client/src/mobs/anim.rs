@@ -816,6 +816,12 @@ pub(super) fn humanoid(p: &mut Poses, s: &State, h: &Hum) {
 /// `Mth.rotLerpRad`.
 fn rot_lerp_rad(a: f32, from: f32, to: f32) -> f32 {
     let mut diff = to - from;
+    // A mod's `humanoid_setup_anim` answer may be any finite angle: past a few turns, bring it
+    // into one turn first, or the wrapping loops below never finish (adding 2π to a huge f32 rounds
+    // back to it). Ordinary angles skip this and wrap exactly as vanilla's loops do.
+    if diff.abs() > 64.0 * PI {
+        diff = diff.rem_euclid(PI * 2.0);
+    }
     while diff < -PI {
         diff += PI * 2.0;
     }
@@ -1248,6 +1254,21 @@ mod body_pose_tests {
         body_pose(&raise, 30.0, at_rest, &mut p);
         assert_eq!(p.version(), version);
         assert_eq!(p.get("right_arm")[5], 1.5);
+    }
+}
+
+#[cfg(test)]
+mod rot_lerp_tests {
+    use super::*;
+
+    #[test]
+    fn a_huge_finite_angle_wraps_instead_of_looping() {
+        for from in [f32::MAX, -f32::MAX, 1.0e9, -1.0e9] {
+            let out = rot_lerp_rad(0.5, from, -std::f32::consts::FRAC_PI_4);
+            assert!(out.is_finite(), "from {from}");
+        }
+        // Ordinary angles are untouched: half way from 0 to 3π/2 goes the short way, to -π/4.
+        assert!((rot_lerp_rad(0.5, 0.0, 1.5 * PI) + 0.25 * PI).abs() < 1e-6);
     }
 }
 
