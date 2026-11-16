@@ -9,6 +9,8 @@ use crate::Identifier;
 /// commits. A phase change or disconnect before publication cancels it. Registered and
 /// engine-reserved custom payload channels require their payload/service API instead.
 /// This is not a connection or protocol implementation; submission applies no local effects.
+/// A `container_click`, whose carried stacks the game hashes, is built by
+/// [`NetworkClientHost::container_click`](crate::NetworkClientHost::container_click).
 /// Signed chat, signed commands and chat sessions have no typed builders:
 /// ```compile_fail
 /// mod_vocab::ServerboundPlayPacket::chat("hello");
