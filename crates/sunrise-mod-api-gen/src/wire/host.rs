@@ -467,7 +467,7 @@ fn fallback(
     reason: Option<&str>,
     isolate: bool,
 ) -> String {
-    if let Some(policy) = super::trait_roles::refusal(&m.owner) {
+    if let Some(policy) = super::trait_roles::refusal(m.owner) {
         let message = match reason {
             Some(reason) => format!("format!(\"wasm call refused or trapped: {{}}\", {reason})"),
             None => "String::from(\"wasm call refused or trapped\")".into(),
@@ -479,12 +479,6 @@ fn fallback(
             super::trait_roles::Refusal::Error(constructor) => {
                 format!("Err(mod_api::{constructor}({message}))")
             }
-        };
-    }
-    if m.owner == "IPayloadHandler" && m.name == "handle" {
-        return match reason {
-            Some(reason) => format!("Err(mod_api::PayloadHandleError::Failed(format!(\"wasm call refused or trapped: {{}}\", {reason})))"),
-            None => "Err(mod_api::PayloadHandleError::Failed(String::from(\"wasm call refused or trapped\")))".into(),
         };
     }
     match &m.ret {
