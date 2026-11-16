@@ -73,7 +73,9 @@ model whose type no mod registered.
 A later registration of a type replaces the earlier one, whichever mod made it and vanilla's types included,
 as in NeoForge; the log names both mods. An id that is not `<namespace>:<path>` is logged and left out. A
 special model of a type no mod registered and vanilla doesn't have is an error naming the type and the item:
-that item draws the missing model, and the rest of the resources load. A renderer that returns an `Err`,
+that item draws the missing model, and the rest of the resources load. A part can also be an item stack (`SpecialModelPart::stack`), resolved through the item model resolver with the
+inner item's own models, tints and foil under the display context you name; a cycle or more than
+`MAX_NESTED_STACK_PARTS` (64) stack parts in one draw refuses the answer. A renderer that returns an `Err`,
 panics, answers more than `MAX_SPECIAL_MODEL_PARTS` (256) parts or a transform that isn't finite, or (in a
 wasm mod) has its call refused or trapped, is logged once with its type and asked no more until resources
 reload; its special models draw the missing model until then. A part naming a model no pack has makes that

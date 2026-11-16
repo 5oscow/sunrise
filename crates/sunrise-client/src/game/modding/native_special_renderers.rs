@@ -12,8 +12,9 @@
 //! its answers are kept only for that frame of that view.
 use super::native_entity_renderers::Resolved;
 use mod_api::{
-    ClientHost, ItemDisplayContext, MAX_SPECIAL_MODEL_PARTS, SpecialModelContext, SpecialModelPart,
-    SpecialModelPolicy, SpecialModelRenderer,
+    ClientHost, ItemDisplayContext, MAX_NESTED_STACK_PARTS, MAX_SPECIAL_MODEL_PARTS,
+    SpecialModelContext, SpecialModelPart, SpecialModelPolicy, SpecialModelRenderer,
+    SpecialPartContent,
 };
 use serde_json::Value;
 use std::{
@@ -21,7 +22,7 @@ use std::{
     sync::{Arc, LazyLock, Mutex, MutexGuard, OnceLock, PoisonError, atomic::Ordering},
 };
 use sunrise_assets::{
-    item_model::{PreparedParts, SpecialModelSlot, SpecialPart, StackView},
+    item_model::{PreparedParts, SpecialContent, SpecialModelSlot, SpecialPart, StackView},
     math::Mat4,
 };
 use sunrise_client::fast_hash::{FxHashMap, FxHasher};
@@ -351,12 +352,23 @@ fn guarded(
 }
 
 /// `parts` as the resolver takes them, or why they are refused: more than
-/// [`MAX_SPECIAL_MODEL_PARTS`], or a transform that isn't finite. Nothing is kept of a refusal.
+/// [`MAX_SPECIAL_MODEL_PARTS`], more than [`MAX_NESTED_STACK_PARTS`] stacks, a stack the game
+/// can't read, or a transform that isn't finite. Nothing is kept of a refusal. Cycles between
+/// stacks are refused when the item is drawn, where the resolver expands them.
 fn checked(parts: &[SpecialModelPart]) -> Result<Vec<SpecialPart>, String> {
     if parts.len() > MAX_SPECIAL_MODEL_PARTS {
         return Err(format!(
             "{} parts, more than {MAX_SPECIAL_MODEL_PARTS}",
             parts.len()
+        ));
+    }
+    let stacks = parts
+        .iter()
+        .filter(|part| matches!(part.content, SpecialPartContent::Stack { .. }))
+        .count();
+    if stacks > MAX_NESTED_STACK_PARTS {
+        return Err(format!(
+            "{stacks} stack parts, more than {MAX_NESTED_STACK_PARTS}"
         ));
     }
     parts
@@ -365,11 +377,29 @@ fn checked(parts: &[SpecialModelPart]) -> Result<Vec<SpecialPart>, String> {
             let [a, b, c, d, e, f, g, h, i, j, k, l] = part.transform;
             let pose =
                 Mat4::from_row_major([a, b, c, d, e, f, g, h, i, j, k, l, 0.0, 0.0, 0.0, 1.0]);
+            let content = match &part.content {
+                SpecialPartContent::Model(model) => SpecialContent::Model(model.clone()),
+                SpecialPartContent::Stack { stack, display } => {
+                    let stack = super::api_values::stack_value(stack)
+                        .map_err(|e| format!("a stack part can't be read: {e:?}"))?;
+                    let display = super::api_values::engine_display_context(*display)
+                        .ok_or("a stack part's display context is unknown")?;
+                    SpecialContent::Stack {
+                        stack: sunrise_client::item_render::stack_view(&stack),
+                        display,
+                    }
+                }
+                _ => return Err("a part of a kind this game doesn't have".into()),
+            };
             if !pose.is_finite() {
-                return Err(format!("{}'s transform isn't finite", part.model));
+                let what = match &part.content {
+                    SpecialPartContent::Model(model) => model,
+                    _ => "a stack part",
+                };
+                return Err(format!("{what}'s transform isn't finite"));
             }
             Ok(SpecialPart {
-                model: part.model.clone(),
+                content,
                 pose,
                 tints: part.tints.iter().map(|&argb| argb as i32).collect(),
             })
@@ -422,7 +452,7 @@ mod tests {
             ])
         })
         .unwrap();
-        assert_eq!(parts[0].model, "t:item/a");
+        assert_eq!(parts[0].content, SpecialContent::Model("t:item/a".into()));
         assert_eq!(parts[0].pose.0, Mat4::translation([1.0, 2.0, 3.0]).0);
         assert_eq!(parts[0].tints, [0xFF11_2233_u32 as i32]);
     }

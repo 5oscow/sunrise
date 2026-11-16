@@ -96,6 +96,7 @@ fn state(sprite: &str, foil: FoilType, display: DisplayContext) -> ItemRenderSta
             particle: sprite.into(),
             uses_block_light: false,
             extents: Arc::new(vec![]),
+            display,
         }],
         oversized_in_gui: false,
         animated: false,
@@ -234,6 +235,24 @@ fn gui_glint_matches_pinned_vanilla_atlas_input() {
             quads[0].foil_uv,
             [[0.0, 0.0], [0.0, 1.0], [1.0, 1.0], [1.0, 0.0]]
         );
+    }
+    // A layer keeps the display context it was resolved for when another state holds it (a
+    // nested stack under another item's display): a GUI glint follows the layer's own, in both
+    // directions.
+    for (outer, inner, outer_gui) in [
+        (DisplayContext::Fixed, DisplayContext::Gui, false),
+        (DisplayContext::Gui, DisplayContext::Fixed, true),
+    ] {
+        let book = "minecraft:item/enchanted_book";
+        let mut state = state(book, FoilType::Standard, outer);
+        state
+            .layers
+            .extend(self::state(book, FoilType::Standard, inner).layers);
+        let mut quads = Vec::new();
+        state.submit(&renderer, &sprites, &NoHost, Mat4::IDENTITY, &mut quads);
+        assert_eq!(quads.len(), 2);
+        assert_eq!(quads[0].gui_glint_uv.is_some(), outer_gui, "{outer:?}");
+        assert_eq!(quads[1].gui_glint_uv.is_some(), !outer_gui, "{inner:?}");
     }
     fs::remove_dir_all(root).unwrap();
 }

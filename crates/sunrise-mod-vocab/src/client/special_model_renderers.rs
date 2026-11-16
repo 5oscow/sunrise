@@ -10,12 +10,35 @@ use crate::wire::{Reader, Wire, WireError, Writer};
 use crate::{ClientHost, ItemDisplayContext, ItemStack, Tag};
 use std::{collections::BTreeMap, sync::Arc};
 
-/// One resource model a special model renderer draws.
+/// What a [`SpecialModelPart`] draws.
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq, sunrise_mod_api_macros::Wire)]
+pub enum SpecialPartContent {
+    /// A resource model: the id (`mymod:item/skillet_pan`) of a model file of the packs.
+    Model(String),
+    /// An item stack, resolved through the item model resolver as any held or displayed item is:
+    /// the item's own models, tints and foil, drawn as `display` says. The part's transform
+    /// places the item's centre, and its `tints` are not used.
+    Stack {
+        /// The stack drawn.
+        stack: ItemStack,
+        /// The display context the item is resolved and drawn with (`Fixed` as in an item frame,
+        /// `Ground`, `Gui`): its own display transform applies.
+        display: ItemDisplayContext,
+    },
+}
+
+/// The most nested stack parts one draw of an item may expand, all its renderers' and the
+/// stacks' own together: a draw that would expand more, or that meets a stack already being
+/// expanded above it, is refused whole.
+pub const MAX_NESTED_STACK_PARTS: usize = 64;
+
+/// One thing a special model renderer draws: a resource model or an item stack.
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, sunrise_mod_api_macros::Wire)]
 pub struct SpecialModelPart {
-    /// The model's id (`mymod:item/skillet_pan`), a model file of the packs.
-    pub model: String,
+    /// What is drawn.
+    pub content: SpecialPartContent,
     /// Where it is drawn: a row-major 3×4 affine transform in the special model's space, in
     /// blocks with the origin at the model's corner (a model element's coordinates over 16).
     pub transform: [f32; 12],
@@ -31,7 +54,16 @@ impl SpecialModelPart {
     /// `model` where the special model is, untinted.
     pub fn new(model: impl Into<String>) -> Self {
         Self {
-            model: model.into(),
+            content: SpecialPartContent::Model(model.into()),
+            transform: Self::IDENTITY,
+            tints: Vec::new(),
+        }
+    }
+
+    /// `stack` drawn as `display` says, centred where the special model is.
+    pub fn stack(stack: ItemStack, display: ItemDisplayContext) -> Self {
+        Self {
+            content: SpecialPartContent::Stack { stack, display },
             transform: Self::IDENTITY,
             tints: Vec::new(),
         }

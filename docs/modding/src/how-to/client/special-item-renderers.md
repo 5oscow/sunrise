@@ -64,8 +64,9 @@ The item definition names the type in a `minecraft:special` model, with a `base`
 
 ## What the parts are
 
-- `model` is a model file of the packs (`example:item/skillet_pan`), with `elements` and textures as
-  any item model has.
+- `SpecialModelPart::new(model)` draws a model file of the packs (`example:item/skillet_pan`), with
+  `elements` and textures as any item model has. `SpecialModelPart::stack(stack, display)` draws an
+  item stack instead (see "Nested stacks" below).
 - `transform` is a row-major 3×4 affine transform in the special model's space: blocks, with the
   origin at the model's corner, so an element's coordinates over 16. `translated` moves a part after
   its transform; `with_transform` sets the whole of it.
@@ -97,6 +98,21 @@ Registering a renderer names its `SpecialModelPolicy`.
   `extract` per drawn item per frame, for each display context it is drawn in, so keep it cheap.
   Answers are kept for their frame only, and a GUI slot showing one is redrawn every frame rather
   than cached.
+
+## Nested stacks
+
+A part can be an item: `SpecialModelPart::stack(stack, ItemDisplayContext::Fixed)` resolves the stack
+through the item model resolver as any held or displayed item is, so the inner item draws with its
+own models, tints and foil, and with the display transform of the context you name (`Fixed` as in an
+item frame, `Ground`, `Gui`). The part's `transform` places the inner item's centre; the part's
+`tints` are not used for it. A food item inside a skillet is the typical case: the renderer names the
+food stack and the resource pack decides how it looks.
+
+The inner item resolves every time the outer one is drawn, so its own `Frame` renderers and
+animations keep moving. A stack that is already being expanded above itself (a cycle), more than
+`MAX_NESTED_STACK_PARTS` (64) stack parts in one draw of an item, or a stack the game can't read,
+refuses the answer whole, as the other limits do: the item draws the missing model and the log
+names the item. Native and wasm renderers are refused identically.
 
 ## Registrations and refusals
 
