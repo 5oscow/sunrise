@@ -66,7 +66,10 @@ for path in Path('crates/sunrise-client').rglob('*.rs'):
         short = name.split('::')[-1]
         if short not in ('encode', 'encode_with', 'encode_proto'):
             continue
-        is_save = 'save::' in name or relative == 'src/save.rs' or relative.startswith('src/save/')
+        is_local_save = name in ('encode', 'encode_with', 'encode_proto',
+                                 'super::encode', 'super::encode_with', 'super::encode_proto')
+        is_save = name.endswith(f'save::{short}') or (is_local_save and (
+            relative == 'src/save.rs' or relative.startswith('src/save/')))
         if not is_save:
             continue
         arguments = node.child_by_field_name('arguments')
