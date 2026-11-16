@@ -483,17 +483,35 @@ fn a_choice_without_a_display_transform_owns_the_layers_below_it() {
             });
         }
     }
-    register_item_models(vec!["layertest:wrap".into()]);
-    let json = r#"{"model":{"type":"layertest:wrap","models":{
-        "bare":{"type":"minecraft:composite","models":[
-            {"type":"minecraft:model","model":"layertest:item/a"},
-            {"type":"minecraft:model","model":"layertest:item/b"}]},
-        "plain":{"type":"minecraft:model","model":"layertest:item/c"}}}}"#;
+    // A local definition holding a `Registered` node, so the process-wide node table stays
+    // untouched.
+    let model = |json: serde_json::Value| ItemModelNode::decode(&json).unwrap();
+    let definition = ClientItem {
+        model: ItemModelNode::Registered {
+            kind: "layertest:wrap".into(),
+            transformation: None,
+            config: Arc::new(sunrise_core::nbt::Tag::Compound(Default::default())),
+            models: vec![
+                (
+                    "bare".into(),
+                    model(serde_json::json!({"type":"minecraft:composite","models":[
+                        {"type":"minecraft:model","model":"layertest:item/a"},
+                        {"type":"minecraft:model","model":"layertest:item/b"}]})),
+                ),
+                (
+                    "plain".into(),
+                    model(serde_json::json!({"type":"minecraft:model","model":"layertest:item/c"})),
+                ),
+            ],
+        },
+        hand_animation_on_swap: true,
+        oversized_in_gui: false,
+        swap_animation_scale: 1.0,
+    };
     let mut models = ItemModels::default();
-    models.definitions.insert(
-        "layertest:wrap".into(),
-        ClientItem::from_json(json).unwrap(),
-    );
+    models
+        .definitions
+        .insert("layertest:wrap".into(), definition);
     let mut stack = StackView::new("layertest:wrap", 1);
     stack.patch.insert(
         "minecraft:item_model".into(),
