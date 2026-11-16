@@ -10,12 +10,12 @@ use super::{
     visit_box_cells,
 };
 use crate::fast_hash::FxHashSet;
+use std::collections::HashMap;
 use sunrise_core::{
     geometry::{Aabb, Axis, Direction, Vec3, sweep_intersected_blocks},
     position::BlockPos,
 };
 use sunrise_world::{entity_move::MovementRecord, registry::BlockStateId};
-use std::collections::HashMap;
 
 /// One thing a traversal did, in order.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -333,7 +333,11 @@ fn old_arrow_sweep(
 /// A seeded move inside the grid: short, axis-ish, or long enough to run the
 /// 16-iteration budget out, with or without a recorded original.
 fn seeded_move(rng: &mut Rng) -> MovementRecord {
-    let from = Vec3::new(rng.range(1.0, 9.0), rng.range(1.0, 9.0), rng.range(1.0, 9.0));
+    let from = Vec3::new(
+        rng.range(1.0, 9.0),
+        rng.range(1.0, 9.0),
+        rng.range(1.0, 9.0),
+    );
     let reach = match rng.next() % 4 {
         0 => 0.0,
         1 => 0.6,
@@ -371,7 +375,9 @@ fn movement_walks_match_the_walk_they_replaced() {
     let mut nonempty = 0;
     for case in 0..CASES {
         let grid = Grid::seeded(&mut rng, false);
-        let movements: Vec<_> = (0..1 + rng.next() % 3).map(|_| seeded_move(&mut rng)).collect();
+        let movements: Vec<_> = (0..1 + rng.next() % 3)
+            .map(|_| seeded_move(&mut rng))
+            .collect();
         let (width, height) = [(0.6, 1.8), (0.25, 0.25), (0.98, 0.7)][(case % 3) as usize];
         let mut walk = GridWalk::<false> {
             grid: &grid,
@@ -417,7 +423,14 @@ fn the_arrow_walk_matches_the_one_it_replaced() {
             16,
         );
         if 16 - used <= 0 {
-            old_arrow_sweep(&grid, movement.to, movement.to, &mut old_visited, &mut old_trace, 1);
+            old_arrow_sweep(
+                &grid,
+                movement.to,
+                movement.to,
+                &mut old_visited,
+                &mut old_trace,
+                1,
+            );
         }
         let mut walk = GridWalk::<true> {
             grid: &grid,
@@ -449,7 +462,11 @@ fn the_arrow_cells_match_the_sweep_they_replaced() {
             old.push(p);
             true
         });
-        assert_eq!(crate::arrows::blocks_inside(m.from, m.to), old, "case {case}: {m:?}");
+        assert_eq!(
+            crate::arrows::blocks_inside(m.from, m.to),
+            old,
+            "case {case}: {m:?}"
+        );
     }
 }
 
@@ -488,7 +505,14 @@ fn the_mob_start_pass_matches_the_loop_it_replaced() {
         }
         old_movements(&mut walk, &[movement], &mut old_visited, &mut old_trace);
         let (mut visited, mut trace) = (FxHashSet::default(), Trace::default());
-        visit_box_cells(&mut walk, start_box, movement.from, &mut visited, &mut trace).unwrap();
+        visit_box_cells(
+            &mut walk,
+            start_box,
+            movement.from,
+            &mut visited,
+            &mut trace,
+        )
+        .unwrap();
         sweep_movements(&mut walk, &[movement], &mut visited, &mut trace).unwrap();
         assert_eq!(trace, old_trace, "case {case}: {movement:?}");
         assert_eq!(visited, old_visited, "case {case}");
@@ -509,7 +533,9 @@ fn the_mob_flower_pass_matches_the_sweep_it_replaced() {
             width: 0.6,
             height: 1.95,
         };
-        let box_at_end = walk.bounds_at(m.to).deflate(Vec3::new(1.0e-5, 1.0e-5, 1.0e-5));
+        let box_at_end = walk
+            .bounds_at(m.to)
+            .deflate(Vec3::new(1.0e-5, 1.0e-5, 1.0e-5));
         let mut old = Vec::new();
         let _ = sweep_intersected_blocks(m.from, m.to, box_at_end, 1 << 22, |p, _| {
             if grid.get(p).is_some_and(|c| c.fire) {
@@ -546,7 +572,11 @@ fn the_mob_flower_pass_matches_the_sweep_it_replaced() {
 fn box_cells_match_the_loops_they_replaced() {
     let mut rng = Rng(0x1011_0006);
     for case in 0..CASES {
-        let at = Vec3::new(rng.range(-3.0, 3.0), rng.range(-3.0, 3.0), rng.range(-3.0, 3.0));
+        let at = Vec3::new(
+            rng.range(-3.0, 3.0),
+            rng.range(-3.0, 3.0),
+            rng.range(-3.0, 3.0),
+        );
         let b = box_at(at, rng.range(0.1, 2.5), rng.range(0.1, 2.5))
             .deflate(Vec3::new(1e-5, 1e-5, 1e-5));
         let (lo, hi) = (b.min_position(), b.max_position());
