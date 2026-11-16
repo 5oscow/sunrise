@@ -25,6 +25,7 @@ impl SpecialModelRenderer for Skillet {
         _host: &dyn ClientHost,
         stack: &ItemStack,
         _config: &Tag,
+        _context: &SpecialModelContext,
     ) -> Result<Vec<SpecialModelPart>, String> {
         let mut parts = vec![SpecialModelPart::new("example:item/skillet_pan")];
         if stack.count() > 1 {
@@ -40,7 +41,7 @@ fn register_special_model_renderer(
     _context: &RegistrationContext,
     event: &mut RegisterSpecialModelRendererEvent<'_>,
 ) {
-    event.renderers.register("example:skillet".into(), Arc::new(Skillet));
+    event.renderers.register("example:skillet".into(), SpecialModelPolicy::Stack, Arc::new(Skillet));
 }
 ```
 
@@ -55,11 +56,19 @@ origin at the model's corner, as an element's coordinates over 16) and its tints
 item model's `tints`). The renderer never sees the `base` model: the game draws the parts with its display
 transforms, particle and GUI light, as vanilla does, and the node's `transformation` applies to all of them.
 
-The renderer is asked on the client's main thread when an item of such a model is drawn with a stack other
-than the last one that model was asked about: an unchanged stack is asked once, however many frames draw it,
-and every display context (a hand, a screen, the ground, a frame, a head) draws that answer. The same for
-native and wasm mods: a wasm renderer is one call for each new stack, the stack copied in and the parts
-copied out.
+Registration names a `SpecialModelPolicy`. `Stack` asks the renderer on the client's main thread when an item
+of such a model is drawn with a stack other than the last one that model was asked about: an unchanged stack is
+asked once, however many frames draw it, and every display context (a hand, a screen, the ground, a frame, a
+head) draws that answer; the `context` it is given is always `SpecialModelContext::STACK`. This caching is a
+deliberate difference from vanilla, which extracts every frame. `Frame` asks once per frame of the view for
+each display context and game time the item is drawn with, and `context` carries the display context, the
+level's game time (`None` outside a world) and the partial tick: for an ingredient that rises and turns over
+a few ticks and must move smoothly between them. There is no cap on animated items: a `Frame` renderer costs one `extract` per drawn item per frame, for each
+display context the item is drawn in (the same item in a hand and in an item frame is asked twice). A `Frame`
+answer is not kept past its frame, and an item
+drawn with one is never cached as a still GUI image. The same for native and wasm mods: a wasm renderer is one
+call per asked stack, the stack copied in and the parts copied out. Nothing is asked, and no scan runs, for a
+model whose type no mod registered.
 
 A later registration of a type replaces the earlier one, whichever mod made it and vanilla's types included,
 as in NeoForge; the log names both mods. An id that is not `<namespace>:<path>` is logged and left out. A

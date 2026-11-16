@@ -4,12 +4,17 @@
 //! may name besides vanilla's, or in place of one; a model resolves its type to the renderer's
 //! slot when it decodes. When an item of such a model is resolved for drawing, on the main thread,
 //! the type's renderer answers the resource models to draw (`ItemEnv::special_model_parts`),
-//! checked here, then prepared by the item renderer, which bakes them once. The prepared answer
-//! is kept by the stack for each model node for as long as that stack is drawn unchanged, so it
-//! is asked once across frames, every display context draws the same answer, and a draw looks
-//! nothing up by name.
+//! checked here, then prepared by the item renderer, which bakes them once. A renderer registered
+//! with `SpecialModelPolicy::Stack` has its answer kept by the stack for each model node for as
+//! long as that stack is drawn unchanged, so it is asked once across frames, every display
+//! context draws the same answer, and a draw looks nothing up by name. One registered with
+//! `Frame` is asked for each frame, display context and game time an item is drawn with, and
+//! its answers are kept only for that frame of that view.
 use super::native_entity_renderers::Resolved;
-use mod_api::{ClientHost, MAX_SPECIAL_MODEL_PARTS, SpecialModelPart, SpecialModelRenderer};
+use mod_api::{
+    ClientHost, ItemDisplayContext, MAX_SPECIAL_MODEL_PARTS, SpecialModelContext, SpecialModelPart,
+    SpecialModelPolicy, SpecialModelRenderer,
+};
 use serde_json::Value;
 use std::{
     hash::{Hash, Hasher},
@@ -24,7 +29,13 @@ use sunrise_core::nbt::Tag;
 
 /// The registrations, by slot ([`SpecialModelSlot`]): each type and its renderer, kept once at
 /// start.
-static REGISTERED: OnceLock<Vec<(String, Resolved<dyn SpecialModelRenderer>)>> = OnceLock::new();
+static REGISTERED: OnceLock<
+    Vec<(
+        String,
+        SpecialModelPolicy,
+        Resolved<dyn SpecialModelRenderer>,
+    )>,
+> = OnceLock::new();
 
 /// The prepared answers of the stacks drawn since the last frame began.
 static ANSWERS: LazyLock<Mutex<Answers>> = LazyLock::new(Mutex::default);
@@ -34,12 +45,14 @@ fn answers() -> MutexGuard<'static, Answers> {
 }
 
 /// Keeps the mods' registrations in slot order, once per process (false when they already were).
-pub(super) fn register(renderers: Vec<(String, Arc<dyn SpecialModelRenderer>)>) -> bool {
+pub(super) fn register(
+    renderers: Vec<(String, SpecialModelPolicy, Arc<dyn SpecialModelRenderer>)>,
+) -> bool {
     REGISTERED
         .set(
             renderers
                 .into_iter()
-                .map(|(kind, renderer)| (kind, Resolved::new(renderer)))
+                .map(|(kind, policy, renderer)| (kind, policy, Resolved::new(renderer)))
                 .collect(),
         )
         .is_ok()
@@ -48,12 +61,13 @@ pub(super) fn register(renderers: Vec<(String, Arc<dyn SpecialModelRenderer>)>) 
 /// On every resource reload: the renderers that failed are asked again, and no answer is kept
 /// (the model nodes and baked models they belonged to are gone).
 pub(in crate::game) fn reload() {
-    for (_, resolved) in REGISTERED.get().into_iter().flatten() {
+    for (_, _, resolved) in REGISTERED.get().into_iter().flatten() {
         resolved.failed.store(false, Ordering::Relaxed);
     }
     let mut answers = answers();
     answers.kept.clear();
     answers.refused.clear();
+    answers.per_frame.clear();
 }
 
 /// Once per frame of the view `view` (its game's address), before it is drawn: the answers of
@@ -63,22 +77,28 @@ pub(in crate::game) fn begin_frame(view: usize) {
     answers().begin_frame(view);
 }
 
-/// What the renderer of `slot` draws for `stack` in the model node of `config`: the kept answer
-/// when this node drew an equal stack last frame or this one, else the renderer's, checked,
-/// prepared by `prepare` and kept. `None` when no mod registered it, when it failed since
-/// resources last loaded, or when it fails now.
+/// What the renderer of `slot` draws for `stack` in the model node of `config`, drawn as
+/// `context` says: under `Stack`, the kept answer when this node drew an equal stack last frame or
+/// this one, else the renderer's, checked, prepared by `prepare` and kept; under `Frame`, the
+/// answer of this frame for the same stack, display context and time, else the renderer's. `None`
+/// when no mod registered it, when it failed since resources last loaded, or when it fails now.
 pub(in crate::game) fn parts(
     host: &dyn ClientHost,
     slot: SpecialModelSlot,
     config: &Arc<Tag>,
     stack: &StackView,
+    context: &SpecialModelContext,
     prepare: impl FnOnce(&[SpecialPart]) -> PreparedParts,
 ) -> Option<PreparedParts> {
-    let (kind, resolved) = REGISTERED.get()?.get(slot.0 as usize)?;
+    let (kind, policy, resolved) = REGISTERED.get()?.get(slot.0 as usize)?;
     if resolved.failed.load(Ordering::Relaxed) {
         return None;
     }
-    answer(&ANSWERS, Arc::as_ptr(config) as usize, stack, || {
+    let (frame, context) = match policy {
+        SpecialModelPolicy::Frame => (Some(FrameTiming::of(context)), context),
+        _ => (None, &SpecialModelContext::STACK),
+    };
+    answer(&ANSWERS, Arc::as_ptr(config) as usize, stack, frame, || {
         // A stack the API can't take is refused alone: the renderer isn't at fault.
         use super::api_values::TryIntoApi;
         let api_stack = stack
@@ -86,7 +106,7 @@ pub(in crate::game) fn parts(
             .map_err(|e| warn_unreadable_once(kind, &stack.item, || format!("{e:?}")))
             .ok()?;
         let parts = guarded(kind, resolved, || {
-            resolved.inner.extract(host, &api_stack, config)
+            resolved.inner.extract(host, &api_stack, config, context)
         })?;
         Some(prepare(&parts))
     })
@@ -111,16 +131,64 @@ fn warn_unreadable_once(kind: &str, item: &str, error: impl FnOnce() -> String) 
     );
 }
 
-/// The answer for `stack` in the model node `node`: the one kept in `answers` for an equal stack,
-/// else what `ask` answers, kept. The lock isn't held while `ask` runs the mod's renderer.
+/// What a `Frame` renderer's answer depends on besides the stack and the model node.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+struct FrameTiming {
+    display: ItemDisplayContext,
+    game_time: Option<i64>,
+    /// The bits of the partial tick, so equal ticks only are equal.
+    partial_tick: u32,
+}
+impl FrameTiming {
+    fn of(context: &SpecialModelContext) -> Self {
+        Self {
+            display: context.display,
+            game_time: context.game_time,
+            partial_tick: context.partial_tick.to_bits(),
+        }
+    }
+}
+
+/// The answer for `stack` in the model node `node`. With no `frame` (the `Stack` policy), the one
+/// kept in `answers` for an equal stack, else what `ask` answers, kept. With one, the answer given
+/// this frame of this view to an equal stack with that timing, else what `ask` answers, kept for
+/// the frame, a refusal included. The lock isn't held while `ask` runs the mod's renderer.
 fn answer(
     answers: &Mutex<Answers>,
     node: usize,
     stack: &StackView,
+    frame: Option<FrameTiming>,
     ask: impl FnOnce() -> Option<PreparedParts>,
 ) -> Option<PreparedParts> {
     let lock = || answers.lock().unwrap_or_else(PoisonError::into_inner);
     let key = (node, stack_hash(stack));
+    if let Some(timing) = frame {
+        let (view, frame) = {
+            let answers = lock();
+            (answers.view, answers.frame)
+        };
+        let key = FrameKey {
+            node,
+            hash: key.1,
+            view,
+            frame,
+            timing,
+        };
+        if let Some(kept) = lock().per_frame.get(&key).and_then(|answers| {
+            answers
+                .iter()
+                .find_map(|(kept, prepared)| (kept == stack).then(|| prepared.clone()))
+        }) {
+            return kept;
+        }
+        let prepared = ask();
+        lock()
+            .per_frame
+            .entry(key)
+            .or_default()
+            .push((stack.clone(), prepared.clone()));
+        return prepared;
+    }
     if let Some(kept) = lock().drawn(key, stack) {
         return Some(kept);
     }
@@ -145,10 +213,24 @@ fn answer(
 struct Answers {
     /// Counts the frames begun, by any view.
     frame: u64,
+    /// The view whose frame began last: the one drawing.
+    view: usize,
+    /// The answers of `Frame` renderers, for the frame being drawn only.
+    per_frame: FxHashMap<FrameKey, Vec<(StackView, Option<PreparedParts>)>>,
     /// Each view's last two frames: when its previous one began and its current one.
     views: FxHashMap<usize, [u64; 2]>,
     kept: FxHashMap<(usize, u64), Vec<Kept>>,
     refused: FxHashMap<(usize, u64), Vec<StackView>>,
+}
+/// Whose `Frame` answer it is: the model node, the stack's hash, the frame of the view drawing it
+/// and what it was drawn with.
+#[derive(PartialEq, Eq, Hash)]
+struct FrameKey {
+    node: usize,
+    hash: u64,
+    view: usize,
+    frame: u64,
+    timing: FrameTiming,
 }
 /// A view no frame of which began for this many frames (of all views) is gone.
 const VIEW_GONE_AFTER: u64 = 256;
@@ -181,6 +263,8 @@ impl Answers {
     /// views' previous frames began: what some view's last frame may have drawn.
     fn begin_frame(&mut self, view: usize) {
         self.refused.clear();
+        self.per_frame.clear();
+        self.view = view;
         self.frame += 1;
         let frame = self.frame;
         // A view's first frame keeps what was drawn before it began, as if its own.
@@ -317,6 +401,7 @@ mod tests {
             _: &dyn ClientHost,
             _: &mod_api::ItemStack,
             _: &Tag,
+            _: &SpecialModelContext,
         ) -> Result<Vec<SpecialModelPart>, String> {
             unreachable!("the tests answer through `guarded`'s closure")
         }
@@ -348,7 +433,7 @@ mod tests {
         let stack = StackView::new("t:pan", 1);
         let asked = std::cell::Cell::new(0);
         let draw = || {
-            answer(&answers, 1, &stack, || {
+            answer(&answers, 1, &stack, None, || {
                 asked.set(asked.get() + 1);
                 None
             })
@@ -370,7 +455,7 @@ mod tests {
         let answers = Mutex::<Answers>::default();
         let asked = std::cell::Cell::new(0);
         let draw = |node: usize, stack: &StackView| {
-            answer(&answers, node, stack, || {
+            answer(&answers, node, stack, None, || {
                 asked.set(asked.get() + 1);
                 Some(PreparedParts(Arc::new(stack.count)))
             })
@@ -425,6 +510,61 @@ mod tests {
         answers.lock().unwrap().kept.clear();
         draw(pan, &stacks[0]);
         assert_eq!(asked.get(), 105);
+    }
+
+    /// A `Frame` answer is asked again for another frame, display context or time, and shared
+    /// only by an equal stack drawn the same way in the same frame, a refusal included.
+    #[test]
+    fn a_frame_answer_is_kept_for_its_frame_display_and_time_only() {
+        let answers = Mutex::<Answers>::default();
+        answers.lock().unwrap().begin_frame(1);
+        let stack = StackView::new("t:pan", 1);
+        let asked = std::cell::Cell::new(0);
+        let timing = |display, game_time, partial: f32| FrameTiming {
+            display,
+            game_time: Some(game_time),
+            partial_tick: partial.to_bits(),
+        };
+        let draw = |timing: FrameTiming, stack: &StackView| {
+            answer(&answers, 1, stack, Some(timing), || {
+                asked.set(asked.get() + 1);
+                (stack.count != 9).then(|| PreparedParts(Arc::new(asked.get())))
+            })
+        };
+        let hand = timing(ItemDisplayContext::FirstPersonRightHand, 100, 0.25);
+        let first = draw(hand, &stack);
+        assert_eq!(draw(hand, &stack), first);
+        assert_eq!(asked.get(), 1);
+        assert_ne!(
+            draw(timing(ItemDisplayContext::Gui, 100, 0.25), &stack),
+            first
+        );
+        assert_ne!(
+            draw(
+                timing(ItemDisplayContext::FirstPersonRightHand, 100, 0.5),
+                &stack
+            ),
+            first
+        );
+        assert_ne!(
+            draw(
+                timing(ItemDisplayContext::FirstPersonRightHand, 101, 0.25),
+                &stack
+            ),
+            first
+        );
+        assert_ne!(draw(hand, &StackView::new("t:pan", 2)), first);
+        assert_eq!(asked.get(), 5);
+        // A refusal is kept for the frame too.
+        let refused = StackView::new("t:pan", 9);
+        assert_eq!(draw(hand, &refused), None);
+        assert_eq!(draw(hand, &refused), None);
+        assert_eq!(asked.get(), 6);
+        // The next frame asks again, though nothing about the stack changed.
+        answers.lock().unwrap().begin_frame(1);
+        assert_ne!(draw(hand, &stack), first);
+        assert_eq!(asked.get(), 7);
+        assert!(answers.lock().unwrap().kept.is_empty());
     }
 
     /// An `Err`, a panic, 257 parts and a transform that isn't finite each refuse the answer

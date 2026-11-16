@@ -66,6 +66,7 @@ impl SpecialModelRenderer for Unmatched {
         _: &dyn ClientHost,
         _: &mod_api::ItemStack,
         _: &sunrise_core::nbt::Tag,
+        _: &mod_api::SpecialModelContext,
     ) -> Result<Vec<SpecialModelPart>, String> {
         panic!("a renderer no drawn model names was asked")
     }
@@ -115,6 +116,7 @@ fn built_in_scenes_cost_nothing_more_without_a_listener_isolated() {
         register_special_model_types(vec!["test:unmatched".into()]);
         assert!(super::register(vec![(
             "test:unmatched".into(),
+            mod_api::SpecialModelPolicy::Stack,
             Arc::new(Unmatched)
         )]));
         let (registered, registered_allocations) = scene(game);
@@ -131,6 +133,7 @@ impl SpecialModelRenderer for Stone {
         _: &dyn ClientHost,
         _: &mod_api::ItemStack,
         _: &sunrise_core::nbt::Tag,
+        _: &mod_api::SpecialModelContext,
     ) -> Result<Vec<SpecialModelPart>, String> {
         Ok(vec![SpecialModelPart::new("minecraft:block/stone")])
     }
@@ -152,6 +155,7 @@ fn special_item_draw_cost() {
     register_special_model_types(vec!["test:stone".into()]);
     assert!(super::register(vec![(
         "test:stone".into(),
+        mod_api::SpecialModelPolicy::Stack,
         Arc::new(Stone)
     )]));
     crate::game::native_entity_refs::tests::with_game(|game| {

@@ -2,8 +2,9 @@
 
 pub trait Hooks {
     /// A node of a type a mod registered (`register_item_models`, vanilla's `ItemModel.update`)
-    /// is resolved for a stack, in hand, in a screen or on the ground: push the names of the
-    /// node's `models` to draw, in order, only for a type your mod owns. `config` borrows the
+    /// is resolved for a stack, in hand, in a screen or on the ground: push the layers to draw, in
+    /// order, only for a type your mod owns. A layer names one of the node's `models` and whose
+    /// display transform it draws under (`ItemModelLayer`, `ItemTransformMode`). `config` borrows the
     /// node's JSON object, converted once at load. The owned stack snapshot is the one being
     /// resolved, including nested bundle items. `bundle_selected` is the runtime bundle selection
     /// index; -1 means none. As `ItemModel.update` reads them: `display` is where the item is
@@ -12,6 +13,7 @@ pub trait Hooks {
     /// `seed` the draw's random seed.
     #[hook(
         side = "client",
+        version = 2,
         contract = "listen",
         neoforge = "none (vanilla ItemModel.update of a type RegisterItemModelsEvent registers; NeoForge adds no event for it)"
     )]
@@ -24,6 +26,6 @@ pub trait Hooks {
         owner: Option<&ItemModelOwner>,
         level: Option<&ItemModelLevel>,
         seed: i32,
-        models: &mut Vec<String>,
+        layers: &mut Vec<ItemModelLayer>,
     );
 }

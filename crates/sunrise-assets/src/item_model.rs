@@ -1180,20 +1180,20 @@ pub trait ItemEnv {
         None
     }
     /// A mod's registered node type for `stack`, with the node's object and the surroundings
-    /// `ItemModel.update` reads (`ctx`): push the names of the node's `models` to draw, in order.
-    /// None draw when no mod answers.
+    /// `ItemModel.update` reads (`ctx`): push the layers to draw, in order, each naming one of the
+    /// node's `models`. None draw when no mod answers.
     fn item_model_update(
         &self,
         _kind: &str,
         _config: &sunrise_core::nbt::Tag,
         _stack: &StackView,
         _ctx: &Context,
-        _models: &mut Vec<String>,
+        _layers: &mut Vec<ModelChoice>,
     ) {
     }
     /// What a mod's registered special model type (`slot`) draws for `stack` in the model node
     /// of `base` and the model object `config` (the same allocation for the node until resources
-    /// reload): the resource models its renderer answered, each posed in the model's space and
+    /// reload), drawn in `ctx`: the resource models its renderer answered, each posed in the model's space and
     /// tinted, prepared for drawing when the answer was accepted. `None` when its renderer refused
     /// or failed, and the layer draws the missing model; nothing draws for an empty answer.
     fn special_model_parts(
@@ -1202,6 +1202,7 @@ pub trait ItemEnv {
         _base: &str,
         _config: &Arc<sunrise_core::nbt::Tag>,
         _stack: &StackView,
+        _ctx: &Context,
     ) -> Option<PreparedParts> {
         None
     }
@@ -1306,12 +1307,31 @@ pub struct SpecialPart {
     /// white.
     pub tints: Vec<i32>,
 }
+/// Whose display transform a layer is drawn under: the layer owns the choice, not the model it
+/// draws.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum LayerTransform {
+    /// The layer's own model's transform for the display context.
+    #[default]
+    Model,
+    /// None: only the centring every item transform ends with
+    /// ([`crate::item_bake::item_transform_matrix`] of no transform).
+    None,
+}
+/// What a mod's registered node answers for a stack: one of the node's `models`, by name, and
+/// whose display transform it draws under.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ModelChoice {
+    pub model: String,
+    pub transform: LayerTransform,
+}
 #[derive(Clone, Debug, PartialEq)]
 pub struct Layer {
     pub content: LayerContent,
     pub tints: Vec<i32>,
     pub foil: FoilType,
     pub transform: Mat4,
+    pub display_transform: LayerTransform,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ResolvedItem {
@@ -1470,6 +1490,7 @@ impl Resolve<'_> {
             tints: Vec::new(),
             foil: FoilType::None,
             transform: *transform,
+            display_transform: LayerTransform::Model,
         });
     }
     fn node(&mut self, out: &mut ResolvedItem, node: &ItemModelNode, parent: &Mat4) {
@@ -1496,6 +1517,7 @@ impl Resolve<'_> {
                     tints,
                     foil,
                     transform,
+                    display_transform: LayerTransform::Model,
                 });
             }
             ItemModelNode::Composite {
@@ -1580,6 +1602,7 @@ impl Resolve<'_> {
                         FoilType::None
                     },
                     transform,
+                    display_transform: LayerTransform::Model,
                 });
             }
             ItemModelNode::RegisteredSpecial {
@@ -1590,7 +1613,7 @@ impl Resolve<'_> {
             } => {
                 let content = match self
                     .env
-                    .special_model_parts(*slot, base, config, self.stack)
+                    .special_model_parts(*slot, base, config, self.stack, self.ctx)
                 {
                     Some(prepared) => LayerContent::Parts(prepared),
                     None => LayerContent::Missing,
@@ -1604,6 +1627,7 @@ impl Resolve<'_> {
                         FoilType::None
                     },
                     transform: compose(parent, transformation),
+                    display_transform: LayerTransform::Model,
                 });
             }
             ItemModelNode::FluidContainer(container) => {
@@ -1625,9 +1649,17 @@ impl Resolve<'_> {
                 self.env
                     .item_model_update(kind, config, self.stack, self.ctx, &mut drawn);
                 let child = compose(parent, transformation);
-                for name in &drawn {
-                    if let Some((_, model)) = models.iter().find(|(key, _)| key == name) {
+                for choice in &drawn {
+                    if let Some((_, model)) = models.iter().find(|(key, _)| *key == choice.model) {
+                        let first = out.layers.len();
                         self.node(out, model, &child);
+                        // The layer's choice wins over what the model chose below it; the
+                        // model's own transform is kept only where no layer above refused it.
+                        if choice.transform == LayerTransform::None {
+                            for layer in &mut out.layers[first..] {
+                                layer.display_transform = LayerTransform::None;
+                            }
+                        }
                     }
                 }
             }
@@ -1700,6 +1732,7 @@ impl Resolve<'_> {
                 FoilType::None
             },
             transform: *parent,
+            display_transform: LayerTransform::Model,
         });
     }
     fn item_in_compass_tag(&self) -> bool {

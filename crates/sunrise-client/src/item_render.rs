@@ -34,7 +34,7 @@ use sunrise_assets::{
     item_bake::{BakedItemModel, SpriteLookup, SpriteMask, bake_item_model, bake_sprite_layer},
     item_model::{
         ClientItem, Context, DisplayContext, FoilType, ItemEnv, ItemModels, LayerContent,
-        LevelState, OwnerState, PreparedParts, SpecialModel, StackView,
+        LayerTransform, LevelState, OwnerState, PreparedParts, SpecialModel, StackView,
     },
     model::Direction,
     palette::PalettedPermutations,
@@ -970,7 +970,11 @@ impl ItemRenderer {
         &self,
         layers: &mut Vec<LayerRender>,
         display: DisplayContext,
-        (foil, transform): (FoilType, sunrise_assets::math::Mat4),
+        (foil, transform, display_transform): (
+            FoilType,
+            sunrise_assets::math::Mat4,
+            LayerTransform,
+        ),
         prepared: &PreparedParts,
     ) {
         let Some(prepared) = prepared.0.downcast_ref::<PreparedSpecial>() else {
@@ -985,7 +989,11 @@ impl ItemRenderer {
                 geometry: LayerGeometry::Quads(part.geometry.clone()),
                 tints: part.tints.clone(),
                 foil,
-                matrix: glam_matrix(&base.layer_matrix(display, &transform.mul(&part.pose))),
+                matrix: glam_matrix(&base.layer_matrix(
+                    display_transform,
+                    display,
+                    &transform.mul(&part.pose),
+                )),
                 uses_block_light: base.uses_block_light,
                 particle: sprite_name(&base.particle.sprite).to_owned(),
                 extents: part.extents.clone(),
@@ -1067,7 +1075,7 @@ impl ItemRenderer {
                     self.push_parts(
                         &mut layers,
                         display,
-                        (layer.foil, layer.transform),
+                        (layer.foil, layer.transform, layer.display_transform),
                         &prepared,
                     );
                     continue;
@@ -1080,7 +1088,11 @@ impl ItemRenderer {
                 geometry,
                 tints: layer.tints,
                 foil: layer.foil,
-                matrix: glam_matrix(&baked.layer_matrix(display, &layer.transform)),
+                matrix: glam_matrix(&baked.layer_matrix(
+                    layer.display_transform,
+                    display,
+                    &layer.transform,
+                )),
                 uses_block_light: baked.uses_block_light,
                 particle: sprite_name(&baked.particle.sprite).to_owned(),
                 extents,
