@@ -1357,11 +1357,7 @@ impl Game<'_> {
                 .bool_at(sunrise_client::gamerules::vanilla::MOB_DROPS),
             dying,
             |table| {
-                let Some(loot) = sunrise_client::structure_blocks::loot_data(
-                    &self.options.resources,
-                    &self.pack_files(),
-                    self.res.item_defaults(),
-                ) else {
+                let Some(loot) = self.server_loot.get() else {
                     return Vec::new();
                 };
                 if !loot.has_table(table) {

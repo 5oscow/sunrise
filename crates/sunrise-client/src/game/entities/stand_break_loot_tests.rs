@@ -90,14 +90,10 @@ fn with_stick_table(game: &mut Game<'_>, name: &str) {
         &[],
     );
     game.world_tables = game.stage_world_tables(&stack, false, &root).unwrap().0;
-    // World open warms the loot data with the world's packs (game.rs); the
-    // break's roll reads that copy, here this test's own, so the stick reaches
-    // no other test's stand (#14266).
-    let _ = sunrise_client::structure_blocks::load_thread_loot_data(
-        &game.options.resources,
-        &game.pack_files(),
-        game.res.item_defaults(),
-    );
+    // Publish the world's snapshot exactly as world open does. Do not prime
+    // the process or thread-local structure-generation cache: entity drops
+    // must read the server's pack-aware snapshot instead.
+    game.load_server_loot();
     // The table the pack installed: a direct roll, far from the stand.
     assert!(game.run_command("loot spawn 12.5 100 12.5 loot minecraft:entities/armor_stand"));
     assert!(
