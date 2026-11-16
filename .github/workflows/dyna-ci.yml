@@ -71,9 +71,11 @@ jobs:
 
   # GitHub delivers almost none of this repository's scheduled events, the daily's included: each push to main starts
   # the day's real daily once 09:00 UTC has passed and none has (tools/ci/daily_catch_up.py). One at a time, so a
-  # push right behind another sees the run the first one started.
+  # push right behind another sees the run the first one started. It is no part of the gate: its failure (an API error,
+  # a dispatch not listed in time) shows on the job and never turns main's run red.
   daily-catch-up:
     if: github.repository == 'sunrise-org/sunrise' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    continue-on-error: true
     runs-on: ${{ vars.DYNA_CI_SELF_HOSTED == 'true' && 'dyna-small' || 'ubuntu-latest' }}
     timeout-minutes: 5
     concurrency:
