@@ -7,11 +7,11 @@
 //! player's own accent comes out as it does on the website.
 
 /// The mockup's defaults: accent, how much white the plates take, and their blur in px.
-pub const ACCENT: u32 = 0x6b4bff;
+pub const ACCENT: u32 = 0x6e64c8;
 pub const TINT: f32 = 0.06;
 pub const BLUR: f32 = 24.;
 /// Behind the scene before it is drawn.
-pub const PAGE: u32 = 0x0a0919;
+pub const PAGE: u32 = 0x0c0b11;
 /// The dark text on a light accent, and on the white buttons.
 pub const ON_LIGHT: u32 = 0x100a1f;
 /// A running game or server, and a ready instance.
@@ -250,9 +250,11 @@ mod tests {
     /// canvas for the sRGB bytes): an independent check of the OKLab maths and the plate's mix.
     #[test]
     fn mixes_match_the_browser() {
-        let g = Glass::default_look();
+        // The mockup's violet, which Chrome's figures were taken for.
+        let violet = 0x6b4bff;
+        let g = Glass::new(violet, TINT, BLUR);
         let soft = oklab(g.accent_soft);
-        let mixed = [0, 1, 2].map(|i| oklab(ACCENT)[i] * 0.52 + oklab(0xffffff)[i] * 0.48);
+        let mixed = [0, 1, 2].map(|i| oklab(violet)[i] * 0.52 + oklab(0xffffff)[i] * 0.48);
         for (i, want) in [0.772018, 0.0291158, -0.12693].into_iter().enumerate() {
             assert!(
                 (mixed[i] - want).abs() < 1e-3,
