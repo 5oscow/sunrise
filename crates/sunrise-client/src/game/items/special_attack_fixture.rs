@@ -133,6 +133,7 @@ impl Game<'_> {
                     fixed: kind == "fixed_frame",
                     invisible: false,
                     check_interval: 0,
+                    ticks: 0,
                     custom_name: None,
                     random: sunrise_core::random::LegacyRandom::new(0),
                 });

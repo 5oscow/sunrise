@@ -114,6 +114,7 @@ impl Game<'_> {
                 fixed: false,
                 invisible: false,
                 check_interval: 0,
+                ticks: 0,
                 custom_name: None,
                 random: sunrise_client::random_source::entity(),
             });

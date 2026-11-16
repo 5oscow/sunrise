@@ -800,6 +800,7 @@ impl Game<'_> {
                         tnt_fuse: Some(fuse),
                         orb_value: None,
                         painting: None,
+                        item_frame: None,
                     }
                     .into();
                 let light = self.world.light(

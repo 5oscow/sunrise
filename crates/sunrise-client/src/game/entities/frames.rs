@@ -241,6 +241,7 @@ impl Game<'_> {
             fixed: false,
             invisible: false,
             check_interval: 0,
+            ticks: 0,
             // `applyComponentsFromItemStack` sets `CUSTOM_NAME`.
             custom_name: stack.data().and_then(|d| d.custom_name.clone()),
             random: sunrise_client::random_source::entity(),
@@ -681,6 +682,8 @@ impl Game<'_> {
                 i += 1;
                 continue;
             }
+            // `Entity.tickCount` is raised before the rest of the tick, and is not saved.
+            self.item_frames[i].ticks = self.item_frames[i].ticks.saturating_add(1);
             self.item_frames[i].check_interval += 1;
             if self.item_frames[i].check_interval >= 100 {
                 self.item_frames[i].check_interval = 0;
@@ -715,7 +718,12 @@ impl Game<'_> {
         }
     }
     /// ItemFrameRenderer: the frame model, then the item half size on its face.
-    pub(super) fn frame_geometry(&mut self, camera: glam::DVec3, out: &mut Vec<Vertex>) {
+    pub(super) fn frame_geometry(
+        &mut self,
+        camera: glam::DVec3,
+        alpha: f64,
+        out: &mut Vec<Vertex>,
+    ) {
         let sprites = &self.gui.atlas.sprites;
         // Each with its frame's type: a pack tells a glow frame and what it holds apart by its
         // `entityId` (`glow_item_frame` in entity.properties), the item drawn within its frame.
@@ -724,6 +732,7 @@ impl Game<'_> {
         // ItemFrame.shouldRenderAtSqrDistance: 1024 blocks at a view scale
         // of 1.
         let range = 16.0 * 64.0 * self.view_scale();
+        let partial = alpha as f32;
         for f in &self.item_frames {
             // LevelExtractor: the camera entity is not drawn from its own eyes.
             if self.hides_as_camera(f.id) {
@@ -754,6 +763,66 @@ impl Game<'_> {
             }
             let entity_start = out.len();
             self.mark_motion(entity_start, Self::MOTION_OBJECT | u64::from(f.id));
+            if let Some(resolved) = super::native_entity_renderers::item_frame_renderer(f.glow) {
+                let step = f.step().map(f64::from);
+                let at = glam::DVec3::new(
+                    f64::from(f.pos[0]) + 0.5 - step[0] * 0.46875,
+                    f64::from(f.pos[1]) + 0.5 - step[1] * 0.46875,
+                    f64::from(f.pos[2]) + 0.5 - step[2] * 0.46875,
+                );
+                let (yaw, pitch) = match f.facing {
+                    0 => (0.0, 90.0),
+                    1 => (0.0, -90.0),
+                    2 => (180.0, 0.0),
+                    4 => (90.0, 0.0),
+                    5 => (270.0, 0.0),
+                    _ => (0.0, 0.0),
+                };
+                let facing = mod_api::Direction::ALL[usize::from(f.facing.min(5))];
+                let entity: mod_api::EntityRenderState =
+                    mod_api::__private::built::EntityRenderState {
+                        id: f.id,
+                        partial,
+                        age: f.ticks as f32 + partial,
+                        yaw,
+                        pitch,
+                        living: None,
+                        tnt_fuse: None,
+                        orb_value: None,
+                        item_frame: Some(
+                            mod_api::__private::built::ItemFrameRenderState {
+                                facing,
+                                glow: f.glow,
+                                invisible: f.invisible,
+                                rotation: f.rotation,
+                                has_item: f.item.is_some(),
+                                has_map: map.is_some(),
+                            }
+                            .into(),
+                        ),
+                    }
+                    .into();
+                let light = self.world.light(f.pos[0], f.pos[1], f.pos[2]);
+                let frame_light = if f.glow {
+                    (light & 0xF0) | (light & 15).max(5)
+                } else {
+                    light
+                };
+                let packed =
+                    (u32::from(frame_light >> 4) * 16) | ((u32::from(frame_light & 15) * 16) << 8);
+                if self.mod_entity_renderer_geometry(
+                    &resolved,
+                    &entity,
+                    f.kind(),
+                    at - camera,
+                    f.pos,
+                    packed,
+                    out,
+                ) {
+                    self.finish_entity_occlusion(culling, f, out, entity_start);
+                    continue;
+                }
+            }
             let s = f.step();
             // Pose: to the block centre, then X/Y rotation by facing.
             let (x_rot, y_rot) = if s[1] == 0 {
@@ -985,6 +1054,7 @@ mod map_limit_tests {
             fixed: false,
             invisible: false,
             check_interval: 0,
+            ticks: 0,
             custom_name: None,
             random: sunrise_core::random::LegacyRandom::new(0),
         }
@@ -1062,6 +1132,7 @@ mod game_event_tests {
             fixed: false,
             invisible: false,
             check_interval: 0,
+            ticks: 0,
             custom_name: None,
             random: sunrise_core::random::LegacyRandom::new(0),
         }

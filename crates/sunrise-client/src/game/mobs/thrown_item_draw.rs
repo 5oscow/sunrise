@@ -35,6 +35,7 @@ impl Game<'_> {
                 tnt_fuse: None,
                 orb_value: None,
                 painting: None,
+                item_frame: None,
             }
             .into();
             let block = at.map(|x| x.floor() as i32);
