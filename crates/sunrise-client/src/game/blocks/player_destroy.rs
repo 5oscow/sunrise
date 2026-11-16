@@ -60,14 +60,14 @@ impl Game<'_> {
                 .data(state)
                 .is(sunrise_world::level::classes::Class::Door)
         {
-            self.mod_harvest_check(pos, state, &mut correct_tool);
+            correct_tool = self.acting_can_harvest(pos, state);
         }
         let removed = self.remove_block_as_player(pos, creative, correct_tool);
         (removed, state, self.harvest_after_removal(pos, state))
     }
 
-    /// Whether the break that has just removed `state` harvests: the tool's answer for the held
-    /// stack as it is now, then the mods' (`can_harvest_block`, `player_harvest_check`). Only a
+    /// Whether the break that has just removed `state` harvests: the tool's answer for the selected
+    /// hotbar stack as it is now, then the mods' (`can_harvest_block`, `player_harvest_check`). Only a
     /// survival player's break asks.
     fn harvest_after_removal(&mut self, pos: [i32; 3], state: BlockStateId) -> bool {
         if self.creative {

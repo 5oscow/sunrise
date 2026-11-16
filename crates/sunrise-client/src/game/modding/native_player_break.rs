@@ -195,6 +195,37 @@ mod tests {
         });
     }
 
+    /// A door's break asks the same harvest answer as every other block: the selected hotbar
+    /// slot, never the offhand. An iron door dropped by a pickaxe in the main hand drops
+    /// nothing with the pickaxe in the offhand, even while the offhand is the acting hand.
+    #[test]
+    #[ignore = "daily"]
+    fn a_door_breaks_by_the_selected_slot_not_the_offhand() {
+        with_game(|game| {
+            game.world.chunks.insert(
+                (0, 0),
+                std::sync::Arc::new(sunrise_client::chunk::Chunk::empty(0, 0)),
+            );
+            let pickaxe = ItemStack::new("minecraft:iron_pickaxe", 1);
+            let player = with_player(game, pickaxe.clone());
+            let pos = [6, 64, 4];
+            place(game, pos, "minecraft:iron_door");
+            assert!(game.player_destroy_block(player, pos, false));
+            assert!(popped(game, "minecraft:iron_door"), "main hand: harvested");
+
+            game.dropped.clear();
+            game.inventory[game.selected] = None;
+            game.offhand = Some(pickaxe);
+            game.hand = sunrise_client::first_person::Hand::Off;
+            place(game, pos, "minecraft:iron_door");
+            assert!(game.player_destroy_block(player, pos, false));
+            assert!(
+                !popped(game, "minecraft:iron_door"),
+                "offhand: not harvested"
+            );
+        });
+    }
+
     /// Into the inventory: silk touch keeps the stone whole, and a diamond
     /// ore gives its diamond and still its experience (3 to 7 points).
     #[test]
