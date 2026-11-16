@@ -133,6 +133,20 @@ pub struct HitLend<'a> {
     position: [f64; 3],
     random: &'a mut sunrise_core::random::LegacyRandom,
 }
+/// Whether any native mod listens to a hook whose host is a `HitHost`. A site looks up its
+/// attacker only then; without one nothing is looked up, borrowed or drawn.
+pub fn hit_host_listened() -> bool {
+    use mod_api::{__private::listened, HookId};
+    [
+        HookId::LivingIncomingDamage,
+        HookId::LivingDamagePre,
+        HookId::LivingDamagePost,
+        HookId::LivingShieldBlock,
+        HookId::LivingUseTotem,
+    ]
+    .into_iter()
+    .any(listened)
+}
 impl<'a> HitLend<'a> {
     pub fn mob(mob: &'a mut crate::mobs::Mob) -> Option<Self> {
         Some(Self {
@@ -143,7 +157,7 @@ impl<'a> HitLend<'a> {
     }
     /// `player`, if it is the attacker `attacker` (an entity id).
     pub fn attacking_player(player: Option<&'a mut PlayerMotion>, attacker: i32) -> Option<Self> {
-        let player = player.filter(|p| p.entity_id == attacker)?;
+        let player = player.filter(|p| p.entity_id == attacker && hit_host_listened())?;
         Some(Self {
             id: player.entity_id,
             position: [player.position.x, player.position.y, player.position.z],
@@ -155,6 +169,7 @@ impl<'a> HitLend<'a> {
         mut mobs: impl Iterator<Item = &'a mut crate::mobs::Mob>,
         attacker: i32,
     ) -> Option<Self> {
+        hit_host_listened().then_some(())?;
         Self::mob(mobs.find(|m| m.id as i32 == attacker)?)
     }
     fn reborrow(&mut self) -> HitLend<'_> {
@@ -240,8 +255,11 @@ impl<'a> HitEffects<'a> {
             return None;
         }
         let lent = self.lent.as_mut()?;
-        (i32::try_from(entity.id()).ok()? == lent.id)
-            .then_some((lent.id, lent.position, &mut *lent.random))
+        (i32::try_from(entity.id()).ok()? == lent.id).then_some((
+            lent.id,
+            lent.position,
+            &mut *lent.random,
+        ))
     }
 }
 /// The level a hit lands in, as damage code sees it: its blocks, its random

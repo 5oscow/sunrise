@@ -1915,7 +1915,9 @@ impl Game<'_> {
         let mut credit = plan.lend(&mut self.last_hurt_by_player);
         let target_index = self.mobs.iter().position(|m| m.id == target);
         let attacker_index = match source.attacker {
-            Some(Who::Mob(id)) => self.mobs.iter().position(|m| m.id == id),
+            Some(Who::Mob(id)) if sunrise_client::health::hit_host_listened() => {
+                self.mobs.iter().position(|m| m.id == id)
+            }
             _ => None,
         };
         if let Some(ti) = target_index {
