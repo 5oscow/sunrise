@@ -16,7 +16,7 @@ pub fn encode(
         |stack: &crate::items::ItemStack| sunrise_items::item_nbt::item_to_nbt(stack, items);
     use crate::containers::BlockEntity;
     let encode_items = |slots: &[Option<crate::items::ItemStack>]| {
-        sunrise_items::item_nbt::encode_items_using(slots, &item_to_nbt)
+        sunrise_items::item_nbt::encode_items_using(slots, item_to_nbt)
     };
     if let BlockEntity::Mod(m) = e {
         let mut map = m.nbt.clone();
