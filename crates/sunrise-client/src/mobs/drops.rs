@@ -505,7 +505,11 @@ pub fn die(
             level_random,
         },
     );
-    finish_death(m, d, rolled, None)
+    let (mut out, skulls) = finish_death(m, d, rolled, None);
+    if let Some(reward) = experience_reward(m, d.player_killed, d.mob_drops) {
+        out.push(Drop::Experience(reward));
+    }
+    (out, skulls)
 }
 /// The first half of `die`: `dropFromLootTable`, which uses the world's
 /// random sequences, and what comes before it.
@@ -569,7 +573,7 @@ pub fn roll_death(m: &mut Mob, d: &Death, rolls: &mut dyn DeathRolls) -> Rolled 
 }
 /// The second half of `die`: `Mob.dropCustomDeathLoot` (each slot's chance,
 /// roll and clear, in order, with `choose` asked for a slot just before its
-/// roll), the species' extras and the experience.
+/// roll) and the species' extra item drops. Experience is independent of loot.
 pub fn finish_death(
     m: &mut Mob,
     d: &Death,
@@ -679,12 +683,15 @@ pub fn finish_death(
             m.extra.chested = false;
         }
     }
-    // dropExperience.
-    if killed_by_player && drops_experience(m) && d.mob_drops {
-        out.push(Drop::Experience(base_experience(m)));
-    }
     (out, skulls)
 }
+
+/// `LivingEntity.dropExperience`: eligibility and reward do not require a loot table.
+/// Called after equipment drops, which may change the mob's experience reward.
+pub fn experience_reward(m: &mut Mob, player_killed: bool, mob_drops: bool) -> Option<i32> {
+    (player_killed && drops_experience(m) && mob_drops).then(|| base_experience(m))
+}
+
 /// The loot parameters of the damage that killed `m`, as the equipment drop
 /// chance enchantments read them (no luck, no killing player).
 fn damage_context(this: LootEntity, d: &Death) -> EntityLootParams {
