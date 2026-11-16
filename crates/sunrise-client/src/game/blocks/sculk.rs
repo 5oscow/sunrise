@@ -674,6 +674,7 @@ impl Game<'_> {
             });
         Context {
             source: Some(EventSource::Entity(id)),
+            source_uuid: self.persist.uuid_of(id),
             affected_state: state,
             dampening_state: self.state_dampens(state),
             dampens,
@@ -843,7 +844,10 @@ impl Game<'_> {
     /// event is heard. Only what the context already names is filled.
     fn with_vibration_uuids(&self, mut ctx: Context) -> Context {
         if ctx.source_uuid.is_none() {
-            ctx.source_uuid = self.vibration_uuid(ctx.source.and_then(|source| source.actor()));
+            ctx.source_uuid = match ctx.source {
+                Some(EventSource::Entity(id)) => self.persist.uuid_of(id),
+                source => self.vibration_uuid(source.and_then(EventSource::actor)),
+            };
         }
         if ctx.owner_uuid.is_none() {
             ctx.owner_uuid = self.vibration_uuid(ctx.owner);
@@ -2564,8 +2568,8 @@ impl Game<'_> {
     /// `ArmorStand.kill`, `VehicleEntity.destroy`): removed, then
     /// `gameEvent(ENTITY_DIE, attributedTo != null ? attributedTo : this)` at
     /// the entity's position. `by_player`: the player's hit killed it, so the
-    /// player is the source. Nonliving self sources have no Who handle;
-    /// their listener facts are represented by the default context.
+    /// player is the source. Nonliving self sources retain their entity id
+    /// even though they have no Who handle.
     pub(super) fn entity_killed_event(&mut self, at: [f64; 3], by_player: bool) {
         self.entity_killed_event_by(at, by_player.then_some(super::commands::Target::Player));
     }
@@ -2602,12 +2606,15 @@ impl Game<'_> {
                 return;
             }
         }
-        let who = match source {
-            Some(Target::Player) => Some(Who::Player),
-            Some(Target::Mob(id)) => Some(Who::Mob(id)),
-            _ => None,
+        let mut ctx = match source {
+            Some(Target::Player) => self.player_context(None),
+            Some(Target::Mob(id)) => self.mob_context(id, None),
+            Some(target) => self
+                .network_entity_id(target)
+                .map(|id| self.entity_event_context(id as u32, None))
+                .unwrap_or_default(),
+            None => Context::default(),
         };
-        let mut ctx = self.who_context(who, None);
         // A stand is living, but Warden.canTargetEntity explicitly excludes it.
         ctx.living |= matches!(source, Some(Target::Stand(_)));
         self.post_game_event(event, at, ctx);
