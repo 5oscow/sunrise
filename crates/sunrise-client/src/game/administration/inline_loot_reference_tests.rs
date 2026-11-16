@@ -95,11 +95,7 @@ fn game<'a>(resources: &'a mut Option<std::sync::Arc<crate::game::Resources>>) -
         &[],
     );
     game.world_tables = game.stage_world_tables(&stack, false, &root).unwrap().0;
-    let _ = sunrise_client::structure_blocks::load_thread_loot_data(
-        &game.options.resources,
-        &game.pack_files(),
-        game.res.item_defaults(),
-    );
+    game.load_server_loot();
     // As the world opens: its registries, with the packs' tables.
     game.build_registries();
     assert!(game.run_command("gamemode survival"));
