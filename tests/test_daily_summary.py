@@ -323,13 +323,99 @@ class DailySummaryTests(unittest.TestCase):
         self.assertIn("Daily: shards did not complete", [body["title"] for _, path, body in api.writes if path == "issues"])
 
     def test_fixture_test_failures_are_filed_by_test_name(self):
-        jobs = GREEN_JOBS[:2] + [job("wasm-mods / fixture", "failure", [summary.FIXTURE_TESTS_STEP])] + GREEN_JOBS[3:]
+        jobs = GREEN_JOBS[:2] + [job("wasm-mods / fixture", "failure", [summary.FIXTURE_TESTS_STEPS[1]])] + GREEN_JOBS[3:]
         report = {"needs": "SUNRISE_WASM_FIXTURE", "incomplete": [], "passed": [],
                   "problems": [failure("game::wasm::wasm_interaction_shared_matrix", None, package="sunrise-client")]}
         api = Api(jobs)
         self.run_summary(api, [report], results=dict(LEGS, **{"wasm-mods": {"result": "failure"}}))
         titles = [body["title"] for _, path, body in api.writes if path == "issues"]
         self.assertEqual(titles, ["Daily: sunrise-client game::wasm::wasm_interaction_shared_matrix"])
+
+    def test_the_fixtures_own_test_failures_are_filed_by_name_and_both_reports_count(self):
+        jobs = GREEN_JOBS[:2] + [job("wasm-mods / fixture", "failure", ["Validate and load the fixture"])] + GREEN_JOBS[3:]
+        own = {"needs": "SUNRISE_WASM_FIXTURE", "incomplete": [],
+               "passed": [{"package": "sunrise-mod-wasm", "test": "was_red"}],
+               "problems": [failure("compiled_guest_strict_math", "crates/sunrise-mod-wasm/tests/strict_math.rs:49:13",
+                                    package="sunrise-mod-wasm")]}
+        clients = {"needs": "SUNRISE_WASM_FIXTURE", "incomplete": [], "problems": [],
+                   "passed": [{"package": "sunrise-client", "test": "game::also_red"}]}
+        api = Api(jobs, issues=[{"number": 7, "title": "Daily: sunrise-mod-wasm was_red"},
+                                {"number": 8, "title": "Daily: sunrise-client game::also_red"}])
+        self.run_summary(api, [own, clients], results=dict(LEGS, **{"wasm-mods": {"result": "failure"}}))
+        titles = [body["title"] for _, path, body in api.writes if path == "issues"]
+        self.assertEqual(titles, ["Daily: sunrise-mod-wasm compiled_guest_strict_math"])
+        closed = [path for method, path, _ in api.writes if method == "PATCH"]
+        self.assertCountEqual(closed, ["issues/7", "issues/8"])
+        # A named failure beside a command that failed without one (a build failure): both are filed.
+        api = Api(jobs)
+        broken = {"shard": "sunrise-mod-points", "reason": "failed without a failed test (a build failure)",
+                  "cargo_exit": 101}
+        self.run_summary(api, [dict(own, incomplete=[broken])], results=dict(LEGS, **{"wasm-mods": {"result": "failure"}}))
+        created = {body["title"]: body["body"] for _, path, body in api.writes if path == "issues"}
+        self.assertEqual(sorted(created), ["Daily: sunrise-mod-wasm compiled_guest_strict_math",
+                                           "Daily: wasm-mods / fixture did not complete"])
+        self.assertIn("`sunrise-mod-points`: failed without a failed test (a build failure) (cargo exit 101)",
+                      created["Daily: wasm-mods / fixture did not complete"])
+        # The step failed before any report was uploaded: the leg's one issue, never a crash of the filing.
+        api = Api(jobs)
+        self.run_summary(api, [], results=dict(LEGS, **{"wasm-mods": {"result": "failure"}}))
+        self.assertEqual([body["title"] for _, path, body in api.writes if path == "issues"],
+                         ["Daily: wasm-mods / fixture did not complete"])
+        # A failure there without a test name (a build error) is still the leg's one issue.
+        api = Api(jobs)
+        self.run_summary(api, [dict(own, problems=[])], results=dict(LEGS, **{"wasm-mods": {"result": "failure"}}))
+        self.assertEqual([body["title"] for _, path, body in api.writes if path == "issues"],
+                         ["Daily: wasm-mods / fixture did not complete"])
+
+    def test_a_failing_test_names_the_pull_requests_that_changed_its_package_since_the_previous_run(self):
+        shard = "shards / ignored-tests-shards (sunrise-world)"
+        jobs = [job(shard, "failure", ["Run"])] + GREEN_JOBS[2:]
+        before, change, other = "b" * 40, "1" * 40, "2" * 40
+        previous = {"id": 70, "conclusion": "failure", "html_url": "https://github.com/arismoko/horizon/actions/runs/70",
+                    "jobs": [job(f"summary {before} (dry run)"), job(shard)]}
+
+        def history(*args):
+            if args[:2] == ("merge-base", "--is-ancestor"):
+                return "" if args[2] == before else None
+            if args[0] == "rev-parse":
+                return None
+            if args[:2] == ("log", "--no-merges"):
+                self.assertEqual(args[3:], (f"{before}..{COMMIT}", "--", "crates/sunrise-world"))
+                return f"{change}\n{other}"
+            if args[:2] == ("log", "--merges"):
+                # Each change's merges on its way in, newest first: its own merge is the oldest naming a PR.
+                return {change: "Merge pull request #40 from org/rollup\nMerge #31 at 1234",
+                        other: "Merge pull request #41 from org/fix"}[args[4].split("..")[0]]
+            return ""
+
+        def run(runs):
+            api = Api(jobs, runs=runs)
+            env = {"GITHUB_REPOSITORY": "arismoko/horizon", "GITHUB_RUN_ID": "77", "GITHUB_REF": "refs/heads/main",
+                   "GITHUB_SERVER_URL": "https://github.com", "COMMIT": COMMIT, "DRY_RUN": "false",
+                   "RESULTS": json.dumps(dict(LEGS, shards={"result": "failure"})), "REPORTS": "/nonexistent"}
+            with tempfile.TemporaryDirectory() as folder, \
+                    mock.patch.dict(os.environ, dict(env, REPORTS=folder), clear=True), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                Path(folder, "shard").mkdir()
+                Path(folder, "shard", "r.json").write_text(json.dumps(shard_report([failure("a::red")])))
+                summary.main(api, history, closers({}))
+            return next(body["body"] for _, path, body in api.writes if path == "issues")
+
+        body = run({70: previous})
+        self.assertIn(f"it passed in the previous daily run (https://github.com/arismoko/horizon/actions/runs/70, "
+                      f"`{before[:9]}`)", body)
+        self.assertIn("that changed `crates/sunrise-world`: #31, #41.", body)
+        # Its job failed there: nothing says the test passed, so earlier merges stay suspects.
+        previous["jobs"][1] = job(shard, "failure")
+        body = run({70: previous})
+        self.assertIn(f"does not show this test passing (its job `{shard}` ended `failure`)", body)
+        # No earlier run: the old line.
+        self.assertIn("every merge before", run({}))
+
+    def test_a_package_built_from_another_folder_counts_that_folder(self):
+        self.assertEqual(summary.package_folders("sunrise-client-lib"),
+                         ["crates/sunrise-client", "crates/sunrise-client-lib"])
+        self.assertEqual(summary.package_folders("sunrise-world"), ["crates/sunrise-world"])
 
     def test_a_second_invocation_for_one_run_posts_nothing_twice(self):
         jobs = [job("shards / ignored-tests-shards (sunrise-world)", "failure", ["Run"])] + GREEN_JOBS[2:]
@@ -397,6 +483,27 @@ class DailySummaryTests(unittest.TestCase):
         _, out = self.run_summary(api, [shard_report()])
         self.assertIn("green=true", out)
         self.assertIn(("PATCH", "issues/77"), [(m, p) for m, p, _ in api.writes])
+
+    def test_a_leg_cancelled_before_it_started_files_and_closes_nothing(self):
+        # Run 43900023409: every leg job still waited for a runner when the cancel came, with no step run.
+        def waiting(name):
+            return {"name": name, "conclusion": "cancelled", "steps": []}
+        jobs = [j for j in GREEN_JOBS if not j["name"].startswith(("machine-sample / ", "linkage / "))]
+        jobs += [waiting("machine-sample / route"), waiting("machine-sample / build"), waiting("linkage / route"),
+                 waiting("linkage / linkage x86_64-unknown-linux-gnu")]
+        issue = [{"number": 77, "title": "Daily: update the machine sample for the mod API change", "body": "> filed"}]
+        api = Api(jobs, issues=issue)
+        _, out = self.run_summary(api, [shard_report()], results=dict(
+            LEGS, **{"machine-sample": {"result": "cancelled"}, "linkage": {"result": "cancelled"}}))
+        self.assertIn("green=false", out, "a leg that never ran is not green either")
+        self.assertEqual(api.writes, [])
+        # A leg cancelled after it started (a time limit, a lost runner) did run: it is still red.
+        jobs = [j for j in GREEN_JOBS if j["name"] != "machine-sample / build"] + [
+            job("machine-sample / build", "cancelled", ["The machine sample builds against this API"])]
+        api = Api(jobs)
+        self.run_summary(api, [shard_report()], results=dict(LEGS, **{"machine-sample": {"result": "cancelled"}}))
+        self.assertEqual([body["title"] for _, path, body in api.writes if path == "issues"],
+                         ["Daily: update the machine sample for the mod API change"])
 
     def test_a_skipped_sdk_build_is_green_only_when_fresh_found_the_release(self):
         jobs = [j for j in GREEN_JOBS if not j["name"].startswith("sdk / ")] + [
@@ -520,6 +627,9 @@ class DailyWorkflowTests(unittest.TestCase):
                                         " && needs.resolve.outputs.dry_run == 'false' && needs.sdk.outputs.needed == 'true'")
         self.assertEqual(jobs["summary"]["outputs"]["sdk_green"], "${{ steps.summary.outputs.sdk_green }}")
         self.assertIn("needs.summary.outputs.sdk_green == 'true'", jobs["sdk-publish-report"]["if"])
+        for name in ("summary", "sdk-publish-report"):
+            self.assertTrue(jobs[name]["if"].startswith("${{ !cancelled() && "),
+                            f"{name} reports nothing from a run cancelled by hand")
         # The one publish step, signed only on main through the called workflow's `release` environment.
         self.assertEqual(publish["uses"], "./.github/workflows/sdk-publish.yml")
         self.assertEqual(publish["with"], {"commit": "${{ needs.resolve.outputs.commit }}", "publish": "true"})

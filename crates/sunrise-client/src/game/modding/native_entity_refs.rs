@@ -240,10 +240,10 @@ impl Game<'_> {
     /// finite (NaN or infinite). A minimum above its maximum is the same box
     /// with the two swapped, as vanilla's `AABB`. On a client, see
     /// `client_entities_in`. The walk
-    /// is in entity-list order followed by players; each overlap requires a
-    /// handle lookup, so cost grows with the box's contents. Tridents cannot
-    /// yet resolve; displays, markers and interactions follow the listed entities.
-    /// Frames, paintings and other special entities
+    /// is in entity-list order, then item frames and paintings, followed by
+    /// players; each overlap requires a handle lookup, so cost grows with the
+    /// box's contents. Tridents cannot yet resolve; displays, markers and
+    /// interactions follow the listed entities. Other special entities
     /// are not on the entity-list walk. The dragon follows ordinary entities;
     /// its eight intersecting parts follow players (`Level.getEntities`).
     /// During `hears_projectile_impacts`, the projectile list is taken out of
@@ -268,6 +268,7 @@ impl Game<'_> {
             return None;
         }
         let mut ids = self.listed_entities_in(bounds);
+        self.append_hanging_query_ids(bounds, &mut ids);
         self.append_dragon_query_ids(bounds, false, &mut ids);
         ids.extend(
             self.others
@@ -328,6 +329,31 @@ impl Game<'_> {
         });
         ids
     }
+    /// The item frames and paintings whose boxes meet `bounds` (`HangingEntity`s are entities
+    /// of the level's list in vanilla; here they are lists of their own), in join order.
+    fn append_hanging_query_ids(&self, bounds: Aabb, ids: &mut Vec<u32>) {
+        let meets = |(lo, hi): ([f64; 3], [f64; 3])| {
+            bounds.intersects(Aabb::new(
+                Vec3::new(lo[0], lo[1], lo[2]),
+                Vec3::new(hi[0], hi[1], hi[2]),
+            ))
+        };
+        let mut hanging: Vec<(_, u32)> = Vec::new();
+        hanging.extend(
+            self.item_frames
+                .iter()
+                .filter(|f| f.id != 0 && meets(f.bounds()))
+                .map(|f| (f.join, f.id)),
+        );
+        hanging.extend(
+            self.paintings
+                .iter()
+                .filter(|p| p.id != 0 && meets(p.bounds()))
+                .map(|p| (p.join, p.id)),
+        );
+        hanging.sort_by_key(|&(join, _)| join);
+        ids.extend(hanging.into_iter().map(|(_, id)| id));
+    }
     /// `ClientLevel.getEntities` for `level_entities_in`: the entities the server
     /// tracks to this client in entity-list order, other players among them (a
     /// tracked player has a client copy, so its handle resolves), the dragon and
@@ -339,6 +365,7 @@ impl Game<'_> {
             return None;
         }
         let mut ids = self.listed_entities_in(bounds);
+        self.append_hanging_query_ids(bounds, &mut ids);
         self.append_dragon_query_ids(bounds, false, &mut ids);
         if self.mode_id() != 3
             && let Some(player) = &self.player
@@ -999,10 +1026,11 @@ pub(super) mod tests {
         if std::env::var_os(flag).is_some() {
             return false;
         }
-        let resources =
-            std::path::PathBuf::from(std::env::var_os("SUNRISE_TEST_RESOURCES").unwrap())
-                .canonicalize()
-                .unwrap();
+        let resources = std::path::PathBuf::from(std::env::var_os("SUNRISE_TEST_RESOURCES").expect(
+            "SUNRISE_TEST_RESOURCES must name the prepared resources (.local/sunrise-client/<version>)",
+        ))
+        .canonicalize()
+        .expect("SUNRISE_TEST_RESOURCES names a folder that does not exist");
         let scratch_owner = tempfile::tempdir().unwrap();
         let target = scratch_owner.path();
         let run = |case: &str| {
@@ -1448,6 +1476,55 @@ pub(super) mod tests {
                 b.best_neighbor_signal(level, ticks, BlockPos::new(pos.x - 1, pos.y, pos.z))
             });
             assert_eq!(signal, 15);
+        });
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn a_placement_view_reads_redstone_and_collision_shapes() {
+        use mod_api::{Direction, LevelHost};
+        use std::sync::Arc;
+        use sunrise_client::chunk::Chunk;
+
+        with_game(|game| {
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let registry = game.pack.assets.registry;
+            let glass = registry.default_state("minecraft:glass").unwrap();
+            let stone = registry.default_state("minecraft:stone").unwrap();
+            let lever = registry
+                .resolve(&sunrise_world::chunk::BlockState {
+                    name: "minecraft:lever".into(),
+                    properties: [("face", "wall"), ("facing", "east"), ("powered", "true")]
+                        .into_iter()
+                        .map(|(key, value)| (key.into(), value.into()))
+                        .collect(),
+                })
+                .unwrap();
+            game.world.set(5, 64, 5, glass).unwrap();
+            game.world.set(6, 64, 5, lever).unwrap();
+            game.world.set(9, 64, 5, stone).unwrap();
+            game.with_level(|_, level, ticks| {
+                let view = level.view(ticks);
+                // The glass has a powered lever on its east side; the stone nothing.
+                assert_eq!(view.has_neighbor_signal([5, 64, 5]), Some(true));
+                assert_eq!(view.best_neighbor_signal([5, 64, 5]), Some(15));
+                assert_eq!(view.signal([5, 64, 5], Direction::East), Some(0));
+                assert_eq!(view.direct_signal_to([5, 64, 5]), Some(15));
+                assert_eq!(view.has_neighbor_signal([9, 64, 5]), Some(false));
+                // The same reads from the level itself have no ticks to ask.
+                assert_eq!(LevelHost::has_neighbor_signal(&*level, [5, 64, 5]), None);
+                // A full block's collision box, none for air, nothing for an unloaded position.
+                for host in [&view as &dyn LevelHost, &*level] {
+                    assert_eq!(
+                        host.collision_shape([9, 64, 5]),
+                        Some(vec![[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]])
+                    );
+                    assert_eq!(host.collision_shape([9, 70, 5]), Some(Vec::new()));
+                    assert_eq!(host.collision_shape([160, 64, 5]), None);
+                }
+            });
         });
     }
 
@@ -3596,6 +3673,34 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "daily"]
+    fn level_reads_whether_a_block_conducts_redstone() {
+        use std::sync::Arc;
+        use sunrise_client::chunk::Chunk;
+        with_game(|game| {
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let level = game.level(game.dim.id()).unwrap();
+            for (name, conducts) in [
+                ("minecraft:stone", true),
+                ("minecraft:glass", false),
+                ("minecraft:stone_slab", false),
+            ] {
+                let state = game.pack.assets.registry.default_state(name).unwrap();
+                game.world.set(0, 64, 0, state).unwrap();
+                assert_eq!(
+                    level.is_redstone_conductor(game, [0, 64, 0]),
+                    Some(conducts),
+                    "{name}"
+                );
+            }
+            // An unloaded position is unknown, not a guess.
+            assert_eq!(level.is_redstone_conductor(game, [160, 64, 0]), None);
+        });
+    }
+
+    #[test]
+    #[ignore = "daily"]
     fn level_sturdy_uses_gameplay_support() {
         use mod_api::SupportType as Support;
         use mod_api::{BlockFace as Face, LevelRef, WorldEpoch};
@@ -4336,7 +4441,7 @@ pub(super) mod tests {
             assert_eq!(game.world.block(5, 64, 0), water);
             game.world.set(5, 64, 0, waterlogged).unwrap();
             let removed = game.with_level(|_, level, ticks| {
-                let mut host = super::super::mod_api_host::LevelTicks { level, ticks };
+                let mut host = super::super::mod_api_host::LevelTicks::new(level, ticks);
                 mod_api::LevelWriteHost::remove_block(&mut host, [5, 64, 0], moved)
             });
             assert!(removed);

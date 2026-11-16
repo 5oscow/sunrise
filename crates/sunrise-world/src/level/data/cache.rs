@@ -747,7 +747,7 @@ impl Snapshot {
             }
         }
         let potted_by_content = super::potted_by_content(&blocks, &table);
-        Ok(Behaviours {
+        let behaviours = Behaviours {
             table,
             props,
             named,
@@ -766,7 +766,10 @@ impl Snapshot {
             occlusion_cache: Default::default(),
             growth: Default::default(),
             block_maps: Default::default(),
-        })
+            fluid_interactions: Default::default(),
+        };
+        behaviours.install_vanilla_fluid_interactions();
+        Ok(behaviours)
     }
 }
 

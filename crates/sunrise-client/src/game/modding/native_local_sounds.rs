@@ -1,5 +1,5 @@
 //! Client mods' own sounds (`play_local_sound`) and their `SoundRef` handles: what each is
-//! doing, stopping and fading it, and the sounds and devices the client has.
+//! doing, stopping, fading, moving and re-pitching it, and the sounds and devices the client has.
 use super::Game;
 use mod_api::__private::game::*;
 use mod_api::{SoundPlay, SoundRef, SoundState};
@@ -13,6 +13,8 @@ use sunrise_core::identifier::Identifier;
 enum Change {
     Stop,
     Fade { volume: f32, ticks: u32 },
+    Move { position: [f64; 3] },
+    Pitch { pitch: f32 },
 }
 impl Change {
     /// It ends the sound when applied: a stop, or a fade to 0 at once.
@@ -20,6 +22,7 @@ impl Change {
         match self {
             Change::Stop => true,
             Change::Fade { volume, ticks } => ticks == 0 && volume <= 0.0,
+            Change::Move { .. } | Change::Pitch { .. } => false,
         }
     }
 }
@@ -32,7 +35,7 @@ pub(super) struct ModSounds {
     /// Sounds asked for (`play_local_sound`), with their handle and the ticks each
     /// waits, until the next audio update plays them (`apply_mod_sounds`).
     pub(super) queued: RefCell<Vec<(u64, SoundPlay, u32)>>,
-    /// Stops and fades asked for since the last audio update, in order.
+    /// Stops, fades, moves and pitch changes asked for since the last audio update, in order.
     changes: RefCell<Vec<(u64, Change)>>,
     /// Each started sound's engine instance, until the engine lets it go.
     started: HashMap<u64, InstanceId>,
@@ -95,6 +98,8 @@ impl Game<'_> {
                 Change::Fade { volume, ticks } => {
                     self.audio.fade_mod_sound(instance, volume, ticks)
                 }
+                Change::Move { position } => self.audio.move_mod_sound(instance, position),
+                Change::Pitch { pitch } => self.audio.set_mod_sound_pitch(instance, pitch),
             }
             if change.stops() {
                 sounds.started.remove(&id);
@@ -158,6 +163,28 @@ impl Game<'_> {
             return false;
         }
         self.change_mod_sound(sound, Change::Fade { volume, ticks })
+    }
+    /// For a client mod: from the next audio update, its sound plays at `position` (in blocks,
+    /// within 30 million of the origin): the same instance, not restarted. False, changing
+    /// nothing, for a position that isn't finite or is out of range, a sound that is already
+    /// over, and on a server.
+    pub(super) fn sound_move_to(&self, sound: SoundRef, position: [f64; 3]) -> bool {
+        if !position
+            .iter()
+            .all(|v| v.is_finite() && v.abs() <= 30_000_000.0)
+        {
+            return false;
+        }
+        self.change_mod_sound(sound, Change::Move { position })
+    }
+    /// For a client mod: from the next audio update, its sound plays at `pitch` (at or above
+    /// 0, as `SoundPlay`'s): the same instance, not restarted. False, changing nothing, for a
+    /// pitch that isn't a number at or above 0, a sound that is already over, and on a server.
+    pub(super) fn sound_set_pitch(&self, sound: SoundRef, pitch: f32) -> bool {
+        if !pitch.is_finite() || pitch < 0.0 {
+            return false;
+        }
+        self.change_mod_sound(sound, Change::Pitch { pitch })
     }
     fn change_mod_sound(&self, sound: SoundRef, change: Change) -> bool {
         match self.sound_state(sound) {
@@ -231,6 +258,14 @@ mod tests {
             );
             assert!(!stopped.stop(host), "already over");
             assert!(!stopped.fade(host, 0.5, 10), "already over");
+            assert!(!stopped.move_to(host, [0.0; 3]), "already over");
+            assert!(!stopped.set_pitch(host, 1.0), "already over");
+            assert!(!faded.move_to(host, [f64::NAN, 0.0, 0.0]));
+            assert!(!faded.move_to(host, [0.0, 31_000_000.0, 0.0]));
+            assert!(!faded.set_pitch(host, -1.0));
+            assert!(!faded.set_pitch(host, f32::NAN));
+            assert!(faded.move_to(host, [1.0, 2.0, 3.0]));
+            assert!(faded.set_pitch(host, 1.5));
             assert!(!faded.fade(host, f32::NAN, 10));
             assert!(!faded.fade(host, -1.0, 10));
             assert!(faded.fade(host, 0.0, 20));

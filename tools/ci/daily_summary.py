@@ -2,18 +2,24 @@
 """The daily run's summary (.github/workflows/daily.yml): the `daily-green` tag and one issue per failing test.
 
 Reads this run's jobs (names, conclusions and step names from the Actions API, never a log) and the legs' verdict
-files (tools/ci/ignored_tests.py --report: test identity, kind, panic location, policy file), then:
+files (tools/ci/ignored_tests.py --report, and tools/ci/cargo_test_verdict.py for the wasm fixture's own tests: test
+identity, kind, panic location, policy file), then:
 - every leg green: moves the tag `daily-green` to the commit;
 - a failing test: files `Daily: <crate> <test>` (label `bug`) with its panic location, this run as the first that
-  saw it and the pull requests merged since the last green daily as suspects, or comments on the open one; when its
+  saw it and as suspects the pull requests merged since the previous daily run that changed its package's folders
+  (saying whether that run passed it, from its job's result there; with no earlier run, those since the last green
+  daily), or comments on the open one; when its
   newest issue was closed by a pull request or commit that is not in this run's commit (a fix merged after the commit
   under test), it comments on that closed issue and leaves it closed instead of filing a new one;
-- a leg that failed without a test name (build error, timeout, killed, cancelled, skipped, or a leg with no
-  sanitised verdict): one issue per leg, `Daily: <leg> did not complete`, naming the failed steps and, for a shard,
+- a leg that failed without a test name (build error, timeout, killed, cancelled after it started, skipped, or a
+  leg with no sanitised verdict): one issue per leg, `Daily: <leg> did not complete`, naming the failed steps and, for a shard,
   why each run stopped as its verdict file says (signal or exit status, memory peak and limit, wall time, the tests
   still running past 60 s; stopped_text); a leg whose red asks for an action is titled as that action (ACTIONS:
   `Daily: update the machine sample for the mod API change`);
 - a test (or leg) green again: closes its open issue with a comment.
+A job cancelled before any of its steps ran (one still waiting for a runner) never ran, so it is neither red nor
+green, and nor is a leg whose call was cancelled with only such jobs: nothing is filed or closed for it. A run cancelled
+by hand never gets here: daily.yml runs the summary only when the run was not cancelled.
 It also outputs `sdk_green`: whether the legs sdk-publish waits for (SDK_LEGS) all ran and passed, by the same rules.
 A job it does not know, or an expected leg with no job, is a red leg ("did not report"), never green; so is a
 shard of the matrix (tools/ci/ignored_shards.py, which builds it) with no job of its name. Each comment
@@ -63,9 +69,12 @@ HELPERS = ("plan", "route", "fresh", "gate")
 # The one green skip: the SDK build skips when sdk-<sha> already exists, which `sdk / fresh` found (it
 # succeeded). Any other skip of an expected job is red.
 FRESH = "sdk / fresh"
-# The wasm fixture step whose failures its verdict file names test by test.
-FIXTURE_TESTS_STEP = "Run the client tests that load the compiled fixture"
+# The wasm fixture job's steps whose failures its verdict file names test by test: the fixture's own tests
+# (tools/ci/cargo_test_verdict.py) and the client tests that load it (ignored_tests.py --needs).
+FIXTURE_TESTS_STEPS = ("Validate and load the fixture", "Run the client tests that load the compiled fixture")
 MERGE = re.compile(r"^Merge pull request #(\d+) from ")
+# A pull request merged on its own (`Merge pull request #N from`) or as a rollup's member (`Merge #N at <sha>`).
+BROUGHT_IN = re.compile(r"^Merge (?:pull request #(\d+) from |#(\d+) at )")
 MAX_PAGES = 100
 # How far back a closed issue's fix is looked for: a fix that merged after the commit under test is hours old.
 FIX_LOOKBACK = dt.timedelta(days=14)
@@ -134,6 +143,18 @@ def expected_shards():
             for shard in [*ignored_shards.expand(ignored_shards.SHARDS), *ignored_shards.DAILY_ROWS_LEGS.values()]]
 
 
+def never_started(job):
+    """A job cancelled before any step ran: it waited for a runner, or for jobs it needs, until the cancel."""
+    return job["conclusion"] == "cancelled" and not any(
+        step.get("conclusion") not in (None, "skipped") for step in job.get("steps") or [])
+
+
+def unstarted_legs(jobs, results):
+    """The legs whose call was cancelled and none of whose jobs, routing jobs included, started."""
+    return {leg for leg in LEGS if results.get(leg, {}).get("result") == "cancelled"
+            and all(never_started(job) for job in jobs if job["name"].partition(" / ")[0] == leg)}
+
+
 def job_green(job, fresh_ok):
     return job["conclusion"] == "success" or (
         job["conclusion"] == "skipped" and job["name"].startswith("sdk / ") and fresh_ok)
@@ -144,7 +165,7 @@ def failed_helpers(jobs):
     failed = {}
     for job in jobs:
         leg, _, rest = job["name"].partition(" / ")
-        if leg in LEGS and rest in HELPERS and job["conclusion"] not in ("success", "skipped"):
+        if leg in LEGS and rest in HELPERS and job["conclusion"] not in ("success", "skipped") and not never_started(job):
             failed.setdefault(leg, []).append(job["name"])
     return failed
 
@@ -155,14 +176,17 @@ def failed_steps(job):
 
 
 def report_for(job, reports):
-    """The verdict file a leg job wrote: a shard's names its shard, the fixture's its `needs` variable."""
+    """The verdict a leg job wrote: a shard's file names its shard; the fixture job's files (its own tests' and the
+    client tests') name their `needs` variable, and together are its verdict."""
     name = job["name"]
     for report in reports:
         if any(name.endswith(f"({shard})") for shard in report.get("shards", ())):
             return report
-        if report.get("needs") and name == "wasm-mods / fixture":
-            return report
-    return None
+    fixture = [report for report in reports if report.get("needs")] if name == "wasm-mods / fixture" else []
+    if not fixture:
+        return None
+    return {key: [entry for report in fixture for entry in report.get(key, ())]
+            for key in ("problems", "passed", "incomplete")}
 
 
 def known(name):
@@ -234,7 +258,10 @@ def verdicts(jobs, reports, results):
     tests, unfinished, passed, green_legs = [], [], set(), set()
     fresh_ok = any(job["name"] == FRESH and job["conclusion"] == "success" for job in jobs)
     helpers = failed_helpers(jobs)
+    unstarted = unstarted_legs(jobs, results)
     for job in leg_jobs(jobs):
+        if never_started(job):
+            continue
         report = report_for(job, reports)
         if report:
             passed |= {(item["package"], item["test"]) for item in report["passed"]}
@@ -256,15 +283,21 @@ def verdicts(jobs, reports, results):
                           if report["incomplete"] else
                           "failed tests whose names are withheld" if problems else "failed outside its tests")
                 unfinished.append((job["name"], job["conclusion"], steps, reason))
-        elif job["name"] == "wasm-mods / fixture" and steps == [FIXTURE_TESTS_STEP] and by_name:
+        elif job["name"] == "wasm-mods / fixture" and len(steps) == 1 and steps[0] in FIXTURE_TESTS_STEPS and (
+                by_name or (report or {}).get("incomplete")):
             tests += by_name
+            # A command that failed without naming a test (a build failure beside a named one) is the leg's item too.
+            if report["incomplete"] or len(by_name) < len(problems):
+                unfinished.append((job["name"], job["conclusion"], steps, "a test run did not complete: " + ". ".join(
+                    stopped_text(entry if isinstance(entry, dict) else {}) for entry in report["incomplete"])
+                    if report["incomplete"] else "failed tests whose names are withheld"))
         else:
             unfinished.append((job["name"], job["conclusion"], steps, "failed at the steps named"))
     for job in jobs:
-        if not known(job["name"]):
+        if not known(job["name"]) and not never_started(job):
             unfinished.append((job["name"], job["conclusion"], [], "did not report: a job the summary does not know"))
     names = {job["name"] for job in jobs}
-    if "shards" not in helpers:
+    if "shards" not in helpers and "shards" not in unstarted:
         for expected in expected_shards():
             if expected not in names:
                 unfinished.append((expected, "missing", [], "did not report: the daily matrix has this shard, but "
@@ -274,6 +307,8 @@ def verdicts(jobs, reports, results):
         result = results.get(leg, {}).get("result", "missing")
         accounted = any(item["leg"].split(" / ", 1)[0] == leg for item in tests) or any(
             entry[0].split(" / ", 1)[0] == leg for entry in unfinished)
+        if leg in unstarted:
+            continue
         if leg in helpers:
             unfinished.append((leg, result, [], "did not complete: " + ", ".join(f"`{name}`" for name in helpers[leg])
                                + " failed, so its jobs did not run"))
@@ -331,6 +366,62 @@ def fixes_after(commit, titles, call, query, git):
     return fixes
 
 
+def previous_run(commit, call, git):
+    """(commit, URL, {job name: conclusion}) of the newest earlier daily run whose summary ran, on an ancestor of
+    `commit` other than it (dry runs too: they run every test), or None."""
+    current = int(os.environ["GITHUB_RUN_ID"])
+    since = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=14)).date().isoformat()
+    for run in pages(call, f"actions/workflows/daily.yml/runs?status=completed&created=%3E%3D{since}", "workflow_runs"):
+        if run["id"] == current or run["conclusion"] not in ("success", "failure"):
+            continue
+        jobs = pages(call, f"actions/runs/{run['id']}/jobs?filter=latest", "jobs")
+        tested = [job["name"].split()[1] for job in jobs if job["name"].startswith("summary ")
+                  and job["conclusion"] in ("success", "failure") and len(job["name"].split()) > 1]
+        if tested and tested[0] != commit and git("merge-base", "--is-ancestor", tested[0], commit) is not None:
+            return tested[0], run["html_url"], {job["name"]: job["conclusion"] for job in jobs}
+    return None
+
+
+def package_folders(package):
+    """The source folders a change to `package` lands in: its own, and a folder whose sources it also builds
+    (sunrise-client-lib builds crates/sunrise-client's: ignored_shards.SHARED_SOURCES)."""
+    members = ignored_shards.workspace_members()
+    folders = {members[package][0]} if package in members else set()
+    folders |= {members[crate][0] for crate, packages in ignored_shards.SHARED_SOURCES.items()
+                if package in packages and crate in members}
+    return sorted(folders)
+
+
+def pull_requests_touching(base, commit, folders, git):
+    """The pull requests that brought a commit changing `folders` into `commit` since `base`: for each such commit, the
+    oldest merge naming a pull request on its way into `commit` (its own merge, or a rollup's member merge)."""
+    numbers = set()
+    for change in (git("log", "--no-merges", "--format=%H", f"{base}..{commit}", "--", *folders) or "").split():
+        merges = (git("log", "--merges", "--ancestry-path", "--format=%s", f"{change}..{commit}") or "").splitlines()
+        named = [found for line in merges if (found := BROUGHT_IN.match(line))]
+        if named:
+            numbers.add(int(named[-1][1] or named[-1][2]))
+    return sorted(numbers)
+
+
+def test_suspect_line(item, previous, commit, git):
+    """A failing test's suspects: the pull requests since the previous daily run that changed its package's folders,
+    saying whether that run is known to have passed it (its leg's job succeeded there), or None with no such run."""
+    if previous is None or not (folders := package_folders(item["package"])):
+        return None
+    base, url, legs = previous
+    numbers = pull_requests_touching(base, commit, folders, git)
+    where = ", ".join(f"`{folder}`" for folder in folders)
+    listed = ", ".join(f"#{n}" for n in numbers) if numbers else "none identified in this interval"
+    if legs.get(item["leg"]) == "success":
+        return (f"Suspects: it passed in the previous daily run ({url}, `{base[:9]}`). Pull requests merged since then "
+                f"that changed {where}: {listed}.")
+    seen = legs.get(item["leg"], "no such job")
+    return (f"Suspects: the previous daily run ({url}, `{base[:9]}`) does not show this test passing (its job "
+            f"`{item['leg']}` ended `{seen}`), so earlier merges are suspects too. Pull requests merged since then "
+            f"that changed {where}: {listed}.")
+
+
 def suspect_line(numbers, commit):
     if numbers is None:
         return f"Suspects: no daily run has been green yet, so every merge before `{commit[:9]}` is a suspect."
@@ -366,14 +457,15 @@ def leg_detail(leg, conclusion, steps, reason):
             + f"Leg `{leg}` ended `{conclusion}`: {reason}. Failed steps: {named_steps}.")
 
 
-def plan(commit, run_url, tests, unfinished, passed, green_legs, green, open_issues, numbers, fixes=None):
+def plan(commit, run_url, tests, unfinished, passed, green_legs, green, open_issues, numbers, fixes=None, lines=None):
     """Every write this run makes, in order: ("tag", sha) / ("create", title, body) / ("comment", number, title, body)
-    / ("close", number, title, body). `fixes` (fixes_after) holds the closed issues whose fix this commit predates."""
+    / ("close", number, title, body). `fixes` (fixes_after) holds the closed issues whose fix this commit predates;
+    `lines` a failing test's own suspects line by title (test_suspect_line), else every red gets `numbers`' line."""
     fixes = fixes or {}
+    lines = lines or {}
     actions = []
     if green:
         actions.append(("tag", commit))
-    line = suspect_line(numbers, commit)
     reds = [(test_title(item), detail(item)) for item in tests]
     reds += [(leg_title(leg), leg_detail(leg, conclusion, steps, reason)) for leg, conclusion, steps, reason in unfinished]
     filed = set()
@@ -381,6 +473,7 @@ def plan(commit, run_url, tests, unfinished, passed, green_legs, green, open_iss
         if title in filed:
             continue
         filed.add(title)
+        line = lines.get(title) or suspect_line(numbers, commit)
         if title in open_issues:
             actions.append(("comment", open_issues[title], title,
                             f"🤖 Agent: {red_marks(run_url)[1]} on `{commit[:9]}`.\n\n{text}\n\n{line}\n"))
@@ -487,7 +580,9 @@ def main(call=api, run_git=git, query=graphql):
     numbers = suspects(commit, run_git) if tests or unfinished else []
     reds = {test_title(item) for item in tests} | {leg_title(leg) for leg, *_ in unfinished}
     fixes = fixes_after(commit, reds - open_issues.keys(), call, query, run_git)
-    actions = plan(commit, run_url, tests, unfinished, passed, green_legs, green, open_issues, numbers, fixes)
+    previous = previous_run(commit, call, run_git) if tests else None
+    lines = {test_title(item): line for item in tests if (line := test_suspect_line(item, previous, commit, run_git))}
+    actions = plan(commit, run_url, tests, unfinished, passed, green_legs, green, open_issues, numbers, fixes, lines)
     sdk_green = legs_green(SDK_LEGS, jobs, json.loads(env["RESULTS"]), tests, unfinished)
     text = render(actions, writes) + (
         f"\nSDK legs ({', '.join(SDK_LEGS)}): {'green' if sdk_green else 'not green'}; "

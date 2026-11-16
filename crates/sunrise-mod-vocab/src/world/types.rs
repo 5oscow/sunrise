@@ -1424,6 +1424,47 @@ pub trait LevelHost {
     fn enabled_features(&self) -> FeatureFlags {
         unimplemented!("LevelHost::enabled_features")
     }
+    /// How strongly the block at `pos` powers its neighbour on the `direction` side, power it
+    /// conducts included (`SignalGetter.getSignal(pos, direction)`), 0 to 15: the game's own
+    /// read, mods' `block_signal` and `should_check_weak_power` parts included, as
+    /// `LevelRef::signal` reads it. It writes nothing and draws nothing, so it leaves the
+    /// call it is read in as it was, and it asks no placement or survival hook, so a read made
+    /// inside `state_for_placement` or `can_survive` cannot re-enter them. None in a callback
+    /// whose level has no signal view: `state_for_placement`, `can_survive` and the level
+    /// tick and shape-update hooks have one.
+    fn signal(&self, _pos: [i32; 3], _direction: Direction) -> Option<i32> {
+        None
+    }
+    /// The strong power alone that the block at `pos` gives that way
+    /// (`SignalGetter.getDirectSignal(pos, direction)`), 0 to 15. None as for `signal`.
+    fn direct_signal(&self, _pos: [i32; 3], _direction: Direction) -> Option<i32> {
+        None
+    }
+    /// The strongest strong power reaching the block at `pos` (`SignalGetter.getDirectSignalTo`).
+    /// None as for `signal`.
+    fn direct_signal_to(&self, _pos: [i32; 3]) -> Option<i32> {
+        None
+    }
+    /// The strongest power reaching the block at `pos` from its six neighbours
+    /// (`SignalGetter.getBestNeighborSignal`). None as for `signal`.
+    fn best_neighbor_signal(&self, _pos: [i32; 3]) -> Option<i32> {
+        None
+    }
+    /// Whether any neighbour powers the block at `pos` (`SignalGetter.hasNeighborSignal`),
+    /// asking no side past the first that does: what a lamp's or a door's placement reads.
+    /// None as for `signal`.
+    fn has_neighbor_signal(&self, _pos: [i32; 3]) -> Option<bool> {
+        None
+    }
+    /// The collision shape of the block at `pos` (`BlockState.getCollisionShape(level, pos)`
+    /// with an empty context), as boxes `[minX, minY, minZ, maxX, maxY, maxZ]` in block units
+    /// relative to `pos`: a block entity's published shape where its block publishes one, else
+    /// the declared or vanilla shape. Empty for a block with no collision. None where `pos` is
+    /// not loaded or outside the build height (it never loads a chunk), and in a callback whose
+    /// level has no shape view. `LevelRef::block_shape` is the same read from a handle.
+    fn collision_shape(&self, _pos: [i32; 3]) -> Option<Vec<[f64; 6]>> {
+        None
+    }
 }
 
 /// Access vanilla's `Level.random`, so draws come in vanilla's order.
@@ -1515,32 +1556,6 @@ pub trait LevelTicksHost: LevelHost {
     /// Schedule a fluid tick through `native_schedule_fluid_tick`.
     fn schedule_fluid_tick(&mut self, _pos: [i32; 3], _fluid: &str, _delay: i32) -> bool {
         unimplemented!("LevelTicksHost::schedule_fluid_tick")
-    }
-    /// How strongly the block at `pos` powers its neighbour on the `direction` side, power it
-    /// conducts included (`SignalGetter.getSignal(pos, direction)`), 0 to 15: the game's own
-    /// read, mods' `block_signal` and `should_check_weak_power` parts included, as
-    /// `LevelRef::signal` reads it. It writes nothing and draws nothing, so it leaves the
-    /// write it is read in as it was.
-    fn signal(&self, _pos: [i32; 3], _direction: Direction) -> i32 {
-        unimplemented!("LevelTicksHost::signal")
-    }
-    /// The strong power alone that the block at `pos` gives that way
-    /// (`SignalGetter.getDirectSignal(pos, direction)`), 0 to 15.
-    fn direct_signal(&self, _pos: [i32; 3], _direction: Direction) -> i32 {
-        unimplemented!("LevelTicksHost::direct_signal")
-    }
-    /// The strongest strong power reaching the block at `pos` (`SignalGetter.getDirectSignalTo`).
-    fn direct_signal_to(&self, _pos: [i32; 3]) -> i32 {
-        unimplemented!("LevelTicksHost::direct_signal_to")
-    }
-    /// The strongest power reaching the block at `pos` (`SignalGetter.getBestNeighborSignal`).
-    fn best_neighbor_signal(&self, _pos: [i32; 3]) -> i32 {
-        unimplemented!("LevelTicksHost::best_neighbor_signal")
-    }
-    /// Whether any neighbour powers the block at `pos` (`SignalGetter.hasNeighborSignal`),
-    /// asking no side past the first that does.
-    fn has_neighbor_signal(&self, _pos: [i32; 3]) -> bool {
-        unimplemented!("LevelTicksHost::has_neighbor_signal")
     }
 }
 
@@ -1653,4 +1668,18 @@ impl StructureSearchResult {
 pub enum GameRuleReadError {
     /// No rule has this identifier.
     UnknownRule,
+}
+
+/// One of the scoreboard's objectives of an open server world (vanilla's `Objective`). It holds
+/// the world's epoch and an identity the board gave the objective when it was added, so an
+/// objective that was removed (even if its name was added again) or a handle from an earlier
+/// open reads as stale: reads answer `None` or [`ObjectiveError::Stale`] and writes change
+/// nothing.
+#[derive(sunrise_mod_api_macros::Wire)]
+#[wire(internal_field_layouts)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
+pub struct ObjectiveRef {
+    pub(crate) epoch: WorldEpoch,
+    pub(crate) id: u64,
 }

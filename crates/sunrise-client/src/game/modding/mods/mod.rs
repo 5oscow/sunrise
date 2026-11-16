@@ -1056,6 +1056,7 @@ pub(in crate::game) fn content_root(
     register_menu_types(&overlay.mods)?;
     register_iterated_registries(overlay.root.prepared())?;
     sunrise_client::mod_content::set_fluid_looks(&overlay.mods);
+    sunrise_client::mod_content::set_fluid_interactions(&overlay.mods);
     Ok(overlay.root)
 }
 

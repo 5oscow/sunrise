@@ -192,6 +192,19 @@ These read the local player as the client sees it. They take no mod-controlled n
   lists them, once per item and components. Mod additions from `build_creative_mode_tab_contents`
   join when the tabs are built, and the operator tab's items only with the last build's permissions.
   It is empty before resources load. It reads the same on native and wasm.
+- `ClientHost::creative_tabs()` is the creative inventory's item tabs in `CreativeModeTabs.tabs()` order
+  (not the search, saved toolbars or survival inventory tabs), each a `CreativeModeTabInfo` with its
+  registry id and `display_items` (`CreativeModeTab.getDisplayItems`, components kept), and the build's
+  `has_permissions`. Mod stacks from `build_creative_mode_tab_contents` follow a tab's own, so this is
+  the read for "which tab shows this stack": `tabs_showing(&stack)` matches by item and components. The
+  operator tab is listed only when the last build had permissions. The contents come from the game's
+  tab export, built with vanilla's default feature flags: a world's feature set does not change them,
+  so there is no feature field. Empty before resources load; the same on native and wasm.
+- `ClientHost::item_uses_block_light(&stack, context)` is `ItemStackRenderState.usesBlockLight` of the
+  stack's model resolved for an `ItemDisplayContext` (no owner or level): true for a model lit like a
+  block from the side (`gui_light: side`), false for a flat item lit from the front. It is what
+  `BakedModel.isGui3d` became in 26.3, so use it to draw a stack as a flat sprite or as a 3D model.
+  It is false for an empty stack or one with no model.
 - Reach is `targeting()` (below), which comes from the interaction-range attributes with the server's
   and equipment's modifiers. Menu slot numbers are `Slot.index`, the position in the menu's slot list
   that `menu_slot` and `menu_slot_count` take; `menu_slot_backing` gives the index in the backing container.

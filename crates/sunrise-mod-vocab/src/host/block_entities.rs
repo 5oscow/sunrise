@@ -138,6 +138,22 @@ pub trait BlockEntitiesBackendMut {
         entity: BlockEntityRef,
     ) -> Result<bool, BlockEntityError>;
     /// Side: server.
+    /// Watch one source position in this observer's level. The observer's BlockParts
+    /// receive the same contents_changed notice with observer = Some(self). Repeated
+    /// registration is idempotent; a self-watch never duplicates its own notice.
+    /// Registration changes join the transaction and abort restores them. Removal,
+    /// replacement and chunk unload discard watches; loading must register them again.
+    /// The source need not be loaded; watches follow the position, not its occupant.
+    /// No part subscribed to this moment returns NotSubscribed; an invalid observer
+    /// or a level not writable here returns Stale. Available during the observer's tick.
+    #[access(WorldOnly)]
+    fn block_entity_watch_contents(
+        &mut self,
+        entity: BlockEntityRef,
+        source: BlockPos,
+        enabled: bool,
+    ) -> Result<(), ContentsWatchError>;
+    /// Side: server.
     /// Sets the custom name, or clears it with None, as an anvil-renamed item placed with
     /// `components` sets `CustomName`. Plain text only. Clients get a block entity update.
     /// Ok(false) for an entity that is not nameable; Stale for an invalidated or

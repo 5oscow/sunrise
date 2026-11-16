@@ -148,7 +148,7 @@ fn stateful_creation_uses_actual_state_and_preserves_existing_entity() {
         // outer Game write wrapper and still creates exactly one instance.
         let written = game.with_level(|_, level, ticks| {
             LevelWriteHost::set_block(
-                &mut crate::game::mod_api_host::LevelTicks { level, ticks },
+                &mut crate::game::mod_api_host::LevelTicks::new(level, ticks),
                 [3, 64, 0],
                 populated_api,
                 BlockUpdateFlags::NONE,
@@ -169,5 +169,12 @@ fn stateful_creation_uses_actual_state_and_preserves_existing_entity() {
                 .get(&"progress".into()),
             Some(&Tag::Int(37))
         );
+        // The placement and survival view reads the same live entity.
+        game.with_level(|_, level, ticks| {
+            let view = level.view(ticks);
+            let data = mod_api::LevelHost::block_entity_data(&view, second)
+                .expect("the view forwards a block entity's data");
+            assert_eq!(data.get(&"progress".into()), Some(&Tag::Int(37)));
+        });
     });
 }

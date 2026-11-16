@@ -1186,16 +1186,16 @@ impl Game<'_> {
         }
         Ok(())
     }
-    /// A lid's `Entity.move` for armor stand `i`, one with physics (vanilla's
-    /// `!noPhysics`: not a marker, not `NoGravity`), from the game's one lid
-    /// push: the stand's own `shove` by `delta`. Stands tick
+    /// `Entity.move(mover, delta)` for armor stand `i` (a lid's push or a mod's move), one with physics (vanilla's
+    /// `!noPhysics`: not a marker, not `NoGravity`), the stand's own `shove` by `delta`. Stands tick
     /// before mobs here, while vanilla ticks a stand that joined after the
     /// pushing `shulker` (one placed on it) after the shulker: `shove` makes
     /// up for the order. A shulker box's lid moves it after every entity's tick.
     /// `grid` holds the stands' obstacles, built once per lid at its first stand.
-    pub(super) fn lid_shoves_armor_stand(
+    pub(super) fn shoves_armor_stand(
         &mut self,
         i: usize,
+        mover: sunrise_world::entity_move::MoverType,
         shulker: Option<u32>,
         delta: Vec3,
         grid: &mut Option<sunrise_client::entities::ObstacleGrid>,
@@ -1220,11 +1220,7 @@ impl Game<'_> {
             Some(self.border.geometry()),
             &nearby,
             travels_after,
-            if shulker.is_some() {
-                sunrise_world::entity_move::MoverType::Shulker
-            } else {
-                sunrise_world::entity_move::MoverType::ShulkerBox
-            },
+            mover,
             &self.loop_context,
         );
     }

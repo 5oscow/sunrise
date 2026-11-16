@@ -29,7 +29,8 @@ names its cargo target
 (`lib`, `bin:NAME` or `test:NAME`) and why it is a daily test (`slow`, `game-boot`, `resources`, `child-process`,
 `network`, `wasm-fixture`). It is not a known failure: it runs every day and must pass, and a row whose test no
 longer runs fails. Its package's shard runs it when that shard builds its target, and the `daily-rows` leg runs
-every other one; verify-static fails a row no leg runs. `python3 tools/ci/move_to_daily.py apply LIST` writes the
+every other one, except a `wasm-fixture` row: only `wasm-mods.yml`'s fixture job builds the compiled fixture, so it runs
+those there, each alone in its own process with the `needs SUNRISE_WASM_FIXTURE` rows, and no shard runs them; verify-static fails a row no leg runs. `python3 tools/ci/move_to_daily.py apply LIST` writes the
 attribute and the row (its docstring has the list format). The attribute is the source's mark and the row is the
 daily run's list of what must run: an attribute without a row in a package no shard covers would run nowhere.
 A launcher test is moved the same way (a new `daily-sunrise-launcher-TOPIC.txt`): its own leg, `daily-rows-launcher`, runs it

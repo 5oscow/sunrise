@@ -136,7 +136,7 @@ pub fn trigger_sound_and_game_event(
         false => host.fluid_empty_sound(id),
     });
     if let Some(sound) = sound {
-        level.play_sound(host, sound, at, SoundSource::Blocks, 1.0, 1.0);
+        level.play_sound(host, sound, at, SoundSource::Blocks, 1.0, 1.0, None);
     }
     let event = match pickup {
         true => "minecraft:fluid_pickup",

@@ -113,7 +113,7 @@ console.log(JSON.stringify(eval(expression)));
     def test_a_missing_leg_holds_the_build_only_when_it_is_required(self):
         workflow_jobs = dict(jobs(GAME.read_text()))
         optional = re.search(r"^\s*continue-on-error:\s*\$\{\{(.*?)\}\}", workflow_jobs["build"], re.M).group(1)
-        decide = workflow_jobs["legs"].split("        run: |\n", 1)[1]
+        decide = workflow_jobs["legs"].split("        run: |\n", 1)[1].split("\n      # ", 1)[0].split("\n      - ", 1)[0]
         decide = textwrap.dedent(decide)
         script = """const s = JSON.parse(require('fs').readFileSync(0, 'utf8'));
 const matrix = s.matrix, inputs = s.inputs, github = s.github;

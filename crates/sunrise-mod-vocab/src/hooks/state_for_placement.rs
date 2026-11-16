@@ -29,7 +29,7 @@ pub trait Hooks {
         out = "answer",
         scope = "block",
         key = "state",
-        target = "sunrise_client::game::native_hooks::base::GameLevel<'_>::native_state_for_placement",
+        target = "sunrise_client::game::native_hooks::base::LevelView<'_>::native_state_for_placement",
         neoforge = "none (vanilla Block.getStateForPlacement; NeoForge adds no event or extension for it)"
     )]
     fn state_for_placement();

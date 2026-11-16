@@ -635,7 +635,7 @@ and by hand; pushes to `launcher` and `launcher-*` branches only build.
   macOS on the Mac mini's runner; each runs the launcher's tests and checks its libraries. The smoke test installs
   the newest game build for that platform; Intel macOS skips only the install step while no matching build is
   available yet, and Windows ARM64 installs the x64 build (under emulation) from a Nightly without an ARM64 one.
-- Published with `--latest=false`: the repository's latest release stays a game release. Notes list the pull
+- Published as a pre-release with `--latest=false`: the repository's latest release stays a game release. Notes list the pull
   requests under New and Fixed; Kira posts launcher releases without pinging.
 - Windows also publishes `sunrise-launcher-setup.exe` (x64) and `sunrise-launcher-setup-arm64.exe`, the launcher's
   binary under another name: with no
