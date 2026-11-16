@@ -149,6 +149,7 @@ impl dyn ServerReloadListeners + '_ {
 pub struct ServerListenerRegistry {
     core: crate::world::reload::ReloadCore<dyn ServerReloadListener>,
     retained: Vec<RetainedEntry>,
+    pub(crate) default_anchor: Identifier,
 }
 impl ServerReloadListeners for ServerListenerRegistry {
     fn add_listener(
@@ -187,7 +188,7 @@ impl ServerReloadListeners for ServerListenerRegistry {
             .collect()
     }
     fn get_last_vanilla_listener(&self) -> Identifier {
-        VanillaServerListeners::functions()
+        self.default_anchor.clone()
     }
 }
 impl ServerListenerRegistry {
@@ -200,11 +201,12 @@ impl ServerListenerRegistry {
                 || -> Arc<dyn ServerReloadListener> { Arc::new(Boundary) },
             ),
             retained: Vec::new(),
+            default_anchor: VanillaServerListeners::functions(),
         }
     }
     pub(crate) fn finish(self) -> Result<OrderedServerReload, ReloadOrderError> {
         Ok(OrderedServerReload {
-            listeners: self.core.finish(&VanillaServerListeners::functions())?,
+            listeners: self.core.finish(&self.default_anchor)?,
             retained: self.retained,
         })
     }

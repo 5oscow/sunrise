@@ -174,3 +174,69 @@ pub trait LootModifierContext {
 #[cfg(test)]
 #[path = "loot_modifiers/tests.rs"]
 mod tests;
+
+// no wire: a retained process-local reload listener with callback resources.
+/// The immutable modifier instances of one successful server reload, sorted by
+/// descending priority. Equal-priority ordering has no specified meaning.
+/// Read it through `ServerHost::reload_resources` using `Self::key()`.
+#[derive(Default)]
+pub struct GlobalLootModifierManager {
+    contents: std::sync::OnceLock<Arc<ManagerContents>>,
+}
+struct ManagerContents {
+    entries: Vec<(crate::Identifier, Arc<dyn GlobalLootModifier>)>,
+    _owner: Arc<dyn std::any::Any + Send + Sync>,
+}
+impl GlobalLootModifierManager {
+    /// The retained `neoforge:loot_modifiers` listener.
+    pub fn key() -> crate::world::server_reload::ListenerKey<Self> {
+        crate::world::server_reload::ListenerKey::new(
+            crate::Identifier::parse("neoforge:loot_modifiers").unwrap(),
+        )
+    }
+    /// Prepared instances in application order; a registered type without a
+    /// selected, successfully decoded data file is not present.
+    pub fn modifiers(&self) -> &[(crate::Identifier, Arc<dyn GlobalLootModifier>)] {
+        self.contents
+            .get()
+            .map_or(&[], |contents| contents.entries.as_slice())
+    }
+    /// Find the prepared instance selected for a file id.
+    pub fn get(&self, id: &crate::Identifier) -> Option<Arc<dyn GlobalLootModifier>> {
+        self.modifiers()
+            .iter()
+            .find(|(key, _)| key == id)
+            .map(|(_, modifier)| modifier.clone())
+    }
+    /// Find an instance's id by identity, not by its returned loot or metadata.
+    pub fn id_of(&self, modifier: &Arc<dyn GlobalLootModifier>) -> Option<&crate::Identifier> {
+        self.modifiers()
+            .iter()
+            .find(|(_, candidate)| Arc::ptr_eq(candidate, modifier))
+            .map(|(id, _)| id)
+    }
+    pub(crate) fn prepared(
+        entries: Vec<(crate::Identifier, Arc<dyn GlobalLootModifier>)>,
+        owner: Arc<dyn std::any::Any + Send + Sync>,
+    ) -> Self {
+        Self {
+            contents: std::sync::OnceLock::from(Arc::new(ManagerContents {
+                entries,
+                _owner: owner,
+            })),
+        }
+    }
+    pub(crate) fn bind_from(&self, source: &Self) {
+        if let Some(contents) = source.contents.get() {
+            let _ = self.contents.set(contents.clone());
+        }
+    }
+}
+impl crate::world::server_reload::ServerReloadListener for GlobalLootModifierManager {
+    fn prepare(
+        &self,
+        _: &crate::world::server_reload::ServerReloadContext,
+    ) -> Result<Box<dyn crate::ReloadApply>, crate::ReloadResourceError> {
+        Ok(<dyn crate::ReloadApply>::new(|| {}))
+    }
+}

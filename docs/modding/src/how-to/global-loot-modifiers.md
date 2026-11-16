@@ -3,11 +3,6 @@
 Global loot modifiers are registered serializer types with data-enabled instances, not per-roll
 listeners. A type with no instance file never runs. Native and wasm use the same interfaces.
 
-> **Not active yet.** This page describes the registration and resource API, which is in place. The
-> game does not yet read `data/<namespace>/loot_modifiers/` files, run the ordered modifier pass on
-> top-level rolls, provide the built-in `neoforge:add_table` type or reload instances. Until that
-> lands, a registered serializer is accepted but never decodes or applies anything.
-
 Register a `GlobalLootModifierSerializer` in `Hooks::register`:
 
 ```rust,ignore
@@ -52,6 +47,38 @@ Instances are selected by files under `data/<namespace>/loot_modifiers/<path>.js
 }
 ```
 
+## Loading and reloading
+
+The server selects the highest enabled pack's file for each instance id before reading or decoding
+it. A winning file with false `neoforge:conditions` removes the instance; it never falls back to a
+lower file. Malformed JSON, unknown types, refused metadata and decoder errors log the instance id,
+pack, file and reason, then skip only that file. Load-condition errors are isolated to that file.
+
+Every server data reload prepares a complete immutable generation with its loot tables, predicates
+and item evaluator. Only a successful preparation publishes it. A failed world preparation applies
+no reload listeners and leaves the previous generation active. Retained references keep their old
+instances alive; they do not switch silently to the new generation.
+
+The built-in `neoforge:add_table` type requires `table`, a loot table id, and accepts the same common
+`priority` and `condition` fields. It rolls that table raw with the current parameters, random and
+visited guards, then appends its output unchanged:
+
+```json
+{
+  "type": "neoforge:add_table",
+  "table": "example:bonus",
+  "condition": { "type": "neoforge:loot_table_id", "loot_table_id": "minecraft:blocks/stone" }
+}
+```
+
+`GlobalLootModifierManager::key()` names the retained `neoforge:loot_modifiers` server reload listener.
+From a server hook, read it with
+`host.reload_resources().listener(&GlobalLootModifierManager::key())`. The manager's `modifiers()`
+list is in application order, `get(&id)` finds an instance and `id_of(&instance)` finds its file id
+by resource identity. It retains the exact generation that successful reload published. The anchor
+follows the function library and precedes unrelated mod listeners by default; explicit dependencies
+can order listeners against it.
+
 ## Applying an instance
 
 `GlobalLootModifier::apply` takes a borrowed `LootModifierContext` and the preceding list as
@@ -64,7 +91,9 @@ The list keeps signed counts and arbitrary component patches. A modifier may add
 or reorder entries, including empty and over-maximum stacks. No second splitter or count clamp runs
 between modifiers or after the pass. If application fails, later modifiers receive the preceding
 list; draws already made from the roll random are not undone. A native panic disables the failing
-prepared instance through the standard retained-callback policy.
+prepared instance through the standard retained-callback policy. Only when the Items caller
+materializes its unsigned engine stack does a negative count become zero, retaining that list
+position; subsequent modifiers still observe the original signed count.
 
 `context.snapshot()` reads the current facts and the set-once queried root table id. Missing facts
 stay missing. Its legacy `seed` field is zero: obtaining a snapshot does not draw a new seed.

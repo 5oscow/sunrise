@@ -468,3 +468,220 @@ fn queried_ability_tags_use_prepared_item_sets() {
         assert!(!context.condition(&invalid, &mut LegacyRandom::new(9)));
     }
 }
+
+#[test]
+fn root_modifiers_chain_before_unsigned_caller_consumption() {
+    use sunrise_world::loot::{
+        LootStack,
+        global_modifiers::{
+            AddTableModifier, DecodedModifier, GlobalLootModifiers, ModifierApply, ModifierFile,
+            ModifierRoll,
+        },
+    };
+    struct Stage(bool);
+    impl ModifierApply for Stage {
+        fn apply(
+            &self,
+            roll: &mut dyn ModifierRoll,
+            generated: &[LootStack],
+        ) -> std::result::Result<Vec<LootStack>, String> {
+            if self.0 {
+                assert_eq!(
+                    generated
+                        .iter()
+                        .map(|stack| stack.count)
+                        .collect::<Vec<_>>(),
+                    [-3, 200, 200]
+                );
+                return Ok(generated.to_vec());
+            }
+            assert_eq!(
+                generated
+                    .iter()
+                    .map(|stack| stack.count)
+                    .collect::<Vec<_>>(),
+                [64, 64, 2]
+            );
+            assert!(matches!(
+                roll.facts().table_id(),
+                "minecraft:entities/zombie"
+                    | "minecraft:blocks/stone"
+                    | "neoforge:unknown_loot_table"
+            ));
+            assert_eq!(roll.next_long(), LegacyRandom::new(31).next_long());
+            let raw = roll.roll_raw("test:raw")?;
+            assert_eq!(
+                raw.iter().map(|stack| stack.count).collect::<Vec<_>>(),
+                [200]
+            );
+            let mut negative = generated[0].clone();
+            negative.count = -3;
+            Ok(vec![negative, raw[0].clone()])
+        }
+    }
+    let root = json!({"pools":[{"rolls":1,"entries":[{"type":"minecraft:item","name":"minecraft:diamond"}]}],
+        "modifier":[{"type":"minecraft:set_count","count":130},{"type":"minecraft:set_components","components":{"minecraft:max_stack_size":64}}]});
+    let raw = json!({"pools":[
+        {"rolls":1,"entries":[{"type":"minecraft:loot_table","value":"test:raw"}]},
+        {"rolls":1,"entries":[{"type":"minecraft:item","name":"minecraft:gold_ingot","modifier":{"type":"minecraft:set_count","count":200}}]}
+    ]});
+    let mut items = data(vec![
+        ("minecraft:entities/zombie", root.clone()),
+        ("minecraft:blocks/stone", root.clone()),
+        ("test:raw", raw),
+    ]);
+    let files = ["test:first", "test:add", "test:last"]
+        .into_iter()
+        .map(|id| ModifierFile {
+            id: id.into(),
+            pack: "test".into(),
+            path: id.into(),
+            read: Box::new(|| Ok(br#"{"type":"test:stage"}"#.to_vec())),
+        });
+    items.global_modifiers = Arc::new(GlobalLootModifiers::load(
+        files,
+        &sunrise_world::conditions::LoadConditions::vanilla(),
+        |id, _, _| {
+            let (priority, apply): (_, Arc<dyn ModifierApply>) = match id {
+                "test:first" => (1001, Arc::new(Stage(false))),
+                "test:add" => (
+                    1000,
+                    Arc::new(AddTableModifier {
+                        table: "test:raw".into(),
+                    }),
+                ),
+                _ => (999, Arc::new(Stage(true))),
+            };
+            Ok(DecodedModifier {
+                priority,
+                condition: None,
+                apply,
+            })
+        },
+        |error| panic!("{error}"),
+    ));
+    let registry = BlockRegistry::from_facts_json(&br#"{"defaults":{"minecraft:stone":0},"states":[["stone",false,false,"","minecraft:stone"]]}"#[..]).unwrap();
+    let mut expected = LegacyRandom::new(31);
+    expected.next_long();
+    for adapter in 0..7 {
+        let mut random = LegacyRandom::new(31);
+        let drops = match adapter {
+            0 => items.loot_table("minecraft:entities/zombie", false, None, &mut random),
+            1 => items
+                .roll_loot_table("minecraft:entities/zombie", None, false, &mut random)
+                .unwrap(),
+            2 => items.inline_loot_table(&root, &mut random),
+            3 => items.entity_drops("zombie", false, None, &mut random),
+            4 => items.loot_table_from("minecraft:entities/zombie", false, None, &mut random),
+            5 => items.block_drops(
+                &registry,
+                BlockStateId(0),
+                Default::default(),
+                &mut random,
+                None,
+            ),
+            _ => items.interact_loot(
+                "minecraft:entities/zombie",
+                &registry,
+                BlockStateId(0),
+                &mut random,
+                &mut crate::random_sequences::RandomSequences::default(),
+                0,
+            ),
+        };
+        assert_eq!(
+            drops.iter().map(|stack| stack.count).collect::<Vec<_>>(),
+            [0, 200, 200],
+            "adapter {adapter}"
+        );
+        assert_eq!(
+            <(u64, Option<f64>)>::from(&random),
+            <(u64, Option<f64>)>::from(&expected)
+        );
+    }
+}
+
+#[test]
+fn block_dynamic_stacks_are_materialized_before_the_pass_and_raw_output_is_unsplit() {
+    use sunrise_world::loot::{
+        LootStack,
+        global_modifiers::{
+            DecodedModifier, GlobalLootModifiers, ModifierApply, ModifierFile, ModifierRoll,
+        },
+    };
+    struct Dynamic;
+    impl ModifierApply for Dynamic {
+        fn apply(
+            &self,
+            roll: &mut dyn ModifierRoll,
+            generated: &[LootStack],
+        ) -> std::result::Result<Vec<LootStack>, String> {
+            assert_eq!(
+                generated
+                    .iter()
+                    .map(|stack| (stack.item.as_str(), stack.count))
+                    .collect::<Vec<_>>(),
+                [
+                    ("minecraft:diamond", 64),
+                    ("minecraft:diamond", 64),
+                    ("minecraft:diamond", 2),
+                ]
+            );
+            let raw = roll.roll_raw("test:dynamic")?;
+            assert_eq!(
+                raw.iter()
+                    .map(|stack| (stack.item.as_str(), stack.count))
+                    .collect::<Vec<_>>(),
+                [("minecraft:diamond", 130)]
+            );
+            let mut output = generated.to_vec();
+            output.extend(raw);
+            Ok(output)
+        }
+    }
+    let table = json!({"pools":[{"rolls":1,"entries":[{"type":"minecraft:dynamic","name":"minecraft:sherds"}]}]});
+    let mut items = data(vec![
+        ("minecraft:blocks/decorated_pot", table.clone()),
+        ("test:dynamic", table),
+    ]);
+    items.global_modifiers = Arc::new(GlobalLootModifiers::load(
+        [ModifierFile {
+            id: "test:dynamic".into(),
+            pack: "test".into(),
+            path: "dynamic.json".into(),
+            read: Box::new(|| Ok(br#"{"type":"test:dynamic"}"#.to_vec())),
+        }],
+        &sunrise_world::conditions::LoadConditions::vanilla(),
+        |_, _, _| {
+            Ok(DecodedModifier {
+                priority: 1000,
+                condition: None,
+                apply: Arc::new(Dynamic),
+            })
+        },
+        |error| panic!("{error}"),
+    ));
+    let registry = BlockRegistry::from_facts_json(&br#"{"defaults":{"minecraft:decorated_pot":0},"states":[["decorated_pot",false,false,"","minecraft:decorated_pot"]]}"#[..]).unwrap();
+    let mut supplied = ItemStack::new("minecraft:diamond", 130);
+    supplied.data_mut().set_other(
+        "minecraft:max_stack_size",
+        Some(sunrise_core::nbt::Tag::Int(64)),
+    );
+    let mut random = LegacyRandom::new(31);
+    let before = <(u64, Option<f64>)>::from(&random);
+    let output = items.block_drops(
+        &registry,
+        BlockStateId(0),
+        BlockLootRoll {
+            dynamic: &[supplied],
+            ..Default::default()
+        },
+        &mut random,
+        None,
+    );
+    assert_eq!(
+        output.iter().map(|stack| stack.count).collect::<Vec<_>>(),
+        [64, 64, 2, 130]
+    );
+    assert_eq!(<(u64, Option<f64>)>::from(&random), before);
+}

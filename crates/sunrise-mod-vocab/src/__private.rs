@@ -459,13 +459,36 @@ pub mod game {
         }
     }
 
+    pub trait GlobalLootModifierManagerNew {
+        fn prepared(
+            entries: Vec<(Identifier, std::sync::Arc<dyn crate::GlobalLootModifier>)>,
+            owner: std::sync::Arc<dyn std::any::Any + Send + Sync>,
+        ) -> Self;
+        fn bind_from(&self, source: &Self);
+    }
+    impl GlobalLootModifierManagerNew for crate::GlobalLootModifierManager {
+        fn prepared(
+            entries: Vec<(Identifier, std::sync::Arc<dyn crate::GlobalLootModifier>)>,
+            owner: std::sync::Arc<dyn std::any::Any + Send + Sync>,
+        ) -> Self {
+            Self::prepared(entries, owner)
+        }
+        fn bind_from(&self, source: &Self) {
+            Self::bind_from(self, source);
+        }
+    }
     pub trait ServerReloadListenersOrder {
         fn new() -> Self;
+        /// The engine has registered this builtin and linked the preceding anchor.
+        fn set_last_vanilla_listener(&mut self, id: Identifier);
         fn finish(
             self,
         ) -> Result<crate::world::server_reload::OrderedServerReload, ReloadOrderError>;
     }
     impl ServerReloadListenersOrder for crate::world::server_reload::ServerListenerRegistry {
+        fn set_last_vanilla_listener(&mut self, id: Identifier) {
+            self.default_anchor = id;
+        }
         fn new() -> Self {
             crate::world::server_reload::ServerListenerRegistry::new()
         }

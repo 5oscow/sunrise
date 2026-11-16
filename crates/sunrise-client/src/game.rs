@@ -734,6 +734,8 @@ struct WorldTables {
     /// them), for the advancement tree reload and the loot data.
     files: Vec<(String, Vec<Vec<u8>>)>,
     items: Arc<Items>,
+    loot: Arc<sunrise_world::loot::LootData>,
+    loot_modifier_manager: Arc<mod_api::GlobalLootModifierManager>,
     recipes: Recipes,
     stations: sunrise_client::stations::StationData,
     reload_sources: Option<Arc<sunrise_client::crafting::ResolvedSources>>,
