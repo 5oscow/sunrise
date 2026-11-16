@@ -37,8 +37,9 @@ b. Making and sharing mods, plugins, packs, shaders and tools that run inside th
 c. Videos, streams, guides, reviews and links about the software or about a fork.
 d. Carrying copies for others without changing them, charging for them or passing them off as your own:
    code hosts, package registries, app stores, mirrors.
-e. The Project itself, for as long as it meets 3a to 3d. For the Project, Shield's 32 days to fix a violation
-   apply the first and the second time it is notified, not only the first.
+e. The Project itself, for as long as it meets 3a to 3d. For the Project, Shield's 32 days to fix apply to
+   the first and the second violation it is notified of, not only the first. Notices about the same violation
+   count once, and a notice reaches the Project as an issue opened in its repository.
 f. Handing dedicated server software to others, for as long as it costs nothing to get or use, getting it is
    not gated by ads or sign-ups, and it meets 3a and 3e as a fork would. A dedicated server serves the game
    to clients over the network and cannot itself be used to play. Charging to run or host one is covered
@@ -85,10 +86,11 @@ licence does not change this.
 
 ## 5. Later versions
 
-The Project may publish later versions of these terms, by the decision its GOVERNANCE.md requires for a
+The Project may publish later versions of these terms only by the decision its GOVERNANCE.md requires for a
 licence change. A later version may make the wording clearer or add permissions. It may never allow a
-competing product that fails 3a or 3b, and never give anyone rights that everyone does not get. You may use
-the software under the version it came with or any later one.
+competing product that fails 3a, 3b or 3d, never allow dedicated server software to be sold, and never give
+anyone rights that everyone does not get. You may use the software under the version it came with or any
+later one.
 
 # PolyForm Shield License 1.0.0
 
