@@ -214,10 +214,12 @@ impl Spec<'_> {
                 "{}::{}",
                 self.owner
                     .chars()
-                    .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '_' | ':' | '<' | '>' | ',') {
-                        c
-                    } else {
-                        '_'
+                    .map(|c| {
+                        if c.is_ascii_alphanumeric() || matches!(c, '_' | ':' | '<' | '>' | ',') {
+                            c
+                        } else {
+                            '_'
+                        }
                     })
                     .collect::<String>(),
                 self.method
