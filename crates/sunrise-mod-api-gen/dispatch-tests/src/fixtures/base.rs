@@ -257,7 +257,7 @@ fn slot_rules_mutate_and_item_tick_can_cancel() {
         menus: vec![part(1, &calls)],
         ..Parts::default()
     });
-    let (mut may_place, mut max_stack) = (true, 64);
+    let (mut may_place, mut may_pickup, mut max_stack) = (true, true, 64);
     dispatch_menu_slot_rules(
         &TestHost,
         calls::MenuSlotRulesCall {
@@ -271,10 +271,11 @@ fn slot_rules_mutate_and_item_tick_can_cancel() {
                 slots: vec![vec![None], vec![None, Some(ItemStack::default())]],
             },
             may_place: &mut may_place,
+            may_pickup: &mut may_pickup,
             max_stack: &mut max_stack,
         },
     );
-    assert_eq!((may_place, max_stack), (false, 1));
+    assert_eq!((may_place, may_pickup, max_stack), (false, false, 1));
     let (mut duration, mut canceled) = (10, false);
     dispatch_living_entity_use_item_tick(
         HostSide::Server(&mut TestHost),

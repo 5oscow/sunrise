@@ -591,16 +591,16 @@ impl View<'_> {
             return (own, max.min(item_max));
         };
         let (index, context) = self.slot_context(i);
-        crate::menu::apply_menu_slot_rules(
+        let (place, _, max) = crate::menu::apply_menu_slot_rules(
             rules.slot_rules(),
             &menu.registry_id,
             index,
             stack,
             context,
-            own,
-            max,
+            (own, true, max),
             item_max,
-        )
+        );
+        (place, max)
     }
     fn may_place(&self, i: usize, stack: &ItemStack, rules: &dyn Rules) -> bool {
         self.enabled(i) && self.slot_rules(i, stack, rules).0
@@ -787,8 +787,7 @@ fn move_to(
                     index,
                     &stack,
                     context,
-                    true,
-                    u32::MAX,
+                    (true, true, u32::MAX),
                     rules.max_stack(&stack.item).max(1),
                 )
                 .0

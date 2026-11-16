@@ -13,6 +13,7 @@ impl MenuPart for Part {
         self.0.fetch_add(1, Ordering::Relaxed);
         if event.menu == "test:menu" && event.slot != 1 {
             event.may_place &= event.slot != 0;
+            event.may_pickup &= event.slot != 2;
             event.max_stack = event.max_stack.min(3 + event.slot as u32);
         }
     }
@@ -39,7 +40,9 @@ fn menu_slot_rules_answers_and_asks_match_native_through_the_wire() {
     let mut answers = Vec::new();
     for menu in ["test:menu", "test:other"] {
         for slot in 0..3 {
-            for (may_place, max_stack) in [(true, 64), (false, 1), (true, 2)] {
+            for (may_place, may_pickup, max_stack) in
+                [(true, true, 64), (false, true, 1), (true, false, 2)]
+            {
                 let ask = |part: &dyn MenuPart| {
                     let mut event = MenuSlotRulesEvent {
                         menu,
@@ -48,34 +51,39 @@ fn menu_slot_rules_answers_and_asks_match_native_through_the_wire() {
                         stack: &stack,
                         context: &MenuSlotContext::default(),
                         may_place,
+                        may_pickup,
                         max_stack,
                     };
                     part.menu_slot_rules(&World, &mut event);
-                    (event.may_place, event.max_stack)
+                    (event.may_place, event.may_pickup, event.max_stack)
                 };
                 let (wasm, direct) = (ask(&proxy), ask(&native));
-                assert_eq!(wasm, direct, "{menu} {slot} {may_place} {max_stack}");
+                assert_eq!(
+                    wasm, direct,
+                    "{menu} {slot} {may_place} {may_pickup} {max_stack}"
+                );
                 answers.push(direct);
             }
         }
     }
-    // Slot 0 of the menu the part answers for refuses placement and caps at 3, slot 2 caps at 5,
-    // slot 1 and the other menu are left as asked.
+    // Slot 0 of the menu the part answers for refuses placement and caps at 3, slot 2 refuses
+    // pickup and caps at 5, slot 1 and the other menu are left as asked.
     assert_eq!(
         answers[..9],
         [
-            (false, 3),
-            (false, 1),
-            (false, 2),
-            (true, 64),
-            (false, 1),
-            (true, 2),
-            (true, 5),
-            (false, 1),
-            (true, 2),
+            (false, true, 3),
+            (false, true, 1),
+            (false, false, 2),
+            (true, true, 64),
+            (false, true, 1),
+            (true, false, 2),
+            (true, false, 5),
+            (false, false, 1),
+            (true, false, 2),
         ]
     );
-    assert_eq!(answers[9..], [(true, 64), (false, 1), (true, 2)].repeat(3));
+    let asked = [(true, true, 64), (false, true, 1), (true, false, 2)];
+    assert_eq!(answers[9..], asked.repeat(3));
     assert_eq!(wasm_asks.load(Ordering::Relaxed), 18);
     assert_eq!(native_asks.load(Ordering::Relaxed), 18);
 }

@@ -397,6 +397,7 @@ impl MenuPart for Mod {
         assert_eq!(context.slots.len(), 2);
         assert!(context.slots[1][0].is_none() && context.slots[1][1].is_some());
         event.may_place = false;
+        event.may_pickup = false;
         event.max_stack = self.id;
     }
 }

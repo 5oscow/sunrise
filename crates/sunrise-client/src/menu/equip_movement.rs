@@ -88,17 +88,20 @@ impl Menu {
                 let refuses = if self.state.slots[dest].role == Role::Hidden {
                     true
                 } else if let Some(id) = self.registry_id() {
-                    !apply_menu_slot_rules(
-                        env.slot_rules,
-                        id,
-                        self.state.slots[dest].index,
-                        stack,
-                        self.slot_context(env, dest),
-                        self.state.slots[dest].role != Role::ModResult,
-                        CONTAINER_MAX,
-                        Self::max_stack(env, stack),
-                    )
-                    .0
+                    !self
+                        .ask_slot_rules(
+                            env,
+                            id,
+                            dest,
+                            stack,
+                            (
+                                self.state.slots[dest].role != Role::ModResult,
+                                true,
+                                CONTAINER_MAX,
+                            ),
+                            Self::max_stack(env, stack),
+                        )
+                        .0
                 } else {
                     false
                 };
