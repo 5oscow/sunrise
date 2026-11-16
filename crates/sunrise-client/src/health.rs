@@ -30,6 +30,7 @@ pub use crate::world::HealthRules;
 mod accepted_hit;
 mod attack;
 mod kill_credit;
+use kill_credit::Credit;
 pub use kill_credit::KnockbackCredit;
 mod hit_attempt;
 pub use accepted_hit::AcceptedHit;
@@ -128,7 +129,9 @@ pub struct DamageLevel<'a> {
     /// Which entry of `LivingEntity.knockback` a push in progress came through, for
     /// `living_knockback` ([`Self::through_short_knockback`]).
     knock_entry: mod_api::KnockbackEntry,
-    credit: Option<&'a mut dyn KnockbackCredit>,
+    /// Who a push credits: the site's per-victim loan, or [`KnockbackCredit`]'s memory
+    /// resolution where the level was built without one.
+    credit: Credit<'a>,
 }
 impl<'a> DamageLevel<'a> {
     /// The level of `world`, whose blocks `registry` names.
@@ -162,7 +165,7 @@ impl<'a> DamageLevel<'a> {
             attack: &NO_ATTACK,
             client_side: false,
             knock_entry: mod_api::KnockbackEntry::Full,
-            credit: None,
+            credit: Credit::Memory,
         }
     }
     /// The level of `world`, with the random and attachments `lent` took out of it.
@@ -188,7 +191,7 @@ impl<'a> DamageLevel<'a> {
             attack: &NO_ATTACK,
             client_side: false,
             knock_entry: mod_api::KnockbackEntry::Full,
-            credit: None,
+            credit: Credit::Memory,
         }
     }
     /// The same level, for a shorter borrow.
@@ -207,10 +210,7 @@ impl<'a> DamageLevel<'a> {
             attack: self.attack,
             client_side: self.client_side,
             knock_entry: self.knock_entry,
-            credit: self
-                .credit
-                .as_mut()
-                .map(|credit| &mut **credit as &mut dyn KnockbackCredit),
+            credit: self.credit.reborrow(),
         }
     }
     /// The same level with a task-local random, retaining its typed hook and attachment context.
@@ -232,33 +232,31 @@ impl<'a> DamageLevel<'a> {
             attack: self.attack,
             client_side: self.client_side,
             knock_entry: self.knock_entry,
-            credit: self
-                .credit
-                .as_mut()
-                .map(|credit| &mut **credit as &mut dyn KnockbackCredit),
+            credit: self.credit.reborrow(),
         }
     }
     /// Lend the narrow credit context at a site that can make a living push.
     pub fn with_knockback_credit(mut self, credit: &'a mut dyn KnockbackCredit) -> Self {
-        self.credit = Some(credit);
+        self.credit = Credit::Loan(credit);
         self
     }
     /// Commit this accepted hit's responsibility at vanilla's pre-push memory point.
     pub fn accepted_mob_hit(&mut self, mob: &mut crate::mobs::Mob) {
-        if let Some(credit) = self.credit.as_deref_mut() {
+        if let Credit::Loan(credit) = &mut self.credit {
             credit.accepted_mob_hit(mob);
         }
     }
-    /// Only the game bridge calls this after checking for a knockback subscriber.
-    /// An unwired push is an engine invariant failure, never an invented empty credit.
+    /// Only the game bridge calls this after checking for a knockback subscriber. Without a
+    /// site's loan the credit comes from the pushed entity's own hurt memories and this hit's
+    /// attack ([`kill_credit::from_memory`]).
     pub fn knockback_credit(
         &self,
         pushed: &Hurting<'_>,
     ) -> (i32, Option<&crate::items::ItemStack>) {
-        self.credit
-            .as_deref()
-            .expect("living knockback site missing its credit context")
-            .snapshot(pushed)
+        match &self.credit {
+            Credit::Loan(credit) => credit.snapshot(pushed),
+            Credit::Memory => kill_credit::from_memory(pushed, self.attack),
+        }
     }
 
     /// Runs `push` as the short entry of `LivingEntity.knockback` (power and direction), which

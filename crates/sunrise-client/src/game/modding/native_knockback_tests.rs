@@ -15,15 +15,15 @@ use sunrise_core::{geometry::Vec3, random::RandomSource};
 type Held = (i32, Option<String>, Option<String>);
 
 #[derive(Default)]
-struct Heard {
+pub(in crate::game) struct Heard {
     knocks: Vec<Held>,
-    credits: Vec<(i32, Option<String>)>,
+    pub(in crate::game) credits: Vec<(i32, Option<String>)>,
     /// The entry of `LivingEntity.knockback` each push came through, as the hook named it.
     entries: Vec<mod_api::KnockbackEntry>,
     incoming_causing: Vec<i32>,
     cancel: bool,
     repeat_short: bool,
-    reduce_sword_credit: bool,
+    pub(in crate::game) reduce_sword_credit: bool,
 }
 
 struct Probe(Arc<Mutex<Heard>>);
@@ -78,7 +78,7 @@ impl Hooks for Probe {
     }
 }
 
-fn heard(test: impl FnOnce(&mut super::Game<'_>, &Mutex<Heard>)) -> Heard {
+pub(in crate::game) fn heard(test: impl FnOnce(&mut super::Game<'_>, &Mutex<Heard>)) -> Heard {
     hear(|log| with_game(|game| test(game, log)))
 }
 
@@ -576,7 +576,7 @@ fn with_detached_credit(
     push(damage_level_of!(game, &NO_ATTACK, &mut credit));
 }
 
-fn credit_pig(game: &mut super::Game<'_>) {
+pub(in crate::game) fn credit_pig(game: &mut super::Game<'_>) {
     game.world.health_rules.difficulty = sunrise_world::food::Difficulty::Normal;
     game.world
         .chunks
@@ -770,4 +770,35 @@ fn borrowed_rider_environmental_damage_never_dispatches_a_living_push() {
         );
     });
     assert!(heard.knocks.is_empty());
+}
+
+/// An evoker (id 50) holding an iron sword, the owner the credit tests name; with the probe's
+/// `reduce_sword_credit`, a push credited to it is halved.
+pub(in crate::game) fn sword_evoker(game: &mut super::Game<'_>) {
+    let kind = game
+        .res
+        .mob_types()
+        .get("minecraft:evoker")
+        .unwrap()
+        .clone();
+    let mut evoker = Mob::new(50, kind, Vec3::new(5.0, 0.0, 0.0), 0.0);
+    evoker.no_ai = true;
+    evoker.no_gravity = true;
+    evoker
+        .extra
+        .set_main_hand_stack(Some(ItemStack::new("minecraft:iron_sword", 1)));
+    game.mobs.push(evoker);
+}
+
+/// The listener heard the evoker and its sword as the credit, and its halving reached the
+/// pig's motion (an uncredited push moves it 0.4).
+pub(in crate::game) fn assert_sword_credit_reached_the_push(heard: &Heard, pushed: Vec3) {
+    assert_eq!(
+        heard.credits,
+        [(50, Some("minecraft:iron_sword".to_string()))]
+    );
+    assert!(
+        (pushed.x.hypot(pushed.z) - 0.2).abs() < 1e-6,
+        "pushed with {pushed:?}, not the halved strength"
+    );
 }
