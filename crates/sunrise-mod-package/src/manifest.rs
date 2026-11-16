@@ -1869,7 +1869,7 @@ issues = \"http://example.org/issues\"
         // A minimal valid shared member: a `dylink.0` section and the three guest exports.
         let module = wat::parse_str(
             r#"(module (@custom "dylink.0" "\01\04\00\00\00\00")
-                (func (export "sunrise_layout")) (func (export "sunrise_in")) (func (export "sunrise_hook")))"#,
+                (func (export "sunrise_in")) (func (export "sunrise_hook")))"#,
         )
         .unwrap();
         let text = format!(
