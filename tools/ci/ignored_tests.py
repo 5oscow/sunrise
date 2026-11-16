@@ -48,8 +48,10 @@ output.
 Every reader refuses a malformed row, a test listed twice, a folder with no rows or with a file other than `*.txt`
 and README.md, and a file at the retired single-list path (tools/ci/check_ignored_test_rows.py checks this alone).
 
-Runtime diagnostics expose identities and allowlisted panic categories, never arbitrary assertion
-payloads: the prepared data is Mojang's. Compile/list failures expose bounded compiler headings.
+Runtime diagnostics expose identities, allowlisted panic categories, the statement that panicked and the parts of
+a payload that occur verbatim in the tracked source around it (an assertion's literal message, an expected value
+written in the test), never any other assertion payload: the prepared data is Mojang's. Compile/list failures
+expose bounded compiler headings.
 """
 
 import argparse
@@ -455,17 +457,59 @@ def bounded_record(record, remaining):
     return True, shortened
 
 
+# How far around a panic's tracked source line its own text is looked for (public_text): an assertion and its
+# message span a few lines after the reported line.
+PUBLIC_WINDOW = (2, 12)
+PUBLIC_CHARS = 120
+
+
+def public_text(text, path, line):
+    """`text` when it is provably the checkout's own source: it occurs verbatim in the tracked source around the
+    panic's line, so it carries nothing a test computed or read (no prepared data). An assertion's literal message, an
+    expected value written in the test, a stringified condition; never a value that is not in the source. None
+    otherwise, or when the source is not a bounded tracked blob."""
+    text = text.strip()
+    if not text or len(text) > PUBLIC_CHARS or any(ord(char) < 32 or 127 <= ord(char) <= 159 for char in text):
+        return None
+    lines = source_lines(path) if path in tracked_rust_paths() else None
+    if lines is None:
+        return None
+    window = lines[max(0, line - 1 - PUBLIC_WINDOW[0]):line + PUBLIC_WINDOW[1]]
+    squeeze = lambda value: re.sub(r"\s+", " ", value)
+    return text if squeeze(text) in squeeze(" ".join(window)) else None
+
+
+def assertion_source(path, line):
+    """The source statement that panicked, from its tracked line until it closes (`;`), bounded: public code."""
+    lines = source_lines(path) if path in tracked_rust_paths() else None
+    if lines is None or not 1 <= line <= len(lines):
+        return None
+    parts = []
+    for text in lines[line - 1:line - 1 + PUBLIC_WINDOW[1]]:
+        parts.append(text.strip())
+        if text.rstrip().endswith(";"):
+            break
+    statement = " ".join(parts).encode("unicode_escape").decode("ascii")
+    return statement[:PUBLIC_CHARS] + (" [shortened]" if len(statement) > PUBLIC_CHARS else "")
+
+
 def failure_diagnostics(output):
     """One record per failed result occurrence, including repeated names across targets.
 
     Panic contexts use libtest's name model and the first panic for that name.
     They cannot disambiguate identical names in different targets.
+    Beside the classified reason, a record shows the statement that panicked and any part of the payload (a
+    message, an operand) that occurs verbatim in the tracked source around it (public_text): the checkout's own text,
+    never a computed or prepared value.
     """
     failures = []
     contexts = {}
     context = []
     aborts = []
     panic_reason_pending = False
+    # The tracked (path, line) of the current panic, and whether its `left:`/`right:` operand lines may follow.
+    where = None
+    operands_pending = False
     skipped_lines = 0
     skipped_contexts = 0
     stream = io.StringIO(output)
@@ -487,7 +531,12 @@ def failure_diagnostics(output):
             if abort not in aborts:
                 aborts.append(abort)
         if RESULT.match(line) or SUMMARY.match(line) or TARGET.match(line):
-            panic_reason_pending = False
+            panic_reason_pending = operands_pending = False
+        if operands_pending and (operand := re.match(r"^\s*(left|right): (.*)$", line)):
+            shown = public_text(operand[2], *where)
+            context.append(f"  {operand[1]}: {shown}" if shown else
+                           f"  {operand[1]}: withheld (not text of the tracked source)")
+            continue
         if panic_reason_pending and line.strip():
             context[:] = [item for item in context if item != "  panic reason missing from captured output"]
             # No free-form panic text or assertion operands cross the resource boundary.
@@ -507,7 +556,18 @@ def failure_diagnostics(output):
                     withheld_text = "rest of payload withheld (resource privacy)"
             if arithmetic := re.fullmatch(r"attempt to ((?:add|subtract|multiply|divide|negate|shift left|shift right) with overflow|(?:divide|calculate the remainder) by zero)", line.strip()):
                 reason = "attempt to " + arithmetic[1]
-            context.append(f"  panic reason: {reason}; {withheld_text}")
+            message = None
+            if where and reason in ("assertion equality failed", "assertion inequality failed"):
+                message = line.strip().split("failed: ", 1)[1] if "failed: " in line else None
+            elif where and reason in ("assertion condition failed", "custom panic"):
+                message = line.strip()
+            if shown := (public_text(message, *where) if message else None):
+                context.append(f"  panic reason: {reason}; message: {shown}")
+            else:
+                context.append(f"  panic reason: {reason}; {withheld_text}")
+            if where and (statement := assertion_source(*where)):
+                context.append(f"  panic source: {statement}")
+            operands_pending = bool(where) and reason in ("assertion equality failed", "assertion inequality failed")
             panic_reason_pending = False
             continue
         if found := RESULT.match(line):
@@ -545,9 +605,12 @@ def failure_diagnostics(output):
                     parts.append(part)
             path = "/".join(parts) if not path.startswith("/") else ""
             lines = source_lines(path) if path in tracked_rust_paths() else None
+            where = None
+            operands_pending = False
             if (location and lines is not None and
                     1 <= int(location[2]) <= len(lines) and int(location[3]) >= 1):
                 context.append(f"  panicked at {path}:{location[2]}:{location[3]}")
+                where = (path, int(location[2]))
             else:
                 context.append("  panic location withheld (not a bounded tracked Rust location)")
             context.append("  panic reason missing from captured output")
@@ -579,6 +642,8 @@ def failure_diagnostics(output):
         reasons_shown += any(item.startswith("  panic reason:") for item in details)
         _panic_locations[name] = next((item.removeprefix("  panicked at ") for item in details
                                        if item.startswith("  panicked at ")), None)
+        # The panicking statement goes last: the per-test budget cuts it before an operand.
+        details = sorted(details, key=lambda item: item.startswith("  panic source: "))
         record = f"  failed test: {identity}\n" + "\n".join(details) + "\n"
         emitted, cut = bounded_record(record, remaining)
         shown += emitted
