@@ -1242,7 +1242,16 @@ impl Game<'_> {
             .recipe_book
             .add_recipes(&world_stations!(self).recipe_index, &rewards);
         for table in &a.rewards.loot {
-            let items = world_items!(self).loot_table(table, false, None, &mut self.world.random);
+            // `LootContextParamSets.ADVANCEMENT_REWARD`: the rewarded player is
+            // THIS_ENTITY and their position the ORIGIN.
+            let player = self.killer_loot_entity(None);
+            let origin = self
+                .player
+                .as_ref()
+                .map(|p| [p.position.x, p.position.y, p.position.z]);
+            let items = self
+                .roll_table_at(table, origin, None, Some(&player))
+                .unwrap_or_default();
             for s in items {
                 // Inventory.add returns false when anything is left, and
                 // AdvancementRewards then drops that remainder with no

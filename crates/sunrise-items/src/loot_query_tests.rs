@@ -810,3 +810,24 @@ fn a_barter_roll_names_the_piglin_and_nothing_else() {
     assert_eq!(stacks, 1);
     assert_eq!(seen, (Some("minecraft:piglin".into()), None, None));
 }
+
+/// `LootContextParamSets.ADVANCEMENT_REWARD`: THIS_ENTITY is the rewarded player
+/// and the ORIGIN their position; no tool.
+#[test]
+fn an_advancement_reward_roll_names_the_player_and_their_position() {
+    let (stacks, seen) = roll_as_caller(
+        table_for_this("minecraft:player"),
+        Some("minecraft:player"),
+        None,
+        Some([10.5, 70.0, -3.25]),
+    );
+    assert_eq!(stacks, 1);
+    assert_eq!(
+        seen,
+        (
+            Some("minecraft:player".into()),
+            None,
+            Some([10.5, 70.0, -3.25])
+        )
+    );
+}
