@@ -190,3 +190,13 @@ fn control_one_break_rolls_the_table_once() {
     }
     assert_eq!(sticks(&mut game), "Test passed. Count: 1");
 }
+
+#[test]
+#[ignore = "daily"]
+fn a_broken_stand_item_keeps_its_styled_custom_name() {
+    let mut resources = None;
+    let mut game = game(&mut resources);
+    assert!(game.run_command(r#"summon armor_stand 2.5 100 8.5 {NoGravity:1b,CustomName:{text:"Named",bold:true},UUID:[I;23326,0,0,9]}"#));
+    assert!(game.run_command("damage 00005b1e-0000-0000-0000-000000000009 1 minecraft:arrow"));
+    assert!(game.run_command(r#"execute if entity @e[type=item,nbt={Item:{id:"minecraft:armor_stand",count:1,components:{"minecraft:custom_name":{text:"Named",bold:1b}}}}]"#));
+}
