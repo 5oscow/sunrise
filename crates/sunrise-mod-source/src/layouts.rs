@@ -98,6 +98,11 @@ impl<W: Wires> Layouts<W> {
         }
     }
 
+    /// The crate set's side of the description.
+    pub fn wires(&self) -> &W {
+        &self.wires
+    }
+
     /// The key of `id`'s definition, scheduling it to be described.
     pub fn key(&mut self, index: &Index<'_>, id: ItemId) -> String {
         if let Some(key) = self.keys.get(&id) {
