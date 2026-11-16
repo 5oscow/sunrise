@@ -19,11 +19,11 @@ def main():
     upstream_paths = set(git("ls-tree", "-r", "--name-only", UPSTREAM).splitlines())
     crates = sorted({Path(p).parents[2] for p in upstream_paths
                      if p.endswith("/tests/it/main.rs")})
-    crates.append(Path("crates/horizon-game"))  # Owns the fork's executable.
-    # The launch contract tests require CARGO_BIN_EXE_horizon-client, owned by horizon-game.
-    git("rm", "crates/horizon-client/tests/it/launch_api.rs")
+    crates.append(Path("crates/sunrise-game"))  # Owns the fork's executable.
+    # The launch contract tests require CARGO_BIN_EXE_sunrise-client, owned by sunrise-game.
+    git("rm", "crates/sunrise-client/tests/it/launch_api.rs")
     moved = {}
-    lib_tests = {t["name"] for t in tomllib.loads(Path("crates/horizon-client-lib/Cargo.toml").read_text())["test"]}
+    lib_tests = {t["name"] for t in tomllib.loads(Path("crates/sunrise-client-lib/Cargo.toml").read_text())["test"]}
     for crate in crates:
         tests = crate / "tests"
         dest = tests / "it"
@@ -34,10 +34,10 @@ def main():
             # explicitly owned by client-lib, perf's wasm target and player_block_speed.
             if source.parent == tests and str(source) in upstream_paths:
                 continue
-            if crate.name == "horizon-client" and source.stem in lib_tests:
+            if crate.name == "sunrise-client" and source.stem in lib_tests:
                 continue
             # These fork-only tests each install the same process-wide render slots.
-            if crate.name == "horizon-client-render" and source.stem in {"render_slots", "world_view_slots"}:
+            if crate.name == "sunrise-client-render" and source.stem in {"render_slots", "world_view_slots"}:
                 continue
             if source.name == "main.rs":
                 # Upstream's generated module list replaces the old list and its source-text test.
@@ -55,7 +55,7 @@ def main():
             moved[(crate.name, module)] = "it"
         main_path = dest / "main.rs"
         text = main_path.read_text() if main_path.exists() else "//! Integration tests linked into one binary.\n"
-        if crate.name == "horizon-client":
+        if crate.name == "sunrise-client":
             text = text.replace("mod launch_api;\n", "")
         for name in modules:
             if f"mod {name};" not in text:

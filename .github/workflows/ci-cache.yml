@@ -50,7 +50,7 @@ jobs:
         continue-on-error: true
         run: |
           cargo clippy --keep-going --workspace --all-targets -- -D warnings
-          cargo clippy --keep-going -p horizon-client -p horizon-game -p horizon-mod-host --all-targets --no-default-features -- -D warnings
+          cargo clippy --keep-going -p sunrise-client -p sunrise-game -p sunrise-mod-host --all-targets --no-default-features -- -D warnings
       - uses: actions/cache/save@v4
         if: ${{ !cancelled() && steps.lint-cache.outputs.cache-hit != 'true' }}
         with:

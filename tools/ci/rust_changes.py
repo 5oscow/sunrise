@@ -36,14 +36,14 @@ def needs_rust(paths):
     ) for path in paths)
 
 
-# verify's second clippy, the server build (horizon-client without default features): what it checks differently from
+# verify's second clippy, the server build (sunrise-client without default features): what it checks differently from
 # the first is the feature-gated code of the client crates and the features the manifests choose. Pull requests that
 # change neither skip it; main's pushes and the merge queue always run it.
 SERVER_BUILD_CHECK = {".github/workflows/ci.yml", "tools/ci/rust_changes.py"}
 
 
 def needs_server_build(paths):
-    return any(path.startswith("crates/horizon-client") or path.endswith("Cargo.toml") or path in ROOT_RUST
+    return any(path.startswith("crates/sunrise-client") or path.endswith("Cargo.toml") or path in ROOT_RUST
                or path.startswith(".cargo/") or path in SERVER_BUILD_CHECK for path in paths)
 
 
@@ -62,8 +62,8 @@ UNKNOWN_CHANGE = "Cargo.lock"
 
 def needs_sample(paths):
     return any(path in ROOT_RUST or path == "tools/ci/check_machine_sample.py"
-               or path.startswith(("crates/horizon-mod-", "crates/horizon-core/",
-                                   "crates/horizon-game-discovery/")) for path in paths)
+               or path.startswith(("crates/sunrise-mod-", "crates/sunrise-core/",
+                                   "crates/sunrise-game-discovery/")) for path in paths)
 
 
 def needs_tooling(changes):

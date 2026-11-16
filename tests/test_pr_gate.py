@@ -183,7 +183,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertNotIn("--release", next(s["run"] for s in jobs["launcher-processes"]["steps"] if "--test" in s.get("run", "")))
 
     def test_other_pull_request_workflows_skip_what_compiles_for_forks(self):
-        for workflow, jobs in (("cargo-horizon-mod.yml", ("build",)), ("modding-book.yml", ("book",))):
+        for workflow, jobs in (("cargo-sunrise-mod.yml", ("build",)), ("modding-book.yml", ("book",))):
             text = (ROOT / ".github/workflows" / workflow).read_text()
             for name in jobs:
                 with self.subTest(workflow=workflow, job=name):

@@ -43,7 +43,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 env:
   # Test runs never reach the telemetry server: no live-count ping, no uploads (docs/telemetry.md).
-  HORIZON_TELEMETRY_URL: "off"
+  SUNRISE_TELEMETRY_URL: "off"
   # sccache (shared per Dyna host) cannot cache incremental compiles, so every Rust job builds non-incremental.
   CARGO_INCREMENTAL: 0
 jobs:
@@ -398,11 +398,11 @@ jobs:
       - name: Lint the server build without sound or controllers
         if: ${{ !cancelled() && steps.setup.outcome == 'success' && (needs.changes.outputs.rust_required != 'false') }}
         id: server-lint
-        run: python3 tools/ci/check_warnings.py cargo clippy $JOBS --keep-going -p horizon-client -p horizon-game -p horizon-mod-host --all-targets --no-default-features
+        run: python3 tools/ci/check_warnings.py cargo clippy $JOBS --keep-going -p sunrise-client -p sunrise-game -p sunrise-mod-host --all-targets --no-default-features
       - name: The mod API builds for wasm32
         id: the_mod_api_builds_for_wasm32
         if: ${{ !cancelled() && steps.setup.outcome == 'success' && (needs.changes.outputs.rust_required != 'false') }}
-        run: cargo check $JOBS --keep-going -p horizon-mod-api --target wasm32-unknown-unknown --locked
+        run: cargo check $JOBS --keep-going -p sunrise-mod-api --target wasm32-unknown-unknown --locked
       # The prebuilt SDK's own feature graph: a release --lib build with prefer-dynamic and warnings rejected, as
       # tools/prebuilt_game.py builds it, for the host and for the Windows archive (system-allocator there,
       # cargo_features). The checks above unify test and dev features (test-support) into one host build, which hid
@@ -416,7 +416,7 @@ jobs:
           started=$SECONDS
           host=$(rustc -vV | awk '/^host:/ {print $2}')
           env -u CARGO_ENCODED_RUSTFLAGS RUSTFLAGS='-C prefer-dynamic' \
-            python3 tools/ci/check_warnings.py cargo check $JOBS --keep-going --locked -p horizon-mod-host --lib --profile release --target-dir target/sdk-check --target "$host"
+            python3 tools/ci/check_warnings.py cargo check $JOBS --keep-going --locked -p sunrise-mod-host --lib --profile release --target-dir target/sdk-check --target "$host"
           echo "SDK library check host: $((SECONDS - started)) s" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: The prebuilt SDK's Windows library builds without warnings
         id: sdk_windows
@@ -437,7 +437,7 @@ jobs:
           # builds the dependencies for linker-plugin LTO, which rustc refuses with prefer-dynamic on Windows.
           # A check generates no code, so LTO changes no warning or cfg it reports.
           env -u CARGO_ENCODED_RUSTFLAGS RUSTFLAGS='-C prefer-dynamic' \
-            python3 tools/ci/check_warnings.py cargo check $JOBS --keep-going --locked -p horizon-mod-host --lib --profile release --target-dir target/sdk-check \
+            python3 tools/ci/check_warnings.py cargo check $JOBS --keep-going --locked -p sunrise-mod-host --lib --profile release --target-dir target/sdk-check \
               --target x86_64-pc-windows-gnu --features system-allocator --config profile.release.lto=false
           echo "SDK library check windows: $((SECONDS - started)) s" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Report lint compiler cache
@@ -469,7 +469,7 @@ jobs:
   verify:
     needs: changes
     if: ${{ always() && !cancelled() && needs.changes.result != 'skipped' && (needs.changes.result != 'success' || needs.changes.outputs.heavy == 'true') }}
-    runs-on: ${{ needs.changes.outputs.rust_required == 'false' && 'ubuntu-latest' || needs.changes.outputs.self_hosted == 'true' && 'dyna-large' || !inputs.github-fallback && needs.changes.outputs.forced_github != 'true' && vars.SELF_HOSTED_CI == 'all' && needs.changes.outputs.trusted == 'true' && fromJSON('["self-hosted", "linux", "playhorizon-ci"]') || needs.changes.outputs.hosted_label || 'ubuntu-latest' }}
+    runs-on: ${{ needs.changes.outputs.rust_required == 'false' && 'ubuntu-latest' || needs.changes.outputs.self_hosted == 'true' && 'dyna-large' || !inputs.github-fallback && needs.changes.outputs.forced_github != 'true' && vars.SELF_HOSTED_CI == 'all' && needs.changes.outputs.trusted == 'true' && fromJSON('["self-hosted", "linux", "playsunrise-ci"]') || needs.changes.outputs.hosted_label || 'ubuntu-latest' }}
     timeout-minutes: ${{ needs.changes.outputs.self_hosted == 'true' && 50 || 45 }}
     # Dyna's runner image now carries lavapipe, Mesa's software Vulkan driver, for ignored-tests' `gpu` tests.
     # verify's tests were written to skip GPU work when no adapter exists, and one of them
@@ -580,7 +580,7 @@ jobs:
       # Every build and test in this job runs at the runner's size, not the host's (tools/ci/cargo_jobs.py).
       - name: Cap build parallelism to the runner
         run: python3 tools/ci/cargo_jobs.py --job-mib 3072 --cap
-      # horizon-client rustc processes take several GB each; $JOBS (chosen above) fits them in the runner's
+      # sunrise-client rustc processes take several GB each; $JOBS (chosen above) fits them in the runner's
       # memory. Formatting and lint run in parallel (the lint job), so this job only tests.
       # Libraries, binaries and integration tests, then doc tests: not the ~275 examples, which the lint job already
       # type-checks and the parity job builds and runs (they were most of this step's build and link time).
@@ -593,7 +593,7 @@ jobs:
         id: actor
         if: ${{ !cancelled() && steps.setup.outcome == 'success' && (needs.changes.outputs.rust_required != 'false') }}
         # The command lives in tools/ci/ignored_shards.py PREPARE, which the daily run uses too.
-        run: python3 tools/ci/ignored_shards.py --prepare horizon-mod-package $JOBS
+        run: python3 tools/ci/ignored_shards.py --prepare sunrise-mod-package $JOBS
       # Compile first, apart from running: the build's time and its slowest units show on their own.
       - name: Build Rust core test binaries
         id: core_build
@@ -602,7 +602,7 @@ jobs:
         # dependency profiles; cargo build first would make cargo test compile its consumers again.
         run: |
           # Keep other compiles parallel, but prevent the two large lib tests from exhausting memory together.
-          export HORIZON_TEST_RUSTC_WRAPPER="${RUSTC_WRAPPER:-}"
+          export SUNRISE_TEST_RUSTC_WRAPPER="${RUSTC_WRAPPER:-}"
           export RUSTC_WRAPPER="$GITHUB_WORKSPACE/tools/ci/test-compile-lock.sh"
           build_log=$(mktemp)
           trap 'rm -f "$build_log"' EXIT
@@ -632,7 +632,7 @@ jobs:
         run: |
           python3 tools/ci/cargo_timings.py target/cargo-timings/cargo-timing.html | tee -a "$GITHUB_STEP_SUMMARY"
           # The points build script's phases (seconds since it started), from the file it writes beside its output.
-          for timing in target/debug/build/horizon-mod-points-*/out/points-timing.txt; do
+          for timing in target/debug/build/sunrise-mod-points-*/out/points-timing.txt; do
             [ -f "$timing" ] || continue
             { echo "points build script phases:"; cat "$timing"; } | tee -a "$GITHUB_STEP_SUMMARY"
           done
@@ -655,7 +655,7 @@ jobs:
         if: ${{ !cancelled() && steps.setup.outcome == 'success' && (needs.changes.outputs.rust_required != 'false') }}
         run: |
           started=$SECONDS
-          cargo build $JOBS --locked --profile test -p horizon-mod-api-gen --bin horizon-stage --message-format=json-render-diagnostics > "$RUNNER_TEMP/stage-artifacts.jsonl"
+          cargo build $JOBS --locked --profile test -p sunrise-mod-api-gen --bin sunrise-stage --message-format=json-render-diagnostics > "$RUNNER_TEMP/stage-artifacts.jsonl"
           echo "Stage generator build: $((SECONDS - started))s"
           python3 - <<'PY'
           import json
@@ -665,20 +665,20 @@ jobs:
           artifacts = [json.loads(line) for line in Path(os.environ["RUNNER_TEMP"], "stage-artifacts.jsonl").read_text().splitlines()]
           executables = {item["executable"] for item in artifacts
                          if item.get("reason") == "compiler-artifact"
-                         and item["target"]["name"] == "horizon-stage"
+                         and item["target"]["name"] == "sunrise-stage"
                          and "bin" in item["target"]["kind"]
                          and not item["profile"]["test"] and item.get("executable")}
           if len(executables) != 1:
-              raise SystemExit(f"expected one normal horizon-stage executable, got {executables}")
+              raise SystemExit(f"expected one normal sunrise-stage executable, got {executables}")
           executable = str(Path(executables.pop()).resolve(strict=True))
           if "\r" in executable or "\n" in executable:
-              raise SystemExit("horizon-stage executable path must not contain CR or LF")
+              raise SystemExit("sunrise-stage executable path must not contain CR or LF")
           with open(os.environ["GITHUB_ENV"], "a") as environment:
-              environment.write(f"HORIZON_STAGE_TOOL={executable}\n")
+              environment.write(f"SUNRISE_STAGE_TOOL={executable}\n")
           PY
       - name: Report the mod API surface change
         id: report_the_mod_api_surface_change
-        # What this pull request changes in what mods can name, in the job summary: the head's horizon-stage exports
+        # What this pull request changes in what mods can name, in the job summary: the head's sunrise-stage exports
         # the merge base and this tree, then classifies the diff (tools/ci/surface_report.py). It fails when this
         # tree cannot be exported, for a stale or unreadable new change note, and, with tools/ci/surface.toml's
         # gate on, for a breaking change no new note declares.
@@ -742,7 +742,7 @@ jobs:
     if: ${{ always() && !cancelled() && needs.changes.result != 'skipped' }}
     # A contributor's pull request gets GitHub's runners: these checks compile nothing heavy, and
     # its only two checks must not depend on a paid pool's balance.
-    runs-on: ${{ needs.changes.outputs.rust_required == 'false' && 'ubuntu-latest' || needs.changes.outputs.trusted != 'true' && 'ubuntu-latest' || needs.changes.outputs.self_hosted == 'true' && 'dyna-large' || !inputs.github-fallback && needs.changes.outputs.forced_github != 'true' && vars.SELF_HOSTED_CI == 'all' && needs.changes.outputs.trusted == 'true' && fromJSON('["self-hosted", "linux", "playhorizon-ci"]') || needs.changes.outputs.hosted_label || 'ubuntu-latest' }}
+    runs-on: ${{ needs.changes.outputs.rust_required == 'false' && 'ubuntu-latest' || needs.changes.outputs.trusted != 'true' && 'ubuntu-latest' || needs.changes.outputs.self_hosted == 'true' && 'dyna-large' || !inputs.github-fallback && needs.changes.outputs.forced_github != 'true' && vars.SELF_HOSTED_CI == 'all' && needs.changes.outputs.trusted == 'true' && fromJSON('["self-hosted", "linux", "playsunrise-ci"]') || needs.changes.outputs.hosted_label || 'ubuntu-latest' }}
     timeout-minutes: ${{ needs.changes.outputs.self_hosted == 'true' && needs.changes.outputs.trusted == 'true' && 20 || 45 }}
     # Dyna's runner image now carries lavapipe, Mesa's software Vulkan driver, for ignored-tests' `gpu` tests.
     # verify's tests were written to skip GPU work when no adapter exists, and one of them
@@ -819,7 +819,7 @@ jobs:
         id: check_duplicate_public_native_functions
         if: ${{ !cancelled() && steps.setup.outcome == 'success' && (needs.changes.outputs.rust_required != 'false') }}
         run: python3 tools/sync_upstream.py --check
-      # docs/layers.md#built-in-addresses: every built-in outside address in the Horizon layer's home; the rest only shrinks.
+      # docs/layers.md#built-in-addresses: every built-in outside address in the Sunrise layer's home; the rest only shrinks.
       - name: Built-in addresses stay in their home
         id: built_in_addresses_stay_in_their_home
         if: ${{ !cancelled() && steps.setup.outcome == 'success' && (needs.changes.outputs.rust_required != 'false') }}
@@ -837,7 +837,7 @@ jobs:
           BRANCH: ${{ needs.changes.outputs.trusted == 'true' && github.head_ref || '' }}
           LABELS: ${{ join(github.event.pull_request.labels.*.name, ' ') }}
         run: python3 tools/hotspots/check_guards.py ${BASE_SHA:+--base "$BASE_SHA" --pull-request-merge} --branch "$BRANCH" --labels "$LABELS"
-      # horizon-mod-wasm-wire-loopback's build.rs declares tests/wire_loopback/*.rs: its root gains no module line and no test.
+      # sunrise-mod-wasm-wire-loopback's build.rs declares tests/wire_loopback/*.rs: its root gains no module line and no test.
       - name: wire_loopback root does not grow
         id: wire_loopback_root_does_not_grow
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
@@ -932,7 +932,7 @@ jobs:
   launcher:
     needs: changes
     if: needs.changes.outputs.launcher_required != 'false' && needs.changes.outputs.heavy == 'true'
-    runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna-medium' || !inputs.github-fallback && needs.changes.outputs.forced_github != 'true' && vars.SELF_HOSTED_CI == 'all' && needs.changes.outputs.trusted == 'true' && fromJSON('["self-hosted", "linux", "playhorizon-ci"]') || 'ubuntu-latest' }}
+    runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna-medium' || !inputs.github-fallback && needs.changes.outputs.forced_github != 'true' && vars.SELF_HOSTED_CI == 'all' && needs.changes.outputs.trusted == 'true' && fromJSON('["self-hosted", "linux", "playsunrise-ci"]') || 'ubuntu-latest' }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -1009,14 +1009,14 @@ jobs:
         working-directory: launcher
         env:
           JOBS: ${{ needs.changes.outputs.self_hosted == 'true' && '-j2' || '' }}
-        run: python3 ../tools/ci/ignored_shards.py --prepare horizon-mod-package $JOBS
+        run: python3 ../tools/ci/ignored_shards.py --prepare sunrise-mod-package $JOBS
       - name: Test launcher runtime package
         id: test_launcher_runtime_package
         if: ${{ !cancelled() && steps.setup.outcome == 'success' && steps.build_launcher_runtime_holder_test_actor.outcome == 'success' }}
         working-directory: launcher
         env:
           JOBS: ${{ needs.changes.outputs.self_hosted == 'true' && '-j2' || '' }}
-        run: cargo test $JOBS --no-fail-fast --manifest-path ../Cargo.toml --locked -p horizon-mod-package --features runtime-process --lib
+        run: cargo test $JOBS --no-fail-fast --manifest-path ../Cargo.toml --locked -p sunrise-mod-package --features runtime-process --lib
       - name: Summarize failed gate steps
         if: ${{ failure() && !cancelled() && steps.setup.outcome == 'success' }}
         env:
@@ -1085,9 +1085,9 @@ jobs:
         run: |
           # Never reuse a completed preparation for this diagnostic, including a retry.
           for attempt in 1 2; do
-            HORIZON_PREPARE_KEY="${GITHUB_SHA:0:16}-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$attempt" \
-              HORIZON_PREPARE_EXPORT_DIGEST="$RUNNER_TEMP/export.digest" \
-              HORIZON_DYNA_CACHE=true HORIZON_PREPARED_CACHE="$DYNA_CI_BUILD/vanilla" HORIZON_SHARED_SOURCE=/cache/horizon-local bash tools/ci/vanilla-data.sh
+            SUNRISE_PREPARE_KEY="${GITHUB_SHA:0:16}-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$attempt" \
+              SUNRISE_PREPARE_EXPORT_DIGEST="$RUNNER_TEMP/export.digest" \
+              SUNRISE_DYNA_CACHE=true SUNRISE_PREPARED_CACHE="$DYNA_CI_BUILD/vanilla" SUNRISE_SHARED_SOURCE=/cache/sunrise-local bash tools/ci/vanilla-data.sh
             exported=$(cat "$RUNNER_TEMP/export.digest")
             actual=$(python3 tools/prepare_output.py digest 2>/dev/null) || { echo "::error::prepared output digest unavailable"; exit 1; }
             { echo "fresh export $attempt: $exported"; echo "seeded export $attempt: $actual"; } | tee -a "$GITHUB_STEP_SUMMARY"
@@ -1096,7 +1096,7 @@ jobs:
           python3 tools/prepare_output.py check > "$RUNNER_TEMP/output-check.log" 2>&1
           result=$?
           set -e
-          expected=$(awk '!/^#/ && NF == 2 { value=$2 } END { print value }' crates/horizon-prepare/output-versions.txt)
+          expected=$(awk '!/^#/ && NF == 2 { value=$2 } END { print value }' crates/sunrise-prepare/output-versions.txt)
           { echo "prepared output check: $([ "$result" -eq 0 ] && echo pass || echo fail)"; echo "actual: $actual"; echo "expected: $expected"; } | tee -a "$GITHUB_STEP_SUMMARY"
           exit "$result"
 
@@ -1140,21 +1140,21 @@ jobs:
           mkdir -p "$DYNA_CI_BUILD/parity-out" "$DYNA_CI_BUILD/parity-tmp"
           ln -s "$DYNA_CI_BUILD/parity-out" .local
           echo "TMPDIR=$DYNA_CI_BUILD/parity-tmp" >> "$GITHUB_ENV"
-          HORIZON_DYNA_CACHE=true HORIZON_PREPARED_CACHE="$DYNA_CI_BUILD/vanilla" HORIZON_SHARED_SOURCE=/cache/horizon-local bash tools/ci/vanilla-data.sh
+          SUNRISE_DYNA_CACHE=true SUNRISE_PREPARED_CACHE="$DYNA_CI_BUILD/vanilla" SUNRISE_SHARED_SOURCE=/cache/sunrise-local bash tools/ci/vanilla-data.sh
       # Harness subprocess timeouts can be shorter than a cold release build. Match their build commands and target dir.
       - name: Build parity probes
         run: |
-          cargo build --release --bin horizon-parity
-          cargo build --release --bin horizon-tick-parity
-          cargo build --release --bin horizon-geometry-parity
-          cargo build --release --bin horizon-noise-parity
-          cargo build --release --bin horizon-density-parity
-          cargo build --release --bin horizon-worldgen-parity
-          cargo build --release --bin horizon-float-log-parity
-          cargo build --release -p horizon-core --example generation_tick_fixture
-          cargo build --release -p horizon-core --example biome_zoom_fixture
-          cargo build --release -p horizon-world --bin horizon-world --example world_probe
-          cargo build --release -p horizon-world --example world_probe
+          cargo build --release --bin sunrise-parity
+          cargo build --release --bin sunrise-tick-parity
+          cargo build --release --bin sunrise-geometry-parity
+          cargo build --release --bin sunrise-noise-parity
+          cargo build --release --bin sunrise-density-parity
+          cargo build --release --bin sunrise-worldgen-parity
+          cargo build --release --bin sunrise-float-log-parity
+          cargo build --release -p sunrise-core --example generation_tick_fixture
+          cargo build --release -p sunrise-core --example biome_zoom_fixture
+          cargo build --release -p sunrise-world --bin sunrise-world --example world_probe
+          cargo build --release -p sunrise-world --example world_probe
       - name: Compare Rust foundations with pinned vanilla client and server bytecode
         run: python tools/test_rust_parity.py
       - name: Check Rust world-data interoperability with pinned vanilla client and server

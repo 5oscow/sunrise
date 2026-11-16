@@ -122,8 +122,8 @@ class NightlyBuildSnapshotTests(unittest.TestCase):
             (root / "tools/ci").mkdir(parents=True)
             (root / "tools/ci/sign_release.sh").write_text(
                 'for file in "${@:2}"; do test -f "$file" || exit 9; done\nprintf "%s\\n" "$@" > signed\n')
-            for name in ("horizon-linux-x86_64.tar.gz", "horizon-windows-x64.zip", "horizon-macos-arm64.zip",
-                         "horizon-server-linux-x86_64.tar.gz", "horizon-source.tar.gz"):
+            for name in ("sunrise-linux-x86_64.tar.gz", "sunrise-windows-x64.zip", "sunrise-macos-arm64.zip",
+                         "sunrise-server-linux-x86_64.tar.gz", "sunrise-source.tar.gz"):
                 (root / "dist" / name).touch()
             for kind, code in (("snapshot", 0), ("nightly", 1)):
                 result = subprocess.run(["bash", "-e", "-o", "pipefail", "-c", sign], cwd=root,
@@ -134,8 +134,8 @@ class NightlyBuildSnapshotTests(unittest.TestCase):
             notes = published[published.index("# Archive presence"):].split("# Exactly the files", 1)[0]
             subprocess.run(["bash", "-e", "-o", "pipefail", "-c", notes], cwd=root, check=True)
             body = (root / "dist/nightly-notes.md").read_text()
-            self.assertIn("Built: `horizon-macos-arm64.zip`", body)
-            for missing in ("horizon-macos-x64.zip", "horizon-windows-arm64.zip", "horizon-linux-musl-x86_64.tar.gz"):
+            self.assertIn("Built: `sunrise-macos-arm64.zip`", body)
+            for missing in ("sunrise-macos-x64.zip", "sunrise-windows-arm64.zip", "sunrise-linux-musl-x86_64.tar.gz"):
                 self.assertIn(f"Failed or unavailable; not published: `{missing}`", body)
 
     def test_snapshots_never_replace_a_waiting_nightly(self):
@@ -179,7 +179,7 @@ class SnapshotToolsTests(unittest.TestCase):
                 self.assertEqual(values["tag"], f"snapshot-{today}-0c02067")
                 self.assertEqual(values["version"], f"snapshot-{today}")
                 self.assertEqual(values["build"], "true")
-                self.assertIn(f"horizon-launcher install snapshot-{today}-0c02067", Path("nightly-notes.md").read_text())
+                self.assertIn(f"sunrise-launcher install snapshot-{today}-0c02067", Path("nightly-notes.md").read_text())
                 # Published already (the same commit the same day): skipped, never replaced.
                 with mock.patch.dict(os.environ, env), mock.patch.object(nightly, "git"), \
                         mock.patch.object(nightly.train, "channel_head", return_value=sha), \

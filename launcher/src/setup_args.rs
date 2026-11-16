@@ -128,13 +128,13 @@ mod tests {
         }
     }
 
-    const TASKLIST: &str = "\"horizon-launcher.exe\",\"4120\",\"Console\",\"1\",\"212,044 K\"\r\n\
-        \"Horizon-Launcher.exe\",\"9988\",\"Console\",\"1\",\"80,000 K\"\r\n\
-        \"horizon-launcher.exe\",\"4120\",\"Console\",\"1\",\"212,044 K\"\r\n\
+    const TASKLIST: &str = "\"sunrise-launcher.exe\",\"4120\",\"Console\",\"1\",\"212,044 K\"\r\n\
+        \"Sunrise-Launcher.exe\",\"9988\",\"Console\",\"1\",\"80,000 K\"\r\n\
+        \"sunrise-launcher.exe\",\"4120\",\"Console\",\"1\",\"212,044 K\"\r\n\
         \"horizon-launcher-setup.exe\",\"77\",\"Console\",\"1\",\"9,000 K\"\r\n";
 
     fn tasklist() -> String {
-        if cfg!(horizon_fork_launcher) {
+        if cfg!(sunrise_fork_launcher) {
             TASKLIST
                 .replace("horizon-launcher", "sunrise-launcher")
                 .replace("Horizon-Launcher", "Sunrise-Launcher")
@@ -153,7 +153,7 @@ mod tests {
 
     #[test]
     fn another_identity_is_never_terminated() {
-        let other = if cfg!(horizon_fork_launcher) {
+        let other = if cfg!(sunrise_fork_launcher) {
             "\"horizon-launcher.exe\",\"42\""
         } else {
             "\"sunrise-launcher.exe\",\"42\""
@@ -167,7 +167,7 @@ mod tests {
         assert!(other_launcher_pids(none, 1).is_empty());
         assert!(other_launcher_pids("", 1).is_empty());
         // The setup exe and other programs are not launchers.
-        let other = "\"horizon-launcher-setup.exe\",\"77\",\"Console\",\"1\",\"9 K\"\r\n\
+        let other = "\"sunrise-launcher-setup.exe\",\"77\",\"Console\",\"1\",\"9 K\"\r\n\
             \"horizon-client.exe\",\"78\",\"Console\",\"1\",\"9 K\"\r\n";
         assert!(other_launcher_pids(other, 1).is_empty());
     }

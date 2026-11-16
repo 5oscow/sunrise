@@ -1,23 +1,23 @@
-# Contributing to Horizon
+# Contributing to Sunrise
 
-Thanks for helping. Horizon is Minecraft: Java Edition 26.3 rewritten in Rust, and the one rule that shapes
+Thanks for helping. Sunrise is Minecraft: Java Edition 26.3 rewritten in Rust, and the one rule that shapes
 everything is that **it plays exactly like vanilla**. This page is the short version of how we work; questions are
-welcome on [Discord](https://discord.gg/playhorizon).
+welcome on [Discord](https://discord.gg/playsunrise).
 
 This repository holds the game and the launcher, plus the tools, tests and docs that build, check and release them.
-The website (playhorizon.dev) is built in a separate repository from this one's README, `docs/api/` and roadmap. Anything
+The website (playsunrise.net) is built in a separate repository from this one's README, `docs/api/` and roadmap. Anything
 else (videos, Discord and other community material) lives elsewhere.
 
-**Where to start: [playhorizon.dev/hub](https://playhorizon.dev/hub).** It shows what is being done now and next
+**Where to start: [playsunrise.net/hub](https://playsunrise.net/hub).** It shows what is being done now and next
 ([ROADMAP.md](ROADMAP.md) in the repository), the work board, good first tasks, and the forms to report a bug or
 suggest something. A pull request for a roadmap item carries its `roadmap:<id>` label; ideas go to the suggestion
 queue (the hub, or `/suggest` on Discord) rather than to issues, which are for bugs.
 
 **Mod-related pull requests go to [arismoko/horizon](https://github.com/arismoko/horizon)**, the fork that carries the
 mod API and reviews and merges that work. That covers the mod API, native hooks and events for mods, native mods,
-content mods (`.hmod`), mixins, wasm mods, `cargo horizon-mod`, `horizon-mods`, mod builds and the registry, and
+content mods (`.hmod`), mixins, wasm mods, `cargo sunrise-mod`, `sunrise-mods`, mod builds and the registry, and
 their docs ([mods](docs/mods.md), [native mods](docs/native-mods.md)). Open the pull request there from your usual
-branch. Mod-related pull requests opened here are closed with a pointer to it. Engine extension points that Horizon's
+branch. Mod-related pull requests opened here are closed with a pointer to it. Engine extension points that Sunrise's
 own crates register (the [layer split](docs/layers.md)), resource and shader pack formats, and gameplay fixes stay
 here.
 
@@ -25,13 +25,13 @@ here.
 
 - **Prerequisites:** Rust (stable), Python 3.11+, JDK 25, git 2.38 or newer, and on Linux the ALSA and udev headers
   (`libasound2-dev libudev-dev`).
-- **Resources:** Horizon never downloads the game; it prepares its resources from your own copy of Minecraft 26.3, as
+- **Resources:** Sunrise never downloads the game; it prepares its resources from your own copy of Minecraft 26.3, as
   described in [Build from source](README.md#build-from-source).
 - **Commands:**
 
   ```sh
-  cargo run --release -p horizon-prepare -- --prepare --server-jar ~/Downloads/server.jar
-  cargo run --release -p horizon-game
+  cargo run --release -p sunrise-prepare -- --prepare --server-jar ~/Downloads/server.jar
+  cargo run --release -p sunrise-game
   ```
 
 - **Launcher:** its own Cargo workspace in `launcher/` (`cd launcher && cargo run`; on NixOS, `nix-shell` first).
@@ -39,23 +39,23 @@ here.
 ## Vanilla first
 
 Wherever vanilla has a feature, vanilla is the specification, down to the order of random calls. "Parity" here means
-Horizon gives the same results as the pinned 26.3 client and server for the same inputs, checked by a **harness**: a
-`tools/test_*_parity.py` script that runs a small Java oracle against the real game and a Rust probe against Horizon,
+Sunrise gives the same results as the pinned 26.3 client and server for the same inputs, checked by a **harness**: a
+`tools/test_*_parity.py` script that runs a small Java oracle against the real game and a Rust probe against Sunrise,
 and compares their outputs.
 
-- **Read the vanilla code before writing Horizon's.** `tools/rea_vanilla.py` queries the pinned game bytecode:
+- **Read the vanilla code before writing Sunrise's.** `tools/rea_vanilla.py` queries the pinned game bytecode:
   `python3 tools/rea_vanilla.py method net.minecraft.world.level.block.DispenserBlock dispenseFrom`.
   Say in your pull request which vanilla classes and methods you followed.
 - **One version: 26.3.** Parity work targets 26.3 until its parity is good, redstone first. Don't open pull requests
-  that move Horizon to a newer Minecraft version for now; to join servers on a newer version, put a Via proxy
+  that move Sunrise to a newer Minecraft version for now; to join servers on a newer version, put a Via proxy
   (ViaVersion, ViaProxy) in front of them.
 - **Gameplay changes come with a harness**, new or extended, so the next change can't silently break them.
   [The parity workflow](docs/parity-workflow.md) shows how harnesses run; copy a nearby one.
-- **Horizon's own features** (the launcher, the new menus) follow [the design system](docs/design-system.md) and are
+- **Sunrise's own features** (the launcher, the new menus) follow [the design system](docs/design-system.md) and are
   off by default wherever they would change the vanilla look.
-- **Three layers: engine, platform, Horizon.** Vanilla code never depends on the platform (mods, shader packs,
-  Horizon-only settings) or on Horizon (cosmetics, the shop, official servers, telemetry), and the platform never
-  depends on Horizon. [docs/layers.md](docs/layers.md) says where a new feature goes; CI checks the dependencies.
+- **Three layers: engine, platform, Sunrise.** Vanilla code never depends on the platform (mods, shader packs,
+  Sunrise-only settings) or on Sunrise (cosmetics, the shop, official servers, telemetry), and the platform never
+  depends on Sunrise. [docs/layers.md](docs/layers.md) says where a new feature goes; CI checks the dependencies.
 - **Everything players run is Rust.** Python and Java are fine for dev tools and harness drivers in `tools/`, never
   for player-facing code.
 - **No game files in the repo.** Never commit game files, decompiled source or prepared resources (`.local/`):
@@ -65,7 +65,7 @@ and compares their outputs.
 
 ## Only original code, or code whose license allows it
 
-Horizon is MIT. Its code is written from Minecraft 26.3 itself and from public documentation. Since 30 October 2026
+Sunrise is MIT. Its code is written from Minecraft 26.3 itself and from public documentation. Since 30 October 2026
 another project's source may also be read and used, **only when that project's license allows it**:
 
 - **Allowed:** MIT, MIT-0, BSD-2-Clause, BSD-3-Clause, 0BSD, ISC, zlib, Apache-2.0, Unlicense, and the CC0-1.0
@@ -156,7 +156,7 @@ nightly.
 
 Reviews on this fork read the diff, the design and CI; they do not run your change. So for anything a player or a
 mod author can see, please start the game once and try it (single player is enough:
-`cargo build --profile fast -p horizon-game`, or `horizon-ctl` for agents) and say in one line what you did, under
+`cargo build --profile fast -p sunrise-game`, or `sunrise-ctl` for agents) and say in one line what you did, under
 "Tried in game" in the template. It is not a gate: "no, could not run it here" is an acceptable answer, and it tells
 the reviewer where to look harder.
 
@@ -205,8 +205,8 @@ it (edited on every push, never repeated): talk to its author in the thread befo
   ExplosionPower`, `perf(launcher): download the game's files in parallel`, `bug(saves): keep /attribute modifiers
   through a save`. The kind is one of the words below; the area is an area label, several with commas
   (`perf(chunks,rendering): ...`), or leave it out (`docs: ...`). Release notes drop the prefix.
-- **Tick its kind** in the template: `parity` (Horizon now does what vanilla does), `bug` (a crash or breakage),
-  `perf`, `feature` (new for players), `extra` (Horizon-only, off by default), `tooling` or `docs`. A workflow sets
+- **Tick its kind** in the template: `parity` (Sunrise now does what vanilla does), `bug` (a crash or breakage),
+  `perf`, `feature` (new for players), `extra` (Sunrise-only, off by default), `tooling` or `docs`. A workflow sets
   that label from the box, else from the title, and area labels (`launcher`, `mobs`, `worldgen`, `rendering`...)
   from the title and the paths you change.
   `label:parity` is the list of real progress toward vanilla.
@@ -214,7 +214,7 @@ it (edited on every push, never repeated): talk to its author in the thread befo
   `skip-release` when players see no change (tooling, docs, tests), nothing for a fix. `release-now` is for crash
   fixes that shouldn't wait. pr_ready suggests one.
 
-Who reviews and merges: the Horizon Team, on CI for ordinary pull requests; risky ones (saves, network, world
+Who reviews and merges: the Sunrise Team, on CI for ordinary pull requests; risky ones (saves, network, world
 generation, the launcher's updates) wait for a local proof first ([merging](docs/release-flow.md#merging)).
 
 Merges reach players through the nightly, which the daily run publishes only when every in-game test passed
@@ -244,10 +244,10 @@ new pushes, we add it again.
 
 ## Talk to us
 
-[Discord](https://discord.gg/playhorizon) for questions and ideas, [issues](https://github.com/horizon-rust/horizon/issues)
+[Discord](https://discord.gg/playsunrise) for questions and ideas, [issues](https://github.com/horizon-rust/horizon/issues)
 for bugs. To take something on, `/claim` its issue ([above](#claim-before-you-start)).
 
-How Horizon is run, and how people join the Team or lead a group: [GOVERNANCE.md](GOVERNANCE.md).
+How Sunrise is run, and how people join the Team or lead a group: [GOVERNANCE.md](GOVERNANCE.md).
 
 ## Licence and DCO
 

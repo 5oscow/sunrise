@@ -259,7 +259,7 @@ class DynaRoutingTests(unittest.TestCase):
         self.assertNotIn("cargo test", static)
         self.assertNotIn("Swatinem/rust-cache", static)
         self.assertNotIn("runner-packages.txt", static)
-        self.assertIn("python3 tools/ci/ignored_shards.py --prepare horizon-mod-package $JOBS", runtime)
+        self.assertIn("python3 tools/ci/ignored_shards.py --prepare sunrise-mod-package $JOBS", runtime)
         self.assertIn("cc -shared -fPIC -O2 -Wall -Wextra -Werror tools/ci/network_guard.c -o target/network_guard.so", runtime)
         self.assertIn("python3 tools/ci/run_test_binaries.py --jobs 3 --time-limits 2,5 --network-guard target/network_guard.so --no-data-skips -- cargo test $JOBS --profile test --workspace --lib --bins --tests", runtime)
         self.assertIn("cargo test $JOBS --no-fail-fast --profile test --workspace --doc", runtime)
@@ -341,14 +341,14 @@ class DynaRoutingTests(unittest.TestCase):
                 cargo = stubs / "cargo"
                 cargo.write_text("#!/usr/bin/env python3\nimport os, sys\nsys.stdout.write(os.environ['STAGE_ARTIFACTS'])\n")
                 cargo.chmod(0o755)
-                normal = root / ("line\nbreak" if case == "newline-path" else "horizon-stage")
+                normal = root / ("line\nbreak" if case == "newline-path" else "sunrise-stage")
                 normal.touch()
-                harness = root / "horizon-stage-harness"
+                harness = root / "sunrise-stage-harness"
                 harness.touch()
-                messages = [{"reason": "compiler-artifact", "target": {"name": "horizon-stage", "kind": ["bin"]},
+                messages = [{"reason": "compiler-artifact", "target": {"name": "sunrise-stage", "kind": ["bin"]},
                              "profile": {"test": True}, "executable": str(harness)}]
                 if case != "harness-only":
-                    messages.append({"reason": "compiler-artifact", "target": {"name": "horizon-stage", "kind": ["bin"]},
+                    messages.append({"reason": "compiler-artifact", "target": {"name": "sunrise-stage", "kind": ["bin"]},
                                      "profile": {"test": False}, "executable": str(normal)})
                 environment = root / "github-env"
                 env = dict(os.environ, PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}",
@@ -358,7 +358,7 @@ class DynaRoutingTests(unittest.TestCase):
                                         capture_output=True, text=True)
                 if case == "normal-and-harness":
                     self.assertEqual(result.returncode, 0, result.stderr)
-                    self.assertEqual(environment.read_text(), f"HORIZON_STAGE_TOOL={normal.resolve()}\n")
+                    self.assertEqual(environment.read_text(), f"SUNRISE_STAGE_TOOL={normal.resolve()}\n")
                 else:
                     self.assertNotEqual(result.returncode, 0)
                     self.assertFalse(environment.exists())
@@ -380,8 +380,8 @@ class DynaRoutingTests(unittest.TestCase):
         self.assertLess(verify.index("- name: Install Rust toolchain and the runner image's packages"), verify.index(name))
         self.assertLess(verify.index("uses: actions/setup-python@v5"), verify.index(name))
         build = verify.split("- name: Build the source stage generator (test profile)\n", 1)[1].split("\n      - ", 1)[0]
-        self.assertIn("cargo build $JOBS --locked --profile test -p horizon-mod-api-gen --bin horizon-stage", build)
-        self.assertIn("HORIZON_STAGE_TOOL=", build)
+        self.assertIn("cargo build $JOBS --locked --profile test -p sunrise-mod-api-gen --bin sunrise-stage", build)
+        self.assertIn("SUNRISE_STAGE_TOOL=", build)
         self.assertLess(verify.index("- name: Build the source stage generator (test profile)"), verify.index(name))
 
     def test_positive_stage_export_runs_once_before_docs_outside_offline_discovery(self):
@@ -407,7 +407,7 @@ class DynaRoutingTests(unittest.TestCase):
         self.assertEqual(fields.get("PR"), "${{ inputs.pr }}")
         self.assertEqual(fields.get("GH_TOKEN"), "${{ github.token }}")
         self.assertNotIn("continue-on-error", fields)
-        # It needs the tool the stage build puts in HORIZON_STAGE_TOOL.
+        # It needs the tool the stage build puts in SUNRISE_STAGE_TOOL.
         self.assertLess(verify.index("- name: Build the source stage generator (test profile)"), verify.index(name))
 
     def test_positive_stage_guard_rejects_commented_command_noop_and_ignored_failure(self):
@@ -458,7 +458,7 @@ class DynaRoutingTests(unittest.TestCase):
                                 .split("      - name: Generate", 1)[0])
         script = "for dir " + script
         with tempfile.TemporaryDirectory() as directory:
-            script = script.replace("/cache/horizon-local", directory + "/missing")
+            script = script.replace("/cache/sunrise-local", directory + "/missing")
             summary = Path(directory) / "summary"
             for event in ("push", "workflow_dispatch"):
                 env = dict(os.environ, EVENT=event, GITHUB_STEP_SUMMARY=str(summary))

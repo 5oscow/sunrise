@@ -10,7 +10,7 @@ impl Temp {
         static NEXT: AtomicUsize = AtomicUsize::new(0);
         loop {
             let path = std::env::temp_dir().join(format!(
-                "horizon-location-{}-{}",
+                "sunrise-location-{}-{}",
                 std::process::id(),
                 NEXT.fetch_add(1, Ordering::Relaxed)
             ));
@@ -437,7 +437,7 @@ fn a_config_folder_behind_a_link_still_opens() {
     fs::create_dir_all(&real).unwrap();
     let config = temp.0.join("config");
     std::os::unix::fs::symlink(&real, &config).unwrap();
-    let bootstrap = config.join("horizon-launcher-location/location.json");
+    let bootstrap = config.join("sunrise-launcher-location/location.json");
 
     assert_eq!(resolve_at(&bootstrap), Ok(None));
     assert_eq!(startup_error_at(&bootstrap), None);
@@ -461,7 +461,7 @@ fn a_config_folder_behind_a_link_still_opens() {
 
     // The lock behind the link is the one a worker takes through the real path.
     let reader = acquire_lock_at(&bootstrap).unwrap();
-    assert!(lock_at(&real.join("horizon-launcher-location/location.json"), true).is_err());
+    assert!(lock_at(&real.join("sunrise-launcher-location/location.json"), true).is_err());
     drop(reader);
 }
 
@@ -470,7 +470,7 @@ fn a_config_folder_behind_a_link_still_opens() {
 #[cfg(unix)]
 #[test]
 fn a_link_above_the_root_is_followed() {
-    let base = std::env::temp_dir().join(format!("horizon-dl-link-{}", std::process::id()));
+    let base = std::env::temp_dir().join(format!("sunrise-dl-link-{}", std::process::id()));
     let _ = fs::remove_dir_all(&base);
     fs::create_dir_all(base.join("disk/data")).unwrap();
     std::os::unix::fs::symlink(base.join("disk"), base.join("share")).unwrap();
@@ -485,12 +485,12 @@ fn a_link_above_the_root_is_followed() {
 }
 
 /// No unit test reaches the player's real folders: a test's launcher data, build folders and
-/// native build log are all under the temporary folder, or under the `HORIZON_LAUNCHER_HOME` the
+/// native build log are all under the temporary folder, or under the `SUNRISE_LAUNCHER_HOME` the
 /// run names (launcher.yml points it at a scratch folder).
 #[test]
 fn unit_tests_never_resolve_the_real_profile() {
     // The data folder keeps the named spelling; the build folder is its real one.
-    let homes = match std::env::var_os("HORIZON_LAUNCHER_HOME").filter(|h| !h.is_empty()) {
+    let homes = match std::env::var_os("SUNRISE_LAUNCHER_HOME").filter(|h| !h.is_empty()) {
         Some(home) => {
             let home = PathBuf::from(home);
             let real = crate::backend::plain(home.canonicalize().unwrap_or(home.clone()));

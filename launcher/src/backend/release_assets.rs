@@ -1,12 +1,12 @@
-/// The release assets of each system Horizon ships for: (OS, architecture, the game, the launcher).
+/// The release assets of each system Sunrise ships for: (OS, architecture, the game, the launcher).
 /// game-build.yml builds the game's, nightly-build.yml signs and publishes them, and launcher.yml
 /// builds the launcher's (`platform_assets_are_published`).
 pub const PLATFORMS: [(&str, &str, &str, &str); 5] = [
     (
         "linux",
         "x86_64",
-        "horizon-linux-x86_64.tar.gz",
-        if cfg!(horizon_fork_launcher) {
+        "sunrise-linux-x86_64.tar.gz",
+        if cfg!(sunrise_fork_launcher) {
             "sunrise-launcher-linux-x86_64.tar.gz"
         } else {
             "horizon-launcher-linux-x86_64.tar.gz"
@@ -15,8 +15,8 @@ pub const PLATFORMS: [(&str, &str, &str, &str); 5] = [
     (
         "macos",
         "aarch64",
-        "horizon-macos-arm64.zip",
-        if cfg!(horizon_fork_launcher) {
+        "sunrise-macos-arm64.zip",
+        if cfg!(sunrise_fork_launcher) {
             "sunrise-launcher-macos-arm64.zip"
         } else {
             "horizon-launcher-macos-arm64.zip"
@@ -26,8 +26,8 @@ pub const PLATFORMS: [(&str, &str, &str, &str); 5] = [
     (
         "macos",
         "x86_64",
-        "horizon-macos-x64.zip",
-        if cfg!(horizon_fork_launcher) {
+        "sunrise-macos-x64.zip",
+        if cfg!(sunrise_fork_launcher) {
             "sunrise-launcher-macos-x64.zip"
         } else {
             "horizon-launcher-macos-x64.zip"
@@ -36,8 +36,8 @@ pub const PLATFORMS: [(&str, &str, &str, &str); 5] = [
     (
         "windows",
         "x86_64",
-        "horizon-windows-x64.zip",
-        if cfg!(horizon_fork_launcher) {
+        "sunrise-windows-x64.zip",
+        if cfg!(sunrise_fork_launcher) {
             "sunrise-launcher-windows-x64.zip"
         } else {
             "horizon-launcher-windows-x64.zip"
@@ -46,8 +46,8 @@ pub const PLATFORMS: [(&str, &str, &str, &str); 5] = [
     (
         "windows",
         "aarch64",
-        "horizon-windows-arm64.zip",
-        if cfg!(horizon_fork_launcher) {
+        "sunrise-windows-arm64.zip",
+        if cfg!(sunrise_fork_launcher) {
             "sunrise-launcher-windows-arm64.zip"
         } else {
             "horizon-launcher-windows-arm64.zip"

@@ -20,12 +20,12 @@ ORIGINAL_JDK_TOOLS = {
     # Keep its old path allowed so --history/--pre-push accept its legitimate historical addition.
     "tools/refactors/api-pr3/JsonNbtOracle.java",
 }
-# The prepared folder's files in one file (crates/horizon-core/src/prepared_files.rs): Mojang's data.
-PRIVATE_NAMES = {"horizon-data.bin"}
-# Vanilla's 1.13 data fixer tables, copied from its code until 2026-11; horizon-prepare now exports them from the
+# The prepared folder's files in one file (crates/sunrise-core/src/prepared_files.rs): Mojang's data.
+PRIVATE_NAMES = {"sunrise-data.bin"}
+# Vanilla's 1.13 data fixer tables, copied from its code until 2026-11; sunrise-prepare now exports them from the
 # player's jar (datafix-tables.json). Their old paths stay in history, so only the current tree is checked.
-RETIRED_TABLES = {"crates/horizon-world/src/datafix/flat_tables.rs",
-                  "crates/horizon-world/src/datafix/block_state_data.txt"}
+RETIRED_TABLES = {"crates/sunrise-world/src/datafix/flat_tables.rs",
+                  "crates/sunrise-world/src/datafix/block_state_data.txt"}
 # A file with this many entries like those tables' holds a copy of them, whatever its name or format:
 # ItemStackTheFlatteningFix's `id.damage` keys, and BlockStateData's `id<TAB>name<TAB>` rows (raw or JSON-escaped).
 TABLE_FINGERPRINTS = [r"minecraft:[a-z_]+\.[0-9]+", "[0-9]+(\t|\\\\t)minecraft:[a-z_]+(\t|\\\\t)"]
@@ -37,9 +37,11 @@ def prohibited(path):
     # Original JDK-only tools are an exact allowlist; recovered game Java stays private.
     if path in ORIGINAL_JDK_TOOLS:
         return False
-    # Original Horizon mod sources may also be tracked.
-    if parsed.suffix == ".java" and path.startswith(("mods/horizon/src/", "mods/horizon-lab/src/")):
-        return not ("/dev/horizonlab/" in path)
+    # Original Sunrise mod sources may also be tracked.
+    # History keeps the paths from before the Sunrise rename (mods/horizon, dev.horizonlab).
+    if parsed.suffix == ".java" and path.startswith(("mods/sunrise/src/", "mods/sunrise-lab/src/",
+                                                     "mods/horizon/src/", "mods/horizon-lab/src/")):
+        return not ("/dev/sunriselab/" in path or "/dev/horizonlab/" in path)
     return (
         bool(parsed.parts and parsed.parts[0] in PRIVATE_ROOTS)
         or parsed.suffix.lower() in PRIVATE_EXTENSIONS
@@ -104,7 +106,7 @@ def main():
     rejected = sorted(path for path in set(paths_in_repository(history, revisions)) if path and prohibited(path))
     tables = [] if history else sorted(copied_tables())
     if tables:
-        print("Vanilla's data fixer tables come from the player's jar (horizon-prepare), not from Git:",
+        print("Vanilla's data fixer tables come from the player's jar (sunrise-prepare), not from Git:",
               file=sys.stderr)
         for path in tables:
             print(f"  {path}", file=sys.stderr)
