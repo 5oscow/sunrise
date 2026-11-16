@@ -429,7 +429,8 @@ impl Game<'_> {
                 })
                 .unwrap_or(false);
         }
-        let Some(vehicle_id) = self.native_riding_preconditions(rider, vehicle, force, onto_player) else {
+        let Some(vehicle_id) = self.native_riding_preconditions(rider, vehicle, force, onto_player)
+        else {
             return false;
         };
         let previous_vehicle = self.native_vehicle_id(rider);

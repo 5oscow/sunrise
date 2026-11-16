@@ -563,7 +563,11 @@ impl Game<'_> {
         {
             // Another player: the top of its box for the pose its server synced.
             let attachment = if &*v.kind.id == "minecraft:player" {
-                [0.0, player_box_top(v.extra.synced_pose, riders::scale(v)), 0.0]
+                [
+                    0.0,
+                    player_box_top(v.extra.synced_pose, riders::scale(v)),
+                    0.0,
+                ]
             } else {
                 riders::passenger_attachment(v)
             };
@@ -775,8 +779,16 @@ mod player_seat_tests {
         assert_eq!(super::player_box_top(3, 1.0), 0.6000000238418579);
         assert_eq!(super::player_box_top(1, 1.0), 0.6000000238418579, "gliding");
         assert_eq!(super::player_box_top(4, 1.0), 0.6000000238418579, "riptide");
-        assert_eq!(super::player_box_top(2, 1.0), 0.20000000298023224, "sleeping");
-        assert_eq!(super::player_box_top(12, 1.0), 1.7999999523162842, "a pose with no box stands");
+        assert_eq!(
+            super::player_box_top(2, 1.0),
+            0.20000000298023224,
+            "sleeping"
+        );
+        assert_eq!(
+            super::player_box_top(12, 1.0),
+            1.7999999523162842,
+            "a pose with no box stands"
+        );
         assert_eq!(super::player_box_top(5, 2.0), 3.0, "scaled with the player");
     }
 }
