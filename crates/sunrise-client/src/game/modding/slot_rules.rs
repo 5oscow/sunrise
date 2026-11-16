@@ -97,9 +97,16 @@ impl Game<'_> {
         menu: &'static ModMenuType,
         slot: usize,
         stack: &ItemStack,
+        pos: [i32; 3],
+        items: &[Option<ItemStack>],
     ) -> (bool, Asked) {
         let mut view = Menu::new(Kind::Mod(menu));
         view.set_registry_id(Some(menu.id));
+        view.set_block_pos(Some(pos));
+        view.load_container(&self.menu_env(), items);
+        for (i, held) in self.inventory.iter().enumerate() {
+            view.set_player_item(i, held.clone());
+        }
         view.load_slot(slot, Some(stack.clone()));
         view.ask_pickup(&self.menu_env(), slot)
     }

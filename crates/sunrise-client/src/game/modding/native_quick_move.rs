@@ -211,7 +211,7 @@ impl Game<'_> {
         // refuses it with the same answer.
         let (gives, asked) = match menu_type {
             Some(t) if mod_api::__private::has_part_hook(mod_api::HookId::MenuQuickMove) => {
-                self.mod_menu_slot_gives(t, slot, &stack)
+                self.mod_menu_slot_gives(t, slot, &stack, [pos.0, pos.1, pos.2], &m.items)
             }
             _ => (true, Asked::default()),
         };

@@ -64,6 +64,7 @@ pub trait Hooks {
         stack: &ItemStack,
         context: &MenuSlotContext,
         may_place: &mut bool,
+        may_pickup: &mut bool,
         max_stack: &mut u32,
     );
 }
