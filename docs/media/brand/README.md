@@ -1,9 +1,7 @@
 # Sunrise's mark and icons
 
-**The mark.** An H whose crossbar is the sunrise: the line runs edge to edge in Sunrise's violet,
-the stems above it in full strength and their reflection below at a third. It is drawn on whole
-units of a 16-unit grid, so it is sharp at 16 px and holds at 1024 px. `docs/design-system.md`
-places it in the design system; `candidates/` keeps the two alternatives that were shown with it.
+**The mark.** A pixel-art sunrise on a dark tile, the website's icon: rays, the sun's dome and the horizon
+on whole units of a 16-unit grid, drawn with crisp edges, so it is sharp at 16 px and holds at 1024 px.
 
 ## Masters (edit these)
 
@@ -17,7 +15,7 @@ places it in the design system; `candidates/` keeps the two alternatives that we
 
 ## Generated (don't edit)
 
-`cargo run -p xtask -- icons` (needs `rsvg-convert` from librsvg) renders the masters into:
+`python3 tools/render_brand_icons.py` renders `icon.svg` pixel-exact (nearest neighbour) into:
 
 | Output | Used by |
 |--------|---------|
