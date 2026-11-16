@@ -15,6 +15,7 @@ pub trait Hooks {
     /// Diverges from upstream: new hook.
     #[hook(
         side = "server",
+        version = 2,
         contract = "replace",
         out = "adjacent",
         scope = "block",
