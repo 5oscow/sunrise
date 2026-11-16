@@ -1769,7 +1769,7 @@ mod tests {
             .append(Text::colored("] ", DARK_GRAY));
         let line = line.slice(0, 3);
         assert_eq!(line.spans[1].style.inline_object, Some(object));
-        assert_eq!(line.plain(), "[H]");
+        assert_eq!(line.plain(), "[*]");
     }
     #[test]
     fn appending_builds_the_same_tree_in_linear_time() {
