@@ -489,11 +489,7 @@ mod tests {
         }
     }
 
-    const NO_PACK: FrameRequest = FrameRequest {
-        linear_pack: false,
-        linear_blend: false,
-        hdr_float: true,
-    };
+    const NO_PACK: FrameRequest = FrameRequest::new().with_hdr_float(true);
     fn on() -> Graphics {
         Graphics {
             hdr: HdrMode::On,
