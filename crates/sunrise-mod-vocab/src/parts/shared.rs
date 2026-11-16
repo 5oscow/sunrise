@@ -113,6 +113,8 @@ pub struct Parts {
     pub(crate) payloads: Option<Arc<crate::parts::payloads::Payloads>>,
     /// Only the parts that override each scoped hook, resolved at load or reload.
     pub(crate) hooks: Vec<Option<HookParts>>,
+    /// Who listens, as plain bits derived from `hooks` when the table is resolved.
+    pub(crate) listens: Arc<ListenIndex>,
 }
 
 // no wire: process-local registration and dispatch storage contains trait objects and owning-mod identities.
@@ -456,6 +458,7 @@ pub fn prepare_parts(
             })
             .collect::<Result<_, _>>()?;
     }
+    parts.listens = Arc::new(ListenIndex::of(&parts.hooks));
     Ok(Some(parts))
 }
 

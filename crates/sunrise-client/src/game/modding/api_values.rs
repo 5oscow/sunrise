@@ -4,6 +4,8 @@
 #[path = "api_values/ingredient.rs"]
 mod ingredient_values;
 use mod_api::item::item_stack::{ItemStack as ApiStack, StackWriteError};
+use std::sync::Arc;
+use sunrise_client::parallel::{ListenSnapshot, TickThread};
 use sunrise_core::nbt::{Compound, JavaString, Tag};
 use sunrise_items::items::{ItemStack as EngineStack, Items};
 #[path = "api_values/aggregates.rs"]
@@ -87,7 +89,34 @@ pub(crate) fn behavior_block(
 }
 pub(crate) use super::native_ground::alter_ground;
 pub(in crate::game) use super::native_worldgen::prepare as prepare_block_states;
-pub(in crate::game) use block_state::install as install_block_states;
+
+/// Publish the block state index prepared for this game. Between a tick's phases only: the
+/// token is the tick thread's, which a phase's work can't take or capture.
+pub(in crate::game) fn install_block_states(_tick: &TickThread, prepared: Arc<block_state::Index>) {
+    block_state::install(prepared);
+}
+
+/// Publish the parts table prepared for this game, and with it its listen index. Between a tick's
+/// phases only, like [`install_block_states`]: a phase keeps the `ListenSnapshot` it captured.
+pub(in crate::game) fn install_resolved_parts(
+    _tick: &TickThread,
+    parts: Option<mod_api::Parts>,
+) {
+    mod_api::__private::install_resolved_parts(parts);
+}
+
+/// Who listens, as the tick thread holds it now, for a phase view to keep: None before this
+/// game's block states are bound.
+// The first phase whose view tells who listens is its first non-test caller.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(in crate::game) fn listen_snapshot(tick: &TickThread) -> Option<ListenSnapshot> {
+    let index = block_state::current().ok()?;
+    Some(ListenSnapshot::capture(
+        tick,
+        mod_api::__private::game_listen_index(),
+        index.blocks(),
+    ))
+}
 #[path = "api_values/inside_write.rs"]
 mod inside_write;
 #[path = "api_values/landing_write.rs"]
@@ -133,6 +162,8 @@ pub(in crate::game) fn resolve_block_definitions(
         mod_platform::__private::part_tests::install_parts_fixture(&[])
             .map_err(|errors| errors.join("\n"))?;
     }
+    // A load entry point, not a phase's: the mint refuses a worker by name.
+    let _tick = TickThread::mint();
     block_state::clear();
     if mod_api::__private::block_definitions().is_some() {
         return bind_worker_blocks(registry);

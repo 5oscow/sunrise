@@ -25,6 +25,12 @@ pub mod __private {
     pub fn explosion_resistance_key_pure(_: crate::BlockKey) -> bool {
         true
     }
+    pub fn scoped_state_listens(_: crate::HookId, _: u32) -> Option<bool> {
+        None
+    }
+    pub fn scoped_explosion_resistance_pure(_: u32) -> Option<bool> {
+        None
+    }
     pub fn has_scoped_hook(_: crate::HookId) -> bool {
         true
     }
