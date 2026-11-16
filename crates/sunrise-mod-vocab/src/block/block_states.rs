@@ -125,6 +125,13 @@ impl BlockStates<'_> {
     pub fn destroy_speed(&self, state: BlockState) -> Option<f32> {
         self.backend?.block_state_destroy_speed(state)
     }
+    /// Whether `state` drops its loot only when mined with a correct tool
+    /// (`BlockState.requiresCorrectToolForDrops()`): stone and ores yes, dirt and logs no. Which
+    /// tool is correct at a position is [`LevelRef::block_correct_tool`](crate::LevelRef::block_correct_tool).
+    /// None as for `replaceable`.
+    pub fn requires_correct_tool(&self, state: BlockState) -> Option<bool> {
+        self.backend?.block_state_requires_correct_tool(state)
+    }
     /// The explosion resistance `state`'s block declares (`Block.getExplosionResistance`): stone
     /// 6, obsidian 1200, bedrock 3,600,000. What a blast meets at a position, parts and fluids
     /// included, is [`LevelRef::explosion_resistance`](crate::LevelRef::explosion_resistance).

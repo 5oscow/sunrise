@@ -6,6 +6,7 @@ A `BlockState` is an API-owned value pairing a `BlockKey` with a block-local can
 |---|---|
 | `replaceable(state) -> Option<bool>` | `BlockState.canBeReplaced()` |
 | `destroy_speed(state) -> Option<f32>` | `BlockBehaviour.Properties.destroyTime` (`getDestroySpeed`): stone 1.5, -1 unbreakable |
+| `requires_correct_tool(state) -> Option<bool>` | `BlockState.requiresCorrectToolForDrops()`: stone and ores true, dirt and logs false; which tool is correct is `LevelRef::block_correct_tool` |
 | `sound(state) -> Option<BlockSoundType>` | `BlockState.getSoundType()`: volume, pitch and the break, step, place, hit and fall events |
 | `has_block_entity(state) -> Option<bool>` | `BlockState.hasBlockEntity()` |
 | `map_color(state) -> Option<u8>` | `BlockState.getMapColor`: the `MapColor.id` a map item colours a column by, 0 for none |

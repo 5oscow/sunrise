@@ -27,6 +27,16 @@ not include Efficiency, player attributes, effects, fluid/airborne penalties or
 block hardness. Bare hands return `1.0`; an unavailable position returns `None`.
 This read takes an immutable host and does not modify blocks or tools.
 
+`level.block_correct_tool(host, pos, tool)` answers whether the tool is correct for
+that block (`ItemStack.isCorrectToolForDrops`): a `minecraft:tool` component's rule
+for the block first, else the item's own tool rules, so a wooden pickaxe is correct
+for stone but not obsidian, and a bare hand (`None`) is correct for nothing. Whether
+the block needs a correct tool at all is the state fact `requires_correct_tool`
+([block state facts](block-state-facts.md)): a block that doesn't (dirt, logs) drops
+its loot with any tool. Together they are vanilla's `Player.hasCorrectToolForDrops`
+before the `can_harvest_block` and `player_harvest_check` hooks, which this read does
+not ask. An unavailable position returns `None`.
+
 ## Biome writes in transactions
 
 `LevelRef::set_biome` changes a 4x4x4 cell. Reads inside the transaction see the tentative
