@@ -51,7 +51,7 @@ and the state it proposes against do not depend on the lane that takes it, and t
 - fewer than 512 candidate chunks (about two players' worth, a player's square is 289): a pass over fewer costs about
   half a millisecond, which handing out the work and building a level for each part is close to;
 - a native mod listens to spawns (its hooks run on the server thread only);
-- `SUNRISE_TEST_SEEDS` replays a seed sequence per thread (`random_source::repeating_per_thread`).
+- `SUNRISE_TEST_SEEDS` replays a seed sequence per thread.
 
 `verify` (`SUNRISE_PARALLEL_TICK=verify`) cannot check this phase against the serial one: the draws differ by design.
 
