@@ -23,7 +23,7 @@ use sunrise_world::level::PlayerContext;
 
 /// `WindCharge.RADIUS` and the knockback multiplier of its damage calculator.
 const PLAYER_RADIUS: f32 = 1.2;
-const PLAYER_KNOCKBACK: f32 = 1.22;
+pub(super) const PLAYER_KNOCKBACK: f32 = 1.22;
 /// `BreezeWindCharge.RADIUS`.
 const BREEZE_RADIUS: f32 = 3.0;
 
