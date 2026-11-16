@@ -26,6 +26,16 @@ pub trait ClientRenderClientHost {
     #[access(PublishedResources)]
     fn instance_group_destroy(&self, group: InstanceGroupRef) -> Result<(), GroupError>;
     /// Side: client.
+    /// `ItemStackRenderState.usesBlockLight` of `stack`'s model resolved for `context`
+    /// (`ItemModelResolver.updateForTopItem`, no owner or level): whether the model is lit as a
+    /// block is, from the side (`gui_light: side`, vanilla's 3D item models), where a flat item
+    /// is lit from the front. It is what the 1.21.3 `BakedModel.isGui3d` became: a mod uses it to
+    /// draw a stack as a flat sprite or as a 3D model. False for an
+    /// empty or invalid stack, and for a model that draws nothing. Reads the model the client
+    /// resolved from its resource packs.
+    #[access(ClientSetup)]
+    fn item_uses_block_light(&self, stack: &ItemStack, context: ItemDisplayContext) -> bool;
+    /// Side: client.
     /// Asks `block_render_visibility` again for every state and, when the answers differ
     /// from those in use, remeshes every loaded section with them. Call it when your answer changes (a toggle key, a scan
     /// finishing) and once when the player joins, not every frame: a rebuild takes the workers a
