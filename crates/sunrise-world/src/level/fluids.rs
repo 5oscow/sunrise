@@ -255,6 +255,42 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             None => (-1, VoxelShape::empty_ref()),
         }
     }
+    /// `!merged_face_occludes` for two shapes of which one is published, remembered by the
+    /// shapes' identity: the union it builds allocates, and a spread asks again and again.
+    fn published_passage(
+        &self,
+        source: VoxelShape,
+        target: VoxelShape,
+        direction: Direction,
+    ) -> bool {
+        const LIMIT: usize = 64;
+        let cached = self
+            .b
+            .published_occlusion_cache
+            .read()
+            .ok()
+            .and_then(|cache| {
+                cache
+                    .iter()
+                    .find(|(s, t, d, _)| {
+                        *d == direction as u8
+                            && s.same_identity(&source)
+                            && t.same_identity(&target)
+                    })
+                    .map(|entry| entry.3)
+            });
+        if let Some(result) = cached {
+            return result;
+        }
+        let result = !merged_face_occludes(&source, &target, direction);
+        if let Ok(mut cache) = self.b.published_occlusion_cache.write() {
+            if cache.len() >= LIMIT {
+                cache.clear();
+            }
+            cache.push((source, target, direction as u8, result));
+        }
+        result
+    }
     /// `FlowingFluid.canPassThroughWall` from the cell at `source_pos` toward `direction`: each
     /// cell's collision shape at its position, so a block entity's published shape stands over
     /// the state's. A state whose block publishes nothing reads the state-only path below.
@@ -279,7 +315,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             if target_shape.is_block() || source_shape.is_block() {
                 return false;
             }
-            return !merged_face_occludes(&source_shape, &target_shape, direction);
+            return self.published_passage(source_shape, target_shape, direction);
         }
         // The shapes are compared by identity and borrowed, never cloned: a
         // clone of the shared block or empty shape is atomic reference counts

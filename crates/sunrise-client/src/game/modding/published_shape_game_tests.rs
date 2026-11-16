@@ -377,3 +377,44 @@ fn a_published_shape_stands_over_a_dynamic_template_and_takes_its_offset() {
         assert!(offset_seen, "some column's outline is offset");
     });
 }
+
+/// A publish that a transaction aborts puts the old shape back and tells the neighbours, as the
+/// publish did: the water beside the block is scheduled again to read the restored shape.
+#[test]
+#[ignore = "daily"]
+fn an_aborted_publish_restores_the_shape_and_notifies_the_neighbours() {
+    if fresh("an_aborted_publish_restores_the_shape_and_notifies_the_neighbours") {
+        return;
+    }
+    with_bus(|game| {
+        let pos = [2, 64, 2];
+        let state = game.pack.assets.registry.default_state(BUS).unwrap();
+        let level = game.level(game.dim.id()).unwrap();
+        publish(game, pos, shapes(&[HALF], &[SMALL]));
+        let water = game.pack.assets.registry.default_state("minecraft:water").unwrap();
+        assert!(
+            game.level_set_block(level, [3, 64, 2], water, BlockUpdateFlags::NONE)
+                .unwrap()
+        );
+        let entity = game.block_entity(level, pos).unwrap();
+        let abort = game.transaction_open();
+        assert_eq!(
+            game.block_entity_set_shapes(entity, Some(shapes(&[LOW], &[TALL]))),
+            Ok(true)
+        );
+        // What the publish scheduled is dropped, so only the abort's notice can schedule again.
+        let chunk = sunrise_core::position::ChunkPos::new(0, 0);
+        game.block_ticks.remove_chunk(chunk);
+        game.block_ticks.add_empty_chunk(chunk).unwrap();
+        assert_eq!(game.block_ticks.fluids.count(), 0);
+        game.transaction_close(&abort, false);
+        assert_eq!(
+            game.level_block_shape(level, state, pos, BlockShapeKind::Collision),
+            Some(vec![HALF])
+        );
+        assert!(
+            game.block_ticks.fluids.count() > 0,
+            "the aborted publish told the water beside it"
+        );
+    });
+}
