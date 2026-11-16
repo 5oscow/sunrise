@@ -94,8 +94,6 @@ impl<'a> PackOverlay<'a> {
     }
 }
 
-
-
 /// The tool a loot context names: its item id and enchantments.
 #[derive(Clone)]
 pub struct LootTool {
@@ -105,7 +103,7 @@ pub struct LootTool {
 
 /// What a mod's own loot kinds see of the roll: the entity, the damage,
 /// the player who killed it, the tool, the block, the luck, the biome,
-/// where the roll happens, and a seed from the roll's random. The tool and
+/// where the roll happens. Registered types borrow the evaluator's actual random. The tool and
 /// block are filled by the items engine (block drops, entity drops,
 /// loot_table, interact_loot); the entity, damage and player by the main
 /// loot engine; each is None in the other. A table without a mod's kinds
@@ -133,8 +131,7 @@ pub struct LootContext<'a> {
     pub luck: f32,
     /// The biome the roll is in, if any.
     pub biome: Option<&'a str>,
-    /// A seed from the roll's random, for a mod's own draws. Drawn only
-    /// when a mod's kind is in the table.
+    /// Zero for registered codecs: their scoped context lends the actual roll random.
     pub seed: i64,
     /// Where the roll happens: the origin, the block entity and the level,
     /// when the game rolled the table at a place (a broken block's drops,
@@ -895,30 +892,6 @@ impl LootData {
         &self.tables
     }
 
-    /// Apply native load hooks to a private server snapshot, leaving shared raw tables unchanged.
-    /// `context` is the owning server data load's. Invalid holder-set objects refuse
-    /// the replacement snapshot with a table and field-qualified error.
-    pub fn apply_native_table_loads(&mut self, context: &LoadContext) -> io::Result<()> {
-        let mut ids: Vec<_> = self.tables.0.keys().collect();
-        ids.sort();
-        self.tables = Arc::new(
-            ids.into_iter()
-                .map(|id| {
-                    let mut table = self.tables[id.as_str()].clone();
-                    native_loot_table_load(context, id, &mut table);
-                    self.holder_sets.walk(
-                        &format!("native loot_table {id}"),
-                        &mut table,
-                        &self.tags,
-                    )?;
-                    Ok((id.clone(), table))
-                })
-                .collect::<io::Result<LootTables>>()?,
-        );
-        self.prepare_types()?;
-        Ok(())
-    }
-
     pub fn has_table(&self, table: &str) -> bool {
         self.tables.contains_key(table)
     }
@@ -1440,8 +1413,7 @@ impl<R: RandomSource> Context<'_, R> {
                             .any(|b| b == biome),
                     }
                 }
-                // A mod's own kind: the hook answers; a bare type name is
-                // minecraft's own and an unknown one fails.
+                // A validated registered condition runs in the current roll's order.
                 k if k.contains(':') && !k.starts_with("minecraft:") => {
                     self.registered_condition(k, c)
                 }
@@ -1948,7 +1920,7 @@ impl<R: RandomSource> Context<'_, R> {
                     stack.components.push((id.clone(), tag));
                 }
             }
-            // A mod's own kind: the hook changes the stack.
+            // A validated registered function transforms only this stack.
             k if k.contains(':') && !k.starts_with("minecraft:") => {
                 stack = self.registered_function(k, f, stack);
             }
@@ -3146,11 +3118,10 @@ mod native_kinds_tests {
         assert_eq!(items[0].count, 1);
     }
 
-    /// A table without a mod's kind doesn't shift the random; one with a
-    /// kind draws exactly one `next_long`; the same seed gives the same
-    /// result.
+    /// Neither a vanilla table nor an unregistered inline fixture consumes random.
+    /// Data-file unknown types are refused before rolling; no replacement seed is drawn.
     #[test]
-    fn a_mod_kind_draws_exactly_one_long_and_a_vanilla_table_none() {
+    fn unregistered_inline_types_draw_no_replacement_seed() {
         // A vanilla table: the random is untouched.
         let vanilla = table(
             "seed_vanilla",
@@ -3163,25 +3134,26 @@ mod native_kinds_tests {
         let got: Vec<_> = (0..5).map(|_| r1.next_long()).collect();
         assert_eq!(got, expected, "vanilla table shifted the random");
 
-        // A mod kind: exactly one next_long is drawn.
-        let modded = table(
-            "seed_mod",
+        let modded: Value = serde_json::from_str(
             r#"{"pools":[{"rolls":1,"entries":[{"type":"minecraft:item","name":"minecraft:stone"}],
                 "modifier":[{"type":"lootmod:x"}]}]}"#,
-        );
+        )
+        .unwrap();
         let mut r3 = sunrise_core::random::LegacyRandom::new(100);
         let mut r4 = sunrise_core::random::LegacyRandom::new(100);
-        let _ = modded.roll("minecraft:test", &mut r3, 0.0, None, None);
-        let _ = r4.next_long(); // the one draw
+        let _ = vanilla.roll_inline(&modded, &mut r3);
         let after_mod: Vec<_> = (0..5).map(|_| r4.next_long()).collect();
         let after_run: Vec<_> = (0..5).map(|_| r3.next_long()).collect();
-        assert_eq!(after_run, after_mod, "mod table drew != 1 next_long");
+        assert_eq!(
+            after_run, after_mod,
+            "unregistered inline type consumed random"
+        );
 
         // Same seed, same result.
         let mut r5 = sunrise_core::random::LegacyRandom::new(42);
-        let a = modded.roll("minecraft:test", &mut r5, 0.0, None, None);
+        let a = vanilla.roll_inline(&modded, &mut r5);
         let mut r6 = sunrise_core::random::LegacyRandom::new(42);
-        let b = modded.roll("minecraft:test", &mut r6, 0.0, None, None);
+        let b = vanilla.roll_inline(&modded, &mut r6);
         assert_eq!(a, b, "same seed, different result");
     }
 

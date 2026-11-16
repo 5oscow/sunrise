@@ -1,8 +1,5 @@
 //! Callbacks into the executable for data-loading native trait mods.
-use crate::{
-    loot::{LootContext, LootStack, LootTags},
-    native_load_context::LoadContext,
-};
+use crate::{loot::LootTags, native_load_context::LoadContext};
 use serde_json::{Map, Value};
 use std::sync::OnceLock;
 
@@ -36,8 +33,6 @@ pub(crate) fn modify_default_components(
         (hooks.modify_default_components)(context, item, components);
     }
 }
-
-
 
 pub(crate) fn loot_ability(tool: &crate::loot::LootStack, ability: &str, holds: &mut bool) {
     if let Some(hooks) = HOOKS.get() {

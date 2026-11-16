@@ -2849,9 +2849,9 @@ fn apply_loot(
     stack.tidy();
 }
 
-/// `native_invoke_loot_function` with the items engine's stack: the stack as the
-/// loot engine's, the hook, and back what it changed. `hook` is the hook
-/// point (`sunrise_world::loot::native_invoke_loot_function`); a test passes its own.
+/// Apply a registered function using the items engine's existing component write path.
+/// Convert the input once and apply only the callback's accepted candidate; tests can
+/// supply the transformation without installing a process-wide registry.
 /// `items` holds the prototypes a removal is checked against.
 fn mod_function(
     kind: &str,
@@ -4512,11 +4512,10 @@ mod tests {
         assert_eq!(stack, before);
     }
 
-    /// The items engine reaches the function hook: a pool whose function kind
-    /// is a mod's draws the hook's one `next_long` where a vanilla pool draws
-    /// none. The hook is unclaimed here, so the drop keeps its count.
+    /// An undeclared type on a raw fixture path does not convert or advance random.
+    /// Loaded data refuses such an entry before any evaluation can reach it.
     #[test]
-    fn a_mod_function_kind_reaches_the_items_engines_roll() {
+    fn an_unregistered_function_consumes_no_random() {
         let items = Items::for_tests(HashMap::new());
         let props = sunrise_world::chunk::BlockProperties::new();
         let vanilla = json!({"pools":[{"rolls":1,"entries":[
@@ -4534,10 +4533,9 @@ mod tests {
         let mut c = LegacyRandom::new(100);
         let mut d = LegacyRandom::new(100);
         let drops = ctx(&items, None, &props, "minecraft:stone").evaluate(&modded, &mut c);
-        let _ = d.next_long(); // the hook's seed
         let expected: Vec<i64> = (0..5).map(|_| d.next_long()).collect();
         let got: Vec<i64> = (0..5).map(|_| c.next_long()).collect();
-        assert_eq!(got, expected, "the mod function did not draw its seed");
+        assert_eq!(got, expected, "an unregistered function advanced random");
         assert_eq!(drops.len(), 1);
         assert_eq!(drops[0].count, 1);
     }

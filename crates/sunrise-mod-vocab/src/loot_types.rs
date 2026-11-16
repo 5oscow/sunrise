@@ -8,6 +8,7 @@ pub(crate) mod owned;
 /// An inline loot entry: `type` and the codec's fields share one JSON object.
 /// Wire uses the existing JSON tree encoding (length-prefixed UTF-8 JSON).
 #[derive(Clone, Debug, sunrise_mod_api_macros::Wire)]
+// exhaustive: its field is private; callers construct it through the object-checking constructor.
 pub struct LootEntryData {
     value: serde_json::Value,
 }

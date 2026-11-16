@@ -1,6 +1,9 @@
 // game-module-visibility: pub(crate)
 //! Direct, owner-scoped adapters for the two loot map-codec registries.
 use super::api_values::{TryIntoApi, TryIntoEngine};
+#[cfg(test)]
+#[path = "loot_types/tests.rs"]
+mod tests;
 use mod_api::{LootEntryData, ModLootCondition, ModLootFunction};
 use std::{collections::HashMap, sync::Arc};
 use sunrise_world::loot::{

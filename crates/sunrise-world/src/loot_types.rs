@@ -5,6 +5,9 @@ use serde_json::Value;
 mod normalize;
 #[path = "loot_types/parameters.rs"]
 mod parameters;
+#[cfg(test)]
+#[path = "loot_types/tests.rs"]
+mod tests;
 use std::{
     collections::{HashMap, HashSet},
     io,
@@ -154,7 +157,7 @@ impl Types {
             allowed: None,
         };
         for (id, data) in tables {
-            walker.table(&data, &format!("loot_table {id} $"))?;
+            walker.table(data, &format!("loot_table {id} $"))?;
         }
         walker.allowed = None;
         for (id, data) in predicates {
@@ -299,10 +302,9 @@ impl Walker<'_> {
             }
         }
         if function {
-            if builtin(kind, true) || self.types.conditional(kind) {
-                if let Some(condition) = data.get("condition") {
-                    self.entry(condition, false, &format!("{path}.condition"))?;
-                }
+            if (builtin(kind, true) || self.types.conditional(kind))
+                && let Some(condition) = data.get("condition") {
+                self.entry(condition, false, &format!("{path}.condition"))?;
             }
             match kind {
                 "minecraft:sequence" => self.list(data, "functions", true, path)?,

@@ -2938,10 +2938,10 @@ mod game_rule_values;
 mod item_properties;
 #[path = "api_values/loot_values.rs"]
 pub(crate) mod loot_values;
-#[path = "api_values/particle_values.rs"]
-mod particle_values;
 #[path = "api_values/package_snapshot.rs"]
 mod package_snapshot;
+#[path = "api_values/particle_values.rs"]
+mod particle_values;
 pub(in crate::game) use package_snapshot::install_packages;
 #[path = "api_values/phase_values.rs"]
 mod phase_values;

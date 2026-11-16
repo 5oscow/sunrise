@@ -4802,7 +4802,6 @@ mod tests {
         }
     }
 
-
     #[test]
     fn native_ingredient_stays_hookable() {
         let source = include_str!("../../crafting/native_hooks.rs").replace("\r\n", "\n");
