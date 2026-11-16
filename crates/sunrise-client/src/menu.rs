@@ -10,6 +10,7 @@
 //! classes.
 #[path = "menu/crafting_take.rs"]
 mod crafting_take;
+mod step;
 use crate::{
     banner::{self, Banners},
     brewing::Brewing,
@@ -17,6 +18,7 @@ use crate::{
     items::{ItemStack, Items},
 };
 pub use mod_api::item::menu::{LogicalSide, MenuButtonContext};
+pub use step::{MenuStep, TakeEvent};
 #[cfg(test)]
 use sunrise_world::native_load_context::{DataLoadOrigin, LoadContext, LoadInputs};
 use sunrise_world::native_load_context::{LoopContext, LoopSide};
@@ -2058,13 +2060,28 @@ impl Menu {
         amount: u32,
         max_amount: u32,
     ) -> Option<ItemStack> {
+        self.safe_take_step(env, s, amount, max_amount)
+            .finish(self, env)
+    }
+
+    fn safe_take_step(
+        &mut self,
+        env: &Env,
+        s: usize,
+        amount: u32,
+        max_amount: u32,
+    ) -> MenuStep<Option<ItemStack>> {
         self.touch();
-        let mut result = self.try_remove(env, s, amount, max_amount)?;
-        self.on_take(env, s, &mut result);
-        if self.state.slots[s].role == Role::CartoResult {
-            Self::map_crafted(env.maps, &mut result);
-        }
-        Some(result)
+        let Some(result) = self.try_remove(env, s, amount, max_amount) else {
+            return MenuStep::Done(None);
+        };
+        self.on_take_step(env, s, result)
+            .then(self, env, move |menu, env, mut result| {
+                if menu.state.slots[s].role == Role::CartoResult {
+                    Self::map_crafted(env.maps, &mut result);
+                }
+                MenuStep::Done(Some(result))
+            })
     }
 
     /// `Slot.safeInsert`: puts up to `amount` of `input` into the slot.

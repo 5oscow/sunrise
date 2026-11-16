@@ -43,7 +43,7 @@ path = Path('crates/sunrise-client/src/menu/crafting_take.rs')
 source = path.read_text()
 old = 'impl Menu {\n'
 new = '''impl Menu {
-    fn on_take_step(&mut self, env: &Env, s: usize, mut taken: ItemStack) -> MenuStep<ItemStack> {
+    pub(super) fn on_take_step(&mut self, env: &Env, s: usize, mut taken: ItemStack) -> MenuStep<ItemStack> {
         self.on_take(env, s, &mut taken);
         MenuStep::Done(taken)
     }

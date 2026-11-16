@@ -1,6 +1,16 @@
 //! Result-slot take handling, including pre-take revalidation and remainders.
 use super::*;
 impl Menu {
+    pub(super) fn on_take_step(
+        &mut self,
+        env: &Env,
+        s: usize,
+        mut taken: ItemStack,
+    ) -> MenuStep<ItemStack> {
+        self.on_take(env, s, &mut taken);
+        MenuStep::Done(taken)
+    }
+
     pub(super) fn crafting_result_is_current(&self, env: &Env, slot: usize) -> bool {
         if !env.recipes.has_mod_crafting() {
             return true;
