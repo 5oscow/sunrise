@@ -8,6 +8,8 @@
 # another repository or broken costs nothing but the saving: it is dropped and the fetch goes on without it.
 set -uo pipefail
 step=${FETCH_STEP:?FETCH_STEP names the step in errors}
+# Seconds from this script's start that the mirror's upkeep may use: the steps' timeout-minutes is 11.
+UPKEEP_BUDGET=${UPKEEP_BUDGET:-600}
 [ "$(git rev-parse --is-shallow-repository)" = false ] && exit 0
 head=$(git rev-parse HEAD)
 alternates=$(git rev-parse --git-path objects/info/alternates)
@@ -23,12 +25,28 @@ for attempt in 1 2; do
   if timeout --kill-after=10s 300s git fetch -q --no-tags --unshallow origin "$head"; then
     if [ -n "$mirror" ]; then
       # Keep this head for the next job; a failure only loses the saving. A mirror this checkout borrows from stays
-      # for the job's later steps, and the next job, finding it unusable, borrows nothing and drops it here.
-      { git init -q --bare "$mirror" &&
-        timeout --kill-after=10s 300s git -C "$mirror" fetch -q --no-tags "$(git rev-parse --show-toplevel)" \
-          "+$head:refs/heads/ci-head" &&
-        git -C "$mirror" -c gc.autoDetach=false gc --auto --quiet; } ||
-        { echo "$step: the slot's history mirror could not take this head."; [ -n "$borrowed" ] || rm -rf "$mirror"; }
+      # for the job's later steps, and the next job, finding it unusable, borrows nothing and drops it here. The
+      # upkeep gets only what is left of the step's 11 minutes, less a margin, so it never costs the job.
+      left=$((UPKEEP_BUDGET - SECONDS))
+      if [ "$left" -lt 15 ]; then
+        echo "$step: no time left to update the slot's history mirror."
+      else
+        git init -q --bare "$mirror" &&
+          timeout --kill-after=5s "${left}s" git -C "$mirror" fetch -q --no-tags "$(git rev-parse --show-toplevel)" \
+            "+$head:refs/heads/ci-head"
+        status=$?
+        if [ "$status" -eq 0 ]; then
+          # A repack cut short leaves the mirror as it was: packs and refs are written whole, then renamed.
+          left=$((UPKEEP_BUDGET - SECONDS))
+          [ "$left" -lt 15 ] || timeout --kill-after=5s "${left}s" git -C "$mirror" -c gc.autoDetach=false gc --auto \
+            --quiet || echo "$step: the slot's history mirror was not repacked this time."
+        elif [ "$status" -eq 124 ] || [ "$status" -eq 137 ]; then
+          echo "$step: out of time to update the slot's history mirror; the next job takes it from where it is."
+        else
+          echo "$step: the slot's history mirror could not take this head."
+          [ -n "$borrowed" ] || rm -rf "$mirror"
+        fi
+      fi
     fi
     exit 0
   fi

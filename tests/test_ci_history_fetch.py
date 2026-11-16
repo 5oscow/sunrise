@@ -107,6 +107,11 @@ class HistoryFetchTests(unittest.TestCase):
             self.assertEqual((second / ".git/objects/info/alternates").read_text(), f"{mirror}/objects\n")
             subprocess.run(["git", "fsck", "--connectivity-only"], cwd=second, **quiet)
             self.assertEqual(git("rev-parse", "refs/heads/ci-head", cwd=mirror), heads[5])
+            # With no time left in the step, the job still passes and the mirror stays where it was.
+            env["UPKEEP_BUDGET"] = "0"
+            job(heads[4], "late")
+            self.assertEqual(git("rev-parse", "refs/heads/ci-head", cwd=mirror), heads[5])
+            del env["UPKEEP_BUDGET"]
             # A mirror that no longer reads as a repository is not borrowed, and takes this job's head again.
             shutil.rmtree(mirror / "refs")
             third = job(heads[4], "third")
