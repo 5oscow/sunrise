@@ -30,7 +30,10 @@ fn gui_paint_refusals_round_trip_on_the_wire() {
     for refusal in refusals() {
         let mut out = Writer::new();
         out.put(&refusal);
-        assert_eq!(Reader::decode::<GuiPaintError>(out.bytes()).unwrap(), refusal);
+        assert_eq!(
+            Reader::decode::<GuiPaintError>(out.bytes()).unwrap(),
+            refusal
+        );
     }
 }
 
@@ -78,7 +81,9 @@ fn wire_loopback_a_guests_paint_gets_the_games_named_refusal_back() {
         scale: [2.0, 2.0],
         pivot: [28.0, 28.0],
     };
-    let answers: Vec<_> = (0..9).map(|_| guest::Guest.gui_paint(&[item.clone()])).collect();
+    let answers: Vec<_> = (0..9)
+        .map(|_| guest::Guest.gui_paint(&[item.clone()]))
+        .collect();
     guest::set_transport(None);
     drop(cx);
     let mut want: Vec<_> = refusals().into_iter().map(Err).collect();

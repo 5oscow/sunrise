@@ -3,10 +3,10 @@
 //! `itemDecorations`). A mod's buffer is checked first and refused whole with the op it could
 //! not draw.
 use super::Game;
+use mod_api::GuiPaintError;
 use sunrise_client::hud::HudBatch;
 use sunrise_client::hud_layout::{self, GuiDraw, GuiItems, Undrawable};
 use sunrise_client::items::ItemStack;
-use mod_api::GuiPaintError;
 
 /// The local player's hotbar slots (0-8) and off hand (40), drawn for `GuiDraw::Item`.
 pub(crate) struct HotbarItems<'a, 'g> {
@@ -58,7 +58,6 @@ impl Game<'_> {
         draws: &[GuiDraw],
     ) -> Result<(), GuiPaintError> {
         let mut items = HotbarItems { game: self };
-        hud_layout::paint_checked(batch, &self.gui.atlas, draws, &mut items)
-            .map_err(paint_error)
+        hud_layout::paint_checked(batch, &self.gui.atlas, draws, &mut items).map_err(paint_error)
     }
 }

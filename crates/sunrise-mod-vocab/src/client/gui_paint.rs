@@ -65,25 +65,40 @@ impl std::fmt::Display for GuiPaintError {
         match self {
             Self::Text(error) => write!(f, "gui_paint: text: {error}"),
             Self::ItemSlot { index, slot } => {
-                write!(f, "gui_paint: op {index}: Item of slot {slot}, not 0-8 or 40")
+                write!(
+                    f,
+                    "gui_paint: op {index}: Item of slot {slot}, not 0-8 or 40"
+                )
             }
             Self::ItemNotFinite { index } => {
                 write!(f, "gui_paint: op {index}: Item scale or pivot not finite")
             }
             Self::BlitTexture { index, texture } => {
-                write!(f, "gui_paint: op {index}: Blit of unknown texture {texture}")
+                write!(
+                    f,
+                    "gui_paint: op {index}: Blit of unknown texture {texture}"
+                )
             }
             Self::BlitSize { index } => {
-                write!(f, "gui_paint: op {index}: Blit texture size not positive or uv not finite")
+                write!(
+                    f,
+                    "gui_paint: op {index}: Blit texture size not positive or uv not finite"
+                )
             }
             Self::Sprite { index, sprite } => {
                 write!(f, "gui_paint: op {index}: unknown sprite {sprite}")
             }
             Self::SpriteRegion { index } => {
-                write!(f, "gui_paint: op {index}: Sprite region width or height not positive")
+                write!(
+                    f,
+                    "gui_paint: op {index}: Sprite region width or height not positive"
+                )
             }
             Self::SpriteBlend { index, blend } => {
-                write!(f, "gui_paint: op {index}: Sprite cannot draw with blend {blend:?}")
+                write!(
+                    f,
+                    "gui_paint: op {index}: Sprite cannot draw with blend {blend:?}"
+                )
             }
         }
     }

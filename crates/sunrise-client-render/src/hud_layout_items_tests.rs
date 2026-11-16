@@ -30,7 +30,14 @@ impl GuiItems for Items {
     fn decorations(&mut self, batch: &mut HudBatch, slot: u32, x: i32, y: i32) {
         self.calls.push(("decorations", slot, x, y, 0));
         let atlas = atlas();
-        batch.fill(&atlas, (x + 12) as f32, (y + 12) as f32, 4.0, 4.0, DECORATION + slot);
+        batch.fill(
+            &atlas,
+            (x + 12) as f32,
+            (y + 12) as f32,
+            4.0,
+            4.0,
+            DECORATION + slot,
+        );
     }
 }
 
@@ -75,9 +82,19 @@ fn blit(texture: &'static str, blend: Blend, tex: [i32; 2]) -> GuiDraw {
 
 /// The smallest and largest corner of the vertices in `color`.
 fn bounds(batch: &HudBatch, color: u32) -> [f32; 4] {
-    let mut b = [f32::INFINITY, f32::INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY];
+    let mut b = [
+        f32::INFINITY,
+        f32::INFINITY,
+        f32::NEG_INFINITY,
+        f32::NEG_INFINITY,
+    ];
     for v in batch.vertices.iter().filter(|v| v.color == color) {
-        b = [b[0].min(v.pos[0]), b[1].min(v.pos[1]), b[2].max(v.pos[0]), b[3].max(v.pos[1])];
+        b = [
+            b[0].min(v.pos[0]),
+            b[1].min(v.pos[1]),
+            b[2].max(v.pos[0]),
+            b[3].max(v.pos[1]),
+        ];
     }
     b
 }
@@ -88,7 +105,10 @@ fn an_item_is_scaled_about_its_pivot_and_its_decorations_are_not() {
     let mut batch = HudBatch::scratch([854, 480]);
     let mut items = Items::default();
     let draws = [item(0, 20, 20, [2.0, 2.0], [28.0, 28.0])];
-    assert_eq!(paint_checked(&mut batch, &atlas, &draws, &mut items), Ok(()));
+    assert_eq!(
+        paint_checked(&mut batch, &atlas, &draws, &mut items),
+        Ok(())
+    );
     assert_eq!(
         items.calls,
         [("item", 0, 20, 20, 7), ("decorations", 0, 20, 20, 0)]
@@ -108,7 +128,10 @@ fn items_follow_the_current_pose_and_every_hotbar_slot_and_the_off_hand_draw() {
         GuiDraw::Pop,
         item(40, 0, 0, [1.0, 1.0], [8.0, 12.0]),
     ];
-    assert_eq!(paint_checked(&mut batch, &atlas, &draws, &mut items), Ok(()));
+    assert_eq!(
+        paint_checked(&mut batch, &atlas, &draws, &mut items),
+        Ok(())
+    );
     assert_eq!(bounds(&batch, ITEM + 8), [100.0, 10.0, 116.0, 26.0]);
     assert_eq!(bounds(&batch, DECORATION + 8), [112.0, 22.0, 116.0, 26.0]);
     assert_eq!(bounds(&batch, ITEM + 40), [0.0, 0.0, 16.0, 16.0]);
@@ -162,15 +185,30 @@ fn an_op_the_paint_cannot_draw_refuses_the_buffer_and_draws_nothing_of_it() {
         color: 0xFFFF_FFFF,
     };
     let cases = [
-        (item(9, 0, 0, [1.0, 1.0], [0.0, 0.0]), Undrawable::ItemSlot(9)),
-        (item(41, 0, 0, [1.0, 1.0], [0.0, 0.0]), Undrawable::ItemSlot(41)),
-        (item(0, 0, 0, [f32::NAN, 1.0], [0.0, 0.0]), Undrawable::ItemNotFinite),
-        (item(0, 0, 0, [1.0, 1.0], [0.0, f32::INFINITY]), Undrawable::ItemNotFinite),
+        (
+            item(9, 0, 0, [1.0, 1.0], [0.0, 0.0]),
+            Undrawable::ItemSlot(9),
+        ),
+        (
+            item(41, 0, 0, [1.0, 1.0], [0.0, 0.0]),
+            Undrawable::ItemSlot(41),
+        ),
+        (
+            item(0, 0, 0, [f32::NAN, 1.0], [0.0, 0.0]),
+            Undrawable::ItemNotFinite,
+        ),
+        (
+            item(0, 0, 0, [1.0, 1.0], [0.0, f32::INFINITY]),
+            Undrawable::ItemNotFinite,
+        ),
         (
             blit("test:missing", Blend::Vignette, [8, 8]),
             Undrawable::BlitTexture("test:missing".into()),
         ),
-        (blit(MINIMAP_SPRITE, Blend::Textured, [0, 8]), Undrawable::BlitSize),
+        (
+            blit(MINIMAP_SPRITE, Blend::Textured, [0, 8]),
+            Undrawable::BlitSize,
+        ),
         (sprite, Undrawable::Sprite("test:missing".into())),
         (atlas_sprite, Undrawable::Sprite("test:missing".into())),
     ];

@@ -3,13 +3,13 @@
 //! local player's hotbar stack scaled about its pivot and its decorations, a `Blit` of a screen
 //! effect blend draws with that blend, and an op the paint cannot draw refuses the buffer with
 //! its name and draws nothing of it.
-use sunrise_client::hud::{Blend as Run, HudBatch, MINIMAP_SPRITE};
-use sunrise_client::items::ItemStack;
-use sunrise_client::text::{Style, Text};
 use mod_api::client::hud_layout::{Blend, GuiDraw};
 use mod_api::{ComponentHoverEvent, GuiPaintError, Hooks, ModEntry};
 use mod_platform::testing::with_mods;
 use std::sync::Mutex;
+use sunrise_client::hud::{Blend as Run, HudBatch, MINIMAP_SPRITE};
+use sunrise_client::items::ItemStack;
+use sunrise_client::text::{Style, Text};
 
 /// What each `gui_paint` answered, in order.
 static ANSWERS: Mutex<Vec<Result<(), GuiPaintError>>> = Mutex::new(Vec::new());
@@ -70,7 +70,12 @@ fn a_mods_paint_draws_hotbar_items_and_blits_and_refuses_what_it_cannot_draw() {
             game.inventory[0] = Some(ItemStack::new("minecraft:stone", 5));
             game.component_hover_effect(&mut scaled, &style, (40.0, 30.0));
             // The same stack as `DrawContext::item_stack` would draw it, unscaled, for comparison.
-            game.draw_item_model(&mut plain, &ItemStack::new("minecraft:stone", 5), 20.0, 20.0);
+            game.draw_item_model(
+                &mut plain,
+                &ItemStack::new("minecraft:stone", 5),
+                20.0,
+                20.0,
+            );
         });
     });
     let answers = std::mem::take(&mut *ANSWERS.lock().unwrap());
@@ -95,5 +100,8 @@ fn a_mods_paint_draws_hotbar_items_and_blits_and_refuses_what_it_cannot_draw() {
     assert_eq!(blend, Run::Vignette);
     assert_eq!(last.end as usize, scaled.vertices.len());
     assert_eq!(last.len(), 6);
-    assert!(scaled.vertices.len() > plain.vertices.len() + 6, "no decorations");
+    assert!(
+        scaled.vertices.len() > plain.vertices.len() + 6,
+        "no decorations"
+    );
 }
