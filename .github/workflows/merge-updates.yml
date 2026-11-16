@@ -10,8 +10,7 @@ permissions: {}
 jobs:
   post:
     if: >-
-      github.event.pull_request.head.repo.full_name == 'sunrise-org/sunrise' &&
-      github.event.pull_request.user.login == github.repository_owner && (
+      github.event.pull_request.head.repo.full_name == 'sunrise-org/sunrise' && (
       (github.event.action == 'labeled' && (github.event.label.name == 'rollup' || github.event.label.name == 'sync')) ||
       (github.event.action == 'closed' && github.event.pull_request.merged &&
       (contains(github.event.pull_request.labels.*.name, 'rollup') || contains(github.event.pull_request.labels.*.name, 'sync'))))
