@@ -498,7 +498,7 @@ impl Game<'_> {
             return Err(BlockEntityShapesError::NotDeclared);
         }
         let shapes = shapes
-            .map(|shapes| sunrise_client::containers::PublishedShapes::new(shapes))
+            .map(sunrise_client::containers::PublishedShapes::new)
             .transpose()?
             .map(std::sync::Arc::new);
         let Some(current) = self.mod_block_entity_write_target(key) else {

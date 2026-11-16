@@ -7277,7 +7277,7 @@ mod tests {
             panic!("not a mod's");
         };
         assert_eq!(back.nbt.len(), 1);
-        assert!(back.nbt.get(&SHAPES_KEY.into()).is_none());
+        assert!(!back.nbt.contains_key(&SHAPES_KEY.into()));
         let loaded = back.shapes().expect("restored on load");
         assert_eq!(loaded.boxes().collision, [[-0.25, 0.0, 0.0, 1.0, 1.5, 1.0]]);
         // Saved data that is over a limit loads without them.

@@ -120,8 +120,10 @@ impl PublishedShapes {
                 return None;
             }
             Some(
-                bits.chunks_exact(6)
-                    .map(|chunk| std::array::from_fn(|i| f64::from_bits(chunk[i] as u64)))
+                bits.as_chunks::<6>()
+                    .0
+                    .iter()
+                    .map(|chunk| chunk.map(|bits| f64::from_bits(bits as u64)))
                     .collect(),
             )
         };
