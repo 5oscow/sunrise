@@ -446,10 +446,15 @@ jobs:
             codesign --verify --strict "dist/${{ matrix.dir }}/$binary"
           done
           packaging/macos/notarize.sh "dist/${{ matrix.asset }}"
+      # A file named like the Intel macOS asset comes only from macos-x64-intel: the publish job downloads every
+      # artifact into one folder, so the untested archive carries its own file name too.
+      - name: The Intel macOS archive, named untested until it starts on Intel
+        if: matrix.started_on_intel
+        run: mv "dist/${{ matrix.asset }}" "dist/untested-${{ matrix.asset }}"
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.started_on_intel && 'untested-' || '' }}${{ matrix.asset }}
-          path: dist/${{ matrix.asset }}
+          path: dist/${{ matrix.started_on_intel && 'untested-' || '' }}${{ matrix.asset }}
           if-no-files-found: error
           retention-days: 3
       - name: The server build (the game without sound or controllers, as sunrise-engine)
@@ -515,7 +520,7 @@ jobs:
       - name: Unpack the signed archive, unchanged
         run: |
           set -euo pipefail
-          ditto -x -k "$RUNNER_TEMP/intel/sunrise-macos-x64.zip" "$RUNNER_TEMP/intel"
+          ditto -x -k "$RUNNER_TEMP/intel/untested-sunrise-macos-x64.zip" "$RUNNER_TEMP/intel"
           echo "BIN=$RUNNER_TEMP/intel/sunrise-macos-x64" >> "$GITHUB_ENV"
       - name: Every program starts, on Intel
         run: |
@@ -531,10 +536,15 @@ jobs:
             echo "$out"
             [[ "$out" == "$binary $SUNRISE_VERSION" ]] || { echo "::error::expected $binary $SUNRISE_VERSION"; exit 1; }
           done
+      # The same bytes the build leg signed and notarized, under the asset's own name.
+      - name: The archive, named as it ships
+        run: |
+          mkdir -p "$RUNNER_TEMP/ship"
+          cp "$RUNNER_TEMP/intel/untested-sunrise-macos-x64.zip" "$RUNNER_TEMP/ship/sunrise-macos-x64.zip"
       - uses: actions/upload-artifact@v7
         with:
           name: sunrise-macos-x64.zip
-          path: ${{ runner.temp }}/intel/sunrise-macos-x64.zip
+          path: ${{ runner.temp }}/ship/sunrise-macos-x64.zip
           if-no-files-found: error
           retention-days: 3
       - name: This leg built
