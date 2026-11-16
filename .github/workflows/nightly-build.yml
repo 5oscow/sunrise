@@ -186,11 +186,27 @@ jobs:
       developer_id: false
       trusted: false  # it can hold unreviewed pull requests: their own cache key, never saved, not the release runner
 
+  # Whether every required leg built, from the `build-complete` marker game-build.yml's legs job uploads. build's
+  # result is `failure` or `cancelled` whenever an optional leg failed, timed out or got no runner, and a reusable
+  # workflow that ends that way passes back no outputs, so this is an ordinary job's output instead.
+  complete:
+    needs: build
+    if: ${{ !cancelled() && needs.build.result != 'skipped' }}
+    runs-on: ${{ vars.DYNA_CI_SELF_HOSTED == 'true' && 'dyna-small' || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    outputs:
+      complete: ${{ steps.marker.outcome == 'success' }}
+    steps:
+      - uses: actions/download-artifact@v8
+        id: marker
+        continue-on-error: true
+        with:
+          name: build-complete
+          path: ${{ runner.temp }}/build-complete
+
   sign:
-    needs: [pick, build]
-    # build's result is `cancelled` when an optional leg timed out or was cancelled; its output says whether every
-    # required leg built (game-build.yml, legs).
-    if: ${{ !cancelled() && needs.build.outputs.complete == 'true' }}
+    needs: [pick, build, complete]
+    if: ${{ !cancelled() && needs.complete.outputs.complete == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # The key's only job: main's sign_release.sh hashes the archives and signs with the runner's OpenSSL.
@@ -249,8 +265,8 @@ jobs:
           retention-days: 3
 
   publish:
-    needs: [pick, build, sign]
-    if: ${{ !cancelled() && needs.build.outputs.complete == 'true' && needs.sign.result == 'success' }}
+    needs: [pick, build, complete, sign]
+    if: ${{ !cancelled() && needs.complete.outputs.complete == 'true' && needs.sign.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:

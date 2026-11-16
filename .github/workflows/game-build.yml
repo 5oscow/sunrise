@@ -40,10 +40,6 @@ on:
         description: Sign the macOS programs with Developer ID and notarize the zip (the runner's keychain)
         type: boolean
         default: true
-    outputs:
-      complete:
-        description: '"true" once every required leg built (legs); an optional leg that failed, timed out or was cancelled is left out'
-        value: ${{ jobs.legs.outputs.complete }}
 permissions:
   contents: read
 jobs:
@@ -567,8 +563,6 @@ jobs:
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    outputs:
-      complete: ${{ steps.decide.outputs.complete }}
     steps:
       - uses: actions/download-artifact@v8
         # No marker at all (every leg failed) is the next step's to report.
@@ -595,6 +589,18 @@ jobs:
           done
           if (( ${#missing[@]} )); then echo "::error::required legs did not build: ${missing[*]}"; exit 1; fi
           echo complete=true >> "$GITHUB_OUTPUT"
+      # The caller reads this artifact, not a workflow output: a reusable workflow that ends failed or cancelled (an
+      # optional leg that failed, timed out or got no runner) passes back no outputs at all.
+      - name: The build is complete
+        if: steps.decide.outputs.complete == 'true'
+        run: echo complete > "$RUNNER_TEMP/build-complete"
+      - uses: actions/upload-artifact@v7
+        if: steps.decide.outputs.complete == 'true'
+        with:
+          name: build-complete
+          path: ${{ runner.temp }}/build-complete
+          if-no-files-found: error
+          retention-days: 3
 
   linux-smoke:
     name: smoke hosted Linux artifact
