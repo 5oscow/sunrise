@@ -450,8 +450,9 @@ Use `event.parts.get(HumanoidPart::RightArm)` to read `[position, rotation]`, th
 `set_rotation` or `set_position` to change it. Positions are local texels and
 rotations are radians. A non-finite component is refused while other finite
 components apply; scale and visibility are not changed. Later ITEM, attack,
-crouch, bob and swim animation still apply. Armor stands do not fire this hook;
-they pose from their saved rotations. A model can animate more than
+crouch, bob and swim animation still apply. Armor stands then replace rotations
+with their saved pose, preserving position edits. Their armor models run the same
+setup independently. A model can animate more than
 once per frame, so listeners must not treat this as a once-per-entity frame
 notification or advance simulation from it. Native and wasm use the same finite
 part snapshot, with no callback or stack snapshot when nobody subscribes.

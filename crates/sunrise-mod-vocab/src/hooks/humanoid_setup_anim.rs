@@ -5,8 +5,8 @@ pub trait Hooks {
     /// setup and before arm priority/posing. `parts` contains finite local positions
     /// (texels) and rotations (radians); its setters refuse non-finite components
     /// while retaining their prior values. Later vanilla ITEM, attack, crouch, bob
-    /// and swim animation still apply. Armor stands do not fire it: they pose from
-    /// their saved rotations. Listeners see earlier accepted writes.
+    /// and swim animation still apply. Armor stands then replace rotations with
+    /// their saved pose, preserving position edits. Listeners see earlier accepted writes.
     /// `humanoid` contains this invocation's held stacks and use state. Time is
     /// captured for its view; `game_time` is absent outside a level, never wall time.
     /// The Host is read-only. No frame deduplication: layers that actually animate
