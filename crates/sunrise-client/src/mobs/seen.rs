@@ -32,6 +32,10 @@ pub struct Seen {
     pub hostile: bool,
     pub target: Option<Who>,
     pub health: f32,
+    /// `LivingEntity.getMaxHealth`: the current maximum, an effect's
+    /// modifier included (what `AbstractHorse.canParent` compares the health
+    /// with).
+    pub max_health: f32,
     pub variant: u8,
     /// A slime's or magma cube's size.
     pub size: i32,

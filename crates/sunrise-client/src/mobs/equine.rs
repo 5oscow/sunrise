@@ -1,7 +1,7 @@
 //! Horses, donkeys, mules and the undead horses (`AbstractHorse`): random
 //! stats, coat colours and markings, eating, rearing, taming by riding,
 //! the ridden movement and jump, offspring stats and `AbstractEquineModel`.
-use super::finalize::{Attr, set_base};
+use super::finalize::{Attr, base_value, set_base};
 use super::{
     Mob, MobEvent, MobWorld, Seen, Species,
     anim::{Poses, State},
@@ -316,17 +316,17 @@ pub struct OffspringAttributes {
 }
 impl OffspringAttributes {
     pub fn draw(m: &mut Mob, partner: &Seen) -> Self {
+        // `setOffspringAttribute` reads `getAttributeBaseValue`: an effect's
+        // modifier is not inherited.
+        let (health, speed) = (
+            base_value(m, Attr::MaxHealth),
+            base_value(m, Attr::MovementSpeed),
+        );
         let r = &mut m.random;
         Self {
-            max_health: offspring(
-                f64::from(m.attrs.max_health),
-                partner.stats[0],
-                15.0,
-                30.0,
-                r,
-            ) as f32,
+            max_health: offspring(health, partner.stats[0], 15.0, 30.0, r) as f32,
             jump: offspring(m.extra.vector[0], partner.stats[1], 0.4, 1.0, r),
-            speed: offspring(m.attrs.speed, partner.stats[2], 0.1125, 0.3375, r),
+            speed: offspring(speed, partner.stats[2], 0.1125, 0.3375, r),
         }
     }
 }

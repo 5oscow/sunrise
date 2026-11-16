@@ -2050,6 +2050,9 @@ fn mob_from_nbt_at(
                 m.extra.ambient_effects.push(effect);
             }
         }
+        // A loaded effect adds no modifier (`load_effect`): a loaded Health
+        // Boost's maximum is the saved `attributes`' one, and the health
+        // follows it as `setHealth` clamps.
         if m.extra
             .effects
             .iter()

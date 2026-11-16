@@ -386,7 +386,48 @@ mod inside_walk_tests {
         );
         assert!(ran, "the vanilla test resources must be available");
     }
+
+    /// #478: a part's `AddEffect` write is `LivingEntity.addEffect` on a mob:
+    /// the effect's attribute modifier is stored (`onEffectAdded`), and a
+    /// second write updates the one instance instead of listing it twice.
+    #[test]
+    fn a_parts_add_effect_write_adds_the_effect_and_its_modifier() {
+        let _test = TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        mod_api::__private::resolve_effects(["minecraft:speed"], |_| Some(0)).unwrap();
+        let mut kind = (*crate::mobs::sensor_scan_tests::kind()).clone();
+        kind.speed = 0.25;
+        kind.attributes = Arc::new(std::collections::HashMap::from([(
+            "minecraft:movement_speed".to_owned(),
+            0.25,
+        )]));
+        let mut mob = Mob::new(1, Arc::new(kind), Vec3::ZERO, 0.0);
+        let mut level = crate::health::TestLevel::new(0);
+        let write = |amplifier| mod_api::EntityWrite::AddEffect {
+            effect: mod_api::__private::effect_key("minecraft:speed").expect("a resolved key"),
+            duration: 40,
+            amplifier,
+        };
+        apply_entity_write(&mut mob, &mut level.level(), write(1));
+        apply_entity_write(&mut mob, &mut level.level(), write(0));
+        assert_eq!(
+            mob.extra.effects,
+            vec![crate::mobs::StoredEffect::new("minecraft:speed", 40, 1)]
+        );
+        assert_eq!(
+            crate::mobs::finalize::modifier_amount(
+                &mob,
+                crate::mobs::finalize::Attr::MovementSpeed,
+                "minecraft:effect.speed"
+            ),
+            Some(0.400_000_005_960_464_5)
+        );
+    }
 }
+#[cfg(test)]
+#[path = "effect_modifier_tests.rs"]
+mod effect_modifier_tests;
 #[cfg(test)]
 #[path = "fall_flying_tests.rs"]
 mod fall_flying_tests;
@@ -1463,14 +1504,10 @@ fn apply_entity_write(m: &mut Mob, level: &mut DamageLevel<'_>, write: mod_api::
             duration,
             amplifier,
         } => {
+            // `LivingEntity.addEffect`, as the write's contract names: one
+            // instance an effect, its attribute modifiers stored.
             if let Some(id) = mod_api::__private::effect_key_id(effect) {
-                m.extra.effects.push(crate::mobs::StoredEffect {
-                    id,
-                    duration,
-                    amplifier: i32::from(amplifier),
-                    registry_index: None,
-                    show_icon: true,
-                });
+                m.add_effect(id, duration, i32::from(amplifier));
             }
         }
     }
@@ -3182,16 +3219,6 @@ fn never_removed_when_far(s: Species) -> bool {
             | Species::Wither
     )
 }
-/// The movement speed multiplier of the mob's transient `minecraft:baby`
-/// modifier (`Zombie.SPEED_MODIFIER_BABY` +0.5, `Piglin.SPEED_MODIFIER_BABY`
-/// +0.2, both `ADD_MULTIPLIED_BASE`): the same modifier `/attribute` reads, so
-/// one taken away with `modifier remove` no longer speeds the baby up.
-pub fn speed_bonus(m: &Mob) -> f64 {
-    match super::finalize::transient(m, super::finalize::Attr::MovementSpeed) {
-        Some((amount, super::finalize::Op::AddMultipliedBase)) => 1.0 + amount,
-        _ => 1.0,
-    }
-}
 /// The ambient, hurt and death sounds of species that pick them by state
 /// (`getHurtSound` / `getDeathSound` overrides); the type's otherwise.
 /// `Goat.getAmbientSound`, `Goat.getHurtSound`, and `Goat.getDeathSound`
@@ -3763,12 +3790,6 @@ pub(crate) fn tick_effects_hurting(
     // the next tick on.
     let first = m.extra.effects.len();
     let old_max_absorption = super::armor::max_absorption(m);
-    let old_boost_amp = m
-        .extra
-        .effects
-        .iter()
-        .find(|e| e.id == "minecraft:health_boost")
-        .map(|e| e.amplifier);
     let mut i = 0;
     while i < m.extra.effects.len() && i < first {
         let (effect, amp) = (m.extra.effects[i].id, m.extra.effects[i].amplifier);
@@ -3860,9 +3881,9 @@ pub(crate) fn tick_effects_hurting(
                     m.absorption = m.absorption.min(4.0 * (hidden.amplifier + 1) as f32);
                 }
                 m.extra.effects[i] = super::StoredEffect::from_instance(effect, &hidden);
-                if effect == "minecraft:health_boost" {
-                    super::finalize::health_boost_changed(m);
-                }
+                // `tickServer`'s onExpire: `onEffectUpdated(instance, true, null)`,
+                // the modifiers of the amplifier that is active now.
+                m.set_effect_modifiers(effect, Some(hidden.amplifier));
                 m.extra.ambient_effects.retain(|e| *e != effect);
                 if hidden.ambient {
                     m.extra.ambient_effects.push(effect);
@@ -3911,16 +3932,6 @@ pub(crate) fn tick_effects_hurting(
     let max_absorption = super::armor::max_absorption(m);
     if max_absorption != old_max_absorption {
         m.absorption = m.absorption.min(max_absorption);
-    }
-
-    if old_boost_amp
-        != m.extra
-            .effects
-            .iter()
-            .find(|e| e.id == "minecraft:health_boost")
-            .map(|e| e.amplifier)
-    {
-        super::finalize::health_boost_changed(m);
     }
 }
 
@@ -7808,11 +7819,16 @@ mod baby_speed_tests {
     use std::sync::Arc;
     use sunrise_core::geometry::Vec3;
 
-    fn baby(species: Species, id: &str) -> Mob {
+    fn baby(species: Species, id: &str, speed: f64) -> Mob {
         let mut k = kind();
         let km = Arc::make_mut(&mut k);
         km.id = id.into();
         km.species = species;
+        km.speed = speed;
+        km.attributes = Arc::new(std::collections::HashMap::from([(
+            "minecraft:movement_speed".to_owned(),
+            speed,
+        )]));
         let mut m = Mob::new(1, k, Vec3::ZERO, 0.0);
         finalize::set_baby(&mut m, true);
         m
@@ -7824,22 +7840,28 @@ mod baby_speed_tests {
     /// took it away, until the next `setBaby`.
     #[test]
     fn a_babys_speed_follows_its_baby_modifier() {
-        let mut zombie = baby(Species::Zombie, "minecraft:zombie");
-        assert_eq!(speed_bonus(&zombie), 1.5);
+        let mut zombie = baby(Species::Zombie, "minecraft:zombie", 0.23);
+        // 0.23 + 0.23 x 0.5.
+        assert_eq!(zombie.movement_speed(), 0.345_000_000_000_000_03);
         zombie
             .extra
             .attributes
             .get_or_insert_default()
             .baby_speed_removed = true;
-        assert_eq!(speed_bonus(&zombie), 1.0, "removed with /attribute");
+        assert_eq!(zombie.movement_speed(), 0.23, "removed with /attribute");
         finalize::set_baby(&mut zombie, true);
-        assert_eq!(speed_bonus(&zombie), 1.5, "setBaby adds it back");
-        // The piglin's is 0.2F widened to a double, not the zombie's 0.5.
-        let piglin = baby(Species::Piglin, "minecraft:piglin");
-        assert_eq!(speed_bonus(&piglin), 1.0 + f64::from(0.2f32));
-        let mut adult = baby(Species::Zombie, "minecraft:zombie");
+        assert_eq!(
+            zombie.movement_speed(),
+            0.345_000_000_000_000_03,
+            "setBaby adds it back"
+        );
+        // The piglin's is 0.2F widened to a double, not the zombie's 0.5:
+        // 0.35 + 0.35 x 0.20000000298023224.
+        let piglin = baby(Species::Piglin, "minecraft:piglin", 0.35);
+        assert_eq!(piglin.movement_speed(), 0.420_000_001_043_081_3);
+        let mut adult = baby(Species::Zombie, "minecraft:zombie", 0.23);
         finalize::set_baby(&mut adult, false);
-        assert_eq!(speed_bonus(&adult), 1.0);
+        assert_eq!(adult.movement_speed(), 0.23);
     }
 }
 
