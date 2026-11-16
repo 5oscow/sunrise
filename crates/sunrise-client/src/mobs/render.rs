@@ -25,6 +25,10 @@ pub trait RenderDataSource {
     fn equipment_layers(&self, _mob: &Mob) -> Vec<Layer> {
         Vec::new()
     }
+    /// Default material inventory for random-texture selection, without frame callbacks.
+    fn equipment_inventory(&self, mob: &Mob) -> Vec<Layer> {
+        self.equipment_layers(mob)
+    }
     fn humanoid_setup(&self) -> Option<&dyn anim::HumanoidSetup> {
         None
     }
@@ -127,7 +131,10 @@ fn eyes_layer(m: &Mob, layer: &Layer) -> bool {
 /// One draw of a model with a texture.
 pub struct Layer {
     /// Equipment owns its overlay; other layers inherit the body overlay.
+    pub equipment_texture_final: bool,
     pub equipment_overlay: Option<u32>,
+    /// Reload-baked, slot-clipped replacement; never geometry supplied by a frame.
+    pub equipment_model: Option<std::sync::Arc<Part>>,
     pub model: Cow<'static, str>,
     pub texture: Cow<'static, str>,
     pub color: u32,
@@ -601,6 +608,8 @@ pub fn layers(m: &Mob, age: f32) -> Vec<Layer> {
     ) {
         v.push(Layer {
             equipment_overlay: None,
+            equipment_model: None,
+            equipment_texture_final: false,
             model: model.into(),
             texture: texture.into(),
             color,
@@ -688,6 +697,8 @@ pub fn layers(m: &Mob, age: f32) -> Vec<Layer> {
         S::Breeze => {
             v.push(Layer {
                 equipment_overlay: None,
+                equipment_model: None,
+                equipment_texture_final: false,
                 model: "breeze#wind".into(),
                 texture: "entity/breeze/breeze_wind".into(),
                 color: white,
@@ -987,6 +998,8 @@ impl Layer {
             texture: interned(format_args!("{texture}")),
             color,
             equipment_overlay: Some(overlay),
+            equipment_model: None,
+            equipment_texture_final: false,
             full_bright: false,
             scroll: 0.0,
         }
@@ -1885,6 +1898,7 @@ pub fn drawn_textures(m: &Mob, data: &dyn RenderDataSource) -> Vec<String> {
         }
         names.push(vanilla);
     }
+    let equipment = data.equipment_inventory(m);
     let cem = data
         .mob_data()
         .cem
@@ -1895,11 +1909,13 @@ pub fn drawn_textures(m: &Mob, data: &dyn RenderDataSource) -> Vec<String> {
     let mut names = Vec::new();
     push(&mut names, cem.layer(cem_key), texture.into_owned());
     let mut all_layers = layers(m, m.age as f32);
-    all_layers.extend(data.equipment_layers(m));
+    all_layers.extend(equipment);
     if m.species() == Species::Warden {
         for (model, texture, _) in super::warden::emissive_layers(m, 0.0) {
             all_layers.push(Layer {
                 equipment_overlay: None,
+                equipment_model: None,
+                equipment_texture_final: false,
                 model: model.into(),
                 texture: texture.into(),
                 color: 0,
@@ -2055,6 +2071,7 @@ fn render_visible(
     skin: Option<&mut super::skin::Skin>,
 ) {
     // The armour is a layer: none for a spectator.
+    let equipment = data.equipment_layers(m);
     let extra = if layers_shown(m) { extra } else { &[] };
     let overlay = u32::from(red_overlay(m));
     let s = anim::state(m, alpha).observed(m, data.humanoid_setup());
@@ -2132,13 +2149,15 @@ fn render_visible(
         animation.run(m, &s, &mut poses);
     }
     let mut all_layers = layers(m, s.age);
-    all_layers.extend(data.equipment_layers(m));
+    all_layers.extend(equipment);
     // WardenRenderer: the translucent emissive layers fade with the animations.
     if m.species() == Species::Warden {
         for (model, texture, a) in super::warden::emissive_layers(m, alpha) {
             if a > 0.0 {
                 all_layers.push(Layer {
                     equipment_overlay: None,
+                    equipment_model: None,
+                    equipment_texture_final: false,
                     model: model.into(),
                     texture: texture.into(),
                     color: ((a.clamp(0.0, 1.0) * 255.0) as u32) << 24 | 0x00FF_FFFF,
@@ -2167,8 +2186,10 @@ fn render_visible(
                     (skin.models.tagged && (eyes_layer(m, layer) || !layer.full_bright)
                         || !layer.full_bright && !translucent_layer(m, layer))
                         && cem.layer(&layer.model).is_none()
-                        && m.kind
-                            .layer(&layer.model)
+                        && layer
+                            .equipment_model
+                            .as_ref()
+                            .or_else(|| m.kind.layer(&layer.model))
                             .is_none_or(|part| skin.supports(part))
                 })
         }
@@ -2262,18 +2283,28 @@ fn render_visible(
         // `layer.texture` stays the vanilla name (the villager hats below look for its
         // `/type/` folder).
         let texture = cem_texture(
-            custom.filter(|_| paints_with_jem(&all_layers, i, body_keys)),
+            custom.filter(|_| {
+                !layer.equipment_texture_final && paints_with_jem(&all_layers, i, body_keys)
+            }),
             &layer.texture,
             atlas,
         );
-        let part = match custom {
-            Some(custom) => custom.model.clone(),
-            None => match m.kind.layer(&layer.model) {
-                Some(part) => part.clone(),
-                None => continue,
-            },
+        let part = if let Some(part) = &layer.equipment_model {
+            part.clone()
+        } else {
+            match custom {
+                Some(custom) => custom.model.clone(),
+                None => match m.kind.layer(&layer.model) {
+                    Some(part) => part.clone(),
+                    None => continue,
+                },
+            }
         };
-        let Some((drawn, uv)) = sprite(texture).or_else(|| Some((texture, atlas(texture)?))) else {
+        let Some((drawn, uv)) = (if layer.equipment_texture_final {
+            atlas(texture).map(|uv| (texture, uv))
+        } else {
+            sprite(texture).or_else(|| Some((texture, atlas(texture)?)))
+        }) else {
             continue;
         };
         // VillagerProfessionLayer: the type layer under a profession's full hat draws on
@@ -2292,7 +2323,10 @@ fn render_visible(
         } else {
             true
         };
-        if custom.is_none() && custom_body.is_none() && std::sync::Arc::ptr_eq(&part, &model) {
+        if layer.equipment_model.is_some() {
+            layer_poses.copy_from(&poses);
+        } else if custom.is_none() && custom_body.is_none() && std::sync::Arc::ptr_eq(&part, &model)
+        {
             // A layer over the body's own model (a villager's type, profession
             // and level, a spider's eyes): `setupAnim` gives the body's poses,
             // without the parts a mod hid on it.
