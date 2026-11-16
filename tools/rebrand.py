@@ -20,10 +20,13 @@ SKIP_FILES = re.compile(
 
 PROTECT = [
     # Real repositories and their pages. Horizon's own projects (the machine sample, the mixins tool,
-    # the registry) keep their links; the game repository and the book site are this fork's and follow it.
+    # the registry) keep their links. Historical references to the old mod API repository
+    # also stay pinned: their issue numbers belong to that tracker, not this fork.
     r"(?:https?://)?(?:www\.)?github\.com/horizon-rust\b[\w./#?=&-]*",
     r"\bhorizon-rust\.github\.io[\w./#-]*",
     r"@?\bhorizon-rust(?:/[\w.-]+)?",
+    r"(?:https?://)?(?:www\.)?github\.com/arismoko/horizon[\w./#?=&-]*",
+    r"\barismoko/horizon[\w.-]*(?:/(?:issues|pull)/\d+)?(?:#\d+)?",
     r"(?:https?://)?(?:www\.)?github\.com/arismoko/horizon-machine-sample[\w./#?=&-]*",
     r"\barismoko/horizon-machine-sample[\w.-]*",
     # Vanilla's sky horizon, in prose and in its own names.
