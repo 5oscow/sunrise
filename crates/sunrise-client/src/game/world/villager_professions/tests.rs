@@ -330,7 +330,7 @@ fn wasm_profession(value: ProfessionDefinition, owner: &str) -> mod_api::ModEntr
                 i32.const 0 i32.ne if unreachable end
                 i64.const 0
             else i64.const 0 end end))"#,
-            subscriptions=data(&subscriptions), declaration=data(&declaration), imports=sunrise_mod_wasm::fixture::wat_imports(),
+            subscriptions=data(&subscriptions), declaration=data(&declaration), imports=sunrise_mod_wasm::fixture::wat_imports(), subscribed=sunrise_mod_wasm::fixture_subscribed_id(),
             sub_reply=(2048u64<<32)|subscriptions.len() as u64, length=declaration.len())).unwrap();
     let manifest = sunrise_mod_package::manifest::Manifest::parse(&format!("id = '{owner}'\nname = 'Wasm engineer'\nversion = '1.0.0'\napi = '0.2'\ncapabilities = ['registries']\n[wasm]\nsha512 = '{}'\ntoolchain = 'test'\nbuilt_with = 'test'\n", "a".repeat(128))).unwrap();
     let mut loaded = sunrise_mod_wasm::load(

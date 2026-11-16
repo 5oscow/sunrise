@@ -1390,6 +1390,11 @@ mod mixed_install_tests {
 pub fn fixture_import_id(owner: &str, method: &str) -> Option<u32> {
     boundary::import_index(owner, method)
 }
+/// The id the game asks a guest for its hook subscriptions by.
+#[cfg(feature = "listener-fixture")]
+pub fn fixture_subscribed_id() -> u64 {
+    boundary::SUBSCRIBED
+}
 /// Resolve generated hook operations for hand-written guest integration fixtures.
 #[cfg(feature = "listener-fixture")]
 pub fn fixture_export_id(owner: &str, method: &str) -> Option<u64> {
