@@ -25,6 +25,15 @@ pub(super) struct TakenVault {
     pub(super) ominous: bool,
 }
 
+/// What a key insertion supplies to the reward roll
+/// (`VaultBlockEntity.resolveItemsToEject`): the player, the inserted stack and
+/// the player's luck.
+struct VaultEject {
+    player: sunrise_world::loot::LootEntity,
+    tool: sunrise_world::loot::LootStack,
+    luck: f32,
+}
+
 /// What a vault reads: the game time and the players. The players are listed
 /// at the first ask: a vault looks for them only when its state may change
 /// (`stateUpdatingResumesAt`, once a second), not at every tick.
@@ -86,6 +95,7 @@ impl Game<'_> {
     fn with_vault<T>(
         &mut self,
         key: Pos,
+        eject: Option<&VaultEject>,
         f: impl FnOnce(
             &mut Vault,
             &Players<'_, '_>,
@@ -122,10 +132,33 @@ impl Game<'_> {
                 let Some(loot) = &loot else {
                     return Vec::new();
                 };
-                let drops = match loot.random_sequence(table).filter(|_| sequence) {
-                    Some(s) => loot.roll_split(table, sequences.get(s, seed)),
-                    None => loot.roll_split(table, random),
+                // `LootContextParamSets.VAULT`: the vault's centre is the ORIGIN of
+                // every roll; the reward adds THIS_ENTITY, TOOL and luck.
+                let place = sunrise_world::loot::LootPlace {
+                    origin: Some([key.0, key.1, key.2].map(|v| f64::from(v) + 0.5)),
+                    ..players.game.loot_place_at([0.0; 3], None)
                 };
+                let reward = eject.filter(|_| sequence);
+                let context = sunrise_world::loot::ContainerLootContext {
+                    luck: reward.map_or(0.0, |e| e.luck),
+                    entity: reward.map(|e| &e.player),
+                    ..Default::default()
+                };
+                let query = std::rc::Rc::new(sunrise_world::loot::query::LootQuery::new(
+                    None,
+                    reward.map(|e| e.tool.clone()),
+                ));
+                let drops = sunrise_world::loot::query::with_query(query, || {
+                    sunrise_world::loot::with_native_loot_place(place, || {
+                        match loot.random_sequence(table).filter(|_| sequence) {
+                            Some(s) => {
+                                loot.roll_container_with(table, sequences.get(s, seed), context)
+                            }
+                            None => loot.roll_container_with(table, random, context),
+                        }
+                    })
+                })
+                .unwrap_or_default();
                 drops
                     .iter()
                     .map(sunrise_client::structure_blocks::loot_item_with_components)
@@ -153,7 +186,7 @@ impl Game<'_> {
     /// is a window.
     pub(super) fn tick_vault(&mut self, key: Pos) -> Result<()> {
         let pos = [key.0, key.1, key.2];
-        let ticked = self.with_vault(key, |v, l, random, state, ominous, roll, events| {
+        let ticked = self.with_vault(key, None, |v, l, random, state, ominous, roll, events| {
             v.server_tick(l, random, pos, state, ominous, roll, events);
         });
         if let Some(result) = ticked {
@@ -171,8 +204,14 @@ impl Game<'_> {
             return Ok(false);
         };
         let player = self.acting_uuid();
+        let eject = VaultEject {
+            player: self.killer_loot_entity(None),
+            tool: super::creatures::to_loot(&stack),
+            luck: self.acting_luck(),
+        };
         let used = self.with_vault(
             (pos[0], pos[1], pos[2]),
+            Some(&eject),
             |v, l, random, state, ominous, roll, events| {
                 v.use_item_on(
                     l,

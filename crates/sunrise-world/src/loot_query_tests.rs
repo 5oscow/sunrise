@@ -523,3 +523,42 @@ fn a_brushing_roll_names_the_brusher_the_brush_and_the_block() {
         ))
     );
 }
+
+/// `LootContextParamSets.VAULT`: the reward names the player, the inserted
+/// key as the TOOL, the vault's centre as the ORIGIN and the player's luck;
+/// the display roll supplies the origin alone.
+#[test]
+fn a_vault_reward_names_the_player_the_key_and_the_vault() {
+    let table = json!({"pools":[{"rolls":1,"entries":[
+        {"type":"minecraft:item","name":"minecraft:emerald"}]}]});
+    let (data, seen) = watched(table);
+    let player = LootEntity::new("minecraft:player");
+    as_caller(Some("minecraft:trial_key"), [0.5, 70.5, 0.5], || {
+        data.roll_container_with(
+            "test:caller",
+            &mut LegacyRandom::new(3),
+            fill::ContainerLootContext {
+                luck: 0.5,
+                entity: Some(&player),
+                ..Default::default()
+            },
+        )
+    })
+    .unwrap();
+    assert_eq!(
+        seen.lock().unwrap().take(),
+        Some((
+            Some("minecraft:player".into()),
+            Some("minecraft:trial_key".into()),
+            Some([0.5, 70.5, 0.5]),
+            0.5
+        ))
+    );
+    as_caller(None, [0.5, 70.5, 0.5], || {
+        data.roll_split("test:caller", &mut LegacyRandom::new(3))
+    });
+    assert_eq!(
+        seen.lock().unwrap().take(),
+        Some((None, None, Some([0.5, 70.5, 0.5]), 0.0))
+    );
+}
