@@ -1349,9 +1349,18 @@ pub fn encode_components_with_items(stack: &ItemStack, items: &crate::items::Ite
     let Some(prototype) = items.component_defaults.get(stack.item.as_ref()) else {
         return Some(components);
     };
-    // PatchedDataComponentMap removes every value equal to its item prototype.
+    let Some(info) = items.get(&stack.item) else {
+        return Some(components);
+    };
+    // Equality belongs to the component codec, not its saved NBT numeric width.
     if let Tag::Compound(entries) = &mut components {
-        entries.retain(|id, value| prototype.get(id) != Some(value));
+        let mut key = [0; 64];
+        entries.retain(|id, _| {
+            !prototype.contains_key(id)
+                || !ascii_key(id, &mut key).is_some_and(|id| {
+                    ingredient_components::component_equal(id, stack, &info.component_prototype)
+                })
+        });
         if entries.is_empty() {
             return None;
         }
@@ -2324,27 +2333,17 @@ mod tests {
         }
     }
 
-    fn prototype_items() -> crate::items::Items {
-        let mut items = crate::items::Items::empty();
-        items.component_defaults = Arc::new(
-            [
-                (
-                    "minecraft:red_banner".to_owned(),
-                    [("minecraft:banner_patterns".into(), Tag::List(Vec::new()))]
-                        .into_iter()
-                        .collect(),
-                ),
-                (
-                    "minecraft:diamond_pickaxe".to_owned(),
-                    [("minecraft:damage".into(), Tag::Int(0))]
-                        .into_iter()
-                        .collect(),
-                ),
-            ]
-            .into_iter()
-            .collect(),
-        );
-        items
+    fn prototype_items() -> &'static crate::items::Items {
+        static ITEMS: std::sync::OnceLock<crate::items::Items> = std::sync::OnceLock::new();
+        ITEMS.get_or_init(|| {
+            let root = std::env::temp_dir().join(format!("sunrise-prototypes-{}", std::process::id()));
+            std::fs::create_dir_all(root.join("data/minecraft/loot_table")).unwrap();
+            std::fs::write(root.join("items.json"), r#"{"minecraft:red_banner":{"minecraft:banner_patterns":[]},"minecraft:diamond_pickaxe":{"minecraft:damage":0}}"#).unwrap();
+            let defaults = sunrise_world::item_defaults::read(&root).unwrap();
+            let items = crate::items::Items::catalog(&root, &sunrise_world::loot::PackOverlay::NONE, &defaults).unwrap();
+            std::fs::remove_dir_all(root).unwrap();
+            items
+        })
     }
 
     #[test]
@@ -2355,7 +2354,7 @@ mod tests {
         .unwrap()
         .unwrap();
         assert_eq!(
-            crate::item_nbt::item_to_nbt_with_items(&stack, &prototype_items()),
+            crate::item_nbt::item_to_nbt_with_items(&stack, prototype_items()),
             sunrise_core::nbt::parse_snbt(r#"{id:"minecraft:red_banner",count:1}"#)
                 .unwrap()
                 .0
@@ -2365,7 +2364,7 @@ mod tests {
     #[test]
     fn saved_zero_damage_equals_the_loaded_prototype() {
         let stack = parse_stack(r#"{id:"minecraft:diamond_pickaxe",count:1,components:{"minecraft:damage":0,"minecraft:custom_data":{keep:87}}}"#).unwrap().unwrap();
-        assert_eq!(crate::item_nbt::item_to_nbt_with_items(&stack, &prototype_items()), sunrise_core::nbt::parse_snbt(r#"{id:"minecraft:diamond_pickaxe",count:1,components:{"minecraft:custom_data":{keep:87}}}"#).unwrap().0);
+        assert_eq!(crate::item_nbt::item_to_nbt_with_items(&stack, prototype_items()), sunrise_core::nbt::parse_snbt(r#"{id:"minecraft:diamond_pickaxe",count:1,components:{"minecraft:custom_data":{keep:87}}}"#).unwrap().0);
     }
 
     #[test]
@@ -2373,7 +2372,7 @@ mod tests {
         let source = r#"{id:"example:tool",count:1,components:{"minecraft:damage":0,"minecraft:banner_patterns":[],"example:counter":0}}"#;
         let stack = parse_stack(source).unwrap().unwrap();
         assert_eq!(
-            crate::item_nbt::item_to_nbt_with_items(&stack, &prototype_items()),
+            crate::item_nbt::item_to_nbt_with_items(&stack, prototype_items()),
             sunrise_core::nbt::parse_snbt(source).unwrap().0
         );
     }
