@@ -912,10 +912,12 @@ impl Game<'_> {
             direct: attacker,
             position: None,
         };
-        if super::entity::damage_level_of!(self, scoped).invulnerability_check(
-            sunrise_client::health::Hurting::ArmorStand(id as i32, source),
-            vanilla,
-        ) {
+        if super::entity::damage_level_of!(self, self.combat.attack(), no_push)
+            .invulnerability_check(
+                sunrise_client::health::Hurting::ArmorStand(id as i32, source),
+                vanilla,
+            )
+        {
             return false;
         }
 
@@ -1153,6 +1155,7 @@ impl Game<'_> {
                         Some(block_registries),
                         hooks,
                     )
+                    .no_push()
                     .invulnerability_check(
                         sunrise_client::health::Hurting::ArmorStand(id as i32, source),
                         vanilla,

@@ -748,7 +748,11 @@ impl Game<'_> {
         };
         let at = [m.position.x, m.position.y, m.position.z];
         m.damage(
-            crate::game::entity::damage_level_of!(self),
+            crate::game::entity::damage_level_of!(
+                self,
+                &sunrise_client::health::NO_ATTACK,
+                no_push
+            ),
             4.0,
             Damage::of(DamageKind::Magic),
         );

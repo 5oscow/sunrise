@@ -155,7 +155,7 @@ fn the_original_damage_is_the_hit_before_the_incoming_hook() {
     let heard = heard(|game| {
         let mut pig = mob(game, 225001, "minecraft:pig");
         assert!(pig.damage(
-            damage_level_of!(game),
+            damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push),
             10.0,
             Damage::of(DamageKind::Generic)
         ));
@@ -170,7 +170,11 @@ fn the_original_damage_is_the_hit_before_the_incoming_hook() {
 fn pre_sets_the_health_lost_and_the_last_hurt_the_cooldown_compares() {
     let heard = heard(|game| {
         let mut pig = mob(game, 225003, "minecraft:pig");
-        assert!(pig.damage(damage_level_of!(game), 6.0, Damage::of(DamageKind::Generic)));
+        assert!(pig.damage(
+            damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push),
+            6.0,
+            Damage::of(DamageKind::Generic)
+        ));
         assert_eq!(pig.health, 8.0);
         // The inflicted damage reaches `lastHurt`.
         assert_eq!(pig.last_hurt, 2.0);
@@ -186,7 +190,11 @@ fn pre_fires_for_a_hit_its_reductions_took_to_zero() {
         let mut witch = mob(game, 225008, "minecraft:witch");
         // Witch.getDamageAfterMagicAbsorb: none from its own doing.
         let own = Damage::mob(225008, [2.0, 0.0, 2.0]);
-        assert!(witch.damage(damage_level_of!(game), 6.0, own));
+        assert!(witch.damage(
+            damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push),
+            6.0,
+            own
+        ));
         assert_eq!(witch.health, 24.0);
     });
     assert_eq!(heard.pre, [(225008, 6.0, 2.0, 0.0)]);
@@ -199,7 +207,11 @@ fn pre_draws_from_the_level_random_of_the_hit() {
         let mut expected = game.world.random.clone();
         expected.next_int();
         let mut pig = mob(game, 225010, "minecraft:pig");
-        assert!(pig.damage(damage_level_of!(game), 1.0, Damage::of(DamageKind::Generic)));
+        assert!(pig.damage(
+            damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push),
+            1.0,
+            Damage::of(DamageKind::Generic)
+        ));
         assert_eq!(game.world.random.next_int(), expected.next_int());
     });
 }
@@ -224,9 +236,21 @@ fn mob_and_dragon_post_records_fresh_hit_decision() {
     let heard = heard(|game| {
         let mut pig = mob(game, 225014, "minecraft:pig");
         let source = Damage::of(DamageKind::Generic);
-        assert!(pig.damage(damage_level_of!(game), 2.0, source));
-        assert!(pig.damage(damage_level_of!(game), 4.0, source));
-        assert!(!pig.damage(damage_level_of!(game), 3.0, source));
+        assert!(pig.damage(
+            damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push),
+            2.0,
+            source
+        ));
+        assert!(pig.damage(
+            damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push),
+            4.0,
+            source
+        ));
+        assert!(!pig.damage(
+            damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push),
+            3.0,
+            source
+        ));
         assert_eq!(pig.health, 6.0);
         let mut dragon = Dragon::new(Vec3::ZERO, 0.0, 0);
         dragon.id = 225015;
@@ -299,9 +323,17 @@ fn a_hit_inside_the_cooldown_no_stronger_than_the_last_fires_no_post() {
         // Pre sets 225003's damage to 2, which `lastHurt` keeps.
         let mut pig = mob(game, 225003, "minecraft:pig");
         let source = Damage::of(DamageKind::Generic);
-        assert!(pig.damage(damage_level_of!(game), 4.0, source));
+        assert!(pig.damage(
+            damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push),
+            4.0,
+            source
+        ));
         // Inside the cooldown and no stronger than the last hit: refused, no Post.
-        assert!(!pig.damage(damage_level_of!(game), 2.0, source));
+        assert!(!pig.damage(
+            damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push),
+            2.0,
+            source
+        ));
     });
     assert_eq!(heard.post, [(225003, 2.0)]);
 }
@@ -312,7 +344,7 @@ fn post_fires_once_for_a_killing_blow_on_a_mob() {
     let heard = heard(|game| {
         let mut pig = mob(game, 225016, "minecraft:pig");
         assert!(pig.damage(
-            damage_level_of!(game),
+            damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push),
             100.0,
             Damage::of(DamageKind::Generic)
         ));
@@ -420,7 +452,11 @@ fn the_container_names_what_armor_took() {
         let mut zombie = mob(game, 225011, "minecraft:zombie");
         // A mob's attack: armor takes its share, where a generic hit bypasses it.
         let attack = Damage::mob(225012, [2.0, 0.0, 2.0]);
-        assert!(zombie.damage(damage_level_of!(game), 10.0, attack));
+        assert!(zombie.damage(
+            damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push),
+            10.0,
+            attack
+        ));
     });
     // A zombie's two armor points against 10 damage: `CombatRules.getDamageAfterAbsorb`
     // clamps 2 - 10 / 2 up to a fifth of the armor, 0.4, and keeps 1 - 0.4 / 25 of the hit.
@@ -684,7 +720,7 @@ fn snapshot_crosses_the_real_damage_hook_with_reductions() {
         let mut container = sunrise_world::living_damage::DamageContainer::new(10.0);
         container.record_reduction(sunrise_world::living_damage::Reduction::Armor, 3.5);
         container.enter_pre(6.5);
-        damage_level_of!(game).damage_pre(
+        damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push).damage_pre(
             sunrise_client::health::Hurting::Player(
                 225003,
                 HurtSource {
@@ -712,7 +748,7 @@ fn unsubscribed_damage_does_not_convert() {
         with_game(|game| {
             super::api_values::damage::CONVERSIONS.with(|count| count.set(0));
             let mut container = sunrise_world::living_damage::DamageContainer::new(10.0);
-            damage_level_of!(game).damage_pre(
+            damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push).damage_pre(
                 sunrise_client::health::Hurting::Player(
                     225003,
                     HurtSource {

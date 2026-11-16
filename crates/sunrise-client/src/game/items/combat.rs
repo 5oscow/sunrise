@@ -204,7 +204,7 @@ impl CombatTracker {
         self.blast_hit_list.is_none() || self.blast_hit_ids.contains(&id)
     }
 
-    /// The attack lent by the enclosing [`Game::with_attack`] (`damage_level_of!(game, scoped)`).
+    /// The attack lent by the enclosing [`Game::with_attack`] (`damage_level_of!(game, game.combat.attack(), ..)`).
     pub(super) fn attack(&self) -> &Attack {
         &self.attack
     }
@@ -408,17 +408,25 @@ impl Game<'_> {
     /// hit by entity `id`, which only a native mod reads: a player's hit names
     /// them, a tame wolf's its owner (no one without one), and other mobs leave
     /// it as it was.
-    fn resolve_player_responsible_for_player(&mut self, id: u32) {
+    fn resolve_player_responsible_for_player(
+        &mut self,
+        id: u32,
+        captured_player: Option<[i32; 4]>,
+    ) {
         let now = self.world.game_time;
         match self.mobs.iter().find(|m| m.id == id) {
             None => {
-                let uuid = self.lan.as_ref().and_then(|host| {
-                    host.hub
-                        .guests
-                        .iter()
-                        .find(|g| g.entity_id as u32 == id)
-                        .map(|g| g.uuid)
-                });
+                let uuid = captured_player
+                    .map(sunrise_client::lan::playerdata::ints_uuid)
+                    .or_else(|| {
+                        self.lan.as_ref().and_then(|host| {
+                            host.hub
+                                .guests
+                                .iter()
+                                .find(|g| g.entity_id as u32 == id)
+                                .map(|g| g.uuid)
+                        })
+                    });
                 if let Some(uuid) = uuid {
                     self.combat.note_hurt_by_player(PlayerCredit(uuid), now);
                 }
@@ -433,6 +441,29 @@ impl Game<'_> {
             Some(_) => {}
         }
     }
+    /// Commit accepted hurt memories while its source is still in the pending queue.
+    /// Knockback needs this before the later event drain consumes RecordedDamage.
+    pub(super) fn commit_pending_hurt_memories(
+        &mut self,
+        damage_type: &str,
+        attack: Option<&Attack>,
+    ) {
+        let Some(pending) = self.combat.pending.iter().find(|p| {
+            p.damage_type == damage_type
+                && attack.is_none_or(|attack| p.attacker.0 == attack.attacker as u32)
+        }) else {
+            return;
+        };
+        let id = pending.attacker.0;
+        self.combat.last_hurt_by = pending
+            .credit
+            .then(|| (pending.attacker.clone(), self.world.game_time));
+        self.resolve_player_responsible_for_player(
+            id,
+            attack.and_then(|attack| attack.player_uuid),
+        );
+    }
+
     /// `CombatTracker.recordDamage` for the motion events of this tick.
     pub(super) fn record_combat(&mut self, events: &[MotionEvent]) {
         self.recheck_combat();
@@ -450,26 +481,13 @@ impl Game<'_> {
                 // LivingEntity.hurtServer reached resolvePlayerResponsibleForDamage:
                 // every hit that got past the cooldown, absorbed or blocked too.
                 MotionEvent::Health(HealthEvent::Criterion { source, .. }) => {
-                    if let Some(d) = self.motion.health.damage.definition(*source) {
-                        let attacker = match recorded.take() {
-                            Some((t, id)) if t == d.name => Some(id),
-                            _ => {
-                                if let Some(pending) = self
-                                    .combat
-                                    .pending
-                                    .iter()
-                                    .find(|pending| pending.damage_type == d.name)
-                                {
-                                    self.combat.last_hurt_by =
-                                        Some((pending.attacker.clone(), self.world.game_time));
-                                    Some(pending.attacker.0)
-                                } else {
-                                    None
-                                }
+                    let motion = self.motion;
+                    if let Some(d) = motion.health.damage.definition(*source) {
+                        match recorded.take() {
+                            Some((t, id)) if t == d.name => {
+                                self.resolve_player_responsible_for_player(id, None)
                             }
-                        };
-                        if let Some(id) = attacker {
-                            self.resolve_player_responsible_for_player(id);
+                            _ => self.commit_pending_hurt_memories(&d.name, None),
                         }
                     }
                     continue;
@@ -1200,7 +1218,7 @@ mod pet_credit_tests {
                 pet.extra.tame = tame;
                 pet.extra.owner = Some(uuid_ints(12));
                 game.mobs.push(pet);
-                game.resolve_player_responsible_for_player(7);
+                game.resolve_player_responsible_for_player(7, None);
                 assert_eq!(game.combat.last_hurt_by_player.map(|(c, _)| c.0), credit);
             }
         });

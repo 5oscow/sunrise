@@ -30,10 +30,11 @@ impl Game<'_> {
         source: sunrise_client::health::HurtSource<'_>,
         vanilla: bool,
     ) -> bool {
-        crate::game::entity::damage_level_of!(self, scoped).invulnerability_check(
-            sunrise_client::health::Hurting::Entity(id as i32, kind, source),
-            vanilla,
-        )
+        crate::game::entity::damage_level_of!(self, self.combat.attack(), no_push)
+            .invulnerability_check(
+                sunrise_client::health::Hurting::Entity(id as i32, kind, source),
+                vanilla,
+            )
     }
     /// A player's body, where it is kept now.
     pub(super) fn native_player_body(
@@ -842,13 +843,21 @@ mod tests {
             assert!(game.entity_set_invulnerable_time(victim, 60));
             let before = game.mobs[0].health;
             assert!(!game.mobs[0].damage(
-                crate::game::entity::damage_level_of!(game),
+                crate::game::entity::damage_level_of!(
+                    game,
+                    &sunrise_client::health::NO_ATTACK,
+                    no_push
+                ),
                 5.0,
                 Damage::of(DamageKind::Generic),
             ));
             assert_eq!(game.mobs[0].health, before, "the window refused it");
             assert!(game.mobs[0].damage(
-                crate::game::entity::damage_level_of!(game),
+                crate::game::entity::damage_level_of!(
+                    game,
+                    &sunrise_client::health::NO_ATTACK,
+                    no_push
+                ),
                 100.0,
                 Damage::of(DamageKind::OutOfWorld),
             ));

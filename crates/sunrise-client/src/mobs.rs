@@ -4150,6 +4150,7 @@ impl Mob {
         }
         self.last_direct = None;
         hurt_by::resolve(self, &source);
+        level.accepted_mob_hit(self);
         // dealDefaultKnockback, unless the damage type is tagged no_knockback or
         // the hit was blocked whole; a source without a position knocks in a
         // random direction.
