@@ -1,20 +1,6 @@
 //! Content-root condition selection through the owning reload snapshot.
 use super::*;
 
-/// Evaluate a tag layer before its values or replace flag participate in a merge.
-pub(super) fn tag_conditions_hold(
-    doc: &J,
-    conditions: &sunrise_world::conditions::LoadConditions,
-    path: &str,
-) -> Result<bool> {
-    if doc.get("neoforge:conditions").is_none() {
-        return Ok(true);
-    }
-    let allowed = conditions.allows_file(&serde_json::to_value(doc)?, path);
-    conditions.check_errors()?;
-    Ok(allowed)
-}
-
 /// A tag file's `key` list (`values`, `remove`); empty where it has none.
 pub(super) fn tag_list<'a>(tag: &'a J, key: &str) -> &'a [J] {
     match tag.get(key) {
@@ -244,12 +230,14 @@ pub fn build_with_conditions(
                         format!("{}: {file}", layer.assets.id),
                     )
                 })?;
-                // Dynamic registry entries use the same owning-load conditions as tags.
+                // Modifier files take whole-file conditions; tag files do not.
                 // Evaluate before parsing required modifier fields.
                 if biomes::is_modifier(&file) || structures::is_modifier(&file) {
                     let doc: J = serde_json::from_slice(&bytes)
                         .map_err(|e| format!("mod {}: {file}: {e}", m.id))?;
-                    if !tag_conditions_hold(&doc, conditions, &file)? {
+                    let allowed = conditions.allows_file(&serde_json::to_value(&doc)?, &file);
+                    conditions.check_errors()?;
+                    if !allowed {
                         continue;
                     }
                 }

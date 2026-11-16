@@ -187,9 +187,6 @@ pub(super) fn load<T: Clone>(
         tags,
         |bytes, context| {
             let file = serde_json::from_slice::<Value>(bytes).map_err(|error| error.to_string())?;
-            if !overlay.conditions.allows_file(&file, context) {
-                return Ok(None);
-            }
             decode(file, overlay.conditions, context, &value).map(Some)
         },
         known,
@@ -252,9 +249,6 @@ pub(super) fn load_numeric<T: Clone>(
         |bytes, context| {
             let mut object: RawObject =
                 serde_json::from_slice(bytes).map_err(|error| error.to_string())?;
-            if !allows_raw(&mut object, overlay.conditions, context)? {
-                return Ok(None);
-            }
             let replace = read_field(&mut object, "replace")?;
             let entries: RawObject = read_field(&mut object, "values")?;
             let removals: Vec<Removal> = read_field(&mut object, "remove")?;
@@ -297,4 +291,48 @@ pub(super) fn load_numeric<T: Clone>(
         },
         known,
     )
+}
+
+#[cfg(test)]
+mod condition_tests {
+    use super::*;
+
+    #[test]
+    fn typed_maps_ignore_file_conditions_and_keep_value_conditions() {
+        let files = vec![(
+            "data_maps/test:item/fuel".to_owned(),
+            vec![br#"{"neoforge:conditions":[{"type":"neoforge:false"}],"values":{"minecraft:stick":2,"minecraft:coal":{"neoforge:conditions":[{"type":"neoforge:false"}],"value":3}}}"#.to_vec()],
+        )];
+        let overlay = sunrise_world::loot::PackOverlay {
+            files: &files,
+            ..sunrise_world::loot::PackOverlay::NONE
+        };
+        let (values, applied) = load(
+            "test:fuel",
+            "item",
+            BTreeMap::new(),
+            &overlay,
+            &Tags::new(),
+            |raw| Ok(Some(entry_value(raw)?.as_i64().unwrap())),
+            |_| true,
+        );
+        assert!(applied);
+        assert_eq!(values, BTreeMap::from([("minecraft:stick".to_owned(), 2)]));
+        let (values, applied) = load_numeric(
+            "test:fuel",
+            "item",
+            BTreeMap::new(),
+            &overlay,
+            &Tags::new(),
+            NumberCodec {
+                field: "burn_time",
+                decode: |raw: &RawValue| {
+                    serde_json::from_str::<i64>(raw.get()).map_err(|error| error.to_string())
+                },
+            },
+            |_| true,
+        );
+        assert!(applied);
+        assert_eq!(values, BTreeMap::from([("minecraft:stick".to_owned(), 2)]));
+    }
 }
