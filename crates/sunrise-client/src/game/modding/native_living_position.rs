@@ -169,6 +169,7 @@ impl Game<'_> {
                 if let Some((from, to)) = teleported {
                     let (from, to) = ([from.x, from.y, from.z], [to.x, to.y, to.z]);
                     self.entity_section_moved(id, Some(from), to);
+                    self.sculk_mob_teleported(id);
                 }
                 moved
             }

@@ -2439,6 +2439,18 @@ impl Game<'_> {
             }
         }
     }
+    /// `Entity.teleportSetPosition` changes position without `Entity.move`:
+    /// retain the accumulated step distance, but start future movement here.
+    pub(super) fn sculk_mob_teleported(&mut self, id: u32) {
+        if let Some(entry) = self.sculk.steps.get_mut(&Who::Mob(id))
+            && let Some(mob) = self.mobs.iter().find(|mob| mob.id == id)
+        {
+            entry.last = [mob.position.x, mob.position.y, mob.position.z];
+            entry.on_ground = mob.on_ground;
+            entry.in_water = mob.fluids.in_water;
+        }
+    }
+
     /// `Entity.move`'s emission: footsteps, swimming, landing and splashes.
     fn entity_motion_events(
         &mut self,
@@ -3039,6 +3051,9 @@ mod command_damage_listener_tests {
             assert!(game.run_command("setblock 39 200 4 sculk_sensor strict"));
             game.sculk_prepare();
             game.sculk_sync_index();
+            // Establish the movement-emission snapshot before the teleport,
+            // as the real server does on the mob's preceding tick.
+            game.tick_mob_sculk_events();
             assert!(selected(&game, origin).is_none());
             assert!(selected(&game, destination).is_none());
             let before = game.world.game_time;

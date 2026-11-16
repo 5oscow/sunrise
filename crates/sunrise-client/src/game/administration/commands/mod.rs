@@ -1697,6 +1697,9 @@ impl Game<'_> {
             Target::Frame(_) | Target::Painting(_) => self.teleport_hanging(t, v),
             Target::Hook(_) | Target::DragonPart(_) | Target::Knot(_) => {}
         }
+        if let Target::Mob(id) = t {
+            self.sculk_mob_teleported(id);
+        }
         if !matches!(t, Target::Player | Target::Guest(_) | Target::Mob(_)) {
             target_entity_mut!(self, t, entity => {
                 let velocity = entity.velocity_mut();
