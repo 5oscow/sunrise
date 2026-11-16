@@ -20,10 +20,12 @@ def snapshot_tests(build):
     compiled beside sunrise-client's lib test, 15.6 GiB at once, and a 16 GiB parity runner killed it (signal 9,
     main, run 43884739298). Apart, the larger, sunrise-client's with its rlib, peaks at 11.5 GiB."""
     stdout = output = ""
-    for package in ("sunrise-client-lib", "sunrise-client"):
-        run = subprocess.run(
-            ["cargo", "test", "--locked", "-p", package, "--lib", "datapack_damage_", "--", "--include-ignored"],
-            cwd=lab.ROOT, text=True, capture_output=True)
+    # Written out whole: CI's named-harness step finds the lib tests to build first by these literal arguments.
+    for command in (
+        ["cargo", "test", "--locked", "-p", "sunrise-client-lib", "--lib", "datapack_damage_", "--", "--include-ignored"],
+        ["cargo", "test", "--locked", "-p", "sunrise-client", "--lib", "datapack_damage_", "--", "--include-ignored"],
+    ):
+        run = subprocess.run(command, cwd=lab.ROOT, text=True, capture_output=True)
         stdout += run.stdout
         output += run.stdout + run.stderr
         (build / "snapshot-tests.log").write_text(output)

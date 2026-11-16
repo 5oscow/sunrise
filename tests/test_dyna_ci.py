@@ -553,6 +553,10 @@ class DynaRoutingTests(unittest.TestCase):
                                                    "test --locked --no-run -p sunrise-client --lib"])
             self.assertEqual(built("lib"), ["test --locked --no-run -p sunrise-client-lib --lib"])
             self.assertEqual(built("fast"), [])
+            # damage_catalog, as it is: both lib tests, client-lib first.
+            shutil.copy(ROOT / "tools/test_damage_catalog_parity.py", tree / "tools")
+            self.assertEqual(built("damage_catalog"), ["test --locked --no-run -p sunrise-client-lib --lib",
+                                                       "test --locked --no-run -p sunrise-client --lib"])
 
     def test_parity_output_stays_on_the_runner_whatever_the_tested_tree_holds(self):
         from test_ci_runners import jobs
