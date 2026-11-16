@@ -148,28 +148,11 @@ impl Game<'_> {
                 Who::Player => None,
             });
         let fixed = if observed && mob.is_none() {
-            if self
-                .player
-                .as_ref()
-                .is_some_and(|player| player.entity_id == victim)
-            {
-                // The active guest's tracker is swapped into Game with its body. Its
-                // server-wide handle can still name the parked guest record during the turn.
-                match self.combat.player_credit(self.world.game_time) {
-                    Some(credit) => credited_player(credit).1,
-                    None => self
-                        .combat
-                        .kill_credit(self.world.game_time)
-                        .map(|id| entity(id as i32))
-                        .unwrap_or_default(),
-                }
-            } else {
-                self.entity(victim as u32)
-                    .and_then(|entity| self.living(entity))
-                    .and_then(|living| self.living_kill_credit(living))
-                    .map(|credit| entity(credit.id() as i32))
-                    .unwrap_or_default()
-            }
+            self.entity(victim as u32)
+                .and_then(|entity| self.living(entity))
+                .and_then(|living| self.living_kill_credit(living))
+                .map(|credit| entity(credit.id() as i32))
+                .unwrap_or_default()
         } else {
             CreditEntity::default()
         };
