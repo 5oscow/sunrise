@@ -557,6 +557,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    #[ignore = "daily"]
     fn add_replaces_a_symlinked_manifest_at_its_real_path_and_keeps_its_permissions() {
         use std::os::unix::fs::PermissionsExt;
         let project = Scratch::new("add-project");
