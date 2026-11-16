@@ -101,15 +101,20 @@ class PolicyFiles(unittest.TestCase):
     def test_a_daily_row_needing_an_input_runs_with_that_input_never_in_a_shard(self):
         self.write("fixture.txt", "pkg a::ignored VAR needs\n")
         self.write("daily-pkg.txt", "pkg b::guest lib daily wasm-fixture\npkg c::slow lib daily slow\n"
-                                    "pkg d::loads test:loads daily wasm-fixture\n")
+                                    "pkg d::loads test:loads daily wasm-fixture\n"
+                                    "sunrise-world f::shard lib daily wasm-fixture\n")
         variable = ignored_tests.DAILY_INPUTS["wasm-fixture"]
         self.write("other.txt", f"pkg e::other {variable} needs\n")
-        with patch.object(ignored_tests, "workspace_features", return_value={"pkg": ["fixture"]}):
+        # pkg has no shard: its rows get its workspace features, its library's too (a test behind a feature);
+        # sunrise-world's shard builds its library plainly, so its row reuses that build.
+        with patch.object(ignored_tests, "workspace_features",
+                          return_value={"pkg": ["fixture"], "sunrise-world": ["extra"]}):
             self.assertEqual(ignored_tests.needs_commands(variable), [
                 ["cargo", "test", "-p", "pkg", "--lib", "--", "--ignored", "--exact", "e::other"],
-                ["cargo", "test", "-p", "pkg", "--lib", "--", "--ignored", "--exact", "b::guest"],
+                ["cargo", "test", "-p", "pkg", "--features", "fixture", "--lib", "--", "--ignored", "--exact", "b::guest"],
                 ["cargo", "test", "-p", "pkg", "--features", "fixture", "--test", "loads", "--", "--ignored", "--exact",
                  "d::loads"],
+                ["cargo", "test", "-p", "sunrise-world", "--lib", "--", "--ignored", "--exact", "f::shard"],
             ])
         self.assertEqual([row.test for row in ignored_tests.daily_rows()], ["c::slow"])
 

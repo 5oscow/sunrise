@@ -307,8 +307,10 @@ def harness_inputs():
 
 def needs_commands(variable, jobs=None):
     """One `cargo test` command per test marked `needs variable`, and per daily row whose reason needs it
-    (DAILY_INPUTS), each selecting exactly that test. A daily row's integration test or binary gets the features its
-    workspace build turns on (a target's required-features), as the daily-rows leg gives it."""
+    (DAILY_INPUTS), each selecting exactly that test. A daily row is built as it was before it moved here: a row of a
+    target its package's shard builds (shard_runs) as the shard builds it, so the library test the `needs` rows
+    built is reused; any other row with the features its workspace build turns on (a target's required-features, or
+    a test behind a feature like sunrise-mod-wasm's `test-copy-probe`), as the daily-rows leg gives it."""
     j = [f"-j{jobs}"] if jobs else []
     commands = [
         ["cargo", "test", *j, "-p", row.package, "--lib", "--", *(["--ignored"] if row.mark == "needs" else []), "--exact", row.test]
@@ -318,7 +320,7 @@ def needs_commands(variable, jobs=None):
         if row.mark != "daily" or DAILY_INPUTS.get(row.reason) != variable:
             continue
         kind, _, name = row.reference.partition(":")
-        features = workspace_features().get(row.package, []) if kind != "lib" else []
+        features = [] if shard_runs(row.package, row.reference) else workspace_features().get(row.package, [])
         commands.append(["cargo", "test", *j, "-p", row.package, *(["--features", ",".join(features)] if features else []),
                          *(["--lib"] if kind == "lib" else [f"--{kind}", name]), "--", "--ignored", "--exact", row.test])
     if not commands:
