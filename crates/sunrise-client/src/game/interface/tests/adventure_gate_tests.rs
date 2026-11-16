@@ -23,10 +23,13 @@ fn game() -> Option<crate::game::Game<'static>> {
 /// `stack` with a `can_break` or `can_place_on` component naming `block`.
 fn stack_with(name: &str, component: &str, block: &str) -> ItemStack {
     let mut stack = ItemStack::new(name, 1);
-    stack.data_mut().other.push((
-        component.into(),
-        Tag::compound([("blocks", Tag::List(vec![Tag::String(block.into())]))]),
-    ));
+    stack.data_mut().set_other(
+        component,
+        Some(Tag::compound([(
+            "blocks",
+            Tag::List(vec![Tag::String(block.into())]),
+        )])),
+    );
     stack
 }
 
