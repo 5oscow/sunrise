@@ -835,7 +835,7 @@ impl Cx {
     code.push_str(&served);
     code.push_str("unsafe fn call_unsupported(_: *mut Cx, _: &[u8], _: &mut Writer) -> Result<(), ServeError> { Err(ServeError::Unsupported(0)) }\n");
     // One call the game serves: its name as a guest imports it, and the function that answers.
-    code.push_str("pub struct CallEntry { pub name: &'static str, pub invoke: unsafe fn(*mut Cx, &[u8], &mut Writer) -> Result<(), ServeError> }\n");
+    code.push_str("pub type Invoke = unsafe fn(*mut Cx, &[u8], &mut Writer) -> Result<(), ServeError>;\npub struct CallEntry { pub name: &'static str, pub invoke: Invoke }\n");
     // Sorted by name: the loader looks each import of a module up once, at link time.
     table.sort();
     code.push_str("pub static CALLS: &[CallEntry] = &[\n");
@@ -844,8 +844,9 @@ impl Cx {
     }
     code.push_str("];\n");
     // The test seam: a call by its place in `CALLS`, which no guest sees.
-    code.push_str("pub fn import_id(owner: &str, name: &str) -> Option<u32> { let plain = format!(\"call:{owner}::{name}#\"); let held = format!(\"call:held::{owner}::{name}#\"); CALLS.iter().position(|c| c.name.starts_with(&plain) || c.name.starts_with(&held)).map(|i| i as u32) }\n");
-    code.push_str("pub unsafe fn serve(id: u32, cx: *mut Cx, bytes: &[u8], out: &mut Writer) -> Result<(), ServeError> { match CALLS.get(id as usize) { Some(call) => unsafe { (call.invoke)(cx, bytes, out) }, None => Err(ServeError::Unsupported(id)) } }\n");
+    code.push_str("pub fn import_index(owner: &str, name: &str) -> Option<u32> { let plain = format!(\"call:{owner}::{name}#\"); let held = format!(\"call:held::{owner}::{name}#\"); CALLS.iter().position(|c| c.name.starts_with(&plain) || c.name.starts_with(&held)).map(|i| i as u32) }\n");
+    code.push_str("pub fn import_id(owner: &str, name: &str) -> Option<&'static str> { let plain = format!(\"call:{owner}::{name}#\"); let held = format!(\"call:held::{owner}::{name}#\"); CALLS.iter().map(|c| c.name).find(|c| c.starts_with(&plain) || c.starts_with(&held)) }\n");
+    code.push_str("pub unsafe fn serve(name: &str, cx: *mut Cx, bytes: &[u8], out: &mut Writer) -> Result<(), ServeError> { match CALLS.binary_search_by(|call| call.name.cmp(name)) { Ok(at) => unsafe { (CALLS[at].invoke)(cx, bytes, out) }, Err(_) => Err(ServeError::Unsupported(0)) } }\n");
     writeln!(
         code,
         "pub const UNSUPPORTED_IMPORTS: &[&str] = &{import_gaps:?};"
@@ -1259,6 +1260,23 @@ fn host_and_coverage(root: &std::path::Path) -> Result<(String, String), String>
     writeln!(report, "\nRequired gap total: {gaps}.").unwrap();
     report.push_str(include_str!("../../coverage-notes.md"));
     writeln!(code, "pub const SUBSCRIBED: u64 = {subscribed};").unwrap();
+    // The ids of the prepared entries of the first prepared hook, which the runtime tells apart.
+    let (prepare, release) = prepared_hooks.first().map_or((0, 0), |(hook, _)| {
+        (
+            names.prepared(hook, &format!("prepare_{hook}")).export_id(),
+            names.prepared(hook, &format!("release_{hook}")).export_id(),
+        )
+    });
+    writeln!(code, "pub const PREPARED_PREPARE: u64 = {prepare};").unwrap();
+    writeln!(code, "pub const PREPARED_RELEASE: u64 = {release};").unwrap();
+    // What a mod's markers may name: every hook, Part and handler method it can implement.
+    let mut marked: Vec<String> = names
+        .marked()
+        .into_iter()
+        .map(|(_, _, n)| n.text())
+        .collect();
+    marked.sort();
+    writeln!(code, "pub static EXPORT_CALLS: &[&str] = &{marked:?};").unwrap();
     code.push_str("pub fn hook_id(name: &str) -> Option<mod_api::HookId> { match name {\n");
     for (variant, name) in &surface.hooks {
         writeln!(code, "{:?} => Some(mod_api::HookId::{}),", name, variant).unwrap();
