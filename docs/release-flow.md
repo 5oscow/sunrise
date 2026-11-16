@@ -8,26 +8,28 @@ and every launcher and `sunrise-server update` install it ([Nightly only](#night
 
 ## Pull request checks
 
-The `checks` workflow (`.github/workflows/ci.yml`) runs two jobs on every pull request (opened, pushed to or
-reopened; labels never start it):
+Rollups, syncs and main's pushes are checked by one gate, `dyna-checks` (`.github/workflows/dyna-ci.yml`: `lint`,
+`verify`, `verify-static`, `launcher`); a plain pull request gets its cheap checks there (`format`, `verify-static`)
+([CONTRIBUTING.md](../CONTRIBUTING.md#ci-tiers)). The `checks` workflow (`.github/workflows/ci.yml`) adds a free
+full `verify` on GitHub's runners for a plain pull request only (opened, pushed to or reopened; labels never start
+it). It skips the pull requests `tools/ci/pr_gate.py` sends to dyna-checks' heavy gate (rollup or sync), and runs
+every 6 hours on main to save the Rust caches its pull request runs read. Its by-hand jobs (Windows ARM64,
+vanilla-parity, jfr-analysis) run only on dispatch:
 
 | Job | Runs on | What | Time |
 | --- | --- | --- | --- |
 | `verify` | Our checks runners (label `sunrise-checks`, the desktop's) for this repository's own pull requests whose number ends in 0 or 1; GitHub `ubuntu-latest` for the others, forks' pull requests (they see no repository variable, so no switch could move them off a machine that is off) and main's pushes. `SELF_HOSTED_CI` moves them: `all` all to ours, `light` or `off` all to GitHub ([CI runners](ci-runners.md)) | Three jobs side by side: the public-tree check and Python tests (`verify (tree and tools)`), rustfmt and clippy with warnings denied (`verify (format and lint)`), the Rust tests (`verify (Rust tests)`); `verify` waits for them and passes when each passed or had nothing to do. Dependencies and the workspace build come from a cache saved by main's runs (GitHub) or the runner's own build folder (ours) | ~8 min |
-| `parity / parity` | A runner with the label `sunrise-game`: the Mac mini's and playsunrise's (below) | Only for a change to a harness, an oracle, a probe or the runner (or the `run-parity` label): the vanilla harnesses the change can affect (`tools/parity.py --changed <base>`). Other pull requests skip it: [parity-main](#parity-on-main) checks them on main | seconds when nothing is affected; minutes per affected harness |
 
-Pushes to main run `verify` only; the nightly audit covers main's harnesses.
+A pull request's harnesses run by dispatch on Dyna's runners: `gh workflow run dyna-ci.yml -f pr=<N> -f parity=true`.
 
-`verify` is the check main requires, so it has no condition and runs in every run of `checks`: GitHub counts a
-*skipped* required check as passed, and labels used to start runs whose `verify` was skipped, which let
-auto-merge merge before the real `verify` finished. A pull request that changes no Rust (docs, tools) runs only its
-quick steps and finishes in about a minute. A pull request's public-tree check reads only
+`verify` runs even in a cancelled run of `checks`, so it fails there instead of being skipped. A pull request that
+changes no Rust (docs, tools) runs only its quick steps and finishes in about a minute. A pull request's public-tree check reads only
 its own commits (`--range base..head`); main's pushes read every ref's history.
 
 ### The parity job
 
-The job is `.github/workflows/parity.yml`, a reusable workflow: `checks` calls it for pull requests from this
-repository, `run-parity.yml` for a fork's pull request a maintainer labels `run-parity`.
+The job is `.github/workflows/parity.yml`, a reusable workflow: `run-parity.yml` calls it for a fork's pull request a
+maintainer labels `run-parity`.
 
 A pull request every harness reaches (a crate split moves files every probe links: #2160 ran all 352 harnesses, 71
 minutes on a Mac mini runner, while five other pull requests' jobs queued behind it) carries the `full-parity` label:
@@ -123,7 +125,7 @@ run there (parity has none). It is also a parity host (`playsunrise` in `tools/p
 Pull requests go through the merge queue, which squashes each one into a single commit titled with the pull
 request's title and number (`kind(area): what changes (#123)`); never `gh pr merge --auto`. Branch protection on main
 requires `verify` for everyone, and a council member's review (team `council`) for the files `.github/CODEOWNERS` lists (what builds, signs
-and ships releases). Branches don't have to be up to date with main: main's own `checks` run catches the rare
+and ships releases). Branches don't have to be up to date with main: main's own `dyna-checks` run catches the rare
 semantic conflict.
 
 **Who merges.** The Sunrise Team (GitHub team `sunrise-team`: kacpherek, levzzz5154, rdbtCVS, Online5277, dezer-x) and

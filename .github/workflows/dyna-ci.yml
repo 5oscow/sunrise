@@ -410,6 +410,13 @@ jobs:
         if: ${{ !cancelled() && steps.setup.outcome == 'success' && (needs.changes.outputs.rust_required != 'false') }}
         id: native-lint
         run: python3 tools/ci/check_warnings.py cargo clippy $JOBS --keep-going --workspace --all-targets
+      # The full boundary audit: the mod API's generated signatures (mod_api_generated*.rs, written by sunrise-mod-vocab's
+      # build script during the lint above), which the source-only check cannot see. Only Cargo's build-script outputs
+      # are scanned: the persistent target holds far more.
+      - name: Check generated mod API signatures
+        id: generated_api_boundary
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' && needs.changes.outputs.rust_required != 'false' && steps.native-lint.outcome == 'success' }}
+        run: python3 tools/ci/check_api_boundary.py --generated-root target/debug/build
       - name: Lint the server build without sound or controllers
         if: ${{ !cancelled() && steps.setup.outcome == 'success' && (needs.changes.outputs.rust_required != 'false') }}
         id: server-lint
