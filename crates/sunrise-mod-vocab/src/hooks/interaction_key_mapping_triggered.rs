@@ -61,7 +61,11 @@ pub trait Hooks {
     /// same world tick. A rejected, nonresident passenger does not autonomously
     /// tick or retry. A mob riding a player is compulsorily ejected on save, logout,
     /// death or dimension change: the dismount notifies this hook, but cancellation
-    /// cannot keep the mob aboard. Loading a save does not notify. Server-side.
+    /// cannot keep the mob aboard. Loading a save does not notify. A mob that boards a boat
+    /// by touching it is checked again after the hook returns without canceling: the boat
+    /// is found again by id (gone: the contact pass for that boat ends), its passengers are
+    /// counted again, and the mob must still exist, not be removed and not already ride;
+    /// a full boat or an unfit mob skips that mob. Server-side.
     #[hook(
         side = "server",
         contract = "cancel",

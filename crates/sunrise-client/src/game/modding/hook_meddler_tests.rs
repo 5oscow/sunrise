@@ -3,7 +3,7 @@
 //! first of the hooks it listens to, and does not cancel.
 use super::native_entity_refs::tests::with_game;
 use crate::game::Game;
-use mod_api::{ArmorStandManipulateEvent, Flow, Hooks, ServerHost};
+use mod_api::{ArmorStandManipulateEvent, EntityMountEvent, Flow, Hooks, ServerHost};
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
@@ -46,6 +46,9 @@ impl Hooks for Meddler {
         host: &mut dyn ServerHost,
         _: &mut ArmorStandManipulateEvent<'_>,
     ) -> Flow {
+        self.meddle(host)
+    }
+    fn entity_mount(&self, host: &mut dyn ServerHost, _: &mut EntityMountEvent<'_>) -> Flow {
         self.meddle(host)
     }
 }
