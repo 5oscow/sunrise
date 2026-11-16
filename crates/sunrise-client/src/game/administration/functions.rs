@@ -300,10 +300,13 @@ impl Game<'_> {
         self.fns.loaded = true;
         self.fns.load_pending = true;
         // An explicit reload (`/reload`, `/datapack`) also rebuilds the
-        // content tables, as `ReloadableServerResources` does; on world open
-        // `finish_open_world` builds them right after this.
+        // content tables, as `ReloadableServerResources` does. World open must
+        // also install its tables before function admission validates inline holders.
         if let Some(world) = world {
             self.install_world_tables(world);
+        } else if !run_load {
+            self.open_world_tables(&stack, &resources)
+                .map_err(|error| ReloadStageError::DataSource(error.to_string()))?;
         }
         self.build_native_commands(enabled_features);
         self.apply_server_reload(prepared, &stack);
