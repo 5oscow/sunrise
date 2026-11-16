@@ -513,6 +513,7 @@ impl Game<'_> {
                             }
                             .into(),
                         ),
+                        item_frame: None,
                     }
                     .into();
                 let light = self.world.light(p.pos[0], p.pos[1], p.pos[2]);
