@@ -480,7 +480,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn tick_cancel_and_nonpositive_durations_finish_without_releasing() {
         with_uses(|game, uses, player| {
             game.creative = false;
@@ -521,7 +521,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_crossbows_run_out_counter_keeps_decrementing_until_release() {
         with_uses(|game, uses, player| {
             for (cancel, duration, first, second) in [
@@ -555,7 +555,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn tick_completion_applies_the_finish_listeners_result_stack() {
         with_uses(|game, uses, player| {
             game.inventory[game.selected] = Some(ItemStack::new("minecraft:apple", 2));
@@ -576,7 +576,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_zero_start_begins_but_a_cancelled_stop_only_skips_release() {
         with_uses(|game, uses, player| {
             game.inventory[game.selected] = Some(ItemStack::new("minecraft:bow", 1));
@@ -598,7 +598,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_tick_replaces_the_remaining_counter_rather_than_the_original_duration() {
         with_uses(|game, uses, player| {
             game.inventory[game.selected] = Some(ItemStack::new("minecraft:shield", 1));
@@ -626,7 +626,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn an_item_part_can_extend_the_last_tick_or_shorten_a_use() {
         with_uses(|game, uses, player| {
             for (start, replacement, effects) in [(1, 3, 3), (20, 1, 1), (20, 0, 1), (20, -7, 1)] {
@@ -658,7 +658,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn an_item_used_in_either_hand_is_released_once() {
         with_uses(|game, uses, player| {
             uses.lock().unwrap().release_on_stop = Some(player);

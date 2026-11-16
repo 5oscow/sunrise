@@ -15471,7 +15471,7 @@ mod item_use_tick_tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn client_tick_cancellation_skips_one_tick_and_countdown_continues() {
         let answer = Arc::new(Mutex::new(None));
         let heard = Arc::new(Mutex::new(Vec::new()));
