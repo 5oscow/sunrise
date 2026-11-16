@@ -552,9 +552,9 @@ fn glfw_modifier_bits_are_glfw_modifier_bits() {
 }
 
 /// The `button` a native mod's mouse hooks hand over is GLFW's index (0
-/// left, 1 right, 2 middle, 3 back, 4 forward, else the button's number),
-/// the one `keybinds::mouse_name` names (`key.mouse.<index + 1>` from the
-/// back button on).
+/// left, 1 right, 2 middle, 3 back, 4 forward, else the button's number).
+/// `keybinds::mouse_name` names left, right and middle by name and the rest
+/// `key.mouse.<index + 1>`, vanilla's number only from the back button on.
 #[test]
 fn glfw_button_indices_are_glfw_indices() {
     for (button, index, name) in [
