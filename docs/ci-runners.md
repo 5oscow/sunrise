@@ -165,3 +165,10 @@ A reviewer runs the heavy gate on one contributor's pull request with `gh workfl
 Main's workflow checks out that pull request's head commit on GitHub's runners (never ours) with a read-only token,
 and the `pr-status` job, which runs none of its code and alone may write commit statuses, posts `dispatched/lint`,
 `dispatched/verify`, `dispatched/verify-static` and `dispatched/launcher` on that commit.
+
+The vanilla parity harnesses need the owner's prepared vanilla data, which only the Dyna runners hold
+(`/cache/sunrise-local`). Main's daily dispatch runs the `vanilla-parity` job's fixed set; a lead runs it on one of
+our own pull requests with `gh workflow run dyna-ci.yml -f pr=<number> -f parity=true`, adding
+`-f harnesses='<name> <name>'` for the harnesses the change can reach instead of the fixed set. Only the parity job
+runs, never on a fork's pull request, and the log gets one PASS or FAIL line per harness: their output (vanilla's
+values) stays on the runner.

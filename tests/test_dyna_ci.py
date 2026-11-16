@@ -5,6 +5,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+import textwrap
 import time
 import unittest
 
@@ -229,8 +230,8 @@ class DynaRoutingTests(unittest.TestCase):
         # verify waits for the heavy gate (tools/ci/pr_gate.py); verify-static runs on every pull request.
         conditions = {
             id(runtime): "${{ always() && !cancelled() && needs.changes.result != 'skipped' && "
-                         "(needs.changes.result != 'success' || needs.changes.outputs.heavy == 'true') }}",
-            id(static): "${{ always() && !cancelled() && needs.changes.result != 'skipped' }}",
+                         "(needs.changes.result != 'success' || needs.changes.outputs.heavy == 'true') && !inputs.parity }}",
+            id(static): "${{ always() && !cancelled() && needs.changes.result != 'skipped' && !inputs.parity }}",
         }
         for block in (runtime, static):
             header, steps = block.split("    steps:\n", 1)
@@ -488,6 +489,44 @@ class DynaRoutingTests(unittest.TestCase):
         self.assertIn("github.repository == 'sunrise-org/sunrise'", parity)
         self.assertIn("runs-on: dyna-large", parity)
         self.assertIn("persist-credentials: false", parity)
+        # A parity dispatch on a pull request runs only this job, and never a fork's code beside the vanilla data.
+        self.assertIn("needs.changes.outputs.trusted == 'true'", parity)
+        self.assertIn("ref: ${{ needs.changes.outputs.pr_sha || github.sha }}", parity)
+        for name in ("lint", "verify", "verify-static", "format", "launcher", "pr-status"):
+            header = blocks[name].split("    steps:\n", 1)[0]
+            self.assertIn("!inputs.parity", header, name)
+
+    def test_parity_output_stays_on_the_runner_whatever_the_tested_tree_holds(self):
+        from test_ci_runners import jobs
+        parity = dict(jobs((ROOT / ".github/workflows/dyna-ci.yml").read_text()))["vanilla-parity"]
+        # The helper comes from the workflow's revision: nothing on PATH is taken from the checkout.
+        self.assertNotIn("$GITHUB_WORKSPACE/tools", parity)
+        helper = textwrap.dedent(parity.split("<<'SH'\n", 1)[1].split("\n          SH\n", 1)[0])
+        with tempfile.TemporaryDirectory() as temporary:
+            build, tree = Path(temporary, "build"), Path(temporary, "tree")
+            (build / "bin").mkdir(parents=True)
+            (tree / "tools").mkdir(parents=True)
+            shim = build / "bin" / "python"
+            shim.write_text(helper)
+            shim.chmod(0o755)
+            # An older tree's harness and parity.py stream mismatches (vanilla's values), unindented too.
+            (tree / "tools" / "test_old_parity.py").write_text(
+                "import sys\nprint('mismatch: vanilla 0.7231')\nprint('vanilla 9', file=sys.stderr)\nsys.exit(3)\n")
+            (tree / "tools" / "parity.py").write_text(
+                "import sys\nprint('PASS loot_a 3s')\nprint('vanilla 0.7231')\n"
+                "print('FAIL loot_b 2s  (log)')\nprint('    vanilla 9')\nsys.exit(1)\n")
+            env = {**os.environ, "DYNA_CI_BUILD": str(build)}
+            harness = subprocess.run([str(shim), "tools/test_old_parity.py"], cwd=tree, env=env,
+                                     capture_output=True, text=True)
+            runner = subprocess.run([str(shim), "tools/parity.py", "loot_a", "loot_b"], cwd=tree, env=env,
+                                    capture_output=True, text=True)
+            self.assertEqual(harness.returncode, 3)
+            self.assertEqual(runner.returncode, 1)
+            for result in (harness, runner):
+                self.assertNotIn("vanilla", result.stdout + result.stderr)
+            self.assertIn("FAIL test_old_parity (exit 3", harness.stdout)
+            self.assertEqual(runner.stdout.splitlines()[:2], ["PASS loot_a", "FAIL loot_b"])
+            self.assertIn("mismatch: vanilla 0.7231", (build / "parity-logs" / "test_old_parity.log").read_text())
 
 
 if __name__ == "__main__":
