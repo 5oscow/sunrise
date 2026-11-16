@@ -49,6 +49,19 @@ fn cause_of(cause: MoverType) -> MoveCause {
     }
 }
 
+/// The `MoverType` a mod asks for by its cause (`MoveCause`): `cause_of`'s inverse. None for a
+/// cause this build does not know (`MoveCause` may grow).
+pub fn mover_of(cause: MoveCause) -> Option<MoverType> {
+    match cause {
+        MoveCause::SelfMovement => Some(MoverType::SelfMovement),
+        MoveCause::Player => Some(MoverType::Player),
+        MoveCause::Piston => Some(MoverType::Piston),
+        MoveCause::ShulkerBox => Some(MoverType::ShulkerBox),
+        MoveCause::Shulker => Some(MoverType::Shulker),
+        _ => None,
+    }
+}
+
 /// Arm one physical `Entity.move` invocation (#2414): the entity `entity` is
 /// about to move by `delta` for `cause`'s sake. The `entity_move` hook fires
 /// here — in this one function — on the authoritative side, and only when a

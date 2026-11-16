@@ -53,7 +53,7 @@ mod tests {
         fs::create_dir_all(root.join("data/minecraft/loot_table")).unwrap();
         fs::write(
             root.join("items.json"),
-            r#"{"minecraft:stick":{},"minecraft:diamond_pickaxe":{"minecraft:max_damage":1561}}"#,
+            r#"{"minecraft:stick":{},"minecraft:diamond_pickaxe":{"minecraft:max_damage":1561,"minecraft:damage":0}}"#,
         )
         .unwrap();
         let defaults = sunrise_world::item_defaults::read(&root).unwrap();

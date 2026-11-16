@@ -138,6 +138,22 @@ pub trait BlockEntitiesBackendMut {
         entity: BlockEntityRef,
     ) -> Result<bool, BlockEntityError>;
     /// Side: server.
+    /// Watch one source position in this observer's level. The observer's BlockParts
+    /// receive the same contents_changed notice with observer = Some(self). Repeated
+    /// registration is idempotent; a self-watch never duplicates its own notice.
+    /// Registration changes join the transaction and abort restores them. Removal,
+    /// replacement and chunk unload discard watches; loading must register them again.
+    /// The source need not be loaded; watches follow the position, not its occupant.
+    /// No part subscribed to this moment returns NotSubscribed; an invalid observer
+    /// or a level not writable here returns Stale. Available during the observer's tick.
+    #[access(WorldOnly)]
+    fn block_entity_watch_contents(
+        &mut self,
+        entity: BlockEntityRef,
+        source: BlockPos,
+        enabled: bool,
+    ) -> Result<(), ContentsWatchError>;
+    /// Side: server.
     /// Sets the custom name, or clears it with None, as an anvil-renamed item placed with
     /// `components` sets `CustomName`. Plain text only. Clients get a block entity update.
     /// Ok(false) for an entity that is not nameable; Stale for an invalidated or
@@ -151,10 +167,10 @@ pub trait BlockEntitiesBackendMut {
     /// Side: server.
     /// Publishes the shapes this block entity's block has in place of its declared ones, or
     /// clears them with None, so the declared shapes apply again. The block must declare
-    /// `shapes_from_block_entity`. Physics, selection, ray casts and support read the
-    /// published value at the position and never call into the mod, so a port of NeoForge's
-    /// `getShape` publishes wherever that state changes: it is published when it changes,
-    /// not asked for per query.
+    /// `shapes_from_block_entity`. Physics, selection, ray casts, support, the floor a mob's
+    /// path stands on and its move control's jump read the published value at the position
+    /// and never call into the mod, so a port of NeoForge's `getShape` publishes wherever
+    /// that state changes: it is published when it changes, not asked for per query.
     ///
     /// The server applies it at once, for the queries that follow in the same tick; a client
     /// applies it when the block entity's update arrives, which may be a tick later, as any

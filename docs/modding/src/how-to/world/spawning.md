@@ -27,6 +27,29 @@ The placement type is `SpawnPlacements.isSpawnPositionOk`'s first check, and the
 
 `mob_spawn_placement_check` is the separate per-check moment: it runs after the rule and is told its answer as `default_result`, so you can override it for one position.
 
+## Saved display and utility entities
+
+`entity_join_level` (hook version 3) additionally notifies for live fallback-store
+entities: block, item and text displays, markers, interactions, and summoned or
+chunk-restored eyes of ender and explicit leash knots. Gameplay-thrown eyes and
+naturally tied leash knots live in separate lists and do not notify yet. Saved data
+kept for a missing mod is not a live entity and does not notify. A fresh fallback
+entity notifies once with `loaded_from_disk = false`; restoring it from a saved chunk
+notifies once with `loaded_from_disk = true`. The normal join cancellation and
+transaction rules apply to these entities too.
+
+`entity_leave_level` (hook version 3) reports the same additional kinds when they leave.
+On the server, `level.entities_in(host, min, max)` additionally returns readable `EntityRef`
+handles for block, item and text displays, markers and interactions. Eyes of ender,
+leash knots and other unmodeled kinds are not returned yet. The returned entities'
+kind, position, saved data and tags can be inspected without command selectors. The query uses physical boxes, not rendering/culling boxes:
+displays and markers have zero-sized boxes at their positions; interactions use their
+saved width and height. Face-only contact does not intersect. A handle expires when its
+entity unloads, so find it again when the saved entity rejoins.
+
+`level_entities_in(level, min, max)` lists item frames and paintings whose boxes meet the box too, with
+handles that resolve, after the ordinary entities and before the players.
+
 ## Walking every entity in a level
 
 `host.level_all_entities(level)` returns the authoritative level's available

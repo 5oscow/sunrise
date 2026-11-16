@@ -29,8 +29,8 @@ The build a mod is made for is its pin, always a full commit sha in the file:
 - a native mod: `[native] sunrise` in `sunrise-mod.toml`;
 - a wasm mod: `sdk` under `[package.metadata.sunrise]` in `Cargo.toml`.
 
-`cargo sunrise-mod new` writes the current Nightly's build, or `--sunrise`'s. `cargo sunrise-mod update` moves a
-native mod's pin. Wherever a build is given, these forms are accepted:
+`cargo sunrise-mod new` writes the current Nightly's build, or `--sunrise`'s. `cargo sunrise-mod update` moves
+either pin, changing only its value. Wherever a build is given, these forms are accepted:
 
 | Written | Means |
 |---|---|

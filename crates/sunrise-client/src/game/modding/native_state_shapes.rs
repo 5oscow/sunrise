@@ -5,7 +5,45 @@ use sunrise_client::{
     block_entity_anim::BlockEntityAnims, collisions::SceneCollisions, world::World,
 };
 use sunrise_core::position::BlockPos;
-use sunrise_world::{collision_context::CollisionContext, registry::BlockStateId};
+use sunrise_world::{
+    block_collision::BlockCollisionRegistry, collision_context::CollisionContext,
+    registry::BlockStateId,
+};
+
+/// A state's empty-context collision boxes at `pos`, block-local: a block entity's published
+/// shape where its block publishes one, else the declared or vanilla shape. Collision errors
+/// return no boxes. The one read behind `LevelRef::block_shape` and `LevelHost::collision_shape`.
+pub(super) fn collision_boxes(
+    collision: &BlockCollisionRegistry<'_>,
+    world: &World,
+    state: BlockStateId,
+    pos: [i32; 3],
+) -> Vec<[f64; 6]> {
+    let mut scene = SceneCollisions {
+        world,
+        binding: collision,
+        subject: None,
+    };
+    collision
+        .collision_shape_with_context(
+            &mut scene,
+            state,
+            BlockPos::new(pos[0], pos[1], pos[2]),
+            &CollisionContext::empty(false),
+        )
+        .map(|shape| {
+            shape
+                .boxes()
+                .iter()
+                .map(|bounds| {
+                    let min = bounds.min_position();
+                    let max = bounds.max_position();
+                    [min.x, min.y, min.z, max.x, max.y, max.z]
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
 
 impl Game<'_> {
     /// The same outline traversal without allocating a box list.
@@ -85,32 +123,7 @@ impl Game<'_> {
                 .outline_boxes_iter(world, state, anims, pos, false)
                 .map(|bounds| std::array::from_fn(|i| bounds[i] - f64::from(pos[i % 3])))
                 .collect(),
-            BlockShapeKind::Collision => {
-                let mut scene = SceneCollisions {
-                    world,
-                    binding: self.collision,
-                    subject: None,
-                };
-                self.collision
-                    .collision_shape_with_context(
-                        &mut scene,
-                        state,
-                        BlockPos::new(pos[0], pos[1], pos[2]),
-                        &CollisionContext::empty(false),
-                    )
-                    .map(|shape| {
-                        shape
-                            .boxes()
-                            .iter()
-                            .map(|bounds| {
-                                let min = bounds.min_position();
-                                let max = bounds.max_position();
-                                [min.x, min.y, min.z, max.x, max.y, max.z]
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default()
-            }
+            BlockShapeKind::Collision => collision_boxes(self.collision, world, state, pos),
             _ => unreachable!("BlockShapeKind: unhandled variant"),
         }
     }

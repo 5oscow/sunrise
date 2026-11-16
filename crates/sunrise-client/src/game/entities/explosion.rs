@@ -94,12 +94,25 @@ impl RayWorld for ColliderRays<'_, '_> {
         mode: RayBlockMode,
     ) -> io::Result<VoxelShape> {
         if let Some(data) = &self.clip_data {
-            if data.behaviours.data(state).dynamic_shape {
+            // A block entity's published shapes stand over the declared ones, a
+            // dynamic template's included (#1666): the collider below reads them
+            // through the binding, the outline here.
+            let at = [p.x, p.y, p.z];
+            let published = sunrise_client::collisions::published_outline(
+                self.scene.world,
+                self.scene.binding,
+                state,
+                at,
+            );
+            if published.is_none() && data.behaviours.data(state).dynamic_shape {
                 return Err(io::Error::other("dynamic ray shape unsupported"));
             }
             if mode == RayBlockMode::Outline {
                 let facts = data.facts.get(state);
-                let shape = super::perspective::ray_shape_from_boxes(&facts.outline)?;
+                let shape = match published {
+                    Some(shape) => shape.clone(),
+                    None => super::perspective::ray_shape_from_boxes(&facts.outline)?,
+                };
                 let offset = super::perspective::outline_offset(
                     data.tables,
                     state,

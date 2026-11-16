@@ -103,7 +103,6 @@ use sunrise_core::{
     connection_kind::ConnectionKind,
     geometry::Direction,
     position::BlockPos,
-    random::LegacyRandom,
     ticks::{ScheduleResult, TickPriority},
 };
 use sunrise_world::level::{BonemealCheck, PlaceContext};
@@ -122,6 +121,7 @@ use {
 
 include!(concat!(env!("OUT_DIR"), "/native_hook_modules.rs"));
 pub(in crate::game) use add_attribute_tooltips::HookedAttributeTooltips;
+pub(in crate::game) use base::LevelView;
 pub(in crate::game) use bounce_restitution::install_block_contact_hooks;
 pub(in crate::game) use fishing_medium::NativeFishingMedium;
 pub(in crate::game) use living_change_target::NativeHookHost;

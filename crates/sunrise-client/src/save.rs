@@ -685,7 +685,24 @@ pub fn block_entity_data(
     block: &str,
     lock: Option<&Tag>,
 ) -> Tag {
-    let mut tag = block_entity_encode::encode(p, e, block);
+    block_entity_data_tag(block_entity_encode::encode(p, e, block), lock)
+}
+
+/// Command-visible block-entity data, saved against loaded item prototypes.
+pub fn block_entity_data_with_items(
+    p: (i32, i32, i32),
+    e: &crate::containers::BlockEntity,
+    block: &str,
+    lock: Option<&Tag>,
+    items: &crate::items::Items,
+) -> Tag {
+    block_entity_data_tag(
+        block_entity_encode::encode_with_items(p, e, block, items),
+        lock,
+    )
+}
+
+fn block_entity_data_tag(mut tag: Tag, lock: Option<&Tag>) -> Tag {
     if let Tag::Compound(map) = &mut tag {
         map.remove(&"keepPacked".into());
         if let Some(lock) = lock {
@@ -3475,7 +3492,7 @@ pub struct Level {
     /// the world enables, `minecraft:vanilla` included. Empty is vanilla's
     /// default, which the level.dat omits.
     pub enabled_features: std::sync::Arc<[String]>,
-    /// The code mods (`fml.LoadingModList` beside `Data`), then the content mods (`sunrise.ContentModList`), the world was saved with; `None` without either list.
+    /// The code mods (`fml.LoadingModList` beside `Data`), then the content mods (`sunrise.ContentModList`), the world was saved with; `None` without either list or when both are empty.
     pub saved_mods: Option<Vec<level_mods::ModRecord>>,
     /// Game rule values by name without namespace (`keep_inventory`, ...).
     pub game_rules: BTreeMap<String, i32>,

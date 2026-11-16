@@ -10767,6 +10767,9 @@ mod passage_cross_tests;
 pub(crate) mod tests {
     use super::super::api_values::TryIntoApi;
 
+    mod client_block_changed_tests {
+        include!("client_block_changed_tests.rs");
+    }
     mod predicted_block_notice_tests {
         include!("predicted_block_notice_tests.rs");
     }

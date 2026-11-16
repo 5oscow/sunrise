@@ -4,7 +4,7 @@
 //! reads, and resolve each through `Host::player`, so a guest's turn names its
 //! player once and a player whose handle cannot resolve is left out.
 use super::Game;
-use mod_api::{ChunkRef, LevelRef, PlayerRef};
+use mod_api::{ChunkRef, EntityRef, LevelRef, PlayerRef};
 
 impl Game<'_> {
     /// `ServerLevel.players`: the online players of an open server level, each once.
@@ -13,6 +13,24 @@ impl Game<'_> {
         Some(
             self.level_player_uuids(level.dimension_id())
                 .filter_map(|uuid| self.player(uuid))
+                .collect(),
+        )
+    }
+
+    /// `ChunkMap.TrackedEntity.seenBy`: the players of the level in place whose tracker holds
+    /// the entity, other than the entity itself.
+    pub(super) fn entity_trackers(&self, entity: EntityRef) -> Option<Vec<PlayerRef>> {
+        let target = self.native_entity_target(entity)?;
+        if self.target_level(target).key() != self.dim.key() {
+            return None;
+        }
+        let id = entity.id() as i32;
+        Some(
+            self.lan
+                .iter()
+                .flat_map(|h| h.hub.guests.iter().map(move |g| (&h.hub, g)))
+                .filter(|(hub, g)| hub.here(g) && g.entity_id != id && g.tracker.is_tracking(id))
+                .filter_map(|(_, g)| self.player(g.uuid))
                 .collect(),
         )
     }
@@ -124,6 +142,80 @@ mod tests {
                 assert_eq!(uuids(level.online_players(game)), Some(vec![12, 13]));
             })
             .unwrap();
+        });
+    }
+
+    /// The players whose tracker holds the entity, in server order: a guest far away, the entity's
+    /// own player and a fake player are left out, and a stale handle names nothing.
+    #[test]
+    #[ignore = "daily"]
+    fn entity_trackers_are_the_guests_that_hold_the_entity() {
+        with_guests(|game| {
+            let _serving = super::super::integrated::tests::install_serving(game, false);
+            place_host(game);
+            game.next_entity = 100;
+            let level = game.level(game.dim.id()).unwrap();
+            let fake = game.fake_player(level, 1234, "machine").unwrap();
+            for cz in -1..=1 {
+                for cx in -1..=1 {
+                    let mut chunk = sunrise_client::chunk::Chunk::empty(cx, cz);
+                    chunk.lit = true;
+                    game.world
+                        .chunks
+                        .insert((cx, cz), std::sync::Arc::new(chunk));
+                }
+            }
+            let hub = &mut game.lan.as_mut().unwrap().hub;
+            hub.ticks = 10;
+            hub.guests.update_all(|g| g.max_unacknowledged = 64);
+            let id = game
+                .spawn_mob(
+                    "minecraft:pig",
+                    [2.5, 64.0, 2.5],
+                    true,
+                    super::super::creatures::SpawnSite::Finalizing(
+                        sunrise_client::mobs::spawn_rules::Reason::Command,
+                    ),
+                )
+                .unwrap();
+            let pig = game.entity(id).unwrap();
+            let own = game.player(12).unwrap().entity();
+            for _ in 0..10 {
+                game.tick_lan(false);
+            }
+            assert_eq!(uuids(game.entity_trackers(pig)), Some(vec![12, 13]));
+            assert_eq!(
+                uuids(game.entity_trackers(own)),
+                Some(vec![13]),
+                "not its own player"
+            );
+            assert!(
+                !uuids(game.entity_trackers(pig))
+                    .unwrap()
+                    .contains(&fake.uuid())
+            );
+
+            let host = game.lan.as_mut().unwrap();
+            let far = host.hub.guests.connection_index(13).unwrap();
+            host.hub
+                .guests
+                .update(far, |g| g.position = [900.0, 64.0, 0.0]);
+            for _ in 0..10 {
+                game.tick_lan(false);
+            }
+            assert_eq!(uuids(game.entity_trackers(pig)), Some(vec![12]));
+
+            let stale = mod_api::EntityRef::new(WorldEpoch::new(pig.epoch().get() + 1), pig.id());
+            assert_eq!(game.entity_trackers(stale), None);
+
+            // A live guest in a parked level is not in the level in place: no trackers.
+            let host = game.lan.as_mut().unwrap();
+            let moved = host.hub.guests.connection_index(13).unwrap();
+            host.hub.guests.update(moved, |g| {
+                g.dimension = "minecraft:the_nether".to_owned();
+            });
+            let parked = game.player(13).unwrap().entity();
+            assert_eq!(game.entity_trackers(parked), None);
         });
     }
 
