@@ -608,12 +608,22 @@ impl Game<'_> {
         {
             return Err(ActionRefused::InvalidSetup);
         }
+        let full_attack_charge = setup.full_attack_charge;
         let mut state = ScopedPlayerState::new(self.motion, self.items(), setup)?;
         let host = self.lan.as_mut().expect("validated fake's host");
         host.hub.guests.update(gi, |guest| state.swap(guest));
         let play = host.play.insert(conn, Default::default());
         let menus = host.menus.insert(conn, Default::default());
-        let outcome = self.perform_fake_action(gi, conn, action);
+        // In a turn, so the setup's stack in hand gives the attack speed the charge is for.
+        let charged = !full_attack_charge
+            || self
+                .as_guest_at(gi, conn, Game::charge_attack_fully)
+                .is_ok();
+        let outcome = if charged {
+            self.perform_fake_action(gi, conn, action)
+        } else {
+            Err(ActionRefused::Busy)
+        };
         let host = self.lan.as_mut().expect("guest turns retain the host");
         let (held, other, position) = host.hub.guests.update(gi, |guest| {
             let held = guest
@@ -4799,6 +4809,51 @@ pub(super) mod fake_action_tests {
                     .is_on_cooldown("minecraft:bucket")
             );
             assert_eq!(game.lan.as_ref().unwrap().hub.guests.len(), 2);
+        });
+    }
+
+    /// A scoped attack with `full_attack_charge` deals the sword's full damage, one without it
+    /// only the empty charge's share, and the fake's own ticker comes back after each.
+    #[test]
+    #[ignore = "daily"]
+    fn scoped_fake_attack_with_full_charge_deals_the_weapons_full_damage() {
+        use mod_api::PlayerActionSetup;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let (player, conn, _) = fake(game, None, 0);
+            game.as_guest(conn, |g| g.attack_ticks = 3).unwrap();
+            let charged = zombie(game, 5000, [2.0, 64.0, 0.5]);
+            // Out of a sweep's reach of the first.
+            let uncharged = zombie(game, 5001, [-1.5, 64.0, 0.5]);
+            let full = health(game, 5000);
+            let mut attack = |target, full_attack_charge| {
+                let mut setup = PlayerActionSetup::new(
+                    Some(crate::game::api_values::test_snapshot(&ItemStack::new(
+                        "minecraft:diamond_sword",
+                        1,
+                    ))),
+                    [0.5, 64.0 + f64::from(1.62_f32), 0.5],
+                    0.0,
+                    0.0,
+                    false,
+                );
+                setup.full_attack_charge = full_attack_charge;
+                let result = player
+                    .perform_action_scoped(game, PlayerAction::Attack { target }, setup)
+                    .unwrap();
+                assert_eq!(result.outcome, ActionOutcome::Consumed);
+                assert_eq!(
+                    game.as_guest(conn, |g| g.attack_ticks).unwrap(),
+                    3,
+                    "the fake's own ticker comes back"
+                );
+            };
+            attack(charged, true);
+            attack(uncharged, false);
+            // A diamond sword's 7, after a zombie's 2 armour (`getDamageAfterAbsorb`: the armour
+            // left is at least a fifth of it, 0.4).
+            let dealt = 7.0f32 * (1.0 - 0.4 / 25.0);
+            assert!((full - health(game, 5000) - dealt).abs() < 1e-4);
+            assert!(full - health(game, 5001) < dealt / 2.0);
         });
     }
 
