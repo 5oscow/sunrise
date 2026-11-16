@@ -567,7 +567,7 @@ pub(super) fn build(
     }
     for member in &members {
         // A group member packs no uses table yet, so it counts as made for its build only.
-        crate::pack_into(&member.root, &target, None)?;
+        crate::pack_into(&member.root, &target, None, None)?;
     }
     Ok(())
 }

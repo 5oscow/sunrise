@@ -8,6 +8,8 @@ mod descriptors;
 mod host;
 mod prepared;
 #[cfg(test)]
+mod protocol_pin;
+#[cfg(test)]
 mod prepared_tests;
 pub use host::{generate_coverage, generate_host};
 mod trait_roles;
