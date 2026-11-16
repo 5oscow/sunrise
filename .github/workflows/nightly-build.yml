@@ -113,6 +113,8 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      # gh comes from the room's runner image on Dyna (tools/ci/nightly.py runs it): say so plainly when it is missing.
+      - run: gh --version
       - id: mode
         # A dry run never publishes; a hand-started run off main is always one.
         run: echo "dry_run=${{ github.event_name == 'workflow_dispatch' && (inputs.dry_run || github.ref != 'refs/heads/main') }}" >> "$GITHUB_OUTPUT"
