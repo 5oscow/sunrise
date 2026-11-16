@@ -3397,6 +3397,7 @@ impl Game<'_> {
                 MobEvent::StartRiding { rider, vehicle } => {
                     if sunrise_client::mobs::riders::start_riding(&mut self.mobs, rider, vehicle) {
                         self.seat_mob(rider);
+                        self.break_leash(rider, true, false);
                         // sendEventAndTriggers: the server players already on it.
                         self.note_started_riding(vehicle);
                     }
