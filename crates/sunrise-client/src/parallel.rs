@@ -374,7 +374,7 @@ pub trait PhaseView: sealed::Sealed + Sync {}
 /// let tick = TickThread::mint();
 /// // A worker can't capture the tick's token (or anything else).
 /// phase(view(), &[1u32], 1, |_, item| {
-///     let _ = tick;
+///     std::hint::black_box(tick);
 ///     item + 1
 /// });
 /// ```

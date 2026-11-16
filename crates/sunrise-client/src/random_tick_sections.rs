@@ -9,15 +9,15 @@ use crate::{
 use std::rc::Rc;
 use std::sync::{Arc, Weak};
 use sunrise_world::{
-    level::{Behaviours, RandomTickMask},
+    level::{Behaviours, RandomTickMask, StateFacts},
     registry::BlockStateId,
 };
 
-/// The random-tick masks' phase input (`crate::parallel::phase`): the block behaviours, read only
-/// for `Behaviours::random_tick_candidate`, a state's own flags and fluid. The phase reaches no
-/// hook and no mod state, so mods never make it serial.
+/// The random-tick masks' phase input (`crate::parallel::phase`): each state's plain facts, read
+/// only for `StateFacts::random_tick_candidate`, its own flags and fluid. The phase reaches no
+/// hook, no mod state and no swappable table, so mods never make it serial.
 pub struct RandomTickView<'a> {
-    behaviours: &'a Behaviours,
+    facts: &'a [StateFacts],
 }
 impl crate::parallel::sealed::Sealed for RandomTickView<'_> {}
 impl crate::parallel::PhaseView for RandomTickView<'_> {}
@@ -156,12 +156,14 @@ impl RandomTickSections {
             }
         }
         let masks = crate::parallel::phase(
-            &RandomTickView { behaviours },
+            &RandomTickView {
+                facts: behaviours.state_facts(),
+            },
             &todo,
             128,
             |view, (_, i, chunk)| {
                 Self::candidate_mask(&chunk.sections[*i], |id| {
-                    view.behaviours.random_tick_candidate(BlockStateId(id))
+                    view.facts[id as usize].random_tick_candidate()
                 })
             },
         );
