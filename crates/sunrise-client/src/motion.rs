@@ -3340,7 +3340,10 @@ mod tests {
         MotionWorld {
             tag_items: None,
             block_registries: None,
-            loop_context: crate::test_resources::server_loop_context(),
+            // The player fires on either side; a client one stays off the menu test's server count.
+            loop_context: &crate::test_resources::loop_context(
+                sunrise_world::native_load_context::LoopSide::Client,
+            ),
             damage_hooks: &crate::health::DamageHooks::NONE,
             entities: &[],
             player: &mut player,

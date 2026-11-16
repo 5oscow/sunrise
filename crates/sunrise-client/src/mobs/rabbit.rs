@@ -471,11 +471,6 @@ pub fn hop_event(m: &mut Mob) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// A client context: the installed test `living_jump` counts only server jumps for the menu test.
-    fn client_context() -> std::sync::Arc<LoopContext> {
-        crate::test_resources::loop_context(sunrise_world::native_load_context::LoopSide::Client)
-    }
     use crate::mobs::{
         Anim, Brain, Flags, MobType, Part, Species,
         anim::{self, Poses},
@@ -484,6 +479,11 @@ mod tests {
     };
     use serde_json::json;
     use std::{collections::HashMap, sync::Arc};
+
+    /// A client context: the installed test `living_jump` counts only server jumps for the menu test.
+    fn client_context() -> Arc<LoopContext> {
+        crate::test_resources::loop_context(sunrise_world::native_load_context::LoopSide::Client)
+    }
 
     fn rabbit() -> Mob {
         let model = Arc::new(Part::parse(
