@@ -176,13 +176,14 @@ impl Game<'_> {
         button: i32,
         mode: i32,
     ) {
-        let conn = self
+        if !mod_api::__private::listened(mod_api::HookId::MenuClicked) {
+            return self.native_menu_clicked(uuid, window, slot, button, mode);
+        }
+        let decided = self
             .lan
             .as_ref()
             .and_then(|host| host.hub.guests.iter().find(|g| g.uuid == uuid))
-            .map(|g| g.conn);
-        let decided = conn
-            .filter(|_| mod_api::__private::listened(mod_api::HookId::MenuClicked))
+            .map(|g| g.conn)
             .and_then(|conn| Some((self.guest_actor(conn)?, self.guest_route(conn)?)));
         let Some((actor, route)) = decided else {
             return self.native_menu_clicked(uuid, window, slot, button, mode);
