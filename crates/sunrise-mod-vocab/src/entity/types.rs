@@ -1461,6 +1461,11 @@ pub struct PlayerActionSetup {
     pub pitch: f32,
     /// Secondary use, as when holding sneak; this does not change the standing eye height.
     pub secondary_use: bool,
+    /// Start with a full attack charge: with the stack in hand, the attack-strength ticker is
+    /// set so that `getAttackStrengthScale(0.5)` is 1.0, and the fake's own ticker comes back
+    /// afterwards with its other action timers. Only [`PlayerAction::Attack`] reads it.
+    /// `false` by default; set it by assignment: `setup.full_attack_charge = true;`.
+    pub full_attack_charge: bool,
 }
 
 impl PlayerActionSetup {
@@ -1478,6 +1483,7 @@ impl PlayerActionSetup {
             yaw,
             pitch,
             secondary_use,
+            full_attack_charge: false,
         }
     }
 }
