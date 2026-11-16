@@ -103,7 +103,11 @@ fn refusal(atlas: &HudAtlas, draw: &GuiDraw, name: &mut String) -> Option<Undraw
             let known = atlas.sprites.contains_key(sprite.as_ref());
             (!known).then(|| Undrawable::Sprite(sprite.to_string()))
         }
-        GuiDraw::Fill { .. } | GuiDraw::Text { .. } | GuiDraw::Push(_) | GuiDraw::Pop => None,
+        GuiDraw::Fill { .. }
+        | GuiDraw::FillGradient { .. }
+        | GuiDraw::Text { .. }
+        | GuiDraw::Push(_)
+        | GuiDraw::Pop => None,
     }
 }
 
