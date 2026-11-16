@@ -44,7 +44,7 @@ class ReleaseTrainTests(unittest.TestCase):
                 self.assertEqual([p["number"] for p in prs], [28])
                 api.assert_called_once()
                 args = api.call_args.args
-                self.assertEqual(args[:4], ("api", "graphql", "--paginate", "--slurp"))
+                self.assertEqual(args[:3], ("api", "graphql", "--paginate"))
                 self.assertIn(f"owner={repository.split('/')[0]}", args)
                 self.assertIn(f"name={repository.split('/')[1]}", args)
                 release, _ = train.decision("launcher", prs, NOW)
@@ -109,7 +109,7 @@ class ReleaseTrainTests(unittest.TestCase):
         self.assertEqual(prs[-1]["number"], 300)
         self.assertEqual(prs[-1]["merged_at"], NOW - dt.timedelta(hours=9))
         api.assert_called_once()
-        self.assertEqual(api.call_args.args[:4], ("api", "graphql", "--paginate", "--slurp"))
+        self.assertEqual(api.call_args.args[:3], ("api", "graphql", "--paginate"))
 
     def test_launcher_decision_shell_fails_closed_and_succeeds_normally(self):
         workflow = (train.ROOT / ".github/workflows/launcher.yml").read_text()
@@ -355,8 +355,8 @@ class ReleaseTrainTests(unittest.TestCase):
                    record("new", 3), record("good", 4), record("old", 5)]
         jobs = {3: gates[:-1], 4: gates + [job("client-data", conclusion="failure")]}
         def api(*arguments):
-            self.assertEqual(arguments[:4], ("api", "--paginate", "--slurp", arguments[3]))
-            path = arguments[3]
+            self.assertEqual(arguments[:2], ("api", "--paginate"))
+            path = arguments[2]
             self.assertNotIn("wasm-mods.yml", path, "the fixture runs in the daily run, not on main pushes")
             if "dyna-ci.yml/runs?" in path:
                 self.assertIn("branch=main&event=push", path)
@@ -372,7 +372,7 @@ class ReleaseTrainTests(unittest.TestCase):
             self.assertEqual(train.green_main_head(), "new")
             requests.reset_mock()
             self.assertEqual(train.green_main_head(eligible=lambda sha: sha == "good"), "good")
-            paths = [call.args[3] for call in requests.call_args_list]
+            paths = [call.args[2] for call in requests.call_args_list]
             self.assertFalse(any("/runs/3/jobs" in path for path in paths))
             self.assertTrue(any("/runs/4/jobs" in path for path in paths))
             for name in ("verify", "verify-static", "launcher"):
@@ -624,6 +624,19 @@ class NightlyTrainTests(unittest.TestCase):
     def test_the_cap_is_the_nightly_sets(self):
         from tools.ci import nightly_set
         self.assertEqual(train.NIGHTLY_CAP, nightly_set.MAX_BUILDS_PER_DAY)
+
+
+
+class GhPagesTests(unittest.TestCase):
+    def test_paginated_answers_are_read_page_by_page_without_slurp(self):
+        # gh 2.45 prints each page's JSON value after the last: arrays on their own lines, GraphQL objects back to back.
+        answers = {"--paginate": '[{"n": 1}, {"n": 2}]\n[{"n": 3}]\n', "graphql": '{"page": 1}{"page": 2}\n'}
+        def run(*command, check=True):
+            self.assertNotIn("--slurp", command)
+            return answers["graphql" if "graphql" in command else "--paginate"]
+        with mock.patch.object(train, "run", run):
+            self.assertEqual(train.gh_json("api", "--paginate", "repos/o/r/releases"), [[{"n": 1}, {"n": 2}], [{"n": 3}]])
+            self.assertEqual(train.gh_json("api", "graphql", "--paginate", "-f", "query=q"), [{"page": 1}, {"page": 2}])
 
 
 if __name__ == "__main__":
