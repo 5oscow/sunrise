@@ -58,3 +58,38 @@ fn refused_non_source_tick_keeps_exact_state_and_schedules_nothing() {
     assert_eq!(w.ticks.fluids.count(), 0);
     assert_eq!(w.ticks.blocks.count(), 0);
 }
+
+/// Water passes between two cells by their collision shapes at their positions: a cell whose
+/// block entity publishes a closed shape takes no water from any side, and once the shape opens
+/// and its neighbours are told, the water flows in.
+#[test]
+fn a_published_closed_shape_keeps_water_out_until_it_opens() {
+    let mut w = world!();
+    w.floor(0, 10, "stone");
+    let closed = BlockPos::new(1, 1, 0);
+    w.level.published.insert(closed, VoxelShape::block());
+    w.set(BlockPos::new(0, 1, 0), w.id("water", &[]));
+    for _ in 0..60 {
+        w.tick();
+    }
+    assert_eq!(
+        w.prop(BlockPos::new(0, 1, 1), "level"),
+        "1",
+        "the water spread around it"
+    );
+    assert_eq!(
+        w.get(closed),
+        w.b().air(),
+        "nothing flowed into the closed cell"
+    );
+    // The shape opens: the block entity's change tells its neighbours, which re-evaluate.
+    w.level.published.clear();
+    let air = w.b().air();
+    let block = w.b().block(air);
+    w.b()
+        .update_neighbors_at(&mut w.level, &mut w.ticks, closed, block);
+    for _ in 0..60 {
+        w.tick();
+    }
+    assert_ne!(w.get(closed), air, "water flowed in once the shape opened");
+}

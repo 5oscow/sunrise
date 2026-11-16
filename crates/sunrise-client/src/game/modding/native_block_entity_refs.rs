@@ -15,6 +15,7 @@ use sunrise_client::{
     world::World,
 };
 use sunrise_core::nbt::{Compound, Tag};
+use sunrise_core::position::BlockPos;
 use sunrise_items::items::ItemStack;
 use sunrise_world::registry::BlockStateId;
 
@@ -502,8 +503,9 @@ impl Game<'_> {
     }
 
     /// Publishes the shapes the block entity's block has in place of its declared ones, or
-    /// clears them with None. Applied at once, to the queries that follow; clients get them
-    /// with the block entity update. Inside a transaction an abort puts the old ones back.
+    /// clears them with None. Applied at once, to the queries that follow, and the block's
+    /// neighbours are notified; clients get them with the block entity update. Inside a
+    /// transaction an abort puts the old ones back.
     pub(super) fn block_entity_set_shapes(
         &mut self,
         entity: BlockEntityRef,
@@ -551,6 +553,13 @@ impl Game<'_> {
             block_entity.set_shapes(shapes);
         });
         self.block_entity_updated(key);
+        // Fluids and other neighbours read the shape: tell them it changed (the shulker lid's
+        // `doNeighborUpdates`, without its shape updates).
+        let at = BlockPos::new(key.0, key.1, key.2);
+        self.with_level(|b, level, ticks| {
+            let block = b.block(state);
+            b.update_neighbors_at(level, ticks, at, block);
+        });
         Ok(true)
     }
 
