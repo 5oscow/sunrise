@@ -125,7 +125,7 @@ pub struct Night {
 }
 
 pub const NIGHT: Night = Night {
-    sky: [0x07061a, 0x140f38, 0x2a1656, 0x5b2a78, 0xb0477d, 0xf08a5d],
+    sky: [0x0c0b11; 6],
     page: 0x0c0b11,
     side: 0x0c0b11,
     card: 0x15131c,
