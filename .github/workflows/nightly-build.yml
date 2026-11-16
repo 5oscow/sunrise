@@ -87,7 +87,10 @@ concurrency:
   cancel-in-progress: false
 jobs:
   pick:
-    runs-on: ubuntu-latest
+    # The whole build waits for this job: on Dyna's small runner while the repository's switch is on, as the daily's
+    # `resolve`, so it never queues behind GitHub's runners (the Nightly of 2026-11-16 waited there from 15:34).
+    # Signing and publishing below stay on GitHub's runners.
+    runs-on: ${{ vars.DYNA_CI_SELF_HOSTED == 'true' && 'dyna-small' || 'ubuntu-latest' }}
     timeout-minutes: 10
     permissions:
       contents: write       # nightly/build-<date>-<n> and the nightly-state branch (main is protected)
@@ -110,6 +113,8 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      # gh comes from the room's runner image on Dyna (tools/ci/nightly.py runs it): say so plainly when it is missing.
+      - run: gh --version
       - id: mode
         # A dry run never publishes; a hand-started run off main is always one.
         run: echo "dry_run=${{ github.event_name == 'workflow_dispatch' && (inputs.dry_run || github.ref != 'refs/heads/main') }}" >> "$GITHUB_OUTPUT"
@@ -181,8 +186,27 @@ jobs:
       developer_id: false
       trusted: false  # it can hold unreviewed pull requests: their own cache key, never saved, not the release runner
 
+  # Whether every required leg built, from the `build-complete` marker game-build.yml's legs job uploads. build's
+  # result is `failure` or `cancelled` whenever an optional leg failed, timed out or got no runner, and a reusable
+  # workflow that ends that way passes back no outputs, so this is an ordinary job's output instead.
+  complete:
+    needs: build
+    if: ${{ !cancelled() && needs.build.result != 'skipped' }}
+    runs-on: ${{ vars.DYNA_CI_SELF_HOSTED == 'true' && 'dyna-small' || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    outputs:
+      complete: ${{ steps.marker.outcome == 'success' }}
+    steps:
+      - uses: actions/download-artifact@v8
+        id: marker
+        continue-on-error: true
+        with:
+          name: build-complete
+          path: ${{ runner.temp }}/build-complete
+
   sign:
-    needs: [pick, build]
+    needs: [pick, build, complete]
+    if: ${{ !cancelled() && needs.complete.outputs.complete == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # The key's only job: main's sign_release.sh hashes the archives and signs with the runner's OpenSSL.
@@ -241,7 +265,8 @@ jobs:
           retention-days: 3
 
   publish:
-    needs: [pick, build, sign]
+    needs: [pick, build, complete, sign]
+    if: ${{ !cancelled() && needs.complete.outputs.complete == 'true' && needs.sign.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -317,9 +342,18 @@ jobs:
           if [[ -f dist/sdk.json ]]; then python3 tools/ci/nightly.py require-sdk "$SHA"; fi
           macos=()
           for archive in dist/sunrise-macos-arm64.zip dist/sunrise-macos-x64.zip; do
-            if [[ -f "$archive" ]]; then macos+=("$archive")
-            else printf '\n- macOS archive unavailable: `%s`.\n' "$archive" >> dist/nightly-notes.md; fi
+            if [[ -f "$archive" ]]; then macos+=("$archive"); fi
           done
+          # Every optional build that is missing (the sign job left it out), named in the notes players read.
+          missing=()
+          for platform in "Windows ARM64:sunrise-windows-arm64.zip" "musl Linux:sunrise-linux-musl-x86_64.tar.gz" \
+              "macOS on Apple silicon:sunrise-macos-arm64.zip" "macOS on Intel:sunrise-macos-x64.zip"; do
+            [[ -f "dist/${platform#*:}" ]] || missing+=("$platform")
+          done
+          if (( ${#missing[@]} )); then
+            printf '\n## Not in this Nightly\n\nThese builds failed or did not finish, so this Nightly has no archive for them:\n\n'
+            for platform in "${missing[@]}"; do printf -- '- %s (`%s`)\n' "${platform%%:*}" "${platform#*:}"; done
+          fi >> dist/nightly-notes.md
           gh release create nightly --prerelease --latest=false --target "$SHA" \
             --title "Nightly $DATE · ${SHA:0:7}" --notes-file dist/nightly-notes.md \
             "dist/sunrise-linux-x86_64.tar.gz#Game files the launcher installs (Nightly): Linux (sunrise-linux-x86_64.tar.gz)" \

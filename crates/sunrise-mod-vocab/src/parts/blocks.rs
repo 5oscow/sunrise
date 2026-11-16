@@ -1,23 +1,167 @@
 use super::*;
+/// Which block keys each scoped hook has a prepared subscriber for, and which keys' parts answer
+/// `explosion_resistance` impurely: plain bits, read on any thread. It holds no part, no mod
+/// handle and no callable, so a tick phase may hold an `Arc` of it for the phase's length while
+/// the tick thread replaces the table between phases.
+// no wire: engine-private routing snapshot; never a mod boundary value.
+#[derive(Clone, Debug, Default)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
+pub struct ListenIndex {
+    /// A bit per block key, for each hook that has a subscriber.
+    hooks: Vec<Option<Box<[u64]>>>,
+    /// A bit per block key that has a part whose `explosion_resistance` answer is not pure.
+    explosion_impure: Box<[u64]>,
+}
+
+fn bit(bits: &[u64], key: crate::BlockKey) -> bool {
+    let key = key.0 as usize;
+    bits.get(key / 64)
+        .is_some_and(|word| word >> (key % 64) & 1 != 0)
+}
+
+fn set(bits: &mut Vec<u64>, key: crate::BlockKey) {
+    let key = key.0 as usize;
+    if bits.len() <= key / 64 {
+        bits.resize(key / 64 + 1, 0);
+    }
+    bits[key / 64] |= 1 << (key % 64);
+}
+
+impl ListenIndex {
+    /// The index of the resolved hook tables (`block_keys` filled).
+    pub(crate) fn of(hooks: &[Option<HookParts>]) -> Self {
+        let listening = hooks
+            .iter()
+            .map(|table| {
+                let mut bits = Vec::new();
+                for (key, parts) in table.iter().flat_map(|table| &table.block_keys) {
+                    if !parts.is_empty() {
+                        set(&mut bits, *key);
+                    }
+                }
+                (!bits.is_empty()).then(|| bits.into_boxed_slice())
+            })
+            .collect();
+        let mut impure = Vec::new();
+        let resistance = hooks
+            .get(HookId::ExplosionResistance as usize)
+            .and_then(Option::as_ref);
+        for (key, parts) in resistance.iter().flat_map(|table| &table.block_keys) {
+            if !parts.iter().all(|a| a.part.explosion_resistance_is_pure()) {
+                set(&mut impure, *key);
+            }
+        }
+        Self {
+            hooks: listening,
+            explosion_impure: impure.into_boxed_slice(),
+        }
+    }
+
+    /// Whether `hook` has a prepared subscriber for the block key.
+    pub fn listens(&self, hook: HookId, key: crate::BlockKey) -> bool {
+        self.hooks
+            .get(hook as usize)
+            .and_then(Option::as_deref)
+            .is_some_and(|bits| bit(bits, key))
+    }
+
+    /// Whether every part on the block key that answers `explosion_resistance` declares the
+    /// answer pure (`BlockPart::explosion_resistance_is_pure`).
+    pub fn explosion_resistance_pure(&self, key: crate::BlockKey) -> bool {
+        !bit(&self.explosion_impure, key)
+    }
+}
+
+/// The listen index of this thread's game parts, as they stand now: empty before the game
+/// resolved its parts. A tick phase takes it once, when the phase starts.
+pub fn game_listen_index() -> Arc<ListenIndex> {
+    GAME_PARTS.with_borrow(|lookup| {
+        lookup
+            .parts
+            .as_ref()
+            .map_or_else(Default::default, |parts| parts.listens.clone())
+    })
+}
+
+/// What a tick phase's workers answer "who listens" from: the listen index and each block state's
+/// block key, plain data held by `Arc` so the phase keeps the tables it started with. A worker
+/// thread has no game parts and no state index of its own; inside [`enter`](Self::enter) the
+/// engine's routing questions (`scoped_state_listens`) are answered from this instead of
+/// answering "no listener".
+// no wire: engine-private routing snapshot; never a mod boundary value.
+#[derive(Clone, Debug)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
+pub struct ListenScope {
+    listens: Arc<ListenIndex>,
+    blocks: Arc<[crate::BlockKey]>,
+}
+
+thread_local! {
+    static LISTEN_SCOPE: RefCell<Option<ListenScope>> = const { RefCell::new(None) };
+}
+
+impl ListenScope {
+    /// The scope of `listens`, for the block states `blocks` names by state number.
+    pub fn new(listens: Arc<ListenIndex>, blocks: Arc<[crate::BlockKey]>) -> Self {
+        Self { listens, blocks }
+    }
+
+    /// Whether `hook` has a subscriber for the block state (by number); false for a state with
+    /// no block here.
+    pub fn listens(&self, hook: HookId, state: u32) -> bool {
+        self.blocks
+            .get(state as usize)
+            .is_some_and(|key| self.listens.listens(hook, *key))
+    }
+
+    /// Whether every part on the state's block that answers `explosion_resistance` declares the
+    /// answer pure; false for a state with no block here.
+    pub fn explosion_resistance_pure(&self, state: u32) -> bool {
+        self.blocks
+            .get(state as usize)
+            .is_some_and(|key| self.listens.explosion_resistance_pure(*key))
+    }
+
+    /// Run `f` on this thread with the scope in force, restoring the previous one after, even
+    /// when `f` panics.
+    pub fn enter<R>(&self, f: impl FnOnce() -> R) -> R {
+        struct Restore(Option<ListenScope>);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                LISTEN_SCOPE.with_borrow_mut(|scope| *scope = self.0.take());
+            }
+        }
+        let _restore = Restore(LISTEN_SCOPE.with_borrow_mut(|scope| scope.replace(self.clone())));
+        f()
+    }
+}
+
+/// The scope's answer to [`ListenScope::listens`], or `None` outside a scope.
+pub fn scoped_state_listens(hook: HookId, state: u32) -> Option<bool> {
+    LISTEN_SCOPE.with_borrow(|scope| scope.as_ref().map(|scope| scope.listens(hook, state)))
+}
+
+/// The scope's answer to [`ListenScope::explosion_resistance_pure`], or `None` outside a scope.
+pub fn scoped_explosion_resistance_pure(state: u32) -> Option<bool> {
+    LISTEN_SCOPE.with_borrow(|scope| {
+        scope
+            .as_ref()
+            .map(|scope| scope.explosion_resistance_pure(state))
+    })
+}
+
 /// Whether this hook has a prepared subscriber for an API block key.
 /// The caller owns validation of the routing key.
 pub fn block_key_listens(hook: HookId, key: crate::BlockKey) -> bool {
-    parts(hook, "block routing")
-        .for_hook(hook)
-        .is_some_and(|table| !table.block_key(Some(key)).is_empty())
+    parts(hook, "block routing").listens.listens(hook, key)
 }
 
 /// Whether every part on this API block key that answers `explosion_resistance` declares the
 /// answer pure (`BlockPart::explosion_resistance_is_pure`), so a batched read may ask once a state.
 pub fn explosion_resistance_key_pure(key: crate::BlockKey) -> bool {
     parts(HookId::ExplosionResistance, "block routing")
-        .for_hook(HookId::ExplosionResistance)
-        .is_none_or(|table| {
-            table
-                .block_key(Some(key))
-                .iter()
-                .all(|attached| attached.part.explosion_resistance_is_pure())
-        })
+        .listens
+        .explosion_resistance_pure(key)
 }
 
 /// Whether the feature-pinned published table subscribes to this worldgen block key.

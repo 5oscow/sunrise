@@ -389,6 +389,9 @@ impl Game<'_> {
 
         let mut out = Vec::new();
         let mut changed: Vec<(i32, i32, i32)> = self.world.block_log.take().unwrap_or_default();
+        // Quiet edits such as a sapling advancing its stage do not send a client update.
+        // Compare the input cells too, rather than using network notifications as all edits.
+        changed.extend(before.keys().copied());
         changed.sort_unstable();
         changed.dedup();
         for p in changed {
@@ -1281,18 +1284,25 @@ impl Game<'_> {
         Ok(Target::Mob(id))
     }
 
-    /// `Tinv` lines: a container entity target's items by slot, as
-    /// `VanillaDispenserOracle` prints a `ContainerEntity`'s.
-    fn fixture_vehicle_items(&self, index: usize, target: &Target, out: &mut Vec<String>) {
+    /// Occupied vehicle slots, shared by the target summary and full item records.
+    fn fixture_vehicle_stacks(&self, target: &Target) -> impl Iterator<Item = (usize, &ItemStack)> {
         let items = match *target {
             Target::Boat(id) => self.boats.iter().find(|b| b.id == id).map(|b| &b.items),
             Target::Cart(id) => self.carts.iter().find(|c| c.id == id).map(|c| &c.items),
             Target::Mob(_) | Target::Stand(_) => None,
         };
-        for (slot, stack) in items.into_iter().flatten().enumerate() {
-            if let Some(stack) = stack {
-                out.push(format!("Tinv {index} {slot} {}", canon_stack(Some(stack))));
-            }
+        items
+            .into_iter()
+            .flatten()
+            .enumerate()
+            .filter_map(|(slot, stack)| stack.as_ref().map(|stack| (slot, stack)))
+    }
+
+    /// `Tinv` lines: a container entity target's items by slot, as
+    /// `VanillaDispenserOracle` prints a `ContainerEntity`'s.
+    fn fixture_vehicle_items(&self, index: usize, target: &Target, out: &mut Vec<String>) {
+        for (slot, stack) in self.fixture_vehicle_stacks(target) {
+            out.push(format!("Tinv {index} {slot} {}", canon_stack(Some(stack))));
         }
     }
 
@@ -1377,6 +1387,9 @@ impl Game<'_> {
                     line.push_str(" leashed");
                 }
             }
+        }
+        for (slot, stack) in self.fixture_vehicle_stacks(target) {
+            let _ = write!(line, " slot{slot}={}", canon_stack(Some(stack)));
         }
         line
     }

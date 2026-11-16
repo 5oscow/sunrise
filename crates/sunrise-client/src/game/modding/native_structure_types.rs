@@ -2,7 +2,7 @@
 use super::native_worldgen::WorkerResources;
 use mod_api::{
     BiomeId, ChunkPos, GenerationContext, HeightmapType, NoiseBlock, NoiseColumn, PieceContext,
-    StructurePiece, StructureRandom, StructureType,
+    RandomSource, StructurePiece, StructureType,
 };
 use mod_api::{BlockKey, BlockMetadata, BlockState};
 use std::sync::Arc;
@@ -48,9 +48,9 @@ impl sunrise_world::worldgen::structure::start::NoiseColumnTarget for Column {
     }
 }
 
-/// The engine's piece random, as a [`StructureRandom`].
+/// The engine's piece random, as a [`RandomSource`].
 struct Draws<'a>(&'a mut dyn PieceRandom);
-impl StructureRandom for Draws<'_> {
+impl RandomSource for Draws<'_> {
     fn next_int_bound(&mut self, bound: i32) -> i32 {
         self.0.int(bound)
     }
@@ -65,6 +65,12 @@ impl StructureRandom for Draws<'_> {
     }
     fn next_boolean(&mut self) -> bool {
         self.0.boolean()
+    }
+    fn next_int(&mut self) -> i32 {
+        self.0.int_unbounded()
+    }
+    fn next_gaussian(&mut self) -> f64 {
+        self.0.gaussian()
     }
 }
 
@@ -96,7 +102,7 @@ impl GenerationContext for Start<'_> {
     fn max_y(&self) -> i32 {
         self.inner.max_y()
     }
-    fn random(&mut self) -> &mut dyn StructureRandom {
+    fn random(&mut self) -> &mut dyn RandomSource {
         &mut self.random
     }
     fn base_height(&mut self, x: i32, z: i32, kind: HeightmapType) -> i32 {
@@ -160,7 +166,7 @@ impl PieceContext for Placing<'_> {
     fn chunk_box(&self) -> BoundingBox {
         self.chunk_box
     }
-    fn random(&mut self) -> &mut dyn StructureRandom {
+    fn random(&mut self) -> &mut dyn RandomSource {
         &mut self.random
     }
     fn state(&self, block: BlockKey) -> BlockState {

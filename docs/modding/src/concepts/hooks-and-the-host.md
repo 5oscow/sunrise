@@ -168,6 +168,19 @@ load or reload, and `ClientPacketReceived { integrated_server }` for a client's 
 integrated client, whose server already updated the shared static data. Installing client tags
 announces the bound defaults; it does not rebind those defaults.
 
+Redstone and shape reads on `LevelHost`, for placement and survival: `signal(pos, direction)`
+(`SignalGetter.getSignal`), `direct_signal`, `direct_signal_to`, `best_neighbor_signal(pos)`,
+`has_neighbor_signal(pos)` (what a lamp's or a door's placement reads) and `collision_shape(pos)` (the block's
+collision boxes at `pos`, block-local, a block entity's published shape included, empty for no collision, `None`
+for an unloaded position). The signal reads are the game's own, `block_signal` and `should_check_weak_power`
+listeners included, and are the same ones `LevelRef` and the tick hooks give. `state_for_placement` and
+`can_survive` receive a level that answers them, so a block can place or survive by what powers it or what shape
+sits beside it. The levels of `state_for_placement`, `can_survive` and the level tick and shape-update hooks answer all of them;
+the levels other callbacks get (a damage hit's, a part's read view) may return `None` for any of them, signal reads
+and `collision_shape` alike.
+A signal read never asks `state_for_placement` or `can_survive`, so it cannot re-enter the hook it was read in.
+`LevelTicksHost`'s signal reads moved here and now return `Option`.
+
 `LevelHost` has no random access: a draw from a read-only hook inside a level write would shift the level's random sequence away from vanilla's order. A hook that may draw is given a `LevelRandomHost`.
 `LevelRandomHost` provides vanilla's `Level.random` so
 mod draws come in vanilla's order. `LevelTicksHost` adds scheduling through

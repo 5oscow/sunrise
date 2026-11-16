@@ -482,6 +482,8 @@ pub struct EntityRenderState {
     pub yaw: f32,
     pub pitch: f32,
     pub living: Option<super::LivingRenderState>,
+    pub tnt_fuse: Option<f32>,
+    pub orb_value: Option<i32>,
 }
 impl From<EntityRenderState> for super::EntityRenderState {
     fn from(v: EntityRenderState) -> Self {
@@ -492,6 +494,8 @@ impl From<EntityRenderState> for super::EntityRenderState {
             yaw,
             pitch,
             living,
+            tnt_fuse,
+            orb_value,
         } = v;
         Self {
             id,
@@ -500,6 +504,8 @@ impl From<EntityRenderState> for super::EntityRenderState {
             yaw,
             pitch,
             living,
+            tnt_fuse,
+            orb_value,
         }
     }
 }

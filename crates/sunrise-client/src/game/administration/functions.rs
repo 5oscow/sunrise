@@ -234,6 +234,7 @@ impl Game<'_> {
         run_load: bool,
         enabled_features: &[String],
     ) -> Result<PackStack, ReloadStageError> {
+        let opening_world = !run_load;
         sunrise_client::mod_content::check_jars(
             &self.options.resources,
             &sunrise_client::logging::game_home().join("jars"),
@@ -291,7 +292,7 @@ impl Game<'_> {
             self.mods.data_switched = true;
         }
         self.install_loop_context(context);
-        if !run_load {
+        if opening_world {
             self.fns = Default::default();
         }
         self.fns.packs = stack.packs.clone();
@@ -300,10 +301,13 @@ impl Game<'_> {
         self.fns.loaded = true;
         self.fns.load_pending = true;
         // An explicit reload (`/reload`, `/datapack`) also rebuilds the
-        // content tables, as `ReloadableServerResources` does; on world open
-        // `finish_open_world` builds them right after this.
+        // content tables, as `ReloadableServerResources` does. World open must
+        // also install its tables before function admission validates inline holders.
         if let Some(world) = world {
             self.install_world_tables(world);
+        } else if opening_world {
+            self.open_world_tables(&stack, &resources)
+                .map_err(|error| ReloadStageError::DataSource(error.to_string()))?;
         }
         self.build_native_commands(enabled_features);
         self.apply_server_reload(prepared, &stack);
@@ -370,7 +374,7 @@ impl Game<'_> {
                         format!(
                             "Invalid command {line:?}: {} at position {}",
                             error.message.plain(),
-                            error.cursor
+                            error.java_cursor()
                         ),
                     ));
                     return false;

@@ -1192,7 +1192,13 @@ impl Game<'_> {
                     .ok_or_else(|| err("commands.data.block.invalid", &[]))?;
                 // BlockEntity.saveWithFullMetadata: no chunk-only keepPacked,
                 // and the lock and custom name the model does not hold.
-                let mut tag = save::block_entity_data(key, e, &name, self.world.block_lock(key));
+                let mut tag = save::block_entity_data_with_items(
+                    key,
+                    e,
+                    &name,
+                    self.world.block_lock(key),
+                    self.items(),
+                );
                 if let (Some(custom), Tag::Compound(map)) =
                     (self.world.block_names.get(&key), &mut tag)
                 {
@@ -1219,7 +1225,13 @@ impl Game<'_> {
         let key = (p[0], p[1], p[2]);
         let name = self.data_block_name(p);
         let e = self.world.block_entities.get(&key)?;
-        let mut tag = save::block_entity_data(key, e, &name, self.world.block_lock(key));
+        let mut tag = save::block_entity_data_with_items(
+            key,
+            e,
+            &name,
+            self.world.block_lock(key),
+            self.items(),
+        );
         if name == "minecraft:hopper" {
             set_key(
                 &mut tag,

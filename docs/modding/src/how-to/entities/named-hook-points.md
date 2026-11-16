@@ -64,6 +64,14 @@ delta, not an earlier listener's replacement. Later listeners do not run on that
 invocation, and the failed listener is disabled for this hook for the session;
 its other hooks remain enabled. Native and wasm listeners share this contract.
 
+A mod moves an entity through the same moment with `EntityRef::move_by(host, delta, cause)`
+(`Entity.move(cause, delta)`, server only): the collision scan stops it at blocks, the world border and
+entities, it steps up, and its ground flag follows; its velocity is left as it is, and it is no teleport. The
+`entity_move` hook fires once for it with `cause`, and a cancelled move returns `[0.0; 3]`. It returns how
+far the entity moved, and None for a stale handle, on a client, for a player (teleport it), for an entity
+outside the game's entity walk (a display, a painting, a frame, an End crystal, a dragon part) and for a delta
+that is not finite or beyond 64 blocks on an axis. Fall damage and block effects stay with the entity's tick.
+
 ## Teleport hooks
 
 `ender_pearl_teleport` covers player-owned and mob-owned pearls. Its `owner` is an

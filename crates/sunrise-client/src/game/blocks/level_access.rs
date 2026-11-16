@@ -608,6 +608,7 @@ impl LevelAccess for GameLevel<'_> {
     #[allow(clippy::option_option)]
     fn before_state_for_placement(
         &self,
+        ticks: &Ticks,
         state: BlockStateId,
         context: &PlacementContext,
         fluid: FluidState,
@@ -616,12 +617,25 @@ impl LevelAccess for GameLevel<'_> {
         if self.native_authoritative
             && let Some(fluid) = native_world_read::api_fluid_state(fluid)
         {
-            self.native_state_for_placement(self.dimension, state, context, fluid, answer);
+            self.view(ticks).native_state_for_placement(
+                self.dimension,
+                state,
+                context,
+                fluid,
+                answer,
+            );
         }
     }
-    fn before_can_survive(&self, pos: BlockPos, state: BlockStateId, survives: &mut Option<bool>) {
+    fn before_can_survive(
+        &self,
+        ticks: &Ticks,
+        pos: BlockPos,
+        state: BlockStateId,
+        survives: &mut Option<bool>,
+    ) {
         if self.native_authoritative {
-            self.native_can_survive(self.dimension, pos, state, survives);
+            self.view(ticks)
+                .native_can_survive(self.dimension, pos, state, survives);
         }
     }
     fn before_can_sustain_plant(

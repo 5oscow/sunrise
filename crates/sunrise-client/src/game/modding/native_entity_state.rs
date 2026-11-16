@@ -106,6 +106,50 @@ impl Game<'_> {
             _ => false,
         })
     }
+    /// `Entity.setSprinting` for a player (the flag and the speed modifier) or a mob (the
+    /// flag, sent to the clients). False for other kinds, a stale handle and a client.
+    pub(super) fn entity_set_sprinting(&mut self, entity: EntityRef, sprinting: bool) -> bool {
+        if !self.is_logical_server() {
+            return false;
+        }
+        match self.native_entity_target(entity) {
+            // The acting body: a guest's turn writes its flag back from the guest row, so the
+            // row (`Guest::sprinting`, what metadata publishes) is set with it.
+            Some(Target::Player) => {
+                let Some(player) = self.player.as_mut() else {
+                    return false;
+                };
+                if player.set_sprinting(sprinting).is_err() {
+                    return false;
+                }
+                if let (Some(&conn), Some(lan)) = (self.lan_guest_swaps.last(), self.lan.as_mut()) {
+                    lan.hub
+                        .update_guest(conn, |guest| guest.sprinting = sprinting);
+                }
+                true
+            }
+            // A parked guest: its row and, with it, the body's flag and speed modifier.
+            Some(Target::Guest(conn)) => self
+                .lan
+                .as_mut()
+                .and_then(|lan| {
+                    lan.hub.update_guest(conn, |guest| {
+                        let body = guest.motion.as_mut()?;
+                        body.set_sprinting(sprinting).ok()?;
+                        guest.sprinting = sprinting;
+                        Some(())
+                    })
+                })
+                .flatten()
+                .is_some(),
+            Some(Target::Mob(id)) => self.mobs.iter_mut().find(|m| m.id == id).is_some_and(|m| {
+                m.extra.sprinting = sprinting;
+                m.needs_sync = true;
+                true
+            }),
+            _ => false,
+        }
+    }
     /// Whether the entity touched water at its last fluid update
     /// (`Entity.isInWater`): players and mobs.
     pub(super) fn entity_is_in_water(&self, entity: EntityRef) -> Option<bool> {

@@ -671,7 +671,8 @@ pub(crate) mod source;
 pub mod staging;
 pub mod surface;
 pub use build::{
-    generate, generate_engine_points, generate_points, generate_render, write_if_changed,
+    GUEST_OUTPUT, generate, generate_api_parts, generate_engine_points, generate_points,
+    generate_render, write_if_changed,
 };
 pub use counterparts::generate as generate_counterparts;
 pub use notes::generate as generate_hook_notes;
@@ -779,7 +780,7 @@ mod tests {
             host_param(&level, Some(true), false),
             param("&mut dyn LevelRandomHost", "self")
         );
-        let ticks = "&mut super::mod_api_host::LevelTicks { level: self, ticks }";
+        let ticks = "&mut super::mod_api_host::LevelTicks::new(self, ticks)";
         assert_eq!(
             host_param(&level, Some(false), true),
             param("&mut dyn LevelTicksHost", ticks)

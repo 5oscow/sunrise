@@ -140,7 +140,7 @@ impl BlockStates<'_> {
     }
     /// Whether `state` drops its loot only when mined with a correct tool
     /// (`BlockState.requiresCorrectToolForDrops()`): stone and ores yes, dirt and logs no. Which
-    /// tool is correct is [`BlockStates::is_correct_tool_for_drops`].
+    /// tool is correct for a state is `BlockStates::is_correct_tool_for_drops`.
     /// None as for `replaceable`.
     pub fn requires_correct_tool(&self, state: BlockState) -> Option<bool> {
         self.backend?.block_state_requires_correct_tool(state)
@@ -164,6 +164,24 @@ impl BlockStates<'_> {
     /// None as for `replaceable`.
     pub fn map_color(&self, state: BlockState) -> Option<u8> {
         self.backend?.block_state_map_color(state)
+    }
+    /// `BlockState.getLightEmission()`: the light level the state gives off, 0 to 15 (a torch 14,
+    /// glowstone 15). A block that declares `dynamic_light` answers per cell through its parts,
+    /// which this does not ask. None as for `replaceable`.
+    pub fn light_emission(&self, state: BlockState) -> Option<u8> {
+        self.backend?.block_state_light_emission(state)
+    }
+    /// The friction of `state`'s block (`BlockBehaviour.getFriction`): 0.6 for most blocks, 0.98
+    /// for ice, 0.8 for slime. None as for `replaceable`.
+    pub fn friction(&self, state: BlockState) -> Option<f32> {
+        self.backend?.block_state_friction(state)
+    }
+    /// `BlockState.isSolidRender()`: whether the state is a full, occluding cube for rendering
+    /// and light (stone yes; glass, leaves and slabs no). Whether a block conducts redstone at a
+    /// position is [`LevelRef::is_redstone_conductor`](crate::LevelRef::is_redstone_conductor).
+    /// None as for `replaceable`.
+    pub fn is_solid_render(&self, state: BlockState) -> Option<bool> {
+        self.backend?.block_state_is_solid_render(state)
     }
     /// The block's property names and legal serialized values. None without resolved tables.
     pub fn definition(&self, block: crate::BlockKey) -> Option<Vec<StateProperty>> {

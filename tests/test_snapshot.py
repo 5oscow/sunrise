@@ -109,9 +109,19 @@ class NightlyBuildSnapshotTests(unittest.TestCase):
                         optional.add(row["name"])
                 macs = {"macos", "macos-x64"} if repo == "sunrise-org/sunrise" else ({"macos-x64"} if kind == "snapshot" else set())
                 self.assertEqual(optional, {"windows-arm64", "linux-musl"} | macs)
-        self.assertEqual(game["jobs"]["linux-smoke"]["needs"], ["runner-configuration", "build"])
-        self.assertEqual(self.workflow["jobs"]["sign"]["needs"], ["pick", "build"])
-        self.assertEqual(self.workflow["jobs"]["publish"]["needs"], ["pick", "build", "sign"])
+        self.assertEqual(game["jobs"]["linux-smoke"]["needs"], ["runner-configuration", "legs"])
+        # A reusable workflow that ends failed or cancelled (an optional leg) passes back no outputs: signing and
+        # publishing follow the legs job's build-complete marker, read by an ordinary job.
+        self.assertNotIn("outputs", game["on"]["workflow_call"])
+        marker = [step for step in game["jobs"]["legs"]["steps"] if step.get("with", {}).get("name") == "build-complete"]
+        self.assertEqual([step["if"] for step in marker], ["steps.decide.outputs.complete == 'true'"])
+        complete = self.workflow["jobs"]["complete"]
+        self.assertEqual(complete["steps"][0]["with"]["name"], "build-complete")
+        self.assertEqual(complete["outputs"]["complete"], "${{ steps.marker.outcome == 'success' }}")
+        self.assertEqual(self.workflow["jobs"]["sign"]["needs"], ["pick", "build", "complete"])
+        self.assertEqual(self.workflow["jobs"]["publish"]["needs"], ["pick", "build", "complete", "sign"])
+        for job in ("sign", "publish"):
+            self.assertIn("needs.complete.outputs.complete == 'true'", self.workflow["jobs"][job]["if"])
 
     @unittest.skipIf(os.name == "nt", "executes the POSIX signing step")
     def test_missing_intel_mac_is_signed_only_for_snapshot_and_notes_name_missing_assets(self):

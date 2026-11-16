@@ -115,6 +115,7 @@ mod buckets;
 mod creaking;
 mod falling;
 mod feature_world;
+pub mod fluid_interactions;
 mod fluids;
 mod growth;
 mod hooks;
@@ -769,10 +770,12 @@ pub trait LevelAccess: BlockEntityNeighbors {
     /// places `s`, a state of the block's own, `Some(None)` refuses the
     /// placement (vanilla's `null` return: the block goes nowhere and nothing
     /// is consumed), and `None` leaves the block's own `getStateForPlacement`
-    /// to run. The default does nothing.
+    /// to run. `ticks` is the simulation's own, which a signal read of the level needs
+    /// (comparator outputs, moving pistons). The default does nothing.
     #[allow(clippy::option_option)]
     fn before_state_for_placement(
         &self,
+        _ticks: &Ticks,
         _state: BlockStateId,
         _context: &PlacementContext,
         _fluid: FluidState,
@@ -783,10 +786,11 @@ pub trait LevelAccess: BlockEntityNeighbors {
     /// block answers it: placing it (`BlockItem.canPlace`), a plant's or an
     /// attached block's shape update, and every other rule that asks. `state`
     /// may not be in the level yet (it is being placed). An answer put in
-    /// `survives` is the result, and the block's own rule doesn't run. The
-    /// default does nothing.
+    /// `survives` is the result, and the block's own rule doesn't run. `ticks` is as for
+    /// `before_state_for_placement`. The default does nothing.
     fn before_can_survive(
         &self,
+        _ticks: &Ticks,
         _pos: BlockPos,
         _state: BlockStateId,
         _survives: &mut Option<bool>,
@@ -1376,6 +1380,8 @@ pub struct Behaviours {
     growth: growth::Growth,
     /// The open world's NeoForge block data maps.
     block_maps: block_maps::Slot,
+    /// The open world's fluid interactions: vanilla's two lava rules and the mods' entries.
+    fluid_interactions: fluid_interactions::Slot,
 }
 
 impl Behaviours {
@@ -1466,6 +1472,11 @@ impl Behaviours {
     }
     pub fn is_solid(&self, state: BlockStateId) -> bool {
         self.has_flag(state, data::state_flags::SOLID)
+    }
+    /// `BlockState.isRedstoneConductor(level, pos)`: the exported answer, which does not read the
+    /// position.
+    pub fn is_redstone_conductor(&self, state: BlockStateId) -> bool {
+        self.has_flag(state, data::state_flags::CONDUCTOR)
     }
     pub fn is_replaceable(&self, state: BlockStateId) -> bool {
         self.has_flag(state, data::state_flags::REPLACEABLE)

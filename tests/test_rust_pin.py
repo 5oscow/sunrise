@@ -8,7 +8,12 @@ A workflow names no floating channel (`stable`, `beta`, `nightly`) and no releas
 - `"$(cat …tools/ci/rust-version)"` (or a shell variable holding it) wherever a command needs the release spelled out.
 """
 
+import os
 import re
+import shutil
+import subprocess
+import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -73,6 +78,21 @@ class RustPinTests(unittest.TestCase):
                    '# cargo +stable in a comment\n')
         self.assertEqual(violations("x.yml", allowed), [])
 
+
+
+class RustupInstallTests(unittest.TestCase):
+    def test_a_missing_rustup_fails_at_once_without_retrying(self):
+        with tempfile.TemporaryDirectory() as directory:
+            # Only what the script needs besides rustup.
+            for tool in ("tr", "dirname", "sleep"):
+                os.symlink(shutil.which(tool), Path(directory, tool))
+            started = time.monotonic()
+            result = subprocess.run([shutil.which("bash"), str(ROOT / "tools/ci/rustup_install.sh"), "--profile", "minimal"],
+                                    env={"PATH": directory}, capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 127)
+            self.assertIn("rustup is not installed on this runner", result.stderr)
+            self.assertNotIn("retrying", result.stderr)
+            self.assertLess(time.monotonic() - started, 5)
 
 if __name__ == "__main__":
     unittest.main()

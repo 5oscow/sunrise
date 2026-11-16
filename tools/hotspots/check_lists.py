@@ -34,7 +34,6 @@ LONG_LISTS = {
     "payload_codec.rs": (13, "no planned PR removes it"),
     "phase.rs": (15, "no planned PR removes it"),
     "registry_keys.rs": (15, "rename list"),
-    "structure_type.rs": (14, "no planned PR removes it"),
 }
 
 # Files a switch removed (file under EXPORTS: where its content lives now). One at the old path fails.

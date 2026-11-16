@@ -5,7 +5,9 @@ Fails on a malformed row, a test listed in two files, a folder with no rows or w
 and README.md, and a file at the retired single-list path. The shared reader validates both `needs`
 and `needs-plain` fixture rows; neither is a known failure. Every `daily` row must name a package of a workspace (the game's or the launcher's) and
 one of its test targets, and some leg of the daily run's matrix must run it: its package's shard, or the `daily-rows`
-leg (tools/ci/ignored_shards.py), so no moved test runs nowhere. Builds only the source-inventory helper,
+leg (tools/ci/ignored_shards.py), so no moved test runs nowhere. A row whose reason names an input only one job
+builds (ignored_tests.DAILY_INPUTS: `wasm-fixture`) runs in that job instead, which a workflow must call with
+`--needs VARIABLE`. Builds only the source-inventory helper,
 not the game or SDK.
 
 Every `#[ignore]`d test that no daily shard runs (rowless_problems) has a row of some mark: `daily`, a known
@@ -40,12 +42,16 @@ def daily_problems(rows, targets, matrix):
     """Why each daily row would not run in the daily matrix `matrix` (shard names), given the workspace's targets."""
     problems = []
     groups = ignored_tests.daily_rows_groups(rows)
+    workflows = "\n".join(path.read_text() for path in sorted((ROOT / ".github/workflows").glob("*.y*ml")))
     for row in rows:
         where = f"{row.file}: {row.package} {row.test}"
         if row.package not in targets:
             problems.append(f"{where}: {row.package} is not a workspace package")
         elif row.reference not in targets[row.package]:
             problems.append(f"{where}: {row.package} has no target {row.reference}")
+        elif variable := ignored_tests.DAILY_INPUTS.get(row.reason):
+            if f"--needs {variable}" not in workflows:
+                problems.append(f"{where}: no workflow runs the tests that need {variable} (ignored_tests.py --needs)")
         elif ignored_tests.shard_runs(row.package, row.reference):
             if not any(ignored_tests.parse_shard(shard)[0] == row.package for shard in matrix):
                 problems.append(f"{where}: no leg runs {row.package}'s shard")

@@ -1,11 +1,11 @@
 //! `BlockStates::requires_correct_tool` from a wasm mod reaches the backend with the state
-//! intact, and the answer comes back as the backend gave it.
+//! intact, and the answer comes back as the native read's.
 use super::*;
 use mod_api::__private::game::{BackendMutRefOf, BackendRefOf};
 use mod_api::{BlockState, BlockStateRecord, HostBlockStates};
 
 thread_local! {
-    static ASKED: std::cell::RefCell<Vec<u16>> = const { std::cell::RefCell::new(Vec::new()) };
+    static ASKED: std::cell::RefCell<Vec<BlockState>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
 struct Server;
@@ -24,12 +24,14 @@ mod_api::impl_server_host_areas!(Server);
 impl mod_api::Backend for Server {}
 mod_api::impl_backend_areas!(Server, except(block_states));
 impl mod_api::prelude::BlockStatesBackend for Server {
-    /// State 0 requires a correct tool, state 1 does not, any other is unknown.
+    /// State 0 needs a tool, state 1 doesn't, and state 2 is unknown.
     fn block_state_requires_correct_tool(&self, state: BlockState) -> Option<bool> {
-        ASKED.with_borrow_mut(|asked| asked.push(state.ordinal()));
-        match state.ordinal() {
-            0 => Some(true),
-            1 => Some(false),
+        ASKED.with_borrow_mut(|asked| asked.push(state));
+        let block = REGISTERED_BLOCK.get().unwrap();
+        let index = (0..3).find(|&i| state == BlockStateRecord::new(block, i).into());
+        match index {
+            Some(0) => Some(true),
+            Some(1) => Some(false),
             _ => None,
         }
     }
@@ -38,11 +40,15 @@ impl mod_api::BackendMut for Server {}
 mod_api::impl_backend_mut_areas!(Server);
 
 #[test]
-fn a_wasm_mods_requires_correct_tool_read_crosses_whole() {
+fn a_wasm_mods_requires_tool_read_crosses_whole() {
     ASKED.with_borrow_mut(Vec::clear);
-    // The fixture mod registers the block the states belong to.
+    // The fixture mod registers the block the states are of.
     install_counter();
     let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+    let block = REGISTERED_BLOCK.get().unwrap();
+    let states: Vec<BlockState> = (0..3)
+        .map(|index| BlockStateRecord::new(block, index).into())
+        .collect();
     let mut server = Server;
     {
         let host = &mut server;
@@ -57,13 +63,12 @@ fn a_wasm_mods_requires_correct_tool_read_crosses_whole() {
             LOOPBACK_TRANSPORT.with(|active| active.borrow_mut().replace(transport.clone()));
         let _restore = TransportScope(previous);
         guest::set_transport(Some(transport));
-        let block = REGISTERED_BLOCK.get().unwrap();
-        let state = |ordinal| BlockState::from(BlockStateRecord::new(block, ordinal));
         let facts = guest::Guest.block_states();
-        assert_eq!(facts.requires_correct_tool(state(0)), Some(true));
-        assert_eq!(facts.requires_correct_tool(state(1)), Some(false));
-        assert_eq!(facts.requires_correct_tool(state(2)), None);
+        assert_eq!(facts.requires_correct_tool(states[0]), Some(true));
+        assert_eq!(facts.requires_correct_tool(states[1]), Some(false));
+        assert_eq!(facts.requires_correct_tool(states[2]), None);
         guest::set_transport(None);
     }
-    assert_eq!(ASKED.with_borrow_mut(std::mem::take), vec![0, 1, 2]);
+    // The server was handed exactly the states the guest asked about, in order.
+    assert_eq!(ASKED.with_borrow_mut(std::mem::take), states);
 }

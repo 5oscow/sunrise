@@ -1,4 +1,5 @@
 use super::*;
+use mod_api::__private::game::Fields;
 
 /// The hook points. Each does nothing in Sunrise.
 impl Game<'_> {
@@ -21,12 +22,30 @@ impl Game<'_> {
         level: LevelRef,
         pos: BlockPos,
         state: BlockStateId,
+        observer: Option<BlockEntityRef>,
     ) {
         if self.contents_changing.contains(&(level, pos)) {
             return;
         }
+        let observers = self
+            .world
+            .block_entities
+            .contents_watches
+            .observers((pos.x, pos.y, pos.z));
         self.contents_changing.push((level, pos));
         let notice = ContentsChangedGuard { game: self };
-        notice.game.fire_contents_changed(level, pos, state);
+        notice
+            .game
+            .fire_contents_changed(level, pos, state, observer);
+        for observer in observers.iter() {
+            let Some(entity) = notice.game.block_entity_identity(level, observer.position) else {
+                continue;
+            };
+            if entity.fields().generation == observer.generation {
+                notice
+                    .game
+                    .fire_contents_changed(level, pos, state, Some(entity));
+            }
+        }
     }
 }
