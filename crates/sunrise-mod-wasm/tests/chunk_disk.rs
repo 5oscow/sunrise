@@ -79,7 +79,7 @@ impl log::Log for Stderr {
 // One test: a wasm group installs its replace points process-wide, so the
 // fixture can be loaded once per test binary.
 #[test]
-#[ignore = "needs SUNRISE_WASM_FIXTURE and SUNRISE_WASM_STD, built by wasm-mods"]
+#[ignore = "daily"]
 fn native_and_wasm_execute_identical_job_and_fail_closed_on_trap() {
     crate::test_stack::on_guest_stack(|| {
         let _ = log::set_logger(&Stderr);
