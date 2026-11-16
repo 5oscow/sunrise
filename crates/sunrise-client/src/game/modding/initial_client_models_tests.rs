@@ -76,14 +76,12 @@ fn title_ticks_join_world_resources_without_the_desktop_model_publication() {
             host: &mut dyn mod_api::ClientHost,
             _: &mut mod_api::ClientTickPostEvent,
         ) {
-            // This Host import is also available to a wasm listener. It reaches providers
-            // in WorldRest; an early dispatch used to panic here, even on the title screen.
-            assert!(
-                !host
-                    .registry_entries("minecraft:worldgen/noise_settings")
-                    .unwrap()
-                    .is_empty()
-            );
+            // This Host import is also available to a wasm listener. It reads items in
+            // WorldRest, even when there is no open level.
+            let stone = host
+                .item_key(&mod_api::Identifier::parse("minecraft:stone").unwrap())
+                .unwrap();
+            assert_eq!(host.max_stack_size(stone), Some(64));
             self.0.fetch_add(1, Ordering::Relaxed);
         }
     }
@@ -95,6 +93,8 @@ fn title_ticks_join_world_resources_without_the_desktop_model_publication() {
     .into();
     with_loading_client(|game| {
         mod_platform::testing::with_mods(mods, || {
+            // The scoped mod fixture has its own key table, independent of startup's.
+            mod_api::__private::resolve_items(["minecraft:stone"]).unwrap();
             // Alternate window frontends need not have run publish_initial_client_models.
             game.title = Some(game.new_title(game.save.root.clone()));
             assert!(game.rest_loader.is_some());
