@@ -27,9 +27,9 @@ use crate::{BlockKey, BlockMetadata, BlockState, BlockUpdateFlags};
 use std::sync::Arc;
 use sunrise_core::nbt::Compound;
 
-/// A feature's placement failed: the game discards the call's writes, reports the failure
-/// with the feature's id and disables the type for the rest of the run. A feature that merely
-/// did not place (a tree with no room) answers `Ok(false)` instead.
+/// A feature's placement failed: a fault. The game discards that call's writes, logs it with
+/// the feature's id and disables the type for the session. A feature that merely did not place
+/// (a tree with no room) answers `Ok(false)` instead.
 #[derive(Debug)]
 // exhaustive: mods build it themselves as a feature's error answer
 #[derive(sunrise_mod_api_macros::Wire)]
@@ -64,14 +64,24 @@ crate::wire::wire_handlers::handler!(dyn FeatureType, "FeatureType");
 
 /// What a feature's [`place`](FeatureType::place) sees: vanilla's `WorldGenLevel` around the
 /// origin (a decoration region on a worker, or the live level for growth and commands) and the
-/// caller's random. Writes are staged: the context reads them back, and the level sees them only
-/// when the whole root placement answers `Ok` (a failure in a later call of the same root
-/// discards them). A read the level can't answer is `None`; a write it would refuse
-/// (outside the region decoration may write, outside the build height, or the state already
-/// there) is `false`. Neither loads a chunk. Each world query, block write or block-entity
-/// operation is one unit of the placement's work budget (65,536 for one root placement); past
-/// it, calls answer `None` or `false` and the placement fails without its writes. Random draws
-/// and the config, metadata and state helpers are not charged.
+/// caller's random. Writes are staged: the context reads them back, and the level sees them, in
+/// order, as soon as `place` answers `Ok(true)` or `Ok(false)`, so the steps after it see them
+/// too. A read the level can't answer is `None`; a write onto the state already there is
+/// `false`. Neither loads a chunk.
+///
+/// A fault discards the call's writes, logs it, and disables the feature type for the session
+/// (in memory, never saved; a new load of the mod set enables it again): a later placement of it
+/// answers `Ok(false)` and its root carries on, so chunks generated after the fault differ from
+/// those before. A fault is a panic, an `Err`, a write the level refuses (outside the region
+/// decoration may write, or outside the build height) and a work budget that ran out. Each world
+/// query, block write or block-entity operation is one unit of the budget (65,536 for one root
+/// placement); the budget counts work, never time. Random draws and the config, metadata and
+/// state helpers are not charged. `height` reads the level as it was before the call; every
+/// other read sees the call's own writes. A feature can't place another feature.
+///
+/// Features run on a worldgen worker for decoration and on the tick thread for growth, commands
+/// and `LevelRef::place_feature`; the context holds no `Host`, so a worker never reaches mod
+/// state through it.
 pub trait FeatureContext {
     /// Immutable, load-owned block metadata, safe to borrow on this worker.
     fn metadata(&self) -> &dyn BlockMetadata;

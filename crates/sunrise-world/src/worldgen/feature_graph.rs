@@ -18,10 +18,7 @@ use super::{
     weighted::OptionalWeightedList,
 };
 use serde_json::value::RawValue;
-use std::{
-    cell::{Cell, RefCell},
-    collections::BTreeSet,
-};
+use std::{cell::Cell, collections::BTreeSet};
 use sunrise_core::random::{InvalidBound, RandomSource};
 
 #[derive(Clone, Debug)]
@@ -130,8 +127,6 @@ pub enum FeatureExecutionError<E> {
     InvalidPendingIndex,
     /// A block-state transition required by a feature is absent from the registry.
     InvalidState,
-    /// A mod feature type's `place` failed (its id, then its reason).
-    Mod(String),
 }
 impl<E: std::fmt::Display> std::fmt::Display for FeatureExecutionError<E> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -160,7 +155,6 @@ impl<E: std::fmt::Display> std::fmt::Display for FeatureExecutionError<E> {
             Self::WorkLimit => f.write_str("feature graph work limit exceeded"),
             Self::InvalidPendingIndex => f.write_str("invalid pending modifier index"),
             Self::InvalidState => f.write_str("feature block state outside registry"),
-            Self::Mod(reason) => write!(f, "mod feature failed: {reason}"),
         }
     }
 }
@@ -188,8 +182,6 @@ struct Run {
     /// The root's mod-feature work units (`mod_features::CUSTOM_WORK_BUDGET`), apart from
     /// `remaining` so built-in capacity is unchanged.
     custom: Cell<u32>,
-    /// What the root's successful mod calls wrote, published when the root answers `Ok`.
-    provisional: RefCell<super::mod_features::Provisional>,
 }
 fn visit(depth: usize, remaining: &mut usize) -> Result<(), DecodeError> {
     if depth > 128 || *remaining == 0 {
@@ -262,16 +254,18 @@ impl PlacedFeatureDefinition {
         origin: [i32; 3],
         blocks: FeatureBlocks,
     ) -> Result<bool, FeatureExecutionError<W::Error>> {
-        let run = Run {
-            blocks,
-            depth: Cell::new(0),
-            remaining: Cell::new(65536),
-            custom: Cell::new(super::mod_features::CUSTOM_WORK_BUDGET),
-            provisional: Default::default(),
-        };
-        let placed = self.place_in(&mut FeaturePlacer::new(), world, random, origin, &run)?;
-        run.provisional.take().commit(world);
-        Ok(placed)
+        self.place_in(
+            &mut FeaturePlacer::new(),
+            world,
+            random,
+            origin,
+            &Run {
+                blocks,
+                depth: Cell::new(0),
+                remaining: Cell::new(65536),
+                custom: Cell::new(super::mod_features::CUSTOM_WORK_BUDGET),
+            },
+        )
     }
     fn place_in<W: FeatureWorld + PlacementContext>(
         &self,
@@ -844,16 +838,17 @@ impl FeatureDefinition {
         origin: [i32; 3],
         blocks: FeatureBlocks,
     ) -> Result<bool, FeatureExecutionError<W::Error>> {
-        let run = Run {
-            blocks,
-            depth: Cell::new(0),
-            remaining: Cell::new(65536),
-            custom: Cell::new(super::mod_features::CUSTOM_WORK_BUDGET),
-            provisional: Default::default(),
-        };
-        let placed = self.place_inner(world, random, origin, &run)?;
-        run.provisional.take().commit(world);
-        Ok(placed)
+        self.place_inner(
+            world,
+            random,
+            origin,
+            &Run {
+                blocks,
+                depth: Cell::new(0),
+                remaining: Cell::new(65536),
+                custom: Cell::new(super::mod_features::CUSTOM_WORK_BUDGET),
+            },
+        )
     }
     fn place_inner<W: FeatureWorld + PlacementContext>(
         &self,
@@ -884,9 +879,7 @@ impl FeatureDefinition {
                 .place(world, random, origin, run.blocks)
                 .map_err(FeatureExecutionError::Basic),
             Self::NoOp => Ok(true),
-            Self::Mod(feature) => feature
-                .place(world, random, origin, &run.custom, &run.provisional)
-                .map_err(|error| FeatureExecutionError::Mod(format!("{}: {error}", feature.id))),
+            Self::Mod(feature) => Ok(feature.place(world, random, origin, &run.custom)),
             Self::Template(feature) => feature
                 .place(world, random, origin)
                 .map_err(FeatureExecutionError::Query),

@@ -368,6 +368,24 @@ mod tests {
         }
     }
 
+    /// Links `to` to `from` where the platform can, and copies it (a folder whole) elsewhere.
+    #[cfg(unix)]
+    fn link(from: &std::path::Path, to: &std::path::Path) {
+        std::os::unix::fs::symlink(from, to).unwrap();
+    }
+    #[cfg(not(unix))]
+    fn link(from: &std::path::Path, to: &std::path::Path) {
+        if from.is_dir() {
+            std::fs::create_dir_all(to).unwrap();
+            for entry in std::fs::read_dir(from).unwrap() {
+                let entry = entry.unwrap();
+                link(&entry.path(), &to.join(entry.file_name()));
+            }
+        } else {
+            std::fs::copy(from, to).unwrap();
+        }
+    }
+
     /// The prepared worldgen data with a mod feature type `test:chest` placed in every plains
     /// chunk at the surface of its first column (a copy of the folder whose three data files
     /// carry it, the rest linked).
@@ -385,7 +403,7 @@ mod tests {
         for entry in std::fs::read_dir(&root).unwrap() {
             let entry = entry.unwrap();
             if entry.file_name() != "worldgen" {
-                std::os::unix::fs::symlink(entry.path(), to_root.join(entry.file_name())).unwrap();
+                link(&entry.path(), &to_root.join(entry.file_name()));
             }
         }
         for entry in std::fs::read_dir(&from).unwrap() {
@@ -395,7 +413,7 @@ mod tests {
                 .iter()
                 .all(|edited| name != *edited)
             {
-                std::os::unix::fs::symlink(entry.path(), to.join(&name)).unwrap();
+                link(&entry.path(), &to.join(&name));
             }
         }
         let edit = |file: &str, with: &dyn Fn(&mut serde_json::Map<String, Value>)| {

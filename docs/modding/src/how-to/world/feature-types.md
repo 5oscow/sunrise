@@ -58,17 +58,26 @@ twice is placed twice.
 - `Ok(true)` when the feature placed.
 - `Ok(false)` when it didn't, for example a tree with no room. Blocks written before that are
   kept, as vanilla keeps them.
-- `Err(FeatureError(reason))` for a failure.
+- `Err(FeatureError(reason))` for a failure: a fault, below.
 
-Your writes are staged: `context.block` reads them back, and so do the later calls of the same
-root placement. The level sees them, in order, only when the whole root answers `Ok`: a failure, a
-panic or running out of work in any call of the root discards the writes of all of its mod calls,
-so a failed root leaves nothing of yours behind. The game's own features in the same root read the
-level as it was before your writes are published, and your writes are applied after theirs, so
-where a root mixes your feature and a built-in one on the same block, yours wins. A failure or a panic also disables your type for the rest of
-the run: each later placement of it fails by name without calling it.
+Your writes are staged: `context.block` reads them back, and when `place` answers `Ok(true)` or
+`Ok(false)` they reach the level at once, in order, so the steps after you (the game's own
+features or other mods') see them. `Ok(false)` publishes what you wrote, as vanilla keeps the
+blocks of a partly placed tree.
 
-There is no `Host` in a feature. Decoration runs on worker threads, so your type must be
+A **fault** discards that call's writes and nothing else: the calls of the same root before it
+stay. A fault is a panic, an `Err`, a write the level refuses (outside the region decoration may
+write, or outside the build height), or running out of work. A fault also **disables your type
+for the session**: in memory only, never saved, and a new load of the mod set enables it again.
+Later placements of a disabled type answer `Ok(false)` without calling it and their roots carry
+on, so chunks generated after the fault differ from those before. The game logs the fault once,
+with your mod, the feature type, the position and the reason. Vanilla has no rollback of a whole
+placement either; the unit that is atomic is your call.
+
+There is no `Host` in a feature, and a feature can't place another feature. Your code runs on the
+thread its placement does: a worldgen worker for decoration (chunks generate on several at once),
+the tick thread for growth, `/place feature` and `LevelRef::place_feature`. With no `Host` or
+game state in reach, a worker never touches mod state through you. Your type must be
 `Send + Sync`, stateless and deterministic: draw only from `context.random()`, the same stream
 the modifiers before you drew from.
 
@@ -77,23 +86,25 @@ the modifiers before you drew from.
 | `config` | The configured feature's decoded settings |
 | `random` | The caller's `StructureRandom`: `next_int_bound`, `next_long`, `next_float`, `next_double`, `next_boolean` |
 | `block`, `block_in_tag` | Read blocks and block tags, your own staged writes included |
-| `height` | Heightmap heights, as the level has them before your writes |
+| `height` | Heightmap heights, as the level has them before this call's writes |
 | `set_block` | Write a `BlockState` with `BlockUpdateFlags`; `Feature.setBlock` uses `NEIGHBORS \| CLIENTS` |
 | `block_entity` | Give a block you placed in this call its block entity's saved NBT |
 | `state`, `state_with`, `is_air`, `metadata` | Resolve a registered `BlockKey` to a `BlockState`, and test states |
 | `min_y`, `max_y` | The level's height bounds |
 
-`set_block` answers whether the level will take the write: `false` outside the region it may
-write (during decoration, the game's own decoration region around the chunk), outside the build
-height, and for the state already there, as `Level.setBlock` answers. A read the level can't
+`set_block` answers `false` for the state already there, as `Level.setBlock` answers. A write
+outside the region it may write (during decoration, the game's own decoration region around the
+chunk) or outside the build height also answers `false`, and is a fault. A read the level can't
 answer is `None`. Neither ever loads a chunk. `block_entity` is `false` for a position you didn't
-place a block at in this call, in a full chunk that decoration only reads (the block is never placed there), and for data whose `id` isn't that block's block entity.
+place a block at in this call, in a full chunk that decoration only reads (the block is never
+placed there), and for data whose `id` isn't that block's block entity.
 
 Each world query, block write or block-entity operation is one unit of work; random draws and
-the config, metadata and state helpers are not charged. One root placement (a decoration position, a command, a
-sapling) lends its mod features 65,536 units together, apart from the game's own feature budget.
-Past them, calls answer `None` or `false` and the placement fails without your writes; the next
-placement starts with the whole budget again.
+the config, metadata and state helpers are not charged. One root placement (a decoration
+position, a command, a sapling) lends its mod features 65,536 units together, apart from the
+game's own feature budget. Past them, calls answer `None` or `false` and the call that ran out
+faults; the next placement starts with the whole budget again. The budget counts work, never
+time, so the same seed gives the same result on a slow machine and a fast one.
 
 Resolve block states once per placement, or keep the `BlockKey`s from registration, rather than
 resolving names for every block.

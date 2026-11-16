@@ -1,5 +1,5 @@
 //! Mod feature types through the engine: decoding, the caller's random, the placement chain's
-//! order, nesting, staging, failure, the custom budget and block entities.
+//! order, nesting, staging, faults, the custom budget and block entities.
 use super::*;
 use crate::worldgen::anchor::WorldGenerationContext;
 use crate::worldgen::feature::{FeatureBlocks, FeatureWorld};
@@ -84,6 +84,7 @@ fn blocks() -> FeatureBlocks {
 /// - `Column` writes its config's height of state 1 upward, then answers false;
 /// - `Fails` writes once, then fails; `Panics` writes once, then panics;
 /// - `Flood` reads the origin 70,000 times;
+/// - `Refuses` writes once, then writes outside the world's write zone;
 /// - `Fill` writes 8,000 blocks with block entities, then reads 8,000 positions it never wrote;
 /// - `SecondFails` and `SecondFloods` write once and answer `Ok`, as `Marks` does, but their
 ///   second call (of a run's log) fails, or floods;
@@ -100,6 +101,7 @@ enum Kind {
     SecondFails,
     SecondFloods,
     Fill,
+    Refuses,
 }
 type Log = Arc<Mutex<Vec<([i32; 3], i32)>>>;
 struct Test(Kind, Log);
@@ -149,6 +151,11 @@ impl ModFeatureType for Test {
                 for _ in 0..70_000 {
                     target.block(origin);
                 }
+                Ok(true)
+            }
+            Kind::Refuses => {
+                target.set_block(origin, BlockStateId(1), 3);
+                target.set_block([x + 100, y, z], BlockStateId(1), 3);
                 Ok(true)
             }
             Kind::Fill => {
@@ -209,6 +216,7 @@ fn types(log: &Log) -> ModFeatureTypes {
         ("test:flood", Kind::Flood),
         ("test:chest", Kind::Chest),
         ("test:fill", Kind::Fill),
+        ("test:refuses", Kind::Refuses),
         ("test:second_fails", Kind::SecondFails),
         ("test:second_floods", Kind::SecondFloods),
     ]
@@ -326,8 +334,7 @@ fn a_duplicate_final_position_is_placed_twice() {
 }
 
 /// A nested feature (a random selector's default) reaches the mod's type, and `Ok(false)` keeps
-/// what it wrote, as vanilla does. A write outside the build height is refused and the rest
-/// stand.
+/// what it wrote, as vanilla does.
 #[test]
 fn a_nested_feature_reaches_the_type_and_false_keeps_its_writes() {
     let log = Log::default();
@@ -337,59 +344,82 @@ fn a_nested_feature_reaches_the_type_and_false_keeps_its_writes() {
                 "default":{"feature":{"type":"test:column","height":4},"placement":[]}}"#,
         );
         let mut world = World::default();
-        assert_eq!(place(&selector, &mut world, [3, 13, 3]), Ok(false));
+        assert_eq!(place(&selector, &mut world, [3, 12, 3]), Ok(false));
         assert_eq!(
             world.writes.iter().map(|w| w.0).collect::<Vec<_>>(),
-            [[3, 13, 3], [3, 14, 3], [3, 15, 3]]
+            [[3, 12, 3], [3, 13, 3], [3, 14, 3], [3, 15, 3]]
         );
     });
 }
 
-/// A failure or a panic after a write leaves nothing in the world, nested or not, and disables
-/// the type: its next placement fails by name without calling it.
+/// A failure or a panic after a write discards that call's writes and disables the type for
+/// the session: its next placement answers `Ok(false)` without calling it, and its root
+/// carries on. Another type is not disabled with it, and a fresh load of the mod set enables it
+/// again.
 #[test]
-fn failures_discard_their_writes_and_disable_the_type() {
+fn faults_discard_their_writes_and_disable_the_type_until_the_mods_load_again() {
     let log = Log::default();
-    with_test_feature_types(&types(&log), || {
+    let loaded = || types(&log);
+    with_test_feature_types(&loaded(), || {
         let fails = feature(r#"{"type":"test:fails"}"#);
         let mut world = World::default();
-        assert_eq!(
-            place(&fails, &mut world, [0, 1, 0]),
-            Err("mod feature failed: test:fails: no room".into())
-        );
+        assert_eq!(place(&fails, &mut world, [0, 1, 0]), Ok(false));
         assert!(world.writes.is_empty());
-        assert_eq!(
-            place(&fails, &mut world, [0, 1, 0]),
-            Err("mod feature failed: test:fails: disabled by an earlier failure".into())
-        );
+        assert!(mod_feature_type("test:fails").unwrap().disabled());
+        // Disabled: not called again, so nothing is written, and no error either.
+        assert_eq!(place(&fails, &mut world, [0, 1, 0]), Ok(false));
+        assert!(world.writes.is_empty());
         let nested = feature(
             r#"{"type":"minecraft:random_selector","features":[],
                 "default":{"feature":{"type":"test:panics"},"placement":[]}}"#,
         );
-        let first = place(&nested, &mut world, [0, 1, 0]);
-        assert_eq!(
-            first,
-            Err("mod feature failed: test:panics: panicked".into())
-        );
+        assert_eq!(place(&nested, &mut world, [0, 1, 0]), Ok(false));
         assert!(world.writes.is_empty());
-        assert!(
-            place(&nested, &mut world, [0, 1, 0])
-                .unwrap_err()
-                .ends_with("disabled by an earlier failure")
-        );
+        assert!(mod_feature_type("test:panics").unwrap().disabled());
         // Another type is not disabled with it.
         assert_eq!(
             place(&feature(r#"{"type":"test:marks"}"#), &mut world, [0, 1, 0]),
             Ok(true)
         );
+        assert!(!mod_feature_type("test:marks").unwrap().disabled());
+    });
+    // A new load of the mod set builds its entries again: nothing is disabled.
+    with_test_feature_types(&loaded(), || {
+        assert!(!mod_feature_type("test:fails").unwrap().disabled());
+        let mut world = World::default();
+        let marks = feature(r#"{"type":"test:marks"}"#);
+        assert_eq!(place(&marks, &mut world, [0, 1, 0]), Ok(true));
     });
 }
 
-/// A root's successful calls reach the level only when the whole root answers `Ok`: a count-2
-/// root whose second call fails, or runs the shared budget out, publishes nothing of its first
-/// call's, and one whose calls all succeed publishes them together, in order.
+/// A write the level refuses (outside the region decoration may write, or the build height) is
+/// a fault: the call's writes before it are discarded too, and the type is disabled.
 #[test]
-fn a_roots_calls_publish_together_or_not_at_all() {
+fn a_refused_write_is_a_fault() {
+    for (ty, refused_at) in [("test:refuses", None), ("test:column", Some(14))] {
+        let log = Log::default();
+        with_test_feature_types(&types(&log), || {
+            let height = refused_at.map_or(String::new(), |_| r#","height":4"#.to_owned());
+            let refuses = feature(&format!(r#"{{"type":"{ty}"{height}}}"#));
+            let mut world = World::default();
+            // `test:column` runs from y 14 to 17, past the build height at 16.
+            assert_eq!(
+                place(&refuses, &mut world, [3, refused_at.unwrap_or(1), 3]),
+                Ok(false)
+            );
+            assert!(world.writes.is_empty(), "{ty}");
+            assert!(mod_feature_type(ty).unwrap().disabled(), "{ty}");
+        });
+    }
+}
+
+/// A fault mid-root keeps the writes of the calls before it and nothing of the failed call's:
+/// in a count-2 root whose second call fails, or runs the shared budget out, the first call's
+/// block and block entity stand, the second's are gone, and the root still answers. A root
+/// whose calls all succeed publishes them in order. The same seed twice gives the same world,
+/// faults included.
+#[test]
+fn a_fault_mid_root_keeps_the_earlier_calls() {
     let rooted = |ty: &str| PlacedFeatureDefinition {
         feature: Box::new(feature(&format!(r#"{{"type":"{ty}"}}"#))),
         placement: vec![
@@ -413,24 +443,27 @@ fn a_roots_calls_publish_together_or_not_at_all() {
         let calls = log.lock().unwrap().len();
         (answer, calls, world)
     };
+    let positions = |world: &World| world.writes.iter().map(|w| w.0).collect::<Vec<_>>();
 
-    let (answer, calls, world) = run("test:second_fails");
-    assert_eq!(calls, 2, "the second call ran");
-    assert!(answer.unwrap_err().ends_with("second call"));
-    assert!(world.writes.is_empty() && world.entities.is_empty());
-
-    let (answer, calls, world) = run("test:second_floods");
-    assert_eq!(calls, 2);
-    assert!(answer.unwrap_err().contains("custom work budget"));
-    assert!(world.writes.is_empty() && world.entities.is_empty());
+    for ty in ["test:second_fails", "test:second_floods"] {
+        let (answer, calls, world) = run(ty);
+        assert_eq!(calls, 2, "{ty}: the second call ran");
+        assert!(answer.is_ok(), "{ty}: the root carries on");
+        assert_eq!(positions(&world), [[27, 4, 32]], "{ty}");
+        assert_eq!(
+            world.entities.iter().map(|e| e.0).collect::<Vec<_>>(),
+            [[27, 4, 32]],
+            "{ty}"
+        );
+        let (_, _, again) = run(ty);
+        assert_eq!(positions(&again), positions(&world), "{ty}: same seed");
+        assert_eq!(again.entities.len(), world.entities.len(), "{ty}");
+    }
 
     let (answer, calls, world) = run("test:marks");
     assert_eq!(answer, Ok(true));
     assert_eq!(calls, 2);
-    assert_eq!(
-        world.writes.iter().map(|w| w.0).collect::<Vec<_>>(),
-        [[27, 4, 32], [16, 4, 36]]
-    );
+    assert_eq!(positions(&world), [[27, 4, 32], [16, 4, 36]]);
 }
 
 /// A call that writes thousands of blocks with block entities, then reads thousands of other
@@ -451,22 +484,19 @@ fn a_root_of_thousands_of_writes_publishes_them_all() {
     });
 }
 
-/// A call past the root's custom budget places nothing and fails by name, without disabling
-/// the type; the next root has the whole budget again, and the graph's own budget is untouched.
+/// A call past the root's custom budget places nothing and faults, which disables the type; the
+/// next root has the whole budget again for the other types, and the graph's own budget is
+/// untouched. The budget counts work units, so the outcome does not depend on speed.
 #[test]
-fn the_custom_budget_bounds_a_call_and_recovers_at_the_next_root() {
+fn the_custom_budget_bounds_a_call_and_faults_it() {
     let log = Log::default();
     with_test_feature_types(&types(&log), || {
         let flood = feature(r#"{"type":"test:flood"}"#);
         let mut world = World::default();
-        assert_eq!(
-            place(&flood, &mut world, [0, 1, 0]),
-            Err(format!(
-                "mod feature failed: test:flood: custom work budget of {CUSTOM_WORK_BUDGET} exceeded"
-            ))
-        );
+        assert_eq!(place(&flood, &mut world, [0, 1, 0]), Ok(false));
         assert!(world.writes.is_empty());
-        // Not disabled: a fresh root places a feature of a smaller job.
+        assert!(mod_feature_type("test:flood").unwrap().disabled());
+        // Another type: a fresh root places a feature of a smaller job.
         let marks = feature(r#"{"type":"test:marks"}"#);
         assert_eq!(place(&marks, &mut world, [0, 1, 0]), Ok(true));
         // Several calls in one root share its budget, and small ones fit it.
@@ -478,8 +508,8 @@ fn the_custom_budget_bounds_a_call_and_recovers_at_the_next_root() {
     });
 }
 
-/// Writes go where the world lets them: outside the write zone or the build height, and onto
-/// the same state, they are false. Reads and tags see the call's own staged blocks.
+/// A write onto the same state is false, as the level answers it; reads and tags see the call's
+/// own staged blocks, and a read the world can't answer is `None`.
 #[test]
 fn staged_writes_answer_as_the_world_would_and_read_back() {
     struct Probe;
@@ -500,9 +530,6 @@ fn staged_writes_answer_as_the_world_would_and_read_back() {
                 t.block(o) == Some(BlockStateId(1)),
                 t.block_in_tag(o, "minecraft:dirt") == Some(true),
                 !t.set_block(o, BlockStateId(1), 3),
-                !t.set_block([50, 5, 5], BlockStateId(1), 3),
-                !t.set_block([5, 16, 5], BlockStateId(1), 3),
-                !t.set_block([i32::MIN, i32::MAX, i32::MIN], BlockStateId(1), 3),
                 t.block([i32::MAX, 5, 5]).is_none(),
             ];
             Ok(answers.iter().all(|a| *a))

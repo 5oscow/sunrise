@@ -5,18 +5,25 @@
 //! growth, bone meal, `/place feature` and `LevelRef::place_feature`. Runs on worker threads,
 //! so a type keeps no mutable state and its target carries no `Host`.
 //!
-//! A call's writes are staged ([`Staging`]): the feature reads its own writes and those of the
-//! root's earlier calls. A call that answers `Ok` hands its writes to its root
-//! ([`Provisional`]), and the level sees them, in order, only when the whole root answers `Ok`;
-//! a failure, a panic or an exhausted budget anywhere in the root discards every call's writes,
-//! so a failed root leaves nothing of the mod's behind. A failure or a panic also disables the
-//! type for the rest of the run, and every later placement of it fails by name. The features
-//! of the same root that are not a mod's read the level as it was before the root's mod writes,
-//! and the mod writes are applied after theirs: on a block both write, the mod's wins.
+//! A call's writes are staged ([`Staging`]): the feature reads its own writes, and when it
+//! answers `Ok(true)` or `Ok(false)` they reach the level at once, in order, so the steps after
+//! it (built-in or a mod's) see them. An `Ok(false)` publishes what it wrote, as vanilla keeps
+//! the blocks of a partly placed tree. Only a fault discards the call's writes: a panic, an
+//! `Err`, a work budget that ran out, or a write the level refuses (outside the region
+//! decoration may write, or the build height). A fault also disables the type for the session,
+//! in memory only: a later placement of it answers `Ok(false)` and its root carries on, and a
+//! new load of the mod set enables it again. The call that faults and the root around it are
+//! not rolled back beyond that call: vanilla has no root rollback either. The budget counts
+//! work units, never time, so a run's output does not depend on how fast a machine is.
+//!
+//! A mod feature runs on the thread its placement does: a worldgen worker for decoration, the
+//! tick thread for growth, `/place feature` and `LevelRef::place_feature`. It sees only its
+//! target, its config and the caller's random, with no `Host`, no `Game` and no hook dispatch,
+//! so a worker never reaches mod state through it (#1532).
 use crate::heightmap::HeightmapType;
 use crate::registry::{BlockRegistry, BlockStateId};
 use std::any::Any;
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
@@ -51,13 +58,15 @@ pub trait ModFeatureType: Send + Sync {
 
 /// The level a mod feature places in, object-safe: the caller's own world (a decoration
 /// region, the live level), never a second block store. A read the world can't answer is
-/// `None`, a write it refuses is `false`; neither loads a chunk.
+/// `None`, a write onto the state already there is `false`, and a write it refuses faults the
+/// call; neither loads a chunk.
 pub trait ModFeatureTarget {
     /// The numeric block registry the states are of, for the adapter's state index.
     fn registry(&self) -> Option<&'static BlockRegistry>;
     fn block(&mut self, position: [i32; 3]) -> Option<BlockStateId>;
-    /// `LevelWriter.setBlock` with vanilla's update `flags`: false outside the writable
-    /// region or the build height, and for the state already there.
+    /// `LevelWriter.setBlock` with vanilla's update `flags`: false for the state already there.
+    /// A write outside the writable region or the build height answers false and faults the
+    /// call.
     fn set_block(&mut self, position: [i32; 3], state: BlockStateId, flags: i32) -> bool;
     /// Whether the block at `position` is in block tag `tag`.
     fn block_in_tag(&mut self, position: [i32; 3], tag: &str) -> Option<bool>;
@@ -131,20 +140,7 @@ impl Pending {
             self.entities[at] = None;
         }
     }
-    /// A successful call's writes join the root's: a block entity of an earlier call is dropped
-    /// with the block this call replaces.
-    fn absorb(&mut self, call: Pending) {
-        for &(position, ..) in &call.writes {
-            self.drop_entity(position);
-        }
-        for (position, state, flags) in call.writes {
-            self.write(position, state, flags);
-        }
-        for (position, nbt) in call.entities.into_iter().flatten() {
-            self.set_entity(position, nbt);
-        }
-    }
-    /// The root answered `Ok`: the writes, in order, then the block entities of the blocks among
+    /// The call answered `Ok`: its writes, in order, then the block entities of the blocks among
     /// them the level took. A write the level refuses now drops its block entity with it.
     pub(crate) fn commit<W>(self, world: &mut W)
     where
@@ -166,35 +162,47 @@ impl Pending {
     }
 }
 
-/// The writes of a root's successful mod calls, waiting for the root's answer.
-pub(crate) type Provisional = Pending;
+/// Why a call faulted.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Fault {
+    /// The root's custom work budget ran out.
+    Budget,
+    /// A write the level refuses: outside the region decoration may write, or the build height.
+    Refused([i32; 3]),
+}
+impl std::fmt::Display for Fault {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Budget => write!(f, "the custom work budget of {CUSTOM_WORK_BUDGET} ran out"),
+            Self::Refused([x, y, z]) => write!(
+                f,
+                "a write at [{x}, {y}, {z}] is outside the region or the build height"
+            ),
+        }
+    }
+}
 
-/// One call's view of a placement world: reads see the call's own staged writes and those of
-/// the root's earlier calls, writes and block entities wait for the root
-/// ([`finish`](Self::finish)), and every operation is charged to the root's custom budget. An
-/// operation past the budget answers `None` or `false` and marks the call exhausted.
+/// One call's view of a placement world: reads see the call's own staged writes, writes and
+/// block entities wait for [`publish`](Self::publish), and every operation is charged to the
+/// root's custom budget. An operation past the budget answers `None` or `false` and faults the
+/// call, and so does a write the level refuses. Reads of the heightmap see the level as it was
+/// before the call.
 pub(crate) struct Staging<'a, W> {
     world: &'a mut W,
     budget: &'a Cell<u32>,
-    earlier: &'a RefCell<Provisional>,
     own: Pending,
-    pub(crate) exhausted: bool,
+    fault: Option<Fault>,
 }
 impl<'a, W> Staging<'a, W>
 where
     W: super::feature::FeatureWorld + super::placement::PlacementContext,
 {
-    pub(crate) fn new(
-        world: &'a mut W,
-        budget: &'a Cell<u32>,
-        earlier: &'a RefCell<Provisional>,
-    ) -> Self {
+    pub(crate) fn new(world: &'a mut W, budget: &'a Cell<u32>) -> Self {
         Self {
             world,
             budget,
-            earlier,
             own: Pending::default(),
-            exhausted: false,
+            fault: None,
         }
     }
     fn charge(&mut self) -> bool {
@@ -204,25 +212,20 @@ where
                 true
             }
             None => {
-                self.exhausted = true;
+                self.fault.get_or_insert(Fault::Budget);
                 false
             }
         }
     }
-    fn staged(&self, position: [i32; 3]) -> Option<BlockStateId> {
-        self.own
-            .state(position)
-            .or_else(|| self.earlier.borrow().state(position))
-    }
     fn current(&mut self, position: [i32; 3]) -> Option<BlockStateId> {
-        match self.staged(position) {
+        match self.own.state(position) {
             Some(state) => Some(state),
             None => self.world.block(position).ok(),
         }
     }
-    /// The call answered `Ok`: its writes wait with its root's.
-    pub(crate) fn finish(self) {
-        self.earlier.borrow_mut().absorb(self.own);
+    /// The call answered `Ok`: its writes reach the level, in order.
+    fn publish(self) {
+        self.own.commit(self.world);
     }
 }
 impl<W> ModFeatureTarget for Staging<'_, W>
@@ -244,11 +247,14 @@ where
         }
         let writable = self.world.ensure_can_write(position) == Ok(true)
             && self.world.inside_build_height(position) == Ok(true);
+        if !writable {
+            self.fault.get_or_insert(Fault::Refused(position));
+            return false;
+        }
         // `Level.setBlock` answers false for the state already there.
-        if !writable
-            || self
-                .current(position)
-                .is_none_or(|current| current == state)
+        if self
+            .current(position)
+            .is_none_or(|current| current == state)
         {
             return false;
         }
@@ -259,7 +265,7 @@ where
         if !self.charge() {
             return None;
         }
-        match self.staged(position) {
+        match self.own.state(position) {
             Some(state) => self.world.state_matches_tag(state, tag).ok(),
             None => self.world.block_matches_tag(position, tag).ok(),
         }
@@ -294,7 +300,7 @@ where
     }
 }
 
-/// A registered type and whether a failure has disabled it.
+/// A registered type and whether a fault has disabled it for the session.
 pub struct ModFeatureEntry {
     pub ty: Arc<dyn ModFeatureType>,
     disabled: AtomicBool,
@@ -309,8 +315,9 @@ impl ModFeatureEntry {
     pub fn disabled(&self) -> bool {
         self.disabled.load(Ordering::Relaxed)
     }
-    pub(crate) fn disable(&self) {
-        self.disabled.store(true, Ordering::Relaxed);
+    /// Disables the type; true for the call that did, so the fault is logged once.
+    fn disable(&self) -> bool {
+        !self.disabled.swap(true, Ordering::Relaxed)
     }
 }
 
@@ -329,68 +336,53 @@ impl std::fmt::Debug for ModFeature {
     }
 }
 
-/// Why a mod feature's call placed nothing; its staged writes are discarded.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ModFeatureError {
-    /// The type's `place` answered `Err` (its reason); the type is disabled.
-    Failed(String),
-    /// The type's `place` panicked; the type is disabled.
-    Panicked,
-    /// The root's custom work budget ran out during the call.
-    WorkLimit,
-    /// An earlier failure disabled the type; it was not called.
-    Disabled,
-}
-impl std::fmt::Display for ModFeatureError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Failed(reason) => f.write_str(reason),
-            Self::Panicked => f.write_str("panicked"),
-            Self::WorkLimit => write!(f, "custom work budget of {CUSTOM_WORK_BUDGET} exceeded"),
-            Self::Disabled => f.write_str("disabled by an earlier failure"),
-        }
-    }
-}
-
 impl ModFeature {
-    /// One call of the type at `origin` over `world`, charged to `budget`: its writes join the
-    /// root's `provisional` on `Ok` and reach the world when the root answers `Ok`.
+    /// One call of the type at `origin` over `world`, charged to `budget`. Its writes reach the
+    /// world when it answers `Ok`, `Ok(false)` included, and the answer is the type's. A fault
+    /// discards them, disables the type and answers `false`, as does a type already disabled.
     pub(crate) fn place<W>(
         &self,
         world: &mut W,
         random: &mut impl RandomSource,
         origin: [i32; 3],
         budget: &Cell<u32>,
-        provisional: &RefCell<Provisional>,
-    ) -> Result<bool, ModFeatureError>
+    ) -> bool
     where
         W: super::feature::FeatureWorld + super::placement::PlacementContext,
     {
         if self.entry.disabled() {
-            return Err(ModFeatureError::Disabled);
+            return false;
         }
-        let mut staging = Staging::new(world, budget, provisional);
+        let mut staging = Staging::new(world, budget);
         let mut draws = Draws(random);
         let called = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             self.entry
                 .ty
                 .place(&mut staging, &mut draws, origin, &*self.config)
         }));
-        match called {
-            Err(_) => {
-                self.entry.disable();
-                Err(ModFeatureError::Panicked)
+        let reason = match (called, staging.fault.take()) {
+            (_, Some(fault)) => fault.to_string(),
+            (Err(_), None) => "it panicked".to_owned(),
+            (Ok(Err(reason)), None) => format!("it failed: {reason}"),
+            (Ok(Ok(placed)), None) => {
+                staging.publish();
+                return placed;
             }
-            Ok(Err(reason)) => {
-                self.entry.disable();
-                Err(ModFeatureError::Failed(reason))
-            }
-            Ok(Ok(_)) if staging.exhausted => Err(ModFeatureError::WorkLimit),
-            Ok(Ok(placed)) => {
-                staging.finish();
-                Ok(placed)
-            }
+        };
+        if self.entry.disable() {
+            let [x, y, z] = origin;
+            let mod_id = self
+                .id
+                .split_once(':')
+                .map_or(&*self.id, |(namespace, _)| namespace);
+            log::error!(
+                "mod {mod_id}: feature type {} faulted at [{x}, {y}, {z}] ({reason}); its writes \
+                 of that call are discarded and the type is off until the mods load again, so \
+                 chunks generated from now on differ",
+                self.id
+            );
         }
+        false
     }
 }
 
