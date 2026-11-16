@@ -1125,6 +1125,9 @@ impl SurvivalWorld for World<'_> {
     }
 }
 impl PlacementContext for World<'_> {
+    fn block_registry(&self) -> Option<&'static crate::registry::BlockRegistry> {
+        Some(self.decoration.bindings.registry())
+    }
     fn state_collision_empty(
         &mut self,
         state: BlockStateId,
@@ -1624,6 +1627,13 @@ impl PlacementContext for World<'_> {
         tag: &str,
     ) -> Result<bool, PlacementQueryError> {
         let state = self.region.block(position)?;
+        self.state_matches_tag(state, tag)
+    }
+    fn state_matches_tag(
+        &mut self,
+        state: BlockStateId,
+        tag: &str,
+    ) -> Result<bool, PlacementQueryError> {
         if self
             .last_tag
             .as_ref()
