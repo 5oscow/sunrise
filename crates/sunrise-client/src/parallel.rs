@@ -309,7 +309,7 @@ impl TickThread {
     /// Inside a tick phase's work: a worker never holds the tick's authority.
     pub fn mint() -> Self {
         assert!(
-            !sunrise_threads::in_tick_phase(),
+            !sunrise_core::tick_phase::in_tick_phase(),
             "the tick thread's token was asked for inside a tick phase's work"
         );
         Self(std::marker::PhantomData)
@@ -374,7 +374,7 @@ impl ListenSnapshot {
 ///
 /// `work` is a function pointer, not a closure, so it captures nothing: what a worker sees is
 /// `view` and its item, and nothing that only the tick thread may touch. Inside `work`,
-/// `sunrise_threads::in_tick_phase` holds on every thread, so tick-owned state refuses it by name
+/// `sunrise_core::tick_phase::in_tick_phase` holds on every thread, so tick-owned state refuses it by name
 /// ([`TickThread::mint`], `block_contact`'s level, wasm calls):
 ///
 /// ```no_run
@@ -404,7 +404,7 @@ pub fn phase<V: PhaseView, T: Sync, R: Send>(
 ) -> Vec<R> {
     par_map(items, min, |part, out| {
         let mut run = || out.extend(part.iter().map(|item| work(view, item)));
-        sunrise_threads::as_tick_phase(|| match view.listens() {
+        sunrise_core::tick_phase::as_tick_phase(|| match view.listens() {
             Some(listens) => listens.enter(run),
             None => run(),
         });
@@ -676,7 +676,7 @@ mod tests {
             std::panic::catch_unwind(TickThread::mint).is_err()
         });
         assert!(refused.iter().all(|&refused| refused));
-        assert!(!sunrise_threads::in_tick_phase());
+        assert!(!sunrise_core::tick_phase::in_tick_phase());
         TickThread::mint();
     }
 
