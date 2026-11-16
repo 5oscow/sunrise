@@ -8,6 +8,7 @@ failed in the build (2026-11-16).
 import ast
 import json
 from pathlib import Path
+import shutil
 import subprocess
 import unittest
 
@@ -31,6 +32,7 @@ class HarnessPaths(unittest.TestCase):
                 with self.subTest(harness=harness.name, line=node.lineno):
                     self.assertTrue((ROOT / path).exists(), f"{harness.name}:{node.lineno} names {path}")
 
+    @unittest.skipUnless(shutil.which("cargo"), "needs cargo for the workspace's targets")
     def test_every_cargo_target_a_tool_builds_is_in_its_package(self):
         metadata = json.loads(subprocess.check_output(
             ["cargo", "metadata", "--no-deps", "--format-version", "1"], cwd=ROOT, text=True))
