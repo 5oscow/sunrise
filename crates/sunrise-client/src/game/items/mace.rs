@@ -253,23 +253,6 @@ impl Game<'_> {
             }
         }
     }
-    /// Only the connected owner's acting context supplies a verified identity.
-    /// Guests and unresolved sources retain the existing damage API behavior.
-    pub(super) fn owner_damage_uuid(&self) -> Option<[i32; 4]> {
-        if self.lan_acting.is_some() && self.lan_acting_uuid.is_none() {
-            return None;
-        }
-        let actual = self
-            .lan_acting_uuid
-            .map(sunrise_client::lan::playerdata::uuid_ints)
-            .or(self.level.player_uuid)?;
-        let owner = self
-            .serving
-            .as_ref()
-            .map(|s| sunrise_client::lan::playerdata::uuid_ints(s.owner))
-            .or(self.level.player_uuid)?;
-        (actual == owner).then_some(actual)
-    }
     /// `DamageSource.getWeaponItem` for a hit on the player, when its
     /// `armor_effectiveness` enchantments (Breach) can thin the armour: the
     /// stack the mob that swung holds, and the registry its effects are read
