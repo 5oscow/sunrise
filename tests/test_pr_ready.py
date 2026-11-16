@@ -194,13 +194,21 @@ class PrReadyTests(unittest.TestCase):
             step.status, step.detail = "skip", "content root untouched"
             self.assertIn("data-backed tests not run: content root untouched", render())
 
+    @contextlib.contextmanager
+    def assert_no_reaper_errors(self):
+        errors = []
+        with mock.patch.object(threading, "excepthook", errors.append):
+            yield
+        self.assertEqual(errors, [], "reaper raised")
+
     def test_windows_runner_gives_a_leading_variable_to_the_environment(self):
         step = pr_ready.Step(
             "dispatch tests tests",
             "CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS:-4} cargo test --manifest-path a/Cargo.toml --locked",
         )
         with mock.patch.object(pr_ready.subprocess, "Popen") as popen, \
-                mock.patch.object(pr_ready, "finish"), mock.patch.dict(os.environ):
+                mock.patch.object(pr_ready, "finish"), mock.patch.dict(os.environ), \
+                self.assert_no_reaper_errors():
             os.environ.pop("CARGO_BUILD_JOBS", None)
             popen.return_value.__enter__.return_value.stdout = []
             popen.return_value.__enter__.return_value.wait.return_value = 0
@@ -210,6 +218,11 @@ class PrReadyTests(unittest.TestCase):
                          ["cargo", "test", "--manifest-path", "a/Cargo.toml", "--locked"])
         self.assertEqual(popen.call_args.kwargs["env"]["CARGO_BUILD_JOBS"], "4")
         self.assertEqual(step.status, "pass")
+
+    def test_raising_reaper_fails_the_thread_exception_check(self):
+        with mock.patch.object(pr_ready.process_tree, "ended", side_effect=RuntimeError("reaper failed")):
+            with self.assertRaisesRegex(AssertionError, "reaper raised"):
+                self.test_windows_runner_gives_a_leading_variable_to_the_environment()
 
     def test_paths_map_to_the_crates_that_own_them(self):
         self.assertEqual(pr_ready.touched_crates({"crates/sunrise-core/src/jmath.rs", "crates/sunrise-client/build.rs",
