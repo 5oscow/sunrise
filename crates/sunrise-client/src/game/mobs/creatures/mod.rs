@@ -4229,6 +4229,21 @@ impl Game<'_> {
         // early (invulnerable, or inside the hurt cooldown).
         // A hit a native mod canceled records no damage (hurtServer never ran).
         self.combat.forget_noted(outcome.canceled);
+        // Player motion queues accepted-hit memory events; the normal drain runs after
+        // this function returns. A knockback listener must see those memories already
+        // committed, including absorbed/blocked hits that still reach Criterion.
+        if mod_api::__private::listened(mod_api::HookId::LivingKnockback)
+            && self.player.as_ref().is_some_and(|player| {
+                player.events[events_before..].iter().any(|event| {
+                    matches!(
+                        event,
+                        sunrise_client::motion::MotionEvent::Health(HealthEvent::Criterion { .. })
+                    )
+                })
+            })
+        {
+            self.commit_pending_hurt_memories(damage_type);
+        }
         if outcome.hurt || outcome.sound {
             let source = attacker
                 .or(owner)

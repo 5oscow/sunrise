@@ -433,6 +433,24 @@ impl Game<'_> {
             Some(_) => {}
         }
     }
+    /// Commit accepted hurt memories while its source is still in the pending queue.
+    /// Knockback needs this before the later event drain consumes RecordedDamage.
+    pub(super) fn commit_pending_hurt_memories(&mut self, damage_type: &str) {
+        let Some(pending) = self
+            .combat
+            .pending
+            .iter()
+            .find(|p| p.damage_type == damage_type)
+        else {
+            return;
+        };
+        let id = pending.attacker.0;
+        self.combat.last_hurt_by = pending
+            .credit
+            .then(|| (pending.attacker.clone(), self.world.game_time));
+        self.resolve_player_responsible_for_player(id);
+    }
+
     /// `CombatTracker.recordDamage` for the motion events of this tick.
     pub(super) fn record_combat(&mut self, events: &[MotionEvent]) {
         self.recheck_combat();
@@ -450,26 +468,13 @@ impl Game<'_> {
                 // LivingEntity.hurtServer reached resolvePlayerResponsibleForDamage:
                 // every hit that got past the cooldown, absorbed or blocked too.
                 MotionEvent::Health(HealthEvent::Criterion { source, .. }) => {
-                    if let Some(d) = self.motion.health.damage.definition(*source) {
-                        let attacker = match recorded.take() {
-                            Some((t, id)) if t == d.name => Some(id),
-                            _ => {
-                                if let Some(pending) = self
-                                    .combat
-                                    .pending
-                                    .iter()
-                                    .find(|pending| pending.damage_type == d.name)
-                                {
-                                    self.combat.last_hurt_by =
-                                        Some((pending.attacker.clone(), self.world.game_time));
-                                    Some(pending.attacker.0)
-                                } else {
-                                    None
-                                }
+                    let motion = self.motion;
+                    if let Some(d) = motion.health.damage.definition(*source) {
+                        match recorded.take() {
+                            Some((t, id)) if t == d.name => {
+                                self.resolve_player_responsible_for_player(id)
                             }
-                        };
-                        if let Some(id) = attacker {
-                            self.resolve_player_responsible_for_player(id);
+                            _ => self.commit_pending_hurt_memories(&d.name),
                         }
                     }
                     continue;
