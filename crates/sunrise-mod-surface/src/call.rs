@@ -17,6 +17,15 @@ use crate::shape::digest;
 /// The import module every name here lives in.
 pub const MODULE: &str = "sunrise";
 
+/// The shared protocol's number, carried in the name of each protocol import (`host_reply`,
+/// `release`, `log`) every guest links. The loader refuses a module whose number is not the
+/// game's. Bump it when anything crossing the boundary changes that no declared shape covers:
+/// the identity of a resource (zero is reserved), the group-state words in the std member, the
+/// static-reply framing, the `ConfigFiles` root selector, the shape of `Hooks::subscribed`, or
+/// the transport signature. A test in `sunrise-mod-api-gen` hashes those items and fails with
+/// "bump SHARED_PROTOCOL" when they change and this number does not.
+pub const SHARED_PROTOCOL: u32 = 1;
+
 /// The longest name a module may import (bytes). The generator keeps its own under it.
 pub const MAX_NAME_BYTES: usize = 256;
 
@@ -227,6 +236,24 @@ impl Spec<'_> {
             version: self.version,
             hash: digest(&text),
         }
+    }
+}
+
+/// The bit that marks a point listener's id. Every other export's id has it clear.
+pub const POINT_TAG: u64 = 1 << 63;
+
+impl Name {
+    /// The id the game sends to `sunrise_hook` for an export of this name: 63 bits of a digest
+    /// of the whole name, so it is the same constant in the game and in every guest and moves
+    /// with nothing but the name. The generator refuses two names with one id.
+    pub fn export_id(&self) -> u64 {
+        let digest = digest(&format!("id{{{}}}", self.text()));
+        u64::from_str_radix(&digest[..16], 16).expect("hex") & !POINT_TAG
+    }
+
+    /// A point listener's id: [`Name::export_id`] with [`POINT_TAG`] set.
+    pub fn point_id(&self) -> u64 {
+        self.export_id() | POINT_TAG
     }
 }
 
