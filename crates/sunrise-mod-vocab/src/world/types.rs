@@ -1683,3 +1683,16 @@ pub struct ObjectiveRef {
     pub(crate) epoch: WorldEpoch,
     pub(crate) id: u64,
 }
+
+/// One of the scoreboard's teams of an open server world (vanilla's `PlayerTeam`). It holds the
+/// world's epoch and an identity the board gave the team when it was added, so a team that was
+/// removed (even if its name was added again) or a handle from an earlier open reads as stale:
+/// reads answer `None` or [`TeamError::Stale`] and writes change nothing.
+#[derive(sunrise_mod_api_macros::Wire)]
+#[wire(internal_field_layouts)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
+pub struct TeamRef {
+    pub(crate) epoch: WorldEpoch,
+    pub(crate) id: u64,
+}

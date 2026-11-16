@@ -2,6 +2,7 @@
 
 pub(crate) mod advancement_progress;
 pub(crate) mod scoreboard;
+pub(crate) mod team;
 // hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod biome;
