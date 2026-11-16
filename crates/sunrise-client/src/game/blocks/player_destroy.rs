@@ -50,11 +50,7 @@ impl Game<'_> {
             if removed {
                 self.native_player_destroyed_block(pos, state, block_entity);
             }
-            return (
-                removed,
-                state,
-                self.harvest_after_removal(pos, state, facts),
-            );
+            return (removed, state, self.harvest_after_removal(pos, state));
         }
         let state = self.player_will_destroy(pos, state, facts, filled_hive);
         if !creative
@@ -67,29 +63,17 @@ impl Game<'_> {
             self.mod_harvest_check(pos, state, &mut correct_tool);
         }
         let removed = self.remove_block_as_player(pos, creative, correct_tool);
-        (
-            removed,
-            state,
-            self.harvest_after_removal(pos, state, facts),
-        )
+        (removed, state, self.harvest_after_removal(pos, state))
     }
 
     /// Whether the break that has just removed `state` harvests: the tool's answer for the held
     /// stack as it is now, then the mods' (`can_harvest_block`, `player_harvest_check`). Only a
     /// survival player's break asks.
-    fn harvest_after_removal(
-        &mut self,
-        pos: [i32; 3],
-        state: BlockStateId,
-        facts: &StateFacts,
-    ) -> bool {
+    fn harvest_after_removal(&mut self, pos: [i32; 3], state: BlockStateId) -> bool {
         if self.creative {
             return false;
         }
-        let mut harvest =
-            !facts.requires_tool || self.res.items().correct_for_drops(self.held(), &facts.name);
-        self.mod_harvest_check(pos, state, &mut harvest);
-        harvest
+        self.acting_can_harvest(pos, state)
     }
 
     /// The block side effects of `Block.playerWillDestroy` that run before the vanilla

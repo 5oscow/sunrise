@@ -496,6 +496,21 @@ impl Game<'_> {
             self.native_player_harvest_check(player, pos, state.0, harvest);
         }
     }
+    /// Whether the acting player's selected hotbar slot (never the offhand) harvests `state` at `pos`: vanilla's
+    /// rule, then `mod_harvest_check`. The one answer dig progress, the break's drops and the
+    /// mods' `has_correct_tool_for_drops` query share.
+    pub(in crate::game) fn acting_can_harvest(
+        &mut self,
+        pos: [i32; 3],
+        state: sunrise_world::registry::BlockStateId,
+    ) -> bool {
+        let facts = self.res.facts().get(state);
+        // The selected slot, whichever hand a hook of an offhand use runs under.
+        let tool = self.stack_in(self.selected);
+        let mut harvest = !facts.requires_tool || self.items().correct_for_drops(tool, &facts.name);
+        self.mod_harvest_check(pos, state, &mut harvest);
+        harvest
+    }
     /// `BlockBehaviour.getDestroyProgress` with `Player.getDestroySpeed`, whose
     /// end asks the mods' `native_player_break_speed`. Every dig's progress comes from
     /// here: single player's, a host's for each guest, a remote client's own.
@@ -505,10 +520,8 @@ impl Game<'_> {
         if facts.hardness == -1.0 {
             return 0.0;
         }
-        let mut harvest =
-            !facts.requires_tool || self.items().correct_for_drops(self.held(), &facts.name);
         let hardness = facts.hardness;
-        self.mod_harvest_check(pos, state, &mut harvest);
+        let harvest = self.acting_can_harvest(pos, state);
         let block_break_speed = self.block_break_speed();
         let facts = self.res.facts().get(state);
         let tool_speed = self.items().mining_speed(self.held(), &facts.name);
