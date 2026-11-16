@@ -14,15 +14,15 @@
 //! Each load also asks for the layers of the living renderers (`native_entity_layers`), which draw
 //! through the same guard ([`Game::guarded_entity_draw`]).
 use super::{
-    host::draw::GameBlockEntityDrawContext, native_block_entity_draw::BlockEntityDraw, Game,
+    Game, host::draw::GameBlockEntityDrawContext, native_block_entity_draw::BlockEntityDraw,
 };
 use glam::{DVec3, Mat4};
 use mod_api::{BlockEntityDrawContext, EntityRenderState, EntityRenderer};
 use std::{
     collections::{BTreeMap, HashMap},
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc, OnceLock, PoisonError, RwLock,
+        atomic::{AtomicBool, Ordering},
     },
 };
 use sunrise_client::{
@@ -197,6 +197,7 @@ impl Game<'_> {
         &self,
         resolved: &Resolved<dyn EntityRenderer>,
         entity: &EntityRenderState,
+        entity_type: &str,
         at: DVec3,
         block: [i32; 3],
         light: u32,
@@ -206,6 +207,7 @@ impl Game<'_> {
         self.guarded_entity_draw(
             &resolved.failed,
             entity.partial,
+            entity_type,
             block,
             pose,
             light,
@@ -224,6 +226,7 @@ impl Game<'_> {
         &self,
         failed: &AtomicBool,
         partial: f32,
+        entity_type: &str,
         block: [i32; 3],
         pose: Mat4,
         light: u32,
@@ -258,7 +261,7 @@ impl Game<'_> {
         out.truncate(start);
         if !failed.swap(true, Ordering::Relaxed) {
             log::warn!(
-                "Sunrise: an entity renderer or layer failed ({error}); it is asked no more until resources reload"
+                "Sunrise: the entity renderer or layer for {entity_type} failed ({error}); it is asked no more until resources reload"
             );
         }
         false

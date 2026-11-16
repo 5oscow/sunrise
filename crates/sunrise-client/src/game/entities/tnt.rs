@@ -28,6 +28,8 @@ pub(super) struct PrimedTnt {
     pub previous: Vec3,
     pub velocity: Vec3,
     pub fuse: i32,
+    /// `Entity.tickCount`: starts at 0, +1 each entity tick, not saved.
+    pub ticks: u32,
     pub on_ground: bool,
     /// `Entity.fallDistance` (`fall_distance` in its save).
     pub fall_distance: f64,
@@ -212,6 +214,8 @@ impl PrimedTnt {
         blocks: Option<&sunrise_world::movement_properties::BoundMovementProperties>,
         entities: &[Aabb],
     ) -> Result<(Vec<BlockPos>, bool)> {
+        // `Entity.tickCount` is raised before the rest of the tick, and is not saved.
+        self.ticks = self.ticks.saturating_add(1);
         self.previous = self.position;
         self.velocity.y -= self.get_gravity();
         let wanted = self.velocity;
@@ -422,6 +426,7 @@ impl Game<'_> {
             previous: position,
             velocity: Vec3::new(-rot.sin() * 0.02, f64::from(0.2f32), -rot.cos() * 0.02),
             fuse,
+            ticks: 0,
             on_ground: false,
             fall_distance: 0.0,
             stuck: Vec3::ZERO,
@@ -788,7 +793,7 @@ impl Game<'_> {
                     mod_api::__private::built::EntityRenderState {
                         id: t.id,
                         partial,
-                        age: 0.0,
+                        age: t.ticks as f32 + partial,
                         yaw: t.rotation[0],
                         pitch: t.rotation[1],
                         living: None,
@@ -809,6 +814,7 @@ impl Game<'_> {
                 if self.mod_entity_renderer_geometry(
                     &resolved,
                     &entity,
+                    "minecraft:tnt",
                     at - camera,
                     block,
                     packed,
@@ -982,6 +988,7 @@ mod tests {
             previous: Vec3::ZERO,
             velocity: Vec3::ZERO,
             fuse: 400,
+            ticks: 0,
             on_ground: false,
             fall_distance: 0.0,
             stuck: Vec3::ZERO,
@@ -1053,6 +1060,7 @@ mod tests {
             previous: Vec3::new(0.5, 1.0, 0.5),
             velocity: Vec3::ZERO,
             fuse: 80,
+            ticks: 0,
             on_ground: true,
             fall_distance: 0.0,
             stuck: Vec3::ZERO,
@@ -1105,6 +1113,7 @@ mod tests {
                 previous: at,
                 velocity: Vec3::new(1.5, 0.0, 0.0),
                 fuse: 80,
+                ticks: 0,
                 on_ground: true,
                 fall_distance: 0.0,
                 stuck: Vec3::ZERO,
@@ -1186,6 +1195,7 @@ mod tests {
                 previous: at,
                 velocity: Vec3::new(0.2, 0.0, 0.0),
                 fuse: 80,
+                ticks: 0,
                 on_ground: true,
                 fall_distance: 0.0,
                 stuck: Vec3::ZERO,
@@ -1263,6 +1273,7 @@ mod tests {
             previous: at,
             velocity: Vec3::ZERO,
             fuse: 80,
+            ticks: 0,
             on_ground: false,
             fall_distance: 0.0,
             stuck: Vec3::ZERO,
@@ -1427,6 +1438,7 @@ mod tests {
             previous: at,
             velocity: Vec3::ZERO,
             fuse: 80,
+            ticks: 0,
             on_ground: false,
             fall_distance: 0.0,
             stuck: Vec3::ZERO,
@@ -1537,6 +1549,7 @@ mod tests {
             previous: at,
             velocity: Vec3::ZERO,
             fuse: 80,
+            ticks: 0,
             on_ground: false,
             fall_distance: 0.0,
             stuck: Vec3::ZERO,

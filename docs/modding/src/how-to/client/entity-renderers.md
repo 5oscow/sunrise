@@ -108,7 +108,9 @@ Registered renderers draw these routes:
 - living types drawn as mobs, vanilla's (`minecraft:zombie`) and the content mods' living types: the
   renderer draws instead of the model and its vanilla layers;
 - primed TNT (`minecraft:tnt`): the renderer draws instead of the flashing TNT cube, and reads
-  `tnt_fuse`. Without a renderer, the cube is unchanged.
+  `tnt_fuse`. `age` is the unsaved `Entity.tickCount` plus the partial tick. Yaw and pitch are
+  the TNT's current rotation, not interpolated (it has no previous rotation). Without a
+  renderer, the cube is unchanged.
 
 Registrations for other known entity families, including boats, displays, vanilla projectiles, the
 player (whose model goes by its skin), the armour stand and the ender dragon (which draw through

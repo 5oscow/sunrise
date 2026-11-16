@@ -4,8 +4,8 @@
 //! A renderer draws every entity of one entity type, named by its id (`mymod:bolt`). The game
 //! keeps the registrations from start and resolves each type's renderer on every resource load, so
 //! a frame hands an entity to the renderer of its type's slot and to no other mod.
-use crate::wire::{Reader, Wire, WireError, Writer};
 use crate::BlockEntityDrawContext;
+use crate::wire::{Reader, Wire, WireError, Writer};
 use std::{collections::BTreeMap, sync::Arc};
 
 /// One entity's frame, as `EntityRenderer.extractRenderState` fills an `EntityRenderState`:
