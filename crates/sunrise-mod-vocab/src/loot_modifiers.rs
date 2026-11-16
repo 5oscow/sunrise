@@ -4,7 +4,7 @@
 //! prepared instances. A top-level roll runs them after its table functions and
 //! stack splitter. Nested tables and raw sub-rolls never invoke this pass.
 use crate::wire::{Reader, Wire, WireError, Writer};
-use crate::{DataLoadContext, Identifier, LootContext, LootStack, StructureRandom};
+use crate::{DataLoadContext, Identifier, LootContext, LootStack, RandomSource};
 use serde_json::Value;
 use std::sync::Arc;
 
@@ -164,7 +164,7 @@ pub trait LootModifierContext {
     fn snapshot(&self) -> LootContext;
     /// Borrow the selected roll's actual random through the shared draw capability.
     /// Draws advance that source in order, including draws made by raw sub-rolls.
-    fn random(&mut self) -> &mut dyn StructureRandom;
+    fn random(&mut self) -> &mut dyn RandomSource;
     /// Appendable raw output, with the same parameters, random, visited guards
     /// and data generation. This does not run modifiers or another stack splitter.
     /// A missing table refuses by id; a visited table terminates as an empty roll.

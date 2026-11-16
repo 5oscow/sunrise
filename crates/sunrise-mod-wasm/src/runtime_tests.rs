@@ -55,7 +55,7 @@ fn released_queue_concurrent_pushes_are_delivered_once() {
 }
 
 struct Random<F>(F);
-impl<F: FnMut() -> i64> mod_api::StructureRandom for Random<F> {
+impl<F: FnMut() -> i64> mod_api::RandomSource for Random<F> {
     fn next_int_bound(&mut self, _: i32) -> i32 {
         0
     }
@@ -70,6 +70,12 @@ impl<F: FnMut() -> i64> mod_api::StructureRandom for Random<F> {
     }
     fn next_long(&mut self) -> i64 {
         (self.0)()
+    }
+    fn next_int(&mut self) -> i32 {
+        0
+    }
+    fn next_gaussian(&mut self) -> f64 {
+        0.0
     }
 }
 
@@ -209,7 +215,7 @@ fn encoding_failure_refuses_partial_arguments() {
 fn nested_handler_decodes_in_scope_and_remains_callable_after_return() {
     crate::test_stack::on_guest_stack(|| {
         let bounds = crate::boundary::export_id("StructurePiece", "bounding_box").unwrap();
-        let random_id = crate::boundary::import_id("StructureRandom", "next_long").unwrap();
+        let random_id = crate::boundary::import_id("RandomSource", "next_long").unwrap();
         for handler in [123, 999] {
             let module = module(&format!(
                 r#"
@@ -251,7 +257,7 @@ fn nested_handler_decodes_in_scope_and_remains_callable_after_return() {
             }
             let mut random = Random(|| i64::from(found.pieces[0].bounding_box().max[2]));
             let mut frame = Frame::default();
-            frame.set_structure_random_mut(&mut random);
+            frame.set_random_source_mut(&mut random);
             let answer = module.call(CallClass::Load, frame, 1, None, |_| {}, |r| r.take::<i64>());
             if handler == 123 {
                 assert_eq!(answer, Some(6));
@@ -264,7 +270,7 @@ fn nested_handler_decodes_in_scope_and_remains_callable_after_return() {
 #[test]
 fn imports_inherit_the_root_borrow_token_and_expire_with_the_call() {
     crate::test_stack::on_guest_stack(|| {
-        let id = crate::boundary::import_id("StructureRandom", "next_long").unwrap();
+        let id = crate::boundary::import_id("RandomSource", "next_long").unwrap();
         let module = module(&format!(
             "i32.const {id} i32.const 0 i32.const 0 i32.const 1024 i32.const 8 call $host drop i32.const {id} i32.const 0 i32.const 0 i32.const 1024 i32.const 8 call $host drop i64.const 4398046511112"
         ));
@@ -280,7 +286,7 @@ fn imports_inherit_the_root_borrow_token_and_expire_with_the_call() {
             7
         });
         let mut frame = Frame::default();
-        frame.set_structure_random_mut(&mut random);
+        frame.set_random_source_mut(&mut random);
         assert_eq!(
             module.call(CallClass::Hook, frame, 0, None, |_| {}, |r| r.take::<i64>()),
             Some(7)
@@ -854,7 +860,7 @@ fn callback_borrows_only_the_lent_context_and_restores_depth() {
 #[test]
 fn import_reply_retry_survives_a_nested_callback() {
     crate::test_stack::on_guest_stack(|| {
-        let id = crate::boundary::import_id("StructureRandom", "next_long").unwrap();
+        let id = crate::boundary::import_id("RandomSource", "next_long").unwrap();
         let module = module(&format!(
             r#"
         local.get 0 i32.const 1 i32.eq
@@ -882,7 +888,7 @@ fn import_reply_retry_survives_a_nested_callback() {
                 + 1
         });
         let mut frame = Frame::default();
-        frame.set_structure_random_mut(&mut random);
+        frame.set_random_source_mut(&mut random);
         assert_eq!(
             module.call(CallClass::Hook, frame, 0, None, |_| {}, |r| r.take::<i64>()),
             Some(71)
@@ -893,7 +899,7 @@ fn import_reply_retry_survives_a_nested_callback() {
 #[test]
 fn another_threads_hook_completes_after_an_import_releases_the_group() {
     crate::test_stack::on_guest_stack(|| {
-        let id = crate::boundary::import_id("StructureRandom", "next_long").unwrap();
+        let id = crate::boundary::import_id("RandomSource", "next_long").unwrap();
         let module = module(&format!(
             r#"
             local.get 0 i32.eqz
@@ -923,7 +929,7 @@ fn another_threads_hook_completes_after_an_import_releases_the_group() {
             7
         });
         let mut frame = Frame::default();
-        frame.set_structure_random_mut(&mut random);
+        frame.set_random_source_mut(&mut random);
         assert_eq!(
             module.call(CallClass::Load, frame, 0, None, |_| {}, |r| r.take::<i64>()),
             Some(7)
@@ -1016,7 +1022,7 @@ fn contended_hook_times_out_without_poisoning_the_group() {
 #[test]
 fn nested_load_calls_do_not_extend_the_outer_deadline() {
     crate::test_stack::on_guest_stack(|| {
-        let id = crate::boundary::import_id("StructureRandom", "next_long").unwrap();
+        let id = crate::boundary::import_id("RandomSource", "next_long").unwrap();
         let module = module(&format!(
             "local.get 0 i32.const 1 i32.eq if (result i64) i64.const 0 else i32.const {id} i32.const 0 i32.const 0 i32.const 2048 i32.const 8 call $host drop i64.const 8796093022216 end"
         ));
@@ -1041,7 +1047,7 @@ fn nested_load_calls_do_not_extend_the_outer_deadline() {
             7
         });
         let mut frame = Frame::default();
-        frame.set_structure_random_mut(&mut random);
+        frame.set_random_source_mut(&mut random);
         let _ = module.call(CallClass::Hook, frame, 0, None, |_| {}, |r| r.take::<i64>());
         assert!(entered.get());
         assert!(module.is_stopped());
@@ -1160,7 +1166,7 @@ fn disable_clears_held_resources_before_retained_proxy_can_call() {
 #[test]
 fn disable_during_native_import_defers_resource_drop_until_call_returns() {
     crate::test_stack::on_guest_stack(|| {
-        let id = crate::boundary::import_id("StructureRandom", "next_long").unwrap();
+        let id = crate::boundary::import_id("RandomSource", "next_long").unwrap();
         let module = module(&format!(
             "i32.const {id} i32.const 0 i32.const 0 i32.const 2048 i32.const 8 call $host drop i64.const 8796093022216"
         ));
@@ -1171,7 +1177,7 @@ fn disable_during_native_import_defers_resource_drop_until_call_returns() {
             7
         });
         let mut frame = Frame::default();
-        frame.set_structure_random_mut(&mut random);
+        frame.set_random_source_mut(&mut random);
         assert_eq!(
             module.call(CallClass::Hook, frame, 0, None, |_| {}, |r| r.take::<i64>()),
             Some(7)
@@ -1207,14 +1213,14 @@ fn calling_module_borrow_is_cleared_after_success_and_trap() {
 #[test]
 fn native_panic_stops_group_before_held_resources_drop() {
     crate::test_stack::on_guest_stack(|| {
-        let id = crate::boundary::import_id("StructureRandom", "next_long").unwrap();
+        let id = crate::boundary::import_id("RandomSource", "next_long").unwrap();
         let module = module(&format!(
             "i32.const {id} i32.const 0 i32.const 0 i32.const 2048 i32.const 8 call $host drop i64.const 8796093022216"
         ));
         let dropped = hold_stop_probe(&module);
         let mut random = Random(|| panic!("native callback"));
         let mut frame = Frame::default();
-        frame.set_structure_random_mut(&mut random);
+        frame.set_random_source_mut(&mut random);
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             module.call(CallClass::Hook, frame, 0, None, |_| {}, |r| r.take::<i64>())
         }));

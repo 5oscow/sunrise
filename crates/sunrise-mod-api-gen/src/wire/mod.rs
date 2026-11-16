@@ -55,7 +55,7 @@ pub(super) const IMPORTS: &[&str] = &[
     "ChunkDiskHost",
     "GenerationContext",
     "PieceContext",
-    "StructureRandom",
+    "RandomSource",
     "AttachmentStore",
     "AttachmentDeclarations",
     "ServerReloadListeners",
@@ -440,6 +440,16 @@ pub(super) fn surface_reading<'a>(
             if hidden(&function.attrs) && !subscription {
                 continue;
             }
+            if computed_in_mod(&function.attrs) {
+                if function.default.is_none() {
+                    unbound.push(Unbound {
+                        owner,
+                        name,
+                        why: "is computed in the mod but has no default body".into(),
+                    });
+                }
+                continue;
+            }
             if not_on_wasm(&function.attrs) {
                 excused.push((*owner, name.clone()));
             }
@@ -626,6 +636,17 @@ fn method(
         receiver,
         params,
         ret,
+    })
+}
+
+/// A provided method marked `#[computed_in_mod]`: it gets no call of its own, and its default body
+/// runs wherever the trait object lives, calling the methods that do cross.
+fn computed_in_mod(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|attr| {
+        attr.path()
+            .segments
+            .last()
+            .is_some_and(|segment| segment.ident == "computed_in_mod")
     })
 }
 
@@ -930,6 +951,78 @@ mod tests {
                     );
                 }
                 super::generate(&root, &included).unwrap();
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    /// The marker is the attribute, under any path; a doc line that only says so is not.
+    #[test]
+    fn a_method_is_computed_in_the_mod_only_by_its_attribute() {
+        let item: syn::ItemTrait = syn::parse_quote! {
+            trait Draws {
+                fn primitive(&mut self) -> i32;
+                #[sunrise_mod_api_macros::computed_in_mod]
+                fn qualified(&mut self) -> i32 { self.primitive() }
+                #[computed_in_mod]
+                fn bare(&mut self) -> i32 { self.primitive() }
+                /// Computed in the mod: but not marked.
+                fn prose(&mut self) -> i32 { self.primitive() }
+            }
+        };
+        let marked: Vec<String> = item
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                syn::TraitItem::Fn(function) if super::computed_in_mod(&function.attrs) => {
+                    Some(function.sig.ident.to_string())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(marked, ["qualified", "bare"]);
+    }
+
+    /// `RandomSource`'s range helpers are computed in the mod: only the primitive draws cross.
+    #[test]
+    #[ignore = "daily"]
+    fn only_the_primitive_draws_of_a_random_cross() {
+        std::thread::Builder::new()
+            .stack_size(64 << 20)
+            .spawn(|| {
+                let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+                let generated = crate::sources(&root, crate::FillMode::Require).unwrap();
+                let included = [
+                    ("mod_api_generated.rs", generated.hooks.as_str()),
+                    ("mod_api_generated_host.rs", generated.host.as_str()),
+                    ("mod_api_host_areas.rs", generated.areas.as_str()),
+                ];
+                let providers = crate::capability_providers::generate(&root, &included)
+                    .unwrap()
+                    .0;
+                let mut surface_included = included.to_vec();
+                surface_included.push(("capability_providers_generated.rs", providers.as_str()));
+                let surface = super::surface(&root, &surface_included).unwrap();
+                let mut crossing: Vec<&str> = surface
+                    .methods
+                    .iter()
+                    .filter(|method| method.owner == "RandomSource")
+                    .map(|method| method.name.as_str())
+                    .collect();
+                crossing.sort_unstable();
+                assert_eq!(
+                    crossing,
+                    [
+                        "next_boolean",
+                        "next_double",
+                        "next_float",
+                        "next_gaussian",
+                        "next_int",
+                        "next_int_bound",
+                        "next_long",
+                    ]
+                );
             })
             .unwrap()
             .join()

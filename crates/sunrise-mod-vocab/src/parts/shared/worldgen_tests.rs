@@ -5,7 +5,7 @@ use super::*;
 use crate::*;
 
 struct Draws;
-impl StructureRandom for Draws {
+impl RandomSource for Draws {
     fn next_int_bound(&mut self, _: i32) -> i32 {
         0
     }
@@ -20,6 +20,12 @@ impl StructureRandom for Draws {
     }
     fn next_boolean(&mut self) -> bool {
         false
+    }
+    fn next_int(&mut self) -> i32 {
+        0
+    }
+    fn next_gaussian(&mut self) -> f64 {
+        0.0
     }
 }
 
