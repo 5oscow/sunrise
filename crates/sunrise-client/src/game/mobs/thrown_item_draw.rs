@@ -39,6 +39,7 @@ impl Game<'_> {
             if self.mod_entity_renderer_geometry(
                 &resolved,
                 &entity,
+                t.id,
                 c.as_dvec3(),
                 block,
                 packed,

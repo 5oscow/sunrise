@@ -68,9 +68,10 @@ under the same names. Angles are in degrees, interpolated to the frame.
 ### A painting's frame
 
 A painting's state has `painting: Some(PaintingRenderState)`. `yaw` is
-`Direction.get2DDataValue * 90` (0 is south, 90 west), and `pitch` is 0. Paintings do not move or
-age, so `partial` and `age` are 0. The pose stack starts at the hanging entity's position (the
-centre of its box), not turned.
+`Direction.get2DDataValue * 90` (0 is south, 90 west), and `pitch` is 0; they are the painting's
+current facing, not interpolated (it has no previous rotation). `age` is the unsaved
+`Entity.tickCount` plus the partial tick. The pose stack starts at the hanging entity's position
+(the centre of its box), not turned.
 
 | `PaintingRenderState` | Meaning |
 | --- | --- |
@@ -123,7 +124,9 @@ Registered renderers draw these routes:
 - living types drawn as mobs, vanilla's (`minecraft:zombie`) and the content mods' living types: the
   renderer draws instead of the model and its vanilla layers;
 - paintings (`minecraft:painting`): the renderer draws instead of the painting's quads, and reads
-  `painting`. Without a renderer, the quads are unchanged.
+  `painting`. `age` is the unsaved `Entity.tickCount` plus the partial tick. Yaw is
+  `Direction.get2DDataValue * 90` and pitch is 0, not interpolated (it has no previous rotation).
+  Without a renderer, the quads are unchanged.
 
 Registrations for other known entity families, including boats, displays, vanilla projectiles, the
 player (whose model goes by its skin), the armour stand and the ender dragon (which draw through

@@ -559,6 +559,7 @@ mod tests {
                 width: 1,
                 height: 1,
                 check_interval: 0,
+                ticks: 0,
             });
             // East frame, west glow frame, north painting. Expected origins
             // are the hanging center plus 0.15 facing out and the 0.5 Y offset.

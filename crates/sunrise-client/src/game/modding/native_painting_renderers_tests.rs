@@ -80,6 +80,8 @@ const CENTRE: [f64; 3] = [0.96875, 64.5, 0.5];
 const FACING: u8 = 1;
 const WIDTH: i32 = 1;
 const HEIGHT: i32 = 1;
+/// The frame's partial tick, passed through to `EntityRenderState`.
+const ALPHA: f64 = 0.5;
 
 /// How high above the entity a vertex is, in blocks.
 fn above(v: &Vertex) -> f32 {
@@ -104,6 +106,7 @@ fn hanging(id: u32) -> Painting {
         width: WIDTH,
         height: HEIGHT,
         check_interval: 0,
+        ticks: 0,
     }
 }
 
@@ -112,7 +115,142 @@ fn painting_frame(game: &mut Game<'_>, id: u32) -> Vec<Vertex> {
     game.paintings.clear();
     game.paintings.push(hanging(id));
     let mut out = Vec::new();
-    game.painting_geometry(CAMERA, &mut out);
+    game.painting_geometry(CAMERA, ALPHA, &mut out);
+    out
+}
+
+/// An independent baseline of the vanilla painting quads for `p` at `camera`, not going through
+/// `painting_geometry`. Used so a deterministic change to the quads cannot pass by matching itself.
+fn expected_quads(game: &Game<'_>, p: &Painting, camera: glam::DVec3) -> Vec<Vertex> {
+    let sprites = &game.gui.atlas.sprites;
+    let Some(back) = sprites.get("painting/back").copied() else {
+        return Vec::new();
+    };
+    let Some(v) = game.painting_variants.get(&p.variant) else {
+        return Vec::new();
+    };
+    let Some(front) = sprites.get(&format!("painting/{}", v.asset)).copied() else {
+        return Vec::new();
+    };
+    let (lo, hi) = p.bounds();
+    let c = glam::DVec3::new(
+        (lo[0] + hi[0]) / 2.0,
+        (lo[1] + hi[1]) / 2.0,
+        (lo[2] + hi[2]) / 2.0,
+    ) - camera;
+    let s = p.step().map(f64::from);
+    let l = p.left().map(f64::from);
+    let out_dir = glam::DVec3::new(s[0], 0.0, s[2]);
+    let right = glam::DVec3::new(l[0], 0.0, l[2]);
+    let up = glam::DVec3::Y;
+    let (hw, hh, d) = (
+        f64::from(p.width) / 2.0,
+        f64::from(p.height) / 2.0,
+        1.0 / 32.0,
+    );
+    let light = game.world.light(p.pos[0], p.pos[1], p.pos[2]);
+    let packed = (u32::from(light >> 4) * 16) | ((u32::from(light & 15) * 16) << 8);
+    let faces_camera = |corners: &[glam::DVec3; 4], normal: glam::DVec3| {
+        let centre = (corners[0] + corners[1] + corners[2] + corners[3]) / 4.0;
+        normal.dot(-centre) > 0.0
+    };
+    let mut out = Vec::new();
+    let mut quad =
+        |corners: [glam::DVec3; 4], normal: glam::DVec3, uv: [[f32; 2]; 4], shade: f32| {
+            if !faces_camera(&corners, normal) {
+                return;
+            }
+            let k = (255.0 * shade) as u32;
+            let color = 0xFF00_0000 | k << 16 | k << 8 | k;
+            for (p, uv) in corners.iter().zip(uv) {
+                out.push(Vertex {
+                    normal: [0; 4],
+                    pos: p.as_vec3().to_array(),
+                    uv,
+                    layer: 0,
+                    color,
+                    light: packed,
+                    glint_uv: [0.0, 0.0],
+                });
+            }
+        };
+    let full =
+        |r: sunrise_client::hud::Rect| [[r.u0, r.v1], [r.u1, r.v1], [r.u1, r.v0], [r.u0, r.v0]];
+    let f = c + out_dir * d;
+    quad(
+        [
+            f - right * hw - up * hh,
+            f + right * hw - up * hh,
+            f + right * hw + up * hh,
+            f - right * hw + up * hh,
+        ],
+        out_dir,
+        full(front),
+        1.0,
+    );
+    let b = c - out_dir * d;
+    quad(
+        [
+            b + right * hw - up * hh,
+            b - right * hw - up * hh,
+            b - right * hw + up * hh,
+            b + right * hw + up * hh,
+        ],
+        -out_dir,
+        full(back),
+        0.8,
+    );
+    let strip = [
+        [back.u0, back.v0 + (back.v1 - back.v0) / 16.0],
+        [back.u1, back.v0 + (back.v1 - back.v0) / 16.0],
+        [back.u1, back.v0],
+        [back.u0, back.v0],
+    ];
+    let (top, bt) = (up * hh, -up * hh);
+    quad(
+        [
+            b + top + right * hw,
+            b + top - right * hw,
+            f + top - right * hw,
+            f + top + right * hw,
+        ],
+        up,
+        strip,
+        1.0,
+    );
+    quad(
+        [
+            f + bt + right * hw,
+            f + bt - right * hw,
+            b + bt - right * hw,
+            b + bt + right * hw,
+        ],
+        -up,
+        strip,
+        0.5,
+    );
+    quad(
+        [
+            b - right * hw - up * hh,
+            f - right * hw - up * hh,
+            f - right * hw + up * hh,
+            b - right * hw + up * hh,
+        ],
+        -right,
+        strip,
+        0.6,
+    );
+    quad(
+        [
+            f + right * hw - up * hh,
+            b + right * hw - up * hh,
+            b + right * hw + up * hh,
+            f + right * hw + up * hh,
+        ],
+        right,
+        strip,
+        0.6,
+    );
     out
 }
 
@@ -221,13 +359,31 @@ fn a_registered_painting_draws_its_renderer_in_place_of_the_quads() {
     in_scene(
         "a_registered_painting_draws_its_renderer_in_place_of_the_quads",
         |game, heard, _| {
-            let drawn = painting_frame(game, 91);
+            // A lived-ticks counter and a non-zero partial so age is ticks + partial, not 0.
+            let mut painting = hanging(91);
+            painting.ticks = 6;
+            game.paintings.clear();
+            game.paintings.push(painting);
+            let mut drawn = Vec::new();
+            game.painting_geometry(CAMERA, ALPHA, &mut drawn);
             assert_eq!(drawn.len(), 4, "one quad and no painting: {drawn:?}");
-            assert!(drawn.iter().all(|v| (100.0..=101.0).contains(&above(v))));
+            // Centre [0.96875, 64.5, 0.5] minus CAMERA [-4.0, 64.5, 0.5] is [4.96875, 0.0, 0.0];
+            // the raised quad sits 100..101 above that origin, 0..1 in x, at z.
+            for v in &drawn {
+                assert!(
+                    (4.96875..=5.96875).contains(&v.pos[0]),
+                    "quad x at the hanging pose: {v:?}"
+                );
+                assert!(
+                    (100.0..=101.0).contains(&v.pos[1]),
+                    "quad y 100 blocks above the hanging pose: {v:?}"
+                );
+                assert!(v.pos[2].abs() < 1e-5, "quad z at the hanging pose: {v:?}");
+            }
             let state = heard.lock().unwrap().state.expect("the renderer was asked");
             assert_eq!(state.id, 91);
-            assert_eq!(state.partial, 0.0);
-            assert_eq!(state.age, 0.0);
+            assert_eq!(state.partial, 0.5);
+            assert_eq!(state.age, 6.5);
             assert_eq!(state.yaw, 90.0);
             assert_eq!(state.pitch, 0.0);
             assert_eq!(state.living, None);
@@ -238,8 +394,8 @@ fn a_registered_painting_draws_its_renderer_in_place_of_the_quads() {
     );
 }
 
-/// With no renderer registered, a painting's geometry is byte-identical to the family's own
-/// route (the quads near the entity, no raised quad), and two frames of the same entity match.
+/// With no renderer registered, a painting's quads match an independent baseline for a fixed
+/// fixture, and two frames of the same entity match byte for byte.
 #[test]
 #[ignore = "daily"]
 fn an_unregistered_painting_is_byte_identical_to_the_vanilla_route() {
@@ -264,6 +420,11 @@ fn an_unregistered_painting_is_byte_identical_to_the_vanilla_route() {
         assert!(
             first.iter().all(|v| above(v) < 2.0),
             "near the entity: {first:?}"
+        );
+        assert_eq!(
+            verts(&first),
+            verts(&expected_quads(game, &hanging(92), CAMERA)),
+            "matches the independent painting baseline"
         );
         let second = painting_frame(game, 92);
         assert_eq!(

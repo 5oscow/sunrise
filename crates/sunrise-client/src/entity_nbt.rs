@@ -8503,6 +8503,7 @@ mod fireball_nbt_tests {
                 width: 1,
                 height: 1,
                 check_interval: 0,
+                ticks: 0,
             };
             rotation(&painting_to_nbt(&painting, [1; 4], Some(raw)))
         };
