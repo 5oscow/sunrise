@@ -5026,6 +5026,7 @@ dependencies = [
  "sunrise-mod-api-gen",
  "sunrise-mod-api-macros",
  "sunrise-mod-point-shape",
+ "sunrise-mod-surface",
  "syn 2.0.119",
 ]
 
@@ -5113,6 +5114,7 @@ dependencies = [
  "sunrise-mod-point-emit",
  "sunrise-mod-points",
  "sunrise-mod-runtime",
+ "sunrise-mod-surface",
  "sunrise-threads",
  "sunrise-wasmtime",
  "sunrise-world",

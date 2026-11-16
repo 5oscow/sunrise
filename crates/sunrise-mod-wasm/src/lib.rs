@@ -10,6 +10,7 @@ mod compile_child;
 pub mod copy_probe;
 #[cfg(feature = "runtime-fixture")]
 pub mod fixture;
+mod imports;
 pub mod link;
 mod load_times;
 mod module_cache;
@@ -33,6 +34,7 @@ use runtime::take_refusal as wasm_call_refusal;
 pub(crate) mod boundary {
     include!(concat!(env!("OUT_DIR"), "/wire_host_generated.rs"));
 }
+pub use imports::{Mismatch, Why};
 pub(crate) use runtime::WeakWasmMod;
 pub use runtime::{CallClass, WasmHandler, WasmMod};
 
@@ -100,10 +102,12 @@ pub enum Refusal {
         budget: compile_budget::CompileBudget,
         why: String,
     },
-    /// The mod was compiled against another generated boundary.
-    Layout { built: u64, game: u64 },
-    /// The mod's generated point records differ from this game's.
-    PointLayout { built: u64, game: u64 },
+    /// The mod uses items of the game's API that this game does not have as the mod was built:
+    /// each is named, up to a limit, with how many more there were.
+    Boundary {
+        mismatches: Vec<imports::Mismatch>,
+        omitted: usize,
+    },
     /// The game has no shared Rust standard library beside its executable.
     NoStd,
     /// The group's mods declare more memory (`wasm_memory_mib`) than this instance's cap.
@@ -152,15 +156,21 @@ impl std::fmt::Display for Refusal {
                 f,
                 "{member}: cannot enforce compilation budget {budget}: {why}; restore a private writable .sunrise-cache/wasm directory and a working compiler executable"
             ),
-            Self::Layout { .. } => write!(
-                f,
-                "built for another version of the mod API (including the prepared can_equip ABI)"
-            ),
-            Self::PointLayout { built, game } => {
-                write!(
-                    f,
-                    "built for another version of the mod points API (mod layout {built}, game layout {game})"
-                )
+            Self::Boundary {
+                mismatches,
+                omitted,
+            } => {
+                write!(f, "uses ")?;
+                for (i, mismatch) in mismatches.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, "; ")?;
+                    }
+                    write!(f, "{mismatch}")?;
+                }
+                if *omitted > 0 {
+                    write!(f, "; and {omitted} more")?;
+                }
+                write!(f, " (or a type it carries changed)")
             }
             Self::NoStd => write!(f, "this game has no wasm standard library member"),
             Self::Memory {
@@ -839,21 +849,45 @@ mod tests {
     use super::*;
 
     #[test]
-    fn point_layout_refusal_reports_both_layouts_to_console() {
+    fn a_boundary_refusal_names_each_item_with_its_versions_and_counts_the_rest() {
+        let mismatch = |item: &str, why| Mismatch {
+            item: item.into(),
+            why,
+        };
         let mut console = Vec::new();
         report_refusals(
             &[(
-                "layout_mod".into(),
-                Refusal::PointLayout {
-                    built: 123,
-                    game: 456,
+                "old_mod".into(),
+                Refusal::Boundary {
+                    mismatches: vec![
+                        mismatch(
+                            "host:ServerHost::give_item",
+                            Why::Changed {
+                                built: None,
+                                game: None,
+                                built_hash: "0123456789abcdef".into(),
+                                game_hash: "fedcba9876543210".into(),
+                            },
+                        ),
+                        mismatch(
+                            "hook:Hooks::block_click@3",
+                            Why::Changed {
+                                built: Some(2),
+                                game: Some(3),
+                                built_hash: "aaaaaaaaaaaaaaaa".into(),
+                                game_hash: "bbbbbbbbbbbbbbbb".into(),
+                            },
+                        ),
+                        mismatch("host:Players::kick", Why::Missing),
+                    ],
+                    omitted: 2,
                 },
             )],
             &mut console,
         );
         assert_eq!(
             String::from_utf8(console).unwrap(),
-            "wasm mod layout_mod refused: built for another version of the mod points API (mod layout 123, game layout 456)\n"
+            "wasm mod old_mod refused: uses host:ServerHost::give_item changed (mod #01234567, game #fedcba98); hook:Hooks::block_click@3 changed (version 2 → 3); host:Players::kick is not in this game; and 2 more (or a type it carries changed)\n"
         );
     }
 
@@ -917,12 +951,13 @@ mod tests {
         let root = std::path::PathBuf::from(root);
         let path = root.join("duplicate_dev");
         std::fs::create_dir(&path).unwrap();
-        let module = wat::parse_str(
+        let module = wat::parse_str(format!(
             r#"(module (@custom "dylink.0" "\01\04\00\00\00\00")
-                (func (export "sunrise_layout"))
+                {log}
                 (func (export "sunrise_in"))
                 (func (export "sunrise_hook")))"#,
-        )
+            log = crate::imports::fixtures::log_import()
+        ))
         .unwrap();
         std::fs::write(path.join("mod.wasm"), &module).unwrap();
         std::fs::write(
@@ -1000,12 +1035,12 @@ mod tests {
                 r#"(module
                 (@custom "dylink.0" "\01\04\00\00\00\00")
                 (import "env" "memory" (memory 1))
-                (func (export "sunrise_layout") (result i64) i64.const {})
+                {log}
                 (func (export "sunrise_in") (param i32) (result i32) i32.const 512)
-                (func (export "sunrise_hook") (param i32) (result i64) {stores} i64.const {})
+                (func (export "sunrise_hook") (param i64) (result i64) {stores} i64.const {reply})
             )"#,
-                *mod_api::wire::LAYOUT,
-                (1024u64 << 32) | subscriptions.bytes().len() as u64
+                log = crate::imports::fixtures::log_import(),
+                reply = (1024u64 << 32) | subscriptions.bytes().len() as u64
             ))
             .unwrap();
             let loaded = load(&std, vec![package]);
@@ -1357,7 +1392,7 @@ pub fn fixture_import_id(owner: &str, method: &str) -> Option<u32> {
 }
 /// Resolve generated hook operations for hand-written guest integration fixtures.
 #[cfg(feature = "listener-fixture")]
-pub fn fixture_export_id(owner: &str, method: &str) -> Option<u32> {
+pub fn fixture_export_id(owner: &str, method: &str) -> Option<u64> {
     boundary::export_id(owner, method)
 }
 
