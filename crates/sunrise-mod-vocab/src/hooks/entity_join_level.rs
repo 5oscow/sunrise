@@ -48,10 +48,12 @@ pub trait Hooks {
     /// is gone. A join cancelled at the commit leaves the spawn's handle
     /// stale. Joins at one commit come in the order the entities were added,
     /// before the removals the transaction asked for take effect.
-    /// Every entity that joins a level notifies, including displays, markers,
-    /// interactions, eyes of ender and leash knots. `loaded_from_disk` is set when
-    /// its chunk restores it. Saved data kept for a missing mod is not an entity
-    /// in the level and does not notify. Server-side.
+    /// Live fallback-store entities also notify: displays, markers, interactions,
+    /// and summoned or chunk-restored eyes of ender and explicit leash knots.
+    /// Gameplay-thrown eyes and naturally tied leash knots live in separate lists
+    /// and do not notify yet. `loaded_from_disk` is set when a chunk restores an
+    /// entity. Saved data kept for a missing mod is not an entity in the level
+    /// and does not notify. Server-side.
     #[hook(
         side = "server",
         contract = "cancel",

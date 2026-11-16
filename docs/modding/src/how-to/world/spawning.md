@@ -29,11 +29,14 @@ The placement type is `SpawnPlacements.isSpawnPositionOk`'s first check, and the
 
 ## Saved display and utility entities
 
-`entity_join_level` (hook version 3) notifies for every entity that joins a level,
-including block, item and text displays, markers, interactions, eyes of ender and leash
-knots. Saved data kept for a missing mod is not an entity in the level and does not notify. A fresh spawn notifies once with `loaded_from_disk = false`; restoring an
-entity from a saved chunk notifies once with `loaded_from_disk = true`. The normal join
-cancellation and transaction rules apply to these entities too.
+`entity_join_level` (hook version 3) additionally notifies for live fallback-store
+entities: block, item and text displays, markers, interactions, and summoned or
+chunk-restored eyes of ender and explicit leash knots. Gameplay-thrown eyes and
+naturally tied leash knots live in separate lists and do not notify yet. Saved data
+kept for a missing mod is not a live entity and does not notify. A fresh fallback
+entity notifies once with `loaded_from_disk = false`; restoring it from a saved chunk
+notifies once with `loaded_from_disk = true`. The normal join cancellation and
+transaction rules apply to these entities too.
 
 `entity_leave_level` (hook version 3) reports the same additional kinds when they leave.
 On the server, `level.entities_in(host, min, max)` additionally returns readable `EntityRef`
