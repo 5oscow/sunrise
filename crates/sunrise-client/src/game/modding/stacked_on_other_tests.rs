@@ -156,7 +156,7 @@ fn click(game: &mut crate::game::Game<'_>) -> (u32, u32, u32) {
 }
 
 #[test]
-#[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn an_accepted_pickup_is_one_dispatch_and_one_apply() {
     with_mod(|| {
         with_local(|game| {
@@ -171,7 +171,7 @@ fn an_accepted_pickup_is_one_dispatch_and_one_apply() {
 }
 
 #[test]
-#[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn a_failed_click_undoes_what_the_listener_wrote_and_applies_nothing() {
     with_mod(|| {
         with_local(|game| {
@@ -193,7 +193,7 @@ fn a_failed_click_undoes_what_the_listener_wrote_and_applies_nothing() {
 }
 
 #[test]
-#[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn a_write_to_what_the_click_read_makes_it_stale() {
     with_mod(|| {
         with_local(|game| {
@@ -220,7 +220,7 @@ fn a_write_to_what_the_click_read_makes_it_stale() {
 }
 
 #[test]
-#[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn a_listener_that_panics_after_a_committed_write_is_undone_and_the_next_click_works() {
     with_mod(|| {
         with_local(|game| {
@@ -240,7 +240,7 @@ fn a_listener_that_panics_after_a_committed_write_is_undone_and_the_next_click_w
 }
 
 #[test]
-#[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn a_cancelled_handled_click_sets_the_stacks_and_a_bad_stack_refuses_it() {
     with_mod(|| {
         with_local(|game| {
@@ -279,7 +279,7 @@ fn a_cancelled_handled_click_sets_the_stacks_and_a_bad_stack_refuses_it() {
 }
 
 #[test]
-#[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn an_outer_abort_after_an_applied_click_restores_the_inventory() {
     with_mod(|| {
         with_local(|game| {
@@ -294,7 +294,7 @@ fn an_outer_abort_after_an_applied_click_restores_the_inventory() {
 }
 
 #[test]
-#[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn without_a_listener_the_click_is_plain_and_nothing_is_decided() {
     // Row 92: no mod at all.
     with_local(|game| {
@@ -319,7 +319,7 @@ fn without_a_listener_the_click_is_plain_and_nothing_is_decided() {
 }
 
 #[test]
-#[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn a_lan_hub_click_is_decided_the_same_way() {
     use sunrise_client::lan::menu::Slots;
     use sunrise_protocol::packets::play::{ContainerClick, Serverbound};
@@ -412,7 +412,7 @@ fn a_lan_hub_click_is_decided_the_same_way() {
 }
 
 #[test]
-#[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn a_lan_inventory_click_is_decided_the_same_way() {
     use sunrise_protocol::packets::play::{ContainerClick, Serverbound};
     with_mod(|| {
@@ -548,7 +548,7 @@ mod families {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn the_crafting_table_menu_decides_the_pickup() {
         let window = std::cell::Cell::new(0);
         family(
@@ -564,7 +564,7 @@ mod families {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn the_furnace_menu_decides_the_pickup() {
         use sunrise_client::containers::{BlockEntity, Furnace, FurnaceKind};
         let window = std::cell::Cell::new(0);
@@ -594,7 +594,7 @@ mod families {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_workstation_menu_decides_the_pickup() {
         use crate::game::stations::{Kind, Station};
         let window = std::cell::Cell::new(0);
@@ -611,7 +611,7 @@ mod families {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn the_mount_menu_decides_the_pickup() {
         use sunrise_client::mobs::Mob;
         use sunrise_core::geometry::Vec3;
@@ -633,7 +633,7 @@ mod families {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn the_trading_menu_decides_the_pickup() {
         use crate::game::native_merchant_refs::tests::{offer, spawn};
         use crate::game::trading::MerchantState;
@@ -680,7 +680,7 @@ mod families {
 }
 
 #[test]
-#[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn an_outer_abort_after_an_applied_lan_click_restores_the_guest_and_the_container() {
     use sunrise_client::lan::menu::Slots;
     use sunrise_protocol::packets::play::{ContainerClick, Serverbound};
