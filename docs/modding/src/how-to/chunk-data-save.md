@@ -25,5 +25,4 @@ no callback, while an action savepoint is open, and chunk unloading waits for it
 old record stays on disk, the snapshot stays readable for recovery and the
 wait or flush reports the failure; nothing is marked saved early. A
 chunk whose save was refused or failed is marked modified again, so the game
-tries it again at the next save. See the
-[design](../concepts/chunk-attachment-disk.md) for the full contract.
+tries it again at the next save.

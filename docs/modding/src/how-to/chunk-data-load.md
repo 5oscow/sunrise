@@ -23,6 +23,5 @@ per chunk, naming the chunk and the mod. Fix the mod and rejoin the world to run
 its listeners on that chunk again.
 
 The load runs on the thread that decodes the record, never with access to live
-world state. See the [design](../concepts/chunk-attachment-disk.md) for the
-budgets (65536 bytes per value, depth 64, 1048576 bytes per chunk) and the
-failure policy.
+world state. The budgets are 65536 bytes per value, depth 64 and 1048576 bytes
+per chunk.
