@@ -54,7 +54,7 @@ pub fn api(manifest: &Manifest, points: &[Point], prefix: &str) -> Result<Vec<St
             let (id, priority, inject) = (&manifest.id, entry.priority, &entry.id);
             let listener = format!("{prefix}{}", entry.with);
             let constructor = format!("mod_points::listeners::{place}");
-            if entry.kind == Kind::Replace {
+            let expression = if entry.kind == Kind::Replace {
                 let host = if point.host == "none" { "none" } else { "host" };
                 format!(
                     "mod_points::replace!({constructor}, {}, {host}, {id:?}, {priority}, {inject:?}, {listener})",
@@ -62,7 +62,9 @@ pub fn api(manifest: &Manifest, points: &[Point], prefix: &str) -> Result<Vec<St
                 )
             } else {
                 format!("{constructor}({id:?}, {priority}, {inject:?}, {listener})")
-            }
+            };
+            // The listener is a use of its place: the module's import table names it.
+            format!("{{ mod_points::__point_mark!({place:?}); {expression} }}")
         })
         .collect())
 }
