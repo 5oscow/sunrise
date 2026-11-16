@@ -7,7 +7,7 @@ section has one page per surface, plus the rules every surface follows:
 
 | Surface | For | API today | Stability | Reference |
 | --- | --- | --- | --- | --- |
-| [Mods](../mods.md) | mod authors | content mods: manifest `api` 0.2; native mods: a sunrise-mixins bundle ([native-mods.md](../native-mods.md)) | preview (content), experimental (native) | [mods.md](../mods.md) |
+| [Mods](../mods.md) | mod authors | content mods: manifest `api` 0.2; native mods: a horizon-mixins bundle ([native-mods.md](../native-mods.md)) | preview (content), experimental (native) | [mods.md](../mods.md) |
 | [Shaders](shaders.md) | shader authors | API 0.1 (sky, vertex, material, weather and post stages, coloured block light, options, hot reload) | experimental | [shaders-reference.md](shaders-reference.md) |
 | [Agent control](agent-control.md) | agents, scripts, tests | `sunrise-ctl`, its MCP server, the game's control socket | preview | [sunrise-ctl-commands.md](../sunrise-ctl-commands.md) (generated) |
 | [Servers](server.md) | hosts, panels, bots | `sunrise-server` commands, `server.toml`, control API `/api/v1` | stable | [server-reference.md](server-reference.md) (generated) |

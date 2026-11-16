@@ -11,5 +11,5 @@ crates/sunrise-mod-package/src/sdk/package-format text eol=lf
 launcher/lang/*.json merge=sunrise-lang
 crates/sunrise-client/assets/sunrise/lang/*.json merge=sunrise-lang
 
-# The carried sunrise-mixins patch is hashed into its tool's release tag: the same bytes on every OS.
+# The carried horizon-mixins patch is hashed into its tool's release tag: the same bytes on every OS.
 tools/mixins/*.patch text eol=lf

@@ -28,7 +28,7 @@ that commit's SDK.
    lockfile and the same immutable SDK. The launcher asks for permission before executing dependency
    build scripts or procedural macros.
 6. For `[[native.mixin]]` rows, download the pinned game source, copy the targeted functions into one patch
-   library, apply the rows with sunrise-mixins, and compile that library against the SDK. The game
+   library, apply the rows with horizon-mixins, and compile that library against the SDK. The game
    crates are not compiled. Each checked replacement is installed through its typed installer.
 7. Link the native executable, install it as `native-<commit>-<key>`, and select it for the instance.
    `native-mods.json` records the base, pins, mods and build tools. Client builds share their base's

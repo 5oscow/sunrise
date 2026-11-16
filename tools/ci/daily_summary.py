@@ -14,6 +14,7 @@ files (tools/ci/ignored_tests.py --report: test identity, kind, panic location, 
   still running past 60 s; stopped_text); a leg whose red asks for an action is titled as that action (ACTIONS:
   `Daily: update the machine sample for the mod API change`);
 - a test (or leg) green again: closes its open issue with a comment.
+It also outputs `sdk_green`: whether the legs sdk-publish waits for (SDK_LEGS) all ran and passed, by the same rules.
 A job it does not know, or an expected leg with no job, is a red leg ("did not report"), never green; so is a
 shard of the matrix (tools/ci/ignored_shards.py, which builds it) with no job of its name. Each comment
 names this run's URL, and none is posted twice for one run (a rerun of failed jobs, or a retry after a partial
@@ -49,10 +50,12 @@ UNFINISHED = " did not complete"
 DISCLOSURE = "> 🤖 Filed by Aria's agent swarm, Dyna, not by Aria."
 # daily.yml's leg jobs (each a called workflow), and the called workflows' own routing jobs, which test nothing.
 LEGS = ("shards", "wasm-mods", "fn-replace-check", "linkage", "windows-runtime-leases", "machine-sample", "sdk")
+# The legs sdk-publish waits for (output sdk_green) until a runner with prepared data exists (owner, 2026-11-16).
+SDK_LEGS = ("sdk", "linkage", "machine-sample", "fn-replace-check")
 # Legs whose red is an action for someone, not a break: their one issue is titled as the action, and says what to do.
 ACTIONS = {
     "machine-sample": ("update the machine sample for the mod API change",
-                       "arismoko/horizon-machine-sample, at the pin in `tools/ci/check_machine_sample.py`, no longer "
+                       "sunrise-org/sunrise-machine-sample, at the pin in `tools/ci/check_machine_sample.py`, no longer "
                        "builds against this commit's mod API. Update the sample for the API change, then move the pin "
                        "to the updated sample in a pull request here."),
 }
@@ -282,10 +285,21 @@ def verdicts(jobs, reports, results):
             unfinished.append((leg, result, [], "did not complete, and no job or test of it says why"))
         elif result == "success" and not accounted:
             green_legs.add(leg)  # a whole leg that reported and passed closes its leg-level issue
-    green = (all(results.get(leg, {}).get("result") == "success" for leg in LEGS)
-             and all(job_green(job, fresh_ok) for job in leg_jobs(jobs)) and not tests and not unfinished)
+    green = legs_green(LEGS, jobs, results, tests, unfinished) and not tests and not unfinished
     failing = {(item["package"], item["test"]) for item in tests}
     return tests, unfinished, passed - failing, green_legs, green
+
+
+def legs_green(legs, jobs, results, tests, unfinished):
+    """Whether every one of `legs` ran and passed: its call succeeded, each of its jobs is green, and no failing test
+    or unfinished item is its own."""
+    fresh_ok = any(job["name"] == FRESH and job["conclusion"] == "success" for job in jobs)
+    mine = [job for job in leg_jobs(jobs) if job["name"].split(" / ", 1)[0] in legs]
+    return (all(results.get(leg, {}).get("result") == "success" for leg in legs)
+            and {job["name"].split(" / ", 1)[0] for job in mine} >= set(legs)
+            and all(job_green(job, fresh_ok) for job in mine)
+            and not any(item["leg"].split(" / ", 1)[0] in legs for item in tests)
+            and not any(entry[0].split(" / ", 1)[0] in legs for entry in unfinished))
 
 
 def suspects(commit, git):
@@ -476,7 +490,10 @@ def main(call=api, run_git=git, query=graphql):
     reds = {test_title(item) for item in tests} | {leg_title(leg) for leg, *_ in unfinished}
     fixes = fixes_after(commit, reds - open_issues.keys(), call, query, run_git)
     actions = plan(commit, run_url, tests, unfinished, passed, green_legs, green, open_issues, numbers, fixes)
-    text = render(actions, writes)
+    sdk_green = legs_green(SDK_LEGS, jobs, json.loads(env["RESULTS"]), tests, unfinished)
+    text = render(actions, writes) + (
+        f"\nSDK legs ({', '.join(SDK_LEGS)}): {'green' if sdk_green else 'not green'}; "
+        f"sdk-publish {'publishes' if sdk_green else 'does not publish'} sdk-<sha> on a writing run.\n")
     print(text)
     if env.get("GITHUB_STEP_SUMMARY"):
         with open(env["GITHUB_STEP_SUMMARY"], "a") as summary:
@@ -484,6 +501,7 @@ def main(call=api, run_git=git, query=graphql):
     if env.get("GITHUB_OUTPUT"):
         with open(env["GITHUB_OUTPUT"], "a") as out:
             out.write(f"green={str(green).lower()}\n")
+            out.write(f"sdk_green={str(sdk_green).lower()}\n")
     if writes:
         apply(actions, call, run_url)
     return 0

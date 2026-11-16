@@ -99,7 +99,7 @@ callee without arguments: `autosave_interval` or `self.next_autosave_interval`. 
 | `$operation` | The selected call, as `impl FnOnce(args) -> result` (`WRAP_OPERATION`); the last binding. |
 | `$local:NAME:N`, `$local_ref:NAME:N`, `$local_mut:NAME:N` | The `N`th local named `NAME` in the body, from 0: by value, `&` or `&mut`. |
 
-sunrise-mixins documents every kind and binding in full: [Mixin API](https://github.com/horizon-rust/horizon-mixins/blob/main/docs/mixin-api.md)
+horizon-mixins documents every kind and binding in full: [Mixin API](https://github.com/horizon-rust/horizon-mixins/blob/main/docs/mixin-api.md)
 and [advanced injections](https://github.com/horizon-rust/horizon-mixins/blob/main/docs/advanced-injections.md).
 Read these files at the `mixins` revision pinned in your manifest when checking tool-specific syntax.
 
@@ -160,7 +160,7 @@ A row the build can't apply stops the build, naming the mod, the row and the rea
 | `E_MIXIN_INDEX` | `<path>: …: the game build's SDK has no function index …`, or `functions.json describes game build <commit>, not <commit>` | The SDK on disk is damaged or another build's: fetch the SDK again. |
 | `E_OVERWRITE_CONFLICT` | from the tool: `OVERWRITE must be exclusive on <function>; competing injections: <mod>/<row>, …` | Keep only one of those mods installed. |
 | `E_LOOP_ENTRY_REPLACED` | see [Published loops](3-loops.md#errors) | |
-| `E_MIXINS_PATCH` | `tools/mixins/narrow-reference-rule.patch does not apply to sunrise-mixins <commit>: <why>` | Not your mod: report it on the game. |
+| `E_MIXINS_PATCH` | `tools/mixins/narrow-reference-rule.patch does not apply to horizon-mixins <commit>: <why>` | Not your mod: report it on the game. |
 
 The tool's own codes, such as `E_MATCH_COUNT` and `E_UNSUPPORTED_SITE`, mean a selector, count or binding
 does not fit the body; its docs list them. A helper with a wrong type is a compiler error under your mod's id.

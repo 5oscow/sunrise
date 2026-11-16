@@ -18,7 +18,7 @@
 //! and `sunrise.icns`. `docs/media/brand/README.md` lists what goes where.
 //!
 //! `mixins-tool release | patch SOURCE | identity TARGET`: what
-//! `.github/workflows/prebuilt-mixins-tool.yml` needs to build the sunrise-mixins tool the launcher
+//! `.github/workflows/prebuilt-mixins-tool.yml` needs to build the horizon-mixins tool the launcher
 //! downloads. `release` prints the release's tag, the pinned commit and its source archive as
 //! `name=value` lines; `patch` applies the carried patch to an unpacked source, with the applier
 //! the launcher uses for its own source build; `identity` prints the lines the launcher checks in
@@ -74,7 +74,7 @@ fn main() -> ExitCode {
         [task, what] if task == "mixins-tool" && what == "release" => {
             use sunrise_mod_package::mixins_tool::{REV, release_tag};
             println!("tag={}\nrev={REV}", release_tag());
-            println!("source={}/{REV}", sunrise_addresses::SUNRISE_MIXINS_SOURCE);
+            println!("source={}/{REV}", sunrise_addresses::HORIZON_MIXINS_SOURCE);
             Ok(())
         }
         [task, what, source] if task == "mixins-tool" && what == "patch" => {

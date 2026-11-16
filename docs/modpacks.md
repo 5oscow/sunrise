@@ -25,7 +25,7 @@ why Java jars cannot run in Sunrise, so we port instead). The ATM10 inventory be
    │
    ├─ carry-over (mechanical, no agent): assets/ + data/ upgraded to 26.3 formats,
    │    block and item registrations from the oracle's facts export  →  <mod>.hmod
-   ├─ port (one agent per mod, tiers logic and up): a Rust native mod (a sunrise-mixins
+   ├─ port (one agent per mod, tiers logic and up): a Rust native mod (a horizon-mixins
    │    bundle), iterating until its harness passes                  →  <mod>.hmod
    ├─ harness per mod: the Java mod in a dev-only NeoForge/Fabric oracle vs the port
    ▼
@@ -865,7 +865,7 @@ budget allows:
 - **Input:** the inventory record, the carried-over data, the oracle's exports and traces, the
   harness, [modding/src/how-to/native-mods.md](modding/src/how-to/native-mods.md), the ports of its dependencies, and the mod's public
   documentation. Never its code: the agent doesn't decompile, read or quote it.
-- **Output:** a native mod, a sunrise-mixins bundle started from
+- **Output:** a native mod, a horizon-mixins bundle started from
   [sunrise-native-mod-template](https://github.com/horizon-rust/horizon-native-mod-template), and its `.hmod`.
 - **Loop:** write → build → run the harness → read the differences → fix, until the harness
   passes or the agent reports what blocks it. Usually that is a place in the game's code the

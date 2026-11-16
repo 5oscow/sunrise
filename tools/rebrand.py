@@ -31,6 +31,9 @@ PROTECT = [
     # The earlier launchers' folders and keychain service, which a Sunrise build reads to carry data over.
     r"\bhorizon-fork-arismoko[\w/.-]*",
     r"\bdev\.playhorizon\.launcher\b",
+    # horizon-rust/horizon-mixins: its crates, binary, generated names and the files it reads.
+    r"(?i:horizon[-_ ]mixin)[\w-]*",
+    r"\.horizon-revision\b|\bhorizon_revision\b",
 ]
 PROTECT_RE = re.compile("|".join(f"(?:{p})" for p in PROTECT))
 BRAND = re.compile(r"horizon(?!tal)", re.IGNORECASE)

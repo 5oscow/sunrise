@@ -42,7 +42,7 @@ number, removing or redefining one changes it.
 | `surface.source` | That comparison in one word, its worst change: `identical`, `additive`, `conditional` or `breaking` ([classes](02-surface.md#what-a-change-is)). |
 | `surface.changes` | The ids of the records that changed, breaking ones first. |
 | `surface.notes` | The change notes attached to them, each `{ ids, why, migrate }` ([notes](02-surface.md#change-notes)). |
-| `mixins.rev`, `mixins.patch` | The pinned sunrise-mixins tool's revision and the SHA-256 of the patch carried on it. |
+| `mixins.rev`, `mixins.patch` | The pinned horizon-mixins tool's revision and the SHA-256 of the patch carried on it. |
 | `assets` | Every file of the release but `sdk.json` and the sums, by name: `sha256`, `size`, `kind`, `codec` (`none` or `xz`), and for a compiled slice its `target` and `side` (`client` or `server`). |
 | `inputs` | The files each route needs, named before any download, build or packaging starts: its SDK slices, the programs beside the game and the checkout files, how to make each, and what each slice must hold. |
 

@@ -1,6 +1,6 @@
 name: machine sample
 
-# The machine sample (arismoko/horizon-machine-sample at tools/ci/check_machine_sample.py's pin) compiled against
+# The machine sample (sunrise-org/sunrise-machine-sample at tools/ci/check_machine_sample.py's pin) compiled against
 # this commit's mod API. Run by the daily run (daily.yml) and by dispatch, never on pull requests or main pushes: an
 # approved API change never reddens the gate because another repository must follow (owner, 2026-11-13). Its steps
 # are what dyna-checks' lint job ran before it: the same routing, toolchain and command.

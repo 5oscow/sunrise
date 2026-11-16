@@ -31,12 +31,12 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
-## sunrise-mixins
+## horizon-mixins
 
 The raw injection schema in `crates/sunrise-mod-package/src/manifest.rs` is adapted from
-[sunrise-mixins](https://github.com/horizon-rust/horizon-mixins/tree/ddd9700b21997c95d95ac6ee5ecafe3830cf622a),
+[horizon-mixins](https://github.com/horizon-rust/horizon-mixins/tree/ddd9700b21997c95d95ac6ee5ecafe3830cf622a),
 Copyright (c) 2026 levzzz, under the MIT license
-(`crates/sunrise-mod-package/SUNRISE_MIXINS_LICENSE`).
+(`crates/sunrise-mod-package/HORIZON_MIXINS_LICENSE`).
 
 ## Code removed for its license
 

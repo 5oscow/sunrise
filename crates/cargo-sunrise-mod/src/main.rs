@@ -655,7 +655,7 @@ mod tests {
             "native",
             "rust",
             "sunrise-native.json",
-            "sunrise-mixin.toml",
+            "horizon-mixin.toml",
         ] {
             assert!(!path.join(old).exists());
         }

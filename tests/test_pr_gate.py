@@ -142,7 +142,9 @@ class WorkflowTests(unittest.TestCase):
 
     def test_a_contributors_cheap_checks_run_on_githubs_runners(self):
         # format and verify-static are all a fork pull request gets; a paid pool's balance must not fail them.
-        self.assertIn("runs-on: ubuntu-latest\n", self.job("format"))
+        # format goes to Dyna only for this repository's code (trusted); a fork's stays on GitHub's runners.
+        self.assertIn("runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && needs.changes.outputs.trusted == 'true' "
+                      "&& 'dyna-small' || 'ubuntu-latest' }}\n", self.job("format"))
         static = self.job("verify-static")
         self.assertIn("needs.changes.outputs.trusted != 'true' && 'ubuntu-latest' ||", static)
         self.assertIn("RUNNER_KIND: ${{ needs.changes.outputs.trusted != 'true' && 'github' ||", static)

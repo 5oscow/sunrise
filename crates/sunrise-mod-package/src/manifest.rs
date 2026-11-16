@@ -235,10 +235,10 @@ pub struct Native {
     pub mixin: Vec<mixin::Mixin>,
     #[serde(default)]
     pub module: Vec<Module>,
-    /// Accessor and invoker bridges, forwarded as sunrise-mixins' `[[bridge]]`.
+    /// Accessor and invoker bridges, forwarded as horizon-mixins' `[[bridge]]`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub bridge: Vec<mixin::Forwarded>,
-    /// State fields added to game types, forwarded as sunrise-mixins' `[[state]]`.
+    /// State fields added to game types, forwarded as horizon-mixins' `[[state]]`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub state: Vec<mixin::Forwarded>,
     /// Slots of published game loops, native only (`mod_api::loops`).
@@ -260,7 +260,7 @@ pub struct Internal {
     pub hash: Option<String>,
 }
 
-/// A support module merged into a game crate, forwarded as sunrise-mixins'
+/// A support module merged into a game crate, forwarded as horizon-mixins'
 /// `[[module]]`: self-contained Rust items, emitted into `file` as
 /// `mod name`, for helpers that need more than one function.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -780,7 +780,7 @@ impl Package {
         let toml = if metadata.is_dir() {
             for old in [
                 "sunrise-native.json",
-                "sunrise-mixin.toml",
+                "horizon-mixin.toml",
                 "native",
                 "rust",
             ] {
@@ -881,7 +881,7 @@ impl Package {
             let first = name.split('/').next().unwrap_or("");
             if matches!(
                 first,
-                "sunrise-native.json" | "sunrise-mixin.toml" | "native" | "rust"
+                "sunrise-native.json" | "horizon-mixin.toml" | "native" | "rust"
             ) {
                 return Err(format!("{name}: unsupported package path"));
             }
@@ -1547,7 +1547,7 @@ capabilities = ["registries"]
         let module = &manifest.native.as_ref().unwrap().module[0];
         assert_eq!(module.name, "runtime");
         assert_eq!(module.visibility, None);
-        // Support modules still forward whole to sunrise-mixins.
+        // Support modules still forward whole to horizon-mixins.
         let forwarded = toml::to_string(manifest.native.as_ref().unwrap()).unwrap();
         assert!(forwarded.contains("[[module]]"));
         assert!(forwarded.contains("id = \"runtime\""));
@@ -1569,7 +1569,7 @@ capabilities = ["registries"]
                 "file = 'crates/sunrise-client/src/game.rs'",
                 "file = '/abs.rs'",
             ),
-            // sunrise-mixins accepts exactly pub and pub(crate)
+            // horizon-mixins accepts exactly pub and pub(crate)
             valid.to_owned() + "visibility = 'public'\n",
         ] {
             assert!(

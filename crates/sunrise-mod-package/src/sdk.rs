@@ -127,7 +127,7 @@ pub enum Verdict {
     Breaking,
 }
 
-/// The pinned sunrise-mixins tool, which keeps its own release.
+/// The pinned horizon-mixins tool, which keeps its own release.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Mixins {
     pub rev: String,
