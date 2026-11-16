@@ -35,7 +35,7 @@ impl Hooks for Listener {
 }
 
 fn main() {
-    sunrise_guest_stack::prepare_main();
+    sunrise_mod_host::prepare_main_stack();
     sunrise_mod_host::exit_if_compile_child();
     let startup = sunrise_client::entry::prepare();
     std::hint::black_box(&sunrise_mod_package::holder::CAPABILITY);

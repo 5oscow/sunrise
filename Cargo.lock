@@ -4760,7 +4760,6 @@ dependencies = [
  "serde_json",
  "sunrise-client",
  "sunrise-core",
- "sunrise-guest-stack",
  "sunrise-mod-host",
  "sunrise-mod-package",
  "sunrise-protocol",

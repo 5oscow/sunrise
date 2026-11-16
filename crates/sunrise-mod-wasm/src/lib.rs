@@ -34,7 +34,7 @@ pub(crate) mod boundary {
     include!(concat!(env!("OUT_DIR"), "/wire_host_generated.rs"));
 }
 pub(crate) use runtime::WeakWasmMod;
-pub use runtime::{CallClass, WasmHandler, WasmMod};
+pub use runtime::{CallClass, WasmHandler, WasmMod, guest_engine, install_stack_policy};
 
 #[cfg(any(test, feature = "test-copy-probe"))]
 pub mod test_log;

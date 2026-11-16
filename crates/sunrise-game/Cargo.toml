@@ -7,7 +7,6 @@ rust-version.workspace = true
 description = "The game as the platform runs it: the engine's entry with the platform's parts registered, for an executable to start (docs/layers.md)"
 
 [dependencies]
-sunrise-guest-stack = { path = "../sunrise-guest-stack" }
 sunrise-client = { path = "../sunrise-client", default-features = false }
 sunrise-mod-package = { path = "../sunrise-mod-package", default-features = false, features = ["index"] }
 

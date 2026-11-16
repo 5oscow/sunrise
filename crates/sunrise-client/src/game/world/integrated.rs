@@ -50,11 +50,12 @@ pub(super) const NO_ANSWER: &str =
     "the integrated server stopped or did not answer within 10 s (the game log says which)";
 
 /// The server thread holds its `Game` by value and runs every tick on it.
-/// It reserves the same guest limit and host headroom as the main thread.
-const SERVER_THREAD_STACK: usize =
-    sunrise_guest_stack::GUEST_STACK_BYTES + sunrise_guest_stack::HOST_HEADROOM;
+/// It reserves what every guest-capable thread does under the engine's stack policy.
+fn server_thread_stack_floor() -> usize {
+    sunrise_guest_stack::engine().reservation()
+}
 
-/// The server thread's stack size: [`SERVER_THREAD_STACK`], or what `RUST_MIN_STACK` asks for
+/// The server thread's stack size: [`server_thread_stack_floor`], or what `RUST_MIN_STACK` asks for
 /// when that is larger. std reads the variable only for a thread spawned without a size, and
 /// harnesses raise it for this thread (`tools/test_wind_burst_hook.py`, the parity tools).
 fn server_thread_stack() -> usize {
@@ -62,12 +63,14 @@ fn server_thread_stack() -> usize {
     *SIZE.get_or_init(|| stack_for(std::env::var("RUST_MIN_STACK").ok().as_deref()))
 }
 
-/// [`SERVER_THREAD_STACK`], or `min_stack` (a byte count, as std parses `RUST_MIN_STACK`) when
+/// [`server_thread_stack_floor`], or `min_stack` (a byte count, as std parses `RUST_MIN_STACK`) when
 /// that is larger.
 fn stack_for(min_stack: Option<&str>) -> usize {
     min_stack
         .and_then(|bytes| bytes.parse::<usize>().ok())
-        .map_or(SERVER_THREAD_STACK, |bytes| bytes.max(SERVER_THREAD_STACK))
+        .map_or(server_thread_stack_floor(), |bytes| {
+            bytes.max(server_thread_stack_floor())
+        })
 }
 
 /// `LevelLoadProgressTracker.EXPECTED_PLAYER_CHUNKS`: the 7x7 chunks around the spawn.
