@@ -25,6 +25,9 @@ impl<R: RandomSource + Clone> global_modifiers::ModifierRoll for Context<'_, R> 
     fn facts(&self) -> LootContext<'_> {
         self.roll_facts(0)
     }
+    fn next_int(&mut self) -> i32 {
+        self.random.next_int()
+    }
     fn next_int_bound(&mut self, bound: i32) -> i32 {
         self.random.next_int_bound(bound).unwrap_or(0)
     }
@@ -39,6 +42,9 @@ impl<R: RandomSource + Clone> global_modifiers::ModifierRoll for Context<'_, R> 
     }
     fn next_boolean(&mut self) -> bool {
         self.random.next_boolean()
+    }
+    fn next_gaussian(&mut self) -> f64 {
+        self.random.next_gaussian()
     }
     fn condition(&mut self, condition: &Value) -> bool {
         Context::condition(self, condition)

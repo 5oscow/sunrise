@@ -55,7 +55,9 @@ jobs:
   # daily run (then this one stops). A hand dispatch never stops here: it is how a failed run is retried.
   resolve:
     if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    # Every leg waits for this job: on Dyna's small runner while the repository's switch is on, as dyna-checks'
+    # `changes`, so the run never queues behind GitHub's runners first (31 minutes on 2026-11-16).
+    runs-on: ${{ vars.DYNA_CI_SELF_HOSTED == 'true' && 'dyna-small' || 'ubuntu-latest' }}
     timeout-minutes: 5
     permissions:
       contents: read
