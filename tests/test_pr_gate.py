@@ -149,25 +149,14 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("needs.changes.outputs.trusted != 'true' && 'ubuntu-latest' ||", static)
         self.assertIn("RUNNER_KIND: ${{ needs.changes.outputs.trusted != 'true' && 'github' ||", static)
 
-    def test_windows_jobs_share_the_rollup_and_sync_gate(self):
+    def test_windows_jobs_run_daily_and_by_dispatch_only(self):
         import yaml
 
         workflow = yaml.safe_load((ROOT / ".github/workflows/launcher-windows-check.yml").read_text())
+        # GitHub's Windows runners: no push, pull request, rollup or sync waits on them; the daily run calls it.
+        self.assertEqual(set(workflow[True]), {"workflow_call", "workflow_dispatch"})
         jobs = workflow["jobs"]
-        gate = jobs["gate"]
-        step = next(step for step in gate["steps"] if step.get("id") == "gate")
-        self.assertEqual(step["run"], 'python3 tools/ci/pr_gate.py >> "$GITHUB_OUTPUT"')
-        self.assertEqual(step["env"], {
-            "EVENT": "${{ github.event_name }}",
-            "HEAD_REPO": "${{ github.event.pull_request.head.repo.full_name }}",
-            "PR_LABELS": "${{ toJSON(github.event.pull_request.labels.*.name) }}",
-            "HEAD_REF": "${{ github.event.pull_request.head.ref }}",
-        })
-        self.assertEqual(gate["outputs"]["heavy"], "${{ steps.gate.outputs.heavy }}")
-        self.assertEqual(jobs["test"]["needs"], "gate")
-        self.assertEqual(jobs["test"]["if"], "inputs.commit == '' && needs.gate.outputs.heavy == 'true'")
-        # It starts child processes: the daily run calls it, and a hand dispatch runs it; never pushes or PRs.
-        for name in ("runtime-leases", "launcher-processes"):
+        for name in ("test", "runtime-leases", "launcher-processes"):
             self.assertEqual(jobs[name]["if"], "inputs.commit != '' || github.event_name == 'workflow_dispatch'")
 
     def test_each_launcher_test_target_runs_once_and_spawning_ones_run_daily(self):
