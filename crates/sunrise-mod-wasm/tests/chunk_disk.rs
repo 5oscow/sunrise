@@ -3,8 +3,8 @@
 mod fixture;
 #[path = "support/no_hooks.rs"]
 mod no_hooks;
-use sunrise_mod_package::manifest::Package;
 use mod_api::*;
+use sunrise_mod_package::manifest::Package;
 
 #[derive(Default)]
 struct Native;
