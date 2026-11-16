@@ -187,6 +187,15 @@ class DailySummaryTests(unittest.TestCase):
         self.assertEqual([body["title"] for _, path, body in api.writes if path == "issues"],
                          ["Daily: sdk / build windows did not complete"])
 
+    def test_the_sdk_legs_alone_decide_sdk_green(self):
+        jobs = [job("shards / ignored-tests-shards (sunrise-world)", "failure", ["Run"])] + GREEN_JOBS[2:]
+        _, out = self.run_summary(Api(jobs), [], results=dict(LEGS, shards={"result": "failure"}))
+        self.assertIn("green=false", out)
+        self.assertIn("sdk_green=true", out, "a red shard holds the nightly, not the SDK")
+        jobs = [j for j in GREEN_JOBS if not j["name"].startswith("machine-sample")]
+        _, out = self.run_summary(Api(jobs), [shard_report()], results=dict(LEGS, **{"machine-sample": {"result": "skipped"}}))
+        self.assertIn("sdk_green=false", out, "an SDK leg that never ran is never green")
+
     def test_the_tag_is_created_the_first_time(self):
         api = Api(GREEN_JOBS, tag=False)
         self.run_summary(api, [shard_report()])
@@ -506,8 +515,11 @@ class DailyWorkflowTests(unittest.TestCase):
         self.assertNotIn("permissions", jobs["sdk"], "the build leg publishes nothing")
         publish = jobs["sdk-publish"]
         self.assertEqual(publish["needs"], ["resolve", "summary", "sdk"])
-        self.assertEqual(publish["if"], "needs.summary.outputs.green == 'true' && needs.resolve.outputs.dry_run == 'false'"
-                                        " && needs.sdk.outputs.needed == 'true'")
+        self.assertEqual(publish["if"], "!cancelled() && needs.resolve.result == 'success' && needs.summary.result == 'success'"
+                                        " && needs.sdk.result == 'success' && needs.summary.outputs.sdk_green == 'true'"
+                                        " && needs.resolve.outputs.dry_run == 'false' && needs.sdk.outputs.needed == 'true'")
+        self.assertEqual(jobs["summary"]["outputs"]["sdk_green"], "${{ steps.summary.outputs.sdk_green }}")
+        self.assertIn("needs.summary.outputs.sdk_green == 'true'", jobs["sdk-publish-report"]["if"])
         # The one publish step, signed only on main through the called workflow's `release` environment.
         self.assertEqual(publish["uses"], "./.github/workflows/sdk-publish.yml")
         self.assertEqual(publish["with"], {"commit": "${{ needs.resolve.outputs.commit }}", "publish": "true"})
