@@ -165,6 +165,24 @@ impl BlockStates<'_> {
     pub fn map_color(&self, state: BlockState) -> Option<u8> {
         self.backend?.block_state_map_color(state)
     }
+    /// `BlockState.getLightEmission()`: the light level the state gives off, 0 to 15 (a torch 14,
+    /// glowstone 15). A block that declares `dynamic_light` answers per cell through its parts,
+    /// which this does not ask. None as for `replaceable`.
+    pub fn light_emission(&self, state: BlockState) -> Option<u8> {
+        self.backend?.block_state_light_emission(state)
+    }
+    /// The friction of `state`'s block (`BlockBehaviour.getFriction`): 0.6 for most blocks, 0.98
+    /// for ice, 0.8 for slime. None as for `replaceable`.
+    pub fn friction(&self, state: BlockState) -> Option<f32> {
+        self.backend?.block_state_friction(state)
+    }
+    /// `BlockState.isSolidRender()`: whether the state is a full, occluding cube for rendering
+    /// and light (stone yes; glass, leaves and slabs no). Whether a block conducts redstone at a
+    /// position is [`LevelRef::is_redstone_conductor`](crate::LevelRef::is_redstone_conductor).
+    /// None as for `replaceable`.
+    pub fn is_solid_render(&self, state: BlockState) -> Option<bool> {
+        self.backend?.block_state_is_solid_render(state)
+    }
     /// The block's property names and legal serialized values. None without resolved tables.
     pub fn definition(&self, block: crate::BlockKey) -> Option<Vec<StateProperty>> {
         self.backend?.block_state_definition(block)

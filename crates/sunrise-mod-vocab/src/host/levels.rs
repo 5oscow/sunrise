@@ -468,6 +468,13 @@ pub trait LevelsBackend {
         support: SupportType,
     ) -> Option<bool>;
     /// Side: server.
+    /// `BlockState.isRedstoneConductor(level, pos)` of the block at `pos`: whether it passes
+    /// redstone power through it (a full block that conducts: stone yes; glass, slabs and
+    /// pistons' heads no). It takes the level and position as vanilla's call does. None for a
+    /// stale handle, a client or an unloaded `pos`; a read never loads a chunk.
+    #[access(WorldOnly)]
+    fn level_is_redstone_conductor(&self, level: LevelRef, pos: [i32; 3]) -> Option<bool>;
+    /// Side: server.
     /// How strongly the block at `pos` powers the block on its `direction` side, power it
     /// conducts included (`SignalGetter.getSignal(pos, direction)`, as a block reads its
     /// neighbour `pos` that lies `direction` from it), 0 to 15. None for another level, a stale

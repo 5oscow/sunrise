@@ -3565,6 +3565,34 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "daily"]
+    fn level_reads_whether_a_block_conducts_redstone() {
+        use std::sync::Arc;
+        use sunrise_client::chunk::Chunk;
+        with_game(|game| {
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let level = game.level(game.dim.id()).unwrap();
+            for (name, conducts) in [
+                ("minecraft:stone", true),
+                ("minecraft:glass", false),
+                ("minecraft:stone_slab", false),
+            ] {
+                let state = game.pack.assets.registry.default_state(name).unwrap();
+                game.world.set(0, 64, 0, state).unwrap();
+                assert_eq!(
+                    level.is_redstone_conductor(game, [0, 64, 0]),
+                    Some(conducts),
+                    "{name}"
+                );
+            }
+            // An unloaded position is unknown, not a guess.
+            assert_eq!(level.is_redstone_conductor(game, [160, 64, 0]), None);
+        });
+    }
+
+    #[test]
+    #[ignore = "daily"]
     fn level_sturdy_uses_gameplay_support() {
         use mod_api::SupportType as Support;
         use mod_api::{BlockFace as Face, LevelRef, WorldEpoch};
