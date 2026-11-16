@@ -1126,6 +1126,10 @@ jobs:
       # the runner's slot; the job log gets the harness names with PASS or FAIL, and the exit status is kept. A failure's
       # logs (a failing script's, and each failing harness's from tools/parity.py) are copied to the slot's parity-keep,
       # per run and attempt, which the next job's setup does not wipe, so they can still be read on the host after the slot is reused.
+      # A failure's cause in the compiler's, Cargo's or the test runner's fixed forms (a crate that did not compile, a
+      # process killed by a signal, an error code's source line, a failed test's name, a panic's location, a timeout)
+      # is printed too, rebuilt from parts that match only names, numbers and source paths, so no other text of the log
+      # (a value a harness printed) can pass.
       - name: Keep harness output on the runner
         run: |
           mkdir -p "$DYNA_CI_BUILD/bin"
@@ -1140,6 +1144,18 @@ jobs:
           /usr/bin/python3 "$@" > "$log" 2>&1
           status=$?
           rm -rf "$DYNA_CI_BUILD"/parity-out/rust-*
+          causes() {
+            sed -nE \
+              -e 's/.*could not compile `([A-Za-z0-9_-]+)` \(([a-z ]+)\).*/could not compile \1 (\2)/p' \
+              -e 's/.*--crate-name ([A-Za-z0-9_]+) .*\(signal: ([0-9]+), (SIG[A-Z]+).*/rustc for \1 killed by signal \2 (\3)/p' \
+              -e 's/.*process didn.t exit successfully: `[^ `]*\/deps\/([A-Za-z0-9_]+)-[0-9a-f]+[ `].*\(signal: ([0-9]+), (SIG[A-Z]+).*/test binary \1 killed by signal \2 (\3)/p' \
+              -e 's/^(error\[E[0-9]{4}\]).*/\1/p' \
+              -e 's/^ *--> ([A-Za-z0-9_.\/-]+\.rs:[0-9]+:[0-9]+)$/  at \1/p' \
+              -e 's/^test ([A-Za-z0-9_:]+) \.\.\. FAILED$/test \1 FAILED/p' \
+              -e 's/.*panicked at ([A-Za-z0-9_.\/-]+\.rs:[0-9]+:[0-9]+).*/panicked at \1/p' \
+              -e 's/^--- [a-z0-9_#]+: timed out after ([0-9]+)s$/timed out after \1 s/p' \
+              "$1" | awk '!seen[$0]++' | head -n 12 | sed "s/^/  $2: /"
+          }
           if [ "$name" = parity ]; then grep -aoE '^(PASS|FAIL|RETRIED|FLAKY) [a-z0-9_#]+' "$log" || true; fi
           if [ "$status" -eq 0 ]; then echo "PASS $name"; exit 0; fi
           keep="$DYNA_CI_BUILD/parity-keep/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
@@ -1148,7 +1164,10 @@ jobs:
           if [ "$name" = parity ]; then
             for harness in $(grep -aoE '^FAIL [a-z0-9_#]+' "$log" | cut -d' ' -f2 | sort -u); do
               cp "$GITHUB_WORKSPACE/.local/parity-runner/logs/$harness.log" "$keep/" 2>/dev/null || true
+              [ -f "$keep/$harness.log" ] && causes "$keep/$harness.log" "$harness"
             done
+          else
+            causes "$log" "$name"
           fi
           echo "FAIL $name (exit $status; its logs are kept on runner $RUNNER_NAME in $keep)"
           exit "$status"
@@ -1227,6 +1246,14 @@ jobs:
           if grep -Eq "[\"']sunrise-game[\"'], [\"']--bin[\"'], [\"']sunrise-client[\"']" "${scripts[@]}"; then
             cargo build --profile fast -p sunrise-game --bin sunrise-client
           fi
+          # The client lib tests harnesses run (`cargo test -p <package> --lib`, the dev profile as parity.py sets it),
+          # one at a time and before any oracle starts: one rustc of up to 12 GiB each, which a 16 GiB runner
+          # killed beside the harnesses (signal 9: mount_control and damage_catalog on main, 2026-11-16).
+          for package in sunrise-client-lib sunrise-client; do
+            if grep -Eq "[\"']test[\"'], ([\"']--locked[\"'], )?[\"']-p[\"'], [\"']$package[\"'], [\"']--lib[\"']" "${scripts[@]}"; then
+              cargo test --locked --no-run -p "$package" --lib
+            fi
+          done
           echo "Game probe builds: $((SECONDS - started)) s" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Named harnesses
         if: inputs.harnesses != ''
