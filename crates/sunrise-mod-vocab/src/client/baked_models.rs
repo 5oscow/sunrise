@@ -34,8 +34,10 @@ impl From<ModelRef> for BakedModelKey {
     }
 }
 
-/// A copy of one baked model's geometry and metadata, as the mesher reads it. Changing it changes
-/// nothing the game draws.
+/// A read-only copy of the listed fields of one baked model: its smooth-lighting flag, particle
+/// sprite and quads. It is not a complete copy of what the mesher reads: the material render
+/// type, per-quad colour, per-quad ambient occlusion and shading overrides are not carried.
+/// Changing it changes nothing the game draws.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 #[derive(sunrise_mod_api_macros::Wire)]

@@ -3,9 +3,9 @@
 Every successful resource load bakes each block state's models and the standalone models once,
 into one store for that load. That store belongs to the game and never changes while it is
 published: the mesher, block entity drawing and a mod all read the same baked results. A mod
-holds keys into it and copies of its quads, never the models themselves. This is the first part
-of #861 (the [design](https://github.com/arismoko/horizon/blob/main/docs/design/mod-api/baked-models.md));
-block-entity model data and editing a baking result build on it.
+holds keys into it and read-only copies of the geometry and metadata it lists, never the models
+themselves. The [design](https://github.com/arismoko/horizon/blob/main/docs/design/mod-api/baked-models.md)
+is #861; block-entity model data and editing a baking result are separate changes.
 
 ## Keys
 
@@ -17,10 +17,15 @@ until the next one:
 fn model_baking_completed(&self, host: &mut dyn ClientHost, _: &mut ModelBakingCompletedEvent) {
     let assets = host.render_assets();
     // Every model the state can draw: each weighted alternative and each selected multipart part.
-    let keys = assets.block_state_models(self.state)?;
+    let Ok(keys) = assets.block_state_models(self.state) else { return };
     // A standalone model's handle names a baked model too.
-    let part = BakedModelKey::from(assets.model(&Identifier::parse("mymod:block/part")?)?);
-    let view = assets.baked_model(keys[0])?;
+    let part = Identifier::parse("mymod:block/part")
+        .ok()
+        .and_then(|id| assets.model(&id).ok())
+        .map(BakedModelKey::from);
+    // A state no blockstate file binds has no keys.
+    let Some(first) = keys.first().copied().or(part) else { return };
+    let Ok(view) = assets.baked_model(first) else { return };
     for quad in &view.quads {
         // quad.positions, quad.uvs, quad.sprite, quad.facing, quad.cull, quad.tint_index ...
     }
@@ -30,9 +35,11 @@ fn model_baking_completed(&self, host: &mut dyn ClientHost, _: &mut ModelBakingC
 | Call | Answers |
 | --- | --- |
 | `block_state_models(state)` | Every model the state can select, in bake order without repeats, whichever one a position's seed picks. Empty for a state no blockstate file binds. `UnknownModel` for an id past the state table. |
-| `baked_model(key)` | A copy of the model: `ambient_occlusion`, the `particle` sprite and its `quads`. `StaleModel` once a reload superseded the key; `UnknownModel` for a slot the store lacks. |
+| `baked_model(key)` | A read-only copy of the listed fields: `ambient_occlusion`, the `particle` sprite and its `quads`. `StaleModel` once a reload superseded the key; `UnknownModel` for a slot the store lacks. |
 
-`BakedModelView` and `BakedQuad` are copies: changing them changes nothing the game draws. Each
+`BakedModelView` and `BakedQuad` are copies: changing them changes nothing the game draws. They
+carry the listed geometry and metadata only, not everything the mesher reads: no material render
+type, per-quad colour, per-quad ambient occlusion or shading override. Each
 `baked_model` call copies every quad, so read what a mod needs once per load, not each frame.
 
 ## Generations
