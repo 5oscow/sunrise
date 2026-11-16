@@ -669,9 +669,10 @@ pub struct ScopedActionResult {
     /// Other nonempty inventory stacks, then offhand, carried stack and armor, in that order.
     pub other: Vec<ItemStack>,
     /// Stacks the action produced that the API can't represent (a saved item this game build
-    /// doesn't have); they were left in or returned to the world, never destroyed or replaced.
-    /// Each one returned lies where the actor stood, as an item entity with the default pickup
-    /// delay, and is in neither `held` nor `other`.
+    /// doesn't have) and that went back into the world: never destroyed or replaced, each lies
+    /// where the actor stood as an item entity with the default pickup delay, and is in neither
+    /// `held` nor `other`. That item entity joins the level as any drop does, so an
+    /// `entity_join_level` listener that keeps it out discards it, and it is not counted.
     pub unrepresentable: u32,
 }
 

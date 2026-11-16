@@ -644,13 +644,17 @@ impl Game<'_> {
         // A stack the API can't represent (a saved item this build doesn't have, #1364) is never
         // destroyed or replaced: it goes back into the world where the actor stood, with
         // vanilla's default pickup delay so a repeating action doesn't take it again next tick.
+        // It joins as any drop does, so a join listener may keep it out; only the stacks that
+        // joined are counted.
         let mut unrepresentable = 0;
         let mut represent = |stack: sunrise_items::items::ItemStack| match stack.try_into_api() {
             Ok(stack) => Some(stack),
             Err(_) => {
-                unrepresentable += 1;
                 // ItemEntity.setDefaultPickUpDelay.
-                self.spawn_item_own(stack, position, 10);
+                self.push_item_entity(stack, position, None, 10, None);
+                if self.join_item_entity(self.next_entity, position) {
+                    unrepresentable += 1;
+                }
                 None
             }
         };
@@ -4833,6 +4837,66 @@ pub(super) mod fake_action_tests {
             assert_eq!(item.stack, ItemStack::new("test:missing", 1));
             assert_eq!(item.pickup_delay, 10);
             assert_eq!((item.position.x, item.position.z), (0.5, 0.5));
+        });
+    }
+
+    /// A join listener that keeps item entities out discards the returned stack as it would any
+    /// drop: no item entity is left, and the result does not count it.
+    #[test]
+    #[ignore = "daily"]
+    fn a_vetoed_return_is_not_counted() {
+        use mod_api::{EntityJoinLevelEvent, Flow, Hooks, PlayerActionSetup, ServerHost};
+        struct KeepItemsOut;
+        #[mod_api::__subscriptions]
+        impl Hooks for KeepItemsOut {
+            fn entity_join_level(
+                &self,
+                _: &mut dyn ServerHost,
+                event: &mut EntityJoinLevelEvent<'_>,
+            ) -> Flow {
+                if event.kind == "minecraft:item" {
+                    Flow::Cancel
+                } else {
+                    Flow::Continue
+                }
+            }
+        }
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+            "keep-items-out",
+            Box::new(KeepItemsOut),
+        )]
+        .into();
+        mod_platform::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                let (player, _, _) = fake(game, None, 0);
+                let mut stand = sunrise_client::entities::ArmorStand::new(
+                    5001,
+                    sunrise_core::geometry::Vec3::new(2.0, 64.0, 0.5),
+                    0.0,
+                );
+                stand.equipment[0] = Some(ItemStack::new("test:missing", 1));
+                game.armor_stands.push(stand);
+                let target = game.entity(5001).unwrap();
+                let setup = PlayerActionSetup::new(
+                    None,
+                    [0.5, 64.0 + f64::from(1.62_f32), 0.5],
+                    90.0,
+                    0.0,
+                    false,
+                );
+                let action = PlayerAction::InteractOn {
+                    hand: Hand::Main,
+                    target,
+                    location: [0.0, 1.5, 0.0],
+                };
+                let dropped = game.dropped.len();
+                let result = player.perform_action_scoped(game, action, setup).unwrap();
+                assert_eq!(result.outcome, ActionOutcome::Consumed);
+                assert_eq!((result.held, result.other.len()), (None, 0));
+                assert_eq!(result.unrepresentable, 0, "the vetoed stack is not counted");
+                assert_eq!(game.armor_stands.last().unwrap().equipment[0], None);
+                assert_eq!(game.dropped.len(), dropped, "no item entity is left");
+            });
         });
     }
 

@@ -2586,7 +2586,7 @@ impl Game<'_> {
         random: Option<spill::ItemRandom>,
     ) -> [f64; 3] {
         let velocity = self.push_item_entity(stack, position, velocity, pickup_delay, random);
-        self.join_item_entity(self.next_entity, position);
+        let _ = self.join_item_entity(self.next_entity, position);
         velocity
     }
     /// The block entity at `pos` saved with its id and position
