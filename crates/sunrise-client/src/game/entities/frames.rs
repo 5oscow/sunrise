@@ -801,17 +801,14 @@ impl Game<'_> {
                         tnt_fuse: None,
                         orb_value: None,
                         painting: None,
-                        item_frame: Some(
-                            mod_api::__private::built::ItemFrameRenderState {
-                                facing,
-                                glow: f.glow,
-                                invisible: f.invisible,
-                                rotation: f.rotation,
-                                has_item: f.item.is_some(),
-                                has_map: map.is_some(),
-                            }
-                            .into(),
-                        ),
+                        item_frame: Some(mod_api::__private::built::ItemFrameRenderState {
+                            facing,
+                            glow: f.glow,
+                            invisible: f.invisible,
+                            rotation: f.rotation,
+                            has_item: f.item.is_some(),
+                            has_map: map.is_some(),
+                        }),
                     }
                     .into();
                 let light = self.world.light(f.pos[0], f.pos[1], f.pos[2]);
