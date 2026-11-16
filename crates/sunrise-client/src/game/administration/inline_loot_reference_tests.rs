@@ -248,6 +248,7 @@ fn inline_references_follow_the_codec_and_the_reloaded_registry() {
 #[test]
 #[ignore = "daily"]
 fn pack_functions_admit_inline_references_on_first_open() {
+    let _publication = sunrise_client::datapack_net::isolate_server_publication();
     let mut resources = None;
     let mut game = game(&mut resources);
     let functions = game.world_root.join("datapacks/il/data/parity/function");
