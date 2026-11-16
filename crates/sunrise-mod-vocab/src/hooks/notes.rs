@@ -1525,7 +1525,7 @@ mod mixin or use it replaces in its design or PR."#]
   source with no direct entity stay 0 even during that projectile's impact; and `position`, `getSourcePosition`), the `victim`'s
   position and view vector, the direct entity's `weapon` (`getWeaponItem`) when Sunrise knows it (a player's or mob's
   melee hit or projectile's saved weapon), `causing_weapon` (the causing living entity's current main hand; None for absent,
-  unknown, non-living or gone owners), and `DamageContainer` before reductions. Entity ids are 0 when unknown. A mod may change its new damage or the
+  unknown, non-living or gone owners), and `DamageContainer` before reductions. Entity ids are 0 for none and for the untracked sources listed below. A mod may change the container's new damage or the
   invulnerability ticks a fresh hit leaves (vanilla's 20), or set `canceled`: nothing of `hurtServer` itself happens
   then (no damage, hurt sound, knockback, invulnerable time, statistics or criteria), and the caller acts as on a
   refused hit, so a blast still pushes a mob whose hit was canceled, as vanilla pushes one that refused it. A canceled
