@@ -648,7 +648,7 @@ mod tests {
         std::fs::create_dir_all(dir.path().join("src")).unwrap();
         std::fs::write(
             dir.path().join(MANIFEST),
-            "id = \"greeter\"\nname = \"Greeter\"\nversion = \"0.1.0\"\n",
+            "id = \"greeter\"\nname = \"Greeter\"\nversion = \"0.1.0\"\napi = \"0.2\"\ncapabilities = [\"registries\"]\n",
         )
         .unwrap();
         // Source the scan cannot read, and no fetched SDK: a native mod would fail on either.
