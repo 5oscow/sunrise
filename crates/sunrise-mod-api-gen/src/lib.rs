@@ -610,6 +610,7 @@ enum FillMode {
 
 mod build;
 mod capability_providers;
+pub mod counterparts;
 pub mod crossing;
 mod dispatch;
 mod host_param;
@@ -672,6 +673,7 @@ pub mod surface;
 pub use build::{
     generate, generate_engine_points, generate_points, generate_render, write_if_changed,
 };
+pub use counterparts::generate as generate_counterparts;
 pub use notes::generate as generate_hook_notes;
 mod staged;
 pub use staged::{MODS_STAGE, staged_mods};
