@@ -28,6 +28,7 @@ class GateTests(unittest.TestCase):
         cases = [
             (True, ["rollup"], "work", "true"),
             (True, [], "fork-review-rollup-42", "true"),
+            (True, [], "sunrise-review-rollup-1", "true"),
             (True, ["sync"], "work", "true"),
             (True, [], "sync-28-35", "true"),
             (True, [], "rollup-76", "true"),
@@ -37,6 +38,7 @@ class GateTests(unittest.TestCase):
             (False, [], "rollup-76", "false"),
             (True, ["bug"], "ci-gate", "false"),
             (False, ["rollup", "sync"], "fork-review-rollup-42", "false"),
+            (False, [], "sunrise-review-rollup-1", "false"),
         ]
         for same, labels, branch, expected in cases:
             with self.subTest(same=same, labels=labels, branch=branch):
