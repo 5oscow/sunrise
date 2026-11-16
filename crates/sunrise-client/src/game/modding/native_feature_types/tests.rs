@@ -54,6 +54,10 @@ impl ModFeatureRandom for Random {
         use sunrise_core::random::RandomSource;
         self.0.next_int_bound(bound).unwrap_or(0)
     }
+    fn int_unbounded(&mut self) -> i32 {
+        use sunrise_core::random::RandomSource;
+        self.0.next_int()
+    }
     fn long(&mut self) -> i64 {
         use sunrise_core::random::RandomSource;
         self.0.next_long()
@@ -69,6 +73,10 @@ impl ModFeatureRandom for Random {
     fn boolean(&mut self) -> bool {
         use sunrise_core::random::RandomSource;
         self.0.next_boolean()
+    }
+    fn gaussian(&mut self) -> f64 {
+        use sunrise_core::random::RandomSource;
+        self.0.next_gaussian()
     }
 }
 

@@ -22,8 +22,8 @@
 //! world job runs. Native mods only.
 use crate::wire::{Reader, Wire, WireError, Writer};
 use crate::world::datapack_registry::{DatapackEntry, DatapackField};
-use crate::world::structure_type::{HeightmapType, RandomSource};
-use crate::{BlockKey, BlockMetadata, BlockState, BlockUpdateFlags};
+use crate::world::structure_type::HeightmapType;
+use crate::{BlockKey, BlockMetadata, BlockState, BlockUpdateFlags, RandomSource};
 use std::sync::Arc;
 use sunrise_core::nbt::Compound;
 

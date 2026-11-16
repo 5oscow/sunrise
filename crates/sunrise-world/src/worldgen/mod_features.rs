@@ -83,10 +83,14 @@ pub trait ModFeatureTarget {
 pub trait ModFeatureRandom {
     /// `nextInt(bound)`; 0 without a draw for a bound below 1.
     fn int(&mut self, bound: i32) -> i32;
+    /// `nextInt()`: any `i32`.
+    fn int_unbounded(&mut self) -> i32;
     fn long(&mut self) -> i64;
     fn float(&mut self) -> f32;
     fn double(&mut self) -> f64;
     fn boolean(&mut self) -> bool;
+    /// `nextGaussian()`.
+    fn gaussian(&mut self) -> f64;
 }
 
 /// Any `RandomSource` as a [`ModFeatureRandom`].
@@ -97,6 +101,9 @@ impl<R: RandomSource> ModFeatureRandom for Draws<'_, R> {
             return 0;
         }
         self.0.next_int_bound(bound).unwrap_or(0)
+    }
+    fn int_unbounded(&mut self) -> i32 {
+        self.0.next_int()
     }
     fn long(&mut self) -> i64 {
         self.0.next_long()
@@ -109,6 +116,9 @@ impl<R: RandomSource> ModFeatureRandom for Draws<'_, R> {
     }
     fn boolean(&mut self) -> bool {
         self.0.next_boolean()
+    }
+    fn gaussian(&mut self) -> f64 {
+        self.0.next_gaussian()
     }
 }
 
