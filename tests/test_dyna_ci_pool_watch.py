@@ -5,7 +5,7 @@ import sys
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools/ci"))
-import dyna_ci_pool_watch as watch  # noqa: E402
+import dyna_ci_pool_watch as watch
 
 NOW = 1_800_000_000
 STALL = 20 * 60
@@ -15,8 +15,9 @@ def stamp(minutes_ago):
     return datetime.fromtimestamp(NOW - minutes_ago * 60, timezone.utc).isoformat()
 
 
-def run(ident, status, minutes_ago):
+def run(ident, status, minutes_ago, updated=None):
     return {"id": ident, "status": status, "created_at": stamp(minutes_ago), "name": f"run {ident}",
+            "updated_at": stamp(minutes_ago if updated is None else updated),
             "html_url": f"https://example.invalid/{ident}"}
 
 
@@ -34,7 +35,11 @@ class Watch(unittest.TestCase):
             if "/jobs?" in path:
                 return [{"jobs": jobs[int(path.split("/runs/")[1].split("/")[0])]}]
             status = path.split("status=")[1].split("&")[0]
-            return [{"workflow_runs": [entry for entry in runs if entry["status"] == status]}]
+            listed = [entry for entry in runs if entry["status"] == status]
+            if "created=%3E%3D" in path:
+                since = datetime.fromisoformat(path.split("created=%3E%3D")[1].split("&")[0])
+                listed = [entry for entry in listed if datetime.fromisoformat(entry["created_at"]) >= since]
+            return [{"workflow_runs": listed}]
 
         code = watch.watch(api, cancelled.append, lambda: NOW, sleeps.append, "o/r", me, STALL)
         return code, cancelled, sleeps, requests
@@ -47,6 +52,18 @@ class Watch(unittest.TestCase):
                 3: [job("queued")]}
         code, cancelled, sleeps, _ = self.sweep(runs, jobs)
         self.assertEqual((code, cancelled, sleeps), (1, [1, 2], [watch.QUIET_RECHECK]))
+
+    def test_a_pool_that_just_finished_a_whole_run_is_alive(self):
+        # Run 2 ended on a Dyna runner a minute ago: only the finished runs show that.
+        runs = [run(1, "queued", 45), run(2, "completed", 30, updated=1), run(3, "completed", 2000, updated=1),
+                run(4, "completed", 40, updated=30)]
+        jobs = {1: [job("queued")], 2: [job("completed", started=15, completed=1, runner="dyna-ci-1")],
+                3: [job("completed", started=5, completed=1, runner="dyna-ci-2")],
+                4: [job("completed", started=35, completed=30, runner="dyna-ci-3")]}
+        code, cancelled, _, requests = self.sweep(runs, jobs)
+        self.assertEqual((code, cancelled), (0, []))
+        # A run created over a day ago is not listed, and one not updated since the stall is not read.
+        self.assertFalse([path for path in requests if "/runs/3/" in path or "/runs/4/" in path])
 
     def test_a_busy_pool_cancels_nothing(self):
         runs = [run(1, "queued", 45), run(2, "in_progress", 30)]

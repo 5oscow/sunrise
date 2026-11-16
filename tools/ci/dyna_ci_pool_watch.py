@@ -7,12 +7,13 @@ hours for a runner, so a pool that dies would hold every run routed to it for a 
 Waiting is not enough to call a job stuck, because a run queued behind a busy pool waits too. So a run counts as
 stranded once it has a job queued for the pool and no job of it started or finished for STALL_MINUTES. Then the
 watch looks at the pool's jobs across the repository, and cancels the stranded runs only when, twice in a row
-QUIET_RECHECK apart, none of them is running or finished in that time. That is a pool that is down, or one that
-cannot start a runner. The watch ends red, and a rerun can use GitHub-hosted runners once the pool's lease expires.
+QUIET_RECHECK apart, none of them is running or finished in that time, in an unfinished run or a finished one. That
+is a pool that is down, or one that cannot start a runner. The watch ends red. A rerun goes to the pool again while
+the repository's switch is on: dispatch dyna-ci.yml with github-fallback, or turn DYNA_CI_SELF_HOSTED off first.
 
 One sweep serves the whole repository: a watcher per run held one of GitHub's runners for as long as the run lasted.
 """
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 import os
 import subprocess
@@ -54,9 +55,9 @@ def pool_worked(jobs, label, since):
     return False
 
 
-def runs(api, repo, status):
+def runs(api, repo, query):
     """`api` returns every page of a listing."""
-    pages = api(f"repos/{repo}/actions/runs?status={status}&per_page=100")
+    pages = api(f"repos/{repo}/actions/runs?{query}&per_page=100")
     return [run for page in pages for run in page["workflow_runs"]]
 
 
@@ -67,8 +68,9 @@ def jobs_of(api, repo, run):
 
 def stranded(api, repo, label, now, stall, me):
     """The unfinished runs with a job queued for the pool and no progress for `stall` seconds, and none when the
-    pool served any job since then (a busy pool, not a dead one)."""
-    unfinished = [run for status in ("queued", "in_progress") for run in runs(api, repo, status) if run["id"] != me]
+    pool served any job since then, in an unfinished run or one that has finished (a busy pool, not a dead one)."""
+    unfinished = [run for status in ("queued", "in_progress") for run in runs(api, repo, f"status={status}")
+                  if run["id"] != me]
     found = []
     # The oldest runs reached the pool first, so a busy pool usually answers at once. A run younger than the stall
     # can't be stranded yet, and only a running one can show the pool working.
@@ -82,6 +84,15 @@ def stranded(api, repo, label, now, stall, me):
         queued = sum(job["status"] == "queued" and on_pool(job, label) for job in jobs)
         if old and queued and now - last_progress(run, jobs) >= stall:
             found.append((run, queued))
+    if not found:
+        return []
+    # A pool that just finished a whole run's jobs shows it only in that finished run. GitHub gives up on a job that
+    # waited a day, so a finished run created before then held no runner since; of the rest, only one updated since
+    # can have.
+    created = datetime.fromtimestamp(now - 24 * 3600, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    for run in runs(api, repo, f"status=completed&created=%3E%3D{created}"):
+        if seconds(run["updated_at"]) >= now - stall and pool_worked(jobs_of(api, repo, run), label, now - stall):
+            return []
     return found
 
 
@@ -95,8 +106,8 @@ def watch(api, cancel, clock, sleep, repo, me, stall, label=LABEL):
         return 0
     for run, queued in found:
         print(f"::error::{run['name']} ({run['html_url']}): {queued} job(s) waited {stall // 60} minutes and no job "
-              "on the self-hosted pool is running. Cancelling it; a rerun uses GitHub-hosted runners once the "
-              "pool's lease expires.")
+              "on the self-hosted pool is running. Cancelling it. Dispatch dyna-ci.yml with github-fallback=true, "
+              "or turn DYNA_CI_SELF_HOSTED off, before rerunning: with the switch on a rerun waits for the pool again.")
         cancel(run["id"])
     return 1
 
