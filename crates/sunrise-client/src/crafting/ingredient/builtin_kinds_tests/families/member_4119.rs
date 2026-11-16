@@ -55,7 +55,7 @@ fn base_color_recipe_compiles_and_matches_typed_shields() {
     assert!(recipes.find(&context, &[Some(shield.clone())], 1).is_none());
     // A live shield stores this in StackData, not in its `other` NBT fields.
     shield.data_mut().base_color = Some("red".into());
-    assert!(shield.data().unwrap().other.is_empty());
+    assert!(shield.data().unwrap().preserved_components().is_empty());
     let (id, result) = recipes.find(&context, &[Some(shield.clone())], 1).unwrap();
     assert_eq!(id, "fixture:base_color");
     assert_eq!(result.item.as_ref(), "minecraft:diamond");
@@ -91,7 +91,7 @@ fn base_color_components_preserve_defaults_removals_and_banner_absence() {
     );
     let shown = &red.shown.as_ref().unwrap()[0];
     assert_eq!(shown.data().unwrap().base_color.as_deref(), Some("red"));
-    assert!(shown.data().unwrap().other.is_empty());
+    assert!(shown.data().unwrap().preserved_components().is_empty());
     let load = load();
     let context = load.loop_context(LoopSide::Server, []);
     let mut shield = ItemStack::new("minecraft:shield", 1);

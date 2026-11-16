@@ -1497,7 +1497,7 @@ impl ResolvedSources {
                 let mut resolved = file.clone();
                 let parsed_here = resolved["type"]
                     .as_str()
-                    .is_some_and(|t| VANILLA_RECIPE_TYPES.contains(&t));
+                    .is_some_and(|t| VANILLA_RECIPE_SERIALIZERS.contains(&t));
                 // Answers a file carries are forgeries; an unlisted slot
                 // would otherwise keep one.
                 let mut changed = Ingredient::forget_answers(&mut resolved);
@@ -1672,7 +1672,7 @@ impl Recipes {
                 continue;
             }
             let kind = json["type"].as_str().unwrap_or("");
-            if !VANILLA_RECIPE_TYPES.contains(&kind) {
+            if !VANILLA_RECIPE_SERIALIZERS.contains(&kind) {
                 continue;
             }
             Ingredient::validate_recipe(resolved, items)
@@ -2999,8 +2999,7 @@ mod tests {
                         .by_type
                         .contains_key("minecraft:from_a_later_version")
                 );
-                // Vanilla's types answer through the same table (a type the game doesn't parse keeps its file;
-                // one it parses and drops, `minecraft:smelting` with no result, is no recipe).
+                // Vanilla serializers use the same table and atomic station validation.
                 assert_eq!(ids("minecraft:stonecutting"), ["minecraft:iron_ingot"]);
                 // Not crafted, and no recipe-book meta of their own.
                 assert!(recipes.crafting.is_empty() && recipes.cooking.is_empty());
