@@ -248,7 +248,9 @@ mod tests {
             game.inventory[game.selected] = None;
             game.offhand = Some(pickaxe);
             game.hand = sunrise_client::first_person::Hand::Off;
+            door(game, "lower", lower);
             door(game, "upper", upper);
+            assert_eq!(block(game, lower), "minecraft:iron_door");
             assert!(game.player_destroy_block(player, upper, false));
             assert_eq!(block(game, upper), "minecraft:air");
             assert_eq!(
