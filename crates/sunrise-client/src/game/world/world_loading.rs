@@ -394,10 +394,9 @@ enum Preload {
 
 static PRELOAD: std::sync::Mutex<Preload> = std::sync::Mutex::new(Preload::Idle);
 
-/// Each frame of the title: read what every world opening loads and keeps
-/// for the rest of the process (the worldgen bundle, the loot tables and the
-/// registries the server sends) on a helper thread while the player is on the
-/// world screens (`on_world_screens`: Singleplayer, Create World and their
+/// Each frame of the title: preload the shared worldgen bundle on a helper
+/// thread while the player is on the world screens
+/// (`on_world_screens`: Singleplayer, Create World and their
 /// dialogs), so it overlaps the time spent choosing a world. A world opened
 /// meanwhile waits for the part being read instead of reading it again. Not
 /// at the title screen itself: many players only go to Multiplayer, and
