@@ -176,11 +176,11 @@ impl ItemEnv for Env<'_, '_> {
         ctx: &sunrise_assets::item_model::Context,
     ) -> Option<sunrise_assets::item_model::PreparedParts> {
         let Ok(display) = ctx.display.try_into_api();
-        let context = mod_api::SpecialModelContext {
+        let context = mod_api::SpecialModelContext::new(
             display,
-            game_time: ctx.level.map(|level| level.game_time),
-            partial_tick: self.game.frame_world_partial_tick() as f32,
-        };
+            ctx.level.map(|level| level.game_time),
+            self.game.frame_world_partial_tick() as f32,
+        );
         super::native_special_renderers::parts(self.game, slot, config, stack, &context, |parts| {
             self.game.pack.item_renderer.prepare_parts(base, parts)
         })

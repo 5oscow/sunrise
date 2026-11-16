@@ -110,7 +110,7 @@ pub enum SpecialModelPolicy {
 /// What a [`SpecialModelPolicy::Frame`] renderer is told besides the stack, as `ItemModel.update`
 /// reads it: where the item is drawn and when.
 #[derive(Clone, Debug, PartialEq)]
-// exhaustive: the game builds it with a literal; mods only read it
+#[non_exhaustive]
 #[derive(sunrise_mod_api_macros::Wire)]
 pub struct SpecialModelContext {
     /// Where the item is drawn (a hand, a screen, the ground, a frame, the head).
@@ -123,6 +123,19 @@ pub struct SpecialModelContext {
 }
 
 impl SpecialModelContext {
+    /// The context of one drawn item; only the game builds one, mods read it.
+    #[doc(hidden)]
+    pub const fn new(
+        display: ItemDisplayContext,
+        game_time: Option<i64>,
+        partial_tick: f32,
+    ) -> Self {
+        Self {
+            display,
+            game_time,
+            partial_tick,
+        }
+    }
     /// What a [`SpecialModelPolicy::Stack`] renderer is always given: no display context, no
     /// time.
     pub const STACK: Self = Self {
