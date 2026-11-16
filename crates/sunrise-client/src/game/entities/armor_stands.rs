@@ -168,6 +168,7 @@ pub(super) struct ArmorStandAssets {
     pub player: HashMap<&'static str, Part>,
     /// Asset id -> layer kind -> ordered textures with dyeability and optional undyed colour.
     pub equipment: super::equipment_piece::EquipmentAssets,
+    pub extensions: super::client_item_extensions::ArmorExtensions,
     /// asset id -> `trim_overrides`.
     pub trim_overrides: HashMap<String, Vec<TrimOverride>>,
     pub trims: TrimRegistry,
@@ -245,6 +246,9 @@ impl ArmorStandAssets {
                                     .get("dyeable")
                                     .is_some_and(serde_json::Value::is_object),
                                 color_when_undyed: undyed,
+                                use_player_texture: layer["use_player_texture"]
+                                    .as_bool()
+                                    .unwrap_or(false),
                             }
                         })
                         .collect();
@@ -262,6 +266,7 @@ impl ArmorStandAssets {
             layers,
             player,
             equipment,
+            extensions: Default::default(),
             trim_overrides,
             trims: TrimRegistry::load(root),
             root: root.to_owned(),
@@ -270,6 +275,7 @@ impl ArmorStandAssets {
     /// Trim data of reloaded resources (the models stay).
     pub fn apply_resources(&mut self, fresh: Self) {
         self.equipment = fresh.equipment;
+        self.extensions = fresh.extensions;
         self.trim_overrides = fresh.trim_overrides;
         self.trims = fresh.trims;
         self.root = fresh.root;
@@ -349,9 +355,11 @@ impl Game<'_> {
             let Some(part) = assets.player.get(layer) else {
                 continue;
             };
-            for material in self.equipment_materials(&piece, stack) {
+            for material in
+                self.equipment_materials(&piece, stack, super::equipment_piece::EquipmentPass::Draw)
+            {
                 out.push((
-                    part,
+                    material.model.map_or(part, |model| &**model),
                     material.binding.uv,
                     material.color,
                     material.overlay,
@@ -1798,10 +1806,14 @@ impl Game<'_> {
             // ArmorStandArmorModel.setupAnim runs humanoid setup independently.
             layer_poses.reset(part);
             self.setup_armor_stand_pose(a, partial, &mut layer_poses);
-            for material in self.equipment_materials(&piece, Some(stack)) {
+            for material in self.equipment_materials(
+                &piece,
+                Some(stack),
+                super::equipment_piece::EquipmentPass::Draw,
+            ) {
                 put(
                     &mut skin,
-                    part,
+                    material.model.unwrap_or(part),
                     base,
                     &layer_poses,
                     material.binding.uv,

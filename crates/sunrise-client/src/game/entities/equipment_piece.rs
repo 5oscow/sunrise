@@ -1,11 +1,41 @@
 //! Shared eligibility and material resolution for worn humanoid equipment.
 use super::*;
+use sunrise_client::mobs::Part;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum EquipmentPass {
+    Draw,
+    TextureInventory,
+}
 
 pub(super) struct EquipmentPiece<'a> {
     pub asset: String,
+    pub slot: ArmorSlot,
     pub kind: &'static str,
     pub layers: &'a [EquipmentAssetLayer],
     pub overlay: u32,
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum ArmorSlot {
+    Head,
+    Chest,
+    Legs,
+    Feet,
+}
+impl ArmorSlot {
+    pub(super) fn index(self) -> usize {
+        self as usize
+    }
+    pub(super) fn shows(self, name: &str) -> bool {
+        match name {
+            "head" | "hat" => matches!(self, Self::Head),
+            "body" => matches!(self, Self::Chest | Self::Legs),
+            "left_arm" | "right_arm" => matches!(self, Self::Chest),
+            "left_leg" | "right_leg" => matches!(self, Self::Legs | Self::Feet),
+            _ => true,
+        }
+    }
 }
 
 impl Game<'_> {
@@ -48,6 +78,7 @@ impl Game<'_> {
 pub(super) struct EquipmentAssetLayer {
     pub texture: String,
     pub dyeable: bool,
+    pub use_player_texture: bool,
     pub color_when_undyed: Option<u32>,
 }
 pub(super) type EquipmentAssets = HashMap<String, HashMap<String, Vec<EquipmentAssetLayer>>>;
@@ -75,8 +106,16 @@ fn resolve_piece<'a>(
     if layers.is_empty() {
         return None;
     }
+    let slot = match slot {
+        "head" => ArmorSlot::Head,
+        "chest" => ArmorSlot::Chest,
+        "legs" => ArmorSlot::Legs,
+        "feet" => ArmorSlot::Feet,
+        _ => return None,
+    };
     Some(EquipmentPiece {
         asset,
+        slot,
         kind,
         layers,
         overlay,
@@ -87,6 +126,7 @@ impl Game<'_> {
     pub(super) fn mob_equipment_layers(
         &self,
         mob: &Mob,
+        pass: EquipmentPass,
     ) -> Vec<sunrise_client::mobs::render::Layer> {
         use sunrise_client::mobs::render;
         use sunrise_items::equipment::{CHEST, FEET, HEAD, LEGS};
@@ -123,7 +163,7 @@ impl Game<'_> {
             // The mob renderer resolves CEM textures before applying their emissive overlay.
             // Do not submit the default texture's glow a second time here.
             for material in self
-                .equipment_materials(&piece, Some(stack))
+                .equipment_materials(&piece, Some(stack), pass)
                 .into_iter()
                 .filter(|m| !m.glows)
             {
@@ -133,7 +173,8 @@ impl Game<'_> {
                     material.color,
                     material.overlay,
                 );
-                layer.full_bright = material.glows;
+                layer.equipment_model = material.model.cloned();
+                layer.equipment_texture_final = material.final_texture;
                 out.push(layer);
             }
         }
@@ -151,6 +192,15 @@ pub(super) struct EquipmentMaterial<'a> {
     pub color: u32,
     pub overlay: u32,
     pub glows: bool,
+    pub model: Option<&'a Arc<Part>>,
+    pub final_texture: bool,
+}
+
+pub(super) struct ResolvedEquipmentLayer<'a> {
+    pub binding: MaterialBinding<'a>,
+    pub color: u32,
+    pub model: Option<&'a Arc<Part>>,
+    pub final_texture: bool,
 }
 
 impl Game<'_> {
@@ -158,6 +208,7 @@ impl Game<'_> {
         &'a self,
         piece: &EquipmentPiece<'_>,
         stack: Option<&ItemStack>,
+        pass: EquipmentPass,
     ) -> Vec<EquipmentMaterial<'a>> {
         let sprites = &self.gui.atlas.sprites;
         let bind = |name: &str| {
@@ -181,12 +232,18 @@ impl Game<'_> {
             .emissive
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        piece.materials(
-            stack,
-            trim,
-            |name| sunrise_client::cit_armor::worn_layer(cit, &piece.asset, piece.kind, name, bind),
-            |name| emissive.overlay(name).and_then(bind),
-        )
+        let texture = |name: &str| {
+            sunrise_client::cit_armor::worn_layer(cit, &piece.asset, piece.kind, name, bind)
+        };
+        let glow = |name: &str| emissive.overlay(name).and_then(bind);
+        if pass == EquipmentPass::Draw
+            && let Some(materials) = stack.and_then(|stack| {
+                self.extended_equipment_materials(piece, stack, trim, texture, glow)
+            })
+        {
+            return materials;
+        }
+        piece.materials(stack, trim, texture, glow)
     }
 }
 
@@ -197,26 +254,60 @@ impl EquipmentPiece<'_> {
         stack: Option<&ItemStack>,
         trim: Option<MaterialBinding<'a>>,
         mut texture: impl FnMut(&str) -> Option<MaterialBinding<'a>>,
+        emissive: impl FnMut(&str) -> Option<MaterialBinding<'a>>,
+    ) -> Vec<EquipmentMaterial<'a>> {
+        self.resolved_materials(
+            trim,
+            |_, layer| {
+                let color =
+                    super::armor_stands::layer_color(layer.dyeable, layer.color_when_undyed, stack);
+                if color == 0 {
+                    return None;
+                }
+                Some(ResolvedEquipmentLayer {
+                    binding: texture(&layer.texture)?,
+                    color,
+                    model: None,
+                    final_texture: false,
+                })
+            },
+            emissive,
+        )
+    }
+
+    pub(super) fn resolved_materials<'a>(
+        &self,
+        trim: Option<MaterialBinding<'a>>,
+        mut resolve: impl FnMut(usize, &EquipmentAssetLayer) -> Option<ResolvedEquipmentLayer<'a>>,
         mut emissive: impl FnMut(&str) -> Option<MaterialBinding<'a>>,
     ) -> Vec<EquipmentMaterial<'a>> {
         let trim = trim.filter(|_| self.kind != "humanoid_baby");
         let mut foil = if trim.is_some() { 0 } else { self.overlay };
+        let mut last_model = None;
         let mut out = Vec::new();
-        for layer in self.layers {
-            let name = &layer.texture;
-            let color =
-                super::armor_stands::layer_color(layer.dyeable, layer.color_when_undyed, stack);
-            if color == 0 {
+        for (index, layer) in self.layers.iter().enumerate() {
+            let Some(ResolvedEquipmentLayer {
+                binding,
+                color,
+                model,
+                final_texture,
+            }) = resolve(index, layer)
+            else {
                 continue;
-            }
-            let Some(binding) = texture(name) else {
-                continue;
+            };
+            last_model = model;
+            let name = if final_texture {
+                binding.name
+            } else {
+                &layer.texture
             };
             out.push(EquipmentMaterial {
                 binding,
                 color,
                 overlay: foil,
                 glows: false,
+                model,
+                final_texture,
             });
             foil = 0;
             if let Some(binding) = emissive(name) {
@@ -225,6 +316,8 @@ impl EquipmentPiece<'_> {
                     color,
                     overlay: 0,
                     glows: true,
+                    model,
+                    final_texture,
                 });
             }
         }
@@ -234,6 +327,8 @@ impl EquipmentPiece<'_> {
                 color: 0xFFFF_FFFF,
                 overlay: self.overlay,
                 glows: false,
+                model: last_model,
+                final_texture: false,
             });
         }
         out
@@ -256,6 +351,7 @@ mod tests {
         EquipmentAssetLayer {
             texture: texture.into(),
             dyeable,
+            use_player_texture: false,
             color_when_undyed,
         }
     }
@@ -425,6 +521,7 @@ mod material_tests {
         ];
         let piece = EquipmentPiece {
             asset: "test:dyed".into(),
+            slot: ArmorSlot::Chest,
             kind: "humanoid",
             layers: &layers,
             overlay: 36,
@@ -469,6 +566,7 @@ mod material_tests {
         ];
         let mut piece = EquipmentPiece {
             asset: "test:custom".into(),
+            slot: ArmorSlot::Chest,
             kind: "humanoid",
             layers: &layers,
             overlay: 36,
