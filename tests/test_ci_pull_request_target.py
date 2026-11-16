@@ -3,6 +3,9 @@
 Such a job gets a token that can write and the repository's secrets, even for a fork's pull request. So every
 checkout in it is main's (`ref: main`, this repository), no step checks out or switches to another commit, and no
 step names the pull request's head or merge commit: its code is never on the runner as a working tree.
+
+The repository's Actions policy allows the event for these files by name only, so renaming one, or giving the
+event to another file, stops it running until the policy's list changes too.
 """
 import re
 import unittest
@@ -11,6 +14,8 @@ from pathlib import Path
 from tests.test_ci_concurrency import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
+# The files the repository's Actions policy lets run on pull_request_target; change it with the policy.
+POLICY_FILES = {"cancel-on-close.yml", "overlap-note.yml", "pr-labels.yml"}
 # A pull request's code, by name: its head commit or branch, its merge commit, or its refs.
 PULL_REQUEST_CODE = re.compile(r"pull_request\.head\.(sha|ref)\b|github\.head_ref\b|merge_commit_sha|refs/pull/|"
                                r"\bpull/(\d+|\$\{\{[^}]*\}\})/(head|merge)\b")
@@ -51,6 +56,9 @@ class PullRequestTargetTests(unittest.TestCase):
         for where, job in jobs:
             with self.subTest(job=where):
                 self.assertEqual(problems(job), [])
+
+    def test_only_the_files_the_actions_policy_names_use_pull_request_target(self):
+        self.assertEqual({where.split(" ", 1)[0] for where, _ in pull_request_target_jobs()}, POLICY_FILES)
 
     def test_a_checkout_of_the_pull_requests_head_is_refused(self):
         head = {"steps": [{"uses": "actions/checkout@v7",
