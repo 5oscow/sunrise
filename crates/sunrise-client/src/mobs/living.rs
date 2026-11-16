@@ -708,29 +708,34 @@ impl Mob {
             return Vec::new();
         }
         let area = area.inflate(Vec3::new(1.0e-7, 1.0e-7, 1.0e-7));
-        let mover = self.species();
-        let blocks = |s: &&super::Seen| {
-            s.id != self.id
-                && s.blocks_mob(mover)
-                && s.bounds.intersects(area)
-                && !self.passenger_of_same_vehicle(s.id, s.vehicle)
-        };
+        let mut boxes = Vec::new();
+        let solids = crate::entity_solids::Solids::new(
+            crate::entity_solids::Mover::Mob {
+                id: self.id,
+                happy_ghast: self.species() == super::Species::HappyGhast,
+                mount: self.extra.mount,
+            },
+            Some(area),
+        );
         match w.others_solid {
-            Some(slots) => slots
-                .iter()
-                .map(|&i| &w.others[i as usize])
-                .filter(blocks)
-                .map(|s| s.bounds)
-                .collect(),
-            None => w.others.iter().filter(blocks).map(|s| s.bounds).collect(),
+            Some(slots) => {
+                for &i in slots {
+                    let c = w.others[i as usize].solid_candidate();
+                    if solids.accepts(&c, || None) {
+                        boxes.push(c.bounds);
+                    }
+                }
+            }
+            None => {
+                for s in w.others.iter().filter(|s| s.may_block_mobs()) {
+                    let c = s.solid_candidate();
+                    if solids.accepts(&c, || None) {
+                        boxes.push(c.bounds);
+                    }
+                }
+            }
         }
-    }
-    /// `Entity.isPassengerOfSameVehicle` toward the entity `id` riding
-    /// `vehicle`: one rides the other, or both ride the same one.
-    fn passenger_of_same_vehicle(&self, id: u32, vehicle: Option<u32>) -> bool {
-        self.extra.mount == Some(id)
-            || vehicle == Some(self.id)
-            || (self.extra.mount.is_some() && vehicle == self.extra.mount)
+        boxes
     }
     pub fn do_move(
         &mut self,

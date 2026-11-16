@@ -7,6 +7,7 @@
 //! client predicts its own movement; the server stays authoritative for
 //! everything else.
 mod selector_metadata;
+use crate::game::collision_source::Mover;
 use selector_metadata::hurt_sound_for;
 mod attack_target;
 mod break_prediction;
@@ -6220,7 +6221,7 @@ impl Game<'_> {
         }
         self.tick_subtitles();
         self.tick_client_load();
-        let entity_collisions = self.player_entity_collisions();
+        let entity_collisions = self.entity_collisions(Mover::Player);
         // Those added before it tick before it: their pushes reach this move.
         let pushed = pushed_after.add_vector(self.remote_pushes(true));
         let sprint_window = self.settings.sprint_window;

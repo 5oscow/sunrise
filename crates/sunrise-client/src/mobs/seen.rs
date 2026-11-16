@@ -144,8 +144,32 @@ impl Seen {
             _ => false,
         }
     }
+    /// This snapshot as an obstacle for [`crate::entity_solids::Solids`].
+    pub fn solid_candidate(&self) -> crate::entity_solids::Candidate {
+        crate::entity_solids::Candidate {
+            id: self.id,
+            kind: solid_kind(self.species),
+            bounds: self.bounds,
+            alive: self.alive,
+            removed: self.removed,
+            baby: self.baby,
+            still: self.still,
+            carrying: self.carrying,
+            pushable: self.pushable,
+            mount: self.vehicle,
+        }
+    }
     /// `LivingEntity.hasEffect`, by id without namespace.
     pub fn has_effect(&self, effect: &str) -> bool {
         self.effects.contains(&effect)
+    }
+}
+/// How `canBeCollidedWith` tells a mob's species apart.
+pub(crate) fn solid_kind(species: Species) -> crate::entity_solids::SolidKind {
+    use crate::entity_solids::SolidKind;
+    match species {
+        Species::Shulker => SolidKind::Shulker,
+        Species::HappyGhast => SolidKind::HappyGhast,
+        _ => SolidKind::Mob,
     }
 }
