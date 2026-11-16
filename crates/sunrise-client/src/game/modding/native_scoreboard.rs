@@ -109,6 +109,7 @@ impl Game<'_> {
             .ok_or(ObjectiveError::Stale)?
             .name
             .clone();
+        self.journal_scoreboard();
         Ok(name)
     }
 
@@ -193,6 +194,7 @@ impl Game<'_> {
             return Err(ObjectiveError::Stale);
         }
         self.load_scoreboard();
+        self.journal_scoreboard();
         if self.score.board.objective(name).is_some() {
             return Err(ObjectiveError::NameTaken);
         }
@@ -239,6 +241,7 @@ impl Game<'_> {
                 if self.remote.is_some() {
                     return false;
                 }
+                self.journal_scoreboard();
                 None
             }
         };
@@ -521,7 +524,7 @@ impl Game<'_> {
 mod tests {
     use super::super::{lan::LanSettings, native_entity_refs::tests::with_game};
     use super::*;
-    use mod_api::{TeamColor, prelude::ScoreboardServerHost, text::TextStyle};
+    use mod_api::{HostTransaction, TeamColor, prelude::ScoreboardServerHost, text::TextStyle};
     use std::sync::{
         Arc,
         atomic::{AtomicI32, AtomicUsize},
@@ -739,6 +742,40 @@ mod tests {
             );
             assert!(!kills_again.remove(game));
             assert_eq!(renamed.score(game, ScoreHolder::Name("a".into())), None);
+            // An aborted transaction puts the board back; a committed one keeps its writes.
+            let before = game.score.board.clone();
+            let aborted: Result<(), ()> = game.transaction(|host, _| {
+                let temp = ScoreboardServerHost::add_objective(
+                    host,
+                    "temp",
+                    "dummy",
+                    text("T"),
+                    ObjectiveRenderType::Integer,
+                )
+                .map_err(|_| ())?;
+                temp.set_score(host, ScoreHolder::Name("p".into()), 4)
+                    .map_err(|_| ())?;
+                assert!(renamed.remove(host));
+                Err(())
+            });
+            assert!(aborted.is_err());
+            assert_eq!(game.score.board, before);
+            assert!(game.objective("temp").is_none());
+            assert_eq!(renamed.name(game).as_deref(), Some("kills"));
+            let kept: Result<(), ()> = game.transaction(|host, _| {
+                ScoreboardServerHost::add_objective(
+                    host,
+                    "temp",
+                    "dummy",
+                    text("T"),
+                    ObjectiveRenderType::Integer,
+                )
+                .map(|_| ())
+                .map_err(|_| ())
+            });
+            assert!(kept.is_ok());
+            assert!(game.objective("temp").is_some());
+
             // The command's removal makes a handle stale the same way.
             game.ui.registries.permission = 4;
             assert!(game.run_command("scoreboard objectives remove kills"));

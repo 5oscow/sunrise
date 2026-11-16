@@ -203,7 +203,7 @@ impl Game<'_> {
         }
     }
     /// The names commands complete: objectives, teams and tracked holders.
-    pub(super) fn sync_score_registries(&mut self) {
+    pub(in crate::game) fn sync_score_registries(&mut self) {
         let board = &self.score.board;
         let reg = &mut self.ui.registries;
         reg.objectives = board.objectives.iter().map(|o| o.name.clone()).collect();
