@@ -403,15 +403,23 @@ impl Game<'_> {
         vehicle: Target,
         force: bool,
     ) -> bool {
-        self.try_start_riding_target(rider, vehicle, force, false)
-            .is_ok()
+        self.try_start_riding_target(rider, vehicle, force).is_ok()
     }
 
-    /// `start_riding_target`, where `onto_player` admits a player vehicle for a mob rider:
-    /// only `entity_ride_player` passes true, so every other call keeps refusing one, as
-    /// vanilla's `startRiding` callers and `/ride` do. A refusal is named
-    /// (`StartRidingRefusal`): the bool of `start_riding_target` is `is_ok()` of this.
+    /// `start_riding_target` with its refusal named (`StartRidingRefusal`).
     pub(super) fn try_start_riding_target(
+        &mut self,
+        rider: Target,
+        vehicle: Target,
+        force: bool,
+    ) -> Result<(), StartRidingRefusal> {
+        self.try_start_riding_with(rider, vehicle, force, false)
+    }
+
+    /// `try_start_riding_target`, where `onto_player` admits a player vehicle for a mob rider:
+    /// only `entity_ride_player` passes true, so every other call keeps refusing one, as
+    /// vanilla's `startRiding` callers and `/ride` do.
+    pub(super) fn try_start_riding_with(
         &mut self,
         rider: Target,
         vehicle: Target,
@@ -427,7 +435,7 @@ impl Game<'_> {
             }
             return self
                 .for_player(rider, |game| {
-                    game.try_start_riding_target(Target::Player, vehicle, force, onto_player)
+                    game.try_start_riding_with(Target::Player, vehicle, force, onto_player)
                 })
                 .unwrap_or(Err(StartRidingRefusal::NoEntity));
         }
@@ -441,7 +449,7 @@ impl Game<'_> {
         if !allowed || self.native_vehicle_id(rider) != previous_vehicle {
             return Err(StartRidingRefusal::Canceled);
         }
-        self.native_riding_preconditions(rider, vehicle, force)?;
+        self.native_riding_preconditions(rider, vehicle, force, onto_player)?;
         if previous_vehicle.is_some() {
             match rider {
                 Target::Player => self.stop_riding(),
@@ -672,7 +680,7 @@ impl Game<'_> {
         let vehicle = self
             .native_entity_target(vehicle)
             .ok_or(StartRidingRefusal::NoEntity)?;
-        self.try_start_riding_target(rider, vehicle, force, false)
+        self.try_start_riding_target(rider, vehicle, force)
     }
 
     /// Gets the entity off its vehicle (`Entity.stopRiding`), where the

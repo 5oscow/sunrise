@@ -115,7 +115,7 @@ impl Game<'_> {
             }
         }
         if self
-            .try_start_riding_target(rider, vehicle, force, true)
+            .try_start_riding_with(rider, vehicle, force, true)
             .is_ok()
         {
             Ok(())
@@ -506,8 +506,14 @@ mod tests {
                 game.entity_ride_player(first, player, false),
                 Err(Refusal::CannotRide)
             );
-            assert!(!game.entity_start_riding(first, player, true));
-            assert!(!game.entity_start_riding(first, player, false));
+            assert_eq!(
+                game.entity_start_riding(first, player, true),
+                Err(mod_api::StartRidingRefusal::PlayerVehicle)
+            );
+            assert_eq!(
+                game.entity_start_riding(first, player, false),
+                Err(mod_api::StartRidingRefusal::PlayerVehicle)
+            );
             assert_eq!(game.entity_vehicle(first), None);
             assert_eq!(game.entity_ride_player(first, player, true), Ok(()));
             assert_eq!(game.entity_vehicle(first), Some(player));
