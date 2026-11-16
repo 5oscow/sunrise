@@ -1,4 +1,5 @@
 use super::*;
+pub(super) struct ItemUseTickHooks;
 impl ItemUseTickHooks {
     fn living_entity_use_item_tick(
         &self,
