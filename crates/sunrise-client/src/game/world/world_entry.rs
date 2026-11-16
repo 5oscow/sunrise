@@ -545,6 +545,7 @@ impl Game<'_> {
             .as_ref()
             .map_or_else(Vec::new, |t| t.data_maps.registries());
         self.install_block_maps();
+        self.install_fluid_interactions()?;
         self.install_profession_save_snapshots();
         self.share_mob_maps();
         sunrise_client::datapack_net::serve(self.mods.datapack_registries.clone());
@@ -604,6 +605,9 @@ impl Game<'_> {
             .as_ref()
             .map_or_else(Vec::new, |t| t.data_maps.registries());
         self.install_block_maps();
+        if let Err(error) = self.install_fluid_interactions() {
+            log::error!("Sunrise: {error}");
+        }
         self.install_profession_save_snapshots();
         self.share_mob_maps();
         self.world.pois.clear();
@@ -838,9 +842,9 @@ impl Game<'_> {
                 self.pack.assets.registry,
             );
         }
-        api_values::install_block_states(prepared.block_states);
+        api_values::install_block_states(&self.tick, prepared.block_states);
         native_world_read::install_block_tags(prepared.tags);
-        mod_api::__private::install_resolved_parts(prepared.parts);
+        api_values::install_resolved_parts(&self.tick, prepared.parts);
         self.resolve_block_paths();
         self.resolve_piston_reactions();
         self.resolve_primary_items();

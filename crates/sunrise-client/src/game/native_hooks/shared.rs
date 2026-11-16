@@ -4022,7 +4022,7 @@ mod tests {
             use crate::game::api_values::TryIntoApi;
             let written = game.with_level(|_, level, ticks| {
                 LevelWriteHost::set_block(
-                    &mut super::super::mod_api_host::LevelTicks { level, ticks },
+                    &mut super::super::mod_api_host::LevelTicks::new(level, ticks),
                     [5, 64, 0],
                     first.try_into_api().unwrap(),
                     BlockUpdateFlags::NONE,
@@ -5063,6 +5063,7 @@ mod item_fall_on_tests {
         sync: false,
     };
 
+    use mod_api::RandomSource as _;
     use sunrise_core::random::RandomSource as _;
 
     struct LoanPart(std::sync::Arc<()>);

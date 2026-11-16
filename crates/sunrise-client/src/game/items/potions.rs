@@ -2718,7 +2718,7 @@ impl Game<'_> {
     }
 }
 
-/// A mob's content mod effects tick in its own tick (`ai::tick_effects`).
+/// A mob's content mod effects tick in its own tick (`ai::tick_effects_hurting`).
 impl sunrise_client::mobs::ModEffectTicks for Game<'_> {
     fn tick_mod_effect(
         &self,

@@ -1928,6 +1928,7 @@ fn base_tick(
     // Entity.checkBelowWorld: LivingEntity.onBelowWorld hurts 4 a tick.
     if m.position.y < f64::from(w.world.bottom_y() - 64) {
         m.damage(level, 4.0, Damage::of(DamageKind::OutOfWorld));
+        hurt_teleports(m, w, events);
     }
     m.first_tick = false;
     if m.alive() {
@@ -1968,6 +1969,7 @@ fn base_tick(
             )
         {
             m.damage(level, 1.0, Damage::of(DamageKind::InWall));
+            hurt_teleports(m, w, events);
         }
         // Air supply and drowning (WaterAnimal.handleAirSupply for aquatic mobs).
         // Nautilus.baseTick: NoAI skips only the custom handler; the
@@ -2027,6 +2029,7 @@ fn base_tick(
                 });
                 if let Some(damage) = drowning.damage {
                     m.damage(level, damage, Damage::of(DamageKind::Drown));
+                    hurt_teleports(m, w, events);
                 }
             }
         }
@@ -2039,7 +2042,9 @@ fn base_tick(
     }
     super::hurt_by::base_tick(m, w);
     // LivingEntity.baseTick runs tickEffects after the timers count down.
-    tick_effects(m, w.loop_context, level, w.mod_effects);
+    tick_effects_hurting(m, w.loop_context, level, w.mod_effects, &mut |m| {
+        hurt_teleports(m, w, events)
+    });
     // Entity.applyEffectsFromBlocks runs in LivingEntity.aiStep, after
     // baseTick has counted the fire and the hurt timers down: a fire block or
     // lava ignites to the full 160 / 300 ticks and its hit lands after the
@@ -2055,7 +2060,7 @@ fn base_tick(
     };
     block_contact_damage(m, w, level, fire, lava);
     // Enderman.hurtServer and Shulker.hurtServer teleport inside the hurt
-    // (fire, lava, a block, an effect).
+    // (fire, lava, a block).
     hurt_teleports(m, w, events);
     if !m.alive() {
         m.death_time += 1;
@@ -3729,13 +3734,27 @@ pub fn custom_travel(
     }
 }
 
-/// MobEffect ticking for the effects mobs receive (poison, wither,
-/// regeneration), and a content mod's on a server.
+/// [`tick_effects_hurting`] with no hook, for the effect tests: a hurt it
+/// deals leaves its teleport pending.
+#[cfg(test)]
 pub(crate) fn tick_effects(
     m: &mut Mob,
     context: &LoopContext,
     level: &mut DamageLevel<'_>,
     mods: Option<&dyn super::ModEffectTicks>,
+) {
+    tick_effects_hurting(m, context, level, mods, &mut |_| {});
+}
+/// `LivingEntity.tickEffects`: each active effect's `MobEffectInstance.tickServer`.
+/// `after_effect` runs after each effect's tick, before its countdown, so a
+/// hurt the tick dealt finishes there: `Enderman.hurtServer` teleports inside
+/// the hurt, before the next effect's hurt draws (#1608).
+pub(crate) fn tick_effects_hurting(
+    m: &mut Mob,
+    context: &LoopContext,
+    level: &mut DamageLevel<'_>,
+    mods: Option<&dyn super::ModEffectTicks>,
+    after_effect: &mut dyn FnMut(&mut Mob),
 ) {
     // LivingEntity.tickEffects ticks each active effect with the mob's list
     // still in place: the damage a Poison or Wither tick deals reads the
@@ -3820,6 +3839,7 @@ pub(crate) fn tick_effects(
             }
             _ => {}
         }
+        after_effect(m);
         if m.extra.effects.get(i).is_some_and(|e| e.id == effect) {
             if !expired {
                 if let Some(hidden) = m.extra.effect_chains.iter_mut().find(|e| e.id == effect) {

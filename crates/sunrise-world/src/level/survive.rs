@@ -14,7 +14,8 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     /// `BlockState.canSurvive(level, pos)`.
     pub fn can_survive(&self, state: BlockStateId, pos: BlockPos) -> bool {
         let mut survives = None;
-        self.level.before_can_survive(pos, state, &mut survives);
+        self.level
+            .before_can_survive(&*self.ticks, pos, state, &mut survives);
         survives.unwrap_or_else(|| self.can_survive_at(0, state, pos))
     }
     fn can_survive_at(&self, depth: usize, state: BlockStateId, pos: BlockPos) -> bool {
@@ -215,7 +216,8 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             }
             Class::HangingMoss => {
                 let neighbour = self.above_state(pos);
-                b.multiface_can_attach(neighbour, Direction::Up) || b.is_block(neighbour, block)
+                self.multiface_can_attach_at(above(pos), Direction::Up)
+                    || b.is_block(neighbour, block)
             }
             Class::HangingRoots => self.sturdy(above(pos), Direction::Down),
             Class::Ladder => {
@@ -252,7 +254,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 let mut any = false;
                 for direction in Direction::ALL {
                     if self.multiface_has_face(state, direction) {
-                        if !b.multiface_can_attach(self.rel_state(pos, direction), direction) {
+                        if !self.multiface_can_attach_at(rel(pos, direction), direction) {
                             return Some(false);
                         }
                         any = true;
@@ -581,7 +583,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         let p = &b.props;
         let above_pos = above(pos);
         if b.table.bool(state, p.up) {
-            let accept = b.multiface_can_attach(self.state(above_pos), Direction::Down);
+            let accept = self.multiface_can_attach_at(above_pos, Direction::Down);
             state = b.table.set_bool(state, p.up, accept);
         }
         let mut above_state = None;
@@ -608,7 +610,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         if direction == Direction::Down {
             return false;
         }
-        if b.multiface_can_attach(self.rel_state(pos, direction), direction) {
+        if self.multiface_can_attach_at(rel(pos, direction), direction) {
             return true;
         }
         if direction == Direction::Up {

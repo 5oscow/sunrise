@@ -166,7 +166,8 @@ jobs:
     # The resolved commit names the job: what a scheduled run's lookup (daily_summary.py --seen) matches.
     name: summary ${{ needs.resolve.outputs.commit }}${{ needs.resolve.outputs.dry_run == 'true' && ' (dry run)' || '' }}
     needs: [resolve, shards, wasm-mods, fn-replace-check, linkage, windows-runtime-leases, machine-sample, sdk]
-    if: always() && needs.resolve.result == 'success' && needs.resolve.outputs.skip == 'false'
+    # Not on a cancelled run: its legs did not fail, they were stopped, and a stopped leg says nothing about the commit.
+    if: ${{ !cancelled() && needs.resolve.result == 'success' && needs.resolve.outputs.skip == 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -217,7 +218,7 @@ jobs:
   # closes it. The summary ran before the publish, so it cannot see it.
   sdk-publish-report:
     needs: [resolve, summary, sdk-publish]
-    if: always() && needs.summary.outputs.sdk_green == 'true' && needs.resolve.outputs.dry_run == 'false' && contains(fromJSON('["success", "failure", "cancelled"]'), needs.sdk-publish.result)
+    if: ${{ !cancelled() && needs.summary.outputs.sdk_green == 'true' && needs.resolve.outputs.dry_run == 'false' && contains(fromJSON('["success", "failure", "cancelled"]'), needs.sdk-publish.result) }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

@@ -160,6 +160,19 @@ pub trait ItemsClientHost {
     #[access(ClientSetup)]
     fn creative_search_items(&self) -> Vec<ItemStack>;
     /// Side: client.
+    /// The creative inventory's item tabs, each with the stacks it shows
+    /// (`CreativeModeTabs.tabs()`, `CreativeModeTab.getDisplayItems`), in tab order, and the
+    /// build's `hasPermissions` they were last built with. A tab's stacks keep their
+    /// components, are the ones the creative inventory shows (the operator items tab's only
+    /// when `has_permissions`), and include what mods add in `build_creative_mode_tab_contents`
+    /// once the tabs are built (the first time the creative inventory opens). Not the search,
+    /// saved toolbars or survival inventory tabs; [`creative_search_items`](Self::creative_search_items)
+    /// is the search tab's. The contents come from the game's prepared tab export, which is built
+    /// with vanilla's default feature flags: the build's feature set is not a world's. No tabs
+    /// before the game's resources load.
+    #[access(ClientSetup)]
+    fn creative_tabs(&self) -> CreativeModeTabs;
+    /// Side: client.
     /// Registered enchantments, in registry order.
     #[access(ClientSetup)]
     fn enchantments(&self) -> Vec<EnchantmentInfo>;

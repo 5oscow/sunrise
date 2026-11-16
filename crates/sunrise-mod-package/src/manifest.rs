@@ -703,7 +703,7 @@ pub fn source_file(name: &str) -> bool {
                 .any(|prefix| name.starts_with(prefix)))
 }
 
-fn plain_path(name: &str) -> bool {
+pub(crate) fn plain_path(name: &str) -> bool {
     !name.starts_with('/')
         && !name.contains(['\\', ':'])
         && !name

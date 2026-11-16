@@ -533,6 +533,16 @@ impl Game<'_> {
         let [x, y, z] = pos;
         world.is_loaded_at(x, y, z).then(|| world.block(x, y, z))
     }
+    /// `BlockState.isRedstoneConductor(level, pos)` of the block at `pos`. None for a stale
+    /// handle, a client or an unloaded `pos`.
+    pub(super) fn level_is_redstone_conductor(
+        &self,
+        level: LevelRef,
+        pos: [i32; 3],
+    ) -> Option<bool> {
+        let state = self.level_block_state(level, pos)?;
+        Some(self.res.behaviours().is_redstone_conductor(state))
+    }
     /// Preview a held tool's transformation without changing the block or stack. The existing
     /// block-tool hook fires with `simulated` true; listeners must not mutate the level in a
     /// simulation. The player must be live in the level in place, and the block must be loaded;
@@ -709,15 +719,16 @@ impl Game<'_> {
         self.native_level_read_world(level)
             .is_some_and(|w| w.is_loaded_at(pos[0], pos[1], pos[2]))
     }
-    /// The stored light of one layer at `pos` (`BlockAndLightGetter.getBrightness`), 0 to 15.
-    /// None as for `block_state`: a position that isn't loaded has no light to read.
+    /// The stored light of one layer at `pos` (`BlockAndLightGetter.getBrightness`), 0 to 15,
+    /// of the server's level or the one a client shows. None as for `block_state`: a position
+    /// that isn't loaded has no light to read.
     pub(super) fn level_brightness(
         &self,
         level: LevelRef,
         layer: LightLayer,
         pos: [i32; 3],
     ) -> Option<i32> {
-        let world = self.native_level_world(level)?;
+        let world = self.native_level_read_world(level)?;
         world
             .is_loaded_at(pos[0], pos[1], pos[2])
             .then(|| world_brightness(world, layer, pos))
@@ -725,6 +736,7 @@ impl Game<'_> {
     /// `BlockAndTintGetter.canSeeSky`: the sky light at `pos` is full. None as for
     /// `level_brightness`.
     pub(super) fn level_can_see_sky(&self, level: LevelRef, pos: [i32; 3]) -> Option<bool> {
+        self.native_level_world(level)?;
         Some(self.level_brightness(level, LightLayer::Sky, pos)? >= 15)
     }
     /// `LevelLightEngine.checkBlock` at `pos`, queued with the level's light edits: the next

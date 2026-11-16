@@ -77,6 +77,9 @@ pub use trim::Trim;
 pub struct StackData {
     /// An explicit zero damage component overriding a damaged prototype.
     damage_set: bool,
+    /// An explicit empty `minecraft:banner_patterns`: the component is set
+    /// (and saved) though `banner_patterns` holds no layer.
+    banner_patterns_set: bool,
     /// `minecraft:enchantments`.
     pub enchantments: Levels,
     /// `minecraft:stored_enchantments` (enchanted books).
@@ -269,7 +272,9 @@ impl StackData {
             "minecraft:potion_contents" => self.potion.is_some() || !self.potion_extra.is_empty(),
             "minecraft:trim" => self.trim.is_some(),
             "minecraft:map_id" => self.map_id.is_some(),
-            "minecraft:banner_patterns" => self.ominous_banner || !self.banner_patterns.is_empty(),
+            "minecraft:banner_patterns" => {
+                self.ominous_banner || self.banner_patterns_set || !self.banner_patterns.is_empty()
+            }
             "minecraft:base_color" => self.base_color.is_some(),
             "minecraft:writable_book_content" => !self.writable_pages.is_empty(),
             "minecraft:written_book_content" => self.written.is_some(),
@@ -307,6 +312,7 @@ impl StackData {
             // from `banner_patterns`, not from a tag in `other`.
             "minecraft:banner_patterns" => {
                 self.banner_patterns = crate::banner_layer::layers_from_nbt(tag.as_ref());
+                self.banner_patterns_set = tag.is_some() && self.banner_patterns.is_empty();
             }
             // `set_book_cover` (and `set_components`) write the book's title,
             // author, generation and pages as one component: the fields the
@@ -320,6 +326,11 @@ impl StackData {
             // The scalar lives on ItemStack; retain explicit zero presence here
             // so a non-durable prototype can carry its own durability.
             "minecraft:damage" => {
+                if tag.is_none() {
+                    // A removal: the stack's own damage is gone (its scalar is
+                    // zeroed by the caller that owns it).
+                    self.damage_set = false;
+                }
                 self.explicit_zero_damage = tag.as_ref().is_some_and(|value| {
                     sunrise_world::datafix::dynamic::as_int(Some(value), 0) == 0
                 });
@@ -1234,6 +1245,14 @@ pub fn canon_stack(stack: Option<&ItemStack>) -> String {
         |s| canon_tag(&crate::item_nbt::item_to_nbt(s)),
     )
 }
+/// Canonical saved stack using the world's loaded item prototypes.
+pub fn canon_stack_with_items(stack: Option<&ItemStack>, items: &crate::items::Items) -> String {
+    stack.map_or_else(
+        || "-".to_owned(),
+        |stack| canon_tag(&crate::item_nbt::item_to_nbt_with_items(stack, items)),
+    )
+}
+
 /// The stack of an SNBT `ItemStack.CODEC` compound; None for "-".
 pub fn parse_stack(snbt: &str) -> Result<Option<ItemStack>, String> {
     if snbt == "-" {
@@ -1338,27 +1357,22 @@ fn encode_stack_components(stack: &ItemStack, include_damage: bool) -> Option<Ta
 /// Context-free callers and the live `components_tag` view stay unchanged.
 pub fn encode_components_with_items(stack: &ItemStack, items: &crate::items::Items) -> Option<Tag> {
     let mut components = encode_components(stack)?;
-    let Some(prototype) = items.get(&stack.item) else {
+    let Some(prototype) = items.component_defaults.get(stack.item.as_ref()) else {
         return Some(components);
     };
-    // PatchedDataComponentMap.set removes values equal to the prototype.
-    let same_stack_size = prototype
-        .components
-        .iter()
-        .any(|id| id == "minecraft:max_stack_size")
-        && matches!(components.get("minecraft:max_stack_size"), Some(Tag::Int(size))
-            if *size > 0 && *size as u32 == prototype.max_stack);
-    // A durable prototype carries DAMAGE 0 (`Item.Properties.durability`), so the
-    // explicit zero `components_tag` keeps for a stack-declared MAX_DAMAGE equals it.
-    let same_damage =
-        prototype.max_damage > 0 && matches!(components.get("minecraft:damage"), Some(Tag::Int(0)));
+    let Some(info) = items.get(&stack.item) else {
+        return Some(components);
+    };
+    // Equality belongs to the component codec, not its saved NBT numeric width.
     if let Tag::Compound(entries) = &mut components {
-        if same_stack_size {
-            entries.remove(&JavaString::from("minecraft:max_stack_size"));
-        }
-        if same_damage {
-            entries.remove(&JavaString::from("minecraft:damage"));
-        }
+        entries.retain(|id, _| {
+            !prototype.contains_key(id)
+                || !ingredient_components::component_equal(
+                    &id.to_string_lossy(),
+                    stack,
+                    &info.component_prototype,
+                )
+        });
         if entries.is_empty() {
             return None;
         }
@@ -1426,7 +1440,7 @@ fn components_tag_inner(
         if let Some(id) = d.map_id {
             entries.push(("minecraft:map_id", Tag::Int(id)));
         }
-        if !d.banner_patterns.is_empty() {
+        if !d.banner_patterns.is_empty() || d.banner_patterns_set {
             entries.push((
                 "minecraft:banner_patterns",
                 crate::banner_layer::layers_to_nbt(&d.banner_patterns),
@@ -1708,6 +1722,7 @@ pub fn decode_components(components: Option<&Tag>) -> (u32, Option<Box<StackData
             .map(crate::kinetic_weapon::KineticComponent::new),
         map_id: seen.map_id.and_then(crate::properties::component_int),
         banner_patterns: crate::banner_layer::layers_from_nbt(c.get("minecraft:banner_patterns")),
+        banner_patterns_set: matches!(c.get("minecraft:banner_patterns"), Some(Tag::List(l)) if l.is_empty()),
         base_color: c
             .get("minecraft:base_color")
             .and_then(string)
@@ -2329,6 +2344,50 @@ mod tests {
             assert_eq!(encode_components(&fresh), Some(expected.clone()));
             assert!(fresh.data().unwrap().map_id.is_none());
         }
+    }
+
+    fn prototype_items() -> &'static crate::items::Items {
+        static ITEMS: std::sync::OnceLock<crate::items::Items> = std::sync::OnceLock::new();
+        ITEMS.get_or_init(|| {
+            let root = std::env::temp_dir().join(format!("sunrise-prototypes-{}", std::process::id()));
+            std::fs::create_dir_all(root.join("data/minecraft/loot_table")).unwrap();
+            std::fs::write(root.join("items.json"), r#"{"minecraft:red_banner":{"minecraft:banner_patterns":[]},"minecraft:diamond_pickaxe":{"minecraft:damage":0}}"#).unwrap();
+            let defaults = sunrise_world::item_defaults::read(&root).unwrap();
+            let items = crate::items::Items::catalog(&root, &sunrise_world::loot::PackOverlay::NONE, &defaults).unwrap();
+            std::fs::remove_dir_all(root).unwrap();
+            items
+        })
+    }
+
+    #[test]
+    fn saved_empty_banner_patterns_equal_the_loaded_prototype() {
+        let stack = parse_stack(
+            r#"{id:"minecraft:red_banner",count:1,components:{"minecraft:banner_patterns":[]}}"#,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            crate::item_nbt::item_to_nbt_with_items(&stack, prototype_items()),
+            sunrise_core::nbt::parse_snbt(r#"{id:"minecraft:red_banner",count:1}"#)
+                .unwrap()
+                .0
+        );
+    }
+
+    #[test]
+    fn saved_zero_damage_equals_the_loaded_prototype() {
+        let stack = parse_stack(r#"{id:"minecraft:diamond_pickaxe",count:1,components:{"minecraft:damage":0,"minecraft:custom_data":{keep:87}}}"#).unwrap().unwrap();
+        assert_eq!(crate::item_nbt::item_to_nbt_with_items(&stack, prototype_items()), sunrise_core::nbt::parse_snbt(r#"{id:"minecraft:diamond_pickaxe",count:1,components:{"minecraft:custom_data":{keep:87}}}"#).unwrap().0);
+    }
+
+    #[test]
+    fn saved_mod_item_without_a_prototype_retains_its_components() {
+        let source = r#"{id:"example:tool",count:1,components:{"minecraft:damage":0,"minecraft:banner_patterns":[],"example:counter":0}}"#;
+        let stack = parse_stack(source).unwrap().unwrap();
+        assert_eq!(
+            crate::item_nbt::item_to_nbt_with_items(&stack, prototype_items()),
+            sunrise_core::nbt::parse_snbt(source).unwrap().0
+        );
     }
 
     #[test]
@@ -3070,6 +3129,10 @@ mod tests {
             map_id: c.get("minecraft:map_id").and_then(int).map(|v| v as i32),
             banner_patterns: crate::banner_layer::layers_from_nbt(
                 c.get("minecraft:banner_patterns"),
+            ),
+            banner_patterns_set: matches!(
+                c.get("minecraft:banner_patterns"),
+                Some(Tag::List(l)) if l.is_empty()
             ),
             base_color: c
                 .get("minecraft:base_color")

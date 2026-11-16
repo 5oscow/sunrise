@@ -42,6 +42,10 @@ to end the scan immediately, even if the answer equals the node's current type. 
 `None` to retain that neighbour's fluid and vanilla contribution. Neighbours are visited
 in x, y, z order, each from -1 to 1, excluding the node's own column. No mob is supplied
 to either query. A panicking callback is contained and falls back to the default.
+Vanilla water contributes through its classified path type, so a solid waterlogged
+block remains `Blocked` rather than producing `WaterBorder`. Custom fluids keep
+their default `WaterBorder` contribution. This deliberately differs from NeoForge's
+raw-water default to preserve exact vanilla behavior for vanilla content.
 
 ## Connections
 
@@ -117,7 +121,25 @@ preserves the requested resource-drop flag.
 
 `BlockPart::contents_changed(host, event)` observes a world block's storage at `setChanged`,
 with a `ServerHost`, typed `event.level`, `event.pos: BlockPos` and `event.state`. Attach it to the specific
-blocks you observe, including vanilla containers; it has no global `Hooks` counterpart. The backing
+blocks you observe, including vanilla containers; it has no global `Hooks` counterpart.
+Hook version 2 also lets an automation block entity watch another position without polling or
+attaching Parts to every possible source block type. Its Part calls
+`observer.watch_contents(host, source_pos, true)` on its live `BlockEntityRef`; false unregisters.
+The source is in the observer's level and need not be loaded. Registration is idempotent and
+joins the current transaction: abort restores the previous watches. An observer without a
+subscribing BlockPart returns `ContentsWatchError::NotSubscribed`; a stale or unwritable
+observer returns `Stale`. A block entity temporarily taken for its own tick can still register.
+
+`event.observer` is `None` for the source's own Parts and `Some(observer)` for a watcher.
+The event's level, position and state **always describe the changed source**, not the observer.
+Source Parts run first, then a snapshot of watching observers in registration order, each one's
+subscribing Parts in their usual order. Registration changes made in a callback affect the next
+notice; an observer invalidated before its turn is skipped. A self-watch never duplicates the
+source callback. Removal, replacement and chunk unload discard the observer's watches. Reload
+alone does not restore them: the Part must call `watch_contents` again. Watches are runtime
+state, never saved. Unloading the source does not cancel watches of its position.
+
+The backing
 contents are already written, before dirty/comparator updates. Game-held vanilla container writes
 coalesce their implicit notice per backing block at root commit. Explicit `BlockEntityRef::set_changed`
 notifies immediately, even inside a transaction and for unchanged contents; abort does not retract
