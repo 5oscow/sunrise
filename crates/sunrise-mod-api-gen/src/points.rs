@@ -943,6 +943,12 @@ fn place_items(places: &[(String, String, mod_surface::call::Name)]) -> proc_mac
             pub fn named(name: &str) -> Option<PointId> {
                 match name { #(#names => Some(PointId::#variants),)* _ => None }
             }
+            /// The place at `index` in the catalog, which is `Place::index`.
+            #[doc(hidden)]
+            pub fn from_index(index: usize) -> Option<PointId> {
+                const ALL: &[PointId] = &[#(PointId::#variants),*];
+                ALL.get(index).copied()
+            }
             /// The place fired by `id`.
             #[doc(hidden)]
             pub fn by_id(id: u64) -> Option<PointId> {
