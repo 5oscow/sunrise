@@ -10,6 +10,37 @@ const STAND: i32 = 21;
 
 /// A stand with arms at the origin and a guest acting on it, holding an iron helmet.
 fn set_up(game: &mut Game<'_>) {
+    // The command service requires an open server, not just dedicated options.
+    game.lan_host(
+        crate::game::lan::LanSettings {
+            port: 0,
+            guest_commands: false,
+            force_game_mode: false,
+        },
+        sunrise_client::lan::NetConfig {
+            listen: false,
+            announce: false,
+            lod_distance: 0,
+            ..sunrise_client::lan::NetConfig::lan(0, String::new(), 2)
+        },
+        sunrise_client::lan::hub::HubConfig {
+            default_game_mode: 0,
+            guest_commands: false,
+            force_game_mode: false,
+            hardcore: false,
+            view_distance: 2,
+            simulation_distance: 2,
+            dimension: game.dim.id().to_owned(),
+            allow_flight: true,
+            seed: 0,
+            max_players: 2,
+            integrated: true,
+            levels: game.level_shapes,
+            level_seeds: game.levels.runtime.seeds(),
+        },
+    )
+    .unwrap();
+    game.build_registries();
     let mut stand = ArmorStand::new(STAND as u32, Vec3::new(0.5, 64.0, 0.5), 0.0);
     stand.show_arms = true;
     game.armor_stands.push(stand);
