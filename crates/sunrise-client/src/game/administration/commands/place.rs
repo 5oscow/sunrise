@@ -103,6 +103,26 @@ impl Game<'_> {
         }
         Ok(())
     }
+    /// `Feature.place` (or `PlacedFeature.place` when `placed`) of the feature
+    /// `name` at `at` with the level random, then the level events it raised:
+    /// the one placement `/place feature` and a server mod's host call share.
+    /// `None` when the feature is unknown or cannot run, or its events fail.
+    pub(in crate::game) fn place_named_feature(
+        &mut self,
+        name: &str,
+        at: BlockPos,
+        placed: bool,
+    ) -> Option<bool> {
+        let placed = self.with_level(|b, level, ticks| {
+            if placed {
+                b.place_placed_feature(level, ticks, name, at)
+            } else {
+                b.place_feature(level, ticks, name, at)
+            }
+        })?;
+        self.process_level_events().ok()?;
+        Some(placed)
+    }
     /// `PlaceCommand.placeFeature`, `placeJigsaw` and `placeStructure`.
     pub(super) fn cmd_place_generated(&mut self, id: &str, ctx: &Context) -> R<i32> {
         match id {
@@ -145,10 +165,8 @@ impl Game<'_> {
                 };
                 let at = sunrise_core::position::BlockPos::new(pos[0], pos[1], pos[2]);
                 let placed = self
-                    .with_level(|b, level, ticks| b.place_feature(level, ticks, &name, at))
+                    .place_named_feature(&name, at, false)
                     .ok_or_else(|| err("command.failed", &[]))?;
-                self.process_level_events()
-                    .map_err(|_| err("command.failed", &[]))?;
                 if !placed {
                     return Err(err("commands.place.feature.failed", &[]));
                 }

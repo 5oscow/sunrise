@@ -115,4 +115,28 @@ pub trait WorldEditServerHost {
         rotation: StructureRotation,
         mirror: StructureMirror,
     ) -> Result<(), String>;
+    /// Side: server.
+    /// For a server mod: the feature `id` (an entry of `minecraft:worldgen/feature`,
+    /// a feature type with its settings) placed at `at` with the level's generator
+    /// and random, as `/place feature` places it, by the one placement the command
+    /// uses. `Ok(true)` or `Ok(false)` is the feature's own answer that it placed
+    /// something; a false answer does not promise that no block was written, as
+    /// some feature types write before they decide they failed. Blocks reach
+    /// players through the level's ordinary block changes. `Err` says why nothing
+    /// was placed: an id the registry doesn't have, a client of a server, or any
+    /// of the 3 by 3 chunks around `at` not loaded, as the command refuses. A
+    /// feature may write beyond that area, as far as its own size allows.
+    /// API @API:place_feature@.
+    #[access(WorldOnly)]
+    fn place_feature(&mut self, id: &str, at: [i32; 3]) -> Result<bool, String>;
+    /// Side: server.
+    /// For a server mod: the placed feature `id` (an entry of
+    /// `minecraft:worldgen/placed_feature`) placed at `at`: its placement modifiers
+    /// run in order from `at`, depth first, and its feature is placed at every
+    /// position they give. `Ok(true)` if any placement answered true; no modifier
+    /// position gives `Ok(false)`. There is no biome check from code, so a biome
+    /// filter modifier passes. Answers and refusals as `place_feature`.
+    /// API @API:place_feature@.
+    #[access(WorldOnly)]
+    fn place_placed_feature(&mut self, id: &str, at: [i32; 3]) -> Result<bool, String>;
 }

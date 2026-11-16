@@ -246,6 +246,43 @@ fn a_tree_with_bees_fills_its_nest() {
     );
 }
 #[test]
+fn a_placed_feature_runs_its_modifiers_before_the_feature() {
+    let Some(f) = fixture() else { return };
+    let origin = BlockPos::new(0, 64, 0);
+    // `oak_checked` is `oak` behind a `would_survive` filter for an oak sapling.
+    let mut soil = World::new(f, 3);
+    soil.floor("dirt", 12);
+    let placed = f.behaviours.place_placed_feature(
+        &mut soil.level,
+        &mut soil.ticks,
+        "minecraft:oak_checked",
+        origin,
+    );
+    assert_eq!(placed, Some(true));
+    assert!(soil.count("oak_log") > 0);
+    let mut bare = World::new(f, 3);
+    bare.floor("stone", 12);
+    let placed = f.behaviours.place_placed_feature(
+        &mut bare.level,
+        &mut bare.ticks,
+        "minecraft:oak_checked",
+        origin,
+    );
+    assert_eq!(
+        placed,
+        Some(false),
+        "no soil: the filter leaves no position"
+    );
+    assert_eq!(bare.count("oak_log"), 0);
+    let unknown = f.behaviours.place_placed_feature(
+        &mut bare.level,
+        &mut bare.ticks,
+        "mymod:nothing",
+        origin,
+    );
+    assert_eq!(unknown, None);
+}
+#[test]
 fn single_saplings_grow() {
     grow("birch_sapling", "dirt", &[(0, 0)], "birch_log");
     grow("spruce_sapling", "dirt", &[(0, 0)], "spruce_log");
