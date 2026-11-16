@@ -9,7 +9,7 @@ pub(super) fn overlay_map(overlay: &PackOverlay, kind: &str, out: &mut HashMap<S
         };
         out.insert(id.to_owned(), v);
     }
-    // Only a loot table's pool entries carry their own conditions (#1381).
+    // Only a loot table's pools carry their own conditions (#1381).
     out.retain(|id, value| match kind {
         "loot_table" => overlay.conditions.admit_loot_table(value, id),
         _ => overlay.conditions.allows_id(value, kind, id),
@@ -52,42 +52,37 @@ mod tests {
         out.remove("demo:file").expect("the file loads")
     }
 
-    /// #1381: a loot table's pool entries carry their own conditions: a failing
-    /// entry is dropped and a passing one loses the key; other lists of the
-    /// table (an entry's `children`, a pool's `functions`) keep it as data, as
-    /// the issue's contract names loot pool entries only.
+    /// #1381: a loot table's pools carry their own conditions: a failing pool
+    /// is dropped and a passing one loses the key. A pool's `entries` and
+    /// `functions` and an entry's `children` are plain lists: their key stays as
+    /// data, never evaluated, even naming an unknown condition.
     #[test]
-    fn a_loot_tables_pool_entries_are_filtered_and_nothing_else() {
+    fn a_loot_tables_pools_are_filtered_and_nothing_else() {
         let unknown = json!([{"type": "absent:condition"}]);
         let create = json!([{"type": "neoforge:mod_loaded", "modid": "create"}]);
         let ic2 = json!([{"type": "neoforge:mod_loaded", "modid": "ic2"}]);
+        let inner = json!({
+            "entries": [
+                {"type": "minecraft:item", "name": "ic2:tin", "neoforge:conditions": unknown},
+                {"type": "minecraft:alternatives", "children": [
+                    {"type": "minecraft:item", "name": "minecraft:stick", "neoforge:conditions": unknown}
+                ]}
+            ],
+            "functions": [{"function": "minecraft:set_count", "count": 2, "neoforge:conditions": unknown}]
+        });
+        let pool = |rolls: i32, conditions: Option<&Value>| {
+            let mut pool = inner.clone();
+            pool["rolls"] = json!(rolls);
+            if let Some(conditions) = conditions {
+                pool["neoforge:conditions"] = conditions.clone();
+            }
+            pool
+        };
         let table = read(
             "loot_table",
-            json!({"pools": [{
-                "rolls": 1,
-                "entries": [
-                    {"type": "minecraft:item", "name": "create:zinc", "neoforge:conditions": create},
-                    {"type": "minecraft:item", "name": "ic2:tin", "neoforge:conditions": ic2},
-                    {"type": "minecraft:alternatives", "children": [
-                        {"type": "minecraft:item", "name": "minecraft:stick", "neoforge:conditions": unknown}
-                    ]}
-                ],
-                "functions": [{"function": "minecraft:set_count", "count": 2, "neoforge:conditions": unknown}]
-            }]}),
+            json!({"pools": [pool(1, Some(&create)), pool(2, Some(&ic2)), pool(3, None)]}),
         );
-        assert_eq!(
-            table,
-            json!({"pools": [{
-                "rolls": 1,
-                "entries": [
-                    {"type": "minecraft:item", "name": "create:zinc"},
-                    {"type": "minecraft:alternatives", "children": [
-                        {"type": "minecraft:item", "name": "minecraft:stick", "neoforge:conditions": unknown}
-                    ]}
-                ],
-                "functions": [{"function": "minecraft:set_count", "count": 2, "neoforge:conditions": unknown}]
-            }]})
-        );
+        assert_eq!(table, json!({"pools": [pool(1, None), pool(3, None)]}));
     }
 
     /// #1381: in a predicate, an item modifier, an enchantment or a recipe, a
