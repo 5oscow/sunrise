@@ -1,39 +1,38 @@
-//! `#[derive(Wire)]` in a module whose own items shadow the prelude's names (#1510): the derived
-//! code names the standard types, constructors and macros from the crate roots, so it compiles
-//! and round-trips there as anywhere.
+//! `#[derive(Wire)]` in a module without the implicit prelude (#1510): the derived code names
+//! the standard types, constructors and macros from the crate roots, so it compiles and
+//! round-trips where none of the prelude's names are in scope. `no_implicit_prelude` leaves
+//! the standard macros reachable, so the module shadows the ones the derive could use.
 use mod_api::wire::{Reader, Writer};
 
-mod shadowed {
-    #![allow(dead_code, unused_macros)]
-    pub struct Vec;
-    pub struct Option;
-    pub struct Result;
-    pub struct Some;
-    pub struct Ok;
-    pub struct Err;
+#[no_implicit_prelude]
+mod bare {
+    // Never expanded: a bare `vec!`, `stringify!` or `unreachable!` in derived code would hit these.
+    #[allow(unused_macros)]
     macro_rules! vec {
         ($($any:tt)*) => {
-            compile_error!("the prelude's vec! is shadowed here")
+            ::core::compile_error!("derived code used the bare vec!")
         };
     }
+    #[allow(unused_macros)]
     macro_rules! stringify {
         ($($any:tt)*) => {
-            compile_error!("the prelude's stringify! is shadowed here")
+            ::core::compile_error!("derived code used the bare stringify!")
         };
     }
+    #[allow(unused_macros)]
     macro_rules! unreachable {
         ($($any:tt)*) => {
-            compile_error!("the prelude's unreachable! is shadowed here")
+            ::core::compile_error!("derived code used the bare unreachable!")
         };
     }
 
-    #[derive(Debug, PartialEq, mod_api::Wire)]
+    #[derive(Debug, PartialEq, ::mod_api::Wire)]
     pub struct Record {
         pub count: u32,
         pub names: ::std::vec::Vec<::std::string::String>,
     }
 
-    #[derive(Debug, PartialEq, mod_api::Wire)]
+    #[derive(Debug, PartialEq, ::mod_api::Wire)]
     pub enum Shape {
         Empty,
         Sized(u32),
@@ -42,8 +41,8 @@ mod shadowed {
 }
 
 #[test]
-fn derive_round_trips_where_the_prelude_names_are_shadowed() {
-    use shadowed::{Record, Shape};
+fn derive_round_trips_without_the_implicit_prelude() {
+    use bare::{Record, Shape};
     for value in [
         Shape::Empty,
         Shape::Sized(7),
