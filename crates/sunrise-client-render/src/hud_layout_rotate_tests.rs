@@ -1,6 +1,8 @@
 //! `PoseOp::Rotate` against JOML's `Matrix3x2f.rotate` (what `Matrix3x2fStack.rotate` runs):
 //! quarter turns, composition with `Translate` and `Scale` in vanilla's order, nested
 //! `Push` / `Pop`, text following the turn, and a non-finite angle refused.
+// The expected matrices spell JOML's products term by term, factors of -1 included.
+#![allow(clippy::neg_multiply)]
 use super::{GuiDraw, IDENTITY, Pose, PoseOp, paint, pose_apply, pose_refused};
 use crate::hud::{HudAtlas, HudBatch};
 use std::f32::consts::{FRAC_PI_2, PI};

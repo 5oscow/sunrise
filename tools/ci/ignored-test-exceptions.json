@@ -1150,5 +1150,13 @@
     "path": "crates/sunrise-world/tests/it/world_io.rs",
     "reason": "microbenchmark; run with --ignored --nocapture",
     "rationale": "Existing explicit manual runner by-hand in tools/ci/ignored-tests/manual-sunrise-world.txt: microbenchmark; run with --ignored --nocapture. Not selected by daily shards."
+  },
+  {
+    "package": "sunrise-client",
+    "target": "lib",
+    "test": "game::native_special_renderers::cost_tests::special_item_draw_cost",
+    "path": "crates/sunrise-client/src/game/modding/native_special_renderers/cost_tests.rs",
+    "reason": "measurement; needs SUNRISE_TEST_RESOURCES",
+    "rationale": "Existing explicit manual runner by-hand in tools/ci/ignored-tests/manual-sunrise-client.txt: the per-draw cost table in docs/performance/special-item-renderers.md, run by hand with SUNRISE_TEST_RESOURCES, --profile fast --ignored --nocapture. Not selected by daily shards."
   }
 ]
