@@ -25,6 +25,8 @@ pub trait Hooks {
     /// Selection and application share the answer, including cloned motion snapshots.
     /// A scale change during movement, or a replay with a different vanilla-size key,
     /// uses vanilla for that fit decision until the next pre-motion resolution.
+    /// Uncached fall-flying, sleeping and spin-attack candidates keep vanilla's box.
+    /// Candidate resolution dispatches 2–3 times per player tick with subscribers, never without.
     #[hook(
         side = "both",
         version = 2,
