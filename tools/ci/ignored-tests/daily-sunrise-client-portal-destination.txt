@@ -1,0 +1,1 @@
+sunrise-client game::native_portal_destination::tests::a_portal_is_asked_where_it_leads_and_find_or_create_builds_its_exit lib daily resources

@@ -768,6 +768,23 @@ pub trait LevelsBackend {
     /// height. Constant time, no allocation.
     #[access(WorldOnly)]
     fn level_capability_generation(&self, level: LevelRef, pos: [i32; 3]) -> Option<u64>;
+    /// Side: server.
+    /// Where an entity of box `size` (width, height), not a player, centred in the portal block
+    /// at `portal_pos` of this level and facing `facing`, arrives through it
+    /// (`getPortalDestination`), changing nothing. Nether portals search the closest portal
+    /// around the scaled, border-clamped exit; End portals answer the End's fixed spawn point or
+    /// the Overworld's shared spawn; End gateways answer their stored exit. No platform, ticket,
+    /// sound or hook. Diverges from vanilla, which loads chunks: loaded state only, and
+    /// `ChunksNotLoaded` for a level not open or a chunk of the search (16 blocks into the
+    /// Nether, 128 out, plus a chunk) not loaded.
+    #[access(WorldOnly)]
+    fn level_portal_destination(
+        &self,
+        level: LevelRef,
+        portal_pos: [i32; 3],
+        facing: Direction,
+        size: [f64; 2],
+    ) -> Result<PortalExit, PortalError>;
 }
 /// The handles' writes of the `levels` area, implemented by the game and reached through [`BackendMut`].
 // hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
@@ -1559,6 +1576,21 @@ pub trait LevelsBackendMut {
         pos: [i32; 3],
         source: BlockState,
     ) -> Result<bool, LevelWriteError>;
+    /// Side: server.
+    /// `LevelRef::portal_destination`, then the exit portal built by `PortalForcer.createPortal`
+    /// (the spiral search, obsidian frame and the entry's axis) when none was found, with the
+    /// `portal_create` hook told as for travel, which cannot veto it. Refused inside a transaction
+    /// (`InTransaction`): a built portal cannot be rolled back. Needs the chunks around the
+    /// built exit loaded (`ChunksNotLoaded`); opens no level. `NoExit` when none was found and
+    /// none could be built.
+    #[access(WorldOnly)]
+    fn level_find_or_create_portal_exit(
+        &mut self,
+        level: LevelRef,
+        portal_pos: [i32; 3],
+        facing: Direction,
+        size: [f64; 2],
+    ) -> Result<PortalExit, PortalError>;
     /// Side: server.
     /// Replace the random of the server level `level` names with `random`,
     /// a stream `native_level_random` gave and the mod drew from. False where
