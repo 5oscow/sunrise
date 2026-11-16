@@ -1235,8 +1235,11 @@ pub trait LevelsBackendMut {
     /// Side: server.
     /// Plays sound event `sound` at `at` for the players in this level
     /// within range (16 blocks, times the volume above 1), as
-    /// `ServerLevel.playSound(null, ...)` does, under `source`'s volume
-    /// slider. A `minecraft:` event must be registered; a mod's goes by name
+    /// `ServerLevel.playSound(except, ...)` does, under `source`'s volume
+    /// slider. `except` leaves that player out (a client that already played the sound itself
+    /// for its own action); None plays it to everyone, as `playSound(null, ...)`. A fake player
+    /// has no client to leave out, so it excludes no one; a stale or client-side `except` queues
+    /// nothing. A `minecraft:` event must be registered; a mod's goes by name
     /// and is heard where its resources define it. True means queued, not
     /// heard.
     #[access(WorldOnly)]
@@ -1248,6 +1251,7 @@ pub trait LevelsBackendMut {
         source: SoundSource,
         volume: f32,
         pitch: f32,
+        except: Option<PlayerRef>,
     ) -> bool;
     /// Side: server.
     /// Sends `count` particles around `at` to the players in this level
