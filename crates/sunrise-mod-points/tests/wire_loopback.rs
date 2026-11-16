@@ -222,7 +222,7 @@ fn malformed_writeback_is_atomic() {
 static __REPLACE: [std::sync::atomic::AtomicPtr<()>; 2] =
     [const { std::sync::atomic::AtomicPtr::new(std::ptr::null_mut()) }; 2];
 fn __fnr_read_slot_0() -> Option<fn(f32, usize) -> f32> {
-    let pointer = crate::__REPLACE[0].load(std::sync::atomic::Ordering::Relaxed);
+    let pointer = crate::__REPLACE[0].load(std::sync::atomic::Ordering::Acquire);
     if pointer.is_null() {
         None
     } else {
@@ -230,7 +230,7 @@ fn __fnr_read_slot_0() -> Option<fn(f32, usize) -> f32> {
     }
 }
 fn __fnr_read_body_0() -> Option<fn(f32, usize) -> f32> {
-    let pointer = crate::__REPLACE[1].load(std::sync::atomic::Ordering::Relaxed);
+    let pointer = crate::__REPLACE[1].load(std::sync::atomic::Ordering::Acquire);
     if pointer.is_null() {
         None
     } else {
