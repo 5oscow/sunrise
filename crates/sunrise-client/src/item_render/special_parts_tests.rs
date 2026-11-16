@@ -20,17 +20,25 @@ impl ItemEnv for Pan<'_> {
         slot: SpecialModelSlot,
         base: &str,
         config: &Arc<sunrise_core::nbt::Tag>,
-        stack: &StackView,
+        input_stack: &StackView,
         _: &sunrise_assets::item_model::Context,
     ) -> Option<PreparedParts> {
         assert_eq!((slot, base), (SpecialModelSlot(0), "spt:item/base"));
         assert_eq!(config.get("handle"), Some(&sunrise_core::nbt::Tag::Byte(2)));
+        let stack_part = |item: &str, count| SpecialPart {
+            content: SpecialContent::Stack {
+                stack: stack(item, count),
+                display: DisplayContext::Gui,
+            },
+            pose: sunrise_assets::math::Mat4::IDENTITY,
+            tints: Vec::new(),
+        };
         let part = |model: &str| SpecialPart {
             content: SpecialContent::Model(model.to_owned()),
             pose: sunrise_assets::math::Mat4::translation([0.25, 0.0, 0.0]),
             tints: vec![0xFFCC_2211_u32 as i32],
         };
-        let parts = match stack.count {
+        let parts = match input_stack.count {
             1 => vec![part("spt:item/a")],
             3 => vec![part("spt:item/a"), part("spt:item/nope")],
             4 => return None,
@@ -39,7 +47,7 @@ impl ItemEnv for Pan<'_> {
                 ..part("spt:item/a")
             }],
             6 | 7 => vec![SpecialPart {
-                tints: vec![[WHITE, GREY][stack.count as usize - 6]],
+                tints: vec![[WHITE, GREY][input_stack.count as usize - 6]],
                 ..part("spt:item/a")
             }],
             // The plain cube item nested, then B; and the pan itself, a cycle.
@@ -61,6 +69,16 @@ impl ItemEnv for Pan<'_> {
                 },
                 ..part("")
             }],
+            // A to B to A with a valid sibling model: the cycle refuses every answer above it.
+            10 => vec![part("spt:item/b"), stack_part("spt:pan", 11)],
+            11 => vec![part("spt:item/a"), stack_part("spt:pan", 10)],
+            // 64 cubes, 65, and the same below a first level: draws expand 1 + 64 and 1 + 63.
+            20 | 21 => (0..44 + input_stack.count)
+                .map(|_| stack_part("spt:cube", 1))
+                .collect(),
+            22 => vec![part("spt:item/b"), stack_part("spt:pan", 20)],
+            23 => vec![part("spt:item/b"), stack_part("spt:pan", 24)],
+            24 => (0..63).map(|_| stack_part("spt:cube", 1)).collect(),
             _ => vec![part("spt:item/b")],
         };
         Some(self.0.prepare_parts(base, &parts))
@@ -268,6 +286,15 @@ fn a_registered_special_model_draws_its_renderers_resource_models() {
     assert_eq!(colours.iter().filter(|&&c| c == 0xFFCC_2211).count(), 12);
     assert!(nested.animated);
     assert!(is_missing(&resolve("spt:pan", 9, DisplayContext::Gui)));
+    // A refusal below a first level refuses the answers above it whole, their valid sibling
+    // models too; the expansion budget is 64 for the whole draw, below the first level as well.
+    assert!(is_missing(&resolve("spt:pan", 10, DisplayContext::Gui)));
+    assert!(is_missing(&resolve("spt:pan", 11, DisplayContext::Gui)));
+    let quads_of = |count| quads(&renderer, &resolve("spt:pan", count, DisplayContext::Gui)).len();
+    assert_eq!(quads_of(20), 64 * 6);
+    assert!(is_missing(&resolve("spt:pan", 21, DisplayContext::Gui)));
+    assert!(is_missing(&resolve("spt:pan", 22, DisplayContext::Gui)));
+    assert_eq!(quads_of(23), 12 + 63 * 6);
     assert!(!is_missing(&resolve("spt:pan", 1, DisplayContext::Gui)));
     assert_eq!(
         quads(&renderer, &resolve("spt:cube", 1, DisplayContext::Gui)).len(),

@@ -203,6 +203,9 @@ pub struct LayerRender {
     pub uses_block_light: bool,
     /// Untransformed extents (quad corners or the special model's parts).
     pub extents: Arc<Vec<Vec3>>,
+    /// The display context the layer was resolved for, which its submission follows (a GUI
+    /// glint's atlas coordinates): the state's own, except for the layers of a nested stack.
+    pub display: DisplayContext,
 }
 /// `ItemStackRenderState`.
 #[derive(Clone, Debug)]
@@ -279,7 +282,7 @@ impl ItemRenderState {
             let m = pose * layer.matrix;
             match &layer.geometry {
                 LayerGeometry::Quads(baked) => {
-                    submit_quads(renderer, baked, layer, self.display, m, sprites, sink);
+                    submit_quads(renderer, baked, layer, m, sprites, sink);
                 }
                 LayerGeometry::Special { model, argument } => special::submit(
                     renderer,
@@ -442,7 +445,6 @@ fn submit_quads(
     renderer: &ItemRenderer,
     baked: &BakedItemModel,
     layer: &LayerRender,
-    display: DisplayContext,
     m: Mat4,
     sprites: &HashMap<String, Rect>,
     sink: &mut dyn ItemSink,
@@ -462,7 +464,7 @@ fn submit_quads(
     let mut last: Option<(&str, bool)> = None;
     let mut last_rect: Option<(&str, Option<Rect>)> = None;
     // A glint in the GUI follows the quad's sprite in the glint atlas: looked up once a sprite too.
-    let gui_glint = display == DisplayContext::Gui && foil == Foil::Standard;
+    let gui_glint = layer.display == DisplayContext::Gui && foil == Foil::Standard;
     let mut last_glint: Option<(&str, Option<Rect>)> = None;
     for q in &baked.quads {
         let rect = match last_rect {
@@ -1032,10 +1034,11 @@ impl ItemRenderer {
                     uses_block_light: base.uses_block_light,
                     particle: sprite_name(&base.particle.sprite).to_owned(),
                     extents: extents.clone(),
+                    display,
                 }),
                 PreparedContent::Stack { stack, display } => {
                     let Some(inner) =
-                        self.expand_stack(outer, stack, *display, owner, level, seed, env)
+                        self.expand_stack(outer, stack, *display, (owner, level, seed, env))
                     else {
                         layers.truncate(start);
                         return None;
@@ -1052,16 +1055,12 @@ impl ItemRenderer {
     }
     /// The resolve of the stack part `stack` of an answer drawn for `outer`, or `None` when it is
     /// refused (see [`Self::push_parts`]).
-    #[allow(clippy::too_many_arguments)]
     fn expand_stack(
         &self,
         outer: &StackView,
         stack: &StackView,
         display: DisplayContext,
-        owner: Option<&OwnerState>,
-        level: Option<&LevelState>,
-        seed: i32,
-        env: &dyn ItemEnv,
+        (owner, level, seed, env): (Option<&OwnerState>, Option<&LevelState>, i32, &dyn ItemEnv),
     ) -> Option<ItemRenderState> {
         let pushed = NESTING.with_borrow_mut(|n| {
             if n.expanded >= mod_api::MAX_NESTED_STACK_PARTS
@@ -1083,13 +1082,14 @@ impl ItemRenderer {
             return None;
         };
         let state = self.resolve_with_rule(stack, display, owner, level, seed, env, None);
-        NESTING.with_borrow_mut(|n| {
+        let refused = NESTING.with_borrow_mut(|n| {
             n.chain.pop();
             if root {
                 n.chain.pop();
             }
+            n.refused
         });
-        Some(state)
+        (!refused).then_some(state)
     }
     /// `ItemModelResolver.updateForTopItem`.
     pub fn resolve(
@@ -1172,7 +1172,17 @@ impl ItemRenderer {
                         (stack, owner, level, seed, env),
                     );
                     if drawn.is_none() {
-                        // A refused stack part refuses the answer whole.
+                        // A refused stack part refuses the answer whole, and every answer that
+                        // nests it: only the outermost draws the missing model, in place of the
+                        // answer's parts.
+                        let nested = NESTING.with_borrow_mut(|n| {
+                            let nested = n.depth > 1;
+                            n.refused = nested;
+                            nested
+                        });
+                        if nested {
+                            break;
+                        }
                         let baked = self.bake(MISSING_MODEL);
                         layers.push(LayerRender {
                             extents: self.quad_extents(MISSING_MODEL, &baked),
@@ -1186,6 +1196,7 @@ impl ItemRenderer {
                             )),
                             uses_block_light: baked.uses_block_light,
                             particle: sprite_name(&baked.particle.sprite).to_owned(),
+                            display,
                         });
                     } else if drawn == Some(true) {
                         animated = true;
@@ -1208,6 +1219,7 @@ impl ItemRenderer {
                 uses_block_light: baked.uses_block_light,
                 particle: sprite_name(&baked.particle.sprite).to_owned(),
                 extents,
+                display,
             });
         }
         ItemRenderState {
@@ -1300,6 +1312,9 @@ struct Nesting {
     expanded: usize,
     /// Resolves in progress on this thread; the budget starts again when the outermost ends.
     depth: u32,
+    /// Set by a nested resolve that met a refused stack part, until the outermost answer
+    /// takes it: the refusal reaches every answer above it.
+    refused: bool,
 }
 thread_local! {
     static NESTING: std::cell::RefCell<Nesting> = std::cell::RefCell::default();
@@ -1828,6 +1843,7 @@ mod tests {
                 matrix: Mat4::from_translation(Vec3::new(0.0, 2.0, 0.0)),
                 particle: String::new(),
                 uses_block_light: false,
+                display: DisplayContext::Ground,
                 extents: Arc::new(vec![
                     Vec3::new(-1.0, -0.5, -0.25),
                     Vec3::new(0.5, 1.0, 0.25),
