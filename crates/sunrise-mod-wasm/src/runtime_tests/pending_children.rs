@@ -1,12 +1,12 @@
 //! Real wasm imports exercise the same arena backend as the generated native loopback.
 //! These tests cover transport and trap cleanup, not Game's parent/RNG transaction policy.
 use super::*;
-use sunrise_mod_runtime::pending_children::{Action, Decision, Error, PendingChildren};
 use mod_api::{
     Identifier, PendingChildrenEdits, PendingMobSpec, UnspawnedMobError, UnspawnedMobRef,
     WorldEpoch,
 };
 use std::cell::RefCell;
+use sunrise_mod_runtime::pending_children::{Action, Decision, Error, PendingChildren};
 
 #[path = "../../tests/support/pending_children.rs"]
 mod fixture;

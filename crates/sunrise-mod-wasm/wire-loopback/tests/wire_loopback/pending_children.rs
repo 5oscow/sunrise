@@ -1,9 +1,9 @@
 //! Transport integration: run the same collection through native calls and the generated
 //! guest proxy/host service. Species/gameplay policy belongs to the real game adapter tests.
 use super::*;
-use sunrise_mod_runtime::pending_children::{Action, Decision, PendingChildren};
 use mod_api::{Identifier, PendingChildrenEdits, PendingMobSpec, UnspawnedMobError};
 use std::cell::RefCell;
+use sunrise_mod_runtime::pending_children::{Action, Decision, PendingChildren};
 #[path = "../../../tests/support/pending_children.rs"]
 mod fixture;
 use fixture::Editor;

@@ -9,12 +9,12 @@
 
 use super::Game;
 use super::native_pending_children::{Children, PendingMob, valid_child};
+use mod_api::PendingChildrenEdits;
 use sunrise_client::mobs::Mob;
 use sunrise_mod_runtime::{
     attachments::Attachments,
     pending_children::{Decision, PendingChildren},
 };
-use mod_api::PendingChildrenEdits;
 
 /// A split's most children, and a breeding's only one (the design's limits).
 const SPLIT_CAPACITY: usize = 64;
