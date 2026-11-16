@@ -42,6 +42,10 @@ to end the scan immediately, even if the answer equals the node's current type. 
 `None` to retain that neighbour's fluid and vanilla contribution. Neighbours are visited
 in x, y, z order, each from -1 to 1, excluding the node's own column. No mob is supplied
 to either query. A panicking callback is contained and falls back to the default.
+Vanilla water contributes through its classified path type, so a solid waterlogged
+block remains `Blocked` rather than producing `WaterBorder`. Custom fluids keep
+their default `WaterBorder` contribution. This deliberately differs from NeoForge's
+raw-water default to preserve exact vanilla behavior for vanilla content.
 
 ## Connections
 
