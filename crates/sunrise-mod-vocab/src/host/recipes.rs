@@ -65,7 +65,7 @@ pub trait RecipesHost {
 #[sunrise_mod_api_macros::host_area]
 pub trait RecipesServerHost {
     /// Side: server.
-    /// Only inside `recipe_book_place`: places `recipe`, the recipe that hook was asked about, into a
+    /// Only inside `recipe_book_place`, once per click: places `recipe`, the recipe that hook was asked about, into a
     /// grid of the open mod menu as vanilla's `ServerPlaceRecipe.placeRecipe` does. `grid_width` and
     /// `grid_height` give the grid's cells, row by row; `grid_slots` the menu slot of each cell (a
     /// recipe never fills a cell past the last slot given); `clear_slots` the slots emptied first, their
@@ -73,7 +73,7 @@ pub trait RecipesServerHost {
     /// places as many sets as the items allow (Shift), else one more than the grid holds when it
     /// already matches. Items are taken from the player's inventory and from what the menu's sources
     /// lend. Returns whether items were missing: the grid was cleared and the answer for
-    /// `ghost`. Refused (and nothing changes) outside that hook, for another recipe, a slot the menu
+    /// `ghost`. Refused (and nothing changes) outside that hook, on a second call, for another recipe, a slot the menu
     /// lacks or hides, a repeated slot, an empty grid, a recipe larger than the slots given, a slot
     /// whose pickup a part refuses, or a player with no room for the cleared items outside creative mode.
     #[access(WorldOnly)]

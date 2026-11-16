@@ -174,3 +174,49 @@ fn a_mod_layout_without_a_listening_part_refuses_and_changes_nothing() {
         game.transaction_close(&root, false);
     });
 }
+#[test]
+#[ignore = "daily"]
+fn place_recipe_in_grid_places_once_per_click() {
+    super::super::native_guest_turn_tests::with_guests(|game| {
+        let (_, before, selection) = open_mod_menu(game);
+        let plan = MenuPlacement::for_mod(
+            "review:menu".into(),
+            Placement::of(
+                vec![Some(Ingredient::of(vec!["minecraft:iron_ore".into()]))],
+                None,
+            ),
+        )
+        .unwrap();
+        let known = game
+            .lan
+            .as_ref()
+            .unwrap()
+            .hub
+            .guest(12)
+            .unwrap()
+            .recipe_book
+            .clone();
+        game.native_net.placement.session = Some(Session {
+            recipe: selection.display.recipe.as_str().to_owned(),
+            graph: Backings::capture(game, &before, &plan).unwrap(),
+            menu: Box::new(Menu::new(Kind::Mod(before.kind))),
+            plan,
+            before,
+            known,
+            limited: false,
+            use_max: false,
+            placed: false,
+        });
+        let recipe = "review:recipe";
+        let first = game.place_recipe_in_grid(recipe, 1, 1, vec![0], vec![0], false);
+        assert_eq!(
+            first,
+            Ok(true),
+            "no iron ore anywhere: the grid is cleared and ghosted"
+        );
+        assert_eq!(
+            game.place_recipe_in_grid(recipe, 1, 1, vec![0], vec![0], false),
+            Err("place_recipe_in_grid was already called for this click".to_owned())
+        );
+    });
+}

@@ -189,6 +189,7 @@ impl Game<'_> {
                 known,
                 limited,
                 use_max,
+                placed: false,
             };
             let (session, post) = self.ask_mod_book_place(session)?;
             (menu, graph) = (session.menu, session.graph);

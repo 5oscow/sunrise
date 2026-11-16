@@ -152,28 +152,28 @@ impl MenuPlacement {
             return Err("the grid needs a size and at least one slot".into());
         }
         let (width, height) = (usize::from(width), usize::from(height));
+        if let Some(slot) = grid
+            .iter()
+            .chain(clear)
+            .find(|slot| usize::from(**slot) >= menu_size)
+        {
+            return Err(format!("slot {slot} is outside the menu"));
+        }
         let mut inputs: Vec<usize> = Vec::with_capacity(grid.len());
         for &slot in grid {
             let slot = usize::from(slot);
-            if slot >= menu_size {
-                return Err(format!("slot {slot} is outside the menu"));
-            }
             if inputs.contains(&slot) {
                 return Err(format!("slot {slot} is in the grid twice"));
             }
             inputs.push(slot);
         }
-        let mut cleared = Vec::with_capacity(clear.len() + inputs.len());
-        for &slot in clear {
-            let slot = usize::from(slot);
-            if slot >= menu_size {
-                return Err(format!("slot {slot} is outside the menu"));
-            }
-            if !cleared.contains(&slot) {
-                cleared.push(slot);
-            }
-        }
-        for &slot in &inputs {
+        let mut cleared: Vec<usize> = Vec::with_capacity(clear.len() + inputs.len());
+        for slot in clear
+            .iter()
+            .copied()
+            .map(usize::from)
+            .chain(inputs.iter().copied())
+        {
             if !cleared.contains(&slot) {
                 cleared.push(slot);
             }

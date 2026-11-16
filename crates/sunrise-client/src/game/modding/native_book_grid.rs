@@ -22,6 +22,8 @@ pub(super) struct Session {
     pub(super) known: Settings,
     pub(super) limited: bool,
     pub(super) use_max: bool,
+    /// `place_recipe_in_grid` has placed this click's recipe: it places once.
+    pub(super) placed: bool,
 }
 
 fn reason(refusal: PlacementRefusal) -> &'static str {
@@ -116,6 +118,9 @@ impl Game<'_> {
         clear: &[u16],
         use_max: bool,
     ) -> Result<bool, String> {
+        if session.placed {
+            return Err("place_recipe_in_grid was already called for this click".into());
+        }
         if recipe != session.recipe {
             return Err(format!("the click is for {}, not {recipe}", session.recipe));
         }
@@ -145,6 +150,7 @@ impl Game<'_> {
             .menu
             .place_custom_recipe(&env, &plan, use_max, creative, || true)
             .map_err(|refusal| reason(refusal).to_owned())?;
+        session.placed = true;
         Ok(post == PostPlace::Ghost)
     }
 }
