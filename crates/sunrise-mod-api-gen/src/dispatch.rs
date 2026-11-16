@@ -945,11 +945,12 @@ pub(super) fn emit<'a>(
                     call(&mod_item, "break"),
                 ),
             ),
-            None if name == "setting_changed" => (
+            None if hook.owner.is_some() => (
                 String::new(),
                 format!(
-                    "{{ let mut {entered} = super::runtime::ListenerScope::new(); for (_, owner) in super::listening(HookId::{hook_id}) {{ if owner.id != {event}.mod_id {{ continue; }} let {mod_item} = {entered}.enter(owner, \"{name}\"); {} }} }}",
+                    "{{ let mut {entered} = super::runtime::ListenerScope::new(); for (_, owner) in super::listening(HookId::{hook_id}) {{ if owner.id != {event}.{owner} {{ continue; }} let {mod_item} = {entered}.enter(owner, \"{name}\"); {} }} }}",
                     call(&mod_item, "break"),
+                    owner = hook.owner.as_deref().unwrap(),
                 ),
             ),
             None if mod_cancel && hook.isolate => (

@@ -4125,12 +4125,13 @@ impl Game<'_> {
     /// and `native_apply_effect_tick` follows. Server-side.
     pub(in crate::game) fn native_should_apply_effect_tick_this_tick(
         &self,
+        mod_id: &str,
         effect: EffectKey,
         tick_count: i32,
         amplifier: i32,
         apply: &mut bool,
     ) {
-        self.fire_should_apply_effect_tick_this_tick(effect, tick_count, amplifier, apply);
+        self.fire_should_apply_effect_tick_this_tick(mod_id, effect, tick_count, amplifier, apply);
     }
     /// `MobEffect.applyEffectTick`: the content mod's effect `effect` acts on
     /// `entity` in `dimension` (`minecraft:overworld`). Clear `keep` and the
