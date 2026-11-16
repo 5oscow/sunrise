@@ -1389,7 +1389,12 @@ pub fn encode_with(
                 }
                 None => current,
             };
-            let mut saved = crate::block_entity_nbt::canonical(&merged).unwrap_or(merged);
+            // The source overlay may restore an unchanged stack's original patch.
+            // Apply the loaded catalog after merging, without rebuilding opaque metadata.
+            let mut saved = crate::block_entity_nbt::canonical_with_stack(&merged, &|tag| {
+                item_from_nbt(tag).map(|stack| item_to_nbt(&stack, items))
+            })
+            .unwrap_or(merged);
             if let Some(limit) = extras
                 .and_then(|x| x.block_entity_sources.iter().find(|(q, _)| q == p))
                 .and_then(|(_, tag)| tag.get("sunrise:stack_limit"))
