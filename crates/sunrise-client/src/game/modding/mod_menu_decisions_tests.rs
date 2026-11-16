@@ -133,7 +133,7 @@ fn inventory(game: &crate::game::Game<'_>, slot: usize) -> u32 {
 }
 
 #[test]
-#[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn a_click_on_a_mod_menu_tells_the_mods_inside_an_action_and_a_failure_undoes_it() {
     with_mod(|| {
         with_guests(|game| {
@@ -186,7 +186,7 @@ fn a_click_on_a_mod_menu_tells_the_mods_inside_an_action_and_a_failure_undoes_it
 }
 
 #[test]
-#[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn without_a_listener_a_click_on_a_mod_menu_is_heard_plainly() {
     // Row 92: no mod at all: the plain call, no transaction and no journaled write.
     with_guests(|game| {
@@ -288,7 +288,7 @@ fn depot(game: &crate::game::Game<'_>) -> (u32, u32, u32, u32) {
 }
 
 #[test]
-#[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn a_mod_quick_move_is_one_action_and_a_refusal_leaves_no_prefix() {
     with_mod(|| {
         with_guests(|game| {
@@ -377,7 +377,7 @@ fn a_mod_quick_move_is_one_action_and_a_refusal_leaves_no_prefix() {
 }
 
 #[test]
-#[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn a_mod_quick_move_no_mod_took_is_left_to_the_games_routing() {
     let run = || {
         let mut result = None;
