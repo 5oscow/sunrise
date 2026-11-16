@@ -153,6 +153,56 @@ fn custom_display_shows_its_non_empty_slots_in_order() {
     );
     assert_eq!(result(&custom), &item("meal"));
 }
+/// Matches ingredients against real stock counts, as the game's resolver does.
+struct Stocked(crate::menu::place::Stacked);
+impl DisplayResolver for Stocked {
+    fn resolve(&self, slot: &Slot) -> Vec<ItemStack> {
+        Resolver.resolve(slot)
+    }
+    fn craftable(&self, _: &str, _: &Display, ingredients: &[crate::crafting::Ingredient]) -> bool {
+        self.0.can_craft(&ingredients.iter().collect::<Vec<_>>())
+    }
+    fn search_text(&self, stacks: &[ItemStack]) -> String {
+        Resolver.search_text(stacks)
+    }
+}
+fn stock(items: &[(&str, i32)]) -> Stocked {
+    let mut stacked = crate::menu::place::Stacked::default();
+    for (id, count) in items {
+        stacked.account(&std::sync::Arc::from(*id), *count);
+    }
+    Stocked(stacked)
+}
+#[test]
+fn custom_display_is_craftable_only_when_every_non_empty_slot_is_stocked() {
+    let mut pot = category("demo:first", "demo:a", "demo:meal");
+    pot.displays[0].displays = vec![Display::Custom {
+        slots: vec![item("a"), Slot::Empty, item("a"), item("bowl")],
+        result: item("meal"),
+        station: item("station"),
+    }];
+    let index = ModBookIndex::build(vec![pot], &Resources).unwrap();
+    let book = key("demo:first");
+    let panel = index.panel("demo:menu", &book).unwrap();
+    let prepared = panel.prepare(&Resolver);
+    let listed = |stock: &Stocked, filtering: bool| {
+        let view = prepared.presentation(None, "", filtering, 0, stock);
+        view.recipes
+            .iter()
+            .map(|r| (r.recipe.clone(), r.button.has_craftable))
+            .collect::<Vec<_>>()
+    };
+    let meal = |craftable| vec![("demo:meal".to_owned(), craftable)];
+    // The station is never in the inventory, and never needed.
+    let enough = stock(&[("demo:a", 2), ("demo:bowl", 1)]);
+    assert_eq!(listed(&enough, true), meal(true));
+    let one_a = stock(&[("demo:a", 1), ("demo:bowl", 1)]);
+    assert_eq!(listed(&one_a, true), []);
+    assert_eq!(listed(&one_a, false), meal(false));
+    let no_bowl = stock(&[("demo:a", 2)]);
+    assert_eq!(listed(&no_bowl, true), []);
+    assert_eq!(listed(&no_bowl, false), meal(false));
+}
 #[test]
 fn panel_search_selection_and_inventory_filter_are_isolated() {
     let index = ModBookIndex::build(
