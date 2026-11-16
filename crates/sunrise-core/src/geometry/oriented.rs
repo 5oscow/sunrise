@@ -105,6 +105,33 @@ impl Frame {
         }
     }
 
+    /// The frame `amount` of the way from `self` to `other` (0 is `self`): the origin in a
+    /// line, the axes blended and made orthonormal again, which for the small turns between two
+    /// ticks is the shortest rotation.
+    pub fn interpolate(&self, other: &Self, amount: f64) -> Self {
+        let a = amount.clamp(0.0, 1.0);
+        let mix = |k: usize| {
+            self.axes[k]
+                .scale(1.0 - a)
+                .add_vector(other.axes[k].scale(a))
+        };
+        let unit = |v: Vec3, fallback: Vec3| {
+            let n = v.length();
+            if n.is_finite() && n > DEGENERATE_AXIS {
+                v.scale(1.0 / n)
+            } else {
+                fallback
+            }
+        };
+        let x = unit(mix(0), self.axes[0]);
+        let z = unit(x.cross(mix(1)), self.axes[2]);
+        let y = z.cross(x);
+        Self {
+            origin: self.origin.lerp(other.origin, a),
+            axes: [x, y, z],
+        }
+    }
+
     pub fn to_world(&self, local: Vec3) -> Vec3 {
         Vec3::new(
             self.origin.x

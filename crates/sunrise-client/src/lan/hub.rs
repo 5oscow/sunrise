@@ -41,6 +41,7 @@ use {
 /// GameEvent types (ClientboundGameEventPacket).
 pub mod advancements;
 mod block_changes;
+mod carried_check;
 pub mod chat;
 pub mod chat_filter;
 mod fake_kicks;
@@ -2144,6 +2145,8 @@ impl Hub {
             g.teleport_tick = ticks;
             g.held_ticket_chunk = Some(g.ticket_chunk()); // teleport has no move
             g.pending_move = None;
+            g.on_collider = None;
+            g.carry_hint = None;
             if let Some(p) = position {
                 g.position = p;
                 g.previous_position = p;
@@ -4159,6 +4162,13 @@ impl Hub {
                 S::MovePlayerStatus(p) => {
                     self.move_player(i, None, None, p.flags, ctx, events);
                 }
+                S::CustomPayload(p) if p.channel == sunrise_protocol::carry_age::CHANNEL => {
+                    // A payload that does not decode is no hint: it is only where a search starts.
+                    if let Ok(hint) = sunrise_protocol::carry_age::decode(&p.data) {
+                        self.guests
+                            .update(i, |g| g.carry_hint = Some((hint.collider, hint.ticks)));
+                    }
+                }
                 S::CustomPayload(p)
                     if p.channel == sunrise_protocol::passage_sync::CROSS_CHANNEL =>
                 {
@@ -4549,14 +4559,21 @@ impl Hub {
                 return;
             }
         };
-        let (wrongly, refused, stands) = self.collide(i, to, ctx);
+        let (wrongly, refused, stands) = self.collide_carried(i, to, ctx);
         if wrongly {
             let line = format!("{} moved wrongly!", self.guests[i].name);
             events.push(HostEvent::Warn(line));
         }
         if refused {
             self.guests.update(i, |g| (g.yaw, g.pitch) = (yaw, pitch));
-            self.resend_teleport(i, Some(start));
+            // A carried player goes back to where the server has it on its collider now.
+            let back = self.guests[i].carry_correction.unwrap_or(start);
+            self.guests.update(i, |g| g.carry_correction = None);
+            let carried = self.guests[i].on_collider;
+            self.resend_teleport(i, Some(back));
+            if carried.is_some() {
+                self.guests.update(i, |g| g.on_collider = carried);
+            }
             return;
         }
         // The anticheat's `ground`: a claim of the ground with nothing to
@@ -4584,6 +4601,7 @@ impl Hub {
                 && !g.spectator()
                 && !self.config.allow_flight
                 && !g.creative()
+                && !g.carried_standing
                 && g.effects.get("levitation").is_none()
                 && !g.fall_flying
                 && !g
@@ -5235,6 +5253,7 @@ fn equipment_source(g: &Guest, index: usize) -> Option<&ItemStack> {
 
 #[cfg(test)]
 mod tests {
+    mod carried_check_tests;
     mod cave_air_tests;
     mod collision_exclusion_tests;
     mod effect_meta_tests;

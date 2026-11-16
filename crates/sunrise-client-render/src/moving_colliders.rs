@@ -12,9 +12,14 @@
 use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
+    rc::Rc,
     sync::{Arc, OnceLock},
 };
-use sunrise_core::geometry::{Aabb, Axis, Vec3, oriented::OrientedCollider};
+use sunrise_core::geometry::{
+    Aabb, Axis, Vec3,
+    carried::FrameLog,
+    oriented::{ColliderBoxes, OrientedCollider},
+};
 use sunrise_world::entity_obstruction::EntityIdentity;
 
 /// Side of an index cell, in blocks.
@@ -248,6 +253,143 @@ pub fn overlaps(entity: EntityIdentity, bounds: Aabb) -> bool {
         });
         hit
     })
+}
+
+/// One collider's recent frames, with the boxes it had when they were recorded.
+struct Tracked {
+    log: FrameLog,
+    boxes: Arc<ColliderBoxes>,
+    /// Everywhere the collider has been over the log, for finding what a position can have
+    /// stood on.
+    swept: Option<Aabb>,
+}
+
+/// The recent frames of a level's colliders, for judging a player a collider carries
+/// (`sunrise_core::geometry::carried`). The game keeps one per level and records the level's
+/// colliders into it at the start of each of the level's ticks; only a server needs it.
+#[derive(Default)]
+pub struct History {
+    now: u64,
+    tracked: HashMap<u32, Tracked>,
+}
+
+impl History {
+    /// Records the colliders as the level's tick began. A collider that stood still adds
+    /// nothing; one that is gone is forgotten.
+    pub fn record(&mut self, placed: &Prepared) {
+        self.now += 1;
+        let now = self.now;
+        for p in placed.placed() {
+            let entry = self.tracked.entry(p.id).or_insert_with(|| Tracked {
+                log: FrameLog::default(),
+                boxes: p.collider.boxes.clone(),
+                swept: None,
+            });
+            let new_boxes = !Arc::ptr_eq(&entry.boxes, &p.collider.boxes);
+            if new_boxes {
+                entry.boxes = p.collider.boxes.clone();
+            }
+            if entry.log.record(now, p.collider.frame) || new_boxes || entry.swept.is_none() {
+                entry.swept = entry
+                    .boxes
+                    .bounds()
+                    .and_then(|local| entry.log.swept(local));
+            }
+        }
+        if self.tracked.len() != placed.len() {
+            let ids: std::collections::HashSet<u32> = placed.placed().map(|p| p.id).collect();
+            self.tracked.retain(|id, _| ids.contains(id));
+        }
+    }
+
+    /// The tick of the newest frames: age 0.
+    pub fn now(&self) -> u64 {
+        self.now
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.tracked.is_empty()
+    }
+
+    /// A collider's frames and boxes.
+    pub fn get(&self, id: u32) -> Option<(&FrameLog, &ColliderBoxes)> {
+        self.tracked.get(&id).map(|t| (&t.log, &*t.boxes))
+    }
+
+    /// The colliders that have been in `area` at some tick of the log, by entity id.
+    pub fn near(&self, area: Aabb) -> Vec<u32> {
+        let mut ids: Vec<u32> = self
+            .tracked
+            .iter()
+            .filter(|(_, t)| t.swept.is_some_and(|s| s.intersects(area)))
+            .map(|(id, _)| *id)
+            .collect();
+        ids.sort_unstable();
+        ids
+    }
+}
+
+thread_local! {
+    static HISTORY: RefCell<Option<Rc<RefCell<History>>>> = const { RefCell::new(None) };
+}
+
+/// The history of the level being ticked, for as long as the guard lives (like [`Scope`]).
+pub struct HistoryScope {
+    before: Option<Rc<RefCell<History>>>,
+}
+
+impl HistoryScope {
+    pub fn enter(history: Rc<RefCell<History>>) -> Self {
+        Self {
+            before: HISTORY.with(|cell| cell.borrow_mut().replace(history)),
+        }
+    }
+}
+
+impl Drop for HistoryScope {
+    fn drop(&mut self) {
+        let before = self.before.take();
+        HISTORY.with(|cell| *cell.borrow_mut() = before);
+    }
+}
+
+/// Calls `f` with the level's history; `None` outside a level that keeps one.
+pub fn with_history<R>(f: impl FnOnce(&History) -> R) -> Option<R> {
+    let history = HISTORY.with(|cell| cell.borrow().clone())?;
+    let history = history.borrow();
+    Some(f(&history))
+}
+
+/// Runs `f` with the level's colliders where they stood `age` ticks before the tick began (a
+/// fractional age is interpolated): the world a client saw, which is what a carried player's
+/// move is checked in. Outside a level with a history it just runs `f`.
+pub fn at_age<R>(age: f64, f: impl FnOnce() -> R) -> R {
+    let aged = HISTORY.with(|cell| {
+        let history = cell.borrow().clone()?;
+        let history = history.borrow();
+        let now = PLACED.with(|placed| placed.borrow().clone());
+        let placed = now
+            .placed
+            .iter()
+            .map(|(_, p)| {
+                let frame = history
+                    .tracked
+                    .get(&p.id)
+                    .and_then(|t| t.log.frame_at(history.now, age))
+                    .unwrap_or(p.collider.frame);
+                Placed {
+                    id: p.id,
+                    collider: OrientedCollider::new(frame, p.collider.boxes.clone()),
+                    exempt: p.exempt.clone(),
+                }
+            })
+            .collect();
+        Some(Prepared::new(placed))
+    });
+    match aged {
+        Some(aged) => in_level(aged, f),
+        None => f(),
+    }
 }
 
 #[cfg(test)]

@@ -155,21 +155,28 @@ impl Game<'_> {
             || guest.is_some_and(|g| {
                 let side = f64::from(body.width * 0.8_f32);
                 let eye = [at[0], at[1] + f64::from(body.eye_height), at[2]];
-                sunrise_client_render::moving_colliders::overlaps(
-                    sunrise_world::entity_obstruction::EntityIdentity(g.entity_id as u64),
-                    sunrise_core::geometry::Aabb::new(
-                        sunrise_core::geometry::Vec3::new(
-                            eye[0] - side / 2.0,
-                            eye[1] - 5.0e-7,
-                            eye[2] - side / 2.0,
+                let eyes = || {
+                    sunrise_client_render::moving_colliders::overlaps(
+                        sunrise_world::entity_obstruction::EntityIdentity(g.entity_id as u64),
+                        sunrise_core::geometry::Aabb::new(
+                            sunrise_core::geometry::Vec3::new(
+                                eye[0] - side / 2.0,
+                                eye[1] - 5.0e-7,
+                                eye[2] - side / 2.0,
+                            ),
+                            sunrise_core::geometry::Vec3::new(
+                                eye[0] + side / 2.0,
+                                eye[1] + 5.0e-7,
+                                eye[2] + side / 2.0,
+                            ),
                         ),
-                        sunrise_core::geometry::Vec3::new(
-                            eye[0] + side / 2.0,
-                            eye[1] + 5.0e-7,
-                            eye[2] + side / 2.0,
-                        ),
-                    ),
-                )
+                    )
+                };
+                // The collider as the player's client sees it.
+                match g.on_collider {
+                    Some(held) => sunrise_client_render::moving_colliders::at_age(held.age, eyes),
+                    None => eyes(),
+                }
             })
     }
 }

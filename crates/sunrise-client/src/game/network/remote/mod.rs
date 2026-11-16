@@ -490,6 +490,8 @@ pub(super) struct Remote {
     pub attachments: HashMap<Holder, ResidentAttachments>,
     /// The colliders the server sent, by entity id (`sunrise:collider_sync`).
     pub colliders: HashMap<u32, sunrise_client::colliders::ColliderState>,
+    /// How old the copy of the collider carrying the player is (`sunrise:carry_age`).
+    pub carry_age: sunrise_client::colliders::CarryAge,
     /// The server samples far terrain for us, this far at most (`lod_net`).
     pub far_terrain: Option<sunrise_client::lod_net::Offer>,
     pub(super) builtin: Arc<Builtin>,
@@ -1126,6 +1128,7 @@ impl Game<'_> {
             logged_out: false,
             attachments: HashMap::new(),
             colliders: HashMap::new(),
+            carry_age: Default::default(),
             far_terrain: None,
             builtin,
             status: lang
@@ -1372,6 +1375,7 @@ impl Game<'_> {
             custom_books: false,
             attachments: HashMap::new(),
             colliders: HashMap::new(),
+            carry_age: Default::default(),
             far_terrain: None,
             builtin,
             status: "Playing Studio Replay".into(),
@@ -7531,6 +7535,17 @@ impl Game<'_> {
                     r.position_sender
                         .update(pos, (yaw, pitch), on_ground, collision)
             {
+                // A server that sent colliders reads how old the copy carrying the player is.
+                if !r.colliders.is_empty()
+                    && let Some(hint) = r.carry_age.hint()
+                {
+                    out.push(S::CustomPayload(
+                        sunrise_protocol::packets::configuration::CustomPayload {
+                            channel: sunrise_protocol::carry_age::CHANNEL.into(),
+                            data: sunrise_protocol::carry_age::encode(hint),
+                        },
+                    ));
+                }
                 out.push(packet);
                 moved_or_rotated = true;
             }

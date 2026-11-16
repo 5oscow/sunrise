@@ -873,3 +873,51 @@ fn a_carried_vehicle_takes_its_passengers_and_theirs_with_it() {
         }
     });
 }
+
+/// The level records its colliders as each of its ticks begins, so a report that arrives in a
+/// tick is judged against the transforms of the ticks before it: age 0 is where the collider
+/// was when this tick began, age n where it was n ticks earlier; and a level with no collider
+/// keeps nothing.
+#[test]
+#[ignore = "daily"]
+fn the_level_records_its_colliders_as_each_tick_begins() {
+    with_world(|game| {
+        let (holder, holder_ref) = stand_with_id(game, [8.0, 70.0, 8.0]);
+        holder_ref.set_collider(game, Some(deck())).unwrap();
+        let x_of = |game: &Game<'_>| {
+            game.mobs
+                .iter()
+                .find(|m| m.id == holder)
+                .map(|m| m.position.x)
+                .unwrap()
+        };
+        let mut began = Vec::new();
+        let mut history = None;
+        for _ in 0..8 {
+            let placed = game.placed_moving_colliders();
+            history = game.collider_history(&placed);
+            began.push(x_of(game));
+            tick_level_moving(game, |g| shift_stand(g, holder, Vec3::new(0.5, 0.0, 0.0)));
+        }
+        let history = history.expect("a server records a level that has a collider");
+        let history = history.borrow();
+        let (log, _) = history.get(holder).expect("the collider's frames");
+        for age in 0..8usize {
+            let frame = log.frame_at(history.now(), age as f64).unwrap();
+            assert!(
+                (frame.origin.x - began[7 - age]).abs() < 1.0e-9,
+                "age {age}: {} vs {}",
+                frame.origin.x,
+                began[7 - age]
+            );
+        }
+        // Between two ticks it is the line between them.
+        let mid = log.frame_at(history.now(), 1.5).unwrap().origin.x;
+        assert!((mid - (began[6] + began[5]) / 2.0).abs() < 1.0e-9, "{mid}");
+        drop(history);
+        // The collider goes: the level keeps no history.
+        holder_ref.set_collider(game, None).unwrap();
+        let placed = game.placed_moving_colliders();
+        assert!(game.collider_history(&placed).is_none());
+    });
+}

@@ -1,0 +1,10 @@
+# The move check of a player a moving collider carries, on the hub with real collision data.
+sunrise-client-lib lan::hub::tests::carried_check_tests::a_disassembled_collider_and_a_teleport_let_the_rider_go lib daily resources
+sunrise-client-lib lan::hub::tests::carried_check_tests::a_report_off_the_train_is_corrected_to_the_server_local_position_and_counted lib daily resources
+sunrise-client-lib lan::hub::tests::carried_check_tests::an_honest_rider_at_train_speed_is_never_rejected lib daily resources
+sunrise-client-lib lan::hub::tests::carried_check_tests::an_honest_rider_on_a_curve_is_never_rejected lib daily resources
+sunrise-client-lib lan::hub::tests::carried_check_tests::braking_a_stall_with_a_burst_and_a_wrong_estimate_still_pass lib daily resources
+sunrise-client-lib lan::hub::tests::carried_check_tests::jumping_onto_a_deck_at_two_blocks_a_tick_attaches_on_landing lib daily resources
+sunrise-client-lib lan::hub::tests::carried_check_tests::past_a_second_of_round_trip_the_rider_is_no_longer_carried lib daily resources
+sunrise-client-lib lan::hub::tests::carried_check_tests::stepping_between_colliders_hands_the_player_over_each_way lib daily resources
+sunrise-client-lib lan::hub::tests::carried_check_tests::walls_beside_the_track_and_the_deck_itself_still_stop_an_honest_rider lib daily resources

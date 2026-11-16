@@ -15,6 +15,35 @@ use sunrise_core::{
 };
 use sunrise_protocol::collider_sync::{self, WireBox};
 
+/// How long ago the collider carrying the local player last changed, as the player's own client
+/// moves it with the copy it holds. The server is told it before each position report
+/// (`sunrise:carry_age`) as where to start its search of the collider's recent transforms.
+#[derive(Debug, Default)]
+pub struct CarryAge {
+    held: Option<(u32, Frame, u8)>,
+}
+
+impl CarryAge {
+    /// Notes the collider carrying the player this tick and its frame as the client holds it
+    /// (`None`: nothing carries the player): each tick without a change makes the copy a tick
+    /// older.
+    pub fn observe(&mut self, carrier: Option<(u32, Frame)>) {
+        self.held = match (carrier, self.held) {
+            (None, _) => None,
+            (Some((id, frame)), Some((held, was, ticks))) if held == id && was == frame => {
+                Some((id, frame, ticks.saturating_add(1)))
+            }
+            (Some((id, frame)), _) => Some((id, frame, 0)),
+        };
+    }
+
+    /// What to tell the server, while a collider carries the player.
+    pub fn hint(&self) -> Option<sunrise_protocol::carry_age::Hint> {
+        self.held
+            .map(|(collider, _, ticks)| sunrise_protocol::carry_age::Hint { collider, ticks })
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct ColliderState {
     wire: Vec<WireBox>,
@@ -276,6 +305,27 @@ impl ColliderState {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn the_carry_age_counts_ticks_without_a_change_and_starts_over_with_one() {
+        let at = |x: f64| Frame::translation(Vec3::new(x, 0.0, 0.0));
+        let mut age = CarryAge::default();
+        assert_eq!(age.hint(), None);
+        let ticks = |age: &CarryAge| age.hint().map(|h| (h.collider, h.ticks));
+        age.observe(Some((7, at(0.0))));
+        assert_eq!(ticks(&age), Some((7, 0)));
+        // The server's copy moves every tick: the client's does not until its update arrives.
+        age.observe(Some((7, at(0.0))));
+        age.observe(Some((7, at(0.0))));
+        assert_eq!(ticks(&age), Some((7, 2)));
+        age.observe(Some((7, at(2.0))));
+        assert_eq!(ticks(&age), Some((7, 0)));
+        // Another carrier, or none, starts over.
+        age.observe(Some((9, at(2.0))));
+        assert_eq!(ticks(&age), Some((9, 0)));
+        age.observe(None);
+        assert_eq!(age.hint(), None);
+    }
     use super::*;
     use sunrise_core::geometry::Axis;
 
