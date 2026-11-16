@@ -6075,6 +6075,7 @@ impl Game<'_> {
                 if self.mod_entity_renderer_geometry(
                     &resolved,
                     &entity,
+                    "minecraft:experience_orb",
                     glam::DVec3::from_array(at) - camera,
                     block,
                     packed,

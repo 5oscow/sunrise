@@ -93,7 +93,7 @@ fn verts(out: &[Vertex]) -> Vec<([f32; 3], [f32; 2], u32, u32, u32, [i8; 4], [f3
         .collect()
 }
 
-fn hanging(id: u32) -> ExperienceOrb {
+fn hanging(id: u32, previous: Vec3) -> ExperienceOrb {
     let at = Vec3::new(FEET[0], FEET[1], FEET[2]);
     ExperienceOrb {
         attachment_lifetime: Default::default(),
@@ -102,7 +102,7 @@ fn hanging(id: u32) -> ExperienceOrb {
         join: Default::default(),
         id,
         position: at,
-        previous: at,
+        previous,
         velocity: Vec3::ZERO,
         value: VALUE,
         age: AGE,
@@ -119,8 +119,13 @@ fn hanging(id: u32) -> ExperienceOrb {
 
 /// The vertices one frame of experience orbs draws for a single entity.
 fn orb_frame(game: &mut Game<'_>, id: u32) -> Vec<Vertex> {
+    orb_frame_from(game, id, Vec3::new(FEET[0], FEET[1], FEET[2]))
+}
+
+/// [`orb_frame`] for an orb that moved to its position from `previous`.
+fn orb_frame_from(game: &mut Game<'_>, id: u32, previous: Vec3) -> Vec<Vertex> {
     game.orbs.clear();
-    game.orbs.push(hanging(id));
+    game.orbs.push(hanging(id, previous));
     let live = game.orbs.iter().map(|o| {
         let at = [
             o.previous.x + (o.position.x - o.previous.x) * f64::from(ALPHA),
@@ -240,9 +245,21 @@ fn a_registered_experience_orb_draws_its_renderer_in_place_of_the_quad() {
     in_scene(
         "a_registered_experience_orb_draws_its_renderer_in_place_of_the_quad",
         |game, heard, _| {
-            let drawn = orb_frame(game, 91);
+            // Moved from (-0.5, 60, -1.5) to (0.5, 64, 0.5), half way (ALPHA) it stands at
+            // (0, 62, -0.5); the camera at (0.5, 64, -4.5) puts it at (-0.5, -2, 4) from there.
+            // The quad's corners, in blocks from the entity: x 0 and 1, y 100 and 101, z 0.
+            let drawn = orb_frame_from(game, 91, Vec3::new(-0.5, 60.0, -1.5));
             assert_eq!(drawn.len(), 4, "one quad and no orb: {drawn:?}");
-            assert!(drawn.iter().all(|v| (100.0..=101.0).contains(&above(v))));
+            let corners: Vec<[f32; 3]> = drawn.iter().map(|v| v.pos).collect();
+            assert_eq!(
+                corners,
+                [
+                    [-0.5, 99.0, 4.0],
+                    [-0.5, 98.0, 4.0],
+                    [0.5, 98.0, 4.0],
+                    [0.5, 99.0, 4.0],
+                ]
+            );
             let state = heard.lock().unwrap().state.expect("the renderer was asked");
             assert_eq!(state.id, 91);
             assert_eq!(state.partial, ALPHA);

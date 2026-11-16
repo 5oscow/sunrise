@@ -38,7 +38,7 @@ impl EntityRenderer for Bolt {
 | `id` | The entity's network id, as mod messages name it. |
 | `partial` | The frame's partial tick, 0 to 1. |
 | `age` | Ticks lived plus the partial tick (`ageInTicks`). |
-| `yaw`, `pitch` | The way it faces, in degrees, interpolated to the frame (0 is south, positive pitch looks down). |
+| `yaw`, `pitch` | The way it faces, in degrees, interpolated to the frame, except for primed TNT and experience orbs, which supply their current rotation (0 is south, positive pitch looks down). |
 | `living` | A living entity's own frame (`LivingRenderState`, below); none for any other entity. |
 | `tnt_fuse` | Primed TNT's remaining fuse, in ticks, as vanilla draws it (`fuse - partial + 1`); none for any other entity. |
 | `orb_value` | An experience orb's value (`ExperienceOrb.DATA_VALUE`); none for any other entity. |

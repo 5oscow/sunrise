@@ -10,7 +10,8 @@ use std::{collections::BTreeMap, sync::Arc};
 
 /// One entity's frame, as `EntityRenderer.extractRenderState` fills an `EntityRenderState`:
 /// what a renderer reads to place and turn its model. Angles are in degrees, interpolated to the
-/// frame's partial tick. Plain numbers, so a frame allocates nothing, and one value for native and
+/// frame's partial tick, except for primed TNT and experience orbs, which supply their current
+/// rotation. Plain numbers, so a frame allocates nothing, and one value for native and
 /// wasm mods alike.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, sunrise_mod_api_macros::Wire)]
