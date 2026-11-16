@@ -16,6 +16,65 @@ fn data(tables: Vec<(&str, Value)>) -> LootData {
 fn table(id: &str) -> Value {
     json!({"pools":[{"rolls":1,"condition":{"type":"neoforge:loot_table_id","loot_table_id":id},"entries":[{"type":"minecraft:item","name":"minecraft:diamond"}]}]})
 }
+/// Non-raw adapters preserve the raw draw stream and split only after the
+/// outer table's function. A nested table must not complete the shared query.
+#[test]
+fn root_adapters_preserve_output_and_random_without_modifiers() {
+    let nested = json!({"pools":[{"rolls":1,
+        "condition":{"type":"neoforge:loot_table_id","loot_table_id":"neoforge:unknown_loot_table"},
+        "entries":[{"type":"minecraft:item","name":"minecraft:gold_ingot"},
+                   {"type":"minecraft:item","name":"minecraft:diamond"}]}],
+        "modifier":{"type":"minecraft:set_count","count":200}});
+    let root = json!({"pools":[{"rolls":1,"entries":[
+        {"type":"minecraft:loot_table","value":"test:nested"}]}],
+        "modifier":{"type":"minecraft:set_count","count":130}});
+    let data = data(vec![("test:root", root.clone()), ("test:nested", nested)]);
+    // One weighted choice in the child, no draws for either constant count.
+    let mut expected_random = LegacyRandom::new(0);
+    assert_eq!(expected_random.next_int_bound(2).unwrap(), 1);
+    let expected_state = <(u64, Option<f64>)>::from(&expected_random);
+    for adapter in 0..6 {
+        let query = Rc::new(query::LootQuery::default());
+        let mut random = LegacyRandom::new(0);
+        let params = EntityLootParams::default();
+        let drops = query::with_query(query.clone(), || match adapter {
+            0 => data.roll("test:root", &mut random, 0.0, None, None),
+            1 => data.roll_inline(&root, &mut random),
+            2 => data.roll_entity("test:root", &mut random, &params),
+            3 => data.roll_death_entity("test:root", &mut random, &params, &mut |_, _, _| {
+                panic!("the fixture has no enchanted-level reads")
+            }),
+            4 => data
+                .roll_container_with("test:root", &mut random, Default::default())
+                .unwrap(),
+            _ => data.roll_split("test:root", &mut random),
+        });
+        let observed: Vec<_> = drops.iter().map(|s| (s.item.as_str(), s.count)).collect();
+        assert_eq!(
+            observed,
+            [
+                ("minecraft:diamond", 64),
+                ("minecraft:diamond", 64),
+                ("minecraft:diamond", 2)
+            ],
+            "adapter {adapter}"
+        );
+        assert_eq!(
+            <(u64, Option<f64>)>::from(&random),
+            expected_state,
+            "adapter {adapter}"
+        );
+        assert_eq!(
+            query.table_id(),
+            if adapter == 1 {
+                "neoforge:unknown_loot_table"
+            } else {
+                "test:root"
+            }
+        );
+    }
+}
+
 #[test]
 fn queried_id_is_written_after_root_and_first_wins() {
     for (guard, preset, count) in [

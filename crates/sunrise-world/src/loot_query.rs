@@ -56,9 +56,7 @@ impl LootData {
             entity: None,
             enchanted_level: None,
         };
-        let mut items = Vec::new();
-        c.table_raw(table, json, &mut |c, stack| c.data.split(stack, &mut items));
-        c.query.finish(Some(table));
+        let items = c.roll_root(Some(table), json);
         *random = c.random;
         items
     }
@@ -80,11 +78,7 @@ impl LootData {
             entity: None,
             enchanted_level: None,
         };
-        let mut items = Vec::new();
-        c.table_raw("<root>", table, &mut |c, stack| {
-            c.data.split(stack, &mut items)
-        });
-        c.query.finish(None);
+        let items = c.roll_root(None, table);
         *random = c.random;
         items
     }
