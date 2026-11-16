@@ -1,7 +1,7 @@
 # Drawing an entity type with your own renderer
 
-You can draw content-defined thrown entities and living entity types (mobs, vanilla's or a content
-mod's) with your own renderer. This is the counterpart of
+You can draw content-defined thrown entities, living entity types (mobs, vanilla's or a content
+mod's) and experience orbs with your own renderer. This is the counterpart of
 NeoForge 26.3's `EntityRenderersEvent.RegisterRenderers` (`registerEntityRenderer`): the mod
 registers one renderer per entity type at start, and the game hands each entity of that type in
 view to it, once a frame. Native and wasm mods register and draw the same way.
@@ -40,6 +40,7 @@ impl EntityRenderer for Bolt {
 | `age` | Ticks lived plus the partial tick (`ageInTicks`). |
 | `yaw`, `pitch` | The way it faces, in degrees, interpolated to the frame (0 is south, positive pitch looks down). |
 | `living` | A living entity's own frame (`LivingRenderState`, below); none for any other entity. |
+| `orb_value` | An experience orb's value (`ExperienceOrb.DATA_VALUE`); none for any other entity. |
 
 The pose stack starts at the entity's interpolated position, in blocks, and is not turned. `draw`
 also has the partial tick, the game time and the entity's light. What `submit` draws replaces the
@@ -99,13 +100,17 @@ scan over the mods.
 
 ## What draws through registered renderers
 
-Registered renderers draw two routes:
+Registered renderers draw these routes:
 
 - content-defined thrown types: a `data/<id>/sunrise/entity_type/<name>.json` using the
   `minecraft:snowball` template ([content mods](../content-mods.md)) draws the renderer's geometry
   instead of its flying item. Without a renderer, it draws its item;
 - living types drawn as mobs, vanilla's (`minecraft:zombie`) and the content mods' living types: the
-  renderer draws instead of the model and its vanilla layers.
+  renderer draws instead of the model and its vanilla layers;
+- experience orbs (`minecraft:experience_orb`): the renderer draws instead of the billboarded orb
+  quad, and reads `orb_value`. `age` is ticks lived plus the partial tick. The pose stack starts at
+  the orb's interpolated position, not the 0.1-block lift vanilla's sprite uses. Without a
+  renderer, the quad is unchanged.
 
 Registrations for other known entity families, including boats, displays, vanilla projectiles, the
 player (whose model goes by its skin), the armour stand and the ender dragon (which draw through

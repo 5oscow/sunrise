@@ -27,6 +27,9 @@ pub struct EntityRenderState {
     pub pitch: f32,
     /// A living entity's own frame (`LivingEntityRenderState`); none for any other entity.
     pub living: Option<LivingRenderState>,
+    /// An experience orb's value (`ExperienceOrb.DATA_VALUE`); some for an orb, none for
+    /// every other family.
+    pub orb_value: Option<i32>,
 }
 
 /// What a living entity's frame adds to [`EntityRenderState`], as
@@ -167,6 +170,7 @@ mod tests {
             yaw: 0.0,
             pitch: 0.0,
             living: None,
+            orb_value: None,
         };
         let (mut bolt, mut dart) = (Light::default(), Light::default());
         renderers["mymod:bolt"].submit(&state, &mut bolt).unwrap();
