@@ -21,6 +21,7 @@ impl mod_api::Hooks for BookMod {
             id: "geometry:initial".into(),
             recipe_type: "geometry:crafting".into(),
             icon: "minecraft:stone".into(),
+            secondary_icon: None,
             target_menu: "geometry:menu".into(),
             book: KEY.get().unwrap().clone(),
             search_group: "geometry:search".into(),

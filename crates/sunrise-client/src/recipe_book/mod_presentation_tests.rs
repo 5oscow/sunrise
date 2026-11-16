@@ -101,6 +101,7 @@ fn category(book: &str, id: &str, recipe: &str) -> RecipeBookCategory {
         target_menu: "demo:menu".into(),
         search_group: format!("{book}_search"),
         icon: "demo:icon".into(),
+        secondary_icon: None,
         recipe_type: "demo:type".into(),
         displays: vec![mod_api::RecipeBookDisplayEntry {
             recipe: recipe.into(),
@@ -131,6 +132,27 @@ fn five_layouts_have_independent_expected_cells() {
             .collect();
         assert_eq!(actual, expected);
     }
+}
+#[test]
+fn a_category_tab_carries_its_secondary_icon() {
+    let mut two_icons = category("demo:first", "demo:a", "demo:one");
+    two_icons.secondary_icon = Some("demo:sauce".into());
+    let plain = category("demo:first", "demo:b", "demo:two");
+    let index = ModBookIndex::build(vec![two_icons, plain], &Resources).unwrap();
+    let book = key("demo:first");
+    let panel = index.panel("demo:menu", &book).unwrap();
+    let view = panel
+        .prepare(&Resolver)
+        .presentation(None, "", false, 0, &Resolver);
+    let icons: Vec<_> = view.tabs.iter().map(|t| t.icons.clone()).collect();
+    assert_eq!(
+        icons,
+        [
+            ("minecraft:compass".to_owned(), None),
+            ("demo:icon".to_owned(), Some("demo:sauce".to_owned())),
+            ("demo:icon".to_owned(), None),
+        ]
+    );
 }
 #[test]
 fn panel_search_selection_and_inventory_filter_are_isolated() {
