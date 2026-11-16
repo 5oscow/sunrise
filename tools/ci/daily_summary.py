@@ -283,8 +283,14 @@ def verdicts(jobs, reports, results):
                           if report["incomplete"] else
                           "failed tests whose names are withheld" if problems else "failed outside its tests")
                 unfinished.append((job["name"], job["conclusion"], steps, reason))
-        elif job["name"] == "wasm-mods / fixture" and len(steps) == 1 and steps[0] in FIXTURE_TESTS_STEPS and by_name:
+        elif job["name"] == "wasm-mods / fixture" and len(steps) == 1 and steps[0] in FIXTURE_TESTS_STEPS and (
+                by_name or report["incomplete"]):
             tests += by_name
+            # A command that failed without naming a test (a build failure beside a named one) is the leg's item too.
+            if report["incomplete"] or len(by_name) < len(problems):
+                unfinished.append((job["name"], job["conclusion"], steps, "a test run did not complete: " + ". ".join(
+                    stopped_text(entry if isinstance(entry, dict) else {}) for entry in report["incomplete"])
+                    if report["incomplete"] else "failed tests whose names are withheld"))
         else:
             unfinished.append((job["name"], job["conclusion"], steps, "failed at the steps named"))
     for job in jobs:
@@ -406,7 +412,7 @@ def test_suspect_line(item, previous, commit, git):
     base, url, legs = previous
     numbers = pull_requests_touching(base, commit, folders, git)
     where = ", ".join(f"`{folder}`" for folder in folders)
-    listed = ", ".join(f"#{n}" for n in numbers) if numbers else f"none (the cause is outside {where})"
+    listed = ", ".join(f"#{n}" for n in numbers) if numbers else "none identified in this interval"
     if legs.get(item["leg"]) == "success":
         return (f"Suspects: it passed in the previous daily run ({url}, `{base[:9]}`). Pull requests merged since then "
                 f"that changed {where}: {listed}.")

@@ -59,6 +59,33 @@ class CargoTestVerdictTests(unittest.TestCase):
             self.assertEqual(written["passed"], [{"package": "one", "test": "a"}])
             self.assertEqual([(item["package"], item["test"]) for item in written["problems"]], [("two", "b")])
 
+    def test_a_failure_without_a_whole_verdict_is_recorded_as_incomplete(self):
+        named = ["     Running tests/a.rs (target/a)\n", "test x ... FAILED\n", "test result: FAILED. 0 passed; 1 failed\n"]
+        problems, _ = verdict.verdicts(named, "pkg")
+        self.assertIsNone(verdict.unfinished(named, "pkg", 101, problems), "a named failure with every summary")
+        self.assertEqual(verdict.unfinished(["error[E0425]: cannot find value\n"], "pkg", 101, []),
+                         {"shard": "pkg", "reason": "failed without a failed test (a build failure)", "cargo_exit": 101})
+        # The first binary named its failure, the second stopped before its summary (a crash, a stop partway).
+        partly = named + ["\x1b[1m\x1b[92m     Running\x1b[0m tests/b.rs (target/b)\n", "test y ... ok\n"]
+        problems, _ = verdict.verdicts(partly, "pkg")
+        self.assertEqual(verdict.unfinished(partly, "pkg", 101, problems)["reason"],
+                         "a test binary stopped before its summary")
+        self.assertIsNone(verdict.unfinished([], "pkg", 0, []))
+
+    def test_a_named_failure_and_a_build_failure_both_reach_the_report(self):
+        with tempfile.TemporaryDirectory() as folder:
+            report = Path(folder, "report.json")
+            script = "import sys; print(sys.argv[1]); sys.exit(int(sys.argv[2]))"
+            with contextlib.redirect_stdout(io.StringIO()):
+                verdict.main([str(report), "--", sys.executable, "-c", script,
+                              "test a ... FAILED\ntest result: FAILED. 0 passed; 1 failed", "101", "-p", "one"])
+                verdict.main([str(report), "--", sys.executable, "-c", script, "error: could not compile", "101",
+                              "-p", "two"])
+            written = json.loads(report.read_text())
+            self.assertEqual([item["test"] for item in written["problems"]], ["a"])
+            self.assertEqual(written["incomplete"], [
+                {"shard": "two", "reason": "failed without a failed test (a build failure)", "cargo_exit": 101}])
+
 
 if __name__ == "__main__":
     unittest.main()
