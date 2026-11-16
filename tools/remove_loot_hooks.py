@@ -42,4 +42,4 @@ transform("crates/sunrise-client/src/entry.rs", lambda text: re.sub(r"(?ms)^    
 for file in ["crates/sunrise-client/tests/load_defaults.rs", "crates/sunrise-client/src/game/modding/native_data_bound.rs", "crates/sunrise-world/tests/it/native_load_hooks.rs"]:
     transform(file, lambda text: re.sub(r"(?m)^\s*loot_(?:function|condition):[^\n]*\n", "", text))
 transform("crates/sunrise-world/src/native_load_hook_fixtures.rs", lambda text: re.sub(r"(?ms)^                loot_function:.*?^                },\n", "", text))
-transform("crates/sunrise-client/src/game/native_hooks/shared.rs", lambda text: function(text, "native_loot_kinds_stay_hookable", True))
+transform("crates/sunrise-client/src/game/native_hooks/shared.rs", lambda text: re.sub(r"(?ms)^    #\[test\]\n    fn native_loot_kinds_stay_hookable\(\).*?^    }\n", "", text))
