@@ -81,6 +81,25 @@ pub struct Clock {
     /// it modulo 24000 for the hour; `/time set` can make it negative.
     pub day_time: i64,
 }
+/// Maximum number of columns in one generator surface query.
+pub const MAX_TERRAIN_COLUMNS: usize = 4096;
+
+/// The generator's undecorated surface, without slope rules or chunk allocation.
+/// Created only by the game; identical on native and wasm.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+#[derive(sunrise_mod_api_macros::Wire)]
+pub struct TerrainColumn {
+    /// One above the highest solid block, skipping fluids (OceanFloor).
+    pub height: i32,
+    /// The block at height minus one.
+    pub block: BlockKey,
+    /// One above the highest fluid over the surface, absent on dry land.
+    pub water: Option<i32>,
+    /// Identifier from the world's biome table, including data pack biomes.
+    pub biome: String,
+}
+
 /// What `read_columns` read: the blocks round each column's height (`bases`, none where it isn't loaded),
 /// as indexes into `palette`, a column after another, and three biome tints a column (grass, foliage, water).
 #[derive(Clone, Debug, PartialEq, Default)]
@@ -405,6 +424,24 @@ impl<'a> CubeFace<'a> {
 pub(crate) mod built {
     #[allow(unused_imports)]
     use super::*;
+    // exhaustive: the game builds it with a literal; mods only read it
+    #[derive(sunrise_mod_api_macros::Wire)]
+    pub struct TerrainColumn {
+        pub height: i32,
+        pub block: BlockKey,
+        pub water: Option<i32>,
+        pub biome: String,
+    }
+    impl From<TerrainColumn> for super::TerrainColumn {
+        fn from(v: TerrainColumn) -> Self {
+            Self {
+                height: v.height,
+                block: v.block,
+                water: v.water,
+                biome: v.biome,
+            }
+        }
+    }
     // exhaustive: the game builds it with a literal; mods only read it
     #[derive(sunrise_mod_api_macros::Wire)]
     pub struct ConfigFile {
