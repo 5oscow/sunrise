@@ -270,7 +270,6 @@ impl Game<'_> {
         let context = self
             .prepare_loop_context(&resources)
             .map_err(|error| ReloadStageError::DataSource(error.to_string()))?;
-        let prepared = self.apply_server_reload_callbacks(prepared);
         let world = if run_load && self.remote.is_none() {
             Some(
                 self.prepare_world_reload(&stack, &resources)
@@ -279,6 +278,9 @@ impl Game<'_> {
         } else {
             None
         };
+        // Every candidate, including world tables, must prepare successfully
+        // before any listener publishes its new state.
+        let prepared = self.apply_server_reload_callbacks(prepared);
         if let Some(root) = next_root {
             self.options.resources = root.prepared().to_owned();
             self.pack.data_source = root.data().clone();
@@ -1418,7 +1420,6 @@ impl Game<'_> {
                 )));
             }
         };
-        let prepared = self.apply_server_reload_callbacks(prepared);
         let world = match self.prepare_world_reload(&stack, &root) {
             Ok(world) => world,
             Err(error) => {
@@ -1429,6 +1430,7 @@ impl Game<'_> {
                 )));
             }
         };
+        let prepared = self.apply_server_reload_callbacks(prepared);
         self.install_loop_context(context);
         self.fns.packs = stack.packs.clone();
         self.fns.enabled = stack.enabled.clone();
