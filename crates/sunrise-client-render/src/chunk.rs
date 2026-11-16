@@ -1017,7 +1017,8 @@ pub struct PendingContainerLoot {
     pub seed: Option<Tag>,
 }
 impl PendingContainerLoot {
-    /// Keep the original tags, including an absent or explicitly zero seed.
+    /// Keep the table and raw seed tag, including an explicit zero seed, until
+    /// loot access or serialization. Vanilla's save omits a zero seed.
     pub fn from_tag(tag: &Tag) -> Option<Self> {
         let table = tag.get("LootTable")?;
         let Tag::String(id) = table else { return None };
@@ -1046,8 +1047,8 @@ impl PendingContainerLoot {
             Tag::String(self.table_id().as_str().into()),
         );
         map.remove(&"LootTableSeed".into());
-        if let Some(seed) = &self.seed {
-            map.insert("LootTableSeed".into(), seed.clone());
+        if let Some(seed) = self.seed_value().filter(|seed| *seed != 0) {
+            map.insert("LootTableSeed".into(), Tag::Long(seed));
         }
         map.remove(&"Items".into());
     }
