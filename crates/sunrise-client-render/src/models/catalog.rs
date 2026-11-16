@@ -603,6 +603,21 @@ impl StateModels {
     pub fn model_by_slot(&self, slot: u32) -> Option<&BakedModel> {
         self.baked.get(slot as usize).map(|(_, model)| model)
     }
+    /// Slots of every baked model `state` can select, in bake order without repeats: each
+    /// weighted alternative and each selected multipart part (`CompiledChoices::each_alternative`).
+    /// `None` for a state no definition binds.
+    pub fn state_slots(&self, state: BlockStateId) -> Option<Vec<u32>> {
+        let (choice, selected) = self.state(state)?;
+        let mut slots = Vec::new();
+        self.choices[*choice]
+            .each_alternative(selected, |&slot| {
+                if !slots.contains(&slot) {
+                    slots.push(slot);
+                }
+            })
+            .ok()?;
+        Some(slots)
+    }
     pub fn collect(
         &self,
         state: BlockStateId,
@@ -1001,3 +1016,6 @@ mod bounds_tests;
 #[cfg(test)]
 #[path = "catalog/standalone_tests.rs"]
 mod standalone_tests;
+#[cfg(test)]
+#[path = "catalog/baked_keys_tests.rs"]
+mod baked_keys_tests;

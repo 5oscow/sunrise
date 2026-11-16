@@ -356,6 +356,33 @@ pub trait RenderAssets {
             crate::world::phase::LoadAccess::PublishedResources,
         )
     }
+    /// Side: client.
+    /// Published asset/data read: available in Setup, Reloading and World.
+    /// Keys of every baked model block state `state` can draw in the published store, in bake
+    /// order without repeats: each weighted alternative and each multipart part its properties
+    /// select, whichever one a position's seed would pick. Empty for a state no blockstate file
+    /// binds (air) and on a store that bakes no models. `ModelError::UnknownModel` for an id
+    /// past the block state table. Ask once in `model_baking_completed`, not each frame.
+    fn block_state_models(&self, state: BlockStateId) -> Result<Vec<BakedModelKey>, ModelError> {
+        crate::world::phase::unprovided(
+            "RenderAssets::block_state_models",
+            "block_state_models",
+            crate::world::phase::LoadAccess::PublishedResources,
+        )
+    }
+    /// Side: client.
+    /// Published asset/data read: available in Setup, Reloading and World.
+    /// A copy of the baked model `key` names: its quads and sprites as the mesher draws them.
+    /// `ModelError::StaleModel` once a successful resource reload has superseded the key's
+    /// generation; `ModelError::UnknownModel` for a slot the store lacks. Each call copies the
+    /// model's quads, so read the ones a mod needs once per `model_baking_completed`.
+    fn baked_model(&self, key: BakedModelKey) -> Result<BakedModelView, ModelError> {
+        crate::world::phase::unprovided(
+            "RenderAssets::baked_model",
+            "baked_model",
+            crate::world::phase::LoadAccess::PublishedResources,
+        )
+    }
 }
 
 /// Client-side persistent copies of resolved models.
