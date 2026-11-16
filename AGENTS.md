@@ -156,7 +156,6 @@ Game workspace (root `Cargo.toml`); `launcher/` and `crates/sunrise-telemetry-se
 | `sunrise-theme` | Design tokens and fonts for the launcher, the game's own menus and the website |
 | `sunrise-perf-format` | The `.hzperf` capture contract ([docs/perf-platform.md](docs/perf-platform.md) §3): `proto/sunrise/perf/v1/capture.proto`, its generated types, the gzip writer and its thread. No Sunrise dependencies; nothing in the game reads a capture |
 | `sunrise-telemetry`, `sunrise-telemetry-server`, `sunrise-bench` | Opt-in data collection, its ingest server, the benchmark report format |
-| `sunrise-cosmetics` | Cosmetic items Sunrise clients draw on players (off by default): the item format, bones and animations ([docs/cosmetics.md](docs/cosmetics.md)) |
 | `sunrise-addresses` | Every built-in address of an outside service vanilla doesn't contact (Sunrise layer; [docs/layers.md](docs/layers.md#built-in-addresses)) |
 | `sunrise-system` | The machine the game runs on (OS, CPU, memory, drive, power, GPU maker and memory), for the crash report, the renderer's GPU info and telemetry |
 | `sunrise-platform` | The platform's public API: what the Sunrise layer may use of the engine ([docs/layers.md](docs/layers.md)); re-exports `sunrise-system` today |

@@ -54,7 +54,7 @@ and compares their outputs.
 - **Sunrise's own features** (the launcher, the new menus) follow [the design system](docs/design-system.md) and are
   off by default wherever they would change the vanilla look.
 - **Three layers: engine, platform, Sunrise.** Vanilla code never depends on the platform (mods, shader packs,
-  Sunrise-only settings) or on Sunrise (cosmetics, the shop, official servers, telemetry), and the platform never
+  Sunrise-only settings) or on Sunrise (Discord, Play with Friends, telemetry), and the platform never
   depends on Sunrise. [docs/layers.md](docs/layers.md) says where a new feature goes; CI checks the dependencies.
 - **Everything players run is Rust.** Python and Java are fine for dev tools and harness drivers in `tools/`, never
   for player-facing code.

@@ -103,7 +103,6 @@
     "launcher/src/native_mods.rs github.com",
     "launcher/src/rust_toolchain.rs github.com",
     "launcher/src/rust_toolchain.rs static.rust-lang.org",
-    "launcher/src/shop.rs playsunrise.net",
     "launcher/src/signed.rs github.com",
     "launcher/src/tailscale.rs api.tailscale.com",
     "launcher/src/tailscale.rs login.tailscale.com",

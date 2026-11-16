@@ -8,7 +8,7 @@
 //! [`register`] adds them. Nothing here depends on an engine crate.
 #![forbid(unsafe_code)]
 
-use sunrise_platform::hooks::{self, Hooks};
+use sunrise_platform::hooks::{self, GetTheGame, Hooks};
 use sunrise_platform::{pages, settings};
 
 /// Every Sunrise part in the game, in the order its hooks run.
@@ -17,13 +17,34 @@ const PARTS: [&dyn Hooks; 5] = [
     &sunrise_heartbeat::HOOKS,
     // Play with Friends: `friend:` addresses join through its tunnel.
     &sunrise_friends::game::HOOKS,
-    // The official server in the player's server list.
-    &sunrise_official_servers::HOOKS,
+    // Where a game started without its prepared files sends the player.
+    &LAUNCHER_PAGE,
     // "Playing Sunrise" on the player's Discord profile.
     &sunrise_discord::HOOKS,
     // Open and Share for saved performance captures.
     &sunrise_perf_share::HOOKS,
 ];
+/// The game started by hand without its prepared files: start it from the launcher, downloaded
+/// from Sunrise's website.
+static LAUNCHER_PAGE: LauncherPage = LauncherPage;
+
+struct LauncherPage;
+
+impl Hooks for LauncherPage {
+    fn get_the_game(&self) -> Option<GetTheGame> {
+        Some(GetTheGame {
+            address: sunrise_addresses::WEBSITE,
+            title: "sunrise.get_the_game.title",
+            paragraphs: &[
+                "sunrise.get_the_game.about",
+                "sunrise.get_the_game.minecraft",
+                "sunrise.get_the_game.download",
+            ],
+            button: "sunrise.get_the_game.button",
+        })
+    }
+}
+
 /// Their settings, in the player's settings files.
 const STORES: [&dyn settings::Store; 1] = [&sunrise_discord::SETTING];
 /// Their rows and pages in the options screens.

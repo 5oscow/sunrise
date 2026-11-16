@@ -18,7 +18,7 @@ The kit grows a piece at a time, each with something on screen that needs it:
 | `hud_kit::plate` | `Plate`: the box behind a notice's text, or a guide row's backing |
 | `hud_kit::shapes` | triangles, fans, arcs, discs and radial gradients for `HudBatch`; `alpha_since`, `translate_since` |
 | `hud_kit::motion` | `Clock` and `Tween`: quiet motion as pure functions of the frame's time |
-| `hud_kit::icon` | `Icon`: a sprite, an item, a glyph or the player's face, through an `IconPainter` |
+| `hud_kit::icon` | `Icon`: a sprite, an item or a glyph, through an `IconPainter` |
 | `hud_kit::tabs` | `collapsed`: a page list in one row, `‹ Name ›` with a pip per page; `tab_strip`: a row of tabs that falls back to it |
 | `pad_glyph`, with `GlyphOf` and `MenuJob` in `gamepad.rs` | `Glyph`: a controller button, asked for by what it does, in the player's `Glyphs` |
 | `hud_kit::fit` | `ellipsize`, `wrap`, `chord` and `fit_in_circle`: text cut or wrapped to the room it has |
@@ -172,10 +172,9 @@ sector is drawing.
 | `Sprite("statistics/item_dropped")` | the kit, from the atlas's `gui/sprites/`; proportions kept, centred |
 | `Item("minecraft:chest")` | the game's `IconPainter::item` (`game/item_draw.rs`): the item's model, scaled from 16 |
 | `Glyph(glyph)` | the kit, `pad_glyph::draw`, centred |
-| `PlayerFace` | the game's `IconPainter::face`: the player's skin face with its hat |
 
 `icon::draw(batch, atlas, painter, icon, area, alpha)` says whether anything was drawn. The render
-crate never reaches gameplay, so items and the face go through the painter the game passes in;
+crate never reaches gameplay, so items go through the painter the game passes in;
 tests and sprite-only screens pass `NoItems`. Every picture comes from the player's own resources,
 none is bundled, and a sprite the atlas lacks draws nothing.
 

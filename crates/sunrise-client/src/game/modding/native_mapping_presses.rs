@@ -206,7 +206,7 @@ mod tests {
                 Err(MappingError::NotGameplay { key: key.into() })
             );
         }
-        for key in ["nope", "key.emote", ""] {
+        for key in ["nope", ""] {
             assert_eq!(
                 gameplay_mapping(key),
                 Err(MappingError::Unknown { key: key.into() })

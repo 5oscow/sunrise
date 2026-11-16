@@ -80,8 +80,8 @@ pub struct Config {
     pub live_minute_days: u32,
     /// Days its hourly totals are kept; at least 31, for the 30-day view. Daily ones stay.
     pub live_hour_days: u32,
-    /// The official server, asked for its player count every minute (`history`'s `official`
-    /// series); None asks nothing.
+    /// A server asked for its player count every minute (`history`'s `official` series); None,
+    /// the default, asks nothing.
     pub official_server: Option<String>,
     /// The hub's votes and reads of their counts an IP address may make an hour.
     pub hub_per_hour: f64,
@@ -129,7 +129,7 @@ impl Default for Config {
             live_max_sessions: 200_000,
             live_minute_days: 7,
             live_hour_days: 90,
-            official_server: Some(sunrise_telemetry::server_status::OFFICIAL_STATUS_ADDRESS.into()),
+            official_server: None,
             hub_per_hour: 600.0,
             hub_posts_per_hour: 20.0,
             hub_reports_per_day: 30,

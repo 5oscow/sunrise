@@ -84,7 +84,7 @@ and prepared resources in .local/sunrise-client/26.3. Exit status 0 when every c
   keeps the name) and deletes a page, resets, Undo puts back what it found, and the opener's row binds Y in place.
 - radial_held_sneak: a sneak held on the pad stays held while the menu opens, selects and commits.
 - radial_focus_background: with Play in Background on, losing the window's focus still cancels the menu.
-- radial_unavailable: on a single saved page, an action that can't run (Emote, cosmetics off) is dimmed and its commit does nothing.
+- radial_unavailable: on a single saved page, an action that can't run (Quick Actions, no dialog given) is dimmed and its commit does nothing.
 - radial_old_file: a settings file from before the radial menu keeps D-pad down on the advancements.
 - radial_flick_with_press: a stick flicked as the opener goes down selects; one leaning since well before waits.
 - radial_held_drop: a drop held through the menu doesn't throw the rest of the stack as it closes.
@@ -4040,10 +4040,10 @@ def radial_focus_background(args, name):
 
 def radial_unavailable(args, name):
     def seed(home):
-        # One page: Emote up, Commands right.
+        # One page: Quick Actions up, Commands right.
         (home / 'sunrise-controller.txt').write_text(
-            'bindLayout:2\nradial_0_name:sunrise.radial.page.general\nradial_0_slots:key.emote,,key.command,,,,,\n')
-    game = Game(args, name, world=True, seed=seed, env={'SUNRISE_COSMETICS': '0'})
+            'bindLayout:2\nradial_0_name:sunrise.radial.page.general\nradial_0_slots:key.quickActions,,key.command,,,,,\n')
+    game = Game(args, name, world=True, seed=seed)
     check = Check()
     try:
         game.ctl('pad', 'focus', 'true')
@@ -4052,7 +4052,7 @@ def radial_unavailable(args, name):
         hold_opener(game)
         aim(game, 0, 1)
         state = radial(game)
-        check(state['pages'] == 1 and state['slots'][0] == 'sunrise:emote', f'not the saved page: {state}')
+        check(state['pages'] == 1 and state['slots'][0] == 'key.quickActions', f'not the saved page: {state}')
         check(state['selected'] == 0, f'up selected {state["selected"]}')
         check(state['available'][0] is False and state['available'][2] is True, f"available: {state['available']}")
         shot(game, 'radial_single_page_unavailable')
