@@ -140,7 +140,7 @@ impl Session {
         if state.closed || state.failure.is_some() {
             return Err(ConfigurationTaskError::Disconnected);
         }
-        if !state.started || state.tasks.get(state.at) != Some(task_type) {
+        if !state.started || state.finished || state.tasks.get(state.at) != Some(task_type) {
             state.failure = Some("Finished a configuration task with the wrong type".into());
             return Err(ConfigurationTaskError::WrongType);
         }
@@ -176,5 +176,34 @@ impl Session {
     }
     pub fn closed(&self) -> bool {
         self.state.lock().unwrap_or_else(|e| e.into_inner()).closed || self.transport().closed()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn finishing_twice_before_the_next_turn_refuses_and_fails_configuration() {
+        use crate::lan::config_payloads::ConfigIo;
+        use sunrise_protocol::connection::{Connection, Pipe};
+
+        let (_peer, server) = Pipe::pair();
+        let mut server = Connection::local(server);
+        let transport = Transport::empty();
+        let (events, _receiver) = crate::lan::event_channel_with_capacity(1 << 20);
+        let mut io = ConfigIo::new(&mut server, transport.clone(), events).unwrap();
+        let session = Session::new(io.task_sender(transport).unwrap());
+        let task_type = Identifier::parse("task_fixture:first").unwrap();
+        session.register(vec![ConfigurationTask::new(task_type.clone())]);
+        assert!(session.turn().unwrap().start);
+        assert_eq!(session.finish(&task_type), Ok(()));
+        // No intervening turn: completion itself must consume the right to finish.
+        assert_eq!(
+            session.finish(&task_type),
+            Err(ConfigurationTaskError::WrongType)
+        );
+        assert!(matches!(session.result(), Some(Err(_))));
+        assert!(session.turn().is_none());
     }
 }
