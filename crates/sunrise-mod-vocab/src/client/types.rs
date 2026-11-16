@@ -721,7 +721,7 @@ pub enum ScreenOpening {
 /// `y` below the line `from` names. Vanilla screens place theirs either way:
 /// `leftPos + 5, topPos + 34` is `x: 5.0, y: 34.0, from: Menu`, and
 /// `leftPos + 5, height / 2 - 49` is `x: 5.0, y: -49.0, from: ScreenCentre`.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 // exhaustive: mods build it with a literal and the game reads every field
 #[derive(sunrise_mod_api_macros::Wire)]
 pub struct RecipeBookToggle {
@@ -734,11 +734,12 @@ pub struct RecipeBookToggle {
 }
 
 /// The line a recipe-book toggle's `y` counts from.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 // exhaustive: the two lines vanilla's screens measure from, matched without a wildcard
 #[derive(sunrise_mod_api_macros::Wire)]
 pub enum ToggleOrigin {
     /// The menu's top edge.
+    #[default]
     Menu,
     /// The window's vertical centre, as vanilla's `height / 2` (integer division, so an odd
     /// window height rounds down).
