@@ -24,6 +24,14 @@ beside the bed with the normal wake animation, teleport and pose sync; the usual
 occupying a bed or playing a wake animation. The next entity sync publishes the changed pose and bed to clients.
 Villagers use `start_sleeping`/`stop_sleeping`, not the raw player position setters.
 
+## Sprinting
+
+`EntityRef::is_sprinting` reads `Entity.isSprinting` and `EntityRef::set_sprinting(host, sprinting)` sets it
+(`Entity.setSprinting`, server only): a player's flag with the movement speed bonus that goes with it, or a mob's
+shared flag, which a cat's or ocelot's own AI may set again on its next step. It returns `false` for a stale
+handle, on a client and for a kind with no sprinting flag. It is the flag `Entity.isSprinting` reads, not
+the player's sprint key: a player's own client sets its flag again from its input.
+
 ## Portals and leashes
 
 `EntityRef::portal_cooldown` takes `&dyn Host` and reads the remaining portal cooldown in ticks from the

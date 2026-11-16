@@ -1424,6 +1424,10 @@ impl Game<'_> {
             self.clock.average_nanos() as f64 / 1_000_000.0,
         )
     }
+    /// `TickRateManager.isFrozen`; None on a client, which follows its server's.
+    pub(in crate::game) fn tick_rate_is_frozen(&self) -> Option<bool> {
+        self.is_logical_server().then(|| self.clock.frozen())
+    }
     /// A mod's `set_tick_rate`: `apply_tick_rate`, refused inside the `server_tick_rate_changed`
     /// hook so a listener can't fire it again without end.
     pub(in crate::game) fn set_tick_rate(&mut self, rate: f32) -> bool {

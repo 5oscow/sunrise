@@ -106,6 +106,30 @@ impl Game<'_> {
             _ => false,
         })
     }
+    /// `Entity.setSprinting` for a player (the flag and the speed modifier) or a mob (the
+    /// flag, sent to the clients). False for other kinds, a stale handle and a client.
+    pub(super) fn entity_set_sprinting(&mut self, entity: EntityRef, sprinting: bool) -> bool {
+        if !self.is_logical_server() {
+            return false;
+        }
+        match self.native_entity_target(entity) {
+            Some(Target::Player) => self
+                .player
+                .as_mut()
+                .is_some_and(|p| p.set_sprinting(sprinting).is_ok()),
+            Some(Target::Guest(conn)) => self
+                .lan
+                .as_mut()
+                .and_then(|lan| lan.hub.guests.motion_mut(conn))
+                .is_some_and(|p| p.set_sprinting(sprinting).is_ok()),
+            Some(Target::Mob(id)) => self.mobs.iter_mut().find(|m| m.id == id).is_some_and(|m| {
+                m.extra.sprinting = sprinting;
+                m.needs_sync = true;
+                true
+            }),
+            _ => false,
+        }
+    }
     /// Whether the entity touched water at its last fluid update
     /// (`Entity.isInWater`): players and mobs.
     pub(super) fn entity_is_in_water(&self, entity: EntityRef) -> Option<bool> {
