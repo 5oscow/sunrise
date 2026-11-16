@@ -4,11 +4,11 @@
 //! boats, minecarts and mounts; mobs ride mobs, boats and minecarts. Reads
 //! return `None` for a stale handle or on a client.
 use super::{Game, commands::Target, mounts::steering_item};
+use mod_api::{EntityRef, LeashHolder, LivingRef, StartRidingRefusal};
 use sunrise_client::{
     lan::playerdata::ints_uuid,
     mobs::{Mob, Species, equine, happy_ghast, leash::Holder, nautilus},
 };
-use mod_api::{EntityRef, LeashHolder, LivingRef, StartRidingRefusal};
 
 impl Game<'_> {
     /// The dismount search with a vehicle or passenger lent out of `self.mobs`.
@@ -403,7 +403,8 @@ impl Game<'_> {
         vehicle: Target,
         force: bool,
     ) -> bool {
-        self.try_start_riding_target(rider, vehicle, force, false).is_ok()
+        self.try_start_riding_target(rider, vehicle, force, false)
+            .is_ok()
     }
 
     /// `start_riding_target`, where `onto_player` admits a player vehicle for a mob rider:

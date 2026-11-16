@@ -1746,7 +1746,12 @@ mod nested_vehicle_discard_tests {
                 let level = host.level("minecraft:overworld").unwrap();
                 let removed = mod_api::EntityRef::new(level.epoch(), 71);
                 assert!(removed.position(host).is_none());
-                assert!(host.entity(73).unwrap().start_riding(host, removed, true).is_err());
+                assert!(
+                    host.entity(73)
+                        .unwrap()
+                        .start_riding(host, removed, true)
+                        .is_err()
+                );
                 if self.cancel.load(Ordering::Relaxed) {
                     return mod_api::Flow::Cancel;
                 }

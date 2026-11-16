@@ -5,9 +5,9 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
+use mod_api::{EntityMountEvent, EntityRef, Flow, Hooks, ServerHost, StartRidingRefusal};
 use sunrise_client::{chunk::Chunk, mobs::Mob};
 use sunrise_core::geometry::Vec3;
-use mod_api::{EntityMountEvent, EntityRef, Flow, Hooks, ServerHost, StartRidingRefusal};
 
 use super::{Dim, Game, commands::Target, native_entity_refs::tests::with_game};
 
