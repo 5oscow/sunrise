@@ -163,7 +163,7 @@ Only natural spawning's packs ask it: vanilla has no group limit anywhere else. 
 
 ## Keeping or removing a mob
 
-`mob_despawn` fires once per tick for every mob in a loaded chunk, just before vanilla's `Mob.checkDespawn`, persistent mobs and mobs in peaceful mode included. `Allow` discards the mob, `Deny` keeps it, `Default` leaves vanilla's rules to decide. An answer other than `Default` skips all of vanilla's checks, so a `Deny` keeps a hostile mob in peaceful mode and neither answer takes the idle-despawn `nextInt(800)` draw.
+`mob_despawn` fires once per tick for every mob whose chunk is entity-ticking, just before vanilla's `Mob.checkDespawn`, persistent mobs and mobs in peaceful mode included. Player tickets make chunks entity-ticking across the whole view distance, so a mob beyond the simulation distance is still checked, though it isn't ticked. A mob in a loaded chunk that is not entity-ticking is neither checked nor told. `Allow` discards the mob, `Deny` keeps it, `Default` leaves vanilla's rules to decide. An answer other than `Default` skips all of vanilla's checks, so a `Deny` keeps a hostile mob in peaceful mode and neither answer takes the idle-despawn `nextInt(800)` draw.
 
 ```rust,ignore
 fn mob_despawn(&self, _: &dyn mod_api::Host, event: &mut mod_api::MobDespawnEvent<'_>) {
