@@ -1,5 +1,26 @@
 Required Notice: Copyright The Sunrise contributors (https://github.com/sunrise-org/sunrise)
 
+# Additional permission: free forks and ports
+
+In addition to the PolyForm Shield License 1.0.0 below, the licensor permits you to make, use and distribute a
+product built from the software that would otherwise count as competing under its Competition section (for
+example a port to another platform, or a fork tuned for particular devices), as long as all of these hold:
+
+1. **Free.** Neither the product nor anything distributed, offered or used together with it (including anything
+   that bundles, downloads, links to or requires it, or is run by the same people or organization) is sold, shows
+   advertising, has paid features, tiers or access, or takes money for any person. Donations and sponsorship are
+   allowed only into a fund whose income and every expense are published, and which pays no one beyond reimbursing
+   documented costs.
+2. **Same terms, with source.** You distribute the product under these same terms, this additional permission
+   included, together with its complete source code.
+3. **Credit, not the name.** It says it is based on Sunrise and links to https://github.com/sunrise-org/sunrise,
+   and it does not call itself Sunrise or present itself as official.
+4. **Not part of another client.** It is not included in, combined with or distributed with another
+   reimplementation of Minecraft, or a launcher for one, unless that product meets all of these conditions too.
+
+If a product stops meeting these conditions, this permission ends for it, and only the license below applies.
+
+
 # PolyForm Shield License 1.0.0
 
 <https://polyformproject.org/licenses/shield/1.0.0>
