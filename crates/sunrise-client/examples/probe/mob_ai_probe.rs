@@ -1229,7 +1229,6 @@ pub fn main() -> sunrise_client::Result<()> {
                     dragon: None,
                     leash_boats: &[],
                     who_lookup: None,
-                    foreign: None,
                     others_grid: $grid,
                     others_index: None,
                     passenger_objects: &[],

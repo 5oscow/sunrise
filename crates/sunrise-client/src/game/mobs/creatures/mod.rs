@@ -10595,7 +10595,6 @@ mod pearl_tests {
             dragon: None,
             leash_boats: &[],
             who_lookup: None,
-            foreign: None,
             others_grid: None,
             others_index: None,
             passenger_objects: &[],
@@ -13239,18 +13238,6 @@ mod breeding_heart_tests {
         }
     }
 }
-
-#[cfg(feature = "upstream-parallel-mobs")]
-#[path = "../../creatures/mob_group.rs"]
-mod mob_group;
-
-#[cfg(feature = "upstream-parallel-mobs")]
-#[path = "../../creatures/mob_islands.rs"]
-mod mob_islands;
-
-#[cfg(feature = "upstream-parallel-mobs")]
-#[path = "../../creatures/prep.rs"]
-mod prep;
 
 #[cfg(test)]
 #[path = "frame_projectile_tests.rs"]

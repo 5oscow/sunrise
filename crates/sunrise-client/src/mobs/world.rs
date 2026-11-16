@@ -708,14 +708,13 @@ impl MobWorld<'_> {
             .or_else(|| self.passenger_objects.iter().find(|s| s.id == id))
     }
     pub fn seen(&self, id: u32) -> Option<&Seen> {
-        let own = match self.others_index {
+        match self.others_index {
             Some(index) => index
                 .get(&id)
                 .and_then(|&i| self.others.get(i as usize))
                 .filter(|s| s.id == id),
             None => self.others.iter().find(|s| s.id == id),
-        };
-        own.or_else(|| self.foreign?.seen(id))
+        }
     }
     /// Living mobs of the given species within `range` of `from`, nearest first.
     pub fn nearby<'s>(
@@ -970,7 +969,6 @@ fn run_test_world(
         dragon: None,
         leash_boats: &[],
         who_lookup: None,
-        foreign: None,
         others_grid: None,
         others_index: None,
         passenger_objects: &[],

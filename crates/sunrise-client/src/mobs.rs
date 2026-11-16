@@ -3301,9 +3301,6 @@ pub struct MobWorld<'a> {
     /// not in the level (a warden's anger, `AngerManagement.angerByUuid`).
     /// None: this world keeps no entity UUIDs, so nothing is resolved.
     pub who_lookup: Option<&'a dyn WhoLookup>,
-    /// Another thread's mobs, for a lookup by id that misses `others`: a group of the server's
-    /// parallel mob loop (`game/mob_islands.rs`) answers as the serial loop would.
-    pub foreign: Option<&'a dyn ForeignSeen>,
     /// The level's world border, whose walls stop a mob's moves
     /// (`Entity.collectColliders`); None: nothing stops them there.
     pub border: Option<&'a sunrise_core::geometry::border::BorderGeometry>,
@@ -3454,10 +3451,6 @@ impl MobWorld<'_> {
 /// names while it is in the level, never some other entity as a stand-in. Only
 /// the game layer keeps entity UUIDs, so it answers this (`Game::who_by_uuid`)
 /// and the mob layer reaches it through `MobWorld`.
-/// A mob outside this thread's part of the mob loop, as the serial loop would see it now.
-pub trait ForeignSeen {
-    fn seen(&self, id: u32) -> Option<&Seen>;
-}
 pub trait WhoLookup {
     fn who_by_uuid(&self, uuid: [i32; 4]) -> Option<Who>;
 }
