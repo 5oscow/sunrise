@@ -190,6 +190,20 @@ impl Hooks for Mod {
     ) {
         lending::Lender.menu_links(host, event);
     }
+    fn chunk_data_save(
+        &self,
+        host: &dyn mod_api::ChunkDiskHost,
+        event: &mut mod_api::ChunkDataSaveEvent<'_>,
+    ) {
+        chunk_disk::save(host, event.data);
+    }
+    fn chunk_data_load(
+        &self,
+        host: &dyn mod_api::ChunkDiskHost,
+        event: &mut mod_api::ChunkDataLoadEvent<'_>,
+    ) {
+        chunk_disk::load(host, event.data);
+    }
 
     fn living_entity_use_item_tick(
         &self,
