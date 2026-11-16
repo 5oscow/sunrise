@@ -89,16 +89,31 @@ mod tests {
     struct ExtraPositions {
         calls: Arc<Mutex<Vec<u8>>>,
         invalid: Arc<AtomicBool>,
+        reenter: bool,
     }
     #[mod_api::sunrise_part]
     impl BlockPart for ExtraPositions {
         fn break_progress_positions(
             &self,
-            _: &mut dyn ClientHost,
+            host: &mut dyn ClientHost,
             event: &mut BreakProgressPositionsEvent<'_>,
         ) {
-            self.calls.lock().unwrap().push(event.progress);
+            let count = {
+                let mut calls = self.calls.lock().unwrap();
+                calls.push(event.progress);
+                calls.len()
+            };
             let p = event.pos;
+            // Bound the fixture's recursion so a regression fails the assertion
+            // rather than overflowing the test process's stack.
+            if self.reenter && count == 1 {
+                assert!(event.level.set_client_break_progress(
+                    host,
+                    -1,
+                    [p.x, p.y, p.z],
+                    i32::from(event.progress),
+                ));
+            }
             event.positions.extend([
                 BlockPos::new(p.x + 1, p.y, p.z),
                 BlockPos::new(p.x, p.y, p.z + 1),
@@ -126,6 +141,7 @@ mod tests {
     struct Register {
         calls: Arc<Mutex<Vec<u8>>>,
         invalid: Arc<AtomicBool>,
+        reenter: bool,
     }
     #[mod_api::__subscriptions]
     impl Hooks for Register {
@@ -136,6 +152,7 @@ mod tests {
                 ExtraPositions {
                     calls: self.calls.clone(),
                     invalid: self.invalid.clone(),
+                    reenter: self.reenter,
                 },
             );
         }
@@ -151,6 +168,7 @@ mod tests {
             Box::new(Register {
                 calls: calls.clone(),
                 invalid: invalid.clone(),
+                reenter: false,
             }),
         )]
         .into();
@@ -279,6 +297,42 @@ mod tests {
                 assert!(game.destroying.is_empty());
                 assert!(game.mining.is_none());
                 assert!(game.crack_stages().is_empty());
+            })
+        });
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn reentrant_same_stage_client_crack_update_dispatches_once() {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let mods = vec![ModEntry::new(
+            "reentrant-cracks",
+            Box::new(Register {
+                calls: calls.clone(),
+                invalid: Arc::new(AtomicBool::new(false)),
+                reenter: true,
+            }),
+        )]
+        .into();
+        mod_platform::testing::with_mods(mods, || {
+            with_client_game(|game| {
+                let _server = logged_client(game);
+                game.world
+                    .chunks
+                    .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+                let stone = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:stone")
+                    .unwrap();
+                let pos = [4, 64, 4];
+                game.world.set(pos[0], pos[1], pos[2], stone).unwrap();
+                game.destroy_block_progress(-1, pos, 3);
+                assert_eq!(*calls.lock().unwrap(), [3]);
+                let crack = &game.destroying[&-1];
+                assert_eq!((crack.pos, crack.stage), (pos, 3));
+                assert_eq!(crack.positions, [[5, 64, 4], [4, 64, 5], [5, 64, 5]]);
             })
         });
     }

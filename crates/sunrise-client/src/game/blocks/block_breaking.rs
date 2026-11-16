@@ -102,16 +102,24 @@ impl Game<'_> {
                 crack.updated_at = self.world.game_time;
                 return;
             }
+            // Publish the stage before dispatch: a same-stage client setter
+            // from this block's part must refresh it, not enter the hook again.
+            self.destroying.insert(
+                breaker,
+                crate::game::client_cracks::ClientCrack {
+                    pos,
+                    stage,
+                    updated_at: self.world.game_time,
+                    positions: Vec::new(),
+                },
+            );
             self.with_break_progress_positions(pos, stage, |game, positions| {
-                game.destroying.insert(
-                    breaker,
-                    crate::game::client_cracks::ClientCrack {
-                        pos,
-                        stage,
-                        updated_at: game.world.game_time,
-                        positions,
-                    },
-                );
+                if let Some(crack) = game.destroying.get_mut(&breaker)
+                    && crack.pos == pos
+                    && crack.stage == stage
+                {
+                    crack.positions = positions;
+                }
             });
         } else {
             self.destroying.remove(&breaker);
