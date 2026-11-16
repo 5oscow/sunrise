@@ -87,7 +87,10 @@ concurrency:
   cancel-in-progress: false
 jobs:
   pick:
-    runs-on: ubuntu-latest
+    # The whole build waits for this job: on Dyna's small runner while the repository's switch is on, as the daily's
+    # `resolve`, so it never queues behind GitHub's runners (the Nightly of 2026-11-16 waited there from 15:34).
+    # Signing and publishing below stay on GitHub's runners.
+    runs-on: ${{ vars.DYNA_CI_SELF_HOSTED == 'true' && 'dyna-small' || 'ubuntu-latest' }}
     timeout-minutes: 10
     permissions:
       contents: write       # nightly/build-<date>-<n> and the nightly-state branch (main is protected)
