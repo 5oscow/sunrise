@@ -2206,11 +2206,13 @@ mod tests {
             assert!(loaded.wire_patch().is_none());
             assert!(loaded.data().unwrap().other("minecraft:damage").is_none());
             let saved = crate::item_nbt::item_to_nbt(&loaded, prototype_items());
+            // The loaded pickaxe prototype has damage 0, so an explicit decoded
+            // zero is omitted just like an absent damage component.
             assert_eq!(
                 saved
                     .get("components")
                     .and_then(|c| c.get("minecraft:damage")),
-                raw.is_some().then_some(&Tag::Int(expected as i32)),
+                (expected != 0).then_some(&Tag::Int(expected as i32)),
                 "{raw:?}"
             );
             assert_eq!(
