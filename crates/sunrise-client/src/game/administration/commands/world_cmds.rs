@@ -2248,24 +2248,28 @@ mod allay_owner_damage_tests {
             game.build_registries();
             let actual = [101, 102, 103, 104];
             let other = [10, 20, 30, 40];
+            let mut player =
+                sunrise_client::motion::PlayerMotion::new(game.motion, Vec3::ZERO).unwrap();
+            player.entity_id = 7;
+            game.player = Some(player);
             game.level.player_uuid = Some(actual);
-            game.lan_acting_uuid = Some(sunrise_client::lan::playerdata::ints_uuid(actual));
-            assert_eq!(game.owner_damage_uuid(), Some(actual));
+            assert_eq!(game.attack_of(7).player_uuid, Some(actual));
+            game.lan_acting = Some(12);
             game.lan_acting_uuid = Some(sunrise_client::lan::playerdata::ints_uuid(other));
             assert_eq!(
-                game.owner_damage_uuid(),
-                None,
-                "a guest is not the owner route"
+                game.attack_of(7).player_uuid,
+                Some(other),
+                "the acting guest is the causing player"
             );
             game.lan_acting_uuid = None;
             game.level.player_uuid = None;
             assert_eq!(
-                game.owner_damage_uuid(),
+                game.attack_of(7).player_uuid,
                 None,
                 "no invented UUID for an unknown source"
             );
             game.level.player_uuid = Some(actual);
-            game.lan_acting_uuid = Some(sunrise_client::lan::playerdata::ints_uuid(actual));
+            game.lan_acting = None;
             let kind = game.res.mob_types().get("minecraft:allay").unwrap().clone();
             let before = game.world.game_time;
             for melee in [true, false] {
