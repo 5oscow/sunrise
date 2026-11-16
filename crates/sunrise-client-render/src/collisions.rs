@@ -38,6 +38,25 @@ pub fn load<'r>(root: &Path, registry: &'r BlockRegistry) -> Result<BlockCollisi
     Ok(BlockCollisionRegistry::new(Arc::new(cached))?)
 }
 
+/// The outline a mod block entity published for its block at `p`, which replaces the declared
+/// one for every entity: one lookup, and only for a state that may publish.
+pub fn published_outline<'w>(
+    world: &'w World,
+    binding: &BlockCollisionRegistry<'_>,
+    state: BlockStateId,
+    p: [i32; 3],
+) -> Option<&'w VoxelShape> {
+    if !binding.publishes_shapes(state) {
+        return None;
+    }
+    match world.block_entities.get(&(p[0], p[1], p[2])) {
+        Some(crate::chunk::block_entity::BlockEntity::Mod(entity)) => {
+            entity.shapes().map(|shapes| shapes.outline())
+        }
+        _ => None,
+    }
+}
+
 /// What powder snow's and liquids' contextual collisions ask of the colliding
 /// entity (`PowderSnowBlock` and `LiquidBlock.getCollisionShape`).
 #[derive(Clone, Copy, Debug, Default)]
@@ -591,6 +610,16 @@ impl DynamicSupportWorld for SceneCollisions<'_, '_> {
             .collision_shape(self, p, piston, PISTON_NOCLIP.with(|value| value.get()))
             .map(Some)
             .map_err(io::Error::other)
+    }
+    /// The shapes a mod block entity published for its block: one lookup of the entity at
+    /// the position, whose built shape is shared, not made again.
+    fn published_collision_shape(&mut self, p: [i32; 3]) -> io::Result<Option<VoxelShape>> {
+        Ok(match self.world.block_entities.get(&(p[0], p[1], p[2])) {
+            Some(crate::chunk::block_entity::BlockEntity::Mod(entity)) => {
+                entity.shapes().map(|shapes| shapes.collision().clone())
+            }
+            _ => None,
+        })
     }
 }
 impl PistonCollisionWorld for SceneCollisions<'_, '_> {
@@ -1180,5 +1209,167 @@ mod section_tests {
             skipped > 500 && resolved > 500,
             "{skipped} skipped, {resolved} resolved"
         );
+    }
+}
+
+#[cfg(test)]
+mod published_shape_tests {
+    use super::*;
+    use crate::chunk::{
+        Chunk,
+        block_entity::{BlockEntity, ModBlockEntity, published_shapes::PublishedShapes},
+    };
+    use mod_api::BlockEntityShapes;
+    use sunrise_core::{geometry::Axis, nbt::Tag};
+    use sunrise_world::{DATA_VERSION, registry::BlockStateId};
+
+    /// `test:bus` (state 1) declares a full cube and may publish its shapes; `test:plain`
+    /// (state 2) declares the same cube and may not.
+    fn binding(registry: &BlockRegistry) -> BlockCollisionRegistry<'_> {
+        let empty = VoxelShape::empty();
+        let (min, max) = empty.discrete_bounds();
+        let axes = empty.cube_coordinate_axes();
+        let bits = |axis| {
+            Tag::LongArray(
+                empty
+                    .coordinates(axis)
+                    .iter()
+                    .map(|n| n.to_bits() as i64)
+                    .collect(),
+            )
+        };
+        let air = Tag::compound([
+            ("canonical", Tag::Byte(0)),
+            ("cube", Tag::Byte(i8::from(empty.is_cube()))),
+            (
+                "cube_axes",
+                Tag::Byte((axes[0] as i8) | ((axes[1] as i8) << 1) | ((axes[2] as i8) << 2)),
+            ),
+            ("x", bits(Axis::X)),
+            ("y", bits(Axis::Y)),
+            ("z", bits(Axis::Z)),
+            ("occupied", Tag::ByteArray(vec![])),
+            ("discrete_min", Tag::IntArray(min.to_vec())),
+            ("discrete_max", Tag::IntArray(max.to_vec())),
+        ]);
+        let cube = Tag::compound([
+            ("canonical", Tag::Byte(0)),
+            ("cube", Tag::Byte(1)),
+            ("cube_axes", Tag::Byte(7)),
+            ("x", Tag::LongArray(vec![0, 1.0f64.to_bits() as i64])),
+            ("y", Tag::LongArray(vec![0, 1.0f64.to_bits() as i64])),
+            ("z", Tag::LongArray(vec![0, 1.0f64.to_bits() as i64])),
+            ("occupied", Tag::ByteArray(vec![1])),
+            ("discrete_min", Tag::IntArray(vec![0; 3])),
+            ("discrete_max", Tag::IntArray(vec![1; 3])),
+        ]);
+        let cached = CachedCollisionRegistry::from_nbt(
+            &Tag::compound([
+                ("DataVersion", Tag::Int(DATA_VERSION)),
+                ("states", Tag::List(states())),
+                ("shapes", Tag::List(vec![cube, air])),
+                ("cached_shapes", Tag::IntArray(vec![1, 0, 0])),
+                ("published_shapes", Tag::IntArray(vec![1])),
+            ]),
+            registry,
+        )
+        .unwrap();
+        BlockCollisionRegistry::new(Arc::new(cached)).unwrap()
+    }
+    fn states() -> Vec<Tag> {
+        ["minecraft:air", "test:bus", "test:plain"]
+            .map(|name| Tag::String(name.into()))
+            .to_vec()
+    }
+    fn registry() -> BlockRegistry {
+        BlockRegistry::from_nbt(&Tag::compound([
+            ("DataVersion", Tag::Int(DATA_VERSION)),
+            ("states", Tag::List(states())),
+            (
+                "defaults",
+                Tag::compound([
+                    ("minecraft:air", Tag::Int(0)),
+                    ("test:bus", Tag::Int(1)),
+                    ("test:plain", Tag::Int(2)),
+                ]),
+            ),
+        ]))
+        .unwrap()
+    }
+    fn publish(world: &mut World, at: (i32, i32, i32), collision: &[[f64; 6]]) {
+        let mut entity = ModBlockEntity::new("test:bus".into(), Default::default());
+        entity.set_shapes(Some(Arc::new(
+            PublishedShapes::new(BlockEntityShapes {
+                outline: vec![[0.0, 0.0, 0.0, 0.5, 0.5, 0.5]],
+                collision: collision.to_vec(),
+            })
+            .unwrap(),
+        )));
+        world
+            .block_entities
+            .insert(at, BlockEntity::Mod(Box::new(entity)));
+    }
+    /// How far a body dropped from the block's top face falls, in blocks.
+    fn fall(world: &World, binding: &BlockCollisionRegistry<'_>) -> f64 {
+        let body = Aabb::new(Vec3::new(1.2, 65.0, 1.2), Vec3::new(1.8, 66.8, 1.8));
+        let mut scene = SceneCollisions {
+            world,
+            binding,
+            subject: None,
+        };
+        -scene
+            .resolve(body, Vec3::new(0.0, -2.0, 0.0), 0.0, false)
+            .unwrap()
+            .y
+    }
+
+    #[test]
+    fn a_published_shape_replaces_the_declared_one_until_it_is_cleared() {
+        let registry = registry();
+        let binding = binding(&registry);
+        let mut world = World::new(BlockStateId(0), 0);
+        world.chunks.insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+        world.set(1, 64, 1, BlockStateId(1)).unwrap();
+        world.set(6, 64, 1, BlockStateId(2)).unwrap();
+        let at = (1, 64, 1);
+        // Declared: the full cube stops a body at its top face.
+        assert!(fall(&world, &binding).abs() < 1e-9);
+        // Published: a quarter-high slab.
+        publish(&mut world, at, &[[0.0, 0.0, 0.0, 1.0, 0.25, 1.0]]);
+        assert!((fall(&world, &binding) - 0.75).abs() < 1e-9);
+        let outline = published_outline(&world, &binding, BlockStateId(1), [1, 64, 1]).unwrap();
+        assert_eq!(outline.bounds().unwrap().max(Axis::X), 0.5);
+        // A published shape reaching past its block is found from the next cell over.
+        publish(&mut world, at, &[[0.0, 0.0, 0.0, 2.0, 1.0, 1.0]]);
+        let side = Aabb::new(Vec3::new(3.2, 64.2, 1.2), Vec3::new(3.8, 65.0, 1.8));
+        let mut scene = SceneCollisions {
+            world: &world,
+            binding: &binding,
+            subject: None,
+        };
+        assert!(
+            binding
+                .collision_block(BlockStateId(1))
+                .unwrap()
+                .large_collision_shape
+        );
+        let moved = scene
+            .resolve(side, Vec3::new(-1.0, 0.0, 0.0), 0.0, false)
+            .unwrap();
+        assert!((moved.x + 0.2).abs() < 1e-9, "{moved:?}");
+        // A state that does not publish ignores a published value at its position.
+        publish(&mut world, (6, 64, 1), &[[0.0, 0.0, 0.0, 1.0, 0.25, 1.0]]);
+        assert!(published_outline(&world, &binding, BlockStateId(2), [6, 64, 1]).is_none());
+        // Cleared: the declared cube again.
+        world.block_entities.remove(&at);
+        world.block_entities.insert(
+            at,
+            BlockEntity::Mod(Box::new(ModBlockEntity::new(
+                "test:bus".into(),
+                Default::default(),
+            ))),
+        );
+        assert!(fall(&world, &binding).abs() < 1e-9);
+        assert!(published_outline(&world, &binding, BlockStateId(1), [1, 64, 1]).is_none());
     }
 }

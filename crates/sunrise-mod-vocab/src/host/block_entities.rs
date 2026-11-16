@@ -149,6 +149,28 @@ pub trait BlockEntitiesBackendMut {
         name: Option<&str>,
     ) -> Result<bool, BlockEntityError>;
     /// Side: server.
+    /// Publishes the shapes this block entity's block has in place of its declared ones, or
+    /// clears them with None, so the declared shapes apply again. The block must declare
+    /// `shapes_from_block_entity`. Physics, selection, ray casts and support read the
+    /// published value at the position and never call into the mod, so a port of NeoForge's
+    /// `getShape` publishes wherever that state changes: it is published when it changes,
+    /// not asked for per query.
+    ///
+    /// The server applies it at once, for the queries that follow in the same tick; a client
+    /// applies it when the block entity's update arrives, which may be a tick later, as any
+    /// block change. The game saves it with the block entity, restores it when the chunk
+    /// loads and sends it with the block entity to clients; it is dropped when the block
+    /// entity is removed or its block changes. An entity the new shape now overlaps is
+    /// treated as vanilla treats a block that appears inside it, with no push-out. Ok(false)
+    /// when nothing changed. Inside a transaction an abort puts the old shapes back. The
+    /// limits are those of `BlockEntityShapes`; a shape over them is refused by name.
+    #[access(WorldOnly)]
+    fn block_entity_set_shapes(
+        &mut self,
+        entity: BlockEntityRef,
+        shapes: Option<BlockEntityShapes>,
+    ) -> Result<bool, BlockEntityShapesError>;
+    /// Side: server.
     /// Set a mod block entity's menu data slot in place, joining the current transaction.
     /// This raw storage write issues no notification; call set_changed explicitly if needed.
     /// Ok(false) for a vanilla entity, invalid slot or no change. Does not resize slots.

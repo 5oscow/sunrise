@@ -1,7 +1,7 @@
 //! Engine-owned mod block entity storage and revision tracking.
-use sunrise_core::nbt::Compound;
-#[cfg(test)]
-use sunrise_core::nbt::Tag;
+use super::published_shapes::{PublishedShapes, SHAPES_KEY};
+use std::sync::Arc;
+use sunrise_core::nbt::{Compound, Tag};
 use sunrise_items::items::ItemStack;
 /// A mod's block entity, read and changed through its fields
 /// (`ModBlockEntityFields`) as a struct's: `entity.nbt`. Each change goes
@@ -19,6 +19,9 @@ pub struct ModBlockEntity {
     pub(crate) numeric_id: Option<u32>,
     pub(crate) fields: ModBlockEntityFields,
     pub(crate) revision: ModRevision,
+    /// What its block's collision and outline are while it holds some
+    /// (`BlockEntityRef::set_shapes`). Saved and sent with it, outside its `nbt`.
+    pub(crate) shapes: Option<Arc<PublishedShapes>>,
 }
 /// What a `ModBlockEntity` can change: its saved compound without `id`,
 /// `x`, `y`, `z` and `Items`, its item slots
@@ -73,7 +76,27 @@ impl ModBlockEntity {
                 born: sunrise_mod_runtime::block_entities::new_identity(),
                 changes: 0,
             },
+            shapes: None,
         }
+    }
+    /// The shapes this block entity published for its block, if it holds any.
+    pub fn shapes(&self) -> Option<&PublishedShapes> {
+        self.shapes.as_deref()
+    }
+    /// Publishes `shapes`, or clears them with None; whether that changed them. A change moves
+    /// the revision, so what was drawn from the old shapes is drawn again.
+    pub fn set_shapes(&mut self, shapes: Option<Arc<PublishedShapes>>) -> bool {
+        if self.shapes == shapes {
+            return false;
+        }
+        self.shapes = shapes;
+        self.revision.changes += 1;
+        true
+    }
+    /// What goes beside the saved fields and in the update tag for the published shapes: they
+    /// are not among `nbt`, so a mod's own writes to it never touch them.
+    pub fn shapes_tag(&self) -> Option<(&'static str, Tag)> {
+        self.shapes().map(|shapes| (SHAPES_KEY, shapes.to_tag()))
     }
     /// The block entity's immutable type id (`mymod:machine`).
     ///
@@ -101,9 +124,21 @@ impl ModBlockEntity {
     /// in `ClientPacketListener.handleBlockEntityData`): `tag`'s fields
     /// replace its own of the same names. One it already has as sent is
     /// left alone, so a tag sent again unchanged keeps its revision.
+    ///
+    /// The published shapes' field (`SHAPES_KEY`) is not one of the fields: it sets them, an
+    /// empty compound clears them, and one that does not check is left out.
     pub fn merge_update_tag(&mut self, tag: &Compound) {
         for (k, v) in tag {
-            if self.nbt.get(k) != Some(v) {
+            if k.to_string().is_ok_and(|k| k == SHAPES_KEY) {
+                match v {
+                    Tag::Compound(empty) if empty.is_empty() => _ = self.set_shapes(None),
+                    v => {
+                        if let Some(shapes) = PublishedShapes::from_tag(v) {
+                            self.set_shapes(Some(Arc::new(shapes)));
+                        }
+                    }
+                }
+            } else if self.nbt.get(k) != Some(v) {
                 self.nbt.insert(k.clone(), v.clone());
             }
         }
@@ -138,12 +173,14 @@ impl Default for ModBlockEntity {
 }
 impl Clone for ModBlockEntity {
     fn clone(&self) -> Self {
-        Self::with_numeric_id(self.id.clone(), self.numeric_id, self.fields.clone())
+        let mut copy = Self::with_numeric_id(self.id.clone(), self.numeric_id, self.fields.clone());
+        copy.shapes.clone_from(&self.shapes);
+        copy
     }
 }
 impl PartialEq for ModBlockEntity {
     fn eq(&self, other: &Self) -> bool {
-        self.id == other.id && self.fields == other.fields
+        self.id == other.id && self.fields == other.fields && self.shapes == other.shapes
     }
 }
 impl std::fmt::Debug for ModBlockEntity {
@@ -151,6 +188,7 @@ impl std::fmt::Debug for ModBlockEntity {
         f.debug_struct("ModBlockEntity")
             .field("id", &self.id)
             .field("fields", &self.fields)
+            .field("shapes", &self.shapes)
             .finish()
     }
 }
@@ -207,6 +245,34 @@ mod tests {
         assert_ne!(other_kind, machine);
         let fresh = ModBlockEntity::default();
         assert_ne!(fresh.revision(), ModBlockEntity::default().revision());
+    }
+
+    #[test]
+    fn a_clients_copy_takes_published_shapes_from_the_update_tag_and_clears_them() {
+        use mod_api::BlockEntityShapes;
+        let shapes = PublishedShapes::new(BlockEntityShapes {
+            outline: vec![],
+            collision: vec![[0.0, 0.0, 0.0, 1.0, 0.5, 1.0]],
+        })
+        .unwrap();
+        let mut sent = Compound::from([("progress".into(), Tag::Int(2))]);
+        sent.insert(SHAPES_KEY.into(), shapes.to_tag());
+        let mut copy = ModBlockEntity::new("mymod:machine".into(), Default::default());
+        copy.merge_update_tag(&sent);
+        assert_eq!(copy.shapes().unwrap().boxes(), shapes.boxes());
+        // The shapes are no field of the mod's, and a clone keeps them.
+        assert_eq!(copy.nbt.len(), 1);
+        assert_eq!(copy.clone().shapes().unwrap().boxes(), shapes.boxes());
+        // The same tag again leaves the revision; an empty compound clears them.
+        let revision = copy.revision();
+        copy.merge_update_tag(&sent);
+        assert_eq!(copy.revision(), revision);
+        copy.merge_update_tag(&Compound::from([(
+            SHAPES_KEY.into(),
+            Tag::Compound(Compound::new()),
+        )]));
+        assert!(copy.shapes().is_none());
+        assert_ne!(copy.revision(), revision);
     }
 
     #[test]

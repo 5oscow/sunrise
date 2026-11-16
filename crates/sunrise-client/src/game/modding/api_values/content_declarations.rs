@@ -119,6 +119,7 @@ impl TryIntoEngine<()> for mod_api::Block {
                 .as_ref()
                 .map(|s| s.try_into_engine(&()))
                 .transpose()?,
+            shapes_from_block_entity: self.shapes_from_block_entity,
             state_properties: self
                 .state_properties
                 .iter()

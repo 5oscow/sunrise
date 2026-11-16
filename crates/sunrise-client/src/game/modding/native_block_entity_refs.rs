@@ -4,7 +4,8 @@ use super::Game;
 use mod_api::__private::game::*;
 use mod_api::{
     BlockEntityDataError, BlockEntityError, BlockEntityItemError, BlockEntityRef,
-    BlockEntityTypeKey, LevelRef, PlayerRef, Transaction,
+    BlockEntityShapes, BlockEntityShapesError, BlockEntityTypeKey, LevelRef, PlayerRef,
+    Transaction,
 };
 use sunrise_client::{
     block_entity_nbt,
@@ -444,7 +445,8 @@ impl Game<'_> {
         let base = if replace {
             let mut metadata = Compound::new();
             if let Tag::Compound(fields) = &old {
-                for key in ["id", "x", "y", "z"] {
+                // The published shapes are not part of the payload a mod replaces.
+                for key in ["id", "x", "y", "z", sunrise_client::containers::SHAPES_KEY] {
                     if let Some(value) = fields.get(&key.into()) {
                         metadata.insert(key.into(), value.clone());
                     }
@@ -477,6 +479,46 @@ impl Game<'_> {
             .native_block_entity_write_key(entity)
             .ok_or(BlockEntityError::Stale)?;
         self.container_changed(key);
+        Ok(true)
+    }
+
+    /// Publishes the shapes the block entity's block has in place of its declared ones, or
+    /// clears them with None. Applied at once, to the queries that follow; clients get them
+    /// with the block entity update. Inside a transaction an abort puts the old ones back.
+    pub(super) fn block_entity_set_shapes(
+        &mut self,
+        entity: BlockEntityRef,
+        shapes: Option<BlockEntityShapes>,
+    ) -> Result<bool, BlockEntityShapesError> {
+        let key = self
+            .native_block_entity_write_key(entity)
+            .ok_or(BlockEntityShapesError::Stale)?;
+        let state = self.world.block(key.0, key.1, key.2);
+        if !self.collision.publishes_shapes(state) {
+            return Err(BlockEntityShapesError::NotDeclared);
+        }
+        let shapes = shapes
+            .map(|shapes| sunrise_client::containers::PublishedShapes::new(shapes))
+            .transpose()?
+            .map(std::sync::Arc::new);
+        let Some(current) = self.mod_block_entity_write_target(key) else {
+            return Err(BlockEntityShapesError::Stale);
+        };
+        if current.shapes() == shapes.as_deref() {
+            return Ok(false);
+        }
+        let cleared = shapes.is_none();
+        self.write_mod_block_entity(key, |block_entity| {
+            block_entity.set_shapes(shapes);
+            // A client's copy takes a field that is not sent as cleared, so a clear says so.
+            if cleared {
+                block_entity.set_client_update_fields(Compound::from([(
+                    sunrise_client::containers::SHAPES_KEY.into(),
+                    Tag::Compound(Compound::new()),
+                )]));
+            }
+        });
+        self.block_entity_updated(key);
         Ok(true)
     }
 

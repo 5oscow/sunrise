@@ -798,10 +798,20 @@ impl ChunkEncoder {
         entity: &BlockEntity,
     ) -> Option<Tag> {
         match entity {
-            BlockEntity::Mod(m) => self
-                .mod_update_tag
-                .and_then(|tag| tag([pos.0, pos.1, pos.2], m))
-                .map(Tag::Compound),
+            BlockEntity::Mod(m) => {
+                let tag = self
+                    .mod_update_tag
+                    .and_then(|tag| tag([pos.0, pos.1, pos.2], m));
+                // The published shapes go with the block entity, in chunks and updates alike.
+                match m.shapes_tag() {
+                    Some((key, shapes)) => {
+                        let mut tag = tag.unwrap_or_default();
+                        tag.insert(key.into(), shapes);
+                        Some(Tag::Compound(tag))
+                    }
+                    None => tag.map(Tag::Compound),
+                }
+            }
             _ => entity_tag(entity, self.trial_active.contains(&state)),
         }
     }
@@ -1828,6 +1838,49 @@ mod tests {
         encoder.mod_update_tag = None;
         let infos = encoder.encode(&chunk, &block_entities).chunk.block_entities;
         assert_eq!(infos[0].tag, Tag::End);
+    }
+
+    /// The published shapes are in the chunk's block entity info and in its updates.
+    #[test]
+    fn published_shapes_go_out_with_the_chunk_and_its_updates() {
+        use crate::block_entity_types::BlockEntityTypes;
+        let builtin = Builtin::parse(
+            r#"{"minecraft:block_entity_type":{"entries":{"test:machine":{"protocol_id":49}}}}"#,
+        )
+        .unwrap();
+        let types = BlockEntityTypes::new(
+            [("test:machine".into(), "test:machine".into())].into(),
+            builtin
+                .get("minecraft:block_entity_type")
+                .unwrap()
+                .names
+                .clone(),
+        );
+        let states = ["minecraft:air", "test:machine"].map(|n| (Arc::<str>::from(n), false, None));
+        let encoder = ChunkEncoder::with_types(states, &builtin, &[], &[], Some(&types));
+        let mut chunk = Chunk::empty(0, 0);
+        let pos = (1, MIN_Y + 2, 3);
+        chunk.set(pos.0, pos.1, pos.2, 1);
+        let mut machine = ModBlockEntity::new("test:machine".into(), Default::default());
+        machine.set_shapes(Some(Arc::new(
+            crate::containers::PublishedShapes::new(mod_api::BlockEntityShapes {
+                outline: vec![],
+                collision: vec![[0.0, 0.0, 0.0, 1.0, 0.5, 1.0]],
+            })
+            .unwrap(),
+        )));
+        let entities = HashMap::from([(pos, BlockEntity::Mod(Box::new(machine)))]);
+        let sent = encoder.encode(&chunk, &entities).chunk.block_entities;
+        let update = encoder.update_tag(pos, 1, &entities[&pos]).unwrap();
+        assert_eq!(sent[0].tag, update);
+        // A client's copy made from it has the shapes before anything ticks.
+        let (Tag::Compound(tag), BlockEntity::Mod(sent_from)) = (&update, &entities[&pos]) else {
+            panic!("not a compound");
+        };
+        let mut copy = ModBlockEntity::new("test:machine".into(), Default::default());
+        copy.merge_update_tag(tag);
+        assert_eq!(copy.shapes(), sent_from.shapes());
+        assert!(copy.shapes().is_some());
     }
 
     /// A chunk leaves queued one-shot fields alone; a change's tag takes them, once.

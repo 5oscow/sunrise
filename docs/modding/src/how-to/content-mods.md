@@ -398,6 +398,37 @@ and player selection uses its own outline channel. Callers without a captured
 entity class retain ordinary shapes. These declarations select state/class-only
 geometry, not arbitrary world-dependent block behavior or native callbacks.
 
+### Shapes a block entity publishes
+
+A block whose geometry depends on what is inside it (a cable bus with attached parts, a table
+showing its tools) sets `"shapes_from_block_entity": true` (`Block::shapes_from_block_entity`).
+Loading refuses it, naming the block, when no block entity type owns the block. Its block entity
+then publishes the block's shapes: `BlockEntityRef::set_shapes(host, Some(BlockEntityShapes {
+outline, collision }))`, boxes in block units as in `shapes`, or `None` to clear them. The
+declared `shapes` and `collision_shapes` apply while it holds none, which is also the case until
+the first publish.
+
+This differs from NeoForge, where `getShape` is asked for on every query: here a shape is
+**published when it changes, not asked for per query**, and a port of a `getShape` override calls
+`set_shapes` wherever that state changes (a part attached, a lid opened). Physics, selection,
+ray casts and support read the published value at the position; nothing calls into the mod.
+Shapes that depend on the querying entity are not covered; `outline_context_shapes` and
+`collision_context_shapes` stay declared, and a published shape stands over them.
+
+- **Limits**, refused by name with a `BlockEntityShapesError` and never clamped: at most 16 boxes
+  in each list; every coordinate finite and within -1 to 2; no box with a minimum above its
+  maximum. A box under 1e-7 thick on an axis is an empty box, as in vanilla.
+- **Reach**: entity collision finds a shape at most one block past its own block, on one axis
+  at a time, and a state that publishes is always scanned that way. An outline has no such
+  margin: the part of an outline outside the block is hit only by a ray that is inside it.
+- **Timing**: the server applies a publish at once, to the queries that follow in the same
+  tick. A client applies it when the block entity update arrives, which may be a tick later, as
+  with any block change. An entity the new shape now overlaps is treated as vanilla treats a
+  block that appears inside it: nothing pushes it out.
+- **Lifetime**: the shapes are saved with the block entity, restored when its chunk loads before
+  anything ticks, and sent with the block entity in the chunk and in its updates. They are
+  dropped when the block entity is removed or its block changes. `replace_data` leaves them.
+
 An item copies its template's data components, with `max_stack_size` and
 `rarity` changed, and any other 26.3 component set or removed in
 `components`, written as a data component patch is: `minecraft:<type>` sets
