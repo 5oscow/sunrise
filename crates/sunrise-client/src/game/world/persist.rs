@@ -1522,7 +1522,7 @@ impl Game<'_> {
         self.persist.score_destroyed.remove(&id);
         self.forget_entity_initialization(mod_api::Holder::Entity(id));
         self.entity_attachments.remove(&id);
-        self.entity_attachments.colliders.remove(&id);
+        self.entity_attachments.remove_collider(id);
         self.persist.raw.remove(&id);
         self.persist.no_physics.remove(&id);
     }

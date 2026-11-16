@@ -437,20 +437,22 @@ mod oriented_tests {
         );
     }
 
+    /// A walker steps up a 0.5 ledge as vanilla's step-up does, with no collider in the world.
     #[test]
     fn no_collider_leaves_the_decision_unchanged() {
         let ledge = VoxelShape::from_box(Aabb::new(Vec3::ZERO, Vec3::new(1.0, 0.5, 1.0))).unwrap();
         let b = Aabb::new(Vec3::new(-0.6, 0.0, 0.2), Vec3::new(-0.2, 1.8, 0.8));
         let requested = Vec3::new(1.0, 0.0, 0.0);
+        let expected = Vec3::new(1.0, 0.5, 0.0);
         let plain = try_resolve_step_movement(requested, b, 0.6, true, |_| {
             Ok::<_, std::convert::Infallible>(vec![&ledge])
         })
         .unwrap();
+        assert_eq!(plain, expected);
         let with = try_resolve_step_movement_oriented(requested, b, 0.6, true, &[], |_| {
             Ok::<_, std::convert::Infallible>(vec![&ledge])
         })
         .unwrap();
-        assert_eq!(plain, with);
-        let _ = resolve_oriented;
+        assert_eq!(with, expected);
     }
 }

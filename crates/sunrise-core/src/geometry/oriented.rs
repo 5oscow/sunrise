@@ -7,7 +7,46 @@
 //! uniform grid over the boxes in the collider's frame.
 
 use super::{Aabb, Axis, COLLISION_EPSILON, Vec3};
-use std::{collections::HashMap, sync::Arc};
+use std::{cell::RefCell, collections::HashMap, sync::Arc};
+
+/// The most boxes one collider holds.
+pub const MAX_BOXES: usize = 32_768;
+/// The farthest a box may lie from the collider's origin on any axis, in blocks.
+pub const MAX_REACH: f64 = 512.0;
+/// How far from length 1 a rotation may be.
+pub const ROTATION_TOLERANCE: f64 = 1.0e-3;
+
+/// Why a box of a collider is refused.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BoxFault {
+    NonFinite,
+    OutOfRange,
+}
+
+/// Checks one box's corners against the collider contract. The one check every way a collider
+/// enters the game goes through: a mod's `set_collider`, a save, and the sync wire.
+pub fn check_box(min: [f64; 3], max: [f64; 3]) -> Result<(), BoxFault> {
+    let values = min.iter().chain(&max);
+    if values.clone().any(|v| !v.is_finite()) {
+        return Err(BoxFault::NonFinite);
+    }
+    if values.clone().any(|v| v.abs() > MAX_REACH) {
+        return Err(BoxFault::OutOfRange);
+    }
+    Ok(())
+}
+
+/// Whether a rotation is a finite quaternion of length 1 within [`ROTATION_TOLERANCE`].
+pub fn check_rotation(q: [f64; 4]) -> bool {
+    q.iter().all(|v| v.is_finite())
+        && (q.iter().map(|v| v * v).sum::<f64>().sqrt() - 1.0).abs() <= ROTATION_TOLERANCE
+}
+
+thread_local! {
+    /// Candidate indices of the query in progress, kept between queries so a sweep allocates
+    /// nothing once it has run.
+    static CANDIDATES: RefCell<Vec<u32>> = const { RefCell::new(Vec::new()) };
+}
 
 /// Side of a grid cell in the collider's frame, in blocks.
 const CELL: f64 = 4.0;
@@ -128,6 +167,8 @@ pub struct ColliderBoxes {
     boxes: Vec<Aabb>,
     cells: HashMap<[i32; 3], Vec<u32>>,
     oversized: Vec<u32>,
+    /// The indices of the boxes with volume: the only ones a query can meet.
+    solid: Vec<u32>,
     bounds: Option<Aabb>,
 }
 
@@ -142,8 +183,14 @@ impl ColliderBoxes {
     pub fn new(boxes: Vec<Aabb>) -> Self {
         let mut cells: HashMap<[i32; 3], Vec<u32>> = HashMap::new();
         let mut oversized = Vec::new();
+        let mut solid = Vec::new();
         let mut bounds: Option<Aabb> = None;
         for (index, b) in boxes.iter().enumerate() {
+            // A box with no volume collides with nothing: it keeps its index and is in no cell.
+            if (0..3).any(|i| b.max(Axis::ALL[i]) <= b.min(Axis::ALL[i])) {
+                continue;
+            }
+            solid.push(index as u32);
             bounds = Some(bounds.map_or(*b, |all| all.union_bounds(*b)));
             let (lo, hi) = cell_range(*b);
             let count = (0..3).map(|i| hi[i] - lo[i] + 1).product::<i64>();
@@ -166,6 +213,7 @@ impl ColliderBoxes {
             boxes,
             cells,
             oversized,
+            solid,
             bounds,
         }
     }
@@ -190,14 +238,14 @@ impl ColliderBoxes {
     /// Indices of the boxes that may meet `local` (a superset: each box is then tested).
     pub fn candidates(&self, local: Aabb, out: &mut Vec<u32>) {
         out.clear();
-        if self.boxes.is_empty() {
+        if self.solid.is_empty() {
             return;
         }
         let (lo, hi) = cell_range(local);
         let count = (0..3).map(|i| hi[i] - lo[i] + 1).product::<i64>();
         if count > self.cells.len() as i64 {
             // A query wider than the grid: every box is cheaper than every cell.
-            out.extend(0..self.boxes.len() as u32);
+            out.extend_from_slice(&self.solid);
             return;
         }
         for x in lo[0]..=hi[0] {
@@ -261,12 +309,14 @@ impl OrientedCollider {
 
     /// The boxes whose own bounds meet the world box (tested in the collider's frame, where
     /// they are axis-aligned): the grid's cells first, then each box's bounds.
-    fn candidates_near(&self, world: Aabb) -> Vec<u32> {
+    fn with_candidates<R>(&self, world: Aabb, f: impl FnOnce(&[u32]) -> R) -> R {
         let local = self.frame.local_bounds(world);
-        let mut out = Vec::new();
+        let mut out = CANDIDATES.with(|c| std::mem::take(&mut *c.borrow_mut()));
         self.boxes.candidates(local, &mut out);
         out.retain(|&i| self.boxes.boxes[i as usize].intersects(local));
-        out
+        let result = f(&out);
+        CANDIDATES.with(|c| *c.borrow_mut() = out);
+        result
     }
 
     /// How far the entity box `mover` may move along `axis` by `amount` (signed) before it meets
@@ -282,23 +332,27 @@ impl OrientedCollider {
         let sweep = mover.expand_towards(direction);
         let mut allowed = amount;
         let axes = self.axes();
-        for index in self.candidates_near(sweep) {
-            let obb = self.obb(self.boxes.boxes[index as usize]);
-            if let Some(reach) = self.time_of_impact(&axes, mover, direction, &obb)
-                && reach.abs() < allowed.abs()
-            {
-                allowed = reach;
+        self.with_candidates(sweep, |candidates| {
+            for &index in candidates {
+                let obb = self.obb(self.boxes.boxes[index as usize]);
+                if let Some(reach) = self.time_of_impact(&axes, mover, direction, &obb)
+                    && reach.abs() < allowed.abs()
+                {
+                    allowed = reach;
+                }
             }
-        }
+        });
         allowed
     }
 
     /// Whether the entity box overlaps any box deeper than the collision epsilon.
     pub fn intersects(&self, mover: Aabb) -> bool {
         let axes = self.axes();
-        self.candidates_near(mover).into_iter().any(|index| {
-            let obb = self.obb(self.boxes.boxes[index as usize]);
-            self.overlap_depth(&axes, mover, &obb) > COLLISION_EPSILON
+        self.with_candidates(mover, |candidates| {
+            candidates.iter().any(|&index| {
+                let obb = self.obb(self.boxes.boxes[index as usize]);
+                self.overlap_depth(&axes, mover, &obb) > COLLISION_EPSILON
+            })
         })
     }
 
@@ -419,89 +473,95 @@ impl OrientedCollider {
             }
         };
         let (lo, hi) = (step_box.min, step_box.max);
-        let mut samples = Vec::with_capacity(10);
+        // The box's corners and centre, before and after the horizontal movement, in the
+        // collider's frame; and the world's up there: the same for every box.
+        let mut probes = [Vec3::ZERO; 18];
+        let mut count = 0;
         for dx in [0.0, horizontal.x] {
             for dz in [0.0, horizontal.z] {
                 for (x, z) in [(lo.x, lo.z), (hi.x, lo.z), (lo.x, hi.z), (hi.x, hi.z)] {
-                    samples.push((x + dx, z + dz));
+                    probes[count] = self.frame.to_local(Vec3::new(x + dx, 0.0, z + dz));
+                    count += 1;
                 }
             }
         }
         let centre = step_box.center();
-        samples.push((centre.x, centre.z));
-        samples.push((centre.x + horizontal.x, centre.z + horizontal.z));
-        // The samples in the collider's frame, and the world's up there: the same for every box.
-        let probes: Vec<Vec3> = samples
-            .iter()
-            .map(|&(x, z)| self.frame.to_local(Vec3::new(x, 0.0, z)))
-            .collect();
+        for (dx, dz) in [(0.0, 0.0), (horizontal.x, horizontal.z)] {
+            probes[count] = self
+                .frame
+                .to_local(Vec3::new(centre.x + dx, 0.0, centre.z + dz));
+            count += 1;
+        }
+        let probes = &probes[..count];
         let up = self
             .frame
             .to_local(Vec3::new(0.0, 1.0, 0.0))
             .subtract(self.frame.to_local(Vec3::ZERO));
-        for index in self.candidates_near(reach) {
-            let local = self.boxes.boxes[index as usize];
-            for i in 0..8 {
-                push(
-                    self.frame
-                        .to_world(Vec3::new(
-                            if i & 1 == 0 {
-                                local.min(Axis::X)
-                            } else {
-                                local.max(Axis::X)
-                            },
-                            if i & 2 == 0 {
-                                local.min(Axis::Y)
-                            } else {
-                                local.max(Axis::Y)
-                            },
-                            if i & 4 == 0 {
-                                local.min(Axis::Z)
-                            } else {
-                                local.max(Axis::Z)
-                            },
-                        ))
-                        .y,
-                );
-            }
-            // Each face whose outward normal points up: its height at a sample column.
-            for (axis, sign) in [
-                (0, 1.0),
-                (0, -1.0),
-                (1, 1.0),
-                (1, -1.0),
-                (2, 1.0),
-                (2, -1.0),
-            ] {
-                let normal = self.frame.axes_for(axis).scale(sign);
-                if normal.y <= 1.0e-6 {
-                    continue;
+        self.with_candidates(reach, |candidates| {
+            for &index in candidates {
+                let local = self.boxes.boxes[index as usize];
+                for i in 0..8 {
+                    push(
+                        self.frame
+                            .to_world(Vec3::new(
+                                if i & 1 == 0 {
+                                    local.min(Axis::X)
+                                } else {
+                                    local.max(Axis::X)
+                                },
+                                if i & 2 == 0 {
+                                    local.min(Axis::Y)
+                                } else {
+                                    local.max(Axis::Y)
+                                },
+                                if i & 4 == 0 {
+                                    local.min(Axis::Z)
+                                } else {
+                                    local.max(Axis::Z)
+                                },
+                            ))
+                            .y,
+                    );
                 }
-                let face = Axis::ALL[axis];
-                let plane = if sign > 0.0 {
-                    local.max(face)
-                } else {
-                    local.min(face)
-                };
-                let d = up.component(face);
-                if d.abs() < 1.0e-9 {
-                    continue;
-                }
-                for probe in &probes {
-                    // The point on the face's plane above the sample, then whether the box is there.
-                    let t = (plane - probe.component(face)) / d;
-                    let p = probe.add_vector(up.scale(t));
-                    let inside = Axis::ALL.iter().all(|a| {
-                        *a == face
-                            || (p.component(*a) >= local.min(*a) - COLLISION_EPSILON
-                                && p.component(*a) <= local.max(*a) + COLLISION_EPSILON)
-                    });
-                    if inside {
-                        push(t);
+                // Each face whose outward normal points up: its height at a sample column.
+                for (axis, sign) in [
+                    (0, 1.0),
+                    (0, -1.0),
+                    (1, 1.0),
+                    (1, -1.0),
+                    (2, 1.0),
+                    (2, -1.0),
+                ] {
+                    let normal = self.frame.axes_for(axis).scale(sign);
+                    if normal.y <= 1.0e-6 {
+                        continue;
+                    }
+                    let face = Axis::ALL[axis];
+                    let plane = if sign > 0.0 {
+                        local.max(face)
+                    } else {
+                        local.min(face)
+                    };
+                    let d = up.component(face);
+                    if d.abs() < 1.0e-9 {
+                        continue;
+                    }
+                    for probe in probes {
+                        // The point on the face's plane above the sample, then whether the box is there.
+                        let t = (plane - probe.component(face)) / d;
+                        let p = probe.add_vector(up.scale(t));
+                        let inside = Axis::ALL.iter().all(|a| {
+                            *a == face
+                                || (p.component(*a) >= local.min(*a) - COLLISION_EPSILON
+                                    && p.component(*a) <= local.max(*a) + COLLISION_EPSILON)
+                        });
+                        if inside {
+                            push(t);
+                        }
                     }
                 }
             }
-        }
+        });
     }
 }
 
@@ -684,5 +744,60 @@ mod tests {
             heights.iter().any(|h| (h - ahead).abs() < 1.0e-6),
             "{heights:?} lacks {ahead}"
         );
+    }
+
+    /// A box with no thickness is a box with no volume: nothing stops at it, unturned or turned,
+    /// and nothing steps onto it. Its index stays, so the boxes after it keep theirs.
+    #[test]
+    fn a_box_with_no_volume_collides_with_nothing() {
+        let wall = b([1.0, 0.0, 0.0], [1.0, 2.0, 2.0]);
+        let solid = b([5.0, 0.0, 0.0], [6.0, 2.0, 2.0]);
+        let mover = b([-0.6, 0.0, 0.5], [-0.2, 1.8, 1.0]);
+        let flat = b([0.0, 1.0, 0.0], [3.0, 1.0, 3.0]);
+        for frame in [
+            Frame::translation(Vec3::ZERO),
+            yaw(Vec3::new(0.3, 0.0, 0.1), 30.0),
+        ] {
+            let boxes = ColliderBoxes::new(vec![wall, flat, solid]);
+            assert_eq!(boxes.len(), 3, "the indices stay");
+            let collider = OrientedCollider::new(frame, Arc::new(boxes));
+            let moved = collider.collide(mover, Axis::X, 4.0);
+            // Only the solid box at x = 5 is met, whatever the wall's side of the frame.
+            let at = frame.to_world(Vec3::new(5.5, 1.0, 1.0));
+            let before = b([at.x - 3.2, 0.0, at.z - 0.3], [at.x - 2.8, 1.8, at.z + 0.3]);
+            let ahead = collider.collide(before, Axis::X, 3.0);
+            assert!(ahead < 3.0, "the solid box still stops: {ahead}");
+            let free = OrientedCollider::new(frame, Arc::new(ColliderBoxes::new(vec![wall, flat])));
+            assert_eq!(free.collide(mover, Axis::X, 4.0), 4.0, "{moved}");
+            assert!(!free.intersects(b([0.5, 0.5, 0.5], [1.5, 1.5, 1.5])));
+            let mut heights = Vec::new();
+            free.step_heights(mover, Vec3::new(1.0, 0.0, 0.0), 2.0, &mut heights);
+            assert!(heights.is_empty(), "{heights:?}");
+        }
+    }
+
+    /// One check for a box and a rotation, whichever way they arrive.
+    #[test]
+    fn the_contract_check_refuses_by_name() {
+        assert_eq!(check_box([-512.0; 3], [512.0; 3]), Ok(()));
+        assert_eq!(
+            check_box([0.0; 3], [512.5, 1.0, 1.0]),
+            Err(BoxFault::OutOfRange)
+        );
+        assert_eq!(
+            check_box(
+                [-f64::from(f32::MAX), 0.0, 0.0],
+                [f64::from(f32::MAX), 1.0, 1.0]
+            ),
+            Err(BoxFault::OutOfRange)
+        );
+        assert_eq!(
+            check_box([0.0, f64::NAN, 0.0], [1.0; 3]),
+            Err(BoxFault::NonFinite)
+        );
+        assert!(check_rotation([0.0, 0.0, 0.0, 1.0005]));
+        assert!(!check_rotation([0.0, 0.0, 0.0, 1.01]));
+        assert!(!check_rotation([0.0, 0.0, 0.0, 0.0]));
+        assert!(!check_rotation([f64::INFINITY, 0.0, 0.0, 1.0]));
     }
 }

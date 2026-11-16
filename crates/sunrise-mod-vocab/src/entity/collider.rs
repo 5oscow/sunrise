@@ -1,22 +1,16 @@
 //! A moving collider: boxes an entity carries that other entities collide with, and why one is refused.
-use crate::*;
-
 /// One box of a [`Collider`], axis-aligned in the collider's own frame.
 ///
 /// `min` and `max` are `[x, y, z]` in blocks from the entity's position, before the collider's
 /// rotation; a box whose minimum is above its maximum on an axis is read with the two swapped.
-/// `state` is the block this box stands for: its step sounds, sprint particles, friction and
-/// bounce come from it, as a block's do under an entity.
 #[derive(Clone, Copy, Debug, PartialEq)]
-// exhaustive: mods build it with a literal, and these three values are all there is to a box
+// exhaustive: mods build it with a literal, and the two corners are all there is to a box
 #[derive(sunrise_mod_api_macros::Wire)]
 pub struct ColliderBox {
     /// The corner with the smaller coordinates, `[x, y, z]`.
     pub min: [f64; 3],
     /// The corner with the larger coordinates, `[x, y, z]`.
     pub max: [f64; 3],
-    /// The block state the box stands for, as the game's state table numbers it.
-    pub state: BlockStateId,
 }
 
 /// Boxes an entity carries, turned by a rotation, that every other entity collides with.
@@ -40,7 +34,8 @@ pub struct ColliderBox {
 /// - every box within [`Collider::MAX_REACH`] blocks of the entity on each axis.
 ///
 /// The limits bound what the game keeps and sends; vanilla has none. A box of 0 thickness is a
-/// box with no volume that nothing collides with.
+/// box with no volume that nothing collides with. A box is solid ground and nothing more: it
+/// has no block's step sound, particles, friction or bounce.
 #[derive(Clone, Debug, PartialEq)]
 // exhaustive: mods build it with a literal, and the boxes and their rotation are all there is to a collider
 #[derive(sunrise_mod_api_macros::Wire)]
@@ -54,11 +49,11 @@ pub struct Collider {
 impl Collider {
     /// The most boxes one collider holds: 2048 blocks of 16 boxes each, above the box count of
     /// the heaviest shape a block has.
-    pub const MAX_BOXES: usize = 32_768;
+    pub const MAX_BOXES: usize = sunrise_core::geometry::oriented::MAX_BOXES;
     /// The farthest a box may lie from the entity on any axis, in blocks.
-    pub const MAX_REACH: f64 = 512.0;
+    pub const MAX_REACH: f64 = sunrise_core::geometry::oriented::MAX_REACH;
     /// How far from length 1 a rotation may be.
-    pub const ROTATION_TOLERANCE: f32 = 1.0e-3;
+    pub const ROTATION_TOLERANCE: f32 = sunrise_core::geometry::oriented::ROTATION_TOLERANCE as f32;
 }
 
 /// Why `EntityRef::set_collider` or `set_collider_transform` refused.

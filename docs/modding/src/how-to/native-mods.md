@@ -73,7 +73,7 @@ A native mod gives an entity boxes that every other entity collides with:
 
 ```rust
 entity.set_collider(host, Some(Collider {
-    boxes: vec![ColliderBox { min: [-1.5, -1.0, -10.0], max: [1.5, 0.0, 10.0], state: deck_state }],
+    boxes: vec![ColliderBox { min: [-1.5, -1.0, -10.0], max: [1.5, 0.0, 10.0] }],
     rotation: [0.0, 0.0, 0.0, 1.0],
 }))?;
 entity.set_collider_transform(host, turned)?; // the rotation alone, as the entity turns
@@ -84,13 +84,15 @@ quaternion with any yaw, pitch and roll. Other entities collide with them as sol
 the entity's box is swept against each turned box (a separating-axis test with the time of impact), it
 steps up onto a top within its step height, and standing on a tilted top follows the surface. The
 collider is solid to every mover except spectators, entities with no physics and the entities in its
-own vehicle stack. `state` is the block the box stands for.
+own vehicle stack (the root vehicle and every passenger, at any depth, the collider's entity among them).
+A box is solid ground and nothing more: it has no block's step sound, particles, friction or bounce.
 
 The game checks a collider when it is set and refuses by name (`ColliderError`), keeping the old one:
 every value finite, the rotation a unit quaternion within 1e-3, at most `Collider::MAX_BOXES` (32,768)
 boxes, and every box within `Collider::MAX_REACH` (512) blocks of the entity on each axis. Boxes are kept
 as `f32`; read back, they are the rounded values both sides collide with. A box whose minimum is above
-its maximum is read with the corners swapped.
+its maximum is read with the corners swapped, and a box with no volume (zero thickness on an axis)
+collides with nothing.
 
 A collider is saved with the entity. The server sends it only to Sunrise clients that track the entity:
 the whole collider when they start to (in messages of at most 64 KiB), then only what changed, by box

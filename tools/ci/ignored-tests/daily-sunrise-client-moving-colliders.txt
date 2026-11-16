@@ -1,4 +1,6 @@
 # Moving colliders on a real game: refusals, save and load, and a falling item resting on one.
+sunrise-client game::native_colliders_tests::a_collider_is_not_solid_to_its_own_vehicle_stack lib daily resources
 sunrise-client game::native_colliders_tests::a_collider_is_set_read_refused_saved_and_loaded lib daily resources
+sunrise-client game::native_colliders_tests::a_collider_travels_with_its_entity lib daily resources
 sunrise-client game::native_colliders_tests::a_dropped_item_rests_on_a_collider lib daily resources
 sunrise-client game::native_colliders_tests::each_level_collides_with_its_own_colliders lib daily resources

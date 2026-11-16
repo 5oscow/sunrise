@@ -4,17 +4,16 @@
 //! The server keeps one per collider entity and a client keeps the copy its tracking server
 //! sent. Both hold the boxes as `f32`, rounded when the mod sets them, so the two sides
 //! collide against the same numbers.
-use mod_api::{BlockStateId, Collider, ColliderBox, ColliderError};
+use mod_api::{Collider, ColliderBox, ColliderError};
 use std::sync::Arc;
 use sunrise_core::{
     geometry::{
         Aabb, Vec3,
-        oriented::{ColliderBoxes, Frame, OrientedCollider},
+        oriented::{self, BoxFault, ColliderBoxes, Frame, OrientedCollider},
     },
     nbt::{Compound, Tag},
 };
 use sunrise_protocol::collider_sync::{self, WireBox};
-use sunrise_world::{chunk::BlockState, registry::BlockRegistry};
 
 #[derive(Clone, Debug)]
 pub struct ColliderState {
@@ -40,10 +39,7 @@ fn aabb(b: &WireBox) -> Aabb {
 
 /// Whether a rotation is a finite unit quaternion within the API's tolerance.
 pub fn valid_rotation(q: [f32; 4]) -> bool {
-    q.iter().all(|v| v.is_finite()) && {
-        let length = q.iter().map(|v| f64::from(*v).powi(2)).sum::<f64>().sqrt();
-        (length - 1.0).abs() <= f64::from(Collider::ROTATION_TOLERANCE)
-    }
+    oriented::check_rotation(q.map(f64::from))
 }
 
 impl ColliderState {
@@ -70,23 +66,24 @@ impl ColliderState {
         }
         let mut wire = Vec::with_capacity(collider.boxes.len());
         for (index, b) in collider.boxes.iter().enumerate() {
-            let values = b.min.iter().chain(&b.max);
-            if values.clone().any(|v| !v.is_finite()) {
-                return Err(ColliderError::NonFinite {
-                    index: Some(index as u64),
-                });
-            }
-            if values.clone().any(|v| v.abs() > Collider::MAX_REACH) {
-                return Err(ColliderError::OutOfRange {
-                    index: index as u64,
-                });
+            match oriented::check_box(b.min, b.max) {
+                Ok(()) => {}
+                Err(BoxFault::NonFinite) => {
+                    return Err(ColliderError::NonFinite {
+                        index: Some(index as u64),
+                    });
+                }
+                Err(BoxFault::OutOfRange) => {
+                    return Err(ColliderError::OutOfRange {
+                        index: index as u64,
+                    });
+                }
             }
             let low = |i: usize| b.min[i].min(b.max[i]) as f32;
             let high = |i: usize| b.min[i].max(b.max[i]) as f32;
             wire.push(WireBox {
                 min: [low(0), low(1), low(2)],
                 max: [high(0), high(1), high(2)],
-                state: b.state.0,
             });
         }
         Ok(Self::new(wire, collider.rotation))
@@ -101,7 +98,6 @@ impl ColliderState {
                 .map(|b| ColliderBox {
                     min: b.min.map(f64::from),
                     max: b.max.map(f64::from),
-                    state: BlockStateId(b.state),
                 })
                 .collect(),
             rotation: self.rotation,
@@ -165,7 +161,7 @@ impl ColliderState {
                     }
                 };
                 wire.extend_from_slice(boxes);
-                if wire.len() > *total as usize {
+                if wire.len() > *total as usize || wire.len() > Collider::MAX_BOXES {
                     return;
                 }
                 *held = Some(Self::new(wire, *rotation));
@@ -199,25 +195,10 @@ impl ColliderState {
         }
     }
 
-    /// The collider as a save holds it: the rotation, the box corners as big-endian `f32`s, and
-    /// each box's state as an index into a palette of canonical block states, since a state's
-    /// number is valid for the running game only.
-    pub fn to_nbt(&self, registry: &BlockRegistry) -> Compound {
-        let mut palette: Vec<Tag> = Vec::new();
-        let mut seen: Vec<u32> = Vec::new();
-        let mut indices = Vec::with_capacity(self.wire.len());
+    /// The collider as a save holds it: the rotation, and the box corners as big-endian `f32`s.
+    pub fn to_nbt(&self) -> Compound {
         let mut corners = Vec::with_capacity(self.wire.len() * 24);
         for b in &self.wire {
-            let slot = seen.iter().position(|s| *s == b.state).unwrap_or_else(|| {
-                seen.push(b.state);
-                palette.push(
-                    registry
-                        .state(sunrise_world::registry::BlockStateId(b.state))
-                        .map_or_else(|| Tag::compound([("Name", air())]), BlockState::to_nbt),
-                );
-                seen.len() - 1
-            });
-            indices.push(slot as i32);
             b.min
                 .iter()
                 .chain(&b.max)
@@ -233,17 +214,15 @@ impl ColliderState {
                         .collect(),
                 ),
             ),
-            ("palette".into(), Tag::List(palette)),
-            ("states".into(), Tag::IntArray(indices)),
             ("corners".into(), Tag::ByteArray(corners)),
         ]
         .into_iter()
         .collect()
     }
 
-    /// A saved collider, or None for one that is malformed (a save is not trusted). A state
-    /// the game no longer knows is air.
-    pub fn from_nbt(tag: &Tag, registry: &BlockRegistry) -> Option<Self> {
+    /// A saved collider, or None for one that is malformed or breaks the limits (a save is not
+    /// trusted).
+    pub fn from_nbt(tag: &Tag) -> Option<Self> {
         let Some(Tag::List(rotation)) = tag.get("rotation") else {
             return None;
         };
@@ -258,44 +237,27 @@ impl ColliderState {
         if !valid_rotation(rotation) {
             return None;
         }
-        let Some(Tag::List(palette)) = tag.get("palette") else {
-            return None;
-        };
-        let Some(Tag::IntArray(states)) = tag.get("states") else {
-            return None;
-        };
         let Some(Tag::ByteArray(corners)) = tag.get("corners") else {
             return None;
         };
-        if states.len() > Collider::MAX_BOXES || corners.len() != states.len() * 24 {
+        if corners.len() % 24 != 0 || corners.len() / 24 > Collider::MAX_BOXES {
             return None;
         }
-        let ids: Vec<u32> = palette
-            .iter()
-            .map(|t| registry.saved_state_id(t).map_or(0, |id| id.0))
-            .collect();
-        let mut wire = Vec::with_capacity(states.len());
-        for (i, state) in states.iter().enumerate() {
-            let at = corners.get(i * 24..i * 24 + 24)?;
+        let mut wire = Vec::with_capacity(corners.len() / 24);
+        for at in corners.as_chunks::<24>().0 {
             let mut v = [0.0f32; 6];
             for (slot, bytes) in v.iter_mut().zip(at.as_chunks::<4>().0) {
                 *slot = f32::from_be_bytes(*bytes);
-                if !slot.is_finite() || slot.abs() > Collider::MAX_REACH as f32 {
-                    return None;
-                }
             }
+            let wide = v.map(f64::from);
+            oriented::check_box([wide[0], wide[1], wide[2]], [wide[3], wide[4], wide[5]]).ok()?;
             wire.push(WireBox {
                 min: [v[0], v[1], v[2]],
                 max: [v[3], v[4], v[5]],
-                state: *ids.get(usize::try_from(*state).ok()?)?,
             });
         }
         Some(Self::new(wire, rotation))
     }
-}
-
-fn air() -> Tag {
-    Tag::String("minecraft:air".into())
 }
 
 #[cfg(test)]
@@ -308,7 +270,6 @@ mod tests {
                 .map(|i| ColliderBox {
                     min: [(i % 400) as f64, (i / 400 % 100) as f64, 0.0],
                     max: [(i % 400) as f64 + 1.0, (i / 400 % 100) as f64 + 1.0, 1.0],
-                    state: BlockStateId(0),
                 })
                 .collect(),
             rotation: [0.0, 0.0, 0.0, 1.0],
@@ -370,6 +331,32 @@ mod tests {
                 limit: Collider::MAX_BOXES as u64
             }
         );
+        // Limits as they are met on a save: a corner past the reach or a stretched rotation is
+        // dropped, never built.
+        let saved = ColliderState::from_api(&collider(2)).unwrap().to_nbt();
+        assert!(ColliderState::from_nbt(&Tag::Compound(saved.clone())).is_some());
+        let mut stretched = saved.clone();
+        stretched.insert(
+            "rotation".into(),
+            Tag::List(vec![
+                Tag::Float(0),
+                Tag::Float(0),
+                Tag::Float(0),
+                Tag::Float(1.0e30_f32.to_bits()),
+            ]),
+        );
+        assert!(ColliderState::from_nbt(&Tag::Compound(stretched)).is_none());
+        let mut far = saved;
+        far.insert(
+            "corners".into(),
+            Tag::ByteArray(
+                [-3.0e38_f32, 0.0, 0.0, 3.0e38, 1.0, 1.0]
+                    .iter()
+                    .flat_map(|v| v.to_be_bytes())
+                    .collect(),
+            ),
+        );
+        assert!(ColliderState::from_nbt(&Tag::Compound(far)).is_none());
         // The reach is inclusive.
         let mut reach = collider(1);
         reach.boxes[0].max[2] = Collider::MAX_REACH;
@@ -389,7 +376,7 @@ mod tests {
         assert_eq!(held_state.wire(), server.wire());
         // A change: one box replaced, one cut, a new rotation.
         let mut next = server.to_api();
-        next.boxes[5].state = BlockStateId(3);
+        next.boxes[5].max[1] = 3.0;
         next.boxes.pop();
         next.rotation = [0.0, 0.7071, 0.0, 0.7071];
         let next = ColliderState::from_api(&next).unwrap();

@@ -33,13 +33,38 @@ pub trait EntityMovementWorld {
     ) -> Result<Option<VoxelShape>, Self::Error>;
     /// The moving colliders meeting `bounds` that the entity collides with: boxes that are
     /// oriented in the world (a mod entity's `set_collider`), which no `VoxelShape` holds.
-    /// Selected once with the entity shapes. A world with none answers none.
+    /// Selected once with the entity shapes, and appended to `out`, which the caller owns and
+    /// reuses so a move allocates nothing. A world with none appends none.
     fn moving_colliders(
         &mut self,
         _entity: EntityIdentity,
         _bounds: Aabb,
-    ) -> Result<Vec<OrientedCollider>, Self::Error> {
-        Ok(Vec::new())
+        _out: &mut Vec<OrientedCollider>,
+    ) -> Result<(), Self::Error> {
+        Ok(())
+    }
+}
+
+thread_local! {
+    /// The colliders of the move in progress, kept between moves: a move that meets some
+    /// allocates nothing once the list has grown to fit.
+    static COLLIDERS: std::cell::RefCell<Vec<OrientedCollider>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// A move's list of colliders, borrowed from the thread's reusable one and given back empty.
+struct Colliders(Vec<OrientedCollider>);
+
+impl Colliders {
+    fn take() -> Self {
+        Self(COLLIDERS.with(|list| std::mem::take(&mut *list.borrow_mut())))
+    }
+}
+
+impl Drop for Colliders {
+    fn drop(&mut self) {
+        self.0.clear();
+        COLLIDERS.with(|list| *list.borrow_mut() = std::mem::take(&mut self.0));
     }
 }
 
@@ -69,10 +94,12 @@ where
             entity_collision_bounds(request.movement, request.bounds, request.max_step),
         )
         .map_err(CollisionScanError::World)?;
-    let colliders = world
+    let mut colliders = Colliders::take();
+    world
         .moving_colliders(
             request.entity,
             entity_collision_bounds(request.movement, request.bounds, request.max_step),
+            &mut colliders.0,
         )
         .map_err(CollisionScanError::World)?;
     // Vanilla walks the whole box a movement expands to with no candidate
@@ -93,7 +120,7 @@ where
         request.bounds,
         request.max_step,
         request.on_ground,
-        &colliders,
+        &colliders.0,
         |bounds| {
             // A box's blocks are a few dozen shapes at most: one allocation,
             // not the doubling a push-by-push list makes.
@@ -147,9 +174,12 @@ where
     {
         return Ok(false);
     }
-    if world
-        .moving_colliders(request.entity, request.bounds)
-        .map_err(CollisionScanError::World)?
+    let mut colliders = Colliders::take();
+    world
+        .moving_colliders(request.entity, request.bounds, &mut colliders.0)
+        .map_err(CollisionScanError::World)?;
+    if colliders
+        .0
         .iter()
         .any(|collider| collider.intersects(request.bounds))
     {

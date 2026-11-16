@@ -179,8 +179,9 @@ impl<W: EntityMovementWorld> EntityMovementWorld for Excluding<'_, W> {
         &mut self,
         entity: EntityIdentity,
         bounds: Aabb,
-    ) -> Result<Vec<sunrise_core::geometry::oriented::OrientedCollider>, Self::Error> {
-        self.world.moving_colliders(entity, bounds)
+        out: &mut Vec<sunrise_core::geometry::oriented::OrientedCollider>,
+    ) -> Result<(), Self::Error> {
+        self.world.moving_colliders(entity, bounds, out)
     }
 }
 

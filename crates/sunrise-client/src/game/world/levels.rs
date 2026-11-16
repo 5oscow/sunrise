@@ -1110,6 +1110,8 @@ impl Game<'_> {
             }
         };
         self.journal_arrival(id);
+        let level = self.dim;
+        self.entity_attachments.move_collider(id, level);
         if self.uuid_admission_refused(self.persist.uuids.get(&id).copied()) {
             self.persist.off_level.insert(id, object);
             return;
@@ -1530,6 +1532,7 @@ impl Game<'_> {
         // Its entities' attachments are saved with them; they leave memory too.
         for id in self.persist.uuids.keys() {
             self.entity_attachments.remove(id);
+            self.entity_attachments.remove_collider(*id);
         }
         self.enter_level(back)?;
         self.levels.parked.remove(&dim);

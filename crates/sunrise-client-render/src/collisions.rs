@@ -198,8 +198,9 @@ impl<W: EntityMovementWorld<Error = io::Error>> EntityMovementWorld for EntityCo
         &mut self,
         entity: EntityIdentity,
         bounds: Aabb,
-    ) -> io::Result<Vec<sunrise_core::geometry::oriented::OrientedCollider>> {
-        self.blocks.moving_colliders(entity, bounds)
+        out: &mut Vec<sunrise_core::geometry::oriented::OrientedCollider>,
+    ) -> io::Result<()> {
+        self.blocks.moving_colliders(entity, bounds, out)
     }
 }
 impl<'a, W> EntityCollisions<'a, W>
@@ -595,8 +596,10 @@ impl EntityMovementWorld for SceneCollisions<'_, '_> {
         &mut self,
         entity: EntityIdentity,
         bounds: Aabb,
-    ) -> io::Result<Vec<sunrise_core::geometry::oriented::OrientedCollider>> {
-        Ok(crate::moving_colliders::near(entity, bounds))
+        out: &mut Vec<sunrise_core::geometry::oriented::OrientedCollider>,
+    ) -> io::Result<()> {
+        crate::moving_colliders::near(entity, bounds, out);
+        Ok(())
     }
 }
 impl DynamicSupportWorld for SceneCollisions<'_, '_> {

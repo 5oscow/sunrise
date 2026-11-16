@@ -1,7 +1,7 @@
 //! Moving colliders on a real game: set, read, refused, saved and loaded back, and solid to a
 //! falling item.
 use super::{Dim, Game, native_colliders::SAVE_KEY};
-use mod_api::{BlockStateId, Collider, ColliderBox, ColliderError, EntityRef};
+use mod_api::{Collider, ColliderBox, ColliderError, EntityRef};
 use std::sync::Arc;
 use sunrise_client::chunk::Chunk;
 use sunrise_client::{entities::ItemEntity, items::ItemStack};
@@ -15,7 +15,6 @@ fn deck() -> Collider {
         boxes: vec![ColliderBox {
             min: [-1.5, -1.0, -1.5],
             max: [1.5, 0.0, 1.5],
-            state: BlockStateId(1),
         }],
         rotation: [0.0, 0.0, 0.0, 1.0],
     }
@@ -23,6 +22,10 @@ fn deck() -> Collider {
 
 /// A pig with no AI and no gravity at `at`: it stays where it is put.
 fn stand(game: &mut Game<'_>, at: [f64; 3]) -> EntityRef {
+    stand_with_id(game, at).1
+}
+
+fn stand_with_id(game: &mut Game<'_>, at: [f64; 3]) -> (u32, EntityRef) {
     let nbt: Compound = [
         ("NoGravity".into(), Tag::Byte(1)),
         ("NoAI".into(), Tag::Byte(1)),
@@ -33,8 +36,8 @@ fn stand(game: &mut Game<'_>, at: [f64; 3]) -> EntityRef {
     let dimension = game.dim.id();
     let id = game
         .summon(dimension, "minecraft:pig", at, nbt)
-        .expect("an armor stand");
-    game.entity(id).expect("its handle")
+        .expect("a pig");
+    (id, game.entity(id).expect("its handle"))
 }
 
 #[test]
@@ -237,4 +240,86 @@ fn with_world(test: impl FnOnce(&mut Game<'_>)) {
 fn tick_level(game: &mut Game<'_>) {
     let placed = game.placed_moving_colliders();
     sunrise_client_render::moving_colliders::in_level(placed, || game.tick_world(true).unwrap());
+}
+
+/// A collider goes with its entity through a dimension change: the same collider reads back
+/// from the arrived entity, and it still holds an item up in the destination.
+#[test]
+#[ignore = "daily"]
+fn a_collider_travels_with_its_entity() {
+    with_world(|game| {
+        let source = game.dim;
+        let (id, entity) = stand_with_id(game, [1.5, 70.0, 1.5]);
+        entity.set_collider(game, Some(deck())).unwrap();
+        let want = entity.collider(game);
+        game.enter_level(Dim::Nether).unwrap();
+        game.native_level_opened(Dim::Nether);
+        game.world
+            .chunks
+            .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+        game.streaming.forced.insert((0, 0));
+        game.arrive_vehicle(source, id, Vec3::new(1.5, 70.0, 1.5), 0.0);
+        for _ in 0..3 {
+            tick_level(game);
+        }
+        let arrived = game.entity(id).expect("it arrived");
+        assert_eq!(arrived.collider(game), want, "the collider came along");
+        let held = drop_item(game, [1.5, 70.0, 1.5]);
+        for _ in 0..60 {
+            tick_level(game);
+        }
+        let y = item_y(game, held).unwrap();
+        assert!(
+            (70.0..70.2).contains(&y),
+            "it still holds an item up: y = {y}"
+        );
+    });
+}
+
+/// The collider's own entity is never stopped by it, and neither is anything in its vehicle
+/// stack, ancestors and siblings included; a stranger over the same boxes is.
+#[test]
+#[ignore = "daily"]
+fn a_collider_is_not_solid_to_its_own_vehicle_stack() {
+    with_world(|game| {
+        let (a, a_ref) = stand_with_id(game, [1.5, 70.0, 1.5]);
+        let (b, b_ref) = stand_with_id(game, [1.5, 70.0, 1.5]);
+        let (c, c_ref) = stand_with_id(game, [1.5, 70.0, 1.5]);
+        let (stranger, _) = stand_with_id(game, [10.5, 70.0, 10.5]);
+        // a rides b rides c.
+        game.entity_start_riding(a_ref, b_ref, true).unwrap();
+        game.entity_start_riding(b_ref, c_ref, true).unwrap();
+        // The collider is on the middle of the stack.
+        b_ref.set_collider(game, Some(deck())).unwrap();
+        for held in [a, b, c] {
+            let mut stack = game.vehicle_stack(held);
+            stack.sort_unstable();
+            assert_eq!(stack, vec![a, b, c], "the stack seen from {held}");
+        }
+        assert_eq!(game.vehicle_stack(stranger), vec![stranger]);
+        // A mover of the stack, with gravity, falls through the deck under its own collider;
+        // a stranger placed over the deck's world position lands on it.
+        let placed = game.placed_moving_colliders();
+        assert_eq!(placed.len(), 1);
+        let mut exempt = placed[0].exempt.clone();
+        exempt.sort_unstable();
+        assert_eq!(exempt, vec![a, b, c]);
+        let stands_on = |id: u32| {
+            use sunrise_client_render::moving_colliders::{in_level, near};
+            let mut found = Vec::new();
+            in_level(game.placed_moving_colliders(), || {
+                near(
+                    sunrise_world::entity_obstruction::EntityIdentity(u64::from(id)),
+                    sunrise_core::geometry::Aabb::new(
+                        Vec3::new(1.0, 69.5, 1.0),
+                        Vec3::new(2.0, 71.0, 2.0),
+                    ),
+                    &mut found,
+                );
+            });
+            !found.is_empty()
+        };
+        assert!(!stands_on(a) && !stands_on(b) && !stands_on(c));
+        assert!(stands_on(stranger), "a stranger meets it");
+    });
 }

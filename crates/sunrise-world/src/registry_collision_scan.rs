@@ -127,9 +127,10 @@ impl<W: crate::world_movement::EntityMovementWorld> crate::world_movement::Entit
         &mut self,
         entity: crate::entity_obstruction::EntityIdentity,
         bounds: sunrise_core::geometry::Aabb,
-    ) -> Result<Vec<sunrise_core::geometry::oriented::OrientedCollider>, Self::Error> {
+        out: &mut Vec<sunrise_core::geometry::oriented::OrientedCollider>,
+    ) -> Result<(), Self::Error> {
         self.world
-            .moving_colliders(entity, bounds)
+            .moving_colliders(entity, bounds, out)
             .map_err(CollisionQueryError::Context)
     }
 }

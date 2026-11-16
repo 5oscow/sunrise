@@ -1,6 +1,6 @@
 //! Collider sync: the boxes of a moving collider (an entity's `set_collider`), sent by a
 //! Sunrise server to the Sunrise clients that track the entity
-//! (docs/modding/src/how-to/content-mods.md, "Moving colliders").
+//! (docs/modding/src/how-to/native-mods.md, "Moving colliders").
 //!
 //! A client that starts tracking the entity gets the collider whole, split into messages of
 //! at most [`MAX_MESSAGE`] bytes; after that it gets only what changed: boxes replaced,
@@ -13,6 +13,7 @@ use crate::{
     Error, Result,
     buf::{Reader, Writer},
 };
+use sunrise_core::geometry::oriented;
 
 /// The custom payload channel, clientbound only.
 pub const CHANNEL: &str = "sunrise:collider_sync";
@@ -21,16 +22,15 @@ pub const VERSION: &str = "1";
 /// The largest message the server writes, in bytes.
 pub const MAX_MESSAGE: usize = 64 * 1024;
 /// The most boxes one collider holds (`Collider::MAX_BOXES`).
-pub const MAX_BOXES: u32 = 32_768;
-/// A box on the wire: six `f32` and a state id.
-pub const BOX_BYTES: usize = 28;
+pub const MAX_BOXES: u32 = oriented::MAX_BOXES as u32;
+/// A box on the wire: six `f32`.
+pub const BOX_BYTES: usize = 24;
 
-/// One box: the corners in the collider's frame and the block state it stands for.
+/// One box: the corners in the collider's frame.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct WireBox {
     pub min: [f32; 3],
     pub max: [f32; 3],
-    pub state: u32,
 }
 
 /// What the server tells a client about one entity's collider.
@@ -61,21 +61,27 @@ pub enum Message {
 
 fn write_box(w: &mut Writer, b: &WireBox) {
     b.min.iter().chain(&b.max).for_each(|&v| w.f32(v));
-    w.u32(b.state);
 }
 
 fn read_box(r: &mut Reader) -> Result<WireBox> {
     let mut v = [0.0f32; 6];
     for slot in &mut v {
         *slot = r.f32()?;
-        if !slot.is_finite() {
+    }
+    let wide = v.map(f64::from);
+    // The contract a mod's collider meets when it is set, checked before any geometry is built.
+    match oriented::check_box([wide[0], wide[1], wide[2]], [wide[3], wide[4], wide[5]]) {
+        Ok(()) => {}
+        Err(oriented::BoxFault::NonFinite) => {
             return Err(Error::new("collider sync: a box value is not finite"));
+        }
+        Err(oriented::BoxFault::OutOfRange) => {
+            return Err(Error::new("collider sync: a box lies past the reach"));
         }
     }
     Ok(WireBox {
         min: [v[0], v[1], v[2]],
         max: [v[3], v[4], v[5]],
-        state: r.u32()?,
     })
 }
 
@@ -85,8 +91,10 @@ fn write_rotation(w: &mut Writer, q: [f32; 4]) {
 
 fn read_rotation(r: &mut Reader) -> Result<[f32; 4]> {
     let q = [r.f32()?, r.f32()?, r.f32()?, r.f32()?];
-    if q.iter().any(|v| !v.is_finite()) {
-        return Err(Error::new("collider sync: the rotation is not finite"));
+    if !oriented::check_rotation(q.map(f64::from)) {
+        return Err(Error::new(
+            "collider sync: the rotation is not a unit quaternion",
+        ));
     }
     Ok(q)
 }
@@ -288,9 +296,8 @@ mod tests {
     fn boxes(n: usize) -> Vec<WireBox> {
         (0..n)
             .map(|i| WireBox {
-                min: [i as f32, 0.0, 0.0],
-                max: [i as f32 + 1.0, 1.0, 1.0],
-                state: i as u32 % 7,
+                min: [(i % 400) as f32, (i / 400 % 100) as f32, 0.0],
+                max: [(i % 400) as f32 + 1.0, (i / 400 % 100) as f32 + 1.0, 1.0],
             })
             .collect()
     }
@@ -345,15 +352,15 @@ mod tests {
             joined.extend(boxes);
         }
         assert_eq!(joined, all);
-        // 28 bytes a box: the whole collider is 917,504 bytes of boxes.
-        assert_eq!(MAX_BOXES as usize * BOX_BYTES, 917_504);
+        // 24 bytes a box: the whole collider is 786,432 bytes of boxes.
+        assert_eq!(MAX_BOXES as usize * BOX_BYTES, 786_432);
     }
 
     #[test]
     fn a_change_carries_only_the_boxes_that_differ() {
         let old = boxes(100);
         let mut new = old.clone();
-        new[40].state = 99;
+        new[40].max[1] = 3.0;
         new.truncate(90);
         new.push(boxes(1)[0]);
         let messages = changes(1, &old, &new);
@@ -422,5 +429,50 @@ mod tests {
         assert!(decode(&m).is_err());
         assert!(decode(&[9, 1]).is_err());
         assert!(decode(&[]).is_err());
+    }
+
+    /// Finite values that break the contract are refused by the same limits a mod's collider
+    /// meets: a box that would make the grid huge, and a rotation that is not a unit.
+    #[test]
+    fn finite_values_past_the_limits_are_refused() {
+        let run = |b: WireBox, rotation: [f32; 4]| {
+            decode(&encode(&Message::Boxes {
+                entity: 1,
+                rotation,
+                total: 1,
+                first: 0,
+                boxes: vec![b],
+            }))
+        };
+        let unit = [0.0, 0.0, 0.0, 1.0];
+        let ok = WireBox {
+            min: [-512.0, -512.0, -512.0],
+            max: [512.0, 512.0, 512.0],
+        };
+        assert!(run(ok, unit).is_ok(), "the reach is inclusive");
+        for (min, max) in [
+            ([-f32::MAX, 0.0, 0.0], [f32::MAX, 1.0, 1.0]),
+            ([0.0; 3], [512.5, 1.0, 1.0]),
+            ([0.0, 0.0, -1.0e9], [1.0, 1.0, 1.0]),
+        ] {
+            assert!(run(WireBox { min, max }, unit).is_err(), "{min:?} {max:?}");
+        }
+        for rotation in [
+            [0.0, 0.0, 0.0, 1.0e30],
+            [0.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 1.01],
+            [0.0, 0.0, 0.0, f32::MAX],
+        ] {
+            assert!(run(ok, rotation).is_err(), "{rotation:?}");
+        }
+        assert!(run(ok, [0.0, 0.0, 0.0, 1.0005]).is_ok());
+        let rotation = |q: [f32; 4]| {
+            decode(&encode(&Message::Rotation {
+                entity: 1,
+                rotation: q,
+            }))
+        };
+        assert!(rotation([0.0, 0.0, 0.0, 3.0]).is_err());
+        assert!(rotation([0.0, 0.0, 1.0, 0.0]).is_ok());
     }
 }

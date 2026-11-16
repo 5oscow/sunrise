@@ -77,7 +77,7 @@ pub fn arm_with<'k>(
     // The requested delta is the floor every listener result falls back to:
     // armed first, the decision replaced only by a result that passes
     // validation — the request stays what `overridden` measures against.
-    gate.arm(cause, delta);
+    gate.arm(entity, cause, delta);
     if context.side() != LoopSide::Server {
         return;
     }
@@ -154,6 +154,7 @@ pub fn armed(
 #[allow(clippy::disallowed_methods)]
 mod collide {
     use super::*;
+    use sunrise_client_render::moving_colliders;
     /// `SceneCollisions::resolve` through the gate: the armed move's
     /// collision, stopped by the blocks (and powder snow by the scene's
     /// `subject`).
@@ -165,8 +166,9 @@ mod collide {
         max_step: f32,
         on_ground: bool,
     ) -> crate::Result<Vec3> {
-        let _ = gate;
-        scene.resolve(bounds, movement, max_step, on_ground)
+        moving_colliders::as_mover(gate.mover(), || {
+            scene.resolve(bounds, movement, max_step, on_ground)
+        })
     }
     /// `SceneCollisions::resolve_with_context` through the gate.
     pub fn scene_with_context(
@@ -178,8 +180,9 @@ mod collide {
         on_ground: bool,
         context: CollisionContext<'_>,
     ) -> crate::Result<Vec3> {
-        let _ = gate;
-        scene.resolve_with_context(bounds, movement, max_step, on_ground, context)
+        moving_colliders::as_mover(gate.mover(), || {
+            scene.resolve_with_context(bounds, movement, max_step, on_ground, context)
+        })
     }
     /// `SceneCollisions::resolve_in_border_with` through the gate: also
     /// stopped by the world border's walls and the selected `entities` boxes.
@@ -194,8 +197,9 @@ mod collide {
         border: Option<(&BorderGeometry, [f64; 2])>,
         entities: &[Aabb],
     ) -> crate::Result<Vec3> {
-        let _ = gate;
-        scene.resolve_in_border_with(bounds, movement, max_step, on_ground, border, entities)
+        moving_colliders::as_mover(gate.mover(), || {
+            scene.resolve_in_border_with(bounds, movement, max_step, on_ground, border, entities)
+        })
     }
     /// `EntityCollisions::resolve` through the gate.
     pub fn entities<W>(
@@ -209,8 +213,9 @@ mod collide {
     where
         W: BlockCollisionWorld<Error = io::Error> + EntityMovementWorld<Error = io::Error>,
     {
-        let _ = gate;
-        collisions.resolve(bounds, movement, max_step, on_ground)
+        moving_colliders::as_mover(gate.mover(), || {
+            collisions.resolve(bounds, movement, max_step, on_ground)
+        })
     }
     /// `EntityCollisions::resolve_with_context` through the gate.
     pub fn entities_with_context<W>(
@@ -225,8 +230,9 @@ mod collide {
     where
         W: BlockCollisionWorld<Error = io::Error> + EntityMovementWorld<Error = io::Error>,
     {
-        let _ = gate;
-        collisions.resolve_with_context(bounds, movement, max_step, on_ground, context)
+        moving_colliders::as_mover(gate.mover(), || {
+            collisions.resolve_with_context(bounds, movement, max_step, on_ground, context)
+        })
     }
 }
 pub use collide::{
