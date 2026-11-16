@@ -60,22 +60,11 @@ pub(super) struct OpenTransactions {
     /// The root commits telling their joins and leaves, outermost first: a listener's command in
     /// another level can commit a transaction there while this level's commit is told.
     committing: Vec<entities::Committing>,
-    /// How many writes the journals have been asked to keep, ever: a whole-state epoch that no
-    /// restore moves back. A decision that read a player's inventory or a container's slots
-    /// compares it before and after its listeners ran; an equal rewrite counts as a write.
-    writes: u64,
     composter_epoch: Option<mod_api::WorldEpoch>,
     /// Each composter port owns its transactional random stream, independently of Level.random.
     composter_randoms: ComposterRandoms,
     #[cfg(test)]
     pub(in crate::game) trace: Option<std::sync::Arc<std::sync::Mutex<Vec<String>>>>,
-}
-
-impl OpenTransactions {
-    /// The journaled-write epoch.
-    pub(in crate::game) fn writes(&self) -> u64 {
-        self.writes
-    }
 }
 
 impl OpenTransactions {
