@@ -243,7 +243,7 @@ impl Auto {
 
 /// Whether a villager's brain draws from the villager's own random instead of the level's.
 ///
-/// The level random is one stream, so a draw has to wait for every mob before it (`OrderedDraws`),
+/// The level random is one stream, so a draw has to wait for every mob before it,
 /// and a villager's brain draws on nearly every turn (behaviour durations, one-in-N rolls).
 /// With the parallel tick on, those draws come from a stream seeded from the villager's own, so
 /// no villager waits on another mob and the lanes run apart. That is the one place the parallel
