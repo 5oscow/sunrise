@@ -118,7 +118,7 @@ Native and wasm mods use the same handle methods.
 `CrosshairTarget::Block { pos, state, hit }` or
 `CrosshairTarget::Entity { entity, point }`. The block hit contains its world-space
 location, face and inside flag; the entity point is also in world coordinates.
-It reads the last committed `client_frame_pick` decision, and returns `None`
+It reads the last committed `client_pick` decision, and returns `None`
 on a miss, before the first frame pick, or when its target became stale. It never
 casts a new ray. Without listeners the decision is the vanilla block/entity pick.
 It can be read with a screen open. `entity` is an `EntityRef` carrying the current
@@ -171,7 +171,7 @@ These read the local player as the client sees it. They take no mod-controlled n
 
 ## Combat targeting
 
-`client_frame_pick` runs once per frame, after the frame's client ticks, at its
+`client_pick` runs once per frame, after the frame's client ticks, at its
 game-time partial tick, before render-state extraction. NeoForge 26.3 has no
 counterpart. The event supplies read-only `original`, `block_candidate` and
 `entity_candidate` values and a mutable `result`, initialized to `original`.
@@ -188,7 +188,7 @@ run in one transaction. Buckets, bottles, boats, brushes and other item-specific
 rays remain independent and vanilla-exact.
 
 ```rust,ignore
-fn client_frame_pick(&self, _host: &mut dyn ClientHost, event: &mut ClientFramePickEvent<'_>) {
+fn client_pick(&self, _host: &mut dyn ClientHost, event: &mut ClientPickEvent<'_>) {
     *event.result = event.block_candidate;
 }
 ```

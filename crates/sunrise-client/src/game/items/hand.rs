@@ -390,7 +390,7 @@ impl Game<'_> {
         &self,
         range: &serde_json::Value,
     ) -> Option<Option<(usize, f64, [f64; 3])>> {
-        let (eye, look) = match self.frame_pick.ray {
+        let (eye, look) = match self.client_pick.ray {
             Some((origin, direction)) => (v3(origin), v3(direction)),
             None => (
                 v3(self.eye_position()?),
@@ -643,7 +643,7 @@ impl Game<'_> {
     /// Whether an attack would hit an entity rather than the block behind
     /// it: the crosshair's `EntityHitResult`.
     pub(super) fn entity_targeted(&self) -> bool {
-        if self.uses_frame_pick() {
+        if self.uses_stored_pick() {
             return matches!(
                 self.crosshair_target(),
                 Some(mod_api::CrosshairTarget::Entity { .. })

@@ -61,7 +61,7 @@ impl Game<'_> {
     /// Whether a use starts on an entity: the crosshair's `EntityHitResult`, or a fence knot.
     /// Only a use: Sunrise's attacks still go to the fence behind a knot.
     pub(super) fn remote_use_targets_entity(&self) -> bool {
-        if self.uses_frame_pick() {
+        if self.uses_stored_pick() {
             return self.entity_targeted();
         }
         self.entity_targeted()
@@ -145,7 +145,7 @@ impl Game<'_> {
                 hits.push((id, d, [p.x, p.y, p.z]));
             }
         }
-        if (!attacking || self.frame_pick.ray.is_some())
+        if (!attacking || self.client_pick.ray.is_some())
             && let Some((id, d, p)) = self.remote_knot_hit()
         {
             hits.push((id, d, p));

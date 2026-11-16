@@ -111,7 +111,7 @@ pub trait ClientViewClientHost {
     #[access(WorldOnly)]
     fn set_camera_entity(&mut self, entity: EntityRef) -> bool;
     /// Side: client.
-    /// The committed `client_frame_pick` result (Minecraft.hitResult), computed
+    /// The committed `client_pick` result (Minecraft.hitResult), computed
     /// once per frame at its partial tick before render-state extraction. The
     /// highlight reads it this frame; input ticks read it next frame. A read
     /// during dispatch sees the original. None before the first pick, without a

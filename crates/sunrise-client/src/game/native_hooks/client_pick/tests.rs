@@ -1,5 +1,5 @@
 use super::*;
-use mod_api::{ClientFramePickEvent, ClientHost, CrosshairTarget, Hooks};
+use mod_api::{ClientPickEvent, ClientHost, CrosshairTarget, Hooks};
 use std::sync::{Arc, Mutex};
 
 #[derive(Default)]
@@ -11,14 +11,14 @@ struct First;
 struct Last(Arc<Mutex<Policy>>);
 #[mod_api::__subscriptions]
 impl Hooks for First {
-    fn client_frame_pick(&self, host: &mut dyn ClientHost, event: &mut ClientFramePickEvent<'_>) {
+    fn client_pick(&self, host: &mut dyn ClientHost, event: &mut ClientPickEvent<'_>) {
         assert_eq!(host.crosshair_target(), event.original);
         *event.result = event.block_candidate;
     }
 }
 #[mod_api::__subscriptions]
 impl Hooks for Last {
-    fn client_frame_pick(&self, host: &mut dyn ClientHost, event: &mut ClientFramePickEvent<'_>) {
+    fn client_pick(&self, host: &mut dyn ClientHost, event: &mut ClientPickEvent<'_>) {
         assert_eq!(host.crosshair_target(), event.original);
         assert_eq!(
             *event.result, event.block_candidate,
@@ -95,7 +95,7 @@ fn frame_pick_is_shared_ordered_and_refuses_stale_or_invalid_output() {
                 .default_state("minecraft:stone")
                 .unwrap();
             game.world.set(2, 2, 0, stone).unwrap();
-            game.refresh_frame_pick(1.0);
+            game.refresh_client_pick(1.0);
             let block = game.crosshair_target().unwrap();
             assert!(matches!(block, CrosshairTarget::Block { .. }));
             assert_eq!(
@@ -118,7 +118,7 @@ fn frame_pick_is_shared_ordered_and_refuses_stale_or_invalid_output() {
             );
 
             policy.lock().unwrap().override_result = Some(None);
-            game.refresh_frame_pick(1.0);
+            game.refresh_client_pick(1.0);
             assert!(game.crosshair_target().is_none());
             assert!(game.pick().is_none());
             assert!(
@@ -126,7 +126,7 @@ fn frame_pick_is_shared_ordered_and_refuses_stale_or_invalid_output() {
                 "the item-specific ray ignores the pick miss"
             );
             policy.lock().unwrap().override_result = Some(Some(block));
-            game.refresh_frame_pick(1.0);
+            game.refresh_client_pick(1.0);
             let air = game
                 .pack
                 .assets
@@ -135,7 +135,7 @@ fn frame_pick_is_shared_ordered_and_refuses_stale_or_invalid_output() {
                 .unwrap();
             game.world.set(2, 2, 0, air).unwrap();
             assert!(game.pick().is_none(), "stale state refuses, not a new ray");
-            game.refresh_frame_pick(1.0);
+            game.refresh_client_pick(1.0);
             assert!(
                 game.crosshair_target().is_none(),
                 "stale output refuses at writeback too"
@@ -144,7 +144,7 @@ fn frame_pick_is_shared_ordered_and_refuses_stale_or_invalid_output() {
             for point in [[f64::NAN, 2.0, 0.5], [f64::INFINITY; 3], [100.0; 3]] {
                 policy.lock().unwrap().override_result =
                     Some(Some(CrosshairTarget::Entity { entity, point }));
-                game.refresh_frame_pick(1.0);
+                game.refresh_client_pick(1.0);
                 assert!(game.crosshair_target().is_none());
             }
             let entity_hit = CrosshairTarget::Entity {
@@ -152,13 +152,13 @@ fn frame_pick_is_shared_ordered_and_refuses_stale_or_invalid_output() {
                 point: [1.5, 2.6, 0.5],
             };
             policy.lock().unwrap().override_result = Some(Some(entity_hit));
-            game.refresh_frame_pick(1.0);
+            game.refresh_client_pick(1.0);
             assert_eq!(game.crosshair_target(), Some(entity_hit));
             assert!(game.entity_targeted());
             assert_eq!(game.mob_hit().map(|(i, _, _)| game.mobs[i].id), Some(31));
             game.native_lifecycle
                 .begin_open(mod_api::Authority::RemoteClient);
-            game.refresh_frame_pick(1.0);
+            game.refresh_client_pick(1.0);
             assert!(
                 game.crosshair_target().is_none(),
                 "old level entity is rejected while its id is still present"
@@ -168,7 +168,7 @@ fn frame_pick_is_shared_ordered_and_refuses_stale_or_invalid_output() {
                 entity,
                 point: [1.5, 2.6, 0.5],
             }));
-            game.refresh_frame_pick(1.0);
+            game.refresh_client_pick(1.0);
             assert!(game.entity_targeted());
             game.handle_packet(C::RemoveEntities(play::RemoveEntities { ids: vec![31] }))
                 .unwrap();
@@ -205,7 +205,7 @@ fn frame_pick_without_listeners_keeps_the_vanilla_result() {
                 .default_state("minecraft:stone")
                 .unwrap();
             game.world.set(2, 2, 0, stone).unwrap();
-            game.refresh_frame_pick(1.0);
+            game.refresh_client_pick(1.0);
             assert_eq!(game.pick().unwrap().pos, [2, 2, 0]);
             game.yaw = 90.0;
             assert_eq!(
@@ -213,7 +213,7 @@ fn frame_pick_without_listeners_keeps_the_vanilla_result() {
                 [2, 2, 0],
                 "look changes wait for the next frame"
             );
-            game.refresh_frame_pick(1.0);
+            game.refresh_client_pick(1.0);
             assert!(game.pick().is_none());
         })
     });
@@ -228,7 +228,7 @@ fn finish_login(server: &mut sunrise_protocol::connection::Connection) {
             &login::Clientbound::LoginFinished(login::LoginFinished {
                 profile: login::GameProfile {
                     uuid: 42,
-                    name: "FramePickTest".into(),
+                    name: "ClientPickTest".into(),
                     properties: vec![],
                 },
                 session: 1,
@@ -248,7 +248,7 @@ fn finish_login(server: &mut sunrise_protocol::connection::Connection) {
 struct SelectedPick(Arc<Mutex<Option<CrosshairTarget>>>);
 #[mod_api::__subscriptions]
 impl Hooks for SelectedPick {
-    fn client_frame_pick(&self, _: &mut dyn ClientHost, event: &mut ClientFramePickEvent<'_>) {
+    fn client_pick(&self, _: &mut dyn ClientHost, event: &mut ClientPickEvent<'_>) {
         if let Some(result) = *self.0.lock().unwrap() {
             *event.result = Some(result);
         }
@@ -385,7 +385,7 @@ fn unchanged_attack_listener_preserves_the_committed_point_through_a_wall() {
                     point: [2.25, 2.6, 0.5],
                 };
                 *selected.lock().unwrap() = Some(target);
-                game.refresh_frame_pick(1.0);
+                game.refresh_client_pick(1.0);
                 assert_eq!(game.crosshair_target(), Some(target));
                 assert!(
                     game.targeting_entity_hit(entity).is_none(),
@@ -421,7 +421,7 @@ fn attack_range_indicator_obeys_block_and_miss_replacements() {
                 .default_state("minecraft:stone")
                 .unwrap();
             game.world.set(4, 2, 0, stone).unwrap();
-            game.refresh_frame_pick(1.0);
+            game.refresh_client_pick(1.0);
             assert!(matches!(
                 game.crosshair_target(),
                 Some(CrosshairTarget::Block { .. })
@@ -431,7 +431,7 @@ fn attack_range_indicator_obeys_block_and_miss_replacements() {
                 "no raw attack-range indicator behind the selected block"
             );
             policy.lock().unwrap().override_result = Some(None);
-            game.refresh_frame_pick(1.0);
+            game.refresh_client_pick(1.0);
             assert!(
                 game.crosshair_living().is_none(),
                 "no raw attack-range indicator on a selected miss"
@@ -458,7 +458,7 @@ fn forward_moving_pick_survives_a_noop_listener_and_extended_replacements() {
             with_pick_game("minecraft:pig", 5.5, |game, _| {
                 game.inventory[0] = Some(ranged_stack());
                 game.previous_position.x -= 1.0;
-                game.refresh_frame_pick(1.0);
+                game.refresh_client_pick(1.0);
                 let Some(CrosshairTarget::Entity { entity, point }) = game.crosshair_target()
                 else {
                     panic!("the moving attack-range ray reaches this pig");
@@ -472,14 +472,14 @@ fn forward_moving_pick_survives_a_noop_listener_and_extended_replacements() {
                 } else {
                     vanilla_point = Some(point);
                 }
-                assert!(game.frame_pick_distance(point) > 4.5);
+                assert!(game.pick_distance(point) > 4.5);
                 if subscribe {
                     let replacement = CrosshairTarget::Entity {
                         entity,
                         point: [5.25, 2.6, 0.5],
                     };
                     *selected.lock().unwrap() = Some(replacement);
-                    game.refresh_frame_pick(1.0);
+                    game.refresh_client_pick(1.0);
                     assert_eq!(
                         game.crosshair_target(),
                         Some(replacement),
@@ -510,7 +510,7 @@ fn attack_range_pick_outside_interact_range_falls_through_to_item_use() {
                     point: [4.5, 2.6, 0.5],
                 };
                 *selected.lock().unwrap() = Some(target);
-                game.refresh_frame_pick(1.0);
+                game.refresh_client_pick(1.0);
                 assert_eq!(game.crosshair_target(), Some(target));
                 game.remote_use(mod_api::InteractionAttempt::Press);
                 let actions = sent_actions(game, server);

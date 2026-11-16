@@ -16,7 +16,7 @@ pub trait Hooks {
         out = "result",
         neoforge = "none (vanilla Minecraft.pick, once per frame before extraction)"
     )]
-    fn client_frame_pick(
+    fn client_pick(
         partial_tick: f32,
         original: Option<CrosshairTarget>,
         block_candidate: Option<CrosshairTarget>,

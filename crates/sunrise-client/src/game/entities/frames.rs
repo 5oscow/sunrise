@@ -320,10 +320,10 @@ impl Game<'_> {
         best
     }
     pub(super) fn block_distance(&self) -> Option<f64> {
-        if self.uses_frame_pick() {
+        if self.uses_stored_pick() {
             return match self.crosshair_target() {
                 Some(mod_api::CrosshairTarget::Block { hit, .. }) => {
-                    Some(self.frame_pick_distance(hit.point))
+                    Some(self.pick_distance(hit.point))
                 }
                 _ => None,
             };

@@ -75,7 +75,7 @@ impl Game<'_> {
         }
         nearest_entity(
             hits,
-            if self.frame_pick.ray.is_some() {
+            if self.client_pick.ray.is_some() {
                 None
             } else {
                 self.block_distance()
@@ -91,8 +91,8 @@ impl Game<'_> {
             return None;
         }
         self.player.as_ref()?;
-        if self.uses_frame_pick() {
-            return self.stored_frame_pick();
+        if self.uses_stored_pick() {
+            return self.stored_client_pick();
         }
         if let Some(hit) = self.crosshair_entity_hit() {
             let (eye, direction) = self.aim()?;

@@ -9,7 +9,7 @@ impl Game<'_> {
         if let Some(r) = self.remote.as_mut() {
             r.use_target = None;
         }
-        if self.uses_frame_pick() {
+        if self.uses_stored_pick() {
             let Some(mod_api::CrosshairTarget::Entity { entity, .. }) = self.crosshair_target()
             else {
                 return false;

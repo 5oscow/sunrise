@@ -1873,7 +1873,7 @@ struct Game<'a> {
     /// +2): the pick helpers' `&self` reach.
     entity_reach: f64,
     block_reach: f64,
-    frame_pick: native_hooks::FramePick,
+    client_pick: native_hooks::ClientPick,
     /// The part of a right click a guest's packet asks for (game/network/lan_actions/interaction.rs).
     guest_use: Option<GuestUse>,
     /// The last `use_hand` that ended the click did so with `FAIL`, which
@@ -2328,7 +2328,7 @@ impl Game<'_> {
     /// crosshair target (blocks, fluids, entities, mod raycasts) is found
     /// along this ray, so a tracked controller can stand in for it.
     fn aim(&self) -> Option<([f64; 3], [f64; 3])> {
-        if let Some(ray) = self.frame_pick.ray {
+        if let Some(ray) = self.client_pick.ray {
             return Some(ray);
         }
         // Minecraft.pick: from the camera entity's eyes along its view
@@ -2490,7 +2490,7 @@ impl Game<'_> {
         if let Some(hit) = self.forced_hit {
             return Some(hit);
         }
-        if self.uses_frame_pick() {
+        if self.uses_stored_pick() {
             return match self.crosshair_target() {
                 Some(mod_api::CrosshairTarget::Block { pos, hit, .. }) => Some(Hit {
                     pos: [pos.x, pos.y, pos.z],
@@ -8178,7 +8178,7 @@ impl Game<'_> {
         };
         pr.lap("pr_setup");
         let alpha = self.frame_world_partial_tick();
-        self.refresh_frame_pick(alpha as f32);
+        self.refresh_client_pick(alpha as f32);
         // Camera.getCameraEntityPartialTicks: the view, the hand and the
         // player's own model stay smooth while the level is frozen.
         let camera_alpha = self.clock.camera_fraction();
@@ -11101,7 +11101,7 @@ impl<'a> Game<'a> {
             hotbar_presses: sunrise_client::input_queue::InputQueue::new(hand::HOTBAR_PRESSES),
             entity_reach: 3.0,
             block_reach: 4.5,
-            frame_pick: Default::default(),
+            client_pick: Default::default(),
             guest_use: None,
             use_failed: false,
             block_use_original: Vec::new(),

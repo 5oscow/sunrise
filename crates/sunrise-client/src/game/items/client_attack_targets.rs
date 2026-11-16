@@ -1,4 +1,4 @@
-//! Explicit client attack batches; frame picking lives in client_frame_pick.
+//! Explicit client attack batches; frame picking lives in client_pick.
 use super::{Game, Hit, commands::Target};
 use mod_api::{CrosshairTarget, EntityRef};
 
@@ -35,7 +35,7 @@ impl Game<'_> {
     }
 
     pub(super) fn pick_unfiltered(&self) -> Option<Hit> {
-        if self.uses_frame_pick() {
+        if self.uses_stored_pick() {
             return self.pick();
         }
         if let Some(hit) = self.forced_hit {
@@ -119,7 +119,7 @@ impl Game<'_> {
                 if let Some((_, point)) = selected.filter(|(selected, _)| *selected == entity) {
                     // This is the stored pick, not an independently requested batch target.
                     // Preserve its point and occlusion policy, but refuse a stale decision.
-                    (self.crosshair_target() == committed).then(|| self.frame_pick_distance(point))
+                    (self.crosshair_target() == committed).then(|| self.pick_distance(point))
                 } else {
                     self.targeting_entity_hit(entity)
                         .map(|(_, distance)| distance)
