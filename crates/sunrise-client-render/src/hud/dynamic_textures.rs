@@ -314,15 +314,20 @@ fn owned<'a>(owner: Option<&'a str>, id: &Identifier) -> Result<&'a str, Dynamic
 
 /// The class a `[width, height]` image of `len` bytes takes, and its bytes: `BadSize` for a side
 /// of 0 or pixels that are not `width * height * 4` bytes, `TooLarge` past the largest class.
+/// The class is found before the bytes are counted, so the count only ever sees sides of at most
+/// the largest class and cannot overflow.
 fn sized([width, height]: [u32; 2], len: usize) -> Result<(usize, u64), DynamicTextureError> {
-    let bytes = u64::from(width) * u64::from(height) * 4;
-    if width == 0 || height == 0 || bytes != len as u64 {
+    if width == 0 || height == 0 {
         return Err(DynamicTextureError::BadSize);
     }
     let class = DYNAMIC_TEXTURE_CLASSES
         .iter()
         .position(|side| width <= *side && height <= *side)
         .ok_or(DynamicTextureError::TooLarge)?;
+    let bytes = u64::from(width) * u64::from(height) * 4;
+    if bytes != len as u64 {
+        return Err(DynamicTextureError::BadSize);
+    }
     Ok((class, bytes))
 }
 
@@ -394,6 +399,12 @@ mod tests {
         assert_eq!(class(0, 4), Err(BadSize));
         assert_eq!(sized([2, 2], 15), Err(BadSize));
         assert_eq!(sized([2, 2], 17), Err(BadSize));
+        // Extreme sides are refused by their class, before any byte count.
+        assert_eq!(sized([u32::MAX, u32::MAX], 0), Err(TooLarge));
+        assert_eq!(sized([u32::MAX, 1], 0), Err(TooLarge));
+        assert_eq!(sized([1, u32::MAX], 4), Err(TooLarge));
+        assert_eq!(sized([0, u32::MAX], 0), Err(BadSize));
+        assert_eq!(sized([1025, 1025], 0), Err(TooLarge));
     }
 
     /// The slot and budget decisions, with no GPU: a full class has no slot for any mod, a freed
@@ -843,5 +854,96 @@ mod tests {
         let mut patches = Vec::new();
         textures.patches(Some(&new), &mut patches);
         assert_eq!(patches.len(), 2);
+    }
+
+    /// Extreme and oversized sides, with an empty pixel slice, are refused by name on create and
+    /// on update, and change nothing.
+    #[test]
+    fn extreme_sizes_are_refused_without_overflow_and_change_nothing() {
+        let pool = pool();
+        let (mut textures, mut sprites) = (textures(), HashMap::new());
+        let a = id("alpha:a");
+        let created = textures.create(
+            Some(&pool),
+            &mut sprites,
+            Some("alpha"),
+            &a,
+            [2, 1],
+            &[5; 8],
+        );
+        assert_eq!(created, Ok(()));
+        let before = state(&textures, &sprites);
+        for (size, refusal) in [
+            ([u32::MAX, u32::MAX], TooLarge),
+            ([u32::MAX, 1], TooLarge),
+            ([1, u32::MAX], TooLarge),
+            ([1025, 1025], TooLarge),
+            ([0, u32::MAX], BadSize),
+            ([u32::MAX, 0], BadSize),
+        ] {
+            let b = id("alpha:b");
+            let create = textures.create(Some(&pool), &mut sprites, Some("alpha"), &b, size, &[]);
+            assert_eq!(create, Err(refusal), "create {size:?}");
+            let update = textures.update(Some(&pool), &mut sprites, Some("alpha"), &a, size, &[]);
+            assert_eq!(update, Err(refusal), "update {size:?}");
+            assert_eq!(state(&textures, &sprites), before, "{size:?}");
+        }
+    }
+
+    /// A frame still holding an image's first patch while the mod updates it again and again: the
+    /// held patch keeps its pixels, the next frame gets exactly one patch, of the latest pixels, at
+    /// the same slot, and freeing the image gives the whole budget back.
+    #[test]
+    fn updates_while_a_frame_holds_a_patch_leave_it_and_send_one_latest_patch() {
+        let pool = pool();
+        let (mut textures, mut sprites) = (textures(), HashMap::new());
+        let a = id("alpha:a");
+        let full = textures.budget(Some(&pool), Some("alpha"));
+        let created = textures.create(
+            Some(&pool),
+            &mut sprites,
+            Some("alpha"),
+            &a,
+            [2, 1],
+            &[1; 8],
+        );
+        assert_eq!(created, Ok(()));
+        // The frame in flight keeps its patch.
+        let mut held = Vec::new();
+        textures.patches(Some(&pool), &mut held);
+        assert_eq!(held.len(), 1);
+        let first_origin = held[0].origin;
+        for value in 2..=9 {
+            let updated = textures.update(
+                Some(&pool),
+                &mut sprites,
+                Some("alpha"),
+                &a,
+                [2, 1],
+                &[value; 8],
+            );
+            assert_eq!(updated, Ok(()));
+        }
+        assert_eq!(&*held[0].rgba, &[1; 8], "the held patch keeps its pixels");
+        let mut next = Vec::new();
+        textures.patches(Some(&pool), &mut next);
+        let placed: Vec<_> = next
+            .iter()
+            .map(|p| (p.origin, p.size, p.rgba.to_vec()))
+            .collect();
+        assert_eq!(placed, [(first_origin, [2, 1], vec![9; 8])]);
+        let mut after = Vec::new();
+        textures.patches(Some(&pool), &mut after);
+        assert!(
+            after.is_empty(),
+            "each image is patched once until it changes"
+        );
+        drop(held);
+        assert_eq!(
+            textures.free(Some(&pool), &mut sprites, Some("alpha"), &a),
+            Ok(())
+        );
+        assert_eq!(textures.budget(Some(&pool), Some("alpha")), full);
+        assert!(sprites.is_empty());
     }
 }
