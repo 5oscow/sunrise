@@ -70,3 +70,13 @@ refuses installation even if the mod ignores the returned error. A sprite the re
 
 A category's tab can show two icons: set `RecipeBookCategory::secondary_icon` (see
 [Recipe book categories and displays](../how-to/items/recipe-book-categories.md)).
+
+## Toggle button position
+
+A menu that hosts a book reserves a 20 by 18 pixel spot for its toggle button with
+`Screen::recipe_book_toggle`, a `RecipeBookToggle { x, y, from }`: `x` pixels right of the menu's left edge,
+`y` pixels below the menu's top edge (`ToggleOrigin::Menu`) or below the window's centre
+(`ToggleOrigin::ScreenCentre`). The centre is vanilla's `height / 2` with integer division, so a screen that
+places its button at `height / 2 - 49` writes `RecipeBookToggle { x: 5.0, y: -49.0, from: ToggleOrigin::ScreenCentre }`
+and lands on vanilla's pixel for every window height. Without an anchor the game tries a gutter beside the
+menu, and refuses the book, naming the menu, when no spot fits in the window.
