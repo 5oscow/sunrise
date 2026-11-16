@@ -1883,6 +1883,75 @@ mod tests {
         assert!(copy.shapes().is_some());
     }
 
+    /// A clear and a later publish before the change goes out: clients get the shape the
+    /// block entity holds now, whatever mod fields are queued beside it.
+    #[test]
+    fn a_clear_never_overrides_a_later_publish_in_the_tag_a_change_sends() {
+        use crate::block_entity_types::BlockEntityTypes;
+        let builtin = Builtin::parse(
+            r#"{"minecraft:block_entity_type":{"entries":{"test:machine":{"protocol_id":49}}}}"#,
+        )
+        .unwrap();
+        let types = BlockEntityTypes::new(
+            [("test:machine".into(), "test:machine".into())].into(),
+            builtin
+                .get("minecraft:block_entity_type")
+                .unwrap()
+                .names
+                .clone(),
+        );
+        let states = ["minecraft:air", "test:machine"].map(|n| (Arc::<str>::from(n), false, None));
+        let encoder = ChunkEncoder::with_types(states, &builtin, &[], &[], Some(&types));
+        let pos = (1, MIN_Y + 2, 3);
+        let shapes = |top: f64| {
+            Arc::new(
+                crate::containers::PublishedShapes::new(mod_api::BlockEntityShapes {
+                    outline: vec![],
+                    collision: vec![[0.0, 0.0, 0.0, 1.0, top, 1.0]],
+                })
+                .unwrap(),
+            )
+        };
+        let mut machine = ModBlockEntity::new("test:machine".into(), Default::default());
+        machine.set_shapes(Some(shapes(0.5)));
+        let effect = (JavaString::from("effect"), Tag::Int(23));
+        machine.set_client_update_fields(Compound::from([effect.clone()]));
+        // Cleared: the tag says so, beside the mod's queued field.
+        machine.set_shapes(None);
+        let mut entity = BlockEntity::Mod(Box::new(machine));
+        let key = JavaString::from(crate::containers::SHAPES_KEY);
+        let empty = Tag::Compound(Compound::new());
+        assert_eq!(
+            encoder.update_tag(pos, 1, &entity),
+            Some(Tag::Compound(Compound::from([(
+                key.clone(),
+                empty.clone()
+            )])))
+        );
+        let Some(Tag::Compound(tag)) = encoder.change_tag(pos, 1, &entity) else {
+            panic!("no tag");
+        };
+        assert_eq!(tag.get(&key), Some(&empty));
+        assert_eq!(tag.get(&effect.0), Some(&effect.1));
+        // Published again before the flush: the tag carries that shape, and a client that
+        // had the old one ends with the new one.
+        let BlockEntity::Mod(machine) = &mut entity else {
+            unreachable!()
+        };
+        machine.set_shapes(Some(shapes(0.25)));
+        let Some(Tag::Compound(tag)) = encoder.change_tag(pos, 1, &entity) else {
+            panic!("no tag");
+        };
+        let BlockEntity::Mod(machine) = &entity else {
+            unreachable!()
+        };
+        assert_eq!(tag.get(&key), Some(&machine.shapes().unwrap().to_tag()));
+        let mut client = ModBlockEntity::new("test:machine".into(), Default::default());
+        client.set_shapes(Some(shapes(0.5)));
+        client.merge_update_tag(&tag);
+        assert_eq!(client.shapes(), machine.shapes());
+    }
+
     /// A chunk leaves queued one-shot fields alone; a change's tag takes them, once.
     #[test]
     fn only_a_changes_tag_takes_queued_client_update_fields() {

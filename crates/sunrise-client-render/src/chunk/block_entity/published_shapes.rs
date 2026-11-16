@@ -180,11 +180,18 @@ mod tests {
         // The cap itself, a box far past the block (stored as given, and inert), and a box
         // thinner than 1e-7 (an empty one) are accepted.
         let far = [10.0, 0.0, 0.0, 12.0, 1.0, 1.0];
-        let edge = PublishedShapes::new(shapes(vec![unit; 64], vec![far, [0.0, 0.0, 0.0, 1.0, 5e-8, 1.0]]))
-            .unwrap();
+        let edge = PublishedShapes::new(shapes(
+            vec![unit; 64],
+            vec![far, [0.0, 0.0, 0.0, 1.0, 5e-8, 1.0]],
+        ))
+        .unwrap();
         assert!(edge.reaches_past_one_cell());
         assert_eq!(edge.boxes().collision[0], far);
-        assert!(!PublishedShapes::new(shapes(vec![unit], vec![])).unwrap().reaches_past_one_cell());
+        assert!(
+            !PublishedShapes::new(shapes(vec![unit], vec![]))
+                .unwrap()
+                .reaches_past_one_cell()
+        );
         let thin =
             PublishedShapes::new(shapes(vec![], vec![[0.0, 0.0, 0.0, 1.0, 5e-8, 1.0]])).unwrap();
         assert!(thin.collision().is_empty());

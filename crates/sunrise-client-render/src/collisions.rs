@@ -1324,6 +1324,36 @@ mod published_shape_tests {
     }
 
     #[test]
+    fn an_outline_comes_from_the_world_it_is_asked_of() {
+        let registry = registry();
+        let binding = binding(&registry);
+        let (mut first, mut second) = (
+            World::new(BlockStateId(0), 0),
+            World::new(BlockStateId(0), 0),
+        );
+        publish(&mut first, (1, 64, 1), &[]);
+        let mut entity = ModBlockEntity::new("test:bus".into(), Default::default());
+        entity.set_shapes(Some(Arc::new(
+            PublishedShapes::new(BlockEntityShapes {
+                outline: vec![[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]],
+                collision: vec![],
+            })
+            .unwrap(),
+        )));
+        second
+            .block_entities
+            .insert((1, 64, 1), BlockEntity::Mod(Box::new(entity)));
+        let max = |world: &World| {
+            published_outline(world, &binding, BlockStateId(1), [1, 64, 1])
+                .and_then(|shape| shape.bounds())
+                .map(|bounds| bounds.max(Axis::X))
+        };
+        assert_eq!(max(&first), Some(0.5));
+        assert_eq!(max(&second), Some(1.0));
+        assert_eq!(max(&World::new(BlockStateId(0), 0)), None);
+    }
+
+    #[test]
     fn suffocation_reads_the_published_shape_of_a_flagged_state() {
         use sunrise_world::suffocation::{SuffocationDefinition, SuffocationRegistry};
         let registry = registry();
@@ -1336,7 +1366,7 @@ mod published_shape_tests {
         let mut world = World::new(BlockStateId(0), 0);
         world.chunks.insert((0, 0), Arc::new(Chunk::empty(0, 0)));
         world.set(1, 64, 1, BlockStateId(1)).unwrap();
-        let mut ask = |world: &World, state, at: [i32; 3]| {
+        let ask = |world: &World, state, at: [i32; 3]| {
             let mut scene = SceneCollisions {
                 world,
                 binding: suffocation.collisions(),

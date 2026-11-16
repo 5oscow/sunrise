@@ -425,12 +425,7 @@ impl Game<'_> {
         let (key, block) = self
             .native_block_entity_write_target(entity)
             .ok_or(BlockEntityError::Stale)?;
-        let mut nbt = data;
-        // The shapes are the engine's, kept apart from what a mod writes (`set_shapes`).
-        for field in ["id", "x", "y", "z", sunrise_client::containers::SHAPES_KEY] {
-            nbt.remove(&field.into());
-        }
-        let nbt = Tag::Compound(nbt);
+        let nbt = Tag::Compound(mod_payload(data));
         if sunrise_client::nbt_path::too_deep(&nbt, 0) {
             return Ok(false);
         }
@@ -516,10 +511,17 @@ impl Game<'_> {
             return Ok(false);
         }
         if cfg!(debug_assertions)
-            && shapes.as_ref().is_some_and(|shapes| shapes.reaches_past_one_cell())
+            && shapes
+                .as_ref()
+                .is_some_and(|shapes| shapes.reaches_past_one_cell())
         {
             static WARNED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
-            let block = self.pack.assets.registry.state(state).map(|s| s.name.clone());
+            let block = self
+                .pack
+                .assets
+                .registry
+                .state(state)
+                .map(|s| s.name.clone());
             if let (Some(block), Ok(mut warned)) = (block, WARNED.lock())
                 && !warned.contains(&block)
             {
@@ -636,6 +638,36 @@ impl Game<'_> {
         }
         self.block_entity_updated(key);
         Ok(true)
+    }
+}
+
+/// A mod's data payload as the block entity takes it: without the fields the engine owns, which
+/// are its identity and position, and its published shapes (`set_shapes` alone writes those).
+fn mod_payload(mut data: Compound) -> Compound {
+    for field in ["id", "x", "y", "z", sunrise_client::containers::SHAPES_KEY] {
+        data.remove(&field.into());
+    }
+    data
+}
+
+#[cfg(test)]
+mod payload_tests {
+    use super::*;
+
+    #[test]
+    fn a_payload_cannot_carry_the_engines_shapes_key_in() {
+        let payload = Compound::from([
+            ("progress".into(), Tag::Int(3)),
+            ("id".into(), Tag::String("other:type".into())),
+            (
+                sunrise_client::containers::SHAPES_KEY.into(),
+                Tag::Compound(Compound::new()),
+            ),
+        ]);
+        assert_eq!(
+            mod_payload(payload),
+            Compound::from([("progress".into(), Tag::Int(3))])
+        );
     }
 }
 

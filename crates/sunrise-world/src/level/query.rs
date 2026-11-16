@@ -199,6 +199,10 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         state: BlockStateId,
         pos: BlockPos,
     ) -> super::data::ShapeInfo {
+        // A block entity's published shape stands over the declared one.
+        if let Some(shape) = self.level.published_collision_shape(pos, state) {
+            return super::data::analyse_shape(&shape).unwrap_or_default();
+        }
         if self.b.facts(state).shape >= 0 {
             return self.b.shape_info(state);
         }
@@ -399,8 +403,7 @@ impl<L: super::signal_access::SignalAccess + ?Sized> Signals<'_, L> {
     /// entity at `pos`, as `DiodeBlock.canSurviveOn` asks of a shape update's
     /// neighbour. A retracting piston's base is a `moving_piston` here.
     pub(super) fn can_support_rigid_block_on(&self, pos: BlockPos, state: BlockStateId) -> bool {
-        if let Some(rigid) = self.published_support(pos, state, Direction::Up, SupportType::Rigid)
-        {
+        if let Some(rigid) = self.published_support(pos, state, Direction::Up, SupportType::Rigid) {
             return rigid;
         }
         if let Some(rigid) =

@@ -415,19 +415,26 @@ ray casts and support read the published value at the position; nothing calls in
 Shapes that depend on the querying entity are not covered; `outline_context_shapes` and
 `collision_context_shapes` stay declared, and a published shape stands over them.
 
-- **Limits**, refused by name with a `BlockEntityShapesError` and never clamped: at most 16 boxes
-  in each list; every coordinate finite and within -1 to 2; no box with a minimum above its
-  maximum. A box under 1e-7 thick on an axis is an empty box, as in vanilla.
-- **Reach**: entity collision finds a shape at most one block past its own block, on one axis
-  at a time, and a state that publishes is always scanned that way. An outline has no such
-  margin: the part of an outline outside the block is hit only by a ray that is inside it.
+- **Checks**, refused by name with a `BlockEntityShapesError` and never clamped: every
+  coordinate finite and each minimum at most its maximum; at most 64 boxes in each list.
+  Vanilla has no box limit; 64 bounds what a block entity makes every client receive and
+  keep, while a declared shape table (`shapes`, above) holds 16 boxes, a load-time limit of
+  its own. There is no coordinate range. A box under 1e-7 thick on an axis is an empty box,
+  as in vanilla.
+- **Reach**: collision finds boxes only within one cell of the block, one axis at a time (a
+  state that publishes is always scanned that way); a box beyond that is stored and sent but
+  inert, as in vanilla. An outline can be hit past its cell once the ray enters the owning
+  cell. A debug build warns once per block when a publish holds a box beyond one cell.
 - **Timing**: the server applies a publish at once, to the queries that follow in the same
   tick. A client applies it when the block entity update arrives, which may be a tick later, as
   with any block change. An entity the new shape now overlaps is treated as vanilla treats a
   block that appears inside it: nothing pushes it out.
 - **Lifetime**: the shapes are saved with the block entity, restored when its chunk loads before
-  anything ticks, and sent with the block entity in the chunk and in its updates. They are
-  dropped when the block entity is removed or its block changes. `replace_data` leaves them.
+  anything ticks, and sent with the block entity in the chunk and in its updates, so a part
+  need not publish again after a load or a chunk receive: a publish is an update, never a
+  repair. They are dropped when the block entity is removed or its block changes. The key they
+  are kept under is the engine's: `replace_data` and `merge_data` leave them alone, and a
+  payload that carries it has it ignored.
 
 An item copies its template's data components, with `max_stack_size` and
 `rarity` changed, and any other 26.3 component set or removed in
