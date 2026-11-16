@@ -20,6 +20,8 @@ class ForkClaimReviewersTest(unittest.TestCase):
         The import's `sys.path` and `sys.modules` changes are undone afterwards."""
         path, modules = list(sys.path), dict(sys.modules)
         try:
+            # A fresh top-level `nightly_set`: one another test imported keeps its globals.
+            sys.modules.pop("nightly_set", None)
             with mock.patch.dict(os.environ, {"FORK_OWNER": "owner", "FORK_OWNER_ID": "1"}):
                 spec = importlib.util.spec_from_file_location("fork_claim", ROOT / "tools/fork/claim.py")
                 claim = importlib.util.module_from_spec(spec)
