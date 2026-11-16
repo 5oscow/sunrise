@@ -151,10 +151,10 @@ pub trait BlockEntitiesBackendMut {
     /// Side: server.
     /// Publishes the shapes this block entity's block has in place of its declared ones, or
     /// clears them with None, so the declared shapes apply again. The block must declare
-    /// `shapes_from_block_entity`. Physics, selection, ray casts and support read the
-    /// published value at the position and never call into the mod, so a port of NeoForge's
-    /// `getShape` publishes wherever that state changes: it is published when it changes,
-    /// not asked for per query.
+    /// `shapes_from_block_entity`. Physics, selection, ray casts, support, the floor a mob's
+    /// path stands on and its move control's jump read the published value at the position
+    /// and never call into the mod, so a port of NeoForge's `getShape` publishes wherever
+    /// that state changes: it is published when it changes, not asked for per query.
     ///
     /// The server applies it at once, for the queries that follow in the same tick; a client
     /// applies it when the block entity's update arrives, which may be a tick later, as any
