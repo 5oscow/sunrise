@@ -212,7 +212,7 @@ jobs:
   # Same-run fallback jobs would leave the original queued checks pending, not green.
   boat-watch:
     needs: changes
-    if: needs.changes.outputs.hosted_label == 'boat-large' && needs.changes.outputs.self_hosted != 'true' && needs.changes.outputs.trusted == 'true'
+    if: needs.changes.outputs.heavy == 'true' && needs.changes.outputs.hosted_label == 'boat-large' && needs.changes.outputs.self_hosted != 'true' && needs.changes.outputs.trusted == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -785,7 +785,8 @@ jobs:
     if: ${{ always() && !cancelled() && needs.changes.result != 'skipped' && !inputs.parity }}
     # A contributor's pull request gets GitHub's runners: these checks compile nothing heavy, and
     # its only two checks must not depend on a paid pool's balance.
-    runs-on: ${{ needs.changes.outputs.rust_required == 'false' && (needs.changes.outputs.self_hosted == 'true' && needs.changes.outputs.trusted == 'true' && 'dyna-small' || 'ubuntu-latest') || needs.changes.outputs.trusted != 'true' && 'ubuntu-latest' || needs.changes.outputs.self_hosted == 'true' && 'dyna-large' || !inputs.github-fallback && needs.changes.outputs.forced_github != 'true' && vars.SELF_HOSTED_CI == 'all' && needs.changes.outputs.trusted == 'true' && fromJSON('["self-hosted", "linux", "playsunrise-ci"]') || needs.changes.outputs.hosted_label || 'ubuntu-latest' }}
+    # A pull request outside the gate: GitHub's runner, never a paid pool or our own (it gates nothing).
+    runs-on: ${{ needs.changes.outputs.heavy != 'true' && 'ubuntu-latest' || needs.changes.outputs.rust_required == 'false' && (needs.changes.outputs.self_hosted == 'true' && needs.changes.outputs.trusted == 'true' && 'dyna-small' || 'ubuntu-latest') || needs.changes.outputs.trusted != 'true' && 'ubuntu-latest' || needs.changes.outputs.self_hosted == 'true' && 'dyna-large' || !inputs.github-fallback && needs.changes.outputs.forced_github != 'true' && vars.SELF_HOSTED_CI == 'all' && needs.changes.outputs.trusted == 'true' && fromJSON('["self-hosted", "linux", "playsunrise-ci"]') || needs.changes.outputs.hosted_label || 'ubuntu-latest' }}
     timeout-minutes: ${{ needs.changes.outputs.self_hosted == 'true' && needs.changes.outputs.trusted == 'true' && 20 || 45 }}
     # Dyna's runner image now carries lavapipe, Mesa's software Vulkan driver, for ignored-tests' `gpu` tests.
     # verify's tests were written to skip GPU work when no adapter exists, and one of them
@@ -797,7 +798,7 @@ jobs:
       # With Vulkan hidden, a runner with Mesa's GL software adapter (boat's image) would still run the GPU tests,
       # on GL, and fail (#2841); Vulkan only leaves every runner with no adapter, so GPU tests skip here everywhere.
       WGPU_BACKEND: vulkan
-      RUNNER_KIND: ${{ needs.changes.outputs.trusted != 'true' && 'github' || needs.changes.outputs.self_hosted == 'true' && 'dyna' || !inputs.github-fallback && needs.changes.outputs.forced_github != 'true' && vars.SELF_HOSTED_CI == 'all' && needs.changes.outputs.trusted == 'true' && 'other' || startsWith(needs.changes.outputs.hosted_label, 'boat') && 'boat' || 'github' }}
+      RUNNER_KIND: ${{ needs.changes.outputs.heavy != 'true' && 'github' || needs.changes.outputs.trusted != 'true' && 'github' || needs.changes.outputs.self_hosted == 'true' && 'dyna' || !inputs.github-fallback && needs.changes.outputs.forced_github != 'true' && vars.SELF_HOSTED_CI == 'all' && needs.changes.outputs.trusted == 'true' && 'other' || startsWith(needs.changes.outputs.hosted_label, 'boat') && 'boat' || 'github' }}
     steps:
       - name: Require successful check selection
         if: needs.changes.result != 'success'
