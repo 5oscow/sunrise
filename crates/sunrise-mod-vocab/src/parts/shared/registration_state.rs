@@ -41,6 +41,8 @@ pub(crate) struct Installed {
     pub(crate) controllers: Vec<ControllerInfo>,
     pub(crate) arm_poses: Vec<crate::client::arm_pose::PoseInfo>,
     pub(crate) structure_types: Vec<crate::world::structure_type::StructureTypeInfo>,
+    pub(crate) loot_modifier_serializers:
+        Vec<crate::parts::loot_modifiers::LootModifierSerializerInfo>,
     pub(crate) dimensions: Vec<crate::world::dimension::DimensionInfo>,
     pub(crate) chunk_generators: Vec<crate::world::chunk_generator::ChunkGeneratorInfo>,
     pub(crate) biome_sources: Vec<crate::world::biome_source::BiomeSourceInfo>,
