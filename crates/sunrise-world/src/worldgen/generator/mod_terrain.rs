@@ -338,6 +338,49 @@ mod tests {
         }
     }
 
+    /// A full chunk in a decoration region takes no block entity: its block writes are no-ops
+    /// (`ImposterProtoChunk(chunk, false)`), and so is `setBlockEntity`. At seed 12345 the ruined
+    /// portal of chunk 1 0 queues a block entity (its chest) in an ordinary region; with every
+    /// chunk of the region full none is queued, and one already there at that position stays as
+    /// it was.
+    #[test]
+    #[ignore = "daily"]
+    fn a_full_chunk_takes_no_block_entity_from_decoration() {
+        use sunrise_core::nbt::{Compound, Tag};
+        let all = VanillaStages {
+            surface: true,
+            carvers: true,
+            structures: true,
+            features: true,
+        };
+        // The block entities queued over a region of chunks around 1 0, `existing` placed first.
+        let queued = |full: bool, existing: Option<([i32; 3], Compound)>| {
+            let mut worker = level(all).worker();
+            let mut region: [ProtoChunk; 9] = std::array::from_fn(|i| {
+                let i = i as i32;
+                worker
+                    .generate_proto(ChunkPos::new(1 + i % 3 - 1, i / 3 - 1))
+                    .unwrap()
+            });
+            if full {
+                region.iter_mut().for_each(ProtoChunk::set_full);
+            }
+            region[4].block_entities.extend(existing);
+            worker.decorate(&mut region).unwrap();
+            region
+                .into_iter()
+                .flat_map(|chunk| chunk.block_entities)
+                .collect::<Vec<_>>()
+        };
+        let ordinary = queued(false, None);
+        assert!(!ordinary.is_empty(), "an ordinary region queues some");
+        let sentinel = Compound::from([("id".into(), Tag::String("test:existing".into()))]);
+        assert_eq!(
+            queued(true, Some((ordinary[0].0, sentinel.clone()))),
+            [(ordinary[0].0, sentinel)]
+        );
+    }
+
     /// A level whose stem names no noise settings, or ones the world lacks, is refused naming
     /// the generator and the settings.
     #[test]

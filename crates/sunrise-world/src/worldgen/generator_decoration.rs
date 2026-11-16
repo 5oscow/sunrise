@@ -1355,6 +1355,11 @@ impl PlacementContext for World<'_> {
         position: [i32; 3],
         nbt: sunrise_core::nbt::Compound,
     ) -> Result<(), PlacementQueryError> {
+        // ImposterProtoChunk(chunk, false): `setBlockEntity` changes nothing on a full chunk,
+        // as `set_block` answers true there without writing.
+        if self.is_full_chunk(position) {
+            return Ok(());
+        }
         self.block_entities.retain(|(p, _)| *p != position);
         self.block_entities.push((position, nbt));
         Ok(())
