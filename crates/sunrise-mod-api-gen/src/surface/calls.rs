@@ -4,10 +4,11 @@
 //!
 //! The wire generator (guest and host glue) and the surface export both call [`names`], so the
 //! game's table and `surface.json`'s `call` fields are the same strings.
-use super::rust::{GameWires, Layouts};
+use super::rust::GameWires;
 use super::walk::Walker;
 use super::{API_CRATES, expand, wire_forms};
 use crate::index::Index;
+use mod_source::layouts::Layouts;
 use mod_surface::call::{Kind, Name, Spec};
 use mod_surface::shape::{Body, Definition, Shape, Shapes};
 
