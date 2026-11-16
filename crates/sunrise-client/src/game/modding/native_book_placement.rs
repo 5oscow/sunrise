@@ -17,6 +17,8 @@ pub(super) struct State {
     pub(super) servers: HashMap<u32, Server>,
     pub(super) view: Option<View>,
     pub(super) deadline: Option<std::time::Instant>,
+    /// The placement a `recipe_book_place` part is answering, while its hook runs.
+    pub(super) session: Option<super::native_book_grid::Session>,
 }
 // no wire: source ordinals actually published to this connection.
 pub(super) struct Server {
