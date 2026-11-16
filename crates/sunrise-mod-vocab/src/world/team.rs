@@ -137,31 +137,22 @@ pub struct ClientTeam {
 }
 
 impl ClientTeam {
-    /// A team from its parts.
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        name: String,
-        display_name: Text,
-        color: Option<TeamColor>,
-        prefix: Text,
-        suffix: Text,
-        friendly_fire: bool,
-        see_friendly_invisibles: bool,
-        name_tag_visibility: TeamVisibility,
-        collision_rule: CollisionRule,
-        members: Vec<String>,
-    ) -> Self {
+    /// A team named `name` as vanilla's `PlayerTeam` starts: its name as the display name, no
+    /// color, empty prefix and suffix, friendly fire and friendly invisibles on, name tags and
+    /// collision for everyone, and no members. Set the public fields for the rest.
+    pub fn new(name: impl Into<String>) -> Self {
+        let name = name.into();
         Self {
+            display_name: Text::literal(name.clone()),
             name,
-            display_name,
-            color,
-            prefix,
-            suffix,
-            friendly_fire,
-            see_friendly_invisibles,
-            name_tag_visibility,
-            collision_rule,
-            members,
+            color: None,
+            prefix: Text::literal(""),
+            suffix: Text::literal(""),
+            friendly_fire: true,
+            see_friendly_invisibles: true,
+            name_tag_visibility: TeamVisibility::Always,
+            collision_rule: CollisionRule::Always,
+            members: Vec::new(),
         }
     }
 }

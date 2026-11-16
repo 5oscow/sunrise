@@ -338,18 +338,17 @@ impl Game<'_> {
             .teams
             .iter()
             .map(|t| {
-                Ok(ClientTeam::new(
-                    t.name.clone(),
-                    api_comp(&t.display_name)?,
-                    api_color(t),
-                    api_comp(&t.prefix)?,
-                    api_comp(&t.suffix)?,
-                    t.allow_friendly_fire,
-                    t.see_friendly_invisibles,
-                    api_visibility(t.nametag_visibility),
-                    api_collision_rule(t.collision_rule),
-                    t.players.iter().cloned().collect(),
-                ))
+                let mut team = ClientTeam::new(t.name.clone());
+                team.display_name = api_comp(&t.display_name)?;
+                team.color = api_color(t);
+                team.prefix = api_comp(&t.prefix)?;
+                team.suffix = api_comp(&t.suffix)?;
+                team.friendly_fire = t.allow_friendly_fire;
+                team.see_friendly_invisibles = t.see_friendly_invisibles;
+                team.name_tag_visibility = api_visibility(t.nametag_visibility);
+                team.collision_rule = api_collision_rule(t.collision_rule);
+                team.members = t.players.iter().cloned().collect();
+                Ok(team)
             })
             .collect()
     }
