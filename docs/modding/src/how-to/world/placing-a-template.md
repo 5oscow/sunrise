@@ -67,3 +67,23 @@ and entities uses this call.
 
 Nothing here panics on what a mod supplies: an unreadable file, a rotation this build does not know and
 an id with a `..` in it all come back as a reason.
+
+## Placing a configured feature
+
+`level.place_feature(host, "minecraft:oak", pos)` places a `worldgen/configured_feature` by id, as
+`/place feature` does: `ConfiguredFeature.place` with the level's random and chunk generator, after
+the command's check that the 3x3 chunks around `pos` are loaded. The blocks it sets reach players
+as any block change does.
+
+```rust,ignore
+match level.place_feature(host, "mymod:ender_tree", pos) {
+    Ok(true) => { /* placed */ }
+    Ok(false) => { /* it ran and found no room: a tree on stone */ }
+    Err(refusal) => { /* nothing changed; `refusal` names why */ }
+}
+```
+
+Side: server, on the level being ticked. Each refusal changes nothing: `PlaceFeatureRefusal::Stale`,
+`Client`, `NotInPlace` (another level than the one in place), `NotLoaded` (a chunk of the ring is not
+loaded, or `pos` is out of height) and `UnknownFeature` (the id has no namespace or names no
+configured feature).
