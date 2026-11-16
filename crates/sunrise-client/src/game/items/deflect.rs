@@ -108,7 +108,9 @@ impl Game<'_> {
         if self.mob_hit().is_some_and(|(_, d, _)| d < t) {
             return false;
         }
-        if let (Some(hit), Some(eye)) = (self.pick_unfiltered(), self.eye_position()) {
+        if !self.uses_stored_pick()
+            && let (Some(hit), Some(eye)) = (self.pick_unfiltered(), self.eye_position())
+        {
             let d = (0..3)
                 .map(|a| (hit.point[a] - eye[a]).powi(2))
                 .sum::<f64>()

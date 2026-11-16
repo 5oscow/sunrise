@@ -313,8 +313,8 @@ impl Game<'_> {
         self.attack_ticks = 0;
         self.hand_strength.reset();
     }
-    /// Window inputs consume the previous frame's stored decision, then select
-    /// the queued number keys. Non-window simulation keeps its tick-local ray.
+    /// Window input preparation only selects queued hotbar keys: the enclosing
+    /// client tick already picked before key handling. Simulation keeps its own ray.
     pub(super) fn pick_tick_targets(&mut self) {
         if self.native_window() {
             self.select_queued_hotbar();
@@ -363,7 +363,7 @@ impl Game<'_> {
     /// block within the block reach (`getHitEntitiesAlong`'s block result,
     /// kept by `filterHitResult`); `None` on a miss, where the plain pick
     /// decides.
-    pub(super) fn frame_attack_range_entity(&self) -> Option<mod_api::CrosshairTarget> {
+    pub(super) fn attack_range_pick_entity(&self) -> Option<mod_api::CrosshairTarget> {
         let range = self.active_attack_range()?;
         let (i, _, location) = self.attack_range_pick(&range)??;
         let mob = &self.mobs[i];
@@ -377,7 +377,7 @@ impl Game<'_> {
         })
     }
 
-    pub(super) fn frame_entity_pick_reach(&self, direction: [f64; 3]) -> f64 {
+    pub(super) fn client_pick_entity_reach(&self, direction: [f64; 3]) -> f64 {
         self.active_attack_range()
             .map_or(self.entity_reach, |range| {
                 (f64::from(attack_reach(&range, self.creative).1)
@@ -399,10 +399,9 @@ impl Game<'_> {
         };
         let reach = attack_reach(range, self.creative);
         let camera = self.remote_camera_id();
-        let boxes: Vec<(usize, Aabb)> = (self.mobs.iter().enumerate())
+        let boxes = (self.mobs.iter().enumerate())
             .filter(|(_, m)| !m.removed && Some(m.id) != self.riding && Some(m.id) != camera)
-            .map(|(i, m)| (i, m.bounds()))
-            .collect();
+            .map(|(i, m)| (i, m.bounds()));
         let clip = |from: Vec3, to: Vec3| {
             let length = from.distance_squared(to).sqrt();
             let d = to.subtract(from).scale(1.0 / length);
@@ -412,17 +411,21 @@ impl Game<'_> {
                 .map(|hit| Vec3::new(hit.point[0], hit.point[1], hit.point[2]))
         };
         let movement = self.known_player_movement();
-        let nearest = super::spear::hits_in_reach(&boxes, eye, look, movement, reach, clip)
-            .into_iter()
-            .map(|(i, at)| {
-                let feet = self.mobs[i].position;
-                (
-                    i,
-                    eye.distance_squared(at).sqrt(),
-                    interact_location(at, feet),
-                )
-            })
-            .reduce(|a, b| if b.1 < a.1 { b } else { a });
+        let mut nearest: Option<(usize, f64, [f64; 3])> = None;
+        sunrise_client::spear::for_each_hit_in_reach(
+            boxes,
+            eye,
+            look,
+            movement,
+            reach,
+            clip,
+            |i, at| {
+                let distance = eye.distance_squared(at).sqrt();
+                if nearest.is_none_or(|best| distance < best.1) {
+                    nearest = Some((i, distance, interact_location(at, self.mobs[i].position)));
+                }
+            },
+        );
         if nearest.is_some() {
             return Some(nearest);
         }
@@ -443,8 +446,8 @@ impl Game<'_> {
             // (scripts under --control hold buttons without grabbing it).
             let down = self.left;
             let ticks = self.clicks.destroying.ticks;
-            // Window clicks share the previous frame's decision. A creative
-            // break makes its cached block stale, never selecting the block behind.
+            // Every click and both hands share this tick's stored pick, even
+            // after a creative break changes the block at its position.
             self.pick_tick_targets();
             let mut world = GameHands {
                 game: self,

@@ -8705,6 +8705,7 @@ impl Game<'_> {
         // chosen since the last tick (the wheel, the last tick's number keys, the
         // server's SetHeldSlot) goes out before anything else of this tick.
         self.remote_send_carried();
+        self.refresh_client_pick(1.0);
         if stop || !ready {
             self.stop_remote_mining();
         }

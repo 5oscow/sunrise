@@ -1,5 +1,5 @@
-//! Explicit client attack batches; frame picking lives in client_pick.
-use super::{Game, Hit, commands::Target};
+//! Explicit client attack batches; the stored tick/frame pick lives in client_pick.
+use super::{Game, commands::Target};
 use mod_api::{CrosshairTarget, EntityRef};
 
 fn target_point(eye: [f64; 3], bounds: [[f64; 3]; 2], reach: f64) -> Option<([f64; 3], f64)> {
@@ -23,28 +23,6 @@ fn target_point(eye: [f64; 3], bounds: [[f64; 3]; 2], reach: f64) -> Option<([f6
 }
 
 impl Game<'_> {
-    /// The same traversal without `filterHitResult`: the block hit that
-    /// bounds the entity ray in `GameRenderer.pick`, out to the larger
-    /// interaction range — a wall between the two still hides the entity.
-    pub(super) fn item_pick(&self) -> Option<Hit> {
-        if let Some(hit) = self.forced_hit {
-            return Some(hit);
-        }
-        let (origin, direction) = self.aim()?;
-        self.clip_ray(origin, direction, self.block_reach)
-    }
-
-    pub(super) fn pick_unfiltered(&self) -> Option<Hit> {
-        if self.uses_stored_pick() {
-            return self.pick();
-        }
-        if let Some(hit) = self.forced_hit {
-            return Some(hit);
-        }
-        let (origin, dir) = self.aim()?;
-        self.clip_ray(origin, dir, self.block_reach.max(self.entity_reach))
-    }
-
     pub(super) fn targeting_entity_hit(&self, entity: EntityRef) -> Option<([f64; 3], f64)> {
         let remote = self.remote.as_ref().filter(|r| r.logged_in)?;
         if !self.native_window() || remote.entity_id as u32 == entity.id() {
@@ -118,7 +96,7 @@ impl Game<'_> {
             let distance =
                 if let Some((_, point)) = selected.filter(|(selected, _)| *selected == entity) {
                     // This is the stored pick, not an independently requested batch target.
-                    // Preserve its point and occlusion policy, but refuse a stale decision.
+                    // Preserve its point and occlusion policy for this stored decision.
                     (self.crosshair_target() == committed).then(|| self.pick_distance(point))
                 } else {
                     self.targeting_entity_hit(entity)

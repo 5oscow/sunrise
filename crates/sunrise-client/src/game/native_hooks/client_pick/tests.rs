@@ -1,5 +1,5 @@
 use super::*;
-use mod_api::{ClientPickEvent, ClientHost, CrosshairTarget, Hooks};
+use mod_api::{ClientHost, ClientPickEvent, CrosshairTarget, Hooks};
 use std::sync::{Arc, Mutex};
 
 #[derive(Default)]
@@ -134,7 +134,11 @@ fn frame_pick_is_shared_ordered_and_refuses_stale_or_invalid_output() {
                 .default_state("minecraft:air")
                 .unwrap();
             game.world.set(2, 2, 0, air).unwrap();
-            assert!(game.pick().is_none(), "stale state refuses, not a new ray");
+            assert_eq!(
+                game.pick().unwrap().pos,
+                [2, 2, 0],
+                "consumption keeps the tick hit after a block changes"
+            );
             game.refresh_client_pick(1.0);
             assert!(
                 game.crosshair_target().is_none(),
@@ -172,7 +176,18 @@ fn frame_pick_is_shared_ordered_and_refuses_stale_or_invalid_output() {
             assert!(game.entity_targeted());
             game.handle_packet(C::RemoveEntities(play::RemoveEntities { ids: vec![31] }))
                 .unwrap();
-            assert!(game.crosshair_target().is_none(), "removed entity refuses");
+            assert!(
+                matches!(
+                    game.crosshair_target(),
+                    Some(CrosshairTarget::Entity { .. })
+                ),
+                "consumption retains the hit until the next pick"
+            );
+            game.refresh_client_pick(1.0);
+            assert!(
+                game.crosshair_target().is_none(),
+                "removed entity output is refused at writeback"
+            );
         })
     });
 }
@@ -352,6 +367,7 @@ fn sent_actions(
             S::Attack(hit) => actions.push(("attack", hit.id)),
             S::Interact(hit) => actions.push(("interact", hit.id)),
             S::UseItem(_) => actions.push(("item", 0)),
+            S::UseItemOn(hit) => actions.push(("block", hit.pos[0])),
             S::Punch(_) => return actions,
             _ => {}
         }
@@ -522,4 +538,101 @@ fn attack_range_pick_outside_interact_range_falls_through_to_item_use() {
             })
         });
     }
+}
+
+struct CountPicks(Arc<Mutex<Vec<f32>>>);
+#[mod_api::__subscriptions]
+impl Hooks for CountPicks {
+    fn client_pick(&self, _: &mut dyn ClientHost, event: &mut ClientPickEvent<'_>) {
+        self.0.lock().unwrap().push(event.partial_tick);
+    }
+}
+
+#[test]
+#[ignore = "daily"]
+fn tick_pick_survives_creative_break_then_use_until_the_next_pick() {
+    mod_platform::testing::with_mods(Vec::new().into(), || {
+        with_pick_game("minecraft:pig", 10.0, |game, server| {
+            let stone = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:stone")
+                .unwrap();
+            game.world.set(2, 2, 0, stone).unwrap();
+            game.world.set(3, 2, 0, stone).unwrap();
+            game.creative = true;
+            game.refresh_client_pick(1.0);
+            assert_eq!(game.pick().unwrap().pos, [2, 2, 0]);
+            game.remote_start_attack();
+            assert!(
+                game.res.facts().is_air(game.world.block(2, 2, 0)),
+                "creative break is predicted"
+            );
+            assert_eq!(
+                game.pick().unwrap().pos,
+                [2, 2, 0],
+                "the same tick still uses the old hit"
+            );
+            game.inventory[0] = Some(sunrise_client::items::ItemStack::new("minecraft:stick", 1));
+            game.remote_use(mod_api::InteractionAttempt::Press);
+            assert!(
+                sent_actions(game, server).contains(&("block", 2)),
+                "use sends the stored hit, not the block behind"
+            );
+            game.refresh_client_pick(1.0);
+            assert_eq!(
+                game.pick().unwrap().pos,
+                [3, 2, 0],
+                "the next tick picks again"
+            );
+        })
+    });
+}
+
+#[test]
+#[ignore = "daily"]
+fn paused_ticks_pick_and_the_frame_can_overwrite_the_tick_target() {
+    use sunrise_core::geometry::Vec3;
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let mods = vec![mod_api::ModEntry::new(
+        "count",
+        Box::new(CountPicks(calls.clone())),
+    )]
+    .into();
+    mod_platform::testing::with_mods(mods, || {
+        with_pick_game("minecraft:pig", 10.0, |game, _| {
+            let stone = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:stone")
+                .unwrap();
+            game.world.set(2, 2, 0, stone).unwrap();
+            game.world.set(2, 2, 2, stone).unwrap();
+            game.previous_position = Vec3::new(0.5, 1.0, 2.5);
+            game.pause = true;
+            game.client_tick_steps(2, None).unwrap();
+            assert_eq!(
+                *calls.lock().unwrap(),
+                [1.0, 1.0],
+                "paused client ticks still pick exactly once"
+            );
+            assert_eq!(
+                game.pick().unwrap().pos,
+                [2, 2, 0],
+                "tick uses current eyes"
+            );
+            game.refresh_client_pick(0.0);
+            assert_eq!(
+                game.pick().unwrap().pos,
+                [2, 2, 2],
+                "highlight and crosshair read the interpolated frame pick"
+            );
+            assert!(
+                matches!(game.crosshair_target(), Some(CrosshairTarget::Block { pos, .. }) if pos.z == 2)
+            );
+            assert_eq!(*calls.lock().unwrap(), [1.0, 1.0, 0.0]);
+        })
+    });
 }

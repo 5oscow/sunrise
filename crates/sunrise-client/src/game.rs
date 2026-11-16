@@ -1861,7 +1861,7 @@ struct Game<'a> {
     world_icon: Option<WorldIcon>,
     /// The block a guest is acting on (game/network/lan_actions/interaction.rs).
     forced_hit: Option<Hit>,
-    /// Non-window simulation's tick-local block ray. Windows use frame_pick.
+    /// Non-window simulation's tick-local block ray. Windows use client_pick.
     tick_hit: std::cell::Cell<Option<Option<Hit>>>,
     /// Non-window simulation's tick-local mob ray, including the held attack range.
     tick_mob: Option<Option<(usize, f64, [f64; 3])>>,
@@ -2514,6 +2514,25 @@ impl Game<'_> {
                 distance.iter().map(|v| v * v).sum::<f64>() <= self.block_reach.powi(2)
             })
     }
+    /// An item-specific POV outline ray at the current rotation and block reach.
+    pub(super) fn item_pick(&self) -> Option<Hit> {
+        if let Some(hit) = self.forced_hit {
+            return Some(hit);
+        }
+        let (origin, direction) = self.aim()?;
+        self.clip_ray(origin, direction, self.block_reach)
+    }
+
+    /// The raw outline ray out to the larger interaction range, before range filtering.
+    /// Used once by client_pick and by non-window simulation, never by window actions.
+    pub(super) fn pick_unfiltered(&self) -> Option<Hit> {
+        if let Some(hit) = self.forced_hit {
+            return Some(hit);
+        }
+        let (origin, dir) = self.aim()?;
+        self.clip_ray(origin, dir, self.block_reach.max(self.entity_reach))
+    }
+
     /// The first block outline hit within `reach` along the unit `dir`.
     fn clip_ray(&self, origin: [f64; 3], dir: [f64; 3], reach: f64) -> Option<Hit> {
         self.clip_ray_fluids(origin, dir, reach, false)

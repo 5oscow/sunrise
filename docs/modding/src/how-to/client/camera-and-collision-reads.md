@@ -119,7 +119,8 @@ Native and wasm mods use the same handle methods.
 `CrosshairTarget::Entity { entity, point }`. The block hit contains its world-space
 location, face and inside flag; the entity point is also in world coordinates.
 It reads the last committed `client_pick` decision, and returns `None`
-on a miss, before the first frame pick, or when its target became stale. It never
+on a miss or before the first pick. A tick refreshes it before key handling;
+a frame refreshes it before extraction. Consumption does not recheck liveness. It never
 casts a new ray. Without listeners the decision is the vanilla block/entity pick.
 It can be read with a screen open. `entity` is an `EntityRef` carrying the current
 client level's epoch and network entity ID, including dragon parts. It becomes stale
@@ -171,19 +172,23 @@ These read the local player as the client sees it. They take no mod-controlled n
 
 ## Combat targeting
 
-`client_pick` runs once per frame, after the frame's client ticks, at its
-game-time partial tick, before render-state extraction. NeoForge 26.3 has no
-counterpart. The event supplies read-only `original`, `block_candidate` and
+`client_pick` runs at both vanilla pick call sites: every client tick at
+partial tick 1.0 after the game mode tick and before key handling, even while
+paused; and every frame at its game-time partial tick before render-state
+extraction. Both write the same stored result. NeoForge 26.3 has no counterpart. The event supplies read-only `original`, `block_candidate` and
 `entity_candidate` values and a mutable `result`, initialized to `original`.
 Choose the block candidate to target a block through an entity, choose a target
 from the typed ray APIs, or clear the result for a miss. Later listeners see the
 previous listener's result. A reentrant `crosshair_target()` read sees `original`.
 
-The game validates the final result at writeback: finite point, current level,
-live entity or matching block state, and vanilla pick reach. Invalid output becomes
-a miss, never a new ray. The highlight reads the result this frame; attack, use and
-pick-item read it during the next frame's ticks. A target that becomes stale refuses
-the action, without selecting anything behind it. Listener writes and publication
+The game accepts an unchanged original without revalidating its geometry. A
+replacement is validated at writeback: finite point, current level, live entity or
+matching block state, and the vanilla reach envelope, including forward movement
+for attack-range items. Invalid output becomes a miss, never a new ray. Attack,
+use and pick-item read their tick's stored pick; both hands of use share it. The
+highlight and crosshair read the frame's pick, which can differ from the tick's.
+Consumption does not recheck liveness: a creative break followed by use in the
+same tick still uses that tick's original block hit. Listener writes and publication
 run in one transaction. Buckets, bottles, boats, brushes and other item-specific
 rays remain independent and vanilla-exact.
 
@@ -203,7 +208,7 @@ attribute updates. Replacing the client pick does not grant extra server reach.
 for redirection, append for multiple hits, or clear it to suppress an entity attack.
 `Flow::Cancel` cancels the batch. There is no batch cap; duplicates are sent once
 in first-occurrence order. The selected entry keeps its committed frame-pick point
-and client occlusion policy, unless it becomes stale. Additional targets are checked
+and client occlusion policy. Additional targets are checked
 against live handles, attackability, reach, held-item range and ordinary block occlusion. Clearing an entity hit
 does not mine the block behind it; an empty list on a block or miss keeps the ordinary
 path. Each accepted hit uses normal attack packets and prediction. Server validation

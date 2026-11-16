@@ -112,11 +112,12 @@ pub trait ClientViewClientHost {
     fn set_camera_entity(&mut self, entity: EntityRef) -> bool;
     /// Side: client.
     /// The committed `client_pick` result (Minecraft.hitResult), computed
-    /// once per frame at its partial tick before render-state extraction. The
-    /// highlight reads it this frame; input ticks read it next frame. A read
-    /// during dispatch sees the original. None before the first pick, without a
-    /// client world, on a miss or after the target becomes stale. Never casts
-    /// a ray or refires the hook. Entity hits carry this client level's epoch.
+    /// at partial tick 1.0 before each tick's inputs, including while paused,
+    /// and at the frame's partial tick before extraction. Each input reads its
+    /// tick's result; the highlight reads the frame's result. Reads during
+    /// dispatch see original. None before the first pick, without a client world
+    /// or on a miss. Consumption never recasts or rechecks target liveness;
+    /// a block broken earlier in a tick remains that tick's use target.
     #[access(ClientSetup)]
     fn crosshair_target(&self) -> Option<CrosshairTarget>;
 }

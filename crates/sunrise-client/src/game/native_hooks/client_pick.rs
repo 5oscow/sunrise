@@ -1,4 +1,4 @@
-//! One frame decision, shared by outline extraction and the next frame's inputs.
+//! The one stored pick, refreshed before tick inputs and frame extraction.
 use super::*;
 use crate::game::{Dim, pick_view_vector};
 use mod_api::CrosshairTarget;
@@ -15,6 +15,7 @@ pub(in crate::game) struct ClientPick {
     origin: [f64; 3],
     entity_reach: f64,
     result: Option<CrosshairTarget>,
+    pub entity_metadata: (bool, bool),
     dispatching: bool,
 }
 
@@ -31,7 +32,7 @@ impl Game<'_> {
     }
 
     /// A window always has a decision, including before the first pick (a miss).
-    /// None in the outer option means a server ray or the frame's raw computation.
+    /// None in the outer option means a server ray or the current pick computation.
     pub(in crate::game) fn cached_entity_pick(&self) -> Option<Option<(EntityRef, f64, [f64; 3])>> {
         self.uses_stored_pick()
             .then(|| match self.crosshair_target() {
@@ -42,7 +43,8 @@ impl Game<'_> {
             })
     }
 
-    /// Consumption checks identity/state, never geometry again and never a fallback ray.
+    /// Consumers read the stored hit as-is until the next pick. In particular,
+    /// a block broken earlier in a tick is still that tick's use target.
     pub(in crate::game) fn stored_client_pick(&self) -> Option<CrosshairTarget> {
         if self.client_pick.dispatching {
             return self.client_pick.result;
@@ -50,8 +52,7 @@ impl Game<'_> {
         (self.client_pick.epoch == self.native_lifecycle.epoch()
             && self.client_pick.dimension == Some(self.dim))
         .then_some(())?;
-        let result = self.client_pick.result?;
-        self.pick_target_live(result).then_some(result)
+        self.client_pick.result
     }
 
     fn pick_target_live(&self, result: CrosshairTarget) -> bool {
@@ -118,23 +119,29 @@ impl Game<'_> {
         self.client_pick.origin = origin;
         self.client_pick.epoch = self.native_lifecycle.epoch();
         self.client_pick.dimension = Some(self.dim);
-        let block_candidate = self.pick().and_then(|hit| {
-            use crate::game::api_values::TryIntoApi;
-            Some(CrosshairTarget::Block {
-                pos: mod_api::BlockPos::new(hit.pos[0], hit.pos[1], hit.pos[2]),
-                state: self
-                    .world
-                    .block(hit.pos[0], hit.pos[1], hit.pos[2])
-                    .try_into_api()
-                    .ok()?,
-                hit: hit.native(),
+        let block_hit = self.pick_unfiltered();
+        let occluder = block_hit.map(|hit| self.pick_distance(hit.point));
+        let block_candidate = block_hit
+            .filter(|hit| {
+                (0..3)
+                    .map(|i| (hit.point[i] - origin[i]).powi(2))
+                    .sum::<f64>()
+                    <= self.block_reach.powi(2)
             })
-        });
-        let attack_candidate = self.frame_attack_range_entity();
-        let entity_candidate = attack_candidate.or_else(|| self.frame_entity_candidate());
-        let occluder = self
-            .pick_unfiltered()
-            .map(|hit| self.pick_distance(hit.point));
+            .and_then(|hit| {
+                use crate::game::api_values::TryIntoApi;
+                Some(CrosshairTarget::Block {
+                    pos: mod_api::BlockPos::new(hit.pos[0], hit.pos[1], hit.pos[2]),
+                    state: self
+                        .world
+                        .block(hit.pos[0], hit.pos[1], hit.pos[2])
+                        .try_into_api()
+                        .ok()?,
+                    hit: hit.native(),
+                })
+            });
+        let attack_candidate = self.attack_range_pick_entity();
+        let entity_candidate = attack_candidate.or_else(|| self.pick_entity_candidate());
         let original = attack_candidate.or_else(|| match entity_candidate {
             Some(CrosshairTarget::Entity { point, .. })
                 if occluder.is_none_or(|distance| self.pick_distance(point) < distance) =>
@@ -143,14 +150,14 @@ impl Game<'_> {
             }
             _ => block_candidate,
         });
-        self.client_pick.result = original;
+        self.publish_client_pick(original);
         self.client_pick.ray = None;
         if !mod_api::__private::listened(mod_api::HookId::ClientPick) {
             return;
         }
         // Capture the same forward-movement envelope as the vanilla item ray,
         // before listeners can change the player or held item.
-        self.client_pick.entity_reach = self.frame_entity_pick_reach(direction);
+        self.client_pick.entity_reach = self.client_pick_entity_reach(direction);
         let seal = self.transaction_open();
         self.client_pick.dispatching = true;
         let mut result = original;
@@ -164,15 +171,29 @@ impl Game<'_> {
         self.client_pick.dispatching = false;
         let valid_context = self.client_pick.epoch == self.native_lifecycle.epoch()
             && self.client_pick.dimension == Some(self.dim);
-        self.client_pick.result = result.filter(|&result| {
-            valid_context
-                && if Some(result) == original {
-                    self.pick_target_live(result)
-                } else {
-                    self.accept_client_pick(result)
-                }
+        let result = result.filter(|&result| {
+            valid_context && (Some(result) == original || self.accept_client_pick(result))
         });
+        self.publish_client_pick(result);
         self.transaction_close(&seal, true);
+    }
+
+    fn publish_client_pick(&mut self, result: Option<CrosshairTarget>) {
+        self.client_pick.result = result;
+        self.client_pick.entity_metadata = match result {
+            Some(CrosshairTarget::Entity { entity, .. }) => (
+                !matches!(
+                    self.native_client_entity_target(entity),
+                    Some(
+                        crate::game::commands::Target::Projectile(_)
+                            | crate::game::commands::Target::DragonPart(_)
+                            | crate::game::commands::Target::Other(_)
+                    )
+                ),
+                self.level_dragon_part(entity.id()).is_none(),
+            ),
+            _ => (false, false),
+        };
     }
 
     pub(in crate::game) fn native_client_pick(

@@ -1,20 +1,24 @@
-//! The client's one stored pick decision per frame.
+//! The client's stored pick decision, at both vanilla pick call sites.
 
 pub trait Hooks {
-    /// Once per client frame, after its ticks and at its game-time `partial_tick`,
-    /// before render-state extraction. `original` is the vanilla answer; the block
-    /// and entity candidates are supplied independently. `result` starts at `original`.
-    /// Listeners run in dependency order and may replace or clear only `result`.
-    /// The highlight reads the committed result this frame; attack, use and pick-item
-    /// read it in the next frame's ticks, without casting again. A reentrant
-    /// crosshair_target read sees `original`. Invalid or stale output becomes a miss,
-    /// never a recomputed pick. Server validation and item-specific rays (including
-    /// buckets and brushes) are unchanged. NeoForge 26.3 has no counterpart.
+    /// Whenever vanilla picks: once per client tick at `partial_tick = 1.0`,
+    /// after the game mode tick and before key handling (also while paused),
+    /// and once per frame at the frame's game-time partial tick before extraction.
+    /// Both sites overwrite the same stored result. `original` is the vanilla
+    /// answer; block and entity candidates are supplied independently. `result`
+    /// starts at `original`. Listeners run in dependency order and may replace
+    /// or clear only `result`. Tick inputs, including both hands of use, read
+    /// the tick's result without another pick. The highlight reads the frame's
+    /// result, which can differ from the tick's. Reentrant crosshair_target
+    /// reads see `original`. A replacement is validated once at writeback;
+    /// invalid output becomes a miss, never a recomputed pick. Consumption does
+    /// not recheck block state or entity liveness. Server checks and item-specific
+    /// rays (including buckets and brushes) are unchanged. No NeoForge 26.3 counterpart.
     #[hook(
         side = "client",
         contract = "collect",
         out = "result",
-        neoforge = "none (vanilla Minecraft.pick, once per frame before extraction)"
+        neoforge = "none (vanilla Minecraft.pick, before tick inputs and frame extraction)"
     )]
     fn client_pick(
         partial_tick: f32,

@@ -35,13 +35,8 @@ impl Game<'_> {
             return Some(CrosshairEntityHit {
                 id: entity.id() as i32,
                 distance,
-                pickable: !matches!(
-                    self.native_client_entity_target(entity)?,
-                    crate::game::commands::Target::Projectile(_)
-                        | crate::game::commands::Target::DragonPart(_)
-                        | crate::game::commands::Target::Other(_)
-                ),
-                suggest_uuid: self.level_dragon_part(entity.id()).is_none(),
+                pickable: self.client_pick.entity_metadata.0,
+                suggest_uuid: self.client_pick.entity_metadata.1,
             });
         }
         let hit = |id: u32, distance, pickable| CrosshairEntityHit {
@@ -114,7 +109,7 @@ impl Game<'_> {
         })
     }
 
-    pub(super) fn frame_entity_candidate(&self) -> Option<CrosshairTarget> {
+    pub(super) fn pick_entity_candidate(&self) -> Option<CrosshairTarget> {
         let hit = self.crosshair_entity_hit()?;
         let (eye, direction) = self.aim()?;
         Some(CrosshairTarget::Entity {
