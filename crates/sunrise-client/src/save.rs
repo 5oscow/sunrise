@@ -69,14 +69,14 @@ use {
 
 pub const VERSION_NAME: &str = sunrise_core::VANILLA_VERSION;
 
+mod chunk_disk;
+#[cfg(test)]
+mod chunk_disk_tests;
 #[cfg(test)]
 mod compression_bench;
 mod compression_pool;
 #[cfg(test)]
 mod compression_tests;
-mod chunk_disk;
-#[cfg(test)]
-mod chunk_disk_tests;
 mod gateway;
 #[cfg(test)]
 mod loot_tests;
@@ -2753,7 +2753,7 @@ impl SaveDir {
         };
         load_light(&root.tag, &mut chunk, self.shape.sky_light);
         chunk.entities = sunrise_world::chunk::legacy_entities(&root.tag);
-        // A mod's attachment data that cannot be read is a load failure, like an upgrade failure above.
+        // A failing load listener does not fail the load: the chunk keeps its stored attachments.
         self.load_disk_attachments(&mut chunk, mod_api::ChunkDiskKind::Full)
             .map_err(|_| ())?;
         Ok(Some(chunk))
@@ -4887,9 +4887,6 @@ impl<G: ChunkGenerator> ChunkGenerator for Persistent<G> {
             generated,
             bake,
         })
-    }
-    fn load_refused(&self, x: i32, z: i32) -> bool {
-        self.save.chunk_disk_load_refused(x, z)
     }
     fn load(&self, x: i32, z: i32) -> Option<Chunk> {
         self.save

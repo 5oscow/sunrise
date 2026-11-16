@@ -14,12 +14,13 @@ Every typed value needs both a persistence codec and the shared `Wire` trait.
 Unknown bounded attachment entries are preserved opaquely.
 
 Codec errors, native unwinds and guest dispatch failures refuse the entire
-store. The generator must distinguish this refusal from an absent chunk:
-publishing freshly generated defaults would lose the saved data. The refused
-record stays on disk untouched and the failure is logged with the chunk and the
-mod. For the rest of that session the chunk is neither loaded nor generated,
-so the player sees a gap in the terrain there, and later saves of that chunk
-are refused. Fix the mod and rejoin the world to load it again.
+store: none of its edits are kept. The chunk still loads, with the attachments
+exactly as they were stored, so a mod bug leaves no gap in the world. No
+`chunk_data_save` listener runs for that chunk for the rest of the session, so
+half-initialised state never replaces the stored record, and the chunk's later
+saves write its stored attachments back unchanged. The failure is logged once
+per chunk, naming the chunk and the mod. Fix the mod and rejoin the world to run
+its listeners on that chunk again.
 
 The load runs on the thread that decodes the record, never with access to live
 world state. See the [design](../concepts/chunk-attachment-disk.md) for the

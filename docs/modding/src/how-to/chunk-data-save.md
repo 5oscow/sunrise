@@ -14,7 +14,8 @@ Registry and settings reads use the captured resource generation.
 
 A captured record caches its callback result. Disk encoding and pending reads
 reuse it; they cannot invoke the callback twice. A refusal keeps the original
-capture and prevents the writer from replacing the prior region record.
+capture and prevents the writer from replacing the prior region record. A chunk
+whose `chunk_data_load` listener failed is saved without any save listener.
 Attachment values over 65536 encoded bytes, nesting over 64 or total data over
 1048576 bytes refuse the job, including opaque unknown entries.
 

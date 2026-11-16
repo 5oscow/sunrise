@@ -5,7 +5,9 @@ use mod_api::{ChunkDiskContextWire, ChunkDiskJob, ChunkDiskKind, ChunkDiskPhase,
 use sunrise_mod_runtime::attachments::Attachments;
 
 pub(super) struct DiskRuntime {
-    refused_loads: Mutex<HashSet<(i32, i32)>>,
+    /// Chunks whose load listener failed: their stored record is kept as it was read and no
+    /// save listener runs for them for the rest of the session.
+    save_suppressed: Mutex<HashSet<(i32, i32)>>,
     /// Chunks whose captured save did not reach disk; the game marks them dirty again.
     failed_saves: Mutex<Vec<(i32, i32)>>,
     world: WorldEpoch,
@@ -143,7 +145,7 @@ impl SaveDir {
             return;
         }
         let _ = self.disk.set(Arc::new(DiskRuntime {
-            refused_loads: Mutex::default(),
+            save_suppressed: Mutex::default(),
             failed_saves: Mutex::default(),
             world,
             dimension,
@@ -151,23 +153,16 @@ impl SaveDir {
         }));
     }
 
-    /// A failed decode/callback never becomes a generator's missing chunk.
-    pub fn chunk_disk_load_refused(&self, x: i32, z: i32) -> bool {
+    /// Whether `x`, `z` failed its load listener this session. Such a chunk loads with its stored
+    /// attachments untouched and is saved without any save listener, so half-initialised state
+    /// never replaces the stored record. A poisoned set suppresses, never lets a listener run.
+    pub(super) fn chunk_save_suppressed(&self, x: i32, z: i32) -> bool {
         self.disk.get().is_some_and(|runtime| {
             runtime
-                .refused_loads
+                .save_suppressed
                 .lock()
-                .map_or(true, |refused| refused.contains(&(x, z)))
+                .map_or(true, |suppressed| suppressed.contains(&(x, z)))
         })
-    }
-
-    /// The shared admission point of a region write, for every record kind: a chunk whose
-    /// load was refused never overwrites the record it kept, however the save was queued.
-    pub(super) fn admit_region_write(&self, folder: Folder, key: (i32, i32)) -> Result<()> {
-        if folder == Folder::Region && self.chunk_disk_load_refused(key.0, key.1) {
-            return Err("chunk disk load was refused; prior record retained".into());
-        }
-        Ok(())
     }
 
     pub(super) fn capture_disk_record(&self, record: Record) -> Result<Record> {
@@ -176,7 +171,9 @@ impl SaveDir {
             Record::Proto(proto, ..) => (&proto.column, ChunkDiskKind::Proto),
             _ => return Ok(record),
         };
-        if !mod_api::__private::listened(mod_api::HookId::ChunkDataSave) {
+        if !mod_api::__private::listened(mod_api::HookId::ChunkDataSave)
+            || self.chunk_save_suppressed(chunk.x, chunk.z)
+        {
             return Ok(record);
         }
         admit_disk_save()?;
@@ -219,19 +216,21 @@ impl SaveDir {
                 Ok(())
             }
             Err(error) => {
-                runtime
-                    .refused_loads
+                // The chunk loads with the attachments it was stored with.
+                let first = runtime
+                    .save_suppressed
                     .lock()
-                    .map_err(|_| "chunk disk refusals poisoned")?
+                    .map_err(|_| "chunk disk suppression poisoned")?
                     .insert((chunk.x, chunk.z));
-                let message = error.to_string();
-                *self
-                    .outstanding
-                    .error
-                    .lock()
-                    .map_err(|_| "writer poisoned")? = Some(message);
-                crate::chunk_io::report_load_failure(&self.root, chunk.x, chunk.z, &error);
-                Err(error.into())
+                if first {
+                    log::error!(
+                        "chunk {},{}: a chunk_data_load listener failed ({error}); the stored record \
+                         is kept unchanged and no chunk_data_save listener runs for this chunk this session",
+                        chunk.x,
+                        chunk.z
+                    );
+                }
+                Ok(())
             }
         }
     }
@@ -248,14 +247,6 @@ impl SaveDir {
         if let Err(error) = admit_disk_save() {
             return Some(Err(error));
         }
-        let keys: Vec<_> = chunks.iter().map(|chunk| (chunk.x, chunk.z)).collect();
-        for key in &keys {
-            if let Err(error) = self.admit_region_write(Folder::Region, *key) {
-                // No callback runs for a protected chunk; it stays marked for another attempt.
-                self.note_refused_saves(Folder::Region, &keys);
-                return Some(Err(error));
-            }
-        }
         Some((|| {
             let runtime = self
                 .disk
@@ -263,7 +254,11 @@ impl SaveDir {
                 .ok_or("chunk disk worker context is not bound")?;
             let jobs: Vec<_> = chunks
                 .iter()
-                .map(|chunk| runtime.capture(chunk, ChunkDiskKind::Full, ChunkDiskPhase::Save))
+                .map(|chunk| {
+                    (!self.chunk_save_suppressed(chunk.x, chunk.z))
+                        .then(|| runtime.capture(chunk, ChunkDiskKind::Full, ChunkDiskPhase::Save))
+                        .flatten()
+                })
                 .collect();
             let work = || -> std::io::Result<Vec<_>> {
                 chunks
