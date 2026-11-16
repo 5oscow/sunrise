@@ -391,7 +391,12 @@ fn an_aborted_publish_restores_the_shape_and_notifies_the_neighbours() {
         let state = game.pack.assets.registry.default_state(BUS).unwrap();
         let level = game.level(game.dim.id()).unwrap();
         publish(game, pos, shapes(&[HALF], &[SMALL]));
-        let water = game.pack.assets.registry.default_state("minecraft:water").unwrap();
+        let water = game
+            .pack
+            .assets
+            .registry
+            .default_state("minecraft:water")
+            .unwrap();
         assert!(
             game.level_set_block(level, [3, 64, 2], water, BlockUpdateFlags::NONE)
                 .unwrap()
