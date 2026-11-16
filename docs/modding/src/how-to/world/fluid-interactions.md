@@ -55,9 +55,9 @@ fluid of the `minecraft:water` tag: obsidian for a source, cobblestone for flowi
 over soul soil beside blue ice: basalt), so a data pack that edits those tags changes them.
 A tag neighbour matches exactly the fluids the tag lists; a `fluid` neighbour matches its source
 and flowing form. After them come native mods'
-interactions in load order, then content mods' files in load order and file name. A fluid with no
-interactions returns after a lookup of its own entries, which takes no lock; one with
-entries takes a read lock and indexes its slice, with no allocation.
+interactions in load order, then content mods' files in load order and file name. A fluid outside the installed table's atomic bounds returns without a lock. Other fluids take a
+read lock and index their own entries, returning immediately when that slice is empty. The lookup
+allocates nothing.
 
 The result goes through the `fluid_place_block` hook, which may veto or replace
 it, then level event 1501 plays the fizz, and the liquid stops spreading. A veto writes nothing

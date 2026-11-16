@@ -228,9 +228,10 @@ impl Behaviours {
     pub fn set_fluid_interactions(&self, table: FluidInteractions) {
         self.fluid_interactions.install(table);
     }
-    /// The interactions of the liquid block of `kind`, taken once per update. A fluid without
-    /// any answers from atomic loads alone, with no lock; one with some takes a read lock and
-    /// an `Arc` clone, and indexes its slice.
+    /// The interactions of the liquid block of `kind`, taken once per update. A fluid outside
+    /// the installed table's atomic bounds answers from atomic loads alone, with no lock. Other
+    /// fluids take a read lock and index their own entries, returning immediately when that
+    /// slice is empty; the lookup allocates nothing.
     pub(crate) fn fluid_interactions(&self, kind: FluidKind) -> Option<Entries> {
         let slot = &self.fluid_interactions;
         slot.may_have(kind).then(|| slot.of(kind)).flatten()
@@ -239,7 +240,8 @@ impl Behaviours {
 
 /// The open world's table on [`Behaviours`]: replaced whole by each data load. Which fluids
 /// have entries is also kept as atomics (a mask of vanilla kinds, and how many mod fluids the
-/// table reaches), so a fluid without any is told apart without taking the lock.
+/// table reaches), so a fluid outside those bounds is told apart without taking the lock; a mod
+/// fluid inside them without entries still takes the read lock and finds an empty slice.
 #[derive(Default)]
 pub(super) struct Slot {
     table: RwLock<Arc<FluidInteractions>>,
