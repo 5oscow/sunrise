@@ -11,8 +11,8 @@ and every launcher and `sunrise-server update` install it ([Nightly only](#night
 Rollups, syncs and main's pushes are checked by one gate, `dyna-checks` (`.github/workflows/dyna-ci.yml`: `lint`,
 `verify`, `verify-static`, `launcher`); a plain pull request gets its cheap checks there (`format`, `verify-static`)
 ([CONTRIBUTING.md](../CONTRIBUTING.md#ci-tiers)). The `checks` workflow (`.github/workflows/ci.yml`) adds a free
-full `verify` on GitHub's runners for a plain pull request only (opened, pushed to or reopened; labels never start
-it). It skips the pull requests `tools/ci/pr_gate.py` sends to dyna-checks' heavy gate (rollup or sync), and runs
+full `verify` on GitHub's runners for a fork's pull request only (opened, pushed to or reopened; labels never start
+it): this repository's own pull requests get the cheap checks alone, and their rollups the heavy gate. It also runs
 every 6 hours on main to save the Rust caches its pull request runs read. Its by-hand jobs (Windows ARM64,
 vanilla-parity, jfr-analysis) run only on dispatch:
 

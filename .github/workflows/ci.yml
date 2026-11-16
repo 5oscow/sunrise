@@ -1,8 +1,9 @@
 name: checks
-# verify: a free full check on GitHub's runners for a plain pull request, one that dyna-checks gives only its cheap
-# checks (format, verify-static): its three parts side by side (below). Rollups, syncs and main's pushes get the
-# heavy gate in dyna-checks (.github/workflows/dyna-ci.yml, tools/ci/pr_gate.py) on Dyna's runners and skip this, so
-# no head pays for the same checks twice and the gate never waits on GitHub's runners. A schedule runs verify on
+# verify: a free full check on GitHub's runners for a fork's pull request, one that dyna-checks gives only its cheap
+# checks (format, verify-static): its three parts side by side (below). This repository's own pull requests get those
+# cheap checks alone (root, 2026-11-16: five jobs per push held GitHub's runners, up to 49 minutes' wait, ahead of
+# the Nightly), and their rollups, syncs and main's pushes the heavy gate in dyna-checks (.github/workflows/dyna-ci.yml,
+# tools/ci/pr_gate.py) on Dyna's runners, so the gate never waits on GitHub's runners. A schedule runs verify on
 # main's head every 6 hours, which saves the Rust caches the pull requests' runs read (rust-cache saves only from main)
 # and tries main on the newest stable Rust. A dispatch runs only the by-hand jobs at the end. See docs/release-flow.md.
 on:
@@ -36,10 +37,7 @@ jobs:
     name: verify (tree and tools)
     if: >-
       github.event_name == 'schedule' || github.event_name == 'pull_request' &&
-      !(github.event.pull_request.head.repo.full_name == github.repository && (
-      startsWith(github.head_ref, 'sunrise-review-rollup-') || startsWith(github.head_ref, 'fork-review-rollup-') ||
-      startsWith(github.head_ref, 'rollup-') || startsWith(github.head_ref, 'sync-') ||
-      contains(github.event.pull_request.labels.*.name, 'rollup') || contains(github.event.pull_request.labels.*.name, 'sync')))
+      github.event.pull_request.head.repo.full_name != github.repository
     runs-on: >-
       ${{ vars.SELF_HOSTED_CI != 'off' && vars.SELF_HOSTED_CI != 'light' && (vars.SELF_HOSTED_CI == 'all' ||
       github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository &&
@@ -97,10 +95,7 @@ jobs:
     name: verify (format and lint)
     if: >-
       github.event_name == 'schedule' || github.event_name == 'pull_request' &&
-      !(github.event.pull_request.head.repo.full_name == github.repository && (
-      startsWith(github.head_ref, 'sunrise-review-rollup-') || startsWith(github.head_ref, 'fork-review-rollup-') ||
-      startsWith(github.head_ref, 'rollup-') || startsWith(github.head_ref, 'sync-') ||
-      contains(github.event.pull_request.labels.*.name, 'rollup') || contains(github.event.pull_request.labels.*.name, 'sync')))
+      github.event.pull_request.head.repo.full_name != github.repository
     runs-on: >-
       ${{ vars.SELF_HOSTED_CI != 'off' && vars.SELF_HOSTED_CI != 'light' && (vars.SELF_HOSTED_CI == 'all' ||
       github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository &&
@@ -159,10 +154,7 @@ jobs:
     name: verify (Rust tests)
     if: >-
       github.event_name == 'schedule' || github.event_name == 'pull_request' &&
-      !(github.event.pull_request.head.repo.full_name == github.repository && (
-      startsWith(github.head_ref, 'sunrise-review-rollup-') || startsWith(github.head_ref, 'fork-review-rollup-') ||
-      startsWith(github.head_ref, 'rollup-') || startsWith(github.head_ref, 'sync-') ||
-      contains(github.event.pull_request.labels.*.name, 'rollup') || contains(github.event.pull_request.labels.*.name, 'sync')))
+      github.event.pull_request.head.repo.full_name != github.repository
     runs-on: >-
       ${{ vars.SELF_HOSTED_CI != 'off' && vars.SELF_HOSTED_CI != 'light' && (vars.SELF_HOSTED_CI == 'all' ||
       github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository &&
@@ -253,10 +245,7 @@ jobs:
   launcher:
     if: >-
       github.event_name == 'schedule' || github.event_name == 'pull_request' &&
-      !(github.event.pull_request.head.repo.full_name == github.repository && (
-      startsWith(github.head_ref, 'sunrise-review-rollup-') || startsWith(github.head_ref, 'fork-review-rollup-') ||
-      startsWith(github.head_ref, 'rollup-') || startsWith(github.head_ref, 'sync-') ||
-      contains(github.event.pull_request.labels.*.name, 'rollup') || contains(github.event.pull_request.labels.*.name, 'sync')))
+      github.event.pull_request.head.repo.full_name != github.repository
     runs-on: >-
       ${{ vars.SELF_HOSTED_CI != 'off' && vars.SELF_HOSTED_CI != 'light' && (vars.SELF_HOSTED_CI == 'all' ||
       github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository &&
