@@ -1,3 +1,0 @@
-ids = ["method:BlockStates::requires_correct_tool"]
-why = "Adds BlockStates::requires_correct_tool, BlockState.requiresCorrectToolForDrops: whether a block drops its loot only when mined with a correct tool. Which tool is correct for a state is BlockStates::is_correct_tool_for_drops (#1635). Jade's harvest-tool line and Tinkers' Construct's requires-tool modifiers needed it; mods had no way to read the fact."
-migrate = "Additive: nothing to change. A wasm mod that calls it rebuilds against this SDK."
