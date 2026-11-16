@@ -6,10 +6,11 @@
 //! wasm mods alike.
 //!
 //! The routes that read the table so far: the content mods' thrown types
-//! (`ProjectileKind::Thrown`, by [`ThrownType::slot`]) and the living types drawn as mobs (by
+//! (`ProjectileKind::Thrown`, by [`ThrownType::slot`]), the living types drawn as mobs (by
 //! their shared `MobType`, which the game's types never replace while it runs), whose renderer
-//! draws in place of the model and its vanilla layers. Each other entity family becomes a route of
-//! its own; until then a registration for one of its types is kept and the type keeps its drawing.
+//! draws in place of the model and its vanilla layers, and primed TNT (`minecraft:tnt`). Each
+//! other entity family becomes a route of its own; until then a registration for one of its types
+//! is kept and the type keeps its drawing.
 //! Each load also asks for the layers of the living renderers (`native_entity_layers`), which draw
 //! through the same guard ([`Game::guarded_entity_draw`]).
 use super::{
@@ -45,8 +46,15 @@ static TABLE: RwLock<Option<EntityRendererTable>> = RwLock::new(None);
 /// each mob when none was registered.
 static ANY_LIVING: AtomicBool = AtomicBool::new(false);
 
+/// Whether the last load resolved a renderer for primed TNT: a frame checks only this when none
+/// was registered, so the vanilla TNT route stays off the table lock.
+static ANY_TNT: AtomicBool = AtomicBool::new(false);
+
 /// The player's entity type: its model goes by its skin, not by entity type.
 const PLAYER: &str = "minecraft:player";
+
+/// Primed TNT's entity type.
+const TNT: &str = "minecraft:tnt";
 
 /// Keeps the mods' registrations, once per process (false when they already were).
 pub(super) fn register(renderers: BTreeMap<String, Arc<dyn EntityRenderer>>) -> bool {
@@ -75,6 +83,8 @@ pub(super) struct EntityRendererTable {
     thrown: Vec<Option<Arc<Resolved<dyn EntityRenderer>>>>,
     /// By the address of the mob type the game shares with every mob of the type.
     living: FxHashMap<usize, Arc<Resolved<dyn EntityRenderer>>>,
+    /// Primed TNT (`minecraft:tnt`).
+    tnt: Option<Arc<Resolved<dyn EntityRenderer>>>,
 }
 
 impl EntityRendererTable {
@@ -91,6 +101,7 @@ impl EntityRendererTable {
         let mut table = Self {
             thrown: thrown.iter().map(|_| None).collect(),
             living: FxHashMap::default(),
+            tnt: None,
         };
         let mut unknown = Vec::new();
         for (id, renderer) in registered {
@@ -99,6 +110,8 @@ impl EntityRendererTable {
                 table.thrown[t.slot] = Some(resolved());
             } else if let Some(kind) = mobs.get(id).filter(|_| id != PLAYER) {
                 table.living.insert(Arc::as_ptr(kind) as usize, resolved());
+            } else if id == TNT {
+                table.tnt = Some(resolved());
             } else if !known(id) {
                 unknown.push(id.clone());
             }
@@ -114,6 +127,11 @@ impl EntityRendererTable {
     /// The renderer of `mob`'s type, when a mod registered one for it.
     pub(super) fn living(&self, mob: &Mob) -> Option<&Arc<Resolved<dyn EntityRenderer>>> {
         self.living.get(&(Arc::as_ptr(&mob.kind) as usize))
+    }
+
+    /// The renderer of primed TNT, when a mod registered one for `minecraft:tnt`.
+    pub(super) fn tnt(&self) -> Option<&Arc<Resolved<dyn EntityRenderer>>> {
+        self.tnt.as_ref()
     }
 }
 
@@ -135,6 +153,16 @@ pub(in crate::game) fn living_renderer(mob: &Mob) -> Option<Arc<Resolved<dyn Ent
     table.as_ref()?.living(mob).cloned()
 }
 
+/// The renderer the last resource load resolved for primed TNT, when a mod registered one: with
+/// none registered, one flag check, with no lock.
+pub(in crate::game) fn tnt_renderer() -> Option<Arc<Resolved<dyn EntityRenderer>>> {
+    if !ANY_TNT.load(Ordering::Relaxed) {
+        return None;
+    }
+    let table = TABLE.read().unwrap_or_else(PoisonError::into_inner);
+    table.as_ref()?.tnt().cloned()
+}
+
 impl Game<'_> {
     /// Resolves the registered renderers against the entity types of the resources now loaded, then
     /// asks for the living renderers' layers: at the first load and on every reload after it. A
@@ -154,8 +182,10 @@ impl Game<'_> {
             );
         }
         let any_living = !table.living.is_empty();
+        let any_tnt = table.tnt.is_some();
         *TABLE.write().unwrap_or_else(PoisonError::into_inner) = Some(table);
         ANY_LIVING.store(any_living, Ordering::Relaxed);
+        ANY_TNT.store(any_tnt, Ordering::Relaxed);
         self.resolve_entity_layers(&rows, registered);
     }
 
@@ -167,6 +197,7 @@ impl Game<'_> {
         &self,
         resolved: &Resolved<dyn EntityRenderer>,
         entity: &EntityRenderState,
+        entity_type: &str,
         at: DVec3,
         block: [i32; 3],
         light: u32,
@@ -176,6 +207,7 @@ impl Game<'_> {
         self.guarded_entity_draw(
             &resolved.failed,
             entity.partial,
+            entity_type,
             block,
             pose,
             light,
@@ -194,6 +226,7 @@ impl Game<'_> {
         &self,
         failed: &AtomicBool,
         partial: f32,
+        entity_type: &str,
         block: [i32; 3],
         pose: Mat4,
         light: u32,
@@ -228,7 +261,7 @@ impl Game<'_> {
         out.truncate(start);
         if !failed.swap(true, Ordering::Relaxed) {
             log::warn!(
-                "Sunrise: an entity renderer or layer failed ({error}); it is asked no more until resources reload"
+                "Sunrise: the entity renderer or layer for {entity_type} failed ({error}); it is asked no more until resources reload"
             );
         }
         false

@@ -1,7 +1,7 @@
 # Drawing an entity type with your own renderer
 
-You can draw content-defined thrown entities and living entity types (mobs, vanilla's or a content
-mod's) with your own renderer. This is the counterpart of
+You can draw content-defined thrown entities, living entity types (mobs, vanilla's or a content
+mod's) and primed TNT with your own renderer. This is the counterpart of
 NeoForge 26.3's `EntityRenderersEvent.RegisterRenderers` (`registerEntityRenderer`): the mod
 registers one renderer per entity type at start, and the game hands each entity of that type in
 view to it, once a frame. Native and wasm mods register and draw the same way.
@@ -40,6 +40,7 @@ impl EntityRenderer for Bolt {
 | `age` | Ticks lived plus the partial tick (`ageInTicks`). |
 | `yaw`, `pitch` | The way it faces, in degrees, interpolated to the frame (0 is south, positive pitch looks down). |
 | `living` | A living entity's own frame (`LivingRenderState`, below); none for any other entity. |
+| `tnt_fuse` | Primed TNT's remaining fuse, in ticks, as vanilla draws it (`fuse - partial + 1`); none for any other entity. |
 
 The pose stack starts at the entity's interpolated position, in blocks, and is not turned. `draw`
 also has the partial tick, the game time and the entity's light. What `submit` draws replaces the
@@ -99,13 +100,17 @@ scan over the mods.
 
 ## What draws through registered renderers
 
-Registered renderers draw two routes:
+Registered renderers draw these routes:
 
 - content-defined thrown types: a `data/<id>/sunrise/entity_type/<name>.json` using the
   `minecraft:snowball` template ([content mods](../content-mods.md)) draws the renderer's geometry
   instead of its flying item. Without a renderer, it draws its item;
 - living types drawn as mobs, vanilla's (`minecraft:zombie`) and the content mods' living types: the
-  renderer draws instead of the model and its vanilla layers.
+  renderer draws instead of the model and its vanilla layers;
+- primed TNT (`minecraft:tnt`): the renderer draws instead of the flashing TNT cube, and reads
+  `tnt_fuse`. `age` is the unsaved `Entity.tickCount` plus the partial tick. Yaw and pitch are
+  the TNT's current rotation, not interpolated (it has no previous rotation). Without a
+  renderer, the cube is unchanged.
 
 Registrations for other known entity families, including boats, displays, vanilla projectiles, the
 player (whose model goes by its skin), the armour stand and the ender dragon (which draw through
