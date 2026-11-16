@@ -30,7 +30,9 @@ pass, and its row must name a test that still runs. A package's shard runs the d
 already runs (its library; every target for the packages in INTEGRATION_TESTS); the shard `daily-rows`
 (tools/ci/ignored_shards.py; `daily-rows-launcher` for the launcher's) runs every other daily row, one `cargo test -p PACKAGE TARGET -- --ignored --exact
 TEST...` per package and target, from the package's own workspace: a launcher row runs from launcher/ against its
-own lockfile (`--locked`).
+own lockfile (`--locked`). A daily row whose reason names an input only one job builds (DAILY_INPUTS: `wasm-fixture`)
+runs in that job with the `needs` rows of that variable (`--needs SUNRISE_WASM_FIXTURE --one-process-each`), never in a
+shard.
 
 `--needs VARIABLE --one-process-each` runs the tests marked `needs VARIABLE`, each alone in its own process
 (`--list` prints those commands instead), and fails unless every run reports exactly one test passed: a
@@ -102,6 +104,9 @@ LISTED = re.compile(r"^(\S+): test$")
 DAILY_TARGET = re.compile(r"^(?:lib|(?:bin|test):[\w-]+)$")
 # Why a test is a daily test (CONTRIBUTING.md "CI tiers"): slower than 2 s, or what it needs.
 DAILY_REASONS = ("slow", "game-boot", "resources", "child-process", "network", "wasm-fixture")
+# A daily reason that names an input only one job builds: its rows run there, each alone in its own process with the
+# `needs VARIABLE` rows (--needs VARIABLE --one-process-each), never in the shards, which do not have it.
+DAILY_INPUTS = {"wasm-fixture": "SUNRISE_WASM_FIXTURE"}
 # Who runs a `manual` row's test, never the daily shards: a person, its parent test (a child process it starts), or
 # a workflow of .github/workflows/ by file name.
 MANUAL_RUNNERS = re.compile(r"^(?:by-hand|subprocess|[\w.-]+\.ya?ml)$")
@@ -256,8 +261,9 @@ def known_failures():
 
 
 def daily_rows():
-    """The rows marked `daily`: tests moved out of verify that the daily run must run and pass."""
-    return [row for row in listed_entries() if row.mark == "daily"]
+    """The rows marked `daily` that the shards run: tests moved out of verify that the daily run must run and pass.
+    A row whose reason is in DAILY_INPUTS is left out: the job that builds its input runs it (needs_commands)."""
+    return [row for row in listed_entries() if row.mark == "daily" and row.reason not in DAILY_INPUTS]
 
 
 def daily_tests(package, target):
@@ -289,7 +295,7 @@ def daily_rows_groups(rows):
     """The daily rows no package shard runs, as {(package, target): [test, ...]}: the `daily-rows` shard's runs."""
     groups = {}
     for row in rows:
-        if not shard_runs(row.package, row.reference):
+        if not shard_runs(row.package, row.reference) and row.reason not in DAILY_INPUTS:
             groups.setdefault((row.package, row.reference), []).append(row.test)
     return {key: sorted(tests) for key, tests in sorted(groups.items())}
 
@@ -300,11 +306,23 @@ def harness_inputs():
 
 
 def needs_commands(variable, jobs=None):
-    """One `cargo test` command per test marked `needs variable`, each selecting exactly that test."""
+    """One `cargo test` command per test marked `needs variable`, and per daily row whose reason needs it
+    (DAILY_INPUTS), each selecting exactly that test. A daily row is built as it was before it moved here: a row of a
+    target its package's shard builds (shard_runs) as the shard builds it, so the library test the `needs` rows
+    built is reused; any other row with the features its workspace build turns on (a target's required-features, or
+    a test behind a feature like sunrise-mod-wasm's `test-copy-probe`), as the daily-rows leg gives it."""
+    j = [f"-j{jobs}"] if jobs else []
     commands = [
-        ["cargo", "test", *([f"-j{jobs}"] if jobs else []), "-p", row.package, "--lib", "--", *(["--ignored"] if row.mark == "needs" else []), "--exact", row.test]
+        ["cargo", "test", *j, "-p", row.package, "--lib", "--", *(["--ignored"] if row.mark == "needs" else []), "--exact", row.test]
         for row in listed_entries() if row.mark in {"needs", "needs-plain"} and row.reference == variable
     ]
+    for row in listed_entries():
+        if row.mark != "daily" or DAILY_INPUTS.get(row.reason) != variable:
+            continue
+        kind, _, name = row.reference.partition(":")
+        features = [] if shard_runs(row.package, row.reference) else workspace_features().get(row.package, [])
+        commands.append(["cargo", "test", *j, "-p", row.package, *(["--features", ",".join(features)] if features else []),
+                         *(["--lib"] if kind == "lib" else [f"--{kind}", name]), "--", "--ignored", "--exact", row.test])
     if not commands:
         sys.exit(f"no `needs` row in {POLICY_PATH}/ names {variable}")
     return commands
@@ -965,6 +983,9 @@ def main(shards, report=None):
                 if listed == package and in_leg(test, number, count) and not os.environ.get(variable):
                     print(f"{package} {safe_identity(test)}: refused, needs {variable}; run by the parity harness")
                     skip.append(test)
+            # The daily rows whose input only another job builds (DAILY_INPUTS) run there, never here.
+            skip += [row.test for row in listed_entries() if row.mark == "daily" and row.reason in DAILY_INPUTS
+                     and row.package == package and in_leg(row.test, number, count)]
             results = run(package, skip, number, count) if number is not None else run(package, skip)
         if results is None:
             print(f"{shard}: did not complete: " + json.dumps(_stopped, sort_keys=True), flush=True)
