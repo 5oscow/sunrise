@@ -454,10 +454,7 @@ impl Drop for Reply {
 /// Calls the game's import with `args` and returns its answer. `import` is the module's own
 /// import of that call, declared where it is called ([`__sunrise_host_call!`]).
 #[cfg(target_arch = "wasm32")]
-pub fn host_with(
-    import: impl FnOnce(*const u8, u32, *mut u8, u32) -> u32,
-    args: Writer,
-) -> Reply {
+pub fn host_with(import: impl FnOnce(*const u8, u32, *mut u8, u32) -> u32, args: Writer) -> Reply {
     let mut out = reply_buffer();
     transport::call_with(import, args.bytes(), &mut out);
     RUNTIME.with(|rt| rt.borrow_mut().recycle(args.into_bytes()));
@@ -498,7 +495,9 @@ macro_rules! __sunrise_host_call {
                 fn import(in_ptr: *const u8, in_len: u32, out_ptr: *mut u8, out_cap: u32) -> u32;
             }
             $crate::wire::guest::host_with(
-                |in_ptr, in_len, out_ptr, out_cap| unsafe { import(in_ptr, in_len, out_ptr, out_cap) },
+                |in_ptr, in_len, out_ptr, out_cap| unsafe {
+                    import(in_ptr, in_len, out_ptr, out_cap)
+                },
                 $args,
             )
         }
@@ -602,7 +601,10 @@ mod transport {
             && try_call(super::generated::protocol::LOG, input, &mut Vec::new())
     }
     pub(super) fn call(name: &str, input: &[u8], out: &mut Vec<u8>) {
-        assert!(try_call(name, input, out), "no transport to the game is set");
+        assert!(
+            try_call(name, input, out),
+            "no transport to the game is set"
+        );
     }
 }
 
@@ -1051,11 +1053,11 @@ mod tests {
     #[test]
     fn guest_pool_returns_nested_import_arguments_and_replies() {
         set_transport(Some(std::rc::Rc::new(|id, bytes| {
-            if id == 0 {
+            if id == "outer" {
                 assert_eq!(Reader::decode::<u32>(bytes).unwrap(), 5);
                 let mut arguments = begin();
                 arguments.put(&37u32);
-                assert_eq!(host_named("test", arguments).take::<u32>().unwrap(), 99);
+                assert_eq!(host_named("inner", arguments).take::<u32>().unwrap(), 99);
             } else {
                 assert_eq!(Reader::decode::<u32>(bytes).unwrap(), 37);
             }
@@ -1063,7 +1065,7 @@ mod tests {
         })));
         let mut arguments = begin();
         arguments.put(&5u32);
-        let reply = host_named("test", arguments);
+        let reply = host_named("outer", arguments);
         assert_eq!(reply.take::<u32>().unwrap(), 99);
         // The nested arguments and reply, plus outer arguments, have returned. The
         // outer answer still belongs to Reply and cannot be leased by another call.

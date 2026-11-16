@@ -441,11 +441,13 @@ pub(crate) mod fixtures {
     use mod_surface::call::{SHARED_PROTOCOL, protocol_name};
 
     /// The id `$host` releases an object by.
+    #[cfg(test)]
     pub(crate) fn release_id() -> u32 {
         CALLS.len() as u32
     }
 
     /// The id `$host` sends the game a message by.
+    #[cfg(test)]
     pub(crate) fn log_id() -> u32 {
         CALLS.len() as u32 + 1
     }
