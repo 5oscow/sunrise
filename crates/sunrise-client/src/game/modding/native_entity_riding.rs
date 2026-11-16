@@ -1511,7 +1511,7 @@ mod tests {
                 game.audio.capture = Some(Vec::new());
 
                 // A refused mount must not consume the leash.
-                assert!(!cow.start_riding(game, cow, true));
+                assert!(cow.start_riding(game, cow, true).is_err());
                 assert_eq!(
                     cow.leash_holder(game),
                     Some(mod_api::LeashHolder::Entity(holder))
@@ -1519,7 +1519,7 @@ mod tests {
                 assert!(game.dropped.is_empty());
                 assert_eq!(*unleashed.lock().unwrap(), 0);
 
-                assert!(cow.start_riding(game, vehicle, true));
+                assert!(cow.start_riding(game, vehicle, true).is_ok());
                 assert_eq!(cow.vehicle(game), Some(vehicle));
                 assert_eq!(
                     cow.leash_holder(game),
