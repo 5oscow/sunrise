@@ -96,6 +96,7 @@ class HistoryFetchTests(unittest.TestCase):
                 self.assertNotIn("::error::", result.stdout)
                 self.assertEqual(git("rev-parse", "--is-shallow-repository", cwd=checkout), "false")
                 self.assertEqual(git("rev-list", "--count", "HEAD", cwd=checkout), str(heads.index(commit) + 1))
+                job.output = result.stdout
                 return checkout
 
             # The slot's first job has no mirror: it fetches everything, then leaves its head in the mirror.
@@ -118,6 +119,55 @@ class HistoryFetchTests(unittest.TestCase):
             self.assertFalse((third / ".git/objects/info/alternates").exists())
             self.assertEqual(git("rev-parse", "refs/heads/ci-head", cwd=mirror), heads[4])
 
+            # A stand-in `timeout` answers the calls a rule names with an exit status instead of running them: the
+            # first rule a set number of times, the second every time.
+            stand_in = root / "bin"
+            stand_in.mkdir()
+            (stand_in / "timeout").write_text(
+                f"#!{sys.executable}\n"
+                "import os, pathlib, sys\n"
+                "args = sys.argv[1:]\n"
+                "while args[0].startswith('--'):\n"
+                "    args.pop(0)\n"
+                "args = args[1:]\n"
+                "call = ' '.join(args)\n"
+                "part, status, times = os.environ['ANSWER'].split('|')\n"
+                "count = pathlib.Path(os.environ['ANSWERED'])\n"
+                "n = int(count.read_text()) if count.exists() else 0\n"
+                "if part in call and n < int(times):\n"
+                "    count.write_text(str(n + 1))\n"
+                "    sys.exit(int(status))\n"
+                "always = os.environ.get('ALWAYS')\n"
+                "if always and always.split('|')[0] in call:\n"
+                "    sys.exit(int(always.split('|')[1]))\n"
+                "os.execvp(args[0], args)\n")
+            (stand_in / "timeout").chmod(0o755)
+            env["PATH"] = f"{stand_in}{os.pathsep}{env['PATH']}"
+
+            def answered(part, status, always=None):
+                (root / "answered").unlink(missing_ok=True)
+                env.update(ANSWER=f"{part}|{status}|1", ANSWERED=str(root / "answered"), ALWAYS=always or "")
+
+            # The mirror's update runs out of time (124 from timeout, 137 once it has to kill): the job passes and
+            # the mirror stays, at its old head, for the next job.
+            for status, label in ((124, "fetch-timeout"), (137, "fetch-killed")):
+                answered("refs/heads/ci-head", status)
+                job(heads[5], label)
+                self.assertIn("out of time to update the slot's history mirror", job.output)
+                self.assertEqual(git("rev-parse", "refs/heads/ci-head", cwd=mirror), heads[4])
+            # A repack cut short keeps the update it follows.
+            answered(" gc --auto", 124)
+            job(heads[5], "gc-timeout")
+            self.assertIn("was not repacked this time", job.output)
+            self.assertEqual(git("rev-parse", "refs/heads/ci-head", cwd=mirror), heads[5])
+            # The first remote fetch fails while borrowing: the retry runs without the mirror, and a mirror that then
+            # can't take the head (a real error, not a timeout) is dropped, as no checkout borrows from it any more.
+            answered("--unshallow", 1, always="refs/heads/ci-head|1")
+            retried = job(heads[4], "retried")
+            self.assertIn("retrying without the slot's history mirror", job.output)
+            self.assertNotIn(f"{mirror}/objects", (retried / ".git/objects/info/alternates").read_text())
+            self.assertIn("could not take this head", job.output)
+            self.assertFalse(mirror.exists())
 
 if __name__ == "__main__":
     unittest.main()
