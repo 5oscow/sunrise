@@ -32,11 +32,16 @@ not when the entry happens to roll. Declare parameters with
 `referenced_context_params`; a table whose context set does not allow one logs a
 warning but still loads. At runtime an absent parameter remains absent.
 
-An unknown type, malformed entry, failed validator, reference cycle or refused
-Wire call fails the whole candidate load, with a file/id, entry path and type in
-the diagnostic. Reload failure keeps the previous loot generation. A malformed
-winning pack file never falls back to a lower-priority file. Predicate and item
+Unknown loot types, malformed registered entries, failed codec validators,
+predicate/item-modifier reference cycles and refused Wire validation calls fail
+the candidate preparation, with a file/id, entry path and type in the diagnostic.
+Refusing a candidate leaves previously retained snapshots unchanged. Malformed
+winning pack JSON never falls back to a lower-priority file. Predicate and item
 modifier references, including references selected by tags, validate at load.
+Referenced tables retain the caller's context set during parameter validation;
+recursive table references stop traversal rather than recursing indefinitely.
+Built-in function argument schemas are not fully validated by this registration
+boundary; that pre-existing decoder limitation is separate from registered codecs.
 
 `LootEntryData` is API-owned and derives `Wire`. Its one private JSON-value field
 uses the shared JSON tree encoding: length-prefixed UTF-8 JSON, with the shared
