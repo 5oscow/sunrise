@@ -488,3 +488,38 @@ fn a_fishing_roll_names_the_hook_the_rod_and_the_position() {
         );
     }
 }
+
+/// `LootContextParamSets.ARCHAEOLOGY`: the brusher is THIS_ENTITY, the brush
+/// the TOOL, the block's centre the ORIGIN, with the brusher's luck.
+#[test]
+fn a_brushing_roll_names_the_brusher_the_brush_and_the_block() {
+    let table = json!({"pools":[{"rolls":1,"entries":[
+        {"type":"minecraft:item","name":"minecraft:pottery_sherd_arms_up"}]}]});
+    let (data, seen) = watched(table);
+    let brusher = LootEntity::new("minecraft:player");
+    let slots = as_caller(Some("minecraft:brush"), [8.5, 64.5, -7.5], || {
+        data.fill_in(
+            "test:caller",
+            &mut LegacyRandom::new(3),
+            1,
+            fill::ContainerLootContext {
+                luck: 1.5,
+                entity: Some(&brusher),
+                ..Default::default()
+            },
+        )
+    });
+    assert_eq!(
+        slots[0].as_ref().map(|s| s.item.as_str()),
+        Some("minecraft:pottery_sherd_arms_up")
+    );
+    assert_eq!(
+        seen.lock().unwrap().take(),
+        Some((
+            Some("minecraft:player".into()),
+            Some("minecraft:brush".into()),
+            Some([8.5, 64.5, -7.5]),
+            1.5
+        ))
+    );
+}
