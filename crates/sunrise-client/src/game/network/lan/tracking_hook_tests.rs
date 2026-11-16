@@ -6,6 +6,8 @@
 use crate::game::Game;
 use crate::game::native_entity_refs::tests::with_game;
 use crate::game::native_item_places::tests::{guest, open_to_lan};
+use mod_api::{Hooks, ModEntry, PayloadBytes, PayloadId, Registrar, ServerHost};
+use std::sync::{Arc, Mutex};
 use sunrise_client::{
     chunk::Chunk,
     items::ItemStack,
@@ -13,8 +15,6 @@ use sunrise_client::{
     raw_payloads::{Side, Transport},
 };
 use sunrise_protocol::{buf::Reader, ids::play::clientbound as id};
-use mod_api::{Hooks, ModEntry, PayloadBytes, PayloadId, Registrar, ServerHost};
-use std::sync::{Arc, Mutex};
 
 const CHANNEL: &str = "tracktest:seen";
 
