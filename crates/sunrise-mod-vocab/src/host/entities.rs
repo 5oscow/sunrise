@@ -1007,11 +1007,11 @@ pub trait EntitiesBackendMut {
     fn entity_set_invisible(&mut self, entity: EntityRef, invisible: bool) -> bool;
     /// Side: server.
     /// Sets whether the entity sprints (`Entity.setSprinting`): a player's flag with the
-    /// movement speed bonus `LivingEntity.setSprinting` adds or removes, or a mob's shared
-    /// sprinting flag (a mob's own AI may set it again on its next step). The flag is what
-    /// `Entity.isSprinting` reads, such as a player's sprint dust; it is not the player's
-    /// sprint key, and the player's client sets its own flag again from its input. False for a
-    /// stale handle, on a client, and for kinds with no sprinting flag.
+    /// movement speed modifier `LivingEntity.setSprinting` adds or removes, or a mob's flag,
+    /// which the mob's movement speed reads as that same modifier (a mob's own AI, such as a
+    /// cat's, may set it again on its next step). It is not the player's sprint key: the
+    /// player's client sets its own flag again from its input. False for a stale handle, on a
+    /// client, and for kinds with no sprinting flag.
     #[access(WorldOnly)]
     fn entity_set_sprinting(&mut self, entity: EntityRef, sprinting: bool) -> bool;
     /// Side: server.

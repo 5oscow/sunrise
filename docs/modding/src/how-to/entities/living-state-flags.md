@@ -27,8 +27,8 @@ Villagers use `start_sleeping`/`stop_sleeping`, not the raw player position sett
 ## Sprinting
 
 `EntityRef::is_sprinting` reads `Entity.isSprinting` and `EntityRef::set_sprinting(host, sprinting)` sets it
-(`Entity.setSprinting`, server only): a player's flag with the movement speed bonus that goes with it, or a mob's
-shared flag, which a cat's or ocelot's own AI may set again on its next step. It returns `false` for a stale
+(`Entity.setSprinting`, server only): a player's flag with the movement speed modifier that goes with it, or a mob's flag, which the
+mob's movement speed already reads as that modifier (a cat's or ocelot's own AI may set it again on its next step). It returns `false` for a stale
 handle, on a client and for a kind with no sprinting flag. It is the flag `Entity.isSprinting` reads, not
 the player's sprint key: a player's own client sets its flag again from its input.
 
