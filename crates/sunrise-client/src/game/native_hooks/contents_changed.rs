@@ -1,4 +1,5 @@
 use super::*;
+use mod_api::__private::game::Fields;
 
 /// The hook points. Each does nothing in Sunrise.
 impl Game<'_> {
