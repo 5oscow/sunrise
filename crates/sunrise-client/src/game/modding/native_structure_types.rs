@@ -2,7 +2,7 @@
 use super::native_worldgen::WorkerResources;
 use mod_api::{
     BiomeId, ChunkPos, GenerationContext, HeightmapType, NoiseBlock, NoiseColumn, PieceContext,
-    StructurePiece, RandomSource, StructureType,
+    RandomSource, StructurePiece, StructureType,
 };
 use mod_api::{BlockKey, BlockMetadata, BlockState};
 use std::sync::Arc;

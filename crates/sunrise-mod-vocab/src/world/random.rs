@@ -30,6 +30,9 @@ pub trait RandomSource {
     /// Computed in the mod: drawn through `next_int_bound`, never asked of the game by itself.
     #[sunrise_mod_api_macros::computed_in_mod]
     fn next_int_between_inclusive(&mut self, min: i32, max: i32) -> i32 {
+        if max < min {
+            return min;
+        }
         self.next_int_bound(max.wrapping_sub(min).wrapping_add(1))
             .wrapping_add(min)
     }
@@ -54,6 +57,7 @@ pub trait RandomSource {
 /// what a mod uses for its own seeded draws. Two sources with the same seed draw the same values.
 #[derive(Clone, Debug, sunrise_mod_api_macros::Wire)]
 #[wire(via = (u64, Option<f64>))]
+// exhaustive: its one field is private, so mods cannot build or destructure it
 pub struct LegacyRandomSource(LegacyRandom);
 
 impl LegacyRandomSource {
@@ -158,6 +162,7 @@ mod tests {
         assert_eq!(a.next_int_range(10, 20), b.next_int_bound(10) + 10);
         // Empty ranges answer the lower end and draw nothing.
         assert_eq!(a.next_int_between_inclusive(5, 4), 5);
+        assert_eq!(a.next_int_between_inclusive(i32::MAX, i32::MIN), i32::MAX);
         assert_eq!(a.next_int_range(8, 8), 8);
         assert_eq!(a.next_int_range(9, -9), 9);
         assert_eq!(a.next_int_range(i32::MIN, i32::MAX), i32::MIN);

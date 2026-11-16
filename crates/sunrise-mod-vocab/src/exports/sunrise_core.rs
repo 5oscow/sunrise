@@ -1,6 +1,4 @@
-pub use sunrise_core::{
-    game_mode::GameMode, geometry::Direction, position::BlockPos,
-};
+pub use sunrise_core::{game_mode::GameMode, geometry::Direction, position::BlockPos};
 
 /// Native engine Java Math paths. Results can differ by machine as vanilla's do.
 /// On wasm use strict_math; java_math calls are unavailable there.
