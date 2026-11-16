@@ -155,6 +155,8 @@ def main():
     shutil.copyfile(MASTER, BRAND / 'web/favicon.svg')
     (ROOT / 'docs/media/icon-256.png').write_bytes(at[256])
     (ROOT / 'crates/sunrise-theme/icons/sunrise-64.png').write_bytes(at[64])
+    # The game's inline text sprite, on its 8 px text grid.
+    (ROOT / 'crates/sunrise-client/assets/sunrise/textures/gui/mark.png').write_bytes(png(render(svg, 8)))
 
 
 if __name__ == '__main__':
