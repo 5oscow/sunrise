@@ -9,6 +9,7 @@ sunrise-client game::stacked_on_other_tests::an_accepted_pickup_is_one_dispatch_
 sunrise-client game::stacked_on_other_tests::an_outer_abort_after_an_applied_click_restores_the_inventory lib daily resources
 sunrise-client game::stacked_on_other_tests::an_outer_abort_after_an_applied_lan_click_restores_the_guest_and_the_container lib daily resources
 sunrise-client game::stacked_on_other_tests::families::a_workstation_menu_decides_the_pickup lib daily resources
+sunrise-client game::stacked_on_other_tests::families::an_outer_abort_restores_the_furnace_with_the_cursor_for_place_and_take lib daily resources
 sunrise-client game::stacked_on_other_tests::families::the_crafting_table_menu_decides_the_pickup lib daily resources
 sunrise-client game::stacked_on_other_tests::families::the_furnace_menu_decides_the_pickup lib daily resources
 sunrise-client game::stacked_on_other_tests::families::the_mount_menu_decides_the_pickup lib daily resources

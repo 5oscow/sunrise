@@ -7,12 +7,12 @@
 //! invalid answer and a failing listener; each undoes every write the listener made.
 use crate::game::native_entity_refs::tests::with_game;
 use crate::game::native_guest_turn_tests::with_guests;
-use sunrise_client::{items::ItemStack, menu::Input};
 use mod_api::item::menu::StackResult;
 use mod_api::{
     Flow, Hooks, HostSide, ItemPlace, ItemResource, ItemStackedOnOtherEvent, ModEntry, Mods,
 };
 use std::cell::RefCell;
+use sunrise_client::{items::ItemStack, menu::Input};
 
 /// What the listener does.
 #[derive(Clone, Default)]
@@ -591,6 +591,96 @@ mod families {
             |game| game.lan_guest_packet(12, packet(window.get(), 0)),
             None,
         );
+    }
+
+    /// A furnace at (1, 64, 1) holding `items` (input, fuel, output), open as guest 12's menu.
+    fn open_furnace(game: &mut Game<'_>, items: [Option<ItemStack>; 3]) -> i32 {
+        use sunrise_client::containers::{BlockEntity, Furnace, FurnaceKind};
+        block(game, "minecraft:furnace", (1, 64, 1));
+        game.world.block_entities.insert(
+            (1, 64, 1),
+            BlockEntity::Furnace(Furnace {
+                kind: FurnaceKind::Furnace,
+                items,
+                lit_remaining: 0,
+                lit_total: 0,
+                cooking_timer: 0,
+                cooking_total: 200,
+                speed: 1.0,
+                recipes_used: Default::default(),
+            }),
+        );
+        game.open_block_menu(12, (1, 64, 1));
+        game.lan.as_ref().unwrap().hub.guests[0]
+            .menu
+            .as_ref()
+            .unwrap()
+            .window
+    }
+
+    fn furnace_items(game: &Game<'_>) -> [Option<(String, u32)>; 3] {
+        use sunrise_client::containers::BlockEntity;
+        let Some(BlockEntity::Furnace(f)) = game.world.block_entities.get(&(1, 64, 1)) else {
+            panic!("the furnace is gone");
+        };
+        f.items
+            .clone()
+            .map(|s| s.map(|s| (s.item.to_string(), s.count)))
+    }
+
+    /// The furnace's write-back runs inside the click's action: an outer transaction that aborts
+    /// puts back the furnace with the cursor, for a stack placed in it and for one taken out.
+    #[test]
+    #[ignore = "daily"]
+    fn an_outer_abort_restores_the_furnace_with_the_cursor_for_place_and_take() {
+        with_mod(|| {
+            with_guests(|game| {
+                game.world.chunks.insert(
+                    (0, 0),
+                    std::sync::Arc::new(sunrise_client::chunk::Chunk::empty(0, 0)),
+                );
+                PLAYER.set(12);
+                let stone = |count| Some(ItemStack::new("minecraft:stone", count));
+                let held = |game: &Game<'_>| cursor(game);
+                // Place: stone 3 from the cursor into the input slot.
+                let window = open_furnace(game, [None, None, None]);
+                game.lan.as_mut().unwrap().hub.guests.update(0, |guest| {
+                    guest.carried = stone(3);
+                });
+                script(Script::default());
+                let seal = game.transaction_open();
+                game.lan_guest_packet(12, packet(window, 0));
+                assert_eq!(dispatches(), 1, "the click is decided");
+                assert_eq!(
+                    furnace_items(game)[0],
+                    Some(("minecraft:stone".to_owned(), 3))
+                );
+                assert_eq!(held(game), None);
+                game.transaction_close(&seal, false);
+                assert_eq!(furnace_items(game), [None, None, None]);
+                assert_eq!(held(game), Some(("minecraft:stone".to_owned(), 3)));
+                // Take: the output slot's iron ingots onto an empty cursor.
+                let window = open_furnace(
+                    game,
+                    [None, None, Some(ItemStack::new("minecraft:iron_ingot", 5))],
+                );
+                game.lan.as_mut().unwrap().hub.guests.update(0, |guest| {
+                    guest.carried = None;
+                });
+                script(Script::default());
+                let seal = game.transaction_open();
+                game.lan_guest_packet(12, packet(window, 2));
+                assert_eq!(dispatches(), 1, "the click is decided");
+                assert_eq!(furnace_items(game)[2], None);
+                assert_eq!(held(game), Some(("minecraft:iron_ingot".to_owned(), 5)));
+                game.transaction_close(&seal, false);
+                assert_eq!(
+                    furnace_items(game),
+                    [None, None, Some(("minecraft:iron_ingot".to_owned(), 5))]
+                );
+                assert_eq!(held(game), None);
+            });
+        });
     }
 
     #[test]
