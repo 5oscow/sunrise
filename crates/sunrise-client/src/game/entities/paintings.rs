@@ -505,14 +505,11 @@ impl Game<'_> {
                         living: None,
                         tnt_fuse: None,
                         orb_value: None,
-                        painting: Some(
-                            mod_api::__private::built::PaintingRenderState {
-                                facing,
-                                width: p.width,
-                                height: p.height,
-                            }
-                            .into(),
-                        ),
+                        painting: Some(mod_api::__private::built::PaintingRenderState {
+                            facing,
+                            width: p.width,
+                            height: p.height,
+                        }),
                         item_frame: None,
                     }
                     .into();
