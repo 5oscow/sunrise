@@ -38,6 +38,7 @@
 - [Publishing your mod](how-to/publish.md)
 - [Levels, dimensions and blocks](how-to/world.md)
 - [Items, recipes and loot](how-to/items.md)
+- [Global loot modifiers](how-to/global-loot-modifiers.md)
 - [Entities, players and commands](how-to/entities.md)
 - [Client, rendering and sound](how-to/client.md)
 

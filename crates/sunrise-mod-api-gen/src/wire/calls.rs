@@ -1050,8 +1050,18 @@ pub(super) fn dispatch(
         let mut back = String::new();
         for (i, (_, ty)) in m.params.iter().enumerate() {
             match ty {
-                Ty::Dyn(_, true) => args.push("&mut host".to_string()),
-                Ty::Dyn(..) => args.push("&host".to_string()),
+                Ty::Dyn(_, mutable) => {
+                    // Guest is a stateless view into the active frame. Each
+                    // capability needs its own view so a read-only Host and a
+                    // mutable scoped resource can be lent in the same call.
+                    writeln!(
+                        body,
+                        "let {}p{i} = Guest;",
+                        if *mutable { "mut " } else { "" }
+                    )
+                    .unwrap();
+                    args.push(format!("&{}p{i}", if *mutable { "mut " } else { "" }));
+                }
                 Ty::Named(d) if types.defs[*d].lifetimes != 0 => {
                     let (read, name, _) = borrowed(types, *d, &format!("p{i}"), false).unwrap();
                     body.push_str(&read);

@@ -1,0 +1,2 @@
+ids = ["trait:GlobalLootModifierSerializer", "trait:GlobalLootModifier", "trait:LootModifierContext", "type:LootModifierError", "type:LootModifierSettings", "method:Registrar::register_global_loot_modifier_serializer"]
+why = "Adds static serializer registration and retained, data-enabled global loot modifier resources for native and wasm mods. A prepared instance receives a read-only Host and a scoped context lending the selected roll random and raw sub-roll capability. Existing loot hooks and their meanings do not change."
