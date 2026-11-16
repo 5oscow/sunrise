@@ -1,11 +1,14 @@
 //! `entity_size` (`EntityEvent.Size`): vanilla's `Entity.refreshDimensions` lets a listener
-//! change the size it just computed, whenever the pose changes and from the constructor.
+//! change the size it just computed, whenever the pose changes and from the constructor; a
+//! player's standing, crouching and swimming candidates are also resolved before its motion, for
+//! the pose fit tests.
 //! Sunrise computes a mob's size from its state (`Mob::dims`) and keeps a player's in its body
 //! (`PlayerMotion::refresh_dimensions`), so the hook is asked here instead: a pass tells it each
 //! entity whose pose or vanilla size changed since it was last asked (or that was never asked,
 //! the constructor's call), and keeps the answer on the entity (`pose::SizeAnswer`) for as long
-//! as that pose and vanilla size hold. The server's mobs are asked before and after their ticks,
-//! a guest's body once per server tick, the client's own body after its tick.
+//! as that pose and vanilla size hold. The server's mobs are asked before and after their ticks;
+//! a guest's body once per server tick, with its candidates, before its motion; the client's own
+//! body for its candidates before its tick and for its current pose after it.
 
 use super::Game;
 use mod_api::{EntityRef, Pose};
