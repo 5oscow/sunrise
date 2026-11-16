@@ -57,7 +57,12 @@ categories, it returns the first in category-id order. Implement
 
 ## Display and placement rules
 
-`RecipeBookDisplay` provides `Shaped`, `Shapeless`, `Furnace`, `Stonecutter` and `Smithing` layouts.
+`RecipeBookDisplay` provides `Shaped`, `Shapeless`, `Furnace`, `Stonecutter` and `Smithing` layouts,
+and `Custom { slots, result, station }` for a recipe type whose pictures none of them fit, such as a
+cooking pot's inputs beside a container. A custom display's slot meaning belongs to the recipe
+type: the book lists its non-empty `slots` in order as the recipe's ingredients (all of them count
+in the craftable filter) and never draws `station`. The four built-in menu layouts map none of it, so a
+menu bound to one refuses a category that holds a custom display.
 Each recipe entry can supply several displays. `RecipeSlotDisplay` supports items, owned
 `ItemStack` values, tags, fuel, empty slots, alternatives through `Composite`, potion and
 component filters, dyeing, smithing trims and remainders.

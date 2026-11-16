@@ -264,6 +264,11 @@ fn validate_display(
             ingredients,
             result,
             station,
+        }
+        | Display::Custom {
+            slots: ingredients,
+            result,
+            station,
         } => ingredients.iter().chain([result, station]).collect(),
         Display::Furnace {
             ingredient,
