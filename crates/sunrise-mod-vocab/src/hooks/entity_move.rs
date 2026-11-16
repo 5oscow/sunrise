@@ -21,7 +21,14 @@ pub trait Hooks {
     /// delta, and its `context` is the loop `context` of the side that ticks
     /// the body. Server-authoritative: the client does not predict a custom
     /// movement. Beyond NeoForge: there is no counterpart.
+    ///
+    /// Version 2: `MoveCause::Carried`, a moving collider carrying a body that stands on it
+    /// once a tick (`EntityRef::set_collider`), is a new cause under the same signature, so a
+    /// listener written for version 1 hears moves it never heard. `MoveCause` is
+    /// `#[non_exhaustive]`: match it with a wildcard arm. A wasm mod built before the cause
+    /// existed does not match the cause's new wire layout and is rebuilt against this SDK.
     #[hook(
+        version = 2,
         side = "server",
         contract = "cancel",
         out = "canceled",

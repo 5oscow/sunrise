@@ -112,6 +112,15 @@ impl Prepared {
         self.0.placed.iter().map(|(_, p)| p)
     }
 
+    /// Calls `f` with each collider whose world bounds meet `area`, through the grid: a query far
+    /// from every collider costs one lookup.
+    pub fn meeting(&self, area: Aabb, mut f: impl FnMut(&Placed)) {
+        visit(&self.0, area, 0, |p| {
+            f(p);
+            false
+        });
+    }
+
     /// No collider at all, without building anything.
     pub fn empty() -> Self {
         static EMPTY: OnceLock<Arc<Index>> = OnceLock::new();
@@ -165,61 +174,80 @@ pub fn as_mover<R>(id: u32, f: impl FnOnce() -> R) -> R {
     result
 }
 
+/// Calls `f` with each collider of `index` meeting `area` that `mover` collides with, until it
+/// answers true. `mover` 0 is exempt from nothing.
+fn visit(index: &Index, area: Aabb, mover: u64, mut f: impl FnMut(&Placed) -> bool) {
+    let Some(all) = index.all else { return };
+    if !all.intersects(area) {
+        return;
+    }
+    let mut found = SCRATCH.with(|s| std::mem::take(&mut *s.borrow_mut()));
+    found.clear();
+    let (lo, hi) = cells_of(area);
+    let count = (0..3).map(|i| hi[i] - lo[i] + 1).product::<i64>();
+    if count > index.cells.len() as i64 {
+        found.extend(0..index.placed.len() as u32);
+    } else {
+        for x in lo[0]..=hi[0] {
+            for y in lo[1]..=hi[1] {
+                for z in lo[2]..=hi[2] {
+                    if let Some(list) = index.cells.get(&[x as i32, y as i32, z as i32]) {
+                        found.extend_from_slice(list);
+                    }
+                }
+            }
+        }
+        found.extend_from_slice(&index.big);
+    }
+    found.sort_unstable();
+    found.dedup();
+    for &at in &found {
+        let (world, p) = &index.placed[at as usize];
+        if world.intersects(area)
+            && (mover == 0 || !p.exempt.iter().any(|id| u64::from(*id) == mover))
+            && f(p)
+        {
+            break;
+        }
+    }
+    SCRATCH.with(|s| *s.borrow_mut() = found);
+}
+
+/// The entity an unnamed query is made for: the move [`as_mover`] names when `entity` is 0.
+fn mover_of(entity: EntityIdentity) -> u64 {
+    if entity.0 == 0 {
+        MOVER.with(Cell::get)
+    } else {
+        entity.0
+    }
+}
+
 /// Appends to `out` the colliders meeting `bounds` that `entity` collides with. An identity of
 /// 0 is the move [`as_mover`] names; with none named (a ray, a projectile's path) it is exempt
 /// from nothing and meets every collider.
 pub fn near(entity: EntityIdentity, bounds: Aabb, out: &mut Vec<OrientedCollider>) {
     PLACED.with(|cell| {
-        let index = cell.borrow();
-        let Some(all) = index.all else { return };
         // EntityGetter.getEntityCollisions expands its query by 1e-7.
         let area = bounds.inflate(Vec3::new(1.0e-7, 1.0e-7, 1.0e-7));
-        if !all.intersects(area) {
-            return;
-        }
-        let mover = if entity.0 == 0 {
-            MOVER.with(Cell::get)
-        } else {
-            entity.0
-        };
-        let mut found = SCRATCH.with(|s| std::mem::take(&mut *s.borrow_mut()));
-        found.clear();
-        let (lo, hi) = cells_of(area);
-        let count = (0..3).map(|i| hi[i] - lo[i] + 1).product::<i64>();
-        if count > index.cells.len() as i64 {
-            found.extend(0..index.placed.len() as u32);
-        } else {
-            for x in lo[0]..=hi[0] {
-                for y in lo[1]..=hi[1] {
-                    for z in lo[2]..=hi[2] {
-                        if let Some(list) = index.cells.get(&[x as i32, y as i32, z as i32]) {
-                            found.extend_from_slice(list);
-                        }
-                    }
-                }
-            }
-            found.extend_from_slice(&index.big);
-        }
-        found.sort_unstable();
-        found.dedup();
-        for &at in &found {
-            let (world, p) = &index.placed[at as usize];
-            if world.intersects(area)
-                && (mover == 0 || !p.exempt.iter().any(|id| u64::from(*id) == mover))
-            {
-                out.push(p.collider.clone());
-            }
-        }
-        SCRATCH.with(|s| *s.borrow_mut() = found);
+        visit(&cell.borrow(), area, mover_of(entity), |p| {
+            out.push(p.collider.clone());
+            false
+        });
     });
 }
 
 /// Whether a collider box `entity` collides with overlaps `bounds` (the thin box at a body's
-/// eyes, for the in-wall damage a block's suffocation gives).
+/// eyes, for the in-wall damage a block's suffocation gives). Allocates nothing.
 pub fn overlaps(entity: EntityIdentity, bounds: Aabb) -> bool {
-    let mut found = Vec::new();
-    near(entity, bounds, &mut found);
-    found.iter().any(|collider| collider.intersects(bounds))
+    PLACED.with(|cell| {
+        let area = bounds.inflate(Vec3::new(1.0e-7, 1.0e-7, 1.0e-7));
+        let mut hit = false;
+        visit(&cell.borrow(), area, mover_of(entity), |p| {
+            hit = p.collider.intersects(bounds);
+            hit
+        });
+        hit
+    })
 }
 
 #[cfg(test)]

@@ -98,7 +98,8 @@ A collider is saved with the entity. The server sends it only to Sunrise clients
 the whole collider when they start to (in messages of at most 64 KiB), then only what changed, by box
 index, and the rotation alone for `set_collider_transform`. **A vanilla client does not see a collider**:
 it sees the entity and walks through it. A mod that needs players to stand on one requires the Sunrise
-client at join. 
+client at join.
+
 ### Carrying
 
 A collider that moves carries what stands on it. Once a tick, after the level's entities ticked

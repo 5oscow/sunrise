@@ -48,7 +48,8 @@ See the [generated API reference](../../reference/api.md) and the hook's
 `entity_move` runs on the server before one physical `Entity.move` invocation,
 including its no-physics and stuck-multiplier handling. This hook receives the
 loop context, not a `Host`: it decides only the movement delta. `MoveCause`
-distinguishes self movement, player packets, pistons, shulker boxes and shulkers;
+distinguishes self movement, player packets, pistons, shulker boxes, shulkers and a
+moving collider carrying a body (`Carried`, version 2 of the hook);
 boats and minecarts use self movement.
 
 A replacement must have finite components, each within ±64 blocks. Invalid

@@ -25,51 +25,116 @@ struct Rider {
     support: u32,
 }
 
+/// What a carry pass works on, kept from tick to tick so a pass allocates nothing once these
+/// have grown to the level's size.
+#[derive(Default)]
+struct Scratch {
+    /// The bodies standing on a collider, ordered by the collider.
+    riders: Vec<Rider>,
+    /// The riders that are colliders' own entities: (entity, the collider it stands on), by entity.
+    stacked: Vec<(u32, u32)>,
+    /// The colliders with riders, as (depth in the support forest, collider entity).
+    order: Vec<(u32, u32)>,
+    /// The collider entities of the level, sorted.
+    ids: Vec<u32>,
+}
+
+thread_local! {
+    static SCRATCH: std::cell::RefCell<Scratch> = std::cell::RefCell::new(Scratch::default());
+}
+
 impl Game<'_> {
     /// Carries the bodies standing on the colliders of the level that moved this tick.
-    /// `start` is the colliders as the tick began, where the bodies stood.
+    /// `start` is the colliders as the tick began, where the bodies stood. A tick where no
+    /// collider moved does nothing; the bodies are found through the level's collider index.
     pub(in crate::game) fn carry_pass(&mut self, start: &Prepared) {
-        if start.is_empty() {
+        if start.is_empty() || !self.any_collider_moved(start) {
             return;
         }
-        let riders = self.collider_riders(start);
-        if riders.is_empty() {
-            return;
+        let mut scratch = SCRATCH.with(|cell| std::mem::take(&mut *cell.borrow_mut()));
+        let steps = self.push_step_heights();
+        self.collider_riders(start, &steps, &mut scratch);
+        let carried = !scratch.riders.is_empty();
+        if carried {
+            self.carry_in_order(start, &steps, &mut scratch);
         }
-        let ids: Vec<u32> = start.placed().map(|p| p.id).collect();
-        let mut done: std::collections::HashSet<u32> = std::collections::HashSet::new();
-        let mut remaining = ids.clone();
-        let mut stand_grid = None;
-        while !remaining.is_empty() {
-            // A collider is ready once the collider its own entity stands on is done.
-            let (mut ready, rest): (Vec<u32>, Vec<u32>) = remaining.iter().partition(|collider| {
-                riders
-                    .iter()
-                    .find(|r| r.id == **collider)
-                    .is_none_or(|r| done.contains(&r.support) || !ids.contains(&r.support))
-            });
-            let mut rest = rest;
-            if ready.is_empty() {
-                // A cycle of colliders on one another: carried in the order they were placed.
-                ready.append(&mut rest);
-            }
-            // The carried moves meet the colliders where they stand now.
-            let now = self.placed_moving_colliders();
-            moving_colliders::in_level(now, || {
-                for collider in &ready {
-                    self.carry_riders_of(*collider, start, &riders, &mut stand_grid);
-                }
-            });
-            done.extend(ready);
-            remaining = rest;
+        SCRATCH.with(|cell| *cell.borrow_mut() = scratch);
+        if carried {
+            // A carried vehicle's passengers follow it now, through the one rider positioning
+            // the tick uses (`Entity.positionRider`), nested passengers in order.
+            self.position_riders();
         }
     }
 
-    /// The bodies standing on a collider of `start`, each with the collider it stands on.
-    fn collider_riders(&mut self, start: &Prepared) -> Vec<Rider> {
+    /// Whether any collider of `start` stands elsewhere now.
+    fn any_collider_moved(&self, start: &Prepared) -> bool {
+        start.placed().any(|p| {
+            self.collider_now_frame(p.id)
+                .is_some_and(|now| now != p.collider.frame)
+        })
+    }
+
+    /// Carries the riders of each collider, a collider after the collider its own entity stands on.
+    fn carry_in_order(&mut self, start: &Prepared, steps: &StepHeights, scratch: &mut Scratch) {
+        scratch.order.clear();
+        let mut at = 0;
+        while at < scratch.riders.len() {
+            let collider = scratch.riders[at].support;
+            // A cycle of colliders on one another stops at the number of colliders there are:
+            // they are then carried in the order they were placed.
+            let mut depth = 0;
+            let mut up = collider;
+            while let Ok(i) = scratch.stacked.binary_search_by_key(&up, |&(id, _)| id) {
+                up = scratch.stacked[i].1;
+                depth += 1;
+                if depth > start.len() as u32 || up == collider {
+                    break;
+                }
+            }
+            scratch.order.push((depth, collider));
+            while at < scratch.riders.len() && scratch.riders[at].support == collider {
+                at += 1;
+            }
+        }
+        scratch.order.sort_unstable();
+        let mut stand_grid = None;
+        let mut wave = 0;
+        let mut at = 0;
+        while at < scratch.order.len() {
+            // The carried moves meet the colliders where they stand now.
+            wave = wave.max(scratch.order[at].0);
+            let now = self.placed_moving_colliders();
+            moving_colliders::in_level(now, || {
+                while at < scratch.order.len() && scratch.order[at].0 <= wave {
+                    let collider = scratch.order[at].1;
+                    let first = scratch.riders.partition_point(|r| r.support < collider);
+                    let count = scratch.riders[first..]
+                        .iter()
+                        .take_while(|r| r.support == collider)
+                        .count();
+                    self.carry_riders_of(
+                        collider,
+                        start,
+                        steps,
+                        &scratch.riders[first..first + count],
+                        &mut stand_grid,
+                    );
+                    at += 1;
+                }
+            });
+            wave += 1;
+        }
+    }
+
+    /// The bodies standing on a collider of `start`, each with the collider it stands on,
+    /// into `scratch`, by collider.
+    fn collider_riders(&mut self, start: &Prepared, steps: &StepHeights, scratch: &mut Scratch) {
         let server = self.is_logical_server();
-        let steps = self.push_step_heights();
-        let mut riders = Vec::new();
+        scratch.riders.clear();
+        scratch.stacked.clear();
+        scratch.ids.clear();
+        scratch.ids.extend(start.placed().map(|p| p.id));
+        scratch.ids.sort_unstable();
         for target in self.push_targets() {
             let wanted = if server {
                 matches!(target, MoveWho::Entity(_))
@@ -79,7 +144,7 @@ impl Game<'_> {
             if !wanted {
                 continue;
             }
-            let Some(body) = self.push_body(target, None, &steps) else {
+            let Some(body) = self.push_body(target, None, steps) else {
                 continue;
             };
             if !body.on_ground {
@@ -89,16 +154,24 @@ impl Game<'_> {
             if no_physics || rides {
                 continue;
             }
+            // The colliders the level's index finds under its feet: the highest top, a tie to
+            // the lower collider entity id.
             let mut best: Option<(f64, u32)> = None;
-            for placed in start.placed() {
+            let probe = Aabb::new(
+                body.bounds
+                    .min_position()
+                    .subtract(Vec3::new(0.0, SUPPORT_PROBE, 0.0)),
+                body.bounds.max_position(),
+            );
+            start.meeting(probe, |placed| {
                 if placed.exempt.contains(&id) {
-                    continue;
+                    return;
                 }
                 let allowed = placed
                     .collider
                     .collide(body.bounds, Axis::Y, -SUPPORT_PROBE);
                 if allowed <= -SUPPORT_PROBE {
-                    continue;
+                    return;
                 }
                 let gap = -allowed;
                 let better = best
@@ -106,16 +179,22 @@ impl Game<'_> {
                 if better {
                     best = Some((gap, placed.id));
                 }
-            }
+            });
             if let Some((_, support)) = best {
-                riders.push(Rider {
+                scratch.riders.push(Rider {
                     target,
                     id,
                     support,
                 });
             }
         }
-        riders
+        scratch.riders.sort_unstable_by_key(|r| r.support);
+        for rider in &scratch.riders {
+            if scratch.ids.binary_search(&rider.id).is_ok() {
+                scratch.stacked.push((rider.id, rider.support));
+            }
+        }
+        scratch.stacked.sort_unstable();
     }
 
     /// The entity id of a carried body, whether it has no physics, and whether it rides.
@@ -142,6 +221,7 @@ impl Game<'_> {
         &mut self,
         collider: u32,
         start: &Prepared,
+        steps: &StepHeights,
         riders: &[Rider],
         stand_grid: &mut Option<sunrise_client::entities::ObstacleGrid>,
     ) {
@@ -151,9 +231,8 @@ impl Game<'_> {
         let Some(after) = self.collider_now_frame(collider) else {
             return;
         };
-        let steps = self.push_step_heights();
-        for rider in riders.iter().filter(|r| r.support == collider) {
-            let Some(body) = self.push_body(rider.target, None, &steps) else {
+        for rider in riders {
+            let Some(body) = self.push_body(rider.target, None, steps) else {
                 continue;
             };
             let centre = body.bounds.center();

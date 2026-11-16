@@ -831,3 +831,45 @@ fn a_listener_hears_a_carry_and_may_cancel_it() {
         });
     });
 }
+
+/// A carried vehicle takes its passenger and that passenger's own passenger with it: all three
+/// move by the same displacement, the riders seated by the one rider positioning the tick uses.
+#[test]
+#[ignore = "daily"]
+fn a_carried_vehicle_takes_its_passengers_and_theirs_with_it() {
+    with_world(|game| {
+        let (holder, holder_ref) = stand_with_id(game, [8.0, 70.0, 8.0]);
+        holder_ref.set_collider(game, Some(deck())).unwrap();
+        let (vehicle, _) = stand_with_id(game, [8.5, 70.0, 8.0]);
+        let (middle, _) = stand_with_id(game, [8.5, 71.0, 8.0]);
+        let (top, _) = stand_with_id(game, [8.5, 72.0, 8.0]);
+        let update = |game: &mut Game<'_>, id: u32, f: &dyn Fn(&mut sunrise_client::mobs::Mob)| {
+            let at = game.mobs.iter().position(|m| m.id == id).expect("a pig");
+            game.mobs.update(at, |m| f(m));
+        };
+        update(game, vehicle, &|m| m.on_ground = true);
+        update(game, middle, &|m| m.extra.mount = Some(vehicle));
+        update(game, top, &|m| m.extra.mount = Some(middle));
+        game.position_riders();
+        let position = |game: &Game<'_>, id: u32| {
+            game.mobs
+                .iter()
+                .find(|m| m.id == id)
+                .map(|m| m.position)
+                .expect("a pig")
+        };
+        let before = [vehicle, middle, top].map(|id| position(game, id));
+        assert!(
+            before[1].y > before[0].y && before[2].y > before[1].y,
+            "{before:?}"
+        );
+        tick_level_moving(game, |g| shift_stand(g, holder, Vec3::new(0.5, 0.0, 0.0)));
+        for (id, was) in [vehicle, middle, top].into_iter().zip(before) {
+            let now = position(game, id);
+            assert!(
+                near(now, Vec3::new(was.x + 0.5, was.y, was.z), 0.02),
+                "{id}: {was:?} -> {now:?}"
+            );
+        }
+    });
+}
