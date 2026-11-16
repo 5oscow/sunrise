@@ -1017,7 +1017,8 @@ pub struct PendingContainerLoot {
     pub seed: Option<Tag>,
 }
 impl PendingContainerLoot {
-    /// Keep the loaded metadata until access or serialization.
+    /// Keep the table and raw seed tag, including an explicit zero seed, until
+    /// loot access or serialization. Vanilla's save omits a zero seed.
     pub fn from_tag(tag: &Tag) -> Option<Self> {
         let table = tag.get("LootTable")?;
         let Tag::String(id) = table else { return None };
