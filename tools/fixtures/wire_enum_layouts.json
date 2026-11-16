@@ -258,7 +258,8 @@
     {
       "name": "DrawError",
       "path": "crate::client::world_draw::DrawError",
-      "hash": "6738751c2f3fac7a",
+      "hash": "7bfc4da231ac39e2",
+      "contract_change": "arismoko/horizon#4171 appends DrawError::TextTooDeep and DrawError::TextRefused; ordinals 0, 1, 2 remain unchanged; the frozen hash was 6738751c2f3fac7a",
       "canonical_path": "crate::client::world_draw::DrawError"
     },
     {

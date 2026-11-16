@@ -224,6 +224,14 @@ pub fn background_color(chat_only: bool, opacity: f64, default: f32) -> u32 {
     color_from_float(a, 0.0, 0.0, 0.0)
 }
 
+/// The alpha of a name tag's faded text (`NameTagFeatureRenderer`'s see-through and sneaking
+/// text) that goes with [`background_color`]'s opacity: the floor of 255 times the larger of
+/// (opacity + 0.75) / 2 and 0.5. 0x7F at the default 0.25, 159 at 0.5, 223 at 1.0.
+pub fn faded_text_alpha(chat_only: bool, opacity: f64, default: f32) -> u32 {
+    let a = if chat_only { default } else { opacity as f32 };
+    as8(((a + 0.75) / 2.0).max(0.5))
+}
+
 /// `Mth.floor`.
 pub fn floor(x: f32) -> i32 {
     let i = x as i32;
@@ -972,3 +980,21 @@ mod gradient_tests;
 #[cfg(test)]
 #[path = "hud_layout_rotate_tests.rs"]
 mod rotate_tests;
+
+
+#[cfg(test)]
+mod faded_text_tests {
+    use super::{background_color, faded_text_alpha};
+
+    #[test]
+    fn faded_text_follows_the_text_background_opacity() {
+        // Chat only: the default 0.25 whatever the slider says.
+        assert_eq!(faded_text_alpha(true, 1.0, 0.25), 0x7F);
+        assert_eq!(background_color(true, 1.0, 0.25), 0x3F00_0000);
+        // The slider at 0.5: backdrop 127, text 159; at 1.0, text 223; never below 0.5.
+        assert_eq!(background_color(false, 0.5, 0.25) >> 24, 127);
+        assert_eq!(faded_text_alpha(false, 0.5, 0.25), 159);
+        assert_eq!(faded_text_alpha(false, 1.0, 0.25), 223);
+        assert_eq!(faded_text_alpha(false, 0.0, 0.25), 127);
+    }
+}

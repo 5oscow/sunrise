@@ -75,6 +75,42 @@ pub enum DrawError {
     InvalidWidth,
     /// The batch would exceed this view's setup-time capacity.
     CapacityExceeded,
+    /// A label's text is deeper than 512 component nodes (`MAX_TEXT_DEPTH`).
+    TextTooDeep,
+    /// A label's text is otherwise refused at the boundary (`TextFormError`).
+    TextRefused,
+}
+
+/// How [`WorldDrawContext::name_tag`](crate::WorldDrawContext::name_tag) draws a label.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+#[derive(sunrise_mod_api_macros::Wire)]
+pub struct NameTagOptions {
+    /// Draw it as vanilla draws a name that is not sneaking: opaque text in the world and a
+    /// faded copy over everything, walls included. Off, it is drawn once as a sneaking name:
+    /// the faded text, depth tested and translucent. The faded text's alpha follows the
+    /// text background opacity: 255 times the larger of (opacity + 0.75) / 2 and 0.5, 0x7F
+    /// at the default.
+    pub see_through: bool,
+    /// Put the translucent black backdrop behind the faded text, at the player's text
+    /// background opacity (`Options.getBackgroundOpacity(0.25)`: 0x3F at the default).
+    pub background: bool,
+    /// The light at the label, as a name tag reads its entity's: sky light in the high four
+    /// bits, block light in the low four (`0xF0` is full sky light and no block light; `0x0F`
+    /// full block light under no sky). Without `see_through` the label is drawn in exactly
+    /// this light; with it, the copy in the world raises each of the two levels to at least 2
+    /// (`lightCoordsWithEmission(light, 2)`) and the copy over everything ignores it.
+    pub light: u8,
+}
+impl NameTagOptions {
+    /// Describe a label's drawing.
+    pub fn new(see_through: bool, background: bool, light: u8) -> Self {
+        Self {
+            see_through,
+            background,
+            light,
+        }
+    }
 }
 
 /// Where in the world's frame a stage's geometry is drawn: NeoForge 26.3's

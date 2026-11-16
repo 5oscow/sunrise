@@ -330,6 +330,15 @@ impl WorldDrawContext for GameWorldDrawContext<'_, '_> {
         self.game
             .native_world_draw_pipeline_quads(&mut *self.surface, pipeline, quads)
     }
+    fn name_tag(
+        &mut self,
+        at: [f64; 3],
+        text: &Text,
+        options: NameTagOptions,
+    ) -> Result<(), DrawError> {
+        self.game
+            .native_world_name_tag(&mut *self.surface, at, text, options)
+    }
     fn usage(&self) -> WorldDrawUsage {
         self.game.native_world_draw_usage(&*self.surface)
     }

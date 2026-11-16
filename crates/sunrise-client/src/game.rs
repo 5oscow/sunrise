@@ -8727,7 +8727,6 @@ impl Game<'_> {
         let border = (!title)
             .then(|| self.border_draw(camera.to_array(), alpha as f32))
             .flatten();
-        let see_through = std::mem::take(&mut self.see_through_vertices);
         pr.lap("pr_weather_border");
         if title {
             self.dynamic_lights.clear();
@@ -8755,6 +8754,8 @@ impl Game<'_> {
             &mut world_geometry,
             &mut entities,
         );
+        // After the mods' world geometry, whose labels add see-through copies.
+        let see_through = std::mem::take(&mut self.see_through_vertices);
         let colored_lights = if self.title.is_none() {
             visuals.finish(self, camera)
         } else {
