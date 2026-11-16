@@ -1423,6 +1423,55 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "daily"]
+    fn a_placement_view_reads_redstone_and_collision_shapes() {
+        use mod_api::{Direction, LevelHost};
+        use std::sync::Arc;
+        use sunrise_client::chunk::Chunk;
+
+        with_game(|game| {
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let registry = game.pack.assets.registry;
+            let glass = registry.default_state("minecraft:glass").unwrap();
+            let stone = registry.default_state("minecraft:stone").unwrap();
+            let lever = registry
+                .resolve(&sunrise_world::chunk::BlockState {
+                    name: "minecraft:lever".into(),
+                    properties: [("face", "wall"), ("facing", "east"), ("powered", "true")]
+                        .into_iter()
+                        .map(|(key, value)| (key.into(), value.into()))
+                        .collect(),
+                })
+                .unwrap();
+            game.world.set(5, 64, 5, glass).unwrap();
+            game.world.set(6, 64, 5, lever).unwrap();
+            game.world.set(9, 64, 5, stone).unwrap();
+            game.with_level(|_, level, ticks| {
+                let view = level.view(ticks);
+                // The glass has a powered lever on its east side; the stone nothing.
+                assert_eq!(view.has_neighbor_signal([5, 64, 5]), Some(true));
+                assert_eq!(view.best_neighbor_signal([5, 64, 5]), Some(15));
+                assert_eq!(view.signal([5, 64, 5], Direction::East), Some(0));
+                assert_eq!(view.direct_signal_to([5, 64, 5]), Some(15));
+                assert_eq!(view.has_neighbor_signal([9, 64, 5]), Some(false));
+                // The same reads from the level itself have no ticks to ask.
+                assert_eq!(LevelHost::has_neighbor_signal(&*level, [5, 64, 5]), None);
+                // A full block's collision box, none for air, nothing for an unloaded position.
+                for host in [&view as &dyn LevelHost, &*level] {
+                    assert_eq!(
+                        host.collision_shape([9, 64, 5]),
+                        Some(vec![[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]])
+                    );
+                    assert_eq!(host.collision_shape([9, 70, 5]), Some(Vec::new()));
+                    assert_eq!(host.collision_shape([160, 64, 5]), None);
+                }
+            });
+        });
+    }
+
+    #[test]
+    #[ignore = "daily"]
     fn a_soil_part_answers_for_the_plants_above_it_in_a_real_game_level() {
         use std::sync::Arc;
         use sunrise_client::chunk::Chunk;

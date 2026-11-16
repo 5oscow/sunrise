@@ -15,7 +15,7 @@ pub(super) fn is_level(hook: &Hook) -> bool {
 }
 
 fn game_level(hook: &Hook) -> bool {
-    hook.target.contains("::GameLevel<")
+    hook.target.contains("::GameLevel<") || hook.target.contains("::LevelView<")
 }
 
 /// Validate catalog access restrictions against the hook's receiver.

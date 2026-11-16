@@ -349,26 +349,6 @@ impl GameLevel<'_> {
         self.fire_update_shape(ticks, call);
     }
 
-    /// On an authoritative server, `BlockState.canSurvive` for `state` at
-    /// `pos` (`BlockBehaviour.canSurvive`), before the block answers it: as
-    /// it is placed (`BlockItem.canPlace`), from a shape update of a block
-    /// whose template checks it (a plant, a torch, a sign: false breaks the
-    /// block with its drops), and wherever else vanilla asks. `state` may not
-    /// be in the world yet, so decide from `state`. Answer only for your own
-    /// blocks: `Some(false)` refuses the spot, `Some(true)` allows it, and
-    /// the block's own rule doesn't run. The level is read-only. Asked on
-    /// every shape update of such a block: keep it short.
-    #[inline(always)]
-    pub(in crate::game) fn native_can_survive(
-        &self,
-        dimension: LevelDimension,
-        pos: BlockPos,
-        state: BlockStateId,
-        survives: &mut Option<bool>,
-    ) {
-        self.fire_can_survive(dimension, pos, state, survives);
-    }
-
     /// On an authoritative server, `VegetationBlock.mayPlaceOn` for the
     /// plant `state` on `ground` at `ground_pos`, before the plant answers
     /// it: the blocks a mod plant (one whose template is a vanilla plant,
@@ -404,39 +384,6 @@ impl GameLevel<'_> {
         handled: &mut bool,
     ) {
         self.fire_tick_block(ticks, dimension, pos, state, handled);
-    }
-
-    /// A block is about to take the state it is placed in
-    /// (`Block.getStateForPlacement(BlockPlaceContext)`), `state` the block's
-    /// own default state. Answer only for your blocks: put the state you want
-    /// in `answer` as `Some(Some(state))` — a state of that block, as vanilla
-    /// sets properties on its own `defaultBlockState` (another block's is
-    /// ignored) — or refuse the placement with `Some(None)`: the block goes
-    /// nowhere and the stack is kept, as vanilla's `null`. Left empty, the
-    /// block's own placement runs. `context` is
-    /// vanilla's `BlockPlaceContext` (the clicked face, the placer's rotation,
-    /// the clicked position, whether the clicked block is being replaced, the
-    /// item in hand) and `fluid` the fluid in the position the block would go
-    /// in, which a waterlogged block reads. Build the state from `state` with
-    /// `native_state_with_property`, and know whether `state` is yours with
-    /// `native_state_block`. It is asked for every placer that goes
-    /// through vanilla's placement (a player's `BlockItem.place`, a
-    /// dispenser's `DirectionalPlaceContext`), and the answer still takes its
-    /// survival and entity obstruction checks. A trait mod returns
-    /// `Some(Some(state))` to choose a state, `Some(None)` to refuse, or
-    /// `None` to leave the answer to the next mod or vanilla.
-    /// Authoritative servers only.
-    #[inline(always)]
-    #[allow(clippy::option_option)]
-    pub(in crate::game) fn native_state_for_placement(
-        &self,
-        dimension: LevelDimension,
-        state: BlockStateId,
-        context: &PlacementContext,
-        fluid: mod_api::FluidState,
-        answer: &mut Option<Option<BlockStateId>>,
-    ) {
-        self.fire_state_for_placement(dimension, state, context, fluid, answer);
     }
 
     /// A block nothing in Sunrise knows a `BonemealableBlock` for is about to
@@ -4888,6 +4835,84 @@ impl Game<'_> {
     ) -> Result<(), String> {
         let item = mod_api::__private::item_key_id(item).ok_or("unknown item key")?;
         self.recipe_give(item, count)
+    }
+}
+
+/// The level a placement or survival question is asked of: the game's level for reads of blocks
+/// and fluids, with the simulation's ticks beside it, which a signal read needs (comparator
+/// outputs, moving pistons). The listener's `&dyn LevelHost` is this, so `state_for_placement`
+/// and `can_survive` can read redstone and shapes. A read goes only through `Signals`, which
+/// asks the signal hooks and never `state_for_placement` or `can_survive`: a listener cannot
+/// re-enter itself through it.
+pub(in crate::game) struct LevelView<'a> {
+    pub(in crate::game) level: &'a dyn mod_api::LevelHost,
+    pub(in crate::game) access: &'a dyn sunrise_world::level::signal_access::SignalAccess,
+    pub(in crate::game) behaviours: &'a sunrise_world::level::Behaviours,
+    pub(in crate::game) ticks: &'a Ticks,
+}
+impl GameLevel<'_> {
+    /// This level as a placement or survival question sees it, with the simulation's `ticks`.
+    pub(in crate::game) fn view<'a>(&'a self, ticks: &'a Ticks) -> LevelView<'a> {
+        LevelView {
+            level: self,
+            access: self,
+            behaviours: self.behaviours,
+            ticks,
+        }
+    }
+}
+impl LevelView<'_> {
+    /// On an authoritative server, `BlockState.canSurvive` for `state` at
+    /// `pos` (`BlockBehaviour.canSurvive`), before the block answers it: as
+    /// it is placed (`BlockItem.canPlace`), from a shape update of a block
+    /// whose template checks it (a plant, a torch, a sign: false breaks the
+    /// block with its drops), and wherever else vanilla asks. `state` may not
+    /// be in the world yet, so decide from `state`. Answer only for your own
+    /// blocks: `Some(false)` refuses the spot, `Some(true)` allows it, and
+    /// the block's own rule doesn't run. The level is read-only. Asked on
+    /// every shape update of such a block: keep it short.
+    #[inline(always)]
+    pub(in crate::game) fn native_can_survive(
+        &self,
+        dimension: LevelDimension,
+        pos: BlockPos,
+        state: BlockStateId,
+        survives: &mut Option<bool>,
+    ) {
+        self.fire_can_survive(dimension, pos, state, survives);
+    }
+
+    /// A block is about to take the state it is placed in
+    /// (`Block.getStateForPlacement(BlockPlaceContext)`), `state` the block's
+    /// own default state. Answer only for your blocks: put the state you want
+    /// in `answer` as `Some(Some(state))` — a state of that block, as vanilla
+    /// sets properties on its own `defaultBlockState` (another block's is
+    /// ignored) — or refuse the placement with `Some(None)`: the block goes
+    /// nowhere and the stack is kept, as vanilla's `null`. Left empty, the
+    /// block's own placement runs. `context` is
+    /// vanilla's `BlockPlaceContext` (the clicked face, the placer's rotation,
+    /// the clicked position, whether the clicked block is being replaced, the
+    /// item in hand) and `fluid` the fluid in the position the block would go
+    /// in, which a waterlogged block reads. Build the state from `state` with
+    /// `native_state_with_property`, and know whether `state` is yours with
+    /// `native_state_block`. It is asked for every placer that goes
+    /// through vanilla's placement (a player's `BlockItem.place`, a
+    /// dispenser's `DirectionalPlaceContext`), and the answer still takes its
+    /// survival and entity obstruction checks. A trait mod returns
+    /// `Some(Some(state))` to choose a state, `Some(None)` to refuse, or
+    /// `None` to leave the answer to the next mod or vanilla.
+    /// Authoritative servers only.
+    #[inline(always)]
+    #[allow(clippy::option_option)]
+    pub(in crate::game) fn native_state_for_placement(
+        &self,
+        dimension: LevelDimension,
+        state: BlockStateId,
+        context: &PlacementContext,
+        fluid: mod_api::FluidState,
+        answer: &mut Option<Option<BlockStateId>>,
+    ) {
+        self.fire_state_for_placement(dimension, state, context, fluid, answer);
     }
 }
 

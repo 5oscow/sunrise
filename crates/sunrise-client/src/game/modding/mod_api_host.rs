@@ -463,6 +463,18 @@ impl mod_api::LevelHost for super::GameLevel<'_> {
             state.try_into_engine(&()).ok()?,
         )
     }
+    fn collision_shape(&self, pos: [i32; 3]) -> Option<Vec<[f64; 6]>> {
+        let [x, y, z] = pos;
+        if !(self.world.shape.contains_y(y) && self.world.loaded(x, z)) {
+            return None;
+        }
+        Some(super::native_state_shapes::collision_boxes(
+            self.collision,
+            self.world,
+            self.world.block(x, y, z),
+            pos,
+        ))
+    }
     fn fluid_in_tag(&self, fluid: &str, tag: &str) -> Option<bool> {
         self.native_authoritative
             .then(|| super::native_world_read::fluid_in_tag(self.items, fluid, tag))
@@ -769,6 +781,39 @@ impl<'a: 'b, 'b, L: std::ops::Deref<Target = super::GameLevel<'a>>> mod_api::Lev
     fn enabled_features(&self) -> mod_api::FeatureFlags {
         mod_api::LevelHost::enabled_features(&*self.level)
     }
+    fn signal(&self, pos: [i32; 3], direction: Direction) -> Option<i32> {
+        Some(
+            self.signals()
+                .signal(BlockPos::new(pos[0], pos[1], pos[2]), direction),
+        )
+    }
+    fn direct_signal(&self, pos: [i32; 3], direction: Direction) -> Option<i32> {
+        Some(
+            self.signals()
+                .direct_signal(BlockPos::new(pos[0], pos[1], pos[2]), direction),
+        )
+    }
+    fn direct_signal_to(&self, pos: [i32; 3]) -> Option<i32> {
+        Some(
+            self.signals()
+                .direct_signal_to(BlockPos::new(pos[0], pos[1], pos[2])),
+        )
+    }
+    fn best_neighbor_signal(&self, pos: [i32; 3]) -> Option<i32> {
+        Some(
+            self.signals()
+                .best_neighbor_signal(BlockPos::new(pos[0], pos[1], pos[2])),
+        )
+    }
+    fn has_neighbor_signal(&self, pos: [i32; 3]) -> Option<bool> {
+        Some(
+            self.signals()
+                .has_neighbor_signal(BlockPos::new(pos[0], pos[1], pos[2])),
+        )
+    }
+    fn collision_shape(&self, pos: [i32; 3]) -> Option<Vec<[f64; 6]>> {
+        mod_api::LevelHost::collision_shape(&*self.level, pos)
+    }
 }
 
 impl<'a: 'b, 'b> mod_api::LevelRandomHost for LevelTicks<'b, &mut super::GameLevel<'a>> {
@@ -793,26 +838,6 @@ impl<'a: 'b, 'b, L: std::ops::Deref<Target = super::GameLevel<'a>>> mod_api::Lev
     fn schedule_fluid_tick(&mut self, pos: [i32; 3], fluid: &str, delay: i32) -> bool {
         self.level
             .native_schedule_fluid_tick(self.ticks, pos, fluid, delay)
-    }
-    fn signal(&self, pos: [i32; 3], direction: Direction) -> i32 {
-        self.signals()
-            .signal(BlockPos::new(pos[0], pos[1], pos[2]), direction)
-    }
-    fn direct_signal(&self, pos: [i32; 3], direction: Direction) -> i32 {
-        self.signals()
-            .direct_signal(BlockPos::new(pos[0], pos[1], pos[2]), direction)
-    }
-    fn direct_signal_to(&self, pos: [i32; 3]) -> i32 {
-        self.signals()
-            .direct_signal_to(BlockPos::new(pos[0], pos[1], pos[2]))
-    }
-    fn best_neighbor_signal(&self, pos: [i32; 3]) -> i32 {
-        self.signals()
-            .best_neighbor_signal(BlockPos::new(pos[0], pos[1], pos[2]))
-    }
-    fn has_neighbor_signal(&self, pos: [i32; 3]) -> bool {
-        self.signals()
-            .has_neighbor_signal(BlockPos::new(pos[0], pos[1], pos[2]))
     }
 }
 
@@ -889,6 +914,105 @@ super::native_tags::impl_tags!(
     level.native_authoritative.then_some(level.items)
 );
 super::native_tags::impl_tags!(super::native_hooks::HitLevel<'_>, level, level.0.tags());
+
+/// A placement or survival question's level: every read of the game's level, and the signal reads
+/// that need the simulation's ticks.
+impl mod_api::LevelHost for super::native_hooks::LevelView<'_> {
+    fn block_entity_data(&self, entity: mod_api::BlockEntityRef) -> Option<mod_api::Compound> {
+        self.level.block_entity_data(entity)
+    }
+    fn block_state(&self, pos: [i32; 3]) -> Option<mod_api::BlockState> {
+        self.level.block_state(pos)
+    }
+    fn state_block(&self, state: mod_api::BlockState) -> Option<&str> {
+        self.level.state_block(state)
+    }
+    fn block_state_id(&self, name: &str) -> Option<mod_api::BlockState> {
+        self.level.block_state_id(name)
+    }
+    fn block_state_default(&self, block: mod_api::BlockKey) -> Option<mod_api::BlockState> {
+        self.level.block_state_default(block)
+    }
+    fn state_string(&self, state: mod_api::BlockState) -> Option<String> {
+        self.level.state_string(state)
+    }
+    fn min_y(&self) -> i32 {
+        self.level.min_y()
+    }
+    fn height(&self) -> i32 {
+        self.level.height()
+    }
+    fn block_in_tag(&self, block: mod_api::BlockKey, tag: &str) -> Option<bool> {
+        self.level.block_in_tag(block, tag)
+    }
+    fn tags(&self) -> &dyn mod_api::Tags {
+        self.level.tags()
+    }
+    fn fluid_state(&self, pos: [i32; 3]) -> Option<mod_api::FluidState> {
+        self.level.fluid_state(pos)
+    }
+    fn state_fluid_state(&self, state: mod_api::BlockState) -> Option<mod_api::FluidState> {
+        self.level.state_fluid_state(state)
+    }
+    fn fluid_in_tag(&self, fluid: &str, tag: &str) -> Option<bool> {
+        self.level.fluid_in_tag(fluid, tag)
+    }
+    fn state_with_property(
+        &self,
+        state: mod_api::BlockState,
+        key: &str,
+        value: &str,
+    ) -> Option<mod_api::BlockState> {
+        self.level.state_with_property(state, key, value)
+    }
+    fn brightness(&self, layer: mod_api::LightLayer, pos: [i32; 3]) -> i32 {
+        self.level.brightness(layer, pos)
+    }
+    fn raw_brightness(&self, pos: [i32; 3], sky_darken: i32) -> i32 {
+        self.level.raw_brightness(pos, sky_darken)
+    }
+    fn is_loaded(&self, pos: [i32; 3]) -> bool {
+        self.level.is_loaded(pos)
+    }
+    fn is_raining_at(&self, pos: [i32; 3]) -> bool {
+        self.level.is_raining_at(pos)
+    }
+    fn enabled_features(&self) -> mod_api::FeatureFlags {
+        self.level.enabled_features()
+    }
+    fn signal(&self, pos: [i32; 3], direction: Direction) -> Option<i32> {
+        Some(self.signals().signal(block_pos(pos), direction))
+    }
+    fn direct_signal(&self, pos: [i32; 3], direction: Direction) -> Option<i32> {
+        Some(self.signals().direct_signal(block_pos(pos), direction))
+    }
+    fn direct_signal_to(&self, pos: [i32; 3]) -> Option<i32> {
+        Some(self.signals().direct_signal_to(block_pos(pos)))
+    }
+    fn best_neighbor_signal(&self, pos: [i32; 3]) -> Option<i32> {
+        Some(self.signals().best_neighbor_signal(block_pos(pos)))
+    }
+    fn has_neighbor_signal(&self, pos: [i32; 3]) -> Option<bool> {
+        Some(self.signals().has_neighbor_signal(block_pos(pos)))
+    }
+    fn collision_shape(&self, pos: [i32; 3]) -> Option<Vec<[f64; 6]>> {
+        self.level.collision_shape(pos)
+    }
+}
+
+impl super::native_hooks::LevelView<'_> {
+    /// The level read through the game's own `SignalGetter`, with the simulation's ticks.
+    fn signals(
+        &self,
+    ) -> sunrise_world::level::Signals<'_, dyn sunrise_world::level::signal_access::SignalAccess + '_>
+    {
+        self.behaviours.signals(self.access, self.ticks)
+    }
+}
+
+fn block_pos(pos: [i32; 3]) -> BlockPos {
+    BlockPos::new(pos[0], pos[1], pos[2])
+}
 
 #[cfg(test)]
 mod attachment_membership_tests {

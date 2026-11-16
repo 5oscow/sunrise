@@ -769,10 +769,12 @@ pub trait LevelAccess: BlockEntityNeighbors {
     /// places `s`, a state of the block's own, `Some(None)` refuses the
     /// placement (vanilla's `null` return: the block goes nowhere and nothing
     /// is consumed), and `None` leaves the block's own `getStateForPlacement`
-    /// to run. The default does nothing.
+    /// to run. `ticks` is the simulation's own, which a signal read of the level needs
+    /// (comparator outputs, moving pistons). The default does nothing.
     #[allow(clippy::option_option)]
     fn before_state_for_placement(
         &self,
+        _ticks: &Ticks,
         _state: BlockStateId,
         _context: &PlacementContext,
         _fluid: FluidState,
@@ -783,10 +785,11 @@ pub trait LevelAccess: BlockEntityNeighbors {
     /// block answers it: placing it (`BlockItem.canPlace`), a plant's or an
     /// attached block's shape update, and every other rule that asks. `state`
     /// may not be in the level yet (it is being placed). An answer put in
-    /// `survives` is the result, and the block's own rule doesn't run. The
-    /// default does nothing.
+    /// `survives` is the result, and the block's own rule doesn't run. `ticks` is as for
+    /// `before_state_for_placement`. The default does nothing.
     fn before_can_survive(
         &self,
+        _ticks: &Ticks,
         _pos: BlockPos,
         _state: BlockStateId,
         _survives: &mut Option<bool>,

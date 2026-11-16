@@ -14,7 +14,8 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     /// `BlockState.canSurvive(level, pos)`.
     pub fn can_survive(&self, state: BlockStateId, pos: BlockPos) -> bool {
         let mut survives = None;
-        self.level.before_can_survive(pos, state, &mut survives);
+        self.level
+            .before_can_survive(&*self.ticks, pos, state, &mut survives);
         survives.unwrap_or_else(|| self.can_survive_at(0, state, pos))
     }
     fn can_survive_at(&self, depth: usize, state: BlockStateId, pos: BlockPos) -> bool {
