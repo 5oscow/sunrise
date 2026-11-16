@@ -41,7 +41,7 @@ use sunrise_client::{
     items::ItemStack,
     text::{self, Style, Text},
 };
-use sunrise_core::{geometry::Vec3, java_number::float_to_string};
+use sunrise_core::{geometry::Vec3, java_number::float_to_string, random::RandomSource};
 use sunrise_protocol::packets::play::{self, Clientbound as C};
 use sunrise_world::registry::BlockStateId;
 
