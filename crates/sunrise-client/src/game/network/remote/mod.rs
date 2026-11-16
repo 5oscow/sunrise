@@ -15486,7 +15486,7 @@ mod item_use_tick_tests {
         )]
         .into();
         crate::game::api_values::install_parts(&mods).unwrap();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             crate::game::native_entity_refs::tests::with_client_game(|game| {
                 for (cancel, replacement, after_first, after_second) in [
                     (true, 5, -2, -3),

@@ -426,7 +426,7 @@ mod tests {
         }
         fn living_entity_use_item_finish(
             &self,
-            _: &mut dyn mod_api::ServerHost,
+            _: HostSide,
             event: &mut LivingEntityUseItemFinishEvent<'_>,
         ) {
             let mut uses = self.0.lock().unwrap();
