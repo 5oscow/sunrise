@@ -234,6 +234,7 @@ impl Game<'_> {
         run_load: bool,
         enabled_features: &[String],
     ) -> Result<PackStack, ReloadStageError> {
+        let opening_world = !run_load;
         sunrise_client::mod_content::check_jars(
             &self.options.resources,
             &sunrise_client::logging::game_home().join("jars"),
@@ -291,7 +292,7 @@ impl Game<'_> {
             self.mods.data_switched = true;
         }
         self.install_loop_context(context);
-        if !run_load {
+        if opening_world {
             self.fns = Default::default();
         }
         self.fns.packs = stack.packs.clone();
@@ -304,7 +305,7 @@ impl Game<'_> {
         // also install its tables before function admission validates inline holders.
         if let Some(world) = world {
             self.install_world_tables(world);
-        } else if !run_load {
+        } else if opening_world {
             self.open_world_tables(&stack, &resources)
                 .map_err(|error| ReloadStageError::DataSource(error.to_string()))?;
         }
