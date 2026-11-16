@@ -471,6 +471,11 @@ pub fn hop_event(m: &mut Mob) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A client context: the installed test `living_jump` counts only server jumps for the menu test.
+    fn client_context() -> std::sync::Arc<LoopContext> {
+        crate::test_resources::loop_context(sunrise_world::native_load_context::LoopSide::Client)
+    }
     use crate::mobs::{
         Anim, Brain, Flags, MobType, Part, Species,
         anim::{self, Poses},
@@ -623,7 +628,7 @@ mod tests {
         assert!(m.ai.jumping);
         assert_eq!(m.extra.ints[JUMP_DURATION], 15);
         assert_eq!(m.anim.states[0].started, None);
-        apply_jump(&mut m, crate::test_resources::server_loop_context(), 0.2);
+        apply_jump(&mut m, &client_context(), 0.2);
         post_tick(&mut m);
         m.age = 1;
         base_tick(&mut m);
@@ -748,12 +753,12 @@ mod tests {
             1,
         ));
         near(f64::from(jump_power(&m, 0.5)), 0.7);
-        apply_jump(&mut m, crate::test_resources::server_loop_context(), 0.2);
+        apply_jump(&mut m, &client_context(), 0.2);
         near(m.velocity.z, 0.1 / 3.25_f64.sqrt());
         near(m.velocity.y, 0.2 + 0.15 / 3.25_f64.sqrt());
         m.extra.age = -100;
         m.velocity = Vec3::ZERO;
-        apply_jump(&mut m, crate::test_resources::server_loop_context(), 0.2);
+        apply_jump(&mut m, &client_context(), 0.2);
         near(m.velocity.z, 0.1 / 1.25_f64.sqrt());
         near(m.velocity.y, 0.2 + 0.05 / 1.25_f64.sqrt());
         assert_eq!(m.extra.ints[CLIENT_JUMP_DURATION], 15);
