@@ -485,7 +485,7 @@ impl Game<'_> {
     /// tick). TNT primed by an explosion starts ticking next tick.
     /// One primed TNT's `tick`: it moves, and explodes when its fuse is out.
     /// `i` is its place in the list; the caller has checked it is ticking.
-    /// `entities` are the boxes that stop its move (`Game::item_entity_collisions`).
+    /// `entities` are the boxes that stop its move (`Game::entity_collisions` with `Mover::Passive`).
     pub(super) fn tick_one_tnt(&mut self, i: usize, entities: &[Aabb]) -> Result<()> {
         let t = &mut self.tnts[i];
         let (tops, landed) = t.tick_among(

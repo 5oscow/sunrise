@@ -3732,6 +3732,25 @@ impl Mob {
     pub fn bounds(&self) -> Aabb {
         self.bounds_at(self.position)
     }
+    /// `canBeCollidedWith`'s kind of this mob: cheap, for [`crate::entity_solids::Solids::takes`].
+    pub fn solid_kind(&self) -> crate::entity_solids::SolidKind {
+        solid_kind(self.species())
+    }
+    /// This mob as an obstacle for [`crate::entity_solids::Solids`].
+    pub fn solid_candidate(&self) -> crate::entity_solids::Candidate {
+        crate::entity_solids::Candidate {
+            id: self.id,
+            kind: self.solid_kind(),
+            bounds: self.bounds(),
+            alive: self.alive(),
+            removed: self.removed,
+            baby: self.is_baby(),
+            still: self.species() == Species::HappyGhast && happy_ghast::on_still_timeout(self),
+            carrying: self.rider.is_some() || self.extra.rider.is_some(),
+            pushable: self.pushable(),
+            mount: self.extra.mount,
+        }
+    }
     /// `Entity.makeBoundingBox(position)`.
     pub fn bounds_at(&self, position: Vec3) -> Aabb {
         // Shulker.makeBoundingBox: the lid's lift, not the dimensions.

@@ -695,59 +695,6 @@ impl Game<'_> {
         }
         self.rail_pos(cart, x, y, z)
     }
-    /// `AbstractMinecart.canCollideWith`, for `Entity.collide`'s `getEntityCollisions`:
-    /// `AbstractBoat.canVehicleCollide` takes any other cart, boat, shulker or pushable mob and
-    /// player, except one riding this cart. A cart that runs into one has a horizontal
-    /// collision, which sets a TNT minecart off.
-    pub(super) fn cart_entity_collisions(&self, c: &Minecart) -> Vec<Aabb> {
-        let near = c.bounds().inflate(Vec3::new(2.0, 2.0, 2.0));
-        // Every moving cart asks each tick, and the box turns nearly every entity of
-        // the level away: it is tested first, and only the mobs near it are read.
-        let close = |b: &Aabb| b.intersects(near);
-        let mut boxes: Vec<Aabb> = self
-            .carts
-            .iter()
-            .filter(|o| o.id != c.id)
-            .map(Minecart::bounds)
-            .filter(close)
-            .chain(
-                self.boats
-                    .iter()
-                    .map(super::boats::Boat::bounds)
-                    .filter(close),
-            )
-            .collect();
-        self.mobs_meeting(near, |_, m, b| {
-            let counts = m.pushable() || m.species() == Species::Shulker && m.alive();
-            if !m.removed && m.extra.mount != Some(c.id) && counts {
-                boxes.push(b);
-            }
-        });
-        if self.riding != Some(c.id)
-            && let Some(p) = self.player.as_ref()
-            && !self.spectator()
-            && close(&p.bounds())
-        {
-            boxes.push(p.bounds());
-        }
-        if let Some(host) = self.lan.as_ref() {
-            boxes.extend(
-                host.hub
-                    .guests
-                    .iter()
-                    .filter(|g| {
-                        host.hub.here(g)
-                            && g.loaded
-                            && !g.dead
-                            && !g.spectator()
-                            && g.vehicle != Some(c.id)
-                    })
-                    .map(|g| g.bounds())
-                    .filter(close),
-            );
-        }
-        boxes
-    }
     fn max_speed(&self, c: &Minecart) -> f64 {
         let base = if c.in_water { 0.2 } else { 0.4 };
         furnace_speed(c, base)

@@ -1,6 +1,7 @@
 //! Dropped items and experience orbs: their tick (`tick_items`, `tick_dropped_items`,
 //! `tick_experience`), the stacks a destroyed container lets fall, and spawning and merging orbs.
 use super::*;
+use crate::game::collision_source::Mover;
 
 /// A dropped item's `bobOffs` (its bob and spin phase) from its random's draw `drawn`, or under
 /// `SUNRISE_STILL` from a random seeded by its position alone: a client seeds an item's random
@@ -39,7 +40,7 @@ impl Game<'_> {
         // `Entity.checkBelowWorld`: below `Level.getMinY() - 64`.
         let void = f64::from(self.level_min_y() - 64);
         let mut obstacles =
-            sunrise_client::entities::ObstacleGrid::new(self.item_entity_collisions());
+            sunrise_client::entities::ObstacleGrid::new(self.entity_collisions(Mover::Passive));
         let mut nearby = Vec::new();
         let mut bubble_tops = Vec::new();
         let mut moves = ahead::Moves::work_out(self, &items, &obstacles, round, |item| {
