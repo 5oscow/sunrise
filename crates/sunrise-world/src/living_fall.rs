@@ -108,11 +108,11 @@ pub fn cause_living_fall_damage<W: LivingFallWorld>(
     } else {
         distance
     };
+    let (distance, multiplier) = world.modify_fall(distance, multiplier)?;
     // Base Entity.causeFallDamage returns false, even after notifying riders.
     if !world.immune_to_fall_damage()? {
         world.propagate_fall_to_passengers(distance, multiplier)?;
     }
-    let (distance, multiplier) = world.modify_fall(distance, multiplier)?;
     let damage = calculate_fall_damage(world, distance, multiplier)? as f32;
     if damage > 0.0 {
         world.reset_impulse()?;
@@ -135,6 +135,7 @@ mod tests {
         replacement: Option<(f64, f32)>,
         damage: f32,
         sounds: usize,
+        passenger_fall: Option<(f64, f32)>,
     }
     impl LivingFallWorld for Landing {
         type Error = ();
@@ -154,7 +155,12 @@ mod tests {
         fn immune_to_fall_damage(&mut self) -> Result<bool, ()> {
             Ok(false)
         }
-        fn propagate_fall_to_passengers(&mut self, _: f64, _: f32) -> Result<(), ()> {
+        fn propagate_fall_to_passengers(
+            &mut self,
+            distance: f64,
+            multiplier: f32,
+        ) -> Result<(), ()> {
+            self.passenger_fall = Some((distance, multiplier));
             Ok(())
         }
         fn safe_fall_distance(&mut self) -> Result<f64, ()> {
@@ -196,10 +202,16 @@ mod tests {
                 replacement,
                 damage: 0.0,
                 sounds: 0,
+                passenger_fall: None,
             };
             assert_eq!(
                 cause_living_fall_damage(&mut w, 13.0, 1.0),
                 Ok(expected > 0.0)
+            );
+            assert_eq!(
+                w.passenger_fall,
+                Some(replacement.unwrap_or((13.0, 1.0))),
+                "riders receive the block's modified fall inputs"
             );
             assert_eq!(w.damage, expected);
             assert_eq!(w.sounds, if expected > 0.0 { 2 } else { 0 });
