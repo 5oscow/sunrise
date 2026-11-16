@@ -1408,7 +1408,7 @@ impl Game<'_> {
         entity: &mut ModBlockEntity,
         container_slots: usize,
         slot: usize,
-        stack: &mut mod_api::ItemStack,
+        stack: &mut Option<mod_api::ItemStack>,
         handled: &mut bool,
     ) {
         self.fire_menu_quick_move(pos, entity, container_slots, slot, stack, handled);

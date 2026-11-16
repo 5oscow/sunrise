@@ -1888,7 +1888,7 @@ impl super::Game<'_> {
         entity: &mut crate::containers::ModBlockEntity,
         container_slots: usize,
         slot: usize,
-        stack: &mut EngineStack,
+        stack: &mut Option<EngineStack>,
         handled: &mut bool,
     ) {
         if !mod_api::__private::has_part_hook(mod_api::HookId::MenuQuickMove) {

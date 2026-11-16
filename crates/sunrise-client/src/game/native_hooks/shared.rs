@@ -1653,7 +1653,7 @@ pub(super) const BLOCK_CONTACT_HOOKS: sunrise_client::block_contact::Hooks =
                 }
             }
         },
-        fall_on: |dimension, level, c, distance, damage, writes| {
+        fall_on: |dimension, level, c, distance, damage_multiplier, writes| {
             HitLevel(level.reborrow()).native_fall_on(
                 crate::game::native_hooks::fire::FallOnCall {
                     dimension,
@@ -1662,7 +1662,7 @@ pub(super) const BLOCK_CONTACT_HOOKS: sunrise_client::block_contact::Hooks =
                     state: c.state,
                     pos: c.position,
                     distance,
-                    damage,
+                    damage_multiplier,
                     writes,
                 },
             );
@@ -5043,7 +5043,7 @@ mod item_fall_on_tests {
                 event.kind.to_owned(),
                 event.pos,
                 event.distance,
-                event.damage,
+                event.damage_multiplier,
             ));
             event.request(mod_api::LandingWrite::DestroyBlock { drop: false });
         }
