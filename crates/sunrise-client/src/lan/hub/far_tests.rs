@@ -18,6 +18,7 @@ fn far_hub(
     let save = Arc::new(crate::save::SaveDir::new(
         std::env::temp_dir().join("sunrise-far-send-test"),
         crate::save::LevelShape::OVERWORLD,
+        Some(Default::default()),
     ));
     hub.far_level(&save);
     (hub, rx)

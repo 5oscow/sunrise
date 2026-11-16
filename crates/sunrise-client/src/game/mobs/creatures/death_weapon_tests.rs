@@ -82,6 +82,7 @@ fn weapon_case(item: &str, enchantment: &str, level: u32, projectile: bool, swap
         game.save = Arc::new(sunrise_client::save::SaveDir::new(
             scratch.path().join("save"),
             sunrise_client::save::LevelShape::OVERWORLD,
+            Some(Default::default()),
         ));
         game.build_registries();
         game.next_entity = 1000;
@@ -243,6 +244,7 @@ fn death_weapon_e_fall_has_no_weapon() {
         game.save = Arc::new(sunrise_client::save::SaveDir::new(
             scratch.path().join("save"),
             sunrise_client::save::LevelShape::OVERWORLD,
+            Some(Default::default()),
         ));
         game.build_registries();
         let loot = sunrise_world::loot::LootData::load(

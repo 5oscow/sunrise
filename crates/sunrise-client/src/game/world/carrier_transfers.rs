@@ -1170,6 +1170,7 @@ mod tests {
             game.save = std::sync::Arc::new(sunrise_client::save::SaveDir::new(
                 root.join("dimensions/minecraft/overworld"),
                 sunrise_client::save::LevelShape::OVERWORLD,
+                Some(Default::default()),
             ));
             game.world
                 .chunks
@@ -1209,6 +1210,7 @@ mod tests {
             game.save = std::sync::Arc::new(sunrise_client::save::SaveDir::new(
                 root.join("dimensions/minecraft/overworld"),
                 sunrise_client::save::LevelShape::OVERWORLD,
+                Some(Default::default()),
             ));
             game.world
                 .chunks
@@ -1263,6 +1265,7 @@ mod tests {
             game.save = std::sync::Arc::new(sunrise_client::save::SaveDir::new(
                 root.join("dimensions/minecraft/overworld"),
                 sunrise_client::save::LevelShape::OVERWORLD,
+                Some(Default::default()),
             ));
             game.world
                 .chunks
@@ -1315,6 +1318,7 @@ mod tests {
             game.save = std::sync::Arc::new(sunrise_client::save::SaveDir::new(
                 root.join("dimensions/minecraft/overworld"),
                 sunrise_client::save::LevelShape::OVERWORLD,
+                Some(Default::default()),
             ));
             game.world
                 .chunks
@@ -1351,6 +1355,7 @@ mod tests {
             game.save = std::sync::Arc::new(sunrise_client::save::SaveDir::new(
                 root.join("dimensions/minecraft/overworld"),
                 sunrise_client::save::LevelShape::OVERWORLD,
+                Some(Default::default()),
             ));
             game.world
                 .chunks
@@ -1427,6 +1432,7 @@ mod tests {
             game.save = std::sync::Arc::new(sunrise_client::save::SaveDir::new(
                 root.join("dimensions/minecraft/overworld"),
                 sunrise_client::save::LevelShape::OVERWORLD,
+                Some(Default::default()),
             ));
             game.world
                 .chunks
@@ -1512,6 +1518,7 @@ mod tests {
             game.save = std::sync::Arc::new(sunrise_client::save::SaveDir::new(
                 root.join("dimensions/minecraft/overworld"),
                 sunrise_client::save::LevelShape::OVERWORLD,
+                Some(Default::default()),
             ));
             game.world
                 .chunks
@@ -1566,6 +1573,7 @@ mod tests {
             game.save = std::sync::Arc::new(sunrise_client::save::SaveDir::new(
                 root.join("dimensions/minecraft/overworld"),
                 sunrise_client::save::LevelShape::OVERWORLD,
+                Some(Default::default()),
             ));
             game.world
                 .chunks
@@ -1630,6 +1638,7 @@ mod tests {
             game.save = std::sync::Arc::new(sunrise_client::save::SaveDir::new(
                 root.join("dimensions/minecraft/overworld"),
                 sunrise_client::save::LevelShape::OVERWORLD,
+                Some(Default::default()),
             ));
             game.world
                 .chunks
@@ -1706,6 +1715,7 @@ mod tests {
             game.save = std::sync::Arc::new(sunrise_client::save::SaveDir::new(
                 root.join("dimensions/minecraft/overworld"),
                 sunrise_client::save::LevelShape::OVERWORLD,
+                Some(Default::default()),
             ));
             game.world
                 .chunks
@@ -1800,6 +1810,7 @@ mod tests {
             game.save = std::sync::Arc::new(sunrise_client::save::SaveDir::new(
                 root.join("dimensions/minecraft/overworld"),
                 sunrise_client::save::LevelShape::OVERWORLD,
+                Some(Default::default()),
             ));
             game.world
                 .chunks
@@ -1871,6 +1882,7 @@ mod tests {
             game.save = std::sync::Arc::new(sunrise_client::save::SaveDir::new(
                 root.join("dimensions/minecraft/overworld"),
                 sunrise_client::save::LevelShape::OVERWORLD,
+                Some(Default::default()),
             ));
             game.world
                 .chunks
@@ -2139,6 +2151,7 @@ mod tests {
             game.save = std::sync::Arc::new(sunrise_client::save::SaveDir::new(
                 root.join("dimensions/minecraft/the_nether"),
                 sunrise_client::save::LevelShape::NETHER,
+                Some(Default::default()),
             ));
             game.world
                 .chunks
@@ -2266,6 +2279,7 @@ mod tests {
             let save = std::sync::Arc::new(sunrise_client::save::SaveDir::new(
                 root.join("dimensions/minecraft/overworld"),
                 sunrise_client::save::LevelShape::OVERWORLD,
+                Some(Default::default()),
             ));
             let registry = game.pack.assets.registry;
             let stone = registry.default_state("minecraft:stone").unwrap();
@@ -2362,6 +2376,7 @@ mod tests {
             game.save = std::sync::Arc::new(sunrise_client::save::SaveDir::new(
                 root.join("dimensions/minecraft/overworld"),
                 sunrise_client::save::LevelShape::OVERWORLD,
+                Some(Default::default()),
             ));
             game.world
                 .chunks

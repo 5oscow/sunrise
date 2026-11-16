@@ -1204,8 +1204,13 @@ fn nibbles(light: &Light, sky: bool) -> Vec<u8> {
     out
 }
 
-pub fn encode(chunk: &Chunk, registry: &BlockRegistry, biomes: &Biomes) -> NamedTag {
-    encode_with(chunk, registry, biomes, None, LevelShape::OVERWORLD)
+pub fn encode(
+    chunk: &Chunk,
+    registry: &BlockRegistry,
+    biomes: &Biomes,
+    items: &crate::items::Items,
+) -> NamedTag {
+    encode_with(chunk, registry, biomes, None, LevelShape::OVERWORLD, items)
 }
 /// A save's lookup of an old chunk's calculated blending data.
 pub type BlendingLookup = Box<dyn Fn(i32, i32) -> Option<Arc<BlendingData>> + Send + Sync>;
@@ -1220,8 +1225,9 @@ fn encode_saved(
     tables: Option<&SaveTables>,
     shape: LevelShape,
     blending: Option<&BlendingData>,
+    items: &crate::items::Items,
 ) -> NamedTag {
-    let mut root = encode_with(chunk, registry, biomes, tables, shape);
+    let mut root = encode_with(chunk, registry, biomes, tables, shape, items);
     if let Some(data) = blending {
         put_calculated_blending(&mut root, data);
     }
@@ -1260,6 +1266,7 @@ pub fn encode_with(
     biomes: &Biomes,
     tables: Option<&SaveTables>,
     shape: LevelShape,
+    items: &crate::items::Items,
 ) -> NamedTag {
     let sky_light = shape.sky_light;
     let mut sections = Vec::new();
@@ -1357,7 +1364,7 @@ pub fn encode_with(
         .filter(|(_, e)| !block_entity_placeholder(e))
         .map(|(p, e)| {
             let block = block_name(p);
-            let mut current = block_entity_encode::encode(*p, e, &block);
+            let mut current = block_entity_encode::encode_with_items(*p, e, &block, items);
             if let Some((_, name)) = chunk.block_names.iter().find(|(q, _)| q == p)
                 && let Tag::Compound(map) = &mut current
             {
@@ -1374,7 +1381,8 @@ pub fn encode_with(
                     let loaded = decode_block_entity(original).map_or_else(
                         || current.clone(),
                         |(q, e)| {
-                            let mut loaded = block_entity_encode::encode(q, &e, &block);
+                            let mut loaded =
+                                block_entity_encode::encode_with_items(q, &e, &block, items);
                             if !matches!(
                                 e,
                                 crate::containers::BlockEntity::Banner(_)
@@ -1752,8 +1760,9 @@ pub fn encode_proto(
     biomes: &Biomes,
     tables: Option<&SaveTables>,
     shape: LevelShape,
+    items: &crate::items::Items,
 ) -> NamedTag {
-    let mut root = encode_with(&proto.column, registry, biomes, tables, shape);
+    let mut root = encode_with(&proto.column, registry, biomes, tables, shape, items);
     let status = if proto.decorated {
         ChunkStatus::Features
     } else {
@@ -2274,6 +2283,8 @@ impl Folder {
 /// read lazily by worker threads.
 pub struct SaveDir {
     pub root: PathBuf,
+    /// The loaded catalog for stack encoding; absent for metadata-only readers.
+    items: Option<Arc<crate::items::Items>>,
     regions: Arc<RegionCache>,
     entity_regions: Arc<RegionCache>,
     poi_regions: Arc<RegionCache>,
@@ -2433,9 +2444,10 @@ impl SaveDir {
     }
 
     /// The saves of a level of `shape` at `root` (its dimension folder).
-    pub fn new(root: PathBuf, shape: LevelShape) -> Self {
+    pub fn new(root: PathBuf, shape: LevelShape, items: Option<Arc<crate::items::Items>>) -> Self {
         Self {
             root,
+            items,
             regions: Default::default(),
             entity_regions: Default::default(),
             poi_regions: Default::default(),
@@ -2453,6 +2465,11 @@ impl SaveDir {
             datafix_context: OnceLock::new(),
             blending_lookup: OnceLock::new(),
         }
+    }
+    fn items_for_save(&self) -> Result<&Arc<crate::items::Items>> {
+        self.items
+            .as_ref()
+            .ok_or_else(|| "cannot save chunks without a loaded item catalog".into())
     }
     /// Mark this as a server-owned world save, not a remote cache.
     pub fn enable_trusted_fluid_load(&mut self) {
@@ -2829,6 +2846,7 @@ impl SaveDir {
     ) -> Result<()> {
         biomes.ensure_saveable()?;
         let encoding = Arc::new(Encoding {
+            items: self.items_for_save()?.clone(),
             registry,
             biomes: biomes.clone(),
             tables: self.tables.get().cloned(),
@@ -2863,7 +2881,8 @@ impl SaveDir {
         biomes: &Biomes,
     ) -> Result<usize> {
         biomes.ensure_saveable()?;
-        if let Some(result) = self.save_disk_sync(chunks, registry, biomes) {
+        let items = self.items_for_save()?;
+        if let Some(result) = self.save_disk_sync(chunks, registry, biomes, items) {
             return result;
         }
         let tables = self.tables.get().map(|t| &**t);
@@ -2880,6 +2899,7 @@ impl SaveDir {
                         tables,
                         self.shape,
                         blending.as_deref(),
+                        items,
                     )),
                 )
             })
@@ -5390,7 +5410,7 @@ mod tests {
         let bell = assets.registry.default_state("minecraft:bell").unwrap().0;
         let dir = std::env::temp_dir().join(format!("sunrise-poi-save-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
-        let save = SaveDir::new(dir.clone(), LevelShape::OVERWORLD);
+        let save = SaveDir::new(dir.clone(), LevelShape::OVERWORLD, Some(Default::default()));
         let _ = save.tables.set(Arc::new(SaveTables::new(&assets)));
         let mut chunk = Chunk::empty(0, 0);
         chunk.set(5, 71, 5, bell);
@@ -5455,7 +5475,7 @@ mod tests {
         };
         let dir =
             std::env::temp_dir().join(format!("sunrise-level-attachments-{}", std::process::id()));
-        let save = SaveDir::new(dir.clone(), LevelShape::OVERWORLD);
+        let save = SaveDir::new(dir.clone(), LevelShape::OVERWORLD, Some(Default::default()));
         let key = AttachmentType {
             namespace: "test",
             name: "counter",
@@ -5537,7 +5557,12 @@ mod tests {
                 Tag::List(vec![Tag::Compound(top.save().unwrap())]),
             ),
         ]);
-        let mut saved = encode(&Chunk::empty(-2, 3), assets.registry, &biomes);
+        let mut saved = encode(
+            &Chunk::empty(-2, 3),
+            assets.registry,
+            &biomes,
+            &Default::default(),
+        );
         let Some(Tag::Compound(structures)) = saved.tag.get_mut("structures") else {
             panic!("structures")
         };
@@ -5548,6 +5573,7 @@ mod tests {
         let save = Arc::new(SaveDir::new(
             std::env::temp_dir().join(format!("sunrise-saved-monument-{}", std::process::id())),
             LevelShape::OVERWORLD,
+            Some(Default::default()),
         ));
         save.pending
             .lock()
@@ -5615,7 +5641,12 @@ mod tests {
                 Tag::compound([("id", string("INVALID"))]),
             ),
         ]);
-        let mut saved = encode(&Chunk::empty(2, -3), assets.registry, &biomes);
+        let mut saved = encode(
+            &Chunk::empty(2, -3),
+            assets.registry,
+            &biomes,
+            &Default::default(),
+        );
         let Tag::Compound(root) = &mut saved.tag else {
             panic!("chunk root")
         };
@@ -5628,7 +5659,7 @@ mod tests {
             unreachable!()
         };
         assert_eq!(loaded.saved_structure_starts(), Some(expected));
-        let again = encode(&loaded, assets.registry, &biomes);
+        let again = encode(&loaded, assets.registry, &biomes, &Default::default());
         assert_eq!(
             again.tag.get("structures").and_then(|s| s.get("starts")),
             Some(&starts)
@@ -5636,6 +5667,7 @@ mod tests {
         let save = Arc::new(SaveDir::new(
             std::env::temp_dir().join(format!("sunrise-saved-starts-{}", std::process::id())),
             LevelShape::OVERWORLD,
+            Some(Default::default()),
         ));
         // A pending record is authoritative even before any region file exists.
         save.pending
@@ -5712,7 +5744,7 @@ mod tests {
             .push((pos, crate::containers::BlockEntity::Chest(vec![None; 27])));
         extras.block_entity_attachments.push((pos, block_data));
         chunk.saved = Some(Arc::new(extras));
-        let saved = encode(&chunk, assets.registry, &biomes);
+        let saved = encode(&chunk, assets.registry, &biomes, &Default::default());
         let mut loaded = decode(&saved, assets.registry, &biomes).expect("chunk");
         assert_eq!(
             key.get(
@@ -5769,6 +5801,7 @@ mod tests {
                 &biomes,
                 Some(&tables),
                 LevelShape::OVERWORLD,
+                &Default::default(),
             );
             let Some(Tag::List(list)) = saved.tag.get("block_entities") else {
                 panic!("no block entities");
@@ -5833,7 +5866,14 @@ mod tests {
         let mut chunk = Chunk::with_layout(0, 0, shape.column());
         chunk.set(0, -64, 0, stone.0);
         chunk.set(0, 2000, 0, stone.0);
-        let saved = encode_with(&chunk, assets.registry, &biomes, Some(&tables), shape);
+        let saved = encode_with(
+            &chunk,
+            assets.registry,
+            &biomes,
+            Some(&tables),
+            shape,
+            &Default::default(),
+        );
         assert_eq!(number(saved.tag.get("yPos")), Some(-4));
         let Some(Tag::List(sections)) = saved.tag.get("sections") else {
             panic!("no sections");
@@ -5948,6 +5988,7 @@ mod tests {
             &biomes,
             Some(&tables),
             LevelShape::NETHER,
+            &Default::default(),
         );
         assert_eq!(number(saved.tag.get("yPos")), Some(0));
         let Some(Tag::List(sections)) = saved.tag.get("sections") else {
@@ -5978,6 +6019,7 @@ mod tests {
             &biomes,
             Some(&tables),
             LevelShape::OVERWORLD,
+            &Default::default(),
         );
         assert_eq!(number(overworld.tag.get("yPos")), Some(-4));
     }
@@ -6003,11 +6045,15 @@ mod tests {
         lit.lit = true;
         let dir = std::env::temp_dir().join(format!("sunrise-far-save-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
-        let save = SaveDir::new(dir.clone(), LevelShape::OVERWORLD);
-        let records =
-            [&lit, &dark].map(|c| ((c.x, c.z), Some(encode(c, assets.registry, &biomes))));
+        let save = SaveDir::new(dir.clone(), LevelShape::OVERWORLD, Some(Default::default()));
+        let records = [&lit, &dark].map(|c| {
+            (
+                (c.x, c.z),
+                Some(encode(c, assets.registry, &biomes, &Default::default())),
+            )
+        });
         save.write_records("region", records.into(), true).unwrap();
-        let reopened = SaveDir::new(dir.clone(), LevelShape::OVERWORLD);
+        let reopened = SaveDir::new(dir.clone(), LevelShape::OVERWORLD, Some(Default::default()));
         let far = reopened
             .load_far(4, -7, assets.registry, &biomes)
             .expect("saved with its light");
@@ -6080,7 +6126,7 @@ mod tests {
         chunk.set(12, 100, 2, end_stone.0);
         chunk.set(12, 101, 2, chorus.0);
         chunk.set(12, 102, 2, flower.0);
-        let mut saved = encode(&chunk, assets.registry, &biomes);
+        let mut saved = encode(&chunk, assets.registry, &biomes, &Default::default());
         put(
             &mut saved.tag,
             "block_entities",
@@ -6088,10 +6134,10 @@ mod tests {
         );
         let dir = std::env::temp_dir().join(format!("sunrise-lod-save-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
-        let save = SaveDir::new(dir.clone(), LevelShape::OVERWORLD);
+        let save = SaveDir::new(dir.clone(), LevelShape::OVERWORLD, Some(Default::default()));
         save.write_records("region", vec![((-2, 3), Some(saved))], true)
             .unwrap();
-        let reopened = SaveDir::new(dir.clone(), LevelShape::OVERWORLD);
+        let reopened = SaveDir::new(dir.clone(), LevelShape::OVERWORLD, Some(Default::default()));
         let surfaces = reopened
             .lod_surfaces(-2, 3, &assets, &biomes)
             .expect("saved summary");
@@ -6161,7 +6207,7 @@ mod tests {
             reopened.regions.lock().unwrap().is_empty(),
             "far reads do not grow gameplay region cache"
         );
-        let mut proto = encode(&chunk, assets.registry, &biomes);
+        let mut proto = encode(&chunk, assets.registry, &biomes, &Default::default());
         put(
             &mut proto.tag,
             "Status",
@@ -6174,7 +6220,7 @@ mod tests {
             reopened.lod_surfaces(-3, 3, &assets, &biomes).is_none(),
             "unfinished proto saves must not suppress complete decoration"
         );
-        let nether = SaveDir::new(dir.clone(), LevelShape::NETHER);
+        let nether = SaveDir::new(dir.clone(), LevelShape::NETHER, Some(Default::default()));
         let dark = nether.lod_surfaces(-2, 3, &assets, &biomes).unwrap();
         assert!(
             dark.iter()
@@ -6397,7 +6443,7 @@ mod tests {
         for section in 0..chunk.sections.len() as i32 {
             chunk.set(8, MIN_Y + section * 16 + 8, 8, dandelion.0);
         }
-        let saved = encode(&chunk, assets.registry, &biomes);
+        let saved = encode(&chunk, assets.registry, &biomes, &Default::default());
         let layout = LevelShape::OVERWORLD.column();
         let far = || decode_lod_surfaces(&saved, &assets, &biomes, layout, true);
         let columns = far().expect("far columns");
@@ -6625,7 +6671,8 @@ mod tests {
         let open_fds = || std::fs::read_dir("/dev/fd").map_or(0, |d| d.count());
         let dir = std::env::temp_dir().join(format!("sunrise-save-fds-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let save = super::SaveDir::new(dir.clone(), LevelShape::OVERWORLD);
+        let save =
+            super::SaveDir::new(dir.clone(), LevelShape::OVERWORLD, Some(Default::default()));
         let before = open_fds();
         let held = super::cached_region(
             &save.regions,
@@ -6679,7 +6726,8 @@ mod tests {
     fn write_completion_polls_without_waiting_and_keeps_latest_snapshot() {
         let dir = std::env::temp_dir().join(format!("sunrise-save-poll-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let save = super::SaveDir::new(dir.clone(), LevelShape::OVERWORLD);
+        let save =
+            super::SaveDir::new(dir.clone(), LevelShape::OVERWORLD, Some(Default::default()));
         let lock = super::SessionLock::acquire(&dir).unwrap();
         let path = save.region_path("entities", 0, 0);
         let region = super::cached_region(&save.entity_regions, (0, 0), &path, true)
@@ -6704,7 +6752,8 @@ mod tests {
         save.flush().unwrap();
         assert!(save.writes_finished().unwrap());
         assert_eq!(save.active_chunk_writes(), 0);
-        let reopened = super::SaveDir::new(dir.clone(), LevelShape::OVERWORLD);
+        let reopened =
+            super::SaveDir::new(dir.clone(), LevelShape::OVERWORLD, Some(Default::default()));
         assert_eq!(reopened.load_entities(1, 2), vec![entity(2)]);
         save.save_entities_later(vec![((1, 2), vec![])]).unwrap();
         save.flush().unwrap();
@@ -6724,7 +6773,8 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         // A file where a directory is needed causes a real writer I/O error.
         std::fs::write(dir.join("entities"), b"blocked").unwrap();
-        let save = super::SaveDir::new(dir.clone(), LevelShape::OVERWORLD);
+        let save =
+            super::SaveDir::new(dir.clone(), LevelShape::OVERWORLD, Some(Default::default()));
         let entity = Tag::compound([("version", Tag::Int(3))]);
         save.save_entities_later(vec![((0, 0), vec![entity.clone()])])
             .unwrap();
@@ -7526,7 +7576,11 @@ mod tests {
         let root =
             std::env::temp_dir().join(format!("sunrise-fluid-source-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
-        let mut save = SaveDir::new(root.clone(), LevelShape::OVERWORLD);
+        let mut save = SaveDir::new(
+            root.clone(),
+            LevelShape::OVERWORLD,
+            Some(Default::default()),
+        );
         save.enable_trusted_fluid_load();
         let record = |id: &str| NamedTag {
             name: "".into(),
@@ -8937,7 +8991,11 @@ mod tests {
         use sunrise_mod_runtime::attachments::Attachments;
         let root = std::env::temp_dir().join(format!("sunrise-attach-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
-        let save = SaveDir::new(root.clone(), LevelShape::OVERWORLD);
+        let save = SaveDir::new(
+            root.clone(),
+            LevelShape::OVERWORLD,
+            Some(Default::default()),
+        );
         let file = root.join("data/sunrise/attachments.dat");
         save.save_attachments(&Attachments::default()).unwrap();
         assert!(
@@ -9004,14 +9062,22 @@ mod tests {
             "minecraft:the_end",
         ];
         for (i, dim) in dimensions.iter().enumerate() {
-            let save = SaveDir::new(dimension_dir(&root, dim), LevelShape::OVERWORLD);
+            let save = SaveDir::new(
+                dimension_dir(&root, dim),
+                LevelShape::OVERWORLD,
+                Some(Default::default()),
+            );
             assert!(save.load_forced_chunks().is_empty());
             let forced = HashSet::from([(i as i32, -17), (-23, i as i32), (-1, -1)]);
             save.save_chunk_tickets(&forced, &[]).unwrap();
         }
         for (i, dim) in dimensions.iter().enumerate() {
             let path = dimension_dir(&root, dim);
-            let save = SaveDir::new(path.clone(), LevelShape::OVERWORLD);
+            let save = SaveDir::new(
+                path.clone(),
+                LevelShape::OVERWORLD,
+                Some(Default::default()),
+            );
             let mut forced = save.load_forced_chunks();
             assert_eq!(
                 forced,
@@ -9036,7 +9102,11 @@ mod tests {
             forced.remove(&(-1, -1));
             save.save_chunk_tickets(&forced, &[]).unwrap();
             drop(save);
-            let reopened = SaveDir::new(path.clone(), LevelShape::OVERWORLD);
+            let reopened = SaveDir::new(
+                path.clone(),
+                LevelShape::OVERWORLD,
+                Some(Default::default()),
+            );
             assert_eq!(reopened.load_forced_chunks(), forced);
             reopened.save_chunk_tickets(&HashSet::new(), &[]).unwrap();
             assert!(
@@ -9122,6 +9192,7 @@ mod tests {
         let save = SaveDir::new(
             super::dimension_dir(&world, "minecraft:overworld"),
             LevelShape::OVERWORLD,
+            Some(Default::default()),
         );
         // A 1.20.1 chunk (DataVersion 3465): 1.20.3 renamed its grass to short_grass.
         let section = Tag::compound([
@@ -9222,6 +9293,7 @@ mod tests {
         let nether = SaveDir::new(
             super::dimension_dir(&world, "minecraft:the_nether"),
             LevelShape::NETHER,
+            Some(Default::default()),
         );
         // A 1.20.1 Nether chunk: upgraded it has no `blending_data` (only Overworld
         // chunks blend) and the current DataVersion, so only the saved record says
@@ -9270,6 +9342,7 @@ mod tests {
         let overworld = SaveDir::new(
             super::dimension_dir(&world, "minecraft:overworld"),
             LevelShape::OVERWORLD,
+            Some(Default::default()),
         );
         write_old_record(
             &overworld,
@@ -9295,6 +9368,7 @@ mod tests {
         let save = SaveDir::new(
             super::dimension_dir(&world, "minecraft:overworld"),
             LevelShape::OVERWORLD,
+            Some(Default::default()),
         );
         // A 1.17.1 chunk (DataVersion 2730), its fields under `Level`: section 0 all stone.
         let section = Tag::compound([
@@ -9358,6 +9432,7 @@ mod tests {
         let save = SaveDir::new(
             super::dimension_dir(&world, "minecraft:overworld"),
             LevelShape::OVERWORLD,
+            Some(Default::default()),
         );
         let section = Tag::compound([
             ("Y", Tag::Byte(0)),
@@ -9799,6 +9874,7 @@ mod far_census {
         let save = Arc::new(SaveDir::new(
             world.join("dimensions/minecraft/overworld"),
             LevelShape::OVERWORLD,
+            Some(Default::default()),
         ));
         let generator = Arc::new(Persistent {
             inner: terrain,
@@ -10035,7 +10111,7 @@ mod calculated_blending_save_tests {
         let dir = std::env::temp_dir().join(format!("sunrise-h077-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
-        let save = SaveDir::new(dir.clone(), LevelShape::OVERWORLD);
+        let save = SaveDir::new(dir.clone(), LevelShape::OVERWORLD, Some(Default::default()));
         let _ = save.tables.set(Arc::new(SaveTables::new(assets)));
         (dir, save)
     }
@@ -10092,6 +10168,7 @@ mod calculated_blending_save_tests {
         let owner = Arc::new(Owner(calculated(-4, 20)));
         hook(&save, (12, 0), &owner);
         let encoding = Arc::new(Encoding {
+            items: Default::default(),
             registry: assets.registry,
             biomes: biomes.clone(),
             tables: save.tables.get().cloned(),

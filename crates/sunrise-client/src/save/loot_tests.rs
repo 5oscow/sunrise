@@ -101,7 +101,7 @@ fn reload_loot_case(
         .push((pos, crate::containers::BlockEntity::Chest(slots)));
     chunk.block_names.push((pos, custom_name));
     chunk.saved = Some(Arc::new(extras));
-    let encoded = encode(&chunk, registry, biomes);
+    let encoded = encode(&chunk, registry, biomes, &Default::default());
     let bytes = nbt::write_named(&encoded, Limits::default()).unwrap();
     let (encoded, used) = nbt::read_named(&bytes, Limits::default()).unwrap();
     assert_eq!(used, bytes.len());
@@ -163,7 +163,7 @@ fn unopened_loot_tags_round_trip_exactly() {
             ..Default::default()
         }));
         for _ in 0..2 {
-            let encoded = encode(&chunk, &registry, &biomes);
+            let encoded = encode(&chunk, &registry, &biomes, &Default::default());
             let disk = nbt::write_named(&encoded, Limits::default()).unwrap();
             let (encoded, _) = nbt::read_named(&disk, Limits::default()).unwrap();
             let tag = &match encoded.tag.get("block_entities").unwrap() {
@@ -208,7 +208,7 @@ fn opened_loot_parity_fixture() {
             fields[1].parse().unwrap(),
             mode,
         );
-        let source = encode(&chunk, &registry, &biomes);
+        let source = encode(&chunk, &registry, &biomes, &Default::default());
         let Tag::List(tags) = source.tag.get("block_entities").unwrap() else {
             panic!()
         };
@@ -245,7 +245,7 @@ fn eager_save_edits_reach_disk_during_ticks_and_again_after_cooldown() {
     let biomes = Arc::new(biomes);
     let dir = std::env::temp_dir().join(format!("sunrise-eager-edits-{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
-    let save = SaveDir::new(dir.clone(), LevelShape::OVERWORLD);
+    let save = SaveDir::new(dir.clone(), LevelShape::OVERWORLD, Some(Default::default()));
     let mut chunk = Chunk::empty(0, 0);
     let mut dirty = ModifiedChunks::default();
     let now = Instant::now();
@@ -265,7 +265,7 @@ fn eager_save_edits_reach_disk_during_ticks_and_again_after_cooldown() {
             },
         );
         save.flush().unwrap(); // only a barrier: no quit/autosave submission
-        let reopened = SaveDir::new(dir.clone(), LevelShape::OVERWORLD);
+        let reopened = SaveDir::new(dir.clone(), LevelShape::OVERWORLD, Some(Default::default()));
         assert_eq!(
             reopened
                 .load(0, 0, registry, &biomes)
@@ -291,7 +291,7 @@ fn container_limit_survives_chunk_save_and_reload() {
         block_entity_sources: vec![(pos, Tag::compound([("sunrise:stack_limit", Tag::Int(10))]))],
         ..Default::default()
     }));
-    let encoded = encode(&chunk, &registry, &biomes);
+    let encoded = encode(&chunk, &registry, &biomes, &Default::default());
     let loaded = decode(&encoded, &registry, &biomes).unwrap();
     assert_eq!(
         loaded.saved.as_ref().unwrap().block_entity_sources[0]
@@ -310,7 +310,12 @@ fn unmodified_container_nbt_has_no_stack_limit() {
         (1, 64, 2),
         crate::containers::BlockEntity::Chest(vec![None; 27]),
     ));
-    let loaded = decode(&encode(&chunk, &registry, &biomes), &registry, &biomes).unwrap();
+    let loaded = decode(
+        &encode(&chunk, &registry, &biomes, &Default::default()),
+        &registry,
+        &biomes,
+    )
+    .unwrap();
     assert_eq!(loaded.saved.as_ref().unwrap().block_entity_sources.len(), 1);
     for (_, tag) in &loaded.saved.as_ref().unwrap().block_entity_sources {
         assert!(tag.get("sunrise:stack_limit").is_none());
@@ -384,11 +389,11 @@ fn generated_structure_chest_stays_pending_after_save_and_reload() {
         NEXT.fetch_add(1, Ordering::Relaxed)
     ));
     fs::create_dir(&dir).unwrap();
-    let save = SaveDir::new(dir.clone(), LevelShape::OVERWORLD);
+    let save = SaveDir::new(dir.clone(), LevelShape::OVERWORLD, Some(Default::default()));
     save.save(&[Arc::new(chunk)], assets.registry, &biomes)
         .unwrap();
     save.flush().unwrap();
-    let reopened = SaveDir::new(dir.clone(), LevelShape::OVERWORLD);
+    let reopened = SaveDir::new(dir.clone(), LevelShape::OVERWORLD, Some(Default::default()));
     let reloaded = reopened.load(43, 21, assets.registry, &biomes).unwrap();
     assert_eq!(
         reloaded.saved.as_ref().unwrap().pending_loot.get(&CHEST),
@@ -405,7 +410,7 @@ fn generated_structure_chest_stays_pending_after_save_and_reload() {
             .iter()
             .all(Option::is_none)
     );
-    let saved = encode(&reloaded, assets.registry, &biomes);
+    let saved = encode(&reloaded, assets.registry, &biomes, &Default::default());
     let Tag::List(entities) = saved.tag.get("block_entities").unwrap() else {
         panic!()
     };
@@ -436,7 +441,7 @@ fn a_loot_table_that_is_not_an_identifier_is_dropped_with_its_seed() {
     chunk
         .block_entities
         .push((pos, crate::containers::BlockEntity::Chest(vec![None; 27])));
-    let mut encoded = encode(&chunk, &registry, &biomes);
+    let mut encoded = encode(&chunk, &registry, &biomes, &Default::default());
     let Tag::Compound(root) = &mut encoded.tag else {
         panic!("chunk root");
     };
@@ -455,7 +460,7 @@ fn a_loot_table_that_is_not_an_identifier_is_dropped_with_its_seed() {
             .as_ref()
             .is_none_or(|extras| extras.pending_loot.is_empty())
     );
-    let saved = encode(&loaded, &registry, &biomes);
+    let saved = encode(&loaded, &registry, &biomes, &Default::default());
     let Some(Tag::List(entities)) = saved.tag.get("block_entities") else {
         panic!("no block entities");
     };

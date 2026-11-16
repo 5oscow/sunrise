@@ -1041,6 +1041,7 @@ pub(super) fn make_streaming(
     let mut save = SaveDir::new(
         sunrise_client::save::dimension_dir(world_root, dim.id()),
         shape,
+        Some(res.shared_items()),
     );
     save.enable_trusted_fluid_load();
     let save = Arc::new(save);
@@ -1542,7 +1543,11 @@ mod tests {
             let before = game.res.biomes().with_packs([]);
             let mut chunk = sunrise_client::chunk::Chunk::empty(8, 8);
             chunk.set_biome_cell(1, 20, 2, before.saved_id("gone_mod:highland"));
-            let save = SaveDir::new(root.clone(), sunrise_client::chunk::LevelShape::OVERWORLD);
+            let save = SaveDir::new(
+                root.clone(),
+                sunrise_client::chunk::LevelShape::OVERWORLD,
+                Some(Default::default()),
+            );
             save.save(&[Arc::new(chunk)], game.pack.assets.registry, &before)
                 .unwrap();
             drop(save);

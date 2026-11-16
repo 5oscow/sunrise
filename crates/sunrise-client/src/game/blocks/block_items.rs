@@ -755,7 +755,12 @@ mod plain_name_overlay_tests {
                     assert!(source.get("lock").is_some());
                 }
                 let snapshot = game.with_entities([resident]).remove(0);
-                let encoded = save::encode(&snapshot, game.pack.assets.registry, game.res.biomes());
+                let encoded = save::encode(
+                    &snapshot,
+                    game.pack.assets.registry,
+                    game.res.biomes(),
+                    &Default::default(),
+                );
                 let Tag::List(entries) = encoded.tag.get("block_entities").unwrap() else {
                     panic!("actual saved entries")
                 };
@@ -805,7 +810,12 @@ mod styled_name_model_tests {
     fn chunk_saved(game: &Game<'_>, pos: (i32, i32, i32)) -> Tag {
         let resident = game.world.chunks.get(&(0, 0)).unwrap();
         let snapshot = game.with_entities([resident]).remove(0);
-        let encoded = save::encode(&snapshot, game.pack.assets.registry, game.res.biomes());
+        let encoded = save::encode(
+            &snapshot,
+            game.pack.assets.registry,
+            game.res.biomes(),
+            &Default::default(),
+        );
         let Tag::List(entities) = encoded.tag.get("block_entities").unwrap() else {
             panic!("actual chunk entities")
         };

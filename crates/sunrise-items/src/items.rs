@@ -458,7 +458,9 @@ thread_local! {
     /// inside itself (`LootContext.pushVisitedElement`).
     static NESTED_ROLLS: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
 }
-#[derive(Clone)]
+/// An empty catalog is useful for synthetic worlds without registered items;
+/// normal worlds load their catalog from the resource snapshot.
+#[derive(Clone, Default)]
 pub struct Items {
     pub items: HashMap<Arc<str>, ItemInfo>,
     /// Shared Block.getItem snapshot, including blocks sharing another block's item.

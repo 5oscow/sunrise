@@ -1347,6 +1347,7 @@ pub(super) mod tests {
         game.save = std::sync::Arc::new(sunrise_client::save::SaveDir::new(
             saves.path().to_path_buf(),
             sunrise_client::save::LevelShape::OVERWORLD,
+            Some(Default::default()),
         ));
         test(&mut game);
     }

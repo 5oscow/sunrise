@@ -160,6 +160,7 @@ fn every_started_server_stops_and_saves_even_when_startup_or_ticks_fail() {
                         game.save = Arc::new(sunrise_client::save::SaveDir::new(
                             root.clone(),
                             sunrise_client::save::LevelShape::OVERWORLD,
+                            Some(Default::default()),
                         ));
                         game.level.name = "lifecycle final save".into();
                         let adopted =

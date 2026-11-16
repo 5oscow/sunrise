@@ -1259,6 +1259,7 @@ fn eager_saves_wait_for_an_open_world_and_for_light() {
     game.save = Arc::new(sunrise_client::save::SaveDir::new(
         dir.clone(),
         sunrise_client::save::LevelShape::OVERWORLD,
+        Some(Default::default()),
     ));
     Arc::make_mut(game.world.chunks.get_mut(&(0, 0)).unwrap()).lit = true;
     game.world

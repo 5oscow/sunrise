@@ -696,7 +696,7 @@ struct WorldCore {
 }
 
 struct WorldRest {
-    items: Items,
+    items: Arc<Items>,
     recipes: Recipes,
     transformers: sunrise_client::block_transform::Transformers,
     mob_types: HashMap<String, Arc<MobType>>,
@@ -10514,6 +10514,7 @@ impl<'a> Game<'a> {
                 .join("saves")
                 .join(".sunrise-title"),
             sunrise_client::save::LevelShape::OVERWORLD,
+            None,
         ));
         let prepared = prepared.map(Ok).unwrap_or_else(|| {
             GameCpuResources::load(

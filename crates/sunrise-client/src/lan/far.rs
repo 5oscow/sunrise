@@ -364,6 +364,7 @@ mod tests {
         let save = Arc::new(SaveDir::new(
             std::env::temp_dir().join("sunrise-far-ring-test"),
             LevelShape::OVERWORLD,
+            Some(Default::default()),
         ));
         let encoder = ChunkEncoder::new(
             [(Arc::<str>::from("minecraft:air"), false)],

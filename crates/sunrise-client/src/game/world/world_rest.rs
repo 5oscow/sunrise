@@ -295,7 +295,7 @@ pub(super) fn load_world_rest(
     progress.set(8);
     Ok(WorldRest {
         stations,
-        items,
+        items: Arc::new(items),
         recipes,
         transformers,
         providers,

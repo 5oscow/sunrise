@@ -2305,7 +2305,7 @@ mod loot_table_tests {
         let live = game.world.chunks.get(&(0, 0)).unwrap().clone();
         let chunk = game.with_entities([&live]).remove(0);
         let registry = game.pack.assets.registry;
-        let encoded = save::encode(&chunk, registry, game.res.biomes());
+        let encoded = save::encode(&chunk, registry, game.res.biomes(), &Default::default());
         let Some(Tag::List(list)) = encoded.tag.get("block_entities") else {
             panic!("no block entities");
         };

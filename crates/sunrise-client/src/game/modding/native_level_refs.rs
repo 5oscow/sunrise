@@ -2199,7 +2199,7 @@ mod tests {
             let root = game.save.root.clone();
             let shape = game.world.shape;
             game.native_levels_closing();
-            let save = SaveDir::new(root, shape);
+            let save = SaveDir::new(root, shape, Some(Default::default()));
             let chunk = save.load(0, 0, registry, game.res.biomes()).unwrap();
             game.world = World::new(registry.default_state("minecraft:air").unwrap(), 0);
             game.world.chunks.insert((0, 0), Arc::new(chunk));
@@ -2610,7 +2610,11 @@ mod tests {
                     std::env::temp_dir().join(format!("sunrise-validate-{}", std::process::id()));
                 game.world_root = world.clone();
                 let root = sunrise_client::save::dimension_dir(&world, other.id());
-                let save = sunrise_client::save::SaveDir::new(root, other.shape());
+                let save = sunrise_client::save::SaveDir::new(
+                    root,
+                    other.shape(),
+                    Some(Default::default()),
+                );
                 let mut tickets = sunrise_client::mod_chunk_tickets::ModTickets::default();
                 tickets.insert(saved("machines:quarry", [1, 64, 1], (7, 7)));
                 tickets.insert(saved("machines:quarry", [9, 64, 9], (8, 8)));
