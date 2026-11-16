@@ -75,6 +75,11 @@ block's centre:
 | Fill the item | `minecraft:fluid_pickup` | `fluid_pickup_sound` |
 | Empty the item | `minecraft:fluid_place` | `fluid_empty_sound` |
 
+When a player is supplied, the sound excludes that player's client, which already
+played the bucket interaction; other nearby players hear it. With no player, everyone
+nearby hears it. This also applies to the world-fluid helpers below. The game event
+still names the supplied player as its source.
+
 A tank-only fluid emits the event without a sound.
 `fluid_util::interact_with_handler` performs the interaction against a handler you
 supply. `fluid_util::trigger_sound_and_game_event` emits only the sound and event.

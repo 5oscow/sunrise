@@ -221,7 +221,7 @@ impl Game<'_> {
             false => (fluid.and_then(fluid_empty_sound), "minecraft:fluid_place"),
         };
         if let Some(sound) = sound {
-            self.level_play_sound(level, sound, at, SoundSource::Blocks, 1.0, 1.0, None);
+            self.level_play_sound(level, sound, at, SoundSource::Blocks, 1.0, 1.0, player);
         }
         let context = GameEventContext {
             source_entity: player.map(PlayerRef::entity),

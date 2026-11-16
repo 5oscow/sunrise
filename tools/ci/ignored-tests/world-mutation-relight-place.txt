@@ -10,3 +10,4 @@ sunrise-client game::native_player_place_tests::each_place_block_refusal_has_its
 sunrise-client game::native_player_place_tests::another_level_is_not_where_the_player_is lib daily resources
 sunrise-client game::native_player_place_tests::a_client_cannot_place_a_block_as_a_player lib daily resources
 sunrise-client game::native_level_sound_except_tests::a_level_sound_leaves_out_the_player_asked lib daily resources
+sunrise-client game::native_level_sound_except_tests::fluid_sounds_leave_out_the_actor_but_reach_other_players lib daily resources

@@ -116,8 +116,8 @@ pub fn interact_with_handler(
 /// [`fluid_pickup_sound`](crate::prelude::TagsHost::fluid_pickup_sound)) and false when it went
 /// in (`minecraft:fluid_place` and its
 /// [`fluid_empty_sound`](crate::prelude::TagsHost::fluid_empty_sound)). The sound plays under
-/// the block slider at full volume and pitch for every player near, the acting one included,
-/// since the server decides the move; the game event names `player` as its source when given.
+/// the block slider at full volume and pitch, excluding `player` when given because that
+/// client's bucket interaction already played it. The game event names `player` as its source.
 /// A fluid with no world form, a tank-only one, has no sound, and only its game event goes out.
 pub fn trigger_sound_and_game_event(
     host: &mut dyn ServerHost,
@@ -136,7 +136,7 @@ pub fn trigger_sound_and_game_event(
         false => host.fluid_empty_sound(id),
     });
     if let Some(sound) = sound {
-        level.play_sound(host, sound, at, SoundSource::Blocks, 1.0, 1.0, None);
+        level.play_sound(host, sound, at, SoundSource::Blocks, 1.0, 1.0, player);
     }
     let event = match pickup {
         true => "minecraft:fluid_pickup",

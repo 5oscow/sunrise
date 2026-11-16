@@ -35,3 +35,67 @@ fn a_level_sound_leaves_out_the_player_asked() {
         assert_eq!(queued(game), before + 2);
     });
 }
+
+/// Both directions of a container transfer send the sound to the other guest, not its actor.
+#[test]
+#[ignore = "daily"]
+fn fluid_sounds_leave_out_the_actor_but_reach_other_players() {
+    with_guests(|game| {
+        game.options.dedicated = Some(Vec::new());
+        let player = game.player(13).unwrap();
+        let level = game.level(game.dim.id()).unwrap();
+        let water = mod_api::__private::fluid_key("minecraft:water").unwrap();
+        let receivers: Vec<_> = [12, 13]
+            .into_iter()
+            .map(|conn| {
+                let (tx, rx) = std::sync::mpsc::channel();
+                game.lan
+                    .as_mut()
+                    .unwrap()
+                    .hub
+                    .update_guest(conn, |guest| {
+                        guest.sender =
+                            sunrise_client::lan::PlayerSender::new(tx, std::sync::Arc::default());
+                    })
+                    .unwrap();
+                (conn, rx)
+            })
+            .collect();
+        for (pickup, helper) in [(true, false), (false, false), (true, true), (false, true)] {
+            if helper {
+                let fluid = mod_api::FluidStack::new(water, 1000);
+                mod_api::fluid_util::trigger_sound_and_game_event(
+                    game,
+                    &mod_api::FluidResource::of(&fluid),
+                    level,
+                    [3.5, 64.5, 5.5],
+                    Some(player),
+                    pickup,
+                );
+            } else {
+                let seal = game.transaction_open();
+                assert!(game.level_play_fluid_effects(
+                    level,
+                    [3, 64, 5],
+                    water,
+                    pickup,
+                    Some(player),
+                    seal.transaction(),
+                ));
+                game.transaction_close(&seal, true);
+            }
+            game.flush_native_sounds();
+            for (conn, rx) in &receivers {
+                if *conn == 13 {
+                    assert!(rx.try_recv().is_err(), "the actor already played the sound");
+                } else {
+                    assert!(matches!(
+                        rx.try_recv(),
+                        Ok(sunrise_client::lan::Out::Packet(_))
+                    ));
+                    assert!(rx.try_recv().is_err(), "one sound for the other player");
+                }
+            }
+        }
+    });
+}
