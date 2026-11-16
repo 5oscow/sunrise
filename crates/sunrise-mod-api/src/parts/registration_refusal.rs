@@ -78,6 +78,8 @@ impl PartRegistrar {
             arm_poses,
             structure_types,
             loot_modifier_serializers,
+            loot_function_types,
+            loot_condition_types,
             dimensions,
             chunk_generators,
             biome_sources,
