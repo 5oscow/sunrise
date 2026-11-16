@@ -88,7 +88,7 @@ impl BlockEntityPart for Part {
             event.stack.set_count(1).unwrap();
         }
         if s.cross {
-            let level = host.levels().remove(0);
+            let level = host.level("minecraft:overworld").expect("the level");
             let items = level
                 .capability(host, &ITEMS, [2, 64, 1], None)
                 .expect("the second block's items");
