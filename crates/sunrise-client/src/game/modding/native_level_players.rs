@@ -20,7 +20,10 @@ impl Game<'_> {
     /// `ChunkMap.TrackedEntity.seenBy`: the players of the level in place whose tracker holds
     /// the entity, other than the entity itself.
     pub(super) fn entity_trackers(&self, entity: EntityRef) -> Option<Vec<PlayerRef>> {
-        self.native_entity_target(entity)?;
+        let target = self.native_entity_target(entity)?;
+        if self.target_level(target).key() != self.dim.key() {
+            return None;
+        }
         let id = entity.id() as i32;
         Some(
             self.lan
@@ -204,6 +207,15 @@ mod tests {
 
             let stale = mod_api::EntityRef::new(WorldEpoch::new(pig.epoch().get() + 1), pig.id());
             assert_eq!(game.entity_trackers(stale), None);
+
+            // A live guest in a parked level is not in the level in place: no trackers.
+            let host = game.lan.as_mut().unwrap();
+            let moved = host.hub.guests.connection_index(13).unwrap();
+            host.hub.guests.update(moved, |g| {
+                g.dimension = "minecraft:the_nether".to_owned();
+            });
+            let parked = game.player(13).unwrap().entity();
+            assert_eq!(game.entity_trackers(parked), None);
         });
     }
 
