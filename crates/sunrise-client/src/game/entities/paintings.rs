@@ -473,6 +473,53 @@ impl Game<'_> {
             if culling.hides_entity() {
                 continue;
             }
+            if let Some(resolved) = super::native_entity_renderers::painting_renderer() {
+                let entity_start = out.len();
+                self.mark_motion(entity_start, Self::MOTION_OBJECT | u64::from(p.id));
+                let (lo, hi) = p.bounds();
+                let at = glam::DVec3::new(
+                    (lo[0] + hi[0]) / 2.0,
+                    (lo[1] + hi[1]) / 2.0,
+                    (lo[2] + hi[2]) / 2.0,
+                );
+                let facing = match p.facing & 3 {
+                    0 => mod_api::Direction::South,
+                    1 => mod_api::Direction::West,
+                    2 => mod_api::Direction::North,
+                    _ => mod_api::Direction::East,
+                };
+                let entity: mod_api::EntityRenderState =
+                    mod_api::__private::built::EntityRenderState {
+                        id: p.id,
+                        partial: 0.0,
+                        age: 0.0,
+                        yaw: f32::from(p.facing & 3) * 90.0,
+                        pitch: 0.0,
+                        living: None,
+                        painting: Some(
+                            mod_api::__private::built::PaintingRenderState {
+                                facing,
+                                width: p.width,
+                                height: p.height,
+                            }
+                            .into(),
+                        ),
+                    }
+                    .into();
+                let light = self.world.light(p.pos[0], p.pos[1], p.pos[2]);
+                let packed = (u32::from(light >> 4) * 16) | ((u32::from(light & 15) * 16) << 8);
+                if self.mod_entity_renderer_geometry(
+                    &resolved,
+                    &entity,
+                    at - camera,
+                    p.pos,
+                    packed,
+                    out,
+                ) {
+                    self.finish_entity_occlusion(culling, p, out, entity_start);
+                    continue;
+                }
+            }
             let Some(v) = self.painting_variants.get(&p.variant) else {
                 continue;
             };

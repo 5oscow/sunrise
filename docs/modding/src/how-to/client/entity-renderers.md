@@ -1,7 +1,7 @@
 # Drawing an entity type with your own renderer
 
-You can draw content-defined thrown entities and living entity types (mobs, vanilla's or a content
-mod's) with your own renderer. This is the counterpart of
+You can draw content-defined thrown entities, living entity types (mobs, vanilla's or a content
+mod's) and paintings with your own renderer. This is the counterpart of
 NeoForge 26.3's `EntityRenderersEvent.RegisterRenderers` (`registerEntityRenderer`): the mod
 registers one renderer per entity type at start, and the game hands each entity of that type in
 view to it, once a frame. Native and wasm mods register and draw the same way.
@@ -40,6 +40,7 @@ impl EntityRenderer for Bolt {
 | `age` | Ticks lived plus the partial tick (`ageInTicks`). |
 | `yaw`, `pitch` | The way it faces, in degrees, interpolated to the frame (0 is south, positive pitch looks down). |
 | `living` | A living entity's own frame (`LivingRenderState`, below); none for any other entity. |
+| `painting` | A painting's own frame (`PaintingRenderState`, below); none for any other entity. |
 
 The pose stack starts at the entity's interpolated position, in blocks, and is not turned. `draw`
 also has the partial tick, the game time and the entity's light. What `submit` draws replaces the
@@ -63,6 +64,21 @@ under the same names. Angles are in degrees, interpolated to the frame.
 | `is_upside_down`, `is_baby`, `is_in_water`, `has_red_overlay` | Named Dinnerbone or Grumm; a baby; in water; hurt or dying. |
 | `pose` | Its stance (`Pose::Standing`, `Pose::Sleeping`, `Pose::Crouching`...). |
 | `bed_orientation` | The way the bed it sleeps in faces, while it sleeps in one. |
+
+### A painting's frame
+
+A painting's state has `painting: Some(PaintingRenderState)`. `yaw` is
+`Direction.get2DDataValue * 90` (0 is south, 90 west), and `pitch` is 0. Paintings do not move or
+age, so `partial` and `age` are 0. The pose stack starts at the hanging entity's position (the
+centre of its box), not turned.
+
+| `PaintingRenderState` | Meaning |
+| --- | --- |
+| `facing` | The way it faces out from the wall (`Direction`: south, west, north, east). |
+| `width`, `height` | Its size in blocks. |
+
+The variant id (`minecraft:kebab`) is not in the state: a frame allocates nothing, so a renderer
+that needs the variant reads it in a hook and keeps what it read.
 
 A living renderer replaces the type's whole renderer: its model and its vanilla layers (armour, held
 items, a worn head), as a NeoForge `LivingEntityRenderer` does. Vanilla's turn, scale and death
@@ -99,13 +115,15 @@ scan over the mods.
 
 ## What draws through registered renderers
 
-Registered renderers draw two routes:
+Registered renderers draw these routes:
 
 - content-defined thrown types: a `data/<id>/sunrise/entity_type/<name>.json` using the
   `minecraft:snowball` template ([content mods](../content-mods.md)) draws the renderer's geometry
   instead of its flying item. Without a renderer, it draws its item;
 - living types drawn as mobs, vanilla's (`minecraft:zombie`) and the content mods' living types: the
-  renderer draws instead of the model and its vanilla layers.
+  renderer draws instead of the model and its vanilla layers;
+- paintings (`minecraft:painting`): the renderer draws instead of the painting's quads, and reads
+  `painting`. Without a renderer, the quads are unchanged.
 
 Registrations for other known entity families, including boats, displays, vanilla projectiles, the
 player (whose model goes by its skin), the armour stand and the ender dragon (which draw through
