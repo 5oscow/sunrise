@@ -1034,7 +1034,7 @@ fn with_wasm_parts(
         return;
     }
     if crate::game::native_entity_refs::tests::run_fresh_cases(
-        &format!("game::entities::general::tick_tests::{name}"),
+        &format!("game::general::tick_tests::{name}"),
         "SUNRISE_GENERAL_ENTITY_WASM_CHILD",
         &["fresh"],
     ) {
