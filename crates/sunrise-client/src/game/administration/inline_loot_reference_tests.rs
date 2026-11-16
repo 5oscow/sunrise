@@ -240,3 +240,23 @@ fn inline_references_follow_the_codec_and_the_reloaded_registry() {
         Some("Unknown function parity:il_bad")
     );
 }
+
+#[test]
+#[ignore = "daily"]
+fn pack_functions_admit_inline_references_on_first_open() {
+    let _publication = sunrise_client::datapack_net::isolate_server_publication();
+    let mut resources = None;
+    let mut game = game(&mut resources);
+    let functions = game.world_root.join("datapacks/il/data/parity/function");
+    std::fs::create_dir_all(&functions).unwrap();
+    std::fs::write(
+        functions.join("il_good.mcfunction"),
+        format!("loot give @s loot {}\n", reference("\"parity:il_one\"")),
+    )
+    .unwrap();
+    game.world_tables = None;
+    game.open_world_datapacks(&[]).unwrap();
+    assert!(game.run_command("function parity:il_good"));
+    assert!(game.run_command("execute store result score d il run clear @s minecraft:diamond"));
+    assert_eq!(score(&game, "d"), 1);
+}
