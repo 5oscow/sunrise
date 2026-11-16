@@ -4,7 +4,8 @@
 use super::native_entity_refs::tests::with_game;
 use crate::game::Game;
 use mod_api::{
-    ArmorStandManipulateEvent, EntityMountEvent, Flow, HangingBreakEvent, Hooks, ServerHost,
+    ArmorStandManipulateEvent, EntityMountEvent, Flow, HangingBreakEvent, Hooks,
+    PlayerShearEntityEvent, ServerHost,
 };
 use std::sync::{
     Arc,
@@ -47,6 +48,13 @@ impl Hooks for Meddler {
         &self,
         host: &mut dyn ServerHost,
         _: &mut ArmorStandManipulateEvent<'_>,
+    ) -> Flow {
+        self.meddle(host)
+    }
+    fn player_shear_entity(
+        &self,
+        host: &mut dyn ServerHost,
+        _: &mut PlayerShearEntityEvent<'_>,
     ) -> Flow {
         self.meddle(host)
     }
