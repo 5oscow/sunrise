@@ -521,6 +521,39 @@ class DynaRoutingTests(unittest.TestCase):
             header = blocks[name].split("    steps:\n", 1)[0]
             self.assertIn("!inputs.parity", header, name)
 
+    def test_named_harnesses_client_lib_tests_are_built_before_the_harnesses(self):
+        from test_ci_runners import jobs
+        parity = dict(jobs((ROOT / ".github/workflows/dyna-ci.yml").read_text()))["vanilla-parity"]
+        step = parity.split("- name: Build the named harnesses' game probes\n", 1)[1]
+        script = textwrap.dedent(step.split("        run: |\n", 1)[1].split("\n      - ", 1)[0])
+        with tempfile.TemporaryDirectory() as temporary:
+            tree, bin_dir = Path(temporary, "tree"), Path(temporary, "bin")
+            (tree / "tools").mkdir(parents=True)
+            bin_dir.mkdir()
+            calls = Path(temporary, "calls")
+            cargo = bin_dir / "cargo"
+            cargo.write_text(f"#!/bin/sh\necho \"$*\" >> {calls}\n")
+            cargo.chmod(0o755)
+            # Two packages, one Cargo run each, as harnesses write them; a profile of its own builds elsewhere.
+            (tree / "tools" / "test_lib_parity.py").write_text(
+                'run(["cargo", "test", "--locked", "-p", "sunrise-client-lib", "--lib", "x"])\n')
+            (tree / "tools" / "test_game_parity.py").write_text(
+                "run(['cargo', 'test', '-p', 'sunrise-client', '--lib', 'y'])\n")
+            (tree / "tools" / "test_fast_parity.py").write_text(
+                'run(["cargo", "test", "--profile", "fast", "-p", "sunrise-client", "--lib", "z"])\n')
+            env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+                   "GITHUB_STEP_SUMMARY": str(Path(temporary, "summary"))}
+            def built(harnesses):
+                calls.unlink(missing_ok=True)
+                result = subprocess.run(["bash", "-e", "-c", script], cwd=tree, env={**env, "HARNESSES": harnesses},
+                                        capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                return calls.read_text().splitlines() if calls.exists() else []
+            self.assertEqual(built("game lib#2"), ["test --locked --no-run -p sunrise-client-lib --lib",
+                                                   "test --locked --no-run -p sunrise-client --lib"])
+            self.assertEqual(built("lib"), ["test --locked --no-run -p sunrise-client-lib --lib"])
+            self.assertEqual(built("fast"), [])
+
     def test_parity_output_stays_on_the_runner_whatever_the_tested_tree_holds(self):
         from test_ci_runners import jobs
         parity = dict(jobs((ROOT / ".github/workflows/dyna-ci.yml").read_text()))["vanilla-parity"]
