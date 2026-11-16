@@ -270,7 +270,6 @@ impl Game<'_> {
         let context = self
             .prepare_loop_context(&resources)
             .map_err(|error| ReloadStageError::DataSource(error.to_string()))?;
-        let prepared = self.apply_server_reload_callbacks(prepared);
         let world = if run_load && self.remote.is_none() {
             Some(
                 self.prepare_world_reload(&stack, &resources)
@@ -279,6 +278,12 @@ impl Game<'_> {
         } else {
             None
         };
+        if let Some(world) = &world {
+            prepared.bind_loot(world);
+        }
+        // Every candidate, including world tables, must prepare successfully
+        // before any listener publishes its new state.
+        let prepared = self.apply_server_reload_callbacks(prepared);
         if let Some(root) = next_root {
             self.options.resources = root.prepared().to_owned();
             self.pack.data_source = root.data().clone();
@@ -1418,7 +1423,6 @@ impl Game<'_> {
                 )));
             }
         };
-        let prepared = self.apply_server_reload_callbacks(prepared);
         let world = match self.prepare_world_reload(&stack, &root) {
             Ok(world) => world,
             Err(error) => {
@@ -1429,6 +1433,8 @@ impl Game<'_> {
                 )));
             }
         };
+        prepared.bind_loot(&world);
+        let prepared = self.apply_server_reload_callbacks(prepared);
         self.install_loop_context(context);
         self.fns.packs = stack.packs.clone();
         self.fns.enabled = stack.enabled.clone();
@@ -2213,6 +2219,15 @@ mod tests {
                 br#"{"values":["minecraft:stone"]}"#,
             )
             .unwrap();
+            let modifiers = pack.join("data/reload_test/loot_modifiers");
+            std::fs::create_dir_all(&modifiers).unwrap();
+            let modifier_file = modifiers.join("append.json");
+            std::fs::write(
+                &modifier_file,
+                br#"{"type":"neoforge:add_table","table":"minecraft:blocks/stone"}"#,
+            )
+            .unwrap();
+            let modifier_id = mod_api::Identifier::parse("reload_test:append").unwrap();
             game.world_root = root.clone();
             game.set_allow_commands(true);
             // Establish the live pack generation before injecting a refused candidate.
@@ -2220,8 +2235,43 @@ mod tests {
             // a subsequent successful reload of the same live worker registry.
             game.reload_datapacks(true, &[]).unwrap();
             assert!(game.items().block_tags["reload_test:candidate"].contains("minecraft:stone"));
+            let first = game
+                .reload_resources()
+                .listener(&mod_api::GlobalLootModifierManager::key())
+                .unwrap();
+            let first_instance = first.get(&modifier_id).unwrap();
+            assert_eq!(first.id_of(&first_instance), Some(&modifier_id));
+            assert_eq!(first.modifiers().len(), 1);
+            let first_generation =
+                Arc::downgrade(game.world_tables.as_ref().unwrap().loot.global_modifiers());
             assert!(game.run_command("datapack disable \"file/candidate\""));
+            assert!(
+                game.reload_resources()
+                    .listener(&mod_api::GlobalLootModifierManager::key())
+                    .unwrap()
+                    .modifiers()
+                    .is_empty()
+            );
+            // A retained manager keeps the preceding immutable instance generation.
+            assert_eq!(first.modifiers().len(), 1);
+            assert!(first_generation.upgrade().is_some());
+            drop(first);
+            assert!(first_generation.upgrade().is_none());
+            std::fs::write(&modifier_file, br#"{"type":"neoforge:add_table","table":"minecraft:blocks/stone","priority":1002}"#).unwrap();
             assert!(game.run_command("datapack enable \"file/candidate\""));
+            let live_modifiers = game
+                .reload_resources()
+                .listener(&mod_api::GlobalLootModifierManager::key())
+                .unwrap();
+            assert_eq!(
+                live_modifiers
+                    .get(&modifier_id)
+                    .unwrap()
+                    .priority()
+                    .unwrap(),
+                1002
+            );
+            assert_eq!(first_instance.priority().unwrap(), 1000);
             let live_stone = mod_platform::__private::part_tests::block_key("minecraft:stone");
             assert_eq!(
                 super::super::native_world_read::block_in_tag(live_stone, "reload_test:candidate"),
@@ -2246,8 +2296,18 @@ mod tests {
             let old_tables = game.world_tables.as_ref().map(|tables| tables as *const _);
             let old_generation = game.damage_tag_generation;
             let old_enabled = game.fns.enabled.clone();
+            std::fs::write(&modifier_file, br#"{"type":"neoforge:add_table","table":"minecraft:blocks/stone","priority":1003}"#).unwrap();
             let error = game.reload_datapacks(true, &[]).err().unwrap();
             assert!(error.to_string().contains("reload_test:missing"));
+            let retained = game
+                .reload_resources()
+                .listener(&mod_api::GlobalLootModifierManager::key())
+                .unwrap();
+            assert!(Arc::ptr_eq(&retained, &live_modifiers));
+            assert_eq!(
+                retained.get(&modifier_id).unwrap().priority().unwrap(),
+                1002
+            );
             assert_eq!(game.options.resources, old_root);
             assert!(game.pack.data_source.same_generation(&old_data));
             assert!(Arc::ptr_eq(&game.loop_context, &old_context));

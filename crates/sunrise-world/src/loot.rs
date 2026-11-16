@@ -9,6 +9,7 @@
 //! need an entity, tool or damage source fail when the context has none, as
 //! they do for containers.
 mod fill;
+pub mod global_modifiers;
 pub mod query;
 #[path = "loot_query.rs"]
 mod query_context;
@@ -339,8 +340,9 @@ mod holder_sets;
 pub struct LootData {
     holder_sets: holder_sets::Binding,
     tables: Arc<LootTables>,
+    global_modifiers: Arc<global_modifiers::GlobalLootModifiers>,
     modifiers: HashMap<String, Value>,
-    predicates: HashMap<String, Value>,
+    predicates: Arc<HashMap<String, Value>>,
     items: HashMap<String, ItemFacts>,
     /// Enchantments in registry (identifier) order.
     enchantments: Vec<Enchantment>,
@@ -885,8 +887,9 @@ impl LootData {
         let mut loaded = Self {
             holder_sets: Default::default(),
             tables,
+            global_modifiers: Arc::default(),
             modifiers,
-            predicates,
+            predicates: Arc::new(predicates),
             items,
             enchantments,
             tags,
@@ -896,6 +899,18 @@ impl LootData {
         loaded.holder_sets = binding;
         Ok(loaded)
     }
+    /// Attach prepared instances to this private, not-yet-published snapshot.
+    pub fn set_global_modifiers(&mut self, modifiers: Arc<global_modifiers::GlobalLootModifiers>) {
+        self.global_modifiers = modifiers;
+    }
+    pub fn global_modifiers(&self) -> &Arc<global_modifiers::GlobalLootModifiers> {
+        &self.global_modifiers
+    }
+
+    pub fn predicates(&self) -> &Arc<HashMap<String, Value>> {
+        &self.predicates
+    }
+
     /// The table snapshot used by this loot data.
     pub fn tables(&self) -> &Arc<LootTables> {
         &self.tables

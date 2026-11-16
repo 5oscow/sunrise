@@ -27,9 +27,62 @@ impl<R: RandomSource> LootContext<'_, R> {
         table: &Value,
         random: &mut R,
     ) -> Vec<ItemStack> {
-        let items = self.items.split_loot_stacks(self.evaluate(table, random));
+        let raw = self.evaluate(table, random);
+        self.complete_root(id, raw, random, None)
+    }
+    pub(super) fn complete_root(
+        &self,
+        id: Option<&str>,
+        raw: Vec<ItemStack>,
+        random: &mut R,
+        dynamic: Option<&[ItemStack]>,
+    ) -> Vec<ItemStack> {
+        let stacks = self.items.split_loot_stacks(raw);
         self.query.finish(id);
-        items
+        let generation = &self.items.global_modifiers;
+        if generation.is_empty() && dynamic.is_none() {
+            return stacks;
+        }
+        let dynamic = dynamic.unwrap_or(&[]);
+        let stacks = self.expand_dynamic(stacks, dynamic, true);
+        if generation.is_empty() {
+            return stacks;
+        }
+        let generated = stacks.iter().map(loot_of).collect();
+        let mut scope = ModifierScope {
+            context: self,
+            random,
+            dynamic,
+        };
+        generation
+            .apply(&mut scope, generated)
+            .iter()
+            .map(ItemStack::from_loot)
+            .collect()
+    }
+    fn expand_dynamic(
+        &self,
+        stacks: Vec<ItemStack>,
+        dynamic: &[ItemStack],
+        split: bool,
+    ) -> Vec<ItemStack> {
+        if !stacks.iter().any(|stack| stack.item.starts_with(DYNAMIC)) {
+            return stacks;
+        }
+        stacks
+            .into_iter()
+            .flat_map(|stack| {
+                if stack.item.starts_with(DYNAMIC) {
+                    if split {
+                        self.items.split_loot_stacks(dynamic.to_vec())
+                    } else {
+                        dynamic.to_vec()
+                    }
+                } else {
+                    vec![stack]
+                }
+            })
+            .collect()
     }
     /// The context a mod's own loot kind sees in this engine: the block and
     /// the tool it has, and a seed from the roll's random. The entity, the
@@ -39,6 +92,9 @@ impl<R: RandomSource> LootContext<'_, R> {
         &self,
         random: &mut R,
     ) -> sunrise_world::loot::LootContext<'_> {
+        self.roll_facts(random.next_long())
+    }
+    fn roll_facts(&self, seed: i64) -> sunrise_world::loot::LootContext<'_> {
         sunrise_world::loot::LootContext {
             queried_table_id: self.query.id(),
             queried_stack: self.query.queried_stack.clone(),
@@ -56,7 +112,7 @@ impl<R: RandomSource> LootContext<'_, R> {
             }),
             luck: 0.0,
             biome: None,
-            seed: random.next_long(),
+            seed,
             place: sunrise_world::loot::current_native_loot_place(),
         }
     }
@@ -64,6 +120,7 @@ impl<R: RandomSource> LootContext<'_, R> {
 
 impl ItemStack {
     /// Convert loot facts using the same component write path as native loot functions.
+    /// Caller consumption: signed empty counts become zero without removing their list position.
     pub fn from_loot(value: &sunrise_world::loot::LootStack) -> Self {
         let mut stack = Self {
             item: Arc::from(value.item.as_str()),
@@ -180,3 +237,73 @@ mod tests;
 #[cfg(test)]
 #[path = "loot_split_tests.rs"]
 mod split_tests;
+
+/// One capability lending the original evaluator and selected random through
+/// the root pass. Raw sub-rolls retain all borrowed parameters and visited guards.
+struct ModifierScope<'s, 'a, R> {
+    context: &'s LootContext<'a, R>,
+    random: &'s mut R,
+    dynamic: &'s [ItemStack],
+}
+impl<R: RandomSource> sunrise_world::loot::global_modifiers::ModifierRoll
+    for ModifierScope<'_, '_, R>
+{
+    fn facts(&self) -> sunrise_world::loot::LootContext<'_> {
+        self.context.roll_facts(0)
+    }
+    fn next_int_bound(&mut self, bound: i32) -> i32 {
+        self.random.next_int_bound(bound).unwrap_or(0)
+    }
+    fn next_long(&mut self) -> i64 {
+        self.random.next_long()
+    }
+    fn next_float(&mut self) -> f32 {
+        self.random.next_float()
+    }
+    fn next_double(&mut self) -> f64 {
+        self.random.next_double()
+    }
+    fn next_boolean(&mut self) -> bool {
+        self.random.next_boolean()
+    }
+    fn condition(&mut self, condition: &Value) -> bool {
+        self.context.condition(condition, self.random)
+    }
+    fn roll_raw(
+        &mut self,
+        id: &str,
+    ) -> std::result::Result<Vec<sunrise_world::loot::LootStack>, String> {
+        let context = self.context;
+        let table = context
+            .items
+            .loot
+            .get(id)
+            .ok_or_else(|| format!("table: missing loot table {id}"))?;
+        let Some(_guard) = NestedRoll::enter(id) else {
+            return Ok(Vec::new());
+        };
+        // Raw output retains emitted empties all the way through nested tables.
+        // The original root's output policy does not filter a raw sub-roll.
+        let raw = LootContext {
+            query: context.query.clone(),
+            items: context.items,
+            block: context.block,
+            properties: context.properties,
+            held: context.held,
+            killed_by_player: context.killed_by_player,
+            explosion_radius: context.explosion_radius,
+            this_entity: context.this_entity,
+            entity_levels: context.entity_levels,
+            block_levels: context.block_levels,
+            target: context.target,
+            location: context.location,
+            keep_empty: true,
+        }
+        .evaluate(table, self.random);
+        Ok(context
+            .expand_dynamic(raw, self.dynamic, false)
+            .iter()
+            .map(loot_of)
+            .collect())
+    }
+}
