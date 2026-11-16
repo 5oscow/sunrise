@@ -2206,6 +2206,28 @@ fn large_generated_files_scan_in_linear_time() {
     // Each would take quadratic time in some walk over the file: many macro bodies, many
     // `type` keywords in one body, a long path, and many `Self`s among many impls.
     let n = 20_000;
+    // CPU time, not wall time: on a loaded runner the waits for a CPU are not the scan's (one source took 1.06 s of
+    // wall time in verify on main 026c7217b; all four take about 0.3 s on an idle machine). A thread's own clock
+    // leaves out other threads, and the scan parses on a thread of its own (`syntax::read`), so the same parse is
+    // timed on a thread like it and added to this thread's time for the rest of the scan.
+    #[cfg(unix)]
+    let now = || {
+        let mut time = libc::timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        };
+        // SAFETY: clock_gettime only writes the timespec it is given.
+        assert_eq!(
+            unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut time) },
+            0
+        );
+        std::time::Duration::new(time.tv_sec as u64, time.tv_nsec as u32)
+    };
+    #[cfg(not(unix))]
+    let now = {
+        let start = std::time::Instant::now();
+        move || start.elapsed()
+    };
     for source in [
         format!("fn f(_: Settings) {{ {} }}", "a!(); ".repeat(n)),
         format!("m! {{ {} }}\nfn f(_: Settings) {{}}", "type ".repeat(n)),
@@ -2215,9 +2237,21 @@ fn large_generated_files_scan_in_linear_time() {
             "impl S { fn f() -> Self { Self } }\n".repeat(n / 2)
         ),
     ] {
-        let started = std::time::Instant::now();
+        let parse = std::thread::scope(|scope| {
+            std::thread::Builder::new()
+                .stack_size(crate::syntax::PARSER_STACK)
+                .spawn_scoped(scope, || {
+                    let started = now();
+                    assert!(crate::syntax::parse(&source).is_ok());
+                    now() - started
+                })
+                .unwrap()
+                .join()
+                .unwrap()
+        });
+        let started = now();
         assert!(ids(&scan_on(wider(), &source)).contains(&"type:Settings"));
-        let took = started.elapsed();
+        let took = now() - started + parse;
         assert!(
             took < std::time::Duration::from_millis(1000),
             "{took:?}: {}",
