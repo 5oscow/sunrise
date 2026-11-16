@@ -694,11 +694,10 @@ impl Game<'_> {
         let state = self.level_block_state(level, pos)?;
         let direction = block_face_direction(face);
         let b = self.res.behaviours();
-        if !b.has_cached_support(state) {
+        let binding = self.res.collision();
+        if !b.has_cached_support(state) || binding.publishes_shapes(state) {
             use sunrise_client::collisions::SceneCollisions;
             use sunrise_world::{block_support::SupportType, dynamic_support::DynamicSupport};
-            let binding = self.res.collision();
-            let dynamic = DynamicSupport::from_state(binding.registry().state(state)?).ok()??;
             let world = self.native_level_world(level)?;
             let mut scene = SceneCollisions {
                 world,
@@ -711,6 +710,12 @@ impl Game<'_> {
                 mod_api::SupportType::Rigid => SupportType::Rigid,
                 _ => unreachable!("mod_api::SupportType: unhandled variant"),
             };
+            // A state that may publish takes its block entity's shape, else its declared one.
+            if binding.publishes_shapes(state) {
+                let shape = binding.collision_shape(&mut scene, state, pos).ok()?;
+                return support.is_supporting(&shape, direction).ok();
+            }
+            let dynamic = DynamicSupport::from_state(binding.registry().state(state)?).ok()??;
             return dynamic
                 .is_face_sturdy(&mut scene, pos, direction, support)
                 .ok();

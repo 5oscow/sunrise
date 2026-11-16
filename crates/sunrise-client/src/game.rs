@@ -2402,6 +2402,7 @@ impl Game<'_> {
         player_context: bool,
     ) -> Vec<[f64; 6]> {
         self.outline_boxes_iter(
+            world,
             world.block(pos[0], pos[1], pos[2]),
             anims,
             pos,
@@ -2422,7 +2423,9 @@ impl Game<'_> {
         use sunrise_core::geometry::{Aabb, Vec3};
         let facts = self.res.facts().get(state);
         let cached = self.collision.cached_shapes();
-        let shape = cached.context_outline_shape(state, self.outline_context_kind());
+        let shape =
+            sunrise_client::collisions::published_outline(&self.world, self.collision, state, pos)
+                .or_else(|| cached.context_outline_shape(state, self.outline_context_kind()));
         let boxes: Cow<'_, [Aabb]> = if let Some(shape) = shape {
             Cow::Borrowed(shape.boxes())
         } else if let Some(b) = self.context_outline(pos, state, true, &self.be_anims) {

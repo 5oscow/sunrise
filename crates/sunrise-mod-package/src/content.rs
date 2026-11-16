@@ -394,6 +394,8 @@ struct BlockFile {
     #[serde(default)]
     collision_context_shapes: BTreeMap<ShapeEntityKind, BlockShapes>,
     interaction_shapes: Option<BlockShapes>,
+    #[serde(default)]
+    shapes_from_block_entity: bool,
     state_light: Option<StateLight>,
     #[serde(default)]
     state_properties: BTreeMap<String, StateProperty>,
@@ -448,6 +450,9 @@ pub struct Block {
     pub collision_context_shapes: BTreeMap<ShapeEntityKind, BlockShapes>,
     /// Ray-face override; does not replace the outline hit point or create a hit.
     pub interaction_shapes: Option<BlockShapes>,
+    /// The block's block entity publishes its outline and collision shapes, which replace the
+    /// declared ones until cleared. Needs a block entity type that owns the block.
+    pub shapes_from_block_entity: bool,
     /// Per-state emission; takes precedence over `properties.light`.
     pub state_light: Option<StateLight>,
     /// State properties of its own, which its template does not have.
@@ -1221,6 +1226,7 @@ impl Content {
                 outline_context_shapes: file.outline_context_shapes,
                 collision_context_shapes: file.collision_context_shapes,
                 interaction_shapes: file.interaction_shapes,
+                shapes_from_block_entity: file.shapes_from_block_entity,
                 state_light: file.state_light,
                 state_properties: file.state_properties,
                 default_state: file.default_state,
@@ -2179,6 +2185,7 @@ capabilities = ["registries"]
                 outline_context_shapes: BTreeMap::new(),
                 collision_context_shapes: BTreeMap::new(),
                 interaction_shapes: None,
+                shapes_from_block_entity: false,
                 state_light: None,
                 state_properties: BTreeMap::new(),
                 default_state: BTreeMap::new(),

@@ -1306,6 +1306,17 @@ pub trait LevelAccess: BlockEntityNeighbors {
     fn shulker_is_closed(&self, _pos: BlockPos) -> Option<bool> {
         None
     }
+    /// The collision shape the block entity at `pos` published for its block
+    /// (`shapes_from_block_entity`), by one lookup, when `state` is of a block that may
+    /// publish and its block entity holds one. None otherwise, and for a level that keeps no
+    /// block entities: support then comes from the state's declared shape.
+    fn published_collision_shape(
+        &self,
+        _pos: BlockPos,
+        _state: BlockStateId,
+    ) -> Option<sunrise_core::geometry::VoxelShape> {
+        None
+    }
     /// Load saved block-entity data into the block entity of the block just
     /// placed at `pos` (`BlockEntity.loadWithComponents`): a bee nest a grown
     /// tree placed gets its bees. Levels without block entities drop it.

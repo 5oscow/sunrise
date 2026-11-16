@@ -398,6 +398,46 @@ and player selection uses its own outline channel. Callers without a captured
 entity class retain ordinary shapes. These declarations select state/class-only
 geometry, not arbitrary world-dependent block behavior or native callbacks.
 
+### Shapes a block entity publishes
+
+A block whose geometry depends on what is inside it (a cable bus with attached parts, a table
+showing its tools) sets `"shapes_from_block_entity": true` (`Block::shapes_from_block_entity`).
+Loading refuses it, naming the block, when no block entity type owns the block. Its block entity
+then publishes the block's shapes: `BlockEntityRef::set_shapes(host, Some(BlockEntityShapes {
+outline, collision }))`, boxes in block units as in `shapes`, or `None` to clear them. The
+declared `shapes` and `collision_shapes` apply while it holds none, which is also the case until
+the first publish.
+
+This differs from NeoForge, where `getShape` is asked for on every query: here a shape is
+**published when it changes, not asked for per query**, and a port of a `getShape` override calls
+`set_shapes` wherever that state changes (a part attached, a lid opened). Physics, selection,
+ray casts and support read the published value at the position; nothing calls into the mod.
+Face sturdiness and multiface attachment between neighbouring blocks (placement, survival,
+shape updates, as for lichen and sculk veins) still read the declared shape until #1654.
+Shapes that depend on the querying entity are not covered; `outline_context_shapes` and
+`collision_context_shapes` stay declared, and a published shape stands over them.
+
+- **Checks**, refused by name with a `BlockEntityShapesError` and never clamped: every
+  coordinate finite and each minimum at most its maximum; at most 64 boxes in each list.
+  Vanilla has no box limit; 64 bounds what a block entity makes every client receive and
+  keep, while a declared shape table (`shapes`, above) holds 16 boxes, a load-time limit of
+  its own. There is no coordinate range. A box under 1e-7 thick on an axis is an empty box,
+  as in vanilla.
+- **Reach**: collision finds boxes only within one cell of the block, one axis at a time (a
+  state that publishes is always scanned that way); a box beyond that is stored and sent but
+  inert, as in vanilla. An outline can be hit past its cell once the ray enters the owning
+  cell. A debug build warns once per block when a publish holds a box beyond one cell.
+- **Timing**: the server applies a publish at once, to the queries that follow in the same
+  tick. A client applies it when the block entity update arrives, which may be a tick later, as
+  with any block change. An entity the new shape now overlaps is treated as vanilla treats a
+  block that appears inside it: nothing pushes it out.
+- **Lifetime**: the shapes are saved with the block entity, restored when its chunk loads before
+  anything ticks, and sent with the block entity in the chunk and in its updates, so a part
+  need not publish again after a load or a chunk receive: a publish is an update, never a
+  repair. They are dropped when the block entity is removed or its block changes. The key they
+  are kept under is the engine's: `replace_data` and `merge_data` leave them alone, and a
+  payload that carries it has it ignored.
+
 An item copies its template's data components, with `max_stack_size` and
 `rarity` changed, and any other 26.3 component set or removed in
 `components`, written as a data component patch is: `minecraft:<type>` sets

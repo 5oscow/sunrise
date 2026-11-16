@@ -1203,6 +1203,15 @@ impl<'a> Plan<'a> {
                 if defaults.contains_key(&decl.id) {
                     return Err(format!("{}: {} is already a block", m.id, decl.id).into());
                 }
+                if decl.shapes_from_block_entity
+                    && !block_entity_factories.contains_key(decl.id.as_str())
+                {
+                    return Err(format!(
+                        "{}: shapes_from_block_entity needs a block entity type that owns the block",
+                        decl.id
+                    )
+                    .into());
+                }
                 let states = range(&decl.template).ok_or_else(|| {
                     format!("{}: template {} is not a block", decl.id, decl.template)
                 })?;
@@ -2064,6 +2073,28 @@ impl<'a> Plan<'a> {
             }
             _ => return Err("no rule for this table".into()),
         }
+        Ok(())
+    }
+
+    /// The states whose block entity publishes their shapes (`shapes_from_block_entity`), in
+    /// the collision and support tables, which mark such states in their scan metadata.
+    fn published_states(&self, tag: &mut Tag) -> Result<()> {
+        let states: Vec<i32> = self
+            .blocks
+            .iter()
+            .filter(|block| block.decl.shapes_from_block_entity)
+            .flat_map(|block| {
+                (0..block.order.len())
+                    .map(move |offset| (block.rename.first as usize + offset) as i32)
+            })
+            .collect();
+        if states.is_empty() {
+            return Ok(());
+        }
+        let Tag::Compound(root) = tag else {
+            return Err("collision table is not a compound".into());
+        };
+        root.insert("published_shapes".into(), Tag::IntArray(states));
         Ok(())
     }
 
@@ -2987,6 +3018,9 @@ fn tables(base: &Path, plan: &Plan, overlay: &Overlay<'_>, jobs: &[(&str, u64)])
             plan.nbt(&mut named.tag);
             if name == "cached-collision.nbt" || name == "worldgen/blocks/cached-collision.nbt" {
                 plan.declared_shapes(&mut named.tag, true)?;
+                plan.published_states(&mut named.tag)?;
+            } else if name == "worldgen/blocks/cached-support.nbt" {
+                plan.published_states(&mut named.tag)?;
             } else if name == "occlusion.nbt" {
                 plan.declared_shapes(&mut named.tag, false)?;
             } else if name == "worldgen/blocks/block-properties.nbt" {

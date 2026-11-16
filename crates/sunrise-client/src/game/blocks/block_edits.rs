@@ -613,6 +613,48 @@ mod tests {
     }
 
     #[test]
+    fn a_block_entitys_published_shapes_go_with_it_when_its_block_changes() {
+        let mut w = world();
+        w.set(1, 5, 1, BlockStateId(3)).unwrap();
+        let mut press = sunrise_client::containers::ModBlockEntity::new(
+            "machines:press".into(),
+            Default::default(),
+        );
+        press.set_shapes(Some(Arc::new(
+            sunrise_client::containers::PublishedShapes::new(mod_api::BlockEntityShapes {
+                outline: vec![],
+                collision: vec![[0.0, 0.0, 0.0, 1.0, 0.5, 1.0]],
+            })
+            .unwrap(),
+        )));
+        w.block_entities
+            .insert((1, 5, 1), BlockEntity::Mod(Box::new(press)));
+        // Another block, of the same entity type or none: the entity is made again, bare.
+        let out = w.edit_runs(
+            &[Run {
+                x: 1,
+                z: 1,
+                y0: 5,
+                y1: 5,
+                state: 1,
+                only: None,
+            }],
+            |_, _| true,
+            |s| s == 3,
+        );
+        let made = |n: &str| {
+            (n == "machines:press").then(|| {
+                BlockEntity::Mod(Box::new(sunrise_client::containers::ModBlockEntity::new(
+                    "machines:press".into(),
+                    Default::default(),
+                )))
+            })
+        };
+        replace_block_entities(&mut w, &out.tracked, names, made);
+        assert!(w.block_entities.get(&(1, 5, 1)).is_none());
+    }
+
+    #[test]
     fn a_new_block_gets_the_block_entity_made_for_it() {
         let mut w = world();
         let out = w.edit_runs(
