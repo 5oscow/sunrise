@@ -150,7 +150,8 @@ jobs:
           done
           # Each alone in its process: each initializes the fixture mod, and the points table is sealed once per
           # process, so a second initialization there refuses the fixture's replace listener as already owned.
-          # The tests are the `needs SUNRISE_WASM_FIXTURE` rows; each run must report exactly one test passed.
+          # The tests are the `needs SUNRISE_WASM_FIXTURE` rows and the `daily ... wasm-fixture` rows (no shard has the
+          # fixture); each run must report exactly one test passed.
           python3 tools/ci/ignored_tests.py --needs SUNRISE_WASM_FIXTURE --one-process-each --jobs "$jobs" \
             --report "$RUNNER_TEMP/daily-report.json"
       # The tests' names and verdicts for the daily summary (ignored_tests.py --report); no test output.

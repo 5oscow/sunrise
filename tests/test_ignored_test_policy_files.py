@@ -98,6 +98,21 @@ class PolicyFiles(unittest.TestCase):
             ["cargo", "test", "-j2", "-p", "pkg", "--lib", "--", "--exact", "b::plain"],
         ])
 
+    def test_a_daily_row_needing_an_input_runs_with_that_input_never_in_a_shard(self):
+        self.write("fixture.txt", "pkg a::ignored VAR needs\n")
+        self.write("daily-pkg.txt", "pkg b::guest lib daily wasm-fixture\npkg c::slow lib daily slow\n"
+                                    "pkg d::loads test:loads daily wasm-fixture\n")
+        variable = ignored_tests.DAILY_INPUTS["wasm-fixture"]
+        self.write("other.txt", f"pkg e::other {variable} needs\n")
+        with patch.object(ignored_tests, "workspace_features", return_value={"pkg": ["fixture"]}):
+            self.assertEqual(ignored_tests.needs_commands(variable), [
+                ["cargo", "test", "-p", "pkg", "--lib", "--", "--ignored", "--exact", "e::other"],
+                ["cargo", "test", "-p", "pkg", "--lib", "--", "--ignored", "--exact", "b::guest"],
+                ["cargo", "test", "-p", "pkg", "--features", "fixture", "--test", "loads", "--", "--ignored", "--exact",
+                 "d::loads"],
+            ])
+        self.assertEqual([row.test for row in ignored_tests.daily_rows()], ["c::slow"])
+
     def test_an_unset_variable_runs_nothing(self):
         self.write("wasm-fixture.txt", "pkg a::one VAR needs\n")
         with patch.dict(os.environ), patch.object(ignored_tests.subprocess, "Popen") as popen:
