@@ -397,6 +397,8 @@ pub trait PlayersBackend {
     fn player_food(&self, player: PlayerRef) -> Option<PlayerFood>;
     /// Side: both.
     /// `Player.getAbilities`; Paper `Player#getAllowFlight/isFlying/getFlySpeed/getWalkSpeed`.
+    /// On a client, flying is the local body's current prediction; the packet supplies
+    /// the other ability flags and speeds. None for any other player.
     #[access(WorldOnly)]
     fn player_abilities(&self, player: PlayerRef) -> Option<PlayerAbilities>;
     /// Side: both.

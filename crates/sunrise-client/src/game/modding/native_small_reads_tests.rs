@@ -110,7 +110,7 @@ fn client_player_state_reads_its_own_copy_only() {
             let local = game.local_player().unwrap();
             let entity = local.entity();
             let other = mod_api::EntityRef::new(entity.epoch(), 99);
-            let other_player = mod_api::PlayerRef::new(other, 99);
+            let other_player = mod_api::__private::game::player_ref(other, 99);
             game.inventory[5] = Some(ItemStack::new("minecraft:stone", 3));
             for flag in [true, false] {
                 let body = game.player.as_mut().unwrap();
@@ -132,8 +132,40 @@ fn client_player_state_reads_its_own_copy_only() {
                 let slots = local.inventory_slots(host).unwrap();
                 assert_eq!(slots.len(), 1);
                 assert_eq!(slots[0].0, 5);
-                assert_eq!(slots[0].1.count, 3);
+                assert_eq!(slots[0].1.count(), 3);
                 assert_eq!(other_player.inventory_slots(host), None);
+            }
+        });
+    });
+}
+
+#[test]
+#[ignore = "daily"]
+fn client_abilities_follow_predicted_flying_between_packets() {
+    use super::native_client_session::tests::logged_client;
+    use super::native_entity_refs::tests::with_client_game;
+    use sunrise_client::motion::PlayerMotion;
+    use sunrise_core::geometry::Vec3;
+    use sunrise_protocol::packets::play;
+    mod_platform::testing::with_mods(Default::default(), || {
+        with_client_game(|game| {
+            let _server = logged_client(game);
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            game.handle_packet(play::Clientbound::PlayerAbilities(play::PlayerAbilities {
+                flags: 4,
+                flying_speed: 0.1,
+                walking_speed: 0.2,
+            }))
+            .unwrap();
+            let local = game.local_player().unwrap();
+            for flying in [true, false] {
+                game.player.as_mut().unwrap().flying = flying;
+                let abilities = local.abilities(&*game as &dyn mod_api::ClientHost).unwrap();
+                assert_eq!(abilities.flying, flying);
+                assert!(abilities.may_fly);
+                assert!(!abilities.invulnerable);
+                assert!(!abilities.instabuild);
+                assert_eq!((abilities.fly_speed, abilities.walk_speed), (0.1, 0.2));
             }
         });
     });

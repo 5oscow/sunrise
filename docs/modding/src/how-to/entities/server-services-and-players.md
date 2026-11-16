@@ -220,3 +220,6 @@ an entity whose copy the client does not keep:
 
 Client reads are views, not server authority. Inventory access here is read-only;
 inventory and movement writes still require a server host.
+
+The local player's `abilities` read takes `flying` from current client prediction;
+the other flags and speeds stay as supplied by the last abilities packet.

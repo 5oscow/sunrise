@@ -233,9 +233,7 @@ pub trait EntitiesBackend {
     #[access(WorldOnly)]
     fn entity_velocity(&self, entity: EntityRef) -> Option<[f64; 3]>;
     /// Side: both.
-    /// Whether the entity stands on a block (`Entity.onGround`).
-    /// Whether the entity stands on a block (`Entity.onGround`). API
-    /// 379.
+    /// Whether the entity stands on a block (`Entity.onGround`). API 379.
     /// On a client this is the local player's predicted ground flag, not server authority.
     /// None for another player or an entity whose body the client does not keep.
     #[access(WorldOnly)]
