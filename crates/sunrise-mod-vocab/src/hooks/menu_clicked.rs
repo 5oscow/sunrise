@@ -9,8 +9,11 @@ pub trait Hooks {
     /// No player's state is swapped in: the menu helpers take the player's
     /// UUID. `ItemPlace::MenuSlot` reaches the menu's own storage and its player's
     /// inventory and hotbar slots. `PlayerSlot` and `PlayerHand` resolve the online
-    /// clicking player through the usual acting-player or guest path. All writes
-    /// use transactions; stale menus and player identities refuse writes.
+    /// clicking player through the usual acting-player or guest path. For a player still connected, the mods are told inside an
+    /// action: what a listener writes through the `Host` stays when it
+    /// returns, and is undone, with the rest of the action, when a listener
+    /// fails (panics or traps). A click drained after its player left is
+    /// still told, outside an action.
     #[hook(
         side = "server",
         contract = "listen",

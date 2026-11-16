@@ -370,9 +370,10 @@ impl Game<'_> {
                     button,
                     mode,
                 } => {
-                    // A click a mod's backed slots answer (#3385); any other goes to the mods.
+                    // A click a mod's backed slots answer (#3385); any other goes to the mods,
+                    // as a decided action when a listener is subscribed (#784 3b).
                     if !self.place_menu_click(uuid, window, slot, button, mode) {
-                        self.native_menu_clicked(uuid, window, slot, button, mode);
+                        self.menu_clicked_decided(uuid, window, slot, button, mode);
                     }
                 }
                 NativeMenuEvent::Closed { uuid, window } => {
