@@ -304,7 +304,7 @@ fn authoritative_custom_book_rebuilds_cached_geometry_without_observe_screen() {
 
 #[test]
 #[ignore = "daily"]
-fn a_moved_slot_takes_its_hover_box_and_position_from_the_next_frame() {
+fn a_moved_slot_takes_its_place_for_drawing_and_input_from_the_next_frame() {
     let mods: mod_api::Mods = Vec::<mod_api::ModEntry>::new().into();
     mod_platform::testing::with_mods(mods, || {
         crate::game::native_entity_refs::tests::with_client_game(|game| {
@@ -339,22 +339,53 @@ fn a_moved_slot_takes_its_hover_box_and_position_from_the_next_frame() {
                 sunrise_client::hud::HudBatch::new([1280, 720], game.settings.gui_scale_inputs());
             assert_eq!(game.slot_at(&batch, 600.0, 340.0), None);
 
+            // A render hook moves it after this frame's build: drawing and
+            // hit-testing both still use the old place this frame.
             assert!(game.set_screen_slot_position(0, 48.0, 60.0));
-            assert_eq!(game.slot_position(300), (48.0, 60.0));
+            assert_eq!(game.slot_position(300), (8.0, 18.0));
+            assert_eq!(game.slot_at(&batch, 600.0, 340.0), None);
+            assert_eq!(game.slot_at(&batch, 560.0, 295.0), Some(300));
+            assert_eq!(geometry(game), before);
+            // The next frame's build takes it for both.
             game.build_screen();
+            assert_eq!(game.slot_position(300), (48.0, 60.0));
             let after = geometry(game);
             assert!(after.1.contains(&(300, [599.0, 336.0, 18.0, 18.0])));
             // The 18 by 18 box holds the pointer at its first pixel and not past its last.
             assert_eq!(game.slot_at(&batch, 599.0, 336.0), Some(300));
             assert_eq!(game.slot_at(&batch, 616.0, 353.0), Some(300));
             assert_eq!(game.slot_at(&batch, 617.0, 340.0), None);
-            // Nothing else moved, and the old place no longer hovers it.
-            assert_eq!(game.slot_position(301), (26.0, 18.0));
             assert_ne!(game.slot_at(&batch, 560.0, 295.0), Some(300));
+            assert_eq!(game.slot_position(301), (26.0, 18.0));
 
+            // Repeating the position, or the declared one, rebuilds nothing.
+            let builds = crate::game::container_layout::LAYOUT_CONSTRUCTIONS.with(|c| c.get());
+            assert!(game.set_screen_slot_position(0, 48.0, 60.0));
+            assert!(game.set_screen_slot_position(1, 26.0, 18.0));
+            game.build_screen();
+            assert_eq!(
+                crate::game::container_layout::LAYOUT_CONSTRUCTIONS.with(|c| c.get()),
+                builds
+            );
             assert!(!game.set_screen_slot_position(2, 1.0, 1.0));
             assert!(!game.set_screen_slot_position(9, 1.0, 1.0));
             assert_eq!(geometry(game), after);
+
+            // Overlaps resolve by menu index: the container slot over the hotbar's
+            // first slot (8, 142) and over the main inventory's first (8, 84).
+            assert!(game.set_screen_slot_position(0, 8.0, 142.0));
+            assert!(game.set_screen_slot_position(1, 8.0, 84.0));
+            game.build_screen();
+            assert_eq!(game.slot_at(&batch, 561.0, 420.0), Some(300));
+            assert_eq!(game.slot_at(&batch, 561.0, 362.0), Some(301));
+
+            // A slot beyond the image takes the click instead of making it an outside click.
+            assert!(game.set_screen_slot_position(0, 200.0, 20.0));
+            game.build_screen();
+            game.cursor = (555.0 + 200.0, 277.0 + 22.0);
+            assert_eq!(game.target_at(&batch), (Some(300), false));
+            game.cursor = (555.0 + 230.0, 277.0 + 22.0);
+            assert_eq!(game.target_at(&batch), (None, true));
         });
     });
 }

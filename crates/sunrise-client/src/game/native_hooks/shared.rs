@@ -511,33 +511,55 @@ pub(super) struct OpenNativeScreen {
 
 /// Where a mod moved the open screen's slots after it opened, over the
 /// positions its `Screen` declared. Interior state, as the screen hooks that
-/// move slots hold `&self`.
+/// move slots hold `&self`. A move is pending until the layout build commits
+/// it, so drawing and hit-testing read one position within a frame and both
+/// take a move together from the next.
 #[derive(Default)]
 pub(super) struct SlotMoves {
-    to: std::cell::RefCell<std::collections::HashMap<usize, [f32; 2]>>,
+    committed: std::cell::RefCell<std::collections::HashMap<usize, [f32; 2]>>,
+    pending: std::cell::RefCell<std::collections::HashMap<usize, [f32; 2]>>,
     /// How many moves changed a position, for the layout build's cache key.
     count: std::cell::Cell<u32>,
 }
 
 impl SlotMoves {
-    /// Slot `slot`'s position: where it was moved, else `declared`.
+    /// Slot `slot`'s position this frame: where the last build committed it,
+    /// else `declared`.
     fn position(&self, slot: usize, declared: [f32; 2]) -> [f32; 2] {
-        self.to.borrow().get(&slot).copied().unwrap_or(declared)
+        self.committed
+            .borrow()
+            .get(&slot)
+            .copied()
+            .unwrap_or(declared)
     }
-    /// Moves slot `slot` of a screen that declared `slots`. False, changing
-    /// nothing, for a slot the screen does not show or a position that is
-    /// not finite.
+    /// Moves slot `slot` of a screen that declared `slots`, from the next
+    /// build. False, changing nothing, for a slot the screen does not show or
+    /// a position that is not finite.
     fn set(&self, slots: &[Option<[f32; 2]>], slot: u32, x: f32, y: f32) -> bool {
         let shown = usize::try_from(slot)
             .ok()
-            .filter(|&i| slots.get(i).is_some_and(Option::is_some));
+            .filter(|&i| slots.get(i).is_some_and(|p| p.is_some()));
         let Some(slot) = shown.filter(|_| x.is_finite() && y.is_finite()) else {
             return false;
         };
-        if self.to.borrow_mut().insert(slot, [x, y]) != Some([x, y]) {
+        let declared = slots[slot].expect("shown");
+        let mut pending = self.pending.borrow_mut();
+        let current = pending
+            .get(&slot)
+            .copied()
+            .unwrap_or_else(|| self.position(slot, declared));
+        if current != [x, y] {
+            pending.insert(slot, [x, y]);
             self.count.set(self.count.get().wrapping_add(1));
         }
         true
+    }
+    /// Makes the pending moves the positions drawing and hit-testing read.
+    fn commit(&self) {
+        let mut pending = self.pending.borrow_mut();
+        if !pending.is_empty() {
+            self.committed.borrow_mut().extend(pending.drain());
+        }
     }
 }
 
@@ -546,6 +568,11 @@ impl OpenNativeScreen {
     /// last one is rebuilt.
     pub(in crate::game) fn slot_move_count(&self) -> u32 {
         self.slot_moves.count.get()
+    }
+    /// Makes the slot moves a mod made since the last build the screen's
+    /// positions; the layout build calls it before it reads them.
+    pub(in crate::game) fn commit_slot_moves(&self) {
+        self.slot_moves.commit();
     }
     /// The block the menu is of: where the server said, else the clicked
     /// block its slots are under (a server without `sunrise:menu_extra`).
@@ -4725,16 +4752,22 @@ mod tests {
         assert_eq!(s.data, [0, 7]);
     }
 
-    /// A slot move changes only a shown slot, to a finite position, and counts
-    /// only what changed a position (an unchanged repeat keeps the layout).
+    /// A slot move changes only a shown slot, to a finite position, takes
+    /// effect at the commit, and counts only what changed a position (a
+    /// repeat of the effective position, declared or moved, keeps the layout).
     #[test]
     fn slot_moves_refuse_what_the_screen_does_not_show() {
         let declared = [Some([8.0, 18.0]), None, Some([26.0, 18.0])];
         let moves = super::SlotMoves::default();
+        assert!(moves.set(&declared, 0, 8.0, 18.0));
+        assert_eq!(moves.count.get(), 0);
         assert!(moves.set(&declared, 2, 100.5, -4.0));
+        assert_eq!(moves.count.get(), 1);
+        // Pending until the build commits it.
+        assert_eq!(moves.position(2, [26.0, 18.0]), [26.0, 18.0]);
+        moves.commit();
         assert_eq!(moves.position(2, [26.0, 18.0]), [100.5, -4.0]);
         assert_eq!(moves.position(0, [8.0, 18.0]), [8.0, 18.0]);
-        let moved = moves.count.get();
         for (slot, x, y) in [
             (1, 0.0, 0.0),
             (3, 0.0, 0.0),
@@ -4745,11 +4778,10 @@ mod tests {
             assert!(!moves.set(&declared, slot, x, y), "{slot} {x} {y}");
         }
         assert_eq!(moves.position(0, [8.0, 18.0]), [8.0, 18.0]);
-        assert_eq!(moves.count.get(), moved);
         assert!(moves.set(&declared, 2, 100.5, -4.0));
-        assert_eq!(moves.count.get(), moved);
+        assert_eq!(moves.count.get(), 1);
         assert!(moves.set(&declared, 2, 100.5, -3.0));
-        assert_eq!(moves.count.get(), moved + 1);
+        assert_eq!(moves.count.get(), 2);
     }
 
     #[test]

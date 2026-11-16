@@ -50,6 +50,11 @@ impl Game<'_> {
     ) -> ContainerLayout {
         #[cfg(test)]
         LAYOUT_CONSTRUCTIONS.with(|count| count.set(count.get() + 1));
+        // Slot moves made since the last build apply from this one, to the
+        // boxes below and to everything drawn until the next.
+        if let Some(screen) = self.shown_native_screen() {
+            screen.commit_slot_moves();
+        }
         let origin = inputs.origin;
         let slots = self
             .slots()
