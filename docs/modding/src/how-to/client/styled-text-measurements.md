@@ -11,6 +11,12 @@ in client setup. Native and wasm mods use the same methods.
 | `text_string(&Text)` | `Result<String, TextFormError>`: resolved plain characters. |
 | `text_visual_order(&Text)` | `Result<Vec<VisualTextCharacter>, TextFormError>`: styled characters in display order. |
 
+Inside a drawing hook, `DrawContext::text_lines(&Text, max_width, TextAlign, scale)` wraps and
+places the same way and adds what a label needs: each line's `Text`, its `at` position inside the
+width and its width, plus the block's `width` and `height` — all answered in scaled GUI pixels, the
+text wrapping at `max_width / scale`. It refuses invalid widths and scales and oversized layouts
+with a `TextLinesRefusal`. See [Screens](screens.md#labels-wrapped-text-without-a-widget).
+
 Construct an owned `Text` with its content, style and children. A bridge with a
 flat component representation can build a `TextForm` and call
 `Text::try_from(form)` once at its boundary; the host reads accept that validated
