@@ -1936,8 +1936,8 @@ impl MotionWorld<'_, '_, '_> {
         }
     }
     pub fn jump_from_ground(&mut self) -> Result<()> {
-        living_motion::jump_from_ground(self)?;
-        if !self.player.replaying {
+        let jumped = living_motion::jump_from_ground(self)?;
+        if jumped && !self.player.replaying {
             let v = self.player.velocity;
             native_living_jump(
                 self.loop_context,

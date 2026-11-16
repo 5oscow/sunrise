@@ -12,6 +12,7 @@ use sunrise_core::{
     geometry::{Vec3, trig},
     random::RandomSource,
 };
+use sunrise_world::native_load_context::LoopContext;
 
 // Rabbit's transient state in Extra (none of these clocks are saved).
 const JUMP_TICKS: usize = 0;
@@ -432,7 +433,7 @@ fn jump_scale(m: &Mob) -> f32 {
 /// Rabbit.jumpFromGround: ordinary small hops, larger hops toward raised terrain.
 pub fn jump(m: &mut Mob, w: &MobWorld) {
     let power = m.jump_power_with(w, jump_scale(m));
-    apply_jump(m, power);
+    apply_jump(m, w.loop_context, power);
 }
 
 #[cfg(test)]
@@ -440,9 +441,11 @@ fn jump_power(m: &Mob, block_factor: f32) -> f32 {
     m.attrs.jump_strength as f32 * jump_scale(m) * block_factor + m.jump_boost_power()
 }
 
-fn apply_jump(m: &mut Mob, power: f32) {
+fn apply_jump(m: &mut Mob, context: &LoopContext, power: f32) {
     if power > 1.0e-5 {
         m.velocity.y = f64::from(power).max(m.velocity.y);
+        // Rabbit.jumpFromGround: the super call, where NeoForge's LivingJumpEvent fires, comes first.
+        m.living_jumped(context);
     }
     if m.ai.mov.speed_modifier > 0.0
         && m.velocity.x * m.velocity.x + m.velocity.z * m.velocity.z < 0.01
@@ -620,7 +623,7 @@ mod tests {
         assert!(m.ai.jumping);
         assert_eq!(m.extra.ints[JUMP_DURATION], 15);
         assert_eq!(m.anim.states[0].started, None);
-        apply_jump(&mut m, 0.2);
+        apply_jump(&mut m, crate::test_resources::server_loop_context(), 0.2);
         post_tick(&mut m);
         m.age = 1;
         base_tick(&mut m);
@@ -745,12 +748,12 @@ mod tests {
             1,
         ));
         near(f64::from(jump_power(&m, 0.5)), 0.7);
-        apply_jump(&mut m, 0.2);
+        apply_jump(&mut m, crate::test_resources::server_loop_context(), 0.2);
         near(m.velocity.z, 0.1 / 3.25_f64.sqrt());
         near(m.velocity.y, 0.2 + 0.15 / 3.25_f64.sqrt());
         m.extra.age = -100;
         m.velocity = Vec3::ZERO;
-        apply_jump(&mut m, 0.2);
+        apply_jump(&mut m, crate::test_resources::server_loop_context(), 0.2);
         near(m.velocity.z, 0.1 / 1.25_f64.sqrt());
         near(m.velocity.y, 0.2 + 0.05 / 1.25_f64.sqrt());
         assert_eq!(m.extra.ints[CLIENT_JUMP_DURATION], 15);
