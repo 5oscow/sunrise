@@ -1525,6 +1525,22 @@ pub trait LevelsBackendMut {
     /// parked handle, a client, and a block that did not grow.
     #[access(WorldOnly)]
     fn level_bone_meal(&mut self, level: LevelRef, pos: [i32; 3]) -> bool;
+    /// Side: server.
+    /// Place the configured feature `feature` (a `worldgen/configured_feature` id,
+    /// `minecraft:oak` or `mymod:ender_tree`) at `pos`, as `/place feature` does
+    /// (`ConfiguredFeature.place` with the level's random and chunk generator): the blocks it
+    /// sets reach players as any block change does. `Ok(true)` when it placed, `Ok(false)` when it
+    /// ran and found no room (a tree on stone). Refusals change nothing and are named by
+    /// `PlaceFeatureRefusal`: `Stale`, `Client`, `NotInPlace` (only the level being ticked is
+    /// written), `NotLoaded` (a chunk of the 3x3 around `pos` is not loaded, or `pos` is out of
+    /// height) and `UnknownFeature`.
+    #[access(WorldOnly)]
+    fn level_place_feature(
+        &mut self,
+        level: LevelRef,
+        feature: &str,
+        pos: [i32; 3],
+    ) -> Result<bool, PlaceFeatureRefusal>;
     /// Side: both.
     /// Set the biome of the 4x4x4 cell holding `pos` to `biome` (`minecraft:plains`), as
     /// `/fillbiome` does for one cell. False for a refused write, a stale or parked handle, a
