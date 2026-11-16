@@ -47,7 +47,9 @@ permissions:
   contents: read
 jobs:
   runner-configuration:
-    runs-on: ubuntu-latest
+    # Every leg waits for this check: on Dyna's small runner while the repository's switch is on (the events its
+    # runners take), so a build never queues behind GitHub's runners first.
+    runs-on: ${{ vars.DYNA_CI_SELF_HOSTED == 'true' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && 'dyna-small' || 'ubuntu-latest' }}
     steps:
       - name: Require a dedicated trusted release runner
         if: inputs.trusted && vars.MAC_RUNNER == ''
