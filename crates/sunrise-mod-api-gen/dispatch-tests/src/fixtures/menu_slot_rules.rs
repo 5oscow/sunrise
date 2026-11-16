@@ -1,7 +1,9 @@
 //! Pickup-specific dispatch stays out of the shared listener.
 struct PickupPart;
-#[mod_api::sunrise_part]
 impl MenuPart for PickupPart {
+    fn menu_subscribed(&self) -> &'static [Option<HookId>] {
+        &[]
+    }
     fn menu_slot_rules(&self, _: &dyn Host, event: &mut MenuSlotRulesEvent<'_>) {
         event.may_pickup = false;
     }
