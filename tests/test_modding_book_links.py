@@ -13,7 +13,7 @@ STALE_SITE = re.compile(r"https://(?:arismoko|horizon-rust)\.github\.io/sunrise(
 INSTALL = re.compile(r"cargo\s+(?:install|binstall)\b[^\n]*\bcargo-sunrise-mod\b")
 GIT_SOURCE = re.compile(r"--git\s+(\S+)")
 UPSTREAM_PROJECTS = (
-    "https://github.com/arismoko/horizon-machine-sample",
+    "https://github.com/sunrise-org/sunrise-machine-sample",
     "https://github.com/horizon-rust/horizon-mixins",
     "https://github.com/horizon-rust/horizon-mods",
 )
