@@ -139,6 +139,8 @@ impl Game<'_> {
         self.transaction_close(&seal, matches!(outcome, Ok(Outcome::Applied)));
         match outcome {
             Ok(Outcome::Applied) => true,
+            // A cancelled action is the listener's own answer, not a refusal: the caller goes on.
+            Ok(Outcome::Canceled) => false,
             Ok(other) => {
                 log::warn!("{name}: the action was refused ({other:?}); nothing changed");
                 false

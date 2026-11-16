@@ -4,17 +4,20 @@
 //! refusal (stale, invalid, a failing listener) changes nothing and undoes every write the
 //! listener made. The fixtures need prepared resources.
 use crate::game::native_guest_turn_tests::with_guests;
+use mod_api::{
+    BlockEntityPart, Flow, Hooks, ITEMS, ItemPlace, ItemResource, MenuClickedEvent,
+    MenuQuickMoveEvent, ModEntry, Mods, Registrar, ServerHost,
+};
+use std::{
+    cell::{Cell, RefCell},
+    sync::Arc,
+};
 use sunrise_client::{
-    containers::{BlockEntity, ModBlockEntity, ModBlockEntityFields},
+    containers::{BlockEntity, ModBlockEntity, ModBlockEntityFields, ModContainer},
     items::ItemStack,
     lan::menu::Slots,
 };
 use sunrise_protocol::packets::play::{ContainerClick, Serverbound};
-use mod_api::{
-    BlockEntityPart, Flow, Hooks, ItemPlace, ItemResource, MenuClickedEvent, MenuQuickMoveEvent,
-    ModEntry, Mods, Registrar, ServerHost,
-};
-use std::cell::{Cell, RefCell};
 
 #[derive(Clone, Default)]
 struct Script {
@@ -25,6 +28,9 @@ struct Script {
     take: bool,
     /// ...and answer with a stack past the item's maximum in slot 1.
     invalid: bool,
+    /// `menu_quick_move`: move 4 of the stack into the second block through its `ITEMS`
+    /// capability, leave 6 in `stack`, and return unhandled.
+    cross: bool,
 }
 
 thread_local! {
@@ -80,6 +86,18 @@ impl BlockEntityPart for Part {
             event.entity.items[1] = Some(stone(if s.invalid { 65 } else { 4 }));
             event.entity.items[2] = Some(stone(5));
             event.stack.set_count(1).unwrap();
+        }
+        if s.cross {
+            let level = host.list_levels().remove(0);
+            let items = level
+                .capability(host, &ITEMS, [2, 64, 1], None)
+                .expect("the second block's items");
+            let tx = host.transaction_current().expect("inside the action");
+            assert_eq!(
+                items.insert(host, &tx, 0, &ItemResource::of(&stone(1)), 4),
+                4
+            );
+            event.stack.set_count(6).unwrap();
         }
         if s.panic {
             panic!("a listener failed");
@@ -278,6 +296,64 @@ fn open_depot(game: &mut crate::game::Game<'_>) -> i32 {
     host.hub.guests[0].menu.as_ref().unwrap().window
 }
 
+const SECOND: (i32, i32, i32) = (2, 64, 1);
+
+/// A second mod container beside the depot, empty, that a listener can move items into through
+/// its `ITEMS` capability.
+fn second_block(game: &mut crate::game::Game<'_>) {
+    let state = game
+        .pack
+        .assets
+        .registry
+        .default_state("minecraft:stone")
+        .unwrap();
+    game.world.set(SECOND.0, SECOND.1, SECOND.2, state).unwrap();
+    game.world.block_entities.insert(
+        SECOND,
+        BlockEntity::Mod(Box::new(ModBlockEntity::new(
+            "movemod:depot".into(),
+            ModBlockEntityFields {
+                items: vec![None; 9],
+                ..Default::default()
+            },
+        ))),
+    );
+    game.world.block_entities.set_mod_containers(
+        [(
+            state.0,
+            Arc::new(ModContainer {
+                slots: 9,
+                ..Default::default()
+            }),
+        )]
+        .into_iter()
+        .collect(),
+    );
+}
+
+/// Every stone in the depot, the second block and guest 12's inventory: where a move left them.
+fn stone_everywhere(game: &crate::game::Game<'_>) -> (u32, u32, u32) {
+    let held = |items: &[Option<ItemStack>]| {
+        items
+            .iter()
+            .flatten()
+            .filter(|s| s.item == "minecraft:stone")
+            .map(|s| s.count)
+            .sum::<u32>()
+    };
+    let block = |pos| {
+        let Some(BlockEntity::Mod(m)) = game.world.block_entities.get(&pos) else {
+            panic!("the block entity is gone");
+        };
+        held(&m.items)
+    };
+    (
+        block(POS),
+        block(SECOND),
+        held(&game.lan.as_ref().unwrap().hub.guests[0].inventory),
+    )
+}
+
 /// The block's slots 0, 1 and 2, and guest 12's slot 20.
 fn depot(game: &crate::game::Game<'_>) -> (u32, u32, u32, u32) {
     let Some(BlockEntity::Mod(m)) = game.world.block_entities.get(&POS) else {
@@ -403,5 +479,38 @@ fn a_mod_quick_move_no_mod_took_is_left_to_the_games_routing() {
         assert_eq!(DISPATCHES.get(), 1);
         assert_eq!(decided(), 1);
         assert_eq!(IN_ACTION.with(|a| a.borrow().clone()), [true]);
+    });
+}
+
+#[test]
+#[ignore = "daily"]
+fn an_untaken_quick_move_that_wrote_to_another_block_is_undone_and_routed_once() {
+    with_mod(|| {
+        with_guests(|game| {
+            let window = open_depot(game);
+            second_block(game);
+            // The listener moves 4 of the 10 into the second block, leaves 6 in `stack` and
+            // returns unhandled. The action is cancelled: the second block is empty again, and
+            // the game's own routing then moves the original 10 exactly once, so no stone exists
+            // twice and none is lost.
+            script(Script {
+                cross: true,
+                ..Script::default()
+            });
+            game.lan_guest_packet(12, container_click(window, 0, 1));
+            assert_eq!(DISPATCHES.get(), 1);
+            assert_eq!(IN_ACTION.with(|a| a.borrow().clone()), [true]);
+            let (depot, second, inventory) = stone_everywhere(game);
+            assert_eq!((second, depot + inventory), (0, 10));
+            assert!(game.transactions.is_empty());
+            // The same click inside a transaction that aborts afterwards: the depot's 10 are
+            // back in it, the second block is empty, and the inventory holds what the first
+            // click routed there.
+            let window = open_depot(game);
+            let seal = game.transaction_open();
+            game.lan_guest_packet(12, container_click(window, 0, 1));
+            game.transaction_close(&seal, false);
+            assert_eq!(stone_everywhere(game), (10, 0, inventory));
+        });
     });
 }

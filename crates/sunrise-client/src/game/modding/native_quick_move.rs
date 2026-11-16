@@ -3,6 +3,10 @@
 //! the game's own routing.
 use super::{Game, decided_action::Epoch};
 use crate::game::transactions::decision::{InvalidReason, Reply};
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+};
 use sunrise_client::{
     block_entities::Pos,
     containers::{BlockEntity, ModBlockEntity},
@@ -10,10 +14,6 @@ use sunrise_client::{
     lan::menu::Slots,
 };
 use sunrise_protocol::packets::play;
-use std::{
-    cell::{Cell, RefCell},
-    rc::Rc,
-};
 
 /// `ClickType.QUICK_MOVE`'s id in `ServerboundContainerClickPacket`.
 const QUICK_MOVE: i32 = 1;
@@ -276,12 +276,18 @@ impl Game<'_> {
             self.put_back_mod_block_entity(pos, taken, &items);
             return Fire::Invalid;
         }
+        if !handled {
+            // No mod took the click: the game's own routing moves the stack next, so nothing the
+            // listener did may stay. The block entity goes back into the world and the action
+            // is cancelled, which undoes every write the listener made, to this block and to others.
+            self.put_back_mod_block_entity(pos, taken, &items);
+            return Fire::Untaken;
+        }
         Fire::Done(Fired {
             at,
             taken,
             items,
             stack,
-            handled,
         })
     }
 
@@ -350,23 +356,23 @@ impl Game<'_> {
             mut taken,
             items,
             stack,
-            handled,
         } = fired;
         settle(
             at,
-            handled,
+            true,
             stack,
             &items,
             &mut taken.items,
             &mut self.inventory,
         );
         self.put_back_mod_block_entity(pos, taken, &items);
-        handled
+        true
     }
 
     /// `mod_menu_quick_move` as one decided action. `Some(handled)`: the decision stood (a mod took
-    /// the click, or none did and the game routes it); `None`: it was refused (stale, an invalid
-    /// answer, a failing listener, a busy menu) and nothing changed.
+    /// the click), or no mod did and the action was cancelled with every write of the listeners
+    /// undone, so the game routes the click (`Some(false)`); `None`: it was refused (stale, an
+    /// invalid answer, a failing listener, a busy menu) and nothing changed.
     fn decided_mod_quick_move(
         &mut self,
         conn: u32,
@@ -379,7 +385,13 @@ impl Game<'_> {
         let (actor, route) = (self.guest_actor(conn)?, self.guest_route(conn)?);
         let fired = Rc::new(RefCell::new(None));
         let handled = Rc::new(Cell::new(false));
-        let (kept, taken, result) = (fired.clone(), fired.clone(), handled.clone());
+        let untaken = Rc::new(Cell::new(false));
+        let (kept, taken, result, left) = (
+            fired.clone(),
+            fired.clone(),
+            handled.clone(),
+            untaken.clone(),
+        );
         let applied = self.decided_action(
             "menu_quick_move",
             route,
@@ -400,6 +412,10 @@ impl Game<'_> {
                     *kept.borrow_mut() = Some(fired);
                     Reply::Allow
                 }
+                Some(Fire::Untaken) => {
+                    left.set(true);
+                    Reply::Cancel
+                }
                 Some(Fire::Nothing) => Reply::Allow,
                 Some(Fire::Invalid) => Reply::Invalid(InvalidReason::Plan),
                 None => Reply::Failed,
@@ -413,7 +429,11 @@ impl Game<'_> {
                 }
             },
         );
-        applied.then(|| handled.get())
+        if applied {
+            Some(handled.get())
+        } else {
+            untaken.get().then_some(false)
+        }
     }
 }
 
@@ -423,7 +443,6 @@ struct Fired {
     taken: ModBlockEntity,
     items: Vec<Option<ItemStack>>,
     stack: ItemStack,
-    handled: bool,
 }
 
 enum Fire {
@@ -431,6 +450,8 @@ enum Fire {
     Nothing,
     /// The mods' answer was invalid.
     Invalid,
+    /// The mods asked took nothing: the game routes the click.
+    Untaken,
     Done(Fired),
 }
 
