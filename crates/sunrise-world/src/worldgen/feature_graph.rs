@@ -97,6 +97,8 @@ pub enum FeatureDefinition {
         features: Vec<(f32, PlacedFeatureDefinition)>,
         fallback: Box<PlacedFeatureDefinition>,
     },
+    /// A configured feature of a mod's registered type (`super::mod_features`).
+    Mod(Box<super::mod_features::ModFeature>),
 }
 #[derive(Debug)]
 pub enum FeatureExecutionError<E> {
@@ -125,6 +127,8 @@ pub enum FeatureExecutionError<E> {
     InvalidPendingIndex,
     /// A block-state transition required by a feature is absent from the registry.
     InvalidState,
+    /// A mod feature type's `place` failed (its id, then its reason).
+    Mod(String),
 }
 impl<E: std::fmt::Display> std::fmt::Display for FeatureExecutionError<E> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -153,6 +157,7 @@ impl<E: std::fmt::Display> std::fmt::Display for FeatureExecutionError<E> {
             Self::WorkLimit => f.write_str("feature graph work limit exceeded"),
             Self::InvalidPendingIndex => f.write_str("invalid pending modifier index"),
             Self::InvalidState => f.write_str("feature block state outside registry"),
+            Self::Mod(reason) => write!(f, "mod feature failed: {reason}"),
         }
     }
 }
@@ -805,7 +810,22 @@ impl FeatureDefinition {
                     )?),
                 })
             }
-            _ => BasicFeature::from_json(json).map(Self::Basic),
+            kind => match super::mod_features::mod_feature_types().get(kind) {
+                // A mod's registered type: its config is the whole object, converted once here.
+                Some(ty) => {
+                    let config =
+                        ty.prepare_config(&serde_json::from_str(json)?)
+                            .map_err(|error| {
+                                DecodeError::Registry(format!("feature {kind}: {error}"))
+                            })?;
+                    Ok(Self::Mod(Box::new(super::mod_features::ModFeature {
+                        id: kind.to_owned(),
+                        ty: ty.clone(),
+                        config,
+                    })))
+                }
+                None => BasicFeature::from_json(json).map(Self::Basic),
+            },
         }
     }
     pub fn place<W: FeatureWorld + PlacementContext>(
@@ -855,6 +875,15 @@ impl FeatureDefinition {
                 .place(world, random, origin, run.blocks)
                 .map_err(FeatureExecutionError::Basic),
             Self::NoOp => Ok(true),
+            Self::Mod(feature) => feature
+                .ty
+                .place(
+                    &mut super::mod_features::Target(world),
+                    &mut super::mod_features::Draws(random),
+                    origin,
+                    &feature.config,
+                )
+                .map_err(|reason| FeatureExecutionError::Mod(format!("{}: {reason}", feature.id))),
             Self::Template(feature) => feature
                 .place(world, random, origin)
                 .map_err(FeatureExecutionError::Query),

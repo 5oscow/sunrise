@@ -198,3 +198,73 @@ pub mod structures {
     }
     // ANCHOR_END: structure
 }
+
+pub mod features {
+    // ANCHOR: feature
+    use mod_api::{
+        BlockKey, BlockState, BlockUpdateFlags, FeatureContext, FeatureError, FeatureType, Hooks,
+        Registrar, RegistrationContext, StateConstraint, Tag,
+    };
+
+    /// A pillar of logs on dirt or grass: `{"type": "mymod:pillar", "height": 4}`.
+    struct Pillar {
+        log: BlockKey,
+    }
+
+    impl FeatureType for Pillar {
+        fn place(
+            &self,
+            context: &mut dyn FeatureContext,
+            origin: [i32; 3],
+        ) -> Result<bool, FeatureError> {
+            // The configured feature's JSON object, converted to NBT once at load. A JSON
+            // number becomes the smallest tag that holds it, as vanilla's JsonOps does.
+            let height = match &*context.config() {
+                Tag::Compound(config) => match config.get(&"height".into()) {
+                    Some(Tag::Byte(n)) => i32::from(*n),
+                    Some(Tag::Short(n)) => i32::from(*n),
+                    Some(Tag::Int(n)) => *n,
+                    _ => 0,
+                },
+                _ => 0,
+            };
+            if !(1..=32).contains(&height) {
+                return Err(FeatureError("height must be 1 to 32".into()));
+            }
+            let below = [origin[0], origin[1] - 1, origin[2]];
+            if context.block_in_tag(below, "minecraft:dirt") != Some(true) {
+                return Ok(false);
+            }
+            let state = BlockState::of(
+                context.metadata(),
+                self.log,
+                &[StateConstraint::new("axis", "y")],
+            )
+            .map_err(|error| FeatureError(format!("log state: {error:?}")))?;
+            let flags = BlockUpdateFlags::NEIGHBORS | BlockUpdateFlags::CLIENTS;
+            for dy in 0..height {
+                let pos = [origin[0], origin[1] + dy, origin[2]];
+                if !context
+                    .block(pos)
+                    .is_some_and(|block| context.is_air(block))
+                {
+                    // Blocked: what is already placed stays, as vanilla keeps it.
+                    return Ok(dy > 0);
+                }
+                context.set_block(pos, state, flags);
+            }
+            Ok(true)
+        }
+    }
+
+    #[derive(Default)]
+    pub struct FeatureMod;
+    #[mod_api::sunrise_mod]
+    impl Hooks for FeatureMod {
+        fn register(&self, registrar: &mut dyn Registrar, _: &RegistrationContext) {
+            let log = registrar.block_key("minecraft:oak_log");
+            registrar.register_feature_type("pillar", Pillar { log });
+        }
+    }
+    // ANCHOR_END: feature
+}

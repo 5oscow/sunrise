@@ -26,6 +26,12 @@ pub enum LayerBlock {
     Ground,
 }
 pub trait PlacementContext {
+    /// The numeric block registry this world's states are of (the game's are loaded once and
+    /// kept), for a mod feature's state index (`worldgen::mod_features`). Worlds without one
+    /// answer `None`, and a mod feature there places nothing.
+    fn block_registry(&self) -> Option<&'static crate::registry::BlockRegistry> {
+        None
+    }
     /// StructureTemplate.updateShapeAtEdge for one outer face of a placed
     /// voxel shape: update the state at `position` against its neighbor in
     /// `direction`, then the neighbor against the (possibly new) state, writing

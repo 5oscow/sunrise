@@ -10,6 +10,9 @@ struct Queries<'a, C> {
     top: Option<FeatureIdentity>,
 }
 impl<C: PlacementContext> PlacementContext for Queries<'_, C> {
+    fn block_registry(&self) -> Option<&'static crate::registry::BlockRegistry> {
+        self.world.block_registry()
+    }
     fn block_survives(
         &mut self,
         state: crate::registry::BlockStateId,

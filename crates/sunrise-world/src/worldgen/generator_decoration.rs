@@ -1125,6 +1125,9 @@ impl SurvivalWorld for World<'_> {
     }
 }
 impl PlacementContext for World<'_> {
+    fn block_registry(&self) -> Option<&'static crate::registry::BlockRegistry> {
+        Some(self.decoration.bindings.registry())
+    }
     fn state_collision_empty(
         &mut self,
         state: BlockStateId,

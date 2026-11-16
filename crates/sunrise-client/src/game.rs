@@ -11294,6 +11294,14 @@ pub(crate) fn run_with(
     {
         log::warn!("Mod structure types already installed; keeping the first table");
     }
+    // Their feature types, before any world decodes its configured features.
+    if sunrise_world::worldgen::mod_features::install_mod_feature_types(
+        native_feature_types::installed_feature_types(),
+    )
+    .is_err()
+    {
+        log::warn!("Mod feature types already installed; keeping the first table");
+    }
     // The levels they registered, below the data packs of every world opened.
     if sunrise_world::worldgen::overrides::install_mod_dimensions(
         native_dimensions::installed_dimensions(),

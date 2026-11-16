@@ -86,6 +86,10 @@ fn nested_features(
 }
 
 impl LiveFeatures {
+    /// The numeric block registry the features' states are of.
+    pub fn registry(&self) -> &'static crate::registry::BlockRegistry {
+        self.data.registry()
+    }
     /// None when the bundle carries no feature resources.
     pub fn new(data: &Arc<GeneratorData>) -> Result<Option<Self>, GeneratorError> {
         let Some(resources) = &data.feature_resources else {
