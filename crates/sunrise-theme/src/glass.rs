@@ -7,11 +7,11 @@
 //! player's own accent comes out as it does on the website.
 
 /// The mockup's defaults: accent, how much white the plates take, and their blur in px.
-pub const ACCENT: u32 = 0x6e64c8;
+pub const ACCENT: u32 = 0x4f60e6;
 pub const TINT: f32 = 0.06;
 pub const BLUR: f32 = 24.;
 /// Behind the scene before it is drawn.
-pub const PAGE: u32 = 0x0c0b11;
+pub const PAGE: u32 = 0x0f1220;
 /// The dark text on a light accent, and on the white buttons.
 pub const ON_LIGHT: u32 = 0x100a1f;
 /// A running game or server, and a ready instance.
