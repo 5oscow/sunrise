@@ -6,7 +6,6 @@ mod ingredient_defaults;
 #[path = "loot_query.rs"]
 mod loot_query;
 use crate::{Result, blocks::BlockFacts};
-use loot_query::RootOutput;
 use serde_json::Value;
 use std::{
     collections::{HashMap, HashSet},
@@ -1497,7 +1496,7 @@ impl Items {
             location: None,
             keep_empty,
         };
-        ctx.roll_root(None, table, random, RootOutput::Unsplit)
+        ctx.roll_root(None, table, random)
     }
     /// The id of the block's loot table (`minecraft:blocks/stone`), when it
     /// has one. `Blocks.wallVariant`: wall signs, banners, heads, fans and
@@ -1571,7 +1570,7 @@ impl Items {
         if !drops.iter().any(|d| d.item.starts_with(DYNAMIC)) {
             return drops;
         }
-        drops
+        let drops = drops
             .into_iter()
             .flat_map(|d| {
                 if d.item.starts_with(DYNAMIC) {
@@ -1580,7 +1579,8 @@ impl Items {
                     vec![d]
                 }
             })
-            .collect()
+            .collect();
+        self.split_loot_stacks(drops)
     }
 
     fn roll_block_table<R: RandomSource>(
@@ -1608,7 +1608,7 @@ impl Items {
             location: roll.location,
             keep_empty: roll.keep_empty,
         };
-        ctx.roll_root(Some(id), table, random, RootOutput::Unsplit)
+        ctx.roll_root(Some(id), table, random)
     }
     /// Evaluate an entity's loot table (`minecraft:entities/<name>`).
     /// Evaluate any loot table by id (e.g. `minecraft:gameplay/chicken_lay`).
@@ -1630,12 +1630,7 @@ impl Items {
         random: &mut R,
         keep_empty: bool,
     ) -> Vec<ItemStack> {
-        let output = if keep_empty {
-            RootOutput::KeepEmpty
-        } else {
-            RootOutput::Unsplit
-        };
-        self.table_root(id, killed_by_player, held, false, random, output)
+        self.table_root(id, killed_by_player, held, false, random, keep_empty)
             .unwrap_or_default()
     }
     /// `LootTable.getRandomItems(LootParams)` of table `id` with an ORIGIN,
@@ -1650,9 +1645,9 @@ impl Items {
         this_entity: bool,
         random: &mut R,
     ) -> Option<Vec<ItemStack>> {
-        self.table_root(id, false, held, this_entity, random, RootOutput::Split)
+        self.table_root(id, false, held, this_entity, random, false)
     }
-    /// A named root with no block, preserving the adapter's output policy.
+    /// A named root with no block; command replacement may retain emitted empties.
     fn table_root<R: RandomSource>(
         &self,
         id: &str,
@@ -1660,7 +1655,7 @@ impl Items {
         held: Option<&ItemStack>,
         this_entity: bool,
         random: &mut R,
-        output: RootOutput,
+        keep_empty: bool,
     ) -> Option<Vec<ItemStack>> {
         let table = self.loot.get(id)?;
         let empty = sunrise_world::chunk::BlockProperties::new();
@@ -1677,11 +1672,11 @@ impl Items {
             block_levels: None,
             target: None,
             location: None,
-            keep_empty: output == RootOutput::KeepEmpty,
+            keep_empty,
         };
         // LootTable.getRandomItemsRaw visits the table itself first.
         NESTED_ROLLS.with(|v| v.borrow_mut().push(id.to_owned()));
-        let out = ctx.roll_root(Some(id), table, random, output);
+        let out = ctx.roll_root(Some(id), table, random);
         NESTED_ROLLS.with(|v| v.borrow_mut().pop());
         Some(out)
     }
@@ -1715,7 +1710,7 @@ impl Items {
             location: None,
             keep_empty: false,
         };
-        ctx.roll_root(Some(id), table, random, RootOutput::Unsplit)
+        ctx.roll_root(Some(id), table, random)
     }
     /// `loot_table` drawing from any random (a random sequence).
     pub fn loot_table_from(
@@ -1744,7 +1739,7 @@ impl Items {
             location: None,
             keep_empty: false,
         };
-        ctx.roll_root(Some(id), table, random, RootOutput::Unsplit)
+        ctx.roll_root(Some(id), table, random)
     }
     pub fn entity_drops<R: RandomSource>(
         &self,
@@ -1881,12 +1876,7 @@ impl Items {
             location: None,
             keep_empty,
         };
-        ctx.roll_root(
-            Some(&format!("minecraft:entities/{name}")),
-            table,
-            random,
-            RootOutput::Unsplit,
-        )
+        ctx.roll_root(Some(&format!("minecraft:entities/{name}")), table, random)
     }
 }
 /// `DataComponents.BLOCK_STATE`.
@@ -3647,7 +3637,8 @@ mod tests {
                 .map(|s| format!("{} {}", s.item, s.count))
                 .collect::<Vec<_>>()
         };
-        assert_eq!(roll("test:outer"), ["minecraft:diamond 3"]);
+        // The empty fixture registry gives an unknown item a stack limit of one.
+        assert_eq!(roll("test:outer"), ["minecraft:diamond 1"; 3]);
         assert_eq!(roll("test:inline"), ["minecraft:diamond 1"]);
         // `test:loop` is already rolling: its own entry adds nothing.
         assert_eq!(roll("test:loop"), ["minecraft:stick 1"]);

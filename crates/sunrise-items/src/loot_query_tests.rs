@@ -27,8 +27,13 @@ fn root_adapters_preserve_output_policy_and_random_without_modifiers() {
         "modifier":[{"type":"minecraft:set_count","count":130},
                     {"type":"minecraft:set_components","components":{"minecraft:max_stack_size":64}}]});
     let id = "minecraft:entities/zombie";
-    let data = data(vec![(id, root.clone()), ("test:nested", nested)]);
-    let properties = sunrise_world::chunk::BlockProperties::new();
+    let block_id = "minecraft:blocks/stone";
+    let data = data(vec![
+        (id, root.clone()),
+        (block_id, root.clone()),
+        ("test:nested", nested),
+    ]);
+    let registry = BlockRegistry::from_facts_json(&br#"{"defaults":{"minecraft:stone":0},"states":[["stone",false,false,"","minecraft:stone"]]}"#[..]).unwrap();
     // Only the child's two-entry weighted choice advances this random.
     let mut expected_random = LegacyRandom::new(0);
     assert_eq!(expected_random.next_int_bound(2).unwrap(), 1);
@@ -42,26 +47,28 @@ fn root_adapters_preserve_output_policy_and_random_without_modifiers() {
             2 => data.inline_loot_table(&root, &mut random),
             3 => data.entity_drops("zombie", false, None, &mut random),
             4 => data.loot_table_from(id, false, None, &mut random),
-            5 => data.roll_block_table(
-                id,
-                &root,
-                "minecraft:stone",
-                &properties,
+            5 => data.block_drops(
+                &registry,
+                BlockStateId(0),
                 Default::default(),
                 &mut random,
+                None,
             ),
-            _ => data.interact_roll(id, &root, "minecraft:stone", &properties, &mut random),
+            _ => data.interact_loot(
+                id,
+                &registry,
+                BlockStateId(0),
+                &mut random,
+                &mut crate::random_sequences::RandomSequences::default(),
+                0,
+            ),
         });
         let observed: Vec<_> = drops.iter().map(|s| (&*s.item, s.count)).collect();
-        let expected = if adapter == 1 {
-            vec![
-                ("minecraft:diamond", 64),
-                ("minecraft:diamond", 64),
-                ("minecraft:diamond", 2),
-            ]
-        } else {
-            vec![("minecraft:diamond", 130)]
-        };
+        let expected = vec![
+            ("minecraft:diamond", 64),
+            ("minecraft:diamond", 64),
+            ("minecraft:diamond", 2),
+        ];
         assert_eq!(observed, expected, "adapter {adapter}");
         assert_eq!(
             <(u64, Option<f64>)>::from(&random),
@@ -72,6 +79,8 @@ fn root_adapters_preserve_output_policy_and_random_without_modifiers() {
             query.id().as_deref(),
             Some(if adapter == 2 {
                 "neoforge:unknown_loot_table"
+            } else if adapter == 5 {
+                block_id
             } else {
                 id
             })
