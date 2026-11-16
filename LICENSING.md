@@ -37,6 +37,8 @@ a fork tuned for older hardware), as long as:
   whatever they sell.
 - **Donations are welcome** through a plain link or button that never interrupts (no pop-ups, timers or nag
   screens) and unlocks nothing. Where the money goes is up to you.
+- **Platforms are fine**: putting a fork on Modrinth, CurseForge, itch, a store or a code host is fine. The
+  platform's own ads and sign-in don't count against you, as long as you take no share of that ad money.
 - **It's marked unofficial**: say it's based on Sunrise and link to it. A name containing "Sunrise" is fine with
   "unofficial" beside it. Don't use Sunrise's logo or its sign-in, update, telemetry or signing services.
 
