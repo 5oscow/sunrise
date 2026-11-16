@@ -188,7 +188,7 @@ For mods that copy or edit a player whole (a player-data sync, `/invsee`, `/ende
 
 | Method | Behavior |
 |---|---|
-| `inventory_slots(host)` | The non-empty slots by `Inventory`'s numbers, lowest first: 0 to 35 the main inventory (0 to 8 the hotbar), 36 feet, 37 legs, 38 chest, 39 head, 40 off hand, 41 body, 42 saddle. `None` when no online player is behind the handle. |
+| `inventory_slots(host)` | The non-empty slots by `Inventory`'s numbers, lowest first: 0 to 35 the main inventory (0 to 8 the hotbar), 36 feet, 37 legs, 38 chest, 39 head, 40 off hand, 41 body, 42 saddle. `None` when no online player is behind the handle. On a client, reads only the local player's inventory menu (server slot packets plus local edits), not authoritative server state. |
 | `set_inventory_slot(host, slot, stack)` | `Inventory.setItem`: `None` empties the slot; there is no item check, so a worn slot takes any item. The client is sent the slot with the tick's inventory sync, and an open inventory menu shows the written stack. Returns `Result<(), PlayerDataRefusal>`; each refusal writes nothing: `Stale` (no online player), `Client`, `Dead`, `SlotOutOfRange { slot, last: 42 }` (never a panic) and `Stack(StackWriteError)` (a count or damage the item does not allow, an item the world lacks). |
 | `ender_chest(host)` / `set_ender_chest_slot(host, slot, stack)` | The same pair for the 27 ender chest slots, 0 to 26, with `SlotOutOfRange { last: 26 }`; an open ender chest menu shows the written stack. |
 | `give_stack(host, stack)` | Gives one stack as `/give` does: matching stacks, then empty slots, and what does not fit is thrown from the player's eyes for that player alone, with no pickup delay. Refuses with `Stale`, `Client`, `Dead` or `Stack`, giving nothing. |
@@ -204,3 +204,19 @@ The inventory menu has no slot for body or saddle. All four player data writes
 (`set_inventory_slot`, `set_ender_chest_slot`, `give_stack`, `set_persistent_data`)
 are undone by an open transaction abort; equipment effects and overflow drops
 wait for the outermost commit.
+
+## Local player reads on a client
+
+These entity reads also accept a client host. They return `None` for another player or
+an entity whose copy the client does not keep:
+
+| Read | Client value |
+| --- | --- |
+| `air_supply` | Last server-synced air; the client never predicts air loss or refill. |
+| `max_air_supply` | Maximum for the kept entity's kind (300 for the local player). |
+| `on_ground` | The local player's predicted ground flag. |
+| `is_in_water` | The local player's own fluid state, or a kept mob's last fluid update. |
+| `is_swimming` | The player's swimming flag, not the pose (crawling can share that pose). Unavailable for other entity kinds. |
+
+Client reads are views, not server authority. Inventory access here is read-only;
+inventory and movement writes still require a server host.

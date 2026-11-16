@@ -95,3 +95,46 @@ fn the_tick_rate_is_frozen_on_a_server_only() {
         assert_eq!(game.tick_rate_is_frozen(), None);
     });
 }
+
+#[test]
+#[ignore = "daily"]
+fn client_player_state_reads_its_own_copy_only() {
+    use super::native_client_session::tests::logged_client;
+    use super::native_entity_refs::tests::with_client_game;
+    use sunrise_client::{items::ItemStack, motion::PlayerMotion};
+    use sunrise_core::geometry::Vec3;
+    mod_platform::testing::with_mods(Default::default(), || {
+        with_client_game(|game| {
+            let _server = logged_client(game);
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            let local = game.local_player().unwrap();
+            let entity = local.entity();
+            let other = mod_api::EntityRef::new(entity.epoch(), 99);
+            let other_player = mod_api::PlayerRef::new(other, 99);
+            game.inventory[5] = Some(ItemStack::new("minecraft:stone", 3));
+            for flag in [true, false] {
+                let body = game.player.as_mut().unwrap();
+                body.ground.on_ground = flag;
+                body.fluids.was_touching_water = flag;
+                body.swimming = flag;
+                body.air = if flag { 87 } else { 12 };
+                let host = &*game as &dyn mod_api::ClientHost;
+                assert_eq!(entity.on_ground(host), Some(flag));
+                assert_eq!(entity.is_in_water(host), Some(flag));
+                assert_eq!(entity.is_swimming(host), Some(flag));
+                assert_eq!(entity.air_supply(host), Some(if flag { 87 } else { 12 }));
+                assert_eq!(entity.max_air_supply(host), Some(300));
+                assert_eq!(other.on_ground(host), None);
+                assert_eq!(other.is_in_water(host), None);
+                assert_eq!(other.is_swimming(host), None);
+                assert_eq!(other.air_supply(host), None);
+                assert_eq!(other.max_air_supply(host), None);
+                let slots = local.inventory_slots(host).unwrap();
+                assert_eq!(slots.len(), 1);
+                assert_eq!(slots[0].0, 5);
+                assert_eq!(slots[0].1.count, 3);
+                assert_eq!(other_player.inventory_slots(host), None);
+            }
+        });
+    });
+}

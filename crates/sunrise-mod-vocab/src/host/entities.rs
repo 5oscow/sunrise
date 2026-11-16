@@ -232,10 +232,12 @@ pub trait EntitiesBackend {
     /// sent it (`Entity.lerpMotion`). API 379.
     #[access(WorldOnly)]
     fn entity_velocity(&self, entity: EntityRef) -> Option<[f64; 3]>;
-    /// Side: server.
+    /// Side: both.
     /// Whether the entity stands on a block (`Entity.onGround`).
     /// Whether the entity stands on a block (`Entity.onGround`). API
     /// 379.
+    /// On a client this is the local player's predicted ground flag, not server authority.
+    /// None for another player or an entity whose body the client does not keep.
     #[access(WorldOnly)]
     fn entity_on_ground(&self, entity: EntityRef) -> Option<bool>;
     /// Side: both.
@@ -457,11 +459,20 @@ pub trait EntitiesBackend {
     /// client, reads its own copy as `entity_fluid_heights` does.
     #[access(WorldOnly)]
     fn entity_eye_fluid(&self, entity: EntityRef) -> Option<Option<String>>;
-    /// Side: server.
+    /// Side: both.
     /// Whether the entity touched water at its last fluid update
     /// (`Entity.isInWater`): players and mobs.
+    /// On a client this is the local player's own fluid state, or a kept mob's last update.
+    /// None for another player or an entity whose body the client does not keep.
     #[access(WorldOnly)]
     fn entity_is_in_water(&self, entity: EntityRef) -> Option<bool>;
+    /// Side: both.
+    /// The player's swimming flag (`Entity.isSwimming`), not the swimming pose
+    /// (which also covers crawling). On a client, the local player's own state,
+    /// not an authoritative server answer. None for another player or an entity
+    /// whose swimming flag the engine does not keep.
+    #[access(WorldOnly)]
+    fn entity_is_swimming(&self, entity: EntityRef) -> Option<bool>;
     /// Side: server.
     /// Whether the entity is in lava (`Entity.isInLava`): players and mobs.
     #[access(WorldOnly)]
@@ -482,13 +493,17 @@ pub trait EntitiesBackend {
     /// kinds its portal walk carries (zero when it keeps no state for one).
     #[access(WorldOnly)]
     fn entity_portal_cooldown(&self, entity: EntityRef) -> Option<i32>;
-    /// Side: server.
+    /// Side: both.
     /// The entity's air (`Entity.getAirSupply`): players and mobs.
+    /// On a client this is the last server-synced air, never predicted.
+    /// None for another player or an entity whose body the client does not keep.
     #[access(WorldOnly)]
     fn entity_air_supply(&self, entity: EntityRef) -> Option<i32>;
-    /// Side: server.
+    /// Side: both.
     /// The most air the entity holds (`Entity.getMaxAirSupply`): 300, a
     /// dolphin's 4800, an axolotl's 6000.
+    /// On a client this is the maximum for its kept copy's kind, not a new server query.
+    /// None for another player or an entity whose body the client does not keep.
     #[access(WorldOnly)]
     fn entity_max_air_supply(&self, entity: EntityRef) -> Option<i32>;
     /// Side: server.
