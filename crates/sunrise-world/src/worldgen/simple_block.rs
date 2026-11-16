@@ -260,7 +260,7 @@ mod tests {
         let catalog = StateProviderCatalog::from_resources(&BTreeMap::new()).unwrap();
         for name in ["example:wild_crop", "minecraft:tall_grass"] {
             let feature = SimpleBlockFeature::from_json(
-                &format!(r#"{{"to_place":{{"type":"minecraft:simple_state_provider","state":{{"Name":"{name}","Properties":{{"half":"upper"}}}}}}}}"#),
+                &format!(r#"{{"to_place":{{"type":"minecraft:simple","state":{{"id":"{name}","properties":{{"half":"upper"}}}}}}}}"#),
                 &providers, &catalog, &placement,
             ).unwrap();
             let lower = registry.default_state(name).unwrap();
