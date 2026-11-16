@@ -92,6 +92,30 @@ at the eye. Nothing keeps the first answer, so answer from the event alone, the 
 position. The position can't be changed. Server and gameplay fluid checks (an entity in water, drowning,
 swimming, the sculk vibrations' water test) don't read it.
 
+## Block changes in the client level
+
+A client map or minimap keeps its own picture of the terrain and only has to redraw what changed.
+`client_chunk_load(dimension, chunk)` and `client_chunk_unload(dimension, chunk)` tell whole columns
+arriving and leaving; `client_block_changed(dimension, pos, old, new, predicted)` tells each block of a
+held column that changes state, after the write, so `host.level(dimension)` already reads `new` there:
+
+```rust
+fn client_block_changed(&self, _host: &dyn ClientHost, event: &mut ClientBlockChangedEvent<'_>) {
+    // The chunk to redraw: [x, z], in chunks.
+    self.stale(event.dimension, [event.pos.x >> 4, event.pos.z >> 4]);
+}
+```
+
+Every route a client writes a block by tells it: the server's block update, each block of a batched
+section update, the client's own predictions (a break, a placement, a use; `predicted` is true) and,
+when the server acknowledges them, each block that takes the server's state back (`predicted` false). A
+server update for a block still under a pending prediction is held, as in vanilla, and told when the
+acknowledgement applies it. A write that keeps the state is not told, so nothing has to rescan the
+loaded terrain. It needs no mod on the server: it runs on a client of any server, a LAN guest included.
+An integrated world's own blocks are the server's `block_changed`, and a level a server opens for
+viewing (below) is not told. A section update tells each of its blocks, so keep the listener cheap:
+mark the chunk and redraw it later.
+
 ## Viewed levels
 
 A server can open other levels for a client to view besides the one the player is in (`sunrise:levels`,
