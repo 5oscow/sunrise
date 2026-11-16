@@ -1018,8 +1018,11 @@ impl Hooks for Observe {
 
 /// The compiled fixture and (optionally) the native observer as mods, then a
 /// counter game over them. The observer joins after the fixture, so a row's
-/// parts answer in install order: wasm first, native second.
+/// parts answer in install order: wasm first, native second. `name` is the
+/// calling test: each runs in a fresh child process, since the content
+/// registry is process-global and freezes on the first game's membership.
 fn with_wasm_parts(
+    name: &str,
     observer: bool,
     test: impl FnOnce(&mut Game<'_>, Option<Arc<Mutex<Vec<(u32, bool)>>>>) + Send + 'static,
 ) {
@@ -1028,6 +1031,13 @@ fn with_wasm_parts(
         // these tests say so and pass, never silently. The lane runs each by
         // name with the environment set (tools/ci/ignored-tests/wasm-fixture.txt).
         eprintln!("skipped: no compiled SUNRISE_WASM_FIXTURE (the wasm-mods lane runs this)");
+        return;
+    }
+    if crate::game::native_entity_refs::tests::run_fresh_cases(
+        &format!("game::entities::general::tick_tests::{name}"),
+        "SUNRISE_GENERAL_ENTITY_WASM_CHILD",
+        &["fresh"],
+    ) {
         return;
     }
     let with_observer = observer;
@@ -1142,7 +1152,7 @@ fn saved_wasm_counter(game: &Game<'_>, id: u32) -> Option<i32> {
 #[test]
 #[ignore = "daily"]
 fn wasm_counter_advances_one_per_tick() {
-    with_wasm_parts(false, |game, _| {
+    with_wasm_parts("wasm_counter_advances_one_per_tick", false, |game, _| {
         let id = wasm_row(game, [1, 2, 3, 4], Some(40), None);
         tick(game);
         assert_eq!(saved_wasm_counter(game, id), Some(41));
@@ -1153,18 +1163,22 @@ fn wasm_counter_advances_one_per_tick() {
 #[test]
 #[ignore = "daily"]
 fn wasm_two_rows_share_the_part_but_not_their_counters() {
-    with_wasm_parts(false, |game, _| {
-        let first = wasm_row(game, [1, 2, 3, 4], Some(40), None);
-        let second = wasm_row(game, [5, 6, 7, 8], Some(7), None);
-        tick(game);
-        assert_eq!(
-            (
-                saved_wasm_counter(game, first),
-                saved_wasm_counter(game, second)
-            ),
-            (Some(41), Some(8))
-        );
-    });
+    with_wasm_parts(
+        "wasm_two_rows_share_the_part_but_not_their_counters",
+        false,
+        |game, _| {
+            let first = wasm_row(game, [1, 2, 3, 4], Some(40), None);
+            let second = wasm_row(game, [5, 6, 7, 8], Some(7), None);
+            tick(game);
+            assert_eq!(
+                (
+                    saved_wasm_counter(game, first),
+                    saved_wasm_counter(game, second)
+                ),
+                (Some(41), Some(8))
+            );
+        },
+    );
 }
 
 /// A row's wasm part and a native part on the same type tick one row in one
@@ -1174,18 +1188,22 @@ fn wasm_two_rows_share_the_part_but_not_their_counters() {
 #[test]
 #[ignore = "daily"]
 fn wasm_and_native_parts_tick_in_install_order() {
-    with_wasm_parts(true, |game, seen| {
-        let seen = seen.unwrap();
-        let id = wasm_row(game, [1, 2, 3, 4], None, None);
-        tick(game);
-        assert_eq!(
-            *seen.lock().unwrap(),
-            [(id, true)],
-            "the wasm part ticked first"
-        );
-        assert_eq!(saved_wasm_counter(game, id), Some(1));
-        assert_eq!(NATIVE_COUNTER.get(game, Holder::Entity(id)).unwrap(), 1);
-    });
+    with_wasm_parts(
+        "wasm_and_native_parts_tick_in_install_order",
+        true,
+        |game, seen| {
+            let seen = seen.unwrap();
+            let id = wasm_row(game, [1, 2, 3, 4], None, None);
+            tick(game);
+            assert_eq!(
+                *seen.lock().unwrap(),
+                [(id, true)],
+                "the wasm part ticked first"
+            );
+            assert_eq!(saved_wasm_counter(game, id), Some(1));
+            assert_eq!(NATIVE_COUNTER.get(game, Holder::Entity(id)).unwrap(), 1);
+        },
+    );
 }
 
 /// The trap row: a wasm part that traps after its write rolls the whole
@@ -1195,57 +1213,61 @@ fn wasm_and_native_parts_tick_in_install_order() {
 #[test]
 #[ignore = "daily"]
 fn a_trapping_wasm_row_rolls_back_and_the_next_tick_proceeds() {
-    with_wasm_parts(true, |game, seen| {
-        let seen = seen.unwrap();
-        let failures = sunrise_mod_runtime::dispatch_failures::dispatch_failure_counter();
-        let before = failures.get();
-        // The trap row: 40 seeded, armed to trap once its count reaches 41.
-        let first = wasm_row(game, [1, 2, 3, 4], Some(40), Some(41));
-        // The later row carries no counter: whether one appears says whether
-        // its wasm part ran.
-        let second = wasm_row(game, [5, 6, 7, 8], None, None);
-        tick(game);
-        // The trapping row rolled back both parts' writes of that row; the
-        // later row's wasm part answered nothing (its group stopped with the
-        // trap) and stored no counter, its native part ticked.
-        assert_eq!(
-            (
-                saved_wasm_counter(game, first),
-                saved_wasm_counter(game, second)
-            ),
-            (Some(40), None)
-        );
-        assert_eq!(NATIVE_COUNTER.get(game, Holder::Entity(first)).unwrap(), 0);
-        assert_eq!(NATIVE_COUNTER.get(game, Holder::Entity(second)).unwrap(), 1);
-        // The observer ran inside the doomed pass too, after the trap row's
-        // wasm part had already written.
-        assert_eq!(*seen.lock().unwrap(), [(first, true), (second, false)]);
-        assert_eq!(failures.get(), before + 1, "one trap, one dispatch failure");
-        // The next tick: the poisoned group answers nothing, the native parts
-        // keep ticking — the rollback left the trap row at 40, its baseline.
-        tick(game);
-        assert_eq!(
-            (
-                saved_wasm_counter(game, first),
-                saved_wasm_counter(game, second)
-            ),
-            (Some(40), None)
-        );
-        assert_eq!(NATIVE_COUNTER.get(game, Holder::Entity(first)).unwrap(), 1);
-        assert_eq!(NATIVE_COUNTER.get(game, Holder::Entity(second)).unwrap(), 2);
-        assert_eq!(
-            *seen.lock().unwrap(),
-            [
-                (first, true),
-                (second, false),
-                (first, true),
-                (second, false)
-            ]
-        );
-        assert_eq!(
-            failures.get(),
-            before + 1,
-            "no second failure: the group is off"
-        );
-    });
+    with_wasm_parts(
+        "a_trapping_wasm_row_rolls_back_and_the_next_tick_proceeds",
+        true,
+        |game, seen| {
+            let seen = seen.unwrap();
+            let failures = sunrise_mod_runtime::dispatch_failures::dispatch_failure_counter();
+            let before = failures.get();
+            // The trap row: 40 seeded, armed to trap once its count reaches 41.
+            let first = wasm_row(game, [1, 2, 3, 4], Some(40), Some(41));
+            // The later row carries no counter: whether one appears says whether
+            // its wasm part ran.
+            let second = wasm_row(game, [5, 6, 7, 8], None, None);
+            tick(game);
+            // The trapping row rolled back both parts' writes of that row; the
+            // later row's wasm part answered nothing (its group stopped with the
+            // trap) and stored no counter, its native part ticked.
+            assert_eq!(
+                (
+                    saved_wasm_counter(game, first),
+                    saved_wasm_counter(game, second)
+                ),
+                (Some(40), None)
+            );
+            assert_eq!(NATIVE_COUNTER.get(game, Holder::Entity(first)).unwrap(), 0);
+            assert_eq!(NATIVE_COUNTER.get(game, Holder::Entity(second)).unwrap(), 1);
+            // The observer ran inside the doomed pass too, after the trap row's
+            // wasm part had already written.
+            assert_eq!(*seen.lock().unwrap(), [(first, true), (second, false)]);
+            assert_eq!(failures.get(), before + 1, "one trap, one dispatch failure");
+            // The next tick: the poisoned group answers nothing, the native parts
+            // keep ticking — the rollback left the trap row at 40, its baseline.
+            tick(game);
+            assert_eq!(
+                (
+                    saved_wasm_counter(game, first),
+                    saved_wasm_counter(game, second)
+                ),
+                (Some(40), None)
+            );
+            assert_eq!(NATIVE_COUNTER.get(game, Holder::Entity(first)).unwrap(), 1);
+            assert_eq!(NATIVE_COUNTER.get(game, Holder::Entity(second)).unwrap(), 2);
+            assert_eq!(
+                *seen.lock().unwrap(),
+                [
+                    (first, true),
+                    (second, false),
+                    (first, true),
+                    (second, false)
+                ]
+            );
+            assert_eq!(
+                failures.get(),
+                before + 1,
+                "no second failure: the group is off"
+            );
+        },
+    );
 }
