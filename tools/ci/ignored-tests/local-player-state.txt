@@ -1,0 +1,2 @@
+# Local player state and server-owned air.
+sunrise-client-lib motion::tests::client_air_stays_synced_while_server_air_drops lib daily resources
