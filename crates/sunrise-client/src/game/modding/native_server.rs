@@ -4821,7 +4821,8 @@ pub(super) mod fake_action_tests {
             let (player, conn, _) = fake(game, None, 0);
             game.as_guest(conn, |g| g.attack_ticks = 3).unwrap();
             let charged = zombie(game, 5000, [2.0, 64.0, 0.5]);
-            let uncharged = zombie(game, 5001, [0.5, 64.0, 2.0]);
+            // Out of a sweep's reach of the first.
+            let uncharged = zombie(game, 5001, [-1.5, 64.0, 0.5]);
             let full = health(game, 5000);
             let mut attack = |target, full_attack_charge| {
                 let mut setup = PlayerActionSetup::new(

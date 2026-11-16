@@ -1463,7 +1463,8 @@ pub struct PlayerActionSetup {
     pub secondary_use: bool,
     /// Start with a full attack charge: with the stack in hand, the attack-strength ticker is
     /// set so that `getAttackStrengthScale(0.5)` is 1.0, and the fake's own ticker comes back
-    /// afterwards with its other action timers. Only [`PlayerAction::Attack`] reads it.
+    /// afterwards with its other action timers. Only [`PlayerAction::Attack`] reads it. A stack
+    /// that leaves no attack speed never charges, as in vanilla.
     /// `false` by default; set it by assignment: `setup.full_attack_charge = true;`.
     pub full_attack_charge: bool,
 }
