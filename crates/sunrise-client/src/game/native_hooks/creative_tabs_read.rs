@@ -2,6 +2,7 @@
 //! creative tabs' contents and an item model's lighting, read by a client mod.
 use super::*;
 use crate::game::api_values::{TryIntoApi, engine_display_context};
+use sunrise_client::cit::Hand as CitHand;
 
 impl Game<'_> {
     /// The creative inventory's item tabs with their stacks, and the `hasPermissions` they were
@@ -18,7 +19,7 @@ impl Game<'_> {
         let Some(display) = engine_display_context(context) else {
             return false;
         };
-        self.resolve_item(stack, display, None, 0)
+        self.resolve_item_in_level(stack, display, None, None, 0, CitHand::Main)
             .uses_block_light()
     }
 }
