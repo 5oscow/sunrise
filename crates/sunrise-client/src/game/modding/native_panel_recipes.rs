@@ -748,7 +748,6 @@ impl Game<'_> {
         }
     }
 
-    /// A press on the recipes: true when it hit one of their parts.
     /// A wheel notch `d` over the recipe pages: turns them as the arrows
     /// do (`wheel_turn`, telling the mod of a turn); false off the panel.
     pub(super) fn browser_recipes_wheel(&mut self, layout: &Layout, owner: &Owner, d: f32) -> bool {
@@ -760,15 +759,17 @@ impl Game<'_> {
         let Some(to) = wheel_turn(self.cursor, layout.area, page, starts.len(), d) else {
             return false;
         };
+        // A stale stored page takes the clamp too, so a later longer list can't revive it.
+        if let Some(p) = self.panel.recipes.as_mut() {
+            p.page = to;
+        }
         if to != page {
-            if let Some(p) = self.panel.recipes.as_mut() {
-                p.page = to;
-            }
             self.panel_event(owner, BrowserEvent::Page(starts[to] as u32));
         }
         true
     }
 
+    /// A press on the recipes: true when it hit one of their parts.
     pub(super) fn browser_recipes_press(
         &mut self,
         layout: &Layout,
