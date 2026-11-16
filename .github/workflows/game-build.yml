@@ -182,13 +182,15 @@ jobs:
             target: aarch64-apple-darwin
             dir: sunrise-macos-arm64
             asset: sunrise-macos-arm64.zip
-          # Intel Macs: built on the same runner for another target; its checks and smoke test run the x86_64
-          # programs under Rosetta 2.
+          # Intel Macs: built and signed on the same runner for another target. Its programs are started on real
+          # Intel hardware by macos-x64-intel below, not here: under Rosetta 2 the main-thread stack check fails
+          # (#1602). The archive goes up as untested-<asset>, which only that job republishes under its name.
           - name: macos-x64
             mac: true
             target: x86_64-apple-darwin
             dir: sunrise-macos-x64
             asset: sunrise-macos-x64.zip
+            started_on_intel: true
     runs-on: ${{ matrix.mac && fromJSON(inputs.trusted && toJSON(vars.MAC_RUNNER) || (vars.DYNA_CI_SELF_HOSTED == 'true' && vars.NIGHTLY_MAC_RUNNER) || (vars.SELF_HOSTED_CI != 'off' && '["self-hosted", "macOS", "sunrise-nightly"]') || '"macos-15"') || matrix.os }}
     # The fork's cold client + headless builds need both feature variants; keep upstream's limits unchanged.
     # GitHub's macOS runner builds Sunrise's game cold: 60 minutes ran out mid-build (nightly dry run
@@ -356,7 +358,7 @@ jobs:
           echo "Runner arch:"
           arch || true
       - name: Every program starts
-        if: ${{ !matrix.musl }}
+        if: ${{ !matrix.musl && !matrix.started_on_intel }}
         run: |
           set -euo pipefail
           bin=$BIN
@@ -384,7 +386,7 @@ jobs:
             bash tools/ci/vanilla-data.sh
           fi
       - name: The game runs (offscreen, a new world, 1500 frames)
-        if: runner.environment == 'self-hosted'
+        if: runner.environment == 'self-hosted' && !matrix.started_on_intel
         run: bash .workflow-tools/tools/ci/game_smoke.sh
       # The separate Linux artifact smoke supplies the report when Dyna is enabled;
       # otherwise Apple Silicon supplies it. Intel still passes its own smoke run.
@@ -446,7 +448,7 @@ jobs:
           packaging/macos/notarize.sh "dist/${{ matrix.asset }}"
       - uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.asset }}
+          name: ${{ matrix.started_on_intel && 'untested-' || '' }}${{ matrix.asset }}
           path: dist/${{ matrix.asset }}
           if-no-files-found: error
           retention-days: 3
@@ -474,10 +476,13 @@ jobs:
           path: dist/${{ matrix.server_asset }}
           if-no-files-found: error
           retention-days: 3
-      # The leg's last step: legs below counts a leg as built only once this marker exists.
+      # The leg's last step: legs below counts a leg as built only once this marker exists. The Intel macOS
+      # leg's marker is macos-x64-intel's, once its programs started.
       - name: This leg built
+        if: ${{ !matrix.started_on_intel }}
         run: echo built > "$RUNNER_TEMP/leg-${{ matrix.name }}"
       - uses: actions/upload-artifact@v7
+        if: ${{ !matrix.started_on_intel }}
         with:
           name: leg-${{ matrix.name }}
           path: ${{ runner.temp }}/leg-${{ matrix.name }}
@@ -489,8 +494,60 @@ jobs:
 
   # Whether the build is complete: every required leg left its marker. An optional leg (build's continue-on-error)
   # that failed, timed out or was cancelled drops out alike; a cancelled run stops here.
-  legs:
+  # #1602: the Intel macOS archive, built and signed with the others, started on real Intel hardware. It ships only
+  # if its programs start here: this job republishes it under the name the sign job collects and leaves the leg's
+  # marker. No keychain, secrets or publishing; if it fails, the archive drops out like any optional leg.
+  macos-x64-intel:
+    name: start the Intel macOS archive on Intel
     needs: build
+    if: ${{ !cancelled() }}
+    runs-on: macos-15-intel
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      SUNRISE_VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: untested-sunrise-macos-x64.zip
+          path: ${{ runner.temp }}/intel
+      - name: Unpack the signed archive, unchanged
+        run: |
+          set -euo pipefail
+          ditto -x -k "$RUNNER_TEMP/intel/sunrise-macos-x64.zip" "$RUNNER_TEMP/intel"
+          echo "BIN=$RUNNER_TEMP/intel/sunrise-macos-x64" >> "$GITHUB_ENV"
+      - name: Every program starts, on Intel
+        run: |
+          set -euo pipefail
+          [[ "$(uname -m)" == x86_64 && "$(sysctl -n sysctl.proc_translated 2>/dev/null || echo 0)" == 0 ]] \
+            || { echo "::error::not a native Intel runner"; exit 1; }
+          "$BIN/sunrise-client" --help | grep -q -- '--resources'
+          "$BIN/sunrise-ctl" --help > /dev/null
+          "$BIN/sunrise-prepare" --help | grep -q -- '--minecraft-dir'
+          # The version is the release's.
+          for binary in sunrise-prepare sunrise-server; do
+            out=$("$BIN/$binary" --version | tr -d '\r')
+            echo "$out"
+            [[ "$out" == "$binary $SUNRISE_VERSION" ]] || { echo "::error::expected $binary $SUNRISE_VERSION"; exit 1; }
+          done
+      - uses: actions/upload-artifact@v7
+        with:
+          name: sunrise-macos-x64.zip
+          path: ${{ runner.temp }}/intel/sunrise-macos-x64.zip
+          if-no-files-found: error
+          retention-days: 3
+      - name: This leg built
+        run: echo built > "$RUNNER_TEMP/leg-macos-x64"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: leg-macos-x64
+          path: ${{ runner.temp }}/leg-macos-x64
+          if-no-files-found: error
+          retention-days: 3
+
+  legs:
+    needs: [build, macos-x64-intel]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
