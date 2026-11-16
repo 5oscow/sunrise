@@ -11010,6 +11010,30 @@ pub(crate) mod tests {
         });
         assert_eq!(count.load(Ordering::Relaxed), 1);
     }
+    /// A client's painting lives on `Entity.tickCount`, which its renderer reads as the age: it
+    /// advances with each running level tick and holds while the level is frozen.
+    #[test]
+    #[ignore = "daily"]
+    fn a_client_painting_ages_with_running_ticks() {
+        super::super::native_entity_refs::tests::with_client_game(|game| {
+            let (client, _server) = sunrise_protocol::connection::Pipe::pair();
+            game.connect_local(client, "painting-age-client").unwrap();
+            assert!(game.spawn_remote_object(
+                5,
+                "minecraft:painting",
+                [0.5, 64.5, 0.5],
+                (0.0, 0.0),
+                2
+            ));
+            assert_eq!(game.paintings[0].ticks, 0);
+            game.tick_remote_entities(true);
+            game.tick_remote_entities(true);
+            assert_eq!(game.paintings[0].ticks, 2);
+            game.tick_remote_entities(false);
+            assert_eq!(game.paintings[0].ticks, 2);
+        });
+    }
+
     /// The remote player animation uses the scoped item answer once per tick.
     #[test]
     #[ignore = "daily"]

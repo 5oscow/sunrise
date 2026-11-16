@@ -471,6 +471,11 @@ impl Game<'_> {
             }
             stand += 1;
         }
+        // `Entity.tickCount` on the client: a painting's and an item frame's lived ticks, which
+        // their renderers read as the age.
+        for painting in &mut self.paintings {
+            painting.ticks = painting.ticks.saturating_add(1);
+        }
         self.tick_remote_boat_bubbles();
     }
 
