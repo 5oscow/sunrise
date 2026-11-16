@@ -2201,10 +2201,7 @@ impl Game<'_> {
                     }
                 }
                 Call::Sprite { id, x, y, w, h } => {
-                    let name = match id.split_once(':') {
-                        Some((namespace, path)) => format!("{namespace}:gui/sprites/{path}"),
-                        None => format!("gui/sprites/{id}"),
-                    };
+                    let name = sunrise_client::hud::atlas_key_of_gui_sprite(id);
                     let native = atlas
                         .sprites
                         .get(&name)

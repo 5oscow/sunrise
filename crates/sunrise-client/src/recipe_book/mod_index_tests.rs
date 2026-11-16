@@ -109,6 +109,15 @@ fn invalid_declarations_refuse_the_whole_generation() {
             Err(DisplayLoadError::UnknownResource { kind: "item", .. })
         ));
     }
+    for icon in ["minecraft:air", "demo:absent"] {
+        let mut invalid = valid.clone();
+        invalid.id = "demo:stews".into();
+        invalid.secondary_icon = Some(icon.into());
+        assert!(matches!(
+            ModBookIndex::build(vec![valid.clone(), invalid], &Resources),
+            Err(DisplayLoadError::UnknownResource { kind: "item", .. })
+        ));
+    }
     let mut second = valid.clone();
     second.id = "demo:stews".into();
     let index = ModBookIndex::build(vec![valid.clone(), second], &Resources).unwrap();
