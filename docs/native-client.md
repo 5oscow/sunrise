@@ -359,8 +359,16 @@ says whether it arrived, `break` what dropped and what was picked up, `place`
 the block placed. `stop` cancels the running action. Every reply is one JSON
 line; errors are `{"error": "..."}` objects, and the exit status is 0 on
 success, 1 when the game replied with an error, 2 for a usage error and 3 when
-the game cannot be reached or started. `sunrise-ctl script FILE` (or stdin)
-runs one command per line with shell-like quoting and stops at the first error
+the game cannot be reached or started. A command that failed is not a game
+error: `command` replies `ok` (delivered) with, in a world you host or run alone, `success` (any run of the command
+succeeded; an `execute` that forks counts once per fork) and `result`, the pair
+`execute store success|result` stores (the last fork's value). `success` is
+false and `result` `null` when the command never ran (a syntax error, an unknown
+command, an `execute` forking to no target, a line the game refuses, no world
+served or the owner not placed yet), still with `ok` true. A client mod's
+command gives only `ok` and `chat`, and a joined server's reply neither field,
+so a script tests `success`, not the exit status. `sunrise-ctl script FILE`
+(or stdin) runs one command per line with shell-like quoting and stops at the first error
 (`--keep-going` doesn't); `sleep S` waits. `sunrise-ctl -` is the older form
 that reads stdin and keeps going.
 
