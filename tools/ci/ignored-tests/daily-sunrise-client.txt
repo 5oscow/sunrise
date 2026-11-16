@@ -150,6 +150,8 @@ sunrise-client game::native_recipes::tests::a_synced_vanilla_recipe_has_one_book
 sunrise-client game::native_recipes::tests::synced_vanilla_recipes_keep_their_book_ids lib daily resources
 sunrise-client game::native_ride_player::tests::a_mob_rides_a_guest_sits_on_it_and_the_guest_is_told lib daily game-boot
 sunrise-client game::native_server::network_settings_tests::server_settings_follow_the_network_config lib daily slow
+sunrise-client game::native_structure_placement::tests::a_carried_structure_places_its_blocks_block_entity_and_entity lib daily resources
+sunrise-client game::native_structure_placement::tests::a_chunk_the_template_covers_that_is_not_loaded_refuses_and_places_nothing lib daily resources
 sunrise-client game::natural_spawning::tests::spawn_candidates_match_the_uncached_union_while_players_move lib daily slow
 sunrise-client game::rectangular_recipe_remainder_tests::rectangular_recipe_for_preserves_two_custom_remainder_cells lib daily resources
 sunrise-client game::remote::interaction_event_tests::mapping_press_tests::a_callback_click_survives_until_the_next_tick lib daily resources
