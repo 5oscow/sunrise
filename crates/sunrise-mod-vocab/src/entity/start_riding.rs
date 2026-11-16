@@ -42,8 +42,8 @@ pub enum StartRidingRefusal {
     Full,
     /// A mod's `entity_mount` hook canceled the mount, or the dismount from
     /// the rider's old vehicle, or changed the rider so that it no longer
-    /// applies. The hook fires after every other refusal, as vanilla's event
-    /// does.
+    /// applies. The hook fires only after every other check passed, so a
+    /// refusal at those checks reaches no hook.
     Canceled,
 }
 
