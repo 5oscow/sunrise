@@ -1,8 +1,8 @@
 //! The chunk writer's isolated mod attachment callback boundary.
 //! Server code captures encoded envelopes; only workers execute mod code.
 use super::*;
-use sunrise_mod_runtime::attachments::Attachments;
 use mod_api::{ChunkDiskContextWire, ChunkDiskJob, ChunkDiskKind, ChunkDiskPhase, WorldEpoch};
+use sunrise_mod_runtime::attachments::Attachments;
 
 pub(super) struct DiskRuntime {
     refused_loads: Mutex<HashSet<(i32, i32)>>,
@@ -161,15 +161,21 @@ impl SaveDir {
         })
     }
 
+    /// The shared admission point of a region write, for every record kind: a chunk whose
+    /// load was refused never overwrites the record it kept, however the save was queued.
+    pub(super) fn admit_region_write(&self, folder: Folder, key: (i32, i32)) -> Result<()> {
+        if folder == Folder::Region && self.chunk_disk_load_refused(key.0, key.1) {
+            return Err("chunk disk load was refused; prior record retained".into());
+        }
+        Ok(())
+    }
+
     pub(super) fn capture_disk_record(&self, record: Record) -> Result<Record> {
         let (chunk, kind) = match &record {
             Record::Chunk(chunk, ..) => (&**chunk, ChunkDiskKind::Full),
             Record::Proto(proto, ..) => (&proto.column, ChunkDiskKind::Proto),
             _ => return Ok(record),
         };
-        if self.chunk_disk_load_refused(chunk.x, chunk.z) {
-            return Err("chunk disk load was refused; prior record retained".into());
-        }
         if !mod_api::__private::listened(mod_api::HookId::ChunkDataSave) {
             return Ok(record);
         }
@@ -241,6 +247,14 @@ impl SaveDir {
         }
         if let Err(error) = admit_disk_save() {
             return Some(Err(error));
+        }
+        let keys: Vec<_> = chunks.iter().map(|chunk| (chunk.x, chunk.z)).collect();
+        for key in &keys {
+            if let Err(error) = self.admit_region_write(Folder::Region, *key) {
+                // No callback runs for a protected chunk; it stays marked for another attempt.
+                self.note_refused_saves(Folder::Region, &keys);
+                return Some(Err(error));
+            }
         }
         Some((|| {
             let runtime = self

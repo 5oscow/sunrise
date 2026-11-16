@@ -157,6 +157,37 @@ fn full_and_proto_writer_records_each_invoke_once_before_encode() {
 }
 
 /// Records what each save callback saw, in the order the writer ran them.
+#[test]
+fn synchronous_save_after_refused_load_keeps_disk_8_for_load_only_and_load_plus_save() {
+    let (registry, biomes) = super::loot_tests::fixture();
+    let registry = Box::leak(Box::new(registry));
+    let biomes = Arc::new(biomes);
+    let listeners: [fn() -> Box<dyn Hooks>; 2] = [
+        || Box::new(breaker::Breaker),
+        || Box::new(breaker_both::BreakerBoth),
+    ];
+    for listener in listeners {
+        let path = root();
+        mod_platform::testing::with_mods(Vec::new().into(), || {
+            SaveDir::new(path.clone(), LevelShape::OVERWORLD)
+                .save(&[Arc::new(chunk(8))], registry, &biomes)
+                .unwrap();
+        });
+        let mods = vec![mod_api::ModEntry::new("wasm_fixture", listener())].into();
+        mod_platform::testing::with_mods(mods, || {
+            let save = SaveDir::new(path.clone(), LevelShape::OVERWORLD);
+            context(&save);
+            assert!(save.load(2, -3, registry, &biomes).is_none());
+            assert!(save.save(&[Arc::new(chunk(9))], registry, &biomes).is_err());
+            assert_eq!(save.take_failed_chunk_saves(), [(2, -3)]);
+        });
+        mod_platform::testing::with_mods(Vec::new().into(), || {
+            assert_eq!(disk_value(&path, registry, &biomes), Some(8));
+        });
+        fs::remove_dir_all(path).unwrap();
+    }
+}
+
 // Its own module: `sunrise_mod` defines one `hooks` function per module.
 mod echo {
     use super::*;
@@ -358,6 +389,37 @@ fn disk_write_failure_keeps_old_disk_7_and_snapshot_8_for_recovery() {
     fs::remove_dir_all(path).unwrap();
 }
 
+#[test]
+fn synchronous_save_after_refused_load_keeps_disk_8_for_load_only_and_load_plus_save() {
+    let (registry, biomes) = super::loot_tests::fixture();
+    let registry = Box::leak(Box::new(registry));
+    let biomes = Arc::new(biomes);
+    let listeners: [fn() -> Box<dyn Hooks>; 2] = [
+        || Box::new(breaker::Breaker),
+        || Box::new(breaker_both::BreakerBoth),
+    ];
+    for listener in listeners {
+        let path = root();
+        mod_platform::testing::with_mods(Vec::new().into(), || {
+            SaveDir::new(path.clone(), LevelShape::OVERWORLD)
+                .save(&[Arc::new(chunk(8))], registry, &biomes)
+                .unwrap();
+        });
+        let mods = vec![mod_api::ModEntry::new("wasm_fixture", listener())].into();
+        mod_platform::testing::with_mods(mods, || {
+            let save = SaveDir::new(path.clone(), LevelShape::OVERWORLD);
+            context(&save);
+            assert!(save.load(2, -3, registry, &biomes).is_none());
+            assert!(save.save(&[Arc::new(chunk(9))], registry, &biomes).is_err());
+            assert_eq!(save.take_failed_chunk_saves(), [(2, -3)]);
+        });
+        mod_platform::testing::with_mods(Vec::new().into(), || {
+            assert_eq!(disk_value(&path, registry, &biomes), Some(8));
+        });
+        fs::remove_dir_all(path).unwrap();
+    }
+}
+
 // Its own module: `sunrise_mod` defines one `hooks` function per module.
 mod breaker {
     use super::*;
@@ -407,4 +469,16 @@ fn refused_load_publishes_nothing_keeps_disk_8_and_refuses_the_chunks_saves() {
         assert_eq!(disk_value(&path, registry, &biomes), Some(8));
     });
     fs::remove_dir_all(path).unwrap();
+}
+mod breaker_both {
+    use super::*;
+    #[derive(Default)]
+    pub struct BreakerBoth;
+    #[mod_api::sunrise_mod]
+    impl Hooks for BreakerBoth {
+        fn chunk_data_load(&self, _: &dyn ChunkDiskHost, _: &mut ChunkDataLoadEvent<'_>) {
+            panic!("load listener fails");
+        }
+        fn chunk_data_save(&self, _: &dyn ChunkDiskHost, _: &mut ChunkDataSaveEvent<'_>) {}
+    }
 }

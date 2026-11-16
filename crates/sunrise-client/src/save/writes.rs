@@ -51,6 +51,7 @@ impl SaveDir {
                 match records
                     .into_iter()
                     .map(|(key, record)| {
+                        self.admit_region_write(folder, key)?;
                         self.capture_disk_record(record).map(|record| (key, record))
                     })
                     .collect::<Result<Vec<_>>>()
