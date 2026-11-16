@@ -22,4 +22,13 @@ pub trait RecipeBooksRegistrar {
         open_field: &str,
         filtering_field: &str,
     ) -> Result<RecipeBookTypeKey, String>;
+    /// Give a book of this mod its own filter button look: four sprites and a tooltip key. Each
+    /// sprite is a `namespace:path` GUI sprite id and the tooltip a nonempty translation key of
+    /// at most 256 bytes. A book takes one look; a second declaration, a book another mod
+    /// registered and a malformed id refuse installation even if the caller ignores the error.
+    fn recipe_book_filter_look(
+        &mut self,
+        book: &RecipeBookTypeKey,
+        look: crate::RecipeBookFilterLook,
+    ) -> Result<(), String>;
 }

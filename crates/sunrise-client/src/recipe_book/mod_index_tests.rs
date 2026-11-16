@@ -34,6 +34,7 @@ fn category(book: &str, id: &str) -> RecipeBookCategory {
         id: id.into(),
         recipe_type: "demo:cooking".into(),
         icon: "minecraft:stone".into(),
+        secondary_icon: None,
         target_menu: book.into(),
         book: {
             // The key is opaque outside registration. Decode its owned id as a fixture;

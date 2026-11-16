@@ -17,6 +17,7 @@ event.categories.push(RecipeBookCategory {
     id: "mymod:crushing".into(),
     recipe_type: "mymod:crusher".into(),
     icon: "mymod:crusher".into(),
+    secondary_icon: None,
     target_menu: "mymod:crusher".into(),
     book: book.clone(),
     search_group: "mymod:crusher_search".into(),
@@ -39,6 +40,7 @@ event.categories.push(RecipeBookCategory {
 | `id` | Unique namespaced category identifier outside `minecraft:`. |
 | `recipe_type` | Namespaced identifier outside `minecraft:` present in the recipe table. Multiple categories can use one type. |
 | `icon` | Registered item identifier other than `minecraft:air`. |
+| `secondary_icon` | `None` for a one-icon tab, or a registered item identifier other than `minecraft:air` drawn beside `icon`, as vanilla's two-icon tabs do. |
 | `target_menu` | Registered menu identifier. |
 | `book` | Registered `RecipeBookTypeKey`. All categories in one book name the same menu and search group. |
 | `search_group` | Namespaced identifier outside `minecraft:` owned by exactly one book; it cannot also name a category. Search includes exactly that book's categories. |

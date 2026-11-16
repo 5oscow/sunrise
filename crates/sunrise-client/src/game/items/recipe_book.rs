@@ -2148,6 +2148,7 @@ impl Game<'_> {
             mouse: (cursor.0.floor() as i32, cursor.1.floor() as i32),
             index: self.swap_index(),
             filtering: self.book_filtering(book_type),
+            filter_look: None,
             search: &search,
             tabs: &tabs,
             buttons: &buttons,
@@ -2200,7 +2201,10 @@ impl Game<'_> {
                     }
                 }
                 Call::Sprite { id, x, y, w, h } => {
-                    let name = format!("gui/sprites/{id}");
+                    let name = match id.split_once(':') {
+                        Some((namespace, path)) => format!("{namespace}:gui/sprites/{path}"),
+                        None => format!("gui/sprites/{id}"),
+                    };
                     let native = atlas
                         .sprites
                         .get(&name)
@@ -2416,6 +2420,7 @@ mod screen_room_tests {
                     mouse: (221, 50),
                     index: 0,
                     filtering: false,
+                    filter_look: None,
                     search: &search,
                     tabs: &tabs,
                     buttons: &[],

@@ -101,6 +101,7 @@ fn category(book: &str, id: &str, recipe: &str) -> RecipeBookCategory {
         target_menu: "demo:menu".into(),
         search_group: format!("{book}_search"),
         icon: "demo:icon".into(),
+        secondary_icon: None,
         recipe_type: "demo:type".into(),
         displays: vec![mod_api::RecipeBookDisplayEntry {
             recipe: recipe.into(),
