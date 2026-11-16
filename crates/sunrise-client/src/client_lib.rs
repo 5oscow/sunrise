@@ -15,6 +15,7 @@ pub mod bed_geometry;
 pub mod block_contact;
 pub mod block_sounds;
 pub mod item_damage;
+pub mod mod_packet_builders;
 pub mod packet_source;
 pub mod parallel;
 pub mod powder_snow;
