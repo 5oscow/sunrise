@@ -292,6 +292,7 @@ fn run_output(family: Family, output: Output) {
             0,
             sunrise_client::brewing::Category::Neutral,
             None,
+            "borrowed-panic".into(),
         )]);
     });
     eprintln!("BORROWED_ASSERTIONS_DISABLED:{}", !cfg!(debug_assertions));

@@ -3794,7 +3794,27 @@ pub(crate) fn tick_effects_hurting(
     // list it finds (Resistance softens the hit, Infested spawns silverfish,
     // a totem adds its effects to it). An effect a tick appends ticks from
     // the next tick on.
-    let first = m.extra.effects.len();
+    let mut first = m.extra.effects.len();
+    // Finish expiry before the next callback reads the holder. A cancelled expiry
+    // keeps even a zero-duration instance; hidden promotion happens before this.
+    let expire = |m: &mut Mob, i: usize| {
+        let e = &m.extra.effects[i];
+        if e.duration > 0 || e.duration == -1 {
+            return false;
+        }
+        let mut cancel = false;
+        if let Some(mods) = mods
+            && let Some(index) = e.registry_index
+        {
+            mods.effect_expired(m.id, index, e.amplifier, &mut cancel);
+        }
+        if cancel {
+            return false;
+        }
+        let id = e.id;
+        m.retain_effects(|effect| effect.id != id);
+        true
+    };
     let old_max_absorption = super::armor::max_absorption(m);
     let old_boost_amp = m
         .extra
@@ -3808,10 +3828,14 @@ pub(crate) fn tick_effects_hurting(
         // MobEffectInstance.tickServer: an infinite (-1) effect times its
         // ticks by the mob's tickCount and never counts down.
         let infinite = m.extra.effects[i].duration == -1;
-        // MobEffectInstance.tickServer: hasRemainingDuration is false at 0, so the
-        // instance ticks nothing; LivingEntity.tickEffects drops it below.
-        if !infinite && m.extra.effects[i].duration == 0 {
-            i += 1;
+        // MobEffectInstance.tickServer: without remaining duration the instance
+        // ticks nothing; resolve its expiry before the next instance.
+        if !infinite && m.extra.effects[i].duration <= 0 {
+            if expire(m, i) {
+                first -= 1;
+            } else {
+                i += 1;
+            }
             continue;
         }
         let count = if infinite {
@@ -3820,7 +3844,7 @@ pub(crate) fn tick_effects_hurting(
             m.extra.effects[i].duration
         };
         let interval = |base: i32| base.wrapping_shr(amp as u32).max(1);
-        // A refused mod effect is left at 0 ticks for the retain below.
+        // A refused mod effect expires before the next effect ticks.
         let mut expired = false;
         match effect {
             "minecraft:poison"
@@ -3857,11 +3881,6 @@ pub(crate) fn tick_effects_hurting(
                 expired = true;
             }
             id if sunrise_client_core::potions::is_mod_effect(id) => {
-                // tickServer: one with no ticks left goes unasked.
-                if !infinite && m.extra.effects[i].duration <= 0 {
-                    i += 1;
-                    continue;
-                }
                 if let Some(mods) = mods
                     && let Some(index) = m.extra.effects[i].registry_index
                     && !mods.tick_mod_effect(level, index, m, count, amp)
@@ -3918,22 +3937,14 @@ pub(crate) fn tick_effects_hurting(
         {
             m.effects_dirty = true;
         }
-        i += 1;
+        if m.extra.effects.get(i).is_some_and(|e| e.id == effect) && expire(m, i) {
+            // Removal shifts the next original effect into this slot. Shrink the
+            // original-pass boundary too, so newly appended effects still wait.
+            first -= 1;
+        } else {
+            i += 1;
+        }
     }
-    let mob_id = m.id;
-    m.retain_effects(|e| {
-        if e.duration > 0 || e.duration == -1 {
-            return true;
-        }
-        // `MobEffectEvent.Expired`: canceling the expiry keeps the effect.
-        let mut cancel = false;
-        if let Some(mods) = mods
-            && let Some(index) = e.registry_index
-        {
-            mods.effect_expired(mob_id, index, e.amplifier, &mut cancel);
-        }
-        cancel
-    });
     if m.effects_dirty {
         let invisible = m.has_effect("minecraft:invisibility");
         m.needs_sync |= m.invisible != invisible;

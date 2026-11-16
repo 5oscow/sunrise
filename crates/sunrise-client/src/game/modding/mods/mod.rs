@@ -1238,24 +1238,33 @@ fn announced_entry(
 fn register_mob_effects(mods: &[sunrise_client::mod_content::ContentMod]) {
     use sunrise_client::brewing::{self, Category};
     use sunrise_mod_package::content::EffectCategory;
-    let effects = sunrise_client::mod_content::mob_effects(mods);
+    let mut effects: Vec<_> = mods
+        .iter()
+        .flat_map(|m| m.content.effects.iter().map(move |effect| (&m.id, effect)))
+        .collect();
+    effects.sort_by(|(_, a), (_, b)| a.id.cmp(&b.id));
     if effects.is_empty() {
         return;
     }
-    let ids: Vec<String> = effects.iter().map(|e| e.id.clone()).collect();
-    let set = brewing::register_mod_effects(effects.into_iter().map(|e| {
+    let ids: Vec<_> = effects
+        .iter()
+        .map(|(owner, e)| (e.id.clone(), owner.to_string()))
+        .collect();
+    let set = brewing::register_mod_effects(effects.into_iter().map(|(owner, e)| {
         let category = match e.category {
             EffectCategory::Beneficial => Category::Beneficial,
             EffectCategory::Harmful => Category::Harmful,
             EffectCategory::Neutral => Category::Neutral,
         };
-        (e.id.clone(), e.color, category, e.sort_order)
+        (e.id.clone(), e.color, category, e.sort_order, owner.clone())
     }));
     if !set
         && brewing::mod_effects()
             .iter()
-            .map(|e| e.id)
-            .ne(ids.iter().map(String::as_str))
+            .map(|e| (e.id, e.owner))
+            .ne(ids
+                .iter()
+                .map(|(id, owner)| (id.as_str(), Some(owner.as_str()))))
     {
         log::warn!("Sunrise: the mods' mob effects changed; restart the game to use them");
     }
@@ -3187,7 +3196,8 @@ mod tests {
             "test:effect".to_owned(),
             0,
             brewing::Category::Neutral,
-            None
+            None,
+            "test-potions".into()
         )]));
     }
 }
