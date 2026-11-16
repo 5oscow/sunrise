@@ -699,9 +699,10 @@ pub(super) fn emit<'a>(
                     hook_id,
                     scoped.is_some(),
                     hook.scope.as_ref().and_then(|scope| match scope.kind {
-                        PartKind::Block if !observer_routed => Some(scope.key.as_str()),
+                        PartKind::Block => Some(scope.key.as_str()),
                         _ => None,
                     }),
+                    observer_routed,
                     &surface_calls,
                     match hook.stack_count {
                         Some(crate::catalog::StackCount::Trim) => hook.out.as_deref(),
@@ -1087,7 +1088,9 @@ fn stack_crossing(
     scoped: bool,
     surfaces: &std::collections::HashMap<&str, String>,
 ) -> Option<StackCrossing> {
-    stack_crossing_routed(args, output, false, hook_id, scoped, None, surfaces, None)
+    stack_crossing_routed(
+        args, output, false, hook_id, scoped, None, false, surfaces, None,
+    )
 }
 
 fn stack_crossing_routed(
@@ -1097,6 +1100,7 @@ fn stack_crossing_routed(
     hook_id: &str,
     scoped: bool,
     block_scope: Option<&str>,
+    observer_routed: bool,
     surfaces: &std::collections::HashMap<&str, String>,
     trim_count_output: Option<&str>,
 ) -> Option<StackCrossing> {
@@ -1125,7 +1129,12 @@ fn stack_crossing_routed(
     let mut before =
         format!("if !mod_api::__private::{guard}(mod_api::HookId::{hook_id}) {{ return; }} ");
     if let Some(key) = block_scope {
-        before.push_str(&format!("if !crate::game::api_values::block_state::block_listens(mod_api::HookId::{hook_id}, {key}) {{ return; }} "));
+        let source_route = if observer_routed {
+            "observer.is_none() && "
+        } else {
+            ""
+        };
+        before.push_str(&format!("if {source_route}!crate::game::api_values::block_state::block_listens(mod_api::HookId::{hook_id}, {key}) {{ return; }} "));
     }
     before.push_str("use crate::game::api_values::TryIntoApi; ");
     if parameters.iter().any(|(name, ty)| {
@@ -1489,6 +1498,7 @@ mod level { pub trait LevelAccess { fn block_state(&self,pos:crate::BlockPos)->c
             "Proof",
             true,
             Some("state"),
+            false,
             &Default::default(),
             None,
         )
@@ -1504,6 +1514,7 @@ mod level { pub trait LevelAccess { fn block_state(&self,pos:crate::BlockPos)->c
             "Proof",
             false,
             None,
+            false,
             &Default::default(),
             None,
         )

@@ -85,6 +85,7 @@ fn count_policy_applies_only_to_the_named_output() {
         "AnyCollector",
         false,
         None,
+        false,
         &Default::default(),
         Some("drops"),
     )
