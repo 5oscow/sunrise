@@ -106,7 +106,6 @@ fn custom_data_component_recipes_decode_and_match() {
     let root = tempfile::tempdir().unwrap();
     let sources = literals
         .iter()
-        .chain(&refused)
         .map(|(name, source)| {
             let ingredient: serde_json::Value = serde_json::from_str(source).unwrap();
             (
@@ -346,10 +345,12 @@ fn custom_data_component_recipes_decode_and_match() {
         assert!(unicode_ingredients[0].test_in(&context, &stack));
     });
     assert_eq!(allocations.calls, 0, "{allocations:?}");
-    for (name, source) in refused {
-        assert!(recipes.recipe(name).is_none(), "{name}");
-        assert!(!matches(name, &plain), "{name}");
+    for (_, source) in refused {
         let value: serde_json::Value = serde_json::from_str(source).unwrap();
+        super::decoder_contracts::assert_malformed_decoder_refuses_load(
+            &items,
+            value["components"].clone(),
+        );
         let rule = IngredientRule::Components {
             patch: crate::json_nbt::json_to_compound(value["components"].as_object().unwrap())
                 .unwrap(),
