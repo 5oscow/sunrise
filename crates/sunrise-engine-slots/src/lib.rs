@@ -129,9 +129,15 @@ mod tests {
 mod platform;
 pub use platform::{Platform, PlatformRefusal, install_platform, platform};
 
+// The generated point records and dispatch (about 15 MB of source) are left out of this crate's
+// own unit tests, which use none of them. The test target is never served from the compiler
+// cache, so lint spent over two minutes on them there on every run, and verify compiled them into
+// the test binary again. The library target still builds and lints them.
+#[cfg(not(test))]
 include!(concat!(env!("OUT_DIR"), "/engine_points.rs"));
 
 /// The game's point table, set once by the game before any listened point is published.
+#[cfg(not(test))]
 static POINT_TABLE: std::sync::OnceLock<&'static mod_vocab::__private::points::Table> =
     std::sync::OnceLock::new();
 
@@ -144,6 +150,7 @@ static POINT_TABLE: std::sync::OnceLock<&'static mod_vocab::__private::points::T
 /// # Safety
 /// For each catalog index, every typed listener the table holds must be a valid
 /// function pointer with that point's generated host and record signature.
+#[cfg(not(test))]
 pub unsafe fn install_points(
     table: &'static mod_vocab::__private::points::Table,
 ) -> Result<(), Refusal> {
@@ -154,6 +161,7 @@ pub unsafe fn install_points(
 
 /// Engine-side point activity and dispatch boundary.
 #[doc(hidden)]
+#[cfg(not(test))]
 pub mod __private {
     use super::*;
     pub use mod_vocab::__private::points::{ApiKind, PointHost, cold};
