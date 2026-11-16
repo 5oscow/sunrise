@@ -28,13 +28,13 @@ use sunrise_core::{
     nbt::{Compound, JavaString, Limits, Tag},
 };
 use sunrise_mod_package::content::{
-    Block, BlockEntityType, BlockShapes, Content, CreativeTab, EntityType, FluidLook, MenuType,
-    MobEffect, Rarity, StateProperty, StateValues,
+    Block, BlockEntityType, BlockShapes, Content, ContextCollision, CreativeTab, EntityType,
+    FluidLook, MenuType, MobEffect, Rarity, StateProperty, StateValues,
 };
 use sunrise_mod_package::manifest::{
     JarInputsError, JarRef, collect_jar_requirements, missing_jars,
 };
-use sunrise_world::block_properties::BlockDefinitionProperties;
+use sunrise_world::{block_collision::ScaffoldingCollision, block_properties::BlockDefinitionProperties};
 
 /// A content mod to put in the root: its id, its content, and the Java jars
 /// it lists in manifest order — each an asset/data layer under the mod's own
@@ -619,6 +619,22 @@ fn encode_shape(shape: &VoxelShape) -> Tag {
     Tag::Compound(c)
 }
 
+/// A state's value of property `name`: its declared combination's, else its template state's.
+fn state_value<'a>(
+    combo: &'a [(String, String)],
+    template: Option<&'a J>,
+    name: &str,
+) -> Option<&'a str> {
+    combo
+        .iter()
+        .find(|(key, _)| key == name)
+        .map(|(_, value)| value.as_str())
+        .or_else(|| match template?.get(name) {
+            Some(J::Str(value)) => Some(value.as_str()),
+            _ => None,
+        })
+}
+
 fn resolve_state_values<'a, 's, T>(
     spec: &'s StateValues<T>,
     block: &str,
@@ -634,16 +650,7 @@ fn resolve_state_values<'a, 's, T>(
         let values = names
             .iter()
             .map(|name| {
-                combos[combo as usize]
-                    .iter()
-                    .find(|(key, _)| key == name)
-                    .map(|(_, value)| value.as_str())
-                    .or_else(|| {
-                        match properties(states.start + state).and_then(|props| props.get(name)) {
-                            Some(J::Str(value)) => Some(value.as_str()),
-                            _ => None,
-                        }
-                    })
+                state_value(&combos[combo as usize], properties(states.start + state), name)
                     .ok_or_else(|| format!("{block}: state lacks property {name}"))
             })
             .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -1352,6 +1359,17 @@ impl<'a> Plan<'a> {
                     .map(|(name, property)| (name.clone(), property.values().len() as u32))
                     .collect();
                 let order = block_order(&states, properties, &declared, combos.len() as u32);
+                if decl.context_collision == Some(ContextCollision::Scaffolding) {
+                    for &(state, combo) in &order {
+                        let value = |name| {
+                            state_value(&combos[combo as usize], properties(states.start + state), name)
+                        };
+                        ScaffoldingCollision::from_values(value("distance"), value("bottom"))
+                            .map_err(|e| {
+                                format!("{}: context_collision scaffolding: {e}", decl.id)
+                            })?;
+                    }
+                }
                 let resolve = |spec: &BlockShapes| {
                     resolve_shapes(spec, &decl.id, &states, &order, &combos, properties)
                 };
@@ -2137,10 +2155,23 @@ impl<'a> Plan<'a> {
     /// The states whose block entity publishes their shapes (`shapes_from_block_entity`), in
     /// the collision and support tables, which mark such states in their scan metadata.
     fn published_states(&self, tag: &mut Tag) -> Result<()> {
+        self.list_states(tag, "published_shapes", |decl| decl.shapes_from_block_entity)
+    }
+
+    /// The states whose block takes scaffolding's context collision (`context_collision`), in
+    /// the collision tables.
+    fn scaffolding_states(&self, tag: &mut Tag) -> Result<()> {
+        self.list_states(tag, "scaffolding_collision", |decl| {
+            decl.context_collision == Some(ContextCollision::Scaffolding)
+        })
+    }
+
+    /// Lists under `key` the states of the blocks `wanted` picks; no list when it picks none.
+    fn list_states(&self, tag: &mut Tag, key: &str, wanted: impl Fn(&Block) -> bool) -> Result<()> {
         let states: Vec<i32> = self
             .blocks
             .iter()
-            .filter(|block| block.decl.shapes_from_block_entity)
+            .filter(|block| wanted(block.decl))
             .flat_map(|block| {
                 (0..block.order.len())
                     .map(move |offset| (block.rename.first as usize + offset) as i32)
@@ -2152,7 +2183,7 @@ impl<'a> Plan<'a> {
         let Tag::Compound(root) = tag else {
             return Err("collision table is not a compound".into());
         };
-        root.insert("published_shapes".into(), Tag::IntArray(states));
+        root.insert(key.into(), Tag::IntArray(states));
         Ok(())
     }
 
@@ -3077,6 +3108,7 @@ fn tables(base: &Path, plan: &Plan, overlay: &Overlay<'_>, jobs: &[(&str, u64)])
             if name == "cached-collision.nbt" || name == "worldgen/blocks/cached-collision.nbt" {
                 plan.declared_shapes(&mut named.tag, true)?;
                 plan.published_states(&mut named.tag)?;
+                plan.scaffolding_states(&mut named.tag)?;
             } else if name == "worldgen/blocks/cached-support.nbt" {
                 plan.published_states(&mut named.tag)?;
             } else if name == "occlusion.nbt" {

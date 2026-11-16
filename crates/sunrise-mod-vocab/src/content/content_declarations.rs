@@ -128,6 +128,19 @@ pub enum ShapeEntityKind {
     Other,
 }
 
+/// A vanilla block's context-dependent collision a declared block takes ([`Block::context_collision`]),
+/// whatever its template.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+// exhaustive: these variants are the closed content declaration vocabulary.
+#[derive(sunrise_mod_api_macros::Wire)]
+pub enum ContextCollision {
+    /// Scaffolding's (`ScaffoldingBlock.getCollisionShape`): solid on top unless the entity is
+    /// descending, open below, and the bottom row's floor. The block's states need scaffolding's
+    /// `distance` (0 to 7) and `bottom` properties, from the template or declared; loading
+    /// refuses the block, by name, otherwise.
+    Scaffolding,
+}
+
 /// BlockStateProperty in a load-time content declaration.
 #[derive(Clone, Debug, PartialEq)]
 // exhaustive: these variants are the closed content declaration vocabulary.
@@ -174,6 +187,9 @@ pub struct Block {
     /// (`BlockEntityRef::set_shapes`), which then replace the declared ones until cleared.
     /// Refused at load, by name, on a block that no block entity type owns. False when unset.
     pub shapes_from_block_entity: bool,
+    /// A vanilla block's context collision it takes, over its shapes for entities that have no
+    /// `collision_context_shapes` of their own. `None` when unset.
+    pub context_collision: Option<ContextCollision>,
     /// State properties of its own, which its template does not have.
     pub state_properties: BTreeMap<String, BlockStateProperty>,
     /// State properties overlaid on the template default.
@@ -280,6 +296,7 @@ impl Default for Block {
             collision_context_shapes: BTreeMap::new(),
             interaction_shapes: None,
             shapes_from_block_entity: false,
+            context_collision: None,
             state_properties: BTreeMap::new(),
             default_state: BTreeMap::new(),
             item: true,

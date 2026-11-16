@@ -753,8 +753,7 @@ fn falling_block_does_not_descend_through_scaffolding() {
             .collect(),
         },
     )
-    .unwrap()
-    .expect("scaffolding collision rule");
+    .unwrap();
 
     // When a falling block is falling downward (wanted.y < 0) above the scaffolding top (y = 11.0):
     let falling_y = 11.0;
