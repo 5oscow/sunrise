@@ -13,6 +13,9 @@ kills.add_score(host, ScoreHolder::Player(player), 1)?;
 host.set_display_slot(DisplaySlot::Sidebar, Some(kills));
 ```
 
+The saved board is loaded before the server-started hooks run, so a mod that reads at startup
+finds its saved objectives.
+
 ## Same board, same write
 
 A mod's write is the write `/scoreboard` makes on the server's board. Clients are sent the
@@ -45,7 +48,9 @@ objective by name again to get a handle to the new one.
 `set_score` and `add_score` create the score at 0 first (locked, as in vanilla), tell clients
 only when something changed, and wrap on overflow. They refuse a read-only criteria (`health`,
 `food`, `air`, `armor`, `xp`, `level`) with `ObjectiveError::ReadOnlyCriteria`, as the command
-does: only the server's own updates write those. `reset_score` removes one holder's score, and
+does: only the server's own updates write those. A holder that is not on the server (an offline
+player's entity) is `ObjectiveError::UnknownHolder`, which is not a stale handle: the objective
+is fine, and the other score calls answer `None` or `false` for such a holder. `reset_score` removes one holder's score, and
 `set_score_locked` changes the lock `/trigger` uses.
 
 Inside `host.transaction` the writes apply at once, and an abort puts the board back as it was
@@ -59,4 +64,5 @@ one.
 
 `ClientHost::client_scoreboard()` is what this client has been sent: the objectives shown in a
 display slot, with their slots and scores, as plain values. A client has no handles and
-cannot write.
+cannot write. A text the API cannot hold (nested deeper than 512 component nodes) refuses the
+whole snapshot with `TextFormError::TooDeep`; nothing is flattened or skipped.

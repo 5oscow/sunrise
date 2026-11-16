@@ -186,6 +186,12 @@ pub enum ObjectiveError {
     /// The handle is stale: its objective was removed (whatever was added under its name since),
     /// or it is from an earlier open, or there is no server world.
     Stale,
+    /// A score write named a holder that does not resolve: a player or entity that is not on this
+    /// server (an offline player's entity, a stale or earlier-open handle). The objective is fine.
+    /// [`ScoreHolder::Name`] always resolves. Only
+    /// [`set_score`](crate::ObjectiveRef::set_score) and [`add_score`](crate::ObjectiveRef::add_score)
+    /// answer it; the other score calls answer `None` or `false` for such a holder.
+    UnknownHolder,
     /// An objective of that name exists (`Scoreboard.addObjective` throws).
     NameTaken,
     /// The criteria is not one vanilla has: a fixed name, `teamkill.<color>`,

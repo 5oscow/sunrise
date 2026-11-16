@@ -9,7 +9,7 @@ use super::Game;
 use mod_api::__private::game::*;
 use mod_api::{
     ClientObjective, ClientScore, ClientScoreboard, DisplaySlot, NumberFormat, ObjectiveError,
-    ObjectiveRef, ObjectiveRenderType, ScoreEntry, ScoreHolder,
+    ObjectiveRef, ObjectiveRenderType, ScoreEntry, ScoreHolder, TextFormError,
 };
 use sunrise_client::{
     scoreboard::{self as sb, Comp, comp_text, literal},
@@ -30,26 +30,23 @@ fn api_render_type(render: sb::RenderType) -> ObjectiveRenderType {
     }
 }
 
-/// A text as the API holds it; one too deep for the API reads as its plain words.
-fn api_text(text: &EngineText) -> mod_api::Text {
+/// A text as the API holds it; one too deep for the API is refused by name, never flattened.
+fn api_text(text: &EngineText) -> Result<mod_api::Text, TextFormError> {
     use super::api_values::TryIntoApi;
     text.try_into_api()
-        .unwrap_or_else(|_| mod_api::Text::literal(text.plain()))
 }
 
-fn engine_text(text: &mod_api::Text) -> Result<EngineText, mod_api::text::TextFormError> {
+fn engine_text(text: &mod_api::Text) -> Result<EngineText, TextFormError> {
     use super::api_values::TryIntoEngine;
     text.try_into_engine(&())
 }
 
-fn engine_comp(text: &mod_api::Text) -> Result<Comp, mod_api::text::TextFormError> {
+fn engine_comp(text: &mod_api::Text) -> Result<Comp, TextFormError> {
     Ok(engine_text(text)?.component())
 }
 
 /// The board's number format for the API's (`NumberFormatTypes`).
-fn engine_number_format(
-    format: &NumberFormat,
-) -> Result<sb::NumberFormat, mod_api::text::TextFormError> {
+fn engine_number_format(format: &NumberFormat) -> Result<sb::NumberFormat, TextFormError> {
     Ok(match format {
         NumberFormat::Fixed(text) => sb::NumberFormat::Fixed(engine_comp(text)?),
         NumberFormat::Styled(style) => {
@@ -66,18 +63,18 @@ fn engine_number_format(
     })
 }
 
-fn api_number_format(format: &sb::NumberFormat) -> NumberFormat {
-    match format {
+fn api_number_format(format: &sb::NumberFormat) -> Result<NumberFormat, TextFormError> {
+    Ok(match format {
         sb::NumberFormat::Blank => NumberFormat::Blank,
-        sb::NumberFormat::Fixed(comp) => NumberFormat::Fixed(api_text(&comp_text(comp))),
+        sb::NumberFormat::Fixed(comp) => NumberFormat::Fixed(api_text(&comp_text(comp))?),
         sb::NumberFormat::Styled(style) => {
             let mut json = style.clone();
             if let Comp::Object(fields) = &mut json {
                 fields.insert("text".into(), Comp::String(String::new()));
             }
-            NumberFormat::Styled(api_text(&comp_text(&json)).style)
+            NumberFormat::Styled(api_text(&comp_text(&json))?.style)
         }
-    }
+    })
 }
 
 impl Game<'_> {
@@ -157,7 +154,7 @@ impl Game<'_> {
         }
         let (key, display) = self
             .score_holder_for_write(holder)
-            .ok_or(ObjectiveError::Stale)?;
+            .ok_or(ObjectiveError::UnknownHolder)?;
         Ok((name, key, display))
     }
 
@@ -288,7 +285,11 @@ impl Game<'_> {
         let state = self
             .objective_state(objective)
             .ok_or(ObjectiveError::Stale)?;
-        Ok(state.number_format.as_ref().map(api_number_format))
+        Ok(state
+            .number_format
+            .as_ref()
+            .map(api_number_format)
+            .transpose()?)
     }
 
     /// `Objective.displayAutoUpdate`.
@@ -484,39 +485,47 @@ impl Game<'_> {
     }
 
     /// What this client has been sent of the scoreboard; None outside a logged-in client world.
-    pub(super) fn client_scoreboard(&self) -> Option<ClientScoreboard> {
-        self.native_session()?;
+    /// A text the API cannot hold refuses the whole snapshot by name.
+    pub(super) fn client_scoreboard(&self) -> Result<Option<ClientScoreboard>, TextFormError> {
+        if self.native_session().is_none() {
+            return Ok(None);
+        }
         let board = &self.score.board;
-        let objectives = board
-            .objectives
-            .iter()
-            .map(|o| {
-                let slots = DisplaySlot::all()
-                    .filter(|slot| board.display.get(&slot.name()) == Some(&o.name))
-                    .collect();
-                let scores = board
-                    .list_scores(&o.name)
-                    .into_iter()
-                    .map(|entry| {
-                        ClientScore::new(
-                            entry.owner,
-                            entry.value,
-                            entry.display.as_ref().map(|d| api_text(&comp_text(d))),
-                            entry.number_format.as_ref().map(api_number_format),
-                        )
-                    })
-                    .collect();
-                ClientObjective::new(
-                    o.name.clone(),
-                    api_text(&o.display_text()),
-                    api_render_type(o.render_type),
-                    o.number_format.as_ref().map(api_number_format),
-                    slots,
-                    scores,
-                )
-            })
-            .collect();
-        Some(ClientScoreboard::new(objectives))
+        let mut objectives = Vec::new();
+        for o in &board.objectives {
+            let slots = DisplaySlot::all()
+                .filter(|slot| board.display.get(&slot.name()) == Some(&o.name))
+                .collect();
+            let mut scores = Vec::new();
+            for entry in board.list_scores(&o.name) {
+                scores.push(ClientScore::new(
+                    entry.owner,
+                    entry.value,
+                    entry
+                        .display
+                        .as_ref()
+                        .map(|d| api_text(&comp_text(d)))
+                        .transpose()?,
+                    entry
+                        .number_format
+                        .as_ref()
+                        .map(api_number_format)
+                        .transpose()?,
+                ));
+            }
+            objectives.push(ClientObjective::new(
+                o.name.clone(),
+                api_text(&o.display_text())?,
+                api_render_type(o.render_type),
+                o.number_format
+                    .as_ref()
+                    .map(api_number_format)
+                    .transpose()?,
+                slots,
+                scores,
+            ));
+        }
+        Ok(Some(ClientScoreboard::new(objectives)))
     }
 }
 
@@ -557,7 +566,7 @@ mod tests {
             NumberFormat::Styled(styled),
         ] {
             let engine = engine_number_format(&format).unwrap();
-            assert_eq!(api_number_format(&engine), format);
+            assert_eq!(api_number_format(&engine), Ok(format));
         }
         let mut red = TextStyle::default();
         red.color = Some("red".into());
@@ -566,6 +575,22 @@ mod tests {
             engine,
             sb::NumberFormat::Styled(serde_json::json!({"color": "red"}))
         );
+    }
+
+    /// A component the API cannot hold is refused by name, in a number format and in a text: it
+    /// is not flattened to its plain words.
+    #[test]
+    fn a_text_too_deep_for_the_api_is_refused_by_name() {
+        let mut deep = literal("x");
+        for _ in 0..600 {
+            deep = serde_json::json!({"text": "", "extra": [deep]});
+        }
+        assert_eq!(
+            api_number_format(&sb::NumberFormat::Fixed(deep.clone())),
+            Err(TextFormError::TooDeep)
+        );
+        assert_eq!(api_text(&comp_text(&deep)), Err(TextFormError::TooDeep));
+        assert!(api_text(&comp_text(&literal("x"))).is_ok());
     }
 
     fn guest(uuid: u128, conn: u32) -> Guest {
@@ -618,6 +643,9 @@ mod tests {
                 force_game_mode: false,
             };
             game.lan_host(settings, net, config).unwrap();
+            // The test world keeps its folder between runs: start from no saved board.
+            let saved_board = game.world_root.join("data/minecraft/scoreboard.dat");
+            let _ = std::fs::remove_file(&saved_board);
             game.lan.as_mut().unwrap().hub.guests.push(guest(123, 1));
             let player = game.player(123).unwrap();
             let text = mod_api::Text::literal;
@@ -697,6 +725,20 @@ mod tests {
                 hp.set_score(game, ScoreHolder::Name("x".into()), 1),
                 Err(ObjectiveError::ReadOnlyCriteria)
             );
+            // A holder that is not on the server is not a stale handle.
+            let offline = ScoreHolder::Entity(mod_api::EntityRef::new(
+                game.native_lifecycle.epoch().unwrap(),
+                9_999_999,
+            ));
+            assert_eq!(
+                kills.set_score(game, offline.clone(), 1),
+                Err(ObjectiveError::UnknownHolder)
+            );
+            assert_eq!(
+                kills.add_score(game, offline.clone(), 1),
+                Err(ObjectiveError::UnknownHolder)
+            );
+            assert_eq!(kills.score(game, offline), None);
 
             // Shown in the sidebar, a guest's view has it with its score.
             assert!(game.set_display_slot(DisplaySlot::Sidebar, Some(kills)));
@@ -711,17 +753,30 @@ mod tests {
 
             // Saved, the file holds the objective, its score and its slot, as a command's would.
             game.save_scoreboard();
-            let saved = sunrise_client::save::read_dat(
-                &game.world_root.join("data/minecraft/scoreboard.dat"),
-            )
-            .unwrap();
+            let saved = sunrise_client::save::read_dat(&saved_board).unwrap();
             let loaded = sb::Scoreboard::unpack(saved.get("data").unwrap());
             assert_eq!(loaded.score("guest1", "kills").unwrap().value, 5);
             assert_eq!(
                 loaded.display.get("sidebar").map(String::as_str),
                 Some("kills")
             );
-            let kills_again = kills;
+
+            // Reopened, the saved objective is there for a mod reading at startup, before any
+            // write or tick; a handle from before the open is stale.
+            game.native_lifecycle_open_started();
+            game.score = Default::default();
+            game.native_lifecycle_world_ready();
+            let kills_again = game.objective("kills").unwrap();
+            assert_ne!(kills_again, kills);
+            assert_eq!(kills.name(game), None);
+            assert_eq!(
+                kills_again.score(game, ScoreHolder::Name("guest1".into())),
+                Some(5)
+            );
+            assert_eq!(
+                game.display_slot_objective(DisplaySlot::Sidebar),
+                Some(kills_again)
+            );
 
             // Removed, and added again under its name: the old handle stays stale.
             assert!(kills_again.remove(game));
@@ -780,6 +835,7 @@ mod tests {
             game.ui.registries.permission = 4;
             assert!(game.run_command("scoreboard objectives remove kills"));
             assert_eq!(renamed.name(game), None);
+            let _ = std::fs::remove_file(&saved_board);
         });
     }
 }

@@ -23,8 +23,10 @@ pub trait ScoreboardServerHost {
     /// scores' display names, shown nowhere. The name is any string, as the board takes it;
     /// the `/scoreboard` command only reads a single word. Refused with
     /// [`ObjectiveError::NameTaken`] or [`ObjectiveError::UnknownCriteria`].
+    ///
+    /// `display_name` is bounded as every `Text` is: one deeper than 512 component nodes is
+    /// refused with [`ObjectiveError::Text`] before any change.
     #[access(WorldOnly)]
-    /// Refuses text deeper than 512 component nodes before applying any changes.
     fn add_objective(
         &mut self,
         name: &str,
@@ -66,7 +68,7 @@ pub trait ScoreboardBackend {
     fn objective_render_type(&self, objective: ObjectiveRef) -> Option<ObjectiveRenderType>;
     /// Side: server.
     /// `Objective.numberFormat`: None inside the Ok when the objective has none, so the slot's
-    /// default shows.
+    /// default shows. A fixed text the API cannot hold is [`ObjectiveError::Text`].
     #[access(WorldOnly)]
     fn objective_number_format(
         &self,
@@ -104,8 +106,10 @@ pub trait ScoreboardBackend {
 pub trait ScoreboardBackendMut {
     /// Side: server.
     /// `Objective.setDisplayName`: viewers are sent the new name.
+    ///
+    /// `name` is bounded as every `Text` is: one deeper than 512 component nodes is refused with
+    /// [`ObjectiveError::Text`] before any change.
     #[access(WorldOnly)]
-    /// Refuses text deeper than 512 component nodes before applying any changes.
     fn objective_set_display_name(
         &mut self,
         objective: ObjectiveRef,
@@ -133,8 +137,9 @@ pub trait ScoreboardBackendMut {
     fn objective_set_display_auto_update(&mut self, objective: ObjectiveRef, auto: bool) -> bool;
     /// Side: server.
     /// `ScoreAccess.set`, creating the score at 0 first (locked). Clients are told only when
-    /// something changed. Refused with [`ObjectiveError::ReadOnlyCriteria`] for a read-only criteria,
-    /// and with [`ObjectiveError::Stale`] for a stale handle or a holder that does not resolve.
+    /// something changed. Refused with [`ObjectiveError::Stale`] for a stale handle,
+    /// [`ObjectiveError::ReadOnlyCriteria`] for a read-only criteria, and
+    /// [`ObjectiveError::UnknownHolder`] for a holder that does not resolve.
     #[access(WorldOnly)]
     fn objective_set_score(
         &mut self,
@@ -175,7 +180,9 @@ pub trait ScoreboardBackendMut {
 pub trait ScoreboardClientHost {
     /// Side: client.
     /// What this client has been sent of the scoreboard: the objectives shown in a display
-    /// slot, with their scores. None outside a logged-in client world.
+    /// slot, with their scores. None outside a logged-in client world. A text the API cannot hold
+    /// (nested deeper than 512 component nodes) refuses the whole snapshot with
+    /// [`TextFormError::TooDeep`]; nothing is flattened or skipped.
     #[access(ClientSetup)]
-    fn client_scoreboard(&self) -> Option<ClientScoreboard>;
+    fn client_scoreboard(&self) -> Result<Option<ClientScoreboard>, TextFormError>;
 }
