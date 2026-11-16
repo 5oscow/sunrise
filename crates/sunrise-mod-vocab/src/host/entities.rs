@@ -806,6 +806,8 @@ pub trait EntitiesBackendMut {
     /// Players and mobs can ride a mob, boat, minecart or generic seat entity
     /// (an armor stand, display, marker or interaction). A player vehicle is
     /// refused, forced or not: only `entity_ride_player` seats a mob on one.
+    /// A successful mob mount drops its lead as an item without a sound and emits
+    /// `entity_unleash`. A refused mount leaves the leash alone.
     /// Returns false for
     /// unsupported entity pairs, stale or held-out handles, a full stored
     /// vehicle, a cycle, or a canceled mount or dismount. Mob vehicle capacity
