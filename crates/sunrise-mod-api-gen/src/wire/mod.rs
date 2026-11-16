@@ -298,6 +298,19 @@ pub(super) struct Method {
     pub(super) receiver: Option<bool>,
     pub(super) params: Vec<(String, Ty)>,
     pub(super) ret: Ty,
+    /// The types as written, for the shape of the call (`names`).
+    pub(super) syntax: Option<Syntax>,
+}
+
+/// A method's types as the source writes them.
+#[derive(Debug)]
+pub(super) struct Syntax {
+    pub(super) module: usize,
+    /// Token text of each parameter's type, receiver left out.
+    pub(super) params: Vec<String>,
+    pub(super) ret: Option<String>,
+    pub(super) trait_params: Vec<String>,
+    pub(super) owner_args: Vec<String>,
 }
 
 /// A method that can't cross, and why.
@@ -445,6 +458,31 @@ pub(super) fn surface_reading<'a>(
             match method(&mut types, *module, owner, function, &subst) {
                 Ok(mut method) => {
                     method.via = via.clone();
+                    method.syntax = Some(Syntax {
+                        module: *module,
+                        params: function
+                            .sig
+                            .inputs
+                            .iter()
+                            .filter_map(|input| match input {
+                                FnArg::Typed(arg) => Some(quote::ToTokens::to_token_stream(&arg.ty).to_string()),
+                                FnArg::Receiver(_) => None,
+                            })
+                            .collect(),
+                        ret: match &function.sig.output {
+                            ReturnType::Default => None,
+                            ReturnType::Type(_, ty) => Some(quote::ToTokens::to_token_stream(ty).to_string()),
+                        },
+                        trait_params: item
+                            .generics
+                            .type_params()
+                            .map(|p| p.ident.to_string())
+                            .collect(),
+                        owner_args: args
+                            .iter()
+                            .map(|ty| quote::ToTokens::to_token_stream(ty).to_string())
+                            .collect(),
+                    });
                     methods.push(method);
                 }
                 Err(why) => unbound.push(Unbound { owner, name, why }),
@@ -519,6 +557,78 @@ pub(super) fn fallible_frame_accessor(method: &Method) -> Option<(&str, bool, &T
         .iter()
         .any(|owner| owner.rsplit("::").next() == Some(name.as_str()))
         .then_some((name.as_str(), *mutable, &**error))
+}
+
+/// The name of every method that crosses, by (owner, method): what the guest imports or
+/// exports it as, and what the game's table lists it as.
+pub(super) struct Names {
+    by_method: std::collections::HashMap<(String, String), mod_surface::call::Name>,
+}
+
+impl Names {
+    pub(super) fn get(&self, owner: &str, method: &str) -> &mod_surface::call::Name {
+        self.by_method
+            .get(&(owner.to_owned(), method.to_owned()))
+            .unwrap_or_else(|| panic!("no name for {owner}::{method}"))
+    }
+}
+
+/// The hook's side as its name, for the hash.
+fn side_word(side: &crate::catalog::Side) -> &'static str {
+    match side {
+        crate::catalog::Side::Server => "server",
+        crate::catalog::Side::Client => "client",
+        crate::catalog::Side::Both => "both",
+    }
+}
+
+/// Names every method of the surface that crosses (see `surface::calls`).
+pub(super) fn call_names(
+    surface: &mut Surface<'_>,
+    hooks: &[crate::catalog::Hook],
+) -> Result<Names, String> {
+    use mod_surface::call::Kind;
+    let mut calls = Vec::new();
+    let mut keys = Vec::new();
+    for m in &surface.methods {
+        let syntax = m
+            .syntax
+            .as_ref()
+            .ok_or_else(|| format!("{}::{} has no source types", m.owner, m.name))?;
+        let hook = (m.owner == "Hooks")
+            .then(|| hooks.iter().find(|h| h.name == m.name))
+            .flatten();
+        let kind = if imports().contains(&m.owner) {
+            Kind::Call
+        } else if m.owner == "Hooks" {
+            Kind::Hook
+        } else {
+            Kind::Part
+        };
+        let parse = |text: &String| syn::parse_str::<syn::Type>(text).map_err(|e| e.to_string());
+        calls.push(crate::surface::calls::Call {
+            kind,
+            owner: m.owner.to_owned(),
+            method: m.name.clone(),
+            receiver: m.receiver,
+            module: syntax.module,
+            params: syntax.params.iter().map(parse).collect::<Result<_, _>>()?,
+            ret: syntax.ret.as_ref().map(parse).transpose()?,
+            trait_params: syntax.trait_params.clone(),
+            owner_args: syntax
+                .owner_args
+                .iter()
+                .map(parse)
+                .collect::<Result<_, _>>()?,
+            extra: hook.map_or(String::new(), |h| side_word(&h.side).to_owned()),
+            version: hook.and_then(|h| u32::try_from(h.version).ok()),
+        });
+        keys.push((m.owner.to_owned(), m.name.clone()));
+    }
+    let names = crate::surface::calls::names(&mut surface.types.index, &calls)?;
+    Ok(Names {
+        by_method: keys.into_iter().zip(names).collect(),
+    })
 }
 
 /// The coverage check: every method of the bound traits crosses to wasm, or its doc says why
@@ -625,6 +735,7 @@ fn method(
         receiver,
         params,
         ret,
+        syntax: None,
     })
 }
 
@@ -895,6 +1006,43 @@ fn layout(surface: &Surface<'_>) -> u64 {
 
 #[cfg(test)]
 mod tests {
+    /// Every method that crosses gets a name, and no two share one: the table the guest imports
+    /// from and the game serves is the real API's, computed from its source.
+    #[test]
+    #[ignore = "daily"]
+    fn every_crossing_method_has_one_distinct_call_name() {
+        std::thread::Builder::new()
+            .stack_size(64 << 20)
+            .spawn(|| {
+                let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+                let generated = crate::sources(&root, crate::FillMode::Require).unwrap();
+                let included = [
+                    ("mod_api_generated.rs", generated.hooks.as_str()),
+                    ("mod_api_generated_host.rs", generated.host.as_str()),
+                    ("mod_api_host_areas.rs", generated.areas.as_str()),
+                ];
+                let providers = crate::capability_providers::generate(&root, &included)
+                    .unwrap()
+                    .0;
+                let mut with_providers = included.to_vec();
+                with_providers.push(("capability_providers_generated.rs", providers.as_str()));
+                let mut surface = super::surface(&root, &with_providers).unwrap();
+                let hooks = crate::Catalog::load(&root).unwrap().hooks;
+                let names = super::call_names(&mut surface, &hooks).unwrap();
+                assert_eq!(names.by_method.len(), surface.methods.len());
+                let texts: std::collections::BTreeSet<String> =
+                    names.by_method.values().map(|n| n.text()).collect();
+                assert_eq!(texts.len(), surface.methods.len());
+                for text in &texts {
+                    assert!(mod_surface::call::Name::parse(text).is_ok(), "{text}");
+                }
+                eprintln!("{} names, longest {}", texts.len(), texts.iter().map(String::len).max().unwrap());
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
     /// The generated impls depend on the hand-written `Wire` impls the generator skips, so an
     /// edit to that file must rerun the build script.
     #[test]
