@@ -798,6 +798,7 @@ impl Game<'_> {
                         pitch: t.rotation[1],
                         living: None,
                         tnt_fuse: Some(fuse),
+                        orb_value: None,
                     }
                     .into();
                 let light = self.world.light(

@@ -6058,6 +6058,7 @@ impl Game<'_> {
                         yaw: o.rotation[0],
                         pitch: o.rotation[1],
                         living: None,
+                        tnt_fuse: None,
                         orb_value: Some(o.value),
                     }
                     .into();
