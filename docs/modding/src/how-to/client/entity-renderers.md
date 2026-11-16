@@ -69,8 +69,9 @@ under the same names. Angles are in degrees, interpolated to the frame.
 
 An item frame or glow item frame's state has `item_frame: Some(ItemFrameRenderState)`. `yaw` and
 `pitch` follow `ItemFrame.setDirection`: `get2DDataValue * 90` in yaw on a wall (0 is south, 90
-west), or `-90 * getAxisDirection().getStep()` in pitch on the floor and ceiling. Frames do not
-move or age, so `partial` and `age` are 0. The pose stack starts at the hanging entity's position
+west), or `-90 * getAxisDirection().getStep()` in pitch on the floor and ceiling; they are the
+frame's current facing, not interpolated (it has no previous rotation). `age` is the unsaved
+`Entity.tickCount` plus the partial tick. The pose stack starts at the hanging entity's position
 (the centre of its box), not turned, and not at the block centre vanilla's frame model is posed
 from.
 
@@ -130,7 +131,9 @@ Registered renderers draw these routes:
   renderer draws instead of the model and its vanilla layers;
 - item frames and glow item frames (`minecraft:item_frame`, `minecraft:glow_item_frame`): the
   renderer draws instead of the frame model and the item or map on its face, and reads
-  `item_frame`. Without a renderer, that geometry is unchanged.
+  `item_frame`. `age` is the unsaved `Entity.tickCount` plus the partial tick. Yaw and pitch
+  follow `ItemFrame.setDirection` and are not interpolated (it has no previous rotation).
+  Without a renderer, that geometry is unchanged.
 
 Registrations for other known entity families, including boats, displays, vanilla projectiles, the
 player (whose model goes by its skin), the armour stand and the ender dragon (which draw through

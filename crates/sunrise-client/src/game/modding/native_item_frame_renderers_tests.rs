@@ -14,6 +14,7 @@ use std::sync::{
     atomic::{AtomicU32, Ordering},
 };
 use sunrise_client::entities::ItemFrame;
+use sunrise_client::items::ItemStack;
 use sunrise_client::mesher::Vertex;
 
 /// One stone quad a block wide, `height` blocks above the entity.
@@ -79,6 +80,8 @@ const CAMERA: glam::DVec3 = glam::DVec3::new(0.5, 64.5, 4.5);
 /// The hanging entity's position: the centre of a frame at `[0, 64, 0]` facing south.
 const CENTRE: [f64; 3] = [0.5, 64.5, 0.03125];
 const FACING: u8 = 3;
+/// The frame's partial tick, passed through to `EntityRenderState`.
+const ALPHA: f64 = 0.5;
 
 /// How high above the entity a vertex is, in blocks.
 fn above(v: &Vertex) -> f32 {
@@ -106,6 +109,7 @@ fn hanging(id: u32, glow: bool) -> ItemFrame {
         fixed: false,
         invisible: false,
         check_interval: 0,
+        ticks: 0,
         custom_name: None,
         random: sunrise_client::random_source::entity(),
     }
@@ -116,7 +120,84 @@ fn frame_frame(game: &mut Game<'_>, id: u32, glow: bool) -> Vec<Vertex> {
     game.item_frames.clear();
     game.item_frames.push(hanging(id, glow));
     let mut out = Vec::new();
-    game.frame_geometry(CAMERA, &mut out);
+    game.frame_geometry(CAMERA, ALPHA, &mut out);
+    out
+}
+
+/// An independent baseline of the vanilla item-frame model for `f` at `camera`, not going through
+/// `frame_geometry`. Used so a deterministic change to the model cannot pass by matching itself.
+/// The framed item, if any, is not included: the registered-renderer test checks that a
+/// successful replacement drops the contents, and the fallback test checks that they stay.
+fn expected_frame(game: &Game<'_>, f: &ItemFrame, camera: glam::DVec3) -> Vec<Vertex> {
+    let sprites = &game.gui.atlas.sprites;
+    let s = f.step();
+    let (x_rot, y_rot) = if s[1] == 0 {
+        let to_y = match f.facing {
+            3 => 0.0,
+            4 => 90.0,
+            2 => 180.0,
+            _ => 270.0,
+        };
+        (0.0f64, 180.0f64 - to_y)
+    } else {
+        (-90.0 * f64::from(s[1]), 180.0)
+    };
+    let pose = glam::DMat4::from_translation(
+        glam::DVec3::new(
+            f64::from(f.pos[0]) + 0.5,
+            f64::from(f.pos[1]) + 0.5,
+            f64::from(f.pos[2]) + 0.5,
+        ) - camera,
+    ) * glam::DMat4::from_rotation_x(x_rot.to_radians())
+        * glam::DMat4::from_rotation_y(y_rot.to_radians());
+    let light = game.world.light(f.pos[0], f.pos[1], f.pos[2]);
+    let frame_light = if f.glow {
+        (light & 0xF0) | (light & 15).max(5)
+    } else {
+        light
+    };
+    let frame_packed =
+        (u32::from(frame_light >> 4) * 16) | ((u32::from(frame_light & 15) * 16) << 8);
+    // These fixtures never hold a map, so the ordinary (non-map) frame models apply.
+    let model = if f.glow {
+        &game.glow_frame_model
+    } else {
+        &game.frame_model
+    };
+    let mut out = Vec::new();
+    if !f.invisible {
+        for (corners, uv, sprite) in model {
+            let Some(r) = sprites.get(sprite) else {
+                continue;
+            };
+            let at = corners.map(|c| {
+                pose.transform_point3(glam::DVec3::new(
+                    f64::from(c[0]) - 0.5,
+                    f64::from(c[1]) - 0.5,
+                    f64::from(c[2]) - 0.5,
+                ))
+            });
+            let n = (at[1] - at[0]).cross(at[2] - at[0]).normalize_or_zero();
+            let normal = [0, 1, 2].map(|k| (n[k].clamp(-1.0, 1.0) * 127.0) as i8);
+            let mapped = uv.map(|[u, v]| [r.u0 + u * (r.u1 - r.u0), r.v0 + v * (r.v1 - r.v0)]);
+            for (point, uv) in at.into_iter().zip(mapped) {
+                out.push(Vertex {
+                    normal: [normal[0], normal[1], normal[2], -127],
+                    pos: point.as_vec3().to_array(),
+                    uv,
+                    layer: 0,
+                    color: 0xFFFF_FFFF,
+                    light: frame_packed,
+                    glint_uv: [0.0, 0.0],
+                });
+            }
+        }
+    }
+    if f.glow {
+        for v in &mut out {
+            v.layer |= u32::from(sunrise_client::mesher::INCANDESCENT) << 16;
+        }
+    }
     out
 }
 
@@ -236,10 +317,10 @@ fn in_scene(test: &str, check: impl FnOnce(&mut Game<'_>, &Arc<Mutex<Heard>>, &F
     });
 }
 
-fn assert_frame_state(state: EntityRenderState, id: u32, glow: bool) {
+fn assert_frame_state(state: EntityRenderState, id: u32, glow: bool, age: f32, has_item: bool) {
     assert_eq!(state.id, id);
-    assert_eq!(state.partial, 0.0);
-    assert_eq!(state.age, 0.0);
+    assert_eq!(state.partial, 0.5);
+    assert_eq!(state.age, age);
     assert_eq!(state.yaw, 0.0);
     assert_eq!(state.pitch, 0.0);
     assert_eq!(state.living, None);
@@ -248,8 +329,27 @@ fn assert_frame_state(state: EntityRenderState, id: u32, glow: bool) {
     assert_eq!(frame.glow, glow);
     assert!(!frame.invisible);
     assert_eq!(frame.rotation, 0);
-    assert!(!frame.has_item);
+    assert_eq!(frame.has_item, has_item);
     assert!(!frame.has_map);
+}
+
+/// The hanging pose of a south-facing frame at `[0, 64, 0]`, relative to CAMERA.
+/// Centre [0.5, 64.5, 0.03125] minus CAMERA [0.5, 64.5, 4.5] is [0.0, 0.0, -4.46875].
+fn assert_raised_at_hanging_pose(drawn: &[Vertex]) {
+    for v in drawn {
+        assert!(
+            (0.0..=1.0).contains(&v.pos[0]),
+            "quad x at the hanging pose: {v:?}"
+        );
+        assert!(
+            (100.0..=101.0).contains(&v.pos[1]),
+            "quad y 100 blocks above the hanging pose: {v:?}"
+        );
+        assert!(
+            (v.pos[2] + 4.46875).abs() < 1e-5,
+            "quad z at the hanging pose: {v:?}"
+        );
+    }
 }
 
 #[test]
@@ -258,28 +358,42 @@ fn a_registered_item_frame_draws_its_renderer_in_place_of_the_model() {
     in_scene(
         "a_registered_item_frame_draws_its_renderer_in_place_of_the_model",
         |game, heard, _| {
-            let drawn = frame_frame(game, 91, false);
-            assert_eq!(drawn.len(), 4, "one quad and no frame: {drawn:?}");
-            assert!(drawn.iter().all(|v| (100.0..=101.0).contains(&above(v))));
+            // A lived-ticks counter, a non-zero partial, and a held item: age is ticks +
+            // partial, and a successful replacement drops the frame and its contents.
+            let mut frame = hanging(91, false);
+            frame.ticks = 6;
+            frame.item = Some(ItemStack::new("minecraft:diamond", 1));
+            game.item_frames.clear();
+            game.item_frames.push(frame);
+            let mut drawn = Vec::new();
+            game.frame_geometry(CAMERA, ALPHA, &mut drawn);
+            assert_eq!(drawn.len(), 4, "one quad, no frame and no item: {drawn:?}");
+            assert_raised_at_hanging_pose(&drawn);
             let state = heard.lock().unwrap().state.expect("the renderer was asked");
-            assert_frame_state(state, 91, false);
+            assert_frame_state(state, 91, false, 6.5, true);
 
             heard.lock().unwrap().state = None;
-            let drawn = frame_frame(game, 94, true);
+            let mut glow = hanging(94, true);
+            glow.ticks = 3;
+            game.item_frames.clear();
+            game.item_frames.push(glow);
+            let mut drawn = Vec::new();
+            game.frame_geometry(CAMERA, ALPHA, &mut drawn);
             assert_eq!(drawn.len(), 4, "glow: one quad and no frame: {drawn:?}");
-            assert!(drawn.iter().all(|v| (100.0..=101.0).contains(&above(v))));
+            assert_raised_at_hanging_pose(&drawn);
             let state = heard
                 .lock()
                 .unwrap()
                 .state
                 .expect("the glow renderer was asked");
-            assert_frame_state(state, 94, true);
+            assert_frame_state(state, 94, true, 3.5, false);
         },
     );
 }
 
-/// With no renderer registered, an item frame's geometry is byte-identical to the family's own
-/// route (the model near the entity, no raised quad), and two frames of the same entity match.
+/// With no renderer registered, an item frame's model matches an independent baseline for a
+/// fixed fixture (ordinary and glow), two frames of the same entity match byte for byte, and a
+/// frame that holds an item keeps those contents in the fallback.
 #[test]
 #[ignore = "daily"]
 fn an_unregistered_item_frame_is_byte_identical_to_the_vanilla_route() {
@@ -305,6 +419,11 @@ fn an_unregistered_item_frame_is_byte_identical_to_the_vanilla_route() {
             first.iter().all(|v| above(v) < 2.0),
             "near the entity: {first:?}"
         );
+        assert_eq!(
+            verts(&first),
+            verts(&expected_frame(game, &hanging(92, false), CAMERA)),
+            "matches the independent item-frame baseline"
+        );
         let second = frame_frame(game, 92, false);
         assert_eq!(
             verts(&first),
@@ -316,6 +435,27 @@ fn an_unregistered_item_frame_is_byte_identical_to_the_vanilla_route() {
         assert!(
             glow.iter().all(|v| above(v) < 2.0),
             "glow near the entity: {glow:?}"
+        );
+        assert_eq!(
+            verts(&glow),
+            verts(&expected_frame(game, &hanging(95, true), CAMERA)),
+            "glow matches the independent item-frame baseline"
+        );
+        let mut loaded = hanging(96, false);
+        loaded.item = Some(ItemStack::new("minecraft:diamond", 1));
+        game.item_frames.clear();
+        game.item_frames.push(loaded);
+        let mut with_item = Vec::new();
+        game.frame_geometry(CAMERA, ALPHA, &mut with_item);
+        assert!(
+            with_item.len() > first.len(),
+            "fallback keeps the framed item: empty {} verts, with item {} verts: {with_item:?}",
+            first.len(),
+            with_item.len()
+        );
+        assert!(
+            with_item.iter().all(|v| above(v) < 2.0),
+            "item stays near the entity: {with_item:?}"
         );
     });
 }

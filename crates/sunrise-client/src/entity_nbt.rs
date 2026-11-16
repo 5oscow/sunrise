@@ -3753,6 +3753,7 @@ pub fn item_frame_from_nbt(tag: &Tag, id: u32) -> Option<ItemFrame> {
         fixed: flag(tag, "Fixed"),
         invisible: flag(tag, "Invisible"),
         check_interval: 0,
+        ticks: 0,
         custom_name: tag.get("CustomName").cloned(),
         random: crate::random_source::entity(),
     })

@@ -221,7 +221,15 @@ impl Game<'_> {
         let feet = mob.previous.lerp(mob.position, f64::from(partial));
         let feet = DVec3::new(feet.x, feet.y, feet.z);
         let block = [feet.x, feet.y, feet.z].map(|c| c.floor() as i32);
-        self.mod_entity_renderer_geometry(&resolved, &entity, feet - camera, block, light, out)
+        self.mod_entity_renderer_geometry(
+            &resolved,
+            &entity,
+            &mob.kind.id,
+            feet - camera,
+            block,
+            light,
+            out,
+        )
     }
     /// The layers mods added to `mob`'s type or player model (`register_entity_layers`), drawn
     /// after its vanilla model and layers: `layers`, looked up once for the mob by `mod_layers`,

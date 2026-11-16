@@ -241,6 +241,7 @@ impl Game<'_> {
             fixed: false,
             invisible: false,
             check_interval: 0,
+            ticks: 0,
             // `applyComponentsFromItemStack` sets `CUSTOM_NAME`.
             custom_name: stack.data().and_then(|d| d.custom_name.clone()),
             random: sunrise_client::random_source::entity(),
@@ -681,6 +682,8 @@ impl Game<'_> {
                 i += 1;
                 continue;
             }
+            // `Entity.tickCount` is raised before the rest of the tick, and is not saved.
+            self.item_frames[i].ticks = self.item_frames[i].ticks.saturating_add(1);
             self.item_frames[i].check_interval += 1;
             if self.item_frames[i].check_interval >= 100 {
                 self.item_frames[i].check_interval = 0;
@@ -715,7 +718,12 @@ impl Game<'_> {
         }
     }
     /// ItemFrameRenderer: the frame model, then the item half size on its face.
-    pub(super) fn frame_geometry(&mut self, camera: glam::DVec3, out: &mut Vec<Vertex>) {
+    pub(super) fn frame_geometry(
+        &mut self,
+        camera: glam::DVec3,
+        alpha: f64,
+        out: &mut Vec<Vertex>,
+    ) {
         let sprites = &self.gui.atlas.sprites;
         // Each with its frame's type: a pack tells a glow frame and what it holds apart by its
         // `entityId` (`glow_item_frame` in entity.properties), the item drawn within its frame.
@@ -724,6 +732,7 @@ impl Game<'_> {
         // ItemFrame.shouldRenderAtSqrDistance: 1024 blocks at a view scale
         // of 1.
         let range = 16.0 * 64.0 * self.view_scale();
+        let partial = alpha as f32;
         for f in &self.item_frames {
             // LevelExtractor: the camera entity is not drawn from its own eyes.
             if self.hides_as_camera(f.id) {
@@ -773,8 +782,8 @@ impl Game<'_> {
                 let entity: mod_api::EntityRenderState =
                     mod_api::__private::built::EntityRenderState {
                         id: f.id,
-                        partial: 0.0,
-                        age: 0.0,
+                        partial,
+                        age: f.ticks as f32 + partial,
                         yaw,
                         pitch,
                         living: None,
@@ -802,6 +811,7 @@ impl Game<'_> {
                 if self.mod_entity_renderer_geometry(
                     &resolved,
                     &entity,
+                    f.kind(),
                     at - camera,
                     f.pos,
                     packed,
@@ -1042,6 +1052,7 @@ mod map_limit_tests {
             fixed: false,
             invisible: false,
             check_interval: 0,
+            ticks: 0,
             custom_name: None,
             random: sunrise_core::random::LegacyRandom::new(0),
         }
@@ -1119,6 +1130,7 @@ mod game_event_tests {
             fixed: false,
             invisible: false,
             check_interval: 0,
+            ticks: 0,
             custom_name: None,
             random: sunrise_core::random::LegacyRandom::new(0),
         }
