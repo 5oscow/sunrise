@@ -104,7 +104,9 @@ impl Game<'_> {
         attack: &Attack,
     ) -> CreditPlan {
         let observed = mod_api::__private::listened(mod_api::HookId::LivingKnockback);
-        let mob = self.mobs.iter().find(|mob| mob.id as i32 == victim);
+        let mob = observed
+            .then(|| self.mobs.iter().find(|mob| mob.id as i32 == victim))
+            .flatten();
         let player = mob
             .and_then(|mob| self.last_hurt_by_player.get(&mob.id))
             .copied();
