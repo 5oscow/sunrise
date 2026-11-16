@@ -128,14 +128,8 @@ jobs:
         timeout-minutes: 11
         env:
           FETCH_STEP: Fetch this commit's history for selection
-        run: |
-          for attempt in 1 2; do
-            if [ "$(git rev-parse --is-shallow-repository)" = false ]; then exit 0; fi
-            if timeout --kill-after=10s 300s git fetch -q --no-tags --unshallow origin "$(git rev-parse HEAD)"; then exit 0; fi
-            echo "$FETCH_STEP: GitHub fetch attempt $attempt failed or timed out."
-          done
-          echo "::error::$FETCH_STEP: history fetch from GitHub failed or timed out twice."
-          exit 1
+        # On our runners the slot's history mirror makes this a short fetch (tools/ci/history_fetch.sh).
+        run: bash tools/ci/history_fetch.sh
       - name: Select checks once for this pull request
         if: github.event_name == 'pull_request'
         id: selection
@@ -780,14 +774,8 @@ jobs:
         timeout-minutes: 11
         env:
           FETCH_STEP: Fetch this commit's history
-        run: |
-          for attempt in 1 2; do
-            if [ "$(git rev-parse --is-shallow-repository)" = false ]; then exit 0; fi
-            if timeout --kill-after=10s 300s git fetch -q --no-tags --unshallow origin "$(git rev-parse HEAD)"; then exit 0; fi
-            echo "$FETCH_STEP: GitHub fetch attempt $attempt failed or timed out."
-          done
-          echo "::error::$FETCH_STEP: history fetch from GitHub failed or timed out twice."
-          exit 1
+        # On our runners the slot's history mirror makes this a short fetch (tools/ci/history_fetch.sh).
+        run: bash tools/ci/history_fetch.sh
       - uses: actions/setup-python@v5
         if: needs.changes.outputs.tooling_required != 'false' && (env.RUNNER_KIND == 'github' || env.RUNNER_KIND == 'boat')
         with:
