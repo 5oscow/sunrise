@@ -6,8 +6,8 @@ pub trait Hooks {
     /// (`RecipeBookMenu.handlePlacement`, the method a Java menu overrides).
     /// The part of the open menu's type moves the recipe's ingredients itself
     /// and sets `ghost` when items are missing, as vanilla's answer
-    /// `PLACE_GHOST_RECIPE` does: the server then answers the click with its
-    /// missing-ingredients response. `use_max_items` is the Shift click and
+    /// `PLACE_GHOST_RECIPE` does: the client is then told to draw the recipe's
+    /// ghosts (`recipe_book_ghost`). `use_max_items` is the Shift click and
     /// `creative` the player's mode. `player` is swapped in, so
     /// `host.players().acting_player()` names them.
     ///

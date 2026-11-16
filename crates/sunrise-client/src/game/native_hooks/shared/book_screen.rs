@@ -31,6 +31,10 @@ impl Game<'_> {
     pub(in crate::game) fn native_screen_toggle(&self) -> Option<[f32; 2]> {
         self.shown_native_screen()?.screen.recipe_book_toggle
     }
+    pub(in crate::game) fn native_screen_big_result(&self) -> bool {
+        self.shown_native_screen()
+            .is_some_and(|screen| screen.screen.recipe_book_big_result)
+    }
     pub(in crate::game) fn native_screen_block(&self) -> Option<&str> {
         Some(&self.shown_native_screen()?.block)
     }

@@ -867,6 +867,10 @@ pub struct Screen {
     /// Without an anchor the engine uses an external gutter; if none fits,
     /// the book is refused with a diagnostic while the menu remains usable.
     pub recipe_book_toggle: Option<[f32; 2]>,
+    /// The recipe book's result ghost gets a 24 × 24 frame, vanilla's
+    /// `AbstractRecipeBookScreen.isBiggerResultSlot` for a crafting-table-sized result. Off by
+    /// default.
+    pub recipe_book_big_result: bool,
 }
 
 /// An item the panel shows (`panel_items`): its id
