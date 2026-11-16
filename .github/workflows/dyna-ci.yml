@@ -298,48 +298,8 @@ jobs:
             echo "RUSTC_WRAPPER=$GITHUB_WORKSPACE/tools/ci/compiler-cache.sh" >> "$GITHUB_ENV"
           fi
           bash tools/ci/rustup_install.sh --profile minimal --component rustfmt --component clippy --target wasm32-unknown-unknown
-      - name: Lint cache toolchain
-        if: needs.changes.outputs.rust_required != 'false' && (env.RUNNER_KIND == 'github' || env.RUNNER_KIND == 'boat')
-        id: toolchain
-        run: |
-          echo "hash=$(rustc -vV | sha256sum | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
-          # One snapshot every 6 hours: the repository's 10 GB cache budget can't hold one per main head.
-          echo "slot=$(date -u +%Y%m%d)-$(( 10#$(date -u +%H) / 6 ))" >> "$GITHUB_OUTPUT"
-      # rust-cache's default removes workspace artifacts. Those are the expensive part here,
-      # in two feature graphs; keep both. ci-cache.yml publishes a fresh snapshot from main every 6 hours.
-      - uses: actions/cache/restore@v4
-        if: needs.changes.outputs.rust_required != 'false' && (env.RUNNER_KIND == 'github' || env.RUNNER_KIND == 'boat')
-        id: lint-cache
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: lint-workspace-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.hash }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml') }}-${{ steps.toolchain.outputs.slot }}
-          restore-keys: |
-            lint-workspace-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.hash }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml') }}-
-            lint-workspace-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.hash }}-
-      # A restore-key hit can predate a profile or dependency change: a successful download
-      # does not mean Cargo has artifacts for the requested graph (for example, #1190).
-      - name: Report lint cache compatibility
-        if: needs.changes.outputs.rust_required != 'false' && (env.RUNNER_KIND == 'github' || env.RUNNER_KIND == 'boat')
-        env:
-          REQUESTED_KEY: ${{ steps.lint-cache.outputs.cache-primary-key }}
-          MATCHED_KEY: ${{ steps.lint-cache.outputs.cache-matched-key }}
-        run: |
-          if [ -z "$MATCHED_KEY" ]; then
-            STATUS="No lint cache found; this run builds from cold."
-          elif [[ "$MATCHED_KEY" == "${REQUESTED_KEY%-*-*}-"* ]]; then
-            STATUS="Matching manifests and lockfile; unchanged Cargo units can be reused."
-          else
-            STATUS="Fallback cache from different manifests or lockfile; dependency or profile changes can require a full rebuild until main saves a matching snapshot."
-            echo "::notice::$STATUS"
-          fi
-          {
-            echo "### Lint workspace cache"
-            echo "$STATUS"
-            printf '\nRequested: `%s`\n\nRestored: `%s`\n\n' "$REQUESTED_KEY" "${MATCHED_KEY:-none}"
-          } >> "$GITHUB_STEP_SUMMARY"
+      # No lint snapshot on GitHub's runners: ci-cache.yml's 2 GB every 6 hours pushed the release caches (the SDK's and
+      # the launcher's) out of the repository's 10 GB, and those come first. A GitHub-hosted lint builds from cold.
       # A Dyna runner builds as many crates at once as its CPU quota allows within its memory, about 3 GiB
       # per large rustc (tools/ci/cargo_jobs.py); boat's 16 GiB VM keeps four. A cargo flag, not
       # CARGO_BUILD_JOBS: sccache hashes CARGO_* variables, which would split the runners' cache from the boxes'.
@@ -458,16 +418,6 @@ jobs:
           echo "memory.peak $(cat /sys/fs/cgroup/memory.peak 2>/dev/null || echo unavailable)"
           grep '^oom_kill ' /sys/fs/cgroup/memory.events 2>/dev/null || echo "oom_kill unavailable"
           awk '/^anon / {print "anon at job end", $2}' /sys/fs/cgroup/memory.stat 2>/dev/null || echo "anon at job end unavailable"
-      # Publish native work even if the independent wasm check fails. Pull requests only read
-      # main's snapshots; they can never replace a cache subsequently consumed by main.
-      - uses: actions/cache/save@v4
-        if: ${{ !cancelled() && (env.RUNNER_KIND == 'github' || env.RUNNER_KIND == 'boat') && github.ref == 'refs/heads/main' && steps.native-lint.outcome == 'success' && steps.server-lint.outcome == 'success' && steps.lint-cache.outputs.cache-hit != 'true' }}
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ steps.lint-cache.outputs.cache-primary-key }}
       - name: Summarize failed gate steps
         if: ${{ failure() && !cancelled() && steps.setup.outcome == 'success' }}
         env:
