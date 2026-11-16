@@ -412,7 +412,12 @@ mod tests {
         let mut next = server.to_api();
         next.boxes[5].max[1] = 3.0;
         next.boxes.pop();
-        next.rotation = [0.0, 0.7071, 0.0, 0.7071];
+        next.rotation = [
+            0.0,
+            std::f32::consts::FRAC_1_SQRT_2,
+            0.0,
+            std::f32::consts::FRAC_1_SQRT_2,
+        ];
         let next = ColliderState::from_api(&next).unwrap();
         for m in collider_sync::changes(7, server.wire(), next.wire()) {
             ColliderState::apply(&mut held, &m);
