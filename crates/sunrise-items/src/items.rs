@@ -2622,7 +2622,7 @@ fn apply_components(stack: &mut ItemStack, patch: &Value) {
 fn loot_of(stack: &ItemStack) -> sunrise_world::loot::LootStack {
     let mut components: Vec<(String, Option<sunrise_core::nbt::Tag>)> = Vec::new();
     if let Some(data) = stack.data() {
-        for (id, value) in &data.other {
+        for (id, value) in data.preserved_components() {
             components.push((id.clone(), Some(value.clone())));
         }
         if let Some(name) = &data.custom_name {
@@ -3589,10 +3589,10 @@ mod tests {
             "item_damage": {"threshold": 1.0e9, "base": 0.0, "factor": 0.0},
             "bypassed_by": "#minecraft:bypasses_armor",
         });
-        sword.data_mut().other.push((
-            "minecraft:blocks_attacks".into(),
-            sunrise_client_core::scoreboard::json_to_tag(&component),
-        ));
+        sword.data_mut().set_other(
+            "minecraft:blocks_attacks",
+            Some(sunrise_client_core::scoreboard::json_to_tag(&component)),
+        );
         let b = BlocksAttacks::of_stack(&sword, None).expect("the stack's own component");
         assert_eq!(b.delay_seconds, 0.0);
         assert_eq!(b.disable_scale, 0.0);
@@ -3603,10 +3603,10 @@ mod tests {
         assert_eq!(b.bypassed_by.as_deref(), Some("#minecraft:bypasses_armor"));
         // An empty compound is the codec's defaults: a shield's 90 degrees.
         let mut bare = plain.clone();
-        bare.data_mut().other.push((
-            "minecraft:blocks_attacks".into(),
-            sunrise_client_core::scoreboard::json_to_tag(&json!({})),
-        ));
+        bare.data_mut().set_other(
+            "minecraft:blocks_attacks",
+            Some(sunrise_client_core::scoreboard::json_to_tag(&json!({}))),
+        );
         let b = BlocksAttacks::of_stack(&bare, None).expect("defaults");
         assert_eq!(b.reductions[0].horizontal_angle, 90.0);
         assert_eq!(b.disable_scale, 1.0);
