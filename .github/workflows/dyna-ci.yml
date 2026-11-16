@@ -549,15 +549,13 @@ jobs:
             export PATH="$CARGO_HOME/bin:$PATH"
           fi
           bash tools/ci/rustup_install.sh --profile minimal --component rustfmt --component clippy
-      # Workspace crates too: GitHub-hosted verify (outside contributors) otherwise rebuilt every workspace crate.
-      # ci-cache.yml publishes this snapshot from main every 6 hours; pull requests only read it.
+      # Registry dependencies, from the snapshot ci-cache.yml publishes from main every 6 hours; pull requests only
+      # read it. The workspace crates are rebuilt: their snapshot was 3 GB of the repository's 10 GB of caches.
       # Profile overrides in Cargo.toml are part of rust-cache's key; unchanged dependencies still restore.
       - uses: Swatinem/rust-cache@v2
         if: needs.changes.outputs.rust_required != 'false' && (env.RUNNER_KIND == 'github' || env.RUNNER_KIND == 'boat')
         with:
-          # A new key: the dependency-only snapshot under the old one blocked saving this one.
-          shared-key: verify-workspace
-          cache-workspace-crates: true
+          shared-key: verify-deps
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Use persistent verify build artifacts
         if: needs.changes.outputs.rust_required != 'false' && needs.changes.outputs.self_hosted == 'true'

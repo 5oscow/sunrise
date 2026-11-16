@@ -70,11 +70,11 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev
           bash tools/ci/rustup_install.sh --profile minimal --component rustfmt --component clippy
+      # Registry dependencies only: the workspace crates' snapshot was 3 GB of the repository's 10 GB, and saving it
+      # pushed the SDK's and the launcher's caches out (a new key, so this smaller snapshot can save).
       - uses: Swatinem/rust-cache@v2
         with:
-          # A new key: the dependency-only snapshot under the old one blocked saving this one.
-          shared-key: verify-workspace
-          cache-workspace-crates: true
+          shared-key: verify-deps
       # The same targets as dyna-ci.yml's verify, built and not run.
       - name: Build verify's test targets
         run: cargo test --workspace --lib --bins --tests --no-run
