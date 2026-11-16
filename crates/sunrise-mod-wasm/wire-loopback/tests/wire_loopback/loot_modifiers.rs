@@ -26,7 +26,6 @@ impl GlobalLootModifier for Modifier {
     }
     fn apply(
         &self,
-        _: &dyn mod_api::Host,
         context: &mut dyn LootModifierContext,
         mut generated: Vec<LootStack>,
     ) -> Result<Vec<LootStack>, LootModifierError> {
@@ -37,9 +36,6 @@ impl GlobalLootModifier for Modifier {
         Ok(generated)
     }
 }
-struct Host;
-impl mod_api::Host for Host {}
-mod_api::impl_host_areas!(Host);
 struct Roll(mod_api::LegacyRandom);
 impl StructureRandom for Roll {
     fn next_int_bound(&mut self, bound: i32) -> i32 {
@@ -129,7 +125,6 @@ fn native_and_guest_prepared_modifiers_lend_the_same_roll_random_and_raw_context
         let raw = expected.next_int_bound(5).unwrap();
         let result = instance
             .apply(
-                &Host,
                 &mut roll,
                 vec![
                     LootStack::new(REGISTERED_ITEM.get().unwrap(), -7),

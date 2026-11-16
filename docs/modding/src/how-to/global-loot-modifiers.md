@@ -49,10 +49,11 @@ Instances are selected by files under `data/<namespace>/loot_modifiers/<path>.js
 
 ## Applying an instance
 
-`GlobalLootModifier::apply` takes a read-only `Host`, a borrowed `LootModifierContext` and the
-preceding list as `Vec<LootStack>`. It returns the replacement list or a typed error. It cannot
-write world state through this host. Keep implementations `Send + Sync` and retain no borrowed
-context beyond the callback.
+`GlobalLootModifier::apply` takes a borrowed `LootModifierContext` and the preceding list as
+`Vec<LootStack>`. It returns the replacement list or a typed error. Like loot functions and
+conditions, it is a data-only callback: it receives no `Host` or world-write access. Its capabilities
+are the facts snapshot, the borrowed roll random and raw sub-rolls. Keep implementations
+`Send + Sync` and retain no borrowed context beyond the callback.
 
 The list keeps signed counts and arbitrary component patches. A modifier may add, remove, replace
 or reorder entries, including empty and over-maximum stacks. No second splitter or count clamp runs

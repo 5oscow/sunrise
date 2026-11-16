@@ -70,7 +70,6 @@ impl GlobalLootModifier for OwnedModifier {
     }
     fn apply(
         &self,
-        host: &dyn Host,
         context: &mut dyn LootModifierContext,
         generated: Vec<LootStack>,
     ) -> Result<Vec<LootStack>, LootModifierError> {
@@ -80,7 +79,7 @@ impl GlobalLootModifier for OwnedModifier {
             &self.poisoned,
             "loot modifier",
             "global_loot_modifier_apply",
-            || self.instance.apply(host, context, generated),
+            || self.instance.apply(context, generated),
         )
         .map_err(|reason| LootModifierError::new("apply", reason))?
     }

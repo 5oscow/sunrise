@@ -57,9 +57,6 @@ impl LoadReader for Reader {
         None
     }
 }
-struct Host;
-impl crate::Host for Host {}
-crate::impl_host_areas!(Host);
 struct Roll(LegacyRandom);
 impl LootModifierContext for Roll {
     fn snapshot(&self) -> LootContext {
@@ -117,7 +114,6 @@ impl GlobalLootModifier for Modifier {
     }
     fn apply(
         &self,
-        _: &dyn crate::Host,
         context: &mut dyn LootModifierContext,
         mut generated: Vec<LootStack>,
     ) -> Result<Vec<LootStack>, LootModifierError> {
@@ -146,7 +142,6 @@ fn preparation_caches_metadata_and_application_keeps_signed_output_and_roll_rand
     assert_eq!(expected.next_int_bound(2).unwrap(), 1);
     let output = prepared
         .apply(
-            &Host,
             &mut roll,
             vec![
                 LootStack::new(ItemKey(0), -7),
@@ -181,7 +176,6 @@ impl GlobalLootModifierSerializer for Panics {
 impl GlobalLootModifier for Panics {
     fn apply(
         &self,
-        _: &dyn crate::Host,
         _: &mut dyn LootModifierContext,
         _: Vec<LootStack>,
     ) -> Result<Vec<LootStack>, LootModifierError> {
@@ -199,19 +193,19 @@ fn a_native_panic_disables_only_that_prepared_instance() {
     let mut roll = Roll(LegacyRandom::new(0));
     assert!(
         first
-            .apply(&Host, &mut roll, vec![])
+            .apply(&mut roll, vec![])
             .unwrap_err()
             .reason
             .contains("panicked")
     );
     assert_eq!(
-        first.apply(&Host, &mut roll, vec![]).unwrap_err().reason,
+        first.apply(&mut roll, vec![]).unwrap_err().reason,
         "loot modifier owner is disabled"
     );
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     assert!(
         second
-            .apply(&Host, &mut roll, vec![])
+            .apply(&mut roll, vec![])
             .unwrap_err()
             .reason
             .contains("panicked")

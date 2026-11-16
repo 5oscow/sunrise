@@ -4,7 +4,7 @@
 //! prepared instances. A top-level roll runs them after its table functions and
 //! stack splitter. Nested tables and raw sub-rolls never invoke this pass.
 use crate::wire::{Reader, Wire, WireError, Writer};
-use crate::{DataLoadContext, Host, Identifier, LootContext, LootStack, StructureRandom};
+use crate::{DataLoadContext, Identifier, LootContext, LootStack, StructureRandom};
 use serde_json::Value;
 use std::sync::Arc;
 
@@ -138,13 +138,15 @@ pub trait GlobalLootModifier: Send + Sync + 'static {
     fn condition(&self) -> Result<Option<Value>, LootModifierError> {
         Ok(None)
     }
-    /// Replace the preceding modifier's list. Signed/empty and over-max stacks
+    /// Replace the preceding modifier's list using roll facts and scoped roll
+    /// capabilities only. This is a data-only callback, like loot functions and
+    /// conditions, not a world hook: it receives no Host or world-write access.
+    /// Signed/empty and over-max stacks
     /// remain intact between modifiers; the boundary does not split, clamp or
     /// filter the result again. An error rejects this candidate and later
     /// modifiers continue with the preceding list. RNG draws are not rolled back.
     fn apply(
         &self,
-        host: &dyn Host,
         context: &mut dyn LootModifierContext,
         generated: Vec<LootStack>,
     ) -> Result<Vec<LootStack>, LootModifierError>;
