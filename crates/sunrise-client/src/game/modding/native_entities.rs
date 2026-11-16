@@ -671,6 +671,25 @@ mod tests {
                     joins.lock().unwrap().last(),
                     Some(&("minecraft:eye_of_ender".to_owned(), false))
                 );
+                // A quarantined missing-mod record shares storage, not level membership.
+                game.next_entity += 1;
+                let record = Tag::compound([(
+                    "Pos",
+                    Tag::List(
+                        [5.0_f64, 64.0, 5.0]
+                            .map(|n| Tag::Double(n.to_bits()))
+                            .to_vec(),
+                    ),
+                )]);
+                let opaque =
+                    Game::other_from_nbt(&record, game.next_entity, "missing:object").unwrap();
+                game.others.push(opaque);
+                game.native_joins_flush(true, 0);
+                assert_eq!(
+                    joins.lock().unwrap().len(),
+                    11,
+                    "opaque saved data must not join"
+                );
             });
         });
     }
