@@ -254,7 +254,7 @@ impl Game<'_> {
                 // handleKeybinds: the number keys select before key.drop.
                 self.select_queued_hotbar();
                 let all = drop_whole_stack(self.modifiers) || self.input_takes_stack_drop();
-                self.drop_held(all);
+                self.drop_held_item(all);
             }
             KeyCode::Digit1
             | KeyCode::Digit2

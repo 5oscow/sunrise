@@ -2566,7 +2566,8 @@ mod tests {
             let item = ItemStack::new("minecraft:apple", 1);
             game.inventory[game.selected] = Some(item.clone());
             let player_random = game.player.as_ref().unwrap().random.clone();
-            let (_, seeds) = sunrise_client::random_source::record_seeds(|| game.drop_held(true));
+            let (_, seeds) =
+                sunrise_client::random_source::record_seeds(|| game.drop_held_item(true));
             let key_velocity = game.dropped.last().unwrap().velocity;
             *game.world.random = sunrise_core::random::LegacyRandom::new(12345);
             crate::game::native_entity_refs::tests::bind_local_player(game, 42, 123);

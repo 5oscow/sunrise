@@ -1,1 +1,3 @@
-pub use content::packets::{DisconnectError, SendPacketError, ServerboundPlayPacket};
+pub use content::packets::{
+    DisconnectError, HoldError, HoldId, SendPacketError, ServerboundPlayPacket,
+};
