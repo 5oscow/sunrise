@@ -237,10 +237,36 @@ fn export_here(root: &Path) -> Result<Export, String> {
     let mut with_providers = included.to_vec();
     with_providers.push(("capability_providers_generated.rs", providers.as_str()));
     // A listed boundary trait an older tree lacks is noted by `Roles::resolve`, not refused.
-    let wire = crate::wire::surface_reading(root, &with_providers, Some(&mut Vec::new()))?;
+    let mut wire = crate::wire::surface_reading(root, &with_providers, Some(&mut Vec::new()))?;
     let boundary = Boundary::from_wire(&wire);
+    let calls = crate::wire::exported_calls(&mut wire, &catalog.hooks)?;
     let mut index = wire.types.index;
-    build(root, &mut index, &catalog.hooks, &boundary)
+    let mut export = build(root, &mut index, &catalog.hooks, &boundary)?;
+    name_calls(&mut export.surface, &calls);
+    Ok(export)
+}
+
+/// Writes each record's `call`: a hook's, and a trait method's when its trait has one name for
+/// it (a generic trait's instances are separate calls and carry none).
+fn name_calls(surface: &mut Surface, calls: &BTreeMap<(String, String), String>) {
+    for hook in &mut surface.hooks {
+        let name = hook.id.strip_prefix("hook:").unwrap_or(&hook.id);
+        hook.call = calls.get(&("Hooks".to_owned(), name.to_owned())).cloned();
+    }
+    for item in &mut surface.traits {
+        let path = item.id.strip_prefix("trait:").unwrap_or(&item.id);
+        let owner = path.rsplit("::").next().unwrap_or(path);
+        for method in &mut item.methods {
+            let name = method.id.rsplit("::").next().unwrap_or(&method.id);
+            let mut found = calls.iter().filter(|((o, m), _)| {
+                m == name && (o == owner || o.split('<').next() == Some(owner) && o.contains('<'))
+            });
+            method.call = match (found.next(), found.next()) {
+                (Some((_, call)), None) => Some(call.clone()),
+                _ => None,
+            };
+        }
+    }
 }
 
 /// The `///` text of `attrs`, one line each, a leading space dropped.

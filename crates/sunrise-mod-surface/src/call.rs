@@ -45,7 +45,13 @@ pub enum Kind {
 }
 
 impl Kind {
-    const ALL: [Self; 5] = [Self::Call, Self::Hook, Self::Part, Self::Point, Self::Protocol];
+    const ALL: [Self; 5] = [
+        Self::Call,
+        Self::Hook,
+        Self::Part,
+        Self::Point,
+        Self::Protocol,
+    ];
 
     /// The text before the colon.
     pub fn word(self) -> &'static str {
@@ -154,9 +160,9 @@ impl Name {
         let valid = !path.is_empty()
             && !path.starts_with(':')
             && !path.ends_with(':')
-            && path
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b':' | b'<' | b'>' | b','));
+            && path.bytes().all(|b| {
+                b.is_ascii_alphanumeric() || matches!(b, b'_' | b':' | b'<' | b'>' | b',')
+            });
         if !valid {
             return Err(NameError::Path);
         }
@@ -216,10 +222,12 @@ impl Spec<'_> {
                 "{}::{}",
                 self.owner
                     .chars()
-                    .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '_' | ':' | '<' | '>' | ',') {
-                        c
-                    } else {
-                        '_'
+                    .map(|c| {
+                        if c.is_ascii_alphanumeric() || matches!(c, '_' | ':' | '<' | '>' | ',') {
+                            c
+                        } else {
+                            '_'
+                        }
                     })
                     .collect::<String>(),
                 self.method
@@ -320,13 +328,19 @@ mod tests {
             (format!("other:A::b#{hash}"), NameError::Kind),
             ("call:A::b".to_owned(), NameError::Hash),
             (format!("call:A::b#{}", &hash[..31]), NameError::Hash),
-            (format!("call:A::b#{}", hash.to_uppercase()), NameError::Hash),
+            (
+                format!("call:A::b#{}", hash.to_uppercase()),
+                NameError::Hash,
+            ),
             (format!("call:#{hash}"), NameError::Path),
             (format!("call:A b#{hash}"), NameError::Path),
             (format!("call:A::b@x#{hash}"), NameError::Version),
             (format!("call:A::b@01#{hash}"), NameError::Version),
             (format!("call:A::b@-1#{hash}"), NameError::Version),
-            (format!("call:{}#{hash}", "a".repeat(MAX_NAME_BYTES)), NameError::TooLong),
+            (
+                format!("call:{}#{hash}", "a".repeat(MAX_NAME_BYTES)),
+                NameError::TooLong,
+            ),
             (format!("call:é#{hash}"), NameError::Path),
         ];
         for (text, error) in cases {

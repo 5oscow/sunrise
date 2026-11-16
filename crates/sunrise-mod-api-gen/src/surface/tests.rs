@@ -1026,3 +1026,54 @@ fn the_recipe_placement_protocol_is_pinned_to_the_shapes_it_carries() {
         "the placement frames' shapes changed (now {hash}): bump placement_sync PROTOCOL"
     );
 }
+
+/// The names `surface.json` lists as `call` are the names the game's table serves and exports,
+/// both written by the one generator from one source tree: offline, two builds' exports say
+/// whether a built mod loads.
+#[test]
+#[ignore = "daily"]
+fn the_surface_export_names_the_calls_the_games_table_holds() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let host = std::thread::Builder::new()
+        .stack_size(64 << 20)
+        .spawn({
+            let root = root.clone();
+            move || crate::generate_wire_host(&root)
+        })
+        .unwrap()
+        .join()
+        .unwrap()
+        .unwrap();
+    let export = export(&root).unwrap();
+    let calls: Vec<&String> = export
+        .surface
+        .hooks
+        .iter()
+        .filter_map(|hook| hook.call.as_ref())
+        .chain(
+            export
+                .surface
+                .traits
+                .iter()
+                .flat_map(|item| &item.methods)
+                .filter_map(|method| method.call.as_ref()),
+        )
+        .collect();
+    assert!(calls.len() > 1000, "{} calls", calls.len());
+    for call in &calls {
+        assert!(
+            host.contains(&format!("\"{call}\"")),
+            "{call} is not in the game's table"
+        );
+    }
+    let mut owners: std::collections::BTreeMap<&String, Vec<&str>> = Default::default();
+    for item in &export.surface.traits {
+        for method in &item.methods {
+            if let Some(call) = &method.call {
+                owners.entry(call).or_default().push(&method.id);
+            }
+        }
+    }
+    owners.retain(|_, ids| ids.len() > 1);
+    assert!(owners.is_empty(), "records sharing a call name: {owners:?}");
+}
