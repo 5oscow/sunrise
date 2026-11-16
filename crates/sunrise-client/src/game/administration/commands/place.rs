@@ -91,15 +91,21 @@ impl Game<'_> {
         }
         Ok(self.source_position().map(|v| v.floor() as i32))
     }
+    /// The first chunk of the inclusive range `min..=max` that is not loaded.
+    pub(in crate::game) fn first_unloaded_chunk(
+        &self,
+        min: [i32; 2],
+        max: [i32; 2],
+    ) -> Option<(i32, i32)> {
+        (min[0]..=max[0])
+            .flat_map(|cx| (min[1]..=max[1]).map(move |cz| (cx, cz)))
+            .find(|chunk| !self.world.chunks.contains_key(chunk))
+    }
     /// `PlaceCommand.checkLoaded`: every chunk of the inclusive range.
     fn place_check_loaded(&self, min: [i32; 2], max: [i32; 2]) -> R<()> {
         let dimension = self.command_source.map_or(self.dim, |s| s.dimension);
-        for cx in min[0]..=max[0] {
-            for cz in min[1]..=max[1] {
-                if dimension != self.dim || !self.world.chunks.contains_key(&(cx, cz)) {
-                    return Err(err("argument.pos.unloaded", &[]));
-                }
-            }
+        if dimension != self.dim || self.first_unloaded_chunk(min, max).is_some() {
+            return Err(err("argument.pos.unloaded", &[]));
         }
         Ok(())
     }

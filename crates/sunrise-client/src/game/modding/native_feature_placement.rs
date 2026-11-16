@@ -38,14 +38,10 @@ impl Game<'_> {
             );
         }
         let (cx, cz) = (at[0] >> 4, at[2] >> 4);
-        for x in cx - 1..=cx + 1 {
-            for z in cz - 1..=cz + 1 {
-                if !self.world.chunks.contains_key(&(x, z)) {
-                    return Err(format!(
-                        "chunk ({x}, {z}) around the origin is not loaded, so nothing was placed"
-                    ));
-                }
-            }
+        if let Some((x, z)) = self.first_unloaded_chunk([cx - 1, cz - 1], [cx + 1, cz + 1]) {
+            return Err(format!(
+                "chunk ({x}, {z}) around the origin is not loaded, so nothing was placed"
+            ));
         }
         self.place_named_feature(id, BlockPos::new(at[0], at[1], at[2]), placed)
             .ok_or_else(|| {
