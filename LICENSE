@@ -12,7 +12,8 @@ to Shield and take nothing away from it.
 "The software" means everything in this repository except:
 
 a. what was already in it at commit de8b4e2526df9d7f611515b78123a26a3914176f, the last code taken from
-   Horizon and ari's fork. That stays under the MIT licence in LICENSES/MIT-Horizon.txt, and only later
+   Horizon and ari's fork. That stays under the licences it had there: the MIT licence in
+   LICENSES/MIT-Horizon.txt, or for third-party parts the licence THIRD_PARTY_NOTICES.md names. Only later
    changes to it are the software.
 b. code taken later from other projects, which LICENSES/IMPORTS lists with its source and licence.
 
@@ -24,8 +25,8 @@ product the fork is shipped in or started from, or who gets a share of money mad
 
 ## 2. Always allowed
 
-None of the following competes with the software, whoever does it, a fork's own makers included, and whether
-or not they charge for it:
+None of the following counts as competing under Shield's Noncompete, whoever does it, a fork's own makers
+included, and whether or not they charge for it:
 
 a. Playing, and running, hosting or renting out game servers, changed for your own operation or not,
    including selling things on them.
@@ -67,10 +68,10 @@ d. Whole product. 3b and 3c also apply to everything your group ships the fork i
    domain or signing key. A server that the fork contains, starts or needs for single-player play is part of
    the fork.
 e. Own identity. The fork states that it is an unofficial product based on Sunrise and links to
-   https://github.com/sunrise-org/sunrise. If its name contains "Sunrise", the word "unofficial" appears
-   beside the name on its download page or store listing and on its title or about screen. It does not use
-   the Project's logo or icon as its own, and it does not use the Project's sign-in, update, telemetry or
-   signing services unless the Project's published policy allows it.
+   https://github.com/sunrise-org/sunrise. If its name contains "Sunrise", the word "unofficial" (or its
+   translation) appears beside the name on its download page or store listing and on its title or about
+   screen. It does not use the Project's logo or icon as its own, and it does not use the Project's sign-in,
+   update, telemetry or signing services unless the Project's published policy allows it.
 
 If you stop meeting these conditions, this permission no longer covers what you do from then on, and Shield's
 Violations section applies. Other people's rights are not affected.
