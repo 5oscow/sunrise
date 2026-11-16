@@ -209,7 +209,7 @@ impl Game<'_> {
             self.tick_mod_use(slot, ticks, stack);
             return;
         }
-        let Some(consumable) = self.consumable(&stack) else {
+        let Some(consumable) = self.consumable(stack) else {
             self.using = None;
             return;
         };
@@ -219,7 +219,7 @@ impl Game<'_> {
         // Start and Tick left it.
         let remaining = self.use_duration - ticks as i32;
         if remaining > 0 && consumable.should_emit(remaining) {
-            self.emit_consume(&consumable, &stack, 5);
+            self.emit_consume(&consumable, stack, 5);
         }
         if !self.item_on_use_tick(stack, ticks) {
             return;
