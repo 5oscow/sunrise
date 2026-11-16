@@ -467,15 +467,18 @@ fn fallback(
     reason: Option<&str>,
     isolate: bool,
 ) -> String {
-    // The equipment-piece dispatcher catches this unwind and discards all staged layers.
-    // This also covers reference replies, which deliberately have no Default sentinel.
-    if m.owner == "ClientItemExtensions" {
-        return match reason {
-            Some(reason) => format!(
-                "panic!(\"{}: wasm call refused or trapped: {{}}\", {reason})",
-                m.name
-            ),
-            None => format!("panic!(\"{}: wasm call refused or trapped\")", m.name),
+    if let Some(policy) = super::trait_roles::refusal(&m.owner) {
+        let message = match reason {
+            Some(reason) => format!("format!(\"wasm call refused or trapped: {{}}\", {reason})"),
+            None => "String::from(\"wasm call refused or trapped\")".into(),
+        };
+        return match policy {
+            super::trait_roles::Refusal::Unwind => {
+                format!("panic!(\"{}: {{}}\", {message})", m.name)
+            }
+            super::trait_roles::Refusal::Error(constructor) => {
+                format!("Err(mod_api::{constructor}({message}))")
+            }
         };
     }
     if m.owner == "IPayloadHandler" && m.name == "handle" {

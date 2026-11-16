@@ -131,6 +131,7 @@ pub trait ClientItemExtensions: Send + Sync + 'static {
         stack
             .components()
             .and_then(|c| {
+                // Component maps are small; UTF-16 comparison avoids allocating a lookup key each frame.
                 c.as_nbt().iter().find_map(|(id, tag)| {
                     id.0.iter()
                         .copied()
