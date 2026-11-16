@@ -66,6 +66,17 @@ class ReleaseTrainTests(unittest.TestCase):
             _, body = train.notes("launcher", "launcher@0.2.0", prs, [])
             self.assertNotIn("#27", body)
 
+    def test_a_published_launcher_pre_release_is_the_next_baseline(self):
+        page = [{"tag_name": "launcher@1.0.1", "draft": True, "prerelease": True},
+                {"tag_name": "launcher@1.0.0", "draft": False, "prerelease": True},
+                {"tag_name": "nightly", "draft": False, "prerelease": True}]
+        with mock.patch.object(train, "gh_json", return_value=[page]), \
+                mock.patch.object(train, "merged_between", return_value=[]) as between:
+            last, prs = train.gather("launcher", "head")
+        self.assertEqual(last["tag_name"], "launcher@1.0.0")
+        between.assert_called_once_with("launcher", "launcher@1.0.0", "head")
+        self.assertFalse(train.decision("launcher", prs, NOW)[0])
+
     def test_release_metadata_errors_are_not_imports(self):
         with mock.patch.object(train, "merged_pull_requests", return_value=[(28, "own")]), \
                 mock.patch.object(train, "gh_json", side_effect=RuntimeError("API unavailable")):
@@ -525,6 +536,13 @@ class ReleaseTrainTests(unittest.TestCase):
         clone = next(line for line in body.splitlines() if line.startswith("git clone "))
         self.assertEqual(shlex.split(clone)[3], tag)
         self.assertNotIn("{tag}", body)
+
+    def test_the_first_fork_launcher_release_lists_no_pull_requests(self):
+        _, body = train.notes("launcher", "launcher@1.0.0", [pr(3, "CI: a runner change")], [],
+                              repository="sunrise-org/sunrise")
+        self.assertIn("The first release of Sunrise's launcher.", body)
+        self.assertNotIn("(#3)", body)
+        self.assertNotIn("Thanks to", body)
 
     def test_a_game_release_opens_with_the_way_to_the_launcher(self):
         # GitHub's latest is a game release: whoever lands on it is sent to the launcher first (#1647).
