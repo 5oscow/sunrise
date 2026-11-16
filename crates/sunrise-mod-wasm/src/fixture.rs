@@ -21,7 +21,7 @@ pub fn module(bytes: &[u8]) -> Result<WasmMod, String> {
 
 /// Resolve a production host row without pinning generated numeric IDs in a fixture.
 pub fn import_id(owner: &str, name: &str) -> Option<u32> {
-    crate::boundary::import_id(owner, name)
+    crate::boundary::import_index(owner, name)
 }
 
 /// Load through the shipped compiler command, substituting the downstream game executable.
@@ -63,4 +63,10 @@ pub fn call_load(module: &WasmMod) -> Option<()> {
         |_| {},
         |reader| reader.take(),
     )
+}
+
+/// The WAT import of the shared protocol's `log`, which every built module carries: a hand-written
+/// module that calls nothing declares just this one, and is accepted as a module the build tool made.
+pub fn log_import() -> String {
+    crate::imports::fixtures::log_import()
 }
