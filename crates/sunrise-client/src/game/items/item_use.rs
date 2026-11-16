@@ -1293,11 +1293,16 @@ pub(super) mod interact_vibration_tests {
                 host: &dyn mod_api::Host,
                 event: &mut CanEatEvent<'_>,
             ) -> Option<bool> {
-                self.0.fetch_add(1, Ordering::Relaxed);
-                if let Some(stack) = event.stack {
-                    assert_eq!(stack.item().id(host), "minecraft:stick");
+                let call = self.0.fetch_add(1, Ordering::Relaxed);
+                if event
+                    .stack
+                    .is_some_and(|stack| stack.item().id(host) == "minecraft:rotten_flesh")
+                {
+                    return Some(false);
                 }
-                Some(!event.vanilla_can_eat)
+                assert!(event.stack.is_none(), "cake has no food stack");
+                // First exercise player-based overrides, then the stack-only refusal.
+                (call < 4).then_some(!event.vanilla_can_eat)
             }
         }
         let calls = Arc::new(AtomicUsize::new(0));
@@ -1307,7 +1312,7 @@ pub(super) mod interact_vibration_tests {
         )]
         .into();
         mod_platform::testing::with_mods(mods, || {
-            with_game("minecraft:stick", |game| {
+            with_game("minecraft:rotten_flesh", |game| {
                 let use_block = |game: &mut Game<'_>, name: &str| {
                     let player = game.use_context();
                     game.with_block_use_level(|b, level, ticks| {
@@ -1334,7 +1339,6 @@ pub(super) mod interact_vibration_tests {
                     sunrise_world::level::InteractionResult::Pass
                 );
                 assert_eq!(calls.load(Ordering::Relaxed), 1);
-                *game.held_mut() = None;
                 assert_eq!(
                     use_block(game, "minecraft:candle_cake"),
                     sunrise_world::level::InteractionResult::Pass
@@ -1347,6 +1351,22 @@ pub(super) mod interact_vibration_tests {
                     sunrise_world::level::InteractionResult::Success
                 );
                 assert_eq!(calls.load(Ordering::Relaxed), 3);
+                assert_eq!(
+                    use_block(game, "minecraft:candle_cake"),
+                    sunrise_world::level::InteractionResult::Success,
+                    "a stack-based food refusal does not refuse a candle-cake bite"
+                );
+                assert_eq!(calls.load(Ordering::Relaxed), 4);
+                game.player.as_mut().unwrap().health.food.food = 10;
+                assert_eq!(
+                    use_block(game, "minecraft:cake"),
+                    sunrise_world::level::InteractionResult::Success,
+                    "holding refused food does not refuse a hungry player's cake bite"
+                );
+                assert_eq!(
+                    use_block(game, "minecraft:candle_cake"),
+                    sunrise_world::level::InteractionResult::Success
+                );
                 game.world
                     .chunks
                     .insert((0, 0), Arc::new(sunrise_client::chunk::Chunk::empty(0, 0)));
@@ -1369,11 +1389,20 @@ pub(super) mod interact_vibration_tests {
                     point: [0.5, 65.0, 0.5],
                     inside: false,
                 };
-                let (result, _) = game.remote_block_template(&hit, None, true);
+                let held = game.held().cloned();
+                let (result, (changes, _)) = game.remote_block_template(&hit, held.as_ref(), true);
                 assert_eq!(result, sunrise_world::level::InteractionResult::Success);
+                assert_eq!(changes.len(), 1, "the client predicts a bitten cake");
+                let bitten = game.with_level(|b, _, _| {
+                    let cake = b
+                        .table
+                        .default_state(b.table.block_by_name("minecraft:cake").unwrap());
+                    b.table.set_int(cake, b.props.bites, 1)
+                });
+                assert_eq!(changes[0].1, bitten);
                 assert_eq!(
                     calls.load(Ordering::Relaxed),
-                    4,
+                    7,
                     "client dry-level path asks the hook"
                 );
             })
