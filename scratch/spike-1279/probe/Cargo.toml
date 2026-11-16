@@ -1,0 +1,11 @@
+[package]
+name = "spike-1279-probe"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+wasmtime = { version = "50", default-features = false, features = ["anyhow", "cranelift", "runtime", "std", "parallel-compilation", "pulley", "threads"] }
+wat = "1.261"
+
+[workspace]
