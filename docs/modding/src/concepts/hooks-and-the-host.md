@@ -193,6 +193,18 @@ in `mod_api`. Raw GPU access is native-only, unstable and outside that API, in
 `render_needs` collects requests; `world_drawn` runs before the hand and HUD, and
 `hand_drawn` runs after the hand, on the render thread. Use API draw contexts for API-typed drawing.
 
+## After a hook that can change the world
+
+A listener of a hook that gets a mutable host may remove, move or change objects. After such a hook
+returns without cancelling, the game does not use the list position or the state it worked out before
+the hook. It finds the object again by its entity id, checks the facts the action was decided on, and
+abandons the action if the object is gone or a fact changed; it never works the action out again. The
+hook still fires at its usual moment, and the check runs straight after it returns, before anything
+moves. Stack checks are shallow: they compare the item id and the count, not components. Each hook's
+doc names what it checks (`armor_stand_manipulate`, `entity_mount`, `cauldron_level_changed`,
+`hanging_break`, `player_shear_entity`, `living_change_target`). The effect writes on a living handle
+treat a mob that is marked removed but still listed as absent: they return false and change nothing.
+
 ## Hooks and injections
 
 A hook is not an injection point: an `[[inject]]` never runs inside a hook's dispatch. A `head` injection that

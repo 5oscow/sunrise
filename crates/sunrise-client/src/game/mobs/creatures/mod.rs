@@ -6387,7 +6387,7 @@ impl Game<'_> {
     /// crosshair or on the one a guest's interact packet named: returns true
     /// when consumed.
     pub(super) fn interact_mob(&mut self, target: Option<InteractTarget>) -> Result<bool> {
-        let Some(index) = self.mob_interaction_target(target) else {
+        let Some(mut index) = self.mob_interaction_target(target) else {
             return Ok(false);
         };
         // CamelHusk.interact: any click on it keeps it (`setPersistenceRequired`).
@@ -6402,10 +6402,16 @@ impl Game<'_> {
             return Ok(true);
         }
         // Shears ask the mob's entity parts first, then fire `player_shear_entity`.
-        if self.held_shears()
-            && let Some(consumed) = self.player_shear(index)
-        {
-            return Ok(consumed);
+        if self.held_shears() {
+            let id = self.mobs[index].id;
+            if let Some(consumed) = self.player_shear(index) {
+                return Ok(consumed);
+            }
+            // The shear hook may have moved the list: the mob by its id.
+            match self.mobs.iter().position(|m| m.id == id) {
+                Some(now) => index = now,
+                None => return Ok(true),
+            }
         }
         if self.spawn_egg_offspring(index) {
             self.swing_arm();

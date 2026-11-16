@@ -130,7 +130,7 @@ impl Game<'_> {
                 if !self.can_be_affected_resolved(Some(id as i32), &kind, name, Some(effect.id)) {
                     return false;
                 }
-                let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) else {
+                let Some(m) = self.mobs.iter_mut().find(|m| m.id == id && !m.removed) else {
                     return false;
                 };
                 let changed = m.add_effect_instance(name, instance);
@@ -295,7 +295,7 @@ impl Game<'_> {
                 }
                 self.mobs
                     .iter_mut()
-                    .find(|m| m.id == id)
+                    .find(|m| m.id == id && !m.removed)
                     .is_some_and(|m| m.retain_effects(|e| e.registry_index != Some(def.index)))
             }
             _ => false,
@@ -338,11 +338,14 @@ impl Game<'_> {
                     .map(|(name, _)| *name)
                     .collect();
                 // The refused removals keep their effects; the rest go.
-                self.mobs.iter_mut().find(|m| m.id == id).is_some_and(|m| {
-                    m.retain_effects(|e| {
-                        e.registry_index.is_some_and(|index| keep.contains(&index))
+                self.mobs
+                    .iter_mut()
+                    .find(|m| m.id == id && !m.removed)
+                    .is_some_and(|m| {
+                        m.retain_effects(|e| {
+                            e.registry_index.is_some_and(|index| keep.contains(&index))
+                        })
                     })
-                })
             }
             _ => false,
         }
@@ -439,6 +442,26 @@ mod tests {
             assert_eq!(mob.extra.effect_chains[0].registry_index, Some(0));
             assert_eq!(game.living_effect(cow, key).unwrap().id, key);
             assert_eq!(game.living_effect(cow, key).unwrap().amplifier, 1);
+        });
+    }
+
+    /// A mob marked removed but still listed counts as absent, as the effect reads treat it: the
+    /// three writes return false and change nothing.
+    #[test]
+    #[ignore = "daily"]
+    fn effect_writes_on_a_removed_mob_change_nothing() {
+        with_game(|game| {
+            let kind = game.res.mob_types().get("minecraft:cow").unwrap().clone();
+            game.mobs.push(Mob::new(24, kind, Vec3::ZERO, 0.0));
+            let cow = game.living(game.entity(24).unwrap()).unwrap();
+            let speed = mod_platform::__private::part_tests::effect_key("speed");
+            assert!(game.living_add_effect(cow, &effect("speed", 200, 0)));
+            game.mobs[0].removed = true;
+            assert!(!game.living_add_effect(cow, &effect("slowness", 200, 0)));
+            assert!(!game.living_remove_effect(cow, speed));
+            assert!(!game.living_remove_all_effects(cow));
+            let held: Vec<_> = game.mobs[0].extra.effects.iter().map(|e| e.id).collect();
+            assert_eq!(held, ["minecraft:speed"]);
         });
     }
 

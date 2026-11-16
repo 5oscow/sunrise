@@ -368,7 +368,7 @@ impl Game<'_> {
     /// player touching it pushes the two apart once more. Only the window's
     /// own player is moved here: a server's players are pushed by their
     /// clients, which tick the boats near them (`remote_pushes`).
-    pub(super) fn boat_contacts(&mut self, i: usize) {
+    pub(super) fn boat_contacts(&mut self, mut i: usize) {
         let (id, bb, max) = {
             let b = &self.boats[i];
             (b.id, b.bounds(), b.max_passengers())
@@ -455,21 +455,34 @@ impl Game<'_> {
                     // is under water, or when a mod cancels it
                     // (EntityMountEvent).
                     let ready = m.extra.boarding_cooldown <= 0 && species_can_ride(m.species());
-                    if room
-                        && ready
-                        && self.native_mob_may_ride(mob, id, true)
-                        && let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob)
-                    {
-                        sunrise_client::mobs::shulker::on_start_riding(m);
-                        m.extra.mount = Some(id);
-                        m.extra.passenger = true;
-                        m.ai.nav.stop();
-                        count += 1;
-                        self.seat_mob(mob);
-                        // Mob.startRiding drops its lead.
-                        self.break_leash(mob, true, false);
-                        self.note_started_riding(id);
-                        self.vehicle_picked_up();
+                    if room && ready && self.native_mob_may_ride(mob, id, true) {
+                        // The listener had the game in its hands: find the
+                        // boat again by id (it is gone: this boat's pass
+                        // ends), count its passengers again, and board the
+                        // mob only if it is still there, not removed and not
+                        // riding.
+                        let Some(now) = self.boats.iter().position(|b| b.id == id) else {
+                            return;
+                        };
+                        i = now;
+                        count = self.boat_passengers(id);
+                        if count < self.boats[i].max_passengers()
+                            && let Some(m) = self
+                                .mobs
+                                .iter_mut()
+                                .find(|m| m.id == mob && !m.removed && m.extra.mount.is_none())
+                        {
+                            sunrise_client::mobs::shulker::on_start_riding(m);
+                            m.extra.mount = Some(id);
+                            m.extra.passenger = true;
+                            m.ai.nav.stop();
+                            count += 1;
+                            self.seat_mob(mob);
+                            // Mob.startRiding drops its lead.
+                            self.break_leash(mob, true, false);
+                            self.note_started_riding(id);
+                            self.vehicle_picked_up();
+                        }
                     }
                     continue;
                 }

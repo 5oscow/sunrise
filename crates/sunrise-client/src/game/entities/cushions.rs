@@ -343,12 +343,20 @@ impl Game<'_> {
         if !self.native_may_board(id) {
             return true;
         }
+        // After each hook the cushion is found again by its id: a listener
+        // may have removed it, and the click is then spent.
+        if Self::named_entity(&self.cushions, id as i32, |c| c.id).is_none() {
+            return true;
+        }
         self.stop_riding();
         // startRiding stops when stopRiding left the passenger seated (a mod
         // canceled the dismount).
         if self.riding.is_some() {
             return true;
         }
+        let Some(i) = Self::named_entity(&self.cushions, id as i32, |c| c.id) else {
+            return true;
+        };
         self.start_riding(id);
         let p = self.cushions[i].position;
         self.audio.play(
