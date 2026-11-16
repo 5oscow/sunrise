@@ -125,6 +125,7 @@ pub(super) fn entity_render_state(m: &Mob, id: u32, partial: f32) -> EntityRende
         yaw: m.previous_yaw + sunrise_client::mobs::living::wrap(m.yaw - m.previous_yaw) * partial,
         pitch: pose.x_rot,
         living: Some(living.into()),
+        tnt_fuse: None,
     }
     .into()
 }

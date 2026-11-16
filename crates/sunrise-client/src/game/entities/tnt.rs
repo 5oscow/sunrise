@@ -777,6 +777,46 @@ impl Game<'_> {
             }
             self.mark_motion(out.len(), Self::MOTION_OBJECT | u64::from(t.id));
             let fuse = t.fuse as f32 - alpha as f32 + 1.0;
+            if let Some(resolved) = super::native_entity_renderers::tnt_renderer() {
+                let partial = alpha as f32;
+                let at = glam::DVec3::new(
+                    t.previous.x + (t.position.x - t.previous.x) * alpha,
+                    t.previous.y + (t.position.y - t.previous.y) * alpha,
+                    t.previous.z + (t.position.z - t.previous.z) * alpha,
+                );
+                let entity: mod_api::EntityRenderState =
+                    mod_api::__private::built::EntityRenderState {
+                        id: t.id,
+                        partial,
+                        age: 0.0,
+                        yaw: t.rotation[0],
+                        pitch: t.rotation[1],
+                        living: None,
+                        tnt_fuse: Some(fuse),
+                    }
+                    .into();
+                let light = self.world.light(
+                    t.position.x.floor() as i32,
+                    (t.position.y + 0.5).floor() as i32,
+                    t.position.z.floor() as i32,
+                );
+                let packed = (u32::from(light >> 4) * 16) | ((u32::from(light & 15) * 16) << 8);
+                let block = [
+                    at.x.floor() as i32,
+                    at.y.floor() as i32,
+                    at.z.floor() as i32,
+                ];
+                if self.mod_entity_renderer_geometry(
+                    &resolved,
+                    &entity,
+                    at - camera,
+                    block,
+                    packed,
+                    out,
+                ) {
+                    continue;
+                }
+            }
             let scale = if fuse < 10.0 {
                 let g = (1.0 - fuse / 10.0).clamp(0.0, 1.0);
                 1.0 + g * g * g * g * 0.3

@@ -4,8 +4,8 @@
 //! A renderer draws every entity of one entity type, named by its id (`mymod:bolt`). The game
 //! keeps the registrations from start and resolves each type's renderer on every resource load, so
 //! a frame hands an entity to the renderer of its type's slot and to no other mod.
-use crate::BlockEntityDrawContext;
 use crate::wire::{Reader, Wire, WireError, Writer};
+use crate::BlockEntityDrawContext;
 use std::{collections::BTreeMap, sync::Arc};
 
 /// One entity's frame, as `EntityRenderer.extractRenderState` fills an `EntityRenderState`:
@@ -27,6 +27,9 @@ pub struct EntityRenderState {
     pub pitch: f32,
     /// A living entity's own frame (`LivingEntityRenderState`); none for any other entity.
     pub living: Option<LivingRenderState>,
+    /// The remaining primed-TNT fuse, in ticks, as vanilla draws it (`fuse - partial + 1`);
+    /// `Some` for `minecraft:tnt`, none for any other entity.
+    pub tnt_fuse: Option<f32>,
 }
 
 /// What a living entity's frame adds to [`EntityRenderState`], as
@@ -167,6 +170,7 @@ mod tests {
             yaw: 0.0,
             pitch: 0.0,
             living: None,
+            tnt_fuse: None,
         };
         let (mut bolt, mut dart) = (Light::default(), Light::default());
         renderers["mymod:bolt"].submit(&state, &mut bolt).unwrap();
