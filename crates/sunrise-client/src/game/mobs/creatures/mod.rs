@@ -1910,10 +1910,35 @@ impl Game<'_> {
         let attack = self.attack_of_who(source.attacker);
         let plan = self.prepare_knockback_credit(target as i32, source.attacker, &attack);
         let mut credit = plan.lend(&mut self.last_hurt_by_player);
-        if let Some(t) = self.mobs.iter_mut().find(|m| m.id == target) {
+        let target_index = self.mobs.iter().position(|m| m.id == target);
+        let attacker_index = match source.attacker {
+            Some(Who::Mob(id)) if sunrise_client::health::hit_host_listened() => {
+                self.mobs.iter().position(|m| m.id == id)
+            }
+            _ => None,
+        };
+        if let Some(ti) = target_index {
+            // The attacker's own random is lent through a live borrow beside the victim's: a
+            // mob attacker from the same list, the attacking player from its own field.
+            let (t, lend) = match attacker_index.filter(|&ai| ai != ti) {
+                Some(ai) => {
+                    let [t, a] = self
+                        .mobs
+                        .get_disjoint_mut([ti, ai])
+                        .expect("two different mobs");
+                    (t, sunrise_client::health::HitLend::mob(a))
+                }
+                None => (
+                    &mut self.mobs[ti],
+                    sunrise_client::health::HitLend::attacking_player(
+                        self.player.as_mut(),
+                        attack.attacker,
+                    ),
+                ),
+            };
             let previous_invulnerable = t.invulnerable;
             let hit = t.damage_aimed(
-                crate::game::entity::damage_level_of!(self, &attack, &mut credit),
+                crate::game::entity::damage_level_of!(self, &attack, &mut credit, lend),
                 amount,
                 source,
                 aim,
@@ -2482,8 +2507,12 @@ impl Game<'_> {
                             self.prepare_knockback_credit(id as i32, None, self.combat.attack());
                         let mut credit = plan.lend(&mut self.last_hurt_by_player);
                         if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
-                            let level =
-                                crate::game::entity::damage_level_of!(self, &attack, &mut credit);
+                            let level = crate::game::entity::damage_level_of!(
+                                self,
+                                &attack,
+                                &mut credit,
+                                None
+                            );
                             m.knockback(level, power, x, z, &source, 0.0);
                         }
                     }
@@ -2830,7 +2859,8 @@ impl Game<'_> {
                             crate::game::entity::damage_level_of!(
                                 self,
                                 self.combat.attack(),
-                                &mut credit
+                                &mut credit,
+                                None
                             ),
                             amount,
                             sunrise_client::mobs::Damage::of(kind),
@@ -4890,7 +4920,7 @@ impl Game<'_> {
             _ => false,
         };
         let vanilla = self.saved_refuses_damage(id, damage_type, creative);
-        crate::game::entity::damage_level_of!(self, self.combat.attack(), no_push)
+        crate::game::entity::damage_level_of!(self, self.combat.attack(), no_push, None)
             .invulnerability_check(
                 sunrise_client::health::Hurting::Entity(id as i32, kind, source),
                 vanilla,
@@ -5747,7 +5777,8 @@ impl Game<'_> {
                         crate::game::entity::damage_level_of!(
                             self,
                             self.combat.attack(),
-                            &mut credit_plan.lend(&mut self.last_hurt_by_player)
+                            &mut credit_plan.lend(&mut self.last_hurt_by_player),
+                            None
                         ),
                         amount,
                         source,
@@ -5779,7 +5810,8 @@ impl Game<'_> {
                                 crate::game::entity::damage_level_of!(
                                     self,
                                     self.combat.attack(),
-                                    &mut credit_plan.lend(&mut self.last_hurt_by_player)
+                                    &mut credit_plan.lend(&mut self.last_hurt_by_player),
+                                    None
                                 ),
                                 t.damage,
                                 source,
@@ -5835,7 +5867,8 @@ impl Game<'_> {
                         crate::game::entity::damage_level_of!(
                             self,
                             self.combat.attack(),
-                            &mut credit_plan.lend(&mut self.last_hurt_by_player)
+                            &mut credit_plan.lend(&mut self.last_hurt_by_player),
+                            None
                         ),
                         0.0,
                         source,
@@ -5888,7 +5921,8 @@ impl Game<'_> {
                         crate::game::entity::damage_level_of!(
                             self,
                             self.combat.attack(),
-                            &mut credit_plan.lend(&mut self.last_hurt_by_player)
+                            &mut credit_plan.lend(&mut self.last_hurt_by_player),
+                            None
                         ),
                         0.0,
                         source,
@@ -5993,7 +6027,8 @@ impl Game<'_> {
                                 crate::game::entity::damage_level_of!(
                                     self,
                                     self.combat.attack(),
-                                    &mut credit_plan.lend(&mut self.last_hurt_by_player)
+                                    &mut credit_plan.lend(&mut self.last_hurt_by_player),
+                                    None
                                 ),
                                 5.0,
                                 source,
@@ -6066,7 +6101,8 @@ impl Game<'_> {
                                     crate::game::entity::damage_level_of!(
                                         self,
                                         self.combat.attack(),
-                                        &mut credit_plan.lend(&mut self.last_hurt_by_player)
+                                        &mut credit_plan.lend(&mut self.last_hurt_by_player),
+                                        None
                                     ),
                                     6.0,
                                     source,
@@ -6176,7 +6212,8 @@ impl Game<'_> {
                             crate::game::entity::damage_level_of!(
                                 self,
                                 self.combat.attack(),
-                                &mut credit_plan.lend(&mut self.last_hurt_by_player)
+                                &mut credit_plan.lend(&mut self.last_hurt_by_player),
+                                None
                             ),
                             1.0,
                             source,
@@ -6206,7 +6243,8 @@ impl Game<'_> {
                             crate::game::entity::damage_level_of!(
                                 self,
                                 self.combat.attack(),
-                                &mut credit_plan.lend(&mut self.last_hurt_by_player)
+                                &mut credit_plan.lend(&mut self.last_hurt_by_player),
+                                None
                             ),
                             4.0,
                             source,
@@ -7028,7 +7066,8 @@ impl Game<'_> {
                     crate::game::entity::damage_level_of!(
                         self,
                         &sunrise_client::health::NO_ATTACK,
-                        &mut credit_plan.lend(&mut self.last_hurt_by_player)
+                        &mut credit_plan.lend(&mut self.last_hurt_by_player),
+                        None
                     ),
                     f32::MAX,
                     sunrise_client::mobs::Damage::player(player_at.unwrap_or(center)),

@@ -2741,7 +2741,8 @@ impl Game<'_> {
                 Some(world_items!(self)),
                 Some(&self.pack.block_registries),
                 &self.damage_hooks,
-            );
+            )
+            .with_effects(crate::game::entity::hit_effects_of!(self, None));
             let contact = sunrise_client::block_contact::Contact {
                 entity: id as i32,
                 kind: "minecraft:item",

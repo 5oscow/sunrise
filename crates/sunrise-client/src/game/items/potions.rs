@@ -1088,7 +1088,8 @@ impl Game<'_> {
                                     crate::game::entity::damage_level_of!(
                                         self,
                                         self.combat.attack(),
-                                        no_push
+                                        no_push,
+                                        None
                                     ),
                                     (6 << amp.min(30)) as f32,
                                     Damage::of(DamageKind::Magic),
@@ -1154,7 +1155,12 @@ impl Game<'_> {
                 let mut canceled = false;
                 if let Some(id) = self.motion.health.damage.id(source)
                     && let Ok(o) = p.hurt_blocking(
-                        crate::game::entity::damage_level_of!(self, self.combat.attack(), no_push),
+                        crate::game::entity::damage_level_of!(
+                            self,
+                            self.combat.attack(),
+                            no_push,
+                            None
+                        ),
                         &self.motion.health,
                         rules,
                         id,
@@ -1172,7 +1178,12 @@ impl Game<'_> {
                     && let Some(id) = self.health_resources.damage.id("minecraft:magic")
                 {
                     let _ = p.hurt(
-                        crate::game::entity::damage_level_of!(self, self.combat.attack(), no_push),
+                        crate::game::entity::damage_level_of!(
+                            self,
+                            self.combat.attack(),
+                            no_push,
+                            None
+                        ),
                         &self.motion.health,
                         rules,
                         id,
@@ -2135,7 +2146,8 @@ impl Game<'_> {
                                     crate::game::entity::damage_level_of!(
                                         self,
                                         &attack,
-                                        &mut credit
+                                        &mut credit,
+                                        None
                                     ),
                                     amount(6),
                                     source,
@@ -2522,7 +2534,7 @@ impl Game<'_> {
                     let plan = self.prepare_knockback_credit(id as i32, owner.who(), &attack);
                     let mut credit = plan.lend(&mut self.last_hurt_by_player);
                     self.mobs[i].damage_by(
-                        crate::game::entity::damage_level_of!(self, &attack, &mut credit),
+                        crate::game::entity::damage_level_of!(self, &attack, &mut credit, None),
                         harm,
                         source,
                         "minecraft:splash_potion",

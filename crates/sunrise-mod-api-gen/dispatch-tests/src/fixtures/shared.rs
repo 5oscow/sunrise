@@ -108,6 +108,7 @@ struct TestHost;
 struct TestLevel;
 impl LevelHost for TestLevel {}
 impl LevelRandomHost for TestLevel {}
+impl HitHost for TestLevel {}
 impl Host for TestHost {}
 impl ServerHost for TestHost {}
 impl ClientHost for TestHost {}
@@ -494,7 +495,7 @@ impl Hooks for Mod {
     }
     fn living_incoming_damage(
         &self,
-        _: &mut dyn LevelRandomHost,
+        _: &mut dyn HitHost,
         event: &mut LivingIncomingDamageEvent<'_>,
     ) -> Flow {
         event.container.0 = event.container.0 * 2.0 + self.id as f32;

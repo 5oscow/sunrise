@@ -3,7 +3,8 @@
 use super::entity::damage_level_of;
 use super::native_entity_refs::tests::with_game;
 use mod_api::{
-    self, Hooks, HurtSource, LevelRandomHost, LivingIncomingDamageEvent, LivingKnockbackEvent,
+    self, HitHost, Hooks, HurtSource, LevelRandomHost, LivingIncomingDamageEvent,
+    LivingKnockbackEvent,
 };
 use std::sync::{Arc, Mutex};
 use sunrise_client::health::{Attack, Hurting, Knock, NO_ATTACK};
@@ -66,7 +67,7 @@ impl Hooks for Probe {
     }
     fn living_incoming_damage(
         &self,
-        _: &mut dyn LevelRandomHost,
+        _: &mut dyn HitHost,
         event: &mut LivingIncomingDamageEvent<'_>,
     ) -> mod_api::Flow {
         self.0
@@ -148,7 +149,7 @@ fn the_bridge_names_the_attacker_and_what_it_holds() {
             let mut credit = plan.lend(&mut game.last_hurt_by_player);
             let mut knock = PUSH;
             let canceled = super::native_hooks::knockback(
-                damage_level_of!(game, attack, &mut credit).reborrow(),
+                damage_level_of!(game, attack, &mut credit, None).reborrow(),
                 pushed,
                 &mut knock,
             );
@@ -206,7 +207,7 @@ fn a_canceled_push_is_reported() {
     let heard = heard(|game, log| {
         let plan = game.prepare_knockback_credit(12, None, game.combat.attack());
         let mut credit = plan.lend(&mut game.last_hurt_by_player);
-        let level = damage_level_of!(game, &NO_ATTACK, &mut credit);
+        let level = damage_level_of!(game, &NO_ATTACK, &mut credit, None);
         log.lock().unwrap().cancel = true;
         let mut knock = PUSH;
         assert!(super::native_hooks::knockback(
@@ -573,7 +574,7 @@ fn with_detached_credit(
 ) {
     let plan = game.prepare_knockback_credit(victim, None, &NO_ATTACK);
     let mut credit = plan.lend(&mut game.last_hurt_by_player);
-    push(damage_level_of!(game, &NO_ATTACK, &mut credit));
+    push(damage_level_of!(game, &NO_ATTACK, &mut credit, None));
 }
 
 pub(in crate::game) fn credit_pig(game: &mut super::Game<'_>) {
@@ -606,7 +607,7 @@ fn credit_push(game: &mut super::Game<'_>) {
     mob.velocity = Vec3::ZERO;
     mob.on_ground = false;
     mob.knockback(
-        damage_level_of!(game, &NO_ATTACK, &mut credit),
+        damage_level_of!(game, &NO_ATTACK, &mut credit, None),
         0.4,
         1.0,
         0.0,

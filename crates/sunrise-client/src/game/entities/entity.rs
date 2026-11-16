@@ -917,7 +917,8 @@ impl Game<'_> {
             Some(world_items!(self)),
             Some(&self.pack.block_registries),
             &self.damage_hooks,
-        );
+        )
+        .with_effects(crate::game::entity::hit_effects_of!(self, None));
         if let Some(hooks) = sunrise_client::block_contact::HOOKS.get() {
             (hooks.inside_fire)(
                 &mut level,
@@ -1322,14 +1323,42 @@ pub(super) use with_entity;
 mod list_borrows;
 pub(super) use list_borrows::entity_lists_of;
 pub(crate) use list_borrows::{borrow_level_list, borrow_lists};
+/// What a hit lends its listeners besides the level ([`sunrise_client::health::HitEffects`]):
+/// the level sound queue and sound-seed stream, and the entity the site lends (`$lend`: an
+/// `Option<`[`HitLend`](sunrise_client::health::HitLend)`>`, `None` where nothing is lent). Only field borrows of
+/// `$game`, so it composes with the borrows of [`damage_level_of`].
+macro_rules! hit_effects_of {
+    // A site whose `$game` is borrowed whole queues into its own `$sounds`, which it appends to
+    // `creatures.lan_sounds` once the level is dropped (the seeds are still drawn at the call).
+    ($game:ident, $lend:expr, in $sounds:expr) => {
+        sunrise_client::health::HitEffects::new(
+            &mut $sounds,
+            $game.lan.as_ref().map(|lan| &lan.hub),
+            $game.dim.id(),
+            $game.native_lifecycle.epoch(),
+            $lend,
+        )
+    };
+    ($game:ident, $lend:expr) => {
+        sunrise_client::health::HitEffects::new(
+            &mut $game.creatures.lan_sounds,
+            $game.lan.as_ref().map(|lan| &lan.hub),
+            $game.dim.id(),
+            $game.native_lifecycle.epoch(),
+            $lend,
+        )
+    };
+}
 /// The level `$game` ticks, lent to a hit's damage hooks with its block registry and merged
 /// tag tables, so a mob or the player beside them can take the hit. `$attack` is the
-/// [`Attack`](sunrise_client::health::Attack) the site took first. Every site names its
-/// credit: a per-victim plan's loan (`prepare_knockback_credit`), or `no_push` for a site
-/// that never makes a living push (a damage type tagged `no_knockback`, or a check that
-/// pushes nothing).
+/// [`Attack`](sunrise_client::health::Attack) the site took first. Every site names what it
+/// lends, in one place: its credit (a per-victim plan's loan, `prepare_knockback_credit`, or
+/// `no_push` for a site that never makes a living push: a damage type tagged `no_knockback`, or
+/// a check that pushes nothing), and the entity whose own random its listeners may draw
+/// (`$lend`: the attacker the site holds a live borrow of, built with `HitLend`, or `None` where
+/// it cannot lend one).
 macro_rules! damage_level_of {
-    ($game:ident, $attack:expr, no_push) => {
+    ($game:ident, $attack:expr, no_push, $lend:expr) => {
         &mut sunrise_client::health::DamageLevel::of(
             &mut $game.world,
             $game.pack.assets.registry,
@@ -1339,8 +1368,9 @@ macro_rules! damage_level_of {
         )
         .attacked_by($attack)
         .no_push()
+        .with_effects(crate::game::entity::hit_effects_of!($game, $lend))
     };
-    ($game:ident, $attack:expr, $credit:expr) => {
+    ($game:ident, $attack:expr, $credit:expr, $lend:expr) => {
         &mut sunrise_client::health::DamageLevel::of(
             &mut $game.world,
             $game.pack.assets.registry,
@@ -1350,9 +1380,11 @@ macro_rules! damage_level_of {
         )
         .attacked_by($attack)
         .with_knockback_credit($credit)
+        .with_effects(crate::game::entity::hit_effects_of!($game, $lend))
     };
 }
 pub(super) use damage_level_of;
+pub(super) use hit_effects_of;
 
 macro_rules! walk_lists {
     (($lists:expr, $entity:ident, $body:block)

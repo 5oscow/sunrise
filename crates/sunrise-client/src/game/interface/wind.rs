@@ -421,7 +421,8 @@ impl Game<'_> {
                         crate::game::entity::damage_level_of!(
                             self,
                             self.combat.attack(),
-                            &mut credit
+                            &mut credit,
+                            None
                         ),
                         1.0,
                         source,

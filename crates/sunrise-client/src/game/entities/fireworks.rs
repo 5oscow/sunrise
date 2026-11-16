@@ -908,7 +908,7 @@ impl Game<'_> {
             let mut credit = plan.lend(&mut self.last_hurt_by_player);
             if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
                 let hurt = m.damage(
-                    crate::game::entity::damage_level_of!(self, &attack, &mut credit),
+                    crate::game::entity::damage_level_of!(self, &attack, &mut credit, None),
                     amount,
                     Damage::fireworks(attacker, at),
                 );

@@ -103,7 +103,7 @@ Each hook method takes its host, where it has one, and one event:
 ```rust,ignore
 fn living_incoming_damage(
     &self,
-    _level: &mut dyn LevelRandomHost,
+    _level: &mut dyn HitHost,
     event: &mut LivingIncomingDamageEvent<'_>,
 ) -> Flow {
     if event.kind == "minecraft:pig" {
@@ -174,6 +174,14 @@ mod draws come in vanilla's order. `LevelTicksHost` adds scheduling through
 `schedule_block_tick` and `schedule_fluid_tick`, while
 `LevelWriteHost` adds random access, `set_block`, `set_block_property`, `play_sound` and
 `send_particles` and `level_event` (`levelEvent`, queued in order with the write's own events).
+A damage hit's listeners (`living_incoming_damage`, `living_damage_pre`, `living_damage_post`,
+`living_shield_block`, `living_use_totem`) are given a `HitHost`: a `LevelRandomHost` that also plays level
+sounds and draws from an entity's own random, and writes no block. `host.play_sound_at(sound, at, source,
+volume, pitch)` is `Level.playSound(null, x, y, z, ...)` and `host.play_sound_from(entity, ...)` is
+`Level.playSound(null, entity, ...)`: every player in range hears it, and a cancelled hit still plays what was
+queued. The seed is drawn at the call from the level's sound-seed stream, not from the level's random.
+`entity.next_float(host)`, `next_double`, `next_bool` and `next_int(host, bound)` draw from the entity's actual
+random stream, in listener order. A hit lends its attacker where the game applies a melee hit (the attacking player or mob, for player → mob, mob → mob and mob → player) and no entity at any other damage site (environment, projectiles, explosions, potions and the like); the attacking mob's own random is the one its AI draws from, and a hit built inside a mob's own tick lends none. Any other entity, a stale handle, a client and an out-of-range `bound` answer `None` (`false` for a sound).
 Outside a write, a `LevelRef` plays level events, and their global form for every player on the server
 ([Playing level events](../how-to/world/level-events.md)).
 `set_block(pos, state, flags)` is `Level.setBlock` on a whole state, as `LevelRef::set_block` takes it: it

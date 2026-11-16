@@ -223,7 +223,7 @@ fn hit_attempts_reach_the_listener_once_including_refusals() {
             let rules = game.world.health_rules;
             let outcome = player
                 .hurt_blocking(
-                    damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push),
+                    damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push, None),
                     &game.motion.health,
                     rules,
                     id,
@@ -245,7 +245,7 @@ fn hit_attempts_reach_the_listener_once_including_refusals() {
             player
                 .food_tick(
                     &game.loop_context,
-                    damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push),
+                    damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push, None),
                     &game.motion.health,
                     rules,
                 )
@@ -321,13 +321,13 @@ fn hit_attempts_reach_the_listener_once_including_refusals() {
             let kind = game.res.mob_types().get("minecraft:pig").unwrap().clone();
             let mut pig = Mob::new(42, kind, Vec3::ZERO, 0.0);
             assert!(pig.damage(
-                damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push),
+                damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push, None),
                 2.0,
                 Damage::of(DamageKind::Generic)
             ));
             check(&[false], "accepted mob");
             assert!(!pig.damage(
-                damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push),
+                damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push, None),
                 1.0,
                 Damage::of(DamageKind::Generic)
             ));
@@ -336,14 +336,14 @@ fn hit_attempts_reach_the_listener_once_including_refusals() {
             let mut resistant = Mob::new(46, kind, Vec3::ZERO, 0.0);
             resistant.add_effect("minecraft:fire_resistance", -1, 0);
             assert!(!resistant.damage(
-                damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push),
+                damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push, None),
                 2.0,
                 Damage::of(DamageKind::InFire)
             ));
             check(&[false], "fire-resistant mob");
             pig.health = 0.0;
             assert!(!pig.damage(
-                damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push),
+                damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push, None),
                 2.0,
                 Damage::of(DamageKind::Generic)
             ));
@@ -353,7 +353,7 @@ fn hit_attempts_reach_the_listener_once_including_refusals() {
             let mut ghast = Mob::new(43, kind, Vec3::ZERO, 0.0);
             ghast.invulnerable_flag = true;
             assert!(!ghast.damage(
-                damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push),
+                damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push, None),
                 2.0,
                 Damage::of(DamageKind::Generic)
             ));
@@ -362,7 +362,7 @@ fn hit_attempts_reach_the_listener_once_including_refusals() {
             let mut fireball = Damage::of(DamageKind::Fireball);
             fireball.attacker = Some(Who::Player);
             assert!(ghast.damage(
-                damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push),
+                damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push, None),
                 2.0,
                 fireball
             ));
@@ -377,7 +377,7 @@ fn hit_attempts_reach_the_listener_once_including_refusals() {
             let mut warden = Mob::new(44, kind, Vec3::ZERO, 0.0);
             warden.extra.counter = 2; // Existing warden pose encoding: digging.
             assert!(!warden.damage(
-                damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push),
+                damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push, None),
                 2.0,
                 Damage::of(DamageKind::Generic)
             ));
@@ -394,7 +394,7 @@ fn hit_attempts_reach_the_listener_once_including_refusals() {
             let mut blast = Damage::of(DamageKind::Explosion);
             blast.attacker_species = Some(sunrise_client::mobs::Species::Wither);
             assert!(!wither.damage(
-                damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push),
+                damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push, None),
                 2.0,
                 blast
             ));
@@ -410,7 +410,7 @@ fn hit_attempts_reach_the_listener_once_including_refusals() {
             let mut cube = Mob::new(45, kind, Vec3::ZERO, 0.0);
             cube.extra.set_body(Some("minecraft:dirt".into()));
             assert!(cube.damage(
-                damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push),
+                damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push, None),
                 2.0,
                 Damage::of(DamageKind::FallingBlock)
             ));

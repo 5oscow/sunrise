@@ -77,7 +77,12 @@ impl Game<'_> {
             .find(|mob| mob.id == id)
             .is_some_and(|mob| {
                 mob.damage_projectile(
-                    crate::game::entity::damage_level_of!(self, self.combat.attack(), &mut credit),
+                    crate::game::entity::damage_level_of!(
+                        self,
+                        self.combat.attack(),
+                        &mut credit,
+                        None
+                    ),
                     amount,
                     source,
                     aim,

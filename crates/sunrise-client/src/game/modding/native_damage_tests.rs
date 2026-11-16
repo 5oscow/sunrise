@@ -5,7 +5,7 @@ use super::dragon::{Dragon, SPECIAL};
 use super::entity::damage_level_of;
 use super::native_entity_refs::tests::{bind_local_player, with_game};
 use mod_api::{
-    self, Hooks, HurtSource, LevelRandomHost, LivingDamagePostEvent, LivingDamagePreEvent,
+    self, HitHost, Hooks, HurtSource, LivingDamagePostEvent, LivingDamagePreEvent,
     LivingIncomingDamageEvent, LivingShieldBlockEvent, Reduction,
 };
 use std::sync::{Arc, Mutex};
@@ -56,7 +56,7 @@ struct Probe(Arc<Mutex<Heard>>);
 impl Hooks for Probe {
     fn living_incoming_damage(
         &self,
-        _: &mut dyn LevelRandomHost,
+        _: &mut dyn HitHost,
         event: &mut LivingIncomingDamageEvent<'_>,
     ) -> mod_api::Flow {
         self.0
@@ -80,21 +80,13 @@ impl Hooks for Probe {
         }
         mod_api::Flow::Continue
     }
-    fn living_shield_block(
-        &self,
-        _: &mut dyn LevelRandomHost,
-        event: &mut LivingShieldBlockEvent<'_>,
-    ) {
+    fn living_shield_block(&self, _: &mut dyn HitHost, event: &mut LivingShieldBlockEvent<'_>) {
         if event.entity == 227002 {
             event.block.blocked = true;
             event.block.blocked_damage = event.damage;
         }
     }
-    fn living_damage_pre(
-        &self,
-        level: &mut dyn LevelRandomHost,
-        event: &mut LivingDamagePreEvent<'_>,
-    ) {
+    fn living_damage_pre(&self, level: &mut dyn HitHost, event: &mut LivingDamagePreEvent<'_>) {
         let container = &mut *event.container;
         if matches!(event.entity, 225003 | 225008) {
             container.set_new_damage(2.0);
@@ -112,11 +104,7 @@ impl Hooks for Probe {
         log.pre.push(heard);
         log.source("pre", event.entity, event.source);
     }
-    fn living_damage_post(
-        &self,
-        _: &mut dyn LevelRandomHost,
-        event: &mut LivingDamagePostEvent<'_>,
-    ) {
+    fn living_damage_post(&self, _: &mut dyn HitHost, event: &mut LivingDamagePostEvent<'_>) {
         let heard = (event.entity, event.container.health_damage());
         let mut log = self.0.lock().unwrap();
         log.post.push(heard);
@@ -155,7 +143,7 @@ fn the_original_damage_is_the_hit_before_the_incoming_hook() {
     let heard = heard(|game| {
         let mut pig = mob(game, 225001, "minecraft:pig");
         assert!(pig.damage(
-            damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push),
+            damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push, None),
             10.0,
             Damage::of(DamageKind::Generic)
         ));
@@ -171,7 +159,7 @@ fn pre_sets_the_health_lost_and_the_last_hurt_the_cooldown_compares() {
     let heard = heard(|game| {
         let mut pig = mob(game, 225003, "minecraft:pig");
         assert!(pig.damage(
-            damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push),
+            damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push, None),
             6.0,
             Damage::of(DamageKind::Generic)
         ));
@@ -191,7 +179,7 @@ fn pre_fires_for_a_hit_its_reductions_took_to_zero() {
         // Witch.getDamageAfterMagicAbsorb: none from its own doing.
         let own = Damage::mob(225008, [2.0, 0.0, 2.0]);
         assert!(witch.damage(
-            damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push),
+            damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push, None),
             6.0,
             own
         ));
@@ -208,7 +196,7 @@ fn pre_draws_from_the_level_random_of_the_hit() {
         expected.next_int();
         let mut pig = mob(game, 225010, "minecraft:pig");
         assert!(pig.damage(
-            damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push),
+            damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push, None),
             1.0,
             Damage::of(DamageKind::Generic)
         ));
@@ -237,17 +225,17 @@ fn mob_and_dragon_post_records_fresh_hit_decision() {
         let mut pig = mob(game, 225014, "minecraft:pig");
         let source = Damage::of(DamageKind::Generic);
         assert!(pig.damage(
-            damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push),
+            damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push, None),
             2.0,
             source
         ));
         assert!(pig.damage(
-            damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push),
+            damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push, None),
             4.0,
             source
         ));
         assert!(!pig.damage(
-            damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push),
+            damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push, None),
             3.0,
             source
         ));
@@ -324,13 +312,13 @@ fn a_hit_inside_the_cooldown_no_stronger_than_the_last_fires_no_post() {
         let mut pig = mob(game, 225003, "minecraft:pig");
         let source = Damage::of(DamageKind::Generic);
         assert!(pig.damage(
-            damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push),
+            damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push, None),
             4.0,
             source
         ));
         // Inside the cooldown and no stronger than the last hit: refused, no Post.
         assert!(!pig.damage(
-            damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push),
+            damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push, None),
             2.0,
             source
         ));
@@ -344,7 +332,7 @@ fn post_fires_once_for_a_killing_blow_on_a_mob() {
     let heard = heard(|game| {
         let mut pig = mob(game, 225016, "minecraft:pig");
         assert!(pig.damage(
-            damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push),
+            damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push, None),
             100.0,
             Damage::of(DamageKind::Generic)
         ));
@@ -365,11 +353,7 @@ struct DeathProbe(Arc<DeathOrder>);
 
 #[mod_api::__subscriptions]
 impl Hooks for DeathProbe {
-    fn living_damage_post(
-        &self,
-        _: &mut dyn LevelRandomHost,
-        event: &mut LivingDamagePostEvent<'_>,
-    ) {
+    fn living_damage_post(&self, _: &mut dyn HitHost, event: &mut LivingDamagePostEvent<'_>) {
         let entity = i64::from(event.entity);
         self.0.heard.lock().unwrap().push(("post", entity));
     }
@@ -453,7 +437,7 @@ fn the_container_names_what_armor_took() {
         // A mob's attack: armor takes its share, where a generic hit bypasses it.
         let attack = Damage::mob(225012, [2.0, 0.0, 2.0]);
         assert!(zombie.damage(
-            damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push),
+            damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push, None),
             10.0,
             attack
         ));
@@ -720,7 +704,7 @@ fn snapshot_crosses_the_real_damage_hook_with_reductions() {
         let mut container = sunrise_world::living_damage::DamageContainer::new(10.0);
         container.record_reduction(sunrise_world::living_damage::Reduction::Armor, 3.5);
         container.enter_pre(6.5);
-        damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push).damage_pre(
+        damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push, None).damage_pre(
             sunrise_client::health::Hurting::Player(
                 225003,
                 HurtSource {
@@ -748,7 +732,7 @@ fn unsubscribed_damage_does_not_convert() {
         with_game(|game| {
             super::api_values::damage::CONVERSIONS.with(|count| count.set(0));
             let mut container = sunrise_world::living_damage::DamageContainer::new(10.0);
-            damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push).damage_pre(
+            damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push, None).damage_pre(
                 sunrise_client::health::Hurting::Player(
                     225003,
                     HurtSource {

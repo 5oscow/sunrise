@@ -30,7 +30,7 @@ impl Game<'_> {
         source: sunrise_client::health::HurtSource<'_>,
         vanilla: bool,
     ) -> bool {
-        crate::game::entity::damage_level_of!(self, self.combat.attack(), no_push)
+        crate::game::entity::damage_level_of!(self, self.combat.attack(), no_push, None)
             .invulnerability_check(
                 sunrise_client::health::Hurting::Entity(id as i32, kind, source),
                 vanilla,
@@ -470,7 +470,7 @@ mod tests {
     impl mod_api::Hooks for SourceProbe {
         fn living_incoming_damage(
             &self,
-            _: &mut dyn mod_api::LevelRandomHost,
+            _: &mut dyn mod_api::HitHost,
             event: &mut mod_api::LivingIncomingDamageEvent<'_>,
         ) -> mod_api::Flow {
             self.0
@@ -532,7 +532,7 @@ mod tests {
     impl mod_api::Hooks for Probe {
         fn living_incoming_damage(
             &self,
-            _: &mut dyn mod_api::LevelRandomHost,
+            _: &mut dyn mod_api::HitHost,
             event: &mut mod_api::LivingIncomingDamageEvent<'_>,
         ) -> mod_api::Flow {
             self.0.lock().unwrap().push(event.entity as u32);
@@ -846,7 +846,8 @@ mod tests {
                 crate::game::entity::damage_level_of!(
                     game,
                     &sunrise_client::health::NO_ATTACK,
-                    no_push
+                    no_push,
+                    None
                 ),
                 5.0,
                 Damage::of(DamageKind::Generic),
@@ -856,7 +857,8 @@ mod tests {
                 crate::game::entity::damage_level_of!(
                     game,
                     &sunrise_client::health::NO_ATTACK,
-                    no_push
+                    no_push,
+                    None
                 ),
                 100.0,
                 Damage::of(DamageKind::OutOfWorld),
