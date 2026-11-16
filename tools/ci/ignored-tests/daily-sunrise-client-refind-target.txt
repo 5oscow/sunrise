@@ -1,4 +1,8 @@
 # #1502: the game finds its target again after a hook that can change the world (provoking listener, prepared resources)
+sunrise-client game::armor_stand_refind_tests::a_slot_the_listener_filled_spends_the_click lib daily resources
+sunrise-client game::armor_stand_refind_tests::a_stand_the_listener_removed_spends_the_click lib daily resources
+sunrise-client game::boat_refind_tests::a_boat_the_listener_filled_skips_the_mob lib daily resources
+sunrise-client game::boat_refind_tests::a_boat_the_listener_removed_ends_the_contact_pass lib daily resources
 sunrise-client game::cushion_refind_tests::a_cushion_the_listener_removed_does_not_seat_the_player lib daily resources
 sunrise-client game::hanging_refind_tests::a_frame_the_listener_removed_does_not_break lib daily resources
 sunrise-client game::hanging_refind_tests::a_painting_the_listener_removed_is_not_removed_again lib daily resources
