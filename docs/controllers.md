@@ -130,7 +130,7 @@ is held and aimed, saved as `radialMode` and `radialStick` in
   steps, where the stick selects them; the selected sector lights up behind
   its tile. The hub in the middle names the selection; for Perspective, Hide
   HUD and Cinematic Camera it gives the state and what a press turns it to,
-  and for a slot that can't run, why (`Needs cosmetics on`). An empty slot is
+  and for a slot that can't run, why (`This server has no Quick Actions`). An empty slot is
   a pip, one that can't run is dimmed and slashed, and a missing action (an id
   this game doesn't know) says Missing. Along the top, the pages are tabs
   between the bumpers' glyphs, the current one white; on a narrow view they
@@ -178,9 +178,8 @@ is held and aimed, saved as `radialMode` and `radialStick` in
   slot is a faint outline with no caption; only the selected action takes the
   accent.
 - An action that can't run now is drawn dimmed. It can be selected, but its
-  release does nothing: no action, no click. The game decides which: Emote
-  opens the emote wheel only with cosmetics on, Quick Actions only when the
-  server gave a dialog for it, and Social only on a server. Social is the one
+  release does nothing: no action, no click. The game decides which: Quick
+  Actions only when the server gave a dialog for it, and Social only on a server. Social is the one
   exception to doing nothing: in single player its release goes through its key,
   which shows vanilla's "not available" message on the action bar, as
   `Gui.handleKeybinds` does (pressing its key does the same). A Missing action
@@ -240,10 +239,9 @@ id this game doesn't know, which would otherwise replace it. A page of the playe
 `radial_<page>_label` (the player's own text, kept as typed);
 `radial_<page>_kind:hotbar` is read and kept for a hotbar page, which this
 version shows with empty slots. Slot ids are vanilla key mappings by name
-(`key.chat`) and Sunrise's own in its namespace (`sunrise:emote`,
-`sunrise:hotbar_next`, `sunrise:hotbar_previous`); the ids they had before
-(`key.emote`, `pad.hotbarNext`, `pad.hotbarPrevious`) read through an alias
-table. An id this game doesn't know (a newer Sunrise's, a mod's) stays in its
+(`key.chat`) and Sunrise's own in its namespace (`sunrise:hotbar_next`,
+`sunrise:hotbar_previous`); the ids they had before (`pad.hotbarNext`,
+`pad.hotbarPrevious`) read through an alias table. An id this game doesn't know (a newer Sunrise's, a mod's) stays in its
 slot, drawn as Missing and dimmed, and never runs, so a slot can't run a
 command. Fields and kinds it doesn't read stay too. A file can hold up to 16
 pages (`PARSE_MAX`), and the lines of any past them are kept; the menu and the

@@ -17,7 +17,6 @@ winresource = "0.1"
 
 [dependencies]
 sunrise-guest-stack = { path = "../sunrise-guest-stack" }
-sunrise-cosmetics = { path = "../sunrise-cosmetics" }
 sunrise-hooks = { path = "../sunrise-hooks" }
 sunrise-mod-runtime = { path = "../sunrise-mod-runtime" }
 mod_api = { package = "sunrise-mod-vocab", path = "../sunrise-mod-vocab" }
@@ -137,8 +136,7 @@ audio = ["sunrise-client-render/audio", "sunrise-client-lib/audio"]
 # Controllers: gilrs, and the DualSense's own output. Without it only `sunrise-ctl pad`'s virtual pad.
 controllers = ["sunrise-client-lib/controllers", "dep:gilrs", "dep:sunrise-dualsense", "sunrise-client-input/controllers"]
 # Sunrise's own extras over the vanilla game, for a fork that wants them out (docs/forking.md):
-# cosmetics and emotes, the "Sunrise player" presence, the official server added to
-# the server list, the Sunrise Settings and Mods pages and Play with Friends. Players always get
+# the Sunrise Settings and Mods pages and Play with Friends. Players always get
 # them; there is no switch. `grep -rn sunrise-extras crates/` lists
 # every place it gates. Without it (`--no-default-features --features audio,controllers`) the
 # client is best effort: CI builds only the default.

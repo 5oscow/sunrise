@@ -55,7 +55,7 @@ fn buttons((w, h): (f32, f32)) -> [(f32, f32); 6] {
 
 impl Game<'_> {
     /// Opens the editor over the game, from the page (`from_options`) or the key.
-    pub(super) fn open_hud_editor(&mut self, from_options: bool) {
+    pub(in crate::game) fn open_hud_editor(&mut self, from_options: bool) {
         if self.player.is_none() || self.title.is_some() {
             return;
         }
@@ -68,7 +68,7 @@ impl Game<'_> {
         self.screen = Screen::HudEditor;
         self.capture(false);
     }
-    pub(super) fn close_hud_editor(&mut self) {
+    pub(in crate::game) fn close_hud_editor(&mut self) {
         let from_options = self.pvp.editor.take().is_some_and(|e| e.from_options);
         self.settings.save(&Self::options_path());
         if from_options {

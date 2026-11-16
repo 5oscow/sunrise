@@ -8078,8 +8078,8 @@ impl Game<'_> {
                 self.spin_attack_geometry(mob, camera, alpha as f32, packed, out);
                 self.stuck_in_body_geometry(mob, mob.id as i32, camera, alpha as f32, packed, out);
             }
-            // Cosmetics (game/cosmetics.rs), posed on the GPU with the mob's own jobs: culled
-            // with it.
+            // What a hook draws on a player (`Hooks::player_layers`), posed on the GPU with the
+            // mob's own jobs: culled with it.
             if !(layers_only || modded)
                 && sunrise_hooks::engine::any()
                 && (is_player || &*mob.kind.id == "minecraft:mannequin")
