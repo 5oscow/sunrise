@@ -1,6 +1,7 @@
-//! Refusals when a mod places a feature (`LevelRef::place_feature`).
+//! Refusals when a mod places a feature (`LevelRef::place_feature` or `LevelRef::place_placed_feature`).
 
-/// Why [`LevelRef::place_feature`](crate::LevelRef::place_feature) did not run the feature. Every
+/// Why [`LevelRef::place_feature`](crate::LevelRef::place_feature) or
+/// [`LevelRef::place_placed_feature`](crate::LevelRef::place_placed_feature) did not run the feature. Every
 /// refusal is checked before the feature runs and changes nothing; a feature that ran and
 /// reported failure is `Ok(false)`, not a refusal.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -16,7 +17,9 @@ pub enum PlaceFeatureRefusal {
     /// A chunk of the 3x3 around `pos` is not loaded (`PlaceCommand.checkLoaded`), or `pos` is
     /// outside the level's height, or a write there is held by another operation.
     NotLoaded,
-    /// No feature of that id is in `minecraft:worldgen/feature`, or the id has no namespace.
+    /// The id has no namespace or is absent from the called method's registry:
+    /// `minecraft:worldgen/feature` for `place_feature`,
+    /// `minecraft:worldgen/placed_feature` for `place_placed_feature`.
     UnknownFeature,
 }
 

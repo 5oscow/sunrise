@@ -15,8 +15,8 @@ impl Game<'_> {
         self.place_feature_by_id(level, feature, pos, false)
     }
 
-    /// `PlacedFeature.place` of `placed_feature` at `pos` in the level in place: its placement
-    /// modifiers from `pos`, then its feature at each position they give, with no biome check.
+    /// `PlacedFeature.placeWithBiomeCheck` of `placed_feature` at `pos` in the level in place:
+    /// its modifiers from `pos`, checking biome membership, then its feature at each position.
     /// `Ok(false)` when no position remains or every feature invocation reports failure.
     pub(super) fn level_place_placed_feature(
         &mut self,

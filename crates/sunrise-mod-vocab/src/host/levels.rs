@@ -1545,10 +1545,11 @@ pub trait LevelsBackendMut {
     ) -> Result<bool, PlaceFeatureRefusal>;
     /// Side: server.
     /// Place the placed feature `placed_feature` (a `minecraft:worldgen/placed_feature` id,
-    /// `minecraft:oak_checked` or `mymod:ender_tree_checked`) at `pos`, as `PlacedFeature.place`
-    /// does with the level's random and chunk generator: its placement modifiers run in order from
-    /// `pos`, depth first, and its feature is placed at every position they give. There is no
-    /// biome check from code, so a biome filter modifier passes. `Ok(true)` when any feature
+    /// `minecraft:oak_checked` or `mymod:ender_tree_checked`) at `pos`, as
+    /// `PlacedFeature.placeWithBiomeCheck` does with the level's random and chunk generator:
+    /// its placement modifiers run in order from `pos`, depth first, and its feature is placed at
+    /// every position they give. A `minecraft:biome` modifier keeps a position only where that
+    /// position's biome generates this placed feature. `Ok(true)` when any feature
     /// invocation reports success, `Ok(false)` when no positions remain or every invocation
     /// reports failure. Blocks set before a feature reports failure are kept. Refusals are
     /// checked before placement and change nothing, as for `level_place_feature`, with

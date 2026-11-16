@@ -90,9 +90,10 @@ loaded, or `pos` is out of height) and `UnknownFeature` (the id has no namespace
 feature). Each is checked before the feature runs.
 
 `level.place_placed_feature(host, "minecraft:oak_checked", pos)` places a
-`minecraft:worldgen/placed_feature` the way `PlacedFeature.place` does: its placement modifiers
-run in order from `pos`, depth first, and its feature runs at every position they give. There is
-no biome check from code, so a biome filter modifier passes. `Ok(true)` means at least one
+`minecraft:worldgen/placed_feature` the way `PlacedFeature.placeWithBiomeCheck` does: its placement
+modifiers run in order from `pos`, depth first, and its feature runs at every position they give.
+A `minecraft:biome` modifier keeps a position only where that position's biome generates this
+placed feature. `Ok(true)` means at least one
 feature invocation reported success; `Ok(false)` means no positions remained or every invocation
 reported failure. Blocks set before a feature reports failure are kept. Refusals are checked
 before placement and change nothing, as for `place_feature`, with `UnknownFeature` for an id the

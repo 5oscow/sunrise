@@ -261,6 +261,29 @@ impl PlacedFeatureDefinition {
             },
         )
     }
+    /// Place with this feature's identity as the root of biome modifier queries.
+    pub fn place_with_biome_check<W: FeatureWorld + PlacementContext>(
+        &self,
+        world: &mut W,
+        random: &mut impl RandomSource,
+        origin: [i32; 3],
+        blocks: FeatureBlocks,
+        identity: super::feature_sort::FeatureIdentity,
+    ) -> Result<bool, FeatureExecutionError<W::Error>> {
+        let run = Run {
+            blocks,
+            depth: Cell::new(0),
+            remaining: Cell::new(65536),
+        };
+        Ok(FeaturePlacer::new().place_with_biome_check(
+            &self.placement,
+            world,
+            random,
+            origin,
+            identity,
+            |world, random, p| self.feature.place_inner(world, random, p, &run),
+        )?)
+    }
     fn place_in<W: FeatureWorld + PlacementContext>(
         &self,
         placer: &mut FeaturePlacer,

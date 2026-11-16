@@ -338,6 +338,16 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     }
     /// `PlacedFeature.place(level, generator, level.random, pos)`.
     pub(crate) fn place_placed_feature(&mut self, name: &str, pos: BlockPos) -> bool {
+        self.place_placed_feature_inner(name, pos, false)
+    }
+    pub(crate) fn place_placed_feature_with_biome_check(
+        &mut self,
+        name: &str,
+        pos: BlockPos,
+    ) -> bool {
+        self.place_placed_feature_inner(name, pos, true)
+    }
+    fn place_placed_feature_inner(&mut self, name: &str, pos: BlockPos, biome_check: bool) -> bool {
         let b = self.b;
         let Some(features) = b.live_features() else {
             return false;
@@ -349,7 +359,16 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 features: &features,
                 entities: Vec::new(),
             };
-            features.place_placed(name, &mut world, &mut random, [pos.x, pos.y, pos.z])
+            if biome_check {
+                features.place_placed_with_biome_check(
+                    name,
+                    &mut world,
+                    &mut random,
+                    [pos.x, pos.y, pos.z],
+                )
+            } else {
+                features.place_placed(name, &mut world, &mut random, [pos.x, pos.y, pos.z])
+            }
         };
         *self.random() = random;
         placed

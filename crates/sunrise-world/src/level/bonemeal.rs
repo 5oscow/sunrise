@@ -138,9 +138,9 @@ impl Behaviours {
         self.live_features()?.configured(name)?;
         Some(self.sim(level, ticks).place_configured_feature(name, pos))
     }
-    /// `PlacedFeature.place(level, generator, level.random, pos)` for the placed
-    /// feature `name`: its placement modifiers from `pos`, then the feature at
-    /// each position they give, with no biome check. `None` when the placed
+    /// `PlacedFeature.placeWithBiomeCheck(level, generator, level.random, pos)` for the placed
+    /// feature `name`: its modifiers from `pos`, checking biome membership, then the feature at
+    /// each position they give. `None` when the placed
     /// feature is unknown or features are unavailable.
     pub fn place_placed_feature<L: LevelAccess + ?Sized>(
         &self,
@@ -150,7 +150,10 @@ impl Behaviours {
         pos: BlockPos,
     ) -> Option<bool> {
         self.live_features()?.placed(name)?;
-        Some(self.sim(level, ticks).place_placed_feature(name, pos))
+        Some(
+            self.sim(level, ticks)
+                .place_placed_feature_with_biome_check(name, pos),
+        )
     }
     /// `/place feature` with an inline feature value (`json`): decoded by the
     /// feature codec, then placed as `place_feature` places a named one.

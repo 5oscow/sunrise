@@ -1,4 +1,5 @@
 # A feature or placed feature placed by a native mod.
+sunrise-client game::native_place_feature_tests::a_biome_filtered_placed_feature_places_blocks_from_code lib daily resources
 sunrise-client game::native_place_feature_tests::a_placed_feature_id_is_checked_in_its_own_registry lib daily resources
 sunrise-client game::native_place_feature_tests::a_placed_feature_runs_its_modifiers_before_the_feature lib daily resources
 sunrise-client game::native_place_feature_tests::a_tree_is_placed_as_the_command_places_it lib daily resources

@@ -170,6 +170,57 @@ fn a_placed_feature_runs_its_modifiers_before_the_feature() {
     });
 }
 
+/// A biome filter admits birch trees in birch forest, but not in desert.
+#[test]
+#[ignore = "daily"]
+fn a_biome_filtered_placed_feature_places_blocks_from_code() {
+    for (biome, allowed) in [
+        ("minecraft:birch_forest", true),
+        ("minecraft:desert", false),
+    ] {
+        with_game(|game| {
+            ground(game, false);
+            let biome_id = world_biomes!(game)
+                .list
+                .iter()
+                .position(|b| b.name == biome)
+                .unwrap() as u16;
+            for chunk in game.world.chunks.values_mut() {
+                let chunk = Arc::make_mut(chunk);
+                for qy in 0..(chunk.sections.len() as i32 * 4) {
+                    for qx in 0..4 {
+                        for qz in 0..4 {
+                            chunk.set_biome_cell(qx, qy, qz, biome_id);
+                        }
+                    }
+                }
+            }
+            let level = game.level(game.dim.id()).unwrap();
+            assert_eq!(
+                level.place_placed_feature(game, "minecraft:trees_birch", AT),
+                Ok(allowed),
+                "{biome}"
+            );
+            let mut logs = 0;
+            let mut changed = 0;
+            for x in 1600..1632 {
+                for z in 1600..1632 {
+                    for y in 64..90 {
+                        let name = &game.res.facts().get(game.world.block(x, y, z)).name;
+                        logs += usize::from(name.as_ref() == "minecraft:birch_log");
+                        changed += usize::from(name.as_ref() != "minecraft:air");
+                    }
+                }
+            }
+            if allowed {
+                assert!(logs > 0);
+            } else {
+                assert_eq!(changed, 0);
+            }
+        });
+    }
+}
+
 /// A configured feature's id is not a placed feature's, and the other way round.
 #[test]
 #[ignore = "daily"]
