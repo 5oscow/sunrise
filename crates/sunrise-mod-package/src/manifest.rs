@@ -1,4 +1,4 @@
-//! `sunrise-mod.toml`, a mod's manifest, and the `.hmod` file around it.
+//! `sunrise-mod.toml`, a mod's manifest, and the `.smod` file around it.
 //!
 //! Raw injection schema adapted from horizon-mixins (Copyright (c) 2026 levzzz),
 //! MIT licensed; see `HORIZON_MIXINS_LICENSE` and `THIRD_PARTY_NOTICES.md`.
@@ -21,9 +21,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
-/// The manifest's file name in a `.hmod` or a mod folder.
+/// The manifest's file name in a `.smod` or a mod folder.
 pub const MANIFEST: &str = "sunrise-mod.toml";
-/// Executable components are not content and are refused in a `.hmod`.
+/// Executable components are not content and are refused in a `.smod`.
 pub const WASM: &str = "mod.wasm";
 /// The largest uses table ([`USES_FILE`]) a package may carry: what the surface crate reads.
 pub const MAX_USES: u64 = mod_surface::uses::MAX_USES_BYTES as u64;
@@ -770,7 +770,7 @@ impl Package {
         Ok(bytes)
     }
 
-    /// Read a flat `.hmod` or project folder, without executing native code.
+    /// Read a flat `.smod` or project folder, without executing native code.
     pub fn read(path: &Path) -> Result<Self, String> {
         let metadata = std::fs::symlink_metadata(path).map_err(|e| e.to_string())?;
         let mut icon = None;
@@ -1033,7 +1033,7 @@ impl Package {
         }
         Ok(package)
     }
-    /// Whether the mod at `path` (a `.hmod` or a folder) has a [`MANIFEST`].
+    /// Whether the mod at `path` (a `.smod` or a folder) has a [`MANIFEST`].
     pub fn has_manifest(path: &Path) -> bool {
         if path.is_dir() {
             return path.join(MANIFEST).is_file();
@@ -1136,7 +1136,7 @@ impl Package {
         Self::pack_directory_with(root, None)
     }
 
-    /// The bytes of entry `name` in the `.hmod` at `path`, refused past `most` bytes; `None` when
+    /// The bytes of entry `name` in the `.smod` at `path`, refused past `most` bytes; `None` when
     /// it has no such entry.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn entry(path: &Path, name: &str, most: u64) -> Result<Option<Vec<u8>>, String> {
@@ -1175,7 +1175,7 @@ impl Package {
         Self::write_files(&text, &files)
     }
 
-    /// The `.hmod` bytes for `manifest_text` and selected project files.
+    /// The `.smod` bytes for `manifest_text` and selected project files.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn write_files(manifest_text: &str, files: &[(&str, &[u8])]) -> Result<Vec<u8>, String> {
         use std::io::Write;
@@ -1329,7 +1329,7 @@ fn check_folder_file(root: &Path, name: &str) -> Result<(), String> {
     check_file(name, mode, || std::fs::File::open(&path)).map_err(|e| e.to_string())
 }
 
-/// The `.hmod` files and mod folders in `dir`, by name.
+/// The `.smod` files and mod folders in `dir`, by name.
 pub fn find(dir: &Path) -> Vec<PathBuf> {
     let Ok(read) = std::fs::read_dir(dir) else {
         return Vec::new();
@@ -1337,7 +1337,7 @@ pub fn find(dir: &Path) -> Vec<PathBuf> {
     let mut found: Vec<PathBuf> = read
         .flatten()
         .map(|e| e.path())
-        .filter(|p| p.extension().is_some_and(|e| e == "hmod") || p.join(MANIFEST).is_file())
+        .filter(|p| p.extension().is_some_and(|e| e == "smod") || p.join(MANIFEST).is_file())
         .collect();
     found.sort();
     found
@@ -1941,7 +1941,7 @@ issues = \"http://example.org/issues\"
         let dir = root.join("folder");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join(MANIFEST), EXAMPLE).unwrap();
-        let archive = root.join("ruby.hmod");
+        let archive = root.join("ruby.smod");
         std::fs::write(&archive, Package::write_files(EXAMPLE, &[]).unwrap()).unwrap();
         assert_eq!(Package::read(&archive).unwrap().manifest.id, "ruby");
         assert_eq!(Package::read(&dir).unwrap().manifest.id, "ruby");
@@ -2076,7 +2076,7 @@ issues = \"http://example.org/issues\"
         use std::io::Write;
         let root = std::env::temp_dir().join(format!("sunrise-mods-kinds-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
-        let path = root.join("ruby.hmod");
+        let path = root.join("ruby.smod");
         for link in [false, true] {
             let mut zip = zip::ZipWriter::new(std::fs::File::create(&path).unwrap());
             // Made by a Unix tool on every OS: the writer's default on Windows is DOS attributes,

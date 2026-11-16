@@ -1,7 +1,7 @@
 //! Menu-owned destination roles, not recipe ingredient semantics.
 /// Menu-owned roles, never indices into the appended player inventory.
 #[derive(Clone, Debug, PartialEq, Eq, sunrise_mod_api_macros::Wire)]
-// exhaustive: the four destination maps cover the five vanilla displays
+// exhaustive: the four destination maps cover the five vanilla displays, and `Mod` hands the rest to the mod
 pub enum RecipeBookLayout {
     Crafting {
         width: u16,
@@ -24,6 +24,10 @@ pub enum RecipeBookLayout {
         addition: u16,
         result: u16,
     },
+    /// The menu's placement is answered by the mod: the `recipe_book_place` hook of its
+    /// `MenuPart`, with `ServerHost::place_recipe_in_grid` as vanilla's placer. The roles are the
+    /// mod's own, so none is declared or checked here, and the game maps no display to a slot.
+    Mod,
 }
 
 impl RecipeBookLayout {
@@ -78,6 +82,7 @@ impl RecipeBookLayout {
                 addition,
                 result,
             } => vec![*template, *base, *addition, *result],
+            Self::Mod => Vec::new(),
         };
         for slot in roles {
             if screen
@@ -157,6 +162,7 @@ impl RecipeBookLayout {
                 (*addition, "addition"),
                 (*result, "result"),
             ],
+            Self::Mod => Vec::new(),
         };
         let mut seen = [false; 256];
         for (slot, role) in slots {

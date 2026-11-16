@@ -50,7 +50,7 @@ impl Probe {
     fn progress(&self, family: Family, target: bool, host: &mut dyn mod_api::LevelRandomHost) {
         if self.family == family && target && self.armed.load(Ordering::SeqCst) {
             // Seed at the actual callback boundary, independent of earlier vanilla draws.
-            assert!(host.set_random(mod_api::LegacyRandom::new(0x5eed)));
+            assert!(host.set_random(mod_api::LegacyRandomSource::new(0x5eed)));
             let mut expected = LegacyRandom::new(0x5eed);
             assert_eq!(
                 host.with_random(|random| random.next_long()),
@@ -202,7 +202,7 @@ impl mod_api::Hooks for Hooks {
     }
     fn living_incoming_damage(
         &self,
-        host: &mut dyn mod_api::LevelRandomHost,
+        host: &mut dyn mod_api::HitHost,
         event: &mut mod_api::LivingIncomingDamageEvent<'_>,
     ) -> mod_api::Flow {
         if event.kind == "minecraft:player" {
@@ -213,7 +213,7 @@ impl mod_api::Hooks for Hooks {
     }
     fn living_shield_block(
         &self,
-        host: &mut dyn mod_api::LevelRandomHost,
+        host: &mut dyn mod_api::HitHost,
         event: &mut mod_api::LivingShieldBlockEvent<'_>,
     ) {
         self.0.progress(Family::Shield, event.entity == 72, host);
@@ -234,7 +234,7 @@ impl mod_api::Hooks for Hooks {
     }
     fn living_use_totem(
         &self,
-        host: &mut dyn mod_api::LevelRandomHost,
+        host: &mut dyn mod_api::HitHost,
         event: &mut mod_api::LivingUseTotemEvent<'_>,
     ) -> mod_api::Flow {
         self.0.progress(Family::Totem, event.entity == 72, host);
@@ -496,9 +496,11 @@ fn run_output(family: Family, output: Output) {
                         0.0
                     };
                     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        sunrise_client::block_contact::in_level(Some(game.dim.id()), || {
-                            game.tick_creature_entities()
-                        })
+                        sunrise_client::block_contact::in_level(
+                            sunrise_client::parallel::TickThread::mint(),
+                            Some(game.dim.id()),
+                            || game.tick_creature_entities(),
+                        )
                     }));
                     assert_eq!(
                         probe.calls.load(Ordering::SeqCst),

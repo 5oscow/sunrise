@@ -376,9 +376,7 @@ impl MobWorld<'_> {
             // Scaffolding, liquids (a strider stands on lava) and powder snow
             // take the entity's context; every other state has its cached shape.
             let is_contextual = context.is_some() && self.collision.has_context_rule(state);
-            if !is_contextual
-                && let Ok(Some(shape)) = self.collision.cached_shapes().cached_shape(state)
-            {
+            if !is_contextual && let Ok(Some(shape)) = self.collision.static_shape(state) {
                 return shape.clip(from, to, p).map(|_| ());
             }
             let shape = match &context {
@@ -412,10 +410,17 @@ impl MobWorld<'_> {
                 [0.0; 3]
             };
             let o = Vec3::new(o[0], o[1], o[2]);
-            let declared = self
-                .collision
-                .cached_shapes()
-                .context_outline_shape(state, EntityContextKind::Living);
+            let declared = sunrise_client::collisions::published_outline(
+                self.world,
+                self.collision,
+                state,
+                [p.x, p.y, p.z],
+            )
+            .or_else(|| {
+                self.collision
+                    .cached_shapes()
+                    .context_outline_shape(state, EntityContextKind::Living)
+            });
             let hit = match declared {
                 Some(shape) => {
                     VoxelShape::clip_boxes(shape.boxes().iter().map(|b| b.move_by(o)), from, to, p)
@@ -470,7 +475,7 @@ impl MobWorld<'_> {
             if !self.collision.may_collide(state) {
                 return None;
             }
-            if let Ok(Some(shape)) = self.collision.cached_shapes().cached_shape(state) {
+            if let Ok(Some(shape)) = self.collision.static_shape(state) {
                 return shape.clip(from, to, p).map(|hit| hit.location);
             }
             let shape = self
@@ -498,7 +503,7 @@ impl MobWorld<'_> {
             if !self.collision.may_collide(state) {
                 return None;
             }
-            if let Ok(Some(shape)) = self.collision.cached_shapes().cached_shape(state) {
+            if let Ok(Some(shape)) = self.collision.static_shape(state) {
                 return shape.clip(from, to, p).map(|_| [p.x, p.y, p.z]);
             }
             let shape = self
@@ -534,7 +539,7 @@ impl MobWorld<'_> {
     /// top slab and upside-down stairs do, and as a 14/16 snow layer does not.
     pub fn top_face_full(&self, p: [i32; 3]) -> bool {
         let state = self.world.block(p[0], p[1], p[2]);
-        if self.facts.get(state).full_collision {
+        if self.facts.get(state).full_collision && !self.collision.publishes_shapes(state) {
             return true;
         }
         let mut scene = SceneCollisions {
@@ -708,14 +713,13 @@ impl MobWorld<'_> {
             .or_else(|| self.passenger_objects.iter().find(|s| s.id == id))
     }
     pub fn seen(&self, id: u32) -> Option<&Seen> {
-        let own = match self.others_index {
+        match self.others_index {
             Some(index) => index
                 .get(&id)
                 .and_then(|&i| self.others.get(i as usize))
                 .filter(|s| s.id == id),
             None => self.others.iter().find(|s| s.id == id),
-        };
-        own.or_else(|| self.foreign?.seen(id))
+        }
     }
     /// Living mobs of the given species within `range` of `from`, nearest first.
     pub fn nearby<'s>(
@@ -785,7 +789,7 @@ pub fn visual_clip<W: DynamicCollisionWorld>(
                 .clip(from, to)
                 .map(|_| [p.x, p.y, p.z]);
         }
-        if let Ok(Some(shape)) = collision.cached_shapes().cached_shape(id) {
+        if let Ok(Some(shape)) = collision.static_shape(id) {
             return shape.clip(from, to, p).map(|_| [p.x, p.y, p.z]);
         }
         let shape = collision.collision_shape(scene, id, [p.x, p.y, p.z]).ok()?;
@@ -970,7 +974,6 @@ fn run_test_world(
         dragon: None,
         leash_boats: &[],
         who_lookup: None,
-        foreign: None,
         others_grid: None,
         others_index: None,
         passenger_objects: &[],

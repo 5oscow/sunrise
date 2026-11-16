@@ -497,7 +497,7 @@
   "sunrise.mods.browse.title": "Mag-browse ng mga Mod",
   "sunrise.mods.browse.update": "I-update",
   "sunrise.mods.dev": " (Dev)",
-  "sunrise.mods.empty": "Walang mods: ilagay ang mga .hmod file sa sunrise-mods folder",
+  "sunrise.mods.empty": "Walang mods: ilagay ang mga .smod file sa sunrise-mods folder",
   "sunrise.mods.in_world": " (iwanan ang mundo upang magbago)",
   "sunrise.mods.not_built": " (Hindi binuo)",
   "sunrise.mods.open_folder": "Buksan ang Mod Folder",

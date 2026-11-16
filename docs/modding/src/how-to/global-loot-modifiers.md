@@ -97,7 +97,7 @@ position; subsequent modifiers still observe the original signed count.
 
 `context.snapshot()` reads the current facts and the set-once queried root table id. Missing facts
 stay missing. Its legacy `seed` field is zero: obtaining a snapshot does not draw a new seed.
-`context.random()` borrows the actual selected roll source through `StructureRandom`, the existing
+`context.random()` borrows the actual selected roll source through `RandomSource`, the existing
 shared draw capability; do not create a separate seeded generator. `context.roll_raw(&table_id)`
 rolls into an appendable list using the same parameters, selected random, visited-table guards and
 data generation. It runs neither the modifier pass nor another stack splitter. A missing table
@@ -106,3 +106,20 @@ returns an error naming it; a visited table terminates with an empty list.
 The server's root pass is after table functions and stack splitting, before caller consumption and
 container shuffle. Nested tables and raw sub-rolls do not run it. `loot_drops` and
 `container_loot_filled` are separate later moments, not aliases for global loot modifiers.
+
+## What a snapshot holds per caller
+
+Each caller supplies vanilla's parameters for its roll, and only those; the rest stay missing.
+`entity` is `THIS_ENTITY`, `tool` is `TOOL`, and `place.origin` is `ORIGIN`.
+
+| Roll | `entity` | `tool` | `place.origin` | `luck` |
+| --- | --- | --- | --- | --- |
+| Piglin barter | the piglin | none | none | 0 |
+| Advancement reward | the rewarded player | none | the player's position | 0 |
+| Fishing | the fishing hook; its owner is the `attacker` entity target of conditions | the rod | the hook's position | the hook's and the owner's luck |
+| Brushing | the brusher | the brush | the block's centre | the brusher's luck |
+| Vault reward | the player | the inserted key | the vault's centre | the player's luck |
+| Vault display item | none | none | the vault's centre | 0 |
+| A mod's roll call | the entity it named, if any | the tool it gave | the origin it gave | 0 |
+
+The fishing owner is not a damage source: `damage` stays missing, and only a condition's `attacker` target reaches the owner. `place.level` is present on all of them. A player's entity carries their worn and held items.

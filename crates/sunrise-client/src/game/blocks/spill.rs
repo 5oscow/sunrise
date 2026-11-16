@@ -1073,6 +1073,7 @@ impl GameLevel<'_> {
                     &mut self.world.random,
                     self.rand_sequences,
                     self.seed,
+                    sunrise_world::loot::ContainerLootContext::default(),
                 );
                 let mut items = vec![None; slots];
                 items[0] = tag

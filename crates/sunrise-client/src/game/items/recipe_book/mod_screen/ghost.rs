@@ -24,7 +24,8 @@ impl Game<'_> {
                 })
             })
             .collect();
-        let calls = screen::ghost(self.swap_index(), 0, 0, false, &ghosts);
+        let big_result = self.native_screen_big_result();
+        let calls = screen::ghost(self.swap_index(), 0, 0, big_result, &ghosts);
         self.paint_book(batch, &calls);
     }
 }

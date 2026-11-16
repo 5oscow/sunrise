@@ -6,7 +6,7 @@ Environment, all required:
   BENCH_BINARY_HEAD   the Sunrise commit that executable was built from
   BENCH_SAMPLE        the machine sample's source folder
   BENCH_SAMPLE_HEAD   the sample's commit
-  BENCH_PACKAGE       the sample's wasm package (.hmod)
+  BENCH_PACKAGE       the sample's wasm package (.smod)
   BENCH_STD           the matching sunrise-wasm-std.wasm
 Optional: BENCH_WORLD_OUTPUT, where results are written (default /box/shared/wasm-bench).
 """
@@ -49,7 +49,7 @@ def run(mode, count):
     (home/'server.properties').write_text('online-mode=false\nserver-ip=127.0.0.1\nserver-port=25578\nlevel-seed=1\nlevel-type=minecraft:flat\ngenerator-settings={"biome":"minecraft:plains","layers":[{"block":"minecraft:bedrock","height":1},{"block":"minecraft:dirt","height":2},{"block":"minecraft:grass_block","height":1}]}\nview-distance=3\nsimulation-distance=3\nspawn-protection=0\npause-when-empty-seconds=-1\n')
     if mode.startswith('wasm'):
         mods = home / 'sunrise-mods'; mods.mkdir()
-        shutil.copy(PACKAGE, mods/'machine_sample.hmod')
+        shutil.copy(PACKAGE, mods/'machine_sample.smod')
         (home/'sunrise-mods.txt').write_text('mod.machine_sample:true\n')
     log = open(home/'benchmark.log', 'w')
     args = [str(BIN), '--resources', '/box/shared/vanilla/sunrise-client/26.3']

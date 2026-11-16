@@ -4,6 +4,7 @@ fn main() {
     let out_dir = std::path::PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
     sunrise_mod_api_gen::generate(&root, &out_dir, sunrise_mod_api_gen::Target::Vocab)
         .expect("generating the mod API");
+    println!("cargo::metadata=out_dir={}", out_dir.display());
     // Test input follows this build's generated enum, not a checked-in hook list.
     let generated = std::fs::read_to_string(out_dir.join("mod_api_generated.rs"))
         .expect("reading generated hook identifiers");

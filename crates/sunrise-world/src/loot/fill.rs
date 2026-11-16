@@ -31,15 +31,27 @@ impl LootData {
         slots: usize,
         biome: Option<&str>,
     ) -> Vec<Option<LootStack>> {
-        let mut out = vec![None; slots];
-        if let Some(items) = self.roll_container_with(
+        self.fill_in(
             table,
             random,
+            slots,
             ContainerLootContext {
                 biome,
                 ..Default::default()
             },
-        ) {
+        )
+    }
+    /// [`Self::fill_with`] with the parameters the filling caller supplies
+    /// (`THIS_ENTITY`, luck, biome).
+    pub fn fill_in<R: RandomSource + Clone>(
+        &self,
+        table: &str,
+        random: &mut R,
+        slots: usize,
+        context: ContainerLootContext<'_>,
+    ) -> Vec<Option<LootStack>> {
+        let mut out = vec![None; slots];
+        if let Some(items) = self.roll_container_with(table, random, context) {
             self.place_container_loot(items, &mut out, (0..slots).collect(), random);
         }
         out

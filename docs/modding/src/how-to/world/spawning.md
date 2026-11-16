@@ -27,6 +27,26 @@ The placement type is `SpawnPlacements.isSpawnPositionOk`'s first check, and the
 
 `mob_spawn_placement_check` is the separate per-check moment: it runs after the rule and is told its answer as `default_result`, so you can override it for one position.
 
+## Saved display and utility entities
+
+`entity_join_level` (hook version 3) additionally notifies for live fallback-store
+entities: block, item and text displays, markers, interactions, and summoned or
+chunk-restored eyes of ender and explicit leash knots. Gameplay-thrown eyes and
+naturally tied leash knots live in separate lists and do not notify yet. Saved data
+kept for a missing mod is not a live entity and does not notify. A fresh fallback
+entity notifies once with `loaded_from_disk = false`; restoring it from a saved chunk
+notifies once with `loaded_from_disk = true`. The normal join cancellation and
+transaction rules apply to these entities too.
+
+`entity_leave_level` (hook version 3) reports the same additional kinds when they leave.
+On the server, `level.entities_in(host, min, max)` additionally returns readable `EntityRef`
+handles for block, item and text displays, markers and interactions. Eyes of ender,
+leash knots and other unmodeled kinds are not returned yet. The returned entities'
+kind, position, saved data and tags can be inspected without command selectors. The query uses physical boxes, not rendering/culling boxes:
+displays and markers have zero-sized boxes at their positions; interactions use their
+saved width and height. Face-only contact does not intersect. A handle expires when its
+entity unloads, so find it again when the saved entity rejoins.
+
 ## Walking every entity in a level
 
 `host.level_all_entities(level)` returns the authoritative level's available
@@ -136,7 +156,7 @@ read it, change it, set it or clear it, and finalization reads what is left. Eac
 Chunk generation shares group data inside the generator, outside this hook. A group you set affects
 only this mob's finalization.
 
-See [the `finalize_spawn` contract](https://github.com/arismoko/horizon/blob/main/crates/horizon-mod-vocab/src/hooks/finalize_spawn.rs) for the spawn sites that fire the hook.
+See [the `finalize_spawn` contract](https://github.com/sunrise-org/sunrise/blob/main/crates/sunrise-mod-vocab/src/hooks/finalize_spawn.rs) for the spawn sites that fire the hook.
 
 ## Changing how large a spawn group grows
 
@@ -163,7 +183,7 @@ Only natural spawning's packs ask it: vanilla has no group limit anywhere else. 
 
 ## Keeping or removing a mob
 
-`mob_despawn` fires once per tick for every mob in a loaded chunk, just before vanilla's `Mob.checkDespawn`, persistent mobs and mobs in peaceful mode included. `Allow` discards the mob, `Deny` keeps it, `Default` leaves vanilla's rules to decide. An answer other than `Default` skips all of vanilla's checks, so a `Deny` keeps a hostile mob in peaceful mode and neither answer takes the idle-despawn `nextInt(800)` draw.
+`mob_despawn` fires once per tick for every mob whose chunk is entity-ticking, just before vanilla's `Mob.checkDespawn`, persistent mobs and mobs in peaceful mode included. Player tickets make chunks entity-ticking across the whole view distance, so a mob beyond the simulation distance is still checked, though it isn't ticked. A mob in a loaded chunk that is not entity-ticking is neither checked nor told. `Allow` discards the mob, `Deny` keeps it, `Default` leaves vanilla's rules to decide. An answer other than `Default` skips all of vanilla's checks, so a `Deny` keeps a hostile mob in peaceful mode and neither answer takes the idle-despawn `nextInt(800)` draw.
 
 ```rust,ignore
 fn mob_despawn(&self, _: &dyn mod_api::Host, event: &mut mod_api::MobDespawnEvent<'_>) {
@@ -197,7 +217,7 @@ fn custom_spawner_tick(&self, host: &mut dyn mod_api::ServerHost, event: &mut mo
 }
 ```
 
-Every mod is asked about every key, so a mod ignores keys it does not own. See [the custom spawner contracts](https://github.com/arismoko/horizon/blob/main/crates/horizon-mod-vocab/src/hooks/custom_spawners.rs).
+Every mod is asked about every key, so a mod ignores keys it does not own. See [the custom spawner contracts](https://github.com/sunrise-org/sunrise/blob/main/crates/sunrise-mod-vocab/src/hooks/custom_spawners.rs).
 
 ## Spawning from a level
 

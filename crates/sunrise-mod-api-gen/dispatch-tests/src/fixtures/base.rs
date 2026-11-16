@@ -450,7 +450,7 @@ fn incoming_damage_carries_the_attack_data() {
     impl Hooks for Backstab {
         fn living_incoming_damage(
             &self,
-            _: &mut dyn LevelRandomHost,
+            _: &mut dyn HitHost,
             event: &mut LivingIncomingDamageEvent<'_>,
         ) -> Flow {
             assert_eq!(event.source.damage_type, "minecraft:player_attack");

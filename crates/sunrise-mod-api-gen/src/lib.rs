@@ -473,7 +473,7 @@ const PART_DOCS: &str = "/// A block's part: code attached through [`Registrar`]
 
 /// The doc of [`EntityPart`], the goal- and behavior-registering part trait (#1077, #824),
 /// which the general entity tick moment (#792) also scopes hooks to.
-const ENTITY_PART_DOCS: &str = "/// An entity type's part (arismoko/horizon#1077): code attached through\n/// `RegistrationContext::entity_part` to one entity type, a mod's own or vanilla's\n/// (`minecraft:zombie`). Its `register_goals` runs at every `Mob` construction of that\n/// type, spawned or loaded, right after the species' own goals — vanilla's `registerGoals`\n/// moment — and the goals it adds join the mob's two selectors beside vanilla's, same\n/// priorities and interruption. Its `register_behaviors` runs wherever a brain-driven\n/// species' brain is built (#824). Its `spawn_cluster_size` answers how large a spawn group of the\n/// type may grow. Its `general_entity_tick` runs for one general entity row's authoritative\n/// tick (#792). Annotate each part trait implementation with\n/// [`sunrise_part`] to derive its subscriptions; the goal, behavior and spawn-size methods\n/// are not hooks, so they subscribe nothing whatever they override. The part crosses to\n/// wasm mods with its `general_entity_tick` (#792's stage 4b); every other method's doc says\n/// whether it crosses.\n";
+const ENTITY_PART_DOCS: &str = "/// An entity type's part: code attached through\n/// `RegistrationContext::entity_part` to one entity type, a mod's own or vanilla's\n/// (`minecraft:zombie`). Its `register_goals` runs at every `Mob` construction of that\n/// type, spawned or loaded, right after the species' own goals — vanilla's `registerGoals`\n/// moment — and the goals it adds join the mob's two selectors beside vanilla's, same\n/// priorities and interruption. Its `register_behaviors` runs wherever a brain-driven\n/// species' brain is built (#824). Its `spawn_cluster_size` answers how large a spawn group of the\n/// type may grow. Its `general_entity_tick` runs for one general entity row's authoritative\n/// tick (#792). Annotate each part trait implementation with\n/// [`sunrise_part`] to derive its subscriptions; the goal, behavior and spawn-size methods\n/// are not hooks, so they subscribe nothing whatever they override. The part crosses to\n/// wasm mods with its `general_entity_tick` (#792's stage 4b); every other method's doc says\n/// whether it crosses.\n";
 
 /// The crate whose generated sources are being built.
 #[derive(Clone, Copy)]
@@ -671,7 +671,8 @@ pub(crate) mod source;
 pub mod staging;
 pub mod surface;
 pub use build::{
-    generate, generate_engine_points, generate_points, generate_render, write_if_changed,
+    GUEST_OUTPUT, generate, generate_api_parts, generate_engine_points, generate_points,
+    generate_render, write_if_changed,
 };
 pub use counterparts::generate as generate_counterparts;
 pub use notes::generate as generate_hook_notes;
@@ -858,6 +859,34 @@ mod tests {
             param("&mut dyn LevelRandomHost", "self")
         );
         super::host_param::validate(&hit, "test", true, Some(true), false).unwrap();
+        // The hit capability: a server hit with a `&mut self` receiver only.
+        let capable = Hook {
+            host: Some(HostAccess::Hit),
+            ..hit.clone()
+        };
+        assert!(super::host_param::is_level(&capable));
+        assert_eq!(
+            host_param(&capable, Some(true), false),
+            param("&mut dyn HitHost", "self")
+        );
+        super::host_param::validate(&capable, "test", true, Some(true), false).unwrap();
+        for (hook, mutable, ticks) in [
+            (capable.clone(), Some(false), false),
+            (capable.clone(), Some(true), true),
+            (
+                Hook {
+                    side: Side::Both,
+                    ..capable.clone()
+                },
+                Some(false),
+                false,
+            ),
+        ] {
+            assert_eq!(
+                super::host_param::validate(&hook, "test", true, mutable, ticks).unwrap_err(),
+                "test: this entry takes no host marker"
+            );
+        }
         // On both sides a hit's level reads, and its host says which side it is.
         let hit_both = Hook {
             side: Side::Both,

@@ -55,7 +55,9 @@ jobs:
   # daily run (then this one stops). A hand dispatch never stops here: it is how a failed run is retried.
   resolve:
     if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    # Every leg waits for this job: on Dyna's small runner while the repository's switch is on, as dyna-checks'
+    # `changes`, so the run never queues behind GitHub's runners first (31 minutes on 2026-11-16).
+    runs-on: ${{ vars.DYNA_CI_SELF_HOSTED == 'true' && 'dyna-small' || 'ubuntu-latest' }}
     timeout-minutes: 5
     permissions:
       contents: read
@@ -164,7 +166,8 @@ jobs:
     # The resolved commit names the job: what a scheduled run's lookup (daily_summary.py --seen) matches.
     name: summary ${{ needs.resolve.outputs.commit }}${{ needs.resolve.outputs.dry_run == 'true' && ' (dry run)' || '' }}
     needs: [resolve, shards, wasm-mods, fn-replace-check, linkage, windows-runtime-leases, machine-sample, sdk]
-    if: always() && needs.resolve.result == 'success' && needs.resolve.outputs.skip == 'false'
+    # Not on a cancelled run: its legs did not fail, they were stopped, and a stopped leg says nothing about the commit.
+    if: ${{ !cancelled() && needs.resolve.result == 'success' && needs.resolve.outputs.skip == 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -215,7 +218,7 @@ jobs:
   # closes it. The summary ran before the publish, so it cannot see it.
   sdk-publish-report:
     needs: [resolve, summary, sdk-publish]
-    if: always() && needs.summary.outputs.sdk_green == 'true' && needs.resolve.outputs.dry_run == 'false' && contains(fromJSON('["success", "failure", "cancelled"]'), needs.sdk-publish.result)
+    if: ${{ !cancelled() && needs.summary.outputs.sdk_green == 'true' && needs.resolve.outputs.dry_run == 'false' && contains(fromJSON('["success", "failure", "cancelled"]'), needs.sdk-publish.result) }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

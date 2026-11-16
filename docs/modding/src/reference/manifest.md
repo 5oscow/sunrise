@@ -1,6 +1,6 @@
 # The manifest and the package
 
-A `.hmod` is one mod: content, native code, or both. `sunrise_mod_package::Package` reads the shared manifest and
+A `.smod` is one mod: content, native code, or both. `sunrise_mod_package::Package` reads the shared manifest and
 validates the package; `sunrise_mod_package::Content` reads its resources, and `sunrise_mod_package::index::native::Bundle`
 reads its code.
 
@@ -15,7 +15,7 @@ reads its code.
 ## Project and archive layout
 
 ```text
-my_mod.hmod
+my_mod.smod
 ├── sunrise-mod.toml
 ├── icon.png                # optional
 ├── assets/my_mod/

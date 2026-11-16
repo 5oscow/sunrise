@@ -497,7 +497,7 @@
   "sunrise.mods.browse.title": "Modlara Göz At",
   "sunrise.mods.browse.update": "Güncelle",
   "sunrise.mods.dev": " (Geliştirici)",
-  "sunrise.mods.empty": "Henüz mod yok. .hmod dosyalarını sunrise-mods klasörüne yerleştirin.",
+  "sunrise.mods.empty": "Henüz mod yok. .smod dosyalarını sunrise-mods klasörüne yerleştirin.",
   "sunrise.mods.in_world": " (değiştirmek için dünyadan çıkın)",
   "sunrise.mods.not_built": " (Derlenmedi)",
   "sunrise.mods.open_folder": "Mod Klasörünü Aç",

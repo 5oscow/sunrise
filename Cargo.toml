@@ -143,6 +143,12 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.proc-macro2]
 opt-level = 3
+# The parity runner builds at opt-level 3 (CARGO_PROFILE_DEV_OPT_LEVEL, tools/parity.py), and harnesses that run
+# `cargo test -p sunrise-client --lib` compiled its lib test there in one rustc of 15.2 GiB, whatever the job count,
+# which a 16 GiB parity runner killed (signal 9, mount_control, 2026-11-16). At opt-level 0, the test profile's own
+# level and verify's, it takes 12.0 GiB and 124 s instead of 378 s; its dependencies stay at the runner's level.
+[profile.test.package.sunrise-client]
+opt-level = 0
 [profile.release.package.sunrise-mod-api-gen]
 opt-level = 3
 [profile.release.package.syn]

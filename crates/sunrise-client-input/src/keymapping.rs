@@ -455,6 +455,18 @@ mod tests {
         ]);
         keys
     }
+    /// #1646: a mapping bound to a mouse button past the fifth hears it.
+    #[test]
+    fn a_mapping_on_the_sixth_mouse_button_hears_it() {
+        let mut keys = ModKeys::default();
+        keys.bind([binding("dash", "key.mouse.6", 0, MappingContext::Universal)]);
+        let sixth = winit::event::MouseButton::Other(5);
+        keys.button(sixth, KeyAction::Press, false, 0);
+        assert!(keys.is_down("m", "dash", 0, false));
+        keys.button(sixth, KeyAction::Release, false, 0);
+        assert!(!keys.is_down("m", "dash", 0, false));
+        assert!(keys.consume_click("m", "dash"));
+    }
     /// A tap is one click, consumed once.
     #[test]
     fn a_tap_adds_one_click() {

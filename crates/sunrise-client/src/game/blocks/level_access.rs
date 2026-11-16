@@ -1108,6 +1108,20 @@ impl LevelAccess for GameLevel<'_> {
             .get(&[pos.x, pos.y, pos.z])
             .map(|s| s.status == sunrise_client::block_entity_anim::ShulkerStatus::Closed)
     }
+    /// What a mod block entity published for a block that may (`shapes_from_block_entity`).
+    fn published_collision_shape(
+        &self,
+        pos: BlockPos,
+        state: BlockStateId,
+    ) -> Option<sunrise_core::geometry::VoxelShape> {
+        if !self.collision.publishes_shapes(state) {
+            return None;
+        }
+        match self.world.block_entities.get(&(pos.x, pos.y, pos.z))? {
+            BlockEntity::Mod(entity) => entity.shapes().map(|shapes| shapes.collision().clone()),
+            _ => None,
+        }
+    }
     fn remove_block_entity(&mut self, pos: BlockPos, old: BlockStateId, side_effects: bool) -> u8 {
         if let Some(change) = &mut self.command_block_transition
             && change.preserve(self.world, pos, old)

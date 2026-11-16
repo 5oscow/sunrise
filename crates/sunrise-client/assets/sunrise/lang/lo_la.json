@@ -497,7 +497,7 @@
   "sunrise.mods.browse.title": "ເບິ່ງ Mods",
   "sunrise.mods.browse.update": "ອັບເດດ",
   "sunrise.mods.dev": " (Dev)",
-  "sunrise.mods.empty": "ບໍ່ມີ mods: ເອົາໄຟລ໌ .hmod ຢູ່ໃນໂຟນເດີ sunrise-mods",
+  "sunrise.mods.empty": "ບໍ່ມີ mods: ເອົາໄຟລ໌ .smod ຢູ່ໃນໂຟນເດີ sunrise-mods",
   "sunrise.mods.in_world": " (ປ່ອຍໃຫ້ໂລກປ່ຽນແປງ)",
   "sunrise.mods.not_built": " (ບໍ່ໄດ້ສ້າງ)",
   "sunrise.mods.open_folder": "ເປີດ Mod Folder",

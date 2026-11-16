@@ -296,10 +296,10 @@ fn a_block_part_gives_the_nodes_beside_its_block_a_path_type() {
         assert_eq!(world.path_type_static(0, 65, 0), PathType::FireInNeighbor);
         assert_eq!(world.path_type_static(0, 65, 4), PathType::FireInNeighbor);
         assert_eq!(world.path_type_static(4, 65, 4), PathType::Walkable);
-        // Seagrass is overridden to Blocked, but a declined adjacent answer still
-        // asks its water fluid before trying the vanilla type mappings.
+        // Seagrass is overridden to Blocked. A declined adjacent answer keeps
+        // that classified type; contained vanilla water adds no separate border.
         assert_eq!(world.path_type_from_state(7, 64, 7), PathType::Blocked);
-        assert_eq!(world.path_type_static(8, 65, 8), PathType::WaterBorder);
+        assert_eq!(world.path_type_static(8, 65, 8), PathType::Walkable);
         let observed = calls.lock().unwrap();
         // Land made glass Open, the positional path query declined, and adjacency
         // saw that final baseline. Seagrass instead reached adjacency as the

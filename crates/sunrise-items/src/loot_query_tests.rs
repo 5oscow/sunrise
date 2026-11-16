@@ -43,7 +43,7 @@ fn every_root_splits_after_outer_functions_with_one_random_draw() {
         let mut random = LegacyRandom::new(0);
         let drops = query::with_query(query.clone(), || match adapter {
             0 => data.loot_table(id, false, None, &mut random),
-            1 => data.roll_loot_table(id, None, false, &mut random).unwrap(),
+            1 => data.roll_loot_table(id, None, None, &mut random).unwrap(),
             2 => data.inline_loot_table(&root, &mut random),
             3 => data.entity_drops("zombie", false, None, &mut random),
             4 => data.loot_table_from(id, false, None, &mut random),
@@ -568,7 +568,7 @@ fn root_modifiers_chain_before_unsigned_caller_consumption() {
         let drops = match adapter {
             0 => items.loot_table("minecraft:entities/zombie", false, None, &mut random),
             1 => items
-                .roll_loot_table("minecraft:entities/zombie", None, false, &mut random)
+                .roll_loot_table("minecraft:entities/zombie", None, None, &mut random)
                 .unwrap(),
             2 => items.inline_loot_table(&root, &mut random),
             3 => items.entity_drops("zombie", false, None, &mut random),
@@ -684,4 +684,150 @@ fn block_dynamic_stacks_are_materialized_before_the_pass_and_raw_output_is_unspl
         [64, 64, 2, 130]
     );
     assert_eq!(<(u64, Option<f64>)>::from(&random), before);
+}
+
+/// What a root pass's modifier sees of a roll: THIS_ENTITY's type, the tool's
+/// item and the origin.
+type Seen = (Option<String>, Option<String>, Option<[f64; 3]>);
+
+/// Rolls `table` once through `roll_loot_table` with `this` (a type id) as
+/// THIS_ENTITY, `tool` and `origin` as a caller supplies them. Returns the
+/// number of stacks, and what a global modifier saw of the context.
+fn roll_as_caller(
+    table: Value,
+    this: Option<&str>,
+    tool: Option<&str>,
+    origin: Option<[f64; 3]>,
+) -> (usize, Seen) {
+    use std::sync::Mutex;
+    use sunrise_world::loot::{
+        LootPlace, LootStack,
+        global_modifiers::{
+            DecodedModifier, GlobalLootModifiers, ModifierApply, ModifierFile, ModifierRoll,
+        },
+        with_native_loot_place,
+    };
+    struct Watch(Arc<Mutex<Option<Seen>>>);
+    impl ModifierApply for Watch {
+        fn apply(
+            &self,
+            roll: &mut dyn ModifierRoll,
+            generated: &[LootStack],
+        ) -> std::result::Result<Vec<LootStack>, String> {
+            let facts = roll.facts();
+            *self.0.lock().unwrap() = Some((
+                facts.entity.map(|e| e.kind.clone()),
+                facts.tool.as_ref().map(|t| t.item.clone()),
+                facts.place.as_ref().and_then(|p| p.origin),
+            ));
+            Ok(generated.to_vec())
+        }
+    }
+    let seen = Arc::new(Mutex::new(None));
+    let mut items = data(vec![("test:caller", table)]);
+    let watch = seen.clone();
+    items.global_modifiers = Arc::new(GlobalLootModifiers::load(
+        [ModifierFile {
+            id: "test:watch".into(),
+            pack: "test".into(),
+            path: "watch".into(),
+            read: Box::new(|| Ok(br#"{"type":"test:watch"}"#.to_vec())),
+        }],
+        &sunrise_world::conditions::LoadConditions::vanilla(),
+        move |_, _, _| {
+            Ok(DecodedModifier {
+                priority: 1,
+                condition: None,
+                apply: Arc::new(Watch(watch.clone())),
+            })
+        },
+        |error| panic!("{error}"),
+    ));
+    let entity = this.map(sunrise_world::loot::LootEntity::new);
+    let matcher = |predicate: &Value, entity: &sunrise_world::loot::LootEntity| {
+        predicate["type"].as_str() == Some(&entity.kind)
+    };
+    let held = tool.map(|item| ItemStack::new(item, 1));
+    let place = LootPlace {
+        origin,
+        ..Default::default()
+    };
+    let drops = with_native_loot_place(place, || {
+        items
+            .roll_loot_table(
+                "test:caller",
+                held.as_ref(),
+                entity.as_ref().map(|e| (e, &matcher as &EntityMatcher)),
+                &mut LegacyRandom::new(5),
+            )
+            .unwrap()
+    });
+    let seen = seen.lock().unwrap().take().expect("the modifier pass ran");
+    (drops.len(), seen)
+}
+type EntityMatcher = dyn Fn(&Value, &sunrise_world::loot::LootEntity) -> bool;
+
+fn table_for_this(kind: &str) -> Value {
+    json!({"pools":[{"rolls":1,
+        "conditions":[{"type":"minecraft:entity_properties","entity":"this","predicate":{"type":kind}}],
+        "entries":[{"type":"minecraft:item","name":"minecraft:gold_ingot"}]}]})
+}
+
+/// A mod's roll call names a real entity: its type reaches the conditions
+/// (through the matcher) and the modifiers, with the tool and origin it gave.
+#[test]
+fn a_mod_roll_names_the_entity_it_was_given() {
+    let (stacks, seen) = roll_as_caller(
+        table_for_this("minecraft:cow"),
+        Some("minecraft:cow"),
+        Some("minecraft:shears"),
+        Some([1.5, 64.0, -2.5]),
+    );
+    assert_eq!(stacks, 1);
+    assert_eq!(
+        seen,
+        (
+            Some("minecraft:cow".into()),
+            Some("minecraft:shears".into()),
+            Some([1.5, 64.0, -2.5])
+        )
+    );
+    let (stacks, seen) = roll_as_caller(table_for_this("minecraft:cow"), None, None, None);
+    assert_eq!(stacks, 0);
+    assert_eq!(seen, (None, None, None));
+}
+
+/// `LootContextParamSets.PIGLIN_BARTER`: THIS_ENTITY is the piglin and nothing
+/// else is supplied (no tool, no origin).
+#[test]
+fn a_barter_roll_names_the_piglin_and_nothing_else() {
+    let (stacks, seen) = roll_as_caller(
+        table_for_this("minecraft:piglin"),
+        Some("minecraft:piglin"),
+        None,
+        None,
+    );
+    assert_eq!(stacks, 1);
+    assert_eq!(seen, (Some("minecraft:piglin".into()), None, None));
+}
+
+/// `LootContextParamSets.ADVANCEMENT_REWARD`: THIS_ENTITY is the rewarded player
+/// and the ORIGIN their position; no tool.
+#[test]
+fn an_advancement_reward_roll_names_the_player_and_their_position() {
+    let (stacks, seen) = roll_as_caller(
+        table_for_this("minecraft:player"),
+        Some("minecraft:player"),
+        None,
+        Some([10.5, 70.0, -3.25]),
+    );
+    assert_eq!(stacks, 1);
+    assert_eq!(
+        seen,
+        (
+            Some("minecraft:player".into()),
+            None,
+            Some([10.5, 70.0, -3.25])
+        )
+    );
 }

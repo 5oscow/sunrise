@@ -717,6 +717,35 @@ pub enum ScreenOpening {
     ModScreen,
 }
 
+/// Where a mod menu's recipe-book toggle sits: `x` GUI pixels right of the menu's left edge and
+/// `y` below the line `from` names. Vanilla screens place theirs either way:
+/// `leftPos + 5, topPos + 34` is `x: 5.0, y: 34.0, from: Menu`, and
+/// `leftPos + 5, height / 2 - 49` is `x: 5.0, y: -49.0, from: ScreenCentre`.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+// exhaustive: mods build it with a literal and the game reads every field
+#[derive(sunrise_mod_api_macros::Wire)]
+pub struct RecipeBookToggle {
+    /// Pixels right of the menu's left edge.
+    pub x: f32,
+    /// Pixels below the line `from` names; negative above it.
+    pub y: f32,
+    /// What `y` counts from.
+    pub from: ToggleOrigin,
+}
+
+/// The line a recipe-book toggle's `y` counts from.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+// exhaustive: the two lines vanilla's screens measure from, matched without a wildcard
+#[derive(sunrise_mod_api_macros::Wire)]
+pub enum ToggleOrigin {
+    /// The menu's top edge.
+    #[default]
+    Menu,
+    /// The window's vertical centre, as vanilla's `height / 2` (integer division, so an odd
+    /// window height rounds down).
+    ScreenCentre,
+}
+
 /// The stable identifier reported by screen hooks for an observed screen.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 // exhaustive: the game builds it with a literal; mods only read it
@@ -862,11 +891,16 @@ pub struct Screen {
     /// target this menu; no panel is enabled until authoritative settings arrive.
     /// Leaving this unset keeps the screen without a recipe book.
     pub recipe_book: Option<crate::RecipeBookTypeKey>,
-    /// Optional 20 × 18 recipe-book toggle position relative to this menu.
+    /// Optional 20 × 18 recipe-book toggle position, from this menu's left and, per
+    /// [`RecipeBookToggle::from`], its top or the window's centre.
     /// The screen author reserves this area, as vanilla screen templates do.
     /// Without an anchor the engine uses an external gutter; if none fits,
     /// the book is refused with a diagnostic while the menu remains usable.
-    pub recipe_book_toggle: Option<[f32; 2]>,
+    pub recipe_book_toggle: Option<RecipeBookToggle>,
+    /// The recipe book's result ghost gets a 24 × 24 frame, vanilla's
+    /// `AbstractRecipeBookScreen.isBiggerResultSlot` for a crafting-table-sized result. Off by
+    /// default.
+    pub recipe_book_big_result: bool,
 }
 
 /// An item the panel shows (`panel_items`): its id

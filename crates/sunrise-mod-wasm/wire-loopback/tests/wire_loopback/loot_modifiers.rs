@@ -1,8 +1,8 @@
 use super::*;
-use mod_api::RandomSource as _;
 use mod_api::{
-    DataLoadContext, GlobalLootModifier, GlobalLootModifierSerializer, Identifier, LootContext,
-    LootModifierContext, LootModifierError, LootModifierSettings, LootStack, StructureRandom,
+    DataLoadContext, GlobalLootModifier, GlobalLootModifierSerializer, Identifier,
+    LegacyRandomSource, LootContext, LootModifierContext, LootModifierError, LootModifierSettings,
+    LootStack, RandomSource,
 };
 
 struct Codec;
@@ -36,10 +36,13 @@ impl GlobalLootModifier for Modifier {
         Ok(generated)
     }
 }
-struct Roll(mod_api::LegacyRandom);
-impl StructureRandom for Roll {
+struct Roll(LegacyRandomSource);
+impl RandomSource for Roll {
+    fn next_int(&mut self) -> i32 {
+        self.0.next_int()
+    }
     fn next_int_bound(&mut self, bound: i32) -> i32 {
-        self.0.next_int_bound(bound).unwrap_or(0)
+        self.0.next_int_bound(bound)
     }
     fn next_long(&mut self) -> i64 {
         self.0.next_long()
@@ -53,6 +56,9 @@ impl StructureRandom for Roll {
     fn next_boolean(&mut self) -> bool {
         self.0.next_boolean()
     }
+    fn next_gaussian(&mut self) -> f64 {
+        self.0.next_gaussian()
+    }
 }
 impl LootModifierContext for Roll {
     fn snapshot(&self) -> LootContext {
@@ -60,7 +66,7 @@ impl LootModifierContext for Roll {
         snapshot.queried_table_id = "test:root".into();
         snapshot
     }
-    fn random(&mut self) -> &mut dyn StructureRandom {
+    fn random(&mut self) -> &mut dyn RandomSource {
         self
     }
     fn roll_raw(&mut self, table: &Identifier) -> Result<Vec<LootStack>, LootModifierError> {
@@ -119,10 +125,10 @@ fn native_and_guest_prepared_modifiers_lend_the_same_roll_random_and_raw_context
             instance.condition().unwrap(),
             Some(serde_json::json!("test:predicate"))
         );
-        let mut roll = Roll(mod_api::LegacyRandom::new(0));
-        let mut expected = mod_api::LegacyRandom::new(0);
-        let count = -7 - expected.next_int_bound(2).unwrap();
-        let raw = expected.next_int_bound(5).unwrap();
+        let mut roll = Roll(LegacyRandomSource::new(0));
+        let mut expected = LegacyRandomSource::new(0);
+        let count = -7 - expected.next_int_bound(2);
+        let raw = expected.next_int_bound(5);
         let result = instance
             .apply(
                 &mut roll,

@@ -119,6 +119,7 @@ impl TryIntoEngine<()> for mod_api::Block {
                 .as_ref()
                 .map(|s| s.try_into_engine(&()))
                 .transpose()?,
+            shapes_from_block_entity: self.shapes_from_block_entity,
             state_properties: self
                 .state_properties
                 .iter()
@@ -250,7 +251,7 @@ mod tests {
     #[test]
     fn a_block_has_its_item_unless_told_not_to_in_files_and_in_code() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("test.hmod");
+        let path = dir.path().join("test.smod");
         let manifest = "id = \"test\"\nname = \"Test\"\nversion = \"0.1.0\"\napi = \"0.2\"\nside = \"both\"\ncapabilities = [\"registries\"]\n";
         let block_file: &[u8] = br#"{"template": "minecraft:stone"}"#;
         let files = [("data/test/sunrise/block/file.json", block_file)];

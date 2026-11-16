@@ -88,6 +88,7 @@ impl CheckedSlotLayout {
                 addition,
                 result,
             } => vec![*template, *base, *addition, *result],
+            SlotLayout::Mod => Vec::new(),
         }
     }
 

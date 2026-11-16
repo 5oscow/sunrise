@@ -33,6 +33,7 @@ impl PartRegistrar {
         let menu_recipe_books = self.menu_recipe_books.clone();
         let recipe_book_types = self.recipe_book_types.clone();
         let recipe_book_fields = self.recipe_book_fields.clone();
+        let recipe_book_filters = self.recipe_book_filters.clone();
         let registered = self.registered;
         let entity_selector_bytes = self.entity_selector_bytes;
         let block_entity_transforms = self.block_entity_transforms.clone();
@@ -51,6 +52,7 @@ impl PartRegistrar {
                     registrar.menu_recipe_books = menu_recipe_books;
                     registrar.recipe_book_types = recipe_book_types;
                     registrar.recipe_book_fields = recipe_book_fields;
+                    registrar.recipe_book_filters = recipe_book_filters;
                     registrar.registered = registered;
                     registrar.entity_selector_bytes = entity_selector_bytes;
                     registrar.self_refusal = None;

@@ -67,6 +67,7 @@ impl Game<'_> {
         }
         if let Some(screen) = screen {
             self.mod_screen = Some(OpenNativeScreen {
+                slot_moves: Default::default(),
                 layout_revision: {
                     static NEXT: std::sync::atomic::AtomicU64 =
                         std::sync::atomic::AtomicU64::new(1);

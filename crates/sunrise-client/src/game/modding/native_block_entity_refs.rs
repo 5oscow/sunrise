@@ -4,7 +4,8 @@ use super::Game;
 use mod_api::__private::game::*;
 use mod_api::{
     BlockEntityDataError, BlockEntityError, BlockEntityItemError, BlockEntityRef,
-    BlockEntityTypeKey, LevelRef, PlayerRef, Transaction,
+    BlockEntityShapes, BlockEntityShapesError, BlockEntityTypeKey, LevelRef, PlayerRef,
+    Transaction,
 };
 use sunrise_client::{
     block_entity_nbt,
@@ -424,11 +425,7 @@ impl Game<'_> {
         let (key, block) = self
             .native_block_entity_write_target(entity)
             .ok_or(BlockEntityError::Stale)?;
-        let mut nbt = data;
-        for field in ["id", "x", "y", "z"] {
-            nbt.remove(&field.into());
-        }
-        let nbt = Tag::Compound(nbt);
+        let nbt = Tag::Compound(mod_payload(data));
         if sunrise_client::nbt_path::too_deep(&nbt, 0) {
             return Ok(false);
         }
@@ -441,26 +438,20 @@ impl Game<'_> {
         else {
             return Ok(false);
         };
-        let base = if replace {
-            let mut metadata = Compound::new();
-            if let Tag::Compound(fields) = &old {
-                for key in ["id", "x", "y", "z"] {
-                    if let Some(value) = fields.get(&key.into()) {
-                        metadata.insert(key.into(), value.clone());
-                    }
-                }
-            }
-            Tag::Compound(metadata)
-        } else {
-            old.clone()
-        };
-        let merged = sunrise_client::data_cmd::merged(&base, &nbt);
+        let merged = loaded_payload(&old, &nbt, replace);
         if merged == old {
             return Ok(false);
         }
         self.journal_block_entity(key);
+        let cleared = matches!(
+            self.world.block_entities.get(&key),
+            Some(BlockEntity::Mod(current)) if current.shapes_cleared()
+        );
         if !self.load_block_entity_data(key, &merged) {
             return Ok(false);
+        }
+        if cleared && let Some(BlockEntity::Mod(loaded)) = self.world.block_entities.get_mut(&key) {
+            loaded.keep_shapes_cleared(true);
         }
         self.block_entity_updated(key);
         self.container_changed(key);
@@ -477,6 +468,59 @@ impl Game<'_> {
             .native_block_entity_write_key(entity)
             .ok_or(BlockEntityError::Stale)?;
         self.container_changed(key);
+        Ok(true)
+    }
+
+    /// Publishes the shapes the block entity's block has in place of its declared ones, or
+    /// clears them with None. Applied at once, to the queries that follow; clients get them
+    /// with the block entity update. Inside a transaction an abort puts the old ones back.
+    pub(super) fn block_entity_set_shapes(
+        &mut self,
+        entity: BlockEntityRef,
+        shapes: Option<BlockEntityShapes>,
+    ) -> Result<bool, BlockEntityShapesError> {
+        let key = self
+            .native_block_entity_write_key(entity)
+            .ok_or(BlockEntityShapesError::Stale)?;
+        let state = self.world.block(key.0, key.1, key.2);
+        if !self.collision.publishes_shapes(state) {
+            return Err(BlockEntityShapesError::NotDeclared);
+        }
+        let shapes = shapes
+            .map(sunrise_client::containers::PublishedShapes::new)
+            .transpose()?
+            .map(std::sync::Arc::new);
+        let Some(current) = self.mod_block_entity_write_target(key) else {
+            return Err(BlockEntityShapesError::Stale);
+        };
+        if current.shapes() == shapes.as_deref() {
+            return Ok(false);
+        }
+        if cfg!(debug_assertions)
+            && shapes
+                .as_ref()
+                .is_some_and(|shapes| shapes.reaches_past_one_cell())
+        {
+            static WARNED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+            let block = self
+                .pack
+                .assets
+                .registry
+                .state(state)
+                .map(|s| s.name.clone());
+            if let (Some(block), Ok(mut warned)) = (block, WARNED.lock())
+                && !warned.contains(&block)
+            {
+                log::warn!(
+                    "{block}: a published shape has a box beyond one block of the block; collision never finds it"
+                );
+                warned.push(block);
+            }
+        }
+        self.write_mod_block_entity(key, |block_entity| {
+            block_entity.set_shapes(shapes);
+        });
+        self.block_entity_updated(key);
         Ok(true)
     }
 
@@ -580,6 +624,73 @@ impl Game<'_> {
         }
         self.block_entity_updated(key);
         Ok(true)
+    }
+}
+
+/// The compound a merge (or, with `replace`, a replace) of `payload` loads over the block entity
+/// saved as `old`. A replace keeps the identity, position and published shapes, which are not
+/// the payload's to replace.
+fn loaded_payload(old: &Tag, payload: &Tag, replace: bool) -> Tag {
+    let base = if replace {
+        let mut metadata = Compound::new();
+        if let Tag::Compound(fields) = old {
+            for key in ["id", "x", "y", "z", sunrise_client::containers::SHAPES_KEY] {
+                if let Some(value) = fields.get(&key.into()) {
+                    metadata.insert(key.into(), value.clone());
+                }
+            }
+        }
+        Tag::Compound(metadata)
+    } else {
+        old.clone()
+    };
+    sunrise_client::data_cmd::merged(&base, payload)
+}
+
+/// A mod's data payload as the block entity takes it: without the fields the engine owns, which
+/// are its identity and position, and its published shapes (`set_shapes` alone writes those).
+fn mod_payload(mut data: Compound) -> Compound {
+    for field in ["id", "x", "y", "z", sunrise_client::containers::SHAPES_KEY] {
+        data.remove(&field.into());
+    }
+    data
+}
+
+#[cfg(test)]
+mod payload_tests {
+    use super::*;
+
+    #[test]
+    fn merge_and_replace_keep_the_published_shapes_whatever_the_payload_carries() {
+        use sunrise_client::containers::SHAPES_KEY;
+        let shapes = Tag::Compound(Compound::from([(
+            "collision".into(),
+            Tag::LongArray(vec![1, 2, 3, 4, 5, 6]),
+        )]));
+        let old = Tag::Compound(Compound::from([
+            ("id".into(), Tag::String("test:bus".into())),
+            ("x".into(), Tag::Int(1)),
+            ("progress".into(), Tag::Int(7)),
+            ("kept".into(), Tag::Int(9)),
+            (SHAPES_KEY.into(), shapes.clone()),
+        ]));
+        // A payload that carries the key, to overwrite it or to remove it.
+        let colliding = || {
+            mod_payload(Compound::from([
+                ("progress".into(), Tag::Int(8)),
+                ("id".into(), Tag::String("other:type".into())),
+                (SHAPES_KEY.into(), Tag::Compound(Compound::new())),
+            ]))
+        };
+        for replace in [false, true] {
+            let loaded = loaded_payload(&old, &Tag::Compound(colliding()), replace);
+            assert_eq!(loaded.get(SHAPES_KEY), Some(&shapes), "replace: {replace}");
+            // The ordinary field applies, and the identity stays.
+            assert_eq!(loaded.get("progress"), Some(&Tag::Int(8)));
+            assert_eq!(loaded.get("id"), Some(&Tag::String("test:bus".into())));
+            // A merge keeps the fields the payload omits; a replace drops them.
+            assert_eq!(loaded.get("kept").is_some(), !replace);
+        }
     }
 }
 

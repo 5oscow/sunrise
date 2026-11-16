@@ -13,7 +13,7 @@
 //! game's own: the set's spacing, the structure's biomes and its
 //! `terrain_adaptation`, and the pieces ride the one piece mechanism the game
 //! has, next to a fortress piece's.
-use crate::{BlockKey, BlockMetadata, BlockState};
+use crate::{BlockKey, BlockMetadata, BlockState, RandomSource};
 use std::sync::Arc;
 pub use sunrise_core::position::ChunkPos;
 use sunrise_core::{
@@ -147,21 +147,6 @@ pub trait StructurePiece: std::fmt::Debug + Send + Sync {
     fn add_additional_save_data(&self, tag: &mut Compound);
 }
 
-/// The random a structure type or piece draws from, in vanilla's order: the
-/// chunk's `WorldgenRandom` for a start, the piece's `RandomSource` for a piece.
-pub trait StructureRandom {
-    /// `nextInt(bound)`; 0 for a bound below 1.
-    fn next_int_bound(&mut self, bound: i32) -> i32;
-    /// `nextLong`.
-    fn next_long(&mut self) -> i64;
-    /// `nextFloat`.
-    fn next_float(&mut self) -> f32;
-    /// `nextDouble`.
-    fn next_double(&mut self) -> f64;
-    /// `nextBoolean`.
-    fn next_boolean(&mut self) -> bool;
-}
-
 /// A noise-column block, classified by the questions structures ask.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -261,7 +246,7 @@ pub trait GenerationContext {
     fn max_y(&self) -> i32;
     /// The random vanilla's types draw from, seeded for this chunk
     /// (`WorldgenRandom.setLargeFeatureSeed` of the seed, chunk X and Z).
-    fn random(&mut self) -> &mut dyn StructureRandom;
+    fn random(&mut self) -> &mut dyn RandomSource;
     /// `ChunkGenerator.getBaseHeight`: the first free height at (x, z) by the
     /// heightmap kind.
     fn base_height(&mut self, x: i32, z: i32, kind: HeightmapType) -> i32;
@@ -291,7 +276,7 @@ pub trait PieceContext {
     /// The writable box: a `set_block` outside it is dropped silently.
     fn chunk_box(&self) -> BoundingBox;
     /// The piece's random (`RandomSource` of `postProcess`).
-    fn random(&mut self) -> &mut dyn StructureRandom;
+    fn random(&mut self) -> &mut dyn RandomSource;
     /// The block's default state; resolve it once when constructing or loading a piece.
     fn state(&self, block: BlockKey) -> BlockState;
     /// A block state with partial properties; missing properties keep defaults.

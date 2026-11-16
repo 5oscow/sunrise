@@ -421,7 +421,8 @@ impl Game<'_> {
                         crate::game::entity::damage_level_of!(
                             self,
                             self.combat.attack(),
-                            &mut credit
+                            &mut credit,
+                            None
                         ),
                         1.0,
                         source,
@@ -997,6 +998,7 @@ mod tests {
             previous: Vec3::ZERO,
             velocity: Vec3::ZERO,
             fuse: 80,
+            ticks: 0,
             on_ground: false,
             fall_distance: 0.0,
             stuck: Vec3::ZERO,

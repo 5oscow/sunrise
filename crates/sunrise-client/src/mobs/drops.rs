@@ -526,6 +526,7 @@ pub fn roll_death(m: &mut Mob, d: &Death, rolls: &mut dyn DeathRolls) -> Rolled 
             damage: d.damage.clone(),
             player: None,
             luck: 0.0,
+            attacker: None,
         };
         let items = roll(d, "minecraft:charged_creeper/root", &params, rolls, 0);
         skulls = items.iter().any(|i| !i.is_empty());
@@ -552,6 +553,7 @@ pub fn roll_death(m: &mut Mob, d: &Death, rolls: &mut dyn DeathRolls) -> Rolled 
             damage: d.damage.clone(),
             player: d.player.clone().filter(|_| killed_by_player),
             luck: if killed_by_player { d.luck } else { 0.0 },
+            attacker: None,
         };
         let items = roll(d, &table, &params, rolls, m.extra.death_table_seed);
         out.extend(items.into_iter().filter(|i| !i.is_empty()).map(Drop::Item));
@@ -691,6 +693,7 @@ fn damage_context(this: LootEntity, d: &Death) -> EntityLootParams {
         damage: d.damage.clone(),
         player: None,
         luck: 0.0,
+        attacker: None,
     }
 }
 /// `Mob.dropCustomDeathLoot`'s chance for `slot` before the roll, and whether

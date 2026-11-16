@@ -497,7 +497,7 @@
   "sunrise.mods.browse.title": "Selaa modeja",
   "sunrise.mods.browse.update": "Päivitä",
   "sunrise.mods.dev": " (Kehittäjä)",
-  "sunrise.mods.empty": "Ei modeja: laita .hmod-tiedostot sunrise-mods-kansioon",
+  "sunrise.mods.empty": "Ei modeja: laita .smod-tiedostot sunrise-mods-kansioon",
   "sunrise.mods.in_world": " (jätä maailma muuttumaan)",
   "sunrise.mods.not_built": " (Ei rakennettu)",
   "sunrise.mods.open_folder": "Avaa Mod-kansio",

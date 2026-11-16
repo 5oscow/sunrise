@@ -497,7 +497,7 @@
   "sunrise.mods.browse.title": "Mod を探す",
   "sunrise.mods.browse.update": "更新",
   "sunrise.mods.dev": " (開発)",
-  "sunrise.mods.empty": "MODなし: .hmodファイルをsunrise-modsフォルダーに置きます",
+  "sunrise.mods.empty": "MODなし: .smodファイルをsunrise-modsフォルダーに置きます",
   "sunrise.mods.in_world": " (世界の変化に任せて)",
   "sunrise.mods.not_built": " (構築されていません)",
   "sunrise.mods.open_folder": "Modフォルダーを開く",

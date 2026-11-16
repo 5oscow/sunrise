@@ -21,6 +21,29 @@ pub trait ClientInputClientHost {
     #[access(ClientSetup)]
     fn mod_key(&self, mod_id: &str, name: &str) -> Option<(String, ClientModifiers)>;
     /// Side: client.
+    /// Binds mod `mod_id`'s registered mapping `name` to `key` (`key.keyboard.z`,
+    /// `key.mouse.left`, `key.keyboard.unknown` for none) with `modifiers` held, as the player
+    /// binding it in Controls does (`KeyMapping.setKey` with NeoForge's
+    /// `setKeyModifierAndCode`, then `Options.save`): the mapping answers to the new key from the
+    /// next input, and the binding is saved to `sunrise-mods.txt`. A modifier key bound on its own
+    /// is the key, not a modifier held with itself, as Controls stores it. Each refusal changes
+    /// nothing and is named by `ModKeyRefusal`: `NotRegistered`, `NotOwner` (a native mod asked
+    /// for another mod's mapping), `UnknownKey`, `UnknownModifiers` and `Unavailable`.
+    #[access(ClientSetup)]
+    fn set_mod_key(
+        &mut self,
+        mod_id: &str,
+        name: &str,
+        key: &str,
+        modifiers: ClientModifiers,
+    ) -> Result<(), ModKeyRefusal>;
+    /// Side: client.
+    /// Gives mod `mod_id`'s registered mapping `name` its declared default key and modifiers
+    /// back, as Controls' Reset does (`KeyMapping.setToDefault`), and saves `sunrise-mods.txt`.
+    /// Refusals as for `set_mod_key`, without `UnknownKey` and `UnknownModifiers`.
+    #[access(ClientSetup)]
+    fn reset_mod_key(&mut self, mod_id: &str, name: &str) -> Result<(), ModKeyRefusal>;
+    /// Side: client.
     /// Whether mod `mod_id`'s registered mapping `id` is held (`KeyMapping.isDown`): its key or
     /// mouse button is down and its conflict context and modifiers are active. False for an
     /// unregistered id.

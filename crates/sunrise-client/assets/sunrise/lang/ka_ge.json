@@ -497,7 +497,7 @@
   "sunrise.mods.browse.title": "მოდიფიკაციების დათვალიერება",
   "sunrise.mods.browse.update": "განახლება",
   "sunrise.mods.dev": " (დევ)",
-  "sunrise.mods.empty": "მოდიფიკაციების გარეშე: ჩადეთ .hmod ფაილები sunrise-mods საქაღალდეში",
+  "sunrise.mods.empty": "მოდიფიკაციების გარეშე: ჩადეთ .smod ფაილები sunrise-mods საქაღალდეში",
   "sunrise.mods.in_world": " (დატოვე სამყარო, რომ შეიცვალოს)",
   "sunrise.mods.not_built": " (არ არის აშენებული)",
   "sunrise.mods.open_folder": "გახსენით Mod Folder",

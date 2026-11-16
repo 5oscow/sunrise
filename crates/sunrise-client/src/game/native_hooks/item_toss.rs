@@ -53,7 +53,7 @@ impl Game<'_> {
                 return None;
             }
         }
-        self.join_item_entity(id, at);
+        let _ = self.join_item_entity(id, at);
         self.dropped.iter().rev().any(|d| d.id == id).then_some(id)
     }
 }

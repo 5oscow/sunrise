@@ -295,7 +295,8 @@ impl Game<'_> {
                     let plan =
                         self.prepare_knockback_credit(self.mobs[index].id as i32, None, &attack);
                     let mut credit = plan.lend(&mut self.last_hurt_by_player);
-                    let level = crate::game::entity::damage_level_of!(self, &attack, &mut credit);
+                    let level =
+                        crate::game::entity::damage_level_of!(self, &attack, &mut credit, None);
                     self.mobs[index].knockback_full(
                         level,
                         f64::from(knockback),

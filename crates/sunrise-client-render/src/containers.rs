@@ -2,6 +2,7 @@
 //! kinds, ticking as `AbstractFurnaceBlockEntity.serverTick` with fuel times
 //! from the data-driven `context_int_provider`/`context_float_provider` files.
 
+pub use crate::chunk::block_entity::published_shapes::{PublishedShapes, SHAPES_KEY};
 pub use crate::chunk::block_entity::{
     Banner, Beacon, BlockEntity, Brushable, Campfire, ChiseledBookshelf, Crafter, CreakingHeart,
     EndGateway, Furnace, FurnaceKind, Jukebox, Lectern, MOD_MENUS, ModBlockEntity,
@@ -352,8 +353,11 @@ impl SkullSkin {
         }
     }
 }
-/// The skull and head blocks (`SkullBlock`, `WallSkullBlock`): every
-/// `*_skull` and `*_head` but the piston's head.
+/// Stock factories interpret names only in vanilla's namespace. Call after resolving
+/// an explicitly registered mod block's stock factory, before suffix-based dispatch.
+fn vanilla_factory(name: &str) -> Option<&str> {
+    name.starts_with("minecraft:").then_some(name)
+}
 /// The item slots of the container `name`'s block carries, if any.
 fn container_size(name: &str) -> Option<usize> {
     match name {
@@ -368,6 +372,7 @@ fn container_size(name: &str) -> Option<usize> {
         _ => None,
     }
 }
+/// Vanilla's SkullBlock and WallSkullBlock names, excluding the PistonHeadBlock.
 fn is_skull(name: &str) -> bool {
     name.ends_with("_skull") || (name.ends_with("_head") && name != "minecraft:piston_head")
 }
@@ -489,7 +494,7 @@ impl BlockEntity {
     /// The item-bearing stock factory's entity identity, before the block-specific
     /// save identity overrides (a trapped chest, barrel, dropper or shulker box).
     pub fn builtin_item_container_type(name: &str) -> Option<&'static str> {
-        StockItemContainer::for_factory(name).map(|container| container.type_id())
+        StockItemContainer::for_factory(vanilla_factory(name)?).map(|container| container.type_id())
     }
 
     pub fn for_block(name: &str) -> Option<Self> {
@@ -501,6 +506,7 @@ impl BlockEntity {
     }
 
     fn for_factory(name: &str) -> Option<Self> {
+        let name = vanilla_factory(name)?;
         if let Some(hanging) = crate::signs::sign_kind(name) {
             return Some(Self::Sign(crate::signs::SignData {
                 hanging,
@@ -628,6 +634,9 @@ impl BlockEntity {
         if factory != name {
             return crate::block_entity_types::factory_valid(name) == Some(true)
                 && self.fits(factory);
+        }
+        if vanilla_factory(name).is_none() {
+            return false;
         }
         match self {
             Self::Chest(items) => container_size(name) == Some(items.len()),
@@ -1060,6 +1069,56 @@ mod tests {
         let mut fifth = ItemStack::new("minecraft:potato", 1);
         assert!(!c.place_food(&mut fifth, 600));
         assert_eq!(fifth.count, 1);
+    }
+
+    #[test]
+    fn stock_block_entities_do_not_match_mod_name_suffixes() {
+        for path in [
+            "player_head",
+            "skeleton_skull",
+            "red_shulker_box",
+            "copper_chest",
+            "oak_shelf",
+            "red_banner",
+            "copper_golem_statue",
+            "oak_sign",
+        ] {
+            let name = format!("namespace_guard:{path}");
+            assert!(BlockEntity::for_block(&name).is_none(), "{name}");
+            assert!(
+                BlockEntity::builtin_item_container_type(&name).is_none(),
+                "{name}"
+            );
+        }
+        for path in [
+            "skeleton_skull",
+            "skeleton_wall_skull",
+            "wither_skeleton_skull",
+            "wither_skeleton_wall_skull",
+            "zombie_head",
+            "zombie_wall_head",
+            "player_head",
+            "player_wall_head",
+            "creeper_head",
+            "creeper_wall_head",
+            "dragon_head",
+            "dragon_wall_head",
+            "piglin_head",
+            "piglin_wall_head",
+        ] {
+            let name = format!("minecraft:{path}");
+            let entity = BlockEntity::for_block(&name).unwrap();
+            assert!(matches!(entity, BlockEntity::Skull(_)), "{name}");
+            assert!(entity.fits(&name), "{name}");
+            assert!(!entity.fits(&format!("namespace_guard:{path}")));
+        }
+        for name in ["minecraft:red_shulker_box", "minecraft:copper_chest"] {
+            let entity = BlockEntity::for_block(name).unwrap();
+            assert_eq!(entity.slots().len(), 27);
+            assert!(entity.fits(name));
+        }
+        // PistonHeadBlock is not a SkullBlock despite the suffix.
+        assert!(BlockEntity::for_block("minecraft:piston_head").is_none());
     }
 
     /// `JukeboxBlockEntity`'s single slot is a `Container` slot, so a hopper

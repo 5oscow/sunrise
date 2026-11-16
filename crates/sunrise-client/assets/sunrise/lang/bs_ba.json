@@ -497,7 +497,7 @@
   "sunrise.mods.browse.title": "Pregledaj modove",
   "sunrise.mods.browse.update": "Ažuriraj",
   "sunrise.mods.dev": " (dev)",
-  "sunrise.mods.empty": "Bez modova: stavite .hmod fajlove u folder sunrise-mods",
+  "sunrise.mods.empty": "Bez modova: stavite .smod fajlove u folder sunrise-mods",
   "sunrise.mods.in_world": " (ostavi svijet da se promijeni)",
   "sunrise.mods.not_built": " (nije izgrađeno)",
   "sunrise.mods.open_folder": "Otvorite Mod folder",

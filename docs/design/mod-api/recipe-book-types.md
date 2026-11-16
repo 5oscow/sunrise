@@ -304,10 +304,13 @@ amplification without leaving a lost resnapshot or pending UI intent unresolved.
 
 ## Toggle layout and large books
 
-`Screen.recipe_book_toggle` optionally reserves a 20 × 18 GUI-pixel toggle at
-an `[x, y]` offset from the menu origin. Like vanilla's screen-specific button
-positions, this is space the screen author must keep clear of slots and labels.
-Both native and wasm declarations carry the same optional value over Wire.
+`Screen.recipe_book_toggle` optionally reserves a 20 × 18 GUI-pixel toggle:
+`RecipeBookToggle { x, y, from }` puts it `x` pixels right of the menu's left edge and `y` below the
+menu's top edge (`from: Menu`) or below the window's centre (`from: ScreenCentre`, vanilla's
+`height / 2` with integer division, so `leftPos + 5, height / 2 - 49` is `x: 5.0, y: -49.0`).
+Like vanilla's screen-specific button positions, this is space the screen author must keep
+clear of slots and labels. Both native and wasm declarations carry the same optional value
+over Wire.
 
 Without an anchor, the client tries an external right, left, then above-menu
 gutter, rejecting positions covered by the overlay panel. Menus wider than 176
@@ -341,6 +344,8 @@ same native and wasm transport.
 - `Furnace { input, fuel, result }` supports cooking displays.
 - `Stonecutter { input, result }` supports stonecutting displays.
 - `Smithing { template, base, addition, result }` supports smithing displays.
+- `Mod` declares no roles: the menu's `MenuPart` answers a click with `recipe_book_place` and places with
+  `ServerHost::place_recipe_in_grid`, vanilla's `ServerPlaceRecipe.placeRecipe` with the mod's own grid.
 
 These are container slots, not the appended player inventory. Overlapping roles,
 invalid dimensions and indices outside the 256-slot menu bound refuse registration.

@@ -40,7 +40,9 @@ impl Game<'_> {
 
     /// `ServerLevel.addFreshEntity` of the item `id` that `push_item_entity`
     /// made, with the stack it holds now.
-    pub(in crate::game) fn join_item_entity(&mut self, id: u32, position: [f64; 3]) {
+    /// Whether the item entity is in the level after its join: false when a join listener kept
+    /// it out (or no such item entity was made).
+    pub(in crate::game) fn join_item_entity(&mut self, id: u32, position: [f64; 3]) -> bool {
         let Some((item, count)) = self
             .dropped
             .iter()
@@ -48,15 +50,18 @@ impl Game<'_> {
             .find(|d| d.id == id)
             .map(|d| (d.stack.item.clone(), d.stack.count as i32))
         else {
-            return;
+            return false;
         };
         if self.remote.is_none() && !mod_api::__private::mods().is_empty() {
             self.native_lifecycle
                 .pending_item_spawns
                 .push((id, item.to_string(), count, position));
-            self.native_joins_flush(false, id);
+            self.native_joins_flush(false, id)
         } else if self.native_joins_flush(false, id) {
             self.native_item_spawn(id, &item, count, position);
+            true
+        } else {
+            false
         }
     }
 }

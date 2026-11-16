@@ -347,7 +347,7 @@ impl LevelRef {
     pub fn with_random<T>(
         self,
         host: &mut dyn ServerHost,
-        draw: impl FnOnce(&mut LegacyRandom) -> T,
+        draw: impl FnOnce(&mut dyn RandomSource) -> T,
     ) -> Option<T> {
         let mut random = self.random(host)?;
         let drawn = draw(&mut random);
@@ -1434,13 +1434,75 @@ pub trait LevelRandomHost: LevelHost {
     }
     /// A copy of the level's random stream through `native_level_random`, or None on a
     /// non-authoritative level. Draw with `with_random`, which stores it back.
-    fn random(&mut self) -> Option<LegacyRandom> {
+    fn random(&mut self) -> Option<LegacyRandomSource> {
         unimplemented!("LevelRandomHost::random")
     }
     /// Replace the level's random stream with `random`, one `random` gave and the mod drew from.
     /// False on a non-authoritative level.
-    fn set_random(&mut self, _random: LegacyRandom) -> bool {
+    fn set_random(&mut self, _random: LegacyRandomSource) -> bool {
         unimplemented!("LevelRandomHost::set_random")
+    }
+}
+
+/// What a hit's listener may do beyond reading and drawing the level's random: play level
+/// sounds and draw from the random of an entity the hit lends. It is the host of
+/// `living_incoming_damage`, `living_damage_pre`, `living_damage_post`, `living_shield_block`
+/// and `living_use_totem`. It writes no block and schedules no tick.
+///
+/// A sound is queued at the call, and its seed is drawn then from the level's sound-seed
+/// stream, never from [`LevelRandomHost::random`]. An entity's random is the entity's own
+/// stream (`Entity.getRandom`), advanced in listener order, so the hit's continuation sees
+/// the draws. A hit lends its attacker where the game applies a melee hit (the attacking player or mob,
+/// for player → mob, mob → mob and mob → player) and no entity at any other damage site
+/// (environment, projectiles, explosions, potions and the like); any other entity, a stale
+/// handle and a call on a client answer `None` or `false`.
+pub trait HitHost: LevelRandomHost {
+    /// `Level.playSound(null, x, y, z, sound, source, volume, pitch)`: plays sound event
+    /// `sound` at `at` for every player in this level within range (16 blocks, times the
+    /// volume above 1), under `source`'s volume slider. A `minecraft:` event must be
+    /// registered; a mod's goes by name. True means queued, not heard; false for an event
+    /// or a position, volume or pitch the network can't carry, and where no sound can be sent.
+    fn play_sound_at(
+        &mut self,
+        _sound: &str,
+        _at: [f64; 3],
+        _source: SoundSource,
+        _volume: f32,
+        _pitch: f32,
+    ) -> bool {
+        unimplemented!("HitHost::play_sound_at")
+    }
+    /// `Level.playSound(null, entity, sound, source, volume, pitch)`: the same sound bound to
+    /// `entity`, so it follows it, heard by every player within range of where the entity is now,
+    /// the entity's own player too (it is not `EntityRef::play_sound`, which leaves that player
+    /// out and plays nothing for a silent mob). False for a handle the hit does not lend.
+    fn play_sound_from(
+        &mut self,
+        _entity: EntityRef,
+        _sound: &str,
+        _source: SoundSource,
+        _volume: f32,
+        _pitch: f32,
+    ) -> bool {
+        unimplemented!("HitHost::play_sound_from")
+    }
+    /// `RandomSource.nextFloat` on the entity's own random (0 up to, not including, 1). None
+    /// for a handle the hit does not lend.
+    fn entity_next_float(&mut self, _entity: EntityRef) -> Option<f32> {
+        unimplemented!("HitHost::entity_next_float")
+    }
+    /// `RandomSource.nextDouble` on the entity's own random.
+    fn entity_next_double(&mut self, _entity: EntityRef) -> Option<f64> {
+        unimplemented!("HitHost::entity_next_double")
+    }
+    /// `RandomSource.nextBoolean` on the entity's own random.
+    fn entity_next_bool(&mut self, _entity: EntityRef) -> Option<bool> {
+        unimplemented!("HitHost::entity_next_bool")
+    }
+    /// `RandomSource.nextInt(bound)` on the entity's own random, 0 up to `bound`. None for a
+    /// `bound` of 0 or less, which draws nothing.
+    fn entity_next_int(&mut self, _entity: EntityRef, _bound: i32) -> Option<i32> {
+        unimplemented!("HitHost::entity_next_int")
     }
 }
 

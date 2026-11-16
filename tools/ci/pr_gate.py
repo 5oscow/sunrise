@@ -25,8 +25,8 @@ def outputs(event: str, same_repository: bool, pr: str, read_pr, *, labels: tupl
                 "trusted": "true" if head["same_repository"] else "false"}
     # A rollup builder session pushes only branches named after itself (`rollup-76`, `sunrise-review-rollup-3`), and a
     # label added after the pull request opens misses its first event, so the branch name alone counts too.
-    # ci.yml's pull-request jobs skip exactly these pull requests with their own `if:` (same repository, these
-    # branch prefixes or labels), so each pull request gets either `checks` or the heavy gate: change both together.
+    # ci.yml's full checks run only for a fork's pull request (and scheduled runs on main): this repository's other
+    # pull requests get dyna-checks' cheap checks, and these integration pull requests the heavy gate.
     integration = bool({"rollup", "sync"}.intersection(labels)) or head_ref.startswith(
         ("fork-review-rollup-", "sunrise-review-rollup-", "rollup-", "sync-"))
     heavy = event != "pull_request" or (same_repository and integration)
