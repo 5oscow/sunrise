@@ -170,53 +170,51 @@ fn a_placed_feature_runs_its_modifiers_before_the_feature() {
     });
 }
 
-/// A biome filter admits birch trees in birch forest, but not in desert.
+/// Iceberg blue has rarity 200, in-square, biome: seed 5133 passes rarity;
+/// seed 0 rejects it. Only the reached filter refuses, after the expected draws.
 #[test]
 #[ignore = "daily"]
-fn a_biome_filtered_placed_feature_places_blocks_from_code() {
-    for (biome, allowed) in [
-        ("minecraft:birch_forest", true),
-        ("minecraft:desert", false),
-    ] {
+fn a_biome_filter_refuses_only_when_reached() {
+    use mod_api::{LegacyRandomSource, RandomSource};
+    for (seed, reached) in [(5133, true), (0, false)] {
         with_game(|game| {
             ground(game, false);
-            let biome_id = world_biomes!(game)
-                .list
-                .iter()
-                .position(|b| b.name == biome)
-                .unwrap() as u16;
-            for chunk in game.world.chunks.values_mut() {
-                let chunk = Arc::make_mut(chunk);
-                for qy in 0..(chunk.sections.len() as i32 * 4) {
-                    for qx in 0..4 {
-                        for qz in 0..4 {
-                            chunk.set_biome_cell(qx, qy, qz, biome_id);
+            let level = game.level(game.dim.id()).unwrap();
+            assert!(level.set_random(game, LegacyRandomSource::new(seed)));
+            let before = game.world.chunks.clone();
+            assert_eq!(
+                level.place_placed_feature(game, "minecraft:iceberg_blue", AT),
+                if reached {
+                    Err(PlaceFeatureRefusal::BiomeFilter)
+                } else {
+                    Ok(false)
+                }
+            );
+            // Compare every resident block: no feature writes preceded the filter.
+            assert_eq!(game.world.chunks.len(), before.len());
+            for (pos, chunk) in &before {
+                let after = &game.world.chunks[pos];
+                for y in sunrise_client::chunk::MIN_Y
+                    ..sunrise_client::chunk::MIN_Y + sunrise_client::chunk::HEIGHT
+                {
+                    for z in 0..16 {
+                        for x in 0..16 {
+                            assert_eq!(after.get(x, y, z), chunk.get(x, y, z));
                         }
                     }
                 }
             }
-            let level = game.level(game.dim.id()).unwrap();
+            let mut expected = LegacyRandomSource::new(seed);
+            let rarity = expected.next_float();
+            assert_eq!(rarity < 1.0 / 200.0, reached);
+            if reached {
+                expected.next_int_bound(16);
+                expected.next_int_bound(16);
+            }
             assert_eq!(
-                level.place_placed_feature(game, "minecraft:trees_birch", AT),
-                Ok(allowed),
-                "{biome}"
+                <(u64, Option<f64>)>::from(&level.random(game).unwrap()),
+                <(u64, Option<f64>)>::from(&expected)
             );
-            let mut logs = 0;
-            let mut changed = 0;
-            for x in 1600..1632 {
-                for z in 1600..1632 {
-                    for y in 64..90 {
-                        let name = &game.res.facts().get(game.world.block(x, y, z)).name;
-                        logs += usize::from(name.as_ref() == "minecraft:birch_log");
-                        changed += usize::from(name.as_ref() != "minecraft:air");
-                    }
-                }
-            }
-            if allowed {
-                assert!(logs > 0);
-            } else {
-                assert_eq!(changed, 0);
-            }
         });
     }
 }

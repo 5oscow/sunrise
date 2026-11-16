@@ -1,9 +1,9 @@
 //! Refusals when a mod places a feature (`LevelRef::place_feature` or `LevelRef::place_placed_feature`).
 
 /// Why [`LevelRef::place_feature`](crate::LevelRef::place_feature) or
-/// [`LevelRef::place_placed_feature`](crate::LevelRef::place_placed_feature) did not run the feature. Every
-/// refusal is checked before the feature runs and changes nothing; a feature that ran and
-/// reported failure is `Ok(false)`, not a refusal.
+/// [`LevelRef::place_placed_feature`](crate::LevelRef::place_placed_feature) refused placement.
+/// Except for `BiomeFilter`, refusals are checked before placement and change nothing.
+/// A feature that ran and reported failure is `Ok(false)`, not a refusal.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 #[derive(sunrise_mod_api_macros::Wire)]
@@ -21,6 +21,10 @@ pub enum PlaceFeatureRefusal {
     /// `minecraft:worldgen/feature` for `place_feature`,
     /// `minecraft:worldgen/placed_feature` for `place_placed_feature`.
     UnknownFeature,
+    /// Direct placement reached a biome filter without a top feature. This call's
+    /// feature has not run: all its positions must first pass that filter. A nested
+    /// placed feature can still have written before an inner biome filter refuses.
+    BiomeFilter,
 }
 
 impl std::fmt::Display for PlaceFeatureRefusal {
@@ -30,6 +34,7 @@ impl std::fmt::Display for PlaceFeatureRefusal {
             Self::Client => "features are placed on the server only",
             Self::NotInPlace => "the level is not the one being ticked",
             Self::NotLoaded => "the chunks around the position are not loaded",
+            Self::BiomeFilter => "direct placement reached a biome filter without a top feature",
             Self::UnknownFeature => "no feature has that id",
         })
     }

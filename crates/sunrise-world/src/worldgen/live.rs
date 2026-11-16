@@ -10,7 +10,6 @@ use super::{
     feature::{FeatureBlocks, FeatureWorld},
     feature_catalog::FeatureCatalog,
     feature_graph::{FeatureDefinition, PlacedFeatureDefinition},
-    feature_sort::FeatureIdentity,
     generator::{GeneratorData, GeneratorError},
     placement::PlacementContext,
     state_provider::{StateProviderBindings, StateProviderCatalog},
@@ -39,8 +38,6 @@ pub struct LiveFeatures {
     configured_tags: OnceLock<std::collections::BTreeMap<String, Vec<String>>>,
     /// `BiomeGenerationSettings.getBoneMealFeatures` per biome, in vanilla order.
     bone_meal: Vec<Vec<String>>,
-    placed_identity: HashMap<String, FeatureIdentity>,
-    biome_features: Vec<BTreeSet<FeatureIdentity>>,
     /// Temperature settings per biome (`Biome.getTemperature`).
     temperatures: Vec<super::biome_temperature::BiomeTemperatureSettings>,
 }
@@ -155,18 +152,10 @@ impl LiveFeatures {
             .build(|name, _| resources.placed.contains_key(name).then(|| name.to_owned()))
             .map_err(|e| resource(format!("feature tags: {e:?}")))?
             .tags;
-        let placed_identity: HashMap<_, _> = resources
-            .placed
-            .keys()
-            .enumerate()
-            .map(|(i, name)| (name.clone(), FeatureIdentity(i as u32)))
-            .collect();
-        let mut biome_features = Vec::with_capacity(data.biome_names().len());
         let mut bone_meal = Vec::with_capacity(data.biome_names().len());
         for i in 0..data.biome_names().len() {
             let biome: Value = serde_json::from_str(data.biome_json(BiomeId(i as u32)))?;
             let mut list = Vec::new();
-            let mut membership = BTreeSet::new();
             for step in biome["features"].as_array().into_iter().flatten() {
                 let entries: Vec<String> = match step {
                     Value::String(tag) if tag.starts_with('#') => placed_tags
@@ -182,9 +171,6 @@ impl LiveFeatures {
                 };
                 for entry in entries {
                     let name = super::tags::identifier(&entry)?;
-                    if let Some(id) = placed_identity.get(&name) {
-                        membership.insert(*id);
-                    }
                     let Some(placed) = resources
                         .placed
                         .get(&name)
@@ -212,7 +198,6 @@ impl LiveFeatures {
                 }
             }
             bone_meal.push(list);
-            biome_features.push(membership);
         }
         let temperatures = (0..data.biome_names().len())
             .map(|i| {
@@ -234,8 +219,6 @@ impl LiveFeatures {
             provider_ids: OnceLock::new(),
             configured_tags: OnceLock::new(),
             bone_meal,
-            placed_identity,
-            biome_features,
         }))
     }
     pub fn data(&self) -> &Arc<GeneratorData> {
@@ -429,56 +412,32 @@ impl LiveFeatures {
         }
     }
     /// `PlacedFeature.place` (placement modifiers, then the feature).
+    /// A reached biome filter without a top feature is returned distinctly; other
+    /// execution errors retain the live placement failure result.
     pub fn place_placed<W: FeatureWorld + PlacementContext>(
         &self,
         name: &str,
         world: &mut W,
         random: &mut impl RandomSource,
         origin: [i32; 3],
-    ) -> bool
+    ) -> Result<bool, super::placement::PlacementQueryError>
     where
         W::Error: std::fmt::Display,
     {
+        use super::{feature_graph::FeatureExecutionError, placement::PlacementQueryError};
         let Some(feature) = self.placed(name) else {
-            return false;
+            return Ok(false);
         };
         match feature.place(world, random, origin, self.blocks) {
-            Ok(placed) => placed,
+            Ok(placed) => Ok(placed),
+            Err(FeatureExecutionError::Query(PlacementQueryError::MissingTopFeature)) => {
+                Err(PlacementQueryError::MissingTopFeature)
+            }
             Err(e) => {
                 eprintln!("Sunrise: placing {name} failed: {e}");
-                false
+                Ok(false)
             }
         }
-    }
-    /// Code placement with the named placed feature as its own biome-check root.
-    pub fn place_placed_with_biome_check<W: FeatureWorld + PlacementContext>(
-        &self,
-        name: &str,
-        world: &mut W,
-        random: &mut impl RandomSource,
-        origin: [i32; 3],
-    ) -> bool
-    where
-        W::Error: std::fmt::Display,
-    {
-        let Some(feature) = self.placed(name) else {
-            return false;
-        };
-        let Some(&identity) = self.placed_identity.get(name) else {
-            return false;
-        };
-        match feature.place_with_biome_check(world, random, origin, self.blocks, identity) {
-            Ok(placed) => placed,
-            Err(e) => {
-                eprintln!("Sunrise: placing {name} failed: {e}");
-                false
-            }
-        }
-    }
-    pub(crate) fn biome_allows_feature(&self, biome: BiomeId, feature: FeatureIdentity) -> bool {
-        self.biome_features
-            .get(biome.0 as usize)
-            .is_some_and(|features| features.contains(&feature))
     }
     /// Temperature settings of a biome.
     pub fn biome_temperature(

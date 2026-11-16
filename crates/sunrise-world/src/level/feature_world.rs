@@ -301,14 +301,6 @@ impl<L: LevelAccess + ?Sized> PlacementContext for LevelFeatureWorld<'_, '_, L> 
             .and_then(|name| self.features.biome_id(name))
             .ok_or(PlacementQueryError::Unavailable)
     }
-    fn biome_allows_feature(
-        &mut self,
-        position: [i32; 3],
-        feature: crate::worldgen::feature_sort::FeatureIdentity,
-    ) -> Result<bool, PlacementQueryError> {
-        let biome = self.biome_identity(position)?;
-        Ok(self.features.biome_allows_feature(biome, feature))
-    }
     fn block_state(&mut self, position: [i32; 3]) -> Result<BlockStateId, PlacementQueryError> {
         Ok(self.sim.state(pos(position)))
     }

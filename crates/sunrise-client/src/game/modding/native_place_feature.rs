@@ -15,8 +15,8 @@ impl Game<'_> {
         self.place_feature_by_id(level, feature, pos, false)
     }
 
-    /// `PlacedFeature.placeWithBiomeCheck` of `placed_feature` at `pos` in the level in place:
-    /// its modifiers from `pos`, checking biome membership, then its feature at each position.
+    /// `PlacedFeature.place` of `placed_feature` at `pos` in the level in place:
+    /// its modifiers from `pos`, then its feature at each position.
     /// `Ok(false)` when no position remains or every feature invocation reports failure.
     pub(super) fn level_place_placed_feature(
         &mut self,
@@ -75,12 +75,13 @@ impl Game<'_> {
             .with_level(|b, level, ticks| {
                 if placed {
                     b.place_placed_feature(level, ticks, feature, at)
+                        .map(|result| result.map_err(|_| PlaceFeatureRefusal::BiomeFilter))
                 } else {
-                    b.place_feature(level, ticks, feature, at)
+                    b.place_feature(level, ticks, feature, at).map(Ok)
                 }
             })
             .ok_or(PlaceFeatureRefusal::UnknownFeature)?;
         let _ = self.process_level_events();
-        Ok(answer)
+        answer
     }
 }
