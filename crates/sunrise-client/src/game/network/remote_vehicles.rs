@@ -35,6 +35,12 @@ impl Game<'_> {
     /// first and LeashFenceKnotEntity.interact takes the click. The fence block behind only ties
     /// the player's own mobs (LeadItem.useOn), it never takes one back.
     fn remote_knot_hit(&self) -> Option<(i32, f64, [f64; 3])> {
+        if let Some(hit) = self.cached_entity_pick() {
+            let (entity, distance, _) = hit?;
+            let block = *self.remote_knots.get(&entity.id())?;
+            let p = sunrise_client::mobs::leash::knot_state(block).position;
+            return Some((entity.id() as i32, distance, [p.x, p.y, p.z]));
+        }
         let (eye, dir) = self.aim()?;
         self.remote_knots
             .iter()
@@ -55,6 +61,9 @@ impl Game<'_> {
     /// Whether a use starts on an entity: the crosshair's `EntityHitResult`, or a fence knot.
     /// Only a use: Sunrise's attacks still go to the fence behind a knot.
     pub(super) fn remote_use_targets_entity(&self) -> bool {
+        if self.uses_frame_pick() {
+            return self.entity_targeted();
+        }
         self.entity_targeted()
             || self
                 .remote_knot_hit()
@@ -64,6 +73,27 @@ impl Game<'_> {
     /// The nearest boat, minecart, item frame, armor stand or painting the
     /// view hits within reach; also End crystals when attacking, and fence knots when using.
     pub(super) fn remote_object_hit(&self, attacking: bool) -> Option<ObjectHit> {
+        if let Some(hit) = self.cached_entity_pick() {
+            let (entity, distance, point) = hit?;
+            if (!attacking
+                && (self.crystals.iter().any(|c| c.id == entity.id())
+                    || self.level_dragon_part(entity.id()).is_some()))
+                || self.mobs.iter().any(|m| m.id == entity.id())
+                || self
+                    .creatures
+                    .projectiles
+                    .iter()
+                    .any(|p| p.id == entity.id())
+            {
+                return None;
+            }
+            let origin = self.entity_position(entity)?;
+            return Some(ObjectHit {
+                id: entity.id() as i32,
+                distance,
+                location: std::array::from_fn(|i| point[i] - origin[i]),
+            });
+        }
         let (eye, dir) = self.aim()?;
         let at = |d: f64| {
             [
@@ -115,7 +145,9 @@ impl Game<'_> {
                 hits.push((id, d, [p.x, p.y, p.z]));
             }
         }
-        if !attacking && let Some((id, d, p)) = self.remote_knot_hit() {
+        if (!attacking || self.frame_pick.ray.is_some())
+            && let Some((id, d, p)) = self.remote_knot_hit()
+        {
             hits.push((id, d, p));
         }
         if attacking {

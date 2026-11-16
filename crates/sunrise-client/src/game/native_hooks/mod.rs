@@ -8,6 +8,7 @@
 
 /// Generated dispatch entry points, not hand-written hook implementations.
 mod fire;
+pub(in crate::game) use client_frame_pick::FramePick;
 pub(in crate::game) use fire::{
     BlockDropsCall, BlockScreenEffectDrawCall, ConnectsToCall, EntityChangeBlockPreCall,
     ItemAfterVerticalCollisionCall, UpdateShapeCall,

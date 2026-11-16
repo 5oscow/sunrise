@@ -8,7 +8,6 @@ mod friction_tests;
 #[cfg(test)]
 mod lifetime_tests;
 mod placement;
-pub(super) use placement::OutlineFluidRay;
 
 use super::{Game, InteractTarget, entity::Entity, entity_culling::at, view_vector};
 use std::{collections::HashMap, f32::consts::PI, sync::Arc};
@@ -1721,6 +1720,11 @@ impl Game<'_> {
         Some(boat)
     }
     pub(super) fn boat_hit(&self) -> Option<(usize, f64)> {
+        if let Some(hit) = self.cached_entity_pick() {
+            let (entity, distance, _) = hit?;
+            let index = self.boats.iter().position(|f| f.id == entity.id())?;
+            return Some((index, distance));
+        }
         let (eye, dir) = self.aim()?;
         let reach: f64 = self.entity_reach;
         let mut best: Option<(usize, f64)> = None;

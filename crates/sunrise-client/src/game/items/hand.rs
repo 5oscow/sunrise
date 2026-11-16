@@ -313,11 +313,13 @@ impl Game<'_> {
         self.attack_ticks = 0;
         self.hand_strength.reset();
     }
-    /// `Minecraft.tick`'s `pick`, then `handleKeybinds`' number keys: the
-    /// tick's clicks act on what the item held before the keys picked (a
-    /// spear's 4.5 blocks), with the item the keys select (attribute
-    /// swapping a spear's reach onto a mace).
+    /// Window inputs consume the previous frame's stored decision, then select
+    /// the queued number keys. Non-window simulation keeps its tick-local ray.
     pub(super) fn pick_tick_targets(&mut self) {
+        if self.native_window() {
+            self.select_queued_hotbar();
+            return;
+        }
         self.tick_hit.set(Some(self.pick()));
         self.tick_mob = None;
         let mob = match self.active_attack_range() {
@@ -333,7 +335,7 @@ impl Game<'_> {
             self.selected = slot;
         }
     }
-    /// The tick's clicks are done: later picks follow the crosshair again.
+    /// Release only the non-window simulation's tick-local caches.
     pub(super) fn release_tick_targets(&mut self) {
         self.tick_hit.set(None);
         self.tick_mob = None;
@@ -361,12 +363,34 @@ impl Game<'_> {
     /// block within the block reach (`getHitEntitiesAlong`'s block result,
     /// kept by `filterHitResult`); `None` on a miss, where the plain pick
     /// decides.
+    pub(super) fn frame_attack_range_entity(&self) -> Option<mod_api::CrosshairTarget> {
+        let range = self.active_attack_range()?;
+        let (i, _, location) = self.attack_range_pick(&range)??;
+        let mob = &self.mobs[i];
+        Some(mod_api::CrosshairTarget::Entity {
+            entity: mod_api::EntityRef::new(self.native_lifecycle.epoch()?, mob.id),
+            point: [
+                mob.position.x + location[0],
+                mob.position.y + location[1],
+                mob.position.z + location[2],
+            ],
+        })
+    }
+
+    pub(super) fn frame_entity_pick_reach(&self) -> f64 {
+        self.active_attack_range()
+            .map_or(self.entity_reach, |range| {
+                f64::from(attack_reach(&range, self.creative).1).max(self.entity_reach)
+            })
+    }
+
     fn attack_range_pick(
         &self,
         range: &serde_json::Value,
     ) -> Option<Option<(usize, f64, [f64; 3])>> {
-        let eye = v3(self.eye_position()?);
-        let look = v3(super::view_vector(self.yaw, self.pitch));
+        let (origin, direction) = self.aim()?;
+        let eye = v3(origin);
+        let look = v3(direction);
         let reach = attack_reach(range, self.creative);
         let camera = self.remote_camera_id();
         let boxes: Vec<(usize, Aabb)> = (self.mobs.iter().enumerate())
@@ -413,9 +437,8 @@ impl Game<'_> {
             // (scripts under --control hold buttons without grabbing it).
             let down = self.left;
             let ticks = self.clicks.destroying.ticks;
-            // Minecraft.hitResult is picked once per tick, before the number
-            // keys: a creative break does not move the use that follows it
-            // past the broken block.
+            // Window clicks share the previous frame's decision. A creative
+            // break makes its cached block stale, never selecting the block behind.
             self.pick_tick_targets();
             let mut world = GameHands {
                 game: self,
@@ -614,8 +637,11 @@ impl Game<'_> {
     /// Whether an attack would hit an entity rather than the block behind
     /// it: the crosshair's `EntityHitResult`.
     pub(super) fn entity_targeted(&self) -> bool {
-        if let Some(entity) = self.targeting().entity {
-            return self.targeting_entity_hit(entity).is_some();
+        if self.uses_frame_pick() {
+            return matches!(
+                self.crosshair_target(),
+                Some(mod_api::CrosshairTarget::Entity { .. })
+            );
         }
         let before = |d: Option<f64>| d.is_some_and(|d| self.before_block(d));
         before(self.painting_hit().map(|h| h.1))

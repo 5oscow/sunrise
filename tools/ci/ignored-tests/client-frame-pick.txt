@@ -1,0 +1,2 @@
+sunrise-client game::native_hooks::client_frame_pick::tests::frame_pick_is_shared_ordered_and_refuses_stale_or_invalid_output lib daily resources
+sunrise-client game::native_hooks::client_frame_pick::tests::frame_pick_without_listeners_keeps_the_vanilla_result lib daily resources

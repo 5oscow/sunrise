@@ -2273,6 +2273,11 @@ impl Game<'_> {
         true
     }
     pub(super) fn cart_hit(&self) -> Option<(usize, f64)> {
+        if let Some(hit) = self.cached_entity_pick() {
+            let (entity, distance, _) = hit?;
+            let index = self.carts.iter().position(|f| f.id == entity.id())?;
+            return Some((index, distance));
+        }
         let (eye, dir) = self.aim()?;
         let reach: f64 = self.entity_reach;
         let mut best: Option<(usize, f64)> = None;

@@ -118,8 +118,9 @@ Native and wasm mods use the same handle methods.
 `CrosshairTarget::Block { pos, state, hit }` or
 `CrosshairTarget::Entity { entity, point }`. The block hit contains its world-space
 location, face and inside flag; the entity point is also in world coordinates.
-It uses the game's current targeting ray and block/entity reach, respects blocks
-occluding entities, and returns `None` on a miss or without a client world.
+It reads the last committed `client_frame_pick` decision, and returns `None`
+on a miss, before the first frame pick, or when its target became stale. It never
+casts a new ray. Without listeners the decision is the vanilla block/entity pick.
 It can be read with a screen open. `entity` is an `EntityRef` carrying the current
 client level's epoch and network entity ID, including dragon parts. It becomes stale
 when the client level is replaced or the client disconnects; a same-level respawn
@@ -164,32 +165,45 @@ These read the local player as the client sees it. They take no mod-controlled n
   lists them, once per item and components. Mod additions from `build_creative_mode_tab_contents`
   join when the tabs are built, and the operator tab's items only with the last build's permissions.
   It is empty before resources load. It reads the same on native and wasm.
-- Reach is `targeting()` (below), which comes from the interaction-range attributes with the server's
-  and equipment's modifiers. Menu slot numbers are `Slot.index`, the position in the menu's slot list
+- Reach comes from the interaction-range attributes with the server's and equipment's
+  modifiers. Menu slot numbers are `Slot.index`, the position in the menu's slot list
   that `menu_slot` and `menu_slot_count` take; `menu_slot_backing` gives the index in the backing container.
 
 ## Combat targeting
 
-`ClientHost::targeting()` and `set_targeting(ClientTargeting)` control liquid picking,
-entity occlusion and an optional crosshair entity override. Defaults preserve ordinary
-vanilla targeting. Set `pick_liquids` to include source and flowing fluid shapes, or
-`hit_through_walls` to ignore block occlusion for entity picks and attacks. An `entity`
-override must name a live entity in this client level; stale or self handles make the
-setter return `false` without changing the controls. The setter requires a logged-in
-client world. An override is rechecked for reach, held-item range and occlusion when
-used and disappears from reads after its level is replaced.
+`client_frame_pick` runs once per frame, after the frame's client ticks, at its
+game-time partial tick, before render-state extraction. NeoForge 26.3 has no
+counterpart. The event supplies read-only `original`, `block_candidate` and
+`entity_candidate` values and a mutable `result`, initialized to `original`.
+Choose the block candidate to target a block through an entity, choose a target
+from the typed ray APIs, or clear the result for a miss. Later listeners see the
+previous listener's result. A reentrant `crosshair_target()` read sees `original`.
+
+The game validates the final result at writeback: finite point, current level,
+live entity or matching block state, and vanilla pick reach. Invalid output becomes
+a miss, never a new ray. The highlight reads the result this frame; attack, use and
+pick-item read it during the next frame's ticks. A target that becomes stale refuses
+the action, without selecting anything behind it. Listener writes and publication
+run in one transaction. Buckets, bottles, boats, brushes and other item-specific
+rays remain independent and vanilla-exact.
+
+```rust,ignore
+fn client_frame_pick(&self, _host: &mut dyn ClientHost, event: &mut ClientFramePickEvent<'_>) {
+    *event.result = event.block_candidate;
+}
+```
 
 Reach remains attribute-backed: use the server player's living handle and
 `set_attribute_base(host, "minecraft:block_interaction_range", value)` or
 `"minecraft:entity_interaction_range"`. The client's cached reach follows the server's
-attribute updates. Client targeting controls do not grant extra server reach.
+attribute updates. Replacing the client pick does not grant extra server reach.
 
 `client_attack_target` receives a mutable `targets` list before an ordinary melee click
 (spear jabs use their existing path). It starts with the crosshair entity. Replace it
 for redirection, append for multiple hits, or clear it to suppress an entity attack.
 `Flow::Cancel` cancels the batch. There is no batch cap; duplicates are sent once
 in first-occurrence order. Each target is checked again against live handles,
-attackability, reach, held-item range and the occlusion control. Clearing an entity hit
+attackability, reach, held-item range and ordinary block occlusion. Clearing an entity hit
 does not mine the block behind it; an empty list on a block or miss keeps the ordinary
 path. Each accepted hit uses normal attack packets and prediction. Server validation
 and cooldowns apply. Native and wasm mods use the same typed API.

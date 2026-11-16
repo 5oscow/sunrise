@@ -30,8 +30,8 @@ fn nearest_entity(
 
 impl Game<'_> {
     fn crosshair_entity_hit(&self) -> Option<CrosshairEntityHit> {
-        if let Some(entity) = self.targeting().entity {
-            let (_, distance) = self.targeting_entity_hit(entity)?;
+        if let Some(hit) = self.cached_entity_pick() {
+            let (entity, distance, _) = hit?;
             return Some(CrosshairEntityHit {
                 id: entity.id() as i32,
                 distance,
@@ -73,22 +73,26 @@ impl Game<'_> {
         if hits.iter().all(Option::is_none) {
             return None;
         }
-        nearest_entity(hits, self.block_distance())
+        nearest_entity(
+            hits,
+            if self.frame_pick.ray.is_some() {
+                None
+            } else {
+                self.block_distance()
+            },
+        )
     }
 
-    /// The ordinary block-or-entity pick (Minecraft.hitResult), using the
-    /// game's targeting ray, reach and occlusion. None without a client world
-    /// or on a miss. Entity hits carry this client level's epoch. Unlike
-    /// view_hit, this never traces distant terrain.
+    /// The stored frame decision on a window; original during dispatch.
+    /// Raw computation is private to the frame refresh and server-side readers.
     pub(super) fn crosshair_target(&self) -> Option<CrosshairTarget> {
         use crate::game::api_values::TryIntoApi;
         if !self.native_window() || self.title.is_some() {
             return None;
         }
         self.player.as_ref()?;
-        if let Some(entity) = self.targeting().entity {
-            let (point, _) = self.targeting_entity_hit(entity)?;
-            return Some(CrosshairTarget::Entity { entity, point });
+        if self.uses_frame_pick() {
+            return self.stored_frame_pick();
         }
         if let Some(hit) = self.crosshair_entity_hit() {
             let (eye, direction) = self.aim()?;
@@ -107,6 +111,15 @@ impl Game<'_> {
                 .try_into_api()
                 .ok()?,
             hit: hit.native(),
+        })
+    }
+
+    pub(super) fn frame_entity_candidate(&self) -> Option<CrosshairTarget> {
+        let hit = self.crosshair_entity_hit()?;
+        let (eye, direction) = self.aim()?;
+        Some(CrosshairTarget::Entity {
+            entity: EntityRef::new(self.native_lifecycle.epoch()?, hit.id as u32),
+            point: std::array::from_fn(|i| eye[i] + direction[i] * hit.distance),
         })
     }
 
