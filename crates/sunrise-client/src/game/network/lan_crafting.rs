@@ -15,7 +15,7 @@ use sunrise_client::{
         menu::{ModCraft, Slots, linked_slot_count, read_links, write_links},
     },
     menu::{
-        Env, Input, Kind, Menu,
+        Asked, Env, Input, Kind, Menu,
         place::{PostPlace, TransferCheck, TransferError},
     },
 };
@@ -412,6 +412,17 @@ impl Game<'_> {
     /// blaze powder slots) or a content mod's menu type (`Kind::Mod`) over the
     /// block entity's slots. False for other windows.
     pub(super) fn lan_machine_click(&mut self, conn: u32, p: &play::ContainerClick) -> bool {
+        self.lan_machine_click_asked(conn, p, Asked::default())
+    }
+
+    /// `lan_machine_click` with the slot rules' answers the server got for this click before it
+    /// reached the menu (`Menu::click_asked`).
+    pub(in crate::game) fn lan_machine_click_asked(
+        &mut self,
+        conn: u32,
+        p: &play::ContainerClick,
+        asked: Asked,
+    ) -> bool {
         let Some(host) = self.lan.as_mut() else {
             return false;
         };
@@ -516,7 +527,8 @@ impl Game<'_> {
             let before: Vec<_> = (0..menu.slot_count())
                 .map(|s| menu.slot(s).cloned())
                 .collect();
-            let _ = menu.click(env, i32::from(p.slot), i32::from(p.button), input(p.input));
+            let (slot, button) = (i32::from(p.slot), i32::from(p.button));
+            let _ = menu.click_asked(env, slot, button, input(p.input), asked);
             (0..menu.slot_count())
                 .filter(|&s| menu.slot(s) != before[s].as_ref())
                 .collect::<Vec<_>>()

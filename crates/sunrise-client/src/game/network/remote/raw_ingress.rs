@@ -167,6 +167,7 @@ impl Game<'_> {
                     self.native_lifecycle_world_closed();
                     let ticks = self.ticks;
                     if let Some(r) = self.remote.as_mut() {
+                        self.native_net.holds.borrow_mut().clear();
                         r.reconfiguring = Some(ticks);
                         r.chat_tree_received = false;
                     }

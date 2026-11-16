@@ -61,7 +61,8 @@ pub struct SlotContext<'a> {
 pub trait SlotRules {
     /// Whether a part answers the menu type `menu`; a menu type none answers is never asked.
     fn listens(&self, menu: &str) -> bool;
-    /// The slot's own answers arrive in `may_place` and `max_stack`; the parts may change them.
+    /// The slot's own answers arrive in `may_place`, `may_pickup` and `max_stack`; the parts may
+    /// change them.
     /// `context` is who and where the ask is about (see [`SlotContext`]).
     fn rule(
         &self,
@@ -70,6 +71,7 @@ pub trait SlotRules {
         stack: &ItemStack,
         context: SlotContext<'_>,
         may_place: &mut bool,
+        may_pickup: &mut bool,
         max_stack: &mut u32,
     );
 }

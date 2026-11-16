@@ -108,7 +108,7 @@ pub fn main() -> sunrise_client::Result<()> {
         &items,
         &PackOverlay::NONE,
         &crate::test_resources::server_load(),
-    );
+    )?;
     let enchantments = sunrise_client::enchant::Enchantments::load(root, &defaults)?;
     let names = sunrise_client::creative::Names::load(
         &sunrise_assets::resource_source::ResourceSource::directory(root.to_path_buf()),

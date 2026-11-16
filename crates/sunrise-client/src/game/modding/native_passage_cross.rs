@@ -109,6 +109,7 @@ impl Game<'_> {
             data,
         });
         if !self.send_play(payload) {
+            self.native_net.holds.borrow_mut().clear();
             return Err(Error::Cancelled);
         }
         // The send hook's listeners only read the host: the player is still there.
@@ -141,6 +142,9 @@ impl Game<'_> {
             log::debug!("Sunrise: a passage refusal this build does not know: {reason}");
             return;
         };
+        if self.passages.crossing == Some(PassageId::from_raw(id)) {
+            self.native_net.holds.borrow_mut().clear();
+        }
         self.passages.refused = Some((PassageId::from_raw(id), why));
     }
 

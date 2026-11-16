@@ -3,7 +3,11 @@
 //! the game's own routing.
 use super::Game;
 use sunrise_client::{
-    block_entities::Pos, containers::BlockEntity, items::ItemStack, lan::menu::Slots,
+    block_entities::Pos,
+    containers::{BlockEntity, ModMenuType},
+    items::ItemStack,
+    lan::menu::Slots,
+    menu::Asked,
 };
 use sunrise_protocol::packets::play;
 
@@ -122,8 +126,7 @@ impl Game<'_> {
         {
             return false;
         }
-        let size = menu.size;
-        let window = menu.window;
+        let (size, window, menu_type) = (menu.size, menu.window, menu.mod_type);
         // A mod menu type keeps its drag in the connection's machine menu
         // (`lan_machine_click`), not in `menu.drag`: a shift-click during it
         // goes there too, to only end the drag.
@@ -141,13 +144,15 @@ impl Game<'_> {
         ) {
             return false;
         }
-        let handled = self
+        let (handled, asked) = self
             .as_guest(conn, |game| {
-                game.mod_menu_quick_move(pos, size, p.slot as usize, at)
+                game.mod_menu_quick_move(pos, size, menu_type, p.slot as usize, at)
             })
-            .unwrap_or(false);
+            .unwrap_or_default();
+        // The game's own routing reuses the pickup rule's answer asked before the hook, so the
+        // click asks it once, as the client's prediction does.
         if !handled {
-            return false;
+            return !asked.is_empty() && self.lan_machine_click_asked(conn, p, asked);
         }
         // The mod menu type's engine starts over from the block entity next click.
         let Some(host) = self.lan.as_mut() else {
@@ -178,20 +183,41 @@ impl Game<'_> {
     }
 
     /// The mods' `native_menu_quick_move` on menu slot `slot` (living at
-    /// `at`) of the mod container at `pos` (`size` container slots), for the
-    /// player in place: true when
-    /// one took it, the slot then holding what is left of its stack. The
+    /// `at`) of the mod container at `pos` (`size` container slots, on mod
+    /// menu type `menu_type` or a vanilla one), for the player in place: true
+    /// when one took it, the slot then holding what is left of its stack, and
+    /// the slot rules' answers asked before the mods (`Menu::click_asked`). The
     /// block entity is out of the world during the call.
-    fn mod_menu_quick_move(&mut self, pos: Pos, size: usize, slot: usize, at: MenuSlot) -> bool {
-        let Some(BlockEntity::Mod(m)) = self.world.block_entities.get_mut(&pos) else {
-            return false;
+    fn mod_menu_quick_move(
+        &mut self,
+        pos: Pos,
+        size: usize,
+        menu_type: Option<&'static ModMenuType>,
+        slot: usize,
+        at: MenuSlot,
+    ) -> (bool, Asked) {
+        let Some(BlockEntity::Mod(m)) = self.world.block_entities.get(&pos) else {
+            return (false, Asked::default());
         };
         let held = match at {
             MenuSlot::Container(k) => m.items.get(k).cloned().flatten(),
             MenuSlot::Inventory(i) => self.inventory.get(i).cloned().flatten(),
         };
         let Some(mut stack) = held.filter(|s| s.count > 0) else {
-            return false;
+            return (false, Asked::default());
+        };
+        // `doClick` asks `Slot.mayPickup` before the menu's `quickMoveStack`: a slot of a mod
+        // menu type its parts refuse (`menu_slot_rules`) asks no mod, and the game's own routing
+        // refuses it with the same answer.
+        let (gives, asked) = match menu_type {
+            Some(t) if mod_api::__private::has_part_hook(mod_api::HookId::MenuQuickMove) => {
+                self.mod_menu_slot_gives(t, slot, &stack, [pos.0, pos.1, pos.2], &m.items)
+            }
+            _ => (true, Asked::default()),
+        };
+        let Some(BlockEntity::Mod(m)) = self.world.block_entities.get_mut(&pos).filter(|_| gives)
+        else {
+            return (false, asked);
         };
         let mut taken = std::mem::take(&mut **m);
         let items = taken.items.clone();
@@ -213,7 +239,7 @@ impl Game<'_> {
             &mut self.inventory,
         );
         self.put_back_mod_block_entity(pos, taken, &items);
-        handled
+        (handled, asked)
     }
 }
 

@@ -19,7 +19,7 @@ pub fn visit_components(stack: &ItemStack, mut visit: impl FnMut(&str)) {
         }
     }
     if let Some(data) = stack.data() {
-        for (id, _) in &data.other {
+        for (id, _) in data.preserved_components() {
             if !id.starts_with('!') && !MODELLED.contains(&id.as_str()) {
                 visit(id);
             }
@@ -31,7 +31,7 @@ pub fn visit_components(stack: &ItemStack, mut visit: impl FnMut(&str)) {
 pub fn removed(stack: &ItemStack, id: &str) -> bool {
     !stack.carries_component(None, id)
         && stack.data().is_some_and(|data| {
-            data.other
+            data.preserved_components()
                 .iter()
                 .any(|(key, _)| key.strip_prefix('!') == Some(id))
         })
@@ -253,6 +253,13 @@ pub fn component_equal(id: &str, a: &ItemStack, b: &ItemStack) -> bool {
             a.data().and_then(|d| d.other(id)),
             b.data().and_then(|d| d.other(id)),
         ),
+        "minecraft:custom_data" => match (
+            a.data().and_then(|d| d.other(id)),
+            b.data().and_then(|d| d.other(id)),
+        ) {
+            (Some(a @ Tag::Compound(_)), Some(b @ Tag::Compound(_))) => custom_data_equal(a, b),
+            _ => false,
+        },
         "minecraft:item_name" => item_name_equal(a, b),
         "minecraft:item_model" | "minecraft:tooltip_style" => identifier_equal(
             a.data().and_then(|d| d.other(id)),
@@ -399,13 +406,13 @@ pub fn stored_component_equal(id: &str, a: &ItemStack, b: &ItemStack) -> bool {
         return a.data().and_then(|d| d.other(id)) == b.data().and_then(|d| d.other(id));
     }
     let raw_a = a.data().and_then(|data| {
-        data.other
+        data.preserved_components()
             .iter()
             .find(|(key, _)| key == id)
             .map(|(_, value)| value)
     });
     let raw_b = b.data().and_then(|data| {
-        data.other
+        data.preserved_components()
             .iter()
             .find(|(key, _)| key == id)
             .map(|(_, value)| value)
@@ -627,6 +634,29 @@ fn mob_visibility_equal(a: Option<&Tag>, b: Option<&Tag>) -> bool {
         return false;
     }
     super::component_values::holder_set_equal(a.targets, b.targets)
+}
+
+/// `CustomData.equals`, not `matchedBy`: compounds are exact, lists are ordered,
+/// and FloatTag/DoubleTag records use Java's NaN-canonicalizing floating equality.
+fn custom_data_equal(a: &Tag, b: &Tag) -> bool {
+    match (a, b) {
+        (Tag::Float(a), Tag::Float(b)) => {
+            a == b || (f32::from_bits(*a).is_nan() && f32::from_bits(*b).is_nan())
+        }
+        (Tag::Double(a), Tag::Double(b)) => {
+            a == b || (f64::from_bits(*a).is_nan() && f64::from_bits(*b).is_nan())
+        }
+        (Tag::Compound(a), Tag::Compound(b)) => {
+            a.len() == b.len()
+                && a.iter().zip(b).all(|((key, value), (other_key, other))| {
+                    key == other_key && custom_data_equal(value, other)
+                })
+        }
+        (Tag::List(a), Tag::List(b)) => {
+            a.len() == b.len() && a.iter().zip(b).all(|(a, b)| custom_data_equal(a, b))
+        }
+        _ => a == b,
+    }
 }
 
 fn block_entity_equal(a: Option<&Tag>, b: Option<&Tag>) -> bool {

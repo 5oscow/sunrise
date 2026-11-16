@@ -9,6 +9,18 @@ use crate::Identifier;
 /// commits. A phase change or disconnect before publication cancels it. Registered and
 /// engine-reserved custom payload channels require their payload/service API instead.
 /// This is not a connection or protocol implementation; submission applies no local effects.
+/// A `container_click`, whose carried stacks the game hashes, is built by
+/// [`NetworkClientHost::container_click`](crate::NetworkClientHost::container_click).
+/// Signed chat, signed commands and chat sessions have no typed builders:
+/// ```compile_fail
+/// mod_vocab::ServerboundPlayPacket::chat("hello");
+/// ```
+/// ```compile_fail
+/// mod_vocab::ServerboundPlayPacket::chat_command_signed("help");
+/// ```
+/// ```compile_fail
+/// mod_vocab::ServerboundPlayPacket::chat_session_update();
+/// ```
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 #[derive(sunrise_mod_api_macros::Wire)]
@@ -71,6 +83,50 @@ pub enum SendPacketError {
     },
 }
 
+/// Opaque identity of one connection's packet hold.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, sunrise_mod_api_macros::Wire)]
+#[wire(internal_field_layouts)]
+// exhaustive: the private field prevents mods constructing or destructuring the id
+pub struct HoldId(pub(crate) u64);
+impl HoldId {
+    /// Construct an identity for the game implementation.
+    // hidden: game-side identity construction, matching the other opaque Wire ids
+    #[doc(hidden)]
+    pub fn new(value: u64) -> Self {
+        Self(value)
+    }
+}
+
+/// Why a hold operation was refused.
+#[derive(Clone, Debug, PartialEq, Eq, sunrise_mod_api_macros::Wire)]
+#[non_exhaustive]
+pub enum HoldError {
+    /// No joined client world is available.
+    NoWorld,
+    /// The hold ended or belongs to a different connection.
+    Unknown,
+    /// Another hold is active, or this hold overflowed and was flushed.
+    /// These are the configured bounds.
+    Limit {
+        /// Maximum held packets.
+        packets: usize,
+        /// Maximum held encoded bytes, including packet type ids.
+        bytes: usize,
+    },
+    /// Publication failed. The remaining packets were discarded.
+    Send {
+        /// Packets successfully published before the failure.
+        sent: usize,
+        /// The existing packet service's refusal.
+        error: SendPacketError,
+    },
+}
+impl crate::NoBackend for HoldError {
+    fn no_backend() -> Self {
+        Self::NoWorld
+    }
+}
+
 /// Why a client mod's `disconnect` was refused.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -92,5 +148,52 @@ impl crate::NoBackend for DisconnectError {
     /// No game: nothing is joined.
     fn no_backend() -> Self {
         Self::Unavailable
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::wire::{Reader, Writer};
+    #[test]
+    fn hold_errors_keep_literal_ordinals_and_partial_send_fields() {
+        for (error, ordinal) in [
+            (HoldError::NoWorld, 0u32),
+            (HoldError::Unknown, 1),
+            (
+                HoldError::Limit {
+                    packets: 256,
+                    bytes: 1_048_576,
+                },
+                2,
+            ),
+            (
+                HoldError::Send {
+                    sent: 1,
+                    error: SendPacketError::Backpressure,
+                },
+                3,
+            ),
+        ] {
+            let mut writer = Writer::new();
+            writer.put(&error);
+            assert_eq!(&writer.bytes()[..4], &ordinal.to_le_bytes());
+            assert_eq!(
+                Reader::new(writer.bytes()).take::<HoldError>().unwrap(),
+                error
+            );
+        }
+        let mut writer = Writer::new();
+        writer.put(&HoldError::Send {
+            sent: 1,
+            error: SendPacketError::Backpressure,
+        });
+        assert_eq!(
+            writer.bytes(),
+            &[3, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0]
+        );
+        let mut writer = Writer::new();
+        writer.put(&HoldId::new(4178));
+        assert_eq!(writer.bytes(), &[82, 16, 0, 0, 0, 0, 0, 0]);
     }
 }

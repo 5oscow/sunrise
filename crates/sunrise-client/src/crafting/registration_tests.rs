@@ -27,6 +27,17 @@ fn unregistered_serializer_refuses_whole_load_after_false_conditions() {
         r#"{"type":"absent:serializer","neoforge:conditions":[{"type":"neoforge:not","value":{"type":"neoforge:true"}}]}"#,
     )
     .unwrap();
+    // With the serializer skipped by its false condition, the malformed sibling still
+    // refuses the whole load, naming its file.
+    let error = Recipes::load(root.path(), &items, &PackOverlay::NONE, &load)
+        .err()
+        .unwrap()
+        .to_string();
+    assert!(
+        error.contains("known_bad.json") && error.contains("invalid result"),
+        "{error}"
+    );
+    std::fs::remove_file(folder.join("known_bad.json")).unwrap();
     let recipes = Recipes::load(root.path(), &items, &PackOverlay::NONE, &load).unwrap();
     assert_eq!(recipes.crafting.len(), 1);
     assert_eq!(

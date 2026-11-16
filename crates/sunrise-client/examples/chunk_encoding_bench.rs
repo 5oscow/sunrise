@@ -72,11 +72,11 @@ fn main() -> sunrise_client::Result<()> {
         root,
         &sunrise_world::loot::PackOverlay::NONE,
         &defaults,
-        &sunrise_client::crafting::ResolvedSources::load_or_empty(
+        &sunrise_client::crafting::ResolvedSources::load(
             root,
             &sunrise_world::loot::PackOverlay::NONE,
             &server_load(),
-        ),
+        )?,
     )?;
     let biome_registry: Vec<String> = sync
         .dynamic

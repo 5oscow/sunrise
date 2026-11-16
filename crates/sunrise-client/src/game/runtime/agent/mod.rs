@@ -1602,7 +1602,7 @@ impl Game<'_> {
                         self.remote_drop(all);
                     }
                 } else {
-                    self.drop_held(all);
+                    self.drop_held_item(all);
                 }
                 ok(
                     json!({ "ok": true, "dropped_from": before, "held": self.held().map(|s| self.stack_value(s)) }),

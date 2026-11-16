@@ -24,8 +24,19 @@ impl Menu {
         self.state.quick_slots.clear();
     }
 
-    /// `AbstractContainerMenu.clicked`: Err carries a vanilla exception name.
+    /// `AbstractContainerMenu.clicked`: Err carries a vanilla exception name. The slot rules are
+    /// asked once for each slot and stack the click plans (`Asked`).
     pub fn click(
+        &mut self,
+        env: &Env,
+        slot_index: i32,
+        button: i32,
+        input: Input,
+    ) -> Result<(), &'static str> {
+        self.click_asked(env, slot_index, button, input, Asked::default())
+    }
+
+    pub(super) fn click_planned(
         &mut self,
         env: &Env,
         slot_index: i32,
@@ -480,12 +491,17 @@ impl Menu {
         }
         let container = self.state.slots[clicked].container;
         for t in 0..self.state.slots.len() {
-            if self.may_pickup(env, t)
-                && self.has_item(t)
-                && self.state.slots[t].container == container
-                && self.quick_replace(t, moved, env)
-            {
-                self.click(env, t as i32, 0, Input::QuickMove)?;
+            // The screen's `mayPickup` and the click it sends are one question about slot `t`:
+            // the server, which hears only the click, asks it once too.
+            let clicked = self.planned(Asked::default(), |menu| {
+                let sent = menu.has_item(t)
+                    && menu.state.slots[t].container == container
+                    && menu.quick_replace(t, moved, env)
+                    && menu.may_pickup(env, t);
+                sent.then(|| menu.click(env, t as i32, 0, Input::QuickMove))
+            });
+            if let Some(clicked) = clicked.0 {
+                clicked?;
                 each(self, t);
             }
         }

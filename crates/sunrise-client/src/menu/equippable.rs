@@ -49,13 +49,8 @@ impl Menu {
         let (allowed, max) = if self.state.slots[slot].role == super::Role::Hidden {
             (false, 0)
         } else {
-            self.slot_rules(
-                env,
-                slot,
-                stack,
-                self.vanilla_may_place(env, slot, stack),
-                self.vanilla_slot_max(slot, stack),
-            )
+            let (place, _, maximum) = self.slot_rules(env, slot, stack);
+            (place, maximum)
         };
         EquipPlacement {
             menu,
