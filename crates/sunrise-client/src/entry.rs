@@ -118,9 +118,8 @@ pub fn start<G>(
     sunrise_client::telemetry::mark_start();
     // Opt-in telemetry keeps each crash report (docs/telemetry.md), whatever the mode.
     crash::on_report(sunrise_client::telemetry::keep_crash);
-    // Crates above the engine registered their hooks before this (sunrise-official's `main`),
-    // then the Sunrise parts still in this crate; none registers after this point.
-    game::player_hooks::register();
+    // Crates above the engine registered their hooks before this (sunrise-official's `main`);
+    // none registers after this point.
     sunrise_hooks::engine::seal();
     // The text crates ship (`sunrise_hooks::lang`), loaded with the game's own languages.
     sunrise_client::lang::install_crate_files(sunrise_hooks::lang::engine::all());

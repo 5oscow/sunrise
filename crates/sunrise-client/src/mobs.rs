@@ -1615,7 +1615,7 @@ pub struct Mob {
     /// its skin is ready.
     pub cape: Option<String>,
     /// A pose laid over this player's body after the vanilla animation (`anim::setup`), timed on
-    /// `age`: a Sunrise emote (docs/cosmetics.md), given by the game. Visual only.
+    /// `age`, given by a hook (`sunrise_hooks::players::BodyPose`). Visual only.
     pub emote: Option<Arc<dyn anim::BodyPose>>,
     /// A mannequin's `DATA_PROFILE` (ResolvableProfile): the profile's
     /// `textures` property resolves to `skin` like a player's.

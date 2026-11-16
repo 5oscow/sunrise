@@ -4489,7 +4489,6 @@ dependencies = [
  "sunrise-client-render",
  "sunrise-command",
  "sunrise-core",
- "sunrise-cosmetics",
  "sunrise-dualsense",
  "sunrise-engine-slots",
  "sunrise-friends",
@@ -4709,19 +4708,6 @@ dependencies = [
  "serde",
  "serde_json",
  "unicode_names2",
-]
-
-[[package]]
-name = "sunrise-cosmetics"
-version = "0.1.0"
-dependencies = [
- "base64 0.22.1",
- "glam",
- "png",
- "serde",
- "serde_json",
- "sunrise-addresses",
- "ureq",
 ]
 
 [[package]]
@@ -5175,23 +5161,14 @@ name = "sunrise-official"
 version = "0.1.0"
 dependencies = [
  "log",
+ "sunrise-addresses",
  "sunrise-discord",
  "sunrise-friends",
  "sunrise-game",
  "sunrise-heartbeat",
- "sunrise-official-servers",
  "sunrise-perf-share",
  "sunrise-platform",
  "winresource",
-]
-
-[[package]]
-name = "sunrise-official-servers"
-version = "0.1.0"
-dependencies = [
- "log",
- "sunrise-addresses",
- "sunrise-platform",
 ]
 
 [[package]]

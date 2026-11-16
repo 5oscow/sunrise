@@ -18,7 +18,7 @@ sunrise-game = { path = "../sunrise-game" }
 sunrise-platform = { path = "../sunrise-platform" }
 sunrise-heartbeat = { path = "../sunrise-heartbeat" }
 sunrise-friends = { path = "../sunrise-friends", features = ["game"] }
-sunrise-official-servers = { path = "../sunrise-official-servers" }
+sunrise-addresses = { path = "../sunrise-addresses" }
 sunrise-discord = { path = "../sunrise-discord" }
 sunrise-perf-share = { path = "../sunrise-perf-share" }
 log = "0.4"

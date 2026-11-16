@@ -12,5 +12,4 @@ sunrise-launcher native_mods::registry_compile::tests::real_sdk_registry_compile
 sunrise-launcher pictures::tests::a_32k_screenshot_is_read_in_little_memory by-hand manual # slow soak: 2 GiB of pixels; run with --ignored --nocapture
 sunrise-launcher rust_toolchain::tests::managed_arm64_toolchain_builds_the_game ci.yml manual # downloads the managed Windows ARM64 toolchain and builds Sunrise
 sunrise-launcher storage::inventory::eviction_tests::allocated_forty_gib_cleanup_proof by-hand manual # manual allocated 40 GiB proof; requires SUNRISE_EVICTION_PROOF_ROOT in checkout scratch
-sunrise-launcher telemetry::tests::official_count_follows_the_srv_record by-hand manual # asks the live official server
 sunrise-launcher downloads::tests::benchmark_download_pipeline by-hand manual # local download throughput benchmark; run explicitly in a fresh process per mode

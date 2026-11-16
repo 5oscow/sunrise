@@ -96,8 +96,6 @@ pub(super) struct Pads {
     radial_runs: RadialRuns,
     /// The moments the radial menu's overlay moves from (`radial_overlay::Look`).
     pub(super) radial_look: sunrise_client_render::radial_overlay::Look,
-    /// The player's skin for the overlay's Emote face, read as it opens.
-    radial_face: Option<String>,
     /// The D-pad's quiet after the menu closed on a D-pad opener.
     radial_settle: radial::DpadSettle,
     /// The narrator said the page shown, and the slot selected.
