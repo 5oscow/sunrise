@@ -1,17 +1,17 @@
 # Release, signing and download-check paths: the release council (.github/council.txt); licence and governance: the core team.
-/.github/                                @UMCEKO @reservedbytes @arismoko
-/tools/ci/                               @UMCEKO @reservedbytes @arismoko
-/tools/release_train.py                  @UMCEKO @reservedbytes @arismoko
-/crates/sunrise-release-sign/            @UMCEKO @reservedbytes @arismoko
-/crates/sunrise-server/src/update.rs     @UMCEKO @reservedbytes @arismoko
-/crates/sunrise-server/Cargo.toml        @UMCEKO @reservedbytes @arismoko
-/launcher/src/signed.rs                  @UMCEKO @reservedbytes @arismoko
-/launcher/src/backend.rs                 @UMCEKO @reservedbytes @arismoko
-/launcher/links.json                     @UMCEKO @reservedbytes @arismoko
-/launcher/Cargo.toml                     @UMCEKO @reservedbytes @arismoko
-/packaging/                              @UMCEKO @reservedbytes @arismoko
+/.github/                                @UMCEKO @reservedbytes @arismoko @Xmilon
+/tools/ci/                               @UMCEKO @reservedbytes @arismoko @Xmilon
+/tools/release_train.py                  @UMCEKO @reservedbytes @arismoko @Xmilon
+/crates/sunrise-release-sign/            @UMCEKO @reservedbytes @arismoko @Xmilon
+/crates/sunrise-server/src/update.rs     @UMCEKO @reservedbytes @arismoko @Xmilon
+/crates/sunrise-server/Cargo.toml        @UMCEKO @reservedbytes @arismoko @Xmilon
+/launcher/src/signed.rs                  @UMCEKO @reservedbytes @arismoko @Xmilon
+/launcher/src/backend.rs                 @UMCEKO @reservedbytes @arismoko @Xmilon
+/launcher/links.json                     @UMCEKO @reservedbytes @arismoko @Xmilon
+/launcher/Cargo.toml                     @UMCEKO @reservedbytes @arismoko @Xmilon
+/packaging/                              @UMCEKO @reservedbytes @arismoko @Xmilon
 /LICENSE                                 @UMCEKO @reservedbytes @arismoko
 /LICENSES/                               @UMCEKO @reservedbytes @arismoko
 /LICENSING.md                            @UMCEKO @reservedbytes @arismoko
 /GOVERNANCE.md                           @UMCEKO @reservedbytes @arismoko
-/.github/CODEOWNERS                      @UMCEKO @reservedbytes @arismoko
+/.github/CODEOWNERS                      @UMCEKO @reservedbytes @arismoko @Xmilon
