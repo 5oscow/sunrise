@@ -127,8 +127,6 @@ pub enum FeatureExecutionError<E> {
     InvalidPendingIndex,
     /// A block-state transition required by a feature is absent from the registry.
     InvalidState,
-    /// A mod feature type's `place` failed (its id, then its reason).
-    Mod(String),
 }
 impl<E: std::fmt::Display> std::fmt::Display for FeatureExecutionError<E> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -157,7 +155,6 @@ impl<E: std::fmt::Display> std::fmt::Display for FeatureExecutionError<E> {
             Self::WorkLimit => f.write_str("feature graph work limit exceeded"),
             Self::InvalidPendingIndex => f.write_str("invalid pending modifier index"),
             Self::InvalidState => f.write_str("feature block state outside registry"),
-            Self::Mod(reason) => write!(f, "mod feature failed: {reason}"),
         }
     }
 }
@@ -882,9 +879,7 @@ impl FeatureDefinition {
                 .place(world, random, origin, run.blocks)
                 .map_err(FeatureExecutionError::Basic),
             Self::NoOp => Ok(true),
-            Self::Mod(feature) => feature
-                .place(world, random, origin, &run.custom)
-                .map_err(|error| FeatureExecutionError::Mod(format!("{}: {error}", feature.id))),
+            Self::Mod(feature) => Ok(feature.place(world, random, origin, &run.custom)),
             Self::Template(feature) => feature
                 .place(world, random, origin)
                 .map_err(FeatureExecutionError::Query),

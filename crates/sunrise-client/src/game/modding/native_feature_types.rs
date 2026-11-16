@@ -3,7 +3,7 @@
 use super::native_worldgen::WorkerResources;
 use mod_api::{
     BlockKey, BlockMetadata, BlockState, BlockUpdateFlags, DatapackEntry, DatapackField,
-    FeatureContext, FeatureType, HeightmapType, StructureRandom,
+    FeatureContext, FeatureType, HeightmapType, RandomSource,
 };
 use std::any::Any;
 use std::sync::Arc;
@@ -26,9 +26,9 @@ fn engine_heightmap(kind: HeightmapType) -> sunrise_world::heightmap::HeightmapT
     }
 }
 
-/// The caller's random, as a [`StructureRandom`].
+/// The caller's random, as a [`RandomSource`].
 struct Draws<'a>(&'a mut dyn ModFeatureRandom);
-impl StructureRandom for Draws<'_> {
+impl RandomSource for Draws<'_> {
     fn next_int_bound(&mut self, bound: i32) -> i32 {
         self.0.int(bound)
     }
@@ -43,6 +43,12 @@ impl StructureRandom for Draws<'_> {
     }
     fn next_boolean(&mut self) -> bool {
         self.0.boolean()
+    }
+    fn next_int(&mut self) -> i32 {
+        self.0.int_unbounded()
+    }
+    fn next_gaussian(&mut self) -> f64 {
+        self.0.gaussian()
     }
 }
 
@@ -62,7 +68,7 @@ impl FeatureContext for Placing<'_> {
     fn config(&self) -> &DatapackEntry {
         self.config
     }
-    fn random(&mut self) -> &mut dyn StructureRandom {
+    fn random(&mut self) -> &mut dyn RandomSource {
         &mut self.random
     }
     fn min_y(&mut self) -> Option<i32> {

@@ -1,6 +1,6 @@
 //! Feature types a trait mod registers: vanilla's `Feature` with its own `place`, as
 //! [`Registrar::register_feature_type`](crate::Registrar::register_feature_type) hands it over
-//! once at startup (NeoForge's registry `FEATURE_TYPE`, which vanilla calls `FEATURE`; a
+//! once at startup (the `FEATURE_TYPE` registry; a
 //! configured feature is an entry of `minecraft:worldgen/feature`). A configured feature with
 //! `"type": "modid:tree"` then places by the mod's code, wherever the game places features:
 //! biome decoration, a nested feature (a random selector's choice), a sapling's growth, bone
@@ -15,17 +15,21 @@
 //! A type declares its config as a flat record ([`DatapackField`]s, the schema datapack
 //! registries use); the game decodes each configured feature against it when the definition
 //! loads, so a config that doesn't fit is refused then, naming the feature, never during
-//! generation. Native mods only: a wasm mod's feature type is refused at registration.
+//! generation.
+//!
+//! Not on wasm: feature types run on the worldgen workers, which wasm mods can't serve yet, so
+//! registering one from a wasm mod is refused at startup, naming the mod and the type, before any
+//! world job runs. Native mods only.
 use crate::wire::{Reader, Wire, WireError, Writer};
 use crate::world::datapack_registry::{DatapackEntry, DatapackField};
-use crate::world::structure_type::{HeightmapType, StructureRandom};
-use crate::{BlockKey, BlockMetadata, BlockState, BlockUpdateFlags};
+use crate::world::structure_type::HeightmapType;
+use crate::{BlockKey, BlockMetadata, BlockState, BlockUpdateFlags, RandomSource};
 use std::sync::Arc;
 use sunrise_core::nbt::Compound;
 
-/// A feature's placement failed: the game discards the call's writes, reports the failure
-/// with the feature's id and disables the type for the rest of the run. A feature that merely
-/// did not place (a tree with no room) answers `Ok(false)` instead.
+/// A feature's placement failed: a fault. The game discards that call's writes, logs it with
+/// the feature's id and disables the type for the session. A feature that merely did not place
+/// (a tree with no room) answers `Ok(false)` instead.
 #[derive(Debug)]
 // exhaustive: mods build it themselves as a feature's error answer
 #[derive(sunrise_mod_api_macros::Wire)]
@@ -60,12 +64,24 @@ crate::wire::wire_handlers::handler!(dyn FeatureType, "FeatureType");
 
 /// What a feature's [`place`](FeatureType::place) sees: vanilla's `WorldGenLevel` around the
 /// origin (a decoration region on a worker, or the live level for growth and commands) and the
-/// caller's random. Writes are staged: the context reads them back, and the level sees them only
-/// when `place` answers `Ok`. A read the level can't answer is `None`; a write it would refuse
-/// (outside the region decoration may write, outside the build height, or the state already
-/// there) is `false`. Neither loads a chunk. Every call is one unit of the placement's work
-/// budget (65,536 for one root placement); past it, calls answer `None` or `false` and the
-/// placement fails without its writes.
+/// caller's random. Writes are staged: the context reads them back, and the level sees them, in
+/// order, as soon as `place` answers `Ok(true)` or `Ok(false)`, so the steps after it see them
+/// too. A read the level can't answer is `None`; a write onto the state already there is
+/// `false`. Neither loads a chunk.
+///
+/// A fault discards the call's writes, logs it, and disables the feature type for the session
+/// (in memory, never saved; a new load of the mod set enables it again): a later placement of it
+/// answers `Ok(false)` and its root carries on, so chunks generated after the fault differ from
+/// those before. A fault is a panic, an `Err`, a write the level refuses (outside the region
+/// decoration may write, or outside the build height) and a work budget that ran out. Each world
+/// query, block write or block-entity operation is one unit of the budget (65,536 for one root
+/// placement); the budget counts work, never time. Random draws and the config, metadata and
+/// state helpers are not charged. `height` reads the level as it was before the call; every
+/// other read sees the call's own writes. A feature can't place another feature.
+///
+/// Features run on a worldgen worker for decoration and on the tick thread for growth, commands
+/// and `LevelRef::place_feature`; the context holds no `Host`, so a worker never reaches mod
+/// state through it.
 pub trait FeatureContext {
     /// Immutable, load-owned block metadata, safe to borrow on this worker.
     fn metadata(&self) -> &dyn BlockMetadata;
@@ -74,7 +90,7 @@ pub trait FeatureContext {
     fn config(&self) -> &DatapackEntry;
     /// The caller's random: the same stream the placement modifiers before this feature drew
     /// from, so draws stay in vanilla's order.
-    fn random(&mut self) -> &mut dyn StructureRandom;
+    fn random(&mut self) -> &mut dyn RandomSource;
     /// The level's minimum block Y.
     fn min_y(&mut self) -> Option<i32>;
     /// The level's maximum block Y.
