@@ -27,6 +27,20 @@ The placement type is `SpawnPlacements.isSpawnPositionOk`'s first check, and the
 
 `mob_spawn_placement_check` is the separate per-check moment: it runs after the rule and is told its answer as `default_result`, so you can override it for one position.
 
+## Saved display and utility entities
+
+`entity_join_level` (hook version 3) includes block, item and text displays, markers and
+interactions. A fresh spawn notifies once with `loaded_from_disk = false`; restoring an
+entity from a saved chunk notifies once with `loaded_from_disk = true`. The normal join
+cancellation and transaction rules apply to these entities too.
+
+On the server, `level.entities_in(host, min, max)` returns readable `EntityRef` handles
+for these resident entities. Their kind, position, saved data and tags can be inspected
+without command selectors. The query uses physical boxes, not rendering/culling boxes:
+displays and markers have zero-sized boxes at their positions; interactions use their
+saved width and height. Face-only contact does not intersect. A handle expires when its
+entity unloads, so find it again when the saved entity rejoins.
+
 ## Walking every entity in a level
 
 `host.level_all_entities(level)` returns the authoritative level's available

@@ -242,7 +242,8 @@ impl Game<'_> {
     /// `client_entities_in`. The walk
     /// is in entity-list order followed by players; each overlap requires a
     /// handle lookup, so cost grows with the box's contents. Tridents cannot
-    /// yet resolve; frames, paintings and other special entities
+    /// yet resolve; displays, markers and interactions follow the listed entities.
+    /// Frames, paintings and other special entities
     /// are not on the entity-list walk. The dragon follows ordinary entities;
     /// its eight intersecting parts follow players (`Level.getEntities`).
     /// During `hears_projectile_impacts`, the projectile list is taken out of
@@ -268,6 +269,15 @@ impl Game<'_> {
         }
         let mut ids = self.listed_entities_in(bounds);
         self.append_dragon_query_ids(bounds, false, &mut ids);
+        ids.extend(
+            self.others
+                .iter()
+                .filter(|e| {
+                    e.display_marker_or_interaction_bounds()
+                        .is_some_and(|body| bounds.intersects(body))
+                })
+                .map(|e| e.id),
+        );
         ids.extend(
             self.fishing_hooks_here()
                 .filter(|(hook, _)| bounds.intersects(hook.bounds()))

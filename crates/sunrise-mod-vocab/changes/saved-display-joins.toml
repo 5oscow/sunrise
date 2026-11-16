@@ -1,0 +1,3 @@
+ids = ["hook:entity_join_level"]
+why = "Hook version 3 includes block, item and text displays, markers and interactions, for fresh spawns and chunk reloads."
+migrate = "Listeners should handle these entity kinds as well; loaded_from_disk distinguishes chunk reloads. LevelRef::entities_in returns readable handles for them."

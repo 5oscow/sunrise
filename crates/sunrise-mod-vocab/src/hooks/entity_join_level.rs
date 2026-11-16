@@ -31,7 +31,8 @@ pub trait Hooks {
     /// back out as if never added, and a `/summon` of it fails. Tells every
     /// kind in the game's entity lists (items, orbs, mobs, boats, minecarts,
     /// armor stands, primed TNT, falling blocks, projectiles, rockets,
-    /// tridents, end crystals, the dragon, cushions, paintings, item frames),
+    /// tridents, end crystals, the dragon, cushions, paintings, item frames,
+    /// block/item/text displays, markers and interactions),
     /// once each, in the order they were created; check `kind`. A drop, an
     /// orb, a mob, a `/summon` and a chunk's entities are told at once, any
     /// other spawn between the tick's phases (it is checked after the blocks,
@@ -47,14 +48,14 @@ pub trait Hooks {
     /// is gone. A join cancelled at the commit leaves the spawn's handle
     /// stale. Joins at one commit come in the order the entities were added,
     /// before the removals the transaction asked for take effect.
-    /// Not told: the entities Sunrise keeps without
-    /// simulating (displays, markers, interactions). Server-side.
+    /// Saved displays, markers and interactions also notify with `loaded_from_disk`
+    /// when their chunk loads. Server-side.
     #[hook(
         side = "server",
         contract = "cancel",
         out = "canceled",
         neoforge = "EntityJoinLevelEvent",
-        version = 2
+        version = 3
     )]
     fn entity_join_level();
 }
