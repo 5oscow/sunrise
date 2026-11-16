@@ -542,7 +542,11 @@ pub fn main() -> sunrise_client::Result<()> {
     // Trial spawner rewards: the loot tables and the configs.
     let loot = if input.contains("mode=trial") || input.contains("mode=vault") {
         sunrise_client::mobs::trial_spawner::load_registry(root);
-        sunrise_client::structure_blocks::loot_data(root, &PackOverlay::NONE, &defaults)
+        Some(std::sync::Arc::new(sunrise_world::loot::LootData::load(
+            root,
+            &PackOverlay::NONE,
+            &defaults,
+        )?))
     } else {
         None
     };

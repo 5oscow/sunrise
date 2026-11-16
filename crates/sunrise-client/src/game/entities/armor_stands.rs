@@ -983,12 +983,12 @@ impl Game<'_> {
             .play("minecraft:entity.armor_stand.break", Some(at), 1.0, 1.0);
         self.show_breaking_particles(at, f64::from(width), f64::from(height));
         let center = [at[0], at[1] + if a.small { 0.4875 } else { 0.9875 }, at[2]];
-        let stand = ItemStack {
-            item: Arc::from("minecraft:armor_stand"),
-            count: 1,
-            damage: 0,
-            extra: None,
-        };
+        let mut stand = ItemStack::new("minecraft:armor_stand", 1);
+        if let Some(name) = &a.custom_name {
+            stand
+                .data_mut()
+                .set_loot_name("minecraft:custom_name", &name.component());
+        }
         self.spawn_item(stand, center, [0.0; 3], 10);
         self.armor_stand_death_drops(&a, "minecraft:player_attack", self.own_entity_id() as u32);
         for stack in a.equipment.into_iter().flatten() {
@@ -1357,11 +1357,7 @@ impl Game<'_> {
                 .bool_at(sunrise_client::gamerules::vanilla::MOB_DROPS),
             dying,
             |table| {
-                let Some(loot) = sunrise_client::structure_blocks::loot_data(
-                    &self.options.resources,
-                    &self.pack_files(),
-                    self.res.item_defaults(),
-                ) else {
+                let Some(loot) = self.server_loot.get() else {
                     return Vec::new();
                 };
                 if !loot.has_table(table) {
