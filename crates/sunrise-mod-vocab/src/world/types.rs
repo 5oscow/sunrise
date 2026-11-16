@@ -1452,9 +1452,10 @@ pub trait LevelRandomHost: LevelHost {
 /// A sound is queued at the call, and its seed is drawn then from the level's sound-seed
 /// stream, never from [`LevelRandomHost::random`]. An entity's random is the entity's own
 /// stream (`Entity.getRandom`), advanced in listener order, so the hit's continuation sees
-/// the draws. A hit lends the entities it can lend (the attacking player, when it is not the
-/// one hurt); any other entity, a stale handle and a call on a client answer `None` or
-/// `false`.
+/// the draws. A hit lends its attacker where the game applies a melee hit (the attacking player or mob,
+/// for player → mob, mob → mob and mob → player) and no entity at any other damage site
+/// (environment, projectiles, explosions, potions and the like); any other entity, a stale
+/// handle and a call on a client answer `None` or `false`.
 pub trait HitHost: LevelRandomHost {
     /// `Level.playSound(null, x, y, z, sound, source, volume, pitch)`: plays sound event
     /// `sound` at `at` for every player in this level within range (16 blocks, times the

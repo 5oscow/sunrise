@@ -86,7 +86,6 @@ fn living_incoming_damage(&self, hit: &mut dyn HitHost, e: &mut LivingIncomingDa
 `Level.playSound(null, entity, ...)`: every player in range hears it, the entity's own player included
 (unlike `EntityRef::play_sound`). The sounds queue at the call, with their seeds drawn then from the level's
 sound-seed stream, so a hit a listener cancels still plays them. The entity draws (`next_float`, `next_double`,
-`next_bool`, `next_int(host, bound)`) advance the entity's actual stream. A hit lends the attacking player (not a player that is itself the one hurt); any other entity, a stale handle and a bound of 0 or less answer `None`; a hit that runs inside a mob's own tick lends nothing yet, so
-there `play_sound_at` and `play_sound_from` return false.
+`next_bool`, `next_int(host, bound)`) advance the entity's actual stream. A hit lends its attacker where the game applies a melee hit (the attacking player or mob, for player → mob, mob → mob and mob → player) and no entity at any other damage site (environment, projectiles, explosions, potions and the like); the attacking mob's own random is the one its AI draws from, and a hit built inside a mob's own tick lends none. Any other entity, a stale handle, a client and an out-of-range `bound` answer `None` (`false` for a sound). Where a hit lends no sound queue (a client's prediction, piston restitution) `play_sound_at` and `play_sound_from` return false.
 Hooks: `living_incoming_damage`, `living_damage_pre`, `living_damage_post`, `living_shield_block` and
 `living_use_totem`.
