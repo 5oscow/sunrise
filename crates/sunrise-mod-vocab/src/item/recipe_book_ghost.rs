@@ -15,3 +15,14 @@ pub struct GhostSlot {
     /// The recipe's result: it gets the frame `Screen::recipe_book_big_result` asks for.
     pub result: bool,
 }
+
+impl GhostSlot {
+    /// A ghost in menu slot `slot` that shows `display`; `result` marks the recipe's result.
+    pub fn new(slot: u16, display: RecipeSlotDisplay, result: bool) -> Self {
+        Self {
+            slot,
+            display,
+            result,
+        }
+    }
+}

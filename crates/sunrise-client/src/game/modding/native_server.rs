@@ -9,11 +9,17 @@
 //! server thread's), never on a client's.
 #[path = "native_server/argument_kinds.rs"]
 mod argument_kinds;
+#[cfg(test)]
+#[path = "native_server/provider_tests.rs"]
+mod provider_tests;
 #[path = "native_server/registered_commands.rs"]
 mod registered_commands;
 #[cfg(test)]
 #[path = "native_server/selector_tests.rs"]
 mod selector_tests;
+#[cfg(test)]
+#[path = "native_server/wasm_provider_tests.rs"]
+mod wasm_provider_tests;
 #[cfg(test)]
 #[path = "native_server/wasm_selector_tests.rs"]
 mod wasm_selector_tests;
@@ -73,6 +79,7 @@ const LEVELS: [&str; 5] = ["", "moderators", "gamemasters", "admins", "owners"];
 fn usage_nodes(
     usage: &str,
     custom: &CommandArguments,
+    client: bool,
 ) -> Result<Vec<(String, Value, bool)>, String> {
     let mut out = Vec::new();
     let mut optional_seen = false;
@@ -113,6 +120,15 @@ fn usage_nodes(
                 let Some(argument) = custom.get(kind) else {
                     return Err(format!("`{usage}`: unknown kind `{kind}`"));
                 };
+                // A declared provider answers on the server alone: whoever types the argument asks
+                // the server, and no mod code runs in a client. A client tree has no server behind
+                // it, so it refuses the usage by name rather than run the provider locally.
+                if client && declares_provider(kind, argument) {
+                    return Err(format!(
+                        "`{usage}`: argument type `{kind}` declares a suggestion provider, which \
+                         only a server command can offer; a client command completes without one"
+                    ));
+                }
                 let (properties, greedy) = match std::panic::catch_unwind(
                     std::panic::AssertUnwindSafe(|| argument.kind()),
                 )
@@ -165,11 +181,48 @@ pub(super) fn command_tree(
     vanilla: impl Fn(&str) -> bool,
     custom: &CommandArguments,
 ) -> (Value, HashMap<String, u8>, Vec<String>) {
+    command_tree_for(commands, vanilla, custom, false)
+}
+
+/// [`command_tree`] for the client's own commands: an argument type that declares a suggestion
+/// provider is refused by name, because that provider answers on the server alone and a client
+/// tree has no server behind it. Every other argument kind builds exactly as on the server.
+pub(super) fn client_command_tree(
+    commands: &[mod_api::Command],
+    vanilla: impl Fn(&str) -> bool,
+    custom: &CommandArguments,
+) -> (Value, HashMap<String, u8>, Vec<String>) {
+    command_tree_for(commands, vanilla, custom, true)
+}
+
+/// Whether `argument` declares a suggestion provider, read once per tree. A panic is logged and
+/// counts as no provider, as `argument_type` reads it when it builds the node.
+fn declares_provider(kind: &str, argument: &Arc<dyn mod_api::CommandArgumentType>) -> bool {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        argument.suggestion_provider()
+    })) {
+        Ok(provider) => provider.is_some(),
+        Err(_) => {
+            eprintln!(
+                "mod command argument type {kind} panicked declaring its suggestion provider; \
+                 its arguments complete by `suggest`"
+            );
+            false
+        }
+    }
+}
+
+fn command_tree_for(
+    commands: &[mod_api::Command],
+    vanilla: impl Fn(&str) -> bool,
+    custom: &CommandArguments,
+    client: bool,
+) -> (Value, HashMap<String, u8>, Vec<String>) {
     let mut root: Map<String, Value> = Map::new();
     let mut levels: HashMap<String, u8> = HashMap::new();
     let mut problems = Vec::new();
     for command in commands {
-        let nodes = match usage_nodes(&command.usage, custom) {
+        let nodes = match usage_nodes(&command.usage, custom, client) {
             Ok(n) => n,
             Err(e) => {
                 problems.push(e);

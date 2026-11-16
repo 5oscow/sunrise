@@ -139,7 +139,7 @@ fn install_mod_resources(
 
 #[test]
 #[ignore = "daily"]
-fn reload_command_uses_applied_listener_state_and_preserves_tables_on_refusal() {
+fn reload_command_prepares_world_before_applying_listeners_and_preserves_tables_on_refusal() {
     use mod_api::{DataPackFilesEvent, Registrar, RegistrationContext, ServerHost};
     use std::sync::atomic::AtomicUsize;
     struct Listener(Arc<AtomicUsize>);
@@ -214,8 +214,9 @@ fn reload_command_uses_applied_listener_state_and_preserves_tables_on_refusal() 
                 state.store(0, Ordering::SeqCst);
                 assert!(game.run_command("reload"));
                 assert_eq!(state.load(Ordering::SeqCst), 1);
+                // World preparation sees the previous listener generation.
                 assert!(
-                    game.items().block_tags["reload_order:derived"].contains("minecraft:stone")
+                    game.items().block_tags["reload_order:derived"].contains("minecraft:diamond")
                 );
                 assert!(mod_api::Tags::blocks(game, class).unwrap().contains(&fence));
                 let old_bound = crate::game::native_world_read::installed_block_tag_snapshot();
@@ -228,13 +229,13 @@ fn reload_command_uses_applied_listener_state_and_preserves_tables_on_refusal() 
                 )])
                 .unwrap();
                 assert!(!game.run_command("reload"));
-                assert_eq!(state.load(Ordering::SeqCst), 2);
+                assert_eq!(state.load(Ordering::SeqCst), 1);
                 assert_eq!(
                     old,
                     game.world_tables.as_ref().map(|tables| tables as *const _)
                 );
                 assert!(
-                    game.items().block_tags["reload_order:derived"].contains("minecraft:stone")
+                    game.items().block_tags["reload_order:derived"].contains("minecraft:diamond")
                 );
                 assert_eq!(
                     crate::game::native_world_read::installed_block_tag_snapshot(),
@@ -311,7 +312,7 @@ fn missing_original_at_reload_preserves_the_published_data_and_reports_its_owner
         "id='reload_test'\nname='Reload Test'\nversion='1'\napi='0.2'\nside='both'\ncapabilities=['registries']\n[[jar]]\nid='original'\nversion='1'\nsha512='{}'\n",
         jar.sha512()
     );
-    let package = root.join("reload_test.hmod");
+    let package = root.join("reload_test.smod");
     write(
         &package,
         sunrise_mod_package::Package::write_files(&manifest, &[]).unwrap(),
@@ -389,7 +390,7 @@ fn server_reload_delivers_mod_files_overrides_and_preserves_all_data_on_failure(
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).unwrap();
     let manifest = "id = \"reload_test\"\nname = \"Reload Test\"\nversion = \"0.1.0\"\napi = \"0.2\"\nside = \"both\"\ncapabilities = [\"registries\"]\n";
-    let package = root.join("reload_test.hmod");
+    let package = root.join("reload_test.smod");
     write(
         &package,
         sunrise_mod_package::Package::write_files(
@@ -571,7 +572,7 @@ fn server_reload_skips_unparsable_files_and_delivers_the_rest() {
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).unwrap();
     let manifest = "id = \"reload_test\"\nname = \"Reload Test\"\nversion = \"0.1.0\"\napi = \"0.2\"\nside = \"both\"\ncapabilities = [\"registries\"]\n";
-    let package = root.join("reload_test.hmod");
+    let package = root.join("reload_test.smod");
     write(
         &package,
         sunrise_mod_package::Package::write_files(
@@ -775,7 +776,7 @@ fn server_reload_retains_listeners_for_other_hooks() {
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).unwrap();
     let manifest = "id = \"reload_test\"\nname = \"Reload Test\"\nversion = \"0.1.0\"\napi = \"0.2\"\nside = \"both\"\ncapabilities = [\"registries\"]\n";
-    let package = root.join("reload_test.hmod");
+    let package = root.join("reload_test.smod");
     write(
         &package,
         sunrise_mod_package::Package::write_files(

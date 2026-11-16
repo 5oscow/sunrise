@@ -61,5 +61,5 @@ A struct built with `..` (for example `..Default::default()`) keeps fitting when
 field by field does not. `cargo sunrise-mod check --uses` says which of the mod's literals are which.
 
 A registry or a release page can tell which builds a published package fits from the package and each build's
-`surface.json` alone: `cargo sunrise-mod fits <file.hmod> --build <name>`. Nothing from the build the mod was made for
+`surface.json` alone: `cargo sunrise-mod fits <file.smod> --build <name>`. Nothing from the build the mod was made for
 is needed, so pruning that build's compiled files never strands the mod.

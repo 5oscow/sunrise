@@ -1,8 +1,11 @@
 //! Sandboxed core-wasm transport. One lock, memory and poison flag per dependency group.
 //! Ordinary refusals leave the group running. Faults, native unwinds and a failed
 //! prepared release poison it, since the guest may still own retained state.
-//! The preallocated call path adds an Arc increment/decrement per call, without
-//! allocating on success. Diagnostic keys are built and checked only on refusal.
+//! The preallocated call path allocates nothing on success: a crossing records the member
+//! slot and export id it enters, and the names a depth refusal or a payload snapshot prints
+//! are resolved only when one of those is built. A top-level call still takes its holding
+//! mod, thread and timestamp eagerly: a caller on another thread cannot recover them later,
+//! and `held_millis` measures from that instant (see #1009).
 #[cfg(all(test, feature = "test-copy-probe"))]
 #[path = "equip_scope_tests.rs"]
 mod equip_scope_tests;
@@ -121,7 +124,11 @@ pub(crate) struct State {
     outputs: Vec<Vec<u8>>,
     imports: Vec<Vec<u8>>,
     depth: usize,
-    path: Vec<(Arc<str>, u32)>,
+    /// The member each open crossing entered, as `(name slot, export id)`. A slot costs no
+    /// refcount, so a successful crossing clones no name; only a depth refusal resolves them.
+    path: Vec<(usize, u32)>,
+    /// The group's member names by slot, resolved only when a depth refusal is formatted.
+    names: Vec<Arc<str>>,
     refusals: std::collections::HashSet<String>,
     epoch_budget: u64,
     group: usize,
@@ -144,6 +151,7 @@ impl State {
             imports: Vec::new(),
             depth: 0,
             path: Vec::with_capacity(64),
+            names: Vec::new(),
             refusals: Default::default(),
             epoch_budget: 0,
             group: 0,
@@ -266,22 +274,33 @@ struct Running {
     holder: Mutex<Option<Holder>>,
 }
 
-/// A top-level call holding a group: its mod, export, thread and when it took the lock.
+/// A top-level call holding a group: its mod, export and thread, and when it took the lock.
+/// The export's printable name is resolved from [`EXPORT_NAMES`] only when a payload snapshot
+/// prints it, so a successful crossing does no lookup. A busy refusal names the export by id.
 struct Holder {
     module: Arc<str>,
     export: u32,
-    name: Arc<str>,
     thread: Arc<str>,
     since: Instant,
 }
 
 impl Holder {
+    /// The holding export's name, always the same `Arc` for the same export.
+    fn export_name(&self) -> &Arc<str> {
+        EXPORT_NAMES
+            .get(&self.export)
+            .unwrap_or(&OUTSIDE_GUEST.export)
+    }
+    /// How long this call has held its group, in whole milliseconds.
+    fn held_millis(&self) -> u64 {
+        self.since.elapsed().as_millis().min(u128::from(u64::MAX)) as u64
+    }
     fn snapshot(&self) -> mod_api::PayloadBusy {
         mod_api::PayloadBusy {
             owner: self.module.clone(),
-            export: self.name.clone(),
+            export: self.export_name().clone(),
             thread: self.thread.clone(),
-            held_millis: self.since.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
+            held_millis: self.held_millis(),
         }
     }
 }
@@ -296,7 +315,7 @@ impl Running {
                 h.module,
                 h.export,
                 h.thread,
-                h.since.elapsed().as_millis(),
+                h.held_millis(),
                 waited.as_millis()
             ),
             None => format!(
@@ -305,6 +324,26 @@ impl Running {
                 waited.as_millis()
             ),
         }
+    }
+}
+
+/// A depth refusal's open crossings, named from the group's table when the refusal is built.
+/// Its `Debug` prints exactly what a `Vec<(Arc<str>, u32)>` of the same path printed.
+struct DepthPath<'a> {
+    path: &'a [(usize, u32)],
+    names: &'a [Arc<str>],
+}
+impl std::fmt::Debug for DepthPath<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_list()
+            .entries(self.path.iter().map(|&(slot, id)| {
+                let name = self
+                    .names
+                    .get(slot)
+                    .map_or("<unknown member>", |name| &**name);
+                (name, id)
+            }))
+            .finish()
     }
 }
 thread_local! {
@@ -416,6 +455,8 @@ impl Drop for FrameScope {
 #[derive(Clone)]
 pub struct WasmMod {
     id: Arc<str>,
+    /// This member's index in its group's name table: a depth refusal resolves a name from it.
+    slot: usize,
     running: Arc<Running>,
     input: TypedFunc<u32, u32>,
     hook: TypedFunc<u32, u64>,
@@ -431,6 +472,7 @@ pub struct WasmMod {
 #[derive(Clone)]
 pub(crate) struct WeakWasmMod {
     id: Arc<str>,
+    slot: usize,
     running: Weak<Running>,
     input: TypedFunc<u32, u32>,
     hook: TypedFunc<u32, u64>,
@@ -604,6 +646,7 @@ impl WeakWasmMod {
         };
         Some(WasmMod {
             id: self.id.clone(),
+            slot: self.slot,
             running,
             input: self.input.clone(),
             hook: self.hook.clone(),
@@ -851,6 +894,7 @@ impl WasmMod {
     pub(crate) fn downgrade(&self) -> WeakWasmMod {
         WeakWasmMod {
             id: self.id.clone(),
+            slot: self.slot,
             running: Arc::downgrade(&self.running),
             input: self.input.clone(),
             hook: self.hook.clone(),
@@ -986,6 +1030,13 @@ impl WasmMod {
             }
             exports.push((name, input, hook, Arc::new(prepared_entries)));
         }
+        // A member's slot in this table is what each crossing records; the names are
+        // resolved from it only when a depth refusal is built.
+        let names: Vec<Arc<str>> = exports
+            .iter()
+            .map(|(name, ..)| Arc::from(name.as_str()))
+            .collect();
+        group.store.data_mut().names = names.clone();
         let lending = group.store.data().lending.clone();
         let running = Arc::new(Running {
             lending,
@@ -1002,8 +1053,11 @@ impl WasmMod {
             .group = Arc::as_ptr(&running) as usize;
         Ok(exports
             .into_iter()
-            .map(|(name, input, hook, prepared_entries)| Self {
-                id: name.into(),
+            .zip(names)
+            .enumerate()
+            .map(|(slot, ((_, input, hook, prepared_entries), id))| Self {
+                id,
+                slot,
                 running: running.clone(),
                 input,
                 hook,
@@ -1055,6 +1109,16 @@ impl WasmMod {
         if let Err(error) = sunrise_guest_stack::check_current() {
             log::error!("wasm mod {}: {error}", self.mod_id());
             note(error.into());
+            return Ok(None);
+        }
+        // A tick phase's work runs off the tick's thread and in no fixed order: a group is
+        // single-threaded and its calls ordered, so it refuses such a caller by name.
+        if sunrise_threads::in_tick_phase() {
+            log::error!(
+                "wasm mod {}: called inside a tick phase's work, which a wasm mod never runs in",
+                self.mod_id()
+            );
+            note("called inside a tick phase's work".into());
             return Ok(None);
         }
         if self.running.poisoned.load(Ordering::Relaxed) {
@@ -1116,13 +1180,12 @@ impl WasmMod {
                     }
                 }
                 if locked.is_some() {
+                    // Only what another thread cannot recover later is taken here: the mod,
+                    // the export id, the holding thread and the acquisition time. The printable
+                    // names stay resolved on demand.
                     *holder = Some(Holder {
                         module: self.id.clone(),
                         export: id,
-                        name: EXPORT_NAMES
-                            .get(&id)
-                            .unwrap_or(&OUTSIDE_GUEST.export)
-                            .clone(),
                         thread: THREAD_NAME.with(Arc::clone),
                         since: Instant::now(),
                     });
@@ -1162,7 +1225,14 @@ impl WasmMod {
         let budget = store.data().epoch_budget;
         let depth = store.data().depth + 1;
         if depth > 64 {
-            let path = format!("{:?} -> ({}, {id}), limit 64", store.data().path, self.id);
+            let path = format!(
+                "{:?} -> ({}, {id}), limit 64",
+                DepthPath {
+                    path: &store.data().path,
+                    names: &store.data().names,
+                },
+                self.id
+            );
             if store.data_mut().refusals.insert(path.clone()) {
                 log::warn!("wasm depth refusal: {path}");
             }
@@ -1180,7 +1250,7 @@ impl WasmMod {
             store.data_mut().imports.resize_with(depth + 1, Vec::new);
         }
         store.data_mut().cx.frames.push(Frame::default());
-        store.data_mut().path.push((self.id.clone(), id));
+        store.data_mut().path.push((self.slot, id));
         // self remains borrowed until this call returns. FrameScope restores the
         // enclosing module before this borrow ends, including on error or unwind.
         let previous_module =

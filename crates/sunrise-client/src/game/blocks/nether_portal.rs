@@ -1978,7 +1978,7 @@ mod tests {
                     == 1
             {
                 let root = mod_api::EntityRef::new(e.entity.epoch(), 101);
-                assert!(root.start_riding(host, e.entity, true));
+                assert!(root.start_riding(host, e.entity, true).is_ok());
             }
             if attack == 1002 && e.entity.id() == 102 {
                 assert!(mod_api::EntityRef::new(e.entity.epoch(), 103).discard(host));

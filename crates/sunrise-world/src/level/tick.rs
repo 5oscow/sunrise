@@ -2049,8 +2049,12 @@ impl Behaviours {
     /// [`Self::tick_chunk_random_masked`]'s masks hold. `random_tick_at`
     /// ticks a randomly ticking block, then lava's fluid.
     pub fn random_tick_candidate(&self, state: BlockStateId) -> bool {
-        self.is_randomly_ticking(state)
-            || super::fluids::fluid_randomly_ticks(self.fluid(state).kind())
+        self.facts(state).random_tick_candidate()
+    }
+    /// Every state's facts, indexed by state id: plain data, for readers off the tick thread
+    /// that must not reach the behaviours' swappable tables.
+    pub fn state_facts(&self) -> &[super::StateFacts] {
+        &self.facts
     }
     /// Random-tick a single position (block then fluid), as `tickChunk` does.
     pub fn random_tick<L: LevelAccess + ?Sized>(

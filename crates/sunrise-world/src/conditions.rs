@@ -251,6 +251,21 @@ impl LoadConditions {
         self.allows_context(file, || path.to_owned())
     }
 
+    /// Evaluate a per-file-skipping loader without poisoning the rest of its
+    /// owning data candidate. Registered lookups and bound inputs are shared,
+    /// but this file's cache and diagnostics belong only to this evaluation.
+    pub fn allows_file_isolated(&self, file: &Value, path: &str) -> Result<bool, String> {
+        let mut view = self.clone();
+        view.diagnostics = Diagnostics::default();
+        let allowed = view.allows_file(file, path);
+        view.check_errors()?;
+        let unknown = view.foreign_errors();
+        if !unknown.is_empty() {
+            return Err(unknown.join("; "));
+        }
+        Ok(allowed)
+    }
+
     fn allows_context(&self, file: &Value, path: impl FnOnce() -> String) -> bool {
         let Some(payload) = file.get("neoforge:conditions") else {
             return true;

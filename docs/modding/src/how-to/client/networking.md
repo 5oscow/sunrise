@@ -75,6 +75,16 @@ fn register(r: &mut dyn Registrar) {
   handler received on. They return the raw sends' results: `Queued` means accepted locally.
   Sending the wrong direction does not compile. To address the single-player owner,
   use the ordinary player ref from the [players service](../entities/server-services-and-players.md).
+- **Sending to a group.** A `ToClient<T>` also sends to a set of players without you building
+  the set, each checking the token and encoding once, then sending the same bytes to each
+  player and returning how many sends were accepted: `send_to_all(host, &value)` (every
+  server player), `send_in_level(host, level, &value)`, `send_near(host, level, pos, radius,
+  except, &value)` (players in the level, not `except`, strictly closer to `pos` than
+  `radius`) and `send_tracking_chunk(host, chunk, &value)` (the chunk's watchers). They
+  are NeoForge's `PacketDistributor` `sendToAllPlayers`, `sendToPlayersInDimension`,
+  `sendToPlayersNear` and `sendToPlayersTrackingChunk`. A player whose send is refused (no
+  channel, gone since the list was read, backpressure) is skipped and not counted; only a
+  stale token or an encode failure is an `Err`, before anything is sent.
 - **Schema negotiation.** The derive gives the value type a schema fingerprint (field types in
   order, variant positions; not names), and it is part of the negotiated version. A peer whose
   type has another shape is refused at join when the payload is required; when both sides
@@ -86,3 +96,9 @@ fn register(r: &mut dyn Registrar) {
   received body that is not one value of the type closes the session, naming the mod, and the
   handler does not run. A handler that panics is disabled: its transaction rolls back, nothing it
   staged is sent, the session closes, and it is not called again.
+- **Raw channel failures stay local.** A raw channel (`play_raw`) carries bytes from any client,
+  so a declaring mod's handler that returns `Failed`, or stays busy past its deadline, does not
+  close the session: the game logs the mod and the channel, rolls back that delivery's staged
+  work (a staged disconnect included), and still delivers the other declaring mods' copies. A
+  handler that succeeds and asks to disconnect still disconnects, and so does a refusal by the
+  main thread's work queue. A typed payload's failure closes the session as above.

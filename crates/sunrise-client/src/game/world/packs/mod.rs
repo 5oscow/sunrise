@@ -656,6 +656,8 @@ impl Game<'_> {
         self.creative_screen.invalidate_build();
         super::client_reload::apply_client_reload(&self.mod_phase, client_applies);
         self.install_loop_context(loop_context);
+        // A reload from the title can apply before the start's world-rest worker is done.
+        self.join_world_rest()?;
         self.resolve_entity_renderers();
         super::native_special_renderers::reload();
         self.texture_atlases_stitched();

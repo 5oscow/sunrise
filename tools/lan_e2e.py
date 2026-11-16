@@ -17,7 +17,7 @@ address. The script then checks, from both sides, what a guest's game used to ge
              leaves the host's screen and mouse look alone;
 - datapack-recipe: (--server-thread) a crafting recipe from the world's data pack shows its result in the
              table of the host's window and of a guest, and taking it crafts (#6733);
-- recipes-hmod: opt-in, requires native Recipes: search original .hmod content, fill the server's
+- recipes-smod: opt-in, requires native Recipes: search original .smod content, fill the server's
              crafting grid, consume inputs and preserve both players' output after save/rejoin (#9647);
 - spawned:   the host and a guest new to the world join on different spots (PlayerSpawnFinder), and the
              guest opens a crafting table, a chest, a furnace and a stonecutter where it joined;
@@ -7381,8 +7381,8 @@ def run(ctl, out, resources, checks):
         launch.append('--no-pause')
     results = {}
     try:
-        if 'recipes-hmod' in checks:
-            prepare_recipes_hmod(host, guest)
+        if 'recipes-smod' in checks:
+            prepare_recipes_smod(host, guest)
         host.pid = host.raw(*launch)['pid']
         # Guests' commands need the world's Allow Commands as well as the LAN's (#372): a creative
         # world has them; everyone plays in survival.
@@ -7464,7 +7464,7 @@ def main():
     out = Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
     # Recipes is an opt-in native mod; this check requires a game built with it.
-    checks = args.check or [name for name in CHECKS if name != 'recipes-hmod']
+    checks = args.check or [name for name in CHECKS if name != 'recipes-smod']
     results = run(bins / 'sunrise-ctl', out, resources, checks)
     (out / 'results.json').write_text(json.dumps({'checks': results}, indent=2) + '\n')
     print(json.dumps(results, indent=1))
@@ -13547,9 +13547,9 @@ CHECKS += ['pig-saddle-shears']
 CHECK_FNS['pig-saddle-shears'] = check_pig_saddle_shears
 
 
-def prepare_recipes_hmod(*games):
+def prepare_recipes_smod(*games):
     """Install the same original content package in both scratch game folders."""
-    fixture = ROOT / 'tools/fixtures/recipes_hmod'
+    fixture = ROOT / 'tools/fixtures/recipes_smod'
     package = io.BytesIO()
     with zipfile.ZipFile(package, 'w', zipfile.ZIP_DEFLATED) as archive:
         for path in sorted(fixture.rglob('*')):
@@ -13558,7 +13558,7 @@ def prepare_recipes_hmod(*games):
     for game in games:
         mods = game.work / 'sunrise-mods'
         mods.mkdir()
-        (mods / 'recipe_pilot.hmod').write_bytes(package.getvalue())
+        (mods / 'recipe_pilot.smod').write_bytes(package.getvalue())
         (game.work / 'sunrise-mods.txt').write_text('mod.recipe_pilot:true\nmod.recipes:true\n')
         (game.work / 'options.txt').write_text('lang:en_us\n')
         settings = mods / '.sunrise-mod-data/recipes'
@@ -13566,7 +13566,7 @@ def prepare_recipes_hmod(*games):
         (settings / 'give').write_text('false')
 
 
-def exercise_recipes_hmod(game, out, mode, supplied):
+def exercise_recipes_smod(game, out, mode, supplied):
     """Use the real Recipes panel and the authoritative crafting table."""
     item = 'minecraft:echo_shard'
 
@@ -13579,8 +13579,8 @@ def exercise_recipes_hmod(game, out, mode, supplied):
         ui = game.raw('ui')
         fields = [w for w in ui['widgets'] if w['kind'] == 'field']
         if not fields:
-            game.shot(out, 'recipes-hmod-no-search')
-            (out / f'{game.name}-recipes-hmod-ui.json').write_text(json.dumps(ui, indent=2))
+            game.shot(out, 'recipes-smod-no-search')
+            (out / f'{game.name}-recipes-smod-ui.json').write_text(json.dumps(ui, indent=2))
         assert fields, f'{game.name}: no Recipes search field (mod absent or empty-search recovery failed)'
         # The native panel is to the right of the vanilla recipe book's search field.
         field = max(fields, key=lambda w: w['bounds'][0])
@@ -13672,11 +13672,11 @@ def exercise_recipes_hmod(game, out, mode, supplied):
             'grid': grid, 'result': result, 'crafted': crafted}
 
 
-def check_recipes_hmod(host, guest, out):
+def check_recipes_smod(host, guest, out):
     """Exercise Survival and Creative through the real host/guest server."""
     seen = {
-        host.name: exercise_recipes_hmod(host, out, 'survival', 4),
-        guest.name: exercise_recipes_hmod(guest, out, 'creative', 5),
+        host.name: exercise_recipes_smod(host, out, 'survival', 4),
+        guest.name: exercise_recipes_smod(guest, out, 'creative', 5),
     }
     save_and_reopen(host, guest)
     for game in (host, guest):
@@ -13684,12 +13684,12 @@ def check_recipes_hmod(host, guest, out):
         assert persisted == seen[game.name]['crafted'], f'{game.name}: after rejoin {persisted}'
         seen[game.name]['rejoined'] = persisted
         game.shot(out, f"{seen[game.name]['mode']}-rejoined")
-    (out / 'recipes-hmod.json').write_text(json.dumps(seen, indent=2) + '\n')
+    (out / 'recipes-smod.json').write_text(json.dumps(seen, indent=2) + '\n')
     return seen
 
 
-CHECKS += ['recipes-hmod']
-CHECK_FNS['recipes-hmod'] = check_recipes_hmod
+CHECKS += ['recipes-smod']
+CHECK_FNS['recipes-smod'] = check_recipes_smod
 
 
 def check_levelup_sounds(host, guest, out):

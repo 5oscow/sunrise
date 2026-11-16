@@ -139,6 +139,17 @@ fn hook_round_trip_and_malformed_reply_refusal() {
         assert_eq!(call(&module), None);
     })
 }
+/// A call made inside a tick phase's work is refused before the guest runs, and the group keeps
+/// answering the tick's own thread.
+#[test]
+fn a_call_inside_a_tick_phase_is_refused_and_the_group_keeps_running() {
+    crate::test_stack::on_guest_stack(|| {
+        let module = module("i64.const 2199023255556"); // 512 << 32 | 4
+        assert_eq!(sunrise_threads::as_tick_phase(|| call(&module)), None);
+        assert!(!module.running.poisoned.load(Ordering::Relaxed));
+        assert_eq!(call(&module), Some(42));
+    })
+}
 /// The reply a hook names is read only where it lies inside guest memory.
 #[test]
 fn a_reply_reaching_past_guest_memory_is_refused_and_one_ending_at_its_edge_is_read() {
@@ -1523,14 +1534,30 @@ fn refusal_replies_survive_and_report_once() {
     })
 }
 
-/// A depth refusal never enters guest code and is deduplicated by call path.
+/// A depth refusal never enters guest code, is deduplicated by call path, and names the open
+/// crossings from the group's table rather than from a name each crossing cloned.
 #[test]
 fn depth_refusal_survives() {
     crate::test_stack::on_guest_stack(|| {
         capture_logs();
-        let mut module = module("i64.const 2199023255556");
-        module.id = "depth_refusal_case".into();
-        module.running.group.lock().unwrap().store.data_mut().depth = 64;
+        let engine = engine().unwrap();
+        let bytes = guest(*mod_api::wire::LAYOUT, "i64.const 2199023255556");
+        let module = WasmMod::instantiate(
+            &engine,
+            DEFAULT_GROUP_MEMORY_MIB,
+            &[Member {
+                name: "depth_refusal_case",
+                module: &bytes,
+            }],
+            None,
+        )
+        .unwrap()
+        .remove(0);
+        let mut group = module.running.group.lock().unwrap();
+        group.store.data_mut().depth = 64;
+        // An enclosing crossing recorded its slot and export instead of a cloned name.
+        group.store.data_mut().path.push((0, 17));
+        drop(group);
         for _ in 0..2 {
             assert_eq!(call(&module), None);
             assert!(!module.is_stopped());
@@ -1544,12 +1571,13 @@ fn depth_refusal_survives() {
                 .unwrap()
                 .iter()
                 .filter(|m| m.starts_with("wasm depth refusal:")
-                    && m.contains("depth_refusal_case")
+                    && m.contains(r#"[("depth_refusal_case", 17)] -> (depth_refusal_case, 0)"#)
                     && m.contains("limit 64"))
                 .count(),
             1
         );
         group.store.data_mut().depth = 0;
+        assert_eq!(group.store.data_mut().path.pop(), Some((0, 17)));
         drop(group);
         assert_eq!(call(&module), Some(42));
     })
@@ -1579,7 +1607,6 @@ fn nested_busy_refusal_survives() {
         *module.running.holder.lock().unwrap() = Some(Holder {
             module: "holder_mod".into(),
             export: 7,
-            name: "test::holder".into(),
             thread: THREAD_NAME.with(Arc::clone),
             since: Instant::now() - Duration::from_secs(3),
         });

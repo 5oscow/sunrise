@@ -497,7 +497,7 @@
   "sunrise.mods.browse.title": "Модтарҙы ҡарау",
   "sunrise.mods.browse.update": "Яңыртыу",
   "sunrise.mods.dev": " (Дев)",
-  "sunrise.mods.empty": "Модтар юҡ: .hmod файлдарын горизонт-модтар папкаһына ҡуйығыҙ",
+  "sunrise.mods.empty": "Модтар юҡ: .smod файлдарын горизонт-модтар папкаһына ҡуйығыҙ",
   "sunrise.mods.in_world": " (донъяны үҙгәртергә ҡалдырырға)",
   "sunrise.mods.not_built": " (Төҙөлмәгән)",
   "sunrise.mods.open_folder": "Мод папкаһын асыу",

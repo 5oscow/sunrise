@@ -99,8 +99,10 @@ impl ModBookIndex {
             {
                 return Err(DisplayLoadError::ConflictingBook(category.target_menu));
             }
-            if !resources.item(&category.icon) || category.icon == "minecraft:air" {
-                return Err(unknown("item", &category.icon));
+            for icon in std::iter::once(&category.icon).chain(&category.secondary_icon) {
+                if !resources.item(icon) || icon == "minecraft:air" {
+                    return Err(unknown("item", icon));
+                }
             }
             if index.categories.contains_key(&category.id) {
                 return Err(DisplayLoadError::DuplicateCategory(category.id));
@@ -262,6 +264,11 @@ fn validate_display(
         }
         Display::Shapeless {
             ingredients,
+            result,
+            station,
+        }
+        | Display::Custom {
+            slots: ingredients,
             result,
             station,
         } => ingredients.iter().chain([result, station]).collect(),

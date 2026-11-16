@@ -32,9 +32,10 @@ pub enum RecipeSlotDisplay {
     Composite(Vec<RecipeSlotDisplay>),
 }
 
-/// Vanilla's five recipe display layouts, independent of the recipe's JSON.
+/// Vanilla's five recipe display layouts, independent of the recipe's JSON, and `Custom` for a
+/// recipe type whose pictures none of them fit.
 #[derive(Clone, Debug, PartialEq, sunrise_mod_api_macros::Wire)]
-// exhaustive: the five vanilla layouts the host validates without a wildcard
+// exhaustive: the five vanilla layouts and the custom one, which the host validates without a wildcard
 pub enum RecipeBookDisplay {
     Shaped {
         width: u32,
@@ -65,6 +66,17 @@ pub enum RecipeBookDisplay {
         template: RecipeSlotDisplay,
         base: RecipeSlotDisplay,
         addition: RecipeSlotDisplay,
+        result: RecipeSlotDisplay,
+        station: RecipeSlotDisplay,
+    },
+    /// A display whose slots mean what the recipe type says: a cooking pot's inputs with a
+    /// container beside them, for one. The book shows `slots` in order as the recipe's
+    /// ingredients (empty slots hidden), counts every non-empty one in the craftable filter and
+    /// shows `result` as the recipe's button; `station` is never drawn. The built-in menu layouts
+    /// (crafting, furnace, stonecutter, smithing) map none of it, so a menu bound to one refuses
+    /// a custom display; the mod places and draws ghosts for it itself.
+    Custom {
+        slots: Vec<RecipeSlotDisplay>,
         result: RecipeSlotDisplay,
         station: RecipeSlotDisplay,
     },

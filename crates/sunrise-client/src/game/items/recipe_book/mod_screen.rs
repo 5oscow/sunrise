@@ -324,6 +324,7 @@ impl Game<'_> {
             mouse: (self.cursor.0 as i32, self.cursor.1 as i32),
             index: self.swap_index(),
             filtering,
+            filter_look: mod_api::RecipeBookFilterLook::registered(self.native_screen_book()?),
             search: &search,
             tabs: &tabs,
             buttons: &buttons,

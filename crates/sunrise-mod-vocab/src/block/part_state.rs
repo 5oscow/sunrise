@@ -40,7 +40,7 @@ use std::{cell::RefCell, fmt, sync::Arc};
 pub trait BlockEntityPartState: BlockEntityPart + Sized {
     /// The value each block entity of the Part's type keeps.
     type Data: Clone + Send + Sync + crate::wire::Wire + 'static;
-    /// Its attachment key, default and codec. The key is in a namespace the mod owns;
+    /// Its attachment key, default and codec. The owner declares the key at registration;
     /// without a codec the value is kept for the session only (and a wasm mod needs one).
     const DATA: &'static AttachmentType<Self::Data>;
 
@@ -70,7 +70,7 @@ pub trait BlockEntityPartState: BlockEntityPart + Sized {
 
 /// Why a block entity's or an entity's Part state could not be read or changed. Nothing was
 /// stored.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 // no wire: returned inside the mod that called; the calls it reports on cross as attachment calls.
 pub enum PartStateError {
@@ -141,8 +141,6 @@ pub enum PartStateRefusal {
     /// `Arc<dyn BlockPart>`), which crosses only into one link group's resource scope:
     /// not as data both targets read, nor into a save.
     ResourceHandle,
-    /// `DATA`'s namespace is not one this mod owns.
-    UnownedNamespace,
     /// The same key is already declared with a type of another Wire layout, named here.
     Incompatible {
         /// The type the key was first declared with.
@@ -171,7 +169,6 @@ impl PartStateRefusal {
                 "its Wire form holds a resource handle, which crosses only within one link \
                  group: not to every target, nor into a save",
             ),
-            Self::UnownedNamespace => f.write_str("the namespace is not one this mod owns"),
             Self::Incompatible { declared } => write!(
                 f,
                 "the key is already declared with type {declared}, whose Wire layout differs"

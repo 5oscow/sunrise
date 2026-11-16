@@ -23,6 +23,7 @@ impl AttachmentBatch {
         self,
         key: &AttachmentType<T>,
     ) -> Result<AttachmentQuery<'_, T>, AttachmentError> {
+        crate::parts::validate_attachment_use(key.namespace, key.name, key.sync)?;
         #[cfg(target_arch = "wasm32")]
         if key.codec.is_none() {
             return Err(AttachmentError::Decode);

@@ -5,18 +5,13 @@ import subprocess
 import tempfile
 import unittest
 
-from native_hook_sources import native_hook_sources
-
-ROOT = Path(__file__).resolve().parents[1]
+from rust_items import rust_fn
 
 
 class ModContainerViewersTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("rustc"), "requires Rust")
     def test_opens_second_viewer_close_and_leaving_without_closing(self):
-        source = native_hook_sources()
-        start = source.index("pub(super) fn viewer_changes(")
-        end = source.index("\n}\n", start) + 3
-        function = source[start:end].replace("pub(super) fn", "fn")
+        function = rust_fn("viewer_changes")
         fixture = r"""
 use std::collections::HashMap;
 type Known = HashMap<(&'static str, (i32, i32, i32)), u32>;

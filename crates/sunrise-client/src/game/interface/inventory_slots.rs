@@ -260,29 +260,44 @@ impl Game<'_> {
             return None;
         }
         match self.built_container(batch) {
-            Some(layout) => {
+            Some(layout) => self.first_hovered(
                 layout
                     .slots
                     .iter()
-                    .find(|(_, r)| {
+                    .filter(|(_, r)| {
                         // AbstractContainerScreen.isHovering: the 16x16 slot
                         // grows by one pixel on every side, so the gaps
                         // between slots still hover one.
                         x >= r[0] && x < r[0] + r[2] && y >= r[1] && y < r[1] + r[3]
                     })
-                    .map(|&(slot, _)| slot)
-            }
+                    .map(|&(slot, _)| slot),
+            ),
             None => self.slot_at_unbuilt(batch, x, y),
         }
     }
     /// `slot_at` from the game's state alone, without a build.
     fn slot_at_unbuilt(&self, batch: &HudBatch, x: f32, y: f32) -> Option<usize> {
         let (ox, oy) = self.inventory_origin_unbuilt(batch);
-        self.slots().into_iter().find(|&i| {
+        let hits = self.slots().into_iter().filter(|&i| {
             let (sx, sy) = self.slot_position(i);
             // AbstractContainerScreen.isHovering: the 16x16 slot grows by one
             // pixel on every side, so the gaps between slots still hover one.
             x >= ox + sx - 1.0 && x < ox + sx + 17.0 && y >= oy + sy - 1.0 && y < oy + sy + 17.0
+        });
+        self.first_hovered(hits)
+    }
+    /// The slot a pointer over every one of `hits` (in `slots` order) takes:
+    /// the first. A mod screen's slots overlap by menu index, the container
+    /// first, then the main inventory, then the hotbar, as the menu lists
+    /// them, so the lowest index wins.
+    fn first_hovered(&self, mut hits: impl Iterator<Item = usize>) -> Option<usize> {
+        if !self.native_screen_shown() {
+            return hits.next();
+        }
+        hits.min_by_key(|&slot| match slot {
+            300.. => slot - 300,
+            9..36 => 1000 + slot,
+            _ => 2000 + slot,
         })
     }
     /// `AbstractContainerScreen.extractSlotHighlightBack` and

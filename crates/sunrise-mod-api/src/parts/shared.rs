@@ -47,8 +47,11 @@ pub struct PartRegistrar {
     pub(crate) warnings: Vec<(String, crate::LoadingMessage)>,
     pub(crate) recipe_book_types: HashMap<String, String>,
     pub(crate) recipe_book_fields: HashMap<String, (String, String)>,
+    pub(crate) recipe_book_filters: HashMap<String, crate::RecipeBookFilterLook>,
     pub(crate) game_rule_categories: Vec<String>,
     pub(crate) game_rules: Vec<crate::GameRuleDecl>,
+    pub(crate) attachment_uses: Vec<(String, String, String)>,
+    pub(crate) attachment_types: HashMap<String, HashMap<String, bool>>,
     pub(crate) custom_stats: Vec<String>,
     pub(crate) mod_id: &'static str,
     pub(crate) mod_index: usize,
@@ -76,6 +79,7 @@ pub struct PartRegistrar {
     pub(crate) controllers: Vec<ControllerInfo>,
     pub(crate) arm_poses: Vec<PoseInfo>,
     pub(crate) structure_types: Vec<StructureTypeInfo>,
+    pub(crate) loot_modifier_serializers: Vec<LootModifierSerializerInfo>,
     pub(crate) dimensions: Vec<DimensionInfo>,
     pub(crate) dimension_shape: fn(&crate::DimensionSettings) -> bool,
     pub(crate) chunk_generators: Vec<ChunkGeneratorInfo>,
@@ -97,8 +101,11 @@ impl PartRegistrar {
             datapack_registries: Vec::new(),
             recipe_book_types: HashMap::new(),
             recipe_book_fields: HashMap::new(),
+            recipe_book_filters: HashMap::new(),
             game_rule_categories: Vec::new(),
             game_rules: Vec::new(),
+            attachment_uses: Vec::new(),
+            attachment_types: HashMap::new(),
             custom_stats: Vec::new(),
             mod_id,
             mod_index: 0,
@@ -122,6 +129,7 @@ impl PartRegistrar {
             controllers: Vec::new(),
             arm_poses: Vec::new(),
             structure_types: Vec::new(),
+            loot_modifier_serializers: Vec::new(),
             dimensions: Vec::new(),
             dimension_shape: |_| false,
             chunk_generators: Vec::new(),
@@ -273,6 +281,7 @@ pub(crate) fn install_registrar(
     if !registrar.refused.is_empty() {
         return Err(registrar.refused);
     }
+    registrar.validate_attachment_admission()?;
     let game_rule_slots = slots.expect("every schema refusal was collected");
     let installed = Installed {
         biome_modifiers: registrar.biome_modifiers,
@@ -285,9 +294,11 @@ pub(crate) fn install_registrar(
         menu_recipe_books: registrar.menu_recipe_books,
         recipe_book_types: registrar.recipe_book_types,
         recipe_book_fields: registrar.recipe_book_fields,
+        recipe_book_filters: registrar.recipe_book_filters,
         game_rule_slots,
         game_rules: registrar.game_rules,
         game_rule_categories: registrar.game_rule_categories,
+        attachment_types: registrar.attachment_types,
         custom_stats: registrar.custom_stats,
         keys: registrar.parts,
         tags: registrar.tags,
@@ -315,6 +326,7 @@ pub(crate) fn install_registrar(
         controllers: registrar.controllers,
         arm_poses: registrar.arm_poses,
         structure_types: registrar.structure_types,
+        loot_modifier_serializers: registrar.loot_modifier_serializers,
         dimensions: registrar.dimensions,
         chunk_generators: registrar.chunk_generators,
         biome_sources: registrar.biome_sources,

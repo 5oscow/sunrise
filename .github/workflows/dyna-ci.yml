@@ -128,14 +128,8 @@ jobs:
         timeout-minutes: 11
         env:
           FETCH_STEP: Fetch this commit's history for selection
-        run: |
-          for attempt in 1 2; do
-            if [ "$(git rev-parse --is-shallow-repository)" = false ]; then exit 0; fi
-            if timeout --kill-after=10s 300s git fetch -q --no-tags --unshallow origin "$(git rev-parse HEAD)"; then exit 0; fi
-            echo "$FETCH_STEP: GitHub fetch attempt $attempt failed or timed out."
-          done
-          echo "::error::$FETCH_STEP: history fetch from GitHub failed or timed out twice."
-          exit 1
+        # On our runners the slot's history mirror makes this a short fetch (tools/ci/history_fetch.sh).
+        run: bash tools/ci/history_fetch.sh
       - name: Select checks once for this pull request
         if: github.event_name == 'pull_request'
         id: selection
@@ -164,9 +158,8 @@ jobs:
           name: boat-base-1
           path: boat-base.json
           retention-days: 2
-      # Prefer the live pool switch/lease. github.token normally cannot read Variables;
-      # its snapshot fallback uses run creation time, bounded to an hour of queue age.
-      # Fork pull requests remain on GitHub's runners.
+      # The pool's switch and lease (tools/ci/dyna_ci_route.sh): live when readable, else the run's snapshot judged
+      # at the run's creation and for an hour after it. Fork pull requests remain on GitHub's runners.
       - id: runner
         env:
           GH_TOKEN: ${{ github.token }}
@@ -175,26 +168,7 @@ jobs:
           VARS_LEASE: ${{ vars.DYNA_CI_POOL_UNTIL }}
           EVENT: ${{ github.event_name }}
           SAME_REPO: ${{ steps.gate.outputs.trusted || (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
-        run: |
-          if [ "$SAME_REPO" = true ]; then
-            ENABLED=$(gh api "repos/$GITHUB_REPOSITORY/actions/variables/DYNA_CI_SELF_HOSTED" -q .value 2>/dev/null || true)
-            LEASE=$(gh api "repos/$GITHUB_REPOSITORY/actions/variables/DYNA_CI_POOL_UNTIL" -q .value 2>/dev/null || true)
-          fi
-          # A refused read prints GitHub's error JSON: keep only a well-formed answer, else use the snapshot.
-          case "${LEASE:-}" in '' | *[!0-9]*) LEASE= ;; esac
-          case "${ENABLED:-}" in true | false) ;; *) ENABLED= ;; esac
-          echo "pool lease: live=${LEASE:-unreadable} snapshot=${VARS_LEASE:-none}"
-          SOURCE=live
-          CREATED=
-          if [ -z "${LEASE:-}" ]; then
-            SOURCE=snapshot
-            # Actions read is sufficient for run metadata, unlike the Variables endpoint.
-            CREATED_AT=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" -q .created_at 2>/dev/null || true)
-            if [ -n "$CREATED_AT" ]; then
-              CREATED=$(date -d "$CREATED_AT" +%s 2>/dev/null || true)
-            fi
-          fi
-          ENABLED=${ENABLED:-$VARS_ENABLED} LEASE=${LEASE:-$VARS_LEASE} LEASE_SOURCE=$SOURCE CREATED=$CREATED bash tools/ci/dyna_ci_runner.sh >> "$GITHUB_OUTPUT"
+        run: bash tools/ci/dyna_ci_route.sh >> "$GITHUB_OUTPUT"
       - id: hosted
         if: steps.selection.outputs.rust_required != 'false'
         env:
@@ -772,7 +746,9 @@ jobs:
     # A contributor's pull request gets GitHub's runners: these checks compile nothing heavy, and
     # its only two checks must not depend on a paid pool's balance.
     # A pull request outside the gate: GitHub's runner, never a paid pool or our own (it gates nothing).
-    runs-on: ${{ needs.changes.outputs.heavy != 'true' && 'ubuntu-latest' || needs.changes.outputs.rust_required == 'false' && (needs.changes.outputs.self_hosted == 'true' && needs.changes.outputs.trusted == 'true' && 'dyna-small' || 'ubuntu-latest') || needs.changes.outputs.trusted != 'true' && 'ubuntu-latest' || needs.changes.outputs.self_hosted == 'true' && 'dyna-large' || !inputs.github-fallback && needs.changes.outputs.forced_github != 'true' && vars.SELF_HOSTED_CI == 'all' && needs.changes.outputs.trusted == 'true' && fromJSON('["self-hosted", "linux", "playsunrise-ci"]') || needs.changes.outputs.hosted_label || 'ubuntu-latest' }}
+    # On our pool, dyna-medium: the work is serial Python, git and small fixture compiles, which GitHub's 4-CPU runner
+    # finishes in 8 to 11 minutes, so eight CPUs only took a large slot from the gate's compiling jobs.
+    runs-on: ${{ needs.changes.outputs.heavy != 'true' && 'ubuntu-latest' || needs.changes.outputs.rust_required == 'false' && (needs.changes.outputs.self_hosted == 'true' && needs.changes.outputs.trusted == 'true' && 'dyna-small' || 'ubuntu-latest') || needs.changes.outputs.trusted != 'true' && 'ubuntu-latest' || needs.changes.outputs.self_hosted == 'true' && 'dyna-medium' || !inputs.github-fallback && needs.changes.outputs.forced_github != 'true' && vars.SELF_HOSTED_CI == 'all' && needs.changes.outputs.trusted == 'true' && fromJSON('["self-hosted", "linux", "playsunrise-ci"]') || needs.changes.outputs.hosted_label || 'ubuntu-latest' }}
     timeout-minutes: ${{ needs.changes.outputs.self_hosted == 'true' && needs.changes.outputs.trusted == 'true' && 20 || 45 }}
     # Dyna's runner image now carries lavapipe, Mesa's software Vulkan driver, for ignored-tests' `gpu` tests.
     # verify's tests were written to skip GPU work when no adapter exists, and one of them
@@ -800,14 +776,8 @@ jobs:
         timeout-minutes: 11
         env:
           FETCH_STEP: Fetch this commit's history
-        run: |
-          for attempt in 1 2; do
-            if [ "$(git rev-parse --is-shallow-repository)" = false ]; then exit 0; fi
-            if timeout --kill-after=10s 300s git fetch -q --no-tags --unshallow origin "$(git rev-parse HEAD)"; then exit 0; fi
-            echo "$FETCH_STEP: GitHub fetch attempt $attempt failed or timed out."
-          done
-          echo "::error::$FETCH_STEP: history fetch from GitHub failed or timed out twice."
-          exit 1
+        # On our runners the slot's history mirror makes this a short fetch (tools/ci/history_fetch.sh).
+        run: bash tools/ci/history_fetch.sh
       - uses: actions/setup-python@v5
         if: needs.changes.outputs.tooling_required != 'false' && (env.RUNNER_KIND == 'github' || env.RUNNER_KIND == 'boat')
         with:
@@ -1153,7 +1123,9 @@ jobs:
         run: bash tools/ci/dyna_ci_deps.sh
       # Written from this workflow's own revision, never from the tested tree: an older head's helper would stream a
       # harness's output (vanilla's values) into the public log. Every `python` this job's steps run goes to a log on
-      # the runner's slot; the job log gets the harness names with PASS or FAIL, and the exit status is kept.
+      # the runner's slot; the job log gets the harness names with PASS or FAIL, and the exit status is kept. A failure's
+      # logs (a failing script's, and each failing harness's from tools/parity.py) are copied to the slot's parity-keep,
+      # per run and attempt, which the next job's setup does not wipe, so they can still be read on the host after the slot is reused.
       - name: Keep harness output on the runner
         run: |
           mkdir -p "$DYNA_CI_BUILD/bin"
@@ -1169,7 +1141,16 @@ jobs:
           status=$?
           rm -rf "$DYNA_CI_BUILD"/parity-out/rust-*
           if [ "$name" = parity ]; then grep -aoE '^(PASS|FAIL|RETRIED|FLAKY) [a-z0-9_#]+' "$log" || true; fi
-          if [ "$status" -eq 0 ]; then echo "PASS $name"; else echo "FAIL $name (exit $status; its log stays on the runner: $log)"; fi
+          if [ "$status" -eq 0 ]; then echo "PASS $name"; exit 0; fi
+          keep="$DYNA_CI_BUILD/parity-keep/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -p "$keep"
+          cp "$log" "$keep/"
+          if [ "$name" = parity ]; then
+            for harness in $(grep -aoE '^FAIL [a-z0-9_#]+' "$log" | cut -d' ' -f2 | sort -u); do
+              cp "$GITHUB_WORKSPACE/.local/parity-runner/logs/$harness.log" "$keep/" 2>/dev/null || true
+            done
+          fi
+          echo "FAIL $name (exit $status; its logs are kept on runner $RUNNER_NAME in $keep)"
           exit "$status"
           SH
           chmod +x "$DYNA_CI_BUILD/bin/python"
@@ -1524,3 +1505,13 @@ jobs:
       - name: Compare float logarithms at domain and rounding boundaries
         if: inputs.harnesses == ''
         run: python tools/test_float_log_parity.py
+      # Failure logs kept on the slot (see "Keep harness output on the runner") stay three days, then go.
+      - name: Prune kept failure logs
+        if: always()
+        run: |
+          keep="$DYNA_CI_BUILD/parity-keep"
+          [ -d "$keep" ] || exit 0
+          find "$keep" -mindepth 1 -maxdepth 1 -type d -mmin +4320 -exec rm -rf {} +
+          if [ -d "$keep/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" ]; then
+            echo "Failure logs of run $GITHUB_RUN_ID attempt $GITHUB_RUN_ATTEMPT are kept on runner $RUNNER_NAME in $keep/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi

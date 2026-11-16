@@ -21,7 +21,7 @@ use sunrise_mod_registry::{App, Config, github, router};
 use tower::ServiceExt;
 
 const PUBLIC: &str = "https://playsunrise.test";
-const HMOD_SHA: &str = "cb6e658445269b2a4d2eb104e83e4b993586bc2e56814fd56454244139f08364";
+const SMOD_SHA: &str = "cb6e658445269b2a4d2eb104e83e4b993586bc2e56814fd56454244139f08364";
 
 #[derive(Default)]
 struct Mock {
@@ -349,7 +349,7 @@ fn form() -> Value {
         "license": "MIT",
         "source": "https://github.com/alice/coords",
         "key": key.lines().last().unwrap(),
-        "signature": std::fs::read_to_string(fixtures().join("coords_hud-0.1.0.hmod.minisig")).unwrap(),
+        "signature": std::fs::read_to_string(fixtures().join("coords_hud-0.1.0.smod.minisig")).unwrap(),
         "version": "0.1.0",
         "game": "26.3",
     })
@@ -403,7 +403,7 @@ async fn setup_keyed(
 #[tokio::test(flavor = "multi_thread")]
 async fn a_submission_becomes_a_pull_request() {
     let (mut client, mock) = setup().await;
-    let file = std::fs::read(fixtures().join("coords_hud-0.1.0.hmod")).unwrap();
+    let file = std::fs::read(fixtures().join("coords_hud-0.1.0.smod")).unwrap();
     // Not signed in.
     let (status, _) = client.submit("x", &form(), &file).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
@@ -416,7 +416,7 @@ async fn a_submission_becomes_a_pull_request() {
     assert_eq!(json["pull_request"], "https://github.com/o/r/pull/1");
     {
         let m = mock.lock().unwrap();
-        assert_eq!(m.assets, [(format!("{HMOD_SHA}.hmod"), file.len())]);
+        assert_eq!(m.assets, [(format!("{SMOD_SHA}.smod"), file.len())]);
         assert_eq!(m.branches, ["submit/coords_hud-0.1.0"]);
         let (text, message, replaced) = &m.commits[&(
             "submit/coords_hud-0.1.0".into(),
@@ -424,8 +424,8 @@ async fn a_submission_becomes_a_pull_request() {
         )];
         let entry: Entry = toml::from_str(text).unwrap();
         assert_eq!(entry.owners, ["alice"]);
-        assert_eq!(entry.versions[0].sha256, HMOD_SHA);
-        assert_eq!(entry.versions[0].file, "coords_hud-0.1.0.hmod");
+        assert_eq!(entry.versions[0].sha256, SMOD_SHA);
+        assert_eq!(entry.versions[0].file, "coords_hud-0.1.0.smod");
         assert!(entry.versions[0].signature.is_some() && entry.key.is_some());
         assert!(message.contains("Co-authored-by: alice <7+alice@users.noreply.github.com>"));
         assert_eq!(replaced, &None);
@@ -477,7 +477,7 @@ fn published_with_ids(owner: &str, key: bool, ids: &[u64]) -> String {
         ),
     };
     let text = format!(
-        "id = \"coords_hud\"\nkind = \"mod\"\nname = \"Coordinates HUD\"\nsummary = \"Your coordinates in a corner.\"\ndescription = \"{DESCRIPTION}\"\ncategories = [\"utility\"]\nauthors = [\"Alice\"]\nowners = [\"{owner}\"]\n{ids}license = \"MIT\"\nsource = \"https://github.com/alice/coords\"\n{}\n[[versions]]\nversion = \"0.0.1\"\npublished = \"2026-01-01\"\ngame = \"26.3\"\nfile = \"coords_hud-0.0.1.hmod\"\nsha256 = \"{}\"\n",
+        "id = \"coords_hud\"\nkind = \"mod\"\nname = \"Coordinates HUD\"\nsummary = \"Your coordinates in a corner.\"\ndescription = \"{DESCRIPTION}\"\ncategories = [\"utility\"]\nauthors = [\"Alice\"]\nowners = [\"{owner}\"]\n{ids}license = \"MIT\"\nsource = \"https://github.com/alice/coords\"\n{}\n[[versions]]\nversion = \"0.0.1\"\npublished = \"2026-01-01\"\ngame = \"26.3\"\nfile = \"coords_hud-0.0.1.smod\"\nsha256 = \"{}\"\n",
         if key {
             format!("key = {}\n", f["key"])
         } else {
@@ -500,7 +500,7 @@ async fn update(
         .unwrap()
         .main
         .insert("mods/coords_hud.toml".into(), main);
-    let file = std::fs::read(fixtures().join("coords_hud-0.1.0.hmod")).unwrap();
+    let file = std::fs::read(fixtures().join("coords_hud-0.1.0.smod")).unwrap();
     let csrf = client.sign_in().await;
     // An update uploads no image: an owner's version alone.
     client.images.clear();
@@ -522,7 +522,7 @@ async fn an_owners_update_is_signed_for_the_repository() {
     let trailer = body.split("<!-- owner-update\n").nth(1).expect(&body);
     let mut mac = Hmac::<sha2::Sha256>::new_from_slice(UPDATE_KEY).unwrap();
     mac.update(
-        format!("owner-update-v2\ncoords_hud\n0.1.0\n{HMOD_SHA}\ncoords_hud-0.1.0.hmod\nalice\n{ALICE_ID}")
+        format!("owner-update-v2\ncoords_hud\n0.1.0\n{SMOD_SHA}\ncoords_hud-0.1.0.smod\nalice\n{ALICE_ID}")
             .as_bytes(),
     );
     let hmac: String = mac
@@ -534,7 +534,7 @@ async fn an_owners_update_is_signed_for_the_repository() {
     assert_eq!(
         trailer,
         format!(
-            "format: v2\nid: coords_hud\nversion: 0.1.0\nsha256: {HMOD_SHA}\nfile: coords_hud-0.1.0.hmod\nsubmitter: alice\nsubmitter_id: {ALICE_ID}\nhmac: {hmac}\n-->"
+            "format: v2\nid: coords_hud\nversion: 0.1.0\nsha256: {SMOD_SHA}\nfile: coords_hud-0.1.0.smod\nsubmitter: alice\nsubmitter_id: {ALICE_ID}\nhmac: {hmac}\n-->"
         ),
     );
     assert_eq!(labels, [(1, json!(["owner-update"]))]);
@@ -548,7 +548,7 @@ async fn everything_else_waits_for_a_reviewer() {
     };
     // A new project, not an update (alice isn't in a missing entry's owners).
     let (mut client, mock) = setup().await;
-    let file = std::fs::read(fixtures().join("coords_hud-0.1.0.hmod")).unwrap();
+    let file = std::fs::read(fixtures().join("coords_hud-0.1.0.smod")).unwrap();
     let csrf = client.sign_in().await;
     client.submit(&csrf, &form(), &file).await;
     {
@@ -623,7 +623,7 @@ async fn a_reclaimed_login_is_not_the_owner() {
         "mods/coords_hud.toml".into(),
         published_with_ids("alice", true, &[99]),
     );
-    let file = std::fs::read(fixtures().join("coords_hud-0.1.0.hmod")).unwrap();
+    let file = std::fs::read(fixtures().join("coords_hud-0.1.0.smod")).unwrap();
     let csrf = client.sign_in().await;
     let (status, json) = client.submit(&csrf, &form(), &file).await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{json}");
@@ -651,7 +651,7 @@ async fn a_renamed_owner_keeps_publishing_by_id() {
 #[tokio::test(flavor = "multi_thread")]
 async fn what_the_form_refuses() {
     let (mut client, mock) = setup().await;
-    let file = std::fs::read(fixtures().join("coords_hud-0.1.0.hmod")).unwrap();
+    let file = std::fs::read(fixtures().join("coords_hud-0.1.0.smod")).unwrap();
     let csrf = client.sign_in().await;
     let refused = |status: StatusCode, json: &Value, part: &str| {
         assert!(
@@ -668,7 +668,7 @@ async fn what_the_form_refuses() {
     // A broken signature.
     let mut f = form();
     let signature =
-        std::fs::read_to_string(fixtures().join("coords_hud-0.1.0.hmod.minisig")).unwrap();
+        std::fs::read_to_string(fixtures().join("coords_hud-0.1.0.smod.minisig")).unwrap();
     let mut lines: Vec<_> = signature.lines().map(str::to_owned).collect();
     let mut bytes = STANDARD.decode(&lines[1]).unwrap();
     bytes[10] ^= 1;
@@ -686,7 +686,7 @@ async fn what_the_form_refuses() {
     assert_eq!(status, StatusCode::BAD_REQUEST, "{json}");
     refused(status, &json, "sunrise-shaders.toml: missing");
     // An update by someone who isn't an owner.
-    let owned = "id = \"coords_hud\"\nkind = \"mod\"\nname = \"C\"\nsummary = \"s\"\nowners = [\"bob\"]\nlicense = \"MIT\"\nsource = \"https://x.test\"\n\n[[versions]]\nversion = \"0.0.1\"\npublished = \"2026-01-01\"\ngame = \"26.3\"\nfile = \"coords_hud-0.0.1.hmod\"\nsha256 = \"0000000000000000000000000000000000000000000000000000000000000000\"\n";
+    let owned = "id = \"coords_hud\"\nkind = \"mod\"\nname = \"C\"\nsummary = \"s\"\nowners = [\"bob\"]\nlicense = \"MIT\"\nsource = \"https://x.test\"\n\n[[versions]]\nversion = \"0.0.1\"\npublished = \"2026-01-01\"\ngame = \"26.3\"\nfile = \"coords_hud-0.0.1.smod\"\nsha256 = \"0000000000000000000000000000000000000000000000000000000000000000\"\n";
     mock.lock()
         .unwrap()
         .main
@@ -728,7 +728,7 @@ async fn what_the_form_refuses() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_zip_with_a_symlink_is_refused() {
     let (mut client, _mock) = setup().await;
-    let file = std::fs::read(fixtures().join("coords_hud-0.1.0.hmod")).unwrap();
+    let file = std::fs::read(fixtures().join("coords_hud-0.1.0.smod")).unwrap();
     let mut zip = zip::ZipWriter::new_append(std::io::Cursor::new(file)).unwrap();
     zip.add_symlink(
         "assets/link",
@@ -805,7 +805,7 @@ async fn a_submission_comes_from_the_sites_own_pages() {
     );
 }
 
-const ENTRY: &str = "kind = \"mod\"\nname = \"N\"\nsummary = \"s\"\nlicense = \"MIT\"\nsource = \"https://x.test\"\n\n[[versions]]\nversion = \"1.0.0\"\npublished = \"2026-01-01\"\ngame = \"26.3\"\nfile = \"f.hmod\"\nsha256 = \"0000000000000000000000000000000000000000000000000000000000000000\"\n";
+const ENTRY: &str = "kind = \"mod\"\nname = \"N\"\nsummary = \"s\"\nlicense = \"MIT\"\nsource = \"https://x.test\"\n\n[[versions]]\nversion = \"1.0.0\"\npublished = \"2026-01-01\"\ngame = \"26.3\"\nfile = \"f.smod\"\nsha256 = \"0000000000000000000000000000000000000000000000000000000000000000\"\n";
 
 impl Client {
     async fn rate(&mut self, csrf: &str, id: &str, body: &str) -> (StatusCode, Value) {
@@ -903,7 +903,7 @@ async fn a_slow_github_is_named() {
     let (mut client, mock) =
         setup_with(|gh| gh.call_timeout = std::time::Duration::from_millis(300)).await;
     mock.lock().unwrap().slow = Some(std::time::Duration::from_secs(3));
-    let file = std::fs::read(fixtures().join("coords_hud-0.1.0.hmod")).unwrap();
+    let file = std::fs::read(fixtures().join("coords_hud-0.1.0.smod")).unwrap();
     let csrf = client.sign_in().await;
     let (status, json) = client.submit(&csrf, &form(), &file).await;
     assert_eq!(status, StatusCode::GATEWAY_TIMEOUT, "{json}");
@@ -952,7 +952,7 @@ async fn a_refusal_waits_for_the_upload() {
 async fn a_retry_takes_up_its_own_branch() {
     let (mut client, mock) =
         setup_with(|gh| gh.call_timeout = std::time::Duration::from_millis(300)).await;
-    let file = std::fs::read(fixtures().join("coords_hud-0.1.0.hmod")).unwrap();
+    let file = std::fs::read(fixtures().join("coords_hud-0.1.0.smod")).unwrap();
     let branch = "submit/coords_hud-0.1.0".to_owned();
     let key = (branch.clone(), "mods/coords_hud.toml".to_owned());
 
@@ -1037,8 +1037,8 @@ async fn a_retry_takes_up_its_own_branch() {
     assert_eq!(mock.lock().unwrap().resets, [branch.as_str()]);
 }
 
-/// A native rewrite (`.hmod`) of `coords_hud` at `version`.
-fn hmod(version: &str) -> Vec<u8> {
+/// A native rewrite (`.smod`) of `coords_hud` at `version`.
+fn smod(version: &str) -> Vec<u8> {
     let manifest = format!(
         "id = 'coords_hud'\nname = 'Coordinates'\nversion = '{version}'\napi = '0.2'\ncapabilities = ['registries']\n[native]\ngame = '26.3'\nsunrise = '{}'\nmixins = '{}'\n",
         "a".repeat(40),
@@ -1055,7 +1055,7 @@ fn hmod(version: &str) -> Vec<u8> {
 async fn a_mod_cannot_turn_native() {
     let (mut client, mock) = setup().await;
     let published = format!(
-        "id = \"coords_hud\"\nkind = \"mod\"\nname = \"C\"\nsummary = \"s\"\nowners = [\"Alice\"]\nlicense = \"MIT\"\nsource = \"https://x.test\"\n\n[[versions]]\nversion = \"0.1.0\"\npublished = \"2026-01-01\"\ngame = \"26.3\"\nfile = \"coords_hud-0.1.0.hmod\"\nsha256 = \"{HMOD_SHA}\"\n"
+        "id = \"coords_hud\"\nkind = \"mod\"\nname = \"C\"\nsummary = \"s\"\nowners = [\"Alice\"]\nlicense = \"MIT\"\nsource = \"https://x.test\"\n\n[[versions]]\nversion = \"0.1.0\"\npublished = \"2026-01-01\"\ngame = \"26.3\"\nfile = \"coords_hud-0.1.0.smod\"\nsha256 = \"{SMOD_SHA}\"\n"
     );
     mock.lock()
         .unwrap()
@@ -1067,7 +1067,7 @@ async fn a_mod_cannot_turn_native() {
     native["version"] = json!("0.2.0");
     native["key"] = Value::Null;
     native["signature"] = Value::Null;
-    let (status, json) = client.submit(&csrf, &native, &hmod("0.2.0")).await;
+    let (status, json) = client.submit(&csrf, &native, &smod("0.2.0")).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{json}");
     assert_eq!(json["error"], "coords_hud: its kind can't change");
     assert!(mock.lock().unwrap().pulls.is_empty());
@@ -1102,7 +1102,7 @@ async fn the_registry_follows_no_repository() {
         .unwrap()
         .main
         .insert("mods/coords_hud.toml".into(), main);
-    let file = std::fs::read(fixtures().join("coords_hud-0.1.0.hmod")).unwrap();
+    let file = std::fs::read(fixtures().join("coords_hud-0.1.0.smod")).unwrap();
     let (status, json) = client.submit(&csrf, &form(), &file).await;
     assert_eq!(status, StatusCode::CONFLICT, "{json}");
     assert!(mock.lock().unwrap().pulls.is_empty());
@@ -1111,7 +1111,7 @@ async fn the_registry_follows_no_repository() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_new_project_has_a_page_and_its_images_go_in_the_registry() {
     let (mut client, mock) = setup().await;
-    let file = std::fs::read(fixtures().join("coords_hud-0.1.0.hmod")).unwrap();
+    let file = std::fs::read(fixtures().join("coords_hud-0.1.0.smod")).unwrap();
     let csrf = client.sign_in().await;
     // What a new project lacks, each refused before anything reaches GitHub.
     let refusals = [

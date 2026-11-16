@@ -27,11 +27,13 @@ impl RegistrationRefusalRegistrar for PartRegistrar {
 impl PartRegistrar {
     pub(crate) fn registration_checkpoint(&self) -> impl FnOnce(&mut Self) + use<> {
         let parts = self.parts.clone();
+        let attachment_types = self.attachment_types.clone();
         let tags = self.tags.clone();
         let keys = self.registry_keys.borrow().clone();
         let menu_recipe_books = self.menu_recipe_books.clone();
         let recipe_book_types = self.recipe_book_types.clone();
         let recipe_book_fields = self.recipe_book_fields.clone();
+        let recipe_book_filters = self.recipe_book_filters.clone();
         let registered = self.registered;
         let entity_selector_bytes = self.entity_selector_bytes;
         let block_entity_transforms = self.block_entity_transforms.clone();
@@ -44,11 +46,13 @@ impl PartRegistrar {
                     $(registrar.$field.truncate($field);)*
                     registrar.block_entity_transforms = block_entity_transforms;
                     registrar.parts = parts;
+                    registrar.attachment_types = attachment_types;
                     registrar.tags = tags;
                     *registrar.registry_keys.borrow_mut() = keys;
                     registrar.menu_recipe_books = menu_recipe_books;
                     registrar.recipe_book_types = recipe_book_types;
                     registrar.recipe_book_fields = recipe_book_fields;
+                    registrar.recipe_book_filters = recipe_book_filters;
                     registrar.registered = registered;
                     registrar.entity_selector_bytes = entity_selector_bytes;
                     registrar.self_refusal = None;
@@ -59,6 +63,7 @@ impl PartRegistrar {
             game_rule_categories,
             game_rules,
             custom_stats,
+            attachment_uses,
             block_entity_types,
             entity_attributes,
             general_entity_types,
@@ -71,6 +76,7 @@ impl PartRegistrar {
             controllers,
             arm_poses,
             structure_types,
+            loot_modifier_serializers,
             dimensions,
             chunk_generators,
             biome_sources,

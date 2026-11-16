@@ -12,9 +12,9 @@ use std::{
 pub const FILE: &str = "sunrise-mods.txt";
 /// The `sunrise-mods.txt` key of [`ModList::wasm_memory_cap_mib`].
 const WASM_MEMORY_CAP: &str = "wasm.memory_cap_mib";
-/// The folder holding `.hmod` files, beside `options.txt`.
+/// The folder holding `.smod` files, beside `options.txt`.
 pub const DIR: &str = "sunrise-mods";
-/// Where the launcher installs native mods (`<id>.hmod`), beside [`DIR`]. They run only in a
+/// Where the launcher installs native mods (`<id>.smod`), beside [`DIR`]. They run only in a
 /// game the launcher built with them.
 pub const NATIVE_DIR: &str = "sunrise-native-mods";
 /// Why a native mod installed in [`NATIVE_DIR`] doesn't run in this game.

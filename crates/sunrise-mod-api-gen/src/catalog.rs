@@ -43,6 +43,9 @@ pub enum HostAccess {
     Read,
     /// A level host, for a receiver that is a level but not `GameLevel`.
     Level,
+    /// A hit's host: a level host that can also play level sounds and draw from the
+    /// random of the entities the hit lends (`HitHost`). Server hooks only.
+    Hit,
 }
 
 /// A hook fired in a load phase, which takes that phase's context instead of a host.

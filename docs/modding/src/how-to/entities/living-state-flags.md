@@ -54,6 +54,9 @@ fence as `Leashable.setLeashedTo` does: the entity lets go of any other holder a
 `canBeLeashed` nor the distance is asked, so a holder too far away snaps the lead on the next tick. `detach_leash`
 drops the lead as an item or removes it; a mob's removal fires `entity_unleash`.
 
+A successful mob mount through `EntityRef::start_riding` drops the mob's lead as an item without a sound
+and emits `entity_unleash`. A refused mount leaves the leash alone. Natural mob boarding follows the same rule.
+
 ## Physics
 
 `EntityRef::no_physics` takes `&dyn Host` and reads `Entity.noPhysics`: whether the entity's moves pass

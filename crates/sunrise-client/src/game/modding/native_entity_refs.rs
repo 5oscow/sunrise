@@ -419,25 +419,14 @@ impl Game<'_> {
         {
             return None;
         }
-        if let Some(entity) = entity {
-            self.native_entity_target(entity)?;
-        }
-        let place = self.loot_place_at(origin, None);
-        sunrise_world::loot::with_native_loot_place(place, || {
-            let this_entity = entity.is_some();
-            match world_items!(self).loot_sequence(table) {
-                Some(sequence) => {
-                    let random = self.rand_sequences.get(&sequence, self.level.seed);
-                    world_items!(self).roll_loot_table(table, tool, this_entity, random)
-                }
-                None => world_items!(self).roll_loot_table(
-                    table,
-                    tool,
-                    this_entity,
-                    &mut self.world.random,
-                ),
+        let this = match entity {
+            Some(entity) => {
+                let target = self.native_entity_target(entity)?;
+                Some(self.target_loot_entity(target))
             }
-        })
+            None => None,
+        };
+        self.roll_table_at(table, Some(origin), tool, this.as_ref())
     }
     /// Set a block through Level.setBlock. Typed errors distinguish stale/unavailable
     /// levels; Ok(false) preserves vanilla's position/no-change refusal.
@@ -694,11 +683,10 @@ impl Game<'_> {
         let state = self.level_block_state(level, pos)?;
         let direction = block_face_direction(face);
         let b = self.res.behaviours();
-        if !b.has_cached_support(state) {
+        let binding = self.res.collision();
+        if !b.has_cached_support(state) || binding.publishes_shapes(state) {
             use sunrise_client::collisions::SceneCollisions;
             use sunrise_world::{block_support::SupportType, dynamic_support::DynamicSupport};
-            let binding = self.res.collision();
-            let dynamic = DynamicSupport::from_state(binding.registry().state(state)?).ok()??;
             let world = self.native_level_world(level)?;
             let mut scene = SceneCollisions {
                 world,
@@ -711,6 +699,12 @@ impl Game<'_> {
                 mod_api::SupportType::Rigid => SupportType::Rigid,
                 _ => unreachable!("mod_api::SupportType: unhandled variant"),
             };
+            // A state that may publish takes its block entity's shape, else its declared one.
+            if binding.publishes_shapes(state) {
+                let shape = binding.collision_shape(&mut scene, state, pos).ok()?;
+                return support.is_supporting(&shape, direction).ok();
+            }
+            let dynamic = DynamicSupport::from_state(binding.registry().state(state)?).ok()??;
             return dynamic
                 .is_face_sturdy(&mut scene, pos, direction, support)
                 .ok();
@@ -2814,7 +2808,7 @@ pub(super) mod tests {
             ));
             let guest = game.entity(12).unwrap();
             let vehicle = game.entity(21).unwrap();
-            assert!(game.entity_start_riding(guest, vehicle, true));
+            assert!(game.entity_start_riding(guest, vehicle, true).is_ok());
             assert_eq!(game.command_guest(12).unwrap().vehicle, Some(21));
             assert!(game.entity_stop_riding(guest));
             assert_eq!(game.command_guest(12).unwrap().vehicle, None);
@@ -2824,8 +2818,8 @@ pub(super) mod tests {
                 .hub
                 .update_guest(12, |guest| guest.dimension = "minecraft:the_nether".into())
                 .unwrap();
-            assert!(!game.entity_start_riding(guest, vehicle, true));
-            assert!(!game.entity_start_riding(vehicle, guest, true));
+            assert!(game.entity_start_riding(guest, vehicle, true).is_err());
+            assert!(game.entity_start_riding(vehicle, guest, true).is_err());
             let _ = std::fs::remove_dir_all(root);
         });
     }

@@ -268,7 +268,7 @@
   "sunrise.studio.refresh": "รีเฟรช",
   "sunrise.studio.unknown_server": "ไม่ทราบ",
   "sunrise.pages.open.music": "ดนตรี...",
-  "sunrise.mods.empty": "ไม่มี mods: ใส่ไฟล์ .hmod ลงในโฟลเดอร์ Sunrise-mods",
+  "sunrise.mods.empty": "ไม่มี mods: ใส่ไฟล์ .smod ลงในโฟลเดอร์ Sunrise-mods",
   "sunrise.mods.stopped": " (หยุดแล้ว)",
   "sunrise.mods.not_built": " (ไม่ได้สร้าง)",
   "sunrise.mods.dev": " (เดฟ)",

@@ -7,6 +7,9 @@ pub use placement::PlacementInfo;
 #[path = "recipe_book_layout.rs"]
 mod layout;
 pub use layout::RecipeBookLayout;
+#[path = "recipe_book_filter.rs"]
+mod filter;
+pub use filter::RecipeBookFilterLook;
 #[path = "recipe_book_ghost.rs"]
 mod ghost;
 pub use ghost::GhostSlot;
@@ -29,6 +32,9 @@ pub struct RecipeBookCategory {
     pub recipe_type: String,
     /// A registered item id used as the category's icon.
     pub icon: String,
+    /// A second registered item id drawn beside `icon` on the tab, as vanilla's
+    /// `RecipeBookComponent.TabInfo` takes one: two icons share the tab side by side.
+    pub secondary_icon: Option<String>,
     /// The menu whose screen owns this category.
     pub target_menu: String,
     /// Registered book identity, separate from category identity and settings.
@@ -41,7 +47,8 @@ pub struct RecipeBookCategory {
 }
 
 /// What a recipe viewer's transfer into the open crafting grid does or would
-/// do (`RecipesClientHost::transfer_recipe`, `transfer_recipe_check`).
+/// do (`RecipesClientHost::transfer_recipe`, `transfer_recipe_id`,
+/// `transfer_recipe_check`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 // exhaustive: the four answers of Sunrise's transfer channels, matched without a wildcard
 #[derive(sunrise_mod_api_macros::Wire)]

@@ -15,7 +15,7 @@ queue (the hub, or `/suggest` on Discord) rather than to issues, which are for b
 
 **Mod-related pull requests go to [arismoko/horizon](https://github.com/arismoko/horizon)**, the fork that carries the
 mod API and reviews and merges that work. That covers the mod API, native hooks and events for mods, native mods,
-content mods (`.hmod`), mixins, wasm mods, `cargo sunrise-mod`, `sunrise-mods`, mod builds and the registry, and
+content mods (`.smod`), mixins, wasm mods, `cargo sunrise-mod`, `sunrise-mods`, mod builds and the registry, and
 their docs ([mods](docs/mods.md), [native mods](docs/native-mods.md)). Open the pull request there from your usual
 branch. Mod-related pull requests opened here are closed with a pointer to it. Engine extension points that Sunrise's
 own crates register (the [layer split](docs/layers.md)), resource and shader pack formats, and gameplay fixes stay

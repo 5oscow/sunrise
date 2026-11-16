@@ -731,6 +731,8 @@ struct WorldTables {
     /// them), for the advancement tree reload and the loot data.
     files: Vec<(String, Vec<Vec<u8>>)>,
     items: Arc<Items>,
+    loot: Arc<sunrise_world::loot::LootData>,
+    loot_modifier_manager: Arc<mod_api::GlobalLootModifierManager>,
     recipes: Recipes,
     stations: sunrise_client::stations::StationData,
     reload_sources: Option<Arc<sunrise_client::crafting::ResolvedSources>>,
@@ -1239,6 +1241,9 @@ struct Game<'a> {
     /// The side, registries and mod settings of this game's resource generation, which
     /// its menus lend to the hooks they fire inside a loop; rebuilt by `refresh_loop_context`.
     loop_context: Arc<sunrise_world::native_load_context::LoopContext>,
+    /// This thread's authority over the game's tick-owned state (`parallel::TickThread`): a
+    /// `Game` never leaves the thread that built it.
+    tick: sunrise_client::parallel::TickThread,
     setting_overrides: std::cell::RefCell<std::collections::BTreeMap<(String, String), String>>,
     /// The native damage hooks every level of this game lends to its hits.
     damage_hooks: sunrise_client::health::DamageHooks,
@@ -2397,6 +2402,7 @@ impl Game<'_> {
         player_context: bool,
     ) -> Vec<[f64; 6]> {
         self.outline_boxes_iter(
+            world,
             world.block(pos[0], pos[1], pos[2]),
             anims,
             pos,
@@ -2417,7 +2423,9 @@ impl Game<'_> {
         use sunrise_core::geometry::{Aabb, Vec3};
         let facts = self.res.facts().get(state);
         let cached = self.collision.cached_shapes();
-        let shape = cached.context_outline_shape(state, self.outline_context_kind());
+        let shape =
+            sunrise_client::collisions::published_outline(&self.world, self.collision, state, pos)
+                .or_else(|| cached.context_outline_shape(state, self.outline_context_kind()));
         let boxes: Cow<'_, [Aabb]> = if let Some(shape) = shape {
             Cow::Borrowed(shape.boxes())
         } else if let Some(b) = self.context_outline(pos, state, true, &self.be_anims) {
@@ -2733,7 +2741,8 @@ impl Game<'_> {
                 Some(world_items!(self)),
                 Some(&self.pack.block_registries),
                 &self.damage_hooks,
-            );
+            )
+            .with_effects(crate::game::entity::hit_effects_of!(self, None));
             let contact = sunrise_client::block_contact::Contact {
                 entity: id as i32,
                 kind: "minecraft:item",
@@ -10714,6 +10723,7 @@ impl<'a> Game<'a> {
             world_adopted: false,
             audio,
             loop_context: Arc::new(res.core.item_data.context().loop_context(loop_side, [])),
+            tick: sunrise_client::parallel::TickThread::mint(),
             setting_overrides: Default::default(),
             damage_hooks: native_hooks::DAMAGE_HOOKS,
             music: {

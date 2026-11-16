@@ -497,7 +497,7 @@
   "sunrise.mods.browse.title": "Модсене пӑхни",
   "sunrise.mods.browse.update": "Ҫӗнет",
   "sunrise.mods.dev": " (Dev)",
-  "sunrise.mods.empty": "Модсем ҫук: .hmod файлсене sunrise-mods папкине лартӑр",
+  "sunrise.mods.empty": "Модсем ҫук: .smod файлсене sunrise-mods папкине лартӑр",
   "sunrise.mods.in_world": " (тӗнчене улӑштарма хӑвар)",
   "sunrise.mods.not_built": " (Туман)",
   "sunrise.mods.open_folder": "Мод папкине уҫӑр",

@@ -497,7 +497,7 @@
   "sunrise.mods.browse.title": "浏览模组",
   "sunrise.mods.browse.update": "更新",
   "sunrise.mods.dev": "（开发版）",
-  "sunrise.mods.empty": "没有模组：请将 .hmod 文件放入 sunrise-mods 文件夹",
+  "sunrise.mods.empty": "没有模组：请将 .smod 文件放入 sunrise-mods 文件夹",
   "sunrise.mods.in_world": " （离开世界后可更改）",
   "sunrise.mods.not_built": "（未构建）",
   "sunrise.mods.open_folder": "打开模组文件夹",

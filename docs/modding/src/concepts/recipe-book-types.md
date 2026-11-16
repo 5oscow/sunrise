@@ -52,3 +52,31 @@ A menu that hosts a book reserves a 20 by 18 pixel spot for its toggle button wi
 places its button at `height / 2 - 49` writes `RecipeBookToggle { x: 5.0, y: -49.0, from: ToggleOrigin::ScreenCentre }`
 and lands on vanilla's pixel for every window height. Without an anchor the game tries a gutter beside the
 menu, and refuses the book, naming the menu, when no spot fits in the window.
+
+## Filter button look
+
+A custom book's craftable-only button uses the crafting book's sprites and tooltip unless the
+book declares its own look, once, right after registering the book:
+
+```rust,ignore
+registrar.recipe_book_filter_look(
+    &cooking,
+    RecipeBookFilterLook {
+        enabled: "example:recipe_book/cooking_enabled".into(),
+        disabled: "example:recipe_book/cooking_disabled".into(),
+        enabled_highlighted: "example:recipe_book/cooking_enabled_highlighted".into(),
+        disabled_highlighted: "example:recipe_book/cooking_disabled_highlighted".into(),
+        tooltip: "example.recipe_book.cookable".into(),
+    },
+)?;
+```
+
+Each sprite is a 26 by 16 GUI sprite, `namespace:path` for the file
+`assets/<namespace>/textures/gui/sprites/<path>.png`; the highlighted pair shows while the cursor is
+over the button. The tooltip is a translation key, shown while filtering is on; while it is off the
+button keeps vanilla's `gui.recipebook.toggleRecipes.all`. Only the book's own mod may declare its
+look. A second declaration, a malformed sprite id, or a tooltip key that is empty or over 256 bytes
+refuses installation even if the mod ignores the returned error. A sprite the resources lack draws nothing.
+
+A category's tab can show two icons: set `RecipeBookCategory::secondary_icon` (see
+[Recipe book categories and displays](../how-to/items/recipe-book-categories.md)).

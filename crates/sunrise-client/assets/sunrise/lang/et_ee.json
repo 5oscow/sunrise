@@ -497,7 +497,7 @@
   "sunrise.mods.browse.title": "Sirvi modifikatsioone",
   "sunrise.mods.browse.update": "Uuenda",
   "sunrise.mods.dev": " (arendaja)",
-  "sunrise.mods.empty": "Modifikatsioone pole: asetage .hmod-failid kausta sunrise-mods",
+  "sunrise.mods.empty": "Modifikatsioone pole: asetage .smod-failid kausta sunrise-mods",
   "sunrise.mods.in_world": " (jätke maailm muutuma)",
   "sunrise.mods.not_built": " (Ehitamata)",
   "sunrise.mods.open_folder": "Avage kaust Mod",

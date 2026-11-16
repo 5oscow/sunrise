@@ -19,7 +19,7 @@ use std::{io::Read, path::Path};
 /// The index format this build reads and writes. A reader refuses a newer
 /// one rather than misread it.
 pub const SCHEMA: u32 = 1;
-/// The biggest file the registry takes (a `.hmod` with content, a `.hpack`).
+/// The biggest file the registry takes (a `.smod` with content, a `.spack`).
 pub const MAX_FILE: u64 = 64 << 20;
 /// The biggest native binary build ID, in bytes.
 pub const MAX_NATIVE_BUILD: usize = 128;
@@ -74,15 +74,15 @@ impl LeftOut {
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(from = "String", into = "String")]
 pub enum Kind {
-    /// A `.hmod` of content only.
+    /// A `.smod` of content only.
     Mod,
-    /// A native source bundle, compiled into an isolated game build and published as a `.hmod`.
+    /// A native source bundle, compiled into an isolated game build and published as a `.smod`.
     NativeMod,
-    /// A `.hpack`: registry mods played together as a profile.
+    /// A `.spack`: registry mods played together as a profile.
     Modpack,
     /// A resource pack (`.zip` with `pack.mcmeta`) made or tested for Sunrise.
     ResourcePack,
-    /// A Sunrise shader pack (`.hshader`, the native WGSL format of
+    /// A Sunrise shader pack (`.sshader`, the native WGSL format of
     /// docs/shaders.md).
     Shader,
     /// A `shaders/`-folder shader pack (`.zip`, the format `sunrise-shaders` loads), listed by
@@ -110,9 +110,9 @@ impl Kind {
     /// The extension of its files; None for a kind this build doesn't know.
     pub fn extension(&self) -> Option<&'static str> {
         match self {
-            Kind::Mod => Some("hmod"),
-            Kind::NativeMod => Some("hmod"),
-            Kind::Modpack => Some("hpack"),
+            Kind::Mod => Some("smod"),
+            Kind::NativeMod => Some("smod"),
+            Kind::Modpack => Some("spack"),
             Kind::ResourcePack => Some("zip"),
             Kind::Shader => Some(sunrise_shader_api::EXTENSION),
             Kind::ShaderPack | Kind::DataPack => Some("zip"),

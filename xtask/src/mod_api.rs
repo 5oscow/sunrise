@@ -36,3 +36,14 @@ pub fn notes() -> Result<(), String> {
     );
     Ok(())
 }
+
+/// Prints the NeoForge counterparts chapter for the book preprocessor, without writing a source
+/// file.
+pub fn counterparts() -> Result<(), String> {
+    sunrise_mod_api_gen::generated_on_stdout();
+    print!(
+        "{}",
+        sunrise_mod_api_gen::generate_counterparts(&checkout()?)?
+    );
+    Ok(())
+}

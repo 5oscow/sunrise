@@ -14,7 +14,6 @@ impl Game<'_> {
             section_writer: None,
             professions: self.stations().professions.as_ref(),
             loop_context: &self.loop_context,
-            foreign: None,
             world: &self.world,
             registry: self.pack.assets.registry,
             facts: self.res.facts(),

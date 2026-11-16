@@ -6,7 +6,7 @@
 //! ```sh
 //! cargo build -p cargo-sunrise-mod
 //! (cd crates/sunrise-mod-wasm/tests/fixture && "$OLDPWD/target/debug/cargo-sunrise-mod" sunrise-mod build --wasm --catalog points.json && "$OLDPWD/target/debug/cargo-sunrise-mod" sunrise-mod wasm-std "$OLDPWD/target/sunrise-wasm-std.wasm" --catalog points.json)
-//! SUNRISE_WASM_STD="$PWD/target/sunrise-wasm-std.wasm" SUNRISE_WASM_FIXTURE="$PWD/crates/sunrise-mod-wasm/tests/fixture/target/sunrise-mod/wasm_fixture.hmod" cargo test --release -p sunrise-mod-wasm --features listener-fixture --test bench empty_subscribed_listener -- --ignored --exact --nocapture
+//! SUNRISE_WASM_STD="$PWD/target/sunrise-wasm-std.wasm" SUNRISE_WASM_FIXTURE="$PWD/crates/sunrise-mod-wasm/tests/fixture/target/sunrise-mod/wasm_fixture.smod" cargo test --release -p sunrise-mod-wasm --features listener-fixture --test bench empty_subscribed_listener -- --ignored --exact --nocapture
 //! ```
 //! Building the fixture rewrites its `sunrise-mod.toml` with the generated wasm
 //! hash and toolchain identity. Inspect and discard those generated changes after

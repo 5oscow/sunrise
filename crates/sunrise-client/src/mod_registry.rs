@@ -153,7 +153,7 @@ pub struct Done {
 }
 
 /// Installs the newest installable version of the registry's content mod `id`
-/// into the game folder `home`, as the launcher does: `sunrise-mods/<id>.hmod`,
+/// into the game folder `home`, as the launcher does: `sunrise-mods/<id>.smod`,
 /// recorded in `mod-browser.json`. Turning it on is the caller's
 /// (`sunrise-mods.txt` belongs to the game's settings). `get` downloads a file
 /// of at most `max` bytes (the network, or a test's files).
@@ -168,7 +168,7 @@ pub fn install(
         .ok_or_else(|| format!("{id} isn't in Sunrise's registry"))?;
     let v = installable(index, p)
         .ok_or_else(|| format!("{} has no version this game can install", p.name))?;
-    let relative = format!("{}/{id}.hmod", crate::mod_list::DIR);
+    let relative = format!("{}/{id}.smod", crate::mod_list::DIR);
     let target = home.join(&relative);
     // Share the entire read/modify/write transaction with the launcher's installers.
     let _lock = sunrise_mod_package::install_lock::lock_home(home)
@@ -180,7 +180,7 @@ pub fn install(
     if (ours.is_some() && old_file.as_deref() != Some(relative.as_str()))
         || home
             .join(crate::mod_list::NATIVE_DIR)
-            .join(format!("{id}.hmod"))
+            .join(format!("{id}.smod"))
             .exists()
     {
         return Err("code mods are installed and updated in the launcher".into());
@@ -215,7 +215,7 @@ pub fn install(
     let bytes = get(&v.file.url, v.file.size)?;
     let staging = home.join(DOWNLOADS);
     fs::create_dir_all(&staging).map_err(|e| format!("{}: {e}", staging.display()))?;
-    let download = staging.join(format!("{id}.hmod.part"));
+    let download = staging.join(format!("{id}.smod.part"));
     fs::write(&download, &bytes).map_err(|e| format!("{}: {e}", download.display()))?;
     let checked = || -> Result<_, String> {
         let trust = index::check_file(index, p, v, &download)?;
@@ -342,7 +342,7 @@ impl Installed {
     }
 
     /// The version of `id` installed from the registry whose file is still
-    /// there; for a `sunrise-mods/<id>.hmod` put there another way, its
+    /// there; for a `sunrise-mods/<id>.smod` put there another way, its
     /// manifest's version.
     fn version_of(&self, home: &Path, id: &str) -> Option<String> {
         if let Some(e) = self.position(id).map(|i| &self.entries[i])
@@ -351,7 +351,7 @@ impl Installed {
         {
             return Some(version.to_owned());
         }
-        let path: PathBuf = home.join(crate::mod_list::DIR).join(format!("{id}.hmod"));
+        let path: PathBuf = home.join(crate::mod_list::DIR).join(format!("{id}.smod"));
         sunrise_mod_package::Package::read(&path)
             .ok()
             .filter(|p| p.manifest.id == id)

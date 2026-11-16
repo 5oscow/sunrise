@@ -658,22 +658,28 @@ impl TryIntoEngine for mod_api::ItemDisplayContext {
     type Engine = sunrise_assets::item_model::DisplayContext;
     type Error = ();
     fn try_into_engine(&self, _: &Items) -> Result<Self::Engine, Self::Error> {
-        use mod_api::ItemDisplayContext as Api;
-        use sunrise_assets::item_model::DisplayContext as Engine;
-        Ok(match self {
-            Api::None => Engine::None,
-            Api::ThirdPersonLeftHand => Engine::ThirdPersonLeftHand,
-            Api::ThirdPersonRightHand => Engine::ThirdPersonRightHand,
-            Api::FirstPersonLeftHand => Engine::FirstPersonLeftHand,
-            Api::FirstPersonRightHand => Engine::FirstPersonRightHand,
-            Api::Head => Engine::Head,
-            Api::Gui => Engine::Gui,
-            Api::Ground => Engine::Ground,
-            Api::Fixed => Engine::Fixed,
-            Api::OnShelf => Engine::OnShelf,
-            _ => return Err(()),
-        })
+        engine_display_context(*self).ok_or(())
     }
+}
+/// The engine's display context for the API's, `None` for one this game doesn't have.
+pub(in crate::game) fn engine_display_context(
+    context: mod_api::ItemDisplayContext,
+) -> Option<sunrise_assets::item_model::DisplayContext> {
+    use mod_api::ItemDisplayContext as Api;
+    use sunrise_assets::item_model::DisplayContext as Engine;
+    Some(match context {
+        Api::None => Engine::None,
+        Api::ThirdPersonLeftHand => Engine::ThirdPersonLeftHand,
+        Api::ThirdPersonRightHand => Engine::ThirdPersonRightHand,
+        Api::FirstPersonLeftHand => Engine::FirstPersonLeftHand,
+        Api::FirstPersonRightHand => Engine::FirstPersonRightHand,
+        Api::Head => Engine::Head,
+        Api::Gui => Engine::Gui,
+        Api::Ground => Engine::Ground,
+        Api::Fixed => Engine::Fixed,
+        Api::OnShelf => Engine::OnShelf,
+        _ => return None,
+    })
 }
 
 impl TryIntoApi for sunrise_client::merchant::ItemCost {

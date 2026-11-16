@@ -80,6 +80,8 @@ pub(super) struct ModsState {
         Arc<std::sync::OnceLock<Result<crate::game::load_conditions::ConditionTable, String>>>,
     pub(super) profession_declarations:
         Arc<std::sync::OnceLock<Vec<(String, mod_api::ProfessionDefinition)>>>,
+    pub(super) loot_modifier_serializers:
+        Arc<std::sync::OnceLock<super::global_loot_modifiers::Serializers>>,
     /// Saved switches gate the first data inventory while registration keeps
     /// its existing startup ordering. Runtime dispatch owns later switches.
     pub(super) code_switches: Option<Arc<CodeSwitches>>,
@@ -544,7 +546,11 @@ fn register_special_model_renderers() {
     );
     super::native_special_renderers::register(
         kept.into_iter()
-            .filter_map(|kind| renderers.remove(&kind).map(|renderer| (kind, renderer)))
+            .filter_map(|kind| {
+                renderers
+                    .remove(&kind)
+                    .map(|(policy, renderer)| (kind, policy, renderer))
+            })
             .collect(),
     );
 }
@@ -1415,7 +1421,7 @@ fn not_built(
     let mut paths: Vec<PathBuf> = std::fs::read_dir(dir)
         .map(|d| d.flatten().map(|e| e.path()).collect())
         .unwrap_or_default();
-    paths.retain(|p| p.extension().is_some_and(|e| e == "hmod"));
+    paths.retain(|p| p.extension().is_some_and(|e| e == "smod"));
     paths.sort();
     let mut out: Vec<Installed> = Vec::new();
     for path in paths {
@@ -2044,7 +2050,7 @@ mod tests {
         fn runtime(&self) -> Runtime {
             let dir = self.0.join("compiled");
             let package = dir.join(mod_list::NATIVE_DIR).join("machine_sample");
-            let file = std::fs::File::open(self.0.join("machine_sample.hmod")).unwrap();
+            let file = std::fs::File::open(self.0.join("machine_sample.smod")).unwrap();
             zip::ZipArchive::new(file)
                 .unwrap()
                 .extract(&package)
@@ -2757,7 +2763,7 @@ mod tests {
         );
     }
 
-    fn hmod(dir: &std::path::Path, id: &str) {
+    fn smod(dir: &std::path::Path, id: &str) {
         let manifest = format!(
             "id = '{id}'\nname = '{id}'\nversion = '0.3.0'\napi = '0.2'\nside = 'both'\ncapabilities = ['registries']\n[native]\ngame = '26.3'\nsunrise = '{}'\nmixins = '{}'\n",
             "a".repeat(40),
@@ -2771,7 +2777,7 @@ mod tests {
             ("src/lib.rs", b"pub fn hooks() {}"),
         ];
         let bytes = sunrise_mod_package::Package::write_files(&manifest, files).unwrap();
-        std::fs::write(dir.join(format!("{id}.hmod")), bytes).unwrap();
+        std::fs::write(dir.join(format!("{id}.smod")), bytes).unwrap();
     }
 
     #[test]
@@ -2920,7 +2926,7 @@ mod tests {
             return;
         }
         let f = Fixture::new(mode.as_deref().unwrap());
-        hmod(&f.0, "machine_sample");
+        smod(&f.0, "machine_sample");
         let native = if mode.as_deref() == Some("compiled") {
             f.runtime()
         } else {
@@ -2929,10 +2935,10 @@ mod tests {
         let here = f.0.join("unrelated-game");
         let misplaced = here.join(mod_list::NATIVE_DIR);
         std::fs::create_dir_all(&misplaced).unwrap();
-        hmod(&misplaced, "machine_sample");
+        smod(&misplaced, "machine_sample");
         let manifest = "id='plain'\nname='Plain'\nversion='1.0.0'\napi='0.2'\nside='both'\ncapabilities=['registries']\n";
         let plain = sunrise_mod_package::Package::write_files(manifest, &[]).unwrap();
-        std::fs::write(misplaced.join("plain.hmod"), plain).unwrap();
+        std::fs::write(misplaced.join("plain.smod"), plain).unwrap();
         let base = f.0.join("resources");
         std::fs::create_dir_all(&base).unwrap();
         // A prepared root's registry report: block entity registration reads it (B1).
@@ -3017,7 +3023,7 @@ mod tests {
                 &[]
             };
             std::fs::write(
-                f.0.join(format!("{id}.hmod")),
+                f.0.join(format!("{id}.smod")),
                 sunrise_mod_package::Package::write_files(&text, code).unwrap(),
             )
             .unwrap();
@@ -3026,7 +3032,7 @@ mod tests {
             ["alpha", "beta", "gamma"]
                 .into_iter()
                 .map(|id| {
-                    let path = f.0.join(format!("{id}.hmod"));
+                    let path = f.0.join(format!("{id}.smod"));
                     sunrise_mod_package::selection::SelectedPackage {
                         package: sunrise_mod_package::Package::read(&path).unwrap(),
                         path,
@@ -3111,10 +3117,10 @@ mod tests {
     fn native_mods_installed_but_not_built_get_a_row_saying_so() {
         let f = Fixture::new("not-built");
         for id in ["veinminer", "zoom", "minimap", "machine_sample"] {
-            hmod(&f.0, id);
+            smod(&f.0, id);
         }
         std::fs::write(f.0.join("notes.txt"), "not a mod").unwrap();
-        std::fs::write(f.0.join("broken.hmod"), "not a zip").unwrap();
+        std::fs::write(f.0.join("broken.smod"), "not a zip").unwrap();
         let rows = not_built(&f.0, &[], &[]);
         let ids: Vec<_> = rows.iter().map(|r| r.id.as_str()).collect();
         assert_eq!(ids, ["machine_sample", "minimap", "veinminer", "zoom"]);

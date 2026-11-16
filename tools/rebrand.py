@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Horizon -> Sunrise in the tracked files' contents and paths; then run cargo fmt and let Cargo re-sort lockfiles. Usage: tools/rebrand.py [--dry-run]"""
+"""Horizon -> Sunrise in the tracked files' contents and paths, and the package extensions .hmod, .hpack and
+.hshader -> .smod, .spack and .sshader; then run cargo fmt and let Cargo re-sort lockfiles. Usage: tools/rebrand.py [--dry-run]"""
 import os
 import re
 import subprocess
@@ -10,15 +11,25 @@ from pathlib import Path
 DRY = "--dry-run" in sys.argv
 os.chdir(Path(__file__).resolve().parent.parent)
 
-SKIP_FILES = re.compile(r"(^|/)(LICENSE[^/]*|LICENSES/.*|NOTICE[^/]*|COPYING[^/]*|CLA\.md|GOVERNANCE\.md)$|^tools/rebrand\.py$|^tests/fixtures/launcher-upstream/identity\.json$")
+# Files whose strings name an old URL on purpose: the modding book's stale-URL guard and its fixtures. A run
+# that rewrote them would leave a guard that passes because it no longer recognises what it refuses.
+SKIP_FILES = re.compile(
+    r"(^|/)(LICENSE[^/]*|LICENSES/.*|NOTICE[^/]*|COPYING[^/]*|CLA\.md|GOVERNANCE\.md)$"
+    r"|^tools/rebrand\.py$|^tests/fixtures/launcher-upstream/identity\.json$"
+    r"|^tools/modding_concept_pages\.py$|^tests/test_modding_concept_pages\.py$"
+    r"|^tests/test_modding_book_links\.py$")
 
 PROTECT = [
-    # Real repositories and their pages.
+    # Real repositories and their pages. Horizon's own projects (the machine sample, the mixins tool,
+    # the registry) keep their links. Historical references to the old mod API repository
+    # also stay pinned: their issue numbers belong to that tracker, not this fork.
     r"(?:https?://)?(?:www\.)?github\.com/horizon-rust\b[\w./#?=&-]*",
     r"\bhorizon-rust\.github\.io[\w./#-]*",
     r"@?\bhorizon-rust(?:/[\w.-]+)?",
     r"(?:https?://)?(?:www\.)?github\.com/arismoko/horizon[\w./#?=&-]*",
     r"\barismoko/horizon[\w.-]*(?:/(?:issues|pull)/\d+)?(?:#\d+)?",
+    r"(?:https?://)?(?:www\.)?github\.com/arismoko/horizon-machine-sample[\w./#?=&-]*",
+    r"\barismoko/horizon-machine-sample[\w.-]*",
     # Vanilla's sky horizon, in prose and in its own names.
     r"\b(?:the|The|below|above|at|near|to|over|on|from|toward|towards|under|past|beyond) horizon\b(?![-_:]|\s+(?:client|repo|main|`))",
     r"\bhorizon_height\b|\b[gs]etHorizonHeight\b|\bhorizonHeight\b|\bHorizonHeight\b|\bnear_horizon\b",
@@ -44,6 +55,15 @@ LICENCE_PATH = re.compile(r"(^|/)(LICENSES/[^/]*|[^/]*LICEN[CS]E[^/]*)$")
 # Files whose strings and comments name the earlier launchers themselves: only their code is renamed.
 KEEP_STRINGS = {"launcher/src/identity.rs", "launcher/src/setup_args.rs"}
 STRING = re.compile(r'"(?:[^"\\\n]|\\.)*"|//[^\n]*')
+# Sunrise's package extensions, as a whole word in any spelling (`.hmod`, `"hmod"`, `hmod_path`, `HMOD`; never `chmod`).
+PACKAGE = re.compile(r"(?<![A-Za-z0-9])([Hh])(mod|pack|shader|MOD|PACK|SHADER)(?![A-Za-z0-9])")
+# The journal is history, and roadmap.json is generated from it; the two launcher files name the earlier launchers
+# and stay byte for byte.
+PACKAGE_SKIP = re.compile(r"^roadmap/journal/|^roadmap/roadmap\.json$|^launcher/src/(identity|setup_args)\.rs$")
+
+
+def package(text):
+    return PACKAGE.sub(lambda m: ("S" if m.group(1) == "H" else "s") + m.group(2), text)
 
 
 def case(m):
@@ -126,6 +146,10 @@ def keep_fork_branches(text, convert):
 
 def convert_line(text):
     def brand(t):
+        # The fork's own repository and Pages site moved with the rename; the upstream projects stay
+        # protected above, and a later run of this tool names the new owner instead of `arismoko`.
+        t = re.sub(r"\barismoko/horizon(?![\w.-])", "sunrise-org/sunrise", t)
+        t = t.replace("arismoko.github.io/sunrise", "sunrise-org.github.io/sunrise")
         t = BRAND.sub(case, t.replace("playhorizon.dev", "playsunrise.net"))
         t = re.sub(r"([Pp]lay[Ss]unrise)\.dev\b", r"\1.net", t)
         return t.replace("upstream Sunrise", "upstream Horizon").replace("fork of Sunrise", "fork of Horizon")
@@ -161,6 +185,8 @@ def convert_rust(text):
 
 
 def convert_path(path):
+    if not PACKAGE_SKIP.search(path):
+        path = package(path)
     parts = path.split("/")
     keep_last = bool(LICENCE_PATH.search(path))
     return "/".join(
@@ -195,6 +221,8 @@ def main():
         out = stashed(STRING, text, convert, "\x01") if f in KEEP_STRINGS else keep_fork_branches(text, convert)
         if f.endswith(".rs"):
             out = convert_rust(out)
+        if not PACKAGE_SKIP.search(f):
+            out = package(out)
         if out != text:
             changed += 1
             if not DRY:

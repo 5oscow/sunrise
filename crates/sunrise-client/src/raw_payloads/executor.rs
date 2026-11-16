@@ -70,11 +70,7 @@ fn execute(
         return None;
     }
     if let Some(holder) = incoming.expired_busy(now) {
-        log::warn!("{}", incoming.busy_failure(holder));
-        endpoint.disconnect(failure(&format!(
-            "a mod's network handler failed ({})",
-            mod_of(&incoming.id)
-        )));
+        handler_failed(&incoming, endpoint, &incoming.busy_failure(holder));
         return None;
     }
     if matches!(incoming.body, Body::Work(_)) || incoming.receiver.thread == HandlerThread::Main {
@@ -115,24 +111,16 @@ fn execute(
             if incoming.defer(payload, &holder, now) {
                 return Some(incoming);
             }
-            log::warn!("{}", incoming.busy_failure(&holder));
-            endpoint.disconnect(failure(&format!(
-                "a mod's network handler failed ({})",
-                mod_of(&incoming.id)
-            )));
+            handler_failed(&incoming, endpoint, &incoming.busy_failure(&holder));
         }
         Err(mod_api::PayloadHandleError::Failed(error)) => {
-            // Drop reservations and guest work before closing, publishing no partial actions.
+            // Drop reservations and guest work before handling failure, publishing no partial actions.
             drop(context);
             // The reason (a guest's deadline, trap or refusal) goes to the log; the player is told
             // only which mod's handler failed.
-            log::warn!("payload {} failed: {error}", incoming.id.0);
             #[cfg(test)]
             super::staging_probe::failure(&incoming.id.0, &error);
-            endpoint.disconnect(failure(&format!(
-                "a mod's network handler failed ({})",
-                mod_of(&incoming.id)
-            )));
+            handler_failed(&incoming, endpoint, &error);
         }
         Ok(()) => {
             let reason = context.disconnect.take();
@@ -174,6 +162,21 @@ fn execute(
         }
     }
     None
+}
+fn handler_failed(incoming: &Incoming, endpoint: &Endpoint, error: &str) {
+    if incoming.raw {
+        log::warn!(
+            "Mod {} failed on raw channel {}: {error}",
+            incoming.receiver.owner(),
+            incoming.id.0
+        );
+    } else {
+        log::warn!("payload {} failed: {error}", incoming.id.0);
+        endpoint.disconnect(failure(&format!(
+            "a mod's network handler failed ({})",
+            mod_of(&incoming.id)
+        )));
+    }
 }
 /// The mod a channel belongs to: its namespace.
 pub fn mod_of(id: &PayloadId) -> &str {

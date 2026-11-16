@@ -651,7 +651,7 @@ impl Game<'_> {
     /// `ArmorStand.interactAt` for the stand under the crosshair, or for the
     /// stand a guest's interact packet named (its client's click point).
     pub(super) fn interact_armor_stand(&mut self, target: Option<InteractTarget>) -> bool {
-        let Some((i, d, point)) = (match target {
+        let Some((mut i, d, point)) = (match target {
             // interactAt gets the packet's location, measured from the stand's
             // position, so getClickedSlot reads the height the client clicked.
             Some(t) => Self::named_entity(&self.armor_stands, t.id, |a| a.id).map(|i| {
@@ -767,6 +767,19 @@ impl Game<'_> {
             if cancel {
                 return true;
             }
+            // The listener had the game in its hands: find the stand again by
+            // its id and check the click's facts. A change spends the click.
+            let Some(now) = Self::named_entity(&self.armor_stands, stand, |a| a.id) else {
+                return true;
+            };
+            let stand = &self.armor_stands[now];
+            if !Self::same_item_and_count(stand.equipment[slot].as_ref(), current.as_ref())
+                || !Self::same_item_and_count(self.held(), held.as_ref())
+                || stand.swap_locked(slot)
+            {
+                return true;
+            }
+            i = now;
         }
         // ArmorStand.swapItem.
         match held {
@@ -912,10 +925,12 @@ impl Game<'_> {
             direct: attacker,
             position: None,
         };
-        if super::entity::damage_level_of!(self, scoped).invulnerability_check(
-            sunrise_client::health::Hurting::ArmorStand(id as i32, source),
-            vanilla,
-        ) {
+        if super::entity::damage_level_of!(self, self.combat.attack(), no_push, None)
+            .invulnerability_check(
+                sunrise_client::health::Hurting::ArmorStand(id as i32, source),
+                vanilla,
+            )
+        {
             return false;
         }
 
@@ -1153,6 +1168,7 @@ impl Game<'_> {
                         Some(block_registries),
                         hooks,
                     )
+                    .no_push()
                     .invulnerability_check(
                         sunrise_client::health::Hurting::ArmorStand(id as i32, source),
                         vanilla,
@@ -1674,10 +1690,10 @@ impl Game<'_> {
                 let mut frame = self.skin_frame.borrow_mut();
                 let mark = frame.mark();
                 let mut skin = sunrise_client::mobs::skin::Skin::new(&mut models, &mut frame);
-                self.armor_stand_vertices(a, base, packed, Some(&mut skin), out);
+                self.armor_stand_vertices(a, alpha as f32, base, packed, Some(&mut skin), out);
                 Some((mark, skin.bounds))
             } else {
-                self.armor_stand_vertices(a, base, packed, None, out);
+                self.armor_stand_vertices(a, alpha as f32, base, packed, None, out);
                 None
             };
             if !self.tracked_entity_glowing(a.id) {
@@ -1685,6 +1701,49 @@ impl Game<'_> {
             }
         }
     }
+    /// `ArmorStandArmorModel.setupAnim`: humanoid preparation and posing first,
+    /// then saved rotations. Position writes at the humanoid seam survive.
+    fn setup_armor_stand_pose(&self, a: &ArmorStand, partial: f32, poses: &mut Poses) {
+        use sunrise_client::mobs::anim::{self, ArmPose};
+        let state = anim::State {
+            pos: 0.0,
+            speed: 0.0,
+            age: self.world.game_time as f32 + partial,
+            y_rot: 0.0,
+            x_rot: a.pitch,
+            swing: 0.0,
+            baby: a.small,
+            partial,
+            observer: None,
+        };
+        let mut humanoid = anim::Hum::new(ArmPose::Empty, ArmPose::Empty);
+        humanoid.passenger = a.vehicle.is_some();
+        anim::humanoid_with_setup(poses, &state, &humanoid, |poses| {
+            if !mod_api::__private::listened(mod_api::HookId::HumanoidSetupAnim) {
+                return;
+            }
+            use super::api_values::TryIntoApi;
+            let stacks = [0, 1].map(|slot| {
+                a.equipment[slot]
+                    .as_ref()
+                    .and_then(|stack| stack.try_into_api().ok())
+            });
+            let view = mod_api::HumanoidRenderState {
+                main_hand: stacks[0].as_ref(),
+                off_hand: stacks[1].as_ref(),
+                main_arm_left: false,
+                is_using_item: false,
+                use_hand: None,
+                ticks_using_item: 0,
+                use_animation: mod_api::UseAnimation::None,
+                main_arm_pose: mod_api::ArmPose::Empty,
+                off_arm_pose: mod_api::ArmPose::Empty,
+            };
+            self.setup_humanoid_parts(a.id, TYPE_ID, &view, partial, poses);
+        });
+        apply_pose(poses, &a.pose);
+    }
+
     /// `ArmorStandRenderer.submit` for stand `a` under `base` (its
     /// `setupRotations`): the body, the hand and head items, the armour and
     /// the wings, at packed light `packed`. With `skin`, the stand's own models
@@ -1692,6 +1751,7 @@ impl Game<'_> {
     fn armor_stand_vertices(
         &self,
         a: &ArmorStand,
+        partial: f32,
         base: glam::Mat4,
         packed: u32,
         mut skin: Option<&mut sunrise_client::mobs::skin::Skin>,
@@ -1719,8 +1779,7 @@ impl Game<'_> {
             return;
         };
         let mut poses = Poses::new(model);
-        // ArmorStandModel.setupAnim: the stand's pose and part visibility.
-        apply_pose(&mut poses, &a.pose);
+        self.setup_armor_stand_pose(a, partial, &mut poses);
         // Item layers pose from the hidden arms too (`visible` only skips drawing).
         let posed = poses.clone();
         let mut hide = |name: &str| {
@@ -1815,9 +1874,9 @@ impl Game<'_> {
             } else {
                 0
             };
-            // ArmorStandArmorModel.setupAnim: the same pose as the stand.
+            // ArmorStandArmorModel.setupAnim runs humanoid setup independently.
             layer_poses.reset(part);
-            apply_pose(&mut layer_poses, &a.pose);
+            self.setup_armor_stand_pose(a, partial, &mut layer_poses);
             // EquipmentLayerRenderer: every layer of the asset, the leather overlay
             // too; the shader glint goes on the first layer only (renderShaderGlint).
             let cit = self.cit_worn_rule(Kind::Armor, stack);
@@ -1915,7 +1974,7 @@ impl Game<'_> {
             * glam::Mat4::from_scale(glam::Vec3::new(-1.0, -1.0, 1.0))
             * glam::Mat4::from_translation(glam::Vec3::new(0.0, -1.501, 0.0));
         let mut verts = Vec::new();
-        self.armor_stand_vertices(&stand, base, 240 | 240 << 8, None, &mut verts);
+        self.armor_stand_vertices(&stand, 0.0, base, 240 | 240 << 8, None, &mut verts);
         // ARMOR_STAND_ANGLE: rotationXYZ(0.43633232, 0, PI).
         let gui =
             glam::Mat4::from_translation(glam::Vec3::new((x0 + x1) / 2.0, (y0 + y1) / 2.0, 0.0))
@@ -3029,30 +3088,88 @@ mod setup_anim_tests {
         fn humanoid_setup_anim(
             &self,
             _: &dyn mod_api::ClientHost,
-            _: &mut mod_api::HumanoidSetupAnimEvent<'_>,
+            event: &mut mod_api::HumanoidSetupAnimEvent<'_>,
         ) {
+            use mod_api::HumanoidPart;
+            assert_eq!(event.entity_id, 73);
+            assert_eq!(event.entity_type, TYPE_ID);
+            assert_eq!(event.partial_tick, 0.5);
+            assert_eq!(
+                event.parts.get(HumanoidPart::Head).unwrap()[1],
+                [30.0_f32.to_radians(), 0.0, 0.0]
+            );
+            let right = event.parts.get(HumanoidPart::RightArm).unwrap()[1];
+            assert!((right[0] + std::f32::consts::PI / 5.0).abs() < 1e-6);
+            assert_eq!(
+                event.parts.get(HumanoidPart::RightLeg).unwrap()[1],
+                [-1.413_716_7, std::f32::consts::PI / 10.0, 0.078_539_82]
+            );
+            assert!(!event.humanoid.is_using_item);
+            for part in [
+                HumanoidPart::Head,
+                HumanoidPart::Body,
+                HumanoidPart::LeftArm,
+                HumanoidPart::RightArm,
+                HumanoidPart::LeftLeg,
+                HumanoidPart::RightLeg,
+            ] {
+                assert!(event.parts.set_rotation(part, [1.0, 2.0, 3.0]));
+                assert!(event.parts.set_position(part, [7.0, 8.0, 9.0]));
+            }
             HEARD.fetch_add(1, Ordering::Relaxed);
         }
     }
 
-    /// Armor stands pose from their saved rotations, not the humanoid
-    /// setupAnim seam, so drawing one never dispatches `humanoid_setup_anim`.
+    /// The real stand adapter exposes humanoid riding/head preparation, then
+    /// preserves position edits while saved rotations replace listener rotations.
     #[test]
     #[ignore = "daily"]
-    fn drawing_an_armor_stand_does_not_fire_humanoid_setup_anim() {
+    fn armor_stand_prepares_humanoid_then_overrides_only_rotations() {
         let mods = vec![mod_api::ModEntry::new("pose", Box::new(Listener))].into();
         mod_platform::testing::with_mods(mods, || {
             assert!(mod_api::__private::listened(
                 mod_api::HookId::HumanoidSetupAnim
             ));
             super::super::native_entity_refs::tests::with_client_game(|game| {
-                let mut stand = ArmorStand::new(0, Vec3::ZERO, 0.0);
+                let mut stand = ArmorStand::new(73, Vec3::ZERO, 0.0);
                 stand.show_arms = true;
+                stand.pitch = 30.0;
+                stand.vehicle = Some(9);
+                stand.pose = [[10.0, 20.0, 30.0]; 6];
+                let model = game.armor_stand_assets.main.as_ref().unwrap();
+                let mut poses = Poses::new(model);
+                game.setup_armor_stand_pose(&stand, 0.5, &mut poses);
+                for name in [
+                    "head",
+                    "body",
+                    "left_arm",
+                    "right_arm",
+                    "left_leg",
+                    "right_leg",
+                ] {
+                    let pose = poses.pose_of(name).unwrap();
+                    assert_eq!(&pose[..3], &[7.0, 8.0, 9.0]);
+                    assert_eq!(
+                        &pose[3..6],
+                        &[
+                            10.0_f32.to_radians(),
+                            20.0_f32.to_radians(),
+                            30.0_f32.to_radians()
+                        ]
+                    );
+                }
                 let mut verts = Vec::new();
-                game.armor_stand_vertices(&stand, glam::Mat4::IDENTITY, 0xf0f0, None, &mut verts);
+                game.armor_stand_vertices(
+                    &stand,
+                    0.5,
+                    glam::Mat4::IDENTITY,
+                    0xf0f0,
+                    None,
+                    &mut verts,
+                );
                 assert!(!verts.is_empty());
             });
         });
-        assert_eq!(HEARD.load(Ordering::Relaxed), 0);
+        assert_eq!(HEARD.load(Ordering::Relaxed), 2);
     }
 }
