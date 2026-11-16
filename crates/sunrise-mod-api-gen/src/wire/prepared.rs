@@ -14,7 +14,6 @@ pub(super) struct Entry {
 #[derive(Clone, Debug)]
 pub(super) struct Abi {
     pub hook: String,
-    pub parameter: String,
     pub entries: Vec<Entry>,
 }
 
@@ -24,7 +23,7 @@ pub(super) fn describe(
 ) -> Result<Vec<Abi>, String> {
     markers
         .iter()
-        .map(|(hook, parameter)| {
+        .map(|(hook, _)| {
             methods
                 .iter()
                 .filter(|m| exports().contains(&m.owner))
@@ -32,7 +31,6 @@ pub(super) fn describe(
                 .ok_or_else(|| format!("prepared hook {hook} has no ItemPart export"))?;
             Ok(Abi {
                 hook: hook.clone(),
-                parameter: parameter.clone(),
                 entries: vec![
                     Entry {
                         name: format!("prepare_{hook}"),
