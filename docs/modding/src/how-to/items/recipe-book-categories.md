@@ -5,6 +5,9 @@ types. Append `RecipeBookCategory` values to `event.categories`. Register the bo
 `recipe_book_type` during content registration and retain its `RecipeBookTypeKey`; declaring a
 category does not register a book, change its settings or unlock recipes.
 
+For Java-compatible saved flag names, use `recipe_book_type_with_fields`; see
+[Recipe book types and saved flags](../../concepts/recipe-book-types.md).
+
 This example assumes `book` is your registered key and the named menu, items and recipe exist:
 
 ```rust,ignore

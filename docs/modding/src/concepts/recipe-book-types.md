@@ -27,6 +27,8 @@ fields read as false. A player file from a Java world with those field names
 therefore restores the same flags. The book is not also written to the engine
 extension, and extension values are not a fallback for declared flat fields.
 Changing a book's storage declaration is not a migration mechanism.
+Like other custom flags, explicit fields load independently of vanilla recipe-list
+validation; malformed recipe lists do not erase them, unlike Java's whole packed decode.
 
 Names preserve their exact spelling and may contain any characters. Each must be
 nonempty and at most 256 UTF-8 bytes. The two names must differ, and neither may

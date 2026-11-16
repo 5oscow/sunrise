@@ -59,4 +59,3 @@
 - [Container loot](reference/container-loot.md)
 
 - [Crafting recipe kinds](crafting-recipe-kinds.md)
-- [Recipe book types and saved flags](concepts/recipe-book-types.md)

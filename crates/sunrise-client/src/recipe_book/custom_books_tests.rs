@@ -449,3 +449,62 @@ fn explicit_java_fields_load_and_save_flat_without_extension_duplicates() {
         assert_eq!(again.custom, loaded.custom);
     }
 }
+
+#[test]
+fn installed_field_declaration_roundtrips_the_player_book() {
+    struct Cooking;
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for Cooking {
+        fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
+            r.recipe_book_type_with_fields(
+                "demo:cooking_pot",
+                "isModCookingGuiOpen",
+                "isModCookingFilteringCraftable",
+            )
+            .unwrap();
+        }
+    }
+    let mods = [mod_api::ModEntry::new("demo", Box::new(Cooking))];
+    mod_platform::__private::part_tests::install_parts_fixture(&mods).unwrap();
+    assert_eq!(
+        mod_api::RecipeBookTypeKey::registered_save_fields(),
+        vec![(
+            POT.to_owned(),
+            (
+                "isModCookingGuiOpen".to_owned(),
+                "isModCookingFilteringCraftable".to_owned()
+            )
+        )]
+    );
+    let java = Tag::compound([
+        ("recipes", Tag::List(vec![])),
+        ("toBeDisplayed", Tag::List(vec![])),
+        ("isModCookingGuiOpen", Tag::Byte(2)),
+        ("isModCookingFilteringCraftable", Tag::Int(1)),
+    ]);
+    let loaded = Settings::read_valid(Some(&java), &|_| true);
+    assert_eq!(
+        loaded.custom.get(POT),
+        OPEN,
+        "nonzero bytes are true; non-bytes are false"
+    );
+    let written = loaded.write();
+    assert_eq!(written.get("isModCookingGuiOpen"), Some(&Tag::Byte(1)));
+    assert!(written.get("isModCookingFilteringCraftable").is_none());
+    assert!(written.get(EXTENSION).is_none());
+    let raw = sunrise_core::nbt::write_named(
+        &NamedTag {
+            name: "".into(),
+            tag: written,
+        },
+        Limits::saved(),
+    )
+    .unwrap();
+    let (parsed, _) = read_saved(&raw).unwrap();
+    assert_eq!(
+        Settings::read_valid(Some(&parsed.tag), &|_| true)
+            .custom
+            .get(POT),
+        OPEN
+    );
+}

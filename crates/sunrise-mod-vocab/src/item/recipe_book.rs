@@ -91,10 +91,10 @@ impl RecipeBookTypeKey {
         keys
     }
 
-    /// Explicit saved field pairs by book id, in stable id order. Books without a
+    /// Explicit saved field pairs by book id, in unspecified order. Books without a
     /// pair use the engine extension. Intended for player-file persistence, not ticks.
     pub fn registered_save_fields() -> Vec<(String, (String, String))> {
-        let mut fields: Vec<_> = crate::parts::installed()
+        crate::parts::installed()
             .map(|registry| {
                 registry
                     .recipe_book_fields
@@ -102,9 +102,7 @@ impl RecipeBookTypeKey {
                     .map(|(id, pair)| (id.clone(), pair.clone()))
                     .collect()
             })
-            .unwrap_or_default();
-        fields.sort_by(|a, b| a.0.cmp(&b.0));
-        fields
+            .unwrap_or_default()
     }
 
     /// Whether this process has installed this identity in its frozen registry.

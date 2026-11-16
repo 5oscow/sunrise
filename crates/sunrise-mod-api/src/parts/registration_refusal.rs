@@ -118,6 +118,8 @@ mod tests {
             &[]
         }
         fn register(&self, r: &mut dyn Registrar, cx: &RegistrationContext) {
+            r.recipe_book_type_with_fields("broken:book", "reused_open", "reused_filter")
+                .unwrap();
             r.declare_fluid("before");
             r.declare_biome_region("rejected", region()).unwrap();
             let kind = r
@@ -242,7 +244,17 @@ mod tests {
             ModEntry::new("broken", Box::new(Refuses)),
             ModEntry::new("later", Box::new(Healthy)),
         ];
-        let registrar = super::super::register_all(&mods, |_| false);
+        let mut registrar = super::super::register_all(&mods, |_| false);
+        assert!(!registrar.recipe_book_types.contains_key("broken:book"));
+        assert!(registrar.recipe_book_fields.is_empty());
+        registrar.mod_id = "later";
+        crate::RecipeBooksRegistrar::recipe_book_type_with_fields(
+            &mut registrar,
+            "later:book",
+            "reused_open",
+            "reused_filter",
+        )
+        .unwrap();
         assert_eq!(
             registrar.refused,
             ["mod broken refused registration: bootstrap failed: café\nmissing bridge"]
