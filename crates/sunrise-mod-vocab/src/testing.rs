@@ -884,7 +884,7 @@ impl crate::prelude::LevelsBackendMut for FakeHost {
         except: Option<PlayerRef>,
     ) -> bool {
         if level != self.level.level()
-            || except.is_some_and(|p| self.players.get(p.uuid()).is_none())
+            || except.is_some_and(|p| self.players.handle(p.uuid()) != Some(p))
         {
             return false;
         }
