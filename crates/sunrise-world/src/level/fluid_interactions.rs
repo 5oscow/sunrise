@@ -5,7 +5,10 @@
 //! while a liquid updates.
 use super::{Behaviours, data::BlockSet, states::BlockId};
 use crate::{fluid::FluidKind, registry::BlockStateId};
-use std::sync::{Arc, RwLock};
+use std::sync::{
+    Arc, RwLock,
+    atomic::{AtomicBool, AtomicU8, Ordering},
+};
 
 /// A block, or every block of a tag.
 #[derive(Clone, Debug)]
@@ -162,16 +165,38 @@ impl Behaviours {
     }
     /// Install the open world's table, replacing the last load's.
     pub fn set_fluid_interactions(&self, table: FluidInteractions) {
-        *self
-            .fluid_interactions
-            .0
+        let slot = &self.fluid_interactions;
+        let has = |filter: fn(FluidKind) -> bool| {
+            table.by_source.iter().any(|(source, _)| filter(*source))
+        };
+        slot.vanilla.store(
+            table
+                .by_source
+                .iter()
+                .fold(0, |mask, (source, _)| mask | source.mask()),
+            Ordering::Release,
+        );
+        slot.mods.store(
+            has(|source| source.mod_fluid().is_some()),
+            Ordering::Release,
+        );
+        *slot
+            .table
             .write()
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = Arc::new(table);
     }
-    /// The interactions of `kind`'s fluid, taken once per update: none for a fluid without any.
+    /// The interactions of `kind`'s fluid, taken once per update: none for a fluid without any,
+    /// which answers from two atomic loads, with no lock.
     pub(crate) fn fluid_interactions(&self, kind: FluidKind) -> Option<Arc<[FluidInteraction]>> {
-        self.fluid_interactions
-            .0
+        let slot = &self.fluid_interactions;
+        let may_have = match kind.mod_fluid() {
+            Some(_) => slot.mods.load(Ordering::Acquire),
+            None => kind.mask() & slot.vanilla.load(Ordering::Acquire) != 0,
+        };
+        if !may_have {
+            return None;
+        }
+        slot.table
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .of(kind)
@@ -179,9 +204,15 @@ impl Behaviours {
     }
 }
 
-/// The open world's table on [`Behaviours`]: replaced whole by each data load.
+/// The open world's table on [`Behaviours`]: replaced whole by each data load. Which fluids
+/// have entries is also kept as atomics (vanilla kinds by mask, mod fluids as one flag), so a
+/// fluid without any is told apart without taking the lock.
 #[derive(Default)]
-pub(super) struct Slot(RwLock<Arc<FluidInteractions>>);
+pub(super) struct Slot {
+    table: RwLock<Arc<FluidInteractions>>,
+    vanilla: AtomicU8,
+    mods: AtomicBool,
+}
 
 #[cfg(test)]
 mod tests {

@@ -55,7 +55,7 @@ flowing lava; lava over soul soil beside blue ice: basalt). After them come nati
 interactions in load order, then content mods' files in load order and file name. A fluid with no
 interaction pays nothing.
 
-The result goes through the [`fluid_place_block`](../../hooks.md) hook, which may veto or replace
+The result goes through the `fluid_place_block` hook, which may veto or replace
 it, then level event 1501 plays the fizz, and the liquid stops spreading. A veto writes nothing
 and still fizzes and stops the spread.
 
