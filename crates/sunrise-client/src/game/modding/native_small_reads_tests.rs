@@ -43,18 +43,35 @@ fn a_client_reads_the_light_of_its_level() {
     });
 }
 
-/// A player's sprinting flag is set and cleared, and a stale handle sets nothing.
+/// A guest's sprinting is written to its row, so it survives the turn boundary the body is
+/// rebuilt at, and its speed modifier stays with the flag; a stale handle sets nothing.
 #[test]
 #[ignore = "daily"]
-fn a_players_sprinting_is_set_and_cleared() {
+fn a_guests_sprinting_survives_a_turn() {
     with_guests(|game: &mut Game<'_>| {
-        let player = game.player(13).unwrap();
-        let entity = player.entity();
+        let entity = game.player(13).unwrap().entity();
+        // A guest has no body until its first turn.
+        assert!(game.as_guest(13, |_| ()).is_some());
         assert_eq!(game.entity_is_sprinting(entity), Some(false));
+        let stored = |game: &mut Game<'_>| {
+            let lan = game.lan.as_mut().unwrap();
+            let flag = lan.hub.update_guest(13, |g| g.sprinting).unwrap();
+            let modifier = lan.hub.guests.motion_mut(13).unwrap().has_sprint_modifier();
+            (flag, modifier)
+        };
         assert!(game.entity_set_sprinting(entity, true));
+        assert_eq!(stored(game), (true, true));
         assert_eq!(game.entity_is_sprinting(entity), Some(true));
-        assert!(game.entity_set_sprinting(entity, false));
-        assert_eq!(game.entity_is_sprinting(entity), Some(false));
+        // The next turn starts from the row, and ends with the row still set.
+        let mut in_turn = None;
+        game.as_guest(13, |game| {
+            in_turn = Some(game.entity_is_sprinting(entity));
+        });
+        assert_eq!(in_turn, Some(Some(true)));
+        assert_eq!(stored(game), (true, true));
+        // Inside a turn the write goes to the row as well.
+        game.as_guest(13, |game| assert!(game.entity_set_sprinting(entity, false)));
+        assert_eq!(stored(game), (false, false));
         let stale = mod_api::EntityRef::new(
             mod_api::WorldEpoch::new(entity.epoch().get() + 1),
             entity.id(),
