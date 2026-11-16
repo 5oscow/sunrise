@@ -164,6 +164,7 @@ mod tests {
             let before = (game.world.chunks.len(), game.streaming.pending());
             let columns = [(100000, -100000), (0, 0), (-1, 31), (100000, -100000)];
             let answer = game.terrain_surface(dimension, &columns).unwrap();
+            assert_eq!(answer.len(), columns.len());
             // Four layers from the overworld minimum -64, independent of the sampler.
             for column in &answer {
                 let column = column.as_ref().unwrap();
