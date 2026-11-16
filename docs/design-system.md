@@ -243,8 +243,8 @@ Light); `tokens.css` carries them as `--night-*`. The game's menus don't use it.
 
 - **Motion that means something**: the interface moves only to show cause and effect (a row
   arrives where it was added, progress fills). Every theme draws the same flat pages; Home's page
-  between the sidebars holds the theme's animated pixel scene (Sunrise's sunset, or the theme's
-  painted sky from `launcher/scenery/src/sky.rs`), which Settings › Appearance › Home background
+  between the sidebars holds the theme's animated pixel scene (Sunrise's coast at first light,
+  `launcher/scenery/src/coast.rs`, or the theme's painted sky from `launcher/scenery/src/sky.rs`), which Settings › Appearance › Home background
   turns plain. The sky moves in whole texels on a half-second beat, keeps its drift off the hero,
   and stops when the window is hidden. Reduced motion: nothing moves
   (`launcher/scenery/src/clock.rs`); `SUNRISE_LAUNCHER_MOTION=off` stills everything, `always`
