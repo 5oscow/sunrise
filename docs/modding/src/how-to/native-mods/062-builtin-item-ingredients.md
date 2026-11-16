@@ -181,6 +181,16 @@ Omitted or empty namespaces become `minecraft`; empty paths are allowed, so
 path characters follow vanilla's lowercase ASCII identifier rules (including
 the forbidden namespace `..`); malformed UTF-16 strings are rejected.
 
+`custom_data` accepts an arbitrary NBT compound or a fully parsed SNBT compound
+string. Its keys and values are preserved, without identifier normalization or
+field defaults. Equality requires the entire compound, ordered lists and exact
+numeric tag types; floating NaNs compare equal and signed zeros remain distinct.
+An empty compound is a present value, not a removal. SNBT supports the pinned
+26.3 numeric syntax, typed/mixed lists, `bool`/`uuid`, and Unicode-16 named/hex
+escapes; Java UTF-16 units are retained even for unpaired surrogates. Live stack
+loads and `StackData::set_other`/`set_loot_component` normalize flattened payloads
+once; `preserved_components()` exposes only borrowed, read-only storage.
+
 Component ingredient displays contain the patch, including removals. Difference
 lists retain the base list and remove only items whose default stack passes the
 subtracted predicate. Non-simple cooking ingredients are tested outside the
