@@ -12,7 +12,7 @@ impl DrawContext for Draw {
     fn fill_gradient(&mut self, rect: [f32; 4], top: u32, bottom: u32) {
         self.gradients.push((rect, top, bottom));
     }
-    fn gui_paint(&mut self, draws: &[GuiDraw]) -> Result<(), mod_api::text::TextFormError> {
+    fn gui_paint(&mut self, draws: &[GuiDraw]) -> Result<(), mod_api::GuiPaintError> {
         self.painted.push(draws.to_vec());
         Ok(())
     }
