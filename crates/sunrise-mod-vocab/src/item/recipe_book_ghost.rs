@@ -18,7 +18,7 @@ pub struct GhostSlot {
 
 impl GhostSlot {
     /// A ghost in menu slot `slot` that shows `display`; `result` marks the recipe's result.
-    pub const fn new(slot: u16, display: RecipeSlotDisplay, result: bool) -> Self {
+    pub fn new(slot: u16, display: RecipeSlotDisplay, result: bool) -> Self {
         Self {
             slot,
             display,
