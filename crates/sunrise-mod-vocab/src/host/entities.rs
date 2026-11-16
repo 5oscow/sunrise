@@ -974,7 +974,9 @@ pub trait EntitiesBackendMut {
     /// Gives the entity boxes that every other entity collides with, or removes them with None.
     /// The boxes are in the entity's frame (its position is the origin), turned by the
     /// collider's rotation; see [`Collider`] for what collides, who is exempt, the limits and
-    /// that a vanilla client does not see them. The collider is saved with the entity, sent to
+    /// that a vanilla client does not see them. Contact effects (step sounds, sprint particles,
+    /// friction, bounce) are not applied yet: a box is solid ground and walls only
+    /// (sunrise-org/sunrise#1909). The collider is saved with the entity, sent to
     /// the Sunrise clients that track it when they start to (and then only what changed), and
     /// dropped with the entity. Replacing a collider sends the boxes that were added or removed
     /// by index. An entity the new boxes overlap is treated as vanilla treats a block that

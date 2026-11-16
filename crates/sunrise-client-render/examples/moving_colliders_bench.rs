@@ -2,7 +2,7 @@
 //! level's scoped index (`moving_colliders::near`) and the step-resolved move against what it
 //! found. `cargo run --release -p sunrise-client-render --example moving_colliders_bench`.
 use std::{hint::black_box, sync::Arc, time::Instant};
-use sunrise_client_render::moving_colliders::{self, Placed};
+use sunrise_client_render::moving_colliders::{self, Placed, Prepared};
 use sunrise_core::geometry::{
     Aabb, Vec3, VoxelShape,
     oriented::{ColliderBoxes, Frame, MAX_BOXES, OrientedCollider},
@@ -108,16 +108,19 @@ fn main() {
         .collect();
     let lump_origin = Vec3::new(0.0, 64.0, 0.0);
     println!("per move, 200 movers, {TICKS} ticks (ns):");
-    let none = moving_colliders::in_level(Vec::new(), || per_move(&open));
+    let none = moving_colliders::in_level(Prepared::empty(), || per_move(&open));
     println!("  level with no collider, movers in the open:          {none:8.0}");
-    let far = moving_colliders::in_level(vec![capped(lump_origin)], || per_move(&open));
+    let far =
+        moving_colliders::in_level(Prepared::new(vec![capped(lump_origin)]), || per_move(&open));
     println!("  one capped collider, movers far from it:             {far:8.0}");
     let many: Vec<Placed> = (0..200)
         .map(|i| small(Vec3::new(i as f64 * 40.0 - 4000.0, 64.0, -300.0)))
         .collect();
-    let crowd = moving_colliders::in_level(many, || per_move(&open));
+    let crowd = moving_colliders::in_level(Prepared::new(many), || per_move(&open));
     println!("  200 small colliders, movers far from all:            {crowd:8.0}");
-    let on = moving_colliders::in_level(vec![capped(lump_origin)], || per_move(&on_lump));
+    let on = moving_colliders::in_level(Prepared::new(vec![capped(lump_origin)]), || {
+        per_move(&on_lump)
+    });
     println!("  one capped collider, movers standing on it:          {on:8.0}");
     println!(
         "  that is {:.2} ms per tick for {MOVERS} movers on a capped collider",

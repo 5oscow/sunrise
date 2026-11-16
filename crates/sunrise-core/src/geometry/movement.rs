@@ -164,6 +164,10 @@ pub fn candidate_step_heights(
     borrowed_step_heights(aabb, shapes, &[], Vec3::ZERO, max_step, current_y)
 }
 
+thread_local! {
+    static FOUND: std::cell::RefCell<Vec<f64>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
 fn borrowed_step_heights<S: std::borrow::Borrow<VoxelShape>>(
     aabb: Aabb,
     shapes: &[S],
@@ -174,16 +178,19 @@ fn borrowed_step_heights<S: std::borrow::Borrow<VoxelShape>>(
 ) -> Vec<f32> {
     let mut heights = Vec::<f32>::with_capacity(4);
     if !oriented.is_empty() {
-        let mut found = Vec::new();
+        // Kept between moves: a step attempt on a collider allocates nothing for these.
+        let mut found = FOUND.with(|c| std::mem::take(&mut *c.borrow_mut()));
+        found.clear();
         for collider in oriented {
             collider.step_heights(aabb, horizontal, f64::from(max_step), &mut found);
         }
-        for height in found {
+        for &height in &found {
             let height = height as f32;
             if height != current_y && !heights.iter().any(|old| old.to_bits() == height.to_bits()) {
                 heights.push(height);
             }
         }
+        FOUND.with(|c| *c.borrow_mut() = found);
     }
     for shape in shapes {
         let shape = shape.borrow();

@@ -1756,6 +1756,7 @@ struct Game<'a> {
     entity_attachments: native_colliders::EntityMaps,
     /// What changed in entities' colliders this tick, for the players who track them.
     collider_changes: Vec<native_colliders::ColliderChange>,
+    collider_placements: native_colliders::Placements,
     entity_initialization: entity_initialization::EntityInitialization,
     /// Typed per-level membership follows dimensions, not the temporary world swap.
     attachment_indexes: attachment_index::Indexes,
@@ -11060,6 +11061,7 @@ impl<'a> Game<'a> {
             missing_professions: Default::default(),
             entity_attachments: Default::default(),
             collider_changes: Vec::new(),
+            collider_placements: Default::default(),
             entity_initialization: Default::default(),
             attachment_indexes: Default::default(),
             remote: None,

@@ -9,7 +9,11 @@
 //!
 //! The level's colliders are indexed by their world bounds in a coarse grid, so a mover far
 //! from every collider pays one lookup however many the level holds.
-use std::{cell::Cell, cell::RefCell, collections::HashMap};
+use std::{
+    cell::{Cell, RefCell},
+    collections::HashMap,
+    sync::{Arc, OnceLock},
+};
 use sunrise_core::geometry::{Aabb, Axis, Vec3, oriented::OrientedCollider};
 use sunrise_world::entity_obstruction::EntityIdentity;
 
@@ -77,8 +81,39 @@ impl Index {
     }
 }
 
+/// A level's placed colliders, indexed once and shared: the game keeps one per level and
+/// builds a new one only when a collider, its place or its vehicle stack changed.
+#[derive(Clone)]
+pub struct Prepared(Arc<Index>);
+
+impl Prepared {
+    pub fn new(placed: Vec<Placed>) -> Self {
+        Self(Arc::new(Index::new(placed)))
+    }
+
+    /// How many colliders the level holds.
+    pub fn len(&self) -> usize {
+        self.0.placed.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.placed.is_empty()
+    }
+
+    /// The entities exempt from the `at`th collider.
+    pub fn exempt(&self, at: usize) -> Option<&[u32]> {
+        self.0.placed.get(at).map(|(_, p)| p.exempt.as_slice())
+    }
+
+    /// No collider at all, without building anything.
+    pub fn empty() -> Self {
+        static EMPTY: OnceLock<Arc<Index>> = OnceLock::new();
+        Self(EMPTY.get_or_init(Arc::default).clone())
+    }
+}
+
 thread_local! {
-    static PLACED: RefCell<Index> = RefCell::new(Index::default());
+    static PLACED: RefCell<Arc<Index>> = RefCell::new(Prepared::empty().0);
     /// The entity whose move is being resolved, for the moves that do not say who they are.
     static MOVER: Cell<u64> = const { Cell::new(0) };
     static SCRATCH: RefCell<Vec<u32>> = const { RefCell::new(Vec::new()) };
@@ -89,26 +124,26 @@ thread_local! {
 /// outlives its tick. The level's tick holds one (like `block_contact::in_level`), and so
 /// does a client's tick of the level it shows.
 pub struct Scope {
-    before: Index,
+    before: Arc<Index>,
 }
 
 impl Scope {
-    pub fn enter(placed: Vec<Placed>) -> Self {
-        let index = Index::new(placed);
+    pub fn enter(placed: Prepared) -> Self {
         Self {
-            before: PLACED.with(|cell| std::mem::replace(&mut *cell.borrow_mut(), index)),
+            before: PLACED.with(|cell| std::mem::replace(&mut *cell.borrow_mut(), placed.0)),
         }
     }
 }
 
 impl Drop for Scope {
     fn drop(&mut self) {
-        PLACED.with(|cell| *cell.borrow_mut() = std::mem::take(&mut self.before));
+        let before = std::mem::replace(&mut self.before, Prepared::empty().0);
+        PLACED.with(|cell| *cell.borrow_mut() = before);
     }
 }
 
 /// Runs `f` with `placed` as the colliders of the level it ticks.
-pub fn in_level<R>(placed: Vec<Placed>, f: impl FnOnce() -> R) -> R {
+pub fn in_level<R>(placed: Prepared, f: impl FnOnce() -> R) -> R {
     let _scope = Scope::enter(placed);
     f()
 }
@@ -205,11 +240,11 @@ mod tests {
     #[test]
     fn a_query_meets_the_colliders_near_it_and_not_those_exempt_or_far() {
         in_level(
-            vec![
+            Prepared::new(vec![
                 block_at(0.0, &[7, 8]),
                 block_at(100.0, &[]),
                 block_at(2_000.0, &[]),
-            ],
+            ]),
             || {
                 assert_eq!(found(5, 0.0), 1, "an outsider meets the near one");
                 assert_eq!(found(7, 0.0), 0, "the collider's own stack does not");
@@ -228,8 +263,8 @@ mod tests {
 
     #[test]
     fn scopes_nest_and_restore() {
-        in_level(vec![block_at(0.0, &[])], || {
-            in_level(Vec::new(), || assert_eq!(found(5, 0.0), 0));
+        in_level(Prepared::new(vec![block_at(0.0, &[])]), || {
+            in_level(Prepared::empty(), || assert_eq!(found(5, 0.0), 0));
             assert_eq!(found(5, 0.0), 1);
         });
     }

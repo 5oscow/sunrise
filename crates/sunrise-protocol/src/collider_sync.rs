@@ -183,13 +183,28 @@ pub fn decode(data: &[u8]) -> Result<Message> {
             if at > MAX_BOXES {
                 return Err(Error::new("collider sync: a cut past the cap"));
             }
-            let replaced = (0..r.count(r.remaining() / (BOX_BYTES + 1))?)
+            let replaced_count = r.count(r.remaining() / (BOX_BYTES + 1))?;
+            if replaced_count > MAX_BOXES as usize {
+                return Err(Error::new(
+                    "collider sync: more replaced boxes than the cap",
+                ));
+            }
+            let replaced = (0..replaced_count)
                 .map(|_| {
                     let index = r.varint()? as u32;
+                    if index >= MAX_BOXES {
+                        return Err(Error::new("collider sync: a replaced box past the cap"));
+                    }
                     Ok((index, read_box(&mut r)?))
                 })
                 .collect::<Result<Vec<_>>>()?;
-            let appended = (0..r.count(r.remaining() / BOX_BYTES)?)
+            let appended_count = r.count(r.remaining() / BOX_BYTES)?;
+            if appended_count > MAX_BOXES as usize {
+                return Err(Error::new(
+                    "collider sync: more appended boxes than the cap",
+                ));
+            }
+            let appended = (0..appended_count)
                 .map(|_| read_box(&mut r))
                 .collect::<Result<Vec<_>>>()?;
             Message::Patch {
@@ -429,6 +444,39 @@ mod tests {
         assert!(decode(&m).is_err());
         assert!(decode(&[9, 1]).is_err());
         assert!(decode(&[]).is_err());
+    }
+
+    /// A patch past the caps is refused as the runs are: an index at the cap, and more boxes
+    /// than a collider holds.
+    #[test]
+    fn malformed_patches_are_refused() {
+        let patch = |replaced: Vec<(u32, WireBox)>, appended: Vec<WireBox>| {
+            decode(&encode(&Message::Patch {
+                entity: 1,
+                truncate: None,
+                replaced,
+                appended,
+            }))
+        };
+        let one = boxes(1)[0];
+        assert!(patch(vec![(MAX_BOXES - 1, one)], vec![]).is_ok());
+        assert!(patch(vec![(MAX_BOXES, one)], vec![]).is_err());
+        assert!(patch(vec![(u32::MAX >> 1, one)], vec![]).is_err());
+        let all = boxes(MAX_BOXES as usize);
+        assert!(patch(vec![], all.clone()).is_ok());
+        let mut over = all.clone();
+        over.push(one);
+        assert!(patch(vec![], over).is_err());
+        let replaced: Vec<(u32, WireBox)> = (0..=MAX_BOXES).map(|i| (i % 100, one)).collect();
+        assert!(patch(replaced, vec![]).is_err());
+        // A cut past the cap.
+        let cut = encode(&Message::Patch {
+            entity: 1,
+            truncate: Some(MAX_BOXES + 1),
+            replaced: vec![],
+            appended: vec![],
+        });
+        assert!(decode(&cut).is_err());
     }
 
     /// Finite values that break the contract are refused by the same limits a mod's collider

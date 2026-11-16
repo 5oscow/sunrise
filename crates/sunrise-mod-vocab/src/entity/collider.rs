@@ -3,7 +3,7 @@
 ///
 /// `min` and `max` are `[x, y, z]` in blocks from the entity's position, before the collider's
 /// rotation; a box whose minimum is above its maximum on an axis is read with the two swapped.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 // exhaustive: mods build it with a literal, and the two corners are all there is to a box
 #[derive(sunrise_mod_api_macros::Wire)]
 pub struct ColliderBox {
@@ -34,8 +34,11 @@ pub struct ColliderBox {
 /// - every box within [`Collider::MAX_REACH`] blocks of the entity on each axis.
 ///
 /// The limits bound what the game keeps and sends; vanilla has none. A box of 0 thickness is a
-/// box with no volume that nothing collides with. A box is solid ground and nothing more: it
-/// has no block's step sound, particles, friction or bounce.
+/// box with no volume that nothing collides with.
+///
+/// **Contact effects are not applied yet.** A box is solid ground and walls and nothing more:
+/// standing or walking on one has no block's step sound, sprint particles, friction or bounce
+/// (tracked in sunrise-org/sunrise#1909).
 #[derive(Clone, Debug, PartialEq)]
 // exhaustive: mods build it with a literal, and the boxes and their rotation are all there is to a collider
 #[derive(sunrise_mod_api_macros::Wire)]
@@ -44,6 +47,16 @@ pub struct Collider {
     pub boxes: Vec<ColliderBox>,
     /// A unit quaternion `[x, y, z, w]`: `[0.0, 0.0, 0.0, 1.0]` is no turn.
     pub rotation: [f32; 4],
+}
+
+impl Default for Collider {
+    /// No boxes and no turn.
+    fn default() -> Self {
+        Self {
+            boxes: Vec::new(),
+            rotation: [0.0, 0.0, 0.0, 1.0],
+        }
+    }
 }
 
 impl Collider {

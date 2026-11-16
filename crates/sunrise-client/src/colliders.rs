@@ -20,6 +20,14 @@ pub struct ColliderState {
     wire: Vec<WireBox>,
     rotation: [f32; 4],
     geometry: Arc<ColliderBoxes>,
+    /// Changes whenever the boxes or the rotation do, so a placement made from this state can
+    /// be kept while the number is the same.
+    serial: u64,
+}
+
+fn next_serial() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 fn aabb(b: &WireBox) -> Aabb {
@@ -50,7 +58,12 @@ impl ColliderState {
             wire,
             rotation,
             geometry,
+            serial: next_serial(),
         }
+    }
+
+    pub fn serial(&self) -> u64 {
+        self.serial
     }
 
     /// Checks a mod's collider and keeps it as `f32`: refused by name, never clamped.
@@ -114,6 +127,7 @@ impl ColliderState {
 
     pub fn set_rotation(&mut self, rotation: [f32; 4]) {
         self.rotation = rotation;
+        self.serial = next_serial();
     }
 
     pub fn geometry(&self) -> &ColliderBoxes {
@@ -188,7 +202,7 @@ impl ColliderState {
             }
             M::Rotation { rotation, .. } => {
                 if let Some(state) = held.as_mut() {
-                    state.rotation = *rotation;
+                    state.set_rotation(*rotation);
                 }
             }
             M::Clear { .. } => *held = None,
@@ -263,6 +277,7 @@ impl ColliderState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sunrise_core::geometry::Axis;
 
     fn collider(n: usize) -> Collider {
         Collider {
@@ -331,6 +346,25 @@ mod tests {
                 limit: Collider::MAX_BOXES as u64
             }
         );
+        // Corners that differ as f64 but are the same f32 make a box with no volume: nothing
+        // stops at it and no step height comes from it.
+        let mut thin = collider(0);
+        thin.boxes.push(ColliderBox {
+            min: [1.0, 0.0, 0.0],
+            max: [1.0 + 1.0e-9, 2.0, 2.0],
+        });
+        thin.boxes.push(ColliderBox {
+            min: [0.0, 1.0, 0.0],
+            max: [3.0, 1.0 + 1.0e-9, 3.0],
+        });
+        let state = ColliderState::from_api(&thin).unwrap();
+        assert_eq!(state.wire()[0].min[0], state.wire()[0].max[0]);
+        let placed = state.oriented(Vec3::ZERO);
+        let mover = Aabb::new(Vec3::new(-0.6, 0.0, 0.5), Vec3::new(-0.2, 1.8, 1.0));
+        assert_eq!(placed.collide(mover, Axis::X, 4.0), 4.0);
+        let mut heights = Vec::new();
+        placed.step_heights(mover, Vec3::new(1.0, 0.0, 0.0), 2.0, &mut heights);
+        assert!(heights.is_empty(), "{heights:?}");
         // Limits as they are met on a save: a corner past the reach or a stretched rotation is
         // dropped, never built.
         let saved = ColliderState::from_api(&collider(2)).unwrap().to_nbt();

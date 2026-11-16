@@ -297,14 +297,13 @@ fn a_collider_is_not_solid_to_its_own_vehicle_stack() {
             assert_eq!(stack, vec![a, b, c], "the stack seen from {held}");
         }
         assert_eq!(game.vehicle_stack(stranger), vec![stranger]);
-        // A mover of the stack, with gravity, falls through the deck under its own collider;
-        // a stranger placed over the deck's world position lands on it.
+        // What a mover of each kind meets where the collider stands.
         let placed = game.placed_moving_colliders();
         assert_eq!(placed.len(), 1);
-        let mut exempt = placed[0].exempt.clone();
+        let mut exempt = placed.exempt(0).unwrap().to_vec();
         exempt.sort_unstable();
         assert_eq!(exempt, vec![a, b, c]);
-        let stands_on = |id: u32| {
+        let mut stands_on = |id: u32| {
             use sunrise_client_render::moving_colliders::{in_level, near};
             let mut found = Vec::new();
             in_level(game.placed_moving_colliders(), || {
@@ -321,5 +320,160 @@ fn a_collider_is_not_solid_to_its_own_vehicle_stack() {
         };
         assert!(!stands_on(a) && !stands_on(b) && !stands_on(c));
         assert!(stands_on(stranger), "a stranger meets it");
+    });
+}
+
+/// An item is a mover that carries its own collider: it moves through the gated collision as
+/// a self move, so the boxes under its own feet are not solid to it and it falls through them,
+/// where a stranger over the same boxes lands.
+#[test]
+#[ignore = "daily"]
+fn an_item_falls_through_its_own_collider_and_a_stranger_lands_on_it() {
+    let deck_under = || Collider {
+        boxes: vec![ColliderBox {
+            min: [-1.0, -2.5, -1.0],
+            max: [1.0, -2.0, 1.0],
+        }],
+        rotation: [0.0, 0.0, 0.0, 1.0],
+    };
+    with_world(|game| {
+        // A holder that stays where it is, with the deck's top at y = 70, and a stranger over it.
+        let fixed = drop_item(game, [1.5, 70.0, 1.5]);
+        game.dropped
+            .iter_mut()
+            .find(|i| i.id == fixed)
+            .unwrap()
+            .no_gravity = true;
+        game.entity(fixed)
+            .unwrap()
+            .set_collider(game, Some(deck_under()))
+            .unwrap();
+        let stranger = drop_item(game, [1.2, 71.0, 1.2]);
+        // A holder that falls, with the same deck under its own feet.
+        let own = drop_item(game, [10.5, 70.0, 10.5]);
+        game.entity(own)
+            .unwrap()
+            .set_collider(game, Some(deck_under()))
+            .unwrap();
+        for _ in 0..60 {
+            tick_level(game);
+        }
+        let other = item_y(game, stranger).unwrap();
+        assert!(
+            (70.0..70.3).contains(&other),
+            "the stranger stands on the fixed holder's deck: y = {other}"
+        );
+        // The falling holder took its deck with it and was never stopped by it: with the deck
+        // a block and a half under its feet, a stopped holder would rest at y = 72 - 2 + ... 70.
+        let fell = item_y(game, own).unwrap_or(f64::NEG_INFINITY);
+        assert!(
+            fell < 60.0,
+            "the holder fell through its own deck: y = {fell}"
+        );
+    });
+}
+
+/// Siblings in one vehicle stack are exempt from each other's collider, and a mover outside
+/// the stack is not.
+#[test]
+#[ignore = "daily"]
+fn siblings_riding_one_vehicle_share_a_stack() {
+    with_world(|game| {
+        let (x, x_ref) = stand_with_id(game, [1.5, 70.0, 1.5]);
+        let (y, y_ref) = stand_with_id(game, [1.5, 70.0, 1.5]);
+        let (z, z_ref) = stand_with_id(game, [1.5, 70.0, 1.5]);
+        let (other, _) = stand_with_id(game, [10.5, 70.0, 10.5]);
+        game.entity_start_riding(x_ref, z_ref, true).unwrap();
+        game.entity_start_riding(y_ref, z_ref, true).unwrap();
+        x_ref.set_collider(game, Some(deck())).unwrap();
+        for member in [x, y, z] {
+            let mut stack = game.vehicle_stack(member);
+            stack.sort_unstable();
+            let mut want = vec![x, y, z];
+            want.sort_unstable();
+            assert_eq!(stack, want, "seen from {member}");
+        }
+        assert_eq!(game.vehicle_stack(other), vec![other]);
+    });
+}
+
+/// What a level's tick costs with 200 items over a collider at the box cap: with no collider,
+/// with one that stays, and with one that moves every tick (Create's normal case), each timed
+/// over the same ticks. The numbers go to stderr (`--nocapture`); the test holds the
+/// outcome: the items rest on the capped collider, moving or not.
+#[test]
+#[ignore = "daily"]
+fn two_hundred_items_over_a_capped_collider_rest_and_the_tick_is_timed() {
+    use std::time::Instant;
+    const SIDE: usize = 32;
+    with_world(|game| {
+        let (holder, holder_ref) = stand_with_id(game, [8.0, 70.0, 8.0]);
+        let items = |game: &mut Game<'_>| -> Vec<u32> {
+            (0..200)
+                .map(|i| {
+                    let at = [0.5 + (i % 15) as f64, 70.0, 0.5 + (i / 15) as f64];
+                    drop_item(game, at)
+                })
+                .collect()
+        };
+        let time =
+            |game: &mut Game<'_>, ticks: usize, mut each: Option<&mut dyn FnMut(&mut Game<'_>)>| {
+                let start = Instant::now();
+                for _ in 0..ticks {
+                    if let Some(each) = each.as_mut() {
+                        each(game);
+                    }
+                    tick_level(game);
+                }
+                start.elapsed().as_secs_f64() * 1000.0 / ticks as f64
+            };
+        // No collider: the items fall in the open.
+        let before = items(game);
+        let open = time(game, 40, None);
+        for id in &before {
+            game.dropped.retain(|i| i.id != *id);
+        }
+        // The cap: a 32 x 32 x 32 lump, its top at the holder's feet.
+        let boxes = (0..SIDE * SIDE * SIDE)
+            .map(|i| {
+                let (x, y, z) = (i % SIDE, i / SIDE % SIDE, i / SIDE / SIDE);
+                ColliderBox {
+                    min: [x as f64 - 16.0, y as f64 - 32.0, z as f64 - 16.0],
+                    max: [x as f64 - 15.0, y as f64 - 31.0, z as f64 - 15.0],
+                }
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(boxes.len(), Collider::MAX_BOXES);
+        holder_ref
+            .set_collider(
+                game,
+                Some(Collider {
+                    boxes,
+                    rotation: [0.0, 0.0, 0.0, 1.0],
+                }),
+            )
+            .unwrap();
+        let on = items(game);
+        for _ in 0..20 {
+            tick_level(game);
+        }
+        let rests = |game: &Game<'_>| {
+            on.iter()
+                .filter(|id| item_y(game, **id).is_some_and(|y| (70.0..70.3).contains(&y)))
+                .count()
+        };
+        assert_eq!(rests(game), 200, "every item rests on the capped collider");
+        let still = time(game, 40, None);
+        assert_eq!(rests(game), 200);
+        // The collider moves every tick: its placement is rebuilt each time.
+        let index = game.mobs.iter().position(|m| m.id == holder).unwrap();
+        let mut step = |game: &mut Game<'_>| {
+            game.mobs.update(index, |m| m.position.x += 0.001);
+        };
+        let moving = time(game, 40, Some(&mut step));
+        assert_eq!(rests(game), 200, "and they still rest on it while it moves");
+        eprintln!(
+            "tick of the level, 200 items, ms per tick: no collider {open:.3}, capped collider still {still:.3}, capped collider moving {moving:.3}"
+        );
     });
 }

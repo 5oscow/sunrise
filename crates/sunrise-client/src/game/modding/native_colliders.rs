@@ -111,6 +111,56 @@ impl EntityMaps {
     }
 }
 
+/// What a placed collider was made from: when all of these are as they were, so is it.
+#[derive(PartialEq)]
+struct PlacementKey {
+    id: u32,
+    serial: u64,
+    origin: [u64; 3],
+    /// The entities of its vehicle stack.
+    stack: Vec<u32>,
+}
+
+/// The vehicle stack of `id` in a riding graph (passenger to vehicle): the root and everything
+/// whose way up reaches it, `id` included. The walks are bounded by the graph's size, so a
+/// cycle in what a server sent ends them.
+fn stack_in_graph(vehicles: &HashMap<u32, u32>, id: u32) -> Vec<u32> {
+    let root_of = |mut at: u32| {
+        for _ in 0..=vehicles.len() {
+            match vehicles.get(&at) {
+                Some(&vehicle) => at = vehicle,
+                None => break,
+            }
+        }
+        at
+    };
+    let root = root_of(id);
+    let mut stack = vec![root];
+    stack.extend(
+        vehicles
+            .keys()
+            .copied()
+            .filter(|&rider| root_of(rider) == root),
+    );
+    if !stack.contains(&id) {
+        stack.push(id);
+    }
+    stack
+}
+
+fn origin_bits(origin: Vec3) -> [u64; 3] {
+    [origin.x.to_bits(), origin.y.to_bits(), origin.z.to_bits()]
+}
+
+struct Placement {
+    keys: Vec<PlacementKey>,
+    prepared: sunrise_client_render::moving_colliders::Prepared,
+}
+
+/// The placements of each level's colliders, kept from tick to tick.
+#[derive(Default)]
+pub(in crate::game) struct Placements(HashMap<Dim, Placement>);
+
 /// What the server sends about one entity's collider this tick.
 pub(in crate::game) struct ColliderChange {
     entity: u32,
@@ -264,64 +314,128 @@ impl Game<'_> {
         let Some(remote) = &self.remote else {
             return vec![id];
         };
-        let vehicles = &remote.passenger_vehicles;
-        // Up to the root, then every entity whose way up reaches it; the walks are bounded by
-        // the graph's size, so a cycle in what a server sent ends them.
-        let root_of = |mut at: u32| {
-            for _ in 0..=vehicles.len() {
-                match vehicles.get(&at) {
-                    Some(&vehicle) => at = vehicle,
-                    None => break,
+        stack_in_graph(&remote.passenger_vehicles, id)
+    }
+
+    /// Calls `f` with each collider of the level in place, in an order that is the same from
+    /// one call to the next while none is added or removed; stops and answers false when `f`
+    /// does.
+    fn each_collider(&self, mut f: impl FnMut(u32, &ColliderState) -> bool) -> bool {
+        if self.is_logical_server() {
+            for id in self.entity_attachments.colliders_in(self.dim) {
+                if let Some(entry) = self.entity_attachments.collider(id)
+                    && !f(id, &entry.state)
+                {
+                    return false;
                 }
             }
-            at
-        };
-        let root = root_of(id);
-        let mut stack = vec![root];
-        stack.extend(
-            vehicles
-                .keys()
-                .copied()
-                .filter(|&rider| root_of(rider) == root),
-        );
-        if !stack.contains(&id) {
-            stack.push(id);
+        } else if let Some(remote) = &self.remote {
+            for (&id, state) in &remote.colliders {
+                if !f(id, state) {
+                    return false;
+                }
+            }
         }
-        stack
+        true
+    }
+
+    /// Whether the entity `id` is in no vehicle stack but its own: it rides nothing and
+    /// nothing rides it. Asked without building the stack.
+    fn is_alone(&self, id: u32) -> bool {
+        if self.is_logical_server() {
+            let Some(epoch) = self.native_lifecycle.epoch() else {
+                return true;
+            };
+            let entity = EntityRef::new(epoch, id);
+            self.entity_is_passenger(entity) == Some(false)
+                && self.entity_is_vehicle(entity) == Some(false)
+        } else {
+            self.remote.as_ref().is_none_or(|r| {
+                !r.passenger_vehicles.contains_key(&id)
+                    && !r.passenger_vehicles.values().any(|&vehicle| vehicle == id)
+            })
+        }
+    }
+
+    /// Whether `kept` is still the vehicle stack of the entity `id`.
+    fn stack_is(&self, id: u32, kept: &[u32]) -> bool {
+        if kept == [id] {
+            self.is_alone(id)
+        } else {
+            let mut now = self.vehicle_stack(id);
+            let mut kept = kept.to_vec();
+            now.sort_unstable();
+            kept.sort_unstable();
+            now == kept
+        }
     }
 
     /// The colliders of the level in place, where they stand now, for the movers of its tick
     /// (`sunrise_client_render::moving_colliders::in_level`): a collider is solid at the
     /// position it had when its level's tick began, and moves after it. A level with none
-    /// answers an empty list and pays nothing more.
+    /// answers an empty one and pays nothing more. The level's placement is kept while no
+    /// collider, place or vehicle stack of it changed; a tick where none did builds nothing
+    /// (a collider that rides, or is ridden, has its stack worked out each tick).
     pub(in crate::game) fn placed_moving_colliders(
-        &self,
-    ) -> Vec<sunrise_client_render::moving_colliders::Placed> {
-        use sunrise_client_render::moving_colliders::Placed;
-        let server = self.is_logical_server();
-        let ids: Vec<u32> = if server {
-            self.entity_attachments.colliders_in(self.dim).collect()
-        } else {
-            self.remote
-                .as_ref()
-                .map_or_else(Vec::new, |r| r.colliders.keys().copied().collect())
-        };
-        let mut placed = Vec::with_capacity(ids.len());
-        for id in ids {
-            let state = if server {
-                self.entity_attachments.collider(id).map(|e| &e.state)
-            } else {
-                self.remote.as_ref().and_then(|r| r.colliders.get(&id))
-            };
-            let (Some(state), Some(origin)) = (state, self.collider_origin(id)) else {
-                continue;
-            };
-            placed.push(Placed {
-                collider: state.oriented(origin),
-                exempt: self.vehicle_stack(id),
-            });
+        &mut self,
+    ) -> sunrise_client_render::moving_colliders::Prepared {
+        use sunrise_client_render::moving_colliders::{Placed, Prepared};
+        let level = self.dim;
+        let mut any = false;
+        self.each_collider(|_, _| {
+            any = true;
+            false
+        });
+        if !any {
+            self.collider_placements.0.remove(&level);
+            return Prepared::empty();
         }
-        placed
+        if let Some(kept) = self.collider_placements.0.get(&level) {
+            let mut at = 0;
+            let same = self.each_collider(|id, state| {
+                let key = kept.keys.get(at);
+                at += 1;
+                let Some(origin) = self.collider_origin(id) else {
+                    return false;
+                };
+                key.is_some_and(|key| {
+                    key.id == id
+                        && key.serial == state.serial()
+                        && key.origin == origin_bits(origin)
+                        && self.stack_is(id, &key.stack)
+                })
+            });
+            if same && at == kept.keys.len() {
+                return kept.prepared.clone();
+            }
+        }
+        let mut keys = Vec::new();
+        let mut placed = Vec::new();
+        self.each_collider(|id, state| {
+            if let Some(origin) = self.collider_origin(id) {
+                let stack = self.vehicle_stack(id);
+                keys.push(PlacementKey {
+                    id,
+                    serial: state.serial(),
+                    origin: origin_bits(origin),
+                    stack: stack.clone(),
+                });
+                placed.push(Placed {
+                    collider: state.oriented(origin),
+                    exempt: stack,
+                });
+            }
+            true
+        });
+        let prepared = Prepared::new(placed);
+        self.collider_placements.0.insert(
+            level,
+            Placement {
+                keys,
+                prepared: prepared.clone(),
+            },
+        );
+        prepared
     }
 
     /// Sends what changed this tick to the clients that track each entity and have the
@@ -434,5 +548,38 @@ impl Game<'_> {
                 _ => None,
             })
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// What a client works out from the riding its server told: the root, every rider at any
+    /// depth, siblings included.
+    #[test]
+    fn a_stack_in_a_riding_graph_holds_root_and_every_rider() {
+        // 1 rides 2 rides 3; 10 and 11 ride 12; 20 and 21 ride each other (a cycle).
+        let graph: HashMap<u32, u32> = [(1, 2), (2, 3), (10, 12), (11, 12), (20, 21), (21, 20)]
+            .into_iter()
+            .collect();
+        let sorted = |id| {
+            let mut stack = stack_in_graph(&graph, id);
+            stack.sort_unstable();
+            stack
+        };
+        for member in [1, 2, 3] {
+            assert_eq!(sorted(member), vec![1, 2, 3], "from {member}");
+        }
+        for member in [10, 11, 12] {
+            assert_eq!(
+                sorted(member),
+                vec![10, 11, 12],
+                "a sibling sees its siblings"
+            );
+        }
+        assert_eq!(sorted(99), vec![99], "alone");
+        // A cycle ends, and still holds the entity asked about.
+        assert!(sorted(20).contains(&20));
     }
 }

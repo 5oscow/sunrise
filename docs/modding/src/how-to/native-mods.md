@@ -85,7 +85,7 @@ the entity's box is swept against each turned box (a separating-axis test with t
 steps up onto a top within its step height, and standing on a tilted top follows the surface. The
 collider is solid to every mover except spectators, entities with no physics and the entities in its
 own vehicle stack (the root vehicle and every passenger, at any depth, the collider's entity among them).
-A box is solid ground and nothing more: it has no block's step sound, particles, friction or bounce.
+**Contact effects are not applied yet:** a box is solid ground and walls and nothing more, so standing or walking on one has no block's step sound, sprint particles, friction or bounce ([#1909](https://github.com/sunrise-org/sunrise/issues/1909)).
 
 The game checks a collider when it is set and refuses by name (`ColliderError`), keeping the old one:
 every value finite, the rotation a unit quaternion within 1e-3, at most `Collider::MAX_BOXES` (32,768)
