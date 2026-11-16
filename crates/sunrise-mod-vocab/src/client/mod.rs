@@ -33,8 +33,8 @@ pub mod hud_layout;
 #[doc(hidden)]
 pub mod hud_mode;
 pub(crate) mod key_mapping;
-pub(crate) mod mod_key_refusal;
 pub(crate) mod keyframe_animation;
+pub(crate) mod mod_key_refusal;
 // hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod mesher;

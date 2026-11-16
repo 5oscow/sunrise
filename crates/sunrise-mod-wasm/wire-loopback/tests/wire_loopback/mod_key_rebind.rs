@@ -70,10 +70,34 @@ fn a_wasm_mods_rebind_reaches_the_client_and_gets_each_refusal_by_name() {
     })));
     let sets = [
         ("keys", "zoom", "key.keyboard.x", 2, Ok(())),
-        ("keys", "missing", "key.keyboard.x", 0, Err(ModKeyRefusal::NotRegistered)),
-        ("other", "zoom", "key.keyboard.x", 0, Err(ModKeyRefusal::NotOwner)),
-        ("keys", "zoom", "key.keyboard.nope", 0, Err(ModKeyRefusal::UnknownKey)),
-        ("keys", "zoom", "key.mouse.left", 8, Err(ModKeyRefusal::UnknownModifiers)),
+        (
+            "keys",
+            "missing",
+            "key.keyboard.x",
+            0,
+            Err(ModKeyRefusal::NotRegistered),
+        ),
+        (
+            "other",
+            "zoom",
+            "key.keyboard.x",
+            0,
+            Err(ModKeyRefusal::NotOwner),
+        ),
+        (
+            "keys",
+            "zoom",
+            "key.keyboard.nope",
+            0,
+            Err(ModKeyRefusal::UnknownKey),
+        ),
+        (
+            "keys",
+            "zoom",
+            "key.mouse.left",
+            8,
+            Err(ModKeyRefusal::UnknownModifiers),
+        ),
     ];
     for (mod_id, name, key, bits, answer) in sets {
         assert_eq!(
