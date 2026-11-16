@@ -1755,7 +1755,7 @@ mod tests {
         let object = InlineObject::Atlas {
             atlas: "minecraft:gui".into(),
             sprite: "sunrise:gui/mark".into(),
-            fallback: "H".into(),
+            fallback: "*".into(),
         };
         let sprite = Text::styled(
             "\u{fffc}",

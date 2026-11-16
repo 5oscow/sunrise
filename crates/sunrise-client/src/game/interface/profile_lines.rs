@@ -21,7 +21,7 @@ fn tagged(body: Text, color: u32) -> Notice {
         inline_object: Some(InlineObject::Atlas {
             atlas: "minecraft:gui".into(),
             sprite: MARK_SPRITE.into(),
-            fallback: "H".into(),
+            fallback: "*".into(),
         }),
         ..Style::default()
     };
