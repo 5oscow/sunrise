@@ -20,11 +20,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   plan:
-    # Dyna's small runner for this repository's pull requests and tags while its switch is on.
-    runs-on: >-
-      ${{ vars.DYNA_CI_SELF_HOSTED == 'true' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' ||
-      github.event.pull_request.head.repo.full_name == github.repository) &&
-      'dyna-small' || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
       platforms: ${{ steps.platforms.outputs.platforms }}
