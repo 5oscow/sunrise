@@ -17,7 +17,7 @@ promise, how something is deprecated and removed, and the tests that keep old mo
 | API | The version | A user names the line they need |
 | --- | --- | --- |
 | Content mods | the manifest's `api` line | `api = "0.2"` in `sunrise-mod.toml` |
-| Native mods | the exact Sunrise and sunrise-mixins revisions the mod pins | `[native] sunrise` and `mixins` in `sunrise-mod.toml` |
+| Native mods | the exact Sunrise and horizon-mixins revisions the mod pins | `[native] sunrise` and `mixins` in `sunrise-mod.toml` |
 | Agent control | the control protocol's version (`hello` replies it; MCP `serverInfo` carries the release) | `sunrise-ctl --api 0.1` (planned) |
 | Server control API | the path (`/api/v1/`) | the path |
 | `server.toml` | the file's keys; a key is never renamed in place | nothing: old files keep loading |

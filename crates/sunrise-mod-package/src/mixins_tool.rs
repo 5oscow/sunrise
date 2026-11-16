@@ -1,4 +1,4 @@
-//! The sunrise-mixins tool the launcher runs for `[[native.mixin]]` builds: the pinned source
+//! The horizon-mixins tool the launcher runs for `[[native.mixin]]` builds: the pinned source
 //! ([`REV`]), the one change carried on it until upstream takes it ([`PATCH`], which narrows the
 //! tool's "calls beneath a reference" rule from the whole function to the site a hook rewrites),
 //! and the names of its prebuilt release. `.github/workflows/prebuilt-mixins-tool.yml` builds and
@@ -10,7 +10,7 @@ use std::path::Path;
 
 use sha2::{Digest, Sha256};
 
-/// The sunrise-mixins commit the tool is built from.
+/// The horizon-mixins commit the tool is built from.
 pub const REV: &str = "e59da9094f0c2fdda6c627fe9eff22dec6a906f0";
 
 pub const PATCH: &str = include_str!("../../../tools/mixins/narrow-reference-rule.patch");
@@ -32,7 +32,7 @@ pub fn release_tag() -> String {
 
 /// The prebuilt tool's archive for a rustc host target.
 pub fn archive(target: &str) -> String {
-    format!("sunrise-mixins-{target}.tar.gz")
+    format!("horizon-mixins-{target}.tar.gz")
 }
 
 /// What [`IDENTITY`] starts with for `target`: the lines the launcher checks. The archive's file

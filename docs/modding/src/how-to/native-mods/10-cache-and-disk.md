@@ -1,6 +1,6 @@
 # Cache and disk
 
-The native build key includes the pinned game and sunrise-mixins commits, Rust version, target,
+The native build key includes the pinned game and horizon-mixins commits, Rust version, target,
 compilation settings and mod files. A matching installed build is reused. Editing a mod creates
 a new build; the launcher compiles mods and their patch library, not the game.
 
@@ -13,7 +13,7 @@ The launcher keeps these managed caches under its data folder:
   build id of each release seen; kept, so a mod's fit is told offline. What the published releases keep is in
   [Retention](../../reference/sdk/07-retention.md).
 - `native/source/`: pinned source used to copy functions for mixins.
-- `native/tools/`: pinned sunrise-mixins executables.
+- `native/tools/`: pinned horizon-mixins executables.
 - `native/prebuilt-build/`: mod, registry dependency, patch-library and linking outputs.
 - `native/internals-sync/`: separate metadata-only discovery source and check outputs.
 - `rust/` and `cargo/`: the pinned compiler and Cargo downloads.

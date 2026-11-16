@@ -1491,7 +1491,7 @@ mod mixin or use it replaces in its design or PR."#]
     #[notes = r#"## Left to do
 
 - A list of every native build, to delete the ones no instance needs.
-- A prebuilt sunrise-mixins from its CI instead of building it on the player's computer."#]
+- A prebuilt horizon-mixins from its CI instead of building it on the player's computer."#]
     #[notes = r##"## More hook capabilities
 
 - `entity_join_level(dimension, entity, kind, pos, loaded_from_disk, canceled)`, an entity joining a

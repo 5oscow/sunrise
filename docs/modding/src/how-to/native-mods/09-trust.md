@@ -32,5 +32,5 @@ The launcher loads native mods for the instance where you install them, using th
 worlds, options and logs. Other instances select their own versions. This separation is not a
 security boundary: native code can access files outside its instance.
 
-The checks in `sunrise-mixins` catch mistakes, not malicious code. See its
+The checks in `horizon-mixins` catch mistakes, not malicious code. See its
 [security notes](https://github.com/horizon-rust/horizon-mixins/blob/main/docs/security.md).

@@ -645,7 +645,7 @@ status = "later"
 area = "mods"
 plain = """The community mod Orbital Laser, made for a fork of Horizon, running on the normal game as a native mod and \
 listed in the registry."""
-dev = """A native port (a sunrise-mixins bundle, docs/modding/src/how-to/native-mods.md) of https://github.com/Stink-O/orbital-laser \
+dev = """A native port (a horizon-mixins bundle, docs/modding/src/how-to/native-mods.md) of https://github.com/Stink-O/orbital-laser \
 (MIT), which today runs through its author's fork. Tested in the game, and listed in the registry."""
 links = ["https://github.com/Stink-O/orbital-laser"]
 
@@ -924,7 +924,7 @@ plain = """Making mods that add machines, magic and mobs work in Sunrise, in ste
 most of what a big modpack is made of."""
 dev = """333 of the 496 mods in a big pack (ATM10) contain code. Issue #1854 ranks the gaps (ticking block \
 entities, networking, rendering, menus, inventories) that unlock them in tiers, with machines first as the \
-recommended path. Code mods are native mods now (docs/modding/src/how-to/native-mods.md): each port is a sunrise-mixins bundle. \
+recommended path. Code mods are native mods now (docs/modding/src/how-to/native-mods.md): each port is a horizon-mixins bundle. \
 The path isn't started yet (docs/modpacks.md)."""
 links = ["#1854", "docs/modpacks.md", "docs/modding/src/how-to/native-mods.md"]
 

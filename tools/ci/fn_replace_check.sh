@@ -27,8 +27,8 @@ test "$(echo "$release" | wc -l)" = 1 && test -n "$release" || { echo "$sdk_base
 revision=${release##*/sdk-}
 mixins=$(sed -n 's/^pub const REV: &str = "\(.*\)";$/\1/p' "$root/crates/sunrise-mod-package/src/mixins_tool.rs")
 
-# FNR_KEEP=1 keeps the launcher's folder (toolchain, sunrise-mixins, source): a warm build.
-# FNR_MIXINS_FROM_SOURCE=1 builds sunrise-mixins from its pinned source, dropping a kept tool: the
+# FNR_KEEP=1 keeps the launcher's folder (toolchain, horizon-mixins, source): a warm build.
+# FNR_MIXINS_FROM_SOURCE=1 builds horizon-mixins from its pinned source, dropping a kept tool: the
 # launcher otherwise downloads the prebuilt one, and its source build has to stay proven.
 if [ -n "${FNR_KEEP:-}" ]; then rm -rf "$scratch/mods" "$scratch/engine" "$scratch/run" "$scratch/swap-mods" "$scratch/swap-engine" "$scratch/launcher/native/server-builds" "$scratch/launcher/versions"/native-*; else rm -rf "$scratch"; fi
 mkdir -p "$scratch"/{home,launcher,data,config,trash,clipboard,desktop,mods}
@@ -41,7 +41,7 @@ rm -rf "$source"
 mkdir -p "$source"
 git -C "$root" archive "$revision" | tar -x -C "$source"
 find "$source" -type l -delete
-printf '%s' "$revision" > "$source/.sunrise-revision"
+printf '%s' "$revision" > "$source/.horizon-revision"
 
 base=$data/versions/ci
 mkdir -p "$base/.local/sunrise-client/26.3"

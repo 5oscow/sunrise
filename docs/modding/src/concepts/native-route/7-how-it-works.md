@@ -7,7 +7,7 @@ without rebuilding the game.
 
 The game is never rebuilt for a mod. When you build, the launcher downloads the prebuilt game for your
 `sunrise` commit and that commit's source. It copies each function your rows target out of the source. It
-applies your mixins to the copies with sunrise-mixins, and adds your loop slots, bridges and modules. Then it
+applies your mixins to the copies with horizon-mixins, and adds your loop slots, bridges and modules. Then it
 compiles the copies against the prebuilt game, together with your mod's crate.
 
 Each copy is installed through a **replacement cell**: a pointer the prebuilt game checks at the start of
@@ -27,9 +27,9 @@ game-crate function.
 Rows of several mods on one function go into one copy, ordered by the tool (by `priority` at one place). An `[[inject]]` listener on the
 same function shares its replacement cell: head listeners run first, then the copy, then return listeners.
 
-## sunrise-mixins
+## horizon-mixins
 
-[sunrise-mixins](https://github.com/horizon-rust/horizon-mixins) is upstream's source-level mixin tool; the
+[horizon-mixins](https://github.com/horizon-rust/horizon-mixins) is upstream's source-level mixin tool; the
 kinds and bindings are its vocabulary. The launcher applies one small patch to it,
 `tools/mixins/narrow-reference-rule.patch`, which accepts a call directly under `&` for the kinds that rewrite
 only that call. `E_MIXINS_PATCH` means that patch does not apply to the tool's source.

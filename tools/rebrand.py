@@ -31,12 +31,15 @@ PROTECT = [
     # The earlier launchers' folders and keychain service, which a Sunrise build reads to carry data over.
     r"\bhorizon-fork-arismoko[\w/.-]*",
     r"\bdev\.playhorizon\.launcher\b",
+    # horizon-rust/horizon-mixins: its crates, binary, generated names and the files it reads.
+    r"(?i:horizon[-_ ]mixin)[\w-]*",
+    r"\.horizon-revision\b|\bhorizon_revision\b",
 ]
 PROTECT_RE = re.compile("|".join(f"(?:{p})" for p in PROTECT))
 BRAND = re.compile(r"horizon(?!tal)", re.IGNORECASE)
 LICENCE_LINE = re.compile(r"(?i)copyright|MIT[- ]licen[cs]e|MIT licensed|MIT-Horizon|Horizon contributors|came from Horizon|Horizon's MIT|SPDX-License")
 # Lines that explain or encode a kept name; left as they are.
-KEEP_LINE = re.compile(r'through the rename|Horizon\'s name, kept|before the Sunrise rename|"playhorizon\.dev": "playsunrise\.net"|^\s+"mods/horizon/src/", "mods/horizon-lab/src/"\)\):|sunriselab/" in path or "/dev/horizonlab/"')
+KEEP_LINE = re.compile(r'"Building horizon-mixins \(once\)": |through the rename|Horizon\'s name, kept|before the Sunrise rename|"playhorizon\.dev": "playsunrise\.net"|^\s+"mods/horizon/src/", "mods/horizon-lab/src/"\)\):|sunriselab/" in path or "/dev/horizonlab/"')
 LICENCE_PATH = re.compile(r"(^|/)(LICENSES/[^/]*|[^/]*LICEN[CS]E[^/]*)$")
 # Files whose strings and comments name the earlier launchers themselves: only their code is renamed.
 KEEP_STRINGS = {"launcher/src/identity.rs", "launcher/src/setup_args.rs"}
