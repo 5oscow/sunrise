@@ -373,3 +373,39 @@ fn a_dead_endermans_refused_hurt_still_draws_its_chance() {
         "vanilla data is missing"
     );
 }
+
+/// Contained water is not a neighbouring WATER node when its solid block
+/// classifies as BLOCKED. Open water still contributes WATER_BORDER.
+#[test]
+#[ignore = "daily"]
+fn a_solid_waterlogged_neighbor_does_not_penalize_a_dry_walk_node() {
+    for waterlogged in [true, false] {
+        assert!(
+            with_built_test_world(
+                &[],
+                move |world, registry| {
+                    build("minecraft:stone", "minecraft:air")(world, registry);
+                    let neighbor = if waterlogged {
+                        let default = registry.default_state("minecraft:oak_slab").unwrap();
+                        let mut slab = registry.state(default).unwrap().clone();
+                        slab.properties.insert("type".into(), "top".into());
+                        slab.properties.insert("waterlogged".into(), "true".into());
+                        registry.id(&slab).unwrap()
+                    } else {
+                        registry.default_state("minecraft:water").unwrap()
+                    };
+                    world.set(1, 63, 0, neighbor).unwrap();
+                },
+                |w, _| {
+                    let expected = if waterlogged {
+                        super::super::path::PathType::Walkable
+                    } else {
+                        super::super::path::PathType::WaterBorder
+                    };
+                    assert_eq!(w.path_type_static(0, 64, 0), expected);
+                },
+            ),
+            "vanilla data is missing"
+        );
+    }
+}

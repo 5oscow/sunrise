@@ -82,9 +82,10 @@ impl MobWorld<'_> {
                     if let Some(adjacent) = adjacent {
                         return adjacent;
                     }
-                    // A declined block answer keeps this neighbour's fluid
-                    // contribution before the vanilla type mappings.
-                    if matches!(facts.fluid, Fluid::Water | Fluid::Modded) {
+                    // Custom fluids retain their default neighbour contribution.
+                    // Vanilla water contributes through its classified path type:
+                    // a solid waterlogged block is BLOCKED, not WATER.
+                    if facts.fluid == Fluid::Modded {
                         return PathType::WaterBorder;
                     }
                     if let Some(adjacent) = data::vanilla_adjacent(own) {
