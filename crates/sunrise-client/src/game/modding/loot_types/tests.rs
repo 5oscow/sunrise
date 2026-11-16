@@ -84,7 +84,6 @@ fn registered_types_preserve_both_evaluators_order_short_circuit_and_selected_ra
             mod_platform::__private::part_tests::install_parts_fixture(mod_api::__private::mods())
                 .unwrap();
             mod_api::__private::resolve_items(["minecraft:stick"]).unwrap();
-            let _ = loot::types::install(capture);
             let root = tempfile::tempdir().unwrap();
             let folder = root.path().join("data/test/loot_table");
             std::fs::create_dir_all(&folder).unwrap();
@@ -105,8 +104,13 @@ fn registered_types_preserve_both_evaluators_order_short_circuit_and_selected_ra
             "modifier":function("pool function",2)}], "modifier":function("table function",2)});
             std::fs::write(folder.join("root.json"), table.to_string()).unwrap();
             let defaults = sunrise_world::item_defaults::read(root.path()).unwrap();
-            let data =
-                loot::LootData::load(root.path(), &loot::PackOverlay::NONE, &defaults).unwrap();
+            let data = loot::LootData::load_with_types(
+                root.path(),
+                &loot::PackOverlay::NONE,
+                &defaults,
+                capture(),
+            )
+            .unwrap();
             let mut items = sunrise_items::items::Items::for_tests(HashMap::new());
             items.set_loot_data(&data);
             let mut expected_random = LegacyRandom::new(123);
@@ -166,10 +170,15 @@ fn registered_types_preserve_both_evaluators_order_short_circuit_and_selected_ra
                 let mut bad = table.clone();
                 bad["modifier"] = entry;
                 std::fs::write(folder.join("root.json"), bad.to_string()).unwrap();
-                let error = loot::LootData::load(root.path(), &loot::PackOverlay::NONE, &defaults)
-                    .err()
-                    .unwrap()
-                    .to_string();
+                let error = loot::LootData::load_with_types(
+                    root.path(),
+                    &loot::PackOverlay::NONE,
+                    &defaults,
+                    capture(),
+                )
+                .err()
+                .unwrap()
+                .to_string();
                 assert!(
                     error.contains("loot_table test:root $.modifier") && error.contains(expected),
                     "{error}"

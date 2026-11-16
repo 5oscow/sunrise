@@ -760,6 +760,15 @@ impl LootData {
         overlay: &PackOverlay,
         defaults: &crate::item_defaults::ItemDefaults,
     ) -> io::Result<Self> {
+        Self::load_with_types(root, overlay, defaults, types::Types::capture())
+    }
+    /// Prepare a generation with explicit retained codecs, without a global factory.
+    pub fn load_with_types(
+        root: &Path,
+        overlay: &PackOverlay,
+        defaults: &crate::item_defaults::ItemDefaults,
+        types: types::Types,
+    ) -> io::Result<Self> {
         let all = root.join("data");
         let tables = shared_tables(root, overlay)?;
         let modifiers = types::load_files(root, overlay, "item_modifier")?;
@@ -862,7 +871,7 @@ impl LootData {
         let binding = holder_sets::Binding::load(root, overlay, &items, &enchantments)?;
         let mut loaded = Self {
             holder_sets: Default::default(),
-            types: types::Types::capture(),
+            types,
             tables,
             global_modifiers: Arc::default(),
             modifiers,
