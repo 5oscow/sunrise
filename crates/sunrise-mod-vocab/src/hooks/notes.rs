@@ -1312,7 +1312,7 @@ stock client shows as a chest (`generic_9x1` to `generic_9x6`); nothing is insta
 
 - `host.open_menu(uuid, rows, title, items, replace)` opens one in place of the player's open menu (its window id, a new one each time, as `ServerPlayer.openMenu` counts them); the old menu closes on the server as a close does, its cursor stack back to the inventory, and its window's packets are ignored. `MenuReplace::CloseFirst` first sends the client a close, vanilla's default; `MenuReplace::InPlace` doesn't (`MenuProvider.shouldTriggerClientSideContainerClosingOnOpen`), so the title and rows change without the mouse centring again. A title changes only this way. `host.close_menu(uuid)` closes it.
   `host.menu(uuid, window)` is the open one's `MenuRef` (None for another window or player): its slots are [menu slots](../concepts/capabilities/menu-slots.md), written in a transaction, and the tick's container sync sends each changed one (`ContainerSetSlot`). Change its items that way, not by opening it again.
-- **No click moves anything.** Each reaches `menu_clicked(uuid, window, slot, button, mode)`, and the client
+- **No click moves anything.** Each is heard raw by `menu_clicked(uuid, window, slot, button, mode)` (a single-slot drag once; menu-button clicks, recipe placement and creative set-slot never reach it; the hook cannot know whether a click would change anything and carries no pickup answer), inside an action for a connected player, and the client
   is sent the menu, its inventory and its cursor as they were. `slot` counts the menu's own slots first, then the
   player's inventory below it: `native_menu_inventory_slot(size, slot)` gives the inventory slot (0..9 the hotbar).
 - `menu_closed(uuid, window)`: the player closed it, another menu opened, or the player left.
@@ -1426,7 +1426,7 @@ mods and again on each `/reload`, so a reload captures fresh settings. A LAN or 
 current one, so its Tab list and chat names, and the clicks of its players, see it too.
 
 `item_stacked_on_other(host, event, result, canceled)` is NeoForge's `ItemStackedOnOtherEvent`, fired inside a pickup click on
-either side with the game's `Host` and the click frozen in `event`; see its hook documentation. `player_name_format(context, username,
+the authoritative side only (the server: single player's server thread, a LAN host and its guests, a dedicated server) with the game's `Host` and the click frozen in `event`; see its hook documentation. `player_name_format(context, username,
 displayname)` and `player_tab_list_name_format(context, player, name, display_name)` format a player's name for chat and
 commands (both sides) and for the Tab list (server). The name hooks are contract version `2`: a mod written for `1` takes the
 context as a new first argument of the `Hooks` method, and reads the side from it instead of `event.side`.
