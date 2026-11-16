@@ -1980,6 +1980,7 @@ mod tests {
                 progress: 0.5,
                 per_tick: 0.0,
                 ticks: 8,
+                crack: None,
             }),
             destroy_pos: Some(pos),
             dig_start: 1000,

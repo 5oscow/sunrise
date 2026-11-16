@@ -27,7 +27,8 @@ class RemoteMiningTests(unittest.TestCase):
 struct Hit { pos: [i32; 3], face: u8 }
 /// The held stack: `ItemStack.item`, which the debug-stick check reads.
 struct Stack { item: &'static str }
-struct Mining { pos: [i32; 3], progress: f32, per_tick: f32, ticks: u32 }
+// Display-only crack state is covered by the client crack integration tests.
+struct Mining { pos: [i32; 3], progress: f32, per_tick: f32, ticks: u32, crack: Option<()> }
 #[derive(Default)]
 struct Remote { destroy_delay: u32, destroying: Option<([i32; 3], u8, f32)>, destroying_item: String, is_destroying: bool }
 struct Ground { on_ground: bool }
@@ -76,6 +77,8 @@ struct Game {
     veto: bool,
 }
 impl Game {
+    // No display subscribers in this packet/gameplay fixture.
+    fn set_client_mining(&mut self, mining: Option<Mining>) { self.mining = mining; }
     fn main_hand_key(&self) -> String { String::new() }
     fn same_destroying_item(&self, began: &String) -> bool { *began == self.main_hand_key() }
     fn reset_attack_strength(&mut self) {}

@@ -329,6 +329,8 @@ struct Mining {
     /// The latest destroy-speed query, reused for server crack feedback.
     per_tick: f32,
     ticks: u32,
+    /// The stage's display-only answer, dropped with this mining state.
+    crack: Option<client_cracks::ClientCrack>,
 }
 impl Mining {
     fn stage(&self) -> Option<u8> {
@@ -1060,8 +1062,8 @@ struct Game<'a> {
     scratch_slot: Option<ItemStack>,
     mining: Option<Mining>,
     /// The other players' cracks (`LevelRenderer.destroyingBlocks`): breaker id to the block,
-    /// the stage (0..=9) and the game time it last changed.
-    destroying: HashMap<i32, ([i32; 3], u8, i64)>,
+    /// stage (0..=9), last refresh time and stored additional display positions.
+    destroying: HashMap<i32, client_cracks::ClientCrack>,
     destroy_delay: u32,
     use_delay: u32,
     creative: bool,
@@ -4310,6 +4312,7 @@ impl Game<'_> {
                 progress: 0.0,
                 per_tick: 0.0,
                 ticks: 0,
+                crack: None,
             });
         }
         let state = self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]);
@@ -4345,6 +4348,7 @@ impl Game<'_> {
             self.break_block(pos)?;
             self.destroy_delay = 5;
         }
+        self.update_local_crack();
         Ok(())
     }
     /// A column whose surface is a full solid, non-fluid, non-leaf block open to the sky.
