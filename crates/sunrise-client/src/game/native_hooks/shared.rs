@@ -5,6 +5,9 @@ mod item_fallthrough;
 #[path = "shared/loot.rs"]
 mod loot;
 #[cfg(test)]
+#[path = "shared/screen_position_tests.rs"]
+mod screen_position_tests;
+#[cfg(test)]
 #[path = "shared/slot_icon_tests.rs"]
 mod slot_icon_tests;
 
@@ -3146,7 +3149,7 @@ impl Game<'_> {
                 );
             }
         }
-        self.native_screen_draw(&s.block, &s.data, batch, [ox, oy]);
+        self.native_screen_draw(&s.block, s.pos(), &s.data, batch, [ox, oy]);
         self.draw_screen_phase(batch, sunrise_client::screen_draw::RenderPhase::Background);
         if s.screen.own_labels {
             return true;

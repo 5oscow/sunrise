@@ -1128,11 +1128,12 @@ impl Game<'_> {
     pub(in crate::game) fn native_screen_draw(
         &self,
         block: &str,
+        pos: Option<[i32; 3]>,
         data: &[i32],
         draw: &mut HudBatch,
         origin: [f32; 2],
     ) {
-        self.fire_screen_draw(block, data, draw, origin);
+        self.fire_screen_draw(block, pos, data, draw, origin);
     }
     /// The open screen has drawn itself and its tooltips (`Screen.render`,
     /// the point of `ScreenEvent.Render.Post`): draw over it with
