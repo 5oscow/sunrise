@@ -491,6 +491,7 @@ impl Game<'_> {
         harvest: &mut bool,
     ) {
         let player = self.own_entity_id() as u32;
+        let _dispatching = HarvestDispatch::enter();
         self.native_can_harvest_block(player, pos, state, harvest);
         if mod_api::__private::listened(mod_api::HookId::PlayerHarvestCheck) {
             self.native_player_harvest_check(player, pos, state.0, harvest);
@@ -1305,5 +1306,34 @@ mod tests {
             assert!(attack_range_contains(&defaults, max, creative));
             assert!(!attack_range_contains(&defaults, max + 1e-8, creative));
         }
+    }
+}
+
+std::thread_local! {
+    /// Whether a harvest check's hooks are running on this thread.
+    static HARVEST_DISPATCH: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// The harvest hooks of one `mod_harvest_check` running, given back when dropped (a panic
+/// unwinding included). A listener that asks the mods' harvest query meanwhile would recurse
+/// without bound, so the query answers None while this is held ([`HarvestDispatch::running`]).
+pub(in crate::game) struct HarvestDispatch {
+    outer: bool,
+}
+
+impl HarvestDispatch {
+    fn enter() -> Self {
+        Self {
+            outer: HARVEST_DISPATCH.replace(true),
+        }
+    }
+    pub(in crate::game) fn running() -> bool {
+        HARVEST_DISPATCH.get()
+    }
+}
+
+impl Drop for HarvestDispatch {
+    fn drop(&mut self) {
+        HARVEST_DISPATCH.set(self.outer);
     }
 }

@@ -522,8 +522,9 @@ pub trait PlayersBackendMut {
     /// hooks** with this player. Sunrise's sites all share this one answer, unlike NeoForge's
     /// break progress, which skips the block override. Nothing requires `pos` to hold `state`. On
     /// a server any online player can be asked; on a client only the local player. None for a
-    /// stale handle or player, a dead server player, a level other than the one in place, and a
-    /// player the client has no state for.
+    /// stale handle or player, a dead server player, a level other than the one in place, a
+    /// player the client has no state for, and a call from inside the harvest hooks themselves
+    /// (`can_harvest_block`, `player_harvest_check`), which would recurse.
     #[access(WorldOnly)]
     fn player_has_correct_tool_for_drops(
         &mut self,

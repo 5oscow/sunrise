@@ -25,7 +25,8 @@ impl Game<'_> {
     /// selected slot against `state`, then the mods' `can_harvest_block` and
     /// `player_harvest_check`. A server asks any online player (their state swapped in); a
     /// client only its local player. None for a stale handle, an unknown state, a dead player,
-    /// or a level other than the one in place.
+    /// a level other than the one in place, or a call from inside a harvest hook
+    /// (`can_harvest_block`, `player_harvest_check`), which would recurse.
     pub(super) fn player_has_correct_tool_for_drops(
         &mut self,
         player: PlayerRef,
@@ -34,6 +35,10 @@ impl Game<'_> {
         state: BlockStateId,
     ) -> Option<bool> {
         self.pack.assets.registry.state(state)?;
+        // From inside a harvest hook the query would run the hook again, without bound.
+        if crate::game::hand::HarvestDispatch::running() {
+            return None;
+        }
         if self.native_level_read_world(level).is_none() || level.dimension() != self.dim.key() {
             return None;
         }
@@ -53,6 +58,8 @@ impl Game<'_> {
 mod tests {
     use super::super::native_guest_turn_tests::with_guests;
     use mod_api::__private::game::*;
+    use mod_api::{Hooks, HostSide, PlayerHarvestCheckEvent};
+    use std::sync::{Arc, Mutex};
     use sunrise_client::items::ItemStack;
 
     /// A stack is the correct tool by its own rules only; a player is by their selected slot
@@ -133,6 +140,62 @@ mod tests {
                 a.uuid(),
             );
             assert_eq!(ask(game, stale, stone), None);
+        });
+    }
+
+    /// Asks the player query from a `player_harvest_check` listener, recording the answer.
+    struct Asker(Arc<Mutex<Vec<Option<bool>>>>);
+
+    #[mod_api::__subscriptions]
+    impl Hooks for Asker {
+        fn player_harvest_check(&self, host: HostSide<'_>, _: &mut PlayerHarvestCheckEvent) {
+            let HostSide::Server(host) = host else { return };
+            let player = host.players().acting_player().unwrap();
+            let level = player.level(&*host).unwrap();
+            let stone = host.block_state_id("minecraft:stone").unwrap();
+            let asked = player.has_correct_tool_for_drops(host, level, [0, 64, 0], stone);
+            self.0.lock().unwrap().push(asked);
+        }
+    }
+
+    /// A listener that asks the query while the harvest hooks run gets None instead of
+    /// recursing; the same call outside the hooks answers, before and after.
+    #[test]
+    #[ignore = "daily"]
+    fn the_query_from_inside_a_harvest_hook_answers_none() {
+        let inner = Arc::new(Mutex::new(Vec::new()));
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+            "asker",
+            Box::new(Asker(inner.clone())),
+        )]
+        .into();
+        mod_platform::testing::with_mods(mods, || {
+            with_guests(|game| {
+                let stone = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:stone")
+                    .unwrap();
+                let a = game.player(12).unwrap();
+                let level = a.level(&*game).unwrap();
+                game.lan
+                    .as_mut()
+                    .unwrap()
+                    .hub
+                    .update_guest(12, |guest| {
+                        guest.inventory[guest.selected] =
+                            Some(ItemStack::new("minecraft:iron_pickaxe", 1));
+                    })
+                    .unwrap();
+                for _ in 0..2 {
+                    assert_eq!(
+                        game.player_has_correct_tool_for_drops(a, level, [0, 64, 0], stone),
+                        Some(true)
+                    );
+                    assert_eq!(std::mem::take(&mut *inner.lock().unwrap()), [None]);
+                }
+            });
         });
     }
 }
