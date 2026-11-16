@@ -107,7 +107,7 @@ fn loaded_source_stacks_are_normalised_after_overlay_without_losing_metadata() {
         &defaults,
     )
     .unwrap();
-    let source = sunrise_core::nbt::parse_snbt(r#"{id:"minecraft:chest",x:1,y:64,z:2,CustomName:{text:"Keep me",color:"gold"},lock:{items:"minecraft:tripwire_hook"},components:{"minecraft:custom_data":{opaque:87}},Items:[{Slot:0b,id:"minecraft:red_banner",count:1,components:{"minecraft:banner_patterns":[],"minecraft:custom_data":{keep:99}}},{Slot:1b,id:"minecraft:stone",count:1}]}"#).unwrap().0;
+    let source = sunrise_core::nbt::parse_snbt(r#"{id:"minecraft:chest",x:1,y:64,z:2,CustomName:{text:"Keep me",color:"gold"},lock:{items:"minecraft:tripwire_hook"},components:{"minecraft:custom_data":{opaque:87}},Items:[{Slot:0b,id:"minecraft:red_banner",count:1,components:{"minecraft:banner_patterns":[],"minecraft:custom_data":{keep:99},"missing_mod:state":{keep:123}}},{Slot:1b,id:"minecraft:stone",count:1},{Slot:2b,id:"minecraft:red_banner",count:150}]}"#).unwrap().0;
     let mut chunk = Chunk::empty(0, 0);
     chunk.set(1, 64, 2, 1);
     let mut encoded = encode(&chunk, &registry, &biomes, &items);
@@ -129,7 +129,9 @@ fn loaded_source_stacks_are_normalised_after_overlay_without_losing_metadata() {
         panic!("block entities")
     };
     let saved = &entities[0];
-    let expected = sunrise_core::nbt::parse_snbt(r#"[{Slot:0b,id:"minecraft:red_banner",count:1,components:{"minecraft:custom_data":{keep:99}}},{Slot:1b,id:"minecraft:gold_ingot",count:2}]"#).unwrap().0;
+    // The restored count-150 entry is dropped, not converted into a count-one stack.
+    // The valid unchanged stack keeps even a component absent from the loaded catalog.
+    let expected = sunrise_core::nbt::parse_snbt(r#"[{Slot:0b,id:"minecraft:red_banner",count:1,components:{"minecraft:custom_data":{keep:99},"missing_mod:state":{keep:123}}},{Slot:1b,id:"minecraft:gold_ingot",count:2}]"#).unwrap().0;
     assert_eq!(saved.get("Items"), Some(&expected));
     for key in ["CustomName", "lock", "components"] {
         assert_eq!(saved.get(key), source.get(key), "{key}");

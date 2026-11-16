@@ -1392,7 +1392,9 @@ pub fn encode_with(
             // The source overlay may restore an unchanged stack's original patch.
             // Apply the loaded catalog after merging, without rebuilding opaque metadata.
             let mut saved = crate::block_entity_nbt::canonical_with_stack(&merged, &|tag| {
-                item_from_nbt(tag).map(|stack| item_to_nbt(&stack, items))
+                crate::block_entity_nbt::stack(tag)
+                    .and_then(|tag| item_from_nbt(&tag))
+                    .map(|stack| item_to_nbt(&stack, items))
             })
             .unwrap_or(merged);
             if let Some(limit) = extras
