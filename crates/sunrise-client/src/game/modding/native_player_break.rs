@@ -196,8 +196,9 @@ mod tests {
     }
 
     /// A door's break asks the same harvest answer as every other block: the selected hotbar
-    /// slot, never the offhand. An iron door dropped by a pickaxe in the main hand drops
-    /// nothing with the pickaxe in the offhand, even while the offhand is the acting hand.
+    /// slot, never the offhand. Breaking an iron door's upper half with the pickaxe in the main
+    /// hand leaves the lower half standing; with the pickaxe only in the offhand (and acting)
+    /// the tool is not the correct one, so the lower half goes too, and nothing drops.
     #[test]
     #[ignore = "daily"]
     fn a_door_breaks_by_the_selected_slot_not_the_offhand() {
@@ -208,21 +209,51 @@ mod tests {
             );
             let pickaxe = ItemStack::new("minecraft:iron_pickaxe", 1);
             let player = with_player(game, pickaxe.clone());
-            let pos = [6, 64, 4];
-            place(game, pos, "minecraft:iron_door");
-            assert!(game.player_destroy_block(player, pos, false));
-            assert!(popped(game, "minecraft:iron_door"), "main hand: harvested");
+            let (lower, upper) = ([6, 64, 4], [6, 65, 4]);
+            let door = |game: &mut Game<'_>, half: &str, pos: [i32; 3]| {
+                let state = game
+                    .pack
+                    .assets
+                    .registry
+                    .resolve(&sunrise_world::chunk::BlockState {
+                        name: "minecraft:iron_door".into(),
+                        properties: [
+                            ("facing", "north"),
+                            ("half", half),
+                            ("hinge", "left"),
+                            ("open", "false"),
+                            ("powered", "false"),
+                        ]
+                        .into_iter()
+                        .map(|(k, v)| (k.into(), v.into()))
+                        .collect(),
+                    })
+                    .unwrap();
+                game.world.set(pos[0], pos[1], pos[2], state).unwrap();
+            };
+            door(game, "lower", lower);
+            door(game, "upper", upper);
+            assert!(game.player_destroy_block(player, upper, false));
+            assert_eq!(block(game, upper), "minecraft:air");
+            assert_eq!(
+                block(game, lower),
+                "minecraft:iron_door",
+                "main hand: correct tool"
+            );
 
             game.dropped.clear();
             game.inventory[game.selected] = None;
             game.offhand = Some(pickaxe);
             game.hand = sunrise_client::first_person::Hand::Off;
-            place(game, pos, "minecraft:iron_door");
-            assert!(game.player_destroy_block(player, pos, false));
-            assert!(
-                !popped(game, "minecraft:iron_door"),
-                "offhand: not harvested"
+            door(game, "upper", upper);
+            assert!(game.player_destroy_block(player, upper, false));
+            assert_eq!(block(game, upper), "minecraft:air");
+            assert_eq!(
+                block(game, lower),
+                "minecraft:air",
+                "offhand: not the correct tool"
             );
+            assert!(!popped(game, "minecraft:iron_door"));
         });
     }
 
