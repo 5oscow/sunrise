@@ -1,12 +1,5 @@
 use super::*;
 
-/// Preserve each existing adapter's output policy at root completion.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum RootOutput {
-    KeepEmpty,
-    Unsplit,
-    Split,
-}
 impl<R: RandomSource> LootContext<'_, R> {
     pub(super) fn stock_condition(&self, c: &Value) -> Option<bool> {
         if !matches!(
@@ -26,33 +19,15 @@ impl<R: RandomSource> LootContext<'_, R> {
             self.items.vanilla_can_perform(item, ability)
         })
     }
-    /// Non-raw completion retains the caller's context and random through its
-    /// output policy. Nested entries evaluate raw and never complete a query.
+    /// Non-raw completion splits after table functions, retaining the caller's
+    /// context and random. Nested entries evaluate raw and never complete a query.
     pub(super) fn roll_root(
         &self,
         id: Option<&str>,
         table: &Value,
         random: &mut R,
-        output: RootOutput,
     ) -> Vec<ItemStack> {
-        let raw = self.evaluate(table, random);
-        let items = if output == RootOutput::Split {
-            let mut out = Vec::with_capacity(raw.len());
-            for stack in raw {
-                let max = crate::bundle::max_stack(self.items, &stack);
-                let mut count = stack.count;
-                while count > max {
-                    let mut part = stack.clone();
-                    part.count = max;
-                    out.push(part);
-                    count -= max;
-                }
-                out.push(ItemStack { count, ..stack });
-            }
-            out
-        } else {
-            raw
-        };
+        let items = self.items.split_loot_stacks(self.evaluate(table, random));
         self.query.finish(id);
         items
     }
@@ -103,6 +78,37 @@ impl ItemStack {
 }
 
 impl Items {
+    /// `LootTable.createStackSplitter`, also used after resolving dynamic drops.
+    pub(super) fn split_loot_stacks(&self, stacks: Vec<ItemStack>) -> Vec<ItemStack> {
+        // Stack limits are at least one: singles and empty positions need no lookup.
+        if !stacks.iter().any(|stack| {
+            stack.count > 1
+                && !stack.item.starts_with(DYNAMIC)
+                && stack.count > crate::bundle::max_stack(self, stack)
+        }) {
+            return stacks;
+        }
+        let mut out = Vec::with_capacity(stacks.len());
+        for stack in stacks {
+            // A dynamic marker is not an item. Its supplied stacks are split
+            // when block_drops resolves it, never the marker's own count.
+            if stack.count <= 1 || stack.item.starts_with(DYNAMIC) {
+                out.push(stack);
+                continue;
+            }
+            let max = crate::bundle::max_stack(self, &stack);
+            let mut count = stack.count;
+            while count > max {
+                let mut part = stack.clone();
+                part.count = max;
+                out.push(part);
+                count -= max;
+            }
+            out.push(ItemStack { count, ..stack });
+        }
+        out
+    }
+
     pub(super) fn scoped_block_roll(
         &self,
         registry: &BlockRegistry,
@@ -170,3 +176,7 @@ impl Items {
 #[cfg(test)]
 #[path = "loot_query_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "loot_split_tests.rs"]
+mod split_tests;
