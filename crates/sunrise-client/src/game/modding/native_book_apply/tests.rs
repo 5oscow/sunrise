@@ -247,7 +247,6 @@ impl mod_api::Hooks for PlacerMod {
 fn a_listening_part_places_the_recipe_through_the_real_stage() {
     let mods: mod_api::Mods = vec![mod_api::ModEntry::new("review", Box::new(PlacerMod))].into();
     crate::game::api_values::install_parts(&mods).unwrap();
-    crate::entry::install_client_hooks();
     mod_platform::testing::with_mods(mods, || {
         super::super::native_guest_turn_tests::with_guests(|game| {
             let (pos, _, selection) = open_mod_menu(game);
