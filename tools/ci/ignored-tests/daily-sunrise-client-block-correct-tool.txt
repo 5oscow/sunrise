@@ -1,0 +1,2 @@
+# Whether a tool is correct for a block, for native mods (LevelRef::block_correct_tool).
+sunrise-client game::native_block_tool::tests::a_tool_is_correct_for_a_block_as_vanilla_says lib daily resources

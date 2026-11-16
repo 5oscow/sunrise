@@ -139,6 +139,11 @@ pub trait BlockStatesBackend {
         state: BlockState,
     ) -> Option<bool>;
     /// Side: both.
+    /// `BlockState.requiresCorrectToolForDrops()`: whether the block drops its loot only when
+    /// mined with a correct tool (stone and ores yes, dirt and logs no). None for an unknown state.
+    #[access(Metadata)]
+    fn block_state_requires_correct_tool(&self, state: BlockState) -> Option<bool>;
+    /// Side: both.
     /// The explosion resistance the block of this state declares (`Block.getExplosionResistance`,
     /// `BlockBehaviour.Properties.explosionResistance`): stone 6, obsidian 1200, bedrock 3,600,000,
     /// water 100. Not what a blast meets at a position, which parts, fluids and the blast's own

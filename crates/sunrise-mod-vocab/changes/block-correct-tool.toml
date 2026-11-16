@@ -1,0 +1,3 @@
+ids = ["handle:LevelRef::block_correct_tool", "method:BlockStates::requires_correct_tool"]
+why = "Adds the two halves of vanilla's harvest-tool check as reads: LevelRef::block_correct_tool answers ItemStack.isCorrectToolForDrops for a tool on the block at a position (a minecraft:tool component's rule first, else the item's tool rules), and BlockStates::requires_correct_tool answers BlockState.requiresCorrectToolForDrops. Jade's harvest-tool line and Tinkers' requires-tool modifiers needed both; until now a mod could only guess from break speed."
+migrate = "Additive: nothing to change. A wasm mod that calls the new reads rebuilds against this SDK."
