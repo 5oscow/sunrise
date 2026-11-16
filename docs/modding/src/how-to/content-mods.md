@@ -12,9 +12,9 @@ cargo binstall --git https://github.com/arismoko/horizon cargo-sunrise-mod
 cargo install --git https://github.com/arismoko/horizon cargo-sunrise-mod
 cargo sunrise-mod new my-mod        # a content mod: manifest, one block with its model, loot and recipe
 cd my-mod
-cargo sunrise-mod run               # build my-mod.hmod, then start the game with it turned on
-cargo sunrise-mod build             # only build: target/sunrise-mod/my_mod.hmod
-cargo sunrise-mod check target/sunrise-mod/my_mod.hmod   # the registry's checks; --json for JSON
+cargo sunrise-mod run               # build my-mod.smod, then start the game with it turned on
+cargo sunrise-mod build             # only build: target/sunrise-mod/my_mod.smod
+cargo sunrise-mod check target/sunrise-mod/my_mod.smod   # the registry's checks; --json for JSON
 ```
 
 - `new <path> [--name "Name"]` writes the content template. `--template native` writes
@@ -34,16 +34,16 @@ cargo sunrise-mod check target/sunrise-mod/my_mod.hmod   # the registry's checks
   ([the SDK in a mod project](../reference/sdk/03-in-a-project.md)). Its root `impl Hooks` uses
   `#[mod_api::sunrise_mod]`. Compile it with `sunrise-launcher native-build <path> --trust-native-code`
   ([writing hooks](../start/writing-hooks.md)). Any other `--template` is refused.
-- `build` packs the checked project into `target/sunrise-mod/<id>.hmod`: `sunrise-mod.toml`, `assets/`,
+- `build` packs the checked project into `target/sunrise-mod/<id>.smod`: `sunrise-mod.toml`, `assets/`,
   `data/`, optional `icon.png` and, for code, the root Cargo project. It validates content with the same
   checks as the game; without `--wasm`, it does not compile code. Native code requires both `Cargo.toml` and `[native]`; inconsistent
   declarations and a manifest without capability `registries` are refused.
 - `run` builds, then starts `sunrise-client` (on `PATH`, or `--game PATH`, or `SUNRISE_CLIENT`) with
-  `--dev-mod target/sunrise-mod/<id>.hmod`, always on. Arguments after `--` go to the game. The game reads content once
+  `--dev-mod target/sunrise-mod/<id>.smod`, always on. Arguments after `--` go to the game. The game reads content once
   at start, so rebuild and run again after an edit.
 - `check <file>` runs what the registry runs: the file's size and SHA-256, its manifest and content, and a signature
-  with `--key <public key> --signature <file>.minisig`. It reads `.hmod`, `.hpack`, resource pack `.zip`
-  and `.hshader` files.
+  with `--key <public key> --signature <file>.minisig`. It reads `.smod`, `.spack`, resource pack `.zip`
+  and `.sshader` files.
 - `registry build|review|check|list|release|page` is the registry repository's CI ([the registry index](../reference/registry-index.md)).
 - `use-jar <path>` records an original Java jar as an external asset/data source, without copying it into the mod
   ([Java jars as external assets](#java-jars-as-external-assets)).
@@ -141,12 +141,12 @@ The list is ordered: new references are appended, not sorted.
 
 Jar bytes stay external. The launcher finds the exact hash locally or asks before downloading that exact file from
 Modrinth. Its `assets/` and `data/` are passive pack layers below the Sunrise mod's own files; a player-local runtime
-cache is not part of the mod package. Do not copy a jar or its extracted files into the mod's source or `.hmod`.
+cache is not part of the mod package. Do not copy a jar or its extracted files into the mod's source or `.smod`.
 A jar reference supplies assets and data, not the original Java behavior: port that behavior through the mod API.
 
 ### Content mods (API 0.2)
 
-A content mod has capability `registries` and carries `assets/` and `data/` in the `.hmod`. It adds blocks and items
+A content mod has capability `registries` and carries `assets/` and `data/` in the `.smod`. It adds blocks and items
 by declaring them in `data/<id>/sunrise/block/*.json` and `data/<id>/sunrise/item/*.json`, each copying a vanilla
 template ([modpacks.md](https://github.com/arismoko/horizon/blob/main/docs/modpacks.md#registries-02-data-driven-blocks-items-and-mob-effects)), and creative tabs, mob
 effects, entity types and menu types (each below) in `creative_tab/`, `mob_effect/`, `entity_type/` and `menu/` beside

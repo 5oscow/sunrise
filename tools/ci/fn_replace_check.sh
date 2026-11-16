@@ -3,7 +3,7 @@
 # launcher's normal native build against a PREBUILT game, with no game rebuild, then run on a
 # dedicated server.
 #   [FNR_MODS="alpha beta"] [FNR_MOD_ROOT=DIR] [FNR_ROUTE=prebuilt|prebuilt-api] tools/ci/fn_replace_check.sh LAUNCHER SDK_BASE SCRATCH [RESOURCES]
-# FNR_WASM_LAYOUT_PACKAGE=valid.hmod FNR_WASM_STD=std.wasm adds a wasm point-layout refusal check
+# FNR_WASM_LAYOUT_PACKAGE=valid.smod FNR_WASM_STD=std.wasm adds a wasm point-layout refusal check
 # to the with-RESOURCES server run (not the build/link-only CI mode):
 # its exported layout fingerprint is changed to zero, and its integrity hash is updated.
 # SDK_BASE is a folder holding one `sdk-<commit>/` release folder (the SDK's archives, `sdk.json`, `SHA256SUMS` and its
@@ -166,7 +166,7 @@ if [ -n "$resources" ]; then
   layout_mod=
   if [ -n "${FNR_WASM_LAYOUT_PACKAGE:-}" ]; then
     cp "${FNR_WASM_STD:?set FNR_WASM_STD to the matching sunrise-wasm-std.wasm}" "$scratch/engine/sunrise-wasm-std.wasm"
-    layout_mod=$(python3 "$root/tools/ci/mismatch_wasm_layout.py" "$FNR_WASM_LAYOUT_PACKAGE" "$run/sunrise-mods/layout-refused.hmod")
+    layout_mod=$(python3 "$root/tools/ci/mismatch_wasm_layout.py" "$FNR_WASM_LAYOUT_PACKAGE" "$run/sunrise-mods/layout-refused.smod")
     printf 'mod.%s:true\n' "$layout_mod" > "$run/sunrise-mods.txt"
   fi
   # Compile a changed copy of one mod, then swap only its library into the first build.

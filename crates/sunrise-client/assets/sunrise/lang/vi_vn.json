@@ -497,7 +497,7 @@
   "sunrise.mods.browse.title": "Duyệt mod",
   "sunrise.mods.browse.update": "Cập nhật",
   "sunrise.mods.dev": " (Nhà phát triển)",
-  "sunrise.mods.empty": "Không có mod: đặt tệp .hmod vào thư mục Sunrise-mods",
+  "sunrise.mods.empty": "Không có mod: đặt tệp .smod vào thư mục Sunrise-mods",
   "sunrise.mods.in_world": " (để thế giới thay đổi)",
   "sunrise.mods.not_built": " (Chưa được xây dựng)",
   "sunrise.mods.open_folder": "Mở thư mục Mod",

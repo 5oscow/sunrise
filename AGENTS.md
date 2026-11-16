@@ -85,7 +85,7 @@ break**, and every change to it follows these rules. Reviews block a PR that bre
   multi-mod bundle, and no rule that holds for one target only. A change to the dependency model lands
   for both targets in the same PR.
 - **Versions are the exact build for native mods.** A native mod is built against one game build and the
-  loader checks that build id; a wasm mod links by interface instead. `.hmod` is the one package format.
+  loader checks that build id; a wasm mod links by interface instead. `.smod` is the one package format.
 - **DRY.** One implementation per behaviour: reuse the existing helper, write path or generator rule, and
   let the catalog and generator own repetition instead of hand-written match arms.
 - **SOLID.** Each module, trait and handle has one job; traits stay small and split by side and concern;
@@ -147,11 +147,11 @@ Game workspace (root `Cargo.toml`); `launcher/` and `crates/sunrise-telemetry-se
 | `sunrise-java-properties` | `java.util.Properties` load/store and the JDK date text, standard library only: shared by `sunrise-server-files` and the wasm runtime |
 | `sunrise-anticheat` | The dedicated server's anticheat, off by default: `[anticheat]` settings, violation levels, the checks' rules; the hub runs them (`lan/anticheat.rs`) ([docs/anticheat.md](docs/anticheat.md)) |
 | `sunrise-friends`, `sunrise-relay` | Play with Friends: invite codes, encrypted tunnel, the relay ([docs/play-with-friends.md](docs/play-with-friends.md)) |
-| `sunrise-mod-package`, `cargo-sunrise-mod` | Content mods (`.hmod`: manifest, content fence, no code), the registry index and `.hpack`, and `cargo sunrise-mod` (`new`, `build`, `run`, `check`, `registry`) ([docs/modding/](docs/modding/src/introduction.md)). Code mods are native, built by the launcher ([docs/modding/src/how-to/native-mods.md](docs/modding/src/how-to/native-mods.md)) |
+| `sunrise-mod-package`, `cargo-sunrise-mod` | Content mods (`.smod`: manifest, content fence, no code), the registry index and `.spack`, and `cargo sunrise-mod` (`new`, `build`, `run`, `check`, `registry`) ([docs/modding/](docs/modding/src/introduction.md)). Code mods are native, built by the launcher ([docs/modding/src/how-to/native-mods.md](docs/modding/src/how-to/native-mods.md)) |
 | `sunrise-port-pack` | Porting Java modpacks ([docs/modpacks.md](docs/modpacks.md)) |
 | `sunrise-optifine` | OptiFine-format pack files below every feature that reads them: `.properties`, the name/range/block matchers, paths and `optifine/` folders, and custom entity models (`cem/`: `.jem`/`.jpm` parsing and baking) |
 | `sunrise-polytone` | Polytone-format pack files (`assets/*/polytone/`), read clean-room from the public wiki: targets, biome and dimension modifiers and their environment attribute layers (#11486) |
-| `sunrise-shader-api` | Sunrise's own WGSL shader packs ([docs/api/shaders.md](docs/api/shaders.md)): `sunrise-shaders.toml`, the `.hshader` package; shared by the game, the launcher and the registry |
+| `sunrise-shader-api` | Sunrise's own WGSL shader packs ([docs/api/shaders.md](docs/api/shaders.md)): `sunrise-shaders.toml`, the `.sshader` package; shared by the game, the launcher and the registry |
 | `sunrise-shaders` | Shader packs (the `shaders/` folder format), rebuilt clean-room from a written spec of the format; no wgpu |
 | `sunrise-theme` | Design tokens and fonts for the launcher, the game's own menus and the website |
 | `sunrise-perf-format` | The `.hzperf` capture contract ([docs/perf-platform.md](docs/perf-platform.md) §3): `proto/sunrise/perf/v1/capture.proto`, its generated types, the gzip writer and its thread. No Sunrise dependencies; nothing in the game reads a capture |

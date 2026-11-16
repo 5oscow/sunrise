@@ -312,7 +312,7 @@ fn missing_original_at_reload_preserves_the_published_data_and_reports_its_owner
         "id='reload_test'\nname='Reload Test'\nversion='1'\napi='0.2'\nside='both'\ncapabilities=['registries']\n[[jar]]\nid='original'\nversion='1'\nsha512='{}'\n",
         jar.sha512()
     );
-    let package = root.join("reload_test.hmod");
+    let package = root.join("reload_test.smod");
     write(
         &package,
         sunrise_mod_package::Package::write_files(&manifest, &[]).unwrap(),
@@ -390,7 +390,7 @@ fn server_reload_delivers_mod_files_overrides_and_preserves_all_data_on_failure(
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).unwrap();
     let manifest = "id = \"reload_test\"\nname = \"Reload Test\"\nversion = \"0.1.0\"\napi = \"0.2\"\nside = \"both\"\ncapabilities = [\"registries\"]\n";
-    let package = root.join("reload_test.hmod");
+    let package = root.join("reload_test.smod");
     write(
         &package,
         sunrise_mod_package::Package::write_files(
@@ -572,7 +572,7 @@ fn server_reload_skips_unparsable_files_and_delivers_the_rest() {
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).unwrap();
     let manifest = "id = \"reload_test\"\nname = \"Reload Test\"\nversion = \"0.1.0\"\napi = \"0.2\"\nside = \"both\"\ncapabilities = [\"registries\"]\n";
-    let package = root.join("reload_test.hmod");
+    let package = root.join("reload_test.smod");
     write(
         &package,
         sunrise_mod_package::Package::write_files(
@@ -776,7 +776,7 @@ fn server_reload_retains_listeners_for_other_hooks() {
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).unwrap();
     let manifest = "id = \"reload_test\"\nname = \"Reload Test\"\nversion = \"0.1.0\"\napi = \"0.2\"\nside = \"both\"\ncapabilities = [\"registries\"]\n";
-    let package = root.join("reload_test.hmod");
+    let package = root.join("reload_test.smod");
     write(
         &package,
         sunrise_mod_package::Package::write_files(

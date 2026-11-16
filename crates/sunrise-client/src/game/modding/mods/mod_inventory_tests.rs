@@ -42,7 +42,7 @@ fn selected(fixture: &Fixture, id: &str, code: bool, side: &str) -> SelectedPack
     } else {
         Vec::new()
     };
-    let path = fixture.0.join(format!("{id}.hmod"));
+    let path = fixture.0.join(format!("{id}.smod"));
     std::fs::write(
         &path,
         sunrise_mod_package::Package::write_files(&manifest, &files).unwrap(),
@@ -57,7 +57,7 @@ fn selected(fixture: &Fixture, id: &str, code: bool, side: &str) -> SelectedPack
 #[test]
 fn admission_uses_active_native_and_wasm_entries_and_accepted_content_not_startup_metadata() {
     let fixture = Fixture::new("inventory-admission");
-    hmod(&fixture.0, "machine_sample");
+    smod(&fixture.0, "machine_sample");
     let sources = ModsState {
         native: Arc::new(fixture.runtime()),
         selected: vec![
@@ -171,7 +171,7 @@ impl Hooks for Guard {
 #[ignore = "daily"]
 fn code_only_reload_publishes_one_new_inventory_after_prepare_and_preserves_old_readers() {
     let fixture = Fixture::new("inventory-reload");
-    hmod(&fixture.0, "machine_sample");
+    smod(&fixture.0, "machine_sample");
     let sources = ModsState {
         native: Arc::new(fixture.runtime()),
         ..Default::default()
@@ -334,7 +334,7 @@ fn code_only_reload_publishes_one_new_inventory_after_prepare_and_preserves_old_
 fn capture_metadata_distinguishes_content_native_wasm_and_unknown_code() {
     use sunrise_perf_format::v1::ModKind;
     let fixture = Fixture::new("perf-inventory");
-    hmod(&fixture.0, "machine_sample");
+    smod(&fixture.0, "machine_sample");
     let sources = ModsState {
         native: Arc::new(fixture.runtime()),
         selected: vec![selected(&fixture, "wasm_mod", true, "both")].into(),

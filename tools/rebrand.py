@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Horizon -> Sunrise in the tracked files' contents and paths; then run cargo fmt and let Cargo re-sort lockfiles. Usage: tools/rebrand.py [--dry-run]"""
+"""Horizon -> Sunrise in the tracked files' contents and paths, and the package extensions .hmod, .hpack and
+.hshader -> .smod, .spack and .sshader; then run cargo fmt and let Cargo re-sort lockfiles. Usage: tools/rebrand.py [--dry-run]"""
 import os
 import re
 import subprocess
@@ -44,6 +45,15 @@ LICENCE_PATH = re.compile(r"(^|/)(LICENSES/[^/]*|[^/]*LICEN[CS]E[^/]*)$")
 # Files whose strings and comments name the earlier launchers themselves: only their code is renamed.
 KEEP_STRINGS = {"launcher/src/identity.rs", "launcher/src/setup_args.rs"}
 STRING = re.compile(r'"(?:[^"\\\n]|\\.)*"|//[^\n]*')
+# Sunrise's package extensions, as a whole word in any spelling (`.hmod`, `"hmod"`, `hmod_path`, `HMOD`; never `chmod`).
+PACKAGE = re.compile(r"(?<![A-Za-z0-9])([Hh])(mod|pack|shader|MOD|PACK|SHADER)(?![A-Za-z0-9])")
+# The journal is history, and roadmap.json is generated from it; the two launcher files name the earlier launchers
+# and stay byte for byte.
+PACKAGE_SKIP = re.compile(r"^roadmap/journal/|^roadmap/roadmap\.json$|^launcher/src/(identity|setup_args)\.rs$")
+
+
+def package(text):
+    return PACKAGE.sub(lambda m: ("S" if m.group(1) == "H" else "s") + m.group(2), text)
 
 
 def case(m):
@@ -161,6 +171,8 @@ def convert_rust(text):
 
 
 def convert_path(path):
+    if not PACKAGE_SKIP.search(path):
+        path = package(path)
     parts = path.split("/")
     keep_last = bool(LICENCE_PATH.search(path))
     return "/".join(
@@ -195,6 +207,8 @@ def main():
         out = stashed(STRING, text, convert, "\x01") if f in KEEP_STRINGS else keep_fork_branches(text, convert)
         if f.endswith(".rs"):
             out = convert_rust(out)
+        if not PACKAGE_SKIP.search(f):
+            out = package(out)
         if out != text:
             changed += 1
             if not DRY:

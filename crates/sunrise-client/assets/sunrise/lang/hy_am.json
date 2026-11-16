@@ -497,7 +497,7 @@
   "sunrise.mods.browse.title": "Զննել Mods-ը",
   "sunrise.mods.browse.update": "Թարմացնել",
   "sunrise.mods.dev": " (Մշակում)",
-  "sunrise.mods.empty": "Ոչ մի ռեժիմ. դրեք .hmod ֆայլերը sunrise-mods թղթապանակում",
+  "sunrise.mods.empty": "Ոչ մի ռեժիմ. դրեք .smod ֆայլերը sunrise-mods թղթապանակում",
   "sunrise.mods.in_world": " (թողեք աշխարհը փոխվի)",
   "sunrise.mods.not_built": " (Չի կառուցված)",
   "sunrise.mods.open_folder": "Բացեք Mod թղթապանակը",

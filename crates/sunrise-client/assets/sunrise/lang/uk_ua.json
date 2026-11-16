@@ -502,7 +502,7 @@
   "sunrise.mods.browse.title": "Огляд модів",
   "sunrise.mods.browse.update": "Оновити",
   "sunrise.mods.dev": " (розробка)",
-  "sunrise.mods.empty": "Немає модів: покладіть файли .hmod у теку sunrise-mods",
+  "sunrise.mods.empty": "Немає модів: покладіть файли .smod у теку sunrise-mods",
   "sunrise.mods.in_world": " (вийдіть зі світу, щоб змінити)",
   "sunrise.mods.not_built": " (не зібрано)",
   "sunrise.mods.open_folder": "Відкрити теку з модами",

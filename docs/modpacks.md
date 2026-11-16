@@ -24,9 +24,9 @@ why Java jars cannot run in Sunrise, so we port instead). The ATM10 inventory be
  dependency order (libraries first, then the mods that need them)
    │
    ├─ carry-over (mechanical, no agent): assets/ + data/ upgraded to 26.3 formats,
-   │    block and item registrations from the oracle's facts export  →  <mod>.hmod
+   │    block and item registrations from the oracle's facts export  →  <mod>.smod
    ├─ port (one agent per mod, tiers logic and up): a Rust native mod (a horizon-mixins
-   │    bundle), iterating until its harness passes                  →  <mod>.hmod
+   │    bundle), iterating until its harness passes                  →  <mod>.smod
    ├─ harness per mod: the Java mod in a dev-only NeoForge/Fabric oracle vs the port
    ▼
  coverage report: ported · partial · not yet · not needed, per mod and per class
@@ -155,7 +155,7 @@ with advice if needed.
 
 ## What packs need, and what runs today
 
-Content mods (`.hmod`, API 0.2) carry data: blocks, items, and everything in the 26.3 data-pack and resource-pack
+Content mods (`.smod`, API 0.2) carry data: blocks, items, and everything in the 26.3 data-pack and resource-pack
 formats ([mods.md](modding/src/how-to/content-mods.md#content-mods-api-02)). Behaviour that needs code is not a content-mod feature: it is
 written as a native mod ([modding/src/how-to/native-mods.md](modding/src/how-to/native-mods.md)), one per ported mod. What a content pack needs:
 
@@ -187,10 +187,10 @@ harnesses test the same game).
 
 ### Registries 0.2: data-driven blocks, items and mob effects
 
-A content mod (`.hmod`) carries `assets/` and `data/` and no code:
+A content mod (`.smod`) carries `assets/` and `data/` and no code:
 
 ```
-ruby.hmod
+ruby.smod
 ├── sunrise-mod.toml          id = "ruby", api = "0.2", side = "both", capabilities = ["registries"]
 ├── data/ruby/sunrise/block/ruby_block.json
 ├── data/ruby/sunrise/item/ruby.json
@@ -311,7 +311,7 @@ inspected:
 │   ├── oracle/               facts, registries and traces exported from the Java oracle
 │   ├── port/                 the agent's Rust crate (tiers logic and up)
 │   ├── harness/              per-mod harness results and logs
-│   └── <id>.hmod
+│   └── <id>.smod
 └── coverage.json, coverage.md
 ```
 
@@ -579,7 +579,7 @@ Mechanical, the same for every mod, and no agent:
    recipes, tags and loot after load. We do not translate scripts. The oracle exports the
    **final** recipe, tag and loot registries of the whole pack once, and the pack layer
    carries those over.
-5. Write `<id>.hmod`. For a data-tier mod, it is now ported.
+5. Write `<id>.smod`. For a data-tier mod, it is now ported.
 
 Two cases the oracle fills in:
 
@@ -866,7 +866,7 @@ budget allows:
   harness, [modding/src/how-to/native-mods.md](modding/src/how-to/native-mods.md), the ports of its dependencies, and the mod's public
   documentation. Never its code: the agent doesn't decompile, read or quote it.
 - **Output:** a native mod, a horizon-mixins bundle started from
-  [sunrise-native-mod-template](https://github.com/horizon-rust/horizon-native-mod-template), and its `.hmod`.
+  [sunrise-native-mod-template](https://github.com/horizon-rust/horizon-native-mod-template), and its `.smod`.
 - **Loop:** write → build → run the harness → read the differences → fix, until the harness
   passes or the agent reports what blocks it. Usually that is a place in the game's code the
   mixins can't reach yet, which becomes an issue ("needs a scheduled-tick hook point"), the way version ports
@@ -948,8 +948,8 @@ the self-drop tables it registers in code (step 4).
 
 `coverage.json` and `coverage.md`, per mod and totalled per class and tier:
 
-- **ported**: `.hmod` built, harness green;
-- **partial**: `.hmod` built, harness passes the listed parts (e.g. blocks and recipes yes,
+- **ported**: `.smod` built, harness green;
+- **partial**: `.smod` built, harness passes the listed parts (e.g. blocks and recipes yes,
   machine processing not yet), with the failing checks and the API gaps blocking them;
 - **not yet**: waiting on an API tier or a dependency, which is named;
 - **not needed**: performance, library mapped to the API, pack tooling folded into the
@@ -1019,12 +1019,12 @@ carried-over mods into Sunrise. A whole pack (`--pack`, its recommended JVM argu
 
 | Metric | How | Sunrise side |
 |---|---|---|
-| **Load time** | start → title screen; start → in a fresh world, every chunk around the spawn drawn | the same with the ported pack's `.hmod`s enabled |
+| **Load time** | start → title screen; start → in a fresh world, every chunk around the spawn drawn | the same with the ported pack's `.smod`s enabled |
 | **RAM** | peak and steady RSS of the process, sampled 4 times a second from outside (the whole JVM for Java) | the whole process |
 | **FPS** | the four flight scenes: mean, 1 % and 0.1 % lows, p99 frame time | same |
 | **TPS / MSPT** | a fixed server-load world: N loaded chunks with the pack's machines and mobs placed by the harness fixtures; mean and p99 milliseconds per tick over 60 s (NeoForge: `/neoforge tps` and spark; Sunrise: the integrated server's tick times, which today feed only the debug chart, exposed through `sunrise-ctl`) | same fixture, the ported content |
 | **World generation** | chunks per second pregenerating a fixed square (Chunky on NeoForge; Sunrise gets a pregeneration command for this) with the pack's worldgen | same |
-| **Disk and download** | install size of the pack against its `.hmod`s | |
+| **Disk and download** | install size of the pack against its `.smod`s | |
 
 Two comparisons, both published:
 

@@ -497,7 +497,7 @@
   "sunrise.mods.browse.title": "Modok böngészése",
   "sunrise.mods.browse.update": "Frissítés",
   "sunrise.mods.dev": " (Fejlesztő)",
-  "sunrise.mods.empty": "Nincs mod: tegye a .hmod fájlokat a sunrise-mods mappába",
+  "sunrise.mods.empty": "Nincs mod: tegye a .smod fájlokat a sunrise-mods mappába",
   "sunrise.mods.in_world": " (hagyd a világot, hogy megváltozzon)",
   "sunrise.mods.not_built": " (nem épült)",
   "sunrise.mods.open_folder": "Nyissa meg a Mod mappát",

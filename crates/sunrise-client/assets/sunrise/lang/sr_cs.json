@@ -288,7 +288,7 @@
   "sunrise.friends.troubleshooting": "Rešavanje problema...",
   "sunrise.friends.wrong_code": "Neko je probao pogrešan kod.",
   "sunrise.mods.dev": " (Dev)",
-  "sunrise.mods.empty": "Bez modova: stavite .hmod datoteke u fasciklu sunrise-mods",
+  "sunrise.mods.empty": "Bez modova: stavite .smod datoteke u fasciklu sunrise-mods",
   "sunrise.mods.in_world": " (ostavi svet da se promeni)",
   "sunrise.mods.not_built": " (Nije izgrađeno)",
   "sunrise.mods.open_folder": "Otvorite fasciklu modova",

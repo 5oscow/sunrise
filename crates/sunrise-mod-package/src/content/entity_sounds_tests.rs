@@ -4,7 +4,7 @@ use crate::{Package, content::Content};
 #[test]
 fn entity_sounds_admission_preserves_inherit_id_and_mute_and_rejects_bad_ids() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("bird.hmod");
+    let path = dir.path().join("bird.smod");
     let manifest = "id = \"bird\"\nname = \"Bird\"\nversion = \"1.0\"\napi = \"0.2\"\nside = \"both\"\ncapabilities = [\"registries\"]\n";
     for slot in ["ambient", "hurt", "death", "step"] {
         let file = format!(
@@ -47,7 +47,7 @@ fn entity_sounds_admission_preserves_inherit_id_and_mute_and_rejects_bad_ids() {
 #[test]
 fn entity_sounds_thrown_type_refuses_sounds_with_exact_error() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("bird.hmod");
+    let path = dir.path().join("bird.smod");
     let manifest = "id = \"bird\"\nname = \"Bird\"\nversion = \"1.0\"\napi = \"0.2\"\nside = \"both\"\ncapabilities = [\"registries\"]\n";
     let declaration = br#"{"template":"minecraft:snowball","sounds":{"hurt":"bird:hurt"}}"#;
     std::fs::write(

@@ -19,7 +19,7 @@ It runs on the same OS/architecture as the host and requires an installed launch
 It is copied outside managed cache folders. On Windows use `sunrise-engine.exe`.
 
 Wasm packages use API hooks and API injection points, not engine internals. Install and
-enable their `.hmod` packages in the server game folder's `sunrise-mods/`. A plain engine
+enable their `.smod` packages in the server game folder's `sunrise-mods/`. A plain engine
 build refuses API listeners by name; listeners require the staged SDK engine.
 
 A mod's crate depends on `sunrise-mod-api` and never on the game: a `sunrise-client` dependency,

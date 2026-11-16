@@ -497,7 +497,7 @@
   "sunrise.mods.browse.title": "Jelajahi Mod",
   "sunrise.mods.browse.update": "Perbarui",
   "sunrise.mods.dev": " (Pengembang)",
-  "sunrise.mods.empty": "Tidak ada mod: masukkan file .hmod ke dalam folder sunrise-mods",
+  "sunrise.mods.empty": "Tidak ada mod: masukkan file .smod ke dalam folder sunrise-mods",
   "sunrise.mods.in_world": " (keluar dari dunia untuk mengubah)",
   "sunrise.mods.not_built": " (Belum dibangun)",
   "sunrise.mods.open_folder": "Buka Folder Mod",

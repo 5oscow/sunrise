@@ -4772,7 +4772,7 @@ impl Game<'_> {
     }
     /// The recipes of type `kind` (`minecraft:smelting`, `mymod:crusher`), vanilla's
     /// types and mods' own alike, from `data/<namespace>/recipe/*.json` of vanilla,
-    /// the content mods (`.hmod`) and the world's data packs, in file order: each
+    /// the content mods (`.smod`) and the world's data packs, in file order: each
     /// one typed (`Recipe`: its ingredients, results, group, cooking time and
     /// experience, or its stonecutting, smithing or special crafting rule),
     /// with its file as JSON for a mod's own type. Dynamic rules are not fixed

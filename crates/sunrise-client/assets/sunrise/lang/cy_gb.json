@@ -497,7 +497,7 @@
   "sunrise.mods.browse.title": "Pori Mods",
   "sunrise.mods.browse.update": "Diweddaru",
   "sunrise.mods.dev": " (Datblygu)",
-  "sunrise.mods.empty": "Dim mods: rhowch ffeiliau .hmod yn y ffolder sunrise-mods",
+  "sunrise.mods.empty": "Dim mods: rhowch ffeiliau .smod yn y ffolder sunrise-mods",
   "sunrise.mods.in_world": " (gadewch y byd i newid)",
   "sunrise.mods.not_built": " (Heb ei adeiladu)",
   "sunrise.mods.open_folder": "Agor Ffolder Mod",

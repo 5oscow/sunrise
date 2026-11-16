@@ -257,9 +257,9 @@ mod tests {
                 "--home",
                 "cache",
                 "--dev-mod",
-                "one.hmod",
+                "one.smod",
                 "--dev-mod",
-                "/two.hmod",
+                "/two.smod",
                 "--dedicated",
                 "--home",
                 "server-only",
@@ -270,7 +270,7 @@ mod tests {
         assert_eq!(parsed.context.home, Path::new("/start/cache"));
         assert_eq!(
             parsed.context.dev_mods,
-            [PathBuf::from("/start/one.hmod"), PathBuf::from("/two.hmod")]
+            [PathBuf::from("/start/one.smod"), PathBuf::from("/two.smod")]
         );
         assert_eq!(
             parsed.rest,
