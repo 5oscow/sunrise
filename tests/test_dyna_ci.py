@@ -250,7 +250,7 @@ class DynaRoutingTests(unittest.TestCase):
                             ("RUNNER_KIND", "needs.changes.outputs.trusted != 'true' && 'github' || ")):
             shared = runtime.split(f"{field}:", 1)[1].split("\n", 1)[0]
             if field == "runs-on":
-                shared = shared.replace("'ubuntu-latest' || ", "'ubuntu-latest' || " + fork, 1)
+                shared = shared.replace("'ubuntu-latest') || ", "'ubuntu-latest') || " + fork, 1)
             else:
                 shared = shared.replace("${{ ", "${{ " + fork, 1)
             self.assertEqual(static.split(f"{field}:", 1)[1].split("\n", 1)[0], shared)
