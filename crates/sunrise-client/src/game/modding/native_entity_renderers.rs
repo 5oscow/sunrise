@@ -142,6 +142,8 @@ impl EntityRendererTable {
     /// The renderer of primed TNT, when a mod registered one for `minecraft:tnt`.
     pub(super) fn tnt(&self) -> Option<&Arc<Resolved<dyn EntityRenderer>>> {
         self.tnt.as_ref()
+    }
+
     /// The renderer of an experience orb, when a mod registered one for `minecraft:experience_orb`.
     pub(super) fn experience_orb(&self) -> Option<&Arc<Resolved<dyn EntityRenderer>>> {
         self.experience_orb.as_ref()
@@ -174,6 +176,8 @@ pub(in crate::game) fn tnt_renderer() -> Option<Arc<Resolved<dyn EntityRenderer>
     }
     let table = TABLE.read().unwrap_or_else(PoisonError::into_inner);
     table.as_ref()?.tnt().cloned()
+}
+
 /// The renderer the last resource load resolved for an experience orb, when a mod registered one:
 /// with none registered, one flag check, with no lock.
 pub(in crate::game) fn experience_orb_renderer() -> Option<Arc<Resolved<dyn EntityRenderer>>> {
@@ -204,12 +208,10 @@ impl Game<'_> {
         }
         let any_living = !table.living.is_empty();
         let any_tnt = table.tnt.is_some();
-        *TABLE.write().unwrap_or_else(PoisonError::into_inner) = Some(table);
-        ANY_LIVING.store(any_living, Ordering::Relaxed);
-        ANY_TNT.store(any_tnt, Ordering::Relaxed);
         let any_experience_orb = table.experience_orb.is_some();
         *TABLE.write().unwrap_or_else(PoisonError::into_inner) = Some(table);
         ANY_LIVING.store(any_living, Ordering::Relaxed);
+        ANY_TNT.store(any_tnt, Ordering::Relaxed);
         ANY_EXPERIENCE_ORB.store(any_experience_orb, Ordering::Relaxed);
         self.resolve_entity_layers(&rows, registered);
     }
