@@ -1,3 +1,3 @@
-ids = ["method:ServerHost::place_feature", "method:ServerHost::place_placed_feature"]
+ids = ["method:prelude::WorldEditServerHost::place_feature", "method:prelude::WorldEditServerHost::place_placed_feature"]
 why = "A mod could place a world-generation feature only through run_command with /place feature. place_feature and place_placed_feature call the placement the command uses and answer with the feature's own true or false, or an Err that says why nothing was placed. They are new surface, not a change to an old one: nothing is removed or renamed, and every existing call keeps its meaning."
 migrate = "A mod that ran /place feature through run_command can call host.place_feature(id, at) for an entry of minecraft:worldgen/feature, or host.place_placed_feature(id, at) for one of minecraft:worldgen/placed_feature, and read the Result instead of the command's feedback. Rebuild native and wasm mods against the updated SDK; no old call changes."
