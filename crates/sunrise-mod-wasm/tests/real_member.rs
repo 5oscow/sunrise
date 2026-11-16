@@ -30,6 +30,8 @@ impl mod_api::ClientHost for Quiet {}
 mod_api::impl_client_host_areas!(Quiet);
 impl mod_api::ServerHost for Quiet {}
 mod_api::impl_server_host_areas!(Quiet, except(projectiles));
+impl mod_api::ClientHost for Quiet {}
+mod_api::impl_client_host_areas!(Quiet);
 static OWNER_LAUNCH_CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 impl mod_api::prelude::ProjectilesServerHost for Quiet {
     fn spawn_projectile_from_rotation(

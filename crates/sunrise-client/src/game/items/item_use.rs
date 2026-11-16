@@ -278,10 +278,15 @@ impl Game<'_> {
         let (mut remaining, mut canceled) = (before, false);
         let hand = self.used_hand().unwrap_or(self.hand);
         self.native_living_entity_use_item_tick(stack, None, hand, &mut remaining, &mut canceled);
+        if canceled && self.options.execution_role.is_client() {
+            // A client cancellation suppresses only this tick's effects. The
+            // existing countdown continues, so a later tick can run effects.
+            return false;
+        }
         let (left, set) = tick_left(before, remaining, canceled, self.use_start.ticks_set);
         self.use_start.ticks_set = set;
         self.use_duration = duration_leaving(ticks, left);
-        left > 0 || !set
+        left > 0
     }
     /// A mod's `Item.onUseTick` of `stack` used `ticks`, while ticks are left.
     /// False when that mod released the use, which then has nothing left to run.
@@ -503,10 +508,10 @@ impl Game<'_> {
     }
 }
 
-/// The ticks left after a mod's `Tick`, a cancel leaving -1, and
-/// whether a mod ever set this use's: once one did, the use goes on only
-/// while some are left, else it ran out. A use no mod touched goes on as
-/// vanilla's own do (an eye of ender's has none from the start).
+/// The event's replacement counter (a cancel leaves -1), and whether a
+/// mod has changed this use's countdown. This flag preserves vanilla's
+/// initially zero-duration items; a mod-run-out use skips effects, but
+/// still decrements on both sides.
 fn tick_left(before: i32, remaining: i32, canceled: bool, set: bool) -> (i32, bool) {
     let left = if canceled { -1 } else { remaining };
     (left, set || canceled || remaining != before)
@@ -1083,7 +1088,7 @@ mod tests {
         assert_eq!(tick_left(20, 20, true, false), (-1, true));
         assert!(!goes_on(tick_left(20, 0, false, false)));
         assert!(!goes_on(tick_left(20, -1, false, false)));
-        // a use a mod ran out stays out on the next ticks (a crossbow frozen).
+        // A run-out use keeps skipping effects while its counter goes negative.
         assert!(!goes_on(tick_left(-1, -1, false, true)));
         // and goes on again if a mod gives it ticks back.
         assert!(goes_on(tick_left(-1, 10, false, true)));
