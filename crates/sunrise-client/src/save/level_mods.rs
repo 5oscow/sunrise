@@ -9,7 +9,7 @@
 //! opens, [`missing`] names each saved mod that is no longer loaded and each saved block namespace
 //! that nothing registers now: opening the world anyway turns those blocks into air, with what
 //! they hold, for good.
-use super::{compound_or_empty, put, string, text, Level, Tag};
+use super::{Level, Tag, compound_or_empty, put, string, text};
 use std::{
     path::{Path, PathBuf},
     sync::{Mutex, RwLock},
@@ -51,7 +51,7 @@ fn saved_code(data: &Tag) -> Option<Vec<ModRecord>> {
     (!records.is_empty()).then_some(records)
 }
 
-/// The code mods, then the content mods, a level.dat's root lists; `None` without either list.
+/// The code mods, then the content mods, a level.dat's root lists; `None` without either list, or when both are empty (an empty list reads as absent).
 pub(super) fn saved(data: &Tag) -> Option<Vec<ModRecord>> {
     let content = sunrise_records(data).content_mods;
     match (saved_code(data), content) {
@@ -421,7 +421,7 @@ pub fn missing_in(dir: &Path, loaded: &Loaded) -> Vec<MissingMod> {
 }
 
 /// `mod_mismatch`'s differences for the world in `dir`: its saved code and content mods against
-/// the loaded ones (`Level::mod_mismatches`); `None` without a saved list.
+/// the loaded ones (`Level::mod_mismatches`); `None` without a saved list or with only empty ones.
 pub fn mismatches_in(dir: &Path, loaded: &Loaded) -> Option<Vec<mod_api::ModMismatch>> {
     let saved = saved(&super::read_level_dat(dir)?)?;
     Some(mismatches(&saved, &loaded.mods()))
@@ -579,9 +579,11 @@ mod tests {
         };
         let differences = level.mod_mismatches(&[]);
         assert_eq!(differences.len(), 2);
-        assert!(differences
-            .iter()
-            .all(|m| m.mod_id.is_empty() && m.current_version.is_none()));
+        assert!(
+            differences
+                .iter()
+                .all(|m| m.mod_id.is_empty() && m.current_version.is_none())
+        );
     }
 
     /// The loaded mods replace the list the file had and the other `fml` keys stay; a write
