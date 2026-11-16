@@ -166,6 +166,9 @@ pub struct ReplacedSpecialModelRenderer {
     pub later: Option<&'static str>,
 }
 
+/// A type's policy and its renderer, as the registry keeps them.
+type PolicyRenderer = (SpecialModelPolicy, Arc<dyn SpecialModelRenderer>);
+
 // no wire: process-local listener or callback storage; trait objects are invoked through host dispatch, not serialized.
 /// The game's [`SpecialModelRenderers`]: the registrations by type.
 #[derive(Default)]
@@ -217,11 +220,10 @@ impl SpecialModelRendererRegistry {
 
     /// Each type's policy and renderer, the last registration of a type winning, and the
     /// registrations that replaced an earlier one.
-    #[allow(clippy::type_complexity)]
     pub fn into_renderers(
         self,
     ) -> (
-        BTreeMap<String, (SpecialModelPolicy, Arc<dyn SpecialModelRenderer>)>,
+        BTreeMap<String, PolicyRenderer>,
         Vec<ReplacedSpecialModelRenderer>,
     ) {
         let renderers = self
