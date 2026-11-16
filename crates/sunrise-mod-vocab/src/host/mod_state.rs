@@ -8,8 +8,13 @@ pub trait ModStateHost {
     /// Capture a SNAPSHOT of the current dimension's attachment residency and values.
     /// Later changes require a fresh query. Removed-but-unswept entities may appear;
     /// writes through stale holders fail. Values are neither cloned nor eagerly decoded.
+    /// An undeclared id is refused with the calling package and attachment id.
     #[access(WorldOnly)]
-    fn attachment_query(&self, namespace: &str, name: &str) -> AttachmentBatch;
+    fn attachment_query(
+        &self,
+        namespace: &str,
+        name: &str,
+    ) -> Result<AttachmentBatch, AttachmentError>;
     /// Side: both.
     /// The server-owned holders' attachments; `TYPE.get(host, holder)` reads
     /// one. On a client it is the copy of what the server synced: `set` and

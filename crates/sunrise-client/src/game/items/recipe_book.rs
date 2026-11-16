@@ -129,12 +129,12 @@ pub(in crate::game) struct ViewerChannels {
 struct TransferChecks {
     seen: Option<(i32, i32, Vec<Option<ItemStack>>)>,
     answers: Vec<CheckAnswer>,
-    /// The one request out: its display id and when it went.
-    asked: Option<(i32, i32, Instant)>,
+    /// The one request out: its tag, its recipe and when it went.
+    asked: Option<(i32, String, Instant)>,
 }
 
 impl TransferChecks {
-    fn ask(&mut self, display_id: i32, now: Instant) -> Option<i32> {
+    fn ask(&mut self, recipe: &str, now: Instant) -> Option<i32> {
         static NEXT_TAG: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
         let tag = NEXT_TAG
             .try_update(
@@ -143,14 +143,14 @@ impl TransferChecks {
                 |tag| tag.checked_add(1),
             )
             .ok()?;
-        self.asked = Some((tag, display_id, now));
+        self.asked = Some((tag, recipe.to_owned(), now));
         Some(tag)
     }
 }
 
 /// One answer of `TransferChecks`.
 struct CheckAnswer {
-    display_id: i32,
+    recipe: String,
     /// When it came.
     at: Instant,
     /// How many times it was asked again for this view of the menu.
@@ -209,11 +209,12 @@ impl Game<'_> {
             return None;
         }
         match self.container_kind() {
+            // The inventory's grid, or a crafting table's (`CraftingScreen`); a server's
+            // other menus have no crafting book.
             None if self.container.is_none()
-                && self
-                    .remote
-                    .as_ref()
-                    .is_none_or(|r| r.menu.as_ref().is_none()) =>
+                && self.remote.as_ref().is_none_or(|r| {
+                    (r.menu.as_ref()).is_none_or(|(_, menu)| menu == "minecraft:crafting")
+                }) =>
             {
                 Some(BookType::Crafting)
             }
@@ -1432,9 +1433,8 @@ impl Game<'_> {
     }
     /// The display ids of `recipe_id` that the server sent and this book
     /// numbers the same way (`Book::confirmed_ids`): the entries
-    /// `transfer_viewer_recipe` and `transfer_recipe_check` find. A server
-    /// numbers the recipes it sent itself, so the display index's ids are not
-    /// evidence of its own.
+    /// `transfer_viewer_recipe` finds. A server numbers the recipes it sent
+    /// itself, so the display index's ids are not evidence of its own.
     pub(in crate::game) fn viewer_book_ids(&mut self, recipe_id: &str) -> std::sync::Arc<[i32]> {
         self.ensure_book();
         self.recipe_ui
@@ -1569,7 +1569,7 @@ impl Game<'_> {
     }
 
     /// `RecipesClientHost::transfer_recipe_check`: the server's latest check of a viewer
-    /// transfer of `display_id` into the open crafting grid. Asked for when
+    /// transfer of `recipe` (its id) into the open menu. Asked for when
     /// there is no answer for what the client sees now (the window, its state
     /// id, the inventory and the grid), and again every `CHECK_REFRESH` while
     /// it is wanted, at most `CHECK_REFRESHES` times for that view: chests a
@@ -1578,16 +1578,12 @@ impl Game<'_> {
     /// recipes, and on a server that doesn't advertise `sunrise:recipe_check`.
     pub(in crate::game) fn transfer_recipe_check(
         &mut self,
-        display_id: i32,
+        recipe: &str,
     ) -> Option<RecipeTransferCheck> {
         // The game is its own server: a mod menu's part answers the dry run, as
         // `sunrise:recipe_check` asks it on a server; with none the check is as before.
         if self.remote.is_none() && self.mod_menu_open() {
-            self.ensure_book();
-            let id = (self.recipe_ui.book.as_ref())
-                .and_then(|book| book.entries.iter().find(|e| e.display_id == display_id))
-                .map(|e| e.id.clone())?;
-            let result = self.local_menu_transfer(&id, false, true)?;
+            let result = self.local_menu_transfer(recipe, false, true)?;
             return Some(RecipeTransferCheck {
                 result,
                 missing_cells: Vec::new(),
@@ -1614,33 +1610,28 @@ impl Game<'_> {
                 ..Default::default()
             };
         }
-        let answer = (checks.answers.iter()).find(|a| a.display_id == display_id);
+        let answer = (checks.answers.iter()).find(|a| a.recipe == recipe);
         let ask = match answer {
             None => true,
             Some(a) => a.refreshes < CHECK_REFRESHES && now.duration_since(a.at) >= CHECK_REFRESH,
         };
         let answer = answer.map(|a| a.check.clone());
-        let waiting = (checks.asked).is_some_and(|(_, _, at)| now.duration_since(at) < CHECK_WAIT);
+        let waiting =
+            (checks.asked.as_ref()).is_some_and(|(_, _, at)| now.duration_since(*at) < CHECK_WAIT);
         if ask && !waiting {
-            self.ensure_book();
-            let id = (self.recipe_ui.book.as_ref())
-                .and_then(|book| book.entries.iter().find(|e| e.display_id == display_id))
-                .map(|e| e.id.clone());
-            if let Some(id) = id {
-                let mut request = sunrise_protocol::buf::Writer::new();
-                request.varint(self.remote_menu_id());
-                let Some(tag) = self.recipe_ui.checks.ask(display_id, now) else {
-                    return answer;
-                };
-                request.varint(tag);
-                request.string(&id);
-                self.send(sunrise_protocol::packets::play::Serverbound::CustomPayload(
-                    sunrise_protocol::packets::configuration::CustomPayload {
-                        channel: sunrise_client::lan::recipes::CHECK_CHANNEL.into(),
-                        data: request.data,
-                    },
-                ));
-            }
+            let mut request = sunrise_protocol::buf::Writer::new();
+            request.varint(self.remote_menu_id());
+            let Some(tag) = self.recipe_ui.checks.ask(recipe, now) else {
+                return answer;
+            };
+            request.varint(tag);
+            request.string(recipe);
+            self.send(sunrise_protocol::packets::play::Serverbound::CustomPayload(
+                sunrise_protocol::packets::configuration::CustomPayload {
+                    channel: sunrise_client::lan::recipes::CHECK_CHANNEL.into(),
+                    data: request.data,
+                },
+            ));
         }
         answer
     }
@@ -1670,17 +1661,13 @@ impl Game<'_> {
         }
         let checks = &mut self.recipe_ui.checks;
         if reader.remaining() != 0
-            || checks.asked.map(|(id, _, _)| id) != Some(tag)
+            || checks.asked.as_ref().map(|(id, _, _)| *id) != Some(tag)
             || checks.seen.as_ref().map(|s| s.0) != Some(container)
         {
             return;
         }
-        let (_, display_id, _) = checks.asked.take().unwrap();
-        let refreshes = match checks
-            .answers
-            .iter()
-            .position(|a| a.display_id == display_id)
-        {
+        let (_, recipe, _) = checks.asked.take().unwrap();
+        let refreshes = match checks.answers.iter().position(|a| a.recipe == recipe) {
             Some(i) => checks.answers.remove(i).refreshes + 1,
             None => 0,
         };
@@ -1688,7 +1675,7 @@ impl Game<'_> {
             checks.answers.remove(0);
         }
         checks.answers.push(CheckAnswer {
-            display_id,
+            recipe,
             at: Instant::now(),
             refreshes,
             check: RecipeTransferCheck {
@@ -2340,15 +2327,15 @@ mod request_generation_tests {
     #[test]
     fn delayed_answers_cannot_match_inventory_changes_or_retries() {
         let mut checks = TransferChecks::default();
-        let first = checks.ask(42, Instant::now()).unwrap();
+        let first = checks.ask("minecraft:stick", Instant::now()).unwrap();
         checks = TransferChecks::default(); // Inventory change clears the cache.
-        let second = checks.ask(42, Instant::now()).unwrap();
+        let second = checks.ask("minecraft:stick", Instant::now()).unwrap();
         assert_ne!(first, second);
-        let retry = checks.ask(42, Instant::now()).unwrap();
+        let retry = checks.ask("minecraft:stick", Instant::now()).unwrap();
         assert_ne!(second, retry);
         assert_eq!(
-            checks.asked.map(|(tag, id, _)| (tag, id)),
-            Some((retry, 42))
+            (checks.asked.as_ref()).map(|(tag, id, _)| (*tag, id.as_str())),
+            Some((retry, "minecraft:stick"))
         );
     }
 }

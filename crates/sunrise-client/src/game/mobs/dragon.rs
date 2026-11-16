@@ -3375,7 +3375,9 @@ impl Game<'_> {
             else {
                 return true;
             };
-            let bar = bar.try_into_api().unwrap();
+            let Ok(bar) = bar.try_into_api() else {
+                return true;
+            };
             let mut cancel = false;
             self.native_customize_boss_event_progress(
                 &bar,

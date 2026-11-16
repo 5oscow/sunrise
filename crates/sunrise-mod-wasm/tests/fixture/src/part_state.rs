@@ -110,6 +110,11 @@ impl BlockEntityPartState for Counter {
 }
 
 pub fn register(registrar: &mut dyn Registrar) {
+    for name in ["part_state_count", "part_state_mark", "part_state_held"] {
+        registrar
+            .register_attachment_type(&format!("wasm_fixture:{name}"), false)
+            .unwrap();
+    }
     let kind = registrar
         .block_entity_type("part_state")
         .blocks(&["wasm_fixture:part_state"])

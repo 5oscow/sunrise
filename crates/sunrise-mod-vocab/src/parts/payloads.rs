@@ -101,15 +101,14 @@ impl PayloadReceiver {
         self.call("payload work", || work.run(context))?
     }
     fn call<T>(&self, operation: &'static str, call: impl FnOnce() -> T) -> Result<T, String> {
-        if !self.enabled() {
-            return Err("payload owner is disabled".into());
-        }
-        let _guard = crate::mark_mod(self.owner, operation);
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(call)).map_err(|_| {
-            self.panicked
-                .store(true, std::sync::atomic::Ordering::Release);
-            "payload callback panicked; it is disabled".into()
-        })
+        crate::callback_owner::call(
+            self.owner,
+            self.owner_index,
+            &self.panicked,
+            "payload",
+            operation,
+            call,
+        )
     }
 }
 

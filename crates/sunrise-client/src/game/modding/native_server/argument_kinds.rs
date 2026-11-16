@@ -8,7 +8,8 @@ use std::{
     sync::{Arc, Mutex, OnceLock},
 };
 use sunrise_client::command::{
-    CommandError, Dispatcher, NodeKind, Range, Reader, args::Coordinates, snbt,
+    CommandError, Dispatcher, MAX_SUGGESTION_TEXT, MAX_SUGGESTION_TOOLTIP, NodeKind, Range, Reader,
+    args::Coordinates, snbt,
 };
 
 /// The argument kinds a native usage may name, each with a [`parser`]; `resource:<registry>`
@@ -289,6 +290,54 @@ fn suggestion_refusal(
     })
 }
 
+/// Ask a mod's declared provider for one argument: the request the engine builds from what its
+/// dispatcher parsed, and the answer as the engine's suggestions. A panic answers no suggestions
+/// and is logged against the argument type; nothing is kept between two requests.
+fn provider_suggestions(
+    provider: &Arc<dyn mod_api::SuggestionProvider>,
+    id: &str,
+    reg: &sunrise_client::command::Registries,
+    prefix: &str,
+    arguments: &[sunrise_client::command::ParsedArgument],
+) -> Vec<sunrise_client::command::CustomSuggestion> {
+    let request = mod_api::SuggestionRequest::new(
+        prefix,
+        arguments
+            .iter()
+            .map(|argument| {
+                mod_api::TypedArgument::new(argument.name.clone(), argument.text.clone())
+            })
+            .collect(),
+        reg.sender.as_ref().map(|sender| {
+            mod_api::__private::game::command_sender(
+                sender.uuid,
+                sender.name.clone(),
+                mod_api::PermissionLevel::from_level(reg.permission.into()),
+            )
+        }),
+    );
+    let answered =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| provider.suggest(&request)));
+    match answered {
+        Ok(reply) => reply
+            .suggestions
+            .into_iter()
+            .map(|suggestion| sunrise_client::command::CustomSuggestion {
+                text: suggestion.text,
+                tooltip: suggestion.tooltip,
+                // The provider answers whole-prefix completions: no replacement offset.
+                replace_start: None,
+            })
+            .collect(),
+        Err(_) => {
+            eprintln!(
+                "mod command argument type {id} suggestion provider panicked; no suggestions"
+            );
+            Vec::new()
+        }
+    }
+}
+
 /// The dispatcher type of one validated tree node: a vanilla kind, or the mod's registered
 /// argument type with its parser and suggestions.
 pub(super) fn argument_type(node: &Value, arguments: &CommandArguments) -> ArgType {
@@ -305,13 +354,26 @@ pub(super) fn argument_type(node: &Value, arguments: &CommandArguments) -> ArgTy
         let parse = argument.clone();
         let suggest = argument.clone();
         let kind_id = id.to_owned();
+        // Read once per tree, like `kind()`: the tree keeps the declaration, not the mod code.
+        let provider = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            argument.suggestion_provider()
+        })) {
+            Ok(provider) => provider,
+            Err(_) => {
+                eprintln!(
+                    "mod command argument type {id} panicked declaring its suggestion provider; \
+                     its arguments complete by `suggest`"
+                );
+                None
+            }
+        };
         // Use the validated tree property rather than calling mod code again.
         let kind = if node["properties"]["type"] == "greedy" {
             sunrise_client::command::CustomArgumentKind::Greedy
         } else {
             sunrise_client::command::CustomArgumentKind::Word
         };
-        return ArgType::Custom(sunrise_client::command::CustomArgument::new(
+        let custom = sunrise_client::command::CustomArgument::new(
             id,
             kind,
             move |input| {
@@ -338,7 +400,7 @@ pub(super) fn argument_type(node: &Value, arguments: &CommandArguments) -> ArgTy
                 // Suggestions use STRING_UTF8 (Java UTF-16 length). Tooltips are
                 // literal NBT strings, whose modified UTF-8 byte length is unsigned u16.
                 if results.iter().any(|s| {
-                    s.text.encode_utf16().count() > 32767
+                    s.text.encode_utf16().count() > MAX_SUGGESTION_TEXT
                         || s.tooltip.as_ref().is_some_and(|tip| {
                             tip.encode_utf16()
                                 .map(|unit| match unit {
@@ -347,7 +409,7 @@ pub(super) fn argument_type(node: &Value, arguments: &CommandArguments) -> ArgTy
                                     _ => 3,
                                 })
                                 .sum::<usize>()
-                                > 65535
+                                > MAX_SUGGESTION_TOOLTIP
                         })
                 }) {
                     eprintln!("mod command argument completion exceeds the protocol string limit");
@@ -371,7 +433,17 @@ pub(super) fn argument_type(node: &Value, arguments: &CommandArguments) -> ArgTy
                     })
                     .collect()
             },
-        ));
+        );
+        return match provider {
+            Some(provider) => {
+                let id: Arc<str> = id.into();
+                let named = id.clone();
+                ArgType::Custom(custom.with_provider(move |reg, prefix, arguments| {
+                    provider_suggestions(&provider, &named, reg, prefix, arguments)
+                }))
+            }
+            None => ArgType::Custom(custom),
+        };
     }
     if node["parser"] == "minecraft:vec3" && node[UNCENTERED] == true {
         return ArgType::Vec3 { center: false };

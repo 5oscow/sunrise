@@ -79,7 +79,9 @@ before use, including count and components. Cancellation ends further teleport
 attempts, not consumption. Fox callbacks run before that fox's living AI/movement
 and before the next mob ticks, with the full server host. Listener changes to an
 actor's item, position or eligibility survive rather than being overwritten by a
-stale teleport decision.
+stale teleport decision. A consumed stack the API can't carry, such as a saved item
+whose id isn't registered, isn't heard: the listeners aren't called and the teleport
+goes on as vanilla's.
 
 #### Item use lifecycle (native and wasm)
 

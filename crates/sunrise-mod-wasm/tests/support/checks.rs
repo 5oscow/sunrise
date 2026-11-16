@@ -52,7 +52,7 @@ pub fn check() {
 }
 
 fn __fnr_read_slot_6() -> Option<fn(u32, &u32) -> u32> {
-    let pointer = crate::__REPLACE[6].load(std::sync::atomic::Ordering::Relaxed);
+    let pointer = crate::__REPLACE[6].load(std::sync::atomic::Ordering::Acquire);
     if pointer.is_null() {
         None
     } else {
@@ -60,7 +60,7 @@ fn __fnr_read_slot_6() -> Option<fn(u32, &u32) -> u32> {
     }
 }
 fn __fnr_read_body_6() -> Option<fn(u32, &u32) -> u32> {
-    let pointer = crate::__REPLACE[7].load(std::sync::atomic::Ordering::Relaxed);
+    let pointer = crate::__REPLACE[7].load(std::sync::atomic::Ordering::Acquire);
     if pointer.is_null() {
         None
     } else {
