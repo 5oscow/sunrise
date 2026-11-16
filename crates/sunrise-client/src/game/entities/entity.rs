@@ -542,6 +542,7 @@ pub(in crate::game) struct ItemInside<'a, 'g> {
 }
 
 impl sunrise_client::block_contact::InsideWalk for ItemInside<'_, '_> {
+    type Effects = mod_api::InsideEffects;
     type Error = ();
     fn bounds_at(&self, at: Vec3) -> Aabb {
         let b = self.item.bounds();
@@ -596,6 +597,7 @@ pub(in crate::game) struct ProjectileInside<'a, 'g> {
 }
 
 impl sunrise_client::block_contact::InsideWalk for ProjectileInside<'_, '_> {
+    type Effects = mod_api::InsideEffects;
     type Error = ();
     fn bounds_at(&self, at: Vec3) -> Aabb {
         let b = self.shot.bounds();
