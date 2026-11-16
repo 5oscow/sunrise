@@ -89,7 +89,7 @@ pub trait Registry: Send + Sync {
         ctx: &LootContext<'_>,
         random: &mut dyn RollRandom,
         tags: &dyn LootTags,
-        stack: LootStack,
+        stack: &LootStack,
     ) -> Result<LootStack, String>;
     fn test(
         &self,
@@ -103,15 +103,42 @@ pub trait Registry: Send + Sync {
 
 /// One data generation retains its codecs and their owning code stores.
 #[derive(Clone, Default)]
-pub struct Types(pub Option<Arc<dyn Registry>>);
+pub struct Types {
+    registry: Option<Arc<dyn Registry>>,
+    warned: Arc<[std::sync::Mutex<HashSet<String>>; 2]>,
+}
 impl Types {
+    pub fn new(registry: Arc<dyn Registry>) -> Self {
+        Self {
+            registry: Some(registry),
+            ..Self::default()
+        }
+    }
+    /// Report a callback refusal once per registry type in this retained generation.
+    /// Cloned snapshots share the gate; preparing a new generation starts a new gate.
+    pub fn warn_once(&self, kind: &str, function: bool, reason: &str) {
+        let first = {
+            let mut warned = self.warned[usize::from(function)]
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if warned.contains(kind) {
+                false
+            } else {
+                warned.insert(kind.to_owned())
+            }
+        };
+        if first {
+            let category = if function { "function" } else { "condition" };
+            log::warn!("loot {category} type {kind}: {reason}");
+        }
+    }
     pub fn contains(&self, kind: &str, function: bool) -> bool {
-        self.0
+        self.registry
             .as_ref()
             .is_some_and(|registry| registry.contains(kind, function))
     }
     pub fn conditional(&self, kind: &str) -> bool {
-        self.0
+        self.registry
             .as_ref()
             .is_none_or(|registry| registry.conditional(kind))
     }
@@ -122,9 +149,9 @@ impl Types {
         ctx: &LootContext<'_>,
         random: &mut dyn RollRandom,
         tags: &dyn LootTags,
-        stack: LootStack,
+        stack: &LootStack,
     ) -> Result<LootStack, String> {
-        self.0
+        self.registry
             .as_ref()
             .ok_or_else(|| format!("unknown loot function type {kind}"))?
             .apply(kind, data, ctx, random, tags, stack)
@@ -137,7 +164,7 @@ impl Types {
         random: &mut dyn RollRandom,
         tags: &dyn LootTags,
     ) -> Result<bool, String> {
-        self.0
+        self.registry
             .as_ref()
             .ok_or_else(|| format!("unknown loot condition type {kind}"))?
             .test(kind, data, ctx, random, tags)
@@ -277,7 +304,7 @@ impl Walker<'_> {
         if !builtin(kind, function) {
             let registry = self
                 .types
-                .0
+                .registry
                 .as_ref()
                 .filter(|r| r.contains(kind, function))
                 .ok_or_else(|| invalid(path, kind, "unknown loot type"))?;
@@ -441,7 +468,7 @@ impl<R: sunrise_core::random::RandomSource> super::Context<'_, R> {
         {
             Ok(value) => value,
             Err(reason) => {
-                log::warn!("loot condition type {kind}: {reason}");
+                self.data.types.warn_once(kind, false, &reason);
                 false
             }
         }
@@ -456,17 +483,14 @@ impl<R: sunrise_core::random::RandomSource> super::Context<'_, R> {
             return stack;
         }
         let snapshot = self.roll_facts(0);
-        match self.data.types.apply(
-            kind,
-            data,
-            &snapshot,
-            &mut self.random,
-            self.data,
-            stack.clone(),
-        ) {
+        match self
+            .data
+            .types
+            .apply(kind, data, &snapshot, &mut self.random, self.data, &stack)
+        {
             Ok(value) => value,
             Err(reason) => {
-                log::warn!("loot function type {kind}: {reason}");
+                self.data.types.warn_once(kind, true, &reason);
                 stack
             }
         }

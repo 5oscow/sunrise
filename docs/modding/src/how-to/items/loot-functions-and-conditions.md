@@ -50,9 +50,10 @@ A function's `apply` receives its entry, the current owned `LootStack` and a sco
 `test` receives its entry and that context, returning `Result<bool, String>`.
 The result allows a refused resource call to be diagnosed, not mistaken for a
 successful edit. A function's rejected output leaves its preceding stack intact;
-a condition call failure is diagnosed and does not pass.
+a condition call failure is diagnosed and does not pass. Callback failures warn once
+per type id in each retained data generation, not once per roll.
 
-The context supplies a read-only `Host`, optional facts through `snapshot()`,
+The context supplies optional facts through `snapshot()`,
 authoritative tags through `tags()`, and `random()`. See [Reading tags](loot-tags.md).
 Use only that random source: it is the evaluator's actual selected stream, not a
 new generator seeded from a snapshot. Reading facts consumes no random; the

@@ -2200,7 +2200,7 @@ impl<R: RandomSource> LootContext<'_, R> {
                 .location
                 .and_then(|location| location(c))
                 .unwrap_or(true),
-            // A mod's own kind: the condition hook answers.
+            // A registered condition answers using the current roll context.
             k if !c.is_null() && k.contains(':') && !k.starts_with("minecraft:") => {
                 if !self.items.loot_types.contains(k, false) {
                     return false;
@@ -2209,7 +2209,7 @@ impl<R: RandomSource> LootContext<'_, R> {
                 match self.items.loot_types.test(k, c, &ctx, random, self.items) {
                     Ok(holds) => holds,
                     Err(reason) => {
-                        log::warn!("loot condition type {k}: {reason}");
+                        self.items.loot_types.warn_once(k, false, &reason);
                         false
                     }
                 }
@@ -2611,16 +2611,13 @@ impl<R: RandomSource> LootContext<'_, R> {
                         &ctx,
                         self.items,
                         stack,
-                        |kind, data, ctx, stack| match self.items.loot_types.apply(
-                            kind,
-                            data,
-                            ctx,
-                            random,
-                            self.items,
-                            stack.clone(),
-                        ) {
+                        |kind, data, ctx, stack| match self
+                            .items
+                            .loot_types
+                            .apply(kind, data, ctx, random, self.items, stack)
+                        {
                             Ok(candidate) => *stack = candidate,
-                            Err(reason) => log::warn!("loot function type {kind}: {reason}"),
+                            Err(reason) => self.items.loot_types.warn_once(kind, true, &reason),
                         },
                     );
                 }

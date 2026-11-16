@@ -25,9 +25,9 @@ impl sunrise_world::loot::types::Registry for QueryCodec {
         _: &sunrise_world::loot::LootContext<'_>,
         _: &mut dyn sunrise_world::loot::types::RollRandom,
         _: &dyn sunrise_world::loot::LootTags,
-        stack: sunrise_world::loot::LootStack,
+        stack: &sunrise_world::loot::LootStack,
     ) -> std::result::Result<sunrise_world::loot::LootStack, String> {
-        Ok(stack)
+        Ok(stack.clone())
     }
     fn test(
         &self,
@@ -45,7 +45,7 @@ impl sunrise_world::loot::types::Registry for QueryCodec {
 }
 fn data(tables: Vec<(&str, Value)>) -> Items {
     let mut items = Items::for_tests(HashMap::new());
-    items.loot_types = sunrise_world::loot::types::Types(Some(Arc::new(QueryCodec)));
+    items.loot_types = sunrise_world::loot::types::Types::new(Arc::new(QueryCodec));
     items.loot = Arc::new(tables.into_iter().map(|(k, v)| (k.into(), v)).collect());
     items
 }

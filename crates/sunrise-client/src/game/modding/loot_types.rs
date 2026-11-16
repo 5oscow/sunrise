@@ -13,10 +13,10 @@ use sunrise_world::loot::{
 
 pub(crate) fn capture() -> Types {
     let (functions, conditions) = mod_api::__private::loot_type_declarations();
-    Types(Some(Arc::new(Codecs {
+    Types::new(Arc::new(Codecs {
         functions: functions.into_iter().collect(),
         conditions: conditions.into_iter().collect(),
-    })))
+    }))
 }
 struct Codecs {
     functions: HashMap<String, Arc<dyn ModLootFunction>>,
@@ -79,7 +79,7 @@ impl Registry for Codecs {
         ctx: &loot::LootContext<'_>,
         random: &mut dyn RollRandom,
         tags: &dyn loot::LootTags,
-        stack: loot::LootStack,
+        stack: &loot::LootStack,
     ) -> Result<loot::LootStack, String> {
         let codec = self
             .functions
@@ -124,18 +124,12 @@ impl Registry for Codecs {
         codec.test(&LootEntryData::new(data.clone())?, &mut context)
     }
 }
-struct ReadHost;
-impl mod_api::Host for ReadHost {}
-mod_api::impl_host_areas!(ReadHost);
 struct Context<'a> {
     snapshot: mod_api::LootContext,
     random: &'a mut dyn RollRandom,
     tags: crate::game::loot_tags::LootTags<'a>,
 }
 impl mod_api::LootTypeContext for Context<'_> {
-    fn host(&self) -> &dyn mod_api::Host {
-        &ReadHost
-    }
     fn snapshot(&self) -> mod_api::LootContext {
         self.snapshot.clone()
     }

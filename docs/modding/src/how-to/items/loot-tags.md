@@ -3,7 +3,7 @@
 Registered `ModLootFunction` and `ModLootCondition` codecs read
 `LootTypeContext::tags() -> &dyn Tags` alongside their owned context and candidate
 snapshots. This is a read-only view of the merged tags used by the current loot
-evaluator; the context separately supplies a read-only `Host`.
+evaluator. The context supplies only its snapshot, tags and selected random.
 
 Resolve an `Identifier` with `context.tags().key(&id)`, retain the resulting `TagKey`,
 and call `is_in_tag(item, tag)` for item membership. `items(tag)`, `blocks(tag)`

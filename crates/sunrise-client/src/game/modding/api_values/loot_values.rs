@@ -234,7 +234,7 @@ mod tests {
             return;
         }
         let mut random = sunrise_core::random::LegacyRandom::new(0);
-        if let Ok(candidate) = types.apply(kind, data, ctx, &mut random, tags, stack.clone()) {
+        if let Ok(candidate) = types.apply(kind, data, ctx, &mut random, tags, stack) {
             *stack = candidate;
         }
     }

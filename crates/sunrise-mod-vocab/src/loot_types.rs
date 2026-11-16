@@ -1,6 +1,6 @@
 //! Static, unsynced loot function and condition map-codec registries.
 use crate::wire::{Reader, Wire, WireError, Writer};
-use crate::{Host, Identifier, LootContext, LootStack, RandomSource, Tags};
+use crate::{Identifier, LootContext, LootStack, RandomSource, Tags};
 use std::sync::Arc;
 #[path = "loot_types/owned.rs"]
 pub(crate) mod owned;
@@ -26,11 +26,9 @@ impl LootEntryData {
     }
 }
 
-/// Read-only world access and the actual random of one active loot evaluation.
+/// Facts, tags and the actual random of one active loot evaluation.
 /// This borrow cannot be retained by a codec. Snapshot reads consume no random.
 pub trait LootTypeContext {
-    /// Read-only host; no server mutation capability is exposed.
-    fn host(&self) -> &dyn Host;
     /// Optional parameters, level facts, luck and the set-once queried table id.
     fn snapshot(&self) -> LootContext;
     /// Authoritative merged tags of this evaluation.

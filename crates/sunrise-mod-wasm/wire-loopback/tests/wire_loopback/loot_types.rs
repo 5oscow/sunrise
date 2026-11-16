@@ -45,9 +45,6 @@ impl ModLootCondition for Codec {
         Ok(context.random().next_int_bound(10) < 5)
     }
 }
-struct Host;
-impl mod_api::Host for Host {}
-mod_api::impl_host_areas!(Host);
 struct Tags;
 impl mod_api::Tags for Tags {
     fn key(&self, id: &mod_api::Identifier) -> Option<mod_api::TagKey> {
@@ -69,9 +66,6 @@ impl mod_api::Tags for Tags {
 }
 struct Context(mod_api::LegacyRandomSource);
 impl LootTypeContext for Context {
-    fn host(&self) -> &dyn mod_api::Host {
-        &Host
-    }
     fn tags(&self) -> &dyn mod_api::Tags {
         &Tags
     }

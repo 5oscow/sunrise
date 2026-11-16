@@ -19,9 +19,9 @@ impl loot::types::Registry for QueryCodec {
         _: &LootContext<'_>,
         _: &mut dyn loot::types::RollRandom,
         _: &dyn LootTags,
-        stack: LootStack,
+        stack: &LootStack,
     ) -> Result<LootStack, String> {
-        Ok(stack)
+        Ok(stack.clone())
     }
     fn test(
         &self,
@@ -51,7 +51,7 @@ pub(crate) fn install() {
     static INIT: std::sync::Once = std::sync::Once::new();
     INIT.call_once(|| {
         assert!(
-            loot::types::install(|| loot::types::Types(Some(std::sync::Arc::new(QueryCodec))))
+            loot::types::install(|| loot::types::Types::new(std::sync::Arc::new(QueryCodec)))
                 .is_ok()
         );
         assert!(
