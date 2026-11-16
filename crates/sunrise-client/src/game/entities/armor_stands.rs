@@ -3016,3 +3016,43 @@ mod postbaseline_lodestone_controls {
         );
     }
 }
+
+#[cfg(test)]
+mod setup_anim_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static HEARD: AtomicUsize = AtomicUsize::new(0);
+    struct Listener;
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for Listener {
+        fn humanoid_setup_anim(
+            &self,
+            _: &dyn mod_api::ClientHost,
+            _: &mut mod_api::HumanoidSetupAnimEvent<'_>,
+        ) {
+            HEARD.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// Armor stands pose from their saved rotations, not the humanoid
+    /// setupAnim seam, so drawing one never dispatches `humanoid_setup_anim`.
+    #[test]
+    #[ignore = "daily"]
+    fn drawing_an_armor_stand_does_not_fire_humanoid_setup_anim() {
+        let mods = vec![mod_api::ModEntry::new("pose", Box::new(Listener))].into();
+        mod_platform::testing::with_mods(mods, || {
+            assert!(mod_api::__private::listened(
+                mod_api::HookId::HumanoidSetupAnim
+            ));
+            super::super::native_entity_refs::tests::with_client_game(|game| {
+                let mut stand = ArmorStand::new(0, Vec3::ZERO, 0.0);
+                stand.show_arms = true;
+                let mut verts = Vec::new();
+                game.armor_stand_vertices(&stand, glam::Mat4::IDENTITY, 0xf0f0, None, &mut verts);
+                assert!(!verts.is_empty());
+            });
+        });
+        assert_eq!(HEARD.load(Ordering::Relaxed), 0);
+    }
+}

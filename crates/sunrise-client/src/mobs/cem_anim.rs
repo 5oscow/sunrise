@@ -943,6 +943,7 @@ mod tests {
             swing: 0.0,
             baby: true,
             partial: 0.25,
+            observer: None,
         };
         let model = bone("root", vec![]);
         let animation = animate(
@@ -981,7 +982,7 @@ mod tests {
     }
 
     /// A state with every value at rest.
-    fn still() -> State {
+    fn still() -> State<'static> {
         State {
             pos: 0.0,
             speed: 0.0,
@@ -991,6 +992,7 @@ mod tests {
             swing: 0.0,
             baby: false,
             partial: 0.0,
+            observer: None,
         }
     }
 

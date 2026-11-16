@@ -17,6 +17,21 @@ use sunrise_core::geometry::trig::Mth;
 mod invisible_body;
 pub use invisible_body::render_seen_invisible;
 
+/// Immutable resources and the optional frame-local gameplay animation observer.
+/// Ordinary tools and probes use MobData directly, with no callbacks.
+pub trait RenderDataSource {
+    fn mob_data(&self) -> &MobData;
+    fn humanoid_setup(&self) -> Option<&dyn anim::HumanoidSetup> {
+        None
+    }
+}
+
+impl RenderDataSource for MobData {
+    fn mob_data(&self) -> &MobData {
+        self
+    }
+}
+
 /// A texture lookup into the shared atlas (name without namespace -> uv rect).
 pub type Atlas<'a> = &'a dyn Fn(&str) -> Option<[f32; 4]>;
 
@@ -1455,7 +1470,7 @@ pub fn render(
     camera: glam::DVec3,
     atlas: Atlas,
     light: u32,
-    data: &MobData,
+    data: &dyn RenderDataSource,
     out: &mut Vec<Vertex>,
 ) {
     render_with(m, alpha, camera, atlas, light, data, &[], out);
@@ -1470,7 +1485,7 @@ pub fn render_with(
     camera: glam::DVec3,
     atlas: Atlas,
     light: u32,
-    data: &MobData,
+    data: &dyn RenderDataSource,
     extra: &[(&Part, [f32; 4], u32, u32, bool)],
     out: &mut Vec<Vertex>,
 ) {
@@ -1499,7 +1514,7 @@ pub fn render_with_hidden(
     camera: glam::DVec3,
     atlas: Atlas,
     light: u32,
-    data: &MobData,
+    data: &dyn RenderDataSource,
     extra: &[(&Part, [f32; 4], u32, u32, bool)],
     hidden: mod_api::HiddenParts,
     mut parts: Option<&mut Option<mod_api::PosedParts>>,
@@ -1559,7 +1574,7 @@ pub fn render_skinned(
     camera: glam::DVec3,
     atlas: Atlas,
     light: u32,
-    data: &MobData,
+    data: &dyn RenderDataSource,
     hidden: mod_api::HiddenParts,
     parts: Option<&mut Option<mod_api::PosedParts>>,
     out: &mut Vec<Vertex>,
@@ -1606,15 +1621,15 @@ pub fn cape(
     base: glam::Mat4,
     uv: [f32; 4],
     light: u32,
-    data: &MobData,
+    data: &dyn RenderDataSource,
     out: &mut Vec<Vertex>,
 ) {
     let Some(model) = m.kind.layer("player#cape") else {
         return;
     };
-    let s = anim::state(m, alpha);
+    let s = anim::state(m, alpha).observed(m, data.humanoid_setup());
     let mut poses = Poses::new(model);
-    anim::setup(m, &s, &mut poses, &data.animations);
+    anim::setup(m, &s, &mut poses, &data.mob_data().animations);
     let a = f64::from(alpha);
     let at = [
         m.previous.x + (m.position.x - m.previous.x) * a,
@@ -1648,7 +1663,7 @@ pub fn ears(
     base: glam::Mat4,
     uv: [f32; 4],
     light: u32,
-    data: &MobData,
+    data: &dyn RenderDataSource,
     out: &mut Vec<Vertex>,
 ) {
     if m.is_invisible() {
@@ -1657,9 +1672,9 @@ pub fn ears(
     let Some(model) = m.kind.layer("player#ears") else {
         return;
     };
-    let s = anim::state(m, alpha);
+    let s = anim::state(m, alpha).observed(m, data.humanoid_setup());
     let mut poses = Poses::new(model);
-    anim::setup(m, &s, &mut poses, &data.animations);
+    anim::setup(m, &s, &mut poses, &data.mob_data().animations);
     // LivingEntityRenderer.getOverlayCoords(state, 0.0F).
     draw(
         model,
@@ -1720,7 +1735,7 @@ pub fn stuck_in_body(
     id: i32,
     alpha: f32,
     camera: glam::DVec3,
-    data: &MobData,
+    data: &dyn RenderDataSource,
     count: i32,
     on_surface: bool,
     item: &Part,
@@ -1733,7 +1748,7 @@ pub fn stuck_in_body(
         return;
     }
     let base = base_transform(m, alpha, camera);
-    let s = anim::state(m, alpha);
+    let s = anim::state(m, alpha).observed(m, data.humanoid_setup());
     let (model_key, _) = body(m);
     let model = m
         .kind
@@ -1741,7 +1756,7 @@ pub fn stuck_in_body(
         .cloned()
         .unwrap_or_else(|| m.kind.model.clone());
     let mut poses = Poses::new(&model);
-    anim::setup(m, &s, &mut poses, &data.animations);
+    anim::setup(m, &s, &mut poses, &data.mob_data().animations);
     let mut random = LegacyRandom::new(i64::from(id));
     for _ in 0..count {
         let name = BODY_PARTS[random.next_int_bound(BODY_PARTS.len() as i32).unwrap_or(0) as usize];
@@ -1846,7 +1861,7 @@ pub fn render_layers(
     camera: glam::DVec3,
     atlas: Atlas,
     light: u32,
-    data: &MobData,
+    data: &dyn RenderDataSource,
     extra: &[(&Part, [f32; 4], u32, u32, bool)],
     parts: Option<&mut Option<mod_api::PosedParts>>,
     out: &mut Vec<Vertex>,
@@ -1875,7 +1890,7 @@ pub fn render_posed(
     origin: glam::Mat4,
     atlas: Atlas,
     light: u32,
-    data: &MobData,
+    data: &dyn RenderDataSource,
     out: &mut Vec<Vertex>,
 ) {
     let base = base_transform_at(m, alpha, origin);
@@ -1908,7 +1923,7 @@ fn cem_key(model_key: &str) -> &str {
 /// the atlas lacks it, and only the layer a `.jem` was made for takes it, `paints_with_jem`),
 /// and the warden's glowing layers (whether they glow this frame or not). Random textures
 /// choose a variant for each.
-pub fn drawn_textures(m: &Mob, data: &MobData) -> Vec<String> {
+pub fn drawn_textures(m: &Mob, data: &dyn RenderDataSource) -> Vec<String> {
     fn push(names: &mut Vec<String>, custom: Option<&super::cem::CemLayer>, vanilla: String) {
         if let Some(texture) = custom.and_then(|c| c.texture_for(&vanilla)) {
             names.push(texture.to_owned());
@@ -1916,6 +1931,7 @@ pub fn drawn_textures(m: &Mob, data: &MobData) -> Vec<String> {
         names.push(vanilla);
     }
     let cem = data
+        .mob_data()
         .cem
         .read()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -1972,11 +1988,12 @@ fn paints_with_jem(layers: &[Layer], i: usize, body: [&str; 2]) -> bool {
 fn posed_body(
     m: &Mob,
     alpha: f32,
-    data: &MobData,
+    data: &dyn RenderDataSource,
 ) -> (std::sync::Arc<Part>, Poses, Vec<(String, String, [f32; 3])>) {
-    let s = anim::state(m, alpha);
+    let s = anim::state(m, alpha).observed(m, data.humanoid_setup());
     let (model_key, _) = body(m);
     let cem = data
+        .mob_data()
         .cem
         .read()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -1990,7 +2007,7 @@ fn posed_body(
             .unwrap_or_else(|| m.kind.model.clone()),
     };
     let mut poses = Poses::new(&model);
-    anim::setup(m, &s, &mut poses, &data.animations);
+    anim::setup(m, &s, &mut poses, &data.mob_data().animations);
     if let Some(c) = custom
         && let Some(animation) = &c.animation
     {
@@ -2071,7 +2088,7 @@ fn render_visible(
     base: glam::Mat4,
     atlas: Atlas,
     light: u32,
-    data: &MobData,
+    data: &dyn RenderDataSource,
     extra: &[(&Part, [f32; 4], u32, u32, bool)],
     // `submit`'s `tintedColor` to draw the body in, or `None` for its layers only.
     paint: Option<u32>,
@@ -2083,11 +2100,12 @@ fn render_visible(
     // The armour is a layer: none for a spectator.
     let extra = if layers_shown(m) { extra } else { &[] };
     let overlay = u32::from(red_overlay(m));
-    let s = anim::state(m, alpha);
+    let s = anim::state(m, alpha).observed(m, data.humanoid_setup());
     let (model_key, texture) = body(m);
     // The packs' custom entity models replace a layer's parts and maybe its texture. The read
     // guard, not a clone of the Arc: one uncontended lock per mob, nothing else without a pack.
     let cem = data
+        .mob_data()
         .cem
         .read()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -2109,10 +2127,12 @@ fn render_visible(
     // the atlas has it: the variant the mob wears, then its blink frame while it blinks (or
     // sleeps). The texture keeps its name for everything else.
     let random = data
+        .mob_data()
         .random_textures
         .read()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let blinks = data
+        .mob_data()
         .blinks
         .read()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -2138,6 +2158,7 @@ fn render_visible(
     // OptiFine emissive overlays: the drawn sprite's `_e`, at full brightness with the model's
     // shading, as OptiFine draws them.
     let emissive = data
+        .mob_data()
         .emissive
         .read()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -2149,7 +2170,7 @@ fn render_visible(
     };
     let mut poses = Poses::pooled();
     poses.reset(&model);
-    anim::setup(m, &s, &mut poses, &data.animations);
+    anim::setup(m, &s, &mut poses, &data.mob_data().animations);
     if let Some(animation) = body_animation {
         animation.run(m, &s, &mut poses);
     }
@@ -2319,7 +2340,7 @@ fn render_visible(
             layer_poses.copy_from(if type_hat_shown { body_poses } else { &poses });
         } else {
             layer_poses.reset(&part);
-            anim::setup(m, &s, &mut layer_poses, &data.animations);
+            anim::setup(m, &s, &mut layer_poses, &data.mob_data().animations);
             if let Some(animation) = custom.and_then(|c| c.animation.as_ref()) {
                 animation.run(m, &s, &mut layer_poses);
             }
@@ -2407,7 +2428,7 @@ fn render_visible(
         && let Some([u0, v0, u1, v1]) = atlas(texture)
     {
         layer_poses.reset(part);
-        anim::setup(m, &s, &mut layer_poses, &data.animations);
+        anim::setup(m, &s, &mut layer_poses, &data.mob_data().animations);
         // `RenderTypes.energySwirl`'s texture offset, as the sprite-local UV.
         let (du, dv) = (x_offset % 1.0, s.age * 0.01 % 1.0);
         let start = out.len();
@@ -2639,7 +2660,7 @@ pub fn part_transform(
     m: &Mob,
     alpha: f32,
     camera: glam::DVec3,
-    data: &MobData,
+    data: &dyn RenderDataSource,
     part: &str,
 ) -> Option<glam::Mat4> {
     let base = base_transform(m, alpha, camera);
@@ -2653,7 +2674,7 @@ pub fn held_to_eye_matrix(
     m: &Mob,
     alpha: f32,
     camera: glam::DVec3,
-    data: &MobData,
+    data: &dyn RenderDataSource,
     left: bool,
 ) -> Option<glam::Mat4> {
     use glam::{Mat4, Vec3};
@@ -2674,9 +2695,14 @@ pub fn held_to_eye_matrix(
 /// `FoxHeldItemLayer`: the item sits at the head's position under the render
 /// state's head roll, yaw and pitch (not the posed head's, which differ while
 /// it sleeps), pushed out to the mouth.
-fn fox_item_transform(m: &Mob, alpha: f32, camera: glam::DVec3, data: &MobData) -> glam::Mat4 {
+fn fox_item_transform(
+    m: &Mob,
+    alpha: f32,
+    camera: glam::DVec3,
+    data: &dyn RenderDataSource,
+) -> glam::Mat4 {
     use glam::{Mat4, Vec3};
-    let s = anim::state(m, alpha);
+    let s = anim::state(m, alpha).observed(m, data.humanoid_setup());
     let (model, mut poses, anchors) = posed_body(m, alpha, data);
     let head = *poses.get("head");
     let fox = super::fox::pose(m, alpha);
@@ -2729,7 +2755,7 @@ pub fn held_item_transform(
     m: &Mob,
     alpha: f32,
     camera: glam::DVec3,
-    data: &MobData,
+    data: &dyn RenderDataSource,
     left: bool,
 ) -> Option<glam::Mat4> {
     // PandaHoldsItemLayer: the main hand's item in its mouth.
@@ -2746,7 +2772,9 @@ pub fn held_item_transform(
     // pulled in as the dolphin pitches (up or down) toward 60 degrees.
     if m.species() == Species::Dolphin {
         return (!left).then(|| {
-            let pitch = anim::state(m, alpha).x_rot;
+            let pitch = anim::state(m, alpha)
+                .observed(m, data.humanoid_setup())
+                .x_rot;
             let percent = pitch.abs() / 60.0;
             let offset = if pitch < 0.0 {
                 glam::Vec3::new(0.0, 1.0 - percent * 0.5, -1.0 + percent * 0.5)
@@ -2760,7 +2788,7 @@ pub fn held_item_transform(
         return None;
     }
     let base = base_transform(m, alpha, camera);
-    let s = anim::state(m, alpha);
+    let s = anim::state(m, alpha).observed(m, data.humanoid_setup());
     let (model, poses, anchors) = posed_body(m, alpha, data);
     // WitchItemLayer.applyTranslation: a potion is held at the nose, any other
     // item as CrossedArmsItemLayer holds it; only the main hand's item is drawn.
