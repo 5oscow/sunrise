@@ -8,6 +8,8 @@ mod host;
 mod prepared;
 #[cfg(test)]
 mod prepared_tests;
+#[cfg(test)]
+mod protocol_pin;
 pub use host::{generate_coverage, generate_host};
 mod trait_roles;
 mod ty;
@@ -503,7 +505,30 @@ fn side_word(side: &crate::catalog::Side) -> &'static str {
     }
 }
 
-/// Names every method of the surface that crosses (see `surface::calls`).
+/// The name text of every call the surface names, by (owner as the wire writes it, method): what
+/// `surface.json` lists as each record's `call`.
+pub(crate) fn exported_calls(
+    surface: &mut Surface<'_>,
+    hooks: &[crate::catalog::Hook],
+) -> Result<std::collections::BTreeMap<(String, String), String>, String> {
+    let prepared: Vec<(String, String)> = hooks
+        .iter()
+        .filter_map(|hook| {
+            hook.prepared
+                .clone()
+                .map(|field| (hook.name.clone(), field))
+        })
+        .collect();
+    let names = call_names(surface, hooks, &prepared)?;
+    Ok(names
+        .by_method
+        .iter()
+        .map(|(key, name)| (key.clone(), name.text()))
+        .collect())
+}
+
+/// Names every method of the surface that crosses (see `surface::calls`), the calls a mod makes
+/// on objects it holds, and the entries of the prepared hooks.
 pub(super) fn call_names(
     surface: &mut Surface<'_>,
     hooks: &[crate::catalog::Hook],

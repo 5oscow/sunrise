@@ -186,7 +186,7 @@ macro_rules! sealed {
 }
 
 sealed!(
-    Method(MethodContract) { wasm_reason },
+    Method(MethodContract) { wasm_reason, call },
     Function(FunctionContract) { wasm_reason, paths },
     Macro(MacroContract) { paths },
     Field(FieldContract) {},
@@ -263,6 +263,7 @@ impl Hook {
             doc: doc.into(),
             engine,
             counterparts,
+            call: None,
             contract,
             fields,
         }

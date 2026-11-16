@@ -112,6 +112,9 @@ pub struct Hook {
     pub engine: HookEngine,
     #[serde(default, skip_serializing_if = "Counterparts::is_empty")]
     pub counterparts: Counterparts,
+    /// The name a built wasm mod exports a listener as ([`crate::call`]); outside the hash.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call: Option<String>,
     #[serde(flatten)]
     pub contract: HookContract,
     /// Its arguments and output as member records, `hook:<name>.<argument>`, in declaration
@@ -232,6 +235,10 @@ pub struct Method {
     /// Why it is not on wasm, when it is not; documentation, outside the hash.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wasm_reason: Option<String>,
+    /// The name a built wasm mod imports or exports this method as ([`crate::call`]), when it
+    /// crosses; outside the hash. Two builds' exports say offline whether a built mod loads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call: Option<String>,
     #[serde(flatten)]
     pub contract: MethodContract,
 }
