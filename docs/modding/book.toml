@@ -29,8 +29,8 @@ if sys.argv[1:2] == ["supports"]:
     sys.exit(0)
 context, book = json.load(sys.stdin)
 sys.path.insert(0, str(pathlib.Path(context["root"]).resolve().parents[1] / "tools"))
-import neoforge_counterparts as counterparts
-print(json.dumps(counterparts.preprocess(context, book)))
+import modding_hook_notes as notes
+print(json.dumps(notes.chapter(context, book, "counterparts", "NeoForge counterparts", "reference/neoforge-counterparts.md")))
 '"""
 before = ["concept-pages", "links"]
 

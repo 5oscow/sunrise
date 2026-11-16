@@ -38,7 +38,7 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, ExitCode};
 
-const USAGE: &str = "usage: cargo run -p xtask -- package BINARY OUTDIR | package-server ENGINE OUTDIR | mod-api [notes|coverage] | tokens | icons | perf-wasm | mixins-tool release | mixins-tool patch SOURCE | mixins-tool identity TARGET | sdk-index DIST COMMIT DATE [--nightly NAME] [--previous BUILD DIFF]";
+const USAGE: &str = "usage: cargo run -p xtask -- package BINARY OUTDIR | package-server ENGINE OUTDIR | mod-api [notes|counterparts|coverage] | tokens | icons | perf-wasm | mixins-tool release | mixins-tool patch SOURCE | mixins-tool identity TARGET | sdk-index DIST COMMIT DATE [--nightly NAME] [--previous BUILD DIFF]";
 
 /// What the release folder takes from the repository at HEAD, as `git archive` writes it.
 const ARCHIVED: [&str; 6] = [
@@ -65,6 +65,9 @@ fn main() -> ExitCode {
         }
         [task] if task == "mod-api" => mod_api::run(),
         [task, notes] if task == "mod-api" && notes == "notes" => mod_api::notes(),
+        [task, counterparts] if task == "mod-api" && counterparts == "counterparts" => {
+            mod_api::counterparts()
+        }
         [task, coverage] if task == "mod-api" && coverage == "coverage" => mod_api::coverage(),
         [task, dist, commit, date, options @ ..] if task == "sdk-index" => {
             sdk_index(Path::new(dist), commit, date, options)
