@@ -86,9 +86,9 @@ SIZE = (854, 480)
 SEED = '7'
 # 🤖 Agent: changes under these, and Markdown outside crates/, build no game binary, so the base can reuse the
 # change's. Not all of docs/: sunrise-port-pack embeds docs/modpacks/atm10-mods.csv. Not all of tools/ either:
-# sunrise-mod-api-gen generates Rust from tools/native-hook-fragments/ (BUILT_FROM_TOOLS).
+# Rust reads the pinned toolchain, the mixins patch and the mod vocabulary's layering state from there (BUILT_FROM_TOOLS).
 NO_BINARY = ('tools/', 'tests/', '.github/')
-BUILT_FROM_TOOLS = ('tools/native-hook-fragments/',)
+BUILT_FROM_TOOLS = ('tools/ci/rust-version', 'tools/mixins/', 'tools/layering/')
 BUILD = ['cargo', 'build', '--locked', '--profile', 'fast', '-p', 'sunrise-game', '-p', 'sunrise-client-lib', '--bins']
 # 🤖 Agent: Where the overworld scenes are built, high above seed 7's spawn, so terrain below hardly shows.
 X, Y, Z = 8, 160, 8

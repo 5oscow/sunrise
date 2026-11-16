@@ -22,8 +22,8 @@ except ImportError:
 
 SOURCES = [
     'crates/sunrise-client/src/game.rs',
-    'crates/sunrise-client/src/game/native_client_particles.rs',
-    'crates/sunrise-client/src/game/native_client_particles_fixture.rs',
+    'crates/sunrise-client/src/game/modding/native_client_particles.rs',
+    'crates/sunrise-client/src/game/modding/native_client_particles_fixture.rs',
     'crates/sunrise-client-render/src/particles.rs',
     'native-hooks.json',  # Stamping moves the helper here and consumes its fragment.
     'tools/test_native_client_particles_parity.py',
