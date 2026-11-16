@@ -68,20 +68,25 @@ impl crate::prelude::ServicesServerHost for Double {
 }
 crate::impl_server_host_areas!(Double, except(services));
 impl Backend for Double {}
-impl crate::prelude::LevelsBackend for Double {
+impl crate::prelude::LevelEntitiesBackend for Double {
     fn level_online_players(&self, level: LevelRef) -> Option<Vec<PlayerRef>> {
         self.levels.get(&level).cloned()
     }
+}
+impl crate::prelude::LevelChunksBackend for Double {
     fn chunk_watchers(&self, _: ChunkRef) -> Option<Vec<PlayerRef>> {
         Some(self.watchers.clone())
     }
 }
-impl crate::prelude::EntitiesBackend for Double {
+impl crate::prelude::EntityPositionBackend for Double {
     fn entity_position(&self, entity: EntityRef) -> Option<[f64; 3]> {
         self.positions.get(&entity.id()).copied()
     }
 }
-crate::impl_backend_areas!(Double, except(levels, entities));
+crate::impl_backend_areas!(
+    Double,
+    except(level_entities, level_chunks, entity_position)
+);
 impl BackendMut for Double {}
 impl crate::prelude::PayloadsBackendMut for Double {
     fn player_send_payload(
