@@ -232,15 +232,17 @@ mod tests {
 
     /// A paused allay (a brain mob) and a paused zombie (a goal mob) run no
     /// AI step while their unpaused neighbours do; a flying mob's vertical
-    /// input is zeroed every paused tick, its move target kept. The witness
-    /// for the allay is `noActionTime`, cleared after warm-up. For the zombie,
-    /// Monster.aiStep also adds two per bright tick outside serverAiStep, so
-    /// the running goal's counters witness the pause independently of that
-    /// ambient increment: it neither ticks, stops nor restarts.
+    /// input is zeroed every paused tick, its move target kept. The zombie
+    /// retains a running goal without ticking, stopping or restarting it.
+    /// Its unpaused neighbour keeps ticking the same goal.
+    /// The Allay keeps its real Deliver behaviour and expiring Brain memories,
+    /// while its passive healing and duplication countdown still run.
     #[test]
     #[ignore = "daily"]
     fn a_paused_brain_or_goal_mob_runs_no_ai_step_and_holds_no_input() {
         use std::sync::atomic::{AtomicUsize, Ordering};
+        use sunrise_client::items::ItemStack;
+        use sunrise_client::mobs::allay;
         use sunrise_client::mobs::goals::{Cx, Goal};
 
         #[derive(Clone, Debug)]
@@ -281,23 +283,68 @@ mod tests {
                 add(game, 32, "minecraft:allay", Vec3::new(2.5, 67.0, 10.5)),
                 add(game, 33, "minecraft:zombie", Vec3::new(6.5, 65.0, 10.5)),
             ];
+            const NOTE: [i32; 3] = [12, 65, 2];
+            const LIKED_PLAYER: [i32; 4] = [1, 2, 3, 4];
+            let note = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:note_block")
+                .unwrap();
+            game.world.set(NOTE[0], NOTE[1], NOTE[2], note).unwrap();
+            let m = mob_mut(game, paused[0]);
+            allay::hear_noteblock(m, "minecraft:overworld", NOTE);
+            m.extra.allay.as_mut().unwrap().inventory = Some(ItemStack {
+                item: "minecraft:diamond".into(),
+                count: 1,
+                damage: 0,
+                extra: None,
+            });
             let counts = Arc::new(std::array::from_fn(|_| AtomicUsize::new(0)));
-            let zombie = mob_mut(game, paused[1]);
-            zombie.ai.goals.clear();
-            zombie.ai.targets.clear();
-            zombie.ai.goals.add(0, PauseProbe(Arc::clone(&counts)));
+            let thinking_counts = Arc::new(std::array::from_fn(|_| AtomicUsize::new(0)));
+            for (handle, counts) in [(paused[1], &counts), (thinking[1], &thinking_counts)] {
+                let zombie = mob_mut(game, handle);
+                zombie.ai.goals.clear();
+                zombie.ai.targets.clear();
+                zombie.ai.goals.add(0, PauseProbe(Arc::clone(counts)));
+            }
             let observed = || counts.each_ref().map(|count| count.load(Ordering::SeqCst));
+            let thinking_observed = || {
+                thinking_counts
+                    .each_ref()
+                    .map(|count| count.load(Ordering::SeqCst))
+            };
             tick(game, 1);
             assert_eq!(observed(), [1, 1, 0]);
+            assert_eq!(thinking_observed(), [1, 1, 0]);
             assert_eq!(
                 mob(game, paused[1]).ai.goals.running_names(),
                 vec!["PauseProbe"]
             );
+            let allay_running = mob(game, paused[0]).ai.goals.running_names();
+            assert!(
+                allay_running.contains(&"Deliver"),
+                "the real delivery starts"
+            );
             for handle in paused {
-                mob_mut(game, handle).ai.no_action_time = 0;
                 assert_eq!(handle.set_ai_paused(game, true), Ok(()));
             }
             let allay = paused[0];
+            {
+                let m = mob_mut(game, allay);
+                allay::like_player(m, LIKED_PLAYER);
+                let state = m.extra.allay.as_mut().unwrap();
+                state.liked_player_ttl = Some(2);
+                state.pickup_cooldown = Some(5);
+                m.extra.ints[2] = 7;
+                m.extra.egg_time = 40;
+                m.health = 8.0;
+            }
+            {
+                let m = mob_mut(game, thinking[0]);
+                allay::like_player(m, LIKED_PLAYER);
+                m.extra.allay.as_mut().unwrap().liked_player_ttl = Some(2);
+            }
             mob_mut(game, allay).ai.mov.set_wanted(2.5, 75.0, 2.5, 1.0);
             let wanted = mob(game, allay).ai.mov.wanted;
             for _ in 0..10 {
@@ -310,25 +357,50 @@ mod tests {
                     mob(game, paused[1]).ai.goals.running_names(),
                     vec!["PauseProbe"]
                 );
+                assert_eq!(
+                    mob(game, allay).ai.goals.running_names(),
+                    allay_running,
+                    "the real delivery behaviour is held"
+                );
             }
             let m = mob(game, allay);
             assert!(m.position.y < 67.5, "did not climb: {}", m.position.y);
             assert!(m.ai.mov.has_wanted(), "the move target is kept");
             assert_eq!(m.ai.mov.wanted, wanted);
-            assert_eq!(mob(game, allay).ai.no_action_time, 0, "no brain AI step");
+            let state = m.extra.allay.as_ref().unwrap();
+            assert_eq!(state.liked_player_ttl, Some(2));
+            assert!(m.extra.tame);
+            assert_eq!(m.extra.owner, Some(LIKED_PLAYER));
+            assert_eq!(state.noteblock.unwrap().pos, NOTE);
+            assert_eq!(m.extra.ints[2], 7);
+            assert_eq!(state.pickup_cooldown, Some(5));
+            let held = state.inventory.as_ref().unwrap();
+            assert_eq!(held.item.as_ref(), "minecraft:diamond");
+            assert_eq!(held.count, 1);
+            assert_eq!(m.extra.egg_time, 30, "duplication is passive");
+            assert_eq!(m.health, 9.0, "passive healing continues");
             assert_eq!(
-                mob(game, paused[1]).ai.no_action_time,
-                20,
-                "ten bright Monster.aiStep ticks, but no serverAiStep increment"
+                thinking_observed(),
+                [1, 11, 0],
+                "the unpaused goal keeps ticking without restarting"
             );
-            for handle in thinking {
-                let m = mob(game, handle);
-                assert!(m.ai.no_action_time >= 1, "{}: thinks", m.kind.id);
-            }
+            let thinking_allay = mob(game, thinking[0]);
+            assert!(!thinking_allay.extra.tame, "the unpaused memory expires");
+            assert_eq!(thinking_allay.extra.owner, None);
             for handle in paused {
                 assert_eq!(handle.set_ai_paused(game, false), Ok(()));
             }
-            tick(game, 3);
+            tick(game, 1);
+            let m = mob(game, allay);
+            assert_eq!(m.extra.allay.as_ref().unwrap().liked_player_ttl, Some(1));
+            assert_eq!(m.extra.owner, Some(LIKED_PLAYER));
+            assert_eq!(m.extra.ints[2], 6);
+            assert_eq!(allay::pickup_cooldown(m), Some(4));
+            assert!(m.ai.goals.running_names().contains(&"Deliver"));
+            tick(game, 2);
+            let m = mob(game, allay);
+            assert!(!m.extra.tame, "the resumed memory expires normally");
+            assert_eq!(m.extra.owner, None);
             assert_eq!(
                 observed(),
                 [1, 4, 0],
@@ -338,9 +410,7 @@ mod tests {
                 mob(game, paused[1]).ai.goals.running_names(),
                 vec!["PauseProbe"]
             );
-            for handle in paused {
-                assert!(mob(game, handle).ai.no_action_time >= 1, "resumed");
-            }
+            assert_eq!(thinking_observed(), [1, 14, 0]);
         });
     }
 

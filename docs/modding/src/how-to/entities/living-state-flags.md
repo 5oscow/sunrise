@@ -88,6 +88,9 @@ neither read nor written. The pause is saved with the mob as an attachment-style
 (another epoch's handle or no such entity), `Client`, `HeldOut` (a mob held out of the level for its own tick),
 `NoAiStep` (the dragon and its parts) or `NotAMob` (a player, an armor stand). None changes anything.
 
+For an Allay, the expiring liked-player memory, liked-note-block cooldown and item-pickup cooldown also
+stop during the pause. Passive healing, the duplication countdown, dancing and animation continue.
+
 ```rust
 // A spawner's movable no-AI mob: paused once, and still paused after a reload.
 if let Some(mob) = host.mob(entity) {

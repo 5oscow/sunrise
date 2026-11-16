@@ -510,17 +510,20 @@ pub fn travel(
     m.travel_flying_speeds(w, level, input, events, 0.02, 0.02, speed);
     true
 }
-/// `Allay.aiStep` / `tick`: healing, cooldowns, the hold and spin clocks.
+/// `Allay.aiStep` / `tick`: pause the Brain's memory clocks, not passive work.
 pub fn ai_step(m: &mut Mob, w: &MobWorld) {
-    tick_liked_player(m);
+    if !m.ai.ai_paused {
+        tick_liked_player(m);
+        // `AllayAi.initCoreActivity`: both cooldowns are Brain behaviours.
+        if m.extra.ints[2] > 0 {
+            m.extra.ints[2] -= 1;
+        }
+        // CountDownCooldownTicks stops and erases a nonpositive memory; a positive
+        // value reaches zero for one tick before that stop.
+        set_pickup_cooldown(m, pickup_cooldown(m).filter(|t| *t > 0).map(|t| t - 1));
+    }
     passive_heal(m, w.loop_context);
     stop_dancing_away(m, w);
-    if m.extra.ints[2] > 0 {
-        m.extra.ints[2] -= 1;
-    }
-    // CountDownCooldownTicks stops and erases a nonpositive memory; a positive
-    // value reaches zero for one tick before that stop.
-    set_pickup_cooldown(m, pickup_cooldown(m).filter(|t| *t > 0).map(|t| t - 1));
     update_duplication_cooldown(m);
     animate(m);
 }
