@@ -175,8 +175,11 @@ impl Types {
         predicates: &HashMap<String, Value>,
         modifiers: &HashMap<String, Value>,
     ) -> io::Result<()> {
+        let tables: HashMap<_, _> = tables.collect();
         let mut walker = Walker {
             types: self,
+            tables: tables.clone(),
+            visiting_tables: HashSet::new(),
             predicates,
             modifiers,
             visiting: HashSet::new(),
@@ -184,7 +187,9 @@ impl Types {
             allowed: None,
         };
         for (id, data) in tables {
+            walker.visiting_tables.insert(id.to_owned());
             walker.table(data, &format!("loot_table {id} $"))?;
+            walker.visiting_tables.remove(id);
         }
         walker.allowed = None;
         for (id, data) in predicates {
@@ -204,6 +209,8 @@ fn invalid(path: &str, kind: &str, reason: impl std::fmt::Display) -> io::Error 
 }
 struct Walker<'a> {
     types: &'a Types,
+    tables: HashMap<&'a str, &'a Value>,
+    visiting_tables: HashSet<String>,
     predicates: &'a HashMap<String, Value>,
     modifiers: &'a HashMap<String, Value>,
     visiting: HashSet<(bool, String)>,
@@ -212,11 +219,16 @@ struct Walker<'a> {
 }
 impl Walker<'_> {
     fn table(&mut self, table: &Value, path: &str) -> io::Result<()> {
+        let previous = self.allowed;
+        self.allowed = parameters::allowed(&table["type"]);
+        let result = self.contents(table, path);
+        self.allowed = previous;
+        result
+    }
+    fn contents(&mut self, table: &Value, path: &str) -> io::Result<()> {
         if !table.is_object() {
             return Err(invalid(path, "loot_table", "expected object"));
         }
-        let previous = self.allowed;
-        self.allowed = parameters::allowed(&table["type"]);
         self.fields(table, path)?;
         if let Some(pools) = table.get("pools") {
             let pools = pools
@@ -237,7 +249,6 @@ impl Walker<'_> {
                 }
             }
         }
-        self.allowed = previous;
         Ok(())
     }
     fn container(&mut self, entry: &Value, path: &str) -> io::Result<()> {
@@ -252,8 +263,22 @@ impl Walker<'_> {
                 self.container(child, &format!("{path}.children[{i}]"))?;
             }
         }
-        if entry["type"] == "minecraft:loot_table" && entry["value"].is_object() {
-            self.table(&entry["value"], &format!("{path}.value"))?;
+        if entry["type"] == "minecraft:loot_table" {
+            if entry["value"].is_object() {
+                self.contents(&entry["value"], &format!("{path}.value"))?;
+            } else if let Some(id) = entry["value"].as_str() {
+                let id = if id.contains(':') {
+                    id.to_owned()
+                } else {
+                    format!("minecraft:{id}")
+                };
+                if self.visiting_tables.insert(id.clone()) {
+                    if let Some(table) = self.tables.get(id.as_str()).copied() {
+                        self.contents(table, &format!("{path}.value -> loot_table {id}"))?;
+                    }
+                    self.visiting_tables.remove(&id);
+                }
+            }
         }
         Ok(())
     }
