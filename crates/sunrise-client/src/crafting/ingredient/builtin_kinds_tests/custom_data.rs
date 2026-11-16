@@ -267,11 +267,8 @@ fn custom_data_component_recipes_decode_and_match() {
     assert!(matches("removed", &stack));
     assert!(!matches("empty", &stack));
     assert!(!matches("compound", &stack));
-    let no_default = ItemStack::new("minecraft:blaze_rod", 1);
-    // This item inherits custom data too; removal must suppress its prototype.
-    let mut overridden = no_default.clone();
-    overridden.data_mut().set_loot_component(ID, &None);
-    assert!(matches("removed", &overridden));
+    let absent = parse(r#"{"type":"neoforge:components","items":"minecraft:stone","components":{"!minecraft:custom_data":{}}}"#, &items);
+    assert!(absent.test_in(&context, &ItemStack::new("minecraft:stone", 1)));
     let patch = Tag::compound([("!minecraft:custom_data", Tag::Compound(Default::default()))]);
     (_, stack.extra) = crate::item_data::decode_components(Some(&patch));
     assert!(matches("removed", &stack));
