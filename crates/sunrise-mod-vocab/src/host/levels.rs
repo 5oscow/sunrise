@@ -126,21 +126,6 @@ pub trait LevelsBackend {
         pos: [i32; 3],
         tool: Option<&ItemStack>,
     ) -> Option<f32>;
-    /// Side: both.
-    /// Whether `tool` (None is an empty hand) is correct for the block at `pos`
-    /// (`ItemStack.isCorrectToolForDrops`): its `minecraft:tool` component's rule for that block
-    /// when it has one, else its item's tool rules. This is the tool half of vanilla's harvest
-    /// check; a block that does not require a tool (`requiresCorrectToolForDrops` unset) drops
-    /// its loot with any tool, whatever this answers, and the block-side `can_harvest_block` and
-    /// player-side `player_harvest_check` hooks are not asked. None for a stale handle or an
-    /// unloaded or out-of-height position. Reads no chunks.
-    #[access(WorldOnly)]
-    fn level_block_correct_tool(
-        &self,
-        level: LevelRef,
-        pos: [i32; 3],
-        tool: Option<&ItemStack>,
-    ) -> Option<bool>;
     /// Side: client.
     /// The biome in the client's current level (`LevelReader.getBiome`). None before
     /// login, for a stale or foreign dimension, or an unloaded selected column. Never loads chunks.

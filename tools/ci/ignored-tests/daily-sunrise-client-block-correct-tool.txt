@@ -1,2 +1,2 @@
-# Whether a tool is correct for a block, for native mods (LevelRef::block_correct_tool).
-sunrise-client game::native_block_tool::tests::a_tool_is_correct_for_a_block_as_vanilla_says lib daily resources
+# Whether a block needs a correct tool, for native mods (BlockStates::requires_correct_tool).
+sunrise-client game::native_requires_tool_tests::requires_correct_tool_is_the_states_own_fact lib daily resources
