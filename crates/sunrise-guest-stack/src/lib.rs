@@ -41,7 +41,11 @@ pub fn run_on_guest_stack(test: impl FnOnce() + Send + 'static) {
 /// Must run before compiler-child handling or any game initialization.
 pub fn prepare_main() {
     if let Err(error) = prepare() {
-        eprintln!("GuestStackUnavailable: {error}");
+        let error = error.to_string();
+        let message = error
+            .strip_prefix("GuestStackUnavailable: ")
+            .unwrap_or(&error);
+        eprintln!("GuestStackUnavailable: {message}");
         std::process::exit(1);
     }
 }
@@ -49,7 +53,7 @@ pub fn prepare_main() {
 #[cfg(not(target_os = "linux"))]
 fn prepare() -> std::io::Result<()> {
     // Executable link settings reserve the same stack on Windows and macOS.
-    inspect_current().map_err(std::io::Error::other)
+    inspect_current().map_err(|error| std::io::Error::other(error.to_string()))
 }
 
 #[cfg(target_os = "linux")]
@@ -80,13 +84,16 @@ fn prepare() -> std::io::Result<()> {
         describe(limit.rlim_max)
     );
     if std::env::var_os("SUNRISE_STACK_REEXEC").is_some() {
+        let found = inspect_current()
+            .err()
+            .map_or(String::new(), |error| format!(": {error}"));
         return Err(std::io::Error::other(format!(
-            "stack re-exec marker already set but the stack is insufficient ({limits})"
+            "GuestStackUnavailable: stack re-exec marker already set but the stack is insufficient ({limits}){found}"
         )));
     }
     if limit.rlim_max < required {
         return Err(std::io::Error::other(format!(
-            "stack hard limit is too low ({limits}); raise ulimit -Hs to at least {} KiB",
+            "GuestStackUnavailable: stack hard limit is too low ({limits}); raise ulimit -Hs to at least {} KiB",
             required.saturating_add(HOST_HEADROOM as libc::rlim_t) / 1024
         )));
     }
@@ -115,49 +122,109 @@ pub fn check_current() -> Result<(), &'static str> {
     thread_local! {
         static CHECK: std::cell::OnceCell<Result<(), &'static str>> = const { std::cell::OnceCell::new() };
     }
-    CHECK.with(|check| *check.get_or_init(inspect_current))
+    CHECK.with(|check| {
+        *check.get_or_init(|| {
+            inspect_current().map_err(|error| match error {
+                StackError::Uninspectable(reason) => reason,
+                StackError::Small(_) => {
+                    "GuestStackUnavailable: calling thread needs 136 MiB of stack"
+                }
+            })
+        })
+    })
 }
 
-fn inspect_current() -> Result<(), &'static str> {
-    #[cfg(target_os = "linux")]
-    {
-        let mut attr = std::mem::MaybeUninit::<libc::pthread_attr_t>::uninit();
-        // SAFETY: pthread_self is live and attr is writable. Destroy only on success.
-        unsafe {
-            if libc::pthread_getattr_np(libc::pthread_self(), attr.as_mut_ptr()) != 0 {
-                return Err("GuestStackUnavailable: cannot inspect the calling thread stack");
-            }
-            let mut attr = attr.assume_init();
-            let mut size = 0;
-            let result = libc::pthread_attr_getstacksize(&attr, &mut size);
-            libc::pthread_attr_destroy(&mut attr);
-            if result != 0 || size < GUEST_STACK_BYTES + HOST_HEADROOM {
-                return Err("GuestStackUnavailable: calling thread needs 136 MiB of stack");
-            }
+/// Why the calling thread can't enter a guest.
+#[derive(Clone, Copy, Debug)]
+enum StackError {
+    Uninspectable(&'static str),
+    /// Its stack, in bytes, is smaller than the guest's reservation.
+    Small(usize),
+}
+
+impl std::fmt::Display for StackError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Uninspectable(reason) => f.write_str(reason),
+            Self::Small(size) => write!(
+                f,
+                "GuestStackUnavailable: calling thread needs {} MiB of stack, has {} KiB",
+                (GUEST_STACK_BYTES + HOST_HEADROOM) >> 20,
+                size >> 10
+            ),
         }
     }
-    #[cfg(target_vendor = "apple")]
-    {
-        // SAFETY: pthread_self names the live calling thread.
-        let size = unsafe { libc::pthread_get_stacksize_np(libc::pthread_self()) };
-        if size < GUEST_STACK_BYTES + HOST_HEADROOM {
-            return Err("GuestStackUnavailable: calling thread needs 136 MiB of stack");
-        }
+}
+
+fn inspect_current() -> Result<(), StackError> {
+    let size = current_stack_size()?;
+    if size < GUEST_STACK_BYTES + HOST_HEADROOM {
+        return Err(StackError::Small(size));
     }
-    #[cfg(windows)]
-    {
-        let mut low = 0;
-        let mut high = 0;
-        // SAFETY: both pointers refer to writable stack bounds.
-        unsafe { get_current_thread_stack_limits(&mut low, &mut high) };
-        if high - low < GUEST_STACK_BYTES + HOST_HEADROOM {
-            return Err("GuestStackUnavailable: calling thread needs 136 MiB of stack");
-        }
-    }
-    #[cfg(not(any(target_os = "linux", target_vendor = "apple", windows)))]
-    return Err("GuestStackUnavailable: stack inspection is unsupported on this platform");
-    #[cfg(any(target_os = "linux", target_vendor = "apple", windows))]
     Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn current_stack_size() -> Result<usize, StackError> {
+    // SAFETY: getpid and gettid take no arguments and always succeed.
+    let main = unsafe { libc::getpid() as libc::c_long == libc::syscall(libc::SYS_gettid) };
+    if main {
+        // The main thread's stack grows on demand up to RLIMIT_STACK (`prepare` raises it and
+        // re-execs so the range stays clear). glibc's pthread_getattr_np reports that limit, but
+        // musl's reports only the pages mapped so far, so read the limit itself.
+        let mut limit = libc::rlimit {
+            rlim_cur: 0,
+            rlim_max: 0,
+        };
+        // SAFETY: limit is writable and getrlimit initializes it on success.
+        if unsafe { libc::getrlimit(libc::RLIMIT_STACK, &mut limit) } != 0 {
+            return Err(StackError::Uninspectable(
+                "GuestStackUnavailable: cannot read the main thread's stack limit",
+            ));
+        }
+        return Ok(usize::try_from(limit.rlim_cur).unwrap_or(usize::MAX));
+    }
+    let mut attr = std::mem::MaybeUninit::<libc::pthread_attr_t>::uninit();
+    // SAFETY: pthread_self is live and attr is writable. Destroy only on success.
+    unsafe {
+        if libc::pthread_getattr_np(libc::pthread_self(), attr.as_mut_ptr()) != 0 {
+            return Err(StackError::Uninspectable(
+                "GuestStackUnavailable: cannot inspect the calling thread stack",
+            ));
+        }
+        let mut attr = attr.assume_init();
+        let mut size = 0;
+        let result = libc::pthread_attr_getstacksize(&attr, &mut size);
+        libc::pthread_attr_destroy(&mut attr);
+        if result != 0 {
+            return Err(StackError::Uninspectable(
+                "GuestStackUnavailable: cannot inspect the calling thread stack",
+            ));
+        }
+        Ok(size)
+    }
+}
+
+#[cfg(target_vendor = "apple")]
+fn current_stack_size() -> Result<usize, StackError> {
+    // SAFETY: pthread_self names the live calling thread.
+    Ok(unsafe { libc::pthread_get_stacksize_np(libc::pthread_self()) })
+}
+
+#[cfg(windows)]
+fn current_stack_size() -> Result<usize, StackError> {
+    let mut low = 0;
+    let mut high = 0;
+    // SAFETY: both pointers refer to writable stack bounds.
+    unsafe { get_current_thread_stack_limits(&mut low, &mut high) };
+    Ok(high - low)
+}
+
+#[cfg(not(any(target_os = "linux", target_vendor = "apple", windows)))]
+fn current_stack_size() -> Result<usize, StackError> {
+    Err(StackError::Uninspectable(
+        "GuestStackUnavailable: stack inspection is unsupported on this platform",
+    ))
 }
 
 #[cfg(windows)]
