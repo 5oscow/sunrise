@@ -977,3 +977,52 @@ fn a_hidden_type_named_only_by_an_impl_gets_its_record() {
         Some("type:internal::Secret")
     );
 }
+
+/// `placement_sync::PROTOCOL` stands for the shapes the placement frames carry, which nothing
+/// else reads: `Frame` and the catalogue body's `RecipeBookCategory`. When this fails, the
+/// frames changed: bump `PROTOCOL` there, then update the pinned hash here.
+#[test]
+#[ignore = "daily"]
+fn the_recipe_placement_protocol_is_pinned_to_the_shapes_it_carries() {
+    const PINNED: &str = "7ac8342cd861d9a76ab542d43ded039f";
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let generated = crate::sources(&root, crate::FillMode::Require).unwrap();
+    let providers = crate::capability_providers::generate(&root, &[]).unwrap().0;
+    let included = [
+        ("mod_api_generated.rs", generated.hooks.as_str()),
+        ("mod_api_generated_host.rs", generated.host.as_str()),
+        ("mod_api_host_areas.rs", generated.areas.as_str()),
+        ("capability_providers_generated.rs", providers.as_str()),
+    ];
+    let mut index = crate::index::game(&root, &included);
+    index.add_crate("sunrise_client", "crates/sunrise-client/src");
+    let (forms, ids) = (HashMap::new(), HashMap::new());
+    let mut layouts = mod_source::layouts::Layouts::new(rust::GameWires {
+        forms: &forms,
+        ids: &ids,
+    });
+    layouts.fields_without_form = true;
+    let mut keys = Vec::new();
+    for (krate, module, name) in [
+        (
+            "sunrise_client",
+            vec!["recipe_book".to_owned(), "placement_sync".to_owned()],
+            "Frame",
+        ),
+        ("mod_api", Vec::new(), "RecipeBookCategory"),
+    ] {
+        let module = index.module(krate, &module).unwrap();
+        let Ok(Found::Item(id)) = index.resolve_path(module, &[name.to_owned()]) else {
+            panic!("{krate}: no type {name}");
+        };
+        keys.push(layouts.key(&index, id));
+    }
+    layouts.finish(&mut index);
+    let mut shapes = Shapes::new(&layouts.table);
+    let text: Vec<String> = keys.iter().map(|key| shapes.shape(key).unwrap()).collect();
+    let hash = mod_surface::shape::digest(&text.join(","));
+    assert_eq!(
+        hash, PINNED,
+        "the placement frames' shapes changed (now {hash}): bump placement_sync PROTOCOL"
+    );
+}

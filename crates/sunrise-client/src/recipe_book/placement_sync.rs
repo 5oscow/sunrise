@@ -129,7 +129,9 @@ pub enum Frame {
 
 /// The number of this frame set and catalogue body: bump it when `Frame`, the catalogue's
 /// types (`mod_api::RecipeBookCategory`) or their encoding change. The fragmentation policy is
-/// mixed in below, so changing a limit changes the schema by itself.
+/// mixed in below, so changing a limit changes the schema by itself. A daily test in
+/// `sunrise-mod-api-gen` (`the_recipe_placement_protocol_is_pinned_to_the_shapes_it_carries`)
+/// fails when those shapes change without a bump.
 const PROTOCOL: u64 = 1;
 
 /// What the client and the server must agree on before either sends a frame.
