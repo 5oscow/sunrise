@@ -4133,19 +4133,19 @@ pub(crate) mod tests {
             let mut menu = Menu::new(kind);
             menu.set_registry_id(Some("test:context"));
             // No block: the rule refuses.
-            assert!(!menu.slot_rules(env, 1, &stack, true, CONTAINER_MAX).0);
+            assert!(!menu.slot_rules(env, 1, &stack).0);
             menu.set_block_pos(Some([4, 5, 6]));
-            assert!(menu.slot_rules(env, 1, &stack, true, CONTAINER_MAX).0);
+            assert!(menu.slot_rules(env, 1, &stack).0);
             // What slot 0 holds is seen by the ask about slot 1.
             menu.set_slot(env, 0, Some(ItemStack::new("minecraft:dirt", 1)));
-            assert!(!menu.slot_rules(env, 1, &stack, true, CONTAINER_MAX).0);
+            assert!(!menu.slot_rules(env, 1, &stack).0);
             // Another player's menu (player 8) is refused even at the block.
             let other = Env {
                 player: Some(8),
                 ..*env
             };
             menu.set_slot(env, 0, None);
-            assert!(!menu.slot_rules(&other, 1, &stack, true, CONTAINER_MAX).0);
+            assert!(!menu.slot_rules(&other, 1, &stack).0);
         });
     }
 
