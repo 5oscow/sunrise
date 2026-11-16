@@ -207,6 +207,16 @@ impl<'r> BlockCollisionRegistry<'r> {
             .get(state.0 as usize)
             .is_none_or(|flags| flags & 8 != 0)
     }
+    /// Whether `state` takes scaffolding's context collision (vanilla's scaffolding, or a block
+    /// declaring `context_collision` scaffolding): also what lets a sneaking entity inside it
+    /// slide down (`isScaffolding`).
+    pub fn is_scaffolding(&self, state: BlockStateId) -> bool {
+        self.has_context_rule(state)
+            && matches!(
+                self.contextual.get(&state),
+                Some(ContextualRule::Scaffolding(_))
+            )
+    }
     /// Whether a scan keeps `state` in the cells around its box: a large
     /// collision shape or a moving piston. States outside the registry count.
     pub fn reaches_out(&self, state: BlockStateId) -> bool {
@@ -514,6 +524,7 @@ mod tests {
                 shape(vanilla, y, descending)
             );
         }
+        assert!((0..4).all(|state| binding.is_scaffolding(BlockStateId(state))));
         assert!(!shape(2, 65.0, false).is_empty());
         assert!(shape(2, 65.0, true).is_empty());
         assert_eq!(

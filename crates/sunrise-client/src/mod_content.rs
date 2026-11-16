@@ -34,7 +34,9 @@ use sunrise_mod_package::content::{
 use sunrise_mod_package::manifest::{
     JarInputsError, JarRef, collect_jar_requirements, missing_jars,
 };
-use sunrise_world::{block_collision::ScaffoldingCollision, block_properties::BlockDefinitionProperties};
+use sunrise_world::{
+    block_collision::ScaffoldingCollision, block_properties::BlockDefinitionProperties,
+};
 
 /// A content mod to put in the root: its id, its content, and the Java jars
 /// it lists in manifest order — each an asset/data layer under the mod's own
@@ -650,8 +652,12 @@ fn resolve_state_values<'a, 's, T>(
         let values = names
             .iter()
             .map(|name| {
-                state_value(&combos[combo as usize], properties(states.start + state), name)
-                    .ok_or_else(|| format!("{block}: state lacks property {name}"))
+                state_value(
+                    &combos[combo as usize],
+                    properties(states.start + state),
+                    name,
+                )
+                .ok_or_else(|| format!("{block}: state lacks property {name}"))
             })
             .collect::<std::result::Result<Vec<_>, _>>()?;
         let key = values.join(",");
@@ -1362,7 +1368,11 @@ impl<'a> Plan<'a> {
                 if decl.context_collision == Some(ContextCollision::Scaffolding) {
                     for &(state, combo) in &order {
                         let value = |name| {
-                            state_value(&combos[combo as usize], properties(states.start + state), name)
+                            state_value(
+                                &combos[combo as usize],
+                                properties(states.start + state),
+                                name,
+                            )
                         };
                         ScaffoldingCollision::from_values(value("distance"), value("bottom"))
                             .map_err(|e| {
@@ -2155,7 +2165,9 @@ impl<'a> Plan<'a> {
     /// The states whose block entity publishes their shapes (`shapes_from_block_entity`), in
     /// the collision and support tables, which mark such states in their scan metadata.
     fn published_states(&self, tag: &mut Tag) -> Result<()> {
-        self.list_states(tag, "published_shapes", |decl| decl.shapes_from_block_entity)
+        self.list_states(tag, "published_shapes", |decl| {
+            decl.shapes_from_block_entity
+        })
     }
 
     /// The states whose block takes scaffolding's context collision (`context_collision`), in
