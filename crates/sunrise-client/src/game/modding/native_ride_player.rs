@@ -114,7 +114,7 @@ impl Game<'_> {
                 return Err(RidePlayerRefusal::CannotRide);
             }
         }
-        if self.start_riding_with(rider, vehicle, force, true) {
+        if self.try_start_riding_target(rider, vehicle, force, true).is_ok() {
             Ok(())
         } else {
             Err(RidePlayerRefusal::Canceled)
