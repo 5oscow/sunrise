@@ -1311,10 +1311,7 @@ impl Game<'_> {
                         exhaustion: food.exhaustion,
                     }));
                     let (keep, changes) = self.mod_effect_tick(
-                        mod_api::__private::effect_key_by_index(
-                            e.registry_index.expect("active effect registry index"),
-                        )
-                        .expect("effects resolved at load"),
+                        e.registry_index,
                         None,
                         t,
                         e.amplifier,
@@ -1322,9 +1319,9 @@ impl Game<'_> {
                         health,
                         max_health,
                         food,
-                        active_effects.iter().map(|effect| {
-                            effect.registry_index.expect("active effect registry index")
-                        }),
+                        active_effects
+                            .iter()
+                            .filter_map(|effect| effect.registry_index),
                     );
                     let registry = &self.motion.health.damage;
                     actions.extend(changes.into_iter().filter_map(|change| {
@@ -1546,7 +1543,7 @@ impl Game<'_> {
     /// may end it. Whether it stays.
     fn mod_effect_tick(
         &self,
-        effect: mod_api::EffectKey,
+        index: Option<usize>,
         entity: Option<i32>,
         tick_count: i32,
         amplifier: i32,
@@ -1556,10 +1553,19 @@ impl Game<'_> {
         food: Option<PlayerFood>,
         active_effects: impl Iterator<Item = usize>,
     ) -> (bool, Vec<EffectTickChange>) {
-        let index = mod_api::__private::effect_index(effect).expect("effects resolved at load");
-        let mod_id = sunrise_client_core::potions::effect_by_index(index)
-            .and_then(|def| def.owner)
-            .expect("mod effect has a declaring content mod");
+        let resolved = index.and_then(|index| {
+            Some((
+                mod_api::__private::effect_key_by_index(index)?,
+                sunrise_client_core::potions::effect_by_index(index)?.owner?,
+            ))
+        });
+        let Some((effect, mod_id)) = resolved else {
+            static MISSING_EFFECT: std::sync::Once = std::sync::Once::new();
+            MISSING_EFFECT.call_once(|| {
+                log::debug!("Skipping mod effect tick: missing registry key or declaring mod for index {index:?}");
+            });
+            return (true, Vec::new());
+        };
         let mut apply = false;
         self.native_should_apply_effect_tick_this_tick(
             mod_id, effect, tick_count, amplifier, &mut apply,
@@ -1569,9 +1575,7 @@ impl Game<'_> {
         if apply {
             let mut keys = self.potions.tick_keys.borrow_mut();
             keys.clear();
-            keys.extend(active_effects.map(|index| {
-                mod_api::__private::effect_key_by_index(index).expect("effects resolved at load")
-            }));
+            keys.extend(active_effects.filter_map(mod_api::__private::effect_key_by_index));
             self.native_apply_effect_tick(mod_api::__private::ApplyEffectTickCall {
                 mod_id,
                 effect,
@@ -2751,11 +2755,8 @@ impl sunrise_client::mobs::ModEffectTicks for Game<'_> {
             return true;
         };
         let holder = LivingRef::new(EntityRef::new(epoch, mob.id));
-        let Some(effect) = mod_api::__private::effect_key_by_index(effect) else {
-            return true;
-        };
         let (keep, changes) = self.mod_effect_tick(
-            effect,
+            Some(effect),
             Some(mob.id as i32),
             tick_count,
             amplifier,
@@ -2766,7 +2767,7 @@ impl sunrise_client::mobs::ModEffectTicks for Game<'_> {
             mob.extra
                 .effects
                 .iter()
-                .map(|effect| effect.registry_index.expect("active effect registry index")),
+                .filter_map(|effect| effect.registry_index),
         );
         for change in changes {
             match change {
