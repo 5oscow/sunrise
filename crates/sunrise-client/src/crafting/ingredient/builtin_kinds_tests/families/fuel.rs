@@ -802,9 +802,10 @@ fn food_codec_compiles_recipes_and_matches_borrowed_values() {
     );
     assert!(strict.test_in(&context, &paper));
     assert!(!absent.test_in(&context, &paper));
-    paper
-        .data_mut()
-        .set_other("minecraft:custom_data", Some(Tag::Int(7)));
+    paper.data_mut().set_other(
+        "minecraft:custom_data",
+        Some(Tag::compound([("extra", Tag::Int(7))])),
+    );
     assert!(!strict.test_in(&context, &paper));
     assert!(relaxed.test_in(&context, &paper));
 

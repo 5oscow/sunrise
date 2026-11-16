@@ -122,9 +122,10 @@ fn pet_holder_contracts_preserve_siblings_removals_and_prototypes() {
         paper.data_mut().set_other(id, Some(raw.clone()));
         assert!(strict.test_in(&context, &paper));
         assert!(!absent.test_in(&context, &paper));
-        paper
-            .data_mut()
-            .set_other("minecraft:custom_data", Some(Tag::Int(1)));
+        paper.data_mut().set_other(
+            "minecraft:custom_data",
+            Some(Tag::compound([("extra", Tag::Int(1))])),
+        );
         assert!(!strict.test_in(&context, &paper));
         assert!(loose.test_in(&context, &paper));
         items.component_defaults = std::sync::Arc::new(std::collections::HashMap::from([(
