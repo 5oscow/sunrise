@@ -48,7 +48,7 @@ the game's own types, such as `Game` and its fields, and these change between bu
 | --- | --- |
 | `game` | The Minecraft version, `"26.3"`. |
 | `sunrise` | The game build: the exact Sunrise commit, 40 lowercase hex characters. |
-| `mixins` | The exact commit of the [sunrise-mixins](https://github.com/horizon-rust/horizon-mixins) tool, which applies `[[native.mixin]]` rows; 40 lowercase hex characters. |
+| `mixins` | The exact commit of the [horizon-mixins](https://github.com/horizon-rust/horizon-mixins) tool, which applies `[[native.mixin]]` rows; 40 lowercase hex characters. |
 
 `cargo sunrise-mod new path/to/mod --template native` writes all three; to move an existing mod, edit them. Otherwise the mod is an ordinary native mod
 ([Your first native mod](../start/first-mod.md)).
@@ -59,7 +59,7 @@ Build as for any native mod: the launcher's **Build**, or
 `sunrise-launcher native-build path/to/mod --trust-native-code`. The flag says you trust the mod's code to
 run with your rights.
 
-A build with a `[[native.mixin]]` row obtains the sunrise-mixins tool for your `mixins` commit.
+A build with a `[[native.mixin]]` row obtains the horizon-mixins tool for your `mixins` commit.
 
 The prebuilt tool is checked against its release's `SHA256SUMS` and against the commit, patch and platform the
 launcher pins. Where no prebuilt exists for your platform or pin, the launcher builds the tool from source.

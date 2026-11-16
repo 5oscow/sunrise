@@ -49,11 +49,11 @@ pub const FORK_LAUNCHER_ABOUT: &str = "https://github.com/sunrise-org/sunrise";
 /// Cargo's canonical source identity for the crates.io registry.
 pub const CARGO_CRATES_IO_SOURCE: &str = "registry+https://github.com/rust-lang/crates.io-index";
 
-/// The pinned sunrise-mixins archive the launcher downloads for `[[native.mixin]]` builds.
-pub const SUNRISE_MIXINS_SOURCE: &str =
+/// The pinned horizon-mixins archive the launcher downloads for `[[native.mixin]]` builds.
+pub const HORIZON_MIXINS_SOURCE: &str =
     "https://codeload.github.com/horizon-rust/horizon-mixins/tar.gz";
 
-/// Where the fork releases the prebuilt sunrise-mixins tool; a release's tag and file follow.
+/// Where the fork releases the prebuilt horizon-mixins tool; a release's tag and file follow.
 pub const MIXINS_TOOL_RELEASES: &str = "https://github.com/sunrise-org/sunrise/releases/download";
 
 /// Where the fork publishes each game build's mod SDK (`sdk-<build id>`) and the game releases

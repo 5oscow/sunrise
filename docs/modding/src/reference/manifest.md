@@ -35,7 +35,7 @@ my_mod.hmod
 
 There is no mod-id directory level inside the archive. `sunrise-mod.toml` is the only manifest and the only
 source of the mod's id and version; Cargo's package name and version are not mod identity. IDs are plain
-`[a-z0-9_]{1,64}` names, also used as resource namespaces. The launcher writes `sunrise-mixin.toml` in its
+`[a-z0-9_]{1,64}` names, also used as resource namespaces. The launcher writes `horizon-mixin.toml` in its
 staging area when needed. Hand-written tool manifests, `sunrise-native.json`, and input `native/` or `rust/`
 folders are unsupported.
 
@@ -50,7 +50,7 @@ refuse the manifest. Native mods may declare top-level `internals`, an array of 
 | --- | --- | --- |
 | `game` | string | not empty, the Minecraft version (`"26.3"`) |
 | `sunrise` | string | the exact Sunrise commit, 40 lowercase hex characters |
-| `mixins` | string | the exact sunrise-mixins commit, 40 lowercase hex characters |
+| `mixins` | string | the exact horizon-mixins commit, 40 lowercase hex characters |
 | `module` | array of tables | optional support modules, written as `[[native.module]]` |
 
 API points use top-level declarations.
@@ -68,7 +68,7 @@ file that receives it, a `name` that is a Rust module identifier, and a `source`
 
 `[[inject]]` only fills compiled slots and never compiles game code. Native source edits
 use `[[native.mixin]]` with `id`, `target`, uppercase `kind`, `helper` and the other
-sunrise-mixins options ([Mixins](../concepts/native-route/2-mixins.md)). `[[native.loop]]`, `[[native.bridge]]` and `[[native.module]]` complete the route; `[[native.state]]` is refused. See [The native route](../concepts/native-route.md) for every table, its fields and its refusals.
+horizon-mixins options ([Mixins](../concepts/native-route/2-mixins.md)). `[[native.loop]]`, `[[native.bridge]]` and `[[native.module]]` complete the route; `[[native.state]]` is refused. See [The native route](../concepts/native-route.md) for every table, its fields and its refusals.
 
 A wasm mod adds `[wasm]` instead, written by `cargo sunrise-mod build --wasm`
 ([Building to `mod.wasm`](../how-to/wasm-mods.md)):
