@@ -213,7 +213,7 @@
     "test": "game::levels::tests::an_old_chunk_saves_the_heights_its_new_neighbour_calculated",
     "path": "crates/sunrise-client/src/game/world/levels.rs",
     "reason": "needs SUNRISE_TEST_RESOURCES, a scratch SUNRISE_HOME and the constructed H077_OLD_WORLD",
-    "rationale": "Existing separately supplied input H077_OLD_WORLD in tools/ci/ignored-tests/old-world.txt; its dedicated workflow/harness must supply this input, which ordinary prepared resources do not contain. needs SUNRISE_TEST_RESOURCES, a scratch SUNRISE_HOME and the constructed H077_OLD_WORLD"
+    "rationale": "No harness exists. Plain known failure in tools/ci/ignored-tests/old-world.txt (#1028): the daily sunrise-client shard runs it with --include-ignored, and it fails at the absent H077_OLD_WORLD. Remove the row when a reproducible 1.20.4 generation recipe or the exact private CI fixture is provisioned."
   },
   {
     "package": "sunrise-client",
@@ -221,7 +221,7 @@
     "test": "game::levels::tests::features_write_a_full_neighbour_only_through_its_sections",
     "path": "crates/sunrise-client/src/game/world/levels.rs",
     "reason": "needs SUNRISE_TEST_RESOURCES, a scratch SUNRISE_HOME and the constructed H077_OLD_WORLD",
-    "rationale": "Existing separately supplied input H077_OLD_WORLD in tools/ci/ignored-tests/old-world.txt; its dedicated workflow/harness must supply this input, which ordinary prepared resources do not contain. needs SUNRISE_TEST_RESOURCES, a scratch SUNRISE_HOME and the constructed H077_OLD_WORLD"
+    "rationale": "No harness exists. Plain known failure in tools/ci/ignored-tests/old-world.txt (#1028): the daily sunrise-client shard runs it with --include-ignored, and it fails at the absent H077_OLD_WORLD. Remove the row when a reproducible 1.20.4 generation recipe or the exact private CI fixture is provisioned."
   },
   {
     "package": "sunrise-client",
@@ -229,7 +229,7 @@
     "test": "game::levels::tests::the_overworld_cache_holds_the_edge_chunks_calculated_heights",
     "path": "crates/sunrise-client/src/game/world/levels.rs",
     "reason": "needs SUNRISE_TEST_RESOURCES, a scratch SUNRISE_HOME and the constructed H077_OLD_WORLD",
-    "rationale": "Existing separately supplied input H077_OLD_WORLD in tools/ci/ignored-tests/old-world.txt; its dedicated workflow/harness must supply this input, which ordinary prepared resources do not contain. needs SUNRISE_TEST_RESOURCES, a scratch SUNRISE_HOME and the constructed H077_OLD_WORLD"
+    "rationale": "No harness exists. Plain known failure in tools/ci/ignored-tests/old-world.txt (#1028): the daily sunrise-client shard runs it with --include-ignored, and it fails at the absent H077_OLD_WORLD. Remove the row when a reproducible 1.20.4 generation recipe or the exact private CI fixture is provisioned."
   },
   {
     "package": "sunrise-client",
