@@ -146,6 +146,8 @@ pub(super) struct Level {
     item_entities: HashMap<u32, ItemStack>,
     /// Each guest's menu storage before this transaction first wrote it, by connection.
     menus: HashMap<u32, KeptMenus>,
+    /// The scoreboard before this transaction first wrote it (`journal_scoreboard`), whole.
+    board: Option<sunrise_client::scoreboard::Scoreboard>,
     /// Each entity's, player's, chunk's and the level's attachment map before this transaction
     /// first reached it (a block entity's is kept with it).
     attachments: HashMap<Holder, KeptAttachments>,
@@ -539,6 +541,9 @@ impl Game<'_> {
                 for (id, kept) in level.equipment {
                     outer.equipment.entry(id).or_insert(kept);
                 }
+                if outer.board.is_none() {
+                    outer.board = level.board;
+                }
                 for (id, kept) in level.item_entities {
                     outer.item_entities.entry(id).or_insert(kept);
                 }
@@ -900,6 +905,17 @@ impl Game<'_> {
         };
         if let Some(level) = self.transactions.last_mut() {
             level.entities.entry(id).or_insert(slots);
+        }
+    }
+    /// Keeps the scoreboard as it is, if a transaction is open and hasn't yet: a copy of the
+    /// whole board, taken on the transaction's first scoreboard write and never otherwise, so a
+    /// transaction that writes none pays nothing. An abort puts it back.
+    pub(super) fn journal_scoreboard(&mut self) {
+        let Some(level) = self.transactions.last_mut() else {
+            return;
+        };
+        if level.board.is_none() {
+            level.board = Some(self.score.board.clone());
         }
     }
     /// Keeps mob `id`'s equipment as it is, if a transaction is open and hasn't yet (#932):
@@ -1320,6 +1336,10 @@ impl Game<'_> {
             }
         }
         level.actions.rollback_in(self);
+        if let Some(saved) = level.board {
+            self.score.board.restore(saved);
+            self.sync_score_registries();
+        }
         for (uuid, kept) in level.players {
             self.native_as_player(uuid, |g| {
                 g.ender_items = kept.ender_items;

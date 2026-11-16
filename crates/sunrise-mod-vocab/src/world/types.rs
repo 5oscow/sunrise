@@ -1669,3 +1669,17 @@ pub enum GameRuleReadError {
     /// No rule has this identifier.
     UnknownRule,
 }
+
+/// One of the scoreboard's objectives of an open server world (vanilla's `Objective`). It holds
+/// the world's epoch and an identity the board gave the objective when it was added, so an
+/// objective that was removed (even if its name was added again) or a handle from an earlier
+/// open reads as stale: reads answer `None` or [`ObjectiveError::Stale`] and writes change
+/// nothing.
+#[derive(sunrise_mod_api_macros::Wire)]
+#[wire(internal_field_layouts)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
+pub struct ObjectiveRef {
+    pub(crate) epoch: WorldEpoch,
+    pub(crate) id: u64,
+}
