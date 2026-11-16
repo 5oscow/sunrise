@@ -19,6 +19,7 @@ impl ItemEnv for Pan<'_> {
         base: &str,
         config: &Arc<sunrise_core::nbt::Tag>,
         stack: &StackView,
+        _: &sunrise_assets::item_model::Context,
     ) -> Option<PreparedParts> {
         assert_eq!((slot, base), (SpecialModelSlot(0), "spt:item/base"));
         assert_eq!(config.get("handle"), Some(&sunrise_core::nbt::Tag::Byte(2)));

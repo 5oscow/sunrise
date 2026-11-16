@@ -11,9 +11,9 @@ draw, each with a transform and tints, and the game draws them as it draws any i
 
 ## Write the renderer
 
-A renderer implements `SpecialModelRenderer`. Its `extract` gets a `ClientHost`, the stack and the
-special model's `model` object (`config`, its JSON converted to NBT once at load), and answers the
-parts:
+A renderer implements `SpecialModelRenderer`. Its `extract` gets a `ClientHost`, the stack, the
+special model's `model` object (`config`, its JSON converted to NBT once at load) and a
+`SpecialModelContext`, and answers the parts:
 
 ```rust,ignore
 use mod_api::*;
@@ -26,6 +26,7 @@ impl SpecialModelRenderer for Skillet {
         _host: &dyn ClientHost,
         stack: &ItemStack,
         _config: &Tag,
+        _context: &SpecialModelContext,
     ) -> Result<Vec<SpecialModelPart>, String> {
         let mut parts = vec![SpecialModelPart::new("example:item/skillet_pan")];
         if stack.count() > 1 {
@@ -45,7 +46,11 @@ impl Hooks for MyMod {
         _context: &RegistrationContext,
         event: &mut RegisterSpecialModelRendererEvent<'_>,
     ) {
-        event.renderers.register("example:skillet".into(), Arc::new(Skillet));
+        event.renderers.register(
+            "example:skillet".into(),
+            SpecialModelPolicy::Stack,
+            Arc::new(Skillet),
+        );
     }
 }
 ```
@@ -75,11 +80,21 @@ vanilla's special models do. The node's own `transformation` applies to every pa
 
 ## When it is asked
 
-The renderer is asked on the client's main thread when an item of such a model is drawn with a
-stack that model didn't draw in the last frame. An unchanged stack is asked once, however many
-frames draw it in a row and however many stacks share the model, and every display context (a hand,
-a screen, the ground, a frame, a head, another player's hand) draws that answer. A stack that leaves
-the screen, or changes, is asked again when it is next drawn; a resource reload drops every answer.
+Registering a renderer names its `SpecialModelPolicy`.
+
+- `Stack`: the renderer is asked on the client's main thread when an item of such a model is drawn
+  with a stack that model didn't draw in the last frame. An unchanged stack is asked once, however
+  many frames draw it in a row and however many stacks share the model, and every display context
+  (a hand, a screen, the ground, a frame, a head, another player's hand) draws that answer. A stack
+  that leaves the screen, or changes, is asked again when it is next drawn; a resource reload drops
+  every answer. The context is always `SpecialModelContext::STACK`. Vanilla extracts every frame;
+  this caching is a deliberate difference, and host-state changes do not invalidate it.
+- `Frame`: the renderer is asked once per frame of a view for each display context and game time
+  the item is drawn with, and `context.display`, `context.game_time` (`None` outside a world) and
+  `context.partial_tick` say which. Use it for an answer that moves with time, such as an
+  ingredient rising and turning over 12 ticks after a flip, smooth between ticks in first person,
+  third person and an item frame. Answers are kept for their frame only, so there is no cap on
+  animated items, and a GUI slot showing one is redrawn every frame rather than cached.
 
 ## Registrations and refusals
 

@@ -544,7 +544,11 @@ fn register_special_model_renderers() {
     );
     super::native_special_renderers::register(
         kept.into_iter()
-            .filter_map(|kind| renderers.remove(&kind).map(|renderer| (kind, renderer)))
+            .filter_map(|kind| {
+                renderers
+                    .remove(&kind)
+                    .map(|(policy, renderer)| (kind, policy, renderer))
+            })
             .collect(),
     );
 }
