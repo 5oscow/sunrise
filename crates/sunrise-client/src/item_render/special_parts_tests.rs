@@ -4,7 +4,9 @@
 use super::*;
 use std::fs;
 use sunrise_assets::{
-    item_model::{PreparedParts, SpecialModelSlot, SpecialPart, register_special_model_types},
+    item_model::{
+        PreparedParts, SpecialContent, SpecialModelSlot, SpecialPart, register_special_model_types,
+    },
     resource_source::ResourceRoot,
 };
 
@@ -24,7 +26,7 @@ impl ItemEnv for Pan<'_> {
         assert_eq!((slot, base), (SpecialModelSlot(0), "spt:item/base"));
         assert_eq!(config.get("handle"), Some(&sunrise_core::nbt::Tag::Byte(2)));
         let part = |model: &str| SpecialPart {
-            model: model.to_owned(),
+            content: SpecialContent::Model(model.to_owned()),
             pose: sunrise_assets::math::Mat4::translation([0.25, 0.0, 0.0]),
             tints: vec![0xFFCC_2211_u32 as i32],
         };
@@ -39,6 +41,25 @@ impl ItemEnv for Pan<'_> {
             6 | 7 => vec![SpecialPart {
                 tints: vec![[WHITE, GREY][stack.count as usize - 6]],
                 ..part("spt:item/a")
+            }],
+            // The plain cube item nested, then B; and the pan itself, a cycle.
+            8 => vec![
+                SpecialPart {
+                    content: SpecialContent::Stack {
+                        stack: stack("spt:cube", 1),
+                        display: DisplayContext::Gui,
+                    },
+                    tints: Vec::new(),
+                    ..part("")
+                },
+                part("spt:item/b"),
+            ],
+            9 => vec![SpecialPart {
+                content: SpecialContent::Stack {
+                    stack: stack("spt:pan", 9),
+                    display: DisplayContext::Gui,
+                },
+                ..part("")
             }],
             _ => vec![part("spt:item/b")],
         };
@@ -238,6 +259,15 @@ fn a_registered_special_model_draws_its_renderers_resource_models() {
     };
     assert!(is_missing(&resolve("spt:pan", 3, DisplayContext::Gui)));
     assert!(is_missing(&resolve("spt:pan", 4, DisplayContext::Gui)));
+    // A stack part draws the inner item through the resolver, under its own display context and
+    // tints, not the part's: the cube's 6 white quads beside B's 12 tinted ones. A stack part
+    // that names the stack being drawn is a cycle, refused whole.
+    let nested = resolve("spt:pan", 8, DisplayContext::Fixed);
+    let colours: Vec<u32> = quads(&renderer, &nested).iter().map(|q| q.color).collect();
+    assert_eq!(colours.iter().filter(|&&c| c == 0xFFFF_FFFF).count(), 6);
+    assert_eq!(colours.iter().filter(|&&c| c == 0xFFCC_2211).count(), 12);
+    assert!(nested.animated);
+    assert!(is_missing(&resolve("spt:pan", 9, DisplayContext::Gui)));
     assert!(!is_missing(&resolve("spt:pan", 1, DisplayContext::Gui)));
     assert_eq!(
         quads(&renderer, &resolve("spt:cube", 1, DisplayContext::Gui)).len(),

@@ -34,7 +34,8 @@ use sunrise_assets::{
     item_bake::{BakedItemModel, SpriteLookup, SpriteMask, bake_item_model, bake_sprite_layer},
     item_model::{
         ClientItem, Context, DisplayContext, FoilType, ItemEnv, ItemModels, LayerContent,
-        LayerTransform, LevelState, OwnerState, PreparedParts, SpecialModel, StackView,
+        LayerTransform, LevelState, OwnerState, PreparedParts, SpecialContent, SpecialModel,
+        StackView,
     },
     model::Direction,
     palette::PalettedPermutations,
@@ -938,15 +939,21 @@ impl ItemRenderer {
         let part = |model: &str, tints, pose| {
             let geometry = self.bake(model);
             PreparedPart {
-                extents: self.quad_extents(model, &geometry),
-                geometry,
-                tints,
+                content: PreparedContent::Model {
+                    extents: self.quad_extents(model, &geometry),
+                    geometry,
+                    tints,
+                },
                 pose,
             }
         };
-        let parts = match parts.iter().find(|p| !self.library.resolves(&p.model)) {
+        let unknown = parts.iter().find_map(|p| match &p.content {
+            SpecialContent::Model(model) if !self.library.resolves(model) => Some(model),
+            _ => None,
+        });
+        let parts = match unknown {
             Some(unknown) => {
-                warn_unknown_part_once(&unknown.model);
+                warn_unknown_part_once(unknown);
                 vec![part(
                     MISSING_MODEL,
                     Vec::new(),
@@ -955,7 +962,16 @@ impl ItemRenderer {
             }
             None => parts
                 .iter()
-                .map(|p| part(&p.model, p.tints.clone(), p.pose))
+                .map(|p| match &p.content {
+                    SpecialContent::Model(model) => part(model, p.tints.clone(), p.pose),
+                    SpecialContent::Stack { stack, display } => PreparedPart {
+                        content: PreparedContent::Stack {
+                            stack: stack.clone(),
+                            display: *display,
+                        },
+                        pose: p.pose,
+                    },
+                })
                 .collect(),
         };
         PreparedParts(Arc::new(PreparedSpecial {
@@ -963,9 +979,13 @@ impl ItemRenderer {
             parts,
         }))
     }
-    /// The layers of a prepared answer (`LayerContent::Parts`), one for each part: the part's own
-    /// model's quads, posed under the layer's transform, with the base model's display transform,
-    /// particle and GUI light.
+    /// The layers of a prepared answer (`LayerContent::Parts`), one for each model part and the
+    /// layers of each stack part's own resolve: the part's own model's quads, posed under the
+    /// layer's transform, with the base model's display transform, particle and GUI light. A
+    /// stack part's layers keep their own foil, tints and display transform, and sit under the
+    /// part's pose. Returns the state's animation flag, or `None` (with `layers` as they were)
+    /// when a stack part is refused: it meets a stack that is already being expanded above it, or
+    /// the draw has expanded [`mod_api::MAX_NESTED_STACK_PARTS`].
     fn push_parts(
         &self,
         layers: &mut Vec<LayerRender>,
@@ -976,29 +996,100 @@ impl ItemRenderer {
             LayerTransform,
         ),
         prepared: &PreparedParts,
-    ) {
+        (outer, owner, level, seed, env): (
+            &StackView,
+            Option<&OwnerState>,
+            Option<&LevelState>,
+            i32,
+            &dyn ItemEnv,
+        ),
+    ) -> Option<bool> {
         let Some(prepared) = prepared.0.downcast_ref::<PreparedSpecial>() else {
             // Only `prepare_parts` makes them.
-            return;
+            return Some(false);
         };
         let base = &prepared.base;
+        let start = layers.len();
+        let mut animated = false;
         for part in &prepared.parts {
             // Under `applyTransform`'s half-block offset, so a part's pose is about the model's
             // corner, as its elements are.
-            layers.push(LayerRender {
-                geometry: LayerGeometry::Quads(part.geometry.clone()),
-                tints: part.tints.clone(),
-                foil,
-                matrix: glam_matrix(&base.layer_matrix(
-                    display_transform,
-                    display,
-                    &transform.mul(&part.pose),
-                )),
-                uses_block_light: base.uses_block_light,
-                particle: sprite_name(&base.particle.sprite).to_owned(),
-                extents: part.extents.clone(),
-            });
+            let matrix = glam_matrix(&base.layer_matrix(
+                display_transform,
+                display,
+                &transform.mul(&part.pose),
+            ));
+            match &part.content {
+                PreparedContent::Model {
+                    geometry,
+                    extents,
+                    tints,
+                } => layers.push(LayerRender {
+                    geometry: LayerGeometry::Quads(geometry.clone()),
+                    tints: tints.clone(),
+                    foil,
+                    matrix,
+                    uses_block_light: base.uses_block_light,
+                    particle: sprite_name(&base.particle.sprite).to_owned(),
+                    extents: extents.clone(),
+                }),
+                PreparedContent::Stack { stack, display } => {
+                    let Some(inner) =
+                        self.expand_stack(outer, stack, *display, owner, level, seed, env)
+                    else {
+                        layers.truncate(start);
+                        return None;
+                    };
+                    animated |= inner.animated;
+                    layers.extend(inner.layers.into_iter().map(|mut layer| {
+                        layer.matrix = matrix * layer.matrix;
+                        layer
+                    }));
+                }
+            }
         }
+        Some(animated)
+    }
+    /// The resolve of the stack part `stack` of an answer drawn for `outer`, or `None` when it is
+    /// refused (see [`Self::push_parts`]).
+    #[allow(clippy::too_many_arguments)]
+    fn expand_stack(
+        &self,
+        outer: &StackView,
+        stack: &StackView,
+        display: DisplayContext,
+        owner: Option<&OwnerState>,
+        level: Option<&LevelState>,
+        seed: i32,
+        env: &dyn ItemEnv,
+    ) -> Option<ItemRenderState> {
+        let pushed = NESTING.with_borrow_mut(|n| {
+            if n.expanded >= mod_api::MAX_NESTED_STACK_PARTS
+                || n.chain.contains(stack)
+                || (n.chain.is_empty() && outer == stack)
+            {
+                return None;
+            }
+            n.expanded += 1;
+            let root = n.chain.is_empty();
+            if root {
+                n.chain.push(outer.clone());
+            }
+            n.chain.push(stack.clone());
+            Some(root)
+        });
+        let Some(root) = pushed else {
+            warn_refused_nesting_once(&stack.item);
+            return None;
+        };
+        let state = self.resolve_with_rule(stack, display, owner, level, seed, env, None);
+        NESTING.with_borrow_mut(|n| {
+            n.chain.pop();
+            if root {
+                n.chain.pop();
+            }
+        });
+        Some(state)
     }
     /// `ItemModelResolver.updateForTopItem`.
     pub fn resolve(
@@ -1032,6 +1123,7 @@ impl ItemRenderer {
             level,
             seed,
         };
+        let _depth = ResolveDepth::enter();
         let resolved = self.models.resolve(stack, &ctx, env);
         let mut animated = false;
         let mut layers = Vec::with_capacity(resolved.layers.len());
@@ -1072,12 +1164,32 @@ impl ItemRenderer {
                 LayerContent::Parts(prepared) => {
                     // What a mod drew may change with every draw, so no GUI item is kept.
                     animated = true;
-                    self.push_parts(
+                    let drawn = self.push_parts(
                         &mut layers,
                         display,
                         (layer.foil, layer.transform, layer.display_transform),
                         &prepared,
+                        (stack, owner, level, seed, env),
                     );
+                    if drawn.is_none() {
+                        // A refused stack part refuses the answer whole.
+                        let baked = self.bake(MISSING_MODEL);
+                        layers.push(LayerRender {
+                            extents: self.quad_extents(MISSING_MODEL, &baked),
+                            geometry: LayerGeometry::Quads(baked.clone()),
+                            tints: Vec::new(),
+                            foil: layer.foil,
+                            matrix: glam_matrix(&baked.layer_matrix(
+                                layer.display_transform,
+                                display,
+                                &layer.transform,
+                            )),
+                            uses_block_light: baked.uses_block_light,
+                            particle: sprite_name(&baked.particle.sprite).to_owned(),
+                        });
+                    } else if drawn == Some(true) {
+                        animated = true;
+                    }
                     continue;
                 }
             };
@@ -1163,10 +1275,52 @@ struct PreparedSpecial {
     parts: Vec<PreparedPart>,
 }
 struct PreparedPart {
-    geometry: Arc<BakedItemModel>,
-    extents: Arc<Vec<Vec3>>,
-    tints: Vec<i32>,
+    content: PreparedContent,
     pose: sunrise_assets::math::Mat4,
+}
+enum PreparedContent {
+    /// A model, baked once.
+    Model {
+        geometry: Arc<BakedItemModel>,
+        extents: Arc<Vec<Vec3>>,
+        tints: Vec<i32>,
+    },
+    /// A stack, resolved when the item is drawn, so what it draws moves with its own models.
+    Stack {
+        stack: StackView,
+        display: DisplayContext,
+    },
+}
+/// The stacks being expanded by this thread's draw, outermost first, and how many stack parts
+/// the draw has expanded: a stack met again while it is expanding is a cycle, and a draw expands
+/// at most [`mod_api::MAX_NESTED_STACK_PARTS`], both refusing the whole answer.
+#[derive(Default)]
+struct Nesting {
+    chain: Vec<StackView>,
+    expanded: usize,
+    /// Resolves in progress on this thread; the budget starts again when the outermost ends.
+    depth: u32,
+}
+thread_local! {
+    static NESTING: std::cell::RefCell<Nesting> = std::cell::RefCell::default();
+}
+/// Counts a resolve of this thread in progress; the budget resets when the last one ends.
+struct ResolveDepth;
+impl ResolveDepth {
+    fn enter() -> Self {
+        NESTING.with_borrow_mut(|n| n.depth += 1);
+        Self
+    }
+}
+impl Drop for ResolveDepth {
+    fn drop(&mut self) {
+        NESTING.with_borrow_mut(|n| {
+            n.depth -= 1;
+            if n.depth == 0 {
+                n.expanded = 0;
+            }
+        });
+    }
 }
 /// Says once per model id that a mod's special model renderer drew a model the packs don't have.
 fn warn_unknown_part_once(model: &str) {
@@ -1179,6 +1333,21 @@ fn warn_unknown_part_once(model: &str) {
     {
         log::warn!(
             "Sunrise: a special model renderer drew the model {model}, which no pack has; the item draws the missing model"
+        );
+    }
+}
+/// Says once per item that a special model renderer's stack part was refused as a cycle or past
+/// the budget.
+fn warn_refused_nesting_once(item: &str) {
+    static SEEN: Mutex<std::collections::BTreeSet<String>> =
+        Mutex::new(std::collections::BTreeSet::new());
+    if SEEN
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(item.to_owned())
+    {
+        log::warn!(
+            "Sunrise: a special model renderer's stack part of {item} is a cycle or past the nesting budget; the item draws the missing model"
         );
     }
 }

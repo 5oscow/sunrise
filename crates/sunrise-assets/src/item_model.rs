@@ -1295,16 +1295,27 @@ impl PartialEq for PreparedParts {
         Arc::ptr_eq(&self.0, &other.0)
     }
 }
-/// One resource model a mod's special model renderer draws.
+/// What one part of a mod's special model renderer draws.
+#[derive(Clone, Debug, PartialEq)]
+pub enum SpecialContent {
+    /// A resource model (`mymod:item/skillet_pan`), drawn as the model resource itself.
+    Model(String),
+    /// An item stack, resolved through the item model resolver as `display` says: the item's own
+    /// models, tints and foil. The part's pose places the item's centre.
+    Stack {
+        stack: StackView,
+        display: DisplayContext,
+    },
+}
+/// One thing a mod's special model renderer draws.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SpecialPart {
-    /// The model's id (`mymod:item/skillet_pan`), drawn as the model resource itself.
-    pub model: String,
+    pub content: SpecialContent,
     /// Where it is drawn, in the special model's space (blocks, as the base model's elements
     /// over 16).
     pub pose: Mat4,
-    /// ARGB per tint index, as an item model's `tints`; a quad whose index is past them draws
-    /// white.
+    /// ARGB per tint index of a model, as an item model's `tints`; a quad whose index is past
+    /// them draws white. A stack carries its own.
     pub tints: Vec<i32>,
 }
 /// Whose display transform a layer is drawn under: the layer owns the choice, not the model it
