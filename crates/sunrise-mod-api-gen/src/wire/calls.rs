@@ -1048,7 +1048,7 @@ fn mark_block(root: &str, name: &str) -> String {
 /// impl overrides. The protocol module holds the three imports every guest links.
 pub(super) fn mark_macro(names: &super::Names) -> String {
     let mut out = String::from(
-        "/// Marks that the mod implements one export: an import of the game's table, called for nothing.\n#[doc(hidden)]\n#[macro_export]\nmacro_rules! __sunrise_mark {\n",
+        "/// Marks that the mod implements one export: an import of the game's table, called for nothing.\n#[doc(hidden)]\n#[cfg(not(test))]\n#[macro_export]\nmacro_rules! __sunrise_mark {\n",
     );
     for (owner, method, name) in names.marked() {
         writeln!(

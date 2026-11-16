@@ -70,3 +70,10 @@ pub fn call_load(module: &WasmMod) -> Option<()> {
 pub fn log_import() -> String {
     crate::imports::fixtures::log_import()
 }
+
+/// The WAT items a hand-written test module declares before its functions: every call the game
+/// serves as an import, the protocol words, and `$host`, which calls one by its place in the
+/// table (an id [`import_id`] gives) and `$reply` for `protocol:host_reply`.
+pub fn wat_imports() -> String {
+    crate::imports::fixtures::wat()
+}
