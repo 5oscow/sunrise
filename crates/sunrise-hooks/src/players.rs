@@ -14,8 +14,9 @@ pub const BODY_PARTS: [&str; 6] = [
     "left_leg",
 ];
 
-/// A pose a crate lays over a player model's body after its vanilla animation, handed to the model with [`PlayerModels::set_body_pose`]. The crate
-/// downcasts its own back through [`std::any::Any`].
+/// A pose a crate lays over a player model's body after its vanilla animation, handed to the model
+/// with [`PlayerModels::set_body_pose`]. The crate downcasts its own back through
+/// [`std::any::Any`].
 pub trait BodyPose: std::any::Any + std::fmt::Debug + Send + Sync {
     /// Poses the [`BODY_PARTS`] at `age` (the model's ticks): `at_rest` holds each part before the
     /// animation, `poses` as the animation left it (x, y, z, x/y/z rotation, x/y/z scale); a part

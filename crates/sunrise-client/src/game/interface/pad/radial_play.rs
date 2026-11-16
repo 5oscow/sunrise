@@ -143,8 +143,8 @@ impl Game<'_> {
     }
 
     /// Whether `action` would do anything now. Only what is known here, cheaply and for certain:
-    /// Quick Actions only when the server gave a dialog for it, and Social only on a server (`Gui.handleKeybinds`). Everything else on the
-    /// list always runs.
+    /// Quick Actions only when the server gave a dialog for it, and Social only on a server
+    /// (`Gui.handleKeybinds`). Everything else on the list always runs.
     fn pad_radial_runs(&self, action: RadialAction) -> bool {
         self.pad_radial_why(action).is_none()
     }

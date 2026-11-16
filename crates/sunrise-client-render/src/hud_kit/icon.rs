@@ -1,7 +1,7 @@
 //! Icons: a small picture for an action or an entry, from the player's own resources. An icon is
 //! a GUI sprite, an item or a controller glyph. Sprites and glyphs draw here; items need the
-//! game (its item models), so the game paints them through an [`IconPainter`] it implements (`game/item_draw.rs`). The render crate never
-//! reaches gameplay, and tests use [`NoItems`].
+//! game (its item models), so the game paints them through an [`IconPainter`] it implements
+//! (`game/item_draw.rs`). The render crate never reaches gameplay, and tests use [`NoItems`].
 //!
 //! Every icon fills a square of `size` GUI px: 16 for a slot, 32 for a large one. A sprite of
 //! another shape keeps its proportions inside the square, centred; an item model is drawn at 16
