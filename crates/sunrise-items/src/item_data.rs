@@ -3664,6 +3664,75 @@ mod custom_data_boundary_tests {
     const CUSTOM: &str = "minecraft:custom_data";
 
     #[test]
+    fn custom_data_preserves_literal_tag_types_and_utf16_on_round_trip() {
+        let expected = Tag::compound([
+            ("byte", Tag::Byte(-7)),
+            ("short", Tag::Short(300)),
+            ("int", Tag::Int(70000)),
+            ("long", Tag::Long(5000000000)),
+            ("float", Tag::Float(0x3fc00000)),
+            ("double", Tag::Double(0xc002000000000000)),
+            ("bytes", Tag::ByteArray(vec![255, 2])),
+            ("ints", Tag::IntArray(vec![-3, 70000])),
+            ("longs", Tag::LongArray(vec![5000000000, -9])),
+            ("empty", Tag::compound([] as [(&str, Tag); 0])),
+        ]);
+        let mut data = StackData::default();
+        data.set_other(CUSTOM, Some(Tag::String("{byte:-7b,short:300s,int:70000,long:5000000000L,float:1.5f,double:-2.25d,bytes:[B;-1b,2b],ints:[I;-3,70000],longs:[L;5000000000L,-9L],empty:{}}".into())));
+        assert_eq!(data.other(CUSTOM), Some(&expected));
+        assert_eq!(
+            components_tag(0, Some(&data)),
+            Some(Tag::compound([(CUSTOM, expected.clone())]))
+        );
+        let input = Tag::compound([(CUSTOM, expected.clone())]);
+        let (_, loaded) = decode_components(Some(&input));
+        assert_eq!(loaded.unwrap().other(CUSTOM), Some(&expected));
+
+        // Compound payloads are opaque, even for mixed lists and lone Java surrogates.
+        let opaque = Tag::Compound(
+            [
+                (
+                    JavaString(vec![0xd800]),
+                    Tag::String(JavaString(vec![0xdc00])),
+                ),
+                (
+                    JavaString::from("mixed"),
+                    Tag::List(vec![
+                        Tag::Byte(1),
+                        Tag::String("x".into()),
+                        Tag::compound([] as [(&str, Tag); 0]),
+                    ]),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        data.set_other(CUSTOM, Some(opaque));
+        let saved = components_tag(0, Some(&data)).unwrap();
+        let (_, loaded) = decode_components(Some(&saved));
+        let literal = Tag::Compound(
+            [
+                (
+                    JavaString(vec![0xd800]),
+                    Tag::String(JavaString(vec![0xdc00])),
+                ),
+                (
+                    JavaString::from("mixed"),
+                    Tag::List(vec![
+                        Tag::Byte(1),
+                        Tag::String("x".into()),
+                        Tag::compound([] as [(&str, Tag); 0]),
+                    ]),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        assert_eq!(loaded.unwrap().other(CUSTOM), Some(&literal));
+        assert_eq!(saved, Tag::compound([(CUSTOM, literal)]));
+    }
+
+    #[test]
     fn load_setter_and_loot_normalize_flattened_custom_data() {
         let flattened = Tag::String("{audit:7,nested:{enabled:1b}}".into());
         let expected = Tag::compound([
