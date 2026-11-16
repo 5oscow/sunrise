@@ -62,6 +62,10 @@ name = "real_member"
 required-features = ["listener-fixture"]
 
 [[test]]
+name = "import_identity"
+required-features = ["listener-fixture"]
+
+[[test]]
 name = "native_listener"
 required-features = ["listener-fixture"]
 
