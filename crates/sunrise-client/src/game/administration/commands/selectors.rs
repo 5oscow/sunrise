@@ -56,7 +56,7 @@ impl Game<'_> {
                     candidates.extend(self.level_candidates());
                 }
             }
-            out.extend(self.select_in_level(candidates, s, origin));
+            out.extend(self.native_selector_kept(s, candidates, origin));
             if let Some(back) = back {
                 self.enter_command_level(back);
             }
