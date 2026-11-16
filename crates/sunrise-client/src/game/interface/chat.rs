@@ -178,7 +178,7 @@ impl Game<'_> {
             keep
         });
         let arguments = super::native_server::command_arguments();
-        let (tree, _, problems) = super::native_server::command_tree(
+        let (tree, _, problems) = super::native_server::client_command_tree(
             &commands,
             |name| base.find(name).is_some(),
             &arguments,
@@ -2633,7 +2633,7 @@ mod tests {
         let vanilla = sunrise_client::command::vanilla::game_dispatcher();
         let commands = [mod_api::Command::new("xmode <mode:word>")];
         let arguments = super::super::native_server::command_arguments();
-        let (tree, _, problems) = super::super::native_server::command_tree(
+        let (tree, _, problems) = super::super::native_server::client_command_tree(
             &commands,
             |name| vanilla.find(name).is_some(),
             &arguments,
