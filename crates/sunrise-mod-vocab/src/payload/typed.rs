@@ -142,12 +142,7 @@ macro_rules! token {
                 crate::wire::layout_name(stringify!($name)),
                 <PayloadToken as Wire>::LAYOUT_SEED,
             );
-            fn layout(visiting: &mut Vec<&'static str>) -> u64 {
-                crate::wire::layout_mix(
-                    crate::wire::layout_name(stringify!($name)),
-                    <PayloadToken as Wire>::layout(visiting),
-                )
-            }
+            crate::wire::layout_fields!("token" => PayloadToken);
             const MIN: usize = <PayloadToken as Wire>::MIN;
             fn put(&self, out: &mut Writer) {
                 self.token.put(out);
