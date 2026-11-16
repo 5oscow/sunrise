@@ -60,7 +60,7 @@ impl Game<'_> {
         let plan = self.prepare_knockback_credit(
             self.player.as_ref().map_or(0, |p| p.entity_id),
             None,
-            &attack,
+            attack,
         );
         let mut credit = plan.lend(&mut self.last_hurt_by_player);
         if let Some(p) = self.player.as_mut() {
