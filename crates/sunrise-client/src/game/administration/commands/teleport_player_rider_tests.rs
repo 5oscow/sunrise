@@ -268,4 +268,51 @@ mod teleport_rider_tests {
             );
         });
     }
+
+    /// `Entity.teleportSameDimension` carries a nested vehicle tree immediately;
+    /// the grandchildren do not wait for the next `position_riders` pass.
+    #[test]
+    #[ignore = "daily"]
+    fn a_vehicle_carries_a_two_level_mob_stack_without_a_seating_tick() {
+        use super::super::Target;
+        use sunrise_client::mobs::Mob;
+        use sunrise_core::geometry::Vec3;
+
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            let kind = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+            let root = Mob::new(60, kind.clone(), Vec3::new(3.0, 64.0, 5.0), 0.0);
+            let mut middle = Mob::new(61, kind.clone(), Vec3::new(3.0, 65.0, 5.0), 30.0);
+            let mut leaf = Mob::new(62, kind, Vec3::new(3.0, 66.0, 5.0), 60.0);
+            middle.velocity = Vec3::new(0.125, -0.25, 0.375);
+            middle.fall_distance = 3.5;
+            leaf.velocity = Vec3::new(-0.5, 0.75, -0.25);
+            leaf.fall_distance = 7.25;
+            middle.extra.mount = Some(root.id);
+            middle.extra.passenger = true;
+            leaf.extra.mount = Some(middle.id);
+            leaf.extra.passenger = true;
+            game.mobs.extend([root, middle, leaf]);
+
+            game.teleport_to_in_level(
+                Target::Mob(60),
+                [10.0, 70.0, -4.0],
+                Some([90.0, 0.0]),
+                [false; 3],
+                true,
+            );
+
+            let middle = game.mob_object(61).unwrap();
+            assert_eq!(middle.position, Vec3::new(10.0, 71.0, -4.0));
+            assert_eq!(middle.yaw, 120.0);
+            assert_eq!(middle.velocity, Vec3::new(0.125, -0.25, 0.375));
+            assert_eq!(middle.fall_distance, 3.5);
+            assert_eq!(middle.extra.mount, Some(60));
+            let leaf = game.mob_object(62).unwrap();
+            assert_eq!(leaf.position, Vec3::new(10.0, 72.0, -4.0));
+            assert_eq!(leaf.yaw, 150.0);
+            assert_eq!(leaf.velocity, Vec3::new(-0.5, 0.75, -0.25));
+            assert_eq!(leaf.fall_distance, 7.25);
+            assert_eq!(leaf.extra.mount, Some(61));
+        });
+    }
 }
