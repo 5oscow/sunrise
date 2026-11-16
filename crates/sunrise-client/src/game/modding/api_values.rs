@@ -1608,7 +1608,10 @@ mod recipe_listing_tests {
     use super::*;
     #[test]
     fn a_bad_recipe_does_not_hide_the_good_recipe_of_its_type() {
-        prepare_stack_boundary_tests();
+        let mut registries = mod_api::testing::FakeRegistries::default();
+        registries
+            .resolve_items([mod_api::Identifier::parse("minecraft:stick").unwrap()])
+            .unwrap();
         let mut good = crate::crafting::RecipeSnapshot::new(
             "example:good",
             "example:machine",
