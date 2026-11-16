@@ -518,6 +518,19 @@ where
         .map_err(|error| error.into_write_error().into())
 }
 
+/// Convert a successful block-state write answer; a state the registry cannot name is the
+/// write's own `InvalidState` error.
+pub(in crate::game) fn call_state_write<W>(
+    call: impl FnOnce() -> W,
+) -> Result<<W::Value as TryIntoApi>::Api, W::Error>
+where
+    W: IntoWriteResult,
+    W::Value: TryIntoApi,
+    W::Error: From<<W::Value as TryIntoApi>::Error>,
+{
+    call_write(call)?.try_into_api().map_err(Into::into)
+}
+
 macro_rules! scalar_values {
     ($($ty:ty),* $(,)?) => { $(
         impl TryIntoApi for $ty {
