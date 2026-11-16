@@ -144,6 +144,14 @@ impl Game<'_> {
     }
 }
 
+/// Whether the HUD atlas packs the pool of dynamic texture slots: whenever a client mod is
+/// loaded, native or wasm, since any of them can call `ClientHost::create_dynamic_texture`, with
+/// no mixin and no opt-in (#4437). A game with no mod packs no slot and its atlas does not grow.
+/// Read where the atlas is built: at the first load and on a resource reload.
+pub(in crate::game) fn dynamic_texture_pool() -> bool {
+    !mod_api::__private::mods().is_empty()
+}
+
 impl UiResources {
     /// The resolved resource generation, including the base layer and pack filters.
     /// Its splash pool is empty until `with_splashes`.
@@ -156,7 +164,10 @@ impl UiResources {
                     sunrise_client::gfx::panorama::Faces::load(root, root)
                 })
             });
-            let atlas = startup::time("ui.atlas", || HudAtlas::build_over(root, root));
+            let pool = dynamic_texture_pool();
+            let atlas = startup::time("ui.atlas", || {
+                HudAtlas::build_over_with_dynamic_textures(root, root, pool)
+            });
             let panorama = panorama
                 .join()
                 .unwrap_or_else(|panic| std::panic::resume_unwind(panic));

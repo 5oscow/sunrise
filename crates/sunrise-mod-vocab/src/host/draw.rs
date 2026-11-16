@@ -54,8 +54,8 @@ pub trait DrawContext {
     }
     /// Part `src` (`[x, y, w, h]` in the sprite's own pixels) of sprite
     /// `name` (vanilla's `gui/...`, a content mod's GUI texture `mymod:gui/...`, or
-    /// a dynamic texture, `ClientRenderClientHost::upload_dynamic_texture`), drawn
-    /// stretched into `dst` (`[x, y, w, h]` in GUI pixels), every texel multiplied by
+    /// a client mod's dynamic texture, `ClientRenderClientHost::create_dynamic_texture`),
+    /// drawn stretched into `dst` (`[x, y, w, h]` in GUI pixels), every texel multiplied by
     /// `tint` (`0xAARRGGBB`, a fluid's colour) when there is one. False when there is
     /// no such sprite.
     fn sprite(&mut self, name: &str, src: [f32; 4], dst: [f32; 4], tint: Option<u32>) -> bool {

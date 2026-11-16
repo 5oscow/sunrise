@@ -1,45 +1,78 @@
-//! `ClientRenderClientHost::upload_dynamic_texture` and `release_dynamic_texture`: a client
-//! mod's run-time textures (vanilla's `DynamicTexture` in the `TextureManager`), kept for the
-//! mod whose hook or part is running (`crash::current_native_mod`) and drawn by
-//! `native_sprite` as GUI pictures of their own.
+//! `ClientRenderClientHost::create_dynamic_texture`, `update_dynamic_texture`,
+//! `free_dynamic_texture` and `dynamic_texture_budget`: a client mod's dynamic textures (vanilla's
+//! `DynamicTexture` in the `TextureManager`), held in the GUI atlas's pool of slots for the mod
+//! whose hook or part is running (`crash::current_native_mod`) and named among the atlas's
+//! sprites, so `native_sprite` and every other sprite path draw them.
 use super::Game;
-use mod_api::{DynamicTextureError, Identifier};
-use std::sync::Arc;
-use sunrise_client::hud::pictures::Picture;
+use mod_api::{DynamicTextureBudget, DynamicTextureError, Identifier};
+use sunrise_client::hud::dynamic_textures::ImagePatch;
 
 impl Game<'_> {
-    /// The calling mod's texture `id` made, or given new pixels: `rgba` is `width * height`
-    /// pixels of four bytes. It takes `&self`, so a HUD or screen hook can upload as it draws.
-    /// `Unavailable` on a server, which draws nothing.
-    pub(in crate::game) fn upload_dynamic_texture(
-        &self,
+    /// The calling mod's image `id` made from `rgba` (`width * height` pixels of four bytes) in
+    /// a slot of the atlas's pool, its pixels uploaded with the next frame.
+    pub(in crate::game) fn create_dynamic_texture(
+        &mut self,
         id: &Identifier,
         width: u32,
         height: u32,
         rgba: &[u8],
     ) -> Result<(), DynamicTextureError> {
-        if !self.native_window() {
-            return Err(DynamicTextureError::Unavailable);
-        }
         let owner = mod_api::content::crash::current_native_mod();
-        self.dynamic_textures
-            .borrow_mut()
-            .upload(owner, id, width, height, rgba)
+        let atlas = &mut self.gui.atlas;
+        self.dynamic_textures.create(
+            atlas.dynamic_texture_pool.as_ref(),
+            &mut atlas.sprites,
+            owner,
+            id,
+            [width, height],
+            rgba,
+        )
     }
-    /// The calling mod's texture `id` freed.
-    pub(in crate::game) fn release_dynamic_texture(
-        &self,
+    /// The calling mod's image `id` given new pixels, written into its slot with the next frame.
+    pub(in crate::game) fn update_dynamic_texture(
+        &mut self,
+        id: &Identifier,
+        width: u32,
+        height: u32,
+        rgba: &[u8],
+    ) -> Result<(), DynamicTextureError> {
+        let owner = mod_api::content::crash::current_native_mod();
+        let atlas = &mut self.gui.atlas;
+        self.dynamic_textures.update(
+            atlas.dynamic_texture_pool.as_ref(),
+            &mut atlas.sprites,
+            owner,
+            id,
+            [width, height],
+            rgba,
+        )
+    }
+    /// The calling mod's image `id` freed: its name and slot go at once.
+    pub(in crate::game) fn free_dynamic_texture(
+        &mut self,
         id: &Identifier,
     ) -> Result<(), DynamicTextureError> {
-        if !self.native_window() {
-            return Err(DynamicTextureError::Unavailable);
-        }
         let owner = mod_api::content::crash::current_native_mod();
-        self.dynamic_textures.borrow_mut().release(owner, id)
+        let atlas = &mut self.gui.atlas;
+        self.dynamic_textures.free(
+            atlas.dynamic_texture_pool.as_ref(),
+            &mut atlas.sprites,
+            owner,
+            id,
+        )
     }
-    /// The dynamic texture sprite `name` draws (`native_sprite`), when a mod uploaded one
-    /// under it.
-    pub(in crate::game) fn dynamic_texture(&self, name: &str) -> Option<Arc<Picture>> {
-        self.dynamic_textures.borrow().get(name).cloned()
+    /// What the calling mod may still create.
+    pub(in crate::game) fn dynamic_texture_budget(
+        &self,
+    ) -> Result<DynamicTextureBudget, DynamicTextureError> {
+        let owner = mod_api::content::crash::current_native_mod();
+        self.dynamic_textures
+            .budget(self.gui.atlas.dynamic_texture_pool.as_ref(), owner)
+    }
+    /// The images created, updated or lost by a rebuilt atlas texture since the last frame, as
+    /// patches into their slots for this frame's batch.
+    pub(in crate::game) fn dynamic_texture_patches(&mut self, patches: &mut Vec<ImagePatch>) {
+        self.dynamic_textures
+            .patches(self.gui.atlas.dynamic_texture_pool.as_ref(), patches);
     }
 }

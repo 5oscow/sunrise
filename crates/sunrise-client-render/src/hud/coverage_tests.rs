@@ -67,50 +67,6 @@ fn standalone_picture_draw_order_and_screen_exit_release() {
     eprintln!("standalone picture GPU rendering and release exercised");
 }
 
-/// A part of a picture, as `DrawContext::sprite` draws a mod's dynamic texture, is stretched
-/// over its destination: the source rectangle, in the picture's texels, picks what shows.
-#[test]
-fn a_pictures_part_draws_the_texels_its_source_rectangle_names() {
-    let _gpu = crate::gfx::test_gpu::lock();
-    let Some(mut gpu) = Gpu::new() else { return };
-    // Two texels: red, then blue.
-    let pixels = vec![255, 0, 0, 255, 0, 0, 255, 255];
-    let picture = pictures::Picture::new(2, 1, pixels, TextureFlags::default());
-    let mut batch = HudBatch::scratch([4, 2]);
-    batch.picture_part(
-        &picture,
-        [1.0, 0.0, 1.0, 1.0],
-        [0.0, 0.0, 2.0, 2.0],
-        u32::MAX,
-    );
-    batch.picture_part(
-        &picture,
-        [0.0, 0.0, 1.0, 1.0],
-        [2.0, 0.0, 2.0, 2.0],
-        u32::MAX,
-    );
-    assert_eq!(batch.pictures.len(), 1, "one texture for both parts");
-    let mut uploads = crate::gfx::upload::Uploads::new(&gpu.device);
-    let mut encoder = gpu.device.create_command_encoder(&Default::default());
-    gpu.hud
-        .prepare_pictures(&gpu.device, &mut uploads, &mut encoder, &batch);
-    uploads.finish(&encoder);
-    gpu.queue.submit([encoder.finish()]);
-    let (pixels, _) = gpu.draw(&batch, 0.0, 0.0, false);
-    for row in pixels.as_chunks::<16>().0 {
-        assert_eq!(
-            &row[..8],
-            &[0, 0, 255, 255, 0, 0, 255, 255],
-            "the right texel"
-        );
-        assert_eq!(
-            &row[8..],
-            &[255, 0, 0, 255, 255, 0, 0, 255],
-            "the left texel"
-        );
-    }
-}
-
 struct Gpu {
     device: wgpu::Device,
     queue: wgpu::Queue,

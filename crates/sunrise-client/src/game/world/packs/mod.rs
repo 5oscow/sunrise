@@ -562,6 +562,11 @@ impl Game<'_> {
         self.maps.slots.forget();
         self.map_patches.clear();
         self.text_patches.get_mut().clear();
+        // Mods' dynamic textures keep their names and slots in the new atlas's pool, and their
+        // kept pixels upload into it again.
+        let atlas = &mut self.gui.atlas;
+        self.dynamic_textures
+            .rebind(atlas.dynamic_texture_pool.as_ref(), &mut atlas.sprites);
         // Kept mod block entities name the old atlas's sprites, and their view distances the old
         // registry's states.
         self.kept_block_entities.get_mut().clear();
@@ -703,11 +708,13 @@ pub(super) fn stage_pack(
     .map_err(|e| e.to_string())?;
     // The world's models and sprites and the GUI atlas read the same root and nothing of
     // each other: about a second each, side by side.
+    let pool = super::resource_tables::dynamic_texture_pool();
     // The sound events, the GUI sprites' metadata and the language are read here too, not in
     // the frame that applies the reload (about 20 ms of it).
     let (render, atlas, panorama, (sounds, ui_metadata, language)) = std::thread::scope(|s| {
         let atlas = super::resource_load::named_scope(s, "pack-assets", || {
-            HudAtlas::build_over(&source, &source).map_err(|e| e.to_string())
+            HudAtlas::build_over_with_dynamic_textures(&source, &source, pool)
+                .map_err(|e| e.to_string())
         });
         let panorama = super::resource_load::named_scope(s, "pack-assets", || {
             sunrise_client::gfx::panorama::Faces::load(&source, &source)

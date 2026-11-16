@@ -4492,10 +4492,11 @@ impl Game<'_> {
         batch.fill(&self.gui.atlas, x, y, w, h, rgba(r, g, b, a));
     }
     /// Part `src` (`[x, y, w, h]` in the sprite's own pixels) of sprite
-    /// `name` (vanilla's `gui/...`, a content mod's GUI texture `mymod:gui/...`, or
-    /// a dynamic texture, `upload_dynamic_texture`), drawn stretched into `dst`
-    /// (`[x, y, w, h]` in GUI pixels), every texel multiplied by `tint` (`0xAARRGGBB`,
-    /// a fluid's colour) when there is one. False when there is no such sprite.
+    /// `name` (vanilla's `gui/...`, a content mod's GUI texture `mymod:gui/...`,
+    /// or a client mod's dynamic texture bound to an atlas slot,
+    /// `create_dynamic_texture`), drawn stretched into `dst` (`[x, y, w, h]` in GUI
+    /// pixels), every texel multiplied by `tint` (`0xAARRGGBB`, a fluid's colour)
+    /// when there is one. False when there is no such sprite.
     pub(in crate::game) fn native_sprite(
         &self,
         batch: &mut HudBatch,
@@ -4504,14 +4505,6 @@ impl Game<'_> {
         dst: [f32; 4],
         tint: Option<u32>,
     ) -> bool {
-        let [a, red, green, blue] = tint.unwrap_or(u32::MAX).to_be_bytes();
-        let tint = rgba(red, green, blue, a);
-        // A dynamic texture shadows the GUI sprite of its name, as a texture registered
-        // in vanilla's `TextureManager` shadows the file of its id.
-        if let Some(picture) = self.dynamic_texture(name) {
-            batch.picture_part(&picture, src, dst, tint);
-            return true;
-        }
         let Some(mut r) = self.gui.atlas.sprites.get(name).copied() else {
             return false;
         };
@@ -4520,7 +4513,8 @@ impl Game<'_> {
         r.v0 += src[1] * dv;
         r.u1 = r.u0 + src[2] * du;
         r.v1 = r.v0 + src[3] * dv;
-        batch.rect_uv(dst[0], dst[1], dst[2], dst[3], r, tint);
+        let [a, red, green, blue] = tint.unwrap_or(u32::MAX).to_be_bytes();
+        batch.rect_uv(dst[0], dst[1], dst[2], dst[3], r, rgba(red, green, blue, a));
         true
     }
     /// Item `item`'s icon (`mymod:machine`) with its top left at `at`,

@@ -7605,11 +7605,13 @@ impl Renderer {
         };
         self.finish_prepared_frame();
         // A frame that was not drawn still submits the section copies and
-        // atlas patches (glyphs, skins, maps), which the caller already took.
+        // atlas patches (glyphs, skins, maps, mods' dynamic textures), which the caller
+        // already took.
         if self.device_lost() {
             return Err("the graphics device was lost".into());
         }
-        if !matches!(rendered, Ok(true)) && !frame.hud.patches.is_empty() {
+        let patched = !frame.hud.patches.is_empty() || !frame.hud.image_patches.is_empty();
+        if !matches!(rendered, Ok(true)) && patched {
             let section_copies = self.section_copies.take();
             let has_section_copies = section_copies.is_some();
             let mut encoder = section_copies.unwrap_or_else(|| {
@@ -7619,7 +7621,7 @@ impl Renderer {
                     })
             });
             self.hud
-                .upload_patches(&mut self.uploads, &mut encoder, &frame.hud.patches);
+                .upload_patches(&mut self.uploads, &mut encoder, frame.hud);
             self.uploads.finish(&encoder);
             if has_section_copies {
                 self.section_copy_bytes = 0;

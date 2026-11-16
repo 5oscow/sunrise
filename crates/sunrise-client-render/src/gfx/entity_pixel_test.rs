@@ -1298,8 +1298,8 @@ pub fn render_hud(
         false,
     )
     .map_err(|error| error.to_string())?;
-    // As the game's renderer has it (gfx.rs): the batch's atlas patches, a map's image,
-    // upload before the draw.
+    // As the game's renderer has it (gfx.rs): the batch's atlas patches, a map's or a mod's
+    // image, upload before the draw.
     hud.atlas_texture = Some(frame.atlas_texture.clone());
     let mut uploads = super::upload::Uploads::new(&frame.device);
     let mut encoder = frame.device.create_command_encoder(&Default::default());
