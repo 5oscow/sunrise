@@ -34,14 +34,14 @@ use super::{Dim, Game, Screen, chat::PLAYER_NAME, vehicle_teleport::TeleportMoti
 use sunrise_client::{
     command::{
         Arg, CommandError, Context, Reader,
-        args::{BlockInput, Coordinates, GameMode, ItemInput, Selector, Sort},
+        args::{BlockInput, Coordinates, GameMode, ItemInput, Selector},
         vanilla::DIFFICULTIES,
     },
     gamerules::{self, Value},
     items::ItemStack,
     text::{self, Style, Text},
 };
-use sunrise_core::{geometry::Vec3, java_number::float_to_string, random::RandomSource};
+use sunrise_core::{geometry::Vec3, java_number::float_to_string};
 use sunrise_protocol::packets::play::{self, Clientbound as C};
 use sunrise_world::registry::BlockStateId;
 
@@ -5827,7 +5827,8 @@ mod vehicle_kill_tests;
 
 #[cfg(test)]
 mod global_selector_order_tests {
-    use super::{Selector, Sort, Target};
+    use super::{Selector, Target};
+    use sunrise_client::command::args::Sort;
     use sunrise_client::join_seq::Joined;
     use sunrise_core::nbt::Tag;
     use sunrise_core::position::ChunkPos;

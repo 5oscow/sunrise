@@ -1,5 +1,6 @@
 //! Resolve a parsed entity selector against the game's loaded levels.
-use super::{Game, Selector, Sort, Target};
+use super::{Game, Selector, Target};
+use sunrise_client::command::args::Sort;
 use sunrise_core::random::RandomSource;
 
 impl Game<'_> {
