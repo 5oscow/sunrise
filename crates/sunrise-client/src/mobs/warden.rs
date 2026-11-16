@@ -177,6 +177,12 @@ pub struct AngerManagement {
     /// mob's own random would shift that stream's parity.
     conversion_delay: i32,
     highest: i32,
+    /// The UUID of the player `Who::Player` stands for in `anger` (#486):
+    /// vanilla keys a player suspect by its entity, so a save names that
+    /// player. Recorded when a player raises the anger or is found again by
+    /// UUID; `None` when no player suspect is known, and then a save writes
+    /// no pair for it rather than a made-up UUID.
+    player: Option<[i32; 4]>,
 }
 /// `AngerManagement.CONVERSION_DELAY`: anger ticks between two lookups of the
 /// suspects that are away.
@@ -227,8 +233,7 @@ impl AngerManagement {
             }
         }
         for who in dropped {
-            self.anger.remove(&who);
-            self.suspects.retain(|s| *s != who);
+            self.forget(who);
         }
         self.sort_and_update_highest();
     }
@@ -241,7 +246,19 @@ impl AngerManagement {
     fn convert_from_uuids(&mut self, by_uuid: impl Fn([i32; 4]) -> Option<Who>) {
         let away = std::mem::take(&mut self.unloaded);
         for (uuid, anger) in away {
-            match by_uuid(uuid) {
+            let who = by_uuid(uuid);
+            if who == Some(Who::Player) {
+                // `Who::Player` already stands for another player: that one's
+                // anger is not this one's, so this pair stays away.
+                if self.player.is_some_and(|other| other != uuid)
+                    && self.anger.contains_key(&Who::Player)
+                {
+                    self.unloaded.insert(uuid, anger);
+                    continue;
+                }
+                self.player = Some(uuid);
+            }
+            match who {
                 Some(who) if self.anger.contains_key(&who) => {
                     *self.anger.entry(who).or_default() += anger;
                 }
@@ -300,10 +317,42 @@ impl AngerManagement {
         self.sort_and_update_highest();
         current
     }
+    /// `increaseAnger` for a player suspect, whose entity is the player with
+    /// `uuid` (when the world knows it). Another player than the one `Who::Player`
+    /// stands for leaves that one's anger under its own UUID, as vanilla keeps one
+    /// entry per player entity, and the anger kept under `uuid` while that player
+    /// was away is added (`angerByUuid.removeInt(entity.getUUID())`).
+    pub fn increase_player(&mut self, uuid: Option<[i32; 4]>, amount: i32) -> i32 {
+        if let (Some(old), Some(new)) = (self.player, uuid)
+            && old != new
+            && let Some(anger) = self.anger.get(&Who::Player).copied()
+        {
+            *self.unloaded.entry(old).or_default() += anger;
+            self.forget(Who::Player);
+        }
+        let kept = match uuid {
+            Some(uuid) => {
+                self.player = Some(uuid);
+                self.unloaded.remove(&uuid).unwrap_or(0)
+            }
+            None => 0,
+        };
+        self.increase(Who::Player, amount + kept)
+    }
+    /// The UUID of the player suspect, when it is known.
+    pub fn player_uuid(&self) -> Option<[i32; 4]> {
+        self.player
+    }
     pub fn clear(&mut self, who: Who) {
+        self.forget(who);
+        self.sort_and_update_highest();
+    }
+    fn forget(&mut self, who: Who) {
         self.anger.remove(&who);
         self.suspects.retain(|s| *s != who);
-        self.sort_and_update_highest();
+        if who == Who::Player {
+            self.player = None;
+        }
     }
     /// `getActiveAnger`: the target's anger, or the highest when there is none.
     pub fn active_anger(&self, target: Option<Who>) -> i32 {
@@ -475,7 +524,14 @@ pub(super) fn increase_anger(
         return;
     };
     let maybe_switch = st.target() != Some(Who::Player);
-    let new = st.anger.increase(who, amount);
+    let new = match who {
+        // The selected player's verified identity: `None` where the view
+        // stands for nobody the world can name (no UUID yet, a fake player).
+        Who::Player => st
+            .anger
+            .increase_player(w.selected_player_identity().map(|(uuid, _)| uuid), amount),
+        Who::Mob(_) => st.anger.increase(who, amount),
+    };
     if who == Who::Player
         && maybe_switch
         && AngerLevel::by_anger(new).is_angry()
@@ -1240,6 +1296,55 @@ mod tests {
         a.clear(Who::Player);
         assert_eq!(a.suspects(), &[Who::Mob(2), Who::Mob(1)]);
         assert_eq!(a.active_anger(None), 120);
+    }
+
+    /// #486: the player suspect is the player who raised the anger. Another
+    /// player keeps the first one's anger under the first one's UUID, and a
+    /// player found again by UUID is the one the suspect stands for.
+    #[test]
+    fn a_player_suspect_keeps_its_own_uuid() {
+        let (alice, bob) = ([1, 2, 3, 4], [5, 6, 7, 8]);
+        let mut a = AngerManagement::default();
+        assert_eq!(a.increase_player(Some(alice), 35), 35);
+        assert_eq!(a.increase_player(Some(alice), 33), 68);
+        assert_eq!(a.player_uuid(), Some(alice));
+        assert_eq!(a.increase_player(Some(bob), 35), 35);
+        assert_eq!(a.player_uuid(), Some(bob));
+        assert_eq!(a.anger_of(Who::Player), 35);
+        assert_eq!(a.unloaded().collect::<Vec<_>>(), vec![(alice, 68)]);
+
+        let mut back = AngerManagement::from_saved([(alice, 50)]);
+        back.tick(|_| true, |uuid| (uuid == alice).then_some(Who::Player));
+        assert_eq!(back.player_uuid(), Some(alice));
+        assert_eq!(back.anger_of(Who::Player), 49);
+        back.clear(Who::Player);
+        assert_eq!(back.player_uuid(), None);
+    }
+
+    /// A lookup by UUID never hands another player's anger to the player
+    /// `Who::Player` stands for: the host found again stays away while the
+    /// suspect is a guest.
+    #[test]
+    fn a_player_found_by_uuid_does_not_take_another_players_anger() {
+        let (alice, bob) = ([1, 2, 3, 4], [5, 6, 7, 8]);
+        let mut a = AngerManagement::default();
+        a.increase_player(Some(alice), 68);
+        a.increase_player(Some(bob), 35);
+        a.tick(|_| true, |uuid| (uuid == alice).then_some(Who::Player));
+        assert_eq!(a.player_uuid(), Some(bob));
+        assert_eq!(a.anger_of(Who::Player), 34);
+        assert_eq!(a.unloaded().collect::<Vec<_>>(), vec![(alice, 67)]);
+    }
+
+    /// `increaseAnger` adds the anger kept under the player's UUID while it was
+    /// away (`angerByUuid.removeInt`): one pair per player, never two.
+    #[test]
+    fn a_returning_players_kept_anger_is_added() {
+        let bob = [5, 6, 7, 8];
+        let mut a = AngerManagement::from_saved([(bob, 80)]);
+        assert_eq!(a.increase_player(Some(bob), 35), 115);
+        assert_eq!(a.unloaded().count(), 0);
+        assert_eq!(a.player_uuid(), Some(bob));
     }
 
     #[test]
