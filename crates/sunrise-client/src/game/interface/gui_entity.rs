@@ -271,7 +271,7 @@ impl Game<'_> {
                 camera,
                 &lookup,
                 FULL_BRIGHT,
-                self.res.mob_data(),
+                self,
                 &[],
                 Default::default(),
                 added.is_some().then_some(&mut parts),

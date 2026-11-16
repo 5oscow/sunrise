@@ -148,7 +148,6 @@ pub mod tests {
 }
 
 impl EntitiesRegistrar for PartRegistrar {
-    #[cfg(not(target_arch = "wasm32"))]
     fn attach_entity_part(&mut self, entity: &str, kind: &'static str, part: Arc<dyn EntityPart>) {
         self.attach(|p| &mut p.entities, kind, entity, part);
     }

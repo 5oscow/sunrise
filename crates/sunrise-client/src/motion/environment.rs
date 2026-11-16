@@ -203,22 +203,19 @@ pub(crate) fn fire_contact(
 ) -> f32 {
     let b = bounds.deflate(Vec3::new(1e-5, 1e-5, 1e-5));
     let mut damage = 0.0f32;
-    for x in b.min_position().x.floor() as i32..=b.max_position().x.floor() as i32 {
-        for y in b.min_position().y.floor() as i32..=b.max_position().y.floor() as i32 {
-            for z in b.min_position().z.floor() as i32..=b.max_position().z.floor() as i32 {
-                damage = damage.max(
-                    match registry
-                        .state(world.block(x, y, z))
-                        .map(|s| s.name.as_str())
-                    {
-                        Some("minecraft:fire") => 1.0,
-                        Some("minecraft:soul_fire") => 2.0,
-                        _ => 0.0,
-                    },
-                );
-            }
-        }
-    }
+    crate::block_contact::box_cells(b, |p| {
+        damage = damage.max(
+            match registry
+                .state(world.block(p.x, p.y, p.z))
+                .map(|s| s.name.as_str())
+            {
+                Some("minecraft:fire") => 1.0,
+                Some("minecraft:soul_fire") => 2.0,
+                _ => 0.0,
+            },
+        );
+        true
+    });
     damage
 }
 /// `CactusBlock.entityInside`: the box (deflated by `1.0E-5`, as in
@@ -230,19 +227,12 @@ pub(crate) fn cactus_contact(
     bounds: Aabb,
 ) -> bool {
     let b = bounds.deflate(Vec3::new(1e-5, 1e-5, 1e-5));
-    for x in b.min_position().x.floor() as i32..=b.max_position().x.floor() as i32 {
-        for y in b.min_position().y.floor() as i32..=b.max_position().y.floor() as i32 {
-            for z in b.min_position().z.floor() as i32..=b.max_position().z.floor() as i32 {
-                if registry
-                    .state(world.block(x, y, z))
-                    .is_some_and(|s| s.name == "minecraft:cactus")
-                {
-                    return true;
-                }
-            }
-        }
-    }
-    false
+    // Stopped early: a cactus cell was found.
+    !crate::block_contact::box_cells(b, |p| {
+        !registry
+            .state(world.block(p.x, p.y, p.z))
+            .is_some_and(|s| s.name == "minecraft:cactus")
+    })
 }
 impl LivingFluidWorld for MotionWorld<'_, '_, '_> {
     fn in_water(&mut self) -> Result<bool> {

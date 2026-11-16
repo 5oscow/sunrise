@@ -440,6 +440,22 @@ only for selected registered poses, on local players, remote players and humanoi
 swing and mob-specific animations run afterward and can change those angles.
 Native and wasm mods use the same registration, token and Wire angle value.
 
+For a change to an intermediate vanilla pose (including `item`), listen to
+`humanoid_setup_anim` instead. This client hook runs inside each actual humanoid
+setup-animation invocation, after head, walk and riding setup but before arm
+priority and posing. Its read-only `ClientHost` and `event.humanoid` provide both
+held stacks, selected poses and `is_using_item`. `event.partial_tick` and optional
+`event.game_time` are captured for that draw; game time is absent outside a level.
+Use `event.parts.get(HumanoidPart::RightArm)` to read `[position, rotation]`, then
+`set_rotation` or `set_position` to change it. Positions are local texels and
+rotations are radians. A non-finite component is refused while other finite
+components apply; scale and visibility are not changed. Later ITEM, attack,
+crouch, bob and swim animation still apply. Armor stands do not fire this hook;
+they pose from their saved rotations. A model can animate more than
+once per frame, so listeners must not treat this as a once-per-entity frame
+notification or advance simulation from it. Native and wasm use the same finite
+part snapshot, with no callback or stack snapshot when nobody subscribes.
+
 ```json
 { "template": "minecraft:stick", "arm_pose": "toot_horn" }
 ```

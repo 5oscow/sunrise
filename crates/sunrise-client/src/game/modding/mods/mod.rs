@@ -989,7 +989,10 @@ mod particle_registry_reload_tests {
 /// The content root with everything the mods declare registered against the
 /// process: block entities, mob effects, entity and menu types, fluid looks,
 /// and the protocol's local mod list, each set once.
-pub(super) fn content_root(
+///
+/// `pub(in crate::game)`: the general entity tick's wasm tests
+/// (`game::entities::general::tick_tests`) build the fixture's game the same way.
+pub(in crate::game) fn content_root(
     root: &std::path::Path,
     sources: &ModsState,
 ) -> sunrise_client::Result<sunrise_assets::resource_source::ResourceRoot> {

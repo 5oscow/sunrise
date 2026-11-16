@@ -152,12 +152,13 @@ impl Behaviours {
         Some(self.sim(level, ticks).place_inline_feature(&feature, pos))
     }
     /// `StructureBlockEntity.placeStructure`'s `StructureTemplate.placeInWorld`
-    /// on the live level: `pos` is both the position and the pivot, the
-    /// template rots at `integrity` below 1 (`BlockRotProcessor`) drawing from
-    /// `LegacyRandomSource(seed)`, the loot seeds from a second one, and
-    /// `flags` are the `setBlock` flags. Returns whether the template placed
-    /// and the entities it carried (their NBT, for the caller to spawn);
-    /// `None` when the level has no structure resources.
+    /// on the live level: `pos` is the position and the reference the
+    /// processors see, the template turns about `settings.pivot` in its own
+    /// coordinates ([`TemplateSettings`]), it rots at `integrity` below 1
+    /// (`BlockRotProcessor`) drawing from `LegacyRandomSource(seed)`, the loot
+    /// seeds from a second one, and `flags` are the `setBlock` flags. Returns
+    /// whether the template placed and the entities it carried (their NBT, for
+    /// the caller to spawn); `None` when the level has no structure resources.
     #[allow(clippy::too_many_arguments)]
     pub fn place_template<L: LevelAccess + ?Sized>(
         &self,
@@ -179,6 +180,7 @@ impl Behaviours {
         let mut loot_random = sunrise_core::random::LegacyRandom::new(settings.seed);
         let mut place = PlaceSettings::new(settings.rotation);
         place.mirror = settings.mirror;
+        place.pivot = settings.pivot;
         place.known_shape = settings.known_shape;
         place.ignore_entities = settings.ignore_entities;
         if settings.integrity < 1.0 {
@@ -1316,6 +1318,10 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
 pub struct TemplateSettings {
     pub mirror: crate::worldgen::structure::Mirror,
     pub rotation: crate::worldgen::structure::Rotation,
+    /// The turn's and the mirror's pivot, in the template's own coordinates:
+    /// `[0; 3]` turns it about its origin, which is what `/place template` and
+    /// a structure block's load do.
+    pub pivot: [i32; 3],
     pub ignore_entities: bool,
     pub known_shape: bool,
     /// `BlockRotProcessor`'s integrity; 1 places everything.

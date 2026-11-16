@@ -215,6 +215,20 @@ fn expand(mut implementation: ItemImpl, export: bool) -> TokenStream {
                 &[#(#(#hooked_cfgs)* mod_api::#ids::#hooked),*]
             }
         });
+        // The plain methods subscribe nothing, but their override is capability
+        // metadata (#792 stage 4b): the wasm side reads it where the real part
+        // lives, and a mod overriding one is refused by name at load.
+        let native: Vec<_> = methods
+            .iter()
+            .zip(&plain)
+            .filter(|(_, plain)| **plain)
+            .map(|(method, _)| proc_macro2::Literal::string(&method.to_string()))
+            .collect();
+        implementation.items.push(syn::parse_quote! {
+            fn entity_native_only(&self) -> &'static [&'static str] {
+                &[#(#native),*]
+            }
+        });
         // A part impl carries no `#[listener]` (refused above) and no guest
         // export (Hooks only), so the shared tail has nothing left to add.
         return quote!(#implementation).into();

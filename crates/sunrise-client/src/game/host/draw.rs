@@ -65,11 +65,10 @@ impl DrawContext for GameDrawContext<'_, '_> {
         self.game
             .native_item_stack(&mut *self.surface, &stack, at, size)
     }
-    fn gui_paint(&mut self, draws: &[GuiDraw]) -> Result<(), mod_api::text::TextFormError> {
+    fn gui_paint(&mut self, draws: &[GuiDraw]) -> Result<(), GuiPaintError> {
         let draws = draws.try_into_engine(&())?;
         crate::game::gui_pose::report_refused_poses(&draws);
-        self.game.native_gui_paint(&mut *self.surface, &draws);
-        Ok(())
+        self.game.native_gui_paint(&mut *self.surface, &draws)
     }
     fn gui_nine_slice(&mut self, sprite: &str, rect: [f32; 4], color: u32) {
         self.game

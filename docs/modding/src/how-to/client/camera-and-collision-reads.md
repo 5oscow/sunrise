@@ -135,6 +135,10 @@ These read the local player as the client sees it. They take no mod-controlled n
 - `ClientHost::hover_name(&stack)` is `ItemStack.getHoverName()` as plain text: the custom name, else
   a written book's non-blank title, else the item's name in the client's language, without rarity
   colour or italics. An invalid stack reads an empty string.
+- `ClientHost::creative_search_items()` is the creative search tab's stacks, in the order the screen
+  lists them, once per item and components. Mod additions from `build_creative_mode_tab_contents`
+  join when the tabs are built, and the operator tab's items only with the last build's permissions.
+  It is empty before resources load. It reads the same on native and wasm.
 - Reach is `targeting()` (below), which comes from the interaction-range attributes with the server's
   and equipment's modifiers. Menu slot numbers are `Slot.index`, the position in the menu's slot list
   that `menu_slot` and `menu_slot_count` take; `menu_slot_backing` gives the index in the backing container.

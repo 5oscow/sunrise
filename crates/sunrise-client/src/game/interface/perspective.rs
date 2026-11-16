@@ -834,7 +834,7 @@ impl Game<'_> {
                 camera,
                 &lookup,
                 packed,
-                self.res.mob_data(),
+                self,
                 &self.player_armor_layers(),
                 hidden,
                 (listened || layers.is_some()).then_some(&mut parts),
@@ -847,7 +847,7 @@ impl Game<'_> {
                 camera,
                 &lookup,
                 packed,
-                self.res.mob_data(),
+                self,
                 &self.player_armor_layers(),
                 (listened || layers.is_some()).then_some(&mut parts),
                 out,
@@ -909,7 +909,7 @@ impl Game<'_> {
                     camera,
                     &lookup,
                     packed,
-                    self.res.mob_data(),
+                    self,
                     &mut silhouette,
                 );
                 self.mark_outline(&silhouette, color);
@@ -965,7 +965,10 @@ impl Game<'_> {
         // A spectator preview still draws its own model: the poses'
         // visibility hides body parts, leaving the head and its layers.
         let body = self.own_body_visible() || self.spectator();
-        let (data, armour) = (self.res.mob_data(), self.player_armor_layers());
+        let (data, armour) = (
+            self as &dyn sunrise_client::mobs::render::RenderDataSource,
+            self.player_armor_layers(),
+        );
         // A screen preview: custom entity model animations see is_in_gui = 1.
         sunrise_client::mobs::cem_anim::in_gui(|| {
             let light = 240 | 240 << 8;
@@ -1226,7 +1229,7 @@ impl Game<'_> {
             base,
             [rect.u0, rect.v0, rect.u1, rect.v1],
             light,
-            self.res.mob_data(),
+            self,
             out,
         );
     }
@@ -1260,7 +1263,7 @@ impl Game<'_> {
             sunrise_client::mobs::render::base_transform(m, partial, camera),
             [rect.u0, rect.v0, rect.u1, rect.v1],
             light,
-            self.res.mob_data(),
+            self,
             out,
         );
     }
@@ -1306,6 +1309,7 @@ impl Game<'_> {
             main_hand: api_stacks[0].as_ref(),
             off_hand: api_stacks[1].as_ref(),
             main_arm_left: m.main_arm_left(),
+            is_using_item: m.extra.using_item > 0,
             use_hand: (m.extra.using_item > 0).then_some(if m.extra.using_off_hand {
                 Hand::Off
             } else {
@@ -1379,7 +1383,7 @@ impl Game<'_> {
                 id,
                 partial,
                 camera,
-                self.res.mob_data(),
+                self,
                 count,
                 on_surface,
                 model,

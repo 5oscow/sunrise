@@ -680,7 +680,7 @@ impl Game<'_> {
                 origin,
                 &lookup,
                 packed,
-                self.res.mob_data(),
+                self,
                 out,
             );
         }

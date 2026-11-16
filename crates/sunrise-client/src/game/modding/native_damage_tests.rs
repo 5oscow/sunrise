@@ -10,6 +10,7 @@ use mod_api::{
 };
 use std::sync::{Arc, Mutex};
 use sunrise_client::command::args::GameMode;
+use sunrise_client::items::ItemStack;
 use sunrise_client::mobs::{Damage, DamageKind, Mob};
 use sunrise_client::motion::PlayerMotion;
 use sunrise_core::{geometry::Vec3, random::RandomSource};
@@ -22,6 +23,8 @@ struct Heard {
     post: Vec<(i32, f32)>,
     post_values: Vec<(i32, f32, f32, f32)>,
     sources: Vec<HitSource>,
+    weapons: Vec<(Option<String>, Option<String>)>,
+    positions: Vec<(&'static str, Option<[f64; 3]>)>,
     side_effects: Vec<(i32, bool)>,
 }
 
@@ -35,6 +38,7 @@ struct HitSource {
 
 impl Heard {
     fn source(&mut self, phase: &'static str, entity: i32, source: &HurtSource<'_>) {
+        self.positions.push((phase, source.position));
         self.sources.push(HitSource {
             phase,
             entity,
@@ -59,6 +63,18 @@ impl Hooks for Probe {
             .lock()
             .unwrap()
             .source("incoming", event.entity, event.source);
+        let item_id = |stack: Option<&mod_api::ItemStack>| {
+            stack.and_then(|s| mod_api::__private::item_key_id(s.item()).map(str::to_owned))
+        };
+        let direct = item_id(event.weapon);
+        let causing = item_id(event.causing_weapon);
+        if causing.as_deref() == Some("minecraft:iron_sword") {
+            event.container.set_new_damage(1.0);
+        }
+        self.0.lock().unwrap().weapons.push((direct, causing));
+        if event.entity == 225020 && event.source.position == Some([0.0, 0.0, -2.0]) {
+            event.container.set_new_damage(4.0);
+        }
         if event.entity == 225001 {
             event.container.set_new_damage(4.0);
         }
@@ -424,6 +440,45 @@ fn a_game_built_level_has_every_damage_hook() {
     });
 }
 
+#[test]
+#[ignore = "daily"]
+fn player_melee_hit_preserves_the_attackers_position_and_direct_entity() {
+    let heard = heard(|game| {
+        let mut player = PlayerMotion::new(game.motion, Vec3::ZERO).unwrap();
+        player.entity_id = 225020;
+        game.player = Some(player);
+        game.set_game_mode(GameMode::Survival);
+        let mut zombie = mob(game, 42, "minecraft:zombie");
+        zombie.position = Vec3::new(0.0, 0.0, -2.0);
+        game.mobs.push(zombie);
+        assert!(game.hurt_player_from(
+            8.0,
+            Some([0.0, 0.0, -2.0]),
+            "minecraft:mob_attack",
+            Some(Some(42)),
+            false,
+        ));
+        assert_eq!(
+            game.player.as_ref().unwrap().health.health(),
+            16.0,
+            "a position-based listener changes actual player damage"
+        );
+    });
+    assert_eq!(
+        heard.sources,
+        ["incoming", "pre", "post"].map(|phase| HitSource {
+            phase,
+            entity: 225020,
+            causing: 42,
+            direct: 42,
+        })
+    );
+    assert_eq!(
+        heard.positions,
+        ["incoming", "pre", "post"].map(|phase| (phase, Some([0.0, 0.0, -2.0])))
+    );
+}
+
 /// The real projectile hit routes (not hand-built HurtSources) preserve the direct
 /// entity through incoming, pre and post, independently of whether there is a shooter.
 #[test]
@@ -435,12 +490,13 @@ fn arrow_hits_name_the_projectile_on_players_mobs_and_the_dragon() {
     use sunrise_client::motion::PlayerMotion;
     use sunrise_client::projectiles::{Hit, Projectile, ProjectileKind};
 
-    for (target, owner, entity, causing) in [
-        (Who::Player, Some(Who::Mob(42)), 7, 42),
-        (Who::Player, None, 7, 0),
-        (Who::Mob(43), Some(Who::Player), 43, 7),
-        (Who::Mob(43), None, 43, 0),
-        (Who::Mob(SPECIAL), Some(Who::Player), 44, 7),
+    for (target, owner, gone, entity, causing) in [
+        (Who::Player, Some(Who::Mob(42)), false, 7, 42),
+        (Who::Player, None, false, 7, 0),
+        (Who::Mob(43), Some(Who::Player), false, 43, 7),
+        (Who::Mob(43), None, false, 43, 0),
+        (Who::Mob(SPECIAL), Some(Who::Player), false, 44, 7),
+        (Who::Mob(43), Some(Who::Mob(42)), true, 43, 42),
     ] {
         let heard = heard(|game| {
             let mut player = PlayerMotion::new(game.motion, Vec3::ZERO).unwrap();
@@ -448,6 +504,11 @@ fn arrow_hits_name_the_projectile_on_players_mobs_and_the_dragon() {
             game.player = Some(player);
             game.set_game_mode(GameMode::Survival);
             game.mobs.push(mob(game, 42, "minecraft:skeleton"));
+            game.mobs[0]
+                .extra
+                .set_main_hand_stack(Some(ItemStack::new("minecraft:stone_sword", 1)));
+            *game.held_mut() = Some(ItemStack::new("minecraft:stone_sword", 1));
+            game.offhand = Some(ItemStack::new("minecraft:crossbow", 1));
             game.mobs.push(mob(game, 43, "minecraft:pig"));
             let mut dragon = Dragon::new(Vec3::ZERO, 0.0, 0);
             // Hover is a sitting phase and correctly shrugs off arrows.
@@ -464,7 +525,17 @@ fn arrow_hits_name_the_projectile_on_players_mobs_and_the_dragon() {
                 owner,
             );
             arrow.id = 912;
+            arrow.arrow.as_mut().unwrap().fired_from_weapon =
+                Some(ItemStack::new("minecraft:crossbow", 1));
             arrow.velocity = Vec3::new(0.0, 0.0, -2.0);
+            // Equipment changes after launch: only the saved crossbow belongs to the arrow.
+            *game.held_mut() = Some(ItemStack::new("minecraft:iron_sword", 1));
+            game.mobs[0]
+                .extra
+                .set_main_hand_stack(Some(ItemStack::new("minecraft:iron_sword", 1)));
+            if gone {
+                game.mobs.retain(|m| m.id != 42);
+            }
             game.projectile_hit(
                 &arrow,
                 Hit::Entity {
@@ -474,10 +545,24 @@ fn arrow_hits_name_the_projectile_on_players_mobs_and_the_dragon() {
             )
             .unwrap();
             assert_eq!(game.current_attack(), NO_ATTACK, "projectile scope leaked");
+            // The listener sets 1 damage: 20 - 1 for a player, 10 - 1 for a pig.
             match target {
-                Who::Player => assert!(game.player.as_ref().unwrap().health.health() < 20.0),
+                Who::Player => {
+                    let health = game.player.as_ref().unwrap().health.health();
+                    if owner.is_some() && !gone {
+                        assert_eq!(health, 19.0, "the causing-weapon rule changes real damage");
+                    } else {
+                        assert!(health < 19.0, "ownerless arrows do not use the weapon rule");
+                    }
+                }
                 Who::Mob(SPECIAL) => assert!(game.dragon.as_ref().unwrap().health < 200.0),
-                Who::Mob(_) => assert!(game.mobs[1].health < 10.0),
+                Who::Mob(_) => {
+                    if owner.is_some() && !gone {
+                        assert_eq!(game.mobs.iter().find(|m| m.id == 43).unwrap().health, 9.0);
+                    } else {
+                        assert!(game.mobs.iter().find(|m| m.id == 43).unwrap().health < 9.0);
+                    }
+                }
             }
         });
         let expected = ["incoming", "pre", "post"].map(|phase| HitSource {
@@ -489,6 +574,105 @@ fn arrow_hits_name_the_projectile_on_players_mobs_and_the_dragon() {
         assert_eq!(
             heard.sources, expected,
             "target {target:?}, owner {owner:?}"
+        );
+        assert_eq!(
+            heard.weapons,
+            [(
+                Some("minecraft:crossbow".into()),
+                owner
+                    .filter(|_| !gone)
+                    .map(|_| "minecraft:iron_sword".into())
+            )],
+            "the saved projectile weapon and the current shooter's main hand are independent"
+        );
+        if target == Who::Player {
+            assert_eq!(
+                heard.positions,
+                ["incoming", "pre", "post"].map(|phase| (phase, Some([0.0, 1.0, 0.5]))),
+                "known projectile position reaches every player hit phase; owner {owner:?}"
+            );
+        }
+    }
+}
+
+#[test]
+#[ignore = "daily"]
+fn guest_projectile_uses_current_main_hand_or_none_after_departure() {
+    use sunrise_client::mobs::Who;
+    use sunrise_client::projectiles::{Hit, Projectile, ProjectileKind};
+
+    for gone in [false, true] {
+        let log = Arc::new(Mutex::new(Heard::default()));
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+            "probe",
+            Box::new(Probe(log.clone())),
+        )]
+        .into();
+        mod_platform::testing::with_mods(mods, || {
+            super::native_guest_turn_tests::with_guests(|game| {
+                game.lan
+                    .as_mut()
+                    .unwrap()
+                    .hub
+                    .update_guest(12, |guest| {
+                        guest.selected = 3;
+                        guest.inventory[3] = Some(ItemStack::new("minecraft:stone_sword", 1));
+                    })
+                    .unwrap();
+                game.mobs.push(mob(game, 43, "minecraft:pig"));
+                let mut arrow = Projectile::new(
+                    ProjectileKind::Arrow {
+                        base_damage: 2.0,
+                        critical: false,
+                        effect: None,
+                    },
+                    Vec3::new(0.0, 1.0, 0.5),
+                    Some(Who::Player),
+                );
+                arrow.id = 912;
+                arrow.guest = Some(12);
+                arrow.arrow.as_mut().unwrap().fired_from_weapon =
+                    Some(ItemStack::new("minecraft:crossbow", 1));
+                arrow.velocity = Vec3::new(0.0, 0.0, -2.0);
+                game.lan
+                    .as_mut()
+                    .unwrap()
+                    .hub
+                    .update_guest(12, |guest| {
+                        guest.inventory[3] = Some(ItemStack::new("minecraft:iron_sword", 1));
+                    })
+                    .unwrap();
+                if gone {
+                    // Model the departed connection being absent when its projectile lands.
+                    game.lan
+                        .as_mut()
+                        .unwrap()
+                        .hub
+                        .guests
+                        .retain(|guest| guest.conn != 12);
+                }
+                game.projectile_hit(
+                    &arrow,
+                    Hit::Entity {
+                        who: Who::Mob(43),
+                        at: Vec3::ZERO,
+                    },
+                )
+                .unwrap();
+                let health = game.mobs.iter().find(|m| m.id == 43).unwrap().health;
+                if gone {
+                    assert!(health < 9.0);
+                } else {
+                    assert_eq!(health, 9.0, "10 health minus the listener's 1 damage");
+                }
+            });
+        });
+        assert_eq!(
+            log.lock().unwrap().weapons,
+            [(
+                Some("minecraft:crossbow".into()),
+                (!gone).then(|| "minecraft:iron_sword".into())
+            )]
         );
     }
 }

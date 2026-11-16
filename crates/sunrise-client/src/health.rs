@@ -1902,15 +1902,10 @@ impl HurtWorld for Environment<'_> {
         Ok(())
     }
     fn damage_post(&mut self, _: &mut State, container: &DamageContainer) -> io::Result<()> {
-        let source = HurtSource {
-            damage_type: &self.source.definition().name,
-            causing: self.causing,
-            direct: self
-                .level
-                .attack()
-                .projectile_direct(&self.source.definition().name),
-            position: None,
-        };
+        let source = self
+            .level
+            .attack()
+            .player_source(&self.source.definition().name, self.causing);
         self.level
             .damage_post(Hurting::Player(self.entity, source), container);
         Ok(())

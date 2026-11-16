@@ -200,7 +200,7 @@ Use API-owned values rather than importing engine or package-loader types.
 | `Suggestion` | Construct with `Suggestion::new((start, end), text)`. Offsets are bytes; `tooltip` and `int_value` are writable. |
 | `Block`, `Item` | Registration declarations. Component patches are `(String, Option<Tag>)` entries; `None` removes a component. Content-file admission checks apply. |
 | `BlockEntityTypeDecl` | Declaration snapshot produced by `r.block_entity_type(...).build()`. |
-| `GuiDraw` | GUI commands; `DrawContext::gui_paint` returns a typed text-conversion result. Handle refusal before drawing. HUD hooks reject invalid writeback as a whole. |
+| `GuiDraw` | GUI commands; `DrawContext::gui_paint` returns a `GuiPaintError` naming the op it could not draw (text conversion, an item slot, a texture or sprite), and draws nothing of that buffer. HUD hooks reject invalid writeback as a whole. |
 
 `ServerHost::game_rule(id)` reads the one server-wide rule store without a
 `LevelRef`, including in `server_about_to_start` and `server_starting`.

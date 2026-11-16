@@ -1524,8 +1524,8 @@ mod mixin or use it replaces in its design or PR."#]
   the ender dragon, including an ownerless projectile, or the attacker itself in melee; `magic()` and any other
   source with no direct entity stay 0 even during that projectile's impact; and `position`, `getSourcePosition`), the `victim`'s
   position and view vector, the direct entity's `weapon` (`getWeaponItem`) when Sunrise knows it (a player's or mob's
-  melee hit inside its attack), and the hit's `DamageContainer` before any reduction. The entity ids are 0 for none,
-  and for the sources listed below that Sunrise doesn't track yet. A mod may change the container's new damage or the
+  melee hit or projectile's saved weapon), `causing_weapon` (the causing living entity's current main hand; None for absent,
+  unknown, non-living or gone owners), and `DamageContainer` before reductions. Entity ids are 0 for none and for the untracked sources listed below. A mod may change the container's new damage or the
   invulnerability ticks a fresh hit leaves (vanilla's 20), or set `canceled`: nothing of `hurtServer` itself happens
   then (no damage, hurt sound, knockback, invulnerable time, statistics or criteria), and the caller acts as on a
   refused hit, so a blast still pushes a mob whose hit was canceled, as vanilla pushes one that refused it. A canceled
@@ -1572,8 +1572,8 @@ datapack's `demo:heat` hurt through `ApplyEffectTickEvent::hurt` or `entity_hurt
 
 The causing and direct entities are 0 for now in these cases:
 
-- A player's direct entity outside a projectile hit, and `magic()` dealt during one (an ownerless wither
-  skull, instant harm from a tipped arrow): vanilla's source names no entity
+- `magic()` dealt to a player during a projectile hit (an ownerless wither skull, instant harm from a
+  tipped arrow): vanilla's source names no entity
 - A player's causing entity, except for a mob that shot the projectile, the mob `/damage` names, an evoker that summoned
   the fangs, a slime or magma cube that touched the player, and a mob that exploded (a sulfur cube's is guessed until
   its blast names its source)
@@ -2278,7 +2278,7 @@ registration path.
 
 - `map_decorations(map, decorations)` is asked each time a map is drawn (held, in an item frame, or on the cartography table's screen) with `MapInfo` (id, centre block, scale, dimension, locked, whether it is in a frame); push `MapDecoration { sprite, x, y, rot, shown_on_frame }` (an atlas sprite, a position in half map pixels from -128 to 127, a rotation 0 to 15, and whether it shows in frames and on the screen like vanilla's markers) and it is drawn after the vanilla decorations with the same pose; a sprite the atlas lacks is left out. Nothing is saved in the map and vanilla's decorations are not passed in. This is the client half of NeoForge's `MapDecorationType`; types registered on the server and saved in map data need code-side registration.
 
-- A player's client starting and stopping tracking an entity, on the single player server thread and on a dedicated server: `player_start_tracking(player, name, entity, uuid, kind)` when the entity is sent to the player (NeoForge's `PlayerEvent.StartTracking`, vanilla's `ServerEntity.addPairing`) and `player_stop_tracking(...)` when it stops (`PlayerEvent.StopTracking`, `removePairing`): out of range, gone from the level, or the player left, changed level or respawned. They name the entity by ID, UUID and type and run with no player's state swapped in, so a mod sends what the player needs with `PlayerRef::send_payload`. Each start has one stop.
+- A player's client starting and stopping tracking an entity, on the single player server thread and on a dedicated server: `player_start_tracking(player, name, entity, uuid, kind)` when the entity is sent to the player (NeoForge's `PlayerEvent.StartTracking`, vanilla's `ServerEntity.addPairing`) and `player_stop_tracking(...)` when it stops (`PlayerEvent.StopTracking`, `removePairing`): out of range, gone from the level, or the player left, changed level or respawned. They name the entity by ID, UUID and type and run with no player's state swapped in, so a mod sends what the player needs with `PlayerRef::send_payload`, and it reaches the player right after the spawn bundle or the removal packet. Each start has one stop. Both are heard in the tick's tracking pass (version 2), once the pass has built every player's packets, because the pass builds them on several threads: a listener sees the player tracking every entity the pass paired, not only those paired before it. A leaving player's stops follow `player_logged_out`; a respawn's or a level change's come at the next pass. While they run the engine is walking its tracker, so a listener reads the game and sends payloads but doesn't spawn, remove or teleport entities.
 
 - An energy buffer on a mod block's block entity. `r.block_energy(&block, buffer)` registers a `ModEnergyBuffer` as `SimpleEnergyHandler` is built: its capacity, the most one insert and one extract moves, and the faces a fill may come through and a drain may leave by. The amount lives in the entity's saved compound as the int `energy`, so it survives restarts and the block's own tick reads it there. The game's own energy capability and registration-time type coverage share that declaration (see "A block's energy").
 

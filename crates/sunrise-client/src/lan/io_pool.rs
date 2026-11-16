@@ -214,7 +214,7 @@ impl Outbox {
             worker.wake();
         }
     }
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-payload-probe"))]
     pub(super) fn queued_contents(&self) -> Vec<Vec<u8>> {
         self.queue()
             .bodies

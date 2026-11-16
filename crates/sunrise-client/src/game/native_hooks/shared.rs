@@ -1332,6 +1332,12 @@ pub(super) fn incoming_damage(
     let Ok(weapon) = attack.weapon_of(source.direct).try_into_api() else {
         return false;
     };
+    let causing_weapon = (source.causing != 0 && source.causing == attack.attacker)
+        .then_some(attack.held[0].as_ref())
+        .flatten();
+    let Ok(causing_weapon) = causing_weapon.try_into_api() else {
+        return false;
+    };
     let mut snapshot = (*container).try_into_api().expect("scalar damage snapshot");
     HitLevel(level).native_living_incoming_damage(mod_api::__private::LivingIncomingDamageCall {
         entity,
@@ -1339,6 +1345,7 @@ pub(super) fn incoming_damage(
         source: &source,
         victim: &victim,
         weapon: weapon.as_ref(),
+        causing_weapon: causing_weapon.as_ref(),
         container: &mut snapshot,
         canceled: &mut canceled,
     });
