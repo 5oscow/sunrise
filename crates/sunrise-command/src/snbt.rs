@@ -145,6 +145,18 @@ mod tests {
         assert_eq!(error.java_cursor(), 6);
         assert_eq!(error.context().unwrap(), "[1e309<--[HERE]");
     }
+
+    /// The suggestion text carries the same UTF-16 position as `java_cursor`, not the byte one.
+    #[test]
+    fn with_context_translates_the_java_position() {
+        // The error is at `]`: byte 18, Java index 14.
+        let error = parse_fully("{\"éééé\":[1e309]}").unwrap_err();
+        assert_eq!(error.cursor, 18);
+        assert_eq!(
+            error.with_context().component()["with"][1].as_i64(),
+            Some(14)
+        );
+    }
 }
 
 #[cfg(test)]
@@ -244,6 +256,18 @@ mod suggestion_tests {
         assert_eq!(suggestions("{a"), [":"]);
         assert_eq!(suggestions("[1,"), ["]"]);
         assert_eq!(suggestions("{\"a"), ["\"", "'", "\\"]);
+    }
+
+    /// After multi-byte text, a suggestion's range is in bytes (what slicing needs) and its
+    /// start converts to UTF-16 units (what the client counts): `{"é` is four bytes, three units.
+    #[test]
+    fn a_suggestion_after_multibyte_text_converts_its_start_to_utf16() {
+        let input = "{\"é";
+        let mut builder = SuggestionsBuilder::new(input, 0);
+        suggest(&mut builder);
+        let quote = builder.out.iter().find(|s| s.text == "\"").unwrap();
+        assert_eq!(quote.range, (4, 4));
+        assert_eq!(crate::utf16_units(input, quote.range.0), 3);
     }
 
     /// Candidates must match the text typed at that position: nothing continues `\q`.
