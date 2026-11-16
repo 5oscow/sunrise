@@ -10,11 +10,11 @@
 
 use super::*;
 use crate::game::native_entity_refs::tests::with_game;
-use sunrise_core::random::LegacyRandom;
 use mod_api::{
     BabyEntitySpawnEvent, Flow, Hooks, MobSplitEvent, PendingMobSpec, ServerHost, UnspawnedMobError,
 };
 use std::sync::{Arc, Mutex};
+use sunrise_core::random::LegacyRandom;
 
 const IGNORE: &str = "needs prepared resources in SUNRISE_TEST_RESOURCES";
 
@@ -121,7 +121,7 @@ fn assert_vanilla_children(children: &[Mob], kind: &str, first_id: u32) {
 }
 
 #[test]
-#[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn size_four_slime_and_magma_split_three_children_and_draw_the_vanilla_yaws() {
     let _ = IGNORE;
     for kind in ["minecraft:slime", "minecraft:magma_cube"] {
@@ -155,7 +155,7 @@ fn size_four_slime_and_magma_split_three_children_and_draw_the_vanilla_yaws() {
 }
 
 #[test]
-#[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn cancelled_split_spawns_nothing_but_keeps_the_construction_draws() {
     with_split(
         |_, _| Flow::Cancel,
@@ -172,7 +172,7 @@ fn cancelled_split_spawns_nothing_but_keeps_the_construction_draws() {
 }
 
 #[test]
-#[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn no_listener_split_is_exactly_vanilla() {
     let mods: mod_api::Mods = Vec::new().into();
     mod_platform::testing::with_mods(mods, || {
@@ -187,7 +187,7 @@ fn no_listener_split_is_exactly_vanilla() {
 }
 
 #[test]
-#[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn sulfur_cube_splits_two_babies_unless_primed_and_size_one_asks_nobody() {
     let calls = Arc::new(Mutex::new(0u32));
     let count = calls.clone();
@@ -238,7 +238,7 @@ fn spec(kind: &str, at: [f64; 3], yaw: f32, size: Option<u32>, dimension: &str) 
 }
 
 #[test]
-#[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn edit_remove_append_commits_a_c_d_once_and_b_goes_stale() {
     let stale = Arc::new(Mutex::new(None));
     let record = stale.clone();
@@ -294,7 +294,7 @@ fn edit_remove_append_commits_a_c_d_once_and_b_goes_stale() {
 }
 
 #[test]
-#[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn replace_c_with_e_commits_a_b_e_and_a_second_append_of_e_is_an_ownership_error() {
     let outcome = Arc::new(Mutex::new(None));
     let record = outcome.clone();
@@ -341,7 +341,7 @@ fn replace_c_with_e_commits_a_b_e_and_a_second_append_of_e_is_an_ownership_error
 }
 
 #[test]
-#[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn invalid_input_fails_before_mutation_and_the_valid_list_stands() {
     let errors = Arc::new(Mutex::new(Vec::new()));
     let record = errors.clone();
@@ -435,7 +435,7 @@ fn invalid_input_fails_before_mutation_and_the_valid_list_stands() {
 }
 
 #[test]
-#[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn retained_native_tokens_fail_after_the_callback_returns() {
     let kept = Arc::new(Mutex::new(None));
     let record = kept.clone();
@@ -469,7 +469,7 @@ fn retained_native_tokens_fail_after_the_callback_returns() {
 }
 
 #[test]
-#[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn a_panicking_listener_spawns_nothing_and_leaves_the_arena_usable() {
     let panic_now = Arc::new(Mutex::new(true));
     let flag = panic_now.clone();
@@ -557,7 +557,7 @@ pub(super) fn find(game: &Game<'_>, id: u32) -> Mob {
 }
 
 #[test]
-#[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn breeding_replaces_the_cow_baby_with_a_pig_baby() {
     let seen = Arc::new(Mutex::new(Vec::new()));
     let record = seen.clone();
@@ -634,7 +634,7 @@ fn breeding_replaces_the_cow_baby_with_a_pig_baby() {
 }
 
 #[test]
-#[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn breeding_veto_leaves_no_baby_orb_or_statistic_and_the_parents_resting() {
     with_baby(
         |_, _| Flow::Cancel,
@@ -661,7 +661,7 @@ fn breeding_veto_leaves_no_baby_orb_or_statistic_and_the_parents_resting() {
 }
 
 #[test]
-#[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn removing_the_baby_is_the_same_outcome_as_a_veto() {
     with_baby(
         |_, event| {
@@ -684,7 +684,7 @@ fn removing_the_baby_is_the_same_outcome_as_a_veto() {
 }
 
 #[test]
-#[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn egg_layers_never_ask_baby_entity_spawn() {
     let calls = Arc::new(Mutex::new(0u32));
     let count = calls.clone();
@@ -707,7 +707,7 @@ fn egg_layers_never_ask_baby_entity_spawn() {
 }
 
 #[test]
-#[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn breeding_without_a_listener_is_vanilla() {
     let mods: mod_api::Mods = Vec::new().into();
     mod_platform::testing::with_mods(mods, || {
@@ -724,7 +724,7 @@ fn breeding_without_a_listener_is_vanilla() {
 }
 
 #[test]
-#[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn turtle_hatching_spawns_its_turtle_without_asking_baby_entity_spawn() {
     let calls = Arc::new(Mutex::new(0u32));
     let count = calls.clone();
@@ -767,7 +767,7 @@ fn with_splits(listeners: Vec<SplitFn>, run: impl FnOnce(&mut Game<'_>)) {
 }
 
 #[test]
-#[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn a_token_kept_from_one_listener_is_expired_in_the_next() {
     type Kept = (
         mod_api::PendingChildrenRef,
@@ -837,7 +837,7 @@ fn animals_bred(game: &Game<'_>) -> i32 {
 }
 
 #[test]
-#[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn credit_goes_to_the_player_only_when_the_baby_is_accepted() {
     with_baby(
         |_, _| Flow::Continue,
@@ -865,7 +865,7 @@ fn credit_goes_to_the_player_only_when_the_baby_is_accepted() {
 }
 
 #[test]
-#[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn a_waiting_baby_publishes_its_uuid_only_when_it_joins() {
     with_baby(
         |_, _| Flow::Continue,
@@ -896,7 +896,7 @@ fn a_waiting_baby_publishes_its_uuid_only_when_it_joins() {
 }
 
 #[test]
-#[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn a_panicking_baby_listener_leaves_no_reserved_state_behind() {
     with_baby(
         |_, _| panic!("a listener fails"),
@@ -917,7 +917,7 @@ fn a_panicking_baby_listener_leaves_no_reserved_state_behind() {
 /// dispatch runs where the listeners run (the host methods that move a mob are not reachable
 /// from a hook's `ServerHost` in the fixture world).
 #[test]
-#[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn a_parent_changed_during_dispatch_refuses_the_baby_and_nothing_is_rebuilt() {
     with_game(|game| {
         let kind = game.res.mob_types().get("minecraft:cow").unwrap().clone();

@@ -426,7 +426,7 @@ pub(crate) fn listening(
             .map(move |subscriber| {
                 // Every listener of a hook the loop reaches is one more entered: scoped
                 // resources end the previous listener's lease on it.
-                bump_listener_serial(hook_id);
+                bump_listener_serial();
                 (
                     subscriber.receives_cancelled,
                     &installed.mods[subscriber.index],
@@ -467,22 +467,47 @@ impl ListenerScope {
 }
 
 thread_local! {
-    /// How many listeners of each hook this thread has entered, so a scoped resource can tell
-    /// that the next listener (or a nested dispatch of the same hook) has begun.
-    static LISTENER_SERIAL: [std::cell::Cell<u64>; generated::HOOK_COUNT] =
-        const { [const { std::cell::Cell::new(0) }; generated::HOOK_COUNT] };
+    /// Every listener entered on this thread, including listeners of different nested hooks.
+    static LISTENER_SERIAL: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
-/// Marks a listener of `hook` entered on this thread.
 #[inline]
-fn bump_listener_serial(hook: generated::HookId) {
-    LISTENER_SERIAL.with(|serial| {
-        let cell = &serial[hook as usize];
-        cell.set(cell.get().wrapping_add(1));
-    });
+fn bump_listener_serial() {
+    LISTENER_SERIAL.with(|serial| serial.set(serial.get().wrapping_add(1)));
 }
 
-/// The number of `hook` listeners this thread has entered so far.
-pub(crate) fn listener_serial(hook: generated::HookId) -> u64 {
-    LISTENER_SERIAL.with(|serial| serial[hook as usize].get())
+pub(crate) fn listener_serial() -> u64 {
+    LISTENER_SERIAL.with(std::cell::Cell::get)
+}
+
+#[cfg(test)]
+mod listener_lease_tests {
+    use super::*;
+    use sunrise_mod_runtime::pending_children::{Decision, Error, PendingChildren};
+
+    #[test]
+    fn entering_a_different_hook_expires_a_retained_pending_child() {
+        let mut arena = PendingChildren::default();
+        arena
+            .run(
+                1,
+                1,
+                vec![7u32],
+                |arena, action| {
+                    let enter = |_: generated::HookId| bump_listener_serial();
+                    enter(generated::HookId::MobSplit);
+                    arena.sync_listener(listener_serial()).unwrap();
+                    let child = arena.borrow(action, 0).unwrap();
+                    assert_eq!(arena.get(child), Ok(&7));
+                    enter(generated::HookId::BabyEntitySpawn);
+                    arena.sync_listener(listener_serial()).unwrap();
+                    assert_eq!(arena.get(child), Err(Error::Expired));
+                    let fresh = arena.borrow(action, 0).unwrap();
+                    assert_eq!(arena.get(fresh), Ok(&7));
+                    Decision::Accept
+                },
+                |_| true,
+            )
+            .unwrap();
+    }
 }

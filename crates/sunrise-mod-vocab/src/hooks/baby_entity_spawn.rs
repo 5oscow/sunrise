@@ -28,6 +28,7 @@ pub trait Hooks {
 - Turtle and frog breeding, sniffer egg laying and turtle hatching make eggs, not babies, and do not fire it. Armadillos breed through the ordinary animal path and do. Villagers breed through their own behavior and do not (a separate moment)."#]
     #[hook(
         side = "server",
+        version = 2,
         contract = "cancel",
         out = "cancel",
         neoforge = "BabyEntitySpawnEvent",

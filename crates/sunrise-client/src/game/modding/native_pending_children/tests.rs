@@ -1,11 +1,11 @@
 use super::*;
 use crate::game::{native_entity_refs::tests::with_game, native_unspawned_mob::Edits};
-use sunrise_mod_runtime::pending_children::Decision;
 use mod_api::UnspawnedMobEdits;
 use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
 };
+use sunrise_mod_runtime::pending_children::Decision;
 
 fn initial(game: &Game<'_>, id: u32) -> PendingMob {
     let kind = game.res.mob_types().get("minecraft:cow").unwrap().clone();
@@ -51,7 +51,7 @@ impl sunrise_client::mobs::goals::Goal for NeverClone {
 }
 
 #[test]
-#[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn edit_remove_append_uses_the_actual_mob_and_expires_metadata_borrows() {
     with_game(|game| {
         let arena = game.lent_mobs.borrow().pending.clone();
@@ -183,7 +183,7 @@ fn edit_remove_append_uses_the_actual_mob_and_expires_metadata_borrows() {
 }
 
 #[test]
-#[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn invalid_input_and_second_baby_refuse_before_changing_the_collection() {
     with_game(|game| {
         let arena = game.lent_mobs.borrow().pending.clone();
@@ -290,7 +290,7 @@ fn invalid_input_and_second_baby_refuse_before_changing_the_collection() {
 /// The collection editor carries no Game borrow: dispatch can lend the mutable server Host
 /// and the editor together. Its read-only resource snapshot is still valid afterward.
 #[test]
-#[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn collection_editor_can_share_a_callback_with_mutable_server_host() {
     fn callback(
         host: &mut dyn mod_api::ServerHost,
@@ -340,7 +340,7 @@ fn collection_editor_can_share_a_callback_with_mutable_server_host() {
 }
 
 #[test]
-#[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn pending_reentrancy_expires_standalone_kind_and_position_metadata() {
     with_game(|game| {
         let arena = game.lent_mobs.borrow().pending.clone();
@@ -382,7 +382,7 @@ fn pending_reentrancy_expires_standalone_kind_and_position_metadata() {
 }
 
 #[test]
-#[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn final_invalid_child_suppresses_the_entire_frozen_output() {
     with_game(|game| {
         let arena = game.lent_mobs.borrow().pending.clone();
