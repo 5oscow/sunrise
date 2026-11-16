@@ -63,3 +63,35 @@ impl CreativeModeTabs {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ItemKey;
+
+    /// A tab is found by id, and a stack is shown by the tabs that list its item with the same
+    /// components: the same item with other components is not.
+    #[test]
+    fn tabs_are_found_by_id_and_membership_follows_item_and_components() {
+        let plain = ItemStack::of(ItemKey(1));
+        let mut damaged = ItemStack::of(ItemKey(1));
+        damaged.set_damage(3);
+        let other = ItemStack::of(ItemKey(2));
+        let tabs = CreativeModeTabs::new(
+            true,
+            vec![
+                CreativeModeTabInfo::new("minecraft:building_blocks".into(), vec![plain.clone()]),
+                CreativeModeTabInfo::new("a:tools".into(), vec![damaged.clone(), other.clone()]),
+                CreativeModeTabInfo::new("a:both".into(), vec![other.clone(), plain.clone()]),
+            ],
+        );
+        assert_eq!(tabs.tab("a:tools").map(|t| t.display_items.len()), Some(2));
+        assert!(tabs.tab("a:missing").is_none());
+        let ids = |stack: &ItemStack| -> Vec<String> {
+            tabs.tabs_showing(stack).map(|t| t.id.clone()).collect()
+        };
+        assert_eq!(ids(&plain), ["minecraft:building_blocks", "a:both"]);
+        assert_eq!(ids(&damaged), ["a:tools"]);
+        assert_eq!(ids(&other), ["a:tools", "a:both"]);
+    }
+}
