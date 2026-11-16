@@ -454,32 +454,17 @@ fn player_melee_hit_preserves_the_attackers_position_and_direct_entity() {
         );
     });
     assert_eq!(
-        heard
-            .sources
-            .iter()
-            .filter(|s| s.phase != "post")
-            .collect::<Vec<_>>(),
-        ["incoming", "pre"]
-            .map(|phase| HitSource {
-                phase,
-                entity: 225020,
-                causing: 42,
-                direct: 42,
-            })
-            .iter()
-            .collect::<Vec<_>>()
+        heard.sources,
+        ["incoming", "pre", "post"].map(|phase| HitSource {
+            phase,
+            entity: 225020,
+            causing: 42,
+            direct: 42,
+        })
     );
     assert_eq!(
-        heard
-            .positions
-            .iter()
-            .filter(|(phase, _)| *phase != "post")
-            .copied()
-            .collect::<Vec<_>>(),
-        [
-            ("incoming", Some([0.0, 0.0, -2.0])),
-            ("pre", Some([0.0, 0.0, -2.0]))
-        ]
+        heard.positions,
+        ["incoming", "pre", "post"].map(|phase| (phase, Some([0.0, 0.0, -2.0])))
     );
 }
 
@@ -549,19 +534,13 @@ fn arrow_hits_name_the_projectile_on_players_mobs_and_the_dragon() {
             heard.sources, expected,
             "target {target:?}, owner {owner:?}"
         );
-        assert_eq!(
-            heard
-                .positions
-                .iter()
-                .filter(|(phase, _)| *phase != "post")
-                .copied()
-                .collect::<Vec<_>>(),
-            [
-                ("incoming", Some([0.0, 1.0, 0.5])),
-                ("pre", Some([0.0, 1.0, 0.5]))
-            ],
-            "known projectile position reaches the incoming and pre hooks"
-        );
+        if target == Who::Player {
+            assert_eq!(
+                heard.positions,
+                ["incoming", "pre", "post"].map(|phase| (phase, Some([0.0, 1.0, 0.5]))),
+                "known projectile position reaches every player hit phase; owner {owner:?}"
+            );
+        }
     }
 }
 
