@@ -36,7 +36,6 @@ impl LootQuery {
     /// Root-only completion point, after all nested tables. Nested rolls never call this.
     pub fn finish(&self, id: Option<&str>) {
         self.set_id(id.unwrap_or(UNKNOWN_LOOT_TABLE));
-        // #1270: the global loot modifier pass belongs here.
     }
 }
 thread_local! { static QUERY: RefCell<Option<Rc<LootQuery>>> = const { RefCell::new(None) }; }
@@ -78,14 +77,4 @@ pub fn condition(
         ),
         _ => None,
     }
-}
-
-/// Run a named root with one shared query, completing it after every nested table.
-pub fn root<T>(id: &str, roll: impl FnOnce() -> T) -> T {
-    let query = current_query();
-    with_query(query.clone(), || {
-        let result = roll();
-        query.finish(Some(id));
-        result
-    })
 }

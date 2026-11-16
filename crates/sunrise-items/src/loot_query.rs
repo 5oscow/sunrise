@@ -1,4 +1,12 @@
 use super::*;
+
+/// Preserve each existing adapter's output policy at root completion.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum RootOutput {
+    KeepEmpty,
+    Unsplit,
+    Split,
+}
 impl<R: RandomSource> LootContext<'_, R> {
     pub(super) fn stock_condition(&self, c: &Value) -> Option<bool> {
         if !matches!(
@@ -18,19 +26,34 @@ impl<R: RandomSource> LootContext<'_, R> {
             self.items.vanilla_can_perform(item, ability)
         })
     }
-    pub(super) fn evaluate_named_root(
+    /// Non-raw completion retains the caller's context and random through its
+    /// output policy. Nested entries evaluate raw and never complete a query.
+    pub(super) fn roll_root(
         &self,
+        id: Option<&str>,
         table: &Value,
         random: &mut R,
-        id: &str,
+        output: RootOutput,
     ) -> Vec<ItemStack> {
-        let items = self.evaluate(table, random);
-        self.query.finish(Some(id));
-        items
-    }
-    pub(super) fn evaluate_root(&self, table: &Value, random: &mut R) -> Vec<ItemStack> {
-        let items = self.evaluate(table, random);
-        self.query.finish(None);
+        let raw = self.evaluate(table, random);
+        let items = if output == RootOutput::Split {
+            let mut out = Vec::with_capacity(raw.len());
+            for stack in raw {
+                let max = crate::bundle::max_stack(self.items, &stack);
+                let mut count = stack.count;
+                while count > max {
+                    let mut part = stack.clone();
+                    part.count = max;
+                    out.push(part);
+                    count -= max;
+                }
+                out.push(ItemStack { count, ..stack });
+            }
+            out
+        } else {
+            raw
+        };
+        self.query.finish(id);
         items
     }
     /// The context a mod's own loot kind sees in this engine: the block and
@@ -80,7 +103,7 @@ impl ItemStack {
 }
 
 impl Items {
-    pub(super) fn block_drops_raw(
+    pub(super) fn roll_block_root(
         &self,
         registry: &BlockRegistry,
         state: BlockStateId,
@@ -98,16 +121,23 @@ impl Items {
         let Some(table) = self.loot.get(&id) else {
             return vec![];
         };
-        sunrise_world::loot::query::root(&id, || {
+        sunrise_world::loot::query::with_query(sunrise_world::loot::query::current_query(), || {
             // LootTable.getRandomItems draws from the table's random sequence.
             if let (Some(seq), Some(sequences)) = (
                 table.get("random_sequence").and_then(Value::as_str),
                 sequences,
             ) {
                 let random = sequences.0.get(seq, sequences.1);
-                return self.roll_block_table(table, &block.name, &block.properties, roll, random);
+                return self.roll_block_table(
+                    &id,
+                    table,
+                    &block.name,
+                    &block.properties,
+                    roll,
+                    random,
+                );
             }
-            self.roll_block_table(table, &block.name, &block.properties, roll, random)
+            self.roll_block_table(&id, table, &block.name, &block.properties, roll, random)
         })
     }
     /// `Block.dropFromBlockInteractLootTable`: the `block_interact` table `id`
@@ -125,13 +155,13 @@ impl Items {
         let (Some(table), Some(block)) = (self.loot.get(id), registry.state(state)) else {
             return vec![];
         };
-        sunrise_world::loot::query::root(id, || {
+        sunrise_world::loot::query::with_query(sunrise_world::loot::query::current_query(), || {
             match table.get("random_sequence").and_then(Value::as_str) {
                 Some(sequence) => {
                     let random = sequences.get(sequence, seed);
-                    self.interact_roll(table, &block.name, &block.properties, random)
+                    self.interact_roll(id, table, &block.name, &block.properties, random)
                 }
-                None => self.interact_roll(table, &block.name, &block.properties, random),
+                None => self.interact_roll(id, table, &block.name, &block.properties, random),
             }
         })
     }

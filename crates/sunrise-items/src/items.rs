@@ -6,6 +6,7 @@ mod ingredient_defaults;
 #[path = "loot_query.rs"]
 mod loot_query;
 use crate::{Result, blocks::BlockFacts};
+use loot_query::RootOutput;
 use serde_json::Value;
 use std::{
     collections::{HashMap, HashSet},
@@ -1496,7 +1497,7 @@ impl Items {
             location: None,
             keep_empty,
         };
-        ctx.evaluate_root(table, random)
+        ctx.roll_root(None, table, random, RootOutput::Unsplit)
     }
     /// The id of the block's loot table (`minecraft:blocks/stone`), when it
     /// has one. `Blocks.wallVariant`: wall signs, banners, heads, fans and
@@ -1566,7 +1567,7 @@ impl Items {
         random: &mut impl RandomSource,
         sequences: Option<(&mut crate::random_sequences::RandomSequences, i64)>,
     ) -> Vec<ItemStack> {
-        let drops = self.block_drops_raw(registry, state, roll, random, sequences);
+        let drops = self.roll_block_root(registry, state, roll, random, sequences);
         if !drops.iter().any(|d| d.item.starts_with(DYNAMIC)) {
             return drops;
         }
@@ -1584,22 +1585,12 @@ impl Items {
 
     fn roll_block_table<R: RandomSource>(
         &self,
+        id: &str,
         table: &Value,
         block: &str,
         properties: &sunrise_world::chunk::BlockProperties,
         roll: BlockLootRoll<'_>,
         random: &mut R,
-    ) -> Vec<ItemStack> {
-        self.roll_block_table_at(table, block, properties, roll, random, roll.location)
-    }
-    fn roll_block_table_at<R: RandomSource>(
-        &self,
-        table: &Value,
-        block: &str,
-        properties: &sunrise_world::chunk::BlockProperties,
-        roll: BlockLootRoll<'_>,
-        random: &mut R,
-        location: Option<&dyn Fn(&Value) -> Option<bool>>,
     ) -> Vec<ItemStack> {
         let ask = |_: &mut R, id: &str, level: u32| roll.levels.map_or(level, |ask| ask(id, level));
         let ctx = LootContext {
@@ -1614,10 +1605,10 @@ impl Items {
             entity_levels: None,
             block_levels: roll.levels.map(|_| &ask as &LootLevels<'_, R>),
             target: None,
-            location,
+            location: roll.location,
             keep_empty: roll.keep_empty,
         };
-        ctx.evaluate(table, random)
+        ctx.roll_root(Some(id), table, random, RootOutput::Unsplit)
     }
     /// Evaluate an entity's loot table (`minecraft:entities/<name>`).
     /// Evaluate any loot table by id (e.g. `minecraft:gameplay/chicken_lay`).
@@ -1639,7 +1630,12 @@ impl Items {
         random: &mut R,
         keep_empty: bool,
     ) -> Vec<ItemStack> {
-        self.table_raw(id, killed_by_player, held, false, random, keep_empty)
+        let output = if keep_empty {
+            RootOutput::KeepEmpty
+        } else {
+            RootOutput::Unsplit
+        };
+        self.table_root(id, killed_by_player, held, false, random, output)
             .unwrap_or_default()
     }
     /// `LootTable.getRandomItems(LootParams)` of table `id` with an ORIGIN,
@@ -1654,31 +1650,17 @@ impl Items {
         this_entity: bool,
         random: &mut R,
     ) -> Option<Vec<ItemStack>> {
-        let raw = self.table_raw(id, false, held, this_entity, random, false)?;
-        // LootTable.createStackSplitter.
-        let mut out = Vec::with_capacity(raw.len());
-        for stack in raw {
-            let max = crate::bundle::max_stack(self, &stack);
-            let mut count = stack.count;
-            while count > max {
-                let mut part = stack.clone();
-                part.count = max;
-                out.push(part);
-                count -= max;
-            }
-            out.push(ItemStack { count, ..stack });
-        }
-        Some(out)
+        self.table_root(id, false, held, this_entity, random, RootOutput::Split)
     }
-    /// `LootTable.getRandomItemsRaw` of table `id` with no block.
-    fn table_raw<R: RandomSource>(
+    /// A named root with no block, preserving the adapter's output policy.
+    fn table_root<R: RandomSource>(
         &self,
         id: &str,
         killed_by_player: bool,
         held: Option<&ItemStack>,
         this_entity: bool,
         random: &mut R,
-        keep_empty: bool,
+        output: RootOutput,
     ) -> Option<Vec<ItemStack>> {
         let table = self.loot.get(id)?;
         let empty = sunrise_world::chunk::BlockProperties::new();
@@ -1695,12 +1677,11 @@ impl Items {
             block_levels: None,
             target: None,
             location: None,
-            keep_empty,
+            keep_empty: output == RootOutput::KeepEmpty,
         };
         // LootTable.getRandomItemsRaw visits the table itself first.
         NESTED_ROLLS.with(|v| v.borrow_mut().push(id.to_owned()));
-        let out = ctx.evaluate(table, random);
-        ctx.query.finish(Some(id));
+        let out = ctx.roll_root(Some(id), table, random, output);
         NESTED_ROLLS.with(|v| v.borrow_mut().pop());
         Some(out)
     }
@@ -1713,6 +1694,7 @@ impl Items {
     }
     fn interact_roll<R: RandomSource>(
         &self,
+        id: &str,
         table: &Value,
         block: &str,
         properties: &sunrise_world::chunk::BlockProperties,
@@ -1733,7 +1715,7 @@ impl Items {
             location: None,
             keep_empty: false,
         };
-        ctx.evaluate(table, random)
+        ctx.roll_root(Some(id), table, random, RootOutput::Unsplit)
     }
     /// `loot_table` drawing from any random (a random sequence).
     pub fn loot_table_from(
@@ -1762,7 +1744,7 @@ impl Items {
             location: None,
             keep_empty: false,
         };
-        ctx.evaluate_named_root(table, random, id)
+        ctx.roll_root(Some(id), table, random, RootOutput::Unsplit)
     }
     pub fn entity_drops<R: RandomSource>(
         &self,
@@ -1899,12 +1881,19 @@ impl Items {
             location: None,
             keep_empty,
         };
-        ctx.evaluate_named_root(table, random, &format!("minecraft:entities/{name}"))
+        ctx.roll_root(
+            Some(&format!("minecraft:entities/{name}")),
+            table,
+            random,
+            RootOutput::Unsplit,
+        )
     }
 }
 /// `DataComponents.BLOCK_STATE`.
 const BLOCK_STATE: &str = "minecraft:block_state";
 impl<R: RandomSource> LootContext<'_, R> {
+    /// Raw evaluation: nested tables share this context, without splitting
+    /// output or completing the queried table id.
     fn evaluate(&self, table: &Value, random: &mut R) -> Vec<ItemStack> {
         let ctx = self;
         let mut out = Vec::new();
@@ -4316,6 +4305,7 @@ mod tests {
         };
         let table = json!({"pools":[{"rolls":1,"entries":[{"type":"minecraft:item","name":"minecraft:bone","modifier":[{"type":"minecraft:enchanted_count_increase","enchantment":"minecraft:looting","count":2.0}]}]}]});
         let drops = items.roll_block_table(
+            "minecraft:blocks/stone",
             &table,
             "minecraft:stone",
             &props,

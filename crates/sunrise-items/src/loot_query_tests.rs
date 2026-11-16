@@ -16,6 +16,70 @@ fn table(id: &str) -> Value {
     json!({"pools":[{"rolls":1,"condition":{"type":"neoforge:loot_table_id","loot_table_id":id},"entries":[{"type":"minecraft:item","name":"minecraft:diamond"}]}]})
 }
 #[test]
+fn root_adapters_preserve_output_policy_and_random_without_modifiers() {
+    let nested = json!({"pools":[{"rolls":1,
+        "condition":{"type":"neoforge:loot_table_id","loot_table_id":"neoforge:unknown_loot_table"},
+        "entries":[{"type":"minecraft:item","name":"minecraft:gold_ingot"},
+                   {"type":"minecraft:item","name":"minecraft:diamond"}]}],
+        "modifier":{"type":"minecraft:set_count","count":200}});
+    let root = json!({"pools":[{"rolls":1,"entries":[
+        {"type":"minecraft:loot_table","value":"test:nested"}]}],
+        "modifier":[{"type":"minecraft:set_count","count":130},
+                    {"type":"minecraft:set_components","components":{"minecraft:max_stack_size":64}}]});
+    let id = "minecraft:entities/zombie";
+    let data = data(vec![(id, root.clone()), ("test:nested", nested)]);
+    let properties = sunrise_world::chunk::BlockProperties::new();
+    // Only the child's two-entry weighted choice advances this random.
+    let mut expected_random = LegacyRandom::new(0);
+    assert_eq!(expected_random.next_int_bound(2).unwrap(), 1);
+    let expected_state = <(u64, Option<f64>)>::from(&expected_random);
+    for adapter in 0..7 {
+        let query = Rc::new(query::LootQuery::default());
+        let mut random = LegacyRandom::new(0);
+        let drops = query::with_query(query.clone(), || match adapter {
+            0 => data.loot_table(id, false, None, &mut random),
+            1 => data.roll_loot_table(id, None, false, &mut random).unwrap(),
+            2 => data.inline_loot_table(&root, &mut random),
+            3 => data.entity_drops("zombie", false, None, &mut random),
+            4 => data.loot_table_from(id, false, None, &mut random),
+            5 => data.roll_block_table(
+                id,
+                &root,
+                "minecraft:stone",
+                &properties,
+                Default::default(),
+                &mut random,
+            ),
+            _ => data.interact_roll(id, &root, "minecraft:stone", &properties, &mut random),
+        });
+        let observed: Vec<_> = drops.iter().map(|s| (&*s.item, s.count)).collect();
+        let expected = if adapter == 1 {
+            vec![
+                ("minecraft:diamond", 64),
+                ("minecraft:diamond", 64),
+                ("minecraft:diamond", 2),
+            ]
+        } else {
+            vec![("minecraft:diamond", 130)]
+        };
+        assert_eq!(observed, expected, "adapter {adapter}");
+        assert_eq!(
+            <(u64, Option<f64>)>::from(&random),
+            expected_state,
+            "adapter {adapter}"
+        );
+        assert_eq!(
+            query.table_id(),
+            if adapter == 2 {
+                "neoforge:unknown_loot_table"
+            } else {
+                id
+            }
+        );
+    }
+}
+
+#[test]
 fn queried_id_is_written_after_root_and_first_wins() {
     for (guard, preset, count) in [
         ("minecraft:blocks/short_grass", None, 0),

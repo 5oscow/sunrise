@@ -10,8 +10,8 @@ impl<R: RandomSource + Clone> Context<'_, R> {
         self.table_raw(id.unwrap_or("<root>"), table, &mut |context, stack| {
             context.data.split(stack, &mut items)
         });
-        // Global modifiers belong after the splitter, with this same context
-        // and RNG, before either is returned to the caller (or container fill).
+        // Every non-raw roll completes after the splitter with its own
+        // context and random, before the caller consumes the list.
         self.query.finish(id);
         items
     }
