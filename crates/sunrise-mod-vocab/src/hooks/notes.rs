@@ -1572,8 +1572,8 @@ datapack's `demo:heat` hurt through `ApplyEffectTickEvent::hurt` or `entity_hurt
 
 The causing and direct entities are 0 for now in these cases:
 
-- A player's direct entity outside a projectile hit, and `magic()` dealt during one (an ownerless wither
-  skull, instant harm from a tipped arrow): vanilla's source names no entity
+- `magic()` dealt to a player during a projectile hit (an ownerless wither skull, instant harm from a
+  tipped arrow): vanilla's source names no entity
 - A player's causing entity, except for a mob that shot the projectile, the mob `/damage` names, an evoker that summoned
   the fangs, a slime or magma cube that touched the player, and a mob that exploded (a sulfur cube's is guessed until
   its blast names its source)
