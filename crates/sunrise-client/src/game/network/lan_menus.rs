@@ -25,9 +25,6 @@ pub(in crate::game) struct GuestMenus {
     /// The storage a mod backed its open menu's slots with (`player_back_mod_menu_slots`);
     /// None for every menu no mod backed.
     pub(in crate::game) slot_places: Option<super::native_menu_places::MenuSlotPlaces>,
-    /// Names the hub's container clicks of this guest, which have no menu value of their own: a
-    /// click while another of the guest's is being decided is refused as busy.
-    pub(in crate::game) hub: MenuOwner<()>,
 }
 
 impl LanHost {
