@@ -128,10 +128,6 @@ fn checked_records_have_declared_field_bytes() {
     );
     let map = serde_json::Map::from_iter([("b".to_owned(), serde_json::json!(2))]);
     fields(map, ("{\"b\":2}".to_owned(),));
-    fields(
-        LegacyRandomSource::from((123u64, Some(0.75f64))),
-        (123u64, Some(0.75f64)),
-    );
 }
 
 #[test]

@@ -136,3 +136,83 @@ impl RandomSource for LegacyRandom {
         EngineRandom::next_gaussian(self)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::wire::{Reader, Writer};
+
+    #[test]
+    fn a_bound_below_one_answers_zero_and_draws_nothing() {
+        let mut source = LegacyRandomSource::new(7);
+        let random: &mut dyn RandomSource = &mut source;
+        assert_eq!(random.next_int_bound(0), 0);
+        assert_eq!(random.next_int_bound(i32::MIN), 0);
+        let mut fresh = LegacyRandom::new(7);
+        assert_eq!(random.next_long(), EngineRandom::next_long(&mut fresh));
+    }
+
+    #[test]
+    fn draws_through_the_trait_object_are_the_engine_sequence() {
+        let mut source = LegacyRandomSource::new(0x5eed);
+        let random: &mut dyn RandomSource = &mut source;
+        let mut engine = LegacyRandom::new(0x5eed);
+        assert_eq!(random.next_int(), EngineRandom::next_int(&mut engine));
+        assert_eq!(
+            random.next_int_bound(100),
+            EngineRandom::next_int_bound(&mut engine, 100).unwrap()
+        );
+        assert_eq!(random.next_long(), EngineRandom::next_long(&mut engine));
+        assert_eq!(
+            random.next_boolean(),
+            EngineRandom::next_boolean(&mut engine)
+        );
+        assert_eq!(random.next_float(), EngineRandom::next_float(&mut engine));
+        assert_eq!(random.next_double(), EngineRandom::next_double(&mut engine));
+        assert_eq!(
+            random.next_gaussian(),
+            EngineRandom::next_gaussian(&mut engine)
+        );
+        assert_eq!(
+            random.next_gaussian(),
+            EngineRandom::next_gaussian(&mut engine)
+        );
+        let mut borrowed = LegacyRandom::new(9);
+        let lent: &mut dyn RandomSource = &mut borrowed;
+        let mut expected = LegacyRandom::new(9);
+        assert_eq!(lent.next_long(), EngineRandom::next_long(&mut expected));
+    }
+
+    #[test]
+    fn range_helpers_follow_vanilla_and_answer_for_empty_ranges() {
+        let mut a = LegacyRandomSource::new(3);
+        let mut b = LegacyRandomSource::new(3);
+        assert_eq!(
+            a.next_int_between_inclusive(-4, 5),
+            b.next_int_bound(10) - 4
+        );
+        assert_eq!(a.next_int_range(10, 20), b.next_int_bound(10) + 10);
+        // Empty ranges answer the lower end and draw nothing.
+        assert_eq!(a.next_int_between_inclusive(5, 4), 5);
+        assert_eq!(a.next_int_range(8, 8), 8);
+        assert_eq!(a.next_int_range(9, -9), 9);
+        assert_eq!(a.next_int_range(i32::MIN, i32::MAX), i32::MIN);
+        assert_eq!(a.next_long(), b.next_long());
+    }
+
+    #[test]
+    fn the_owned_source_crosses_wire_as_seed_and_gaussian() {
+        let mut source = LegacyRandomSource::new(11);
+        source.next_gaussian();
+        let state = <(u64, Option<f64>)>::from(&source);
+        assert!(state.1.is_some());
+        let mut tuple = Writer::new();
+        tuple.put(&state);
+        let mut out = Writer::new();
+        out.put(&source);
+        assert_eq!(out.bytes(), tuple.bytes());
+        let mut back: LegacyRandomSource = Reader::decode(out.bytes()).unwrap();
+        assert_eq!(back.next_gaussian(), source.next_gaussian());
+        assert_eq!(back.next_long(), source.next_long());
+    }
+}

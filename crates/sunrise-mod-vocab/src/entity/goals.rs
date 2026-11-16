@@ -36,10 +36,10 @@
 //!         "Stare"
 //!     }
 //!     fn can_use(&mut self, cx: &mut GoalContext<'_>) -> bool {
-//!         cx.random().next_int_bound(40).unwrap_or(0) == 0
+//!         cx.random().next_int_bound(40) == 0
 //!     }
 //!     fn start(&mut self, cx: &mut GoalContext<'_>) {
-//!         self.ticks = 20 + cx.random().next_int_bound(40).unwrap_or(0) as u32;
+//!         self.ticks = 20 + cx.random().next_int_bound(40) as u32;
 //!     }
 //!     fn tick(&mut self, cx: &mut GoalContext<'_>) {
 //!         self.ticks -= 1;

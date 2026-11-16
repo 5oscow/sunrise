@@ -22,6 +22,7 @@
 - [Capabilities](concepts/capabilities.md)
 - [Attachments](concepts/attachments.md)
 - [Transactions](concepts/transactions.md)
+- [Randomness](concepts/randomness.md)
 - [Registry keys](concepts/registry-keys.md)
 - [Wire types](concepts/wire-types.md)
 - [Dependencies between mods](concepts/dependencies.md)
