@@ -3256,6 +3256,31 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
+    /// #1381: the `data_files` kinds (instruments, songs, enchantments) carry
+    /// no element conditions: a nested key stays, unevaluated.
+    #[test]
+    fn data_files_keep_a_list_elements_conditions_as_data() {
+        let root =
+            std::env::temp_dir().join(format!("sunrise-1381-data-files-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let dir = root.join("data/demo/instrument");
+        fs::create_dir_all(&dir).unwrap();
+        let file = json!({"description": "horn", "sounds": [
+            {"id": "demo:a", "neoforge:conditions": [{"type": "absent:condition"}]}]});
+        fs::write(dir.join("horn.json"), file.to_string()).unwrap();
+        let conditions = sunrise_world::conditions::LoadConditions::new([])
+            .with_diagnostics()
+            .with_lookup(std::collections::BTreeMap::new(), |_, _| None);
+        let overlay = PackOverlay {
+            files: &[],
+            conditions: &conditions,
+        };
+        let loaded = data_files(&root, "instrument", &overlay);
+        fs::remove_dir_all(&root).unwrap();
+        assert_eq!(loaded.get("demo:horn"), Some(&file));
+        assert_eq!(conditions.check_resource_errors("instrument"), Ok(()));
+    }
+
     #[test]
     fn tag_conditions_use_enabled_server_ids_before_each_replace_and_reload() {
         use mod_vocab::Side;

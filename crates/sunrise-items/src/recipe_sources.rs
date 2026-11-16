@@ -72,7 +72,7 @@ pub fn sources(root: &Path, overlay: &PackOverlay) -> Result<Vec<(String, Value)
             format!("recipes: data/{namespace}/recipe/{path}.json refused: {error}")
         })?;
         // A file whose load conditions don't hold is silently absent.
-        if !conditions.admit_id(&mut v, "recipe", &qualified(&name)) {
+        if !conditions.allows_id(&v, "recipe", &qualified(&name)) {
             continue;
         }
         // The data's recipe filters, over the final set.
@@ -84,3 +84,7 @@ pub fn sources(root: &Path, overlay: &PackOverlay) -> Result<Vec<(String, Value)
     conditions.check_resource_errors("recipe")?;
     Ok(parsed)
 }
+
+#[cfg(test)]
+#[path = "recipe_sources_tests.rs"]
+mod tests;
