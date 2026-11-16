@@ -714,13 +714,32 @@ impl mod_api::HitHost for super::native_hooks::HitLevel<'_> {
     }
 }
 
-pub(super) struct LevelTicks<'a, L> {
-    pub level: L,
-    pub ticks: &'a mut Ticks,
+/// A level with the simulation's ticks beside it: `&mut Ticks` in a write or tick hook, `&Ticks`
+/// where the listener only reads (placement and survival: [`LevelView`](super::native_hooks::LevelView)).
+/// Reads need only a shared view of the ticks; scheduling and writes need them mutable.
+pub(in crate::game) struct LevelTicks<'b, L, T = &'b mut Ticks> {
+    level: L,
+    ticks: T,
+    /// The level's and the ticks' borrow, which the delegating reads below are bounded by.
+    borrow: std::marker::PhantomData<&'b ()>,
 }
 
-impl<'a: 'b, 'b, L: std::ops::Deref<Target = super::GameLevel<'a>>> mod_api::LevelHost
-    for LevelTicks<'b, L>
+impl<'b, L, T> LevelTicks<'b, L, T> {
+    pub(in crate::game) fn new(level: L, ticks: T) -> Self {
+        Self {
+            level,
+            ticks,
+            borrow: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<
+    'a: 'b,
+    'b,
+    L: std::ops::Deref<Target = super::GameLevel<'a>>,
+    T: std::ops::Deref<Target = Ticks>,
+> mod_api::LevelHost for LevelTicks<'b, L, T>
 {
     fn block_state_id(&self, name: &str) -> Option<mod_api::BlockState> {
         mod_api::LevelHost::block_state_id(&*self.level, name)
@@ -816,7 +835,9 @@ impl<'a: 'b, 'b, L: std::ops::Deref<Target = super::GameLevel<'a>>> mod_api::Lev
     }
 }
 
-impl<'a: 'b, 'b> mod_api::LevelRandomHost for LevelTicks<'b, &mut super::GameLevel<'a>> {
+impl<'a: 'b, 'b, T: std::ops::Deref<Target = Ticks>> mod_api::LevelRandomHost
+    for LevelTicks<'b, &mut super::GameLevel<'a>, T>
+{
     fn attachments(&mut self) -> &mut dyn mod_api::AttachmentStore {
         mod_api::LevelRandomHost::attachments(&mut *self.level)
     }
@@ -828,28 +849,40 @@ impl<'a: 'b, 'b> mod_api::LevelRandomHost for LevelTicks<'b, &mut super::GameLev
     }
 }
 
-impl<'a: 'b, 'b, L: std::ops::Deref<Target = super::GameLevel<'a>>> mod_api::LevelTicksHost
-    for LevelTicks<'b, L>
+impl<
+    'a: 'b,
+    'b,
+    L: std::ops::Deref<Target = super::GameLevel<'a>>,
+    T: std::ops::DerefMut<Target = Ticks>,
+> mod_api::LevelTicksHost for LevelTicks<'b, L, T>
 {
     fn schedule_block_tick(&mut self, pos: [i32; 3], block: mod_api::BlockKey, delay: i32) -> bool {
         self.level
-            .native_schedule_block_tick(self.ticks, pos, block, delay)
+            .native_schedule_block_tick(&mut self.ticks, pos, block, delay)
     }
     fn schedule_fluid_tick(&mut self, pos: [i32; 3], fluid: &str, delay: i32) -> bool {
         self.level
-            .native_schedule_fluid_tick(self.ticks, pos, fluid, delay)
+            .native_schedule_fluid_tick(&mut self.ticks, pos, fluid, delay)
     }
 }
 
-impl<'a: 'b, 'b, L: std::ops::Deref<Target = super::GameLevel<'a>>> LevelTicks<'b, L> {
+impl<
+    'a: 'b,
+    'b,
+    L: std::ops::Deref<Target = super::GameLevel<'a>>,
+    T: std::ops::Deref<Target = Ticks>,
+> LevelTicks<'b, L, T>
+{
     /// The level in place read through the game's own `SignalGetter`, with this write's
     /// comparator outputs.
     fn signals(&self) -> sunrise_world::level::Signals<'_, super::GameLevel<'a>> {
-        self.level.behaviours.signals(&*self.level, &*self.ticks)
+        self.level.behaviours.signals(&*self.level, &self.ticks)
     }
 }
 
-impl<'a: 'b, 'b> mod_api::LevelWriteHost for LevelTicks<'b, &mut super::GameLevel<'a>> {
+impl<'a: 'b, 'b, T: std::ops::DerefMut<Target = Ticks>> mod_api::LevelWriteHost
+    for LevelTicks<'b, &mut super::GameLevel<'a>, T>
+{
     fn set_block(
         &mut self,
         pos: [i32; 3],
@@ -860,16 +893,16 @@ impl<'a: 'b, 'b> mod_api::LevelWriteHost for LevelTicks<'b, &mut super::GameLeve
             return false;
         };
         self.level
-            .native_set_block(self.ticks, pos, state, flags.bits())
+            .native_set_block(&mut self.ticks, pos, state, flags.bits())
     }
 
     fn remove_block(&mut self, pos: [i32; 3], moved: bool) -> bool {
-        self.level.remove_block_write(self.ticks, pos, moved)
+        self.level.remove_block_write(&mut self.ticks, pos, moved)
     }
 
     fn set_block_property(&mut self, pos: [i32; 3], key: &str, value: &str, flags: i32) -> bool {
         self.level
-            .native_set_block_property(self.ticks, pos, key, value, flags)
+            .native_set_block_property(&mut self.ticks, pos, key, value, flags)
     }
 
     fn play_sound(
@@ -914,105 +947,6 @@ super::native_tags::impl_tags!(
     level.native_authoritative.then_some(level.items)
 );
 super::native_tags::impl_tags!(super::native_hooks::HitLevel<'_>, level, level.0.tags());
-
-/// A placement or survival question's level: every read of the game's level, and the signal reads
-/// that need the simulation's ticks.
-impl mod_api::LevelHost for super::native_hooks::LevelView<'_> {
-    fn block_entity_data(&self, entity: mod_api::BlockEntityRef) -> Option<mod_api::Compound> {
-        self.level.block_entity_data(entity)
-    }
-    fn block_state(&self, pos: [i32; 3]) -> Option<mod_api::BlockState> {
-        self.level.block_state(pos)
-    }
-    fn state_block(&self, state: mod_api::BlockState) -> Option<&str> {
-        self.level.state_block(state)
-    }
-    fn block_state_id(&self, name: &str) -> Option<mod_api::BlockState> {
-        self.level.block_state_id(name)
-    }
-    fn block_state_default(&self, block: mod_api::BlockKey) -> Option<mod_api::BlockState> {
-        self.level.block_state_default(block)
-    }
-    fn state_string(&self, state: mod_api::BlockState) -> Option<String> {
-        self.level.state_string(state)
-    }
-    fn min_y(&self) -> i32 {
-        self.level.min_y()
-    }
-    fn height(&self) -> i32 {
-        self.level.height()
-    }
-    fn block_in_tag(&self, block: mod_api::BlockKey, tag: &str) -> Option<bool> {
-        self.level.block_in_tag(block, tag)
-    }
-    fn tags(&self) -> &dyn mod_api::Tags {
-        self.level.tags()
-    }
-    fn fluid_state(&self, pos: [i32; 3]) -> Option<mod_api::FluidState> {
-        self.level.fluid_state(pos)
-    }
-    fn state_fluid_state(&self, state: mod_api::BlockState) -> Option<mod_api::FluidState> {
-        self.level.state_fluid_state(state)
-    }
-    fn fluid_in_tag(&self, fluid: &str, tag: &str) -> Option<bool> {
-        self.level.fluid_in_tag(fluid, tag)
-    }
-    fn state_with_property(
-        &self,
-        state: mod_api::BlockState,
-        key: &str,
-        value: &str,
-    ) -> Option<mod_api::BlockState> {
-        self.level.state_with_property(state, key, value)
-    }
-    fn brightness(&self, layer: mod_api::LightLayer, pos: [i32; 3]) -> i32 {
-        self.level.brightness(layer, pos)
-    }
-    fn raw_brightness(&self, pos: [i32; 3], sky_darken: i32) -> i32 {
-        self.level.raw_brightness(pos, sky_darken)
-    }
-    fn is_loaded(&self, pos: [i32; 3]) -> bool {
-        self.level.is_loaded(pos)
-    }
-    fn is_raining_at(&self, pos: [i32; 3]) -> bool {
-        self.level.is_raining_at(pos)
-    }
-    fn enabled_features(&self) -> mod_api::FeatureFlags {
-        self.level.enabled_features()
-    }
-    fn signal(&self, pos: [i32; 3], direction: Direction) -> Option<i32> {
-        Some(self.signals().signal(block_pos(pos), direction))
-    }
-    fn direct_signal(&self, pos: [i32; 3], direction: Direction) -> Option<i32> {
-        Some(self.signals().direct_signal(block_pos(pos), direction))
-    }
-    fn direct_signal_to(&self, pos: [i32; 3]) -> Option<i32> {
-        Some(self.signals().direct_signal_to(block_pos(pos)))
-    }
-    fn best_neighbor_signal(&self, pos: [i32; 3]) -> Option<i32> {
-        Some(self.signals().best_neighbor_signal(block_pos(pos)))
-    }
-    fn has_neighbor_signal(&self, pos: [i32; 3]) -> Option<bool> {
-        Some(self.signals().has_neighbor_signal(block_pos(pos)))
-    }
-    fn collision_shape(&self, pos: [i32; 3]) -> Option<Vec<[f64; 6]>> {
-        self.level.collision_shape(pos)
-    }
-}
-
-impl super::native_hooks::LevelView<'_> {
-    /// The level read through the game's own `SignalGetter`, with the simulation's ticks.
-    fn signals(
-        &self,
-    ) -> sunrise_world::level::Signals<'_, dyn sunrise_world::level::signal_access::SignalAccess + '_>
-    {
-        self.behaviours.signals(self.access, self.ticks)
-    }
-}
-
-fn block_pos(pos: [i32; 3]) -> BlockPos {
-    BlockPos::new(pos[0], pos[1], pos[2])
-}
 
 #[cfg(test)]
 mod attachment_membership_tests {

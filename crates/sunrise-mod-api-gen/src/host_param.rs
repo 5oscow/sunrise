@@ -162,7 +162,7 @@ pub(super) fn host_param(hook: &Hook, mutable: Option<bool>, ticks: bool) -> Opt
         HostParam {
             ty: format!("&{mutable}dyn {kind}"),
             call: if ticks {
-                "&mut super::mod_api_host::LevelTicks { level: self, ticks }"
+                "&mut super::mod_api_host::LevelTicks::new(self, ticks)"
             } else {
                 "self"
             },

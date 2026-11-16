@@ -148,7 +148,7 @@ fn stateful_creation_uses_actual_state_and_preserves_existing_entity() {
         // outer Game write wrapper and still creates exactly one instance.
         let written = game.with_level(|_, level, ticks| {
             LevelWriteHost::set_block(
-                &mut crate::game::mod_api_host::LevelTicks { level, ticks },
+                &mut crate::game::mod_api_host::LevelTicks::new(level, ticks),
                 [3, 64, 0],
                 populated_api,
                 BlockUpdateFlags::NONE,

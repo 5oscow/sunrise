@@ -779,7 +779,7 @@ mod tests {
             host_param(&level, Some(true), false),
             param("&mut dyn LevelRandomHost", "self")
         );
-        let ticks = "&mut super::mod_api_host::LevelTicks { level: self, ticks }";
+        let ticks = "&mut super::mod_api_host::LevelTicks::new(self, ticks)";
         assert_eq!(
             host_param(&level, Some(false), true),
             param("&mut dyn LevelTicksHost", ticks)

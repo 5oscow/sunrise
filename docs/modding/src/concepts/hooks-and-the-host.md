@@ -175,8 +175,9 @@ collision boxes at `pos`, block-local, a block entity's published shape included
 for an unloaded position). The signal reads are the game's own, `block_signal` and `should_check_weak_power`
 listeners included, and are the same ones `LevelRef` and the tick hooks give. `state_for_placement` and
 `can_survive` receive a level that answers them, so a block can place or survive by what powers it or what shape
-sits beside it. Each signal read returns `None` in a callback whose level has no signal view (the hit and
-read-only hooks of other kinds); `collision_shape` is answered by every level the game builds from its own world.
+sits beside it. The levels of `state_for_placement`, `can_survive` and the level tick and shape-update hooks answer all of them;
+the levels other callbacks get (a damage hit's, a part's read view) may return `None` for any of them, signal reads
+and `collision_shape` alike.
 A signal read never asks `state_for_placement` or `can_survive`, so it cannot re-enter the hook it was read in.
 `LevelTicksHost`'s signal reads moved here and now return `Option`.
 

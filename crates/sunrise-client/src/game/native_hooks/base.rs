@@ -4838,27 +4838,17 @@ impl Game<'_> {
     }
 }
 
-/// The level a placement or survival question is asked of: the game's level for reads of blocks
-/// and fluids, with the simulation's ticks beside it, which a signal read needs (comparator
-/// outputs, moving pistons). The listener's `&dyn LevelHost` is this, so `state_for_placement`
-/// and `can_survive` can read redstone and shapes. A read goes only through `Signals`, which
-/// asks the signal hooks and never `state_for_placement` or `can_survive`: a listener cannot
-/// re-enter itself through it.
-pub(in crate::game) struct LevelView<'a> {
-    pub(in crate::game) level: &'a dyn mod_api::LevelHost,
-    pub(in crate::game) access: &'a dyn sunrise_world::level::signal_access::SignalAccess,
-    pub(in crate::game) behaviours: &'a sunrise_world::level::Behaviours,
-    pub(in crate::game) ticks: &'a Ticks,
-}
+/// The level a placement or survival question is asked of: the game's level with the
+/// simulation's ticks shared beside it, which a signal read needs (comparator outputs, moving
+/// pistons). The listener's `&dyn LevelHost` is this, so `state_for_placement` and `can_survive`
+/// can read redstone and shapes. A read goes only through `Signals`, which asks the signal hooks
+/// and never `state_for_placement` or `can_survive`: a listener cannot re-enter itself through it.
+pub(in crate::game) type LevelView<'a> =
+    super::super::mod_api_host::LevelTicks<'a, &'a GameLevel<'a>, &'a Ticks>;
 impl GameLevel<'_> {
     /// This level as a placement or survival question sees it, with the simulation's `ticks`.
     pub(in crate::game) fn view<'a>(&'a self, ticks: &'a Ticks) -> LevelView<'a> {
-        LevelView {
-            level: self,
-            access: self,
-            behaviours: self.behaviours,
-            ticks,
-        }
+        super::super::mod_api_host::LevelTicks::new(self, ticks)
     }
 }
 impl LevelView<'_> {

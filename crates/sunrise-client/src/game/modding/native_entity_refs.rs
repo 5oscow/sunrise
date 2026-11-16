@@ -4354,7 +4354,7 @@ pub(super) mod tests {
             assert_eq!(game.world.block(5, 64, 0), water);
             game.world.set(5, 64, 0, waterlogged).unwrap();
             let removed = game.with_level(|_, level, ticks| {
-                let mut host = super::super::mod_api_host::LevelTicks { level, ticks };
+                let mut host = super::super::mod_api_host::LevelTicks::new(level, ticks);
                 mod_api::LevelWriteHost::remove_block(&mut host, [5, 64, 0], moved)
             });
             assert!(removed);

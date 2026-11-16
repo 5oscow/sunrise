@@ -1494,7 +1494,7 @@ mod tests {
             flags: BlockUpdateFlags,
         ) -> bool {
             game.with_level(|_, level, ticks| {
-                LevelWriteHost::set_block(&mut LevelTicks { level, ticks }, pos, state, flags)
+                LevelWriteHost::set_block(&mut LevelTicks::new(level, ticks), pos, state, flags)
             })
         }
         with_game(|game| {

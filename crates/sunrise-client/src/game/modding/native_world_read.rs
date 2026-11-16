@@ -789,10 +789,7 @@ mod tests {
                 );
                 assert_eq!(host.block_state_id("minecraft:oak_slab[bad=true]"), None);
 
-                let wrapped = super::super::mod_api_host::LevelTicks {
-                    level: &*host,
-                    ticks,
-                };
+                let wrapped = super::super::mod_api_host::LevelTicks::new(&*host, ticks);
                 assert_eq!(
                     wrapped.block_state_id("minecraft:oak_slab[waterlogged=true]"),
                     parsed
