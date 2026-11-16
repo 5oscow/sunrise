@@ -540,7 +540,13 @@ class DynaRoutingTests(unittest.TestCase):
             (tree / "tools" / "parity.py").write_text(
                 "import sys\nprint('PASS loot_a 3s')\nprint('vanilla 0.7231')\n"
                 "print('FAIL loot_b 2s  (log)')\nprint('    vanilla 9')\nsys.exit(1)\n")
-            env = {**os.environ, "DYNA_CI_BUILD": str(build)}
+            # tools/parity.py's own log of each harness; the failing one's is kept past the slot's reuse.
+            logs = tree / ".local" / "parity-runner" / "logs"
+            logs.mkdir(parents=True)
+            (logs / "loot_a.log").write_text("passed\n")
+            (logs / "loot_b.log").write_text("vanilla 9\n")
+            env = {**os.environ, "DYNA_CI_BUILD": str(build), "GITHUB_RUN_ID": "77", "GITHUB_RUN_ATTEMPT": "1",
+                   "RUNNER_NAME": "slot-1", "GITHUB_WORKSPACE": str(tree)}
             harness = subprocess.run([str(shim), "tools/test_old_parity.py"], cwd=tree, env=env,
                                      capture_output=True, text=True)
             runner = subprocess.run([str(shim), "tools/parity.py", "loot_a", "loot_b"], cwd=tree, env=env,
@@ -552,6 +558,14 @@ class DynaRoutingTests(unittest.TestCase):
             self.assertIn("FAIL test_old_parity (exit 3", harness.stdout)
             self.assertEqual(runner.stdout.splitlines()[:2], ["PASS loot_a", "FAIL loot_b"])
             self.assertIn("mismatch: vanilla 0.7231", (build / "parity-logs" / "test_old_parity.log").read_text())
+            kept = build / "parity-keep" / "77-1"
+            self.assertEqual(sorted(p.name for p in kept.iterdir()), ["loot_b.log", "parity.log", "test_old_parity.log"])
+            self.assertIn(f"kept on runner slot-1 in {kept}", harness.stdout)
+            # A rerun keeps the run id: the second attempt's logs go beside the first's, not over them.
+            subprocess.run([str(shim), "tools/parity.py", "loot_b"], cwd=tree, env={**env, "GITHUB_RUN_ATTEMPT": "2"},
+                           capture_output=True, text=True)
+            self.assertEqual(sorted(p.name for p in (build / "parity-keep").iterdir()), ["77-1", "77-2"])
+            self.assertEqual(sorted(p.name for p in kept.iterdir()), ["loot_b.log", "parity.log", "test_old_parity.log"])
 
 
 if __name__ == "__main__":
