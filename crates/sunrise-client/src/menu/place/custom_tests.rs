@@ -71,6 +71,18 @@ fn smith() -> MenuPlacement {
     )
     .unwrap()
 }
+fn shapeless(ids: &[&str]) -> MenuPlacement {
+    MenuPlacement::for_mod(
+        "test:custom".into(),
+        Placement::of(
+            ids.iter()
+                .map(|id| Some(Ingredient::of(vec![(*id).into()])))
+                .collect(),
+            None,
+        ),
+    )
+    .unwrap()
+}
 fn stack(id: &str, count: u32) -> Option<ItemStack> {
     Some(ItemStack::new(id, count))
 }
@@ -295,4 +307,49 @@ fn existing_damaged_input_is_usable_but_inventory_damaged_tools_are_not_autofill
         assert!(menu.slot(4).is_none());
         assert_eq!(menu.player_item(0), Some(&damaged));
     });
+}
+
+#[test]
+fn a_named_grid_maps_cells_to_its_slots_and_clears_the_grid_with_the_named_slots() {
+    let pending = shapeless(&["minecraft:stick", "minecraft:coal"]);
+    assert!(pending.awaits_grid());
+    let plan = pending.in_grid(3, 2, &[7, 5, 3, 1, 0], &[2, 5], 10).unwrap();
+    assert!(!plan.awaits_grid());
+    assert_eq!(plan.input_slots(), [7, 5, 3, 1, 0]);
+    // Shapeless ingredients fill the first cells in order, whatever slot each cell is.
+    assert_eq!(plan.cells, [(0, 7), (1, 5)]);
+    assert_eq!(plan.cleared_slots(), [2, 5, 7, 3, 1, 0]);
+}
+#[test]
+fn a_grid_a_mod_gets_wrong_is_refused_with_its_reason_never_a_panic() {
+    let two = shapeless(&["minecraft:stick", "minecraft:coal"]);
+    let reasons = [
+        two.in_grid(0, 2, &[0, 1], &[], 10),
+        two.in_grid(2, 1, &[], &[], 10),
+        two.in_grid(2, 1, &[0, 10], &[], 10),
+        two.in_grid(2, 1, &[0, 1], &[10], 10),
+        two.in_grid(2, 1, &[0, 0], &[], 10),
+    ]
+    .map(|result| result.unwrap_err());
+    assert_eq!(
+        reasons,
+        [
+            "the grid needs a size and at least one slot",
+            "the grid needs a size and at least one slot",
+            "slot 10 is outside the menu",
+            "slot 10 is outside the menu",
+            "slot 0 is in the grid twice",
+        ]
+    );
+    // A 3 by 2 grid given five slots holds a recipe of five or fewer cells; a sixth has no slot.
+    let six = shapeless(&["a:1", "a:2", "a:3", "a:4", "a:5", "a:6"]);
+    assert_eq!(
+        six.in_grid(3, 2, &[0, 1, 2, 3, 4], &[], 10).unwrap_err(),
+        "the recipe needs a cell the grid has no slot for"
+    );
+    let five = shapeless(&["a:1", "a:2", "a:3", "a:4", "a:5"]);
+    assert_eq!(
+        five.in_grid(3, 2, &[0, 1, 2, 3, 4], &[], 10).unwrap().cells,
+        [(0, 0), (1, 1), (2, 2), (3, 3), (4, 4)]
+    );
 }

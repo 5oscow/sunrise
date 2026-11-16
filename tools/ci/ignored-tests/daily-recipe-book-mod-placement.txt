@@ -1,0 +1,2 @@
+# PACKAGE TEST TARGET daily REASON
+sunrise-client game::native_book_apply::tests::a_mod_layout_without_a_listening_part_refuses_and_changes_nothing lib daily resources

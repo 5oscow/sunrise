@@ -84,3 +84,40 @@ Both successful and refused generations are cached until the recipe table change
 replacement, new session or server `/reload` rebuilds declarations. Categories are ordered by
 category identifier; a book's search group includes only its own categories, not categories from
 other books sharing a menu.
+
+## Placing a recipe yourself
+
+A menu whose inputs are not a crafting grid, a furnace, a stonecutter or a smithing table (a cooking pot
+with six inputs, a preview slot and a container slot) registers `RecipeBookLayout::Mod` with
+`menu_recipe_book`. The game then maps no display to a slot and answers a recipe click through your
+`MenuPart`'s `recipe_book_place` hook. Before the hook runs the game checks what vanilla checks: the
+player is not a spectator, the window is the open menu of this type, the menu is still valid, the
+player's book holds the recipe, and its `PlacementInfo` is not `NOT_PLACEABLE`. Every recipe of a
+`Mod` menu supplies a `PlacementInfo`; its ingredients are what `place_recipe_in_grid` moves.
+
+```rust,ignore
+fn recipe_book_place(
+    &self,
+    host: &mut dyn mod_api::ServerHost,
+    event: &mut mod_api::RecipeBookPlaceEvent<'_>,
+) {
+    // The first five slots take ingredients, as a 3 by 2 grid with a slot to spare.
+    let grid: Vec<u16> = (0..5).collect();
+    let clear: Vec<u16> = (0..6).collect();
+    if let Ok(missing) =
+        host.place_recipe_in_grid(event.recipe, 3, 2, grid, clear, event.use_max_items)
+    {
+        event.ghost = missing;
+    }
+}
+```
+
+`place_recipe_in_grid` is vanilla's `ServerPlaceRecipe.placeRecipe`: the grid's width and height, the
+menu slot of each cell, the slots to clear first (the grid's slots are cleared too) and whether to
+place the maximum. It returns whether items were missing: the grid is cleared and `ghost` asks the client
+for the recipe's ghosts. A refusal (outside the hook, another recipe, a slot the menu lacks or
+hides, a repeated slot, a recipe with more cells than slots, a slot whose pickup a part refuses, no
+room for the cleared items) changes nothing and says why. A recipe never reaches a cell past the last slot
+given. The whole answer is one action: a write the part makes to the player's inventory, cursor or the
+menu's storage through the `Host`, or a change to a block behind the menu, refuses it and undoes the
+placement. A menu with no part that listens refuses every click.

@@ -154,7 +154,11 @@ pub(super) fn compile(
         cells,
         info.shape.map(|[w, h]| (usize::from(w), usize::from(h))),
     );
-    match MenuPlacement::new(menu.into(), placement, layout) {
+    let compiled = match layout.declaration() {
+        mod_api::RecipeBookLayout::Mod => MenuPlacement::for_mod(menu.into(), placement),
+        _ => MenuPlacement::new(menu.into(), placement, layout),
+    };
+    match compiled {
         Ok(plan) => Ok(Some(plan)),
         Err(PlacementRefusal::NotPlaceable) => Ok(None),
         Err(error) => Err(invalid(format!(

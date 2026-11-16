@@ -100,6 +100,8 @@ impl Game<'_> {
             | mod_api::RecipeBookLayout::Furnace { result, .. }
             | mod_api::RecipeBookLayout::Stonecutter { result, .. }
             | mod_api::RecipeBookLayout::Smithing { result, .. } => *result,
+            // The mod draws its own ghosts; the game maps no display to a slot here.
+            mod_api::RecipeBookLayout::Mod => return,
         };
         let fuel_empty = match layout.declaration() {
             mod_api::RecipeBookLayout::Furnace { fuel, .. } => {
