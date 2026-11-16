@@ -45,6 +45,7 @@ sunrise-client game::attachment_index::player_tests::saved_placement_respawn_rem
 sunrise-client game::attachment_index::player_tests::travel_moves_rows_before_guest_callbacks_and_keeps_captured_values lib daily resources
 sunrise-client game::attachment_index::query_tests::query_snapshot_dimension_and_stale_writes lib daily resources
 sunrise-client game::attachment_index::query_tests::query_writes_join_transaction_journal_without_implicit_commit lib daily resources
+sunrise-client game::attachment_index::saved_entity_tests::saved_binding_family_first_stores_publish_to_queries lib daily resources
 sunrise-client game::attachment_index::saved_entity_tests::saved_entity_loaders_publish_and_retire_the_authoritative_owner lib daily resources
 sunrise-client game::attachment_index::saved_entity_tests::saved_spit_and_bullet_query_before_access_and_round_trip lib daily resources
 sunrise-client game::attachment_index::tests::chunk_residency_uses_the_owning_level_through_cow_and_swaps lib daily resources

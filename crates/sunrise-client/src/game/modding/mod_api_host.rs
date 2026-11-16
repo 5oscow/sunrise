@@ -42,6 +42,31 @@ fn world_attachments(
     Ok(map)
 }
 
+/// The entity families whose saved maps bind an owning lifetime
+/// (`bind_saved_entity_attachments`), so a first store publishes index rows for them.
+///
+/// Every other family stays unindexed on a first store until its saved binding lands: the value
+/// is kept and saved, but no query visits it. Cushions, hooks, TNT, fangs, crystals, falling
+/// blocks, rockets, tridents, spawners, area-effect clouds, fence knots, the dragon itself and
+/// `Other` (markers, displays) are unindexed today (#995).
+fn saved_binding_target(target: super::commands::Target) -> bool {
+    use super::commands::Target;
+    matches!(
+        target,
+        Target::Mob(_)
+            | Target::Item(_)
+            | Target::Orb(_)
+            | Target::Projectile(_)
+            | Target::Stand(_)
+            | Target::Frame(_)
+            | Target::Painting(_)
+            | Target::Boat(_)
+            | Target::Cart(_)
+            | Target::DragonPart(_)
+            | Target::General(_)
+    )
+}
+
 impl Game<'_> {
     /// Attachment membership uses physical presence (except removed mobs), not the
     /// command resolver's pending-removal masks. Limit resolution to this level.
@@ -162,12 +187,9 @@ impl Game<'_> {
         if !matches!(
             self.server_resident_entity(id.get()),
             sunrise_client::join_seq::residency::table::EntityLookup::Found {
-                value: super::commands::Target::Mob(_)
-                    | super::commands::Target::Painting(_)
-                    | super::commands::Target::DragonPart(_)
-                    | super::commands::Target::General(_),
+                value,
                 ..
-            }
+            } if saved_binding_target(value)
         ) {
             return Ok(());
         }
