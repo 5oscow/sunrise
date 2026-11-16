@@ -103,7 +103,7 @@ impl ItemStack {
 }
 
 impl Items {
-    pub(super) fn roll_block_root(
+    pub(super) fn scoped_block_roll(
         &self,
         registry: &BlockRegistry,
         state: BlockStateId,

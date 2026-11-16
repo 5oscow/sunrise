@@ -1567,7 +1567,7 @@ impl Items {
         random: &mut impl RandomSource,
         sequences: Option<(&mut crate::random_sequences::RandomSequences, i64)>,
     ) -> Vec<ItemStack> {
-        let drops = self.roll_block_root(registry, state, roll, random, sequences);
+        let drops = self.scoped_block_roll(registry, state, roll, random, sequences);
         if !drops.iter().any(|d| d.item.starts_with(DYNAMIC)) {
             return drops;
         }

@@ -33,7 +33,8 @@ impl LootQuery {
     pub fn table_id(&self) -> String {
         self.id().unwrap_or_else(|| UNKNOWN_LOOT_TABLE.into())
     }
-    /// Root-only completion point, after all nested tables. Nested rolls never call this.
+    /// Set-once id completion, called by each evaluator's `roll_root` after
+    /// all nested tables. Nested raw rolls never call this.
     pub fn finish(&self, id: Option<&str>) {
         self.set_id(id.unwrap_or(UNKNOWN_LOOT_TABLE));
     }
