@@ -64,7 +64,8 @@ pub trait ModFeatureTarget {
     fn min_y(&mut self) -> Option<i32>;
     fn max_y(&mut self) -> Option<i32>;
     fn height(&mut self, kind: HeightmapType, x: i32, z: i32) -> Option<i32>;
-    /// Block-entity data for the block this call placed at `position`; false anywhere else.
+    /// Block-entity data for the block this call placed at `position`; false anywhere else, and
+    /// in a full chunk the world only reads, where the block was never placed.
     fn set_block_entity(&mut self, position: [i32; 3], nbt: Compound) -> bool;
 }
 
@@ -282,7 +283,10 @@ where
         self.world.height(kind, x, z).ok()
     }
     fn set_block_entity(&mut self, position: [i32; 3], nbt: Compound) -> bool {
-        if !self.charge() || self.own.state(position).is_none() {
+        if !self.charge()
+            || self.own.state(position).is_none()
+            || self.world.full_chunk_at(position).unwrap_or(false)
+        {
             return false;
         }
         self.own.set_entity(position, nbt);

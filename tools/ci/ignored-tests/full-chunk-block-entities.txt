@@ -1,1 +1,1 @@
-sunrise-world worldgen::generator::mod_terrain::tests::a_full_chunk_takes_no_block_entity_from_decoration lib daily resources
+sunrise-world worldgen::generator::mod_terrain::tests::a_full_chunk_takes_no_block_entity_from_a_mod_feature lib daily resources

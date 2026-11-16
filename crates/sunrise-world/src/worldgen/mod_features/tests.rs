@@ -170,7 +170,9 @@ impl ModFeatureType for Test {
                     log.push((origin, 0));
                     log.len()
                 };
-                let placed = target.set_block(origin, BlockStateId(1), 3);
+                let placed = target.set_block(origin, BlockStateId(5), 3);
+                let chest = Compound::from([("id".into(), Tag::String("minecraft:chest".into()))]);
+                target.set_block_entity(origin, chest);
                 if calls == 2 {
                     match self.0 {
                         Kind::SecondFails => return Err("second call".into()),

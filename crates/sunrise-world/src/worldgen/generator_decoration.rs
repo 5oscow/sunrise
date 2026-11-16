@@ -1128,6 +1128,9 @@ impl PlacementContext for World<'_> {
     fn block_registry(&self) -> Option<&'static crate::registry::BlockRegistry> {
         Some(self.decoration.bindings.registry())
     }
+    fn full_chunk_at(&mut self, position: [i32; 3]) -> Result<bool, PlacementQueryError> {
+        Ok(self.is_full_chunk(position))
+    }
     fn state_collision_empty(
         &mut self,
         state: BlockStateId,
@@ -1355,11 +1358,6 @@ impl PlacementContext for World<'_> {
         position: [i32; 3],
         nbt: sunrise_core::nbt::Compound,
     ) -> Result<(), PlacementQueryError> {
-        // ImposterProtoChunk(chunk, false): `setBlockEntity` changes nothing on a full chunk,
-        // as `set_block` answers true there without writing.
-        if self.is_full_chunk(position) {
-            return Ok(());
-        }
         self.block_entities.retain(|(p, _)| *p != position);
         self.block_entities.push((position, nbt));
         Ok(())

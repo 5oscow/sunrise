@@ -87,7 +87,7 @@ the modifiers before you drew from.
 write (during decoration, the game's own decoration region around the chunk), outside the build
 height, and for the state already there, as `Level.setBlock` answers. A read the level can't
 answer is `None`. Neither ever loads a chunk. `block_entity` is `false` for a position you didn't
-place a block at in this call, and for data whose `id` isn't that block's block entity.
+place a block at in this call, in a full chunk that decoration only reads (the block is never placed there), and for data whose `id` isn't that block's block entity.
 
 Each world query, block write or block-entity operation is one unit of work; random draws and
 the config, metadata and state helpers are not charged. One root placement (a decoration position, a command, a
