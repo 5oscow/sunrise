@@ -741,6 +741,9 @@ impl<
     T: std::ops::Deref<Target = Ticks>,
 > mod_api::LevelHost for LevelTicks<'b, L, T>
 {
+    fn block_entity_data(&self, entity: mod_api::BlockEntityRef) -> Option<mod_api::Compound> {
+        mod_api::LevelHost::block_entity_data(&*self.level, entity)
+    }
     fn block_state_id(&self, name: &str) -> Option<mod_api::BlockState> {
         mod_api::LevelHost::block_state_id(&*self.level, name)
     }

@@ -169,5 +169,12 @@ fn stateful_creation_uses_actual_state_and_preserves_existing_entity() {
                 .get(&"progress".into()),
             Some(&Tag::Int(37))
         );
+        // The placement and survival view reads the same live entity.
+        game.with_level(|_, level, ticks| {
+            let view = level.view(ticks);
+            let data = mod_api::LevelHost::block_entity_data(&view, second)
+                .expect("the view forwards a block entity's data");
+            assert_eq!(data.get(&"progress".into()), Some(&Tag::Int(37)));
+        });
     });
 }
