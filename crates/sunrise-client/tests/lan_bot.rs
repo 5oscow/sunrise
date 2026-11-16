@@ -226,11 +226,12 @@ fn server_with(resources: &Path, net: NetConfig) -> Server {
                 resources,
                 &sunrise_world::loot::PackOverlay::NONE,
                 &defaults,
-                &sunrise_client::crafting::ResolvedSources::load_or_empty(
+                &sunrise_client::crafting::ResolvedSources::load(
                     resources,
                     &sunrise_world::loot::PackOverlay::NONE,
                     &server_load(),
-                ),
+                )
+                .expect("recipe sources"),
             )
             .expect("sync data"),
         ),
@@ -506,11 +507,12 @@ fn neoforge_shapes_items_reach_two_guests() {
             &resources,
             &sunrise_world::loot::PackOverlay::new(&packs),
             &defaults,
-            &sunrise_client::crafting::ResolvedSources::load_or_empty(
+            &sunrise_client::crafting::ResolvedSources::load(
                 &resources,
                 &sunrise_world::loot::PackOverlay::new(&packs),
                 &server_load(),
-            ),
+            )
+            .expect("recipe sources"),
         )
         .expect("sync data"),
     );
@@ -776,11 +778,12 @@ fn a_signed_in_hosts_lan_authenticates_guests_but_not_its_own_player() {
             &resources,
             &sunrise_world::loot::PackOverlay::NONE,
             &defaults,
-            &sunrise_client::crafting::ResolvedSources::load_or_empty(
+            &sunrise_client::crafting::ResolvedSources::load(
                 &resources,
                 &sunrise_world::loot::PackOverlay::NONE,
                 &server_load(),
-            ),
+            )
+            .expect("recipe sources"),
         )
         .expect("sync data"),
     );
