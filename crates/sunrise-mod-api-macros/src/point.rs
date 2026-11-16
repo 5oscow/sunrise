@@ -107,6 +107,24 @@ fn copy_out(arg: &Arg, input: usize, point: &str) -> TokenStream {
 }
 /// `#[point]` on a function: see the attribute's documentation in the crate root.
 pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
+    // A replacement cell holds one function pointer: a generic function would need one per
+    // instantiation, and one installed copy would stand in for all of them.
+    if let Some(param) = function
+        .sig
+        .generics
+        .params
+        .iter()
+        .find(|param| !matches!(param, syn::GenericParam::Lifetime(_)))
+    {
+        return syn::Error::new_spanned(
+            param,
+            format!(
+                "point {} is generic: its replacement cell holds one function, so a point takes lifetime parameters only",
+                function.sig.ident
+            ),
+        )
+        .to_compile_error();
+    }
     if let Some(inline) = function.attrs.iter().find(|attr| {
         attr.path().is_ident("inline")
             && attr
@@ -182,22 +200,6 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
             }
         })
         .collect();
-    let generics: Vec<_> = function
-        .sig
-        .generics
-        .params
-        .iter()
-        .filter_map(|param| match param {
-            syn::GenericParam::Type(ty) => Some(&ty.ident),
-            syn::GenericParam::Const(c) => Some(&c.ident),
-            syn::GenericParam::Lifetime(_) => None,
-        })
-        .collect();
-    let turbofish = if generics.is_empty() {
-        quote!()
-    } else {
-        quote!(::<#(#generics),*>)
-    };
     let (receiver, callee) = match (shape.receiver, shape.free) {
         (Receiver::None, true) => (quote!(), quote!(#inner)),
         (Receiver::None, false) => (quote!(), quote!(Self::#inner)),
@@ -453,7 +455,7 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
         #[allow(unused_mut)]
         let mut __result = match #installed {
             ::std::option::Option::Some(__fnr) => __fnr(#receiver #(#call),*),
-            ::std::option::Option::None => #callee #turbofish(#(#call),*),
+            ::std::option::Option::None => #callee(#(#call),*),
         };
         #returned
         __result
@@ -471,7 +473,7 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
         if let ::std::option::Option::Some(__fnr) = #entry {
             return __fnr(#own #(#plain),*);
         }
-        #callee #turbofish(#(#plain),*)
+        #callee(#(#plain),*)
     });
     let dispatcher_path = if shape.free {
         quote!(#dispatcher)
@@ -562,5 +564,25 @@ mod tests {
                 .to_string()
                 .contains("compile_error")
         );
+    }
+
+    #[test]
+    fn refuses_type_and_const_parameters_but_not_lifetimes() {
+        for function in [
+            syn::parse_quote!(
+                fn typed<T: Copy>(value: T) {}
+            ),
+            syn::parse_quote!(
+                fn sized<'a, const N: usize>(values: &'a [u8; N]) {}
+            ),
+        ] {
+            let error = expand(quote!(free, slot = 0), function).to_string();
+            assert!(error.contains("is generic"), "{error}");
+        }
+        let borrowed: ImplItemFn = syn::parse_quote!(
+            fn borrowed<'a>(value: &'a Unknown) {}
+        );
+        let error = expand(quote!(free, slot = 0), borrowed).to_string();
+        assert!(!error.contains("is generic"), "{error}");
     }
 }

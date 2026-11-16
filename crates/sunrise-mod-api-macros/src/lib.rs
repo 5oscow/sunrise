@@ -387,7 +387,8 @@ pub fn sunrise_part(_attribute: TokenStream, input: TokenStream) -> TokenStream 
 /// or wasm, gets the side's host (on a `Game` method) and a record holding a copy of every
 /// parameter as an API value (an engine type `mirror(…)` names as its `mod_api` mirror): the
 /// function runs with the record's by-value and `&T` values, and a `&mut T` parameter's place
-/// gets the record's value back.
+/// gets the record's value back. A type or const parameter is refused, naming it (lifetimes are
+/// allowed): the cell holds one function pointer, which can't stand for every instantiation.
 #[proc_macro_attribute]
 pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
     point::expand(attribute.into(), parse_macro_input!(input as ImplItemFn)).into()
