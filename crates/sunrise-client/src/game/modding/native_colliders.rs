@@ -582,4 +582,44 @@ mod tests {
         // A cycle ends, and still holds the entity asked about.
         assert!(sorted(20).contains(&20));
     }
+
+    /// The client's exemption, from its riding graph, as the collision query applies it: a
+    /// collider on one sibling is not met by the other sibling or the vehicle, and is met by a
+    /// stranger.
+    #[test]
+    fn a_client_exempts_the_stack_its_graph_gives_and_meets_a_stranger() {
+        use std::sync::Arc;
+        use sunrise_client_render::moving_colliders::{Placed, Prepared, in_level, near};
+        use sunrise_core::geometry::{
+            Aabb,
+            oriented::{ColliderBoxes, Frame, OrientedCollider},
+        };
+        use sunrise_world::entity_obstruction::EntityIdentity;
+        // 10 and 11 ride 12, and 10 carries the collider; 30 is a stranger.
+        let graph: HashMap<u32, u32> = [(10, 12), (11, 12)].into_iter().collect();
+        let boxes = ColliderBoxes::new(vec![Aabb::new(
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(2.0, 1.0, 2.0),
+        )]);
+        let placed = Prepared::new(vec![Placed {
+            collider: OrientedCollider::new(Frame::translation(Vec3::ZERO), Arc::new(boxes)),
+            exempt: stack_in_graph(&graph, 10),
+        }]);
+        let meets = |id: u32| {
+            let mut found = Vec::new();
+            in_level(placed.clone(), || {
+                near(
+                    EntityIdentity(u64::from(id)),
+                    Aabb::new(Vec3::new(0.5, 0.5, 0.5), Vec3::new(1.0, 1.5, 1.0)),
+                    &mut found,
+                );
+            });
+            !found.is_empty()
+        };
+        assert!(
+            !meets(10) && !meets(11) && !meets(12),
+            "the stack is exempt"
+        );
+        assert!(meets(30), "a stranger meets it");
+    }
 }

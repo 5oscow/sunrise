@@ -394,6 +394,25 @@ fn siblings_riding_one_vehicle_share_a_stack() {
             assert_eq!(stack, want, "seen from {member}");
         }
         assert_eq!(game.vehicle_stack(other), vec![other]);
+        // What the exemption does: the collision query leaves the siblings and the vehicle
+        // out and meets a stranger.
+        let placed = game.placed_moving_colliders();
+        let meets = |id: u32| {
+            let mut found = Vec::new();
+            sunrise_client_render::moving_colliders::in_level(placed.clone(), || {
+                sunrise_client_render::moving_colliders::near(
+                    sunrise_world::entity_obstruction::EntityIdentity(u64::from(id)),
+                    sunrise_core::geometry::Aabb::new(
+                        Vec3::new(1.0, 69.5, 1.0),
+                        Vec3::new(2.0, 71.0, 2.0),
+                    ),
+                    &mut found,
+                );
+            });
+            !found.is_empty()
+        };
+        assert!(!meets(x) && !meets(y) && !meets(z), "the stack is exempt");
+        assert!(meets(other), "a stranger meets it");
     });
 }
 
