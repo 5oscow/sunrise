@@ -219,7 +219,9 @@ class DynaRoutingTests(unittest.TestCase):
             self.assertIn(f"needs.changes.outputs.self_hosted == 'true' && '{label}'", block)
             self.assertNotIn("secrets.", block)
             self.assertNotIn("permissions:", block)
-        self.assertIn("runs-on: ubuntu-latest", blocks["pool-watch"])
+        # The watch for a dead pool runs off the pool, as one scheduled sweep, never as a job of each run.
+        self.assertNotIn("pool-watch", blocks)
+        self.assertIn("runs-on: ubuntu-latest", (ROOT / ".github/workflows/dyna-pool-watch.yml").read_text())
         self.assertIn("permissions:\n  contents: read", workflow)
 
     def test_split_jobs_are_independent_fail_closed_and_share_routing(self):
@@ -245,14 +247,19 @@ class DynaRoutingTests(unittest.TestCase):
                          if line.startswith("        ") and ":" in line)
             self.assertEqual(guard["if"].strip(), "needs.changes.result != 'success'")
             self.assertEqual(guard["run"].strip(), "exit 1")
-        # verify-static routes as verify does, except that a contributor's pull request stays on GitHub's runners.
-        for field, fork in (("runs-on", "needs.changes.outputs.trusted != 'true' && 'ubuntu-latest' || "),
-                            ("RUNNER_KIND", "needs.changes.outputs.trusted != 'true' && 'github' || ")):
+        # verify-static routes as verify does, except that a pull request outside the gate and a contributor's
+        # pull request stay on GitHub's runners.
+        for field, outside, fork in (
+                ("runs-on", "needs.changes.outputs.heavy != 'true' && 'ubuntu-latest' || ",
+                 "needs.changes.outputs.trusted != 'true' && 'ubuntu-latest' || "),
+                ("RUNNER_KIND", "needs.changes.outputs.heavy != 'true' && 'github' || ",
+                 "needs.changes.outputs.trusted != 'true' && 'github' || ")):
             shared = runtime.split(f"{field}:", 1)[1].split("\n", 1)[0]
             if field == "runs-on":
                 shared = shared.replace("'ubuntu-latest') || ", "'ubuntu-latest') || " + fork, 1)
             else:
                 shared = shared.replace("${{ ", "${{ " + fork, 1)
+            shared = shared.replace("${{ ", "${{ " + outside, 1)
             self.assertEqual(static.split(f"{field}:", 1)[1].split("\n", 1)[0], shared)
         self.assertIn("- name: No Rust work selected", runtime)
         self.assertNotIn("--unshallow", runtime)
@@ -501,6 +508,8 @@ class DynaRoutingTests(unittest.TestCase):
         parity = dict(jobs((ROOT / ".github/workflows/dyna-ci.yml").read_text()))["vanilla-parity"]
         # The helper comes from the workflow's revision: nothing on PATH is taken from the checkout.
         self.assertNotIn("$GITHUB_WORKSPACE/tools", parity)
+        # A link an older job left on the persistent slot is replaced, never written through.
+        self.assertLess(parity.index('rm -f "$DYNA_CI_BUILD/bin/python"'), parity.index('cat > "$DYNA_CI_BUILD/bin/python"'))
         helper = textwrap.dedent(parity.split("<<'SH'\n", 1)[1].split("\n          SH\n", 1)[0])
         with tempfile.TemporaryDirectory() as temporary:
             build, tree = Path(temporary, "build"), Path(temporary, "tree")

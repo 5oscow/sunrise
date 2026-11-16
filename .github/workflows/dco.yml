@@ -6,6 +6,10 @@ on:
 
 permissions:
   contents: read
+# A newer push replaces the older check: only the head's commits count.
+concurrency:
+  group: dco-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
   dco:
