@@ -426,7 +426,8 @@ impl Game<'_> {
             .native_block_entity_write_target(entity)
             .ok_or(BlockEntityError::Stale)?;
         let mut nbt = data;
-        for field in ["id", "x", "y", "z"] {
+        // The shapes are the engine's, kept apart from what a mod writes (`set_shapes`).
+        for field in ["id", "x", "y", "z", sunrise_client::containers::SHAPES_KEY] {
             nbt.remove(&field.into());
         }
         let nbt = Tag::Compound(nbt);
@@ -461,8 +462,15 @@ impl Game<'_> {
             return Ok(false);
         }
         self.journal_block_entity(key);
+        let cleared = matches!(
+            self.world.block_entities.get(&key),
+            Some(BlockEntity::Mod(current)) if current.shapes_cleared()
+        );
         if !self.load_block_entity_data(key, &merged) {
             return Ok(false);
+        }
+        if cleared && let Some(BlockEntity::Mod(loaded)) = self.world.block_entities.get_mut(&key) {
+            loaded.keep_shapes_cleared(true);
         }
         self.block_entity_updated(key);
         self.container_changed(key);
@@ -507,16 +515,22 @@ impl Game<'_> {
         if current.shapes() == shapes.as_deref() {
             return Ok(false);
         }
-        let cleared = shapes.is_none();
+        if cfg!(debug_assertions)
+            && shapes.as_ref().is_some_and(|shapes| shapes.reaches_past_one_cell())
+        {
+            static WARNED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+            let block = self.pack.assets.registry.state(state).map(|s| s.name.clone());
+            if let (Some(block), Ok(mut warned)) = (block, WARNED.lock())
+                && !warned.contains(&block)
+            {
+                log::warn!(
+                    "{block}: a published shape has a box beyond one block of the block; collision and ray hits never find it"
+                );
+                warned.push(block);
+            }
+        }
         self.write_mod_block_entity(key, |block_entity| {
             block_entity.set_shapes(shapes);
-            // A client's copy takes a field that is not sent as cleared, so a clear says so.
-            if cleared {
-                block_entity.set_client_update_fields(Compound::from([(
-                    sunrise_client::containers::SHAPES_KEY.into(),
-                    Tag::Compound(Compound::new()),
-                )]));
-            }
         });
         self.block_entity_updated(key);
         Ok(true)

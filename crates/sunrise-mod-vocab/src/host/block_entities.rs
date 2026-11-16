@@ -163,7 +163,7 @@ pub trait BlockEntitiesBackendMut {
     /// entity is removed or its block changes. An entity the new shape now overlaps is
     /// treated as vanilla treats a block that appears inside it, with no push-out. Ok(false)
     /// when nothing changed. Inside a transaction an abort puts the old shapes back. The
-    /// limits are those of `BlockEntityShapes`; a shape over them is refused by name.
+    /// checks are those of `BlockEntityShapes`; a shape that fails one is refused by name.
     #[access(WorldOnly)]
     fn block_entity_set_shapes(
         &mut self,

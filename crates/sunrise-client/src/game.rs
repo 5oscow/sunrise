@@ -2397,6 +2397,7 @@ impl Game<'_> {
         player_context: bool,
     ) -> Vec<[f64; 6]> {
         self.outline_boxes_iter(
+            world,
             world.block(pos[0], pos[1], pos[2]),
             anims,
             pos,

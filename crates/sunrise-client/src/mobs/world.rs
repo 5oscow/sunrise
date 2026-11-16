@@ -539,7 +539,7 @@ impl MobWorld<'_> {
     /// top slab and upside-down stairs do, and as a 14/16 snow layer does not.
     pub fn top_face_full(&self, p: [i32; 3]) -> bool {
         let state = self.world.block(p[0], p[1], p[2]);
-        if self.facts.get(state).full_collision {
+        if self.facts.get(state).full_collision && !self.collision.publishes_shapes(state) {
             return true;
         }
         let mut scene = SceneCollisions {

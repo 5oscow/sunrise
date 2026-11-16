@@ -8,17 +8,20 @@
 /// block's own position. Both lists are empty-able: an empty list is an empty shape, which
 /// collides with nothing or cannot be picked.
 ///
-/// Limits, checked when it is published and never clamped:
-/// - at most 16 boxes in each list;
-/// - every coordinate finite and within -1 to 2, so a shape reaches at most one block
-///   past its own;
-/// - every box's minimum at most its maximum on each axis;
+/// Checked when it is published, and never clamped:
+/// - every coordinate finite, and every box's minimum at most its maximum on each axis,
+///   refused by name otherwise;
+/// - at most 64 boxes in each list, refused by name past that. Vanilla has no such limit;
+///   this one bounds what a block entity makes every client receive and keep. Declared
+///   shape tables (`BlockShapes`) are held to 16 boxes each, a load-time limit of their own;
 /// - a box under 1e-7 thick on any axis is an empty box, as vanilla's `Shapes.create`
 ///   makes it, and is accepted.
 ///
-/// Entity collision finds a shape that leaves its block by one block at most, on one axis at
-/// a time. Outlines have no such margin: a part of an outline outside the block is hit only
-/// by a ray that is inside the block, as in vanilla.
+/// A box may lie anywhere. Collision and ray hits find boxes only within one block of the
+/// block, one axis at a time; a box beyond that is stored and sent but inert, as it is in
+/// vanilla. The same goes for outlines: a ray that never enters the block cannot target a
+/// part of its outline outside it. In debug builds the game warns once per block when a
+/// publish holds such a box.
 #[derive(Clone, Debug, Default, PartialEq)]
 // exhaustive: mods build it with a literal, and its two lists are all there is to a shape
 #[derive(sunrise_mod_api_macros::Wire)]
@@ -56,13 +59,6 @@ pub enum BlockEntityShapesError {
     },
     /// A box has a minimum above its maximum.
     InvertedBox {
-        /// Whether the collision list is the one refused, not the outline list.
-        collision: bool,
-        /// The box's place in its list.
-        index: u64,
-    },
-    /// A box has a coordinate outside the reach the game accepts.
-    OutOfReach {
         /// Whether the collision list is the one refused, not the outline list.
         collision: bool,
         /// The box's place in its list.

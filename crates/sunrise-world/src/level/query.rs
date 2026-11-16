@@ -366,8 +366,23 @@ impl<L: super::signal_access::SignalAccess + ?Sized> Signals<'_, L> {
             .is_face_sturdy(&mut world, [pos.x, pos.y, pos.z], direction, support)
             .ok()
     }
+    /// `isFaceSturdy` of a block whose block entity published its shape: that shape stands
+    /// over the declared one. None for every other cell.
+    fn published_support(
+        &self,
+        pos: BlockPos,
+        state: BlockStateId,
+        direction: Direction,
+        support: SupportType,
+    ) -> Option<bool> {
+        let shape = self.level.published_collision_shape(pos, state)?;
+        Some(support.is_supporting(&shape, direction).unwrap_or(false))
+    }
     pub fn sturdy(&self, pos: BlockPos, direction: Direction) -> bool {
         let state = self.state(pos);
+        if let Some(sturdy) = self.published_support(pos, state, direction, SupportType::Full) {
+            return sturdy;
+        }
         if let Some(sturdy) = self.moving_block_supports(pos, state, direction, SupportType::Full) {
             return sturdy;
         }
@@ -384,6 +399,10 @@ impl<L: super::signal_access::SignalAccess + ?Sized> Signals<'_, L> {
     /// entity at `pos`, as `DiodeBlock.canSurviveOn` asks of a shape update's
     /// neighbour. A retracting piston's base is a `moving_piston` here.
     pub(super) fn can_support_rigid_block_on(&self, pos: BlockPos, state: BlockStateId) -> bool {
+        if let Some(rigid) = self.published_support(pos, state, Direction::Up, SupportType::Rigid)
+        {
+            return rigid;
+        }
         if let Some(rigid) =
             self.moving_block_supports(pos, state, Direction::Up, SupportType::Rigid)
         {
@@ -403,6 +422,9 @@ impl<L: super::signal_access::SignalAccess + ?Sized> Signals<'_, L> {
             return false;
         }
         let raw = self.state(pos);
+        if let Some(center) = self.published_support(pos, raw, direction, SupportType::Center) {
+            return center;
+        }
         if let Some(center) = self.moving_block_supports(pos, raw, direction, SupportType::Center) {
             return center;
         }

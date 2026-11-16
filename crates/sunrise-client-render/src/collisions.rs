@@ -1324,6 +1324,40 @@ mod published_shape_tests {
     }
 
     #[test]
+    fn suffocation_reads_the_published_shape_of_a_flagged_state() {
+        use sunrise_world::suffocation::{SuffocationDefinition, SuffocationRegistry};
+        let registry = registry();
+        let binding = Arc::new(binding(&registry));
+        let definitions = ["minecraft:air", "test:bus", "test:plain"]
+            .map(|name| (name.to_owned(), SuffocationDefinition::TaggedFullCollision))
+            .into();
+        let causes = ["test:bus", "test:plain"].map(String::from).into();
+        let suffocation = SuffocationRegistry::new(binding, &definitions, &causes).unwrap();
+        let mut world = World::new(BlockStateId(0), 0);
+        world.chunks.insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+        world.set(1, 64, 1, BlockStateId(1)).unwrap();
+        let mut ask = |world: &World, state, at: [i32; 3]| {
+            let mut scene = SceneCollisions {
+                world,
+                binding: suffocation.collisions(),
+                subject: None,
+            };
+            suffocation
+                .is_suffocating(&mut scene, BlockStateId(state), at)
+                .unwrap()
+        };
+        // Declared full cube: suffocating. A published slab is not a full block.
+        assert!(ask(&world, 1, [1, 64, 1]));
+        publish(&mut world, (1, 64, 1), &[[0.0, 0.0, 0.0, 1.0, 0.25, 1.0]]);
+        assert!(!ask(&world, 1, [1, 64, 1]));
+        publish(&mut world, (1, 64, 1), &[[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]]);
+        assert!(ask(&world, 1, [1, 64, 1]));
+        // A state that does not publish keeps its fixed answer.
+        publish(&mut world, (6, 64, 1), &[[0.0, 0.0, 0.0, 1.0, 0.25, 1.0]]);
+        assert!(ask(&world, 2, [6, 64, 1]));
+    }
+
+    #[test]
     fn a_published_shape_replaces_the_declared_one_until_it_is_cleared() {
         let registry = registry();
         let binding = binding(&registry);

@@ -22,6 +22,10 @@ pub struct ModBlockEntity {
     /// What its block's collision and outline are while it holds some
     /// (`BlockEntityRef::set_shapes`). Saved and sent with it, outside its `nbt`.
     pub(crate) shapes: Option<Arc<PublishedShapes>>,
+    /// Whether the shapes were cleared after holding some, which an update tag says
+    /// (`shapes_update_tag`) so a client drops its copy. Neither saved, compared nor
+    /// part of a mod's replaceable client fields.
+    pub(crate) shapes_cleared: bool,
 }
 /// What a `ModBlockEntity` can change: its saved compound without `id`,
 /// `x`, `y`, `z` and `Items`, its item slots
@@ -77,6 +81,7 @@ impl ModBlockEntity {
                 changes: 0,
             },
             shapes: None,
+            shapes_cleared: false,
         }
     }
     /// The shapes this block entity published for its block, if it holds any.
@@ -89,14 +94,31 @@ impl ModBlockEntity {
         if self.shapes == shapes {
             return false;
         }
+        self.shapes_cleared = shapes.is_none();
         self.shapes = shapes;
         self.revision.changes += 1;
         true
     }
-    /// What goes beside the saved fields and in the update tag for the published shapes: they
-    /// are not among `nbt`, so a mod's own writes to it never touch them.
+    /// What goes beside the saved fields for the published shapes: they are not among
+    /// `nbt`, so a mod's own writes to it never touch them.
     pub fn shapes_tag(&self) -> Option<(&'static str, Tag)> {
         self.shapes().map(|shapes| (SHAPES_KEY, shapes.to_tag()))
+    }
+    /// Whether the shapes were cleared after holding some and clients may not know yet.
+    pub fn shapes_cleared(&self) -> bool {
+        self.shapes_cleared
+    }
+    /// Carries a clear over to the entity that replaces this one on a data write.
+    pub fn keep_shapes_cleared(&mut self, cleared: bool) {
+        self.shapes_cleared = cleared && self.shapes.is_none();
+    }
+    /// [`Self::shapes_tag`] for an update tag, which also says when they were cleared (an
+    /// empty compound), always as the entity holds them now.
+    pub fn shapes_update_tag(&self) -> Option<(&'static str, Tag)> {
+        self.shapes_tag().or_else(|| {
+            self.shapes_cleared
+                .then(|| (SHAPES_KEY, Tag::Compound(Compound::new())))
+        })
     }
     /// The block entity's immutable type id (`mymod:machine`).
     ///
@@ -175,6 +197,7 @@ impl Clone for ModBlockEntity {
     fn clone(&self) -> Self {
         let mut copy = Self::with_numeric_id(self.id.clone(), self.numeric_id, self.fields.clone());
         copy.shapes.clone_from(&self.shapes);
+        copy.shapes_cleared = self.shapes_cleared;
         copy
     }
 }

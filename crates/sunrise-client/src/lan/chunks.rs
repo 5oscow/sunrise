@@ -803,7 +803,7 @@ impl ChunkEncoder {
                     .mod_update_tag
                     .and_then(|tag| tag([pos.0, pos.1, pos.2], m));
                 // The published shapes go with the block entity, in chunks and updates alike.
-                match m.shapes_tag() {
+                match m.shapes_update_tag() {
                     Some((key, shapes)) => {
                         let mut tag = tag.unwrap_or_default();
                         tag.insert(key.into(), shapes);

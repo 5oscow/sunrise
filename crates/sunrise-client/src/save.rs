@@ -7287,7 +7287,7 @@ mod tests {
         bad.insert(
             SHAPES_KEY.into(),
             Tag::Compound(Compound::from([
-                ("outline".into(), Tag::LongArray(vec![0; 6 * 17])),
+                ("outline".into(), Tag::LongArray(vec![0; 6 * 65])),
                 ("collision".into(), Tag::LongArray(vec![])),
             ])),
         );

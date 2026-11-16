@@ -7,14 +7,9 @@ use sunrise_core::{
     nbt::{Compound, Tag},
 };
 
-/// The most boxes in one published list: one more than vanilla's largest shape, the
-/// cauldron's 15, so no vanilla shape is refused.
-pub const MAX_BOXES: usize = 16;
-/// The lowest coordinate of a published box, in block units: one block below the block.
-pub const REACH_MIN: f64 = -1.0;
-/// The highest coordinate of a published box, in block units: one block above the block. The
-/// collision scan finds a shape one block past its own cell and no further.
-pub const REACH_MAX: f64 = 2.0;
+/// The most boxes in one published list: a bound on what a block entity makes every client
+/// receive and keep (vanilla has no such limit; a declared shape table holds 16).
+pub const MAX_BOXES: usize = 64;
 /// Where a block entity's published shapes sit in its saved compound and its update tag, the
 /// name no mod's own fields can use (`ModBlockEntity::merge_update_tag` takes it out).
 pub const SHAPES_KEY: &str = "sunrise:published_shapes";
@@ -58,12 +53,6 @@ impl PublishedShapes {
             if (0..3).any(|axis| bounds[axis] > bounds[axis + 3]) {
                 return Err(BlockEntityShapesError::InvertedBox { collision, index });
             }
-            if bounds
-                .iter()
-                .any(|value| !(REACH_MIN..=REACH_MAX).contains(value))
-            {
-                return Err(BlockEntityShapesError::OutOfReach { collision, index });
-            }
             let part = VoxelShape::from_box(Aabb::new(
                 Vec3::new(bounds[0], bounds[1], bounds[2]),
                 Vec3::new(bounds[3], bounds[4], bounds[5]),
@@ -74,6 +63,17 @@ impl PublishedShapes {
                 .map_err(|_| BlockEntityShapesError::Unbuildable)?;
         }
         Ok(shape)
+    }
+
+    /// Whether a box lies beyond one block of the block, where collision and ray hits never
+    /// find it.
+    pub fn reaches_past_one_cell(&self) -> bool {
+        self.boxes
+            .outline
+            .iter()
+            .chain(&self.boxes.collision)
+            .flatten()
+            .any(|value| !(-1.0..=2.0).contains(value))
     }
 
     /// What the crosshair picks.
@@ -156,11 +156,11 @@ mod tests {
             PublishedShapes::new(shapes(outline, collision)).err()
         };
         assert_eq!(
-            refused(vec![unit; 17], vec![]),
+            refused(vec![unit; 65], vec![]),
             Some(BlockEntityShapesError::TooManyBoxes {
                 collision: false,
-                count: 17,
-                limit: 16
+                count: 65,
+                limit: 64
             })
         );
         assert_eq!(
@@ -177,23 +177,14 @@ mod tests {
                 index: 1
             })
         );
-        assert_eq!(
-            refused(vec![], vec![[0.0, 0.0, 0.0, 1.0, 2.5, 1.0]]),
-            Some(BlockEntityShapesError::OutOfReach {
-                collision: true,
-                index: 0
-            })
-        );
-        // The limits themselves, and a box thinner than 1e-7 (an empty one), are accepted.
-        let edge = PublishedShapes::new(shapes(
-            vec![unit; 16],
-            vec![
-                [-1.0, -1.0, -1.0, 2.0, 2.0, 2.0],
-                [0.0, 0.0, 0.0, 1.0, 5e-8, 1.0],
-            ],
-        ))
-        .unwrap();
-        assert!(!edge.collision().is_empty());
+        // The cap itself, a box far past the block (stored as given, and inert), and a box
+        // thinner than 1e-7 (an empty one) are accepted.
+        let far = [10.0, 0.0, 0.0, 12.0, 1.0, 1.0];
+        let edge = PublishedShapes::new(shapes(vec![unit; 64], vec![far, [0.0, 0.0, 0.0, 1.0, 5e-8, 1.0]]))
+            .unwrap();
+        assert!(edge.reaches_past_one_cell());
+        assert_eq!(edge.boxes().collision[0], far);
+        assert!(!PublishedShapes::new(shapes(vec![unit], vec![])).unwrap().reaches_past_one_cell());
         let thin =
             PublishedShapes::new(shapes(vec![], vec![[0.0, 0.0, 0.0, 1.0, 5e-8, 1.0]])).unwrap();
         assert!(thin.collision().is_empty());
@@ -218,7 +209,7 @@ mod tests {
         ]));
         assert!(PublishedShapes::from_tag(&ragged).is_none());
         let over = Tag::Compound(Compound::from([
-            ("outline".into(), Tag::LongArray(vec![0; 6 * 17])),
+            ("outline".into(), Tag::LongArray(vec![0; 6 * 65])),
             ("collision".into(), Tag::LongArray(vec![])),
         ]));
         assert!(PublishedShapes::from_tag(&over).is_none());
