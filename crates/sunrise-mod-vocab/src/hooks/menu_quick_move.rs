@@ -42,7 +42,8 @@ pub trait Hooks {
         scope = "block_entity",
         key = "entity",
         neoforge = "none (a Java menu overrides AbstractContainerMenu.quickMoveStack; no event)",
-        cancellable = true
+        cancellable = true,
+        version = 2
     )]
     fn menu_quick_move();
 }
