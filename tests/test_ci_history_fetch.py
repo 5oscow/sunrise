@@ -1,8 +1,9 @@
-"""Execute both gate history-fetch steps with controlled Git/network results."""
+"""Execute both gate history-fetch steps with controlled Git/network results, and the slot mirror with real Git."""
 import importlib.util
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -11,16 +12,19 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def steps():
+    import yaml
+    workflow = yaml.load((ROOT / ".github/workflows/dyna-ci.yml").read_text(), Loader=yaml.BaseLoader)["jobs"]
+    for job, name in [("changes", "Fetch this commit's history for selection"),
+                      ("verify-static", "Fetch this commit's history")]:
+        yield job, name, next(s for s in workflow[job]["steps"] if s.get("name") == name)
+
+
 @unittest.skipIf(os.name == "nt", "executes Bash and executable test doubles")
+@unittest.skipIf(importlib.util.find_spec("yaml") is None, "requires PyYAML")
 class HistoryFetchTests(unittest.TestCase):
     def test_bounded_fetch_retries_and_fails_closed(self):
-        if importlib.util.find_spec("yaml") is None:
-            self.skipTest("requires PyYAML")
-        import yaml
-        workflow = yaml.load((ROOT / ".github/workflows/dyna-ci.yml").read_text(), Loader=yaml.BaseLoader)["jobs"]
-        for job, name in [("changes", "Fetch this commit's history for selection"),
-                          ("verify-static", "Fetch this commit's history")]:
-            step = next(s for s in workflow[job]["steps"] if s.get("name") == name)
+        for job, name, step in steps():
             for mode, expected, count in [("success", 0, 1), ("retry", 0, 2),
                                            ("failure", 1, 2), ("complete", 0, 0)]:
                 with self.subTest(job=job, mode=mode), tempfile.TemporaryDirectory() as directory:
@@ -43,10 +47,11 @@ class HistoryFetchTests(unittest.TestCase):
                                        "os.execvp(sys.argv[3], sys.argv[3:])\n")
                     git.chmod(0o755)
                     timeout.chmod(0o755)
-                    env = dict(os.environ, **step["env"], MODE=mode,
+                    # Off our runners: no slot, so no mirror.
+                    env = dict(os.environ, **step["env"], MODE=mode, DYNA_CI_BUILD="",
                                PATH=directory + os.pathsep + os.environ["PATH"],
                                CALLS=str(root / "calls"), LIMITS=str(root / "limits"))
-                    result = subprocess.run(["bash", "-e", "-o", "pipefail", "-c", step["run"]],
+                    result = subprocess.run(["bash", "-e", "-o", "pipefail", "-c", step["run"]], cwd=ROOT,
                                             env=env, capture_output=True, text=True, timeout=5)
                     self.assertEqual(result.returncode, expected, result.stderr)
                     actual = int((root / "calls").read_text()) if (root / "calls").exists() else 0
@@ -58,6 +63,60 @@ class HistoryFetchTests(unittest.TestCase):
                         self.assertIn("GitHub failed or timed out twice", result.stdout)
                     else:
                         self.assertNotIn("::error::", result.stdout)
+
+    @unittest.skipUnless(shutil.which("git") and shutil.which("timeout"), "needs git and timeout")
+    def test_the_slot_mirror_fills_then_lends_its_history_to_the_next_checkout(self):
+        _, name, step = next(steps())
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            quiet = dict(capture_output=True, text=True, check=True)
+            git = lambda *args, cwd=root: subprocess.run(["git", *args], cwd=cwd, **quiet).stdout.strip()
+            server = root / "server"
+            git("init", "-q", "-b", "main", str(server))
+            for n in range(6):
+                (server / "f").write_text(f"{n}\n")
+                git("add", "f", cwd=server)
+                git("-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-qm", f"c{n}",
+                    cwd=server)
+            heads = git("rev-list", "--reverse", "main", cwd=server).split()
+            build = root / "build"
+            mirror = build / "git-mirror" / "org" / "repo.git"
+            env = dict(os.environ, **step["env"], DYNA_CI_BUILD=str(build), GITHUB_REPOSITORY="org/repo")
+
+            def job(commit, label):
+                checkout = root / label
+                git("init", "-q", str(checkout))
+                git("remote", "add", "origin", f"file://{server}", cwd=checkout)
+                git("fetch", "-q", "--depth=1", "origin", commit, cwd=checkout)
+                git("checkout", "-q", "FETCH_HEAD", cwd=checkout)
+                result = subprocess.run(["bash", "-e", "-o", "pipefail", "-c", step["run"].replace(
+                    "tools/ci/", f"{ROOT}/tools/ci/")], cwd=checkout, env=env, capture_output=True, text=True,
+                    timeout=60)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertNotIn("::error::", result.stdout)
+                self.assertEqual(git("rev-parse", "--is-shallow-repository", cwd=checkout), "false")
+                self.assertEqual(git("rev-list", "--count", "HEAD", cwd=checkout), str(heads.index(commit) + 1))
+                return checkout
+
+            # The slot's first job has no mirror: it fetches everything, then leaves its head in the mirror.
+            first = job(heads[3], "first")
+            self.assertFalse((first / ".git/objects/info/alternates").exists())
+            self.assertEqual(git("rev-parse", "refs/heads/ci-head", cwd=mirror), heads[3])
+            # The next job borrows the mirror's objects and takes only what is new; the mirror moves to its head.
+            second = job(heads[5], "second")
+            self.assertEqual((second / ".git/objects/info/alternates").read_text(), f"{mirror}/objects\n")
+            subprocess.run(["git", "fsck", "--connectivity-only"], cwd=second, **quiet)
+            self.assertEqual(git("rev-parse", "refs/heads/ci-head", cwd=mirror), heads[5])
+            # With no time left in the step, the job still passes and the mirror stays where it was.
+            env["UPKEEP_BUDGET"] = "0"
+            job(heads[4], "late")
+            self.assertEqual(git("rev-parse", "refs/heads/ci-head", cwd=mirror), heads[5])
+            del env["UPKEEP_BUDGET"]
+            # A mirror that no longer reads as a repository is not borrowed, and takes this job's head again.
+            shutil.rmtree(mirror / "refs")
+            third = job(heads[4], "third")
+            self.assertFalse((third / ".git/objects/info/alternates").exists())
+            self.assertEqual(git("rev-parse", "refs/heads/ci-head", cwd=mirror), heads[4])
 
 
 if __name__ == "__main__":
