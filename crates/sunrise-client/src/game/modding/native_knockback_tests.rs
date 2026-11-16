@@ -720,6 +720,42 @@ fn remembered_player_wins_after_forty_ticks_then_recent_mob_credit_expires_at_on
 
 #[test]
 #[ignore = "daily"]
+fn queued_player_hurts_select_the_current_source_not_an_older_hit_of_the_same_type() {
+    let heard = heard(|game, _| {
+        player_with_sword(game);
+        super::native_entity_refs::tests::bind_local_player(game, 7, 777);
+        game.set_game_mode(sunrise_client::command::args::GameMode::Creative);
+        game.set_game_mode(sunrise_client::command::args::GameMode::Survival);
+        zombie_at(game, 42, Vec3::new(1.0, 0.0, 0.0));
+        zombie_at(game, 43, Vec3::new(-1.0, 0.0, 0.0));
+        game.mobs[0]
+            .extra
+            .set_main_hand_stack(Some(ItemStack::new("minecraft:bone", 1)));
+        game.mobs[1]
+            .extra
+            .set_main_hand_stack(Some(ItemStack::new("minecraft:iron_axe", 1)));
+        assert!(game.mob_hits_player_from(1.0, [1.0, 0.0, 0.0], "minecraft:mob_attack", false));
+        // A stronger cooldown hit commits memory without another default push.
+        assert!(game.mob_hits_player_from(2.0, [-1.0, 0.0, 0.0], "minecraft:mob_attack", false));
+        game.player.as_mut().unwrap().velocity = Vec3::ZERO;
+        game.player.as_mut().unwrap().ground.on_ground = false;
+        game.knock_back_player(0.4, 1.0, 0.0, source(0), &NO_ATTACK, 0.0);
+        assert_eq!(
+            game.player.as_ref().unwrap().velocity,
+            Vec3::new(0.8, 0.0, 0.0)
+        );
+    });
+    assert_eq!(
+        heard.credits,
+        [
+            (42, Some("minecraft:bone".into())),
+            (43, Some("minecraft:iron_axe".into())),
+        ]
+    );
+}
+
+#[test]
+#[ignore = "daily"]
 fn borrowed_rider_environmental_damage_never_dispatches_a_living_push() {
     let heard = heard(|game, _| {
         credit_pig(game);

@@ -4242,7 +4242,7 @@ impl Game<'_> {
                 })
             })
         {
-            self.commit_pending_hurt_memories(damage_type);
+            self.commit_pending_hurt_memories(damage_type, Some(&attack));
         }
         if outcome.hurt || outcome.sound {
             let source = attacker
@@ -6645,7 +6645,7 @@ impl Game<'_> {
         let held_damage = held.as_ref().map_or(0, |h| h.damage as i32);
         let held_extra = held.as_ref().and_then(|h| h.extra.clone());
         let feeder = sunrise_client::health::Attack {
-            player_uuid: self.owner_damage_uuid(),
+            player_uuid: self.player_uuid_of(self.lan_acting),
             ..Default::default()
         };
         let credit_plan =
