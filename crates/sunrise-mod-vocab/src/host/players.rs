@@ -704,11 +704,13 @@ pub trait PlayersBackendMut {
     /// they go. An item's use, a command or a tick can open it. Its slots are the player's
     /// ender chest itself: clicks, shift-clicks, drags and the close move stacks as an ender
     /// chest block's menu does, and the game writes and saves them. The menu replaces the one
-    /// they had open, as `ServerPlayer.openMenu` does, and the mods may cancel it
-    /// (`player_container_open`). Inside a hook of the player's own action (`use_item`,
-    /// `right_click_item`, `right_click_block`, their command), the menu opens when that action
-    /// ends, as a block's menu the same action opens does. Ok(true) when it opened or will open
-    /// at the end of the action, Ok(false) when a mod cancelled it. Errors:
+    /// they had open, as `ServerPlayer.openMenu` does, and the mods may cancel it with
+    /// `container_opened` (`player_container_open` is the notice after it opened, and cannot
+    /// cancel). Inside a hook of the player's own action (`use_item`, `right_click_item`,
+    /// `right_click_block`, their command), the menu opens when that action ends, as a block's
+    /// menu the same action opens does. Ok(true) inside an action means queued: the menu is
+    /// still subject to cancellation when the queue runs; outside one it opened. Ok(false) is an
+    /// immediate cancellation by a mod. Errors:
     /// `PlayerUnavailable` (stale, dead, fake, or on a client), or `Title` for a title that
     /// could not cross; nothing opens then.
     #[access(WorldOnly)]
