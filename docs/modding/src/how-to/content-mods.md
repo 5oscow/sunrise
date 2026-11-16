@@ -412,6 +412,8 @@ This differs from NeoForge, where `getShape` is asked for on every query: here a
 **published when it changes, not asked for per query**, and a port of a `getShape` override calls
 `set_shapes` wherever that state changes (a part attached, a lid opened). Physics, selection,
 ray casts and support read the published value at the position; nothing calls into the mod.
+Face sturdiness and multiface attachment between neighbouring blocks (placement, survival,
+shape updates, as for lichen and sculk veins) still read the declared shape until #1654.
 Shapes that depend on the querying entity are not covered; `outline_context_shapes` and
 `collision_context_shapes` stay declared, and a published shape stands over them.
 

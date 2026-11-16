@@ -438,21 +438,7 @@ impl Game<'_> {
         else {
             return Ok(false);
         };
-        let base = if replace {
-            let mut metadata = Compound::new();
-            if let Tag::Compound(fields) = &old {
-                // The published shapes are not part of the payload a mod replaces.
-                for key in ["id", "x", "y", "z", sunrise_client::containers::SHAPES_KEY] {
-                    if let Some(value) = fields.get(&key.into()) {
-                        metadata.insert(key.into(), value.clone());
-                    }
-                }
-            }
-            Tag::Compound(metadata)
-        } else {
-            old.clone()
-        };
-        let merged = sunrise_client::data_cmd::merged(&base, &nbt);
+        let merged = loaded_payload(&old, &nbt, replace);
         if merged == old {
             return Ok(false);
         }
@@ -526,7 +512,7 @@ impl Game<'_> {
                 && !warned.contains(&block)
             {
                 log::warn!(
-                    "{block}: a published shape has a box beyond one block of the block; collision and ray hits never find it"
+                    "{block}: a published shape has a box beyond one block of the block; collision never finds it"
                 );
                 warned.push(block);
             }
@@ -641,6 +627,26 @@ impl Game<'_> {
     }
 }
 
+/// The compound a merge (or, with `replace`, a replace) of `payload` loads over the block entity
+/// saved as `old`. A replace keeps the identity, position and published shapes, which are not
+/// the payload's to replace.
+fn loaded_payload(old: &Tag, payload: &Tag, replace: bool) -> Tag {
+    let base = if replace {
+        let mut metadata = Compound::new();
+        if let Tag::Compound(fields) = old {
+            for key in ["id", "x", "y", "z", sunrise_client::containers::SHAPES_KEY] {
+                if let Some(value) = fields.get(&key.into()) {
+                    metadata.insert(key.into(), value.clone());
+                }
+            }
+        }
+        Tag::Compound(metadata)
+    } else {
+        old.clone()
+    };
+    sunrise_client::data_cmd::merged(&base, payload)
+}
+
 /// A mod's data payload as the block entity takes it: without the fields the engine owns, which
 /// are its identity and position, and its published shapes (`set_shapes` alone writes those).
 fn mod_payload(mut data: Compound) -> Compound {
@@ -655,19 +661,36 @@ mod payload_tests {
     use super::*;
 
     #[test]
-    fn a_payload_cannot_carry_the_engines_shapes_key_in() {
-        let payload = Compound::from([
-            ("progress".into(), Tag::Int(3)),
-            ("id".into(), Tag::String("other:type".into())),
-            (
-                sunrise_client::containers::SHAPES_KEY.into(),
-                Tag::Compound(Compound::new()),
-            ),
-        ]);
-        assert_eq!(
-            mod_payload(payload),
-            Compound::from([("progress".into(), Tag::Int(3))])
-        );
+    fn merge_and_replace_keep_the_published_shapes_whatever_the_payload_carries() {
+        use sunrise_client::containers::SHAPES_KEY;
+        let shapes = Tag::Compound(Compound::from([(
+            "collision".into(),
+            Tag::LongArray(vec![1, 2, 3, 4, 5, 6]),
+        )]));
+        let old = Tag::Compound(Compound::from([
+            ("id".into(), Tag::String("test:bus".into())),
+            ("x".into(), Tag::Int(1)),
+            ("progress".into(), Tag::Int(7)),
+            ("kept".into(), Tag::Int(9)),
+            (SHAPES_KEY.into(), shapes.clone()),
+        ]));
+        // A payload that carries the key, to overwrite it or to remove it.
+        let colliding = || {
+            mod_payload(Compound::from([
+                ("progress".into(), Tag::Int(8)),
+                ("id".into(), Tag::String("other:type".into())),
+                (SHAPES_KEY.into(), Tag::Compound(Compound::new())),
+            ]))
+        };
+        for replace in [false, true] {
+            let loaded = loaded_payload(&old, &Tag::Compound(colliding()), replace);
+            assert_eq!(loaded.get(SHAPES_KEY), Some(&shapes), "replace: {replace}");
+            // The ordinary field applies, and the identity stays.
+            assert_eq!(loaded.get("progress"), Some(&Tag::Int(8)));
+            assert_eq!(loaded.get("id"), Some(&Tag::String("test:bus".into())));
+            // A merge keeps the fields the payload omits; a replace drops them.
+            assert_eq!(loaded.get("kept").is_some(), !replace);
+        }
     }
 }
 

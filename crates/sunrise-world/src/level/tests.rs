@@ -3247,6 +3247,7 @@ fn using_storage_and_interactable_blocks_succeeds() {
 }
 
 #[test]
+#[ignore = "daily"]
 fn a_published_shape_decides_support_over_the_declared_one() {
     use sunrise_core::geometry::{Aabb, Vec3};
     let mut w = world!();
@@ -3277,6 +3278,7 @@ fn a_published_shape_decides_support_over_the_declared_one() {
 }
 
 #[test]
+#[ignore = "daily"]
 fn a_published_shape_decides_whether_snow_stands() {
     let mut w = world!();
     let pos = BlockPos::new(0, 1, 0);

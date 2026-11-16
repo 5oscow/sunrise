@@ -65,8 +65,7 @@ impl PublishedShapes {
         Ok(shape)
     }
 
-    /// Whether a box lies beyond one block of the block, where collision and ray hits never
-    /// find it.
+    /// Whether a box lies beyond one block of the block, where collision never finds it.
     pub fn reaches_past_one_cell(&self) -> bool {
         self.boxes
             .outline
@@ -177,7 +176,7 @@ mod tests {
                 index: 1
             })
         );
-        // The cap itself, a box far past the block (stored as given, and inert), and a box
+        // The cap itself, a box far past the block (stored as given), and a box
         // thinner than 1e-7 (an empty one) are accepted.
         let far = [10.0, 0.0, 0.0, 12.0, 1.0, 1.0];
         let edge = PublishedShapes::new(shapes(

@@ -17,11 +17,10 @@
 /// - a box under 1e-7 thick on any axis is an empty box, as vanilla's `Shapes.create`
 ///   makes it, and is accepted.
 ///
-/// A box may lie anywhere. Collision and ray hits find boxes only within one block of the
-/// block, one axis at a time; a box beyond that is stored and sent but inert, as it is in
-/// vanilla. The same goes for outlines: a ray that never enters the block cannot target a
-/// part of its outline outside it. In debug builds the game warns once per block when a
-/// publish holds such a box.
+/// A box may lie anywhere. Collision finds boxes only within one block of the block, one axis
+/// at a time; a collision box beyond that is stored and sent but never found, as in vanilla.
+/// An outline can be hit past its block once the ray enters the block. In debug builds the
+/// game warns once per block when a publish holds a box beyond one block.
 #[derive(Clone, Debug, Default, PartialEq)]
 // exhaustive: mods build it with a literal, and its two lists are all there is to a shape
 #[derive(sunrise_mod_api_macros::Wire)]
