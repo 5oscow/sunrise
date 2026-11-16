@@ -228,7 +228,7 @@ shape. It selects a list of boxes by one template state property:
 ```
 
 Each box is `[min_x, min_y, min_z, max_x, max_y, max_z]` in block units.
-Each value of the template property needs an entry. Up to 16 boxes form a union;
+Each value of the template property needs an entry. Any number of boxes form a union;
 an empty list is an empty shape. Invalid bounds or values reject the content root.
 Without `shapes`, both shapes remain the template's. Other properties such as
 occlusion, light, and support still come from the template.

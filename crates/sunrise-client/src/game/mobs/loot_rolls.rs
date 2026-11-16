@@ -116,13 +116,7 @@ impl Game<'_> {
                 .map(|mob| sunrise_client::mobs::drops::loot_entity(mob, None)),
             _ => None,
         };
-        let loot = live_target.as_ref().and_then(|_| {
-            sunrise_client::structure_blocks::loot_data(
-                &self.options.resources,
-                &self.pack_files(),
-                self.res.item_defaults(),
-            )
-        });
+        let loot = live_target.as_ref().and_then(|_| self.server_loot.get());
         let matcher = |predicate: &serde_json::Value, entity: &sunrise_world::loot::LootEntity| {
             loot.as_ref()
                 .is_some_and(|data| data.entity_matches(predicate, Some(entity)))

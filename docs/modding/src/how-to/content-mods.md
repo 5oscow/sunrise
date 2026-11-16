@@ -327,14 +327,15 @@ outline passes skylight without attenuation when dry, but attenuates it by 1 whe
 `occludes: false` disables face occlusion.
 
 Movement collision is independently selectable with `collision_shapes`; it does not change the outline,
-render solidity, occlusion or lighting.
+render solidity, occlusion or lighting. Both take the same table format. Boxes are
+`[minX,minY,minZ,maxX,maxY,maxZ]` in block units (one block is 1), any number per shape, as in vanilla.
+Coordinates must be finite and each minimum must not exceed its maximum. `[]` is an empty shape.
+
 A declared shape also decides the block's legacy solid bit (`BlockState.isSolid`, which attachment
 survival such as wall signs and torches reads): it is calculated from `collision_shapes`, else from
 `shapes`, as vanilla does for any block (average size at least 0.729, or at least a block tall). A
 template that forces solidity on or off keeps its answer, and a block that declares no shape keeps the
-template's. This is not render solidity and not sturdy-face support. Both take the same table format. Boxes are
-`[minX,minY,minZ,maxX,maxY,maxZ]` in block units (one block is 1), at most 16 per shape.
-Coordinates must be finite and each minimum must not exceed its maximum. `[]` is an empty shape.
+template's. This is not render solidity and not sturdy-face support.
 
 ```json
 {
@@ -425,8 +426,8 @@ Shapes that depend on the querying entity are not covered; `outline_context_shap
 - **Checks**, refused by name with a `BlockEntityShapesError` and never clamped: every
   coordinate finite and each minimum at most its maximum; at most 64 boxes in each list.
   Vanilla has no box limit; 64 bounds what a block entity makes every client receive and
-  keep, while a declared shape table (`shapes`, above) holds 16 boxes, a load-time limit of
-  its own. There is no coordinate range. A box under 1e-7 thick on an axis is an empty box,
+  keep, while a declared shape table (`shapes`, above) syncs nothing and has no box limit.
+  There is no coordinate range. A box under 1e-7 thick on an axis is an empty box,
   as in vanilla.
 - **Reach**: collision finds boxes only within one cell of the block, one axis at a time (a
   state that publishes is always scanned that way); a box beyond that is stored and sent but

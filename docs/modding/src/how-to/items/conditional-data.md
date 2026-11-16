@@ -14,7 +14,12 @@ Ordinary JSON resources select the winning pack file first, then evaluate its
 conditions before decoding the data. If the winner is omitted, a lower pack's
 version does not return. Tag files and data-map files ignore a top-level
 `neoforge:conditions` key. Data-map values evaluate their own conditions when
-read; a failing value is omitted before merging. A damage
+read; a failing value is omitted before merging. In a loot table, only the pools
+in the `pools` list carry their own `neoforge:conditions`: a false pool is
+dropped and a passing pool loses the key before decoding. Anywhere else in a
+recipe, predicate, item modifier, or a pool's entries and functions, a nested
+key is ordinary data and is never evaluated, even when it names an unknown
+condition. A damage
 registry is frozen at world open; reloading reevaluates its tags, not its type
 definitions. Generated item default components retain their prototype
 lifetime and are not conditional data files.

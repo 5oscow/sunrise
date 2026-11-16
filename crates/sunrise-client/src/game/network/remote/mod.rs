@@ -908,10 +908,7 @@ impl Game<'_> {
         lan: bool,
         realm: bool,
     ) -> Result<()> {
-        super::world_loading::preload_server_loot(
-            &self.options.resources,
-            &self.res.core.item_data,
-        );
+        super::world_loading::world_data_used();
         if self.defer_world_entry(super::PendingWorldEntry::Server {
             address: address.to_owned(),
             name: name.to_owned(),
