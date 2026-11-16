@@ -1398,7 +1398,11 @@ impl Game<'_> {
             }
         }
         for (slot, stack) in self.fixture_vehicle_stacks(target) {
-            let _ = write!(line, " slot{slot}={}", canon_stack(Some(stack)));
+            let _ = write!(
+                line,
+                " slot{slot}={}",
+                canon_stack(Some(stack), self.res.items())
+            );
         }
         line
     }
