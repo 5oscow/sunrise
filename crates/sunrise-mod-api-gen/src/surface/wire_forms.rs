@@ -3,33 +3,9 @@
 //! `layout_fields!` list, or a `layout_via!` naming the type it crosses as), including the impls the
 //! API's own macros write once expanded.
 use crate::index::{Found, Index, ItemId};
+pub(super) use mod_source::layouts::WireForm;
 use std::collections::HashMap;
 use syn::{Item, Type};
-
-/// How one type crosses.
-#[derive(Clone)]
-pub(super) enum WireForm {
-    /// `#[derive(Wire)]`: its Rust fields.
-    Derive,
-    /// As another type, written in `module`.
-    Via(Type, usize),
-    /// A hand-written impl's declared fields, each type written in `module`.
-    Fields(Vec<(String, Type)>, usize),
-    /// A hand-written impl that declares no layout of its own.
-    Manual,
-}
-
-impl WireForm {
-    /// Its name in `wire_form`, `via:` followed by the normalised type.
-    pub(super) fn name(&self, via: impl FnOnce(&Type, usize) -> String) -> String {
-        match self {
-            Self::Derive => "derive".into(),
-            Self::Via(ty, module) => format!("via:{}", via(ty, *module)),
-            Self::Fields(..) => "fields".into(),
-            Self::Manual => "manual".into(),
-        }
-    }
-}
 
 /// `ty` without the invisible groups a macro's substitution leaves around it.
 pub(super) fn ungroup(ty: &Type) -> &Type {
