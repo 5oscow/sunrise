@@ -88,7 +88,7 @@ impl BlockEntityPart for Part {
             event.stack.set_count(1).unwrap();
         }
         if s.cross {
-            let level = host.list_levels().remove(0);
+            let level = host.levels().remove(0);
             let items = level
                 .capability(host, &ITEMS, [2, 64, 1], None)
                 .expect("the second block's items");
@@ -337,7 +337,7 @@ fn stone_everywhere(game: &crate::game::Game<'_>) -> (u32, u32, u32) {
         items
             .iter()
             .flatten()
-            .filter(|s| s.item == "minecraft:stone")
+            .filter(|s| &*s.item == "minecraft:stone")
             .map(|s| s.count)
             .sum::<u32>()
     };
