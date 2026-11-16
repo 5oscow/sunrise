@@ -12,21 +12,18 @@ use sunrise_core::geometry::Vec3;
 use sunrise_core::nbt::{Compound, Tag};
 
 impl super::commands::OtherEntity {
-    pub(in crate::game) fn is_display_marker_or_interaction(&self) -> bool {
-        matches!(
+    /// Physical query bounds, not display rendering/culling dimensions.
+    pub(in crate::game) fn display_marker_or_interaction_bounds(
+        &self,
+    ) -> Option<sunrise_core::geometry::Aabb> {
+        if !matches!(
             self.kind.as_str(),
             "minecraft:block_display"
                 | "minecraft:item_display"
                 | "minecraft:text_display"
                 | "minecraft:marker"
                 | "minecraft:interaction"
-        )
-    }
-    /// Physical query bounds, not display rendering/culling dimensions.
-    pub(in crate::game) fn display_marker_or_interaction_bounds(
-        &self,
-    ) -> Option<sunrise_core::geometry::Aabb> {
-        if !self.is_display_marker_or_interaction() {
+        ) {
             return None;
         }
         Some(if let Some(settings) = self.interaction {
@@ -396,7 +393,7 @@ impl Game<'_> {
             .others
             .iter()
             .enumerate()
-            .filter(|(_, e)| e.is_display_marker_or_interaction())
+            .filter(|(_, e)| !super::general::quarantined_kind(&e.kind))
         {
             offer(Slot::Apart(Apart::Other(i)), other.id, other.join);
         }
@@ -583,12 +580,14 @@ mod tests {
                 );
                 assert_eq!(entity.position(host), Some(event.pos));
                 let level = host.level(event.dimension).unwrap();
-                assert!(
-                    level
-                        .entities_in(host, [4.0, 63.0, 4.0], [6.0, 66.0, 6.0])
-                        .unwrap()
-                        .contains(&entity)
-                );
+                if event.kind != "minecraft:eye_of_ender" {
+                    assert!(
+                        level
+                            .entities_in(host, [4.0, 63.0, 4.0], [6.0, 66.0, 6.0])
+                            .unwrap()
+                            .contains(&entity)
+                    );
+                }
                 self.0
                     .lock()
                     .unwrap()
@@ -662,6 +661,15 @@ mod tests {
                     game.persist.live.len(),
                     5,
                     "resident utilities must not spuriously leave"
+                );
+                // The join moment covers the fallback store, not a fixed list of kinds.
+                game.summon_with_nbt("minecraft:eye_of_ender", [5.0, 64.0, 5.0], "{}")
+                    .unwrap();
+                game.native_joins_flush(false, 0);
+                assert_eq!(joins.lock().unwrap().len(), 11);
+                assert_eq!(
+                    joins.lock().unwrap().last(),
+                    Some(&("minecraft:eye_of_ender".to_owned(), false))
                 );
             });
         });

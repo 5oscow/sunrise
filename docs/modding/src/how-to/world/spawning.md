@@ -29,8 +29,9 @@ The placement type is `SpawnPlacements.isSpawnPositionOk`'s first check, and the
 
 ## Saved display and utility entities
 
-`entity_join_level` (hook version 3) includes block, item and text displays, markers and
-interactions. A fresh spawn notifies once with `loaded_from_disk = false`; restoring an
+`entity_join_level` (hook version 3) includes every resident in the saved-entity fallback
+store: block, item and text displays, markers, interactions, eyes of ender and explicit
+leash knots. Quarantined missing-mod records remain opaque saved data and do not join. A fresh spawn notifies once with `loaded_from_disk = false`; restoring an
 entity from a saved chunk notifies once with `loaded_from_disk = true`. The normal join
 cancellation and transaction rules apply to these entities too.
 

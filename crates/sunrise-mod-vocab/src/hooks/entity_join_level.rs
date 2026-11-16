@@ -48,8 +48,10 @@ pub trait Hooks {
     /// is gone. A join cancelled at the commit leaves the spawn's handle
     /// stale. Joins at one commit come in the order the entities were added,
     /// before the removals the transaction asked for take effect.
-    /// Saved displays, markers and interactions also notify with `loaded_from_disk`
-    /// when their chunk loads. Server-side.
+    /// Every saved resident in the fallback entity store also notifies, including
+    /// displays, markers, interactions, eyes of ender and explicit leash knots.
+    /// Restoring them from a chunk sets `loaded_from_disk`. Quarantined missing-mod
+    /// records are opaque saved data, not residents, and do not notify. Server-side.
     #[hook(
         side = "server",
         contract = "cancel",
