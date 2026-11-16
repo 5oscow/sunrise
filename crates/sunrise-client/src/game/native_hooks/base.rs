@@ -4788,15 +4788,17 @@ impl Game<'_> {
     pub(in crate::game) fn recipes_of_type(
         &self,
         kind: &str,
-    ) -> Arc<[crate::crafting::RecipeSnapshot]> {
+    ) -> crate::game::api_values::RecipeListing {
         if self.outside_world() {
             return Default::default();
         }
-        self.recipes()
-            .by_type
-            .get(kind)
-            .cloned()
-            .unwrap_or_default()
+        crate::game::api_values::RecipeListing(
+            self.recipes()
+                .by_type
+                .get(kind)
+                .cloned()
+                .unwrap_or_default(),
+        )
     }
     /// An ingredient as a recipe's JSON names it: an item, a `#tag`, or a list
     /// of them, a bare id as `minecraft:` (as vanilla reads it); `test` says

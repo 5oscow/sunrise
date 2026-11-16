@@ -547,7 +547,7 @@ mod tests {
     #[ignore = "daily"]
     fn recipes_of_type_answers_vanilla_types_from_the_live_table() {
         with_game(|game| {
-            let smelting = game.recipes_of_type("minecraft:smelting");
+            let smelting = game.recipes_of_type("minecraft:smelting").0;
             let iron = smelting
                 .iter()
                 .find(|recipe| recipe.id == "minecraft:iron_ingot_from_smelting_raw_iron")
@@ -558,7 +558,7 @@ mod tests {
             assert_eq!(iron.ingredients.len(), 1);
             assert!(iron.ingredients[0].items.contains("minecraft:raw_iron"));
             assert_eq!(iron.results[0].item.as_ref(), "minecraft:iron_ingot");
-            let shaped = game.recipes_of_type("minecraft:crafting");
+            let shaped = game.recipes_of_type("minecraft:crafting").0;
             let bucket = shaped
                 .iter()
                 .find(|recipe| recipe.id == "minecraft:bucket")
@@ -569,9 +569,10 @@ mod tests {
             assert!(
                 !game
                     .recipes_of_type("minecraft:campfire_cooking")
+                    .0
                     .is_empty()
             );
-            assert!(game.recipes_of_type("nope:missing").is_empty());
+            assert!(game.recipes_of_type("nope:missing").0.is_empty());
         });
     }
 

@@ -66,6 +66,12 @@ impl RandomSource for Draws<'_> {
     fn next_boolean(&mut self) -> bool {
         self.0.boolean()
     }
+    fn next_int(&mut self) -> i32 {
+        self.0.int_unbounded()
+    }
+    fn next_gaussian(&mut self) -> f64 {
+        self.0.gaussian()
+    }
 }
 
 /// The engine's start, as a [`GenerationContext`].

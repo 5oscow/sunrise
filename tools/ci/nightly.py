@@ -262,7 +262,7 @@ SDK_ASSETS = SDK_ARCHIVES + (SDK_INDEX, "SHA256SUMS", "SHA256SUMS.sig")
 
 def ready_sdk_shas() -> set[str]:
     """Snapshot of the complete published `sdk-<sha>` releases; API failures fail closed."""
-    releases = train.gh_json("api", "--paginate", "--slurp",
+    releases = train.gh_json("api", "--paginate",
                              f"repos/sunrise-org/sunrise/releases?per_page=100")
     return {release["tag_name"].removeprefix("sdk-")
             for page in releases for release in page

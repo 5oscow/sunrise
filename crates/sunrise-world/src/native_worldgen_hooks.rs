@@ -20,6 +20,10 @@ pub trait WorldgenRandom {
     fn next_double(&mut self) -> f64;
     /// `nextBoolean`.
     fn next_boolean(&mut self) -> bool;
+    /// `nextInt()`.
+    fn next_int(&mut self) -> i32;
+    /// `nextGaussian`, with the stream's cached second value as the engine keeps it.
+    fn next_gaussian(&mut self) -> f64;
 }
 
 /// What a mod's ground provider reads while the tree decorator asks it for

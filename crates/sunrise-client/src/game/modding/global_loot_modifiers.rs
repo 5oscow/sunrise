@@ -165,7 +165,7 @@ impl mod_api::LootModifierContext for RollAdapter<'_> {
     fn snapshot(&self) -> mod_api::LootContext {
         self.snapshot.clone()
     }
-    fn random(&mut self) -> &mut dyn mod_api::StructureRandom {
+    fn random(&mut self) -> &mut dyn mod_api::RandomSource {
         self
     }
     fn roll_raw(
@@ -184,7 +184,10 @@ impl mod_api::LootModifierContext for RollAdapter<'_> {
             .collect()
     }
 }
-impl mod_api::StructureRandom for RollAdapter<'_> {
+impl mod_api::RandomSource for RollAdapter<'_> {
+    fn next_int(&mut self) -> i32 {
+        self.roll.next_int()
+    }
     fn next_int_bound(&mut self, bound: i32) -> i32 {
         self.roll.next_int_bound(bound)
     }
@@ -199,6 +202,9 @@ impl mod_api::StructureRandom for RollAdapter<'_> {
     }
     fn next_boolean(&mut self) -> bool {
         self.roll.next_boolean()
+    }
+    fn next_gaussian(&mut self) -> f64 {
+        self.roll.next_gaussian()
     }
 }
 

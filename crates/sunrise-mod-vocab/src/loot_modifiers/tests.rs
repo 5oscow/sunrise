@@ -1,8 +1,7 @@
 use super::*;
-use crate::{ItemKey, LoadReader, OwningLoad};
+use crate::{ItemKey, LegacyRandomSource, LoadReader, OwningLoad};
 use serde_json::json;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use sunrise_core::random::{LegacyRandom, RandomSource};
 
 #[test]
 fn common_fields_decode_defaults_limits_and_predicate_holders() {
@@ -57,14 +56,14 @@ impl LoadReader for Reader {
         None
     }
 }
-struct Roll(LegacyRandom);
+struct Roll(LegacyRandomSource);
 impl LootModifierContext for Roll {
     fn snapshot(&self) -> LootContext {
         let mut context = LootContext::new(0);
         context.queried_table_id = "test:root".into();
         context
     }
-    fn random(&mut self) -> &mut dyn StructureRandom {
+    fn random(&mut self) -> &mut dyn RandomSource {
         self
     }
     fn roll_raw(&mut self, table: &Identifier) -> Result<Vec<LootStack>, LootModifierError> {
@@ -72,9 +71,12 @@ impl LootModifierContext for Roll {
         Ok(vec![LootStack::new(ItemKey(2), 0)])
     }
 }
-impl StructureRandom for Roll {
+impl RandomSource for Roll {
+    fn next_int(&mut self) -> i32 {
+        self.0.next_int()
+    }
     fn next_int_bound(&mut self, bound: i32) -> i32 {
-        self.0.next_int_bound(bound).unwrap_or(0)
+        self.0.next_int_bound(bound)
     }
     fn next_long(&mut self) -> i64 {
         self.0.next_long()
@@ -87,6 +89,9 @@ impl StructureRandom for Roll {
     }
     fn next_boolean(&mut self) -> bool {
         self.0.next_boolean()
+    }
+    fn next_gaussian(&mut self) -> f64 {
+        self.0.next_gaussian()
     }
 }
 struct Codec(Arc<AtomicUsize>);
@@ -137,9 +142,9 @@ fn preparation_caches_metadata_and_application_keeps_signed_output_and_roll_rand
         assert_eq!(prepared.priority().unwrap(), 37);
         assert!(prepared.condition().unwrap().is_some());
     }
-    let mut roll = Roll(LegacyRandom::new(0));
-    let mut expected = LegacyRandom::new(0);
-    assert_eq!(expected.next_int_bound(2).unwrap(), 1);
+    let mut roll = Roll(LegacyRandomSource::new(0));
+    let mut expected = LegacyRandomSource::new(0);
+    assert_eq!(expected.next_int_bound(2), 1);
     let output = prepared
         .apply(
             &mut roll,
@@ -190,7 +195,7 @@ fn a_native_panic_disables_only_that_prepared_instance() {
     let load = OwningLoad::new(crate::DataLoadOrigin::ServerDataLoad, &Reader);
     let first = codec.decode(&json!({}), &load).unwrap();
     let second = codec.decode(&json!({}), &load).unwrap();
-    let mut roll = Roll(LegacyRandom::new(0));
+    let mut roll = Roll(LegacyRandomSource::new(0));
     assert!(
         first
             .apply(&mut roll, vec![])

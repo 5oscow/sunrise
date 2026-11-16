@@ -17,7 +17,9 @@ jobs:
   book:
     # A contributor's pull request (its head in a fork) skips what compiles; a reviewer dispatches it (tools/ci/pr_gate.py).
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubuntu-latest
+    # Dyna's runners while the repository's switch is on: a pull request's book on the small one, main's (which also
+    # builds the API docs and tests the examples) on the medium one. The slot keeps CARGO_HOME, so mdBook installs once.
+    runs-on: ${{ vars.DYNA_CI_SELF_HOSTED == 'true' && (github.event_name == 'pull_request' && 'dyna-small' || 'dyna-medium') || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
       # Inert until the modding book exists on the branch.
@@ -25,7 +27,40 @@ jobs:
         run: test -f docs/modding/book.toml && echo present=true >> "$GITHUB_OUTPUT" || true
       - name: The pinned Rust (tools/ci/rust-version)
         if: steps.book.outputs.present == 'true'
-        run: bash tools/ci/rustup_install.sh --profile minimal
+        env:
+          DYNA: ${{ runner.environment != 'github-hosted' }}
+        run: |
+          # Dyna's image has no rustup: the slot's CARGO_HOME keeps the one installed here, as dyna-checks' jobs do.
+          if [ "$DYNA" = true ]; then
+            if [ ! -x "$CARGO_HOME/bin/rustup" ]; then
+              curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal
+            fi
+            export PATH="$CARGO_HOME/bin:$PATH"
+            echo "$CARGO_HOME/bin" >> "$GITHUB_PATH"
+          fi
+          bash tools/ci/rustup_install.sh --profile minimal
+      # Dyna's runner builds in the slot's persistent CARGO_TARGET_DIR; `target` points there so the book, the API docs
+      # and the checks below find them where they look. Last run's pages go first: a page this tree no longer makes
+      # must not stay behind for the private-path check or the artifact.
+      - name: Use the slot's build folder
+        if: steps.book.outputs.present == 'true' && runner.environment != 'github-hosted'
+        run: |
+          mkdir -p "${CARGO_TARGET_DIR:?}"
+          if [ ! -e target ] && [ ! -L target ]; then
+            ln -s "$CARGO_TARGET_DIR" target
+          elif [ ! target -ef "$CARGO_TARGET_DIR" ]; then
+            echo '::error::Existing target path does not point to CARGO_TARGET_DIR; refusing to replace it.'
+            exit 1
+          fi
+          rm -rf target/modding-book target/doc
+      # The slot's build folder keeps other branches' artifacts: only byte-identical sources regain their timestamps.
+      - name: Restore unchanged source timestamps
+        if: steps.book.outputs.present == 'true'
+        run: python3 tools/ci/source_mtimes.py "${CARGO_TARGET_DIR:-target}/ci-source-mtimes-v2.json"
+      # Every build in this job runs at the runner's size, not the host's (tools/ci/cargo_jobs.py).
+      - name: Cap build parallelism to the runner
+        if: steps.book.outputs.present == 'true'
+        run: python3 tools/ci/cargo_jobs.py --job-mib 3072 --cap
       - if: steps.book.outputs.present == 'true'
         run: cargo install mdbook --locked --version 0.4.52
       - if: steps.book.outputs.present == 'true'

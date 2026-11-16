@@ -398,40 +398,57 @@ jobs:
       # The prebuilt SDK's own feature graph: a release --lib build with prefer-dynamic and warnings rejected, as
       # tools/prebuilt_game.py builds it, for the host and for the Windows archive (system-allocator there,
       # cargo_features). The checks above unify test and dev features (test-support) into one host build, which hid
-      # an unused import (Linux) and a unix-only binding (Windows) from everything but the SDK builds on main. Its own
-      # target folder: these flags would otherwise invalidate the workspace's artifacts for the other steps.
+      # an unused import (Linux) and a unix-only binding (Windows) from everything but the SDK builds on main. Own
+      # target folders, one per target so the two run at once: these flags would otherwise invalidate the workspace's
+      # artifacts for the other steps. Each check is a chain of single-threaded crate checks (rollup 13: host 5.9 and
+      # Windows 5.6 minutes one after the other, under 2 of the runner's 8 CPUs busy), so together they take about
+      # as long as one; each gets half the job's crate slots to stay within its memory.
       # --target leaves host units uncapped as before; stable Cargo has no host-rustflags, so their denies can stop dependents.
-      - name: The prebuilt SDK's host library builds without warnings
-        id: sdk_host
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' && needs.changes.outputs.rust_required != 'false' }}
-        run: |
-          started=$SECONDS
-          host=$(rustc -vV | awk '/^host:/ {print $2}')
-          env -u CARGO_ENCODED_RUSTFLAGS RUSTFLAGS='-C prefer-dynamic' \
-            python3 tools/ci/check_warnings.py cargo check $JOBS --keep-going --locked -p sunrise-mod-host --lib --profile release --target-dir target/sdk-check --target "$host"
-          echo "SDK library check host: $((SECONDS - started)) s" | tee -a "$GITHUB_STEP_SUMMARY"
-      - name: The prebuilt SDK's Windows library builds without warnings
-        id: sdk_windows
+      - name: The prebuilt SDK's host and Windows libraries build without warnings
+        id: sdk_libraries
         if: ${{ !cancelled() && steps.setup.outcome == 'success' && needs.changes.outputs.rust_required != 'false' }}
         env:
           # MinGW ignores mimalloc's MSVC pragmas. CFLAGS replaces cc's default warning flags,
           # so retain -Wall/-Wextra for both mimalloc and hidapi; silence only unknown pragmas.
           CFLAGS_x86_64_pc_windows_gnu: -Wall -Wextra -Wno-unknown-pragmas
         run: |
-          started=$SECONDS
           # hidapi and libmimalloc-sys compile C for the target in their build scripts.
           if ! command -v x86_64-w64-mingw32-gcc > /dev/null; then
             echo "::error::x86_64-w64-mingw32-gcc is missing: the Windows SDK check needs MinGW (gcc-mingw-w64-x86-64 in the ci-runner image)"
             exit 1
           fi
           rustup target add x86_64-pc-windows-gnu
+          host=$(rustc -vV | awk '/^host:/ {print $2}')
+          half=${JOBS:+-j$(( (${JOBS#-j} + 1) / 2 ))}
+          check() {  # name, then the cargo arguments; the output waits in a log until both have finished
+            local name=$1 started=$SECONDS status=0
+            shift
+            env -u CARGO_ENCODED_RUSTFLAGS RUSTFLAGS='-C prefer-dynamic' \
+              python3 tools/ci/check_warnings.py cargo check $half --keep-going --locked -p sunrise-mod-host --lib --profile release \
+                "$@" > "$RUNNER_TEMP/sdk-$name.log" 2>&1 || status=$?
+            echo "SDK library check $name: $((SECONDS - started)) s" >> "$RUNNER_TEMP/sdk-times"
+            return $status
+          }
+          check host --target-dir target/sdk-check --target "$host" & host_check=$!
           # The real build is a dylib, which Cargo never LTOs; a --lib check under the release profile's thin LTO
           # builds the dependencies for linker-plugin LTO, which rustc refuses with prefer-dynamic on Windows.
           # A check generates no code, so LTO changes no warning or cfg it reports.
-          env -u CARGO_ENCODED_RUSTFLAGS RUSTFLAGS='-C prefer-dynamic' \
-            python3 tools/ci/check_warnings.py cargo check $JOBS --keep-going --locked -p sunrise-mod-host --lib --profile release --target-dir target/sdk-check \
-              --target x86_64-pc-windows-gnu --features system-allocator --config profile.release.lto=false
-          echo "SDK library check windows: $((SECONDS - started)) s" | tee -a "$GITHUB_STEP_SUMMARY"
+          check windows --target-dir target/sdk-check-windows --target x86_64-pc-windows-gnu --features system-allocator \
+            --config profile.release.lto=false & windows_check=$!
+          failed=
+          wait "$host_check" || failed="$failed host"
+          wait "$windows_check" || failed="$failed windows"
+          for name in host windows; do
+            case " $failed " in
+              *" $name "*) echo "SDK library check $name failed:"; cat "$RUNNER_TEMP/sdk-$name.log" ;;
+              *) echo "::group::SDK library check $name"; cat "$RUNNER_TEMP/sdk-$name.log"; echo "::endgroup::" ;;
+            esac
+          done
+          tee -a "$GITHUB_STEP_SUMMARY" < "$RUNNER_TEMP/sdk-times"
+          if [ -n "$failed" ]; then
+            echo "::error::The prebuilt SDK's library has warnings or errors for:$failed (its output is above)"
+            exit 1
+          fi
       - name: Report lint compiler cache
         if: ${{ !cancelled() && needs.changes.outputs.rust_required != 'false' && needs.changes.outputs.self_hosted == 'true' }}
         run: |
@@ -876,6 +893,12 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: python3 tools/check_layers.py ${BASE_SHA:+--base "$BASE_SHA" --pull-request-merge}
+      # The prebuilt game's second dylib, the wasm runtime, holds no C library: one there is hidden from the game's
+      # library, whose link then fails (#1596's mimalloc). Reads `cargo metadata` only, compiles nothing.
+      - name: The wasm runtime links no native library
+        id: wasm_runtime_links_no_native_library
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' && (needs.changes.outputs.rust_required != 'false') }}
+        run: python3 tools/prebuilt_game.py links
       # tools/hotspots/README.md: a `pub use` brace list under the vocabulary's exports/ names at most 12 items, so two
       # PRs adding names don't conflict on rustfmt's re-wrap; today's longer lists only shrink.
       - name: Export lists stay short

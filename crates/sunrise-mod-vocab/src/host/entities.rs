@@ -240,8 +240,8 @@ pub trait EntitiesBackend {
     fn entity_on_ground(&self, entity: EntityRef) -> Option<bool>;
     /// Side: both.
     /// The entity's box (`Entity.getBoundingBox`): its lowest and highest
-    /// corner. None for the kinds whose box Sunrise doesn't keep (displays,
-    /// markers, End crystals, the dragon); a dragon part's is its own. On a client, reads
+    /// corner. Displays and markers have zero-sized physical boxes; interactions use
+    /// their saved dimensions. None for End crystals and the dragon; a dragon part's is its own. On a client, reads
     /// its own copy of a tracked entity, or the local player's predicted box.
     #[access(WorldOnly)]
     fn entity_bounding_box(&self, entity: EntityRef) -> Option<[[f64; 3]; 2]>;
@@ -1005,6 +1005,15 @@ pub trait EntitiesBackendMut {
     /// Sets the entity's shared invisibility flag (`Entity.setInvisible`). Returns false for players and guests.
     #[access(WorldOnly)]
     fn entity_set_invisible(&mut self, entity: EntityRef, invisible: bool) -> bool;
+    /// Side: server.
+    /// Sets whether the entity sprints (`Entity.setSprinting`): a player's flag with the
+    /// movement speed modifier `LivingEntity.setSprinting` adds or removes, or a mob's flag,
+    /// which the mob's movement speed reads as that same modifier (a mob's own AI, such as a
+    /// cat's, may set it again on its next step). It is not the player's sprint key: the
+    /// player's client sets its own flag again from its input. False for a stale handle, on a
+    /// client, and for kinds with no sprinting flag.
+    #[access(WorldOnly)]
+    fn entity_set_sprinting(&mut self, entity: EntityRef, sprinting: bool) -> bool;
     /// Side: server.
     /// `Level.playSound(null, entity, sound, source, volume, pitch)`: plays
     /// sound event `sound` bound to the entity, so that it follows it, for

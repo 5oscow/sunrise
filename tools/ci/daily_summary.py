@@ -8,12 +8,15 @@ files (tools/ci/ignored_tests.py --report: test identity, kind, panic location, 
   saw it and the pull requests merged since the last green daily as suspects, or comments on the open one; when its
   newest issue was closed by a pull request or commit that is not in this run's commit (a fix merged after the commit
   under test), it comments on that closed issue and leaves it closed instead of filing a new one;
-- a leg that failed without a test name (build error, timeout, killed, cancelled, skipped, or a leg with no
-  sanitised verdict): one issue per leg, `Daily: <leg> did not complete`, naming the failed steps and, for a shard,
+- a leg that failed without a test name (build error, timeout, killed, cancelled after it started, skipped, or a
+  leg with no sanitised verdict): one issue per leg, `Daily: <leg> did not complete`, naming the failed steps and, for a shard,
   why each run stopped as its verdict file says (signal or exit status, memory peak and limit, wall time, the tests
   still running past 60 s; stopped_text); a leg whose red asks for an action is titled as that action (ACTIONS:
   `Daily: update the machine sample for the mod API change`);
 - a test (or leg) green again: closes its open issue with a comment.
+A job cancelled before any of its steps ran (one still waiting for a runner) never ran, so it is neither red nor
+green, and nor is a leg whose call was cancelled with only such jobs: nothing is filed or closed for it. A run cancelled
+by hand never gets here: daily.yml runs the summary only when the run was not cancelled.
 It also outputs `sdk_green`: whether the legs sdk-publish waits for (SDK_LEGS) all ran and passed, by the same rules.
 A job it does not know, or an expected leg with no job, is a red leg ("did not report"), never green; so is a
 shard of the matrix (tools/ci/ignored_shards.py, which builds it) with no job of its name. Each comment
@@ -134,6 +137,18 @@ def expected_shards():
             for shard in [*ignored_shards.expand(ignored_shards.SHARDS), *ignored_shards.DAILY_ROWS_LEGS.values()]]
 
 
+def never_started(job):
+    """A job cancelled before any step ran: it waited for a runner, or for jobs it needs, until the cancel."""
+    return job["conclusion"] == "cancelled" and not any(
+        step.get("conclusion") not in (None, "skipped") for step in job.get("steps") or [])
+
+
+def unstarted_legs(jobs, results):
+    """The legs whose call was cancelled and none of whose jobs, routing jobs included, started."""
+    return {leg for leg in LEGS if results.get(leg, {}).get("result") == "cancelled"
+            and all(never_started(job) for job in jobs if job["name"].partition(" / ")[0] == leg)}
+
+
 def job_green(job, fresh_ok):
     return job["conclusion"] == "success" or (
         job["conclusion"] == "skipped" and job["name"].startswith("sdk / ") and fresh_ok)
@@ -144,7 +159,7 @@ def failed_helpers(jobs):
     failed = {}
     for job in jobs:
         leg, _, rest = job["name"].partition(" / ")
-        if leg in LEGS and rest in HELPERS and job["conclusion"] not in ("success", "skipped"):
+        if leg in LEGS and rest in HELPERS and job["conclusion"] not in ("success", "skipped") and not never_started(job):
             failed.setdefault(leg, []).append(job["name"])
     return failed
 
@@ -234,7 +249,10 @@ def verdicts(jobs, reports, results):
     tests, unfinished, passed, green_legs = [], [], set(), set()
     fresh_ok = any(job["name"] == FRESH and job["conclusion"] == "success" for job in jobs)
     helpers = failed_helpers(jobs)
+    unstarted = unstarted_legs(jobs, results)
     for job in leg_jobs(jobs):
+        if never_started(job):
+            continue
         report = report_for(job, reports)
         if report:
             passed |= {(item["package"], item["test"]) for item in report["passed"]}
@@ -261,10 +279,10 @@ def verdicts(jobs, reports, results):
         else:
             unfinished.append((job["name"], job["conclusion"], steps, "failed at the steps named"))
     for job in jobs:
-        if not known(job["name"]):
+        if not known(job["name"]) and not never_started(job):
             unfinished.append((job["name"], job["conclusion"], [], "did not report: a job the summary does not know"))
     names = {job["name"] for job in jobs}
-    if "shards" not in helpers:
+    if "shards" not in helpers and "shards" not in unstarted:
         for expected in expected_shards():
             if expected not in names:
                 unfinished.append((expected, "missing", [], "did not report: the daily matrix has this shard, but "
@@ -274,6 +292,8 @@ def verdicts(jobs, reports, results):
         result = results.get(leg, {}).get("result", "missing")
         accounted = any(item["leg"].split(" / ", 1)[0] == leg for item in tests) or any(
             entry[0].split(" / ", 1)[0] == leg for entry in unfinished)
+        if leg in unstarted:
+            continue
         if leg in helpers:
             unfinished.append((leg, result, [], "did not complete: " + ", ".join(f"`{name}`" for name in helpers[leg])
                                + " failed, so its jobs did not run"))
