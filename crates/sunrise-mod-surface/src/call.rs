@@ -201,8 +201,9 @@ impl Spec<'_> {
             Some(false) => "&",
             None => "",
         };
+        let ret = format!("{}:{}", self.ret.len(), self.ret);
         let text = format!(
-            "call{{{};{};{};{receiver};{};[{}];{};{}}}",
+            "call{{{};{};{};{receiver};{};[{}];{ret};{}}}",
             self.kind.word(),
             self.owner,
             self.method,
@@ -212,7 +213,6 @@ impl Spec<'_> {
                 .map(|p| format!("{}:{p}", p.len()))
                 .collect::<Vec<_>>()
                 .join(","),
-            format!("{}:{}", self.ret.len(), self.ret),
             self.version.map_or(String::new(), |v| v.to_string()),
         );
         Name {
