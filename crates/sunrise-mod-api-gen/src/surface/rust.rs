@@ -216,28 +216,34 @@ pub(super) fn param_names(generics: &syn::Generics) -> Vec<String> {
 /// defining path, which never enters a shape. A type is described by how it crosses
 /// ([`WireForm`]); one that does not cross, or crosses by a hand-written impl that declares no
 /// layout, gets no definition, so every shape that contains it is refused.
-pub(super) struct Layouts<'f> {
+pub(super) struct Layouts<W> {
     pub(super) table: BTreeMap<String, Definition>,
     keys: HashMap<ItemId, String>,
     pending: Vec<ItemId>,
-    forms: &'f HashMap<ItemId, WireForm>,
-    ids: &'f HashMap<ItemId, Vec<String>>,
+    wires: W,
     /// A type that has no wire form of its own (a borrowed event, a view the boundary copies
     /// field by field) is described by its Rust fields, as a derive would.
     pub(super) fields_without_form: bool,
 }
 
-impl<'f> Layouts<'f> {
-    pub(super) fn new(
-        forms: &'f HashMap<ItemId, WireForm>,
-        ids: &'f HashMap<ItemId, Vec<String>>,
-    ) -> Self {
+/// What `Layouts` asks of the crate set it describes: how a type crosses, and how a type the
+/// description does not look into is written.
+pub(super) trait Wires {
+    /// How the type `id`, with these attributes and derives, crosses; none when it does not.
+    fn form(&self, id: ItemId, attrs: &[syn::Attribute], derives: &[String]) -> Option<WireForm>;
+    /// `id`'s public path, for a note.
+    fn path(&self, id: ItemId) -> Option<&[String]>;
+    /// `ty`, written in `module` with type parameters `params`, as an opaque shape.
+    fn opaque(&self, index: &mut Index<'_>, module: usize, ty: &Type, params: &[String]) -> Shape;
+}
+
+impl<W: Wires> Layouts<W> {
+    pub(super) fn new(wires: W) -> Self {
         Self {
             table: BTreeMap::new(),
             keys: HashMap::new(),
             pending: Vec::new(),
-            forms,
-            ids,
+            wires,
             fields_without_form: false,
         }
     }
@@ -270,7 +276,7 @@ impl<'f> Layouts<'f> {
         self.keys
             .iter()
             .find(|(_, k)| k.as_str() == key)
-            .and_then(|(id, _)| self.ids.get(id))
+            .and_then(|(id, _)| self.wires.path(*id))
             .map_or_else(|| name.to_owned(), |path| path.join("::"))
     }
 
@@ -287,7 +293,7 @@ impl<'f> Layouts<'f> {
             };
             let names = param_names(generics);
             let derives = super::derives(attrs);
-            let form = super::wire_forms::form_of(id, attrs, &derives, self.forms);
+            let form = self.wires.form(id, attrs, &derives);
             let form = match form {
                 None if self.fields_without_form => Some(WireForm::Derive),
                 form => form,
@@ -335,16 +341,7 @@ impl<'f> Layouts<'f> {
 
     /// A type the description does not look into, as the surface writes it.
     fn opaque(&self, index: &mut Index<'_>, module: usize, ty: &Type, params: &[String]) -> Shape {
-        let mut ty = ty.clone();
-        let mut paths = Paths {
-            index,
-            public: self.ids,
-            module,
-            params: params.to_vec(),
-            refs: BTreeSet::new(),
-        };
-        paths.visit_type_mut(&mut ty);
-        Shape::Opaque(print(ty.to_token_stream()))
+        self.wires.opaque(index, module, ty, params)
     }
 
     fn fields(
@@ -558,5 +555,33 @@ impl VisitMut for Substitute<'_> {
             return;
         }
         syn::visit_mut::visit_type_mut(self, ty);
+    }
+}
+
+/// The game's crates: types cross as their derive or hand-written impl says, and an opaque type
+/// is written with the public paths of the API.
+pub(super) struct GameWires<'f> {
+    pub(super) forms: &'f HashMap<ItemId, WireForm>,
+    pub(super) ids: &'f HashMap<ItemId, Vec<String>>,
+}
+
+impl Wires for GameWires<'_> {
+    fn form(&self, id: ItemId, attrs: &[syn::Attribute], derives: &[String]) -> Option<WireForm> {
+        super::wire_forms::form_of(id, attrs, derives, self.forms)
+    }
+    fn path(&self, id: ItemId) -> Option<&[String]> {
+        self.ids.get(&id).map(Vec::as_slice)
+    }
+    fn opaque(&self, index: &mut Index<'_>, module: usize, ty: &Type, params: &[String]) -> Shape {
+        let mut ty = ty.clone();
+        let mut paths = Paths {
+            index,
+            public: self.ids,
+            module,
+            params: params.to_vec(),
+            refs: BTreeSet::new(),
+        };
+        paths.visit_type_mut(&mut ty);
+        Shape::Opaque(print(ty.to_token_stream()))
     }
 }
