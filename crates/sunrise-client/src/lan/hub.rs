@@ -6064,7 +6064,7 @@ mod tests {
     /// when its player changes level or respawns: those close it without
     /// asking `stillValid` (`ServerPlayer.closeContainer`).
     #[test]
-    fn a_menu_kept_open_by_its_part_closes_on_level_change_and_respawn() {
+    fn level_change_and_respawn_close_the_menu_but_keep_book_flags() {
         let mod_type: &'static crate::containers::ModMenuType =
             Box::leak(Box::new(crate::containers::ModMenuType {
                 id: "test:kept",
@@ -6120,12 +6120,21 @@ mod tests {
                 });
             });
         };
+        let flags = crate::recipe_book::BookFlags {
+            open: true,
+            filtering: true,
+        };
+        hub.guests.update(0, |g| {
+            g.recipe_book.custom.set("test:cooking", flags).unwrap();
+        });
         open(&mut hub);
         hub.change_level(0, [100.5, 49.0, 0.5], 0.0, None, false, 0, &ctx);
         assert!(hub.guests[0].menu.is_none());
+        assert_eq!(hub.guests[0].recipe_book.custom.get("test:cooking"), flags);
         open(&mut hub);
         hub.respawn(0, [0.5, 64.0, 0.5], None, &ctx);
         assert!(hub.guests[0].menu.is_none());
+        assert_eq!(hub.guests[0].recipe_book.custom.get("test:cooking"), flags);
     }
 
     /// `ServerGamePacketListenerImpl.forceSendPlayerSupportBlocks`: a client that says it stands

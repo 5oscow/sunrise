@@ -402,3 +402,50 @@ fn only_the_players_own_recipe_book_is_budgeted() {
         assert_eq!(book.map(|b| b.get(EXTENSION)), Some(None), "{path:?}");
     }
 }
+
+#[test]
+fn explicit_java_fields_load_and_save_flat_without_extension_duplicates() {
+    let fields = vec![(
+        POT.to_owned(),
+        (
+            "isModCookingGuiOpen".to_owned(),
+            "isModCookingFilteringCraftable".to_owned(),
+        ),
+    )];
+    for (open, filtering) in [(false, false), (true, false), (false, true), (true, true)] {
+        let mut java = saved(Some(Tag::compound([
+            (POT, entry(Tag::Byte(1), Tag::Byte(1))),
+            (OVEN, entry(Tag::Byte(0), Tag::Byte(1))),
+        ])));
+        let Tag::Compound(map) = &mut java else {
+            unreachable!()
+        };
+        if open {
+            map.insert("isModCookingGuiOpen".into(), Tag::Byte(1));
+        }
+        if filtering {
+            map.insert("isModCookingFilteringCraftable".into(), Tag::Byte(1));
+        }
+        let loaded = Settings::read_with_fields(Some(&java), &|_| true, &fields);
+        assert_eq!(loaded.custom.get(POT), BookFlags { open, filtering });
+        assert_eq!(loaded.custom.get(OVEN), FILTERING);
+        assert!(loaded.open[BookType::Furnace.index()]);
+        let written = loaded.write_with_fields(&fields);
+        assert_eq!(
+            written.get("isModCookingGuiOpen"),
+            open.then_some(&Tag::Byte(1))
+        );
+        assert_eq!(
+            written.get("isModCookingFilteringCraftable"),
+            filtering.then_some(&Tag::Byte(1))
+        );
+        let extension = written.get(EXTENSION).unwrap();
+        assert!(extension.get(POT).is_none());
+        assert_eq!(
+            extension.get(OVEN),
+            Some(&entry(Tag::Byte(0), Tag::Byte(1)))
+        );
+        let again = Settings::read_with_fields(Some(&written), &|_| true, &fields);
+        assert_eq!(again.custom, loaded.custom);
+    }
+}
