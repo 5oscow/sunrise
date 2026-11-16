@@ -69,7 +69,9 @@ pub enum SpecialModelPolicy {
     /// every frame.
     Stack,
     /// Asked in every frame the item is drawn, for each display context and game time it is
-    /// drawn with, as vanilla's `ItemModel.update` is: for an answer that moves with time.
+    /// drawn with, as vanilla's `ItemModel.update` is: for an answer that moves with time. There
+    /// is no cap on animated items: the renderer costs one `extract` per drawn item per frame,
+    /// for each display context it is drawn in.
     Frame,
 }
 

@@ -63,7 +63,9 @@ head) draws that answer; the `context` it is given is always `SpecialModelContex
 deliberate difference from vanilla, which extracts every frame. `Frame` asks once per frame of the view for
 each display context and game time the item is drawn with, and `context` carries the display context, the
 level's game time (`None` outside a world) and the partial tick: for an ingredient that rises and turns over
-a few ticks and must move smoothly between them. A `Frame` answer is not kept past its frame, and an item
+a few ticks and must move smoothly between them. There is no cap on animated items: a `Frame` renderer costs one `extract` per drawn item per frame, for each
+display context the item is drawn in (the same item in a hand and in an item frame is asked twice). A `Frame`
+answer is not kept past its frame, and an item
 drawn with one is never cached as a still GUI image. The same for native and wasm mods: a wasm renderer is one
 call per asked stack, the stack copied in and the parts copied out. Nothing is asked, and no scan runs, for a
 model whose type no mod registered.

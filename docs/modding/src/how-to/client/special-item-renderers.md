@@ -93,8 +93,10 @@ Registering a renderer names its `SpecialModelPolicy`.
   the item is drawn with, and `context.display`, `context.game_time` (`None` outside a world) and
   `context.partial_tick` say which. Use it for an answer that moves with time, such as an
   ingredient rising and turning over 12 ticks after a flip, smooth between ticks in first person,
-  third person and an item frame. Answers are kept for their frame only, so there is no cap on
-  animated items, and a GUI slot showing one is redrawn every frame rather than cached.
+  third person and an item frame. There is no cap on animated items: each `Frame` renderer costs one
+  `extract` per drawn item per frame, for each display context it is drawn in, so keep it cheap.
+  Answers are kept for their frame only, and a GUI slot showing one is redrawn every frame rather
+  than cached.
 
 ## Registrations and refusals
 
