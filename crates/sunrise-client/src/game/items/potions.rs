@@ -3032,7 +3032,7 @@ mod tests {
             return;
         }
         let cancel_expiry = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        mod_platform::testing::with_dispatch(
+        mod_platform::testing::with_mods(
             std::sync::Arc::from([
                 mod_api::ModEntry::new(
                     "effect-owner",
