@@ -278,8 +278,8 @@ impl ColliderState {
         for (i, state) in states.iter().enumerate() {
             let at = corners.get(i * 24..i * 24 + 24)?;
             let mut v = [0.0f32; 6];
-            for (slot, bytes) in v.iter_mut().zip(at.chunks_exact(4)) {
-                *slot = f32::from_be_bytes(bytes.try_into().ok()?);
+            for (slot, bytes) in v.iter_mut().zip(at.as_chunks::<4>().0) {
+                *slot = f32::from_be_bytes(*bytes);
                 if !slot.is_finite() || slot.abs() > Collider::MAX_REACH as f32 {
                     return None;
                 }
@@ -306,8 +306,8 @@ mod tests {
         Collider {
             boxes: (0..n)
                 .map(|i| ColliderBox {
-                    min: [i as f64, 0.0, 0.0],
-                    max: [i as f64 + 1.0, 1.0, 1.0],
+                    min: [(i % 400) as f64, (i / 400 % 100) as f64, 0.0],
+                    max: [(i % 400) as f64 + 1.0, (i / 400 % 100) as f64 + 1.0, 1.0],
                     state: BlockStateId(0),
                 })
                 .collect(),
