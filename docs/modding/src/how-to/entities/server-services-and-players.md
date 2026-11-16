@@ -207,16 +207,17 @@ wait for the outermost commit.
 
 ## Local player reads on a client
 
-These entity reads also accept a client host. They return `None` for another player or
-an entity whose copy the client does not keep:
+These entity reads also accept a client host. They return `None` for a stale handle or
+an entity whose body the client doesn't keep; another player the client tracks is such a
+kept body:
 
 | Read | Client value |
 | --- | --- |
 | `air_supply` | Last server-synced air; the client never predicts air loss or refill. |
 | `max_air_supply` | Maximum for the kept entity's kind (300 for the local player). |
-| `on_ground` | The local player's predicted ground flag. |
-| `is_in_water` | The local player's own fluid state, or a kept mob's last fluid update. |
-| `is_swimming` | The player's swimming flag, not the pose (crawling can share that pose). Unavailable for other entity kinds. |
+| `on_ground` | The local player's own predicted flag; for another kept entity, its client copy's flag. |
+| `is_in_water` | The local player's own fluid state, or a kept entity's last client update. |
+| `is_swimming` | The local player's swimming flag, not the pose (crawling can share that pose). `None` for other players and other entity kinds. |
 
 Client reads are views, not server authority. Inventory access here is read-only;
 inventory and movement writes still require a server host.
