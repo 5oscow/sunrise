@@ -320,6 +320,11 @@ impl StackData {
             // The scalar lives on ItemStack; retain explicit zero presence here
             // so a non-durable prototype can carry its own durability.
             "minecraft:damage" => {
+                if tag.is_none() {
+                    // A removal: the stack's own damage is gone (its scalar is
+                    // zeroed by the caller that owns it).
+                    self.damage_set = false;
+                }
                 self.explicit_zero_damage = tag.as_ref().is_some_and(|value| {
                     sunrise_world::datafix::dynamic::as_int(Some(value), 0) == 0
                 });

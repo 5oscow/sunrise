@@ -74,7 +74,7 @@ impl ItemStack {
             extra: None,
         };
         let before = loot_of(&stack);
-        apply_loot(&before, value, &mut stack);
+        apply_loot(&before, value, &mut stack, |_, _| None);
         stack
     }
 }

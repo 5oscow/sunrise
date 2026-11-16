@@ -2568,7 +2568,7 @@ impl<R: RandomSource> LootContext<'_, R> {
                 // does in the main loot engine.
                 k if k.contains(':') && !k.starts_with("minecraft:") => {
                     let ctx = self.native_loot_context(random);
-                    mod_function(k, f, &ctx, stack, |kind, data, ctx, stack| {
+                    mod_function(k, f, &ctx, self.items, stack, |kind, data, ctx, stack| {
                         sunrise_world::loot::native_invoke_loot_function(
                             kind, data, ctx, stack, self.items,
                         );
@@ -2665,13 +2665,71 @@ fn loot_of(stack: &ItemStack) -> sunrise_world::loot::LootStack {
     }
 }
 
+/// One entry of a loot component patch, written as `PatchedDataComponentMap`
+/// does. A value replaces the stack's own one and any `!id` removal. A removal
+/// (`id` with `None`, or the `!id` form with a value) drops the stack's own
+/// value (a damage removal zeroes the scalar too) and records the `!id`
+/// marker when the item's prototype carries `id`, so the prototype's value
+/// doesn't come back; when the prototype lacks it the marker goes too. When
+/// `prototype_has` can't tell (`None`: no prototypes at hand), an explicit
+/// `!id` is written and an existing one is kept. `id` with `None` in the `!id`
+/// form drops the marker, giving the prototype's value back.
+fn patch_loot_component(
+    stack: &mut ItemStack,
+    id: &str,
+    value: &Option<sunrise_core::nbt::Tag>,
+    prototype_has: &impl Fn(&str, &str) -> Option<bool>,
+) {
+    let (base, removal) = match id.strip_prefix('!') {
+        Some(base) if value.is_some() => (base, true),
+        Some(_) => {
+            stack.data_mut().set_other(id, None);
+            return;
+        }
+        None => (id, value.is_none()),
+    };
+    let marker = format!("!{base}");
+    if !removal {
+        let data = stack.data_mut();
+        data.set_other(&marker, None);
+        data.set_loot_component(base, value);
+        return;
+    }
+    stack.data_mut().set_loot_component(base, &None);
+    if base == "minecraft:damage" {
+        stack.damage = 0;
+    }
+    let keep = match prototype_has(&stack.item, base) {
+        Some(has) => has,
+        None => id.starts_with('!') || stack.data().is_some_and(|d| d.other(&marker).is_some()),
+    };
+    stack.data_mut().set_other(
+        &marker,
+        keep.then(|| sunrise_core::nbt::Tag::Compound(Default::default())),
+    );
+}
+
+/// `prototype_has` over `items`: whether an item's prototype carries a
+/// component, or `None` for an item `items` doesn't know.
+fn prototypes_of(items: &Items) -> impl Fn(&str, &str) -> Option<bool> + '_ {
+    |item, id| {
+        items
+            .get(item)
+            .map(|info| info.components.iter().any(|c| c == id))
+    }
+}
+
 /// What a mod's loot function left in its stack, applied to the engine's.
 /// Only what changed is written, so a field the hook did not touch keeps the
-/// engine's own form of it.
+/// engine's own form of it. `prototype_has(item, id)` says whether `item`'s
+/// prototype carries component `id` (`None`: unknown), so a removal of it
+/// stays a removal; it is asked about the stack's final item, after the hook
+/// changed it if it did.
 fn apply_loot(
     before: &sunrise_world::loot::LootStack,
     after: &sunrise_world::loot::LootStack,
     stack: &mut ItemStack,
+    prototype_has: impl Fn(&str, &str) -> Option<bool>,
 ) {
     if after.item != before.item {
         stack.item = Arc::from(after.item.as_str());
@@ -2726,12 +2784,12 @@ fn apply_loot(
                 .filter(|(key, _)| key == id)
                 .map(|(_, value)| value));
         if !unchanged {
-            stack.data_mut().set_loot_component(id, value);
+            patch_loot_component(stack, id, value, &prototype_has);
         }
     }
     for (id, _) in &before.components {
         if !after.components.iter().any(|(i, _)| i == id) {
-            stack.data_mut().set_loot_component(id, &None);
+            patch_loot_component(stack, id, &None, &prototype_has);
         }
     }
     stack.tidy();
@@ -2740,10 +2798,12 @@ fn apply_loot(
 /// `native_invoke_loot_function` with the items engine's stack: the stack as the
 /// loot engine's, the hook, and back what it changed. `hook` is the hook
 /// point (`sunrise_world::loot::native_invoke_loot_function`); a test passes its own.
+/// `items` holds the prototypes a removal is checked against.
 fn mod_function(
     kind: &str,
     data: &Value,
     ctx: &sunrise_world::loot::LootContext<'_>,
+    items: &Items,
     stack: &mut ItemStack,
     hook: impl FnOnce(
         &str,
@@ -2755,7 +2815,7 @@ fn mod_function(
     let before = loot_of(stack);
     let mut after = before.clone();
     hook(kind, data, ctx, &mut after);
-    apply_loot(&before, &after, stack);
+    apply_loot(&before, &after, stack, prototypes_of(items));
 }
 
 /// `DispensibleContainerItem`: shared contents for hand use and dispensers.
@@ -3961,6 +4021,7 @@ mod tests {
             "mymod:seven",
             &json!({"type": "mymod:seven"}),
             &native,
+            &items,
             &mut stack,
             |_, _, _, loot| {
                 loot.item = "minecraft:diamond".to_owned();
@@ -4010,7 +4071,7 @@ mod tests {
             ("test:array".into(), Some(Tag::ByteArray(vec![7]))),
             ("test:byte".into(), None),
         ]);
-        apply_loot(&before, &after, &mut stack);
+        apply_loot(&before, &after, &mut stack, |_, _| Some(false));
         assert_eq!(
             stack.data().unwrap().other("test:array"),
             Some(&Tag::ByteArray(vec![7]))
@@ -4029,7 +4090,7 @@ mod tests {
         )
         .unwrap();
         after.components.push(("minecraft:trim".into(), Some(trim)));
-        apply_loot(&before, &after, &mut stack);
+        apply_loot(&before, &after, &mut stack, |_, _| Some(false));
         assert_eq!(
             stack.data().unwrap().trim.as_ref().cloned(),
             Some((
@@ -4053,7 +4114,7 @@ mod tests {
         );
         let mut removed = captured.clone();
         removed.components.push(("minecraft:trim".into(), None));
-        apply_loot(&captured, &removed, &mut stack);
+        apply_loot(&captured, &removed, &mut stack, |_, _| Some(false));
         assert!(stack.data().is_none_or(|data| data.trim.is_none()));
     }
 
@@ -4071,11 +4132,226 @@ mod tests {
         after
             .components
             .push(("test:byte".into(), Some(sunrise_core::nbt::Tag::Byte(7))));
-        apply_loot(&before, &after, &mut stack);
+        apply_loot(&before, &after, &mut stack, |_, _| Some(false));
         assert_eq!(
             stack.data().unwrap().custom_name,
             Some(sunrise_core::nbt::Tag::String("New".into()))
         );
+    }
+
+    /// A stick whose prototype carries `minecraft:rarity`, with its own `epic` on top.
+    fn epic_stick() -> ItemStack {
+        let mut stack = ItemStack::new("minecraft:stick", 1);
+        stack.data_mut().set_other(
+            "minecraft:rarity",
+            Some(sunrise_core::nbt::Tag::String("epic".into())),
+        );
+        stack
+    }
+
+    fn stick_has_rarity(item: &str, id: &str) -> Option<bool> {
+        Some(item == "minecraft:stick" && id == "minecraft:rarity")
+    }
+
+    fn removal_marker() -> Option<sunrise_core::nbt::Tag> {
+        Some(sunrise_core::nbt::Tag::Compound(Default::default()))
+    }
+
+    /// #1540: a hook that drops a component the prototype carries leaves the
+    /// `!id` marker, as `SetComponentsFunction`'s `!id` does, so the
+    /// prototype's value doesn't come back.
+    #[test]
+    fn a_hook_removing_a_prototype_component_keeps_it_removed() {
+        let mut stack = epic_stick();
+        let before = loot_of(&stack);
+        let mut after = before.clone();
+        after.components.retain(|(id, _)| id != "minecraft:rarity");
+        apply_loot(&before, &after, &mut stack, stick_has_rarity);
+        let data = stack.data().expect("the marker is stack data");
+        assert_eq!(data.other("minecraft:rarity"), None);
+        assert_eq!(data.other("!minecraft:rarity").cloned(), removal_marker());
+    }
+
+    /// The same removal written as an explicit `None` entry of the patch.
+    #[test]
+    fn an_explicit_none_entry_for_a_prototype_component_keeps_it_removed() {
+        let mut stack = epic_stick();
+        let before = loot_of(&stack);
+        let mut after = before.clone();
+        after.components.push(("minecraft:rarity".into(), None));
+        apply_loot(&before, &after, &mut stack, stick_has_rarity);
+        let data = stack.data().expect("the marker is stack data");
+        assert_eq!(data.other("minecraft:rarity"), None);
+        assert_eq!(data.other("!minecraft:rarity").cloned(), removal_marker());
+    }
+
+    /// A component the prototype lacks is simply dropped: no marker, as
+    /// `PatchedDataComponentMap.remove` leaves the patch without the type.
+    #[test]
+    fn a_hook_removing_a_component_the_prototype_lacks_leaves_no_marker() {
+        let mut stack = ItemStack::new("minecraft:stick", 1);
+        stack
+            .data_mut()
+            .set_other("test:byte", Some(sunrise_core::nbt::Tag::Byte(7)));
+        let before = loot_of(&stack);
+        let mut after = before.clone();
+        after.components.retain(|(id, _)| id != "test:byte");
+        apply_loot(&before, &after, &mut stack, stick_has_rarity);
+        assert!(stack.data().is_none_or(
+            |data| data.other("test:byte").is_none() && data.other("!test:byte").is_none()
+        ));
+    }
+
+    /// A value the hook sets replaces an earlier removal of the same component.
+    #[test]
+    fn a_hook_setting_a_removed_component_drops_the_marker() {
+        let mut stack = ItemStack::new("minecraft:stick", 1);
+        stack
+            .data_mut()
+            .set_other("!minecraft:rarity", removal_marker());
+        let before = loot_of(&stack);
+        let mut after = before.clone();
+        after.components.push((
+            "minecraft:rarity".into(),
+            Some(sunrise_core::nbt::Tag::String("rare".into())),
+        ));
+        apply_loot(&before, &after, &mut stack, stick_has_rarity);
+        let data = stack.data().expect("the value is stack data");
+        assert_eq!(
+            data.other("minecraft:rarity"),
+            Some(&sunrise_core::nbt::Tag::String("rare".into()))
+        );
+        assert_eq!(data.other("!minecraft:rarity"), None);
+    }
+
+    /// A hook may write the `!id` form itself, as `set_components` encodes a
+    /// removal: the stack's own value goes and the marker stays.
+    #[test]
+    fn a_hook_writing_the_removal_form_removes_the_component() {
+        let mut stack = epic_stick();
+        let before = loot_of(&stack);
+        let mut after = before.clone();
+        after
+            .components
+            .push(("!minecraft:rarity".into(), removal_marker()));
+        apply_loot(&before, &after, &mut stack, stick_has_rarity);
+        let data = stack.data().expect("the marker is stack data");
+        assert_eq!(data.other("minecraft:rarity"), None);
+        assert_eq!(data.other("!minecraft:rarity").cloned(), removal_marker());
+    }
+
+    /// One id patched twice in a row: the last entry wins, a removal with its
+    /// marker and a value without one.
+    #[test]
+    fn ordered_entries_for_one_component_end_on_the_last() {
+        let rare = Some(sunrise_core::nbt::Tag::String("rare".into()));
+        for (entries, value, marker) in [
+            (vec![rare.clone(), None], None, removal_marker()),
+            (vec![None, rare.clone()], rare.clone(), None),
+        ] {
+            let mut stack = epic_stick();
+            let before = loot_of(&stack);
+            let mut after = before.clone();
+            after.components.retain(|(id, _)| id != "minecraft:rarity");
+            for entry in entries {
+                after.components.push(("minecraft:rarity".into(), entry));
+            }
+            apply_loot(&before, &after, &mut stack, stick_has_rarity);
+            let data = stack.data();
+            assert_eq!(
+                data.and_then(|d| d.other("minecraft:rarity")).cloned(),
+                value
+            );
+            assert_eq!(
+                data.and_then(|d| d.other("!minecraft:rarity")).cloned(),
+                marker
+            );
+        }
+    }
+
+    /// The prototype that decides is the final item's: a hook that turns the
+    /// stack into a stick and removes its rarity leaves the stick's marker.
+    #[test]
+    fn the_final_items_prototype_decides_a_removal() {
+        let mut stack = ItemStack::new("minecraft:stone", 1);
+        stack.data_mut().set_other(
+            "minecraft:rarity",
+            Some(sunrise_core::nbt::Tag::String("epic".into())),
+        );
+        let before = loot_of(&stack);
+        let mut after = before.clone();
+        after.item = "minecraft:stick".into();
+        after.components.retain(|(id, _)| id != "minecraft:rarity");
+        apply_loot(&before, &after, &mut stack, stick_has_rarity);
+        assert_eq!(&*stack.item, "minecraft:stick");
+        let data = stack.data().expect("the marker is stack data");
+        assert_eq!(data.other("!minecraft:rarity").cloned(), removal_marker());
+    }
+
+    /// A damage removal zeroes the scalar: no saved damage beside its `!id`.
+    #[test]
+    fn a_damage_removal_zeroes_the_stacks_damage() {
+        let mut stack = ItemStack::new("minecraft:iron_sword", 1);
+        stack.damage = 5;
+        let before = loot_of(&stack);
+        let mut after = before.clone();
+        after.components.push(("minecraft:damage".into(), None));
+        apply_loot(&before, &after, &mut stack, |item, id| {
+            Some(item == "minecraft:iron_sword" && id == "minecraft:damage")
+        });
+        assert_eq!(stack.damage, 0);
+        let saved = crate::item_data::encode_components(&stack);
+        let Some(sunrise_core::nbt::Tag::Compound(saved)) = saved else {
+            panic!("the removal is saved");
+        };
+        assert_eq!(saved.get(&"minecraft:damage".into()), None);
+        assert_eq!(
+            saved.get(&"!minecraft:damage".into()).cloned(),
+            removal_marker()
+        );
+    }
+
+    /// `from_loot` has no prototypes: a removal it can't judge keeps the
+    /// stack's explicit marker rather than dropping it.
+    #[test]
+    fn from_loot_keeps_an_explicit_removal() {
+        let mut loot = loot_of(&ItemStack::new("minecraft:stick", 1));
+        loot.components = vec![
+            ("!minecraft:rarity".into(), removal_marker()),
+            ("minecraft:rarity".into(), None),
+        ];
+        let stack = ItemStack::from_loot(&loot);
+        assert_eq!(
+            stack
+                .data()
+                .and_then(|d| d.other("!minecraft:rarity"))
+                .cloned(),
+            removal_marker()
+        );
+    }
+
+    /// #1540 end to end, with the real prototypes: a mod function that removes
+    /// the stick's `minecraft:rarity` leaves a stick without it.
+    #[test]
+    #[ignore = "daily"]
+    fn a_mod_function_removing_a_prototype_component_leaves_the_stack_without_it() {
+        let items = prepared_items().expect("prepared item resources");
+        let info = items.get("minecraft:stick").expect("stick");
+        assert!(info.components.iter().any(|c| c == "minecraft:rarity"));
+        let props = sunrise_world::chunk::BlockProperties::new();
+        let mut random = LegacyRandom::new(7);
+        let block = ctx(&items, None, &props, "minecraft:stone");
+        let native = block.native_loot_context(&mut random);
+        let mut stack = epic_stick();
+        mod_function(
+            "mymod:plain",
+            &json!({"type": "mymod:plain"}),
+            &native,
+            &items,
+            &mut stack,
+            |_, _, _, loot| loot.components.retain(|(id, _)| id != "minecraft:rarity"),
+        );
+        assert!(!stack.carries_component(Some(info), "minecraft:rarity"));
     }
 
     /// A function that leaves the stack alone keeps its own form: the round
@@ -4097,6 +4373,7 @@ mod tests {
             "mymod:nothing",
             &json!({"type": "mymod:nothing"}),
             &native,
+            &items,
             &mut stack,
             |_, _, _, _| {},
         );
