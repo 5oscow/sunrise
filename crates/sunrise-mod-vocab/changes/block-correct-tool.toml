@@ -1,3 +1,0 @@
-ids = ["method:BlockStates::requires_correct_tool"]
-why = "Adds BlockStates::requires_correct_tool, which answers BlockState.requiresCorrectToolForDrops. Jade's harvest-tool line and Tinkers' requires-tool modifiers needed it; which tool is correct is BlockStates::is_correct_tool_for_drops."
-migrate = "Additive: nothing to change. A wasm mod that calls the new read rebuilds against this SDK."
