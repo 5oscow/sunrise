@@ -242,7 +242,7 @@ mod tests {
 
             // An installer is the tick thread's: a phase's worker can't mint the token, and
             // resolving a registry there is refused by name before it touches a table.
-            sunrise_threads::as_tick_phase(|| {
+            sunrise_core::tick_phase::as_tick_phase(|| {
                 assert!(std::panic::catch_unwind(TickThread::mint).is_err());
                 let refused = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     super::super::resolve_block_definitions(&registry)
