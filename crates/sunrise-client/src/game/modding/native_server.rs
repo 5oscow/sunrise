@@ -9,11 +9,11 @@
 //! server thread's), never on a client's.
 #[path = "native_server/argument_kinds.rs"]
 mod argument_kinds;
-#[path = "native_server/registered_commands.rs"]
-mod registered_commands;
 #[cfg(test)]
 #[path = "native_server/provider_tests.rs"]
 mod provider_tests;
+#[path = "native_server/registered_commands.rs"]
+mod registered_commands;
 #[cfg(test)]
 #[path = "native_server/selector_tests.rs"]
 mod selector_tests;

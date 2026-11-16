@@ -8,7 +8,7 @@ use super::*;
 use sunrise_client::command::{Registries, Suggestion};
 
 #[test]
-#[ignore = "needs SUNRISE_TEST_RESOURCES, SUNRISE_WASM_FIXTURE and SUNRISE_WASM_STD built from this tree"]
+#[ignore = "daily"]
 fn a_compiled_guests_suggestion_provider_answers_like_the_native_one() {
     // Enters the guest: libtest's thread is smaller than the guest stack policy requires. The load
     // budget: this checks behaviour, not speed, and a loaded runner can pass 100 ms.

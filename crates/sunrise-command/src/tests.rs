@@ -1982,6 +1982,42 @@ fn a_provider_answer_is_capped_after_matching_and_rejecting_candidates() {
 }
 
 #[test]
+fn candidates_equal_to_the_input_or_repeated_spend_none_of_the_cap() {
+    let none = |text: &str, tooltip: Option<String>| CustomSuggestion {
+        text: text.into(),
+        tooltip,
+        replace_start: None,
+    };
+    let answer = |mut candidates: Vec<CustomSuggestion>| {
+        candidates.push(none("press", None));
+        let dispatcher = provider_dispatcher(provider_argument(candidates, Default::default()));
+        let registries = reg();
+        let typed = "machine use fast pr";
+        let (_, suggestions) = dispatcher.suggestions(
+            &dispatcher.parse(typed, &registries),
+            typed.len(),
+            &registries,
+        );
+        suggestions.into_iter().map(|s| s.text).collect::<Vec<_>>()
+    };
+    // 1,000 candidates identical to the typed text (each with its own tooltip, so none repeats
+    // another), then a useful one.
+    let texts = answer(
+        (0..MAX_PROVIDER_SUGGESTIONS)
+            .map(|i| none("pr", Some(format!("tip {i}"))))
+            .collect(),
+    );
+    assert_eq!(texts, ["press"]);
+    // 1,000 copies of one text and tooltip, then a useful one: the copy counts once.
+    let texts = answer(
+        (0..MAX_PROVIDER_SUGGESTIONS)
+            .map(|_| none("prdup", Some("same".into())))
+            .collect(),
+    );
+    assert_eq!(texts, ["prdup", "press"]);
+}
+
+#[test]
 fn only_the_argument_a_provider_owns_is_marked_as_owned() {
     let calls: ProviderCalls = Default::default();
     let dispatcher = provider_dispatcher(provider_argument(

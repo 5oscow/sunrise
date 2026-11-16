@@ -2,14 +2,14 @@
 //! parser, and the types mods registered, with the dispatcher type each node parses as.
 
 use super::{ArgType, Text, TryIntoEngine};
-use sunrise_client::command::{
-    CommandError, Dispatcher, MAX_SUGGESTION_TEXT, MAX_SUGGESTION_TOOLTIP, NodeKind, Range, Reader,
-    args::Coordinates, snbt,
-};
 use serde_json::{Value, json};
 use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, Mutex, OnceLock},
+};
+use sunrise_client::command::{
+    CommandError, Dispatcher, MAX_SUGGESTION_TEXT, MAX_SUGGESTION_TOOLTIP, NodeKind, Range, Reader,
+    args::Coordinates, snbt,
 };
 
 /// The argument kinds a native usage may name, each with a [`parser`]; `resource:<registry>`

@@ -5,8 +5,8 @@
 //! stand where the game does: they build the report tree, register it into a dispatcher, and
 //! complete like `guest_suggestions` does with the guest's registries swapped in.
 use super::*;
-use sunrise_client::command::{Registries, Suggestion};
 use std::sync::Mutex;
+use sunrise_client::command::{Registries, Suggestion};
 
 /// What one provider call saw: the prefix, the arguments before it, and the sender.
 type Seen = Arc<Mutex<Vec<(String, Vec<(String, String)>, Option<(u128, String, u8)>)>>>;

@@ -650,14 +650,20 @@ fn modified_utf8_len(text: &str) -> usize {
 fn add_provider_suggestions(builder: &mut SuggestionsBuilder, candidates: Vec<CustomSuggestion>) {
     let (count, lower) = (candidates.len(), builder.remaining_lower());
     // The cap counts what the reply keeps, not what the provider answered: a candidate that does
-    // not match the typed text, or that is past a bound, spends none of it, so a long list of
-    // non-matches before the matching ones still completes.
+    // not match the typed text, equals it (the builder adds nothing for it), repeats an earlier
+    // text and tooltip pair, or is past a bound, spends none of it, so a long list of those
+    // before the useful ones still completes.
+    let typed = builder.remaining();
+    let mut seen = std::collections::HashSet::new();
     let mut kept = 0;
     for candidate in candidates {
         if kept == MAX_PROVIDER_SUGGESTIONS {
             break;
         }
-        if !matches_sub_str(&lower, &candidate.text.to_lowercase()) {
+        if candidate.text == typed
+            || !matches_sub_str(&lower, &candidate.text.to_lowercase())
+            || !seen.insert((candidate.text.clone(), candidate.tooltip.clone()))
+        {
             continue;
         }
         // Suggestions use STRING_UTF8 (UTF-16 length); tooltips are literal NBT strings, whose
