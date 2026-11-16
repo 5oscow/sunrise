@@ -4,7 +4,7 @@
 //!
 //! The wire generator (guest and host glue) and the surface export both call [`names`], so the
 //! game's table and `surface.json`'s `call` fields are the same strings.
-use super::rust::Layouts;
+use super::rust::{GameWires, Layouts};
 use super::walk::Walker;
 use super::{API_CRATES, expand, wire_forms};
 use crate::index::Index;
@@ -59,7 +59,10 @@ pub(crate) fn names(index: &mut Index<'_>, calls: &[Call]) -> Result<Vec<Name>, 
     nameable.extend(public.hidden.iter().map(|(id, path)| (*id, path.clone())));
     let forms = wire_forms::wire_forms(index, &modules);
     let api = index.module("mod_api", &[])?;
-    let mut layouts = Layouts::new(&forms, &nameable);
+    let mut layouts = Layouts::new(GameWires {
+        forms: &forms,
+        ids: &nameable,
+    });
     layouts.fields_without_form = true;
     let mut records = Vec::new();
     for call in calls {
