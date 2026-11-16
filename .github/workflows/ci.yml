@@ -225,7 +225,8 @@ jobs:
           cargo +stable test --locked ${PACKAGES:---workspace} --doc
   verify:
     needs: [verify-tree, verify-lint, verify-test]
-    # Skipped with its parts on a rollup or sync branch or a dispatch; otherwise it runs even in a cancelled run.
+    # Skipped with its parts on this repository's pull requests and on a dispatch; otherwise it runs even in a
+    # cancelled run.
     if: always() && needs.verify-tree.result != 'skipped'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
