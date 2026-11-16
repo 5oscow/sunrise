@@ -69,6 +69,29 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh workflow run dyna-ci.yml --repo "$GITHUB_REPOSITORY" --ref main
 
+  # GitHub delivers almost none of this repository's scheduled events, the daily's included: each push to main starts
+  # the day's real daily once 09:00 UTC has passed and none has (tools/ci/daily_catch_up.py). One at a time, so a
+  # push right behind another sees the run the first one started.
+  daily-catch-up:
+    if: github.repository == 'sunrise-org/sunrise' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ${{ vars.DYNA_CI_SELF_HOSTED == 'true' && 'dyna-small' || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    concurrency:
+      group: daily-catch-up
+      cancel-in-progress: false
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: tools/ci/daily_catch_up.py
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/ci/daily_catch_up.py
+
   # Dyna's image enforces the event and repository check again in job-started.sh.
   # GitHub's external-contributor approval is the third lock.
   # A draft pull request skips every check below (they all need this job); it runs when marked ready.
