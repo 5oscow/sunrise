@@ -1570,17 +1570,16 @@ impl Items {
         if !drops.iter().any(|d| d.item.starts_with(DYNAMIC)) {
             return drops;
         }
-        let drops = drops
+        drops
             .into_iter()
             .flat_map(|d| {
                 if d.item.starts_with(DYNAMIC) {
-                    roll.dynamic.to_vec()
+                    self.split_loot_stacks(roll.dynamic.to_vec())
                 } else {
                     vec![d]
                 }
             })
-            .collect();
-        self.split_loot_stacks(drops)
+            .collect()
     }
 
     fn roll_block_table<R: RandomSource>(

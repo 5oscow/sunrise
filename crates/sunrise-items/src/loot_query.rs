@@ -80,11 +80,19 @@ impl ItemStack {
 impl Items {
     /// `LootTable.createStackSplitter`, also used after resolving dynamic drops.
     pub(super) fn split_loot_stacks(&self, stacks: Vec<ItemStack>) -> Vec<ItemStack> {
+        // Stack limits are at least one: singles and empty positions need no lookup.
+        if !stacks.iter().any(|stack| {
+            stack.count > 1
+                && !stack.item.starts_with(DYNAMIC)
+                && stack.count > crate::bundle::max_stack(self, stack)
+        }) {
+            return stacks;
+        }
         let mut out = Vec::with_capacity(stacks.len());
         for stack in stacks {
             // A dynamic marker is not an item. Its supplied stacks are split
             // when block_drops resolves it, never the marker's own count.
-            if stack.item.starts_with(DYNAMIC) {
+            if stack.count <= 1 || stack.item.starts_with(DYNAMIC) {
                 out.push(stack);
                 continue;
             }

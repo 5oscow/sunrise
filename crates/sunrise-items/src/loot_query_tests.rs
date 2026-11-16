@@ -16,7 +16,7 @@ fn table(id: &str) -> Value {
     json!({"pools":[{"rolls":1,"condition":{"type":"neoforge:loot_table_id","loot_table_id":id},"entries":[{"type":"minecraft:item","name":"minecraft:diamond"}]}]})
 }
 #[test]
-fn root_adapters_preserve_output_policy_and_random_without_modifiers() {
+fn every_root_splits_after_outer_functions_with_one_random_draw() {
     let nested = json!({"pools":[{"rolls":1,
         "condition":{"type":"neoforge:loot_table_id","loot_table_id":"neoforge:unknown_loot_table"},
         "entries":[{"type":"minecraft:item","name":"minecraft:gold_ingot"},
