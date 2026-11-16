@@ -874,6 +874,7 @@ fn swim(p: &mut Poses, pos: f32, h: &Hum) {
 pub use sunrise_hooks::players::{BODY_PARTS, BodyPose};
 
 /// Apply the mob's model animation to `p` (at rest), then the pose laid over it, if any.
+#[sunrise_mod_api_macros::replaceable]
 pub fn setup(
     m: &Mob,
     s: &State,

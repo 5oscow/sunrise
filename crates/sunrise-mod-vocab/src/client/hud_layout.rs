@@ -9,6 +9,12 @@ use std::borrow::Cow;
 pub enum PoseOp {
     Translate(f32, f32),
     Scale(f32, f32),
+    /// `Matrix3x2fStack.rotate(angle)`: a turn by `angle` radians about the current pose's
+    /// origin, applied after the ops before it, as vanilla composes them. Positive angles turn
+    /// clockwise on screen (y grows downwards). Everything drawn after it follows: fills,
+    /// sprites, blits and text. A NaN or infinite angle is refused with
+    /// `E_GUI_POSE_ROTATE_NOT_FINITE` in the log and leaves the pose as it was.
+    Rotate(f32),
 }
 /// The render pipeline of a texture blit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

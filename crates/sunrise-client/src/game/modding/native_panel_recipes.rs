@@ -9,7 +9,7 @@ use super::{
         NativeRecipeLayout as BrowserLayout, NativeRecipeResult as BrowserResult,
         NativeRecipeView as BrowserRecipe, PanelEvent as BrowserEvent,
     },
-    native_panel::{Layout, Owner, browser_stack, inside},
+    native_panel::{Layout, Owner, browser_stack, inside, wheel_turn},
 };
 use mod_api::Stack as BrowserStack;
 use std::time::Instant;
@@ -746,6 +746,27 @@ impl Game<'_> {
             // The kind reaches the bumpers only as a target (`key_focus::drawn_targets`).
             sunrise_client::widgets::target_as(rect, kind);
         }
+    }
+
+    /// A wheel notch `d` over the recipe pages: turns them as the arrows
+    /// do (`wheel_turn`, telling the mod of a turn); false off the panel.
+    pub(super) fn browser_recipes_wheel(&mut self, layout: &Layout, owner: &Owner, d: f32) -> bool {
+        let Some(pages) = &self.panel.recipes else {
+            return false;
+        };
+        let starts = Self::recipe_pages(pages, layout);
+        let page = pages.page.min(starts.len() - 1);
+        let Some(to) = wheel_turn(self.cursor, layout.area, page, starts.len(), d) else {
+            return false;
+        };
+        // A stale stored page takes the clamp too, so a later longer list can't revive it.
+        if let Some(p) = self.panel.recipes.as_mut() {
+            p.page = to;
+        }
+        if to != page {
+            self.panel_event(owner, BrowserEvent::Page(starts[to] as u32));
+        }
+        true
     }
 
     /// A press on the recipes: true when it hit one of their parts.

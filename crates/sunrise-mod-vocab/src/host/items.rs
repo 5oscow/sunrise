@@ -154,6 +154,13 @@ pub trait ItemsClientHost {
     #[access(ClientSetup)]
     fn enchantments(&self) -> Vec<EnchantmentInfo>;
     /// Side: client.
+    /// Registered potions (`Registries.POTION`), in registry order, each by its registry id:
+    /// vanilla's 46, from `minecraft:water` to `minecraft:infested` (content mods cannot declare
+    /// potions yet). The game builds the list once; each call copies it. A mod builds the potion, splash,
+    /// lingering or tipped-arrow stack itself with the `minecraft:potion_contents` component.
+    #[access(ClientSetup)]
+    fn potions(&self) -> Vec<PotionInfo>;
+    /// Side: client.
     /// `Enchantment.getMinCost(level)`: the enchanting power needed, or None for an unknown id.
     #[access(ClientSetup)]
     fn enchantment_min_cost(&self, id: &str, level: u32) -> Option<i32>;
