@@ -1699,7 +1699,7 @@ impl Game<'_> {
             direct: direct_entity,
             position: from.map(|p| [p.x, p.y, p.z]),
         };
-        let level = super::entity::damage_level_of!(self, self.combat.attack(), no_push);
+        let level = super::entity::damage_level_of!(self, self.combat.attack(), no_push, None);
         let reaches_base = self.dragon.as_ref().is_some_and(|d| {
             d.reaches_base_check(
                 BODY,
@@ -1720,7 +1720,8 @@ impl Game<'_> {
                 let Some(d) = self.dragon.as_mut().filter(|d| d.id == id) else {
                     return false;
                 };
-                let level = super::entity::damage_level_of!(self, self.combat.attack(), no_push);
+                let level =
+                    super::entity::damage_level_of!(self, self.combat.attack(), no_push, None);
                 return matches!(
                     d.hurt_from(
                         level,
@@ -1892,7 +1893,7 @@ impl Game<'_> {
             let creative = self.creative_source_of(attacker);
             let vanilla =
                 self.saved_refuses_damage(id, hit_source.damage_type, creative) || is_fire(kind);
-            let level = super::entity::damage_level_of!(self, self.combat.attack(), no_push);
+            let level = super::entity::damage_level_of!(self, self.combat.attack(), no_push, None);
             if level.invulnerability_check(
                 sunrise_client::health::Hurting::Dragon(id as i32, hit_source),
                 vanilla,
@@ -1911,7 +1912,7 @@ impl Game<'_> {
         };
         let was_down = d.down();
         let (cooldown, last_hurt) = (d.invulnerable, d.last_hurt);
-        let level = super::entity::damage_level_of!(self, self.combat.attack(), &mut credit);
+        let level = super::entity::damage_level_of!(self, self.combat.attack(), &mut credit, None);
         let hurt = d.hurt_part_from(
             level,
             part,
@@ -3011,7 +3012,8 @@ impl Game<'_> {
                         crate::game::entity::damage_level_of!(
                             self,
                             &sunrise_client::health::NO_ATTACK,
-                            &mut credit
+                            &mut credit,
+                            None
                         ),
                         &mut self.mobs[index],
                         &frame,

@@ -497,7 +497,7 @@
   "sunrise.mods.browse.title": "Модууд үзэх",
   "sunrise.mods.browse.update": "Шинэчлэх",
   "sunrise.mods.dev": " (Хөгжүүлэгч)",
-  "sunrise.mods.empty": "Mods байхгүй: .hmod файлуудыг sunrise-mods хавтсанд хийнэ",
+  "sunrise.mods.empty": "Mods байхгүй: .smod файлуудыг sunrise-mods хавтсанд хийнэ",
   "sunrise.mods.in_world": " (дэлхийг өөрчлөхийн тулд орхи)",
   "sunrise.mods.not_built": " (Бариагүй)",
   "sunrise.mods.open_folder": "Mod хавтас нээх",

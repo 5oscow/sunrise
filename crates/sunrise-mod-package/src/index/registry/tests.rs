@@ -2,9 +2,9 @@
 //! builds the sample index (`tests/index/index-v1.json`) exactly.
 use super::*;
 
-const HMOD: &str = "cb6e658445269b2a4d2eb104e83e4b993586bc2e56814fd56454244139f08364";
-const HPACK: &str = "ca9a0207d5a9df142962a2dd7563a639eea6774e7f144b6ef239eb6eaf753f58";
-const HSHADER: &str = "a23c5fe9fd173243704dd51160f20f35927c6e0060c5541ce1823f25db8c7961";
+const SMOD: &str = "cb6e658445269b2a4d2eb104e83e4b993586bc2e56814fd56454244139f08364";
+const SPACK: &str = "ca9a0207d5a9df142962a2dd7563a639eea6774e7f144b6ef239eb6eaf753f58";
+const SSHADER: &str = "a23c5fe9fd173243704dd51160f20f35927c6e0060c5541ce1823f25db8c7961";
 
 fn fixtures() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/index")
@@ -39,8 +39,8 @@ key = "RWTVDqAKF4nm3+eZIK4SeLU6R6sSdJyNgrG/8bdFuTPpXlGK0I8+7wmc"
 version = "0.1.0"
 published = "2026-10-24"
 game = "26.3"
-file = "coords_hud-0.1.0.hmod"
-sha256 = "{HMOD}"
+file = "coords_hud-0.1.0.smod"
+sha256 = "{SMOD}"
 signature = """{sig}"""
 "#
     )
@@ -62,7 +62,7 @@ source = "https://github.com/horizon-rust/horizon-mods"
 version = "1.0.0"
 published = "2026-10-24"
 game = "26.3"
-file = "cozy-1.0.0.hpack"
+file = "cozy-1.0.0.spack"
 sha256 = "ca9a0207d5a9df142962a2dd7563a639eea6774e7f144b6ef239eb6eaf753f58"
 "#;
 
@@ -82,7 +82,7 @@ source = "https://github.com/horizon-rust/horizon-mods"
 version = "1.0.0"
 published = "2026-10-26"
 game = "26.3"
-file = "glow-1.0.0.hshader"
+file = "glow-1.0.0.sshader"
 sha256 = "a23c5fe9fd173243704dd51160f20f35927c6e0060c5541ce1823f25db8c7961"
 "#;
 
@@ -122,9 +122,9 @@ impl Scratch {
             s.write_bytes(&format!("icons/{icon}.png"), &png(128, 128));
         }
         for (name, hash) in [
-            ("coords_hud-0.1.0.hmod", HMOD),
-            ("cozy-1.0.0.hpack", HPACK),
-            ("glow-1.0.0.hshader", HSHADER),
+            ("coords_hud-0.1.0.smod", SMOD),
+            ("cozy-1.0.0.spack", SPACK),
+            ("glow-1.0.0.sshader", SSHADER),
         ] {
             std::fs::copy(fixtures().join(name), s.0.join("files").join(hash)).unwrap();
         }
@@ -176,7 +176,7 @@ fn lists_every_problem_of_a_registry() {
     let s = Scratch::new("bad");
     // A file that isn't the one its hash names, an unsigned version of a
     // signed project, a shader pack, and a mod whose file is another mod.
-    std::fs::write(s.0.join("files").join(HPACK), b"other bytes").unwrap();
+    std::fs::write(s.0.join("files").join(SPACK), b"other bytes").unwrap();
     s.write(
         "mods/coords_hud.toml",
         &hud_entry().replace("signature = \"\"\"", "changelog = \"\"\""),
@@ -309,7 +309,7 @@ fn a_review_protects_published_files() {
     assert!(r.notes[0].contains("isn't one of its owners"), "{r:?}");
 
     let mut swapped = base.clone();
-    swapped.versions[0].sha256 = HPACK.into();
+    swapped.versions[0].sha256 = SPACK.into();
     swapped.kind = Kind::ResourcePack;
     swapped.key = None;
     let r = review(&[base.clone(), cozy.clone()], &[swapped], "ludovic111");
@@ -330,7 +330,7 @@ fn a_version_taken_down_by_hash_may_leave_its_entry() {
     let old = base.versions[0].clone();
     let mut rotated = base.clone();
     rotated.versions[0].version = "0.2.0".into();
-    rotated.versions[0].sha256 = HPACK.into();
+    rotated.versions[0].sha256 = SPACK.into();
     let down = |id: &str, sha256: &str| Revoked {
         id: id.into(),
         sha256: Some(sha256.into()),
@@ -529,7 +529,7 @@ fn a_project_listed_by_its_repository_takes_its_versions_from_releases() {
     let s = Scratch::new("repo");
     s.write("mods/coords_hud.toml", &hud_entry());
     s.write("mods/cozy.toml", COZY_REPO);
-    let hpack = fixtures().join("cozy-1.0.0.hpack");
+    let spack = fixtures().join("cozy-1.0.0.spack");
     let entry: Entry = toml::from_str(COZY_REPO).unwrap();
     // Listed, nothing released yet: not in the index, and not an error.
     let built = s.build().unwrap();
@@ -556,24 +556,24 @@ fn a_project_listed_by_its_repository_takes_its_versions_from_releases() {
     };
     let v = release_version(
         &entry,
-        &release("v1.0.0", "cozy-1.0.0.hpack", "Notes."),
-        &hpack,
+        &release("v1.0.0", "cozy-1.0.0.spack", "Notes."),
+        &spack,
     )
     .unwrap();
     assert_eq!(v.version, "1.0.0");
-    assert_eq!(v.file.sha256, HPACK);
+    assert_eq!(v.file.sha256, SPACK);
     assert_eq!(
         v.file.url,
-        "https://github.com/acme/cozy-pack/releases/download/v1.0.0/cozy-1.0.0.hpack"
+        "https://github.com/acme/cozy-pack/releases/download/v1.0.0/cozy-1.0.0.spack"
     );
     assert_eq!(v.changelog, "Notes.");
     // A name the launcher can't download, a wrong extension, a project with a key but no signature.
-    assert!(release_version(&entry, &release("v1/x", "cozy-1.0.0.hpack", ""), &hpack).is_err());
-    assert!(release_version(&entry, &release("v1", "cozy.zip", ""), &hpack).is_err());
+    assert!(release_version(&entry, &release("v1/x", "cozy-1.0.0.spack", ""), &spack).is_err());
+    assert!(release_version(&entry, &release("v1", "cozy.zip", ""), &spack).is_err());
     let mut keyed = entry.clone();
     keyed.key = Some("RWTVtuGb/GRXcBf3Re5hzM07EzoStr2sLTJjghJia0xX15ULoZRFFZDb".into());
     assert!(
-        release_version(&keyed, &release("v1", "cozy-1.0.0.hpack", ""), &hpack)
+        release_version(&keyed, &release("v1", "cozy-1.0.0.spack", ""), &spack)
             .unwrap_err()
             .contains("sign")
     );

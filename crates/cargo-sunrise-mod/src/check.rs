@@ -1,6 +1,6 @@
 //! `cargo sunrise-mod check <file>`: what the registry checks of a submission,
 //! run anywhere: its kind's own checks (docs/modding/src/reference/registry-index.md), its signature
-//! when given a key, and for a `.hmod` that it is content only.
+//! when given a key, and for a `.smod` that it is content only.
 use serde_json::{Value, json};
 use std::path::Path;
 use sunrise_mod_package::index::{self, Facts, Kind};
@@ -83,11 +83,11 @@ impl Report {
 /// The kind of a package, inspecting mod archives for their native manifest.
 pub fn kind_of(path: &Path) -> Option<Kind> {
     match path.extension()?.to_str()? {
-        "hmod" if index::native::holds(path) => Some(Kind::NativeMod),
-        "hmod" => Some(Kind::Mod),
-        "hpack" => Some(Kind::Modpack),
+        "smod" if index::native::holds(path) => Some(Kind::NativeMod),
+        "smod" => Some(Kind::Mod),
+        "spack" => Some(Kind::Modpack),
         "zip" => Some(sunrise_mod_package::index::zip_kind(path)),
-        "hshader" => Some(Kind::Shader),
+        "sshader" => Some(Kind::Shader),
         _ => None,
     }
 }
@@ -137,7 +137,7 @@ mod tests {
 
     #[test]
     fn checks_each_kind_its_own_way() {
-        let pack = fixture("cozy-1.0.0.hpack");
+        let pack = fixture("cozy-1.0.0.spack");
         let report = check(&pack, kind_of(&pack).unwrap(), None, None).unwrap();
         assert_eq!(report.facts.requires[0].id, "coords_hud");
         assert!(
@@ -146,15 +146,15 @@ mod tests {
                 .contains("cozy 1.0.0 (modpack, format 1, for 26.3)")
         );
         // A signed content mod passes; a bad signature is still refused.
-        let hmod = fixture("coords_hud-0.1.0.hmod");
+        let smod = fixture("coords_hud-0.1.0.smod");
         let key = std::fs::read_to_string(fixture("test.pub")).unwrap();
-        let sig = std::fs::read_to_string(fixture("coords_hud-0.1.0.hmod.minisig")).unwrap();
+        let sig = std::fs::read_to_string(fixture("coords_hud-0.1.0.smod.minisig")).unwrap();
         let key = key.lines().last().unwrap();
-        let report = check(&hmod, Kind::Mod, Some(key), Some(&sig)).unwrap();
+        let report = check(&smod, Kind::Mod, Some(key), Some(&sig)).unwrap();
         assert!(report.signed);
         assert!(report.text().contains("no code: content only"));
         let e = check(
-            &hmod,
+            &smod,
             Kind::Mod,
             Some(key),
             Some("untrusted comment: x\nRUQ=\n"),

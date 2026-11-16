@@ -545,11 +545,14 @@ impl mod_api::LevelRandomHost for super::GameLevel<'_> {
     fn attachments(&mut self) -> &mut dyn mod_api::AttachmentStore {
         self
     }
-    fn random(&mut self) -> Option<mod_api::LegacyRandom> {
-        self.native_level_random().cloned()
+    fn random(&mut self) -> Option<mod_api::LegacyRandomSource> {
+        self.native_level_random()
+            .map(|r| super::api_values::random_to_api(r))
     }
-    fn set_random(&mut self, random: mod_api::LegacyRandom) -> bool {
-        self.native_level_random().map(|r| *r = random).is_some()
+    fn set_random(&mut self, random: mod_api::LegacyRandomSource) -> bool {
+        self.native_level_random()
+            .map(|r| *r = super::api_values::random_to_engine(&random))
+            .is_some()
     }
 }
 
@@ -638,12 +641,67 @@ impl mod_api::LevelRandomHost for super::native_hooks::HitLevel<'_> {
     fn attachments(&mut self) -> &mut dyn mod_api::AttachmentStore {
         self
     }
-    fn random(&mut self) -> Option<mod_api::LegacyRandom> {
-        Some(self.0.random().clone())
+    fn random(&mut self) -> Option<mod_api::LegacyRandomSource> {
+        Some(super::api_values::random_to_api(self.0.random()))
     }
-    fn set_random(&mut self, random: mod_api::LegacyRandom) -> bool {
-        *self.0.random() = random;
+    fn set_random(&mut self, random: mod_api::LegacyRandomSource) -> bool {
+        *self.0.random() = super::api_values::random_to_engine(&random);
         true
+    }
+}
+
+impl mod_api::HitHost for super::native_hooks::HitLevel<'_> {
+    fn play_sound_at(
+        &mut self,
+        sound: &str,
+        at: [f64; 3],
+        source: mod_api::SoundSource,
+        volume: f32,
+        pitch: f32,
+    ) -> bool {
+        super::native_hooks::mod_sound_ok(sound, at, source.index(), volume, pitch)
+            && self
+                .0
+                .hit_effects()
+                .is_some_and(|hit| hit.play(sound, at, source, volume, pitch, None))
+    }
+    fn play_sound_from(
+        &mut self,
+        entity: mod_api::EntityRef,
+        sound: &str,
+        source: mod_api::SoundSource,
+        volume: f32,
+        pitch: f32,
+    ) -> bool {
+        let Some(hit) = self.0.hit_effects() else {
+            return false;
+        };
+        let Some((id, at, _)) = hit.entity(entity) else {
+            return false;
+        };
+        super::native_hooks::mod_sound_ok(sound, at, source.index(), volume, pitch)
+            && hit.play(sound, at, source, volume, pitch, Some(id))
+    }
+    fn entity_next_float(&mut self, entity: mod_api::EntityRef) -> Option<f32> {
+        use sunrise_core::random::RandomSource;
+        Some(self.0.hit_effects()?.entity(entity)?.2.next_float())
+    }
+    fn entity_next_double(&mut self, entity: mod_api::EntityRef) -> Option<f64> {
+        use sunrise_core::random::RandomSource;
+        Some(self.0.hit_effects()?.entity(entity)?.2.next_double())
+    }
+    fn entity_next_bool(&mut self, entity: mod_api::EntityRef) -> Option<bool> {
+        use sunrise_core::random::RandomSource;
+        Some(self.0.hit_effects()?.entity(entity)?.2.next_boolean())
+    }
+    fn entity_next_int(&mut self, entity: mod_api::EntityRef, bound: i32) -> Option<i32> {
+        use sunrise_core::random::RandomSource;
+        self.0
+            .hit_effects()?
+            .entity(entity)?
+            .2
+            .next_int_bound(bound)
+            .ok()
     }
 }
 
@@ -720,10 +778,10 @@ impl<'a: 'b, 'b> mod_api::LevelRandomHost for LevelTicks<'b, &mut super::GameLev
     fn attachments(&mut self) -> &mut dyn mod_api::AttachmentStore {
         mod_api::LevelRandomHost::attachments(&mut *self.level)
     }
-    fn random(&mut self) -> Option<mod_api::LegacyRandom> {
+    fn random(&mut self) -> Option<mod_api::LegacyRandomSource> {
         mod_api::LevelRandomHost::random(&mut *self.level)
     }
-    fn set_random(&mut self, random: mod_api::LegacyRandom) -> bool {
+    fn set_random(&mut self, random: mod_api::LegacyRandomSource) -> bool {
         mod_api::LevelRandomHost::set_random(&mut *self.level, random)
     }
 }

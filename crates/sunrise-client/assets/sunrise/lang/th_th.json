@@ -502,7 +502,7 @@
   "sunrise.mods.browse.title": "เรียกดูม็อด",
   "sunrise.mods.browse.update": "อัปเดต",
   "sunrise.mods.dev": " (เดฟ)",
-  "sunrise.mods.empty": "ไม่มี mods: ใส่ไฟล์ .hmod ลงในโฟลเดอร์ Sunrise-mods",
+  "sunrise.mods.empty": "ไม่มี mods: ใส่ไฟล์ .smod ลงในโฟลเดอร์ Sunrise-mods",
   "sunrise.mods.in_world": " (ปล่อยให้โลกเปลี่ยนแปลง)",
   "sunrise.mods.not_built": " (ไม่ได้สร้าง)",
   "sunrise.mods.open_folder": "เปิดโฟลเดอร์ Mod",

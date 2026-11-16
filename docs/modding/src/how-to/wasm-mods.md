@@ -55,7 +55,7 @@ cargo sunrise-mod build --wasm
 
 The command builds your crate with the pinned Rust toolchain (installed through rustup the first time, with
 `rust-src`), writes `mod.wasm` beside `sunrise-mod.toml`, records it in a `[wasm]` section, and
-packs `target/sunrise-mod/<id>.hmod`. Let the tool write `[wasm]`; do not edit it by hand:
+packs `target/sunrise-mod/<id>.smod`. Let the tool write `[wasm]`; do not edit it by hand:
 
 ```toml
 [wasm]
@@ -109,7 +109,7 @@ features or settings requires rebuilding its consumers.
 
 The build packages every member of the resolved group into the invoking project's
 `target/sunrise-mod/` directory. A consumer build does not replace another project's previously
-packaged `.hmod`. To include additional local roots in the same Cargo invocation, repeat
+packaged `.smod`. To include additional local roots in the same Cargo invocation, repeat
 `--with path/to/another/mod`. The game links a mod with its
 dependencies at load, one copy of each library shared by every mod that uses it, and refuses a
 mod whose library is missing or another build than the one it was linked against, naming it on

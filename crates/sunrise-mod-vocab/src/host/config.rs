@@ -139,6 +139,12 @@ pub trait ConfigServerHost {
     #[access(WorldOnly)]
     fn set_tick_rate(&mut self, rate: f32) -> bool;
     /// Side: server.
+    /// Whether the server's ticking is frozen (`TickRateManager.isFrozen`, `/tick freeze`). A
+    /// frozen server still runs the ticks `/tick step` asks for, so `server_tick_start`'s
+    /// `world_running` can be true while this is true. None on a client.
+    #[access(WorldOnly)]
+    fn tick_rate_is_frozen(&self) -> Option<bool>;
+    /// Side: server.
     /// The open world's folder (`world/`, beside its `level.dat`): a server
     /// mod keeps its data in a folder of its own there, so the world's
     /// backups carry it. None when no world is open.

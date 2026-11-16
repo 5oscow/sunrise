@@ -59,6 +59,21 @@ impl SignalAccess for ReadLevel<'_, '_> {
             .get(&[pos.x, pos.y, pos.z])
             .map(|s| s.status == sunrise_client::block_entity_anim::ShulkerStatus::Closed)
     }
+    fn published_collision_shape(
+        &self,
+        pos: BlockPos,
+        state: BlockStateId,
+    ) -> Option<sunrise_core::geometry::VoxelShape> {
+        if !self.game.collision.publishes_shapes(state) {
+            return None;
+        }
+        match self.game.world.block_entities.get(&(pos.x, pos.y, pos.z))? {
+            sunrise_client::containers::BlockEntity::Mod(entity) => {
+                entity.shapes().map(|shapes| shapes.collision().clone())
+            }
+            _ => None,
+        }
+    }
     fn adjust_signal_source(&self, state: BlockStateId, vanilla: bool) -> bool {
         if !super::api_values::block_state::block_listens(mod_api::HookId::IsSignalSource, state) {
             return vanilla;

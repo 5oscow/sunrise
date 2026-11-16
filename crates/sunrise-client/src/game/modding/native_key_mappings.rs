@@ -38,6 +38,72 @@ impl Game<'_> {
                 }
             }));
     }
+    /// Binds mod `mod_id`'s mapping `name` to `key` with `modifiers`, as Controls binds it
+    /// (`OptionsUi::bind_key`): the mappings are bound again and the settings saved.
+    pub(super) fn set_mod_key(
+        &mut self,
+        mod_id: &str,
+        name: &str,
+        key: &str,
+        modifiers: mod_api::ClientModifiers,
+    ) -> Result<(), mod_api::ModKeyRefusal> {
+        use mod_api::ModKeyRefusal;
+        self.own_mod_mapping(mod_id, name)?;
+        let known = key == "key.keyboard.unknown"
+            || sunrise_client::keybinds::key_code(key).is_some()
+            || sunrise_client::keybinds::mouse_button(key).is_some();
+        if !known {
+            return Err(ModKeyRefusal::UnknownKey);
+        }
+        // Shift 1, control 2, alt 4 (`mod_list::SHIFT`, `CONTROL`, `ALT`).
+        const SHIFT: u32 = 1;
+        const CONTROL: u32 = 2;
+        const ALT: u32 = 4;
+        if modifiers.bits & !(SHIFT | CONTROL | ALT) != 0 {
+            return Err(ModKeyRefusal::UnknownModifiers);
+        }
+        // A modifier key bound on its own is the key, not a modifier held with itself.
+        let own = match key {
+            "key.keyboard.left.shift" | "key.keyboard.right.shift" => SHIFT,
+            "key.keyboard.left.control" | "key.keyboard.right.control" => CONTROL,
+            "key.keyboard.left.alt" | "key.keyboard.right.alt" => ALT,
+            _ => 0,
+        };
+        self.settings
+            .mods
+            .set_binding(mod_id, name, key, modifiers.bits & !own);
+        self.mod_keys_changed();
+        Ok(())
+    }
+    /// Gives mod `mod_id`'s mapping `name` its declared default back, as Controls' Reset does.
+    pub(super) fn reset_mod_key(
+        &mut self,
+        mod_id: &str,
+        name: &str,
+    ) -> Result<(), mod_api::ModKeyRefusal> {
+        self.own_mod_mapping(mod_id, name)?;
+        self.settings.mods.reset_binding(mod_id, name);
+        self.mod_keys_changed();
+        Ok(())
+    }
+    /// `mod_id`'s registered mapping `name`, asked for by that mod: a native mod running reaches
+    /// only its own mappings.
+    fn own_mod_mapping(&self, mod_id: &str, name: &str) -> Result<(), mod_api::ModKeyRefusal> {
+        if mod_api::content::crash::current_native_mod().is_some_and(|running| running != mod_id) {
+            return Err(mod_api::ModKeyRefusal::NotOwner);
+        }
+        mod_api::__private::key_mappings()
+            .iter()
+            .any(|(owner, mapping)| *owner == mod_id && mapping.id == name)
+            .then_some(())
+            .ok_or(mod_api::ModKeyRefusal::NotRegistered)
+    }
+    /// After a mod changed a binding: the mappings answer to it from the next input, and the
+    /// settings are saved as Controls saves them.
+    fn mod_keys_changed(&mut self) {
+        self.bind_mod_mappings();
+        self.settings.save(&Self::options_path());
+    }
     /// One key event, the window's after it handled it or the control socket's: the mods'
     /// mappings bound to it hear it (`KeyMapping.set`, `KeyMapping.click`), then `input_key`
     /// fires. `key` is vanilla's name for it; the rest is what `native_input_key` takes.

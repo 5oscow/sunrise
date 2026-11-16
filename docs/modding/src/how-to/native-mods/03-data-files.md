@@ -2,7 +2,7 @@
 
 A mod has one top-level `data/` tree and one `assets/` tree, with the same namespace and
 content checks as a content mod. They are normal pack resources, not a second native-only data folder.
-[Server data reload listeners](https://github.com/arismoko/horizon/blob/main/crates/horizon-mod-vocab/src/hooks/notes.rs#L2009) register through
+[Server data reload listeners](https://github.com/sunrise-org/sunrise/blob/main/crates/sunrise-mod-vocab/src/hooks/notes.rs#L2008) register through
 `Hooks::add_server_reload_listeners`. Their `ServerReloadContext` lists namespaced IDs and reads the
 winning bytes from selected datapacks and the mod's own `data/`. Parse once in prepare and publish in
 apply, not on the tick. Server listener applies run before `data_pack_files`. A later refusal
@@ -10,7 +10,7 @@ keeps the old engine tables and Parts, but cannot undo effects of listeners or h
 ran. Contributions share a list, so a failed file cannot be attributed to a particular mod.
 The original pack trees remain separate from the launcher's code-only horizon-mixins input.
 
-Client-side asset reads use [client asset reload listeners](https://github.com/arismoko/horizon/blob/main/crates/horizon-mod-vocab/src/hooks/notes.rs#L2103); server
+Client-side asset reads use [client asset reload listeners](https://github.com/sunrise-org/sunrise/blob/main/crates/sunrise-mod-vocab/src/hooks/notes.rs#L2102); server
 listeners cannot read `assets/`. Packaged assets also participate in the game's normal resource
 packs.
 
@@ -39,6 +39,6 @@ any other file causes the archive to be refused ([the manifest](../../reference/
 Although the archive accepts `build.rs`, a native build refuses it unless you disable it with
 `build = false` in Cargo's `[package]` table and remove build dependencies.
 
-A native `.hmod` carries both source and content: the launcher compiles the source, and the game
+A native `.smod` carries both source and content: the launcher compiles the source, and the game
 loads the package's `assets/` and `data/`. [Wasm packages](../wasm-mods.md) carry executable
 `mod.wasm` bytes declared in `[wasm]`. All package kinds take their identity from `sunrise-mod.toml`.

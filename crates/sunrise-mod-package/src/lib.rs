@@ -1,4 +1,4 @@
-//! Sunrise's mod files (`docs/modding/src/how-to/content-mods.md`): content mods (`.hmod`: blocks, items, data and
+//! Sunrise's mod files (`docs/modding/src/how-to/content-mods.md`): content mods (`.smod`: blocks, items, data and
 //! assets, no code), modpacks and, with `index`, the mod registry's index. Code mods are
 //! native (docs/modding/src/how-to/native-mods.md).
 pub mod content;

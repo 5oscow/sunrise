@@ -1,14 +1,14 @@
 # Your first content mod
 
 A content mod adds blocks, items, recipes, loot, models and textures with data files alone. In this page you
-make one block, see it in the game, and pack it as a `.hmod`.
+make one block, see it in the game, and pack it as a `.smod`.
 
 You need Rust 1.95 or newer (`cargo`) and the Sunrise launcher with an instance to play in.
 
 ## 1. Install the mod tool
 
 ```sh
-cargo install --locked --git https://github.com/arismoko/horizon cargo-sunrise-mod
+cargo install --locked --git https://github.com/sunrise-org/sunrise cargo-sunrise-mod
 ```
 
 This adds the `cargo sunrise-mod` command.
@@ -55,18 +55,18 @@ types to a world.
 cargo sunrise-mod build
 ```
 
-This validates the content with the same checks the game uses and writes `target/sunrise-mod/glowing_blocks.hmod`,
+This validates the content with the same checks the game uses and writes `target/sunrise-mod/glowing_blocks.smod`,
 the file you share.
 
 ## 4. Play it
 
 1. In the launcher, open your instance's folder: **Open folder** in the instance's ⋮ menu in the sidebar. This is the
    game folder, the one that holds `options.txt`.
-2. Copy `glowing_blocks.hmod` into its `sunrise-mods/` folder (create the folder if it is missing).
+2. Copy `glowing_blocks.smod` into its `sunrise-mods/` folder (create the folder if it is missing).
 3. Turn the mod on: add the line `mod.glowing_blocks:true` to `sunrise-mods.txt` in the same game folder.
 4. Start the instance, open a world and craft the block from an amethyst block and glowstone dust.
 
-The game reads content once, at start-up: after you edit a file, build again, copy the new `.hmod` and restart.
+The game reads content once, at start-up: after you edit a file, build again, copy the new `.smod` and restart.
 
 If you run a Sunrise game you built yourself, `cargo sunrise-mod run --game <path to sunrise-client>` builds the
 mod and starts that game with it always on.
@@ -74,7 +74,7 @@ mod and starts that game with it always on.
 ## 5. Check it before you publish
 
 ```sh
-cargo sunrise-mod check target/sunrise-mod/glowing_blocks.hmod
+cargo sunrise-mod check target/sunrise-mod/glowing_blocks.smod
 ```
 
 `check` runs what the mod registry runs on a submission ([Publishing your mod](../how-to/publish.md)).

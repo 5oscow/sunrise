@@ -23,6 +23,34 @@ use std::{
 };
 use syn::{FnArg, ImplItem, Item, Pat, Type};
 
+/// Emit the typed reader for one replacement cell, shared by staging and integration fixtures.
+///
+/// The cell must only hold null or function pointers of `ty`, as enforced by the
+/// corresponding installer and point dispatcher. The load is Acquire, pairing with the
+/// installer's Release: a thread that sees the copy also sees everything written before it was
+/// installed.
+pub fn reader(
+    reader: &syn::Ident,
+    cell: usize,
+    ty: &proc_macro2::TokenStream,
+) -> proc_macro2::TokenStream {
+    quote! {
+        #[doc(hidden)]
+        #[inline(always)]
+        #[allow(unsafe_code, dead_code, clippy::all)]
+        pub fn #reader() -> ::std::option::Option<#ty> {
+            let installed = crate::__REPLACE[#cell].load(::std::sync::atomic::Ordering::Acquire);
+            if installed.is_null() {
+                ::std::option::Option::None
+            } else {
+                // SAFETY: only this function's installer and its point's dispatcher, both
+                // of this type, are stored here.
+                ::std::option::Option::Some(unsafe { ::std::mem::transmute::<*mut (), #ty>(installed) })
+            }
+        }
+    }
+}
+
 /// Whether a function with this signature and these attributes can take a replacement: its
 /// slot holds one function pointer, so one compiled copy must stand for every call.
 pub fn eligible(attrs: &[syn::Attribute], sig: &syn::Signature) -> bool {
@@ -1370,25 +1398,6 @@ fn rewrite(
             }
             _ => pointer_type(function.sig),
         };
-        // The load is Acquire, pairing with the installer's Release: a thread that sees the copy
-        // also sees everything written before it was installed.
-        let read = |reader: &syn::Ident, cell: usize| {
-            quote! {
-                #[doc(hidden)]
-                #[inline(always)]
-                #[allow(unsafe_code, dead_code, clippy::all)]
-                pub fn #reader() -> ::std::option::Option<#ty> {
-                    let installed = crate::__REPLACE[#cell].load(::std::sync::atomic::Ordering::Acquire);
-                    if installed.is_null() {
-                        ::std::option::Option::None
-                    } else {
-                        // SAFETY: only this function's installer and its point's dispatcher, both
-                        // of this type, are stored here.
-                        ::std::option::Option::Some(unsafe { ::std::mem::transmute::<*mut (), #ty>(installed) })
-                    }
-                }
-            }
-        };
         let install = |cell: usize| {
             quote! {
                 crate::__REPLACE[#cell]
@@ -1401,14 +1410,17 @@ fn rewrite(
                     .is_ok()
             }
         };
-        let entry = read(&reader, slot);
+        let entry = self::reader(&reader, slot, &ty);
         let items = if point.is_some() {
             // The copy goes behind the entry, where the point's dispatcher finds it, and into
             // the entry itself unless the dispatcher is there already.
             let body = slot + 1;
             let body_reader = quote::format_ident!("__fnr_read_body_{slot}");
-            let (behind, body_read, direct) =
-                (install(body), read(&body_reader, body), install(slot));
+            let (behind, body_read, direct) = (
+                install(body),
+                self::reader(&body_reader, body, &ty),
+                install(slot),
+            );
             quote! {
                 #entry
                 #body_read

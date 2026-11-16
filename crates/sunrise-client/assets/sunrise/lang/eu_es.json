@@ -497,7 +497,7 @@
   "sunrise.mods.browse.title": "Arakatu modak",
   "sunrise.mods.browse.update": "Eguneratu",
   "sunrise.mods.dev": " (Garapena)",
-  "sunrise.mods.empty": "Modrik ez: jarri .hmod fitxategiak sunrise-mods karpetan",
+  "sunrise.mods.empty": "Modrik ez: jarri .smod fitxategiak sunrise-mods karpetan",
   "sunrise.mods.in_world": " (utzi mundua aldatzen)",
   "sunrise.mods.not_built": " (Ez eraikia)",
   "sunrise.mods.open_folder": "Ireki Mod karpeta",

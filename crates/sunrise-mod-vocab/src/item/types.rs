@@ -668,15 +668,27 @@ pub struct ScopedActionResult {
     pub held: Option<ItemStack>,
     /// Other nonempty inventory stacks, then offhand, carried stack and armor, in that order.
     pub other: Vec<ItemStack>,
+    /// Stacks the action produced that the API can't represent (a saved item this game build
+    /// doesn't have) and that went back into the world: never destroyed or replaced, each lies
+    /// where the actor stood as an item entity with the default pickup delay, and is in neither
+    /// `held` nor `other`. That item entity joins the level as any drop does, so an
+    /// `entity_join_level` listener that keeps it out discards it, and it is not counted.
+    pub unrepresentable: u32,
 }
 
 impl ScopedActionResult {
     /// The outcome and inventory returned by a scoped action.
-    pub fn new(outcome: ActionOutcome, held: Option<ItemStack>, other: Vec<ItemStack>) -> Self {
+    pub fn new(
+        outcome: ActionOutcome,
+        held: Option<ItemStack>,
+        other: Vec<ItemStack>,
+        unrepresentable: u32,
+    ) -> Self {
         Self {
             outcome,
             held,
             other,
+            unrepresentable,
         }
     }
 }

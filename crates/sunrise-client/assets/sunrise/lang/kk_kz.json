@@ -497,7 +497,7 @@
   "sunrise.mods.browse.title": "Модтарды шолу",
   "sunrise.mods.browse.update": "Жаңарту",
   "sunrise.mods.dev": " (әзірлеуші)",
-  "sunrise.mods.empty": "Mods жоқ: .hmod файлдарын sunrise-mods қалтасына салыңыз",
+  "sunrise.mods.empty": "Mods жоқ: .smod файлдарын sunrise-mods қалтасына салыңыз",
   "sunrise.mods.in_world": " (әлемді өзгерту үшін қалдырыңыз)",
   "sunrise.mods.not_built": " (салынбаған)",
   "sunrise.mods.open_folder": "Мод қалтасын ашыңыз",

@@ -214,7 +214,7 @@ message SunriseOptions {
 
 enum ModKind {
   MOD_KIND_UNSPECIFIED = 0;
-  // A .hmod content mod.
+  // A .smod content mod.
   MOD_KIND_CONTENT = 1;
   // A native code mod.
   MOD_KIND_NATIVE = 2;

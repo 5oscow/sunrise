@@ -497,7 +497,7 @@
   "sunrise.mods.browse.title": "Răsfoiește moduri",
   "sunrise.mods.browse.update": "Actualizează",
   "sunrise.mods.dev": " (Dev)",
-  "sunrise.mods.empty": "Fără modificări: puneți fișierele .hmod în folderul sunrise-mods",
+  "sunrise.mods.empty": "Fără modificări: puneți fișierele .smod în folderul sunrise-mods",
   "sunrise.mods.in_world": " (lasa lumea sa se schimbe)",
   "sunrise.mods.not_built": " (Neconstruit)",
   "sunrise.mods.open_folder": "Deschideți folderul Mod",

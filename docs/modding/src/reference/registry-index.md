@@ -1,7 +1,7 @@
-# The registry index and `.hpack`
+# The registry index and `.spack`
 
-Use the registry to distribute content and native mods (`.hmod`), modpacks (`.hpack`),
-resource packs, data packs, shaders-folder packs and Sunrise shader packs (`.hshader`).
+Use the registry to distribute content and native mods (`.smod`), modpacks (`.spack`),
+resource packs, data packs, shaders-folder packs and Sunrise shader packs (`.sshader`).
 Submit your project page and version file through the registry submission form.
 Versions are pinned by SHA-256. The launcher and website read schema 1 of `index.json`.
 The format is defined by `sunrise_mod_package::index` and `sunrise_mod_package::modpack`.
@@ -27,7 +27,7 @@ entry leaves out.
     "versions": [{
       "version": "0.1.0", "published": "2026-10-24", "changelog": "",
       "api": "0.2", "side": "client", "capabilities": ["registries"], "game": "26.3",
-      "file": { "name": "coords_hud-0.1.0.hmod", "url": "https://github.com/horizon-rust/horizon-mods/releases/download/...",
+      "file": { "name": "coords_hud-0.1.0.smod", "url": "https://github.com/horizon-rust/horizon-mods/releases/download/...",
                 "size": 438, "sha256": "e113...", "signature": "untrusted comment: ...\n...\ntrusted comment: ...\n...\n" }
     }]
   }],
@@ -39,7 +39,7 @@ entry leaves out.
 | --- | --- |
 | `schema` | 1. A reader refuses a higher number with "update Sunrise" rather than misread it. |
 | `projects[].id` | `[a-z0-9_]{1,64}`, unique; a mod's is its manifest's `id`. |
-| `kind` | `mod` (content), `native-mod`, `modpack`, `resourcepack`, `shader` (Sunrise `.hshader`), `shaderpack` (a `shaders/`-folder zip), `datapack` (a data-pack zip). Other kinds (worlds, themes) may come without a new schema: a reader keeps a kind it doesn't know and doesn't offer it. |
+| `kind` | `mod` (content), `native-mod`, `modpack`, `resourcepack`, `shader` (Sunrise `.sshader`), `shaderpack` (a `shaders/`-folder zip), `datapack` (a data-pack zip). Other kinds (worlds, themes) may come without a new schema: a reader keeps a kind it doesn't know and doesn't offer it. |
 | `summary`, `description` | Required summary of at most 160 characters for lists; Markdown for the project's page, required for a listed project and 50–10,000 characters after trimming. |
 | `owners` | GitHub logins allowed to publish updates. |
 | `license`, `source` | An SPDX expression and an `https://` address of the source code: both required. |
@@ -56,7 +56,7 @@ entry leaves out.
 | `side`, `capabilities` | A mod's, read from its manifest during validation. |
 | `game` | The Minecraft version it is for. |
 | `requires` | A modpack's mods: `{ id, version, sha256 }`, each a version in this index with that hash. |
-| `file` | A plain name with the kind's extension (`.hmod`, `.hpack`, `.zip`, `.hshader`), an `https://` URL (the registry's release `https://github.com/horizon-rust/horizon-mods/releases/download/<id>-<version>/<name>`, or an asset of the project's own repository, `https://github.com/<owner>/<repo>/releases/download/<tag>/<name>`: the launcher accepts exactly these shapes), the size (at most 64 MiB), the lowercase hex SHA-256, and the `.minisig` text when the project has a key. |
+| `file` | A plain name with the kind's extension (`.smod`, `.spack`, `.zip`, `.sshader`), an `https://` URL (the registry's release `https://github.com/horizon-rust/horizon-mods/releases/download/<id>-<version>/<name>`, or an asset of the project's own repository, `https://github.com/<owner>/<repo>/releases/download/<tag>/<name>`: the launcher accepts exactly these shapes), the size (at most 64 MiB), the lowercase hex SHA-256, and the `.minisig` text when the project has a key. |
 | `revoked` | Files taken down: one file by `sha256`, or every version of `id` without it. The launcher refuses to install them and turns installed copies off with the reason. |
 
 Readers ignore fields they don't know, so an optional field can be added to schema 1. Renaming or removing a field, or
@@ -91,7 +91,7 @@ game; registry-built native binaries are not used.
    shader API).
 4. A kind this build can't install is refused with "this Sunrise can't install a … yet".
 
-## `.hpack`
+## `.spack`
 
 A zip holding `sunrise-modpack.toml` and, optionally, `overrides/`. The mods are not inside: the launcher downloads
 each from the index and checks it as above.
@@ -119,7 +119,7 @@ them into the profile's game folder.
 
 ## Submitting a project
 
-> **This book documents the fork's mod API.** A code mod (native or wasm) that uses it runs on the fork's builds, not on upstream Horizon, so do not submit it to the registry at playsunrise.net: the registry serves upstream's players, who could not load it. A content-only mod loads there only if it uses nothing the fork added. Until the mod API ships in a joint release, share the `.hmod` file ([installing by hand](../start/installing.md)) or your mod's GitHub repository: the fork's launcher installs a native mod from it with **Add from GitHub** and marks it "Not reviewed by the Sunrise registry" ([Install from GitHub](../how-to/native-mods/08-install-from-github.md)).
+> **This book documents the fork's mod API.** A code mod (native or wasm) that uses it runs on the fork's builds, not on upstream Horizon, so do not submit it to the registry at playsunrise.net: the registry serves upstream's players, who could not load it. A content-only mod loads there only if it uses nothing the fork added. Until the mod API ships in a joint release, share the `.smod` file ([installing by hand](../start/installing.md)) or your mod's GitHub repository: the fork's launcher installs a native mod from it with **Add from GitHub** and marks it "Not reviewed by the Sunrise registry" ([Install from GitHub](../how-to/native-mods/08-install-from-github.md)).
 
 Submit through [playsunrise.net/mods/submit](https://playsunrise.net/mods/submit) ([Publishing your mod](../how-to/publish.md)); the service opens a pull request on
 [horizon-rust/horizon-mods](https://github.com/horizon-rust/horizon-mods). Your page needs:
@@ -137,7 +137,7 @@ release in that repository instead of accepting a file update.
 Check your package before submitting it:
 
 ```sh
-cargo sunrise-mod check my_mod.hmod
+cargo sunrise-mod check my_mod.smod
 ```
 
 Use `--key` and `--signature` to check its signature. The command validates package

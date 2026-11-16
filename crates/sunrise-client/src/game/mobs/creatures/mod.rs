@@ -1229,6 +1229,13 @@ impl Game<'_> {
         let levels = self.tickets.levels();
         move |x, z| levels.entity_ticking_at(x, z)
     }
+    /// Whether the chunk's own status is entity-ticking (block coordinates), whatever the
+    /// simulation distance: the chunks whose entities are on `ServerLevel`'s entity tick list
+    /// (`Visibility.fromFullChunkStatus`), so they check despawning.
+    pub(super) fn entity_tick_listed_area(&self) -> impl Fn(i32, i32) -> bool + use<> {
+        let levels = self.tickets.levels();
+        move |x, z| levels.loaded_entity_ticking(x >> 4, z >> 4)
+    }
     /// The entity phase of `tick_creatures`: every mob's tick, deaths, and the
     /// projectiles and effects that follow from them.
     pub(super) fn tick_creature_entities(&mut self) -> Result<()> {
@@ -1903,10 +1910,35 @@ impl Game<'_> {
         let attack = self.attack_of_who(source.attacker);
         let plan = self.prepare_knockback_credit(target as i32, source.attacker, &attack);
         let mut credit = plan.lend(&mut self.last_hurt_by_player);
-        if let Some(t) = self.mobs.iter_mut().find(|m| m.id == target) {
+        let target_index = self.mobs.iter().position(|m| m.id == target);
+        let attacker_index = match source.attacker {
+            Some(Who::Mob(id)) if sunrise_client::health::hit_host_listened() => {
+                self.mobs.iter().position(|m| m.id == id)
+            }
+            _ => None,
+        };
+        if let Some(ti) = target_index {
+            // The attacker's own random is lent through a live borrow beside the victim's: a
+            // mob attacker from the same list, the attacking player from its own field.
+            let (t, lend) = match attacker_index.filter(|&ai| ai != ti) {
+                Some(ai) => {
+                    let [t, a] = self
+                        .mobs
+                        .get_disjoint_mut([ti, ai])
+                        .expect("two different mobs");
+                    (t, sunrise_client::health::HitLend::mob(a))
+                }
+                None => (
+                    &mut self.mobs[ti],
+                    sunrise_client::health::HitLend::attacking_player(
+                        self.player.as_mut(),
+                        attack.attacker,
+                    ),
+                ),
+            };
             let previous_invulnerable = t.invulnerable;
             let hit = t.damage_aimed(
-                crate::game::entity::damage_level_of!(self, &attack, &mut credit),
+                crate::game::entity::damage_level_of!(self, &attack, &mut credit, lend),
                 amount,
                 source,
                 aim,
@@ -2475,8 +2507,12 @@ impl Game<'_> {
                             self.prepare_knockback_credit(id as i32, None, self.combat.attack());
                         let mut credit = plan.lend(&mut self.last_hurt_by_player);
                         if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
-                            let level =
-                                crate::game::entity::damage_level_of!(self, &attack, &mut credit);
+                            let level = crate::game::entity::damage_level_of!(
+                                self,
+                                &attack,
+                                &mut credit,
+                                None
+                            );
                             m.knockback(level, power, x, z, &source, 0.0);
                         }
                     }
@@ -2823,7 +2859,8 @@ impl Game<'_> {
                             crate::game::entity::damage_level_of!(
                                 self,
                                 self.combat.attack(),
-                                &mut credit
+                                &mut credit,
+                                None
                             ),
                             amount,
                             sunrise_client::mobs::Damage::of(kind),
@@ -3397,6 +3434,7 @@ impl Game<'_> {
                 MobEvent::StartRiding { rider, vehicle } => {
                     if sunrise_client::mobs::riders::start_riding(&mut self.mobs, rider, vehicle) {
                         self.seat_mob(rider);
+                        self.break_leash(rider, true, false);
                         // sendEventAndTriggers: the server players already on it.
                         self.note_started_riding(vehicle);
                     }
@@ -4882,7 +4920,7 @@ impl Game<'_> {
             _ => false,
         };
         let vanilla = self.saved_refuses_damage(id, damage_type, creative);
-        crate::game::entity::damage_level_of!(self, self.combat.attack(), no_push)
+        crate::game::entity::damage_level_of!(self, self.combat.attack(), no_push, None)
             .invulnerability_check(
                 sunrise_client::health::Hurting::Entity(id as i32, kind, source),
                 vanilla,
@@ -5739,7 +5777,8 @@ impl Game<'_> {
                         crate::game::entity::damage_level_of!(
                             self,
                             self.combat.attack(),
-                            &mut credit_plan.lend(&mut self.last_hurt_by_player)
+                            &mut credit_plan.lend(&mut self.last_hurt_by_player),
+                            None
                         ),
                         amount,
                         source,
@@ -5771,7 +5810,8 @@ impl Game<'_> {
                                 crate::game::entity::damage_level_of!(
                                     self,
                                     self.combat.attack(),
-                                    &mut credit_plan.lend(&mut self.last_hurt_by_player)
+                                    &mut credit_plan.lend(&mut self.last_hurt_by_player),
+                                    None
                                 ),
                                 t.damage,
                                 source,
@@ -5827,7 +5867,8 @@ impl Game<'_> {
                         crate::game::entity::damage_level_of!(
                             self,
                             self.combat.attack(),
-                            &mut credit_plan.lend(&mut self.last_hurt_by_player)
+                            &mut credit_plan.lend(&mut self.last_hurt_by_player),
+                            None
                         ),
                         0.0,
                         source,
@@ -5880,7 +5921,8 @@ impl Game<'_> {
                         crate::game::entity::damage_level_of!(
                             self,
                             self.combat.attack(),
-                            &mut credit_plan.lend(&mut self.last_hurt_by_player)
+                            &mut credit_plan.lend(&mut self.last_hurt_by_player),
+                            None
                         ),
                         0.0,
                         source,
@@ -5985,7 +6027,8 @@ impl Game<'_> {
                                 crate::game::entity::damage_level_of!(
                                     self,
                                     self.combat.attack(),
-                                    &mut credit_plan.lend(&mut self.last_hurt_by_player)
+                                    &mut credit_plan.lend(&mut self.last_hurt_by_player),
+                                    None
                                 ),
                                 5.0,
                                 source,
@@ -6058,7 +6101,8 @@ impl Game<'_> {
                                     crate::game::entity::damage_level_of!(
                                         self,
                                         self.combat.attack(),
-                                        &mut credit_plan.lend(&mut self.last_hurt_by_player)
+                                        &mut credit_plan.lend(&mut self.last_hurt_by_player),
+                                        None
                                     ),
                                     6.0,
                                     source,
@@ -6168,7 +6212,8 @@ impl Game<'_> {
                             crate::game::entity::damage_level_of!(
                                 self,
                                 self.combat.attack(),
-                                &mut credit_plan.lend(&mut self.last_hurt_by_player)
+                                &mut credit_plan.lend(&mut self.last_hurt_by_player),
+                                None
                             ),
                             1.0,
                             source,
@@ -6198,7 +6243,8 @@ impl Game<'_> {
                             crate::game::entity::damage_level_of!(
                                 self,
                                 self.combat.attack(),
-                                &mut credit_plan.lend(&mut self.last_hurt_by_player)
+                                &mut credit_plan.lend(&mut self.last_hurt_by_player),
+                                None
                             ),
                             4.0,
                             source,
@@ -7020,7 +7066,8 @@ impl Game<'_> {
                     crate::game::entity::damage_level_of!(
                         self,
                         &sunrise_client::health::NO_ATTACK,
-                        &mut credit_plan.lend(&mut self.last_hurt_by_player)
+                        &mut credit_plan.lend(&mut self.last_hurt_by_player),
+                        None
                     ),
                     f32::MAX,
                     sunrise_client::mobs::Damage::player(player_at.unwrap_or(center)),
@@ -8259,7 +8306,7 @@ fn bucketable(species: Species) -> Option<(&'static str, &'static str)> {
 pub(super) use sunrise_client::health::{damage_type, melee, source_damage_type};
 /// A Sunrise item stack as a loot stack (id, count, damage, enchantments,
 /// and its custom data as SNBT for `minecraft:custom_data` predicates).
-fn to_loot(stack: &ItemStack) -> sunrise_world::loot::LootStack {
+pub(in crate::game) fn to_loot(stack: &ItemStack) -> sunrise_world::loot::LootStack {
     let components = stack
         .custom_data()
         .map(|data| {
@@ -10587,7 +10634,6 @@ mod pearl_tests {
             dragon: None,
             leash_boats: &[],
             who_lookup: None,
-            foreign: None,
             others_grid: None,
             others_index: None,
             passenger_objects: &[],
@@ -13231,18 +13277,6 @@ mod breeding_heart_tests {
         }
     }
 }
-
-#[cfg(feature = "upstream-parallel-mobs")]
-#[path = "../../creatures/mob_group.rs"]
-mod mob_group;
-
-#[cfg(feature = "upstream-parallel-mobs")]
-#[path = "../../creatures/mob_islands.rs"]
-mod mob_islands;
-
-#[cfg(feature = "upstream-parallel-mobs")]
-#[path = "../../creatures/prep.rs"]
-mod prep;
 
 #[cfg(test)]
 #[path = "frame_projectile_tests.rs"]

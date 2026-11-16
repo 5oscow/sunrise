@@ -84,6 +84,11 @@
     "category": "immutable cache",
     "reason": "Empty or set-once resolved registry lookup returned when no installed Parts inventory supplies one."
   },
+  "parts/blocks.rs::LISTEN_SCOPE": {
+    "type": "RefCell<Option<ListenScope>>",
+    "category": "Parts lookup table",
+    "reason": "Per-thread listen snapshot a tick phase's worker answers routing questions from, in force only for the phase's work."
+  },
   "parts/shared.rs::GAME_PARTS": {
     "type": "RefCell<GamePartsLookup>",
     "category": "Parts lookup table",

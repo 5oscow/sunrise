@@ -35,7 +35,7 @@ To play, use [the launcher](../launcher/README.md); the project site is [playsun
 - [PvP & HUD](pvp.md): optional client settings for PvP players (custom crosshair, block outline, hit color, HUD widgets), fair-play boundaries, and why each is off by default.
 - [Narrator](narrator.md): vanilla's text-to-speech (Ctrl+B): the voices per platform, how screens record what they narrate, `sunrise-ctl narration`, and where it still differs from vanilla.
 - [Shader packs](shaders.md): Sunrise's own WGSL shader packs, how to make and check one (`sunrise-shader`).
-- [The modding book](modding/src/introduction.md): content mods (data) and native mods (Rust), how to make, install and publish them. [Native mods](modding/src/how-to/native-mods.md): how the launcher builds them. [Hook counterparts](https://arismoko.github.io/sunrise/reference/hook-notes.html#counterparts): the NeoForge and Fabric catalog conventions.
+- [The modding book](modding/src/introduction.md): content mods (data) and native mods (Rust), how to make, install and publish them. [Native mods](modding/src/how-to/native-mods.md): how the launcher builds them. [Hook counterparts](https://sunrise-org.github.io/sunrise/reference/hook-notes.html#counterparts): the NeoForge and Fabric catalog conventions.
 - [Upgrading a 26.2 data pack](datapack-upgrade.md): `sunrise-port-pack upgrade-datapack` rewrites a 26.2 worldgen pack in 26.3's formats, and how the rewrite is checked against vanilla.
 - [Modpacks](modpacks.md): porting whole packs (ATM10 and smaller): import, inventory, carry-over, an agent per mod with a harness against the Java original, coverage, and how "10x" is measured.
 - [Launcher](../launcher/README.md): installs, updates and starts builds; its CLI and MCP server; releasing it.

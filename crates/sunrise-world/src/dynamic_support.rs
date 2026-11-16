@@ -18,6 +18,16 @@ pub trait DynamicSupportWorld {
         &mut self,
         position: [i32; 3],
     ) -> Result<Option<VoxelShape>, Self::Error>;
+    /// The collision shape the block entity at `position` published for its block
+    /// (`shapes_from_block_entity`), by one lookup at the position. None when it holds none, or
+    /// for a world with no block entities, so the block's declared shape applies.
+    fn published_collision_shape(
+        &mut self,
+        position: [i32; 3],
+    ) -> Result<Option<VoxelShape>, Self::Error> {
+        let _ = position;
+        Ok(None)
+    }
 }
 #[derive(Debug)]
 pub enum DynamicSupportError<E> {

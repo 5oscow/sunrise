@@ -130,7 +130,7 @@ mod tests {
     #[test]
     fn shadow_admission_rejects_negative_and_nonfinite_values_with_filename() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("shadow.hmod");
+        let path = dir.path().join("shadow.smod");
         let name = "data/bird/sunrise/entity_type/mob.json";
         let manifest = r#"id = "bird"
 name = "Bird"

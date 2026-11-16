@@ -150,7 +150,7 @@ Native mods (docs/modding/src/how-to/native-mods.md): compile flat Rust mod proj
 - `--sync-internals`: Discover internal uses through compiler diagnostics. Prints resolved declarations as JSON for cargo sunrise-mod internals sync; never installs or selects a game
 - `--catalog`
 - `--catalog-output`: Copy discovery catalogs into this caller-owned empty directory
-- `FOLDER`: A mod folder (sunrise-mod.toml with [native], Cargo.toml and src/), or a folder of them (default: the native mods installed and turned on in the instance). Server exports also read wasm internals declarations from .hmod packages directly in this folder
+- `FOLDER`: A mod folder (sunrise-mod.toml with [native], Cargo.toml and src/), or a folder of them (default: the native mods installed and turned on in the instance). Server exports also read wasm internals declarations from .smod packages directly in this folder
 - `--server-output`: Export mode: build a standalone dedicated-server engine into this folder instead of an instance's build. Needs a mod FOLDER; no instance is read or changed, and no launcher config is written
 - `--allow-jar-downloads`: Allow exact-hash jar downloads into the local cache for the server export; jar bytes are never included in the exported folder
 - `--instance`: The instance whose installed native mods to build, and which then plays the build (default: the selected one)
@@ -688,7 +688,7 @@ MCP: `packs_list`.
 
 ## `sunrise-launcher packs add`
 
-Copy a pack file in: a resource pack .zip, a shader pack .zip or a .hshader.
+Copy a pack file in: a resource pack .zip, a shader pack .zip or a .sshader.
 
     sunrise-launcher packs add <FILE>
 

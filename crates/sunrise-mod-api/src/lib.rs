@@ -5,8 +5,8 @@
 //! targets use this same API; only the build differs. Add it to your mod's `Cargo.toml` as
 //! `sunrise-mod-api` (the library name is `mod_api`).
 //!
-//! The [modding book](https://arismoko.github.io/sunrise/) is the guide: start with
-//! [Your first native mod](https://arismoko.github.io/sunrise/start/first-mod.html). This reference documents
+//! The [modding book](https://sunrise-org.github.io/sunrise/) is the guide: start with
+//! [Your first native mod](https://sunrise-org.github.io/sunrise/start/first-mod.html). This reference documents
 //! every item of the API.
 //!
 //! # A first mod
@@ -47,13 +47,13 @@
 //!
 //! # Guides in the book
 //!
-//! - [Hooks and the Host](https://arismoko.github.io/sunrise/concepts/hooks-and-the-host.html)
-//! - [Load phases and access](https://arismoko.github.io/sunrise/concepts/load-phases.html)
-//! - [Parts](https://arismoko.github.io/sunrise/concepts/parts.html),
-//!   [capabilities](https://arismoko.github.io/sunrise/concepts/capabilities.html) and
-//!   [attachments](https://arismoko.github.io/sunrise/concepts/attachments.html)
-//! - [Wire types](https://arismoko.github.io/sunrise/concepts/wire-types.html)
-//! - [The manifest and the package](https://arismoko.github.io/sunrise/reference/manifest.html)
+//! - [Hooks and the Host](https://sunrise-org.github.io/sunrise/concepts/hooks-and-the-host.html)
+//! - [Load phases and access](https://sunrise-org.github.io/sunrise/concepts/load-phases.html)
+//! - [Parts](https://sunrise-org.github.io/sunrise/concepts/parts.html),
+//!   [capabilities](https://sunrise-org.github.io/sunrise/concepts/capabilities.html) and
+//!   [attachments](https://sunrise-org.github.io/sunrise/concepts/attachments.html)
+//! - [Wire types](https://sunrise-org.github.io/sunrise/concepts/wire-types.html)
+//! - [The manifest and the package](https://sunrise-org.github.io/sunrise/reference/manifest.html)
 extern crate self as mod_api;
 mod equip_reads;
 

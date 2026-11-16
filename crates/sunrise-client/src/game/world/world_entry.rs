@@ -46,7 +46,6 @@ impl Game<'_> {
             &self.options.resources,
             &self.pack.data_changes,
             self.pack.assets.registry,
-            &self.res.core.item_data,
         );
         if std::mem::take(&mut self.pending_pack_reload) {
             self.reload_packs();
@@ -619,7 +618,6 @@ impl Game<'_> {
         self.install_parts(parts);
         self.damage_tag_generation = self.damage_tag_generation.wrapping_add(1);
         self.forget_book();
-        sunrise_client::structure_blocks::forget_loot_data();
         // Before the players are sent the reloaded data below.
         self.sync_recipe_content();
         // PlayerList.reloadResources: the tags and recipes go to the players
@@ -686,19 +684,13 @@ impl Game<'_> {
         }
         self.server_items = None;
         let overlay = pack_files(&self.world_tables);
-        let loot = if mod_api::__private::mods().is_empty() {
-            sunrise_client::structure_blocks::world_loot_data(
-                &self.options.resources,
-                &overlay,
-                self.res.item_defaults(),
-            )
-        } else {
-            match sunrise_world::loot::LootData::load(
-                &self.options.resources,
-                &overlay,
-                self.res.item_defaults(),
-            ) {
-                Ok(mut loot) => {
+        let loot = match sunrise_world::loot::LootData::load(
+            &self.options.resources,
+            &overlay,
+            self.res.item_defaults(),
+        ) {
+            Ok(mut loot) => {
+                if !mod_api::__private::mods().is_empty() {
                     let context = match lan::sync::server_data_load(
                         &self.options.resources,
                         &self.res.core.item_data,
@@ -715,12 +707,12 @@ impl Game<'_> {
                         self.server_loot.set(None);
                         return;
                     }
-                    Some(Arc::new(loot))
                 }
-                Err(e) => {
-                    log::warn!("Sunrise: server loot tables unavailable: {e}");
-                    None
-                }
+                Some(Arc::new(loot))
+            }
+            Err(e) => {
+                log::warn!("Sunrise: server loot tables unavailable: {e}");
+                None
             }
         };
         if !mod_api::__private::mods().is_empty()
@@ -846,9 +838,9 @@ impl Game<'_> {
                 self.pack.assets.registry,
             );
         }
-        api_values::install_block_states(prepared.block_states);
+        api_values::install_block_states(&self.tick, prepared.block_states);
         native_world_read::install_block_tags(prepared.tags);
-        mod_api::__private::install_resolved_parts(prepared.parts);
+        api_values::install_resolved_parts(&self.tick, prepared.parts);
         self.resolve_block_paths();
         self.resolve_piston_reactions();
         self.resolve_primary_items();

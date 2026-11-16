@@ -417,6 +417,22 @@ impl Game<'_> {
         }
     }
 
+    /// The inventory screen's slots as pad targets, at the positions the
+    /// frame draws them (a mod screen's moved slots included).
+    pub(in crate::game) fn pad_slot_targets(&self, batch: &HudBatch) -> Vec<Target> {
+        let (ox, oy) = self.inventory_origin(batch);
+        self.slots()
+            .into_iter()
+            .map(|i| {
+                let (x, y) = self.slot_position(i);
+                Target {
+                    rect: [ox + x, oy + y, 16.0, 16.0],
+                    kind: Kind::Slot,
+                }
+            })
+            .collect()
+    }
+
     fn pad_all_targets(&self) -> Vec<Target> {
         let mut targets = key_focus::drawn_targets();
         if self.title.is_some()
@@ -436,10 +452,7 @@ impl Game<'_> {
         match self.screen {
             Screen::Inventory => {
                 let (ox, oy) = self.inventory_origin(&batch);
-                targets.extend(self.slots().into_iter().map(|i| {
-                    let (x, y) = self.slot_position(i);
-                    slot(ox + x, oy + y)
-                }));
+                targets.extend(self.pad_slot_targets(&batch));
                 targets.extend(
                     self.station_targets()
                         .into_iter()

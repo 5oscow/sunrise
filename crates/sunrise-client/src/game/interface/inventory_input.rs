@@ -307,10 +307,16 @@ impl Game<'_> {
             [r.config.width, r.config.height],
             self.settings.gui_scale_inputs(),
         );
-        (
-            self.slot_at(&batch, self.cursor.0, self.cursor.1),
-            self.clicked_outside(&batch),
-        )
+        self.target_at(&batch)
+    }
+    /// `inventory_target` for the frame `batch` describes.
+    pub(super) fn target_at(&self, batch: &HudBatch) -> (Option<usize>, bool) {
+        let slot = self.slot_at(batch, self.cursor.0, self.cursor.1);
+        // A mod screen may place a slot beyond its image: a click on one is
+        // not a click outside the window.
+        let outside =
+            self.clicked_outside(batch) && !(slot.is_some() && self.native_screen_shown());
+        (slot, outside)
     }
     pub(super) fn screen_button(right: bool) -> sunrise_client::container_screen::Button {
         use sunrise_client::container_screen::Button;

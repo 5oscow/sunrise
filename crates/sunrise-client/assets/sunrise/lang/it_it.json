@@ -497,7 +497,7 @@
   "sunrise.mods.browse.title": "Sfoglia mod",
   "sunrise.mods.browse.update": "Aggiorna",
   "sunrise.mods.dev": " (Sviluppo)",
-  "sunrise.mods.empty": "Nessuna mod: inserisci i file .hmod nella cartella Sunrise-Mods",
+  "sunrise.mods.empty": "Nessuna mod: inserisci i file .smod nella cartella Sunrise-Mods",
   "sunrise.mods.in_world": " (lasciare che il mondo cambi)",
   "sunrise.mods.not_built": " (Non costruito)",
   "sunrise.mods.open_folder": "Apri la cartella Mod",

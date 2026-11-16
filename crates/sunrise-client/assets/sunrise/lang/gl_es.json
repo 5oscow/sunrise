@@ -497,7 +497,7 @@
   "sunrise.mods.browse.title": "Explorar modificacións",
   "sunrise.mods.browse.update": "Actualizar",
   "sunrise.mods.dev": " (Desenvolvedor)",
-  "sunrise.mods.empty": "Sen modificacións: coloque os ficheiros .hmod no cartafol sunrise-mods",
+  "sunrise.mods.empty": "Sen modificacións: coloque os ficheiros .smod no cartafol sunrise-mods",
   "sunrise.mods.in_world": " (deixar o mundo para cambiar)",
   "sunrise.mods.not_built": " (Non construído)",
   "sunrise.mods.open_folder": "Abre o cartafol de mod",

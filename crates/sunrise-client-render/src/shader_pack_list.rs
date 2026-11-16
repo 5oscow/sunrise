@@ -10,7 +10,7 @@ pub const DIR: &str = "shaderpacks";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
-    /// A folder with `sunrise-shaders.toml`, or a `.hshader`.
+    /// A folder with `sunrise-shaders.toml`, or a `.sshader`.
     Sunrise,
     /// A folder with a `shaders` folder, or a `.zip`.
     Classic,
@@ -147,7 +147,7 @@ fn entry(path: &Path) -> Option<Entry> {
 }
 
 /// Resolves a saved identity, migrating a legacy native filename when its manifest or the
-/// launcher's `<id>-<version>.hshader` name identifies it. Duplicate IDs use the first filename
+/// launcher's `<id>-<version>.sshader` name identifies it. Duplicate IDs use the first filename
 /// in lexical order, matching `scan`; versions are free-form strings, not ordered versions.
 /// An absent arbitrary old filename cannot be attributed to a manifest safely.
 pub fn resolve(dir: &Path, picked: &str) -> (String, PathBuf) {
@@ -182,7 +182,7 @@ pub fn resolve(dir: &Path, picked: &str) -> (String, PathBuf) {
             if dir.join(picked).exists() {
                 return None;
             }
-            let stem = picked.strip_suffix(".hshader")?;
+            let stem = picked.strip_suffix(".sshader")?;
             native
                 .iter()
                 .find(|(_, m)| {
@@ -435,23 +435,23 @@ mod tests {
         let dir =
             std::env::temp_dir().join(format!("sunrise-identity-update-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        install(&dir, "warm-1.hshader", "1");
-        std::fs::write(dir.join("warm-1.hshader.txt"), "strength=1.5\n").unwrap();
+        install(&dir, "warm-1.sshader", "1");
+        std::fs::write(dir.join("warm-1.sshader.txt"), "strength=1.5\n").unwrap();
         let options = dir.join("options.txt");
         std::fs::write(&options, "").unwrap();
         std::fs::write(
             dir.join(crate::graphics::FILE),
-            "pickedShaderPack:warm-1.hshader\n",
+            "pickedShaderPack:warm-1.sshader\n",
         )
         .unwrap();
         // Use the real settings loader, including persistence of the migrated selection.
         // Its shaderpacks folder sits beside options.txt.
         let packs = dir.join(DIR);
         std::fs::create_dir_all(&packs).unwrap();
-        std::fs::rename(dir.join("warm-1.hshader"), packs.join("warm-1.hshader")).unwrap();
+        std::fs::rename(dir.join("warm-1.sshader"), packs.join("warm-1.sshader")).unwrap();
         std::fs::rename(
-            dir.join("warm-1.hshader.txt"),
-            packs.join("warm-1.hshader.txt"),
+            dir.join("warm-1.sshader.txt"),
+            packs.join("warm-1.sshader.txt"),
         )
         .unwrap();
         let settings = crate::settings::Settings::load(&options);
@@ -461,13 +461,13 @@ mod tests {
             "sunrise:warm"
         );
         assert_eq!(scan(&packs)[0].values, [1.5]);
-        install(&packs, "warm-2.hshader", "2");
-        std::fs::remove_file(packs.join("warm-1.hshader")).unwrap();
+        install(&packs, "warm-2.sshader", "2");
+        std::fs::remove_file(packs.join("warm-1.sshader")).unwrap();
         let (_, path) = resolve(&packs, &settings.sunrise.shader_pack);
-        assert_eq!(path, packs.join("warm-2.hshader"));
-        std::fs::rename(path, packs.join("renamed.hshader")).unwrap();
+        assert_eq!(path, packs.join("warm-2.sshader"));
+        std::fs::rename(path, packs.join("renamed.sshader")).unwrap();
         let (_, path) = resolve(&packs, "sunrise:warm");
-        assert_eq!(path, packs.join("renamed.hshader"));
+        assert_eq!(path, packs.join("renamed.sshader"));
         let manifest = sunrise_shader_api::Pack::read_manifest(&path).unwrap();
         assert_eq!(
             load_values(&native_values_pack(&path, &manifest.id), &manifest.options),
@@ -484,7 +484,7 @@ mod tests {
         entry.save_values(&packs);
         assert_eq!(scan(&packs)[0].values, [1.0]);
         assert_eq!(
-            std::fs::read_to_string(packs.join("warm-1.hshader.txt")).unwrap(),
+            std::fs::read_to_string(packs.join("warm-1.sshader.txt")).unwrap(),
             "strength=1.5\n"
         );
         std::fs::remove_dir_all(dir).unwrap();
@@ -497,13 +497,13 @@ mod tests {
             std::process::id()
         ));
         std::fs::create_dir_all(&dir).unwrap();
-        install(&dir, "z.hshader", "newest");
-        install(&dir, "a.hshader", "oldest");
-        std::fs::write(dir.join("warm-previous.hshader.txt"), "strength=2\n").unwrap();
-        let (key, path) = resolve(&dir, "warm-previous.hshader");
+        install(&dir, "z.sshader", "newest");
+        install(&dir, "a.sshader", "oldest");
+        std::fs::write(dir.join("warm-previous.sshader.txt"), "strength=2\n").unwrap();
+        let (key, path) = resolve(&dir, "warm-previous.sshader");
         assert_eq!(key, "sunrise:warm");
-        assert_eq!(path, dir.join("a.hshader"));
-        assert_eq!(resolve(&dir, "z.hshader"), (key.clone(), path));
+        assert_eq!(path, dir.join("a.sshader"));
+        assert_eq!(resolve(&dir, "z.sshader"), (key.clone(), path));
         assert_eq!(scan(&dir).len(), 1);
         assert_eq!(scan(&dir)[0].values, [2.0]);
         // A classic folder named like a native ID keeps its filename identity.
@@ -585,7 +585,7 @@ mod tests {
             std::env::temp_dir().join(format!("sunrise-shader-values-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let pack = dir.join("p.hshader");
+        let pack = dir.join("p.sshader");
         let options = [option("a", float), option("b", choice)];
         // Only what differs from the defaults is written; out of range comes back clamped.
         save_values(&pack, &options, &[1.0, 2.0]).unwrap();

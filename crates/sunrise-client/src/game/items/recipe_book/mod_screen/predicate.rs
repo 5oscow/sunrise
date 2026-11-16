@@ -27,6 +27,7 @@ impl Game<'_> {
                 addition,
                 ..
             } => vec![*template, *base, *addition],
+            mod_api::RecipeBookLayout::Mod => Vec::new(),
         };
         let mut stacks: Vec<_> = self
             .inventory

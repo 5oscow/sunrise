@@ -1,6 +1,6 @@
 # The native package
 
-The project and its `.hmod` have the same flat layout, with no mod-id directory level inside the archive:
+The project and its `.smod` have the same flat layout, with no mod-id directory level inside the archive:
 
 ```text
 my_mod/

@@ -497,7 +497,7 @@
   "sunrise.mods.browse.title": "Layari Mod",
   "sunrise.mods.browse.update": "Kemas Kini",
   "sunrise.mods.dev": " (Dev)",
-  "sunrise.mods.empty": "Tiada mod: letakkan fail .hmod dalam folder sunrise-mods",
+  "sunrise.mods.empty": "Tiada mod: letakkan fail .smod dalam folder sunrise-mods",
   "sunrise.mods.in_world": " (tinggalkan dunia untuk berubah)",
   "sunrise.mods.not_built": " (Tidak dibina)",
   "sunrise.mods.open_folder": "Buka Folder Mod",

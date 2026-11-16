@@ -20,7 +20,9 @@ concurrency:
 
 jobs:
   route:
-    runs-on: ubuntu-latest
+    # On Dyna's small runner while the repository's switch is on, as the shards' `plan`, so the leg never queues behind
+    # GitHub's runners first; a daily run cancelled by hand on 2026-11-16 found this job still waiting there.
+    runs-on: ${{ vars.DYNA_CI_SELF_HOSTED == 'true' && 'dyna-small' || 'ubuntu-latest' }}
     permissions:
       contents: read
       actions: read  # the run's creation time (tools/ci/dyna_ci_route.sh)

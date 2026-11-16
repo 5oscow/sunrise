@@ -570,7 +570,7 @@
   "sunrise.mods.browse.title": "Browse Mods",
   "sunrise.mods.browse.update": "Update",
   "sunrise.mods.dev": " (Dev)",
-  "sunrise.mods.empty": "No mods: put .hmod files in the sunrise-mods folder",
+  "sunrise.mods.empty": "No mods: put .smod files in the sunrise-mods folder",
   "sunrise.mods.extra": "These mods are not on this server:\n%s",
   "sunrise.mods.in_world": " (leave the world to change)",
   "sunrise.mods.mismatch": "Your mods don't match this server's.",

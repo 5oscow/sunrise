@@ -525,6 +525,12 @@ impl<W: FeatureWorld, R: RandomSource> WorldgenRandom for GroundRun<'_, '_, W, R
     fn next_boolean(&mut self) -> bool {
         self.run.random.next_boolean()
     }
+    fn next_int(&mut self) -> i32 {
+        self.run.random.next_int()
+    }
+    fn next_gaussian(&mut self) -> f64 {
+        self.run.random.next_gaussian()
+    }
 }
 
 struct Decorate<'a, 'b, 'w, W, R> {

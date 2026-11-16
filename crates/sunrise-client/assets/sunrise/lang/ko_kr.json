@@ -497,7 +497,7 @@
   "sunrise.mods.browse.title": "모드 찾아보기",
   "sunrise.mods.browse.update": "업데이트",
   "sunrise.mods.dev": " (개발용)",
-  "sunrise.mods.empty": "모드 없음: sunrise-mods 폴더에 .hmod 파일을 넣으세요.",
+  "sunrise.mods.empty": "모드 없음: sunrise-mods 폴더에 .smod 파일을 넣으세요.",
   "sunrise.mods.in_world": " (월드를 나가야 변경 가능)",
   "sunrise.mods.not_built": " (빌드되지 않음)",
   "sunrise.mods.open_folder": "모드 폴더 열기",

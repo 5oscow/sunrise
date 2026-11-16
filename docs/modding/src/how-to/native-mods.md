@@ -1,6 +1,6 @@
 # Native mods: building and shipping
 
-A native mod is Rust source in a `.hmod`. The launcher compiles it on the player's machine, with its own pinned Rust
+A native mod is Rust source in a `.smod`. The launcher compiles it on the player's machine, with its own pinned Rust
 toolchain, against the prebuilt game of the exact Sunrise build the mod pins in `[native]`. The game itself is never
 rebuilt for a mod: the mods are compiled and linked against that prebuilt game, and the instance then plays the
 result.
@@ -33,7 +33,7 @@ may receive credit. This context is distinct from `attacker` and its captured so
 
 ## Living death contract version 2
 
-[`living_death` version 2](https://github.com/arismoko/horizon/blob/main/docs/native-mods.md#living-death-version-2) supplies
+[`living_death` version 2](https://github.com/sunrise-org/sunrise/blob/main/docs/native-mods.md#living-death-version-2) supplies
 the accepted killing source and its captured weapon stack. Cancellation keeps the
 health a listener leaves, suppresses loot, experience and death messages, and does
 not heal the body. An unhealed cancelled body is removed at tick 20 without loot

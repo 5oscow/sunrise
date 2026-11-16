@@ -162,7 +162,7 @@ mod tests {
             let mut m = game.mobs.pop().unwrap();
             let hit = Damage::of(DamageKind::Generic);
             m.knockback(
-                damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push),
+                damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push, None),
                 0.4,
                 0.0,
                 1.0,

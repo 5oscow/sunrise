@@ -173,7 +173,7 @@ impl Game<'_> {
                     let mut credit = plan.lend(&mut self.last_hurt_by_player);
                     let m = &mut self.mobs[index];
                     m.damage(
-                        crate::game::entity::damage_level_of!(self, &attack, &mut credit),
+                        crate::game::entity::damage_level_of!(self, &attack, &mut credit, None),
                         1.0,
                         source,
                     );

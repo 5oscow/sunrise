@@ -1,7 +1,6 @@
 //! Prepare local worlds without blocking the window's event loop.
 use super::*;
 use sunrise_client::vanillagen::TerrainResources;
-use sunrise_world::item_defaults::ItemData;
 
 pub(super) struct WorldRequest {
     pub save_root: PathBuf,
@@ -86,43 +85,6 @@ impl WorldRequest {
         upgrade: &sunrise_world::datafix::progress::UpgradeProgress,
     ) -> Result<PreparedWorld> {
         let _prepare_step = startup::step("world.prepare");
-        // Prepare the shared loot snapshot before spawn chunks and server gameplay start.
-        // Container loading only installs pending tags; first inventory access uses this data.
-        // Every world opens here: on the server thread, on a dedicated server.
-        let loot = || {
-            sunrise_client::structure_blocks::loot_data(
-                &options.resources,
-                &sunrise_world::loot::PackOverlay::NONE,
-                res.item_defaults(),
-            );
-        };
-        // The live features (bone meal's and saplings') are installed by `prepare_world`, over
-        // the world's own data packs.
-        if res.threads() <= 1 {
-            loot();
-            return self.prepare_world(res, pack, options, settings, upgrade);
-        }
-        // The loot data does not need the world: it loads beside it (the generator's decoration
-        // keeps one core busy) and is done before it opens.
-        std::thread::scope(|scope| {
-            let loot = sunrise_guest_stack::builder()
-                .spawn_scoped(scope, loot)
-                .expect("loot loader thread");
-            let prepared = self.prepare_world(res, pack, options, settings, upgrade);
-            loot.join()
-                .unwrap_or_else(|panic| std::panic::resume_unwind(panic));
-            prepared
-        })
-    }
-
-    fn prepare_world(
-        self,
-        res: &Resources,
-        pack: &PackResources,
-        options: &Options,
-        settings: &Settings,
-        upgrade: &sunrise_world::datafix::progress::UpgradeProgress,
-    ) -> Result<PreparedWorld> {
         let Self {
             save_root,
             folder,
@@ -432,10 +394,9 @@ enum Preload {
 
 static PRELOAD: std::sync::Mutex<Preload> = std::sync::Mutex::new(Preload::Idle);
 
-/// Each frame of the title: read what every world opening loads and keeps
-/// for the rest of the process (the worldgen bundle, the loot tables and the
-/// registries the server sends) on a helper thread while the player is on the
-/// world screens (`on_world_screens`: Singleplayer, Create World and their
+/// Each frame of the title: preload the shared worldgen bundle on a helper
+/// thread while the player is on the world screens
+/// (`on_world_screens`: Singleplayer, Create World and their
 /// dialogs), so it overlaps the time spent choosing a world. A world opened
 /// meanwhile waits for the part being read instead of reading it again. Not
 /// at the title screen itself: many players only go to Multiplayer, and
@@ -446,7 +407,6 @@ pub(super) fn preload_world_data(
     resources: &std::path::Path,
     data_source: &sunrise_assets::resource_source::ResourceSource,
     registry: &'static sunrise_world::registry::BlockRegistry,
-    item_data: &Arc<ItemData>,
 ) {
     let mut preload = PRELOAD.lock().unwrap_or_else(|e| e.into_inner());
     match &mut *preload {
@@ -454,7 +414,6 @@ pub(super) fn preload_world_data(
         Preload::Idle if on_world_screens => {
             let resources = resources.to_owned();
             let data_source = data_source.clone();
-            let item_data = Arc::clone(item_data);
             let spawned = sunrise_guest_stack::builder()
                 .name("World data preload".into())
                 .spawn(move || {
@@ -470,17 +429,6 @@ pub(super) fn preload_world_data(
                         // seed shares: about 140 ms off opening the world.
                         let _ = data.prepare_decoration("minecraft:normal", "minecraft:overworld");
                     }
-                    // The loot data's item tables and the server's data both
-                    // read the recipe folder: held here, it is read once.
-                    let _recipe_files =
-                        sunrise_client::json_folder::read(&resources.join("data/minecraft/recipe"));
-                    // The preload is the game's own data; the world's packs'
-                    // tables are built when it opens (finish_open_world).
-                    let _ = sunrise_client::structure_blocks::loot_data(
-                        &resources,
-                        &sunrise_world::loot::PackOverlay::NONE,
-                        item_data.defaults(),
-                    );
                 });
             match spawned {
                 Ok(thread) => *preload = Preload::Started { thread, left: None },
@@ -493,7 +441,6 @@ pub(super) fn preload_world_data(
             let left = *left.get_or_insert_with(std::time::Instant::now);
             if left.elapsed() >= PRELOAD_KEPT && thread.is_finished() {
                 sunrise_client::vanillagen::forget_shared_data();
-                sunrise_client::structure_blocks::forget_loot_data();
                 super::lan::sync::forget_sync_data();
                 super::lan::sync::forget_server_sources();
                 sunrise_threads::release_free_memory();
@@ -516,7 +463,6 @@ pub(super) fn preload_launch_world(
     data_source: &sunrise_assets::resource_source::ResourceSource,
     registry: &'static sunrise_world::registry::BlockRegistry,
     biomes: Arc<sunrise_client::biome::Biomes>,
-    item_data: Arc<ItemData>,
     additional: &[Arc<sunrise_client::datapack::DataPack>],
 ) {
     let mut preload = PRELOAD.lock().unwrap_or_else(|e| e.into_inner());
@@ -557,15 +503,6 @@ pub(super) fn preload_launch_world(
                 let preset = sunrise_client::save::WorldGen::preset(&world_root);
                 let _ = data.prepare_decoration(preset, "minecraft:overworld");
             }
-            // As in `preload_world_data`: the loot data and the server's
-            // data share one read of the recipe folder.
-            let _recipe_files =
-                sunrise_client::json_folder::read(&resources.join("data/minecraft/recipe"));
-            let _ = sunrise_client::structure_blocks::loot_data(
-                &resources,
-                &sunrise_world::loot::PackOverlay::NONE,
-                item_data.defaults(),
-            );
             log::info!(
                 "Sunrise: world data preloaded for the launch's world in {} ms",
                 started.elapsed().as_millis()
@@ -580,32 +517,6 @@ pub(super) fn preload_launch_world(
 /// A world opens: what `preload_world_data` read is the world's from now on.
 pub(super) fn world_data_used() {
     *PRELOAD.lock().unwrap_or_else(|e| e.into_inner()) = Preload::Used;
-}
-
-/// A server's world opens: the loot tables its first placed block or broken
-/// container needs (`loot_data`) are read on a helper thread while the
-/// connection is made, so the game thread never waits on them (~0.6 s on a
-/// phone). Kept from then on, as a local world keeps them.
-pub(super) fn preload_server_loot(resources: &std::path::Path, item_data: &Arc<ItemData>) {
-    world_data_used();
-    if sunrise_client::structure_blocks::loaded_loot_data(item_data.defaults()).is_some() {
-        return;
-    }
-    let resources = resources.to_owned();
-    let item_data = Arc::clone(item_data);
-    let spawned = sunrise_guest_stack::builder()
-        .name("Loot preload".into())
-        .spawn(move || {
-            sunrise_threads::behind_server();
-            let _ = sunrise_client::structure_blocks::loot_data(
-                &resources,
-                &sunrise_world::loot::PackOverlay::NONE,
-                item_data.defaults(),
-            );
-        });
-    if let Err(e) = spawned {
-        log::warn!("Sunrise: loot preload: {e}");
-    }
 }
 
 /// The game's biomes with the world's enabled packs over them, from the same

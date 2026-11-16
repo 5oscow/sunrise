@@ -1,4 +1,4 @@
-//! `.hpack`, a Sunrise modpack (docs/modding/src/reference/registry-index.md): registry mods
+//! `.spack`, a Sunrise modpack (docs/modding/src/reference/registry-index.md): registry mods
 //! played together as a profile. A zip holding `sunrise-modpack.toml`, which
 //! names each mod by id, version and SHA-256 (the files themselves come from
 //! the registry), and optionally `overrides/`: settings and resource packs
@@ -10,7 +10,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-/// The manifest's file name in a `.hpack`.
+/// The manifest's file name in a `.spack`.
 pub const MANIFEST: &str = "sunrise-modpack.toml";
 /// The manifest formats this build reads.
 pub const FORMAT: u32 = 1;
@@ -106,7 +106,7 @@ impl Manifest {
     }
 }
 
-/// A `.hpack` as read from disk: its manifest and its override files, by
+/// A `.spack` as read from disk: its manifest and its override files, by
 /// path under `overrides/`.
 #[derive(Debug)]
 pub struct Modpack {
@@ -257,7 +257,7 @@ sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
 "#;
 
     fn write_pack(dir: &Path, manifest: &str, files: &[(&str, &[u8])]) -> PathBuf {
-        let path = dir.join("cozy.hpack");
+        let path = dir.join("cozy.spack");
         let mut zip = zip::ZipWriter::new(std::fs::File::create(&path).unwrap());
         let options = zip::write::SimpleFileOptions::default();
         zip.start_file(MANIFEST, options).unwrap();
@@ -271,7 +271,7 @@ sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
     }
 
     fn scratch(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("sunrise-hpack-{name}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("sunrise-spack-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
@@ -309,7 +309,7 @@ sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
         for name in [
             "mods/evil.jar",
             "overrides/../../.bashrc",
-            "overrides/sunrise-mods/evil.hmod",
+            "overrides/sunrise-mods/evil.smod",
             "overrides/resourcepacks/../options.txt",
             "overrides/servers.dat",
             "overrides/sunrise-mods/.sunrise-mod-data/other_mod/x",

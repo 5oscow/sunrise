@@ -727,6 +727,10 @@ fn decode_mod_block_entity(id: String, tag: &Tag) -> Option<crate::containers::M
     for key in ["id", "x", "y", "z"] {
         nbt.remove(&key.into());
     }
+    // The published shapes are no field of the mod's: saved data that does not check is dropped.
+    let shapes = nbt
+        .remove(&crate::containers::SHAPES_KEY.into())
+        .and_then(|tag| crate::containers::PublishedShapes::from_tag(&tag));
     // `Slot` is a byte: 256 slots at most.
     let mut items = decode_items(nbt.get(&"Items".into()), 256);
     // Compared in slot order, the order `encode_items` writes: vanilla loads by `Slot`.
@@ -747,14 +751,16 @@ fn decode_mod_block_entity(id: String, tag: &Tag) -> Option<crate::containers::M
     } else {
         items.clear();
     }
-    Some(crate::containers::ModBlockEntity::new(
+    let mut entity = crate::containers::ModBlockEntity::new(
         id,
         crate::containers::ModBlockEntityFields {
             nbt,
             items,
             data: Vec::new(),
         },
-    ))
+    );
+    entity.set_shapes(shapes.map(std::sync::Arc::new));
+    Some(entity)
 }
 /// Decode an entity at a known block, refusing undeclared IDs and invalid native membership.
 /// Canonical membership wins; blocks absent from the table use vanilla membership.
@@ -3469,7 +3475,7 @@ pub struct Level {
     /// the world enables, `minecraft:vanilla` included. Empty is vanilla's
     /// default, which the level.dat omits.
     pub enabled_features: std::sync::Arc<[String]>,
-    /// The code mods (`fml.LoadingModList` beside `Data`), then the content mods (`sunrise.ContentModList`), the world was saved with; `None` without either list.
+    /// The code mods (`fml.LoadingModList` beside `Data`), then the content mods (`sunrise.ContentModList`), the world was saved with; `None` without either list or when both are empty.
     pub saved_mods: Option<Vec<level_mods::ModRecord>>,
     /// Game rule values by name without namespace (`keep_inventory`, ...).
     pub game_rules: BTreeMap<String, i32>,
@@ -7245,6 +7251,51 @@ mod tests {
             saved
         );
         assert_eq!(machine.take_client_update_fields(), Some(batch));
+    }
+
+    #[test]
+    fn published_shapes_are_saved_with_the_block_entity_and_come_back_on_load() {
+        use crate::containers::{BlockEntity, PublishedShapes, SHAPES_KEY};
+        let saved = sunrise_core::nbt::parse_snbt(r#"{id:"test:bus",x:5,y:-60,z:12,progress:7}"#)
+            .unwrap()
+            .0;
+        let (pos, entity) = decode_block_entity(&saved).unwrap();
+        let BlockEntity::Mod(mut bus) = entity else {
+            panic!("not a mod's");
+        };
+        assert!(bus.shapes().is_none());
+        let shapes = PublishedShapes::new(mod_api::BlockEntityShapes {
+            outline: vec![[0.0, 0.0, 0.0, 1.0, 0.5, 1.0]],
+            collision: vec![[-0.25, 0.0, 0.0, 1.0, 1.5, 1.0]],
+        })
+        .unwrap();
+        bus.set_shapes(Some(std::sync::Arc::new(shapes)));
+        let saved = block_entity_encode::encode(pos, &BlockEntity::Mod(bus), "test:bus");
+        // Kept apart from the mod's own fields.
+        let (_, back) = decode_block_entity(&saved).unwrap();
+        let BlockEntity::Mod(back) = back else {
+            panic!("not a mod's");
+        };
+        assert_eq!(back.nbt.len(), 1);
+        assert!(!back.nbt.contains_key(&SHAPES_KEY.into()));
+        let loaded = back.shapes().expect("restored on load");
+        assert_eq!(loaded.boxes().collision, [[-0.25, 0.0, 0.0, 1.0, 1.5, 1.0]]);
+        // Saved data that is over a limit loads without them.
+        let Tag::Compound(mut bad) = saved else {
+            unreachable!()
+        };
+        bad.insert(
+            SHAPES_KEY.into(),
+            Tag::Compound(Compound::from([
+                ("outline".into(), Tag::LongArray(vec![0; 6 * 65])),
+                ("collision".into(), Tag::LongArray(vec![])),
+            ])),
+        );
+        let (_, bad) = decode_block_entity(&Tag::Compound(bad)).unwrap();
+        let BlockEntity::Mod(bad) = bad else {
+            panic!("not a mod's");
+        };
+        assert!(bad.shapes().is_none());
     }
 
     #[test]

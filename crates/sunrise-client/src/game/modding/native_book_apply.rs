@@ -1,5 +1,8 @@
 //! Authoritative placement: detached calculation, journaled writes, then publication.
-use super::{Game, native_book_backings::Backings, native_book_scope::MenuSnapshot};
+use super::{
+    Game, native_book_backings::Backings, native_book_grid::Session,
+    native_book_scope::MenuSnapshot,
+};
 use sunrise_client::{
     lan::menu::ModCraft,
     menu::{
@@ -176,7 +179,22 @@ impl Game<'_> {
         let known = guest.recipe_book.clone();
         let limited = host.hub.limited_crafting;
         let name = guest.name.clone();
-        let post = {
+        let post = if plan.awaits_grid() {
+            let session = Session {
+                recipe: selection.display.recipe.as_str().to_owned(),
+                plan: plan.clone(),
+                menu,
+                graph,
+                before: before.clone(),
+                known,
+                limited,
+                use_max,
+                placed: false,
+            };
+            let (session, post) = self.ask_mod_book_place(session)?;
+            (menu, graph) = (session.menu, session.graph);
+            post
+        } else {
             let env = Env {
                 player: Some(before.uuid),
                 player_entity_id: Some(before.entity_id),

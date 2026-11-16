@@ -497,7 +497,7 @@
   "sunrise.mods.browse.title": "Mods bekijken",
   "sunrise.mods.browse.update": "Bijwerken",
   "sunrise.mods.dev": " (Ontwikkelaar)",
-  "sunrise.mods.empty": "Geen mods: plaats .hmod-bestanden in de map sunrise-mods",
+  "sunrise.mods.empty": "Geen mods: plaats .smod-bestanden in de map sunrise-mods",
   "sunrise.mods.in_world": " (Laat de wereld veranderen)",
   "sunrise.mods.not_built": " (Niet gebouwd)",
   "sunrise.mods.open_folder": "Open de Mod-map",

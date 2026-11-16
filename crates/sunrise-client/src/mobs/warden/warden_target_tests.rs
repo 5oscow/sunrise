@@ -154,3 +154,25 @@ fn an_allied_vibration_is_not_heard() {
     });
     assert!(ran, "vanilla data is missing");
 }
+
+/// #486: `Warden.increaseAngerAt` keys a player suspect by that player's own
+/// UUID, the world's verified identity of the selected player; a view the
+/// world can't name records none, so a save writes no pair for it.
+#[test]
+#[ignore = "daily"]
+fn a_player_angers_the_warden_under_its_own_uuid() {
+    let observer = [1100571785, 643185331, -1474652091, 687307347];
+    let ran = with_test_world(&[], |w, types| {
+        for (identity, expected) in [(Some((observer, 9)), Some(observer)), (None, None)] {
+            let mut w = w.clone();
+            w.player = Some(test_player(Vec3::new(0.5, 64.0, 2.5)));
+            w.player_identity = identity;
+            let mut m = warden_mob(types, 1);
+            increase_anger(&mut m, &w, Some(Who::Player), 35, false, &mut Vec::new());
+            let anger = &m.extra.warden.as_ref().unwrap().anger;
+            assert_eq!(anger.anger_of(Who::Player), 35);
+            assert_eq!(anger.player_uuid(), expected);
+        }
+    });
+    assert!(ran, "vanilla data is missing");
+}

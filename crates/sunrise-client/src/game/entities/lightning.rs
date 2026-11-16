@@ -651,7 +651,8 @@ impl Game<'_> {
                         crate::game::entity::damage_level_of!(
                             self,
                             &sunrise_client::health::NO_ATTACK,
-                            no_push
+                            no_push,
+                            None
                         ),
                         f32::MAX,
                         damage,
@@ -686,7 +687,8 @@ impl Game<'_> {
                 crate::game::entity::damage_level_of!(
                     self,
                     &sunrise_client::health::NO_ATTACK,
-                    no_push
+                    no_push,
+                    None
                 ),
                 5.0,
                 damage,

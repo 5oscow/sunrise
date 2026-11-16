@@ -497,7 +497,7 @@
   "sunrise.mods.browse.title": "Разглеждане на модове",
   "sunrise.mods.browse.update": "Актуализирайте",
   "sunrise.mods.dev": " (Разраб.)",
-  "sunrise.mods.empty": "Без модификации: поставете .hmod файлове в папката sunrise-mods",
+  "sunrise.mods.empty": "Без модификации: поставете .smod файлове в папката sunrise-mods",
   "sunrise.mods.in_world": " (оставете света да се промени)",
   "sunrise.mods.not_built": " (Не е построен)",
   "sunrise.mods.open_folder": "Отворете папката на Mod",

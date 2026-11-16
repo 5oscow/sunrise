@@ -322,7 +322,7 @@ impl Game<'_> {
         self.mobs[index].dealt_absorbed = 0;
         let mut credit = plan.lend(&mut self.last_hurt_by_player);
         let hurt = self.mobs[index].damage_with(
-            crate::game::entity::damage_level_of!(self, &attack, &mut credit),
+            crate::game::entity::damage_level_of!(self, &attack, &mut credit, None),
             amount,
             source,
             Some(&mut breach),
@@ -703,7 +703,7 @@ impl Game<'_> {
                 };
                 let plan = self.prepare_knockback_credit(id as i32, None, &attack);
                 let mut credit = plan.lend(&mut self.last_hurt_by_player);
-                let level = crate::game::entity::damage_level_of!(self, &attack, &mut credit);
+                let level = crate::game::entity::damage_level_of!(self, &attack, &mut credit, None);
                 let pushed = sunrise_client::health::Hurting::ArmorStand(id as i32, source);
                 // The smash pushes the armor stand through the short entry, as it pushes the mobs
                 // below (`knockback(power, x, z)`).
@@ -748,7 +748,7 @@ impl Game<'_> {
                 }
                 let plan = self.prepare_knockback_credit(id as i32, None, &attack);
                 let mut credit = plan.lend(&mut self.last_hurt_by_player);
-                let level = crate::game::entity::damage_level_of!(self, &attack, &mut credit);
+                let level = crate::game::entity::damage_level_of!(self, &attack, &mut credit, None);
                 self.mobs[i].knockback(level, 0.4, xd, zd, &source, amount);
                 self.remember_mob_player_credit(self.mobs[i].id);
                 self.post_attack(i);

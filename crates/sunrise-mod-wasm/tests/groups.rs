@@ -81,7 +81,7 @@ fn capability_is_answered_only_within_its_group() {
         let mut infos = Vec::new();
         let packages = ["counter_lib", "alpha", "beta", "gamma", "hog"].map(|id| {
             let path =
-                std::path::Path::new(&folder).join(format!("{id}/target/sunrise-mod/{id}.hmod"));
+                std::path::Path::new(&folder).join(format!("{id}/target/sunrise-mod/{id}.smod"));
             let manifest = sunrise_mod_package::Package::read(&path).unwrap().manifest;
             infos.push(mod_api::PackageInfo::new(
                 manifest.id.clone(),

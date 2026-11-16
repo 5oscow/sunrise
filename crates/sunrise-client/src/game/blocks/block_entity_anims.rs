@@ -751,7 +751,8 @@ impl Game<'_> {
             crate::game::entity::damage_level_of!(
                 self,
                 &sunrise_client::health::NO_ATTACK,
-                no_push
+                no_push,
+                None
             ),
             4.0,
             Damage::of(DamageKind::Magic),
