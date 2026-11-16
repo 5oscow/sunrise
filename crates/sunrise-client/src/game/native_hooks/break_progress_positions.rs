@@ -1,6 +1,6 @@
 //! One validated, stored display answer per crack stage, never per frame.
 use super::*;
-use crate::game::api_values::{TryIntoApi, block_state::block_listens};
+use crate::game::api_values::block_state::block_listens;
 
 impl Game<'_> {
     pub(in crate::game) fn with_break_progress_positions(
@@ -18,13 +18,9 @@ impl Game<'_> {
             publish(self, Vec::new());
             return;
         };
-        let Ok(state) = state.try_into_api() else {
-            publish(self, Vec::new());
-            return;
-        };
         let seal = self.transaction_open();
         let mut positions = Vec::new();
-        self.native_break_progress_positions(mod_api::__private::BreakProgressPositionsCall {
+        self.native_break_progress_positions(super::fire::BreakProgressPositionsCall {
             level,
             pos: mod_api::BlockPos::new(pos[0], pos[1], pos[2]),
             state,
@@ -63,8 +59,8 @@ impl Game<'_> {
 
     pub(in crate::game) fn native_break_progress_positions(
         &mut self,
-        call: mod_api::__private::BreakProgressPositionsCall<'_>,
+        call: super::fire::BreakProgressPositionsCall<'_>,
     ) {
-        mod_api::dispatch_break_progress_positions(self, call);
+        self.fire_break_progress_positions(call);
     }
 }
