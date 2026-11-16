@@ -125,6 +125,7 @@ pub fn check_current() -> Result<(), &'static str> {
     CHECK.with(|check| {
         *check.get_or_init(|| {
             inspect_current().map_err(|error| match error {
+                #[cfg(not(any(target_vendor = "apple", windows)))]
                 StackError::Uninspectable(reason) => reason,
                 StackError::Small(_) => {
                     "GuestStackUnavailable: calling thread needs 136 MiB of stack"
@@ -137,6 +138,8 @@ pub fn check_current() -> Result<(), &'static str> {
 /// Why the calling thread can't enter a guest.
 #[derive(Clone, Copy, Debug)]
 enum StackError {
+    /// Linux and other non-Apple, non-Windows targets: the stack could not be read.
+    #[cfg(not(any(target_vendor = "apple", windows)))]
     Uninspectable(&'static str),
     /// Its stack, in bytes, is smaller than the guest's reservation.
     Small(usize),
@@ -145,6 +148,7 @@ enum StackError {
 impl std::fmt::Display for StackError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            #[cfg(not(any(target_vendor = "apple", windows)))]
             Self::Uninspectable(reason) => f.write_str(reason),
             Self::Small(size) => write!(
                 f,
