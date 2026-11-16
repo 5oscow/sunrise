@@ -146,9 +146,7 @@ impl Game<'_> {
         let Some((pole, flag)) = &self.entity_models.banner else {
             return;
         };
-        let Some(head) =
-            render::part_transform(mob, alpha as f32, camera, self.res.mob_data(), "head")
-        else {
+        let Some(head) = render::part_transform(mob, alpha as f32, camera, self, "head") else {
             return;
         };
         let m = banner_matrix(head);
@@ -272,9 +270,7 @@ impl Game<'_> {
                 }
             }
         }
-        let Some(head) =
-            render::part_transform(mob, alpha as f32, camera, self.res.mob_data(), "head")
-        else {
+        let Some(head) = render::part_transform(mob, alpha as f32, camera, self, "head") else {
             return;
         };
         // Only wildflowers and pink petals carry the flowerbed display shift.
@@ -302,9 +298,7 @@ impl Game<'_> {
         let Some(state) = self.pack.assets.registry.default_state("minecraft:poppy") else {
             return;
         };
-        let Some(arm) =
-            render::part_transform(mob, alpha as f32, camera, self.res.mob_data(), "right_arm")
-        else {
+        let Some(arm) = render::part_transform(mob, alpha as f32, camera, self, "right_arm") else {
             return;
         };
         let t = arm
@@ -347,8 +341,7 @@ impl Game<'_> {
             return;
         };
         let alpha = alpha as f32;
-        let Some(head) = render::part_transform(mob, alpha, camera, self.res.mob_data(), "head")
-        else {
+        let Some(head) = render::part_transform(mob, alpha, camera, self, "head") else {
             return;
         };
         let unit = Mat4::from_translation(Vec3::splat(-0.5));
@@ -416,9 +409,9 @@ impl Game<'_> {
                 && mob.extra.using_item > 0
                 && sunrise_client::mobs::anim::state(mob, alpha as f32).swing < 1.0e-5;
             let t = if spyglass_to_eye {
-                render::held_to_eye_matrix(mob, alpha as f32, camera, self.res.mob_data(), left)
+                render::held_to_eye_matrix(mob, alpha as f32, camera, self, left)
             } else {
-                render::held_item_transform(mob, alpha as f32, camera, self.res.mob_data(), left)
+                render::held_item_transform(mob, alpha as f32, camera, self, left)
             };
             let Some(t) = t else {
                 continue;
@@ -564,9 +557,7 @@ impl Game<'_> {
         {
             stack.enchant("minecraft:unbreaking", 1);
         }
-        let Some(head) =
-            render::part_transform(mob, alpha as f32, camera, self.res.mob_data(), "head")
-        else {
+        let Some(head) = render::part_transform(mob, alpha as f32, camera, self, "head") else {
             return;
         };
         if let Some(kind) = super::armor_stands::skull_kind(&stack.item) {
