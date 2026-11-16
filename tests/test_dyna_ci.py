@@ -571,7 +571,10 @@ class DynaRoutingTests(unittest.TestCase):
             shim.chmod(0o755)
             # An older tree's harness and parity.py stream mismatches (vanilla's values), unindented too.
             (tree / "tools" / "test_old_parity.py").write_text(
-                "import sys\nprint('mismatch: vanilla 0.7231')\nprint('vanilla 9', file=sys.stderr)\nsys.exit(3)\n")
+                "import sys\nprint('mismatch: vanilla 0.7231')\nprint('vanilla 9', file=sys.stderr)\n"
+                "print('test lan::tests::datapack_damage_x ... FAILED')\n"
+                "print('  process didn\\'t exit successfully: `/t/deps/sunrise_client-0a1b vanilla` (signal: 9, SIGKILL: kill)')\n"
+                "sys.exit(3)\n")
             (tree / "tools" / "parity.py").write_text(
                 "import sys\nprint('PASS loot_a 3s')\nprint('vanilla 0.7231')\n"
                 "print('FAIL loot_b 2s  (log)')\nprint('    vanilla 9')\nsys.exit(1)\n")
@@ -579,7 +582,16 @@ class DynaRoutingTests(unittest.TestCase):
             logs = tree / ".local" / "parity-runner" / "logs"
             logs.mkdir(parents=True)
             (logs / "loot_a.log").write_text("passed\n")
-            (logs / "loot_b.log").write_text("vanilla 9\n")
+            # Its build was killed: the cause is printed from Cargo's fixed forms, never the values around them.
+            (logs / "loot_b.log").write_text(
+                "vanilla 9\n"
+                "error: could not compile `sunrise-client-lib` (lib test)\n"
+                "Caused by:\n"
+                "  process didn't exit successfully: `/x/rustc --crate-name sunrise_client_lib --edition=2024 "
+                "--cfg 'feature=\"vanilla 0.7231\"'` (signal: 9, SIGKILL: kill)\n"
+                "vanilla 0.7231 (signal: 9, SIGKILL: kill)\n"
+                "test vanilla_0.7231 ... FAILED\n"
+                "thread 'main' panicked at crates/a/src/b.rs:12:5:\nvanilla 0.7231\n")
             env = {**os.environ, "DYNA_CI_BUILD": str(build), "GITHUB_RUN_ID": "77", "GITHUB_RUN_ATTEMPT": "1",
                    "RUNNER_NAME": "slot-1", "GITHUB_WORKSPACE": str(tree)}
             harness = subprocess.run([str(shim), "tools/test_old_parity.py"], cwd=tree, env=env,
@@ -592,6 +604,13 @@ class DynaRoutingTests(unittest.TestCase):
                 self.assertNotIn("vanilla", result.stdout + result.stderr)
             self.assertIn("FAIL test_old_parity (exit 3", harness.stdout)
             self.assertEqual(runner.stdout.splitlines()[:2], ["PASS loot_a", "FAIL loot_b"])
+            self.assertEqual(runner.stdout.splitlines()[2:5], [
+                "  loot_b: could not compile sunrise-client-lib (lib test)",
+                "  loot_b: rustc for sunrise_client_lib killed by signal 9 (SIGKILL)",
+                "  loot_b: panicked at crates/a/src/b.rs:12:5"])
+            self.assertEqual(harness.stdout.splitlines()[:2], [
+                "  test_old_parity: test lan::tests::datapack_damage_x FAILED",
+                "  test_old_parity: test binary sunrise_client killed by signal 9 (SIGKILL)"])
             self.assertIn("mismatch: vanilla 0.7231", (build / "parity-logs" / "test_old_parity.log").read_text())
             kept = build / "parity-keep" / "77-1"
             self.assertEqual(sorted(p.name for p in kept.iterdir()), ["loot_b.log", "parity.log", "test_old_parity.log"])
