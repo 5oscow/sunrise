@@ -1,29 +1,29 @@
 use super::*;
 impl ItemUseTickHooks {
-        fn living_entity_use_item_tick(
-            &self,
-            _: mod_api::HostSide,
-            event: &mut mod_api::LivingEntityUseItemTickEvent<'_>,
-        ) -> mod_api::Flow {
-            // The input names independent boundary cases, not an implementation
-            // of the engine countdown: that behavior is tested in the game.
-            match event.duration {
-                32 => mod_api::Flow::Cancel,
-                31 => {
-                    event.duration = 0;
-                    mod_api::Flow::Continue
-                }
-                30 => {
-                    event.duration = 1;
-                    mod_api::Flow::Continue
-                }
-                29 => {
-                    event.duration = -7;
-                    mod_api::Flow::Continue
-                }
-                _ => mod_api::Flow::Continue,
+    fn living_entity_use_item_tick(
+        &self,
+        _: mod_api::HostSide,
+        event: &mut mod_api::LivingEntityUseItemTickEvent<'_>,
+    ) -> mod_api::Flow {
+        // The input names independent boundary cases, not an implementation
+        // of the engine countdown: that behavior is tested in the game.
+        match event.duration {
+            32 => mod_api::Flow::Cancel,
+            31 => {
+                event.duration = 0;
+                mod_api::Flow::Continue
             }
+            30 => {
+                event.duration = 1;
+                mod_api::Flow::Continue
+            }
+            29 => {
+                event.duration = -7;
+                mod_api::Flow::Continue
+            }
+            _ => mod_api::Flow::Continue,
         }
+    }
 }
 
 #[test]
