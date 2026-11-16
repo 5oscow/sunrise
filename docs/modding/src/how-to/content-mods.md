@@ -422,6 +422,9 @@ mob's path stands on and its move control's jump read the published value at the
 nothing calls into the mod.
 Face sturdiness and multiface attachment between neighbouring blocks (placement, survival,
 shape updates, as for lichen and sculk veins) read the published collision shape at the position too.
+Fluid passage reads it as well: water and lava pass between two cells by their collision shapes at
+their positions. A publish, a clear and an aborted publish (the old shapes put back) each notify the
+block's neighbours, so a fluid beside it reads the new shape; publishing an unchanged value notifies nothing.
 Shapes that depend on the querying entity are not covered; `outline_context_shapes` and
 `collision_context_shapes` stay declared, and a published shape stands over them.
 
