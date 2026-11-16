@@ -293,6 +293,22 @@ impl NoBackend for BlockEntityError {
     }
 }
 
+/// Why a contents watch could not be registered.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, sunrise_mod_api_macros::Wire)]
+#[non_exhaustive]
+pub enum ContentsWatchError {
+    /// The observer is no longer live or its level cannot be written here.
+    Stale,
+    /// No BlockPart on this observer subscribes to contents_changed.
+    NotSubscribed,
+}
+
+impl NoBackend for ContentsWatchError {
+    fn no_backend() -> Self {
+        Self::Stale
+    }
+}
+
 /// An effect a fake player's action is stopped from starting. Kinds may be added.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]

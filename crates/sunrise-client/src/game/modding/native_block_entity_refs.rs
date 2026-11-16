@@ -471,6 +471,36 @@ impl Game<'_> {
         Ok(true)
     }
 
+    /// Register a generation-bound observer in its level's keyed contents index.
+    pub(super) fn block_entity_watch_contents(
+        &mut self,
+        entity: BlockEntityRef,
+        source: mod_api::BlockPos,
+        enabled: bool,
+    ) -> Result<(), mod_api::ContentsWatchError> {
+        let fields = entity.fields();
+        if !self.level_in_place(fields.level)
+            || self.block_entity_identity(fields.level, fields.position) != Some(entity)
+        {
+            return Err(mod_api::ContentsWatchError::Stale);
+        }
+        let [x, y, z] = fields.position;
+        if !crate::game::api_values::block_state::block_listens(
+            mod_api::HookId::ContentsChanged,
+            self.world.block(x, y, z),
+        ) {
+            return Err(mod_api::ContentsWatchError::NotSubscribed);
+        }
+        self.journal_block_entity((x, y, z));
+        let observer = self.world.block_entities.identity((x, y, z)).unwrap();
+        self.world.block_entities.contents_watches.set(
+            observer,
+            (source.x, source.y, source.z),
+            enabled,
+        );
+        Ok(())
+    }
+
     /// Publishes the shapes the block entity's block has in place of its declared ones, or
     /// clears them with None. Applied at once, to the queries that follow; clients get them
     /// with the block entity update. Inside a transaction an abort puts the old ones back.
