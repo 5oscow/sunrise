@@ -8,9 +8,9 @@
 //! The routes that read the table so far: the content mods' thrown types
 //! (`ProjectileKind::Thrown`, by [`ThrownType::slot`]), the living types drawn as mobs (by
 //! their shared `MobType`, which the game's types never replace while it runs), whose renderer
-//! draws in place of the model and its vanilla layers, and primed TNT (`minecraft:tnt`). Each
-//! other entity family becomes a route of its own; until then a registration for one of its types
-//! is kept and the type keeps its drawing.
+//! draws in place of the model and its vanilla layers, primed TNT (`minecraft:tnt`) and experience
+//! orbs (`minecraft:experience_orb`). Each other entity family becomes a route of its own; until
+//! then a registration for one of its types is kept and the type keeps its drawing.
 //! Each load also asks for the layers of the living renderers (`native_entity_layers`), which draw
 //! through the same guard ([`Game::guarded_entity_draw`]).
 use super::{
@@ -49,12 +49,17 @@ static ANY_LIVING: AtomicBool = AtomicBool::new(false);
 /// Whether the last load resolved a renderer for primed TNT: a frame checks only this when none
 /// was registered, so the vanilla TNT route stays off the table lock.
 static ANY_TNT: AtomicBool = AtomicBool::new(false);
+/// Whether the last load resolved a renderer for an experience orb: a frame checks only this when
+/// none was registered, so the vanilla orb route stays off the table lock.
+static ANY_EXPERIENCE_ORB: AtomicBool = AtomicBool::new(false);
 
 /// The player's entity type: its model goes by its skin, not by entity type.
 const PLAYER: &str = "minecraft:player";
 
 /// Primed TNT's entity type.
 const TNT: &str = "minecraft:tnt";
+/// An experience orb's entity type.
+const EXPERIENCE_ORB: &str = "minecraft:experience_orb";
 
 /// Keeps the mods' registrations, once per process (false when they already were).
 pub(super) fn register(renderers: BTreeMap<String, Arc<dyn EntityRenderer>>) -> bool {
@@ -85,6 +90,8 @@ pub(super) struct EntityRendererTable {
     living: FxHashMap<usize, Arc<Resolved<dyn EntityRenderer>>>,
     /// Primed TNT (`minecraft:tnt`).
     tnt: Option<Arc<Resolved<dyn EntityRenderer>>>,
+    /// An experience orb (`minecraft:experience_orb`).
+    experience_orb: Option<Arc<Resolved<dyn EntityRenderer>>>,
 }
 
 impl EntityRendererTable {
@@ -102,6 +109,7 @@ impl EntityRendererTable {
             thrown: thrown.iter().map(|_| None).collect(),
             living: FxHashMap::default(),
             tnt: None,
+            experience_orb: None,
         };
         let mut unknown = Vec::new();
         for (id, renderer) in registered {
@@ -112,6 +120,8 @@ impl EntityRendererTable {
                 table.living.insert(Arc::as_ptr(kind) as usize, resolved());
             } else if id == TNT {
                 table.tnt = Some(resolved());
+            } else if id == EXPERIENCE_ORB {
+                table.experience_orb = Some(resolved());
             } else if !known(id) {
                 unknown.push(id.clone());
             }
@@ -132,6 +142,9 @@ impl EntityRendererTable {
     /// The renderer of primed TNT, when a mod registered one for `minecraft:tnt`.
     pub(super) fn tnt(&self) -> Option<&Arc<Resolved<dyn EntityRenderer>>> {
         self.tnt.as_ref()
+    /// The renderer of an experience orb, when a mod registered one for `minecraft:experience_orb`.
+    pub(super) fn experience_orb(&self) -> Option<&Arc<Resolved<dyn EntityRenderer>>> {
+        self.experience_orb.as_ref()
     }
 }
 
@@ -161,6 +174,14 @@ pub(in crate::game) fn tnt_renderer() -> Option<Arc<Resolved<dyn EntityRenderer>
     }
     let table = TABLE.read().unwrap_or_else(PoisonError::into_inner);
     table.as_ref()?.tnt().cloned()
+/// The renderer the last resource load resolved for an experience orb, when a mod registered one:
+/// with none registered, one flag check, with no lock.
+pub(in crate::game) fn experience_orb_renderer() -> Option<Arc<Resolved<dyn EntityRenderer>>> {
+    if !ANY_EXPERIENCE_ORB.load(Ordering::Relaxed) {
+        return None;
+    }
+    let table = TABLE.read().unwrap_or_else(PoisonError::into_inner);
+    table.as_ref()?.experience_orb().cloned()
 }
 
 impl Game<'_> {
@@ -186,6 +207,10 @@ impl Game<'_> {
         *TABLE.write().unwrap_or_else(PoisonError::into_inner) = Some(table);
         ANY_LIVING.store(any_living, Ordering::Relaxed);
         ANY_TNT.store(any_tnt, Ordering::Relaxed);
+        let any_experience_orb = table.experience_orb.is_some();
+        *TABLE.write().unwrap_or_else(PoisonError::into_inner) = Some(table);
+        ANY_LIVING.store(any_living, Ordering::Relaxed);
+        ANY_EXPERIENCE_ORB.store(any_experience_orb, Ordering::Relaxed);
         self.resolve_entity_layers(&rows, registered);
     }
 

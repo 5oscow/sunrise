@@ -126,6 +126,7 @@ pub(super) fn entity_render_state(m: &Mob, id: u32, partial: f32) -> EntityRende
         pitch: pose.x_rot,
         living: Some(living.into()),
         tnt_fuse: None,
+        orb_value: None,
     }
     .into()
 }

@@ -30,6 +30,9 @@ pub struct EntityRenderState {
     /// The remaining primed-TNT fuse, in ticks, as vanilla draws it (`fuse - partial + 1`);
     /// `Some` for `minecraft:tnt`, none for any other entity.
     pub tnt_fuse: Option<f32>,
+    /// An experience orb's value (`ExperienceOrb.DATA_VALUE`); some for an orb, none for
+    /// every other family.
+    pub orb_value: Option<i32>,
 }
 
 /// What a living entity's frame adds to [`EntityRenderState`], as
@@ -171,6 +174,7 @@ mod tests {
             pitch: 0.0,
             living: None,
             tnt_fuse: None,
+            orb_value: None,
         };
         let (mut bolt, mut dart) = (Light::default(), Light::default());
         renderers["mymod:bolt"].submit(&state, &mut bolt).unwrap();

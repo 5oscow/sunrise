@@ -33,6 +33,7 @@ impl Game<'_> {
                 pitch: a.previous_pitch + partial * (a.pitch - a.previous_pitch),
                 living: None,
                 tnt_fuse: None,
+                orb_value: None,
             }
             .into();
             let block = at.map(|x| x.floor() as i32);
