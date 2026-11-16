@@ -115,6 +115,7 @@ mod buckets;
 mod creaking;
 mod falling;
 mod feature_world;
+pub mod fluid_interactions;
 mod fluids;
 mod growth;
 mod hooks;
@@ -1379,6 +1380,8 @@ pub struct Behaviours {
     growth: growth::Growth,
     /// The open world's NeoForge block data maps.
     block_maps: block_maps::Slot,
+    /// The open world's fluid interactions: vanilla's two lava rules and the mods' entries.
+    fluid_interactions: fluid_interactions::Slot,
 }
 
 impl Behaviours {
