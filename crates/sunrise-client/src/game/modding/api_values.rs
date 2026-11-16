@@ -1021,12 +1021,6 @@ impl TryIntoApi for crate::crafting::FireworkShapeIngredient {
 /// hide the rest of its type. Other collection conversions remain all-or-nothing.
 #[derive(Default)]
 pub(in crate::game) struct RecipeListing(pub std::sync::Arc<[crate::crafting::RecipeSnapshot]>);
-impl std::ops::Deref for RecipeListing {
-    type Target = [crate::crafting::RecipeSnapshot];
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
 impl TryIntoApi for RecipeListing {
     type Api = std::sync::Arc<[mod_api::Recipe]>;
     type Error = std::convert::Infallible;
