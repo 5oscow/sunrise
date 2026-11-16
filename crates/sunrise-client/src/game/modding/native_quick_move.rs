@@ -9,16 +9,10 @@ use std::{
 };
 use sunrise_client::{
     block_entities::Pos,
-<<<<<<< HEAD
-    containers::{BlockEntity, ModMenuType},
+    containers::{BlockEntity, ModBlockEntity, ModMenuType},
     items::ItemStack,
     lan::menu::Slots,
     menu::Asked,
-=======
-    containers::{BlockEntity, ModBlockEntity},
-    items::ItemStack,
-    lan::menu::Slots,
->>>>>>> 861008eee9b1c840f2a8cc213f20652657ed7abf
 };
 use sunrise_protocol::packets::play;
 
