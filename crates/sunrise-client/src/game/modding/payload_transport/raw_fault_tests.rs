@@ -56,6 +56,8 @@ impl IPayloadHandler for Step {
                 Some(STAGED),
                 "the write is staged in place"
             );
+            // A failed delivery discards its explicit disconnect with its writes.
+            context.disconnect(mod_api::Text::literal("discard this failed handler's kick"));
             return Err(mod_api::PayloadHandleError::Failed(
                 "refused after staging a write".into(),
             ));

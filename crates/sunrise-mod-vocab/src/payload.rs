@@ -259,8 +259,12 @@ crate::wire::wire_handlers::handler!(dyn IPayloadHandler, "IPayloadHandler");
 crate::wire::wire_handlers::handler!(dyn PayloadWork, "PayloadWork");
 
 /// One receiving owner for a registered id and direction, never an all-mod broadcast.
-/// Return `Failed` when application decoding fails; the session names the channel
-/// and fails instead of silently dropping the malformed application message.
+/// Return `Failed` when application decoding fails. For a typed or declared payload the session
+/// names the channel and fails instead of silently dropping the malformed message. For a raw
+/// channel (`PayloadRegistrar::play_raw`) a failure, or a busy expiry, logs the owner and the
+/// channel, drops only that delivery and rolls back its staged effects (a staged disconnect
+/// included); the other owners' copies still run. A successful handler's explicit disconnect
+/// and a main-queue refusal disconnect either way.
 /// `Busy` returns unconsumed bytes to the transport under [`PayloadHandleError`]'s
 /// ordering and deadline contract; this callback does not itself queue a retry.
 pub trait IPayloadHandler: Send + Sync + 'static {
