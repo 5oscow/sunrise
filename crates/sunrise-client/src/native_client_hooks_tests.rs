@@ -19,6 +19,14 @@ thread_local! {
     /// with.
     static ITEM_ASKS: std::cell::RefCell<Vec<(&'static str, String, bool)>> =
         const { std::cell::RefCell::new(Vec::new()) };
+    /// The jumps the installed `living_jump` heard on this thread: the entity and its velocity.
+    static JUMPED: std::cell::RefCell<Vec<(u32, [f64; 3])>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// The jumps the installed `living_jump` heard on this thread since the last call, oldest first.
+pub(crate) fn jumps() -> Vec<(u32, [f64; 3])> {
+    JUMPED.with_borrow_mut(std::mem::take)
 }
 
 /// The item hooks this thread asked since the last call, oldest first: the hook, the stack's
@@ -117,7 +125,8 @@ pub(crate) fn install() {
                     *multiplier *= 2.0;
                 }
             },
-            living_jump: |context, _, _| {
+            living_jump: |context, entity, _, velocity| {
+                JUMPED.with_borrow_mut(|jumps| jumps.push((entity, velocity)));
                 JUMPS.fetch_add(
                     usize::from(context.side() == LoopSide::Server),
                     std::sync::atomic::Ordering::Relaxed,
