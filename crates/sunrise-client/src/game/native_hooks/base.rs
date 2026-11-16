@@ -3742,14 +3742,19 @@ impl Game<'_> {
     }
     /// A client started tracking an entity (NeoForge's
     /// `PlayerEvent.StartTracking`, posted at the end of
-    /// `ServerEntity.addPairing`): `player` (`name`) is now sent `entity`
-    /// (its ID, `uuid` its UUID, `kind` its type, `minecraft:zombie`) and its
-    /// changes. It comes into range, its client's chunks reach it, or it is
-    /// put in the level; another player is an entity too, and a player never
-    /// tracks their own. A mod sends the player what they need to show it
-    /// (`PlayerRef::send_payload`). The entity is as it was last tick: it
-    /// may be gone by now. Heard after the tick's players and entities have
-    /// moved, in order, with no player's state swapped in. Server-side.
+    /// `ServerEntity.addPairing`): `player` (`name`) has just been sent the
+    /// spawn bundle of `entity` (its ID, `uuid` its UUID, `kind` its type,
+    /// `minecraft:zombie`) and counts as tracking it. It came into range, its
+    /// client's chunks reached it, or it was put in the level; another player
+    /// is an entity too, and a player never tracks their own. The entity is
+    /// still in the level. What a listener sends the player
+    /// (`PlayerRef::send_payload`) reaches it right after that bundle, before
+    /// the entity's next changes. Heard in the tick's tracking pass, after the
+    /// pass has built every player's packets: the player already counts as
+    /// tracking the other entities the same pass paired. The engine is still
+    /// walking its tracker: read the game and send payloads, but don't spawn,
+    /// remove or teleport entities from here. No player's state is swapped in.
+    /// Server-side. Named injections request `hook_version = 2`.
     pub(in crate::game) fn native_player_start_tracking(
         &mut self,
         player: u128,
@@ -3762,13 +3767,19 @@ impl Game<'_> {
     }
     /// A client stopped tracking an entity (NeoForge's
     /// `PlayerEvent.StopTracking`, posted at the end of
-    /// `ServerEntity.removePairing`): it went out of range, left the level or
-    /// died, or `player` (`name`) left, changed level or respawned, which
-    /// stops everything they tracked. `entity`, `uuid` and `kind` are as
-    /// `native_player_start_tracking` told. Once for each start, a leaving
-    /// player's after `native_player_logged_out`. The entity is not
-    /// necessarily still there, and a player who left is gone: no player's
-    /// state is swapped in. Server-side.
+    /// `ServerEntity.removePairing`): `entity` went out of range, left the
+    /// level or died, or `player` (`name`) left, changed level or respawned,
+    /// which stops everything they tracked. `entity`, `uuid` and `kind` are as
+    /// `native_player_start_tracking` told, once for each start; the player no longer counts as tracking
+    /// it. A stop of the tracking pass is heard right after the removal
+    /// packet, and what a listener sends the player reaches it after that
+    /// removal. A leaving player's stops come after `native_player_logged_out`; those
+    /// of a respawn or a level change, which send their own removals, at the
+    /// next tracking pass. The entity is not necessarily still there, and a
+    /// player who left is gone. As in `player_start_tracking`, the engine is
+    /// walking its tracker: don't spawn, remove or teleport entities from
+    /// here. No player's state is swapped in. Server-side. Named injections
+    /// request `hook_version = 2`.
     pub(in crate::game) fn native_player_stop_tracking(
         &mut self,
         player: u128,
