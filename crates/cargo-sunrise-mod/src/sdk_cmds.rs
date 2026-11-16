@@ -232,7 +232,7 @@ enum Subject {
     NotApplicable(String),
 }
 
-/// The table of the `.hmod` at `path`.
+/// The table of the `.smod` at `path`.
 fn package_subject(path: &Path) -> Result<Subject, String> {
     let package = Package::read(path)?;
     let manifest = Package::entry(path, MANIFEST, MAX_MANIFEST)?
@@ -287,7 +287,7 @@ fn exact_text(name: &str, why: &str) -> String {
     format!("{name} is made for exactly one build ({why}), so `fits` doesn't apply.")
 }
 
-/// `fits [<file.hmod>] [--build <name>]…`: one line per build (the current Nightly unless
+/// `fits [<file.smod>] [--build <name>]…`: one line per build (the current Nightly unless
 /// `--build` names others) saying whether the mod fits it. Exits 0 when every build fits, 1 when
 /// one does not, and 2 when the question cannot be answered or does not apply.
 pub(crate) fn fits(entry: ChildEntry, args: &[String]) -> ExitCode {

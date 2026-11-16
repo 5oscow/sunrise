@@ -20,12 +20,12 @@ Offer a version only when this build loads it:
 
 | Kind | Loads when | From `content` |
 | --- | --- | --- |
-| Content mod (`.hmod`) | its manifest `api` is listed | `mod.api` |
-| Native mod (`.hmod`) | the game is rebuilt with it for this exact build | `native_mod.exact_build`, `native_mod.rebuild` |
-| Sunrise shader pack (`.hshader`) | its manifest's `schema` and `api` are listed | `shader.schema`, `shader.api` |
+| Content mod (`.smod`) | its manifest `api` is listed | `mod.api` |
+| Native mod (`.smod`) | the game is rebuilt with it for this exact build | `native_mod.exact_build`, `native_mod.rebuild` |
+| Sunrise shader pack (`.sshader`) | its manifest's `schema` and `api` are listed | `shader.schema`, `shader.api` |
 | Resource pack | always; outside `format` it is marked too old or too new, as vanilla marks it | `resourcepack.format` |
 | Data pack | the same | `datapack.format` |
-| Modpack (`.hpack`) | its `format` is this one | `modpack.format` |
+| Modpack (`.spack`) | its `format` is this one | `modpack.format` |
 | The index | its `schema` is at most this one | `index.schema` |
 
 ## Where content goes
@@ -35,9 +35,9 @@ starts and writes them when the player changes a setting.
 
 | Kind | File | Folder | On and off |
 | --- | --- | --- | --- |
-| Content mod | `<id>.hmod`, or a folder with `sunrise-mod.toml` | `sunrise-mods/` | `sunrise-mods.txt`: a `mod.<id>:true` line turns it on. A mod without one is off |
-| Native mod | `<id>.hmod` with `[native]` in `sunrise-mod.toml` | `sunrise-mods/` | runs only in a game built with it: `mod.<id>:true` chooses it for the next build, `mod.<id>:false` turns a built one off |
-| Shader pack | a `.hshader` or a folder with `sunrise-shaders.toml`; a `shaders/`-format `.zip` or folder | `shaderpacks/` | `sunrise-graphics.txt`: `pickedShaderPack:<file or folder name>`, empty for none. A pack's options are in `shaderpacks/<name>.txt` |
+| Content mod | `<id>.smod`, or a folder with `sunrise-mod.toml` | `sunrise-mods/` | `sunrise-mods.txt`: a `mod.<id>:true` line turns it on. A mod without one is off |
+| Native mod | `<id>.smod` with `[native]` in `sunrise-mod.toml` | `sunrise-mods/` | runs only in a game built with it: `mod.<id>:true` chooses it for the next build, `mod.<id>:false` turns a built one off |
+| Shader pack | a `.sshader` or a folder with `sunrise-shaders.toml`; a `shaders/`-format `.zip` or folder | `shaderpacks/` | `sunrise-graphics.txt`: `pickedShaderPack:<file or folder name>`, empty for none. A pack's options are in `shaderpacks/<name>.txt` |
 | Resource pack | a `.zip` or a folder with `pack.mcmeta` | `resourcepacks/` | `options.txt`: `resourcePacks:["vanilla","file/<name>"]`, lowest priority first, as vanilla's |
 | Data pack | a `.zip` or a folder with `pack.mcmeta` and `data/` | `saves/<world>/datapacks/` | `saves/<world>/datapacks.json`: `{"enabled": [...], "disabled": [...]}`, each `file/<name>` (or `vanilla`). A pack in neither list is on |
 
@@ -48,7 +48,7 @@ starts and writes them when the player changes a setting.
   that doesn't build Sunrise doesn't offer them.
 - **A modpack** isn't copied into the game folder. A launcher reads its `sunrise-modpack.toml`, installs each mod
   it lists from the index with the checks below, writes `mod.<id>:true` for those with `on` (the default), and
-  copies `overrides/` into the game folder. `overrides/` may hold only what [mod-index.md](mod-index.md#hpack)
+  copies `overrides/` into the game folder. `overrides/` may hold only what [mod-index.md](mod-index.md#spack)
   lists, within its size limits.
 
 ## Before installing a file

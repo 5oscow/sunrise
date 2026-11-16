@@ -497,7 +497,7 @@
   "sunrise.mods.browse.title": "Περιήγηση Mods",
   "sunrise.mods.browse.update": "Ενημέρωση",
   "sunrise.mods.dev": " (Ανάπτυξη)",
-  "sunrise.mods.empty": "Χωρίς mods: τοποθετήστε τα αρχεία .hmod στο φάκελο sunrise-mods",
+  "sunrise.mods.empty": "Χωρίς mods: τοποθετήστε τα αρχεία .smod στο φάκελο sunrise-mods",
   "sunrise.mods.in_world": " (άσε τον κόσμο να αλλάξει)",
   "sunrise.mods.not_built": " (Δεν έχει κατασκευαστεί)",
   "sunrise.mods.open_folder": "Ανοίξτε το φάκελο Mod",

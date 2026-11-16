@@ -500,7 +500,7 @@
   "sunrise.mods.browse.title": "Przeglądaj mody",
   "sunrise.mods.browse.update": "Aktualizuj",
   "sunrise.mods.dev": " (dev)",
-  "sunrise.mods.empty": "Brak modów: umieść pliki .hmod w folderze sunrise-mods",
+  "sunrise.mods.empty": "Brak modów: umieść pliki .smod w folderze sunrise-mods",
   "sunrise.mods.in_world": " (wyjdź ze świata, aby zmienić)",
   "sunrise.mods.not_built": " (niezbudowany)",
   "sunrise.mods.open_folder": "Otwórz folder z modami",

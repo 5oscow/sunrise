@@ -805,7 +805,9 @@ pub trait EntitiesBackendMut {
     /// a refusal (`StartRidingRefusal`).
     ///
     /// Players and mobs can ride a mob, boat, minecart or generic seat entity
-    /// (an armor stand, display, marker or interaction). Mob vehicle capacity
+    /// (an armor stand, display, marker or interaction). A successful mob mount drops its
+    /// lead as an item without a sound and emits `entity_unleash`; a refused mount leaves the
+    /// leash alone. Mob vehicle capacity
     /// follows its species; minecarts store one passenger and boats store one
     /// mob and up to two passengers in total. Generic seats admit one passenger unless forced.
     /// `force` bypasses normal admission checks, not these storage limits.

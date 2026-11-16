@@ -7,6 +7,7 @@ pub(crate) struct Installed {
     pub(crate) menu_recipe_books: HashMap<String, crate::parts::menus::MenuBookDeclaration>,
     pub(crate) recipe_book_types: HashMap<String, String>,
     pub(crate) recipe_book_fields: HashMap<String, (String, String)>,
+    pub(crate) recipe_book_filters: HashMap<String, crate::RecipeBookFilterLook>,
     pub(crate) game_rule_categories: Vec<String>,
     pub(crate) game_rules: Vec<crate::GameRuleDecl>,
     pub(crate) attachment_types: HashMap<String, HashMap<String, bool>>,

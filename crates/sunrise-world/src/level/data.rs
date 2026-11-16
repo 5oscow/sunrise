@@ -69,6 +69,15 @@ pub struct StateFacts {
     pub shape: i32,
 }
 
+impl StateFacts {
+    /// Whether a random tick at a block in this state can do anything
+    /// ([`super::Behaviours::random_tick_candidate`]): a randomly ticking block, or lava.
+    pub fn random_tick_candidate(&self) -> bool {
+        self.flags & state_flags::RANDOM_TICKS != 0
+            || super::fluids::fluid_randomly_ticks(self.fluid.kind())
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct SetType {
     pub name: Box<str>,

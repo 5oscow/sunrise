@@ -497,7 +497,7 @@
   "sunrise.mods.browse.title": "Pārlūkot modifikācijas",
   "sunrise.mods.browse.update": "Atjaunināt",
   "sunrise.mods.dev": " (Izstrādātājs)",
-  "sunrise.mods.empty": "Nav modifikāciju: ievietojiet .hmod failus mapē sunrise-mods",
+  "sunrise.mods.empty": "Nav modifikāciju: ievietojiet .smod failus mapē sunrise-mods",
   "sunrise.mods.in_world": " (atstāj pasauli mainīties)",
   "sunrise.mods.not_built": " (nav uzbūvēts)",
   "sunrise.mods.open_folder": "Atveriet mod mapi",

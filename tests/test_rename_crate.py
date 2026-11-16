@@ -32,8 +32,8 @@ path = "../crates/sunrise-mod-package"
 # Put files in sunrise-mods/ and enable them in sunrise-mods.txt.
 '''
         self.assertEqual(rename.rewrite("crates/sunrise-mods/Cargo.toml", source), expected)
-        self.assertEqual(rename.destination("crates/sunrise-mods/tests/file.hmod"),
-                         "crates/sunrise-mod-package/tests/file.hmod")
+        self.assertEqual(rename.destination("crates/sunrise-mods/tests/file.smod"),
+                         "crates/sunrise-mod-package/tests/file.smod")
         self.assertEqual(rename.destination("crates/sunrise-mods-other/src/lib.rs"),
                          "crates/sunrise-mods-other/src/lib.rs")
         self.assertEqual(rename.rewrite("crates/sunrise-mod-registry/tests/submit.rs", '../sunrise-mods/tests/index'),

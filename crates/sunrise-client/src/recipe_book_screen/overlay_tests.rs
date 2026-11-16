@@ -19,6 +19,7 @@ fn poses(cells: &[(i32, i32)]) -> Vec<[f32; 6]> {
         mouse: (-1, -1),
         index: 0,
         filtering: false,
+        filter_look: None,
         search: &search,
         tabs: &[],
         buttons: &[],
@@ -102,6 +103,7 @@ fn explicit_origin_moves_widgets_but_not_absolute_overlay_or_ghosts() {
         mouse: (221, 50),
         index: 0,
         filtering: false,
+        filter_look: None,
         search: &search,
         tabs: &tabs,
         buttons: &[],
@@ -143,5 +145,89 @@ fn explicit_origin_moves_widgets_but_not_absolute_overlay_or_ghosts() {
             .iter()
             .any(|c| matches!(&c.call, Call::Item { x: 8, y: 9, .. })
                 && c.pose == [1.0, 0.0, 0.0, 1.0, 400.0, 100.0])
+    );
+}
+
+#[test]
+fn a_book_draws_its_own_filter_look_and_two_icon_tabs() {
+    let look = mod_api::RecipeBookFilterLook {
+        enabled: "demo:book/on".into(),
+        disabled: "demo:book/off".into(),
+        enabled_highlighted: "demo:book/on_hover".into(),
+        disabled_highlighted: "demo:book/off_hover".into(),
+        tooltip: "demo.book.cookable".into(),
+    };
+    let search = Search::default();
+    let tabs = [TabView {
+        icons: ("demo:dumpling".into(), Some("demo:sauce".into())),
+        selected: false,
+        anim: 0.0,
+    }];
+    let mut screen = Screen {
+        book: BookType::Crafting,
+        origin: (110, 37),
+        mouse: (221, 50),
+        index: 0,
+        filtering: true,
+        filter_look: Some(&look),
+        search: &search,
+        tabs: &tabs,
+        buttons: &[],
+        page: 0,
+        pages: 1,
+        overlay: None,
+        ghost: None,
+        translate: &str::to_owned,
+        text_width: &|s| s.len() as i32,
+    };
+    let sprites = |screen: &Screen| -> Vec<String> {
+        draw(screen)
+            .iter()
+            .filter_map(|c| match &c.call {
+                Call::Sprite {
+                    id, x: 220, y: 49, ..
+                } => Some(id.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    assert_eq!(sprites(&screen), ["demo:book/on_hover"]);
+    let tooltip = |screen: &Screen| -> Vec<Vec<Run>> {
+        draw(screen)
+            .into_iter()
+            .find_map(|c| match c.call {
+                Call::Tooltip(lines) => Some(lines),
+                _ => None,
+            })
+            .unwrap()
+    };
+    assert_eq!(
+        tooltip(&screen),
+        [[Run::plain("demo.book.cookable".to_owned())]]
+    );
+    screen.filtering = false;
+    assert_eq!(sprites(&screen), ["demo:book/off_hover"]);
+    assert_eq!(
+        tooltip(&screen),
+        [[Run::plain("gui.recipebook.toggleRecipes.all".to_owned())]]
+    );
+    screen.mouse = (0, 0);
+    assert_eq!(sprites(&screen), ["demo:book/off"]);
+    screen.filtering = true;
+    assert_eq!(sprites(&screen), ["demo:book/on"]);
+    // The tab sits at x = 110 - 30 and y = 37 + 3; its icons are 3 and 14 pixels in, 5 down.
+    let icons: Vec<_> = draw(&screen)
+        .iter()
+        .filter_map(|c| match &c.call {
+            Call::Item { stack, x, y, .. } => Some((stack.item.to_string(), *x, *y)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        icons,
+        [
+            ("demo:dumpling".to_owned(), 83, 45),
+            ("demo:sauce".to_owned(), 94, 45)
+        ]
     );
 }

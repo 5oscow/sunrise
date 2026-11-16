@@ -497,7 +497,7 @@
   "sunrise.mods.browse.title": "Naršyti modifikacijas",
   "sunrise.mods.browse.update": "Atnaujinti",
   "sunrise.mods.dev": " (Kūrėjas)",
-  "sunrise.mods.empty": "Jokių modifikacijų: įdėkite .hmod failus į aplanką „sunrise-mods“.",
+  "sunrise.mods.empty": "Jokių modifikacijų: įdėkite .smod failus į aplanką „sunrise-mods“.",
   "sunrise.mods.in_world": " (palik pasauliui pasikeisti)",
   "sunrise.mods.not_built": " (Nepastatytas)",
   "sunrise.mods.open_folder": "Atidarykite Mod aplanką",

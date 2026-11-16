@@ -17,6 +17,7 @@ event.categories.push(RecipeBookCategory {
     id: "mymod:crushing".into(),
     recipe_type: "mymod:crusher".into(),
     icon: "mymod:crusher".into(),
+    secondary_icon: None,
     target_menu: "mymod:crusher".into(),
     book: book.clone(),
     search_group: "mymod:crusher_search".into(),
@@ -39,6 +40,7 @@ event.categories.push(RecipeBookCategory {
 | `id` | Unique namespaced category identifier outside `minecraft:`. |
 | `recipe_type` | Namespaced identifier outside `minecraft:` present in the recipe table. Multiple categories can use one type. |
 | `icon` | Registered item identifier other than `minecraft:air`. |
+| `secondary_icon` | `None` for a one-icon tab, or a registered item identifier other than `minecraft:air` drawn beside `icon`, as vanilla's two-icon tabs do. |
 | `target_menu` | Registered menu identifier. |
 | `book` | Registered `RecipeBookTypeKey`. All categories in one book name the same menu and search group. |
 | `search_group` | Namespaced identifier outside `minecraft:` owned by exactly one book; it cannot also name a category. Search includes exactly that book's categories. |
@@ -55,7 +57,12 @@ categories, it returns the first in category-id order. Implement
 
 ## Display and placement rules
 
-`RecipeBookDisplay` provides `Shaped`, `Shapeless`, `Furnace`, `Stonecutter` and `Smithing` layouts.
+`RecipeBookDisplay` provides `Shaped`, `Shapeless`, `Furnace`, `Stonecutter` and `Smithing` layouts,
+and `Custom { slots, result, station }` for a recipe type whose pictures none of them fit, such as a
+cooking pot's inputs beside a container. A custom display's slot meaning belongs to the recipe
+type: the book lists its non-empty `slots` in order as the recipe's ingredients (all of them count
+in the craftable filter) and never draws `station`. The four built-in menu layouts map none of it, so a
+menu bound to one refuses a category that holds a custom display.
 Each recipe entry can supply several displays. `RecipeSlotDisplay` supports items, owned
 `ItemStack` values, tags, fuel, empty slots, alternatives through `Composite`, potion and
 component filters, dyeing, smithing trims and remainders.

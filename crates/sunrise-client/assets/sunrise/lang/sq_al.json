@@ -497,7 +497,7 @@
   "sunrise.mods.browse.title": "Shfleto modat",
   "sunrise.mods.browse.update": "Përditëso",
   "sunrise.mods.dev": " (Zhvillues)",
-  "sunrise.mods.empty": "Nuk ka mods: vendosni skedarët .hmod në dosjen sunrise-mods",
+  "sunrise.mods.empty": "Nuk ka mods: vendosni skedarët .smod në dosjen sunrise-mods",
   "sunrise.mods.in_world": " (lëre botën të ndryshojë)",
   "sunrise.mods.not_built": " (Jo ndërtuar)",
   "sunrise.mods.open_folder": "Hapni dosjen Mod",

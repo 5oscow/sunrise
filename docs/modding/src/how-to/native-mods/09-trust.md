@@ -20,7 +20,7 @@ Registry entries distinguish native code with the `native-mod` kind and identify
 repository with `repo`. Registry review is separate from the launcher's local consent and
 validation checks; it does not sandbox the code you run.
 
-- A `.hmod` contains a flat Rust project and can include `assets/`, `data/` and `icon.png`.
+- A `.smod` contains a flat Rust project and can include `assets/`, `data/` and `icon.png`.
 - The launcher validates the bundle without running its code, then builds it on your computer.
 - Registry downloads are pinned by SHA-256. `sunrise-mod.toml` supplies the mod identity and exact
   game build pins. Revocation entries in `revoked.toml` prevent installing revoked releases.

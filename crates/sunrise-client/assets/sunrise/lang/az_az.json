@@ -497,7 +497,7 @@
   "sunrise.mods.browse.title": "Modlara bax",
   "sunrise.mods.browse.update": "Yenilə",
   "sunrise.mods.dev": " (Dev)",
-  "sunrise.mods.empty": "Mod yoxdur: .hmod fayllarını sunrise-mods qovluğuna qoyun",
+  "sunrise.mods.empty": "Mod yoxdur: .smod fayllarını sunrise-mods qovluğuna qoyun",
   "sunrise.mods.in_world": " (Dəyişmək üçün dünyanı tərk et)",
   "sunrise.mods.not_built": " (tikilməyib)",
   "sunrise.mods.open_folder": "Mod Qovluğunu açın",
