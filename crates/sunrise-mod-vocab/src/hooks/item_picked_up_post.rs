@@ -19,7 +19,7 @@ pub trait Hooks {
         side = "server",
         contract = "listen",
         neoforge = "ItemEntityPickupEvent.Post",
-        version = 2
+        version = 3
     )]
     fn item_picked_up_post();
 }
