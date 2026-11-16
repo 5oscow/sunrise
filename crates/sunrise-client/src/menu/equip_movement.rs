@@ -82,6 +82,11 @@ impl Menu {
                 if stack.count == 0 {
                     break;
                 }
+                // Empty destinations belong only to the insertion pass. Do not ask their
+                // placement rule with a different top-up maximum first.
+                if !self.has_item(dest) {
+                    continue;
+                }
                 // A mod menu's result (unless a mod's hook opens it) and a
                 // hidden slot get no top-up either, as a furnace's quick move
                 // never aims at its result.

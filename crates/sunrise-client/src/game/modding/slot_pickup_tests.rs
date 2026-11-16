@@ -418,6 +418,17 @@ fn a_refused_quick_move_moves_nothing_and_asks_before_menu_quick_move() {
         // the hook is the one the game's routing uses. Main inventory index 30 (menu slot
         // `SLOTS + 21`) moves into the pot, whose slots the move asks, so no other question
         // names its index.
+        let (menu, client_asks, server_asks) =
+            asked_by_both(game, rx, (&[(0, stone(5))], None), (0, 0, Input::QuickMove));
+        assert_eq!(served(game), predicted(&menu));
+        assert_eq!(server_asks, client_asks);
+        // Reverse inventory traversal inserts into hotbar slot 8 (inventory index 8).
+        assert_eq!(menu.player_item(8).map(|s| s.count), Some(5));
+        assert_eq!(
+            times(&server_asks, (8, "minecraft:stone", 5)),
+            1,
+            "{server_asks:?}"
+        );
         let from = SLOTS + 21;
         MOVED.with(|moved| moved.borrow_mut().clear());
         let (menu, client_asks, server_asks) = asked_by_both(
@@ -451,6 +462,17 @@ fn a_quick_move_without_menu_quick_move_asks_once() {
     with_pot_mod(false, |game, rx| {
         // No listener: the game's routing asks alone, once for the clicked stack, as the
         // prediction does, refused or not.
+        let (menu, client_asks, server_asks) =
+            asked_by_both(game, rx, (&[(0, stone(5))], None), (0, 0, Input::QuickMove));
+        assert_eq!(served(game), predicted(&menu));
+        assert_eq!(server_asks, client_asks);
+        // Reverse inventory traversal inserts into hotbar slot 8 (inventory index 8).
+        assert_eq!(menu.player_item(8).map(|s| s.count), Some(5));
+        assert_eq!(
+            times(&server_asks, (8, "minecraft:stone", 5)),
+            1,
+            "{server_asks:?}"
+        );
         let from = SLOTS + 21;
         let (menu, client_asks, server_asks) = asked_by_both(
             game,
