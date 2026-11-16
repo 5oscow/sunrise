@@ -2940,7 +2940,6 @@ mod item_properties;
 pub(crate) mod loot_values;
 #[path = "api_values/particle_values.rs"]
 mod particle_values;
-pub(crate) use loot_values::{dispatch_loot_condition, dispatch_loot_function};
 #[path = "api_values/package_snapshot.rs"]
 mod package_snapshot;
 pub(in crate::game) use package_snapshot::install_packages;

@@ -45,8 +45,6 @@ fn load_hooks_are_noops_before_install_and_use_first_callbacks_after() {
             assert_eq!(context.origin(), DataLoadOrigin::ClientPreload);
             components.insert("item".into(), Value::String(item.into()));
         },
-        loot_function: |_, _, _, stack, _| stack.count += 1,
-        loot_condition: |kind, _, _, holds, _| *holds = kind == "mymod:held",
     };
     assert!(native_load_hooks::install(hooks()).is_ok());
     assert!(
@@ -55,8 +53,6 @@ fn load_hooks_are_noops_before_install_and_use_first_callbacks_after() {
             loot_ability: |_, _, _| {},
             loot_table_load: |_, _, table| *table = json!("second"),
             modify_default_components: |_, _, components| components.clear(),
-            loot_function: |_, _, _, stack, _| stack.count = 0,
-            loot_condition: |_, _, _, holds, _| *holds = false,
         })
         .is_err()
     );

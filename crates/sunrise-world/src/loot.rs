@@ -94,34 +94,7 @@ impl<'a> PackOverlay<'a> {
     }
 }
 
-/// A loot function of a mod's own kind: the entry named a `type` in a
-/// namespace outside `minecraft:`, and the roll kept it for this call.
-/// The kind, the JSON, the context and the stack to change are here.
-#[inline(never)]
-pub fn native_invoke_loot_function(
-    kind: &str,
-    data: &Value,
-    ctx: &LootContext<'_>,
-    stack: &mut LootStack,
-    tags: &dyn LootTags,
-) {
-    crate::native_load_hooks::loot_function(kind, data, ctx, stack, tags);
-}
 
-/// A loot condition of a mod's own kind: the entry named a `type` in a
-/// namespace outside `minecraft:`. The kind, the JSON, the context and
-/// whether it holds are here (`holds` starts `false`; a mod that claims
-/// the kind sets it).
-#[inline(never)]
-pub fn native_invoke_loot_condition(
-    kind: &str,
-    data: &Value,
-    ctx: &LootContext<'_>,
-    holds: &mut bool,
-    tags: &dyn LootTags,
-) {
-    crate::native_load_hooks::loot_condition(kind, data, ctx, holds, tags);
-}
 
 /// The tool a loot context names: its item id and enchantments.
 #[derive(Clone)]

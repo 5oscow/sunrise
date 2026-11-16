@@ -177,12 +177,6 @@ pub fn start<G>(
                 let context = reader.context();
                 mod_api::dispatch_modify_default_components(&context, item, components);
             },
-            loot_function: |kind, data, ctx, stack, tags| {
-                crate::game::api_values::dispatch_loot_function(kind, data, ctx, stack, tags);
-            },
-            loot_condition: |kind, data, ctx, holds, tags| {
-                crate::game::api_values::dispatch_loot_condition(kind, data, ctx, holds, tags);
-            },
         },
     )
     .is_err()

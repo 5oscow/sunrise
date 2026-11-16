@@ -4802,26 +4802,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn native_loot_kinds_stay_hookable() {
-        let source = include_str!("../../../../sunrise-world/src/loot.rs").replace("\r\n", "\n");
-        for hook in [
-            "pub fn native_invoke_loot_function(",
-            "pub fn native_invoke_loot_condition(",
-        ] {
-            let at = source
-                .find(hook)
-                .unwrap_or_else(|| panic!("{hook} not found"));
-            let start = source[..at].rfind("///").unwrap();
-            let body = &source[start..start + source[start..].find("\n}\n").unwrap()];
-            for line in body.lines() {
-                assert!(!line.contains("cfg"), "a cfg in a loot hook point: {line}");
-                for mac in ["!(", "![", "! {", "!{"] {
-                    assert!(!line.contains(mac), "a macro in a loot hook point: {line}");
-                }
-            }
-        }
-    }
 
     #[test]
     fn native_ingredient_stays_hookable() {

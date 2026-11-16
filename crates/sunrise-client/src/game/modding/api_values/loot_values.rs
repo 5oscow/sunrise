@@ -3,42 +3,6 @@ use super::{TryIntoApi, TryIntoEngine};
 use mod_api::world::snapshots as api;
 use sunrise_world::loot as engine;
 
-pub(crate) fn dispatch_loot_function(
-    kind: &str,
-    data: &serde_json::Value,
-    ctx: &engine::LootContext<'_>,
-    stack: &mut engine::LootStack,
-    tags: &dyn engine::LootTags,
-) {
-    if !mod_api::__private::listened(mod_api::HookId::LootFunction) {
-        return;
-    }
-    let (Ok(ctx), Ok(mut value)) = (ctx.try_into_api(), stack.try_into_api()) else {
-        return;
-    };
-    let tags = crate::game::loot_tags::LootTags(tags);
-    mod_api::loot_callbacks::native_loot_function(kind, data, &ctx, &mut value, &tags);
-    // Stage the complete candidate before making the one engine write.
-    if let Ok(value) = value.try_into_engine(&()) {
-        *stack = value;
-    }
-}
-pub(crate) fn dispatch_loot_condition(
-    kind: &str,
-    data: &serde_json::Value,
-    ctx: &engine::LootContext<'_>,
-    holds: &mut bool,
-    tags: &dyn engine::LootTags,
-) {
-    if !mod_api::__private::listened(mod_api::HookId::LootCondition) {
-        return;
-    }
-    let Ok(ctx) = ctx.try_into_api() else {
-        return;
-    };
-    let tags = crate::game::loot_tags::LootTags(tags);
-    mod_api::loot_callbacks::native_loot_condition(kind, data, &ctx, holds, &tags);
-}
 
 #[cfg(test)]
 thread_local! { static CONVERSIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }

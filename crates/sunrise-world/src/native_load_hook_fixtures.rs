@@ -39,16 +39,6 @@ pub(crate) fn install() {
                     }
                     _ => {}
                 },
-                loot_function: |_, _, _, _, _| {},
-                loot_condition: |kind, _, ctx, holds, _| {
-                    if kind == "test:query" {
-                        CONTEXT.with(|v| {
-                            *v.borrow_mut() =
-                                Some((ctx.table_id().to_owned(), ctx.queried_stack.clone()))
-                        });
-                        *holds = true;
-                    }
-                },
                 loot_ability: |tool, ability, holds| {
                     ABILITY
                         .with(|v| *v.borrow_mut() = Some((tool.item.clone(), ability.to_owned())));
