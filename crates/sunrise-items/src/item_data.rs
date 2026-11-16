@@ -1310,11 +1310,9 @@ fn encode_stack_components(
     Some(components)
 }
 /// The saved `DataComponentPatch.CODEC`, compared against the loaded prototype.
-/// Nested stack templates use that same catalog recursively.
+/// Nested templates retain their raw patches, including redundant entries and removals.
 pub fn encode_components(stack: &ItemStack, items: &crate::items::Items) -> Option<Tag> {
-    let mut components = encode_stack_components(stack, true, &|nested| {
-        template_tag(nested, encode_components(nested, items))
-    })?;
+    let mut components = encode_stack_components(stack, true, &raw_template_tag)?;
     let Some(prototype) = items.component_defaults.get(stack.item.as_ref()) else {
         return Some(components);
     };
@@ -2344,44 +2342,39 @@ mod tests {
     }
 
     #[test]
-    fn saved_nested_templates_use_the_same_prototypes_without_erasing_live_presence() {
-        for (component, payload, expected) in [
-            (
-                "minecraft:bundle_contents",
-                r#"[{id:"minecraft:red_banner",components:{"minecraft:banner_patterns":[]}}]"#,
-                r#"[{id:"minecraft:red_banner"}]"#,
-            ),
-            (
-                "minecraft:charged_projectiles",
-                r#"[{id:"minecraft:red_banner",components:{"minecraft:banner_patterns":[]}}]"#,
-                r#"[{id:"minecraft:red_banner"}]"#,
-            ),
-            (
-                "minecraft:container",
-                r#"[{slot:0,item:{id:"minecraft:red_banner",components:{"minecraft:banner_patterns":[]}}}]"#,
-                r#"[{slot:0,item:{id:"minecraft:red_banner"}}]"#,
-            ),
-            (
-                "minecraft:pot_decorations",
-                r#"{back:{id:"minecraft:red_banner",components:{"minecraft:banner_patterns":[]}}}"#,
-                r#"{back:{id:"minecraft:red_banner"}}"#,
-            ),
+    fn saved_nested_templates_keep_redundant_values_and_removals() {
+        for patch in [
+            r#"{"minecraft:banner_patterns":[]}"#,
+            r#"{"!minecraft:damage":{}}"#,
         ] {
-            let source = format!(
-                r#"{{id:"example:carrier",count:1,components:{{"{component}":{payload}}}}}"#
-            );
-            let stack = parse_stack(&source).unwrap().unwrap();
-            let saved = crate::item_nbt::item_to_nbt(&stack, prototype_items());
-            let expected = sunrise_core::nbt::parse_snbt(&format!(
-                r#"{{id:"example:carrier",count:1,components:{{"{component}":{expected}}}}}"#
-            ))
-            .unwrap()
-            .0;
-            assert_eq!(saved, expected, "{component}");
-            let live = sunrise_core::nbt::parse_snbt(&format!(r#"{{"{component}":{payload}}}"#))
-                .unwrap()
-                .0;
-            assert_eq!(component_snapshot(&stack), Some(live), "{component}");
+            let template = format!(r#"{{id:"minecraft:red_banner",components:{patch}}}"#);
+            for (component, payload) in [
+                ("minecraft:bundle_contents", format!("[{template}]")),
+                ("minecraft:charged_projectiles", format!("[{template}]")),
+                (
+                    "minecraft:container",
+                    format!("[{{slot:0,item:{template}}}]"),
+                ),
+                ("minecraft:pot_decorations", format!("{{back:{template}}}")),
+                ("minecraft:use_remainder", template.clone()),
+            ] {
+                let source = format!(
+                    r#"{{id:"example:carrier",count:1,components:{{"{component}":{payload}}}}}"#
+                );
+                let stack = parse_stack(&source).unwrap().unwrap();
+                let saved = crate::item_nbt::item_to_nbt(&stack, prototype_items());
+                let expected = sunrise_core::nbt::parse_snbt(&source).unwrap().0;
+                assert_eq!(saved, expected, "{component}: {patch}");
+                let live =
+                    sunrise_core::nbt::parse_snbt(&format!(r#"{{"{component}":{payload}}}"#))
+                        .unwrap()
+                        .0;
+                assert_eq!(
+                    component_snapshot(&stack),
+                    Some(live),
+                    "{component}: {patch}"
+                );
+            }
         }
     }
 
