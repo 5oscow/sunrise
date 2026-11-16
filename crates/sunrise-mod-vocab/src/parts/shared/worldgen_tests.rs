@@ -21,6 +21,12 @@ impl RandomSource for Draws {
     fn next_boolean(&mut self) -> bool {
         false
     }
+    fn next_int(&mut self) -> i32 {
+        0
+    }
+    fn next_gaussian(&mut self) -> f64 {
+        0.0
+    }
 }
 
 #[test]

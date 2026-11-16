@@ -15,7 +15,7 @@ use crate::mobs::{
     part_goals::{BehaviorOp, GoalOp},
 };
 use mod_api::{
-    BehaviorCxBackend, EntityRef, GoalCxBackend, Host, LegacyRandomSource, LivingRef, MobRef, PlayerRef,
+    BehaviorCxBackend, EntityRef, GoalCxBackend, Host, LivingRef, MobRef, PlayerRef, RandomSource,
     content::crash::{ModCall, enter_native_mod},
 };
 use sunrise_core::geometry::Axis;
@@ -356,7 +356,7 @@ impl GoalCxBackend for GoalCx<'_, '_> {
         self.mob_handle()
     }
 
-    fn random(&mut self) -> &mut LegacyRandomSource {
+    fn random(&mut self) -> &mut dyn RandomSource {
         &mut self.m.random
     }
 

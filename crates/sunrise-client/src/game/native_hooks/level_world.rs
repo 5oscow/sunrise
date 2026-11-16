@@ -29,14 +29,17 @@ impl Game<'_> {
     /// server, for a stale handle and for a level not open: the Nether and
     /// the End open when someone first goes there and close after 300 ticks
     /// with nobody in them (`close_idle_levels`).
-    pub(in crate::game) fn level_random(&self, level: LevelRef) -> Option<LegacyRandom> {
+    pub(in crate::game) fn level_random(
+        &self,
+        level: LevelRef,
+    ) -> Option<mod_api::LegacyRandomSource> {
         self.native_level_world(level)?;
         if level.dimension() == self.dim.key() {
-            Some((*self.world.random).clone())
+            Some((*self.world.random).clone().into())
         } else {
             self.levels
                 .parked_world_of(level.dimension_id())
-                .map(|world| (*world.random).clone())
+                .map(|world| (*world.random).clone().into())
         }
     }
     /// Replace the random of the server level `level` names with `random`,
@@ -45,7 +48,7 @@ impl Game<'_> {
     pub(in crate::game) fn level_set_random(
         &mut self,
         level: LevelRef,
-        random: LegacyRandom,
+        random: mod_api::LegacyRandomSource,
     ) -> bool {
         if self.native_level_world(level).is_none() {
             return false;
@@ -57,6 +60,6 @@ impl Game<'_> {
                 .parked_world_mut_of(level.dimension_id())
                 .map(|world| &mut world.random)
         };
-        target.map(|target| **target = random).is_some()
+        target.map(|target| **target = random.into()).is_some()
     }
 }
