@@ -1124,10 +1124,26 @@ jobs:
           persist-credentials: false
       - name: Check Dyna dependencies (install fallback without root)
         run: bash tools/ci/dyna_ci_deps.sh
-      - name: Use system Python for parity harnesses
+      # Written from this workflow's own revision, never from the tested tree: an older head's helper would stream a
+      # harness's output (vanilla's values) into the public log. Every `python` this job's steps run goes to a log on
+      # the runner's slot; the job log gets the harness names with PASS or FAIL, and the exit status is kept.
+      - name: Keep harness output on the runner
         run: |
           mkdir -p "$DYNA_CI_BUILD/bin"
-          ln -sf "$GITHUB_WORKSPACE/tools/ci/dyna_parity_python.sh" "$DYNA_CI_BUILD/bin/python"
+          cat > "$DYNA_CI_BUILD/bin/python" <<'SH'
+          #!/usr/bin/env bash
+          set -uo pipefail
+          mkdir -p "$DYNA_CI_BUILD/parity-logs"
+          name=$(basename "${1:-python}" .py)
+          log="$DYNA_CI_BUILD/parity-logs/$name.log"
+          /usr/bin/python3 "$@" > "$log" 2>&1
+          status=$?
+          rm -rf "$DYNA_CI_BUILD"/parity-out/rust-*
+          if [ "$name" = parity ]; then grep -aoE '^(PASS|FAIL|RETRIED|FLAKY) [a-z0-9_#]+' "$log" || true; fi
+          if [ "$status" -eq 0 ]; then echo "PASS $name"; else echo "FAIL $name (exit $status; its log stays on the runner: $log)"; fi
+          exit "$status"
+          SH
+          chmod +x "$DYNA_CI_BUILD/bin/python"
           echo "$DYNA_CI_BUILD/bin" >> "$GITHUB_PATH"
       - name: Install Rust toolchain
         run: |
@@ -1153,6 +1169,9 @@ jobs:
           mkdir -p "$DYNA_CI_BUILD/parity-out" "$DYNA_CI_BUILD/parity-tmp" "$DYNA_CI_BUILD/parity-logs"
           ln -s "$DYNA_CI_BUILD/parity-out" .local
           echo "TMPDIR=$DYNA_CI_BUILD/parity-tmp" >> "$GITHUB_ENV"
+          # tools/parity.py keeps pass records beside .local/minecraft, which is the read-only cache and holds
+          # other trees' passes: this run's records start empty, on the slot.
+          echo "PARITY_SHARED=$DYNA_CI_BUILD/parity-out/shared" >> "$GITHUB_ENV"
           SUNRISE_DYNA_CACHE=true SUNRISE_PREPARED_CACHE="$DYNA_CI_BUILD/vanilla" SUNRISE_SHARED_SOURCE=/cache/sunrise-local bash tools/ci/vanilla-data.sh
       - name: Named harnesses
         if: inputs.harnesses != ''
@@ -1164,8 +1183,7 @@ jobs:
           for name in "${names[@]}"; do
             [[ "$name" =~ ^[a-z0-9_]+(#[0-9]+)?$ ]] || { echo "::error::not a harness name: $name"; exit 1; }
           done
-          # A failed harness's log tail (indented) can hold vanilla's values: it stays in .local/parity-runner/logs.
-          python3 tools/parity.py -j 4 --timeout 2400 "${names[@]}" | grep -v '^    '
+          python tools/parity.py -j 4 --timeout 2400 "${names[@]}"
       # Harness subprocess timeouts can be shorter than a cold release build. Match their build commands and target dir.
       - name: Build parity probes
         if: inputs.harnesses == ''
