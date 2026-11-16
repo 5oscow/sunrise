@@ -17,7 +17,7 @@ use crate::index::{Found, Index, ItemId};
 use mod_surface::shape::{ShapeError, Shapes};
 use mod_surface::*;
 use quote::ToTokens;
-use rust::{Layouts, Paths, param_names, print};
+use rust::{GameWires, Layouts, Paths, param_names, print};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
 use syn::visit_mut::VisitMut;
@@ -796,7 +796,10 @@ pub(crate) fn build(
     let macros = macros(root, writer.index, &public.macros, &mut notes)?;
 
     // Shapes, over every type the crossing types contain.
-    let mut layouts = Layouts::new(&forms, &nameable);
+    let mut layouts = Layouts::new(GameWires {
+        forms: &forms,
+        ids: &nameable,
+    });
     let keys: Vec<Option<String>> = pending
         .iter()
         .map(|record| {
