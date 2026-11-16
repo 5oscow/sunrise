@@ -1,6 +1,6 @@
 //! Feature types a trait mod registers: vanilla's `Feature` with its own `place`, as
 //! [`Registrar::register_feature_type`](crate::Registrar::register_feature_type) hands it over
-//! once at startup (NeoForge's registry `FEATURE_TYPE`, which vanilla calls `FEATURE`; a
+//! once at startup (the `FEATURE_TYPE` registry; a
 //! configured feature is an entry of `minecraft:worldgen/feature`). A configured feature with
 //! `"type": "modid:tree"` then places by the mod's code, wherever the game places features:
 //! biome decoration, a nested feature (a random selector's choice), a sapling's growth, bone
@@ -15,7 +15,11 @@
 //! A type declares its config as a flat record ([`DatapackField`]s, the schema datapack
 //! registries use); the game decodes each configured feature against it when the definition
 //! loads, so a config that doesn't fit is refused then, naming the feature, never during
-//! generation. Native mods only: a wasm mod's feature type is refused at registration.
+//! generation.
+//!
+//! Not on wasm: feature types run on the worldgen workers, which wasm mods can't serve yet, so
+//! registering one from a wasm mod is refused at startup, naming the mod and the type, before any
+//! world job runs. Native mods only.
 use crate::wire::{Reader, Wire, WireError, Writer};
 use crate::world::datapack_registry::{DatapackEntry, DatapackField};
 use crate::world::structure_type::{HeightmapType, StructureRandom};
@@ -61,11 +65,13 @@ crate::wire::wire_handlers::handler!(dyn FeatureType, "FeatureType");
 /// What a feature's [`place`](FeatureType::place) sees: vanilla's `WorldGenLevel` around the
 /// origin (a decoration region on a worker, or the live level for growth and commands) and the
 /// caller's random. Writes are staged: the context reads them back, and the level sees them only
-/// when `place` answers `Ok`. A read the level can't answer is `None`; a write it would refuse
+/// when the whole root placement answers `Ok` (a failure in a later call of the same root
+/// discards them). A read the level can't answer is `None`; a write it would refuse
 /// (outside the region decoration may write, outside the build height, or the state already
-/// there) is `false`. Neither loads a chunk. Every call is one unit of the placement's work
-/// budget (65,536 for one root placement); past it, calls answer `None` or `false` and the
-/// placement fails without its writes.
+/// there) is `false`. Neither loads a chunk. Each world query, block write or block-entity
+/// operation is one unit of the placement's work budget (65,536 for one root placement); past
+/// it, calls answer `None` or `false` and the placement fails without its writes. Random draws
+/// and the config, metadata and state helpers are not charged.
 pub trait FeatureContext {
     /// Immutable, load-owned block metadata, safe to borrow on this worker.
     fn metadata(&self) -> &dyn BlockMetadata;

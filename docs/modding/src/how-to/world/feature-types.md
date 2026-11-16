@@ -13,8 +13,13 @@ This is vanilla's feature-type registry (`minecraft:worldgen/feature_type`, NeoF
 
 Use an ID in your mod's namespace. These stop startup with a message naming your mod: a
 duplicate ID, an ID in another mod's namespace (vanilla's `minecraft:` included), an empty name,
-an invalid config schema, and a feature type registered by a wasm mod (feature types run on the
-worldgen workers, which wasm mods can't serve yet).
+an invalid config schema, and a feature type registered by a wasm mod.
+
+## Not on wasm
+
+Feature types run on the worldgen workers, which wasm mods can't serve yet. A wasm mod that
+registers one is refused at startup, naming the mod and the type, before any world job runs;
+there is no fallback. Write the feature type in a native mod.
 
 ## Config
 
@@ -55,9 +60,11 @@ twice is placed twice.
   kept, as vanilla keeps them.
 - `Err(FeatureError(reason))` for a failure.
 
-Your writes are staged: `context.block` reads them back, and the level sees them, in order, only
-when `place` answers `Ok`. A failure, a panic or running out of work discards all of them, so a
-failed call leaves nothing behind. A failure or a panic also disables your type for the rest of
+Your writes are staged: `context.block` reads them back, and so do the later calls of the same
+root placement. The level sees them, in order, only when the whole root answers `Ok`: a failure, a
+panic or running out of work in any call of the root discards the writes of all of its mod calls,
+so a failed root leaves nothing of yours behind. The game's own features in the same root read the
+level as it was before your writes are published. A failure or a panic also disables your type for the rest of
 the run: each later placement of it fails by name without calling it.
 
 There is no `Host` in a feature. Decoration runs on worker threads, so your type must be
@@ -81,7 +88,8 @@ height, and for the state already there, as `Level.setBlock` answers. A read the
 answer is `None`. Neither ever loads a chunk. `block_entity` is `false` for a position you didn't
 place a block at in this call, and for data whose `id` isn't that block's block entity.
 
-Each context call is one unit of work. One root placement (a decoration position, a command, a
+Each world query, block write or block-entity operation is one unit of work; random draws and
+the config, metadata and state helpers are not charged. One root placement (a decoration position, a command, a
 sapling) lends its mod features 65,536 units together, apart from the game's own feature budget.
 Past them, calls answer `None` or `false` and the placement fails without your writes; the next
 placement starts with the whole budget again.
