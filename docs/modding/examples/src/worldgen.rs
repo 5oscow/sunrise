@@ -202,8 +202,9 @@ pub mod structures {
 pub mod features {
     // ANCHOR: feature
     use mod_api::{
-        BlockKey, BlockState, BlockUpdateFlags, FeatureContext, FeatureError, FeatureType, Hooks,
-        Registrar, RegistrationContext, StateConstraint, Tag,
+        BlockKey, BlockState, BlockUpdateFlags, DatapackField, DatapackFieldKind, DatapackValue,
+        FeatureContext, FeatureError, FeatureType, Hooks, Registrar, RegistrationContext,
+        StateConstraint,
     };
 
     /// A pillar of logs on dirt or grass: `{"type": "mymod:pillar", "height": 4}`.
@@ -217,20 +218,10 @@ pub mod features {
             context: &mut dyn FeatureContext,
             origin: [i32; 3],
         ) -> Result<bool, FeatureError> {
-            // The configured feature's JSON object, converted to NBT once at load. A JSON
-            // number becomes the smallest tag that holds it, as vanilla's JsonOps does.
-            let height = match &*context.config() {
-                Tag::Compound(config) => match config.get(&"height".into()) {
-                    Some(Tag::Byte(n)) => i32::from(*n),
-                    Some(Tag::Short(n)) => i32::from(*n),
-                    Some(Tag::Int(n)) => *n,
-                    _ => 0,
-                },
-                _ => 0,
+            // Decoded against the schema at load: present, an integer, 1 to 32.
+            let Some(DatapackValue::Int(height)) = context.config().get("height").cloned() else {
+                return Err(FeatureError("height was not decoded".into()));
             };
-            if !(1..=32).contains(&height) {
-                return Err(FeatureError("height must be 1 to 32".into()));
-            }
             let below = [origin[0], origin[1] - 1, origin[2]];
             if context.block_in_tag(below, "minecraft:dirt") != Some(true) {
                 return Ok(false);
@@ -242,7 +233,7 @@ pub mod features {
             )
             .map_err(|error| FeatureError(format!("log state: {error:?}")))?;
             let flags = BlockUpdateFlags::NEIGHBORS | BlockUpdateFlags::CLIENTS;
-            for dy in 0..height {
+            for dy in 0..height as i32 {
                 let pos = [origin[0], origin[1] + dy, origin[2]];
                 if !context
                     .block(pos)
@@ -263,7 +254,12 @@ pub mod features {
     impl Hooks for FeatureMod {
         fn register(&self, registrar: &mut dyn Registrar, _: &RegistrationContext) {
             let log = registrar.block_key("minecraft:oak_log");
-            registrar.register_feature_type("pillar", Pillar { log });
+            let config = vec![DatapackField::with_default(
+                "height",
+                DatapackFieldKind::Int { min: 1, max: 32 },
+                DatapackValue::Int(4),
+            )];
+            registrar.register_feature_type("pillar", config, Pillar { log });
         }
     }
     // ANCHOR_END: feature

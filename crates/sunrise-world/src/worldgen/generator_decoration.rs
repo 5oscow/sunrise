@@ -1627,6 +1627,13 @@ impl PlacementContext for World<'_> {
         tag: &str,
     ) -> Result<bool, PlacementQueryError> {
         let state = self.region.block(position)?;
+        self.state_matches_tag(state, tag)
+    }
+    fn state_matches_tag(
+        &mut self,
+        state: BlockStateId,
+        tag: &str,
+    ) -> Result<bool, PlacementQueryError> {
         if self
             .last_tag
             .as_ref()

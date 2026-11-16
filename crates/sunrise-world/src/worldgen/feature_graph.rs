@@ -182,6 +182,9 @@ struct Run {
     blocks: FeatureBlocks,
     depth: Cell<usize>,
     remaining: Cell<usize>,
+    /// The root's mod-feature work units (`mod_features::CUSTOM_WORK_BUDGET`), apart from
+    /// `remaining` so built-in capacity is unchanged.
+    custom: Cell<u32>,
 }
 fn visit(depth: usize, remaining: &mut usize) -> Result<(), DecodeError> {
     if depth > 128 || *remaining == 0 {
@@ -263,6 +266,7 @@ impl PlacedFeatureDefinition {
                 blocks,
                 depth: Cell::new(0),
                 remaining: Cell::new(65536),
+                custom: Cell::new(super::mod_features::CUSTOM_WORK_BUDGET),
             },
         )
     }
@@ -810,17 +814,19 @@ impl FeatureDefinition {
                     )?),
                 })
             }
-            kind => match super::mod_features::mod_feature_types().get(kind) {
-                // A mod's registered type: its config is the whole object, converted once here.
-                Some(ty) => {
-                    let config =
-                        ty.prepare_config(&serde_json::from_str(json)?)
-                            .map_err(|error| {
-                                DecodeError::Registry(format!("feature {kind}: {error}"))
-                            })?;
+            kind => match super::mod_features::mod_feature_type(kind) {
+                // A mod's registered type: its config is decoded against the type's schema once
+                // here, and a definition that doesn't fit it is refused at load.
+                Some(entry) => {
+                    let config = entry
+                        .ty
+                        .prepare_config(&serde_json::from_str(json)?)
+                        .map_err(|error| {
+                            DecodeError::Registry(format!("feature {kind}: {error}"))
+                        })?;
                     Ok(Self::Mod(Box::new(super::mod_features::ModFeature {
                         id: kind.to_owned(),
-                        ty: ty.clone(),
+                        entry: entry.clone(),
                         config,
                     })))
                 }
@@ -843,6 +849,7 @@ impl FeatureDefinition {
                 blocks,
                 depth: Cell::new(0),
                 remaining: Cell::new(65536),
+                custom: Cell::new(super::mod_features::CUSTOM_WORK_BUDGET),
             },
         )
     }
@@ -876,14 +883,8 @@ impl FeatureDefinition {
                 .map_err(FeatureExecutionError::Basic),
             Self::NoOp => Ok(true),
             Self::Mod(feature) => feature
-                .ty
-                .place(
-                    &mut super::mod_features::Target(world),
-                    &mut super::mod_features::Draws(random),
-                    origin,
-                    &feature.config,
-                )
-                .map_err(|reason| FeatureExecutionError::Mod(format!("{}: {reason}", feature.id))),
+                .place(world, random, origin, &run.custom)
+                .map_err(|error| FeatureExecutionError::Mod(format!("{}: {error}", feature.id))),
             Self::Template(feature) => feature
                 .place(world, random, origin)
                 .map_err(FeatureExecutionError::Query),

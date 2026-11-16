@@ -2,14 +2,15 @@
 //! mod's `FeatureType`, over the caller's own world and random.
 use super::native_worldgen::WorkerResources;
 use mod_api::{
-    BlockKey, BlockMetadata, BlockState, BlockUpdateFlags, FeatureContext, FeatureType,
-    HeightmapType, StructureRandom,
+    BlockKey, BlockMetadata, BlockState, BlockUpdateFlags, DatapackEntry, DatapackField,
+    FeatureContext, FeatureType, HeightmapType, StructureRandom,
 };
+use std::any::Any;
 use std::sync::Arc;
 use sunrise_core::nbt::{Compound, Tag};
 use sunrise_world::registry::BlockRegistry;
 use sunrise_world::worldgen::mod_features::{
-    ModFeatureRandom, ModFeatureTarget, ModFeatureType, ModFeatureTypes,
+    ModFeatureConfig, ModFeatureRandom, ModFeatureTarget, ModFeatureType, ModFeatureTypes,
 };
 
 fn engine_heightmap(kind: HeightmapType) -> sunrise_world::heightmap::HeightmapType {
@@ -51,15 +52,15 @@ struct Placing<'a> {
     worker: &'static WorkerResources,
     registry: &'static BlockRegistry,
     random: Draws<'a>,
-    config: &'a Arc<Tag>,
+    config: &'a DatapackEntry,
 }
 
 impl FeatureContext for Placing<'_> {
     fn metadata(&self) -> &dyn BlockMetadata {
         self.worker.metadata
     }
-    fn config(&self) -> Arc<Tag> {
-        self.config.clone()
+    fn config(&self) -> &DatapackEntry {
+        self.config
     }
     fn random(&mut self) -> &mut dyn StructureRandom {
         &mut self.random
@@ -96,43 +97,56 @@ impl FeatureContext for Placing<'_> {
         self.target.height(engine_heightmap(kind), x, z)
     }
     fn block_entity(&mut self, pos: [i32; 3], nbt: Compound) -> bool {
-        self.target.set_block_entity(pos, nbt)
+        // The data must be the block entity of the block this call placed there, as the game's
+        // own block-entity loading checks it (`decode_block_entity_for_block`); the target
+        // refuses a position the call placed no block at.
+        let Some(name) = self
+            .target
+            .block(pos)
+            .and_then(|state| self.registry.state(state))
+            .map(|state| state.name.to_string())
+        else {
+            return false;
+        };
+        let mut placed = nbt.clone();
+        for (axis, value) in ["x", "y", "z"].into_iter().zip(pos) {
+            placed.insert(axis.into(), Tag::Int(value));
+        }
+        sunrise_client::save::decode_block_entity_for_block(&Tag::Compound(placed), &name).is_some()
+            && self.target.set_block_entity(pos, nbt)
     }
 }
 
 /// The adapter: the game's `ModFeatureType` around a mod's `FeatureType`.
 pub(crate) struct Adapter {
     inner: Arc<dyn FeatureType>,
-    id: String,
+    schema: Vec<DatapackField>,
 }
 
 impl Adapter {
-    pub(crate) fn new(id: &str, inner: Arc<dyn FeatureType>) -> Self {
-        Self {
-            inner,
-            id: id.to_owned(),
-        }
+    pub(crate) fn new(schema: Vec<DatapackField>, inner: Arc<dyn FeatureType>) -> Self {
+        Self { inner, schema }
     }
 }
 
 impl ModFeatureType for Adapter {
-    fn prepare_config(&self, config: &serde_json::Value) -> Result<Arc<Tag>, String> {
-        crate::json_nbt::json_to_tag(config)
-            .map(Arc::new)
-            .map_err(|error| format!("{}: {error}", self.id))
+    fn prepare_config(&self, config: &serde_json::Value) -> Result<ModFeatureConfig, String> {
+        let entry = mod_api::__private::decode_feature_config(&self.schema, config)?;
+        Ok(Arc::new(entry))
     }
     fn place(
         &self,
         target: &mut dyn ModFeatureTarget,
         random: &mut dyn ModFeatureRandom,
         origin: [i32; 3],
-        config: &Arc<Tag>,
+        config: &(dyn Any + Send + Sync),
     ) -> Result<bool, String> {
-        // A world without the game's registry (a probe fixture) has no state index: nothing is
-        // placed, and the feature says so as a built-in feature does with no room.
         let Some(registry) = target.registry() else {
-            return Ok(false);
+            return Err("this world has no block registry for mod features".into());
         };
+        let config = config
+            .downcast_ref::<DatapackEntry>()
+            .ok_or("config was not decoded by this adapter")?;
         let worker = WorkerResources::get(registry).map_err(|error| format!("{error}"))?;
         let mut context = Placing {
             target,
@@ -155,8 +169,8 @@ mod tests;
 pub(in crate::game) fn installed_feature_types() -> ModFeatureTypes {
     mod_api::__private::feature_type_declarations()
         .into_iter()
-        .map(|(id, ty)| {
-            let adapter: Arc<dyn ModFeatureType> = Arc::new(Adapter::new(&id, ty));
+        .map(|(id, schema, ty)| {
+            let adapter: Arc<dyn ModFeatureType> = Arc::new(Adapter::new(schema, ty));
             (id, adapter)
         })
         .collect()

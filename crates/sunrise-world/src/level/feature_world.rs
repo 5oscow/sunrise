@@ -315,6 +315,13 @@ impl<L: LevelAccess + ?Sized> PlacementContext for LevelFeatureWorld<'_, '_, L> 
         let state = self.sim.state(pos(position));
         Ok(self.in_tag(state, tag))
     }
+    fn state_matches_tag(
+        &mut self,
+        state: BlockStateId,
+        tag: &str,
+    ) -> Result<bool, PlacementQueryError> {
+        Ok(self.in_tag(state, tag))
+    }
     fn max_y(&mut self) -> Result<i32, PlacementQueryError> {
         Ok(self.sim.level.max_y() - 1)
     }
