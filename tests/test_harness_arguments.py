@@ -10,7 +10,10 @@ script cannot run without: `add_argument(..., required=True)`, `assert "--x" in 
 """
 import ast
 from pathlib import Path
+import tempfile
 import unittest
+
+from tools import parity
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -76,19 +79,14 @@ def required(tree):
     return found
 
 
-def manual(tree):
-    return any(isinstance(node, ast.Assign) and any(getattr(t, "id", None) == "PARITY_MANUAL" for t in node.targets)
-               for node in tree.body)
-
-
 class HarnessArguments(unittest.TestCase):
     def test_a_harness_the_runner_starts_needs_no_arguments(self):
         harnesses = sorted((ROOT / "tools").glob("test_*_parity.py"))
         self.assertTrue(harnesses)
         for harness in harnesses:
+            if parity.harness_settings(harness).get("PARITY_MANUAL"):
+                continue  # the runner leaves it out
             tree = ast.parse(harness.read_text(encoding="utf-8"))
-            if manual(tree):
-                continue
             with self.subTest(harness=harness.name):
                 self.assertEqual(required(tree), [], f"{harness.name} needs arguments tools/parity.py never "
                                  "passes: give each a default, or declare PARITY_MANUAL with how to run it")
@@ -106,6 +104,16 @@ class HarnessArguments(unittest.TestCase):
         for source, expected in cases.items():
             with self.subTest(source=source):
                 self.assertEqual(required(ast.parse(source)), expected)
+
+    def test_only_a_proof_the_runner_leaves_out_is_exempt(self):
+        cases = {'PARITY_MANUAL = "run by hand"\n': True, 'PARITY_MANUAL = ""\n': False,
+                 'PARITY_MANUAL = OTHER = "run by hand"\n': False}
+        with tempfile.TemporaryDirectory() as folder:
+            for source, exempt in cases.items():
+                with self.subTest(source=source):
+                    harness = Path(folder) / "test_x_parity.py"
+                    harness.write_text(source)
+                    self.assertEqual(bool(parity.harness_settings(harness).get("PARITY_MANUAL")), exempt)
 
 
 if __name__ == "__main__":
