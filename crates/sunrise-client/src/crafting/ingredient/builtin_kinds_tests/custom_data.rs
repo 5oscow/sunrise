@@ -264,6 +264,14 @@ fn custom_data_component_recipes_decode_and_match() {
     assert!(matches("empty", &stack));
     assert!(!matches("removed", &stack));
     stack.data_mut().set_loot_component(ID, &None);
+    assert!(matches("removed", &stack));
+    assert!(!matches("empty", &stack));
+    assert!(!matches("compound", &stack));
+    let no_default = ItemStack::new("minecraft:blaze_rod", 1);
+    // This item inherits custom data too; removal must suppress its prototype.
+    let mut overridden = no_default.clone();
+    overridden.data_mut().set_loot_component(ID, &None);
+    assert!(matches("removed", &overridden));
     let patch = Tag::compound([("!minecraft:custom_data", Tag::Compound(Default::default()))]);
     (_, stack.extra) = crate::item_data::decode_components(Some(&patch));
     assert!(matches("removed", &stack));
