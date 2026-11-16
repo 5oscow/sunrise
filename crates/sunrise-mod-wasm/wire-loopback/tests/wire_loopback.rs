@@ -1294,6 +1294,12 @@ fn wire_loopback_returned_frame_resource_uses_source_permissions() {
         fn next_boolean(&mut self) -> bool {
             unreachable!()
         }
+        fn next_int(&mut self) -> i32 {
+            unreachable!()
+        }
+        fn next_gaussian(&mut self) -> f64 {
+            unreachable!()
+        }
     }
     impl mod_api::GenerationContext for Start {
         fn metadata(&self) -> &dyn mod_api::BlockMetadata {

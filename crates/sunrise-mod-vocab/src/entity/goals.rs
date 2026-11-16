@@ -7,7 +7,7 @@
 //! ```no_run
 //! # use mod_api::{
 //! #     EntityPart, Goal, GoalContext, GoalFlags, GoalRegistrar, Hooks, Registrar,
-//! #     RegistrationContext, RandomSource,
+//! #     RegistrationContext,
 //! # };
 //! # use std::sync::atomic::{AtomicU32, Ordering};
 //! #[derive(Default)]
@@ -60,7 +60,7 @@
 //!     }
 //! }
 //! ```
-use crate::{Host, LegacyRandomSource, LivingRef, MobRef, MoveToPathError, PathNode};
+use crate::{Host, LivingRef, MobRef, MoveToPathError, PathNode, RandomSource};
 
 /// The MOVE, LOOK, JUMP and TARGET bits a [`Goal`] claims, as vanilla's
 /// `Goal.Flag` set does: at most one goal holding each flag runs at a time, and
@@ -232,7 +232,7 @@ impl<'a> GoalContext<'a> {
     }
     /// The mob's own random (`mob.getRandom()`): the stream vanilla's goals
     /// draw from, so a mod's draws keep the mob's stream in shape.
-    pub fn random(&mut self) -> &mut LegacyRandomSource {
+    pub fn random(&mut self) -> &mut dyn RandomSource {
         self.inner.random()
     }
     /// `getNavigation().moveTo(x, y, z, speed)`: start a path to `at`. False
@@ -283,7 +283,7 @@ pub trait GoalCxBackend {
     /// `GoalContext::mob`.
     fn mob(&self) -> MobRef;
     /// `GoalContext::random`.
-    fn random(&mut self) -> &mut LegacyRandomSource;
+    fn random(&mut self) -> &mut dyn RandomSource;
     /// `GoalContext::move_to`.
     fn move_to(&mut self, at: [f64; 3], speed: f64) -> bool;
     /// `GoalContext::move_to_path`.

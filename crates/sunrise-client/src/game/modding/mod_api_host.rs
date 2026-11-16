@@ -508,10 +508,10 @@ impl mod_api::LevelRandomHost for super::GameLevel<'_> {
         self
     }
     fn random(&mut self) -> Option<mod_api::LegacyRandomSource> {
-        self.native_level_random().cloned()
+        self.native_level_random().cloned().map(Into::into)
     }
     fn set_random(&mut self, random: mod_api::LegacyRandomSource) -> bool {
-        self.native_level_random().map(|r| *r = random).is_some()
+        self.native_level_random().map(|r| *r = random.into()).is_some()
     }
 }
 
@@ -593,10 +593,10 @@ impl mod_api::LevelRandomHost for super::native_hooks::HitLevel<'_> {
         self
     }
     fn random(&mut self) -> Option<mod_api::LegacyRandomSource> {
-        Some(self.0.random().clone())
+        Some(self.0.random().clone().into())
     }
     fn set_random(&mut self, random: mod_api::LegacyRandomSource) -> bool {
-        *self.0.random() = random;
+        *self.0.random() = random.into();
         true
     }
 }

@@ -71,6 +71,12 @@ impl<F: FnMut() -> i64> mod_api::RandomSource for Random<F> {
     fn next_long(&mut self) -> i64 {
         (self.0)()
     }
+    fn next_int(&mut self) -> i32 {
+        0
+    }
+    fn next_gaussian(&mut self) -> f64 {
+        0.0
+    }
 }
 
 fn guest(layout: u64, body: &str) -> Vec<u8> {
@@ -240,7 +246,7 @@ fn nested_handler_decodes_in_scope_and_remains_callable_after_return() {
             }
             let mut random = Random(|| i64::from(found.pieces[0].bounding_box().max[2]));
             let mut frame = Frame::default();
-            frame.set_structure_random_mut(&mut random);
+            frame.set_random_source_mut(&mut random);
             let answer = module.call(CallClass::Load, frame, 1, None, |_| {}, |r| r.take::<i64>());
             if handler == 123 {
                 assert_eq!(answer, Some(6));
@@ -269,7 +275,7 @@ fn imports_inherit_the_root_borrow_token_and_expire_with_the_call() {
             7
         });
         let mut frame = Frame::default();
-        frame.set_structure_random_mut(&mut random);
+        frame.set_random_source_mut(&mut random);
         assert_eq!(
             module.call(CallClass::Hook, frame, 0, None, |_| {}, |r| r.take::<i64>()),
             Some(7)
@@ -871,7 +877,7 @@ fn import_reply_retry_survives_a_nested_callback() {
                 + 1
         });
         let mut frame = Frame::default();
-        frame.set_structure_random_mut(&mut random);
+        frame.set_random_source_mut(&mut random);
         assert_eq!(
             module.call(CallClass::Hook, frame, 0, None, |_| {}, |r| r.take::<i64>()),
             Some(71)
@@ -912,7 +918,7 @@ fn another_threads_hook_completes_after_an_import_releases_the_group() {
             7
         });
         let mut frame = Frame::default();
-        frame.set_structure_random_mut(&mut random);
+        frame.set_random_source_mut(&mut random);
         assert_eq!(
             module.call(CallClass::Load, frame, 0, None, |_| {}, |r| r.take::<i64>()),
             Some(7)
@@ -1030,7 +1036,7 @@ fn nested_load_calls_do_not_extend_the_outer_deadline() {
             7
         });
         let mut frame = Frame::default();
-        frame.set_structure_random_mut(&mut random);
+        frame.set_random_source_mut(&mut random);
         let _ = module.call(CallClass::Hook, frame, 0, None, |_| {}, |r| r.take::<i64>());
         assert!(entered.get());
         assert!(module.is_stopped());
@@ -1160,7 +1166,7 @@ fn disable_during_native_import_defers_resource_drop_until_call_returns() {
             7
         });
         let mut frame = Frame::default();
-        frame.set_structure_random_mut(&mut random);
+        frame.set_random_source_mut(&mut random);
         assert_eq!(
             module.call(CallClass::Hook, frame, 0, None, |_| {}, |r| r.take::<i64>()),
             Some(7)
@@ -1203,7 +1209,7 @@ fn native_panic_stops_group_before_held_resources_drop() {
         let dropped = hold_stop_probe(&module);
         let mut random = Random(|| panic!("native callback"));
         let mut frame = Frame::default();
-        frame.set_structure_random_mut(&mut random);
+        frame.set_random_source_mut(&mut random);
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             module.call(CallClass::Hook, frame, 0, None, |_| {}, |r| r.take::<i64>())
         }));

@@ -141,7 +141,7 @@ mod sweep_tests {
             let seen = contacts.len();
             drop(contacts);
             // A level draw, in vanilla's order: between the vanilla contacts.
-            let _ = host.with_random(sunrise_core::random::RandomSource::next_long);
+            let _ = host.with_random(|random| random.next_long());
             if self.panic_after.is_some_and(|after| seen > after) {
                 panic!("an entity_inside part panics");
             }

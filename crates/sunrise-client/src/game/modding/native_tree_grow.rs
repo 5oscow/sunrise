@@ -77,6 +77,12 @@ impl RandomSource for Random<'_> {
     fn next_boolean(&mut self) -> bool {
         self.0.next_boolean()
     }
+    fn next_int(&mut self) -> i32 {
+        self.0.next_int()
+    }
+    fn next_gaussian(&mut self) -> f64 {
+        self.0.next_gaussian()
+    }
 }
 
 #[cfg(test)]
@@ -128,6 +134,14 @@ mod tests {
         fn next_boolean(&mut self) -> bool {
             self.draws += 1;
             false
+        }
+        fn next_int(&mut self) -> i32 {
+            self.draws += 1;
+            0
+        }
+        fn next_gaussian(&mut self) -> f64 {
+            self.draws += 1;
+            0.0
         }
     }
 

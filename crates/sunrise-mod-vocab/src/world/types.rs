@@ -347,7 +347,7 @@ impl LevelRef {
     pub fn with_random<T>(
         self,
         host: &mut dyn ServerHost,
-        draw: impl FnOnce(&mut LegacyRandomSource) -> T,
+        draw: impl FnOnce(&mut dyn RandomSource) -> T,
     ) -> Option<T> {
         let mut random = self.random(host)?;
         let drawn = draw(&mut random);

@@ -1,6 +1,6 @@
 //! Exercise the actual registered leave-block goal and Game event handler.
 use super::{Audio, Game, Options, Progress, Settings, load_resources};
-use mod_api::RandomSource;
+use sunrise_core::random::RandomSource;
 use std::sync::Arc;
 use sunrise_client::{
     chunk::Chunk,
