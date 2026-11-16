@@ -159,11 +159,11 @@ fn h149_actual_registered_local_commands_preserve_exact_saved_positions() {
             assert!(game.run_command("scoreboard players set #r h149 91"));
             assert!(game.run_command("scoreboard players set #s h149 17"));
             assert!(
-            game.run_command(&format!(
-                "execute store result score #r h149 store success score #s h149 run {command}"
-            )),
-            "actual command accepted: {name}"
-        );
+                game.run_command(&format!(
+                    "execute store result score #r h149 store success score #s h149 run {command}"
+                )),
+                "actual command accepted: {name}"
+            );
             assert_eq!(game.score.board.score("#r", "h149").unwrap().value, 1);
             assert_eq!(game.score.board.score("#s", "h149").unwrap().value, 1);
             let model = game.mobs.iter().find(|m| m.id == id).unwrap();
@@ -179,9 +179,7 @@ fn h149_actual_registered_local_commands_preserve_exact_saved_positions() {
             for key in ["Health", "NoAI", "NoGravity", "Rotation", "Motion"] {
                 assert_eq!(saved.get(key), before.get(key), "unchanged {key}: {name}");
             }
-            assert!(
-                game.run_command(&format!("execute as {actor} at @s if block ~ 199 ~ stone"))
-            );
+            assert!(game.run_command(&format!("execute as {actor} at @s if block ~ 199 ~ stone")));
             assert!(game.world.loaded(
                 f64::from_bits(got[0]).floor() as i32,
                 f64::from_bits(got[2]).floor() as i32,
