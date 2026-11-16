@@ -27,7 +27,7 @@ pub trait Hooks {
         out = "canceled",
         host = "hit",
         neoforge = "LivingIncomingDamageEvent",
-        version = 2,
+        version = 3,
         target = "sunrise_client::game::native_hooks::base::HitLevel<'_>::native_living_incoming_damage"
     )]
     fn living_incoming_damage(
