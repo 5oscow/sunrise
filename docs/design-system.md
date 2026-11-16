@@ -241,11 +241,11 @@ Light); `tokens.css` carries them as `--night-*`. The game's menus don't use it.
 | `accent-hi` | `#a08cff` | `#5333c9` | accent text, focus ring |
 | `success`, `warn`, `danger` | `#5fd39a` `#f5b45a` `#ff8a78` | `#136336` `#7a4f00` `#a3301d` | Ready, updates, errors |
 
-- **Motion that means something**: the sky drifts slowly and stops when the window is hidden or
-  unfocused; the interface moves only to show cause and effect (a row arrives where it was added,
-  progress fills). Reduced motion: nothing moves. The launcher's sky (`launcher/scenery/src/sky.rs`) moves
-  in whole texels on a half-second beat, so it asks for two frames a second at most;
-  `SUNRISE_LAUNCHER_MOTION=off` stills it, `always` keeps it moving unfocused (for recordings).
+- **Motion that means something**: the interface moves only to show cause and effect (a row
+  arrives where it was added, progress fills). Every theme draws the same flat pages; nothing is
+  painted behind them. Reduced motion: nothing moves (`launcher/scenery/src/clock.rs`);
+  `SUNRISE_LAUNCHER_MOTION=off` stills everything, `always` keeps the setup's scene moving
+  unfocused (for recordings).
 - **Copy says what happens** ("Downloads 26.3 and Java 21, about 600 MB"), never praises.
 - The specimen (`SUNRISE_LAUNCHER_PAGE=specimen sunrise-launcher`) draws the type and colours in the
   launcher itself.

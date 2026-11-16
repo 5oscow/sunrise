@@ -40,57 +40,6 @@ pub const PLAY: f32 = 56.;
 /// lower stops (the sunset) are too bright for light text, so text there always has a plate.
 pub const UNCARDED_STOPS: usize = 3;
 
-/// What drifts or glows over a theme's sky besides the clouds, in the colours the theme gives it
-/// (`launcher/scenery/src/sky.rs` draws it, a few steps a second; nothing under reduced motion or in
-/// performance mode).
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Mood {
-    Plain,
-    /// Light shafts from the surface (colour) and rising bubbles (rim, shine).
-    Water([u32; 3]),
-    /// Falling leaves in three tones.
-    Leaves([u32; 3]),
-    /// Falling petals in two tones.
-    Petals([u32; 2]),
-    /// Curtains of light in three tones.
-    Aurora([u32; 3]),
-    /// A glow over the horizon and a grid floor scrolling toward the viewer (glow, grid).
-    Neon([u32; 2]),
-    /// Snow falling softly: the flakes and the shade under each.
-    Snow([u32; 2]),
-}
-
-/// How the skylines and the sun are cut. Baked with the sky, so it stays in performance mode.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Land {
-    /// Plain silhouettes under a round sun sliced by the sky.
-    Plain,
-    /// A line of light along each skyline's top (far, near).
-    Neon([u32; 2]),
-    /// Grass along each skyline's top (far, near), leafy trees, and a square sun or moon.
-    Blocks { grass: [u32; 2], leaves: u32 },
-    /// Spruce woods on snowy hills: snow along each skyline's top (far, near), trees capped too.
-    Taiga { snow: [u32; 2] },
-}
-
-/// The sky's hand-drawn art (the clouds, the sun and the two skylines): the colours a launcher
-/// theme paints them with, beside the sky's own bands.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct SkyArt {
-    /// The sun's three bands, from its rim to its middle.
-    pub sun: [u32; 3],
-    /// The far and the near skyline.
-    pub far: u32,
-    pub near: u32,
-    /// The clouds far to near, and each layer's lit band.
-    pub cloud: [u32; 3],
-    pub lit: [u32; 3],
-    pub shade: u32,
-    pub star: u32,
-    pub mood: Mood,
-    pub land: Land,
-}
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Night {
     /// The sky from the top of the window to the horizon, drawn in bands.
@@ -120,8 +69,6 @@ pub struct Night {
     pub warn: u32,
     pub danger: u32,
     pub dark: bool,
-    /// The sky's clouds, sun and skylines.
-    pub art: SkyArt,
 }
 
 pub const NIGHT: Night = Night {
@@ -145,17 +92,6 @@ pub const NIGHT: Night = Night {
     warn: 0xf5a94a,
     danger: 0xff7d7d,
     dark: true,
-    art: SkyArt {
-        sun: [0xffe28c, 0xffbf66, 0xff944f],
-        far: 0x3a1f5e,
-        near: 0x150f2e,
-        cloud: [0x3b2869, 0x6e3a7e, 0xc96a86],
-        lit: [0x5a3f8a, 0x9c5a92, 0xf7a98a],
-        shade: 0x2a1a4c,
-        star: 0xf4f2ff,
-        mood: Mood::Plain,
-        land: Land::Plain,
-    },
 };
 
 /// The light appearance: the same sky at dawn, pale blue to peach, with the night's violet.
@@ -180,17 +116,6 @@ pub const DAWN: Night = Night {
     warn: 0x7a4f00,
     danger: 0xa3301d,
     dark: false,
-    art: SkyArt {
-        sun: [0xfffbea, 0xffeac2, 0xffd3a1],
-        far: 0xdcd3ee,
-        near: 0xbaafdd,
-        cloud: [0xeef0fb, 0xfbeef3, 0xfff1e4],
-        lit: [0xffffff; 3],
-        shade: 0xd9cbe8,
-        star: 0xffffff,
-        mood: Mood::Plain,
-        land: Land::Plain,
-    },
 };
 
 /// `top` at `alpha` over `under`, as the GPU blends them.
