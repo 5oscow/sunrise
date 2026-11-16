@@ -7415,3 +7415,30 @@ fn structure_modifiers_bundle_spawns_without_modifier_preserve_individual_files(
     );
     fs::remove_dir_all(base.parent().unwrap()).unwrap();
 }
+
+#[test]
+fn a_declared_shape_decides_the_legacy_solid_bit() {
+    let boxed =
+        |top: f64| VoxelShape::from_box(Aabb::new(Vec3::ZERO, Vec3::new(1.0, top, 1.0))).unwrap();
+    // The other flag bits stay as the template has them.
+    let flags = 0b10;
+    // A full cube and a slab (average size 0.83) are solid, a flat carpet-thin box is not, and a
+    // box a block and a half tall is.
+    assert_eq!(with_solid_bit(flags, None, &boxed(1.0)), 0b11);
+    assert_eq!(with_solid_bit(flags, None, &boxed(0.5)), 0b11);
+    assert_eq!(with_solid_bit(flags | 1, None, &boxed(0.1)), 0b10);
+    assert_eq!(with_solid_bit(flags, None, &boxed(1.5)), 0b11);
+    // A thin tall pole is solid by height alone; a thin short one is not.
+    let pole = |top: f64| {
+        VoxelShape::from_box(Aabb::new(
+            Vec3::new(0.4, 0.0, 0.4),
+            Vec3::new(0.6, top, 0.6),
+        ))
+        .unwrap()
+    };
+    assert_eq!(with_solid_bit(flags, None, &pole(1.0)), 0b11);
+    assert_eq!(with_solid_bit(flags, None, &pole(0.5)), 0b10);
+    // A template that forces solidity keeps its answer whatever the shape.
+    assert_eq!(with_solid_bit(flags, Some(true), &boxed(0.1)), 0b11);
+    assert_eq!(with_solid_bit(flags | 1, Some(false), &boxed(1.0)), 0b10);
+}
