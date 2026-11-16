@@ -29,8 +29,8 @@ built-in one.
 | `special_kept` | 591 to 601 | 621 to 631 | 641 to 642 |
 | `special_first_extraction` | 1,183 to 1,203 | 1,242 to 1,262 | 1,292 to 1,293 |
 
-An unchanged stack costs about 10 ns more per draw than the built-in model, the frame's start
-included. A stack's first draw, and its next draw after a frame that didn't draw it, costs about
+An unchanged stack costs about 10 ns more per resolve and submit than the built-in model. Frame
+starts and answer-cache eviction run before the timer and are not included. A stack's first draw, and its next draw after a frame that didn't draw it, costs about
 twice a built-in draw. The renderer here does almost nothing, so a real one adds its own work to
 that first draw only.
 

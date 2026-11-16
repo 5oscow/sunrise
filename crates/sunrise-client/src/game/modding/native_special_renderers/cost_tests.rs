@@ -3,10 +3,10 @@
 //! `docs/performance/special-item-renderers.md`). Each test runs alone in its own process, the
 //! measurement by hand: it registers the process's renderers.
 use crate::game::Game;
-use sunrise_assets::item_model::{ClientItem, DisplayContext, register_special_model_types};
-use sunrise_client::{item_render::ItemRenderState, items::ItemStack, mesher::Vertex};
 use mod_api::{ClientHost, SpecialModelPart, SpecialModelRenderer};
 use std::sync::Arc;
+use sunrise_assets::item_model::{ClientItem, DisplayContext, register_special_model_types};
+use sunrise_client::{item_render::ItemRenderState, items::ItemStack, mesher::Vertex};
 
 /// Full sky and block light, as the frame packs it.
 const LIGHT: u32 = 0x00F0_00F0;
