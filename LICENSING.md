@@ -52,9 +52,10 @@ product uses.
 
 - **Contributing:** there is no CLA. Contributors keep their copyright, their code comes in under the same licence
   it goes out under, and commits are signed off under the Developer Certificate of Origin
-  ([CONTRIBUTING.md](CONTRIBUTING.md#licence-and-dco)). Every author stays free to license their own contributions
-  elsewhere too.
+  ([CONTRIBUTING.md](CONTRIBUTING.md#licence-and-dco)). Nobody, Sunrise included, can put your code under other terms.
+  Every author stays free to license their own contributions elsewhere too.
 - **Later versions:** the project may publish later versions of the Additional Terms, which can only make the
-  wording clearer or add permissions; you may use any later version.
+  wording clearer or add permissions, and can never allow a closed or monetized competing product or give
+  anyone special rights; you may use any later version.
 - **When you share Sunrise**, pass on the licence (or its URL) and the `Required Notice:` line at the top of
   [LICENSE](LICENSE).
