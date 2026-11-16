@@ -154,7 +154,7 @@ pub fn register_world_fluids(
 
 #[path = "mod_content_fluid_declarations.rs"]
 mod fluid_declarations;
-pub use fluid_declarations::accept_world_fluids;
+pub use fluid_declarations::{accept_world_fluids, fluid_interactions, set_fluid_interactions};
 
 /// How the fluid `id` looks, when a mod declares it.
 pub fn fluid_look(id: &str) -> Option<FluidLook> {

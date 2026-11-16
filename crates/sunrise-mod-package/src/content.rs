@@ -1,7 +1,7 @@
 //! A content mod's `assets/` and `data/` (API 0.2, docs/modpacks.md): the
 //! files it adds to the game's resource tree, and the blocks, items, mob
 //! effects, entity types and menu types it declares in
-//! `data/<id>/sunrise/{block,item,mob_effect,entity_type,menu}/`.
+//! `data/<id>/sunrise/{block,item,mob_effect,entity_type,fluid,fluid_interaction,menu}/`.
 //!
 //! Content is data, not code: nothing here executes. What a mod
 //! may add is fenced instead. Its own namespaces (its id and the ones its
@@ -759,6 +759,8 @@ pub const LIVING_TEMPLATES: [&str; 6] = [
 pub mod entity_sounds;
 mod entity_type;
 pub use entity_type::EntityType;
+pub mod fluid_interaction;
+pub use fluid_interaction::FluidInteraction;
 
 /// A block entity type declared in code, with the blocks it supports.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -865,6 +867,8 @@ pub struct Content {
     pub creative_tabs: Vec<CreativeTab>,
     /// How its fluids look, by id.
     pub fluids: Vec<FluidLook>,
+    /// What its liquid blocks turn into beside another fluid or block, in file-name order.
+    pub fluid_interactions: Vec<FluidInteraction>,
     pub entity_types: Vec<EntityType>,
     /// Block entity types declared by native code, not content files.
     pub block_entity_types: Vec<BlockEntityType>,
@@ -990,6 +994,7 @@ impl Content {
             effects: Vec::new(),
             creative_tabs: Vec::new(),
             fluids: Vec::new(),
+            fluid_interactions: Vec::new(),
             entity_types: Vec::new(),
             block_entity_types: Vec::new(),
             menu_types: Vec::new(),
@@ -1010,6 +1015,7 @@ impl Content {
             effects: Vec::new(),
             creative_tabs: Vec::new(),
             fluids: Vec::new(),
+            fluid_interactions: Vec::new(),
             entity_types: Vec::new(),
             block_entity_types: Vec::new(),
             menu_types: Vec::new(),
@@ -1150,6 +1156,7 @@ impl Content {
         let mut effects = Vec::new();
         let mut tabs = Vec::new();
         let mut fluids = Vec::new();
+        let mut interactions = Vec::new();
         let mut types = Vec::new();
         let mut menus = Vec::new();
         for name in &self.files {
@@ -1190,13 +1197,15 @@ impl Content {
                 tabs.push((tab, name.clone()));
             } else if let Some(fluid) = parse("fluid") {
                 fluids.push((fluid, name.clone()));
+            } else if let Some(interaction) = parse("fluid_interaction") {
+                interactions.push((interaction, name.clone()));
             } else if let Some(kind) = parse("entity_type") {
                 types.push((kind, name.clone()));
             } else if let Some(menu) = parse("menu") {
                 menus.push((menu, name.clone()));
             } else {
                 return Err(format!(
-                    "{name}: data/{id}/sunrise/ holds block/, item/, mob_effect/, creative_tab/, fluid/, entity_type/ and menu/*.json only"
+                    "{name}: data/{id}/sunrise/ holds block/, item/, mob_effect/, creative_tab/, fluid/, fluid_interaction/, entity_type/ and menu/*.json only"
                 ));
             }
         }
@@ -1356,6 +1365,12 @@ impl Content {
                 self.items.push(item);
             }
             self.fluids.push(look);
+        }
+        for (_, name) in interactions {
+            let file: FluidInteraction =
+                serde_json::from_slice(&self.file(&name)?).map_err(|e| format!("{name}: {e}"))?;
+            file.check().map_err(|e| format!("{name}: {e}"))?;
+            self.fluid_interactions.push(file);
         }
         for (kind, name) in types {
             let file: EntityType =
@@ -3241,6 +3256,66 @@ capabilities = ["registries"]
                 .unwrap_err()
                 .contains("declared twice")
         );
+    }
+
+    #[test]
+    fn fluid_interaction_files_load_in_name_order_and_refuse_what_cannot_resolve() {
+        let file = |name: &str, body: &'static str| {
+            vec![(
+                format!("data/ruby/sunrise/fluid_interaction/{name}.json"),
+                body,
+            )]
+        };
+        let load = |files: Vec<(String, &'static str)>| {
+            let files: Vec<(&str, &[u8])> = files
+                .iter()
+                .map(|(n, b)| (n.as_str(), b.as_bytes()))
+                .collect();
+            smod("fluid-interaction", MANIFEST_TEXT, &files)
+        };
+        let slag = r#"{"source":"minecraft:lava","neighbour":{"fluid_tag":"minecraft:water"},
+            "below":{"block_tag":"ruby:cold"},"becomes":{"source":"ruby:slag","flowing":"ruby:slag[age=1]"}}"#;
+        let mut files = file("b_slag", slag);
+        files.extend(file(
+            "a_glass",
+            r#"{"source":"ruby:oil","neighbour":{"block":"minecraft:sand"},"becomes":{"flowing":"minecraft:glass"}}"#,
+        ));
+        let content = load(files).unwrap();
+        let sources: Vec<_> = content
+            .fluid_interactions
+            .iter()
+            .map(|i| i.source.as_str())
+            .collect();
+        assert_eq!(sources, ["ruby:oil", "minecraft:lava"], "by file name");
+        for (body, refusal) in [
+            (
+                r#"{"source":"lava","neighbour":{"block":"minecraft:sand"},"becomes":{"source":"minecraft:glass"}}"#,
+                "source",
+            ),
+            (
+                r#"{"source":"minecraft:lava","neighbour":{"block":"sand"},"becomes":{"source":"minecraft:glass"}}"#,
+                "neighbour",
+            ),
+            (
+                r#"{"source":"minecraft:lava","neighbour":{"block":"minecraft:sand"},"becomes":{}}"#,
+                "becomes",
+            ),
+            (
+                r#"{"source":"minecraft:lava","neighbour":{"block":"minecraft:sand"},"becomes":{"source":"glass"}}"#,
+                "becomes",
+            ),
+            (
+                r#"{"source":"minecraft:lava","neighbour":{"stone":"minecraft:sand"},"becomes":{"source":"minecraft:glass"}}"#,
+                "stone",
+            ),
+            (
+                r#"{"source":"minecraft:lava","neighbour":{"block":"minecraft:sand"},"becomes":{"source":"minecraft:glass"},"when":"any"}"#,
+                "when",
+            ),
+        ] {
+            let error = load(file("bad", body)).unwrap_err();
+            assert!(error.contains(refusal), "{body}: {error}");
+        }
     }
 
     #[test]

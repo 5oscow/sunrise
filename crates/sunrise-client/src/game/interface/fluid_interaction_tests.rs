@@ -1,0 +1,116 @@
+//! A mod's fluid interaction in a real game: lava beside the mod's fluid turns to the block it
+//! declared, `fluid_place_block` can veto it, vanilla's two lava rules stay first, and the water
+//! tag is read again when the tables are installed again.
+use super::native_entity_refs::tests::{run_fresh_cases, with_game_at};
+use mod_api::{
+    Flow, FluidBecomes, FluidInteraction, FluidNeighbour, FluidPlaceBlockEvent, Hooks, LevelHost,
+    ModEntry, PlacedState, Registrar, WorldFluid,
+};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
+use sunrise_client::chunk::Chunk;
+use sunrise_core::position::BlockPos;
+use sunrise_items::items::TagRegistry;
+
+static VETO: AtomicBool = AtomicBool::new(false);
+
+struct Gluey;
+#[mod_api::__subscriptions]
+impl Hooks for Gluey {
+    fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
+        let honey = r.declare_world_fluid("honey", WorldFluid::default());
+        let lava = r.fluid_key("minecraft:lava");
+        let glass = r.block_key("minecraft:glass");
+        r.fluid_interaction(FluidInteraction::new(
+            lava,
+            FluidNeighbour::Fluid(honey),
+            FluidBecomes::always(PlacedState::of(glass)),
+        ));
+    }
+    fn fluid_place_block(&self, _: &dyn LevelHost, _: &mut FluidPlaceBlockEvent<'_>) -> Flow {
+        if VETO.load(Ordering::Relaxed) {
+            Flow::Cancel
+        } else {
+            Flow::Continue
+        }
+    }
+}
+
+#[test]
+#[ignore = "daily"]
+fn a_declared_interaction_runs_after_vanillas_and_a_veto_stops_it() {
+    if run_fresh_cases(
+        "game::fluid_interaction_tests::a_declared_interaction_runs_after_vanillas_and_a_veto_stops_it",
+        "SUNRISE_FLUID_INTERACTION_CHILD",
+        &["valid"],
+    ) {
+        return;
+    }
+    let mods: mod_api::Mods = vec![ModEntry::new("gluey", Box::new(Gluey))].into();
+    mod_platform::__private::install(mods.clone());
+    crate::game::api_values::install_parts(&mods).unwrap();
+    let base = std::path::PathBuf::from(std::env::var_os("SUNRISE_TEST_RESOURCES").unwrap());
+    let root = super::mods::content_root(&base, &Default::default())
+        .unwrap()
+        .prepared()
+        .to_path_buf();
+    with_game_at(root, |game| {
+        game.options.dedicated = Some(Vec::new());
+        for cx in -1..=1 {
+            for cz in -1..=1 {
+                game.world
+                    .chunks
+                    .insert((cx, cz), Arc::new(Chunk::empty(cx, cz)));
+            }
+        }
+        let registry = game.pack.assets.registry;
+        let state = |name: &str| registry.default_state(name).unwrap();
+        let (lava, water, honey, glass, air) = (
+            state("minecraft:lava"),
+            state("minecraft:water"),
+            state("gluey:honey"),
+            state("minecraft:glass"),
+            state("minecraft:air"),
+        );
+        let (obsidian, stone) = (state("minecraft:obsidian"), state("minecraft:stone"));
+        for x in -16..32 {
+            for z in -16..32 {
+                game.world.set(x, 63, z, stone).unwrap();
+            }
+        }
+        game.install_fluid_interactions().unwrap();
+        // Lava at (x, 64, z) with `beside` to its east; the beside block's placement tells
+        // its neighbours, as a block set does.
+        let meet = |game: &mut super::Game<'_>, z: i32, beside| {
+            game.world.set(4, 64, z, lava).unwrap();
+            game.world.set(5, 64, z, beside).unwrap();
+            let at = BlockPos::new(5, 64, z);
+            game.with_level(|b, level, ticks| {
+                b.update_neighbours_on_block_set(level, ticks, at, air)
+            });
+            game.world.block(4, 64, z)
+        };
+
+        // The mod's fluid and a source of lava: glass, the block the mod declared.
+        VETO.store(false, Ordering::Relaxed);
+        assert_eq!(meet(game, 2, honey), glass);
+        // Vanilla's rule still comes first and still makes obsidian of a lava source.
+        assert_eq!(meet(game, 6, water), obsidian);
+
+        // The hook vetoes what the table decided: nothing is written.
+        VETO.store(true, Ordering::Relaxed);
+        assert_eq!(meet(game, 10, honey), lava);
+        VETO.store(false, Ordering::Relaxed);
+
+        // The water tag is read again when the tables are installed again: lava no longer meets
+        // water once a pack empties the tag, and does again with the pack's tag back.
+        let mut edited = game.items().clone();
+        edited.set_tags(TagRegistry::Fluid, Default::default());
+        game.install_fluid_interactions_from(&edited).unwrap();
+        assert_eq!(meet(game, 14, water), lava);
+        game.install_fluid_interactions().unwrap();
+        assert_eq!(meet(game, 18, water), obsidian);
+    });
+}

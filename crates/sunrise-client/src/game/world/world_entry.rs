@@ -545,6 +545,7 @@ impl Game<'_> {
             .as_ref()
             .map_or_else(Vec::new, |t| t.data_maps.registries());
         self.install_block_maps();
+        self.install_fluid_interactions()?;
         self.install_profession_save_snapshots();
         self.share_mob_maps();
         sunrise_client::datapack_net::serve(self.mods.datapack_registries.clone());
@@ -604,6 +605,9 @@ impl Game<'_> {
             .as_ref()
             .map_or_else(Vec::new, |t| t.data_maps.registries());
         self.install_block_maps();
+        if let Err(error) = self.install_fluid_interactions() {
+            log::error!("Sunrise: {error}");
+        }
         self.install_profession_save_snapshots();
         self.share_mob_maps();
         self.world.pois.clear();

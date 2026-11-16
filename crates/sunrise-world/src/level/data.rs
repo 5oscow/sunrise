@@ -1128,7 +1128,7 @@ fn build_with_gameplay<G: GameplayStateSource>(
             }
         }
     }
-    Ok(Behaviours {
+    let behaviours = Behaviours {
         table,
         props,
         named,
@@ -1147,7 +1147,10 @@ fn build_with_gameplay<G: GameplayStateSource>(
         occlusion_cache: Default::default(),
         growth: Default::default(),
         block_maps: Default::default(),
-    })
+        fluid_interactions: Default::default(),
+    };
+    behaviours.install_vanilla_fluid_interactions();
+    Ok(behaviours)
 }
 
 pub(super) fn potted_by_content(
