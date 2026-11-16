@@ -334,7 +334,7 @@ fn resource_codec(types: &Types<'_>, names: &super::Names) -> String {
             .marked()
             .into_iter()
             .filter(|(o, _, _)| *o == owner.as_str())
-            .map(|(_, _, name)| format!("{} ", mark_block(&name.text())))
+            .map(|(_, _, name)| format!("{} ", mark_block("crate", &name.text())))
             .collect();
         writeln!(store,"if value.is::<std::sync::Arc<dyn {path}>>() {{ let value=*value.downcast::<std::sync::Arc<dyn {path}>>().map_err(|_|crate::wire::WireError::Invalid(\"wrong handler\"))?; {marks}return Ok(crate::wire::guest::add_handler(vec![{views}])); }}").unwrap();
         if super::held(owner) {
@@ -406,10 +406,7 @@ pub(super) fn mutable_scalar(ty: &Ty) -> bool {
 /// The body is `#[inline]`: the method is then code only in the crate that calls it (or builds a
 /// vtable of it), not a function the mod's link exports whether anything uses it or not.
 fn import_body(types: &Types<'_>, m: &Method, name: &str, prefix: &str) -> String {
-    format!(
-        "#[inline] {}",
-        cached_import_body(types, m, name, prefix)
-    )
+    format!("#[inline] {}", cached_import_body(types, m, name, prefix))
 }
 
 fn cached_import_body(types: &Types<'_>, m: &Method, name: &str, prefix: &str) -> String {
@@ -1039,19 +1036,17 @@ pub(super) fn dispatchable(types: &Types<'_>, m: &Method) -> bool {
             })
 }
 
-/// A statement marking one export as used: a call of a no-op import named like it, on wasm.
-fn mark_block(name: &str) -> String {
-    let module = mod_surface::call::MODULE;
-    format!(
-        "{{ #[cfg(target_arch = \"wasm32\")] {{ #[link(wasm_import_module = \"{module}\")] unsafe extern \"C\" {{ #[link_name = \"{name}\"] fn mark(); }} unsafe {{ mark() }} }} }}"
-    )
+/// A statement marking one export as used: a call of a no-op import named like it, on wasm
+/// (`__sunrise_import!`, in the vocabulary).
+fn mark_block(root: &str, name: &str) -> String {
+    format!("{root}::__sunrise_import!(\"{name}\");")
 }
 
 /// The `__sunrise_mark!` macro: one arm per export a mod can implement, each a no-op import
 /// named like the export, so a mod's import section lists exactly the hooks, Part methods and
 /// handler methods it writes; `#[sunrise_mod]` and `#[sunrise_part]` call it for each method an
 /// impl overrides. The protocol module holds the three imports every guest links.
-pub(super) fn markers(names: &super::Names) -> String {
+pub(super) fn mark_macro(names: &super::Names) -> String {
     let mut out = String::from(
         "/// Marks that the mod implements one export: an import of the game's table, called for nothing.\n#[doc(hidden)]\n#[macro_export]\nmacro_rules! __sunrise_mark {\n",
     );
@@ -1059,13 +1054,21 @@ pub(super) fn markers(names: &super::Names) -> String {
         writeln!(
             out,
             "(\"{owner}\" {method}) => {{ {} }};",
-            mark_block(&name.text())
+            mark_block("$crate", &name.text())
         )
         .unwrap();
     }
     // A method the API keeps off wasm crosses nowhere and has no name.
     out.push_str("($owner:literal $method:ident) => {};\n}\n");
-    let protocol = |word: &str| mod_surface::call::protocol_name(word, mod_surface::call::SHARED_PROTOCOL).text();
+    out
+}
+
+/// The protocol module every guest links.
+pub(super) fn protocol_module() -> String {
+    let mut out = String::new();
+    let protocol = |word: &str| {
+        mod_surface::call::protocol_name(word, mod_surface::call::SHARED_PROTOCOL).text()
+    };
     write!(
         out,
         r#"/// The imports every guest links, named for the shared protocol's number.
