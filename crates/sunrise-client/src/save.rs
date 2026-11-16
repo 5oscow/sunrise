@@ -685,7 +685,24 @@ pub fn block_entity_data(
     block: &str,
     lock: Option<&Tag>,
 ) -> Tag {
-    let mut tag = block_entity_encode::encode(p, e, block);
+    block_entity_data_tag(block_entity_encode::encode(p, e, block), lock)
+}
+
+/// Command-visible block-entity data, saved against loaded item prototypes.
+pub fn block_entity_data_with_items(
+    p: (i32, i32, i32),
+    e: &crate::containers::BlockEntity,
+    block: &str,
+    lock: Option<&Tag>,
+    items: &crate::items::Items,
+) -> Tag {
+    block_entity_data_tag(
+        block_entity_encode::encode_with_items(p, e, block, items),
+        lock,
+    )
+}
+
+fn block_entity_data_tag(mut tag: Tag, lock: Option<&Tag>) -> Tag {
     if let Tag::Compound(map) = &mut tag {
         map.remove(&"keepPacked".into());
         if let Some(lock) = lock {

@@ -1234,6 +1234,14 @@ pub fn canon_stack(stack: Option<&ItemStack>) -> String {
         |s| canon_tag(&crate::item_nbt::item_to_nbt(s)),
     )
 }
+/// Canonical saved stack using the world's loaded item prototypes.
+pub fn canon_stack_with_items(stack: Option<&ItemStack>, items: &crate::items::Items) -> String {
+    stack.map_or_else(
+        || "-".to_owned(),
+        |stack| canon_tag(&crate::item_nbt::item_to_nbt_with_items(stack, items)),
+    )
+}
+
 /// The stack of an SNBT `ItemStack.CODEC` compound; None for "-".
 pub fn parse_stack(snbt: &str) -> Result<Option<ItemStack>, String> {
     if snbt == "-" {
@@ -1338,27 +1346,12 @@ fn encode_stack_components(stack: &ItemStack, include_damage: bool) -> Option<Ta
 /// Context-free callers and the live `components_tag` view stay unchanged.
 pub fn encode_components_with_items(stack: &ItemStack, items: &crate::items::Items) -> Option<Tag> {
     let mut components = encode_components(stack)?;
-    let Some(prototype) = items.get(&stack.item) else {
+    let Some(prototype) = items.component_defaults.get(stack.item.as_ref()) else {
         return Some(components);
     };
-    // PatchedDataComponentMap.set removes values equal to the prototype.
-    let same_stack_size = prototype
-        .components
-        .iter()
-        .any(|id| id == "minecraft:max_stack_size")
-        && matches!(components.get("minecraft:max_stack_size"), Some(Tag::Int(size))
-            if *size > 0 && *size as u32 == prototype.max_stack);
-    // A durable prototype carries DAMAGE 0 (`Item.Properties.durability`), so the
-    // explicit zero `components_tag` keeps for a stack-declared MAX_DAMAGE equals it.
-    let same_damage =
-        prototype.max_damage > 0 && matches!(components.get("minecraft:damage"), Some(Tag::Int(0)));
+    // PatchedDataComponentMap removes every value equal to its item prototype.
     if let Tag::Compound(entries) = &mut components {
-        if same_stack_size {
-            entries.remove(&JavaString::from("minecraft:max_stack_size"));
-        }
-        if same_damage {
-            entries.remove(&JavaString::from("minecraft:damage"));
-        }
+        entries.retain(|id, value| prototype.get(id) != Some(value));
         if entries.is_empty() {
             return None;
         }
@@ -2329,6 +2322,60 @@ mod tests {
             assert_eq!(encode_components(&fresh), Some(expected.clone()));
             assert!(fresh.data().unwrap().map_id.is_none());
         }
+    }
+
+    fn prototype_items() -> crate::items::Items {
+        let mut items = crate::items::Items::empty();
+        items.component_defaults = Arc::new(
+            [
+                (
+                    "minecraft:red_banner".to_owned(),
+                    [("minecraft:banner_patterns".into(), Tag::List(Vec::new()))]
+                        .into_iter()
+                        .collect(),
+                ),
+                (
+                    "minecraft:diamond_pickaxe".to_owned(),
+                    [("minecraft:damage".into(), Tag::Int(0))]
+                        .into_iter()
+                        .collect(),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        items
+    }
+
+    #[test]
+    fn saved_empty_banner_patterns_equal_the_loaded_prototype() {
+        let stack = parse_stack(
+            r#"{id:"minecraft:red_banner",count:1,components:{"minecraft:banner_patterns":[]}}"#,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            crate::item_nbt::item_to_nbt_with_items(&stack, &prototype_items()),
+            sunrise_core::nbt::parse_snbt(r#"{id:"minecraft:red_banner",count:1}"#)
+                .unwrap()
+                .0
+        );
+    }
+
+    #[test]
+    fn saved_zero_damage_equals_the_loaded_prototype() {
+        let stack = parse_stack(r#"{id:"minecraft:diamond_pickaxe",count:1,components:{"minecraft:damage":0,"minecraft:custom_data":{keep:87}}}"#).unwrap().unwrap();
+        assert_eq!(crate::item_nbt::item_to_nbt_with_items(&stack, &prototype_items()), sunrise_core::nbt::parse_snbt(r#"{id:"minecraft:diamond_pickaxe",count:1,components:{"minecraft:custom_data":{keep:87}}}"#).unwrap().0);
+    }
+
+    #[test]
+    fn saved_mod_item_without_a_prototype_retains_its_components() {
+        let source = r#"{id:"example:tool",count:1,components:{"minecraft:damage":0,"minecraft:banner_patterns":[],"example:counter":0}}"#;
+        let stack = parse_stack(source).unwrap().unwrap();
+        assert_eq!(
+            crate::item_nbt::item_to_nbt_with_items(&stack, &prototype_items()),
+            sunrise_core::nbt::parse_snbt(source).unwrap().0
+        );
     }
 
     #[test]
