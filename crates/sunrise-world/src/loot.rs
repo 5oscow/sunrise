@@ -627,6 +627,8 @@ fn int_value(v: &Value) -> Option<i64> {
 #[path = "loot_conditions.rs"]
 mod loot_conditions;
 use loot_conditions::overlay_map;
+#[path = "loot_item_predicates.rs"]
+pub mod item_predicates;
 mod predicates;
 pub use predicates::load_predicates;
 
@@ -3503,51 +3505,9 @@ impl LootData {
         })
     }
     fn item_matches(&self, p: &Value, stack: &LootStack) -> bool {
-        if !p["items"].is_null() && !self.item_in(&stack.item, &p["items"]) {
-            return false;
-        }
-        if !int_bounds(&p["count"], stack.count) {
-            return false;
-        }
-        if p["predicates"].get("minecraft:map_id").is_some() && !stack.map {
-            return false;
-        }
-        if let Some(pattern) = p["predicates"].get("minecraft:custom_data") {
-            let data = stack
-                .components
-                .iter()
-                .rev()
-                .find(|(id, _)| id == "minecraft:custom_data")
-                .and_then(|(_, value)| value.clone());
-            let data = match &data {
-                Some(Tag::Compound(c)) => Some(c),
-                _ => None,
-            };
-            if !custom_data_matches(pattern, data) {
-                return false;
-            }
-        }
-        // EnchantmentsPredicate: every entry must hold.
-        if let Some(list) = p["predicates"]["minecraft:enchantments"].as_array() {
-            let data = self;
-            let ok = list.iter().all(|e| {
-                let levels = &e["levels"];
-                match &e["enchantments"] {
-                    Value::Null => stack
-                        .enchantments
-                        .iter()
-                        .any(|(_, l)| int_bounds(levels, *l)),
-                    set => data.holder_set("enchantment", set).iter().any(|name| {
-                        let level = item_level(stack, name);
-                        level != 0 && int_bounds(levels, level)
-                    }),
-                }
-            });
-            if !ok {
-                return false;
-            }
-        }
-        true
+        item_predicates::matches(p, stack, |registry, tag, id| {
+            self.contains(registry, tag, id)
+        })
     }
 }
 

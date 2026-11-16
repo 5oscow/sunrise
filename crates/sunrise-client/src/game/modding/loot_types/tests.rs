@@ -101,7 +101,7 @@ fn registered_types_preserve_both_evaluators_order_short_circuit_and_selected_ra
             "condition":{"type":"minecraft:all_of", "terms":[gate("pool", true), {"type":"minecraft:any_of", "terms":[gate("any",true), gate("skipped any",false)]}]},
             "entries":[{"type":"minecraft:item","name":"minecraft:stick",
                 "condition":{"type":"minecraft:any_of","terms":[gate("entry false",false), gate("entry true",true), gate("skipped entry",false)]},
-                "modifier":{"type":"minecraft:sequence","functions":[{"type":"minecraft:set_count","count":2},skipped,scaled,function("sequence",2)]}}],
+                "modifier":{"type":"minecraft:sequence","functions":[{"type":"minecraft:set_count","count":2},skipped,scaled,{"type":"minecraft:filtered","item_filter":{"items":"minecraft:stick"},"on_pass":function("sequence",2),"on_fail":function("skipped filter fail",9)},{"type":"minecraft:filtered","item_filter":{"items":"minecraft:diamond"},"on_pass":function("skipped filter pass",9),"on_fail":function("filtered fail",1)}]}}],
             "modifier":function("pool function",2)}], "modifier":function("table function",2)});
             std::fs::write(folder.join("root.json"), table.to_string()).unwrap();
             let defaults = sunrise_world::item_defaults::read(root.path()).unwrap();
@@ -119,6 +119,7 @@ fn registered_types_preserve_both_evaluators_order_short_circuit_and_selected_ra
                 "gate true",
                 "entry",
                 "sequence",
+                "filtered fail",
                 "pool function",
                 "table function",
             ];
@@ -131,8 +132,10 @@ fn registered_types_preserve_both_evaluators_order_short_circuit_and_selected_ra
                     )
                 })
                 .collect();
-            let count = (((2 * 3 + expected[6].1) * 2 + expected[7].1) * 2 + expected[8].1) * 2
-                + expected[9].1;
+            let count = ((((2 * 3 + expected[6].1) * 2 + expected[7].1) + expected[8].1) * 2
+                + expected[9].1)
+                * 2
+                + expected[10].1;
             for item_engine in [false, true] {
                 observations.lock().unwrap().clear();
                 let mut random = LegacyRandom::new(123);

@@ -2404,6 +2404,23 @@ impl<R: RandomSource> LootContext<'_, R> {
                         self.modifiers(function, stack, random);
                     }
                 }
+                "minecraft:filtered" => {
+                    let candidate = loot_of(stack);
+                    let pass = sunrise_world::loot::item_predicates::matches(
+                        &f["item_filter"],
+                        &candidate,
+                        |registry, tag, id| match registry {
+                            "item" => self.items.item_in_tag(tag, id),
+                            "enchantment" => self.items.enchantments.in_tag(tag, id),
+                            _ => false,
+                        },
+                    );
+                    self.modifiers(
+                        if pass { &f["on_pass"] } else { &f["on_fail"] },
+                        stack,
+                        random,
+                    );
+                }
                 "minecraft:set_count" => {
                     let n = Self::int_number(&f["count"], random);
                     let base = if f["add"].as_bool() == Some(true) {

@@ -16,9 +16,11 @@ impl<R: RandomSource> LootContext<'_, R> {
                 self.items
                     .loot_types
                     .contains(value["type"].as_str().unwrap_or(""), true)
-                    || value
-                        .get("functions")
-                        .is_some_and(|value| self.has_registered_function(value))
+                    || ["functions", "on_pass", "on_fail"].iter().any(|field| {
+                        value
+                            .get(field)
+                            .is_some_and(|value| self.has_registered_function(value))
+                    })
             }
             _ => false,
         }
