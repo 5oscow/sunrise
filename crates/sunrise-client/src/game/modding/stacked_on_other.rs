@@ -15,11 +15,11 @@ use crate::game::transactions::decision::{
     self, ActionTarget, GameHost, Identity, InvalidReason, MenuId, Outcome, Reply, Side,
     StaleReason,
 };
+use mod_api::item::menu::{StackResult, StackedOnOtherResult};
+use std::{cell::RefCell, rc::Rc};
 use sunrise_client::menu::{
     Env, Menu, PlanningRules, RuleAnswers, StackedClick, StackedOutcome, StoredRules,
 };
-use mod_api::item::menu::{StackResult, StackedOnOtherResult};
-use std::{cell::RefCell, rc::Rc};
 
 /// What a pickup click did: it ran, or the decision refused it and nothing changed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

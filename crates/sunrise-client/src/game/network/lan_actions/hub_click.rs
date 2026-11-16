@@ -4,8 +4,8 @@
 //! click, so the click code and the game are separate values and the game is whole while the
 //! hub runs.
 use super::*;
-use sunrise_client::menu::{PlanningRules, RuleAnswers, StackedOutcome, StoredRules};
 use std::{cell::RefCell, rc::Rc};
+use sunrise_client::menu::{PlanningRules, RuleAnswers, StackedOutcome, StoredRules};
 
 impl Game<'_> {
     /// Run `f` with the LAN host taken out of `self.lan`, then put it back. `f` is given the whole
