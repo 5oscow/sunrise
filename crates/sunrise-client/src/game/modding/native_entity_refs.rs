@@ -240,10 +240,9 @@ impl Game<'_> {
     /// finite (NaN or infinite). A minimum above its maximum is the same box
     /// with the two swapped, as vanilla's `AABB`. On a client, see
     /// `client_entities_in`. The walk
-    /// is in entity-list order followed by players; each overlap requires a
-    /// handle lookup, so cost grows with the box's contents. Tridents cannot
-    /// yet resolve; frames, paintings and other special entities
-    /// are not on the entity-list walk. The dragon follows ordinary entities;
+    /// is in entity-list order, then item frames and paintings, followed by
+    /// players; each overlap requires a handle lookup, so cost grows with the
+    /// box's contents. Tridents cannot yet resolve. The dragon follows ordinary entities;
     /// its eight intersecting parts follow players (`Level.getEntities`).
     /// During `hears_projectile_impacts`, the projectile list is taken out of
     /// the game and is not visible; it is restored for `projectile_impact`.
@@ -267,6 +266,7 @@ impl Game<'_> {
             return None;
         }
         let mut ids = self.listed_entities_in(bounds);
+        self.append_hanging_query_ids(bounds, &mut ids);
         self.append_dragon_query_ids(bounds, false, &mut ids);
         ids.extend(
             self.fishing_hooks_here()
@@ -318,6 +318,31 @@ impl Game<'_> {
         });
         ids
     }
+    /// The item frames and paintings whose boxes meet `bounds` (`HangingEntity`s are entities
+    /// of the level's list in vanilla; here they are lists of their own), in join order.
+    fn append_hanging_query_ids(&self, bounds: Aabb, ids: &mut Vec<u32>) {
+        let meets = |(lo, hi): ([f64; 3], [f64; 3])| {
+            bounds.intersects(Aabb::new(
+                Vec3::new(lo[0], lo[1], lo[2]),
+                Vec3::new(hi[0], hi[1], hi[2]),
+            ))
+        };
+        let mut hanging: Vec<(_, u32)> = Vec::new();
+        hanging.extend(
+            self.item_frames
+                .iter()
+                .filter(|f| f.id != 0 && meets(f.bounds()))
+                .map(|f| (f.join, f.id)),
+        );
+        hanging.extend(
+            self.paintings
+                .iter()
+                .filter(|p| p.id != 0 && meets(p.bounds()))
+                .map(|p| (p.join, p.id)),
+        );
+        hanging.sort_by_key(|&(join, _)| join);
+        ids.extend(hanging.into_iter().map(|(_, id)| id));
+    }
     /// `ClientLevel.getEntities` for `level_entities_in`: the entities the server
     /// tracks to this client in entity-list order, other players among them (a
     /// tracked player has a client copy, so its handle resolves), the dragon and
@@ -329,6 +354,7 @@ impl Game<'_> {
             return None;
         }
         let mut ids = self.listed_entities_in(bounds);
+        self.append_hanging_query_ids(bounds, &mut ids);
         self.append_dragon_query_ids(bounds, false, &mut ids);
         if self.mode_id() != 3
             && let Some(player) = &self.player

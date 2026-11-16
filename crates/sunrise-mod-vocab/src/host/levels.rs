@@ -270,11 +270,10 @@ pub trait LevelsBackend {
     /// the entities the server tracks to it, other players among them, and the
     /// window's own player, with the same walk.
     /// None there before login and for a level it does not show. The walk
-    /// is in entity-list order followed by players. Every entity list is walked
+    /// is in entity-list order, then item frames and paintings, followed by players. Every entity list is walked
     /// once per call: O(entities) regardless of the box. Each overlapping mob
     /// resolves through a mob-list scan: O(K*N) for K overlapping mobs and N mobs. Tridents do not
-    /// resolve; frames, paintings and other special entities
-    /// are not on the entity-list walk. The dragon follows ordinary entities;
+    /// resolve; other special entities are not on the entity-list walk. The dragon follows ordinary entities;
     /// its eight intersecting parts follow players in vanilla hash-table order (`Level.getEntities`).
     /// During `hears_projectile_impacts`, the projectile list is taken out of
     /// the game and is not visible; it is restored for `projectile_impact`.

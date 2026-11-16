@@ -647,6 +647,26 @@ pub trait EntitiesBackendMut {
         rotation: Option<[f32; 2]>,
     ) -> bool;
     /// Side: server.
+    /// Moves the entity by `delta` blocks as `Entity.move(cause, delta)` does: the block,
+    /// entity and world border collision scan stops it at what is in the way, it steps up what
+    /// its step height allows, and its ground flag follows the move. It is not a teleport
+    /// (nothing is skipped over) and not a velocity: the entity's motion is left as it is. The
+    /// `entity_move` hook fires for it with `cause`, once, so a listener may replace or cancel
+    /// the delta as for any other move; a cancelled move is `Some([0.0; 3])`. Returns how far
+    /// the entity moved, `delta` less what the collisions took. None for a stale handle, on a
+    /// client, for a player (its client owns its position; teleport it instead), for an entity
+    /// outside the game's entity walk (a display, a painting, an item frame, an End crystal, a
+    /// dragon part) and for a delta that is not finite or has a component beyond 64 blocks. The
+    /// entity's own tick still does what follows a move: fall damage, block effects and
+    /// triggers.
+    #[access(WorldOnly)]
+    fn entity_move_by(
+        &mut self,
+        entity: EntityRef,
+        delta: [f64; 3],
+        cause: MoveCause,
+    ) -> Option<[f64; 3]>;
+    /// Side: server.
     /// Sends the entity to `pos` in the level `dimension` (`minecraft:the_nether`,
     /// or a level a mod registered), as `Entity.teleport` does with a portal's
     /// transition: `pos` is in that level's own coordinates (nothing scales it

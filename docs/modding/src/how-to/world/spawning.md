@@ -27,6 +27,9 @@ The placement type is `SpawnPlacements.isSpawnPositionOk`'s first check, and the
 
 `mob_spawn_placement_check` is the separate per-check moment: it runs after the rule and is told its answer as `default_result`, so you can override it for one position.
 
+`level_entities_in(level, min, max)` lists item frames and paintings whose boxes meet the box too, with
+handles that resolve, after the ordinary entities and before the players.
+
 ## Walking every entity in a level
 
 `host.level_all_entities(level)` returns the authoritative level's available

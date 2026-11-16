@@ -49,6 +49,20 @@ fn cause_of(cause: MoverType) -> MoveCause {
     }
 }
 
+/// The `MoverType` a mod asks for by its cause (`MoveCause`): `cause_of`'s inverse.
+pub fn mover_of(cause: MoveCause) -> MoverType {
+    [
+        MoverType::SelfMovement,
+        MoverType::Player,
+        MoverType::Piston,
+        MoverType::ShulkerBox,
+        MoverType::Shulker,
+    ]
+    .into_iter()
+    .find(|mover| cause_of(*mover) == cause)
+    .expect("every cause is one of vanilla's five movers")
+}
+
 /// Arm one physical `Entity.move` invocation (#2414): the entity `entity` is
 /// about to move by `delta` for `cause`'s sake. The `entity_move` hook fires
 /// here — in this one function — on the authoritative side, and only when a
