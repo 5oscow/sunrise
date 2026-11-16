@@ -65,7 +65,9 @@ pub trait Hooks {
     /// by touching it is checked again after the hook returns without canceling: the boat
     /// is found again by id (gone: the contact pass for that boat ends), its passengers are
     /// counted again, and the mob must still exist, not be removed and not already ride;
-    /// a full boat or an unfit mob skips that mob. Server-side.
+    /// a full boat or an unfit mob skips that mob. A player who sits on a cushion has the cushion
+    /// found again by id after the board and dismount checks: gone, the click is spent and
+    /// the player is not seated. Server-side.
     #[hook(
         side = "server",
         contract = "cancel",

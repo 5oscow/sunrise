@@ -1,0 +1,2 @@
+# #1502: the game finds its target again after a hook that can change the world (provoking listener, prepared resources)
+sunrise-client game::cushion_refind_tests::a_cushion_the_listener_removed_does_not_seat_the_player lib daily resources
