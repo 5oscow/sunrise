@@ -8,10 +8,14 @@ mod_api::impl_host_areas!(Client);
 // A boundary reply fixture: vanilla's first potions and a mod namespace, not the game's registry.
 impl ItemsClientHost for Client {
     fn potions(&self) -> Vec<PotionInfo> {
-        ["minecraft:water", "minecraft:long_swiftness", "wire_test:sticky"]
-            .into_iter()
-            .map(|id| PotionInfo::new(id.into()))
-            .collect()
+        [
+            "minecraft:water",
+            "minecraft:long_swiftness",
+            "wire_test:sticky",
+        ]
+        .into_iter()
+        .map(|id| PotionInfo::new(id.into()))
+        .collect()
     }
 }
 impl mod_api::ClientHost for Client {}
@@ -22,7 +26,11 @@ fn registered_potions_keep_order_and_ids_across_the_host_call() {
     install_counter();
     let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
     let mut client = Client;
-    let expected = client.potions();
+    let expected = vec![
+        PotionInfo::new("minecraft:water".into()),
+        PotionInfo::new("minecraft:long_swiftness".into()),
+        PotionInfo::new("wire_test:sticky".into()),
+    ];
     for potion in &expected {
         let mut writer = Writer::new();
         writer.put(potion);
@@ -36,6 +44,8 @@ fn registered_potions_keep_order_and_ids_across_the_host_call() {
     let mut cx = boundary::Cx::default();
     cx.frames.push(frame);
     let cx = std::cell::RefCell::new(cx);
+    // Restores the previous transport even when an assertion below unwinds.
+    let _transport = TransportScope(None);
     guest::set_transport(Some(Rc::new(move |id, bytes| {
         let mut out = Writer::new();
         // SAFETY: the client and its frame outlive this synchronous transport.
@@ -43,5 +53,4 @@ fn registered_potions_keep_order_and_ids_across_the_host_call() {
         out.into_bytes()
     })));
     assert_eq!(guest::Guest.potions(), expected);
-    guest::set_transport(None);
 }
