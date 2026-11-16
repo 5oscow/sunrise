@@ -291,6 +291,11 @@ impl Game<'_> {
     }
     /// The frame under the crosshair within reach and its distance.
     pub(super) fn frame_hit(&self) -> Option<(usize, f64)> {
+        if let Some(hit) = self.cached_entity_pick() {
+            let (entity, distance, _) = hit?;
+            let index = self.item_frames.iter().position(|f| f.id == entity.id())?;
+            return Some((index, distance));
+        }
         let (eye, dir) = self.aim()?;
         let reach: f64 = self.entity_reach;
         let mut best: Option<(usize, f64)> = None;
@@ -317,8 +322,13 @@ impl Game<'_> {
         best
     }
     pub(super) fn block_distance(&self) -> Option<f64> {
-        if self.native_window() && self.targeting().hit_through_walls {
-            return None;
+        if self.uses_stored_pick() {
+            return match self.crosshair_target() {
+                Some(mod_api::CrosshairTarget::Block { hit, .. }) => {
+                    Some(self.pick_distance(hit.point))
+                }
+                _ => None,
+            };
         }
         self.pick_unfiltered().map(|h| {
             let eye = self.aim().map(|(eye, _)| eye).unwrap_or_default();

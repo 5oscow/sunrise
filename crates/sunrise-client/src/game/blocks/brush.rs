@@ -48,7 +48,7 @@ impl Game<'_> {
     ) {
         // No block under the crosshair: vanilla calls releaseUsingItem, which
         // stops the use and causes the interaction vibration.
-        let Some(hit) = self.pick() else {
+        let Some(hit) = self.item_pick() else {
             self.stop_using_item(stack);
             return;
         };

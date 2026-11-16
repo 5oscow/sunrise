@@ -146,6 +146,11 @@ impl Game<'_> {
 impl Game<'_> {
     /// The cushion under the crosshair, its distance and the hit point.
     pub(super) fn cushion_hit(&self) -> Option<(usize, f64, [f64; 3])> {
+        if let Some(hit) = self.cached_entity_pick() {
+            let (entity, distance, point) = hit?;
+            let index = self.cushions.iter().position(|f| f.id == entity.id())?;
+            return Some((index, distance, point));
+        }
         let (eye, dir) = self.aim()?;
         let reach: f64 = self.entity_reach;
         let mut best: Option<(usize, f64, [f64; 3])> = None;

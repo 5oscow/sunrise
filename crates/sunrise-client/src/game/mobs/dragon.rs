@@ -2025,6 +2025,14 @@ impl Game<'_> {
     /// Player melee on the dragon's parts or a crystal under the crosshair.
     /// The dragon part under the crosshair within reach: its id and distance.
     pub(super) fn dragon_hit(&self) -> Option<(u32, f64)> {
+        if let Some(hit) = self.cached_entity_pick() {
+            let (entity, distance, _) = hit?;
+            return self
+                .special_targets()
+                .into_iter()
+                .any(|(id, _)| id == entity.id())
+                .then_some((entity.id(), distance));
+        }
         let (eye, dir) = self.aim()?;
         let reach: f64 = self.entity_reach;
         let mut best: Option<(u32, f64)> = None;

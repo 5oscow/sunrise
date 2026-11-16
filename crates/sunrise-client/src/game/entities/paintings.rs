@@ -327,6 +327,11 @@ impl Game<'_> {
     }
     /// The painting under the crosshair within reach and its distance.
     pub(super) fn painting_hit(&self) -> Option<(usize, f64)> {
+        if let Some(hit) = self.cached_entity_pick() {
+            let (entity, distance, _) = hit?;
+            let index = self.paintings.iter().position(|f| f.id == entity.id())?;
+            return Some((index, distance));
+        }
         let (eye, dir) = self.aim()?;
         let reach: f64 = self.entity_reach;
         let mut best: Option<(usize, f64)> = None;

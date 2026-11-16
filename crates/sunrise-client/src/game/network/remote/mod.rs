@@ -8707,6 +8707,7 @@ impl Game<'_> {
         // chosen since the last tick (the wheel, the last tick's number keys, the
         // server's SetHeldSlot) goes out before anything else of this tick.
         self.remote_send_carried();
+        self.refresh_client_pick(1.0);
         if stop || !ready {
             self.stop_remote_mining();
         }
@@ -13276,6 +13277,7 @@ pub(crate) mod tests {
             game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
             game.yaw = 0.0;
             game.pitch = 0.0;
+            game.refresh_client_pick(1.0);
             let Some(CrosshairTarget::Entity { entity, .. }) = game.crosshair_target() else {
                 panic!("the crosshair hits the pig in front of the player");
             };
