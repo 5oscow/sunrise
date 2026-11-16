@@ -1,21 +1,11 @@
-//! `LevelRef::block_correct_tool` from a wasm mod reaches the backend with the level, the
-//! position and the tool intact, and the answer comes back as the native read's.
+//! `BlockStates::requires_correct_tool` from a wasm mod reaches the backend with the state
+//! intact, and the answer comes back as the backend gave it.
 use super::*;
 use mod_api::__private::game::{BackendMutRefOf, BackendRefOf};
-use mod_api::{ItemStack, LevelRef, WorldEpoch};
+use mod_api::{BlockState, BlockStateRecord, Host};
 
 thread_local! {
-    static ASKED: std::cell::RefCell<Vec<([i32; 3], Option<u32>)>> =
-        const { std::cell::RefCell::new(Vec::new()) };
-}
-
-/// A tool of one item is correct at x 1, no tool is; nothing is at x 2; x 3 is not loaded.
-fn answer(pos: [i32; 3], tool: Option<&ItemStack>) -> Option<bool> {
-    match pos[0] {
-        1 => Some(tool.is_some_and(|t| t.count() == 1)),
-        2 => Some(false),
-        _ => None,
-    }
+    static ASKED: std::cell::RefCell<Vec<u16>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
 struct Server;
@@ -32,41 +22,27 @@ impl mod_api::ServerHost for Server {
 }
 mod_api::impl_server_host_areas!(Server);
 impl mod_api::Backend for Server {}
-mod_api::impl_backend_areas!(Server, except(levels));
-impl mod_api::prelude::LevelsBackend for Server {
-    fn level_block_correct_tool(
-        &self,
-        _level: LevelRef,
-        pos: [i32; 3],
-        tool: Option<&ItemStack>,
-    ) -> Option<bool> {
-        ASKED.with_borrow_mut(|asked| asked.push((pos, tool.map(ItemStack::count))));
-        answer(pos, tool)
+mod_api::impl_backend_areas!(Server, except(block_states));
+impl mod_api::prelude::BlockStatesBackend for Server {
+    /// State 0 requires a correct tool, state 1 does not, any other is unknown.
+    fn block_state_requires_correct_tool(&self, state: BlockState) -> Option<bool> {
+        ASKED.with_borrow_mut(|asked| asked.push(state.ordinal()));
+        match state.ordinal() {
+            0 => Some(true),
+            1 => Some(false),
+            _ => None,
+        }
     }
 }
 impl mod_api::BackendMut for Server {}
 mod_api::impl_backend_mut_areas!(Server);
 
-fn asks() -> Vec<([i32; 3], Option<ItemStack>)> {
-    let item = REGISTERED_ITEM.get().unwrap();
-    let one = ItemStack::new(item, 1).unwrap();
-    let two = ItemStack::new(item, 2).unwrap();
-    vec![
-        ([1, 64, 0], Some(one.clone())),
-        ([1, 64, 0], Some(two)),
-        ([1, 64, 0], None),
-        ([2, 64, 0], Some(one.clone())),
-        ([3, 64, 0], Some(one)),
-    ]
-}
-
 #[test]
-fn a_wasm_mods_correct_tool_read_crosses_whole() {
+fn a_wasm_mods_requires_correct_tool_read_crosses_whole() {
     ASKED.with_borrow_mut(Vec::clear);
-    // The fixture mod registers the item the tools are stacks of.
+    // The fixture mod registers the block the states belong to.
     install_counter();
     let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
-    let level = LevelRef::new(WorldEpoch::new(2), mod_api::DimensionKey::OVERWORLD);
     let mut server = Server;
     {
         let host = &mut server;
@@ -81,17 +57,13 @@ fn a_wasm_mods_correct_tool_read_crosses_whole() {
             LOOPBACK_TRANSPORT.with(|active| active.borrow_mut().replace(transport.clone()));
         let _restore = TransportScope(previous);
         guest::set_transport(Some(transport));
-        for (pos, tool) in asks() {
-            assert_eq!(
-                level.block_correct_tool(&guest::Guest, pos, tool.as_ref()),
-                answer(pos, tool.as_ref())
-            );
-        }
+        let block = REGISTERED_BLOCK.get().unwrap();
+        let state = |ordinal| BlockState::from(BlockStateRecord::new(block, ordinal));
+        let facts = guest::Guest.block_states();
+        assert_eq!(facts.requires_correct_tool(state(0)), Some(true));
+        assert_eq!(facts.requires_correct_tool(state(1)), Some(false));
+        assert_eq!(facts.requires_correct_tool(state(2)), None);
         guest::set_transport(None);
     }
-    let expected: Vec<_> = asks()
-        .into_iter()
-        .map(|(pos, tool)| (pos, tool.map(|t| t.count())))
-        .collect();
-    assert_eq!(ASKED.with_borrow_mut(std::mem::take), expected);
+    assert_eq!(ASKED.with_borrow_mut(std::mem::take), vec![0, 1, 2]);
 }
