@@ -18,8 +18,18 @@ pub trait Hooks {
     /// a size changed within a tick takes the answer at the next of those. Does not fire for:
     /// other kinds of entity, whose vanilla sizes are fixed, and a client's copies of other
     /// entities, which keep vanilla's size. Not cancellable.
+    ///
+    /// Version 2: the player's standing, crouching and swimming pose fit tests also use
+    /// this answer, resolved before motion with live scale; an unchanged current-pose
+    /// answer is reused, while other candidates are asked once per player tick.
+    /// Selection and application share the answer, including cloned motion snapshots.
+    /// A scale change during movement, or a replay with a different vanilla-size key,
+    /// uses vanilla for that fit decision until the next pre-motion resolution.
+    /// Uncached fall-flying, sleeping and spin-attack candidates keep vanilla's box.
+    /// Candidate resolution dispatches 2–3 times per player tick with subscribers, never without.
     #[hook(
         side = "both",
+        version = 2,
         contract = "collect",
         out = "size",
         host = "read",
