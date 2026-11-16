@@ -53,7 +53,7 @@ pub(super) const IMPORTS: &[&str] = &[
     "WorldgenHost",
     "GenerationContext",
     "PieceContext",
-    "StructureRandom",
+    "RandomSource",
     "AttachmentStore",
     "ServerReloadListeners",
     "GameTests",

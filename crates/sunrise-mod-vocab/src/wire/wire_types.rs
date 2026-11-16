@@ -1030,9 +1030,9 @@ mod tests {
 }
 
 /// The whole generator, through its own constructor, which masks the state to 48 bits.
-impl Wire for crate::LegacyRandom {
+impl Wire for crate::LegacyRandomSource {
     layout_fields!("seed" => u64, "gaussian" => Option<f64>);
-    const LAYOUT_SEED: u64 = crate::wire::layout_seed(stringify!(crate::LegacyRandom));
+    const LAYOUT_SEED: u64 = crate::wire::layout_seed(stringify!(crate::LegacyRandomSource));
     const MIN: usize = 9;
     fn put(&self, out: &mut Writer) {
         out.put(&<(u64, Option<f64>)>::from(self));

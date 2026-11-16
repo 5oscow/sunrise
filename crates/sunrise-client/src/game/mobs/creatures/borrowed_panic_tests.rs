@@ -50,7 +50,7 @@ impl Probe {
     fn progress(&self, family: Family, target: bool, host: &mut dyn mod_api::LevelRandomHost) {
         if self.family == family && target && self.armed.load(Ordering::SeqCst) {
             // Seed at the actual callback boundary, independent of earlier vanilla draws.
-            assert!(host.set_random(mod_api::LegacyRandom::new(0x5eed)));
+            assert!(host.set_random(mod_api::LegacyRandomSource::new(0x5eed)));
             let mut expected = LegacyRandom::new(0x5eed);
             assert_eq!(
                 host.with_random(|random| random.next_long()),
