@@ -262,10 +262,12 @@ fn custom_data_component_recipes_decode_and_match() {
         .set_loot_component(ID, &Some(Tag::Compound(Default::default())));
     assert!(matches("empty", &stack));
     assert!(!matches("removed", &stack));
+    // A loot removal drops the stack's own value and leaves no `!` marker, so the
+    // stick's prototype custom data shows through; only `!id` patches record a removal.
     stack.data_mut().set_loot_component(ID, &None);
-    assert!(matches("removed", &stack));
+    assert!(!matches("removed", &stack));
     assert!(!matches("empty", &stack));
-    assert!(!matches("compound", &stack));
+    assert!(matches("compound", &stack));
     let absent = parse(
         r#"{"type":"neoforge:components","items":"minecraft:stone","components":{"!minecraft:custom_data":{}}}"#,
         &items,
