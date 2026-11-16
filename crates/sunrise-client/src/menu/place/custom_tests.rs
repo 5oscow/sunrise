@@ -313,7 +313,9 @@ fn existing_damaged_input_is_usable_but_inventory_damaged_tools_are_not_autofill
 fn a_named_grid_maps_cells_to_its_slots_and_clears_the_grid_with_the_named_slots() {
     let pending = shapeless(&["minecraft:stick", "minecraft:coal"]);
     assert!(pending.awaits_grid());
-    let plan = pending.in_grid(3, 2, &[7, 5, 3, 1, 0], &[2, 5], 10).unwrap();
+    let plan = pending
+        .in_grid(3, 2, &[7, 5, 3, 1, 0], &[2, 5], 10)
+        .unwrap();
     assert!(!plan.awaits_grid());
     assert_eq!(plan.input_slots(), [7, 5, 3, 1, 0]);
     // Shapeless ingredients fill the first cells in order, whatever slot each cell is.
@@ -351,5 +353,18 @@ fn a_grid_a_mod_gets_wrong_is_refused_with_its_reason_never_a_panic() {
     assert_eq!(
         five.in_grid(3, 2, &[0, 1, 2, 3, 4], &[], 10).unwrap().cells,
         [(0, 0), (1, 1), (2, 2), (3, 3), (4, 4)]
+    );
+}
+#[test]
+fn a_grid_with_fewer_cells_than_the_recipe_has_ingredients_is_refused() {
+    let two = shapeless(&["minecraft:stick", "minecraft:coal"]);
+    assert_eq!(
+        two.in_grid(1, 1, &[0], &[], 10).unwrap_err(),
+        "the grid has fewer cells than the recipe has ingredients"
+    );
+    // The same recipe fits a grid of two cells, whichever slot each is.
+    assert_eq!(
+        two.in_grid(2, 1, &[4, 2], &[], 10).unwrap().cells,
+        [(0, 4), (1, 2)]
     );
 }

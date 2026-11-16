@@ -194,6 +194,13 @@ impl MenuPlacement {
                 .ok_or("the recipe needs a cell the grid has no slot for")?;
             cells.push((ingredient as usize, slot));
         }
+        let mut reached = vec![false; self.placement.ingredients.len()];
+        for (ingredient, _) in &cells {
+            reached[*ingredient] = true;
+        }
+        if reached.contains(&false) {
+            return Err("the grid has fewer cells than the recipe has ingredients".into());
+        }
         Ok(Self {
             menu: self.menu.clone(),
             placement: self.placement.clone(),

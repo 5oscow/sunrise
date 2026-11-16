@@ -220,3 +220,70 @@ fn place_recipe_in_grid_places_once_per_click() {
         );
     });
 }
+
+/// The menu's part: it places the clicked recipe in a one-slot grid, as a mod would.
+struct Placer;
+#[mod_api::sunrise_part]
+impl mod_api::MenuPart for Placer {
+    fn recipe_book_place(
+        &self,
+        host: &mut dyn mod_api::ServerHost,
+        event: &mut mod_api::RecipeBookPlaceEvent<'_>,
+    ) {
+        event.ghost = host
+            .place_recipe_in_grid(event.recipe, 1, 1, vec![0], vec![0], event.use_max_items)
+            .unwrap();
+    }
+}
+struct PlacerMod;
+#[mod_api::__subscriptions]
+impl mod_api::Hooks for PlacerMod {
+    fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
+        r.menu_part("review:menu", Placer);
+    }
+}
+#[test]
+#[ignore = "daily"]
+fn a_listening_part_places_the_recipe_through_the_real_stage() {
+    let mods: mod_api::Mods = vec![mod_api::ModEntry::new("review", Box::new(PlacerMod))].into();
+    crate::game::api_values::install_parts(&mods).unwrap();
+    crate::entry::install_client_hooks();
+    mod_platform::testing::with_mods(mods, || {
+        super::super::native_guest_turn_tests::with_guests(|game| {
+            let (pos, _, selection) = open_mod_menu(game);
+            game.lan.as_mut().unwrap().hub.guests.update(0, |g| {
+                g.inventory[9] = Some(sunrise_client::items::ItemStack::new(
+                    "minecraft:iron_ore",
+                    3,
+                ));
+            });
+            let before = game.mod_book_menu_snapshot(12, 1, "review:menu").unwrap();
+            let plan = MenuPlacement::for_mod(
+                "review:menu".into(),
+                Placement::of(
+                    vec![Some(Ingredient::of(vec!["minecraft:iron_ore".into()]))],
+                    None,
+                ),
+            )
+            .unwrap();
+            let root = game.transaction_open();
+            assert_eq!(
+                game.stage_mod_book_place(&before, &selection, &plan, false),
+                Ok(PostPlace::Nothing)
+            );
+            game.transaction_close(&root, true);
+            let placed = game.world.block_entities.get(&pos).unwrap().slots()[0]
+                .clone()
+                .unwrap();
+            assert_eq!(
+                (placed.item.to_string(), placed.count),
+                ("minecraft:iron_ore".to_owned(), 1)
+            );
+            let left = game.lan.as_ref().unwrap().hub.guest(12).unwrap().inventory[9]
+                .as_ref()
+                .unwrap()
+                .count;
+            assert_eq!(left, 2);
+        });
+    });
+}
