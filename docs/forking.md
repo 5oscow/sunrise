@@ -5,8 +5,9 @@ horizon-rust/horizon#12055 to group its cosmetics, emotes, presence, server-list
 promotions and settings pages. This fork deliberately differs: excluded features
 are removed, not compiled behind a switch.
 
-Cosmetics, wardrobe, emotes, partner ads, sponsor cards, telemetry and Discord
-presence are not part of this fork. No Cargo feature restores them. The Mods and
+Cosmetics, emotes, the Wardrobe and the Shop, partner ads, sponsor links and the
+official server are not part of this fork: Sunrise has no paid features, shop or
+ads. No Cargo feature restores them. The Mods and
 Sunrise Settings pages remain available independently of the client's default
 features; disabling audio or controllers does not hide mod management.
 
@@ -27,8 +28,7 @@ a telemetry placeholder or an official-build promotion in the options screen.
 
 | Extra | Where it lives | The gate |
 |---|---|---|
-| Cosmetics, emotes and the emote wheel, "Show me as a Sunrise player" | `game/cosmetics.rs` (+ `cosmetics/fx.rs`, `cosmetics/emotes.rs`, `cosmetics/emote_wheel.rs`), crate `sunrise-cosmetics` | `game::cosmetics::enabled()`: the service is never asked, nothing is drawn, B opens no wheel |
-| The official server added to the server list, the withdrawn partner server taken out; the "Start Sunrise from the launcher" screen of a game without its prepared files, with its Download button (`get_the_game` hook) | crate `sunrise-official-servers` | registered only by the official executable (`sunrise-official`); sunrise-client's own executable has none |
+| The "Start Sunrise from the launcher" screen of a game without its prepared files, with its Download button (`get_the_game` hook) | crate `sunrise-official` | registered only by the official executable (`sunrise-official`); sunrise-client's own executable has none |
 | Sunrise Settings (Extras, PvP & HUD, Splitscreen, Studio, AI Agent) and Mods (with the registry browser) | `options_ui.rs` (`Page::Sunrise` and below), `extras_ui.rs`, `extras.rs`, `pvp.rs`, `game/extras.rs` and `game/extras/`, `extras_hud.rs` | the Options screen shows vanilla's greyed Telemetry Data instead (`options_ui::SUNRISE_EXTRAS`, set in `entry.rs`) |
 | Discord Rich Presence and its switch | crate `sunrise-discord` | registered only by the official executable (`sunrise-official`); sunrise-client's own executable has none |
 | Play with Friends | hosting: `game/friends.rs`, `game/friends/screen.rs`; joining: crate `sunrise-friends` (`game`) | hosting: the `friends` feature (`game/friends_off.rs` stands in); joining: only the official executable registers it ([layers.md](layers.md#how-a-sunrise-crate-plugs-in)) |
@@ -43,8 +43,7 @@ gate guards.
 
 ## Not behind the feature
 
-- The launcher (`launcher/`) holds the Wardrobe, the Shop, the featured servers page, its themes,
-  the telemetry consent and updates. A build of the game alone has none of them; without the
+- The launcher (`launcher/`) holds its themes, the telemetry consent and updates. A build of the game alone has none of them; without the
   launcher's consent the game keeps no crash or performance report (docs/telemetry.md).
 - The graphics screen's fullbright, dynamic lights and hiding block-break particles: renderer
   options, off by default (docs/extras.md). A `sunrise-extras.txt` left by an official install is

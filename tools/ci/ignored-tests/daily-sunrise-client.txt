@@ -122,6 +122,9 @@ sunrise-client game::native_menu_places::tests::un_backing_or_shortening_empties
 sunrise-client game::native_menus::tests::a_menus_items_are_replaced_in_one_packet_without_reopening lib daily resources
 sunrise-client game::native_menus::tests::container_hooks_follow_actual_open_boundaries_without_a_tick lib daily game-boot
 sunrise-client game::native_menus::tests::each_menu_items_refusal_has_its_own_name_and_sends_nothing lib daily resources
+sunrise-client game::native_net::packet_hold::tests::generation_change_after_a_drops_b_and_invalidates_the_hold lib daily network
+sunrise-client game::native_net::packet_hold::tests::physical_hold_orders_engine_and_mod_packets_and_bypasses_network_keepalive lib daily resources
+sunrise-client game::native_packet_builders::tests::client_host_hashes_plain_stacks_with_added_and_removed_components lib daily child-process
 sunrise-client game::native_passage_cross::tests::a_crossing_into_another_level_is_refused_far_level lib daily resources
 sunrise-client game::native_passages::tests::a_destination_level_must_be_open_and_another_level lib daily resources
 sunrise-client game::native_passages::tests::a_passage_into_another_level_is_not_sent_to_the_clients lib daily resources
@@ -145,6 +148,7 @@ sunrise-client game::native_player_respawn_tests::a_player_who_won_the_game_is_r
 sunrise-client game::native_player_respawn_tests::each_respawn_refusal_has_its_own_name_and_changes_nothing lib daily resources
 sunrise-client game::native_recipes::tests::a_synced_vanilla_recipe_has_one_book_id_the_servers lib daily resources
 sunrise-client game::native_recipes::tests::synced_vanilla_recipes_keep_their_book_ids lib daily resources
+sunrise-client game::native_ride_player::tests::a_mob_rides_a_guest_sits_on_it_and_the_guest_is_told lib daily game-boot
 sunrise-client game::native_server::network_settings_tests::server_settings_follow_the_network_config lib daily slow
 sunrise-client game::natural_spawning::tests::spawn_candidates_match_the_uncached_union_while_players_move lib daily slow
 sunrise-client game::rectangular_recipe_remainder_tests::rectangular_recipe_for_preserves_two_custom_remainder_cells lib daily resources

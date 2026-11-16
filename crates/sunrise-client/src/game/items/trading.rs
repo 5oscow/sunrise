@@ -142,9 +142,9 @@ impl merchant::MapMaker for GameMaps<'_> {
         let mut out = stack;
         let d = out.data_mut();
         d.map_id = Some(id);
-        d.other.push((
-            "minecraft:map_decorations".into(),
-            sunrise_core::nbt::Tag::compound([(
+        d.set_other(
+            "minecraft:map_decorations",
+            Some(sunrise_core::nbt::Tag::compound([(
                 "+",
                 sunrise_core::nbt::Tag::compound([
                     (
@@ -164,8 +164,8 @@ impl merchant::MapMaker for GameMaps<'_> {
                         sunrise_core::nbt::Tag::Float(180.0f32.to_bits()),
                     ),
                 ]),
-            )]),
-        ));
+            )])),
+        );
         out
     }
 }

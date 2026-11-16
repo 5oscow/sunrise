@@ -1,5 +1,5 @@
 //! `[[native.mixin]]`: a source-level edit of a game function, the only form that compiles game code.
-//! Each row is one sunrise-mixins `[[injection]]`, forwarded to the pinned tool, which owns the
+//! Each row is one horizon-mixins `[[injection]]`, forwarded to the pinned tool, which owns the
 //! vocabulary beyond the keys named here. Native only.
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -19,7 +19,7 @@ pub struct Mixin {
     pub options: toml::Table,
 }
 
-/// A sunrise-mixins table forwarded whole (`[[native.bridge]]`, `[[native.state]]`); only its
+/// A horizon-mixins table forwarded whole (`[[native.bridge]]`, `[[native.state]]`); only its
 /// id is the package's to check.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub struct Forwarded {
@@ -28,7 +28,7 @@ pub struct Forwarded {
     pub fields: toml::Table,
 }
 
-/// sunrise-mixins' injection kinds, spelled in upper case in the manifest.
+/// horizon-mixins' injection kinds, spelled in upper case in the manifest.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Head,

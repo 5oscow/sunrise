@@ -3,7 +3,7 @@
 //! Hook documentation and contract versions live in the catalog, not a shared changelog.
 //!
 //! Native mods are built against an exact game revision, rather than a hook API revision.
-//! Bodies have no `cfg` and no macros: sunrise-mixins refuses a target with
+//! Bodies have no `cfg` and no macros: horizon-mixins refuses a target with
 //! either (`tests::hook_points_stay_hookable`).
 
 /// Generated dispatch entry points, not hand-written hook implementations.

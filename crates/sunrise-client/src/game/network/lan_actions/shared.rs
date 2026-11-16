@@ -280,6 +280,7 @@ struct ItemRules<'a>(
     &'a sunrise_client::items::Items,
     &'a sunrise_client::enchant::Enchantments,
     Option<&'a dyn sunrise_client::menu::SlotRules>,
+    Option<&'a sunrise_client::menu::StackedOutcome>,
 );
 impl Rules for ItemRules<'_> {
     fn items(&self) -> &sunrise_client::items::Items {
@@ -293,6 +294,9 @@ impl Rules for ItemRules<'_> {
     }
     fn slot_rules(&self) -> Option<&dyn sunrise_client::menu::SlotRules> {
         self.2
+    }
+    fn stacked(&self) -> Option<&sunrise_client::menu::StackedOutcome> {
+        self.3
     }
 }
 

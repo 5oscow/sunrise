@@ -271,8 +271,8 @@ impl Game<'_> {
     }
     /// `LivingEntityUseItemEvent.Tick` for `stack` in use `ticks` so far, as
     /// `updatingUsingItem` starts: a mod may change the ticks left, which
-    /// moves the end. False when it ran the use out (`tick_ran_out`): the
-    /// item's tick and countdown are skipped.
+    /// moves the end. False when the remaining counter is nonpositive:
+    /// effects are skipped, but the countdown still decrements.
     pub(super) fn use_item_ticked(&mut self, stack: &ItemStack, ticks: u32) -> bool {
         let before = ticks_left(self.use_duration, ticks);
         let (mut remaining, mut canceled) = (before, false);
@@ -281,7 +281,7 @@ impl Game<'_> {
         let (left, set) = tick_left(before, remaining, canceled, self.use_start.ticks_set);
         self.use_start.ticks_set = set;
         self.use_duration = duration_leaving(ticks, left);
-        left > 0 || !set
+        left > 0
     }
     /// A mod's `Item.onUseTick` of `stack` used `ticks`, while ticks are left.
     /// False when that mod released the use, which then has nothing left to run.
@@ -503,10 +503,10 @@ impl Game<'_> {
     }
 }
 
-/// The ticks left after a mod's `Tick`, a cancel leaving -1, and
-/// whether a mod ever set this use's: once one did, the use goes on only
-/// while some are left, else it ran out. A use no mod touched goes on as
-/// vanilla's own do (an eye of ender's has none from the start).
+/// The event's replacement counter (a cancel leaves -1), and whether a
+/// mod has changed this use's countdown. This flag preserves vanilla's
+/// initially zero-duration items; a mod-run-out use skips effects, but
+/// still decrements on both sides.
 fn tick_left(before: i32, remaining: i32, canceled: bool, set: bool) -> (i32, bool) {
     let left = if canceled { -1 } else { remaining };
     (left, set || canceled || remaining != before)
@@ -1083,7 +1083,7 @@ mod tests {
         assert_eq!(tick_left(20, 20, true, false), (-1, true));
         assert!(!goes_on(tick_left(20, 0, false, false)));
         assert!(!goes_on(tick_left(20, -1, false, false)));
-        // a use a mod ran out stays out on the next ticks (a crossbow frozen).
+        // A run-out use keeps skipping effects while its counter goes negative.
         assert!(!goes_on(tick_left(-1, -1, false, true)));
         // and goes on again if a mod gives it ticks back.
         assert!(goes_on(tick_left(-1, 10, false, true)));
@@ -1293,11 +1293,16 @@ pub(super) mod interact_vibration_tests {
                 host: &dyn mod_api::Host,
                 event: &mut CanEatEvent<'_>,
             ) -> Option<bool> {
-                self.0.fetch_add(1, Ordering::Relaxed);
-                if let Some(stack) = event.stack {
-                    assert_eq!(stack.item().id(host), "minecraft:stick");
+                let call = self.0.fetch_add(1, Ordering::Relaxed);
+                if event
+                    .stack
+                    .is_some_and(|stack| stack.item().id(host) == "minecraft:rotten_flesh")
+                {
+                    return Some(false);
                 }
-                Some(!event.vanilla_can_eat)
+                assert!(event.stack.is_none(), "cake has no food stack");
+                // First exercise player-based overrides, then the stack-only refusal.
+                (call < 4).then_some(!event.vanilla_can_eat)
             }
         }
         let calls = Arc::new(AtomicUsize::new(0));
@@ -1307,7 +1312,7 @@ pub(super) mod interact_vibration_tests {
         )]
         .into();
         mod_platform::testing::with_mods(mods, || {
-            with_game("minecraft:stick", |game| {
+            with_game("minecraft:rotten_flesh", |game| {
                 let use_block = |game: &mut Game<'_>, name: &str| {
                     let player = game.use_context();
                     game.with_block_use_level(|b, level, ticks| {
@@ -1334,7 +1339,6 @@ pub(super) mod interact_vibration_tests {
                     sunrise_world::level::InteractionResult::Pass
                 );
                 assert_eq!(calls.load(Ordering::Relaxed), 1);
-                *game.held_mut() = None;
                 assert_eq!(
                     use_block(game, "minecraft:candle_cake"),
                     sunrise_world::level::InteractionResult::Pass
@@ -1347,6 +1351,22 @@ pub(super) mod interact_vibration_tests {
                     sunrise_world::level::InteractionResult::Success
                 );
                 assert_eq!(calls.load(Ordering::Relaxed), 3);
+                assert_eq!(
+                    use_block(game, "minecraft:candle_cake"),
+                    sunrise_world::level::InteractionResult::Success,
+                    "a stack-based food refusal does not refuse a candle-cake bite"
+                );
+                assert_eq!(calls.load(Ordering::Relaxed), 4);
+                game.player.as_mut().unwrap().health.food.food = 10;
+                assert_eq!(
+                    use_block(game, "minecraft:cake"),
+                    sunrise_world::level::InteractionResult::Success,
+                    "holding refused food does not refuse a hungry player's cake bite"
+                );
+                assert_eq!(
+                    use_block(game, "minecraft:candle_cake"),
+                    sunrise_world::level::InteractionResult::Success
+                );
                 game.world
                     .chunks
                     .insert((0, 0), Arc::new(sunrise_client::chunk::Chunk::empty(0, 0)));
@@ -1369,11 +1389,20 @@ pub(super) mod interact_vibration_tests {
                     point: [0.5, 65.0, 0.5],
                     inside: false,
                 };
-                let (result, _) = game.remote_block_template(&hit, None, true);
+                let held = game.held().cloned();
+                let (result, (changes, _)) = game.remote_block_template(&hit, held.as_ref(), true);
                 assert_eq!(result, sunrise_world::level::InteractionResult::Success);
+                assert_eq!(changes.len(), 1, "the client predicts a bitten cake");
+                let bitten = game.with_level(|b, _, _| {
+                    let cake = b
+                        .table
+                        .default_state(b.table.block_by_name("minecraft:cake").unwrap());
+                    b.table.set_int(cake, b.props.bites, 1)
+                });
+                assert_eq!(changes[0].1, bitten);
                 assert_eq!(
                     calls.load(Ordering::Relaxed),
-                    4,
+                    7,
                     "client dry-level path asks the hook"
                 );
             })

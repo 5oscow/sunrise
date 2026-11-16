@@ -22,8 +22,8 @@ use sunrise_world::native_load_context::{DataLoadOrigin, LoadContext, LoadInputs
 use sunrise_world::native_load_context::{LoopContext, LoopSide};
 mod models;
 pub use models::{
-    AnvilCraft, AnvilUpdate, AnvilVanilla, CarriedAccess, GrindstonePlace, GrindstoneTake,
-    SlotContext, SlotRules, SlotView, StackedOnOther,
+    AnvilCraft, AnvilUpdate, AnvilVanilla, GrindstonePlace, GrindstoneTake, PlanningRules,
+    RuleAnswers, SlotContext, SlotRules, SlotView, StackedClick, StackedOutcome, StoredRules,
 };
 mod slot_context;
 pub use slot_context::{SlotSnapshot, apply_menu_slot_rules, lan_container};
@@ -35,10 +35,12 @@ pub use container_items::fits_inside_container_items;
 mod click;
 mod storage;
 pub use storage::{MutationStamp, Snapshot};
+mod asked;
 mod equip_movement;
 mod equippable;
 pub mod place;
 mod remainder;
+pub use asked::Asked;
 
 /// `ServerPlayer.getRecipeBook`: whether the player knows a recipe.
 pub trait KnownRecipes {
@@ -130,6 +132,9 @@ pub struct Env<'a> {
     /// The mods' `menu_slot_rules`, lent by the game with the read-only `Host` behind it (none
     /// keeps every slot's own answer: a data-only consumer, or a click made without the game).
     pub slot_rules: Option<&'a dyn SlotRules>,
+    /// What the mods decided about this pickup click (`item_stacked_on_other`), made by the game
+    /// before the click (none: no listener, so the plain click).
+    pub stacked: Option<&'a StackedOutcome>,
 }
 
 /// The maps of the level a menu is in.
@@ -329,85 +334,6 @@ struct Slot {
     role: Role,
 }
 
-struct MenuSlotView<'a, 'e> {
-    menu: &'a mut Menu,
-    env: &'a Env<'e>,
-    slot: usize,
-}
-
-impl SlotView for MenuSlotView<'_, '_> {
-    fn with_staged(&mut self, edit: &mut dyn FnMut(&mut dyn SlotView) -> bool) -> bool {
-        let mut menu = self.menu.clone();
-        let mut run = |maps: Option<&dyn Maps>, maker: Option<&dyn crate::merchant::MapMaker>| {
-            let trade = self.env.trade.map(|trade| crate::merchant::TradeEnv {
-                maps: maker,
-                ..*trade
-            });
-            let env = Env {
-                maps,
-                trade: trade.as_ref(),
-                ..*self.env
-            };
-            edit(&mut MenuSlotView {
-                menu: &mut menu,
-                env: &env,
-                slot: self.slot,
-            })
-        };
-        let mut with_maps = |maker: Option<&dyn crate::merchant::MapMaker>| match self.env.maps {
-            Some(maps) => maps.with_staged(&mut |maps| run(Some(maps), maker)),
-            None => run(None, maker),
-        };
-        let accepted = match self.env.trade.and_then(|trade| trade.maps) {
-            Some(maker) => maker.with_staged(&mut |maker| with_maps(Some(maker))),
-            None => with_maps(None),
-        };
-        if accepted {
-            self.menu.install_state(menu);
-        }
-        accepted
-    }
-    fn items(&self) -> &crate::items::Items {
-        self.env.items
-    }
-
-    fn item(&self) -> Option<ItemStack> {
-        self.menu.slot(self.slot).cloned()
-    }
-    fn may_place(&self, stack: &ItemStack) -> bool {
-        self.menu.may_place(self.env, self.slot, stack)
-    }
-    fn may_pickup(&self) -> bool {
-        self.menu.may_pickup(self.env, self.slot)
-    }
-    fn allow_modification(&self) -> bool {
-        if self.menu.slot(self.slot).is_some() {
-            self.menu.allow_modification(self.env, self.slot)
-        } else {
-            let empty = ItemStack::new("minecraft:air", 0);
-            self.may_pickup() && self.may_place(&empty)
-        }
-    }
-    fn safe_insert(&mut self, mut stack: Option<ItemStack>, count: u32) -> Option<ItemStack> {
-        self.menu
-            .safe_insert(self.env, self.slot, &mut stack, count);
-        stack
-    }
-    fn safe_take(&mut self, count: u32, max: u32) -> Option<ItemStack> {
-        self.menu.safe_take(self.env, self.slot, count, max)
-    }
-}
-
-/// NeoForge's `ItemStackedOnOtherEvent`, before either item override.
-#[inline(never)]
-pub fn native_item_stacked_on_other(
-    context: &LoopContext,
-    event: &mut StackedOnOther<'_>,
-    canceled: &mut bool,
-) {
-    crate::native_client_hooks::item_stacked_on_other(context, event, canceled);
-}
-
 /// `BeaconBlockEntity.BEACON_EFFECTS`: the powers of each pyramid level.
 pub const BEACON_EFFECTS: [&[&str]; 4] = [
     &["minecraft:speed", "minecraft:haste"],
@@ -440,6 +366,7 @@ const OFFHAND: usize = 40;
 pub struct Menu {
     state: storage::State,
     stamp: storage::MutationStamp,
+    planning: asked::Planning,
 }
 
 /// `AnvilMenu`'s state besides its slots and `cost`.
@@ -843,6 +770,7 @@ impl Menu {
         containers[RESULT] = vec![None; 1];
         Self {
             stamp: storage::MutationStamp::fresh(),
+            planning: Default::default(),
             state: storage::State {
                 kind,
                 registry_id: match kind {
@@ -1621,9 +1549,7 @@ impl Menu {
         if self.state.slots[s].role == Role::Hidden {
             return false;
         }
-        let own = self.vanilla_may_place(env, s, stack);
-        self.slot_rules(env, s, stack, own, self.vanilla_slot_max(s, stack))
-            .0
+        self.slot_rules(env, s, stack).0
     }
 
     fn vanilla_may_place(&self, env: &Env, s: usize, stack: &ItemStack) -> bool {
@@ -1687,7 +1613,22 @@ impl Menu {
         stack.item.ends_with("_banner")
     }
 
+    /// `Slot.mayPickup`: the slot's own answer, then, on a mod menu type and only for a stack
+    /// the slot holds, the parts' (`menu_slot_rules`).
     fn may_pickup(&self, env: &Env, s: usize) -> bool {
+        self.vanilla_may_pickup(env, s)
+            && match self.slot(s) {
+                Some(held) if self.asks_pickup(s) => self.slot_rules(env, s, held).1,
+                _ => true,
+            }
+    }
+
+    /// The parts answer `mayPickup` on a mod menu type's slots that its screen shows.
+    fn asks_pickup(&self, s: usize) -> bool {
+        matches!(self.state.kind, Kind::Mod(_)) && self.state.slots[s].role != Role::Hidden
+    }
+
+    fn vanilla_may_pickup(&self, env: &Env, s: usize) -> bool {
         match self.state.slots[s].role {
             Role::Inert | Role::Hidden => false,
             Role::CraftResult => self.crafting_result_is_current(env, s),
@@ -1787,27 +1728,16 @@ impl Menu {
         partial
     }
 
-    fn slot_rules(
-        &self,
-        env: &Env,
-        s: usize,
-        stack: &ItemStack,
-        own: bool,
-        max: u32,
-    ) -> (bool, u32) {
+    /// Slot `s`'s `mayPlace`, the parts' `mayPickup` (true unless they refuse) and
+    /// `getMaxStackSize` for `stack`: its own answers, then the parts' on a registered menu
+    /// type, all from one ask.
+    fn slot_rules(&self, env: &Env, s: usize, stack: &ItemStack) -> (bool, bool, u32) {
+        let place = self.vanilla_may_place(env, s, stack);
+        let (max, item_max) = (self.vanilla_slot_max(s, stack), Self::max_stack(env, stack));
         let Some(id) = self.registry_id() else {
-            return (own, max.min(Self::max_stack(env, stack)));
+            return (place, true, max.min(item_max));
         };
-        apply_menu_slot_rules(
-            env.slot_rules,
-            id,
-            self.state.slots[s].index,
-            stack,
-            self.slot_context(env, s),
-            own,
-            max,
-            Self::max_stack(env, stack),
-        )
+        self.ask_slot_rules(env, id, s, stack, (place, true, max), item_max)
     }
 
     /// Capacity overrides for the backing container slots, refreshed before each server edit.
@@ -1818,15 +1748,7 @@ impl Menu {
 
     /// `Slot.getMaxStackSize(stack)`.
     fn slot_max(&self, env: &Env, s: usize, stack: &ItemStack) -> u32 {
-        let max = self
-            .slot_rules(
-                env,
-                s,
-                stack,
-                self.vanilla_may_place(env, s, stack),
-                self.vanilla_slot_max(s, stack),
-            )
-            .1;
+        let max = self.slot_rules(env, s, stack).2;
         self.limit_slot_max(s, max)
     }
 
@@ -2123,12 +2045,10 @@ impl Menu {
         Some(result)
     }
 
+    /// `Slot.allowModification`: `mayPickup` and `mayPlace` of what the slot holds, the click's
+    /// one ask for that stack.
     fn allow_modification(&self, env: &Env, s: usize) -> bool {
-        self.may_pickup(env, s)
-            && match self.slot(s) {
-                Some(stack) => self.may_place(env, s, stack),
-                None => true,
-            }
+        self.may_pickup(env, s) && self.slot(s).is_none_or(|held| self.may_place(env, s, held))
     }
 
     fn safe_take(
@@ -3080,7 +3000,8 @@ pub(crate) mod tests {
             &items,
             &PackOverlay::NONE,
             &crate::test_resources::server_load(),
-        );
+        )
+        .unwrap();
         let enchantments = crate::enchant::Enchantments::default();
         let names = crate::creative::Names::default();
         let env = Env {
@@ -3101,56 +3022,11 @@ pub(crate) mod tests {
             can_equip: None,
             known_recipes: None,
             slot_rules: None,
+            stacked: None,
         };
         let mut menu = Menu::new(kind);
         menu.creative = true;
         test(&env, &mut menu);
-    }
-
-    #[test]
-    #[ignore = "daily"]
-    fn staged_slot_refusal_restores_contents_and_on_take_side_effects() {
-        let mut ran = false;
-        with_menu(Kind::Brewing, |env, menu| {
-            ran = true;
-            let potion = ItemStack::new("minecraft:potion", 1);
-            for take in [false, true] {
-                for accepted in [false, true] {
-                    *menu = Menu::new(Kind::Brewing);
-                    menu.brewed_potion_hook = true;
-                    if take {
-                        menu.set_slot(env, 0, Some(potion.clone()));
-                    }
-                    let committed = MenuSlotView { menu, env, slot: 0 }.with_staged(&mut |slot| {
-                        if take {
-                            assert_eq!(slot.safe_take(1, 1), Some(potion.clone()));
-                        } else {
-                            assert!(slot.safe_insert(Some(potion.clone()), 1).is_none());
-                        }
-                        accepted
-                    });
-                    assert_eq!(committed, accepted);
-                    assert_eq!(menu.slot(0), (take != accepted).then_some(&potion));
-                    assert_eq!(
-                        menu.brewed_potion_takes.as_slice(),
-                        if take && accepted {
-                            std::slice::from_ref(&potion)
-                        } else {
-                            &[]
-                        }
-                    );
-                    assert_eq!(
-                        menu.brewed.as_slice(),
-                        if take && accepted {
-                            std::slice::from_ref(&potion)
-                        } else {
-                            &[]
-                        }
-                    );
-                }
-            }
-        });
-        assert!(ran, "prepared menu fixture was not loaded");
     }
 
     #[test]
@@ -3250,6 +3126,7 @@ pub(crate) mod tests {
             can_equip: None,
             known_recipes: None,
             slot_rules: None,
+            stacked: None,
         };
         let mut fuel = ItemStack::new("minecraft:stone", 2);
         fuel.data_mut().set_loot_component(
@@ -3299,6 +3176,7 @@ pub(crate) mod tests {
             can_equip: None,
             known_recipes: None,
             slot_rules: None,
+            stacked: None,
         };
         for (input, payment) in [
             (Input::Pickup, 8),
@@ -3416,7 +3294,8 @@ pub(crate) mod tests {
                     &PackOverlay::NONE,
                     &defaults,
                     &crate::test_resources::server_load(),
-                );
+                )
+                .unwrap();
                 assert_eq!(stations.brewing.is_reagent(&apple), added);
                 assert_eq!(
                     env.station_recipes
@@ -3520,6 +3399,7 @@ pub(crate) mod tests {
             can_equip: None,
             known_recipes: None,
             slot_rules: Some(&rules),
+            stacked: None,
         });
     }
 
@@ -3537,6 +3417,7 @@ pub(crate) mod tests {
             _: &ItemStack,
             context: SlotContext<'_>,
             may_place: &mut bool,
+            _: &mut bool,
             max_stack: &mut u32,
         ) {
             // `test:context` slot 1 takes a stack only for player 7 at its block, beside an
@@ -3940,44 +3821,6 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn listener_safe_take_consumes_crafting_inputs() {
-        with_menu(Kind::Crafting, |env, menu| {
-            menu.creative = false;
-            menu.set_slot(env, 1, stack("oak_log", 1));
-            menu.settle(env);
-            let mut view = MenuSlotView { menu, env, slot: 0 };
-            let mut carried = None;
-            let mut event = StackedOnOther {
-                player: None,
-                player_entity_id: None,
-                slot: 0,
-                container: MAIN,
-                container_slot: 0,
-                primary: true,
-                carried: CarriedAccess(&mut carried),
-                clicked: &mut view,
-                cancellation_result: false,
-            };
-            let listener = |event: &mut StackedOnOther<'_>| {
-                event.carried.set(event.clicked.safe_take(4, 4));
-            };
-            listener(&mut event);
-            assert_eq!(carried, stack("oak_planks", 4));
-            assert!(menu.slot(1).is_none());
-            let mut grid = vec![None; 9];
-            grid[0] = stack("oak_log", 1);
-            assert_eq!(
-                menu.item_crafted,
-                vec![(
-                    "minecraft:oak_planks".to_owned(),
-                    stack("oak_planks", 4).unwrap(),
-                    grid
-                )]
-            );
-        });
-    }
-
-    #[test]
     fn quick_move_landing_routes_plain_containers() {
         for (kind, size) in [
             (Kind::Hopper, 5),
@@ -4134,19 +3977,19 @@ pub(crate) mod tests {
             let mut menu = Menu::new(kind);
             menu.set_registry_id(Some("test:context"));
             // No block: the rule refuses.
-            assert!(!menu.slot_rules(env, 1, &stack, true, CONTAINER_MAX).0);
+            assert!(!menu.slot_rules(env, 1, &stack).0);
             menu.set_block_pos(Some([4, 5, 6]));
-            assert!(menu.slot_rules(env, 1, &stack, true, CONTAINER_MAX).0);
+            assert!(menu.slot_rules(env, 1, &stack).0);
             // What slot 0 holds is seen by the ask about slot 1.
             menu.set_slot(env, 0, Some(ItemStack::new("minecraft:dirt", 1)));
-            assert!(!menu.slot_rules(env, 1, &stack, true, CONTAINER_MAX).0);
+            assert!(!menu.slot_rules(env, 1, &stack).0);
             // Another player's menu (player 8) is refused even at the block.
             let other = Env {
                 player: Some(8),
                 ..*env
             };
             menu.set_slot(env, 0, None);
-            assert!(!menu.slot_rules(&other, 1, &stack, true, CONTAINER_MAX).0);
+            assert!(!menu.slot_rules(&other, 1, &stack).0);
         });
     }
 
@@ -4175,18 +4018,12 @@ pub(crate) mod tests {
         let before = load.loop_context(LoopSide::Server, []);
         assert_eq!(before.setting("rules_mod", "stack"), None);
         bare_env_in(&before, |env| {
-            assert_eq!(
-                menu.slot_rules(env, 0, &stack, true, CONTAINER_MAX),
-                (true, 7)
-            );
+            assert_eq!(menu.slot_rules(env, 0, &stack), (true, true, 7));
         });
         std::fs::write(&file, "3").unwrap();
         let after = load.loop_context(LoopSide::Server, ["rules_mod"]);
         bare_env_in(&after, |env| {
-            assert_eq!(
-                menu.slot_rules(env, 0, &stack, true, CONTAINER_MAX),
-                (true, 3)
-            );
+            assert_eq!(menu.slot_rules(env, 0, &stack), (true, true, 3));
             // Slot 28 is hotbar 0 in this one-slot mod menu; both indices
             // refer to inventory cell 0 and the rule caps that cell at three.
             menu.set_player_item(0, Some(ItemStack::new("minecraft:stone", 8)));
@@ -4213,37 +4050,10 @@ pub(crate) mod tests {
             );
         });
         bare_env_in(&before, |env| {
-            assert_eq!(
-                menu.slot_rules(env, 0, &stack, true, CONTAINER_MAX),
-                (true, 7)
-            );
+            assert_eq!(menu.slot_rules(env, 0, &stack), (true, true, 7));
         });
         // The other loop hooks read the same context: before the reload the
         // setting is missing, after it every one sees it.
-        let stacked_on_other = |context: &LoopContext, menu: &mut Menu| {
-            let mut canceled = false;
-            bare_env_in(context, |env| {
-                let mut carried = None;
-                let mut view = MenuSlotView {
-                    menu: &mut *menu,
-                    env,
-                    slot: 0,
-                };
-                let mut event = StackedOnOther {
-                    player: None,
-                    player_entity_id: None,
-                    slot: 0,
-                    container: MAIN,
-                    container_slot: 0,
-                    primary: true,
-                    carried: CarriedAccess(&mut carried),
-                    clicked: &mut view,
-                    cancellation_result: false,
-                };
-                native_item_stacked_on_other(context, &mut event, &mut canceled);
-            });
-            canceled
-        };
         let name = |context: &LoopContext| {
             let mut displayname = crate::text::Text::literal("Alex");
             crate::lan::hub::native_player_name_format(
@@ -4263,10 +4073,8 @@ pub(crate) mod tests {
             );
             display_name.map(|text| text.plain())
         };
-        assert!(!stacked_on_other(&before, &mut menu));
         assert_eq!(name(&before), "Alex");
         assert_eq!(tab_list(&before), None);
-        assert!(stacked_on_other(&after, &mut menu));
         assert_eq!(name(&after), "3");
         assert_eq!(tab_list(&after), Some("3".to_owned()));
         // The motion value hooks read it too, and change nothing without it.
@@ -4607,6 +4415,7 @@ pub(crate) mod tests {
             can_equip: None,
             known_recipes: None,
             slot_rules: None,
+            stacked: None,
         };
         // Both a pick-up onto the cursor and a shift-click into the inventory.
         for input in [Input::Pickup, Input::QuickMove] {
@@ -4698,6 +4507,7 @@ pub(crate) mod tests {
             can_equip: None,
             known_recipes: None,
             slot_rules: None,
+            stacked: None,
         };
         let menu = &mut Menu::new(mod_menu());
         {
@@ -5106,6 +4916,7 @@ pub(crate) mod tests {
             can_equip: None,
             known_recipes: None,
             slot_rules: None,
+            stacked: None,
         };
 
         let mut menu = Menu::new(Kind::Inventory);
@@ -5162,6 +4973,7 @@ pub(crate) mod tests {
             can_equip: None,
             known_recipes: Some(&known),
             slot_rules: None,
+            stacked: None,
         };
 
         let mut menu = Menu::new(Kind::Inventory);
@@ -5218,6 +5030,7 @@ pub(crate) mod tests {
             can_equip: None,
             known_recipes: Some(&known),
             slot_rules: None,
+            stacked: None,
         };
 
         let mut menu = Menu::new(Kind::Inventory);
@@ -5278,6 +5091,7 @@ pub(crate) mod tests {
             can_equip: None,
             known_recipes: Some(&known),
             slot_rules: None,
+            stacked: None,
         };
 
         let mut menu = Menu::new(Kind::Inventory);
@@ -5328,6 +5142,7 @@ pub(crate) mod tests {
             can_equip: None,
             known_recipes: None,
             slot_rules: None,
+            stacked: None,
         };
         let potion = ItemStack::new("minecraft:potion", 1);
         let mut seen = Vec::new();

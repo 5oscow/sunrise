@@ -1,7 +1,7 @@
 name: fn-replace windows
 # Function replacement on Windows (fn-replace, branch-only): the server SDK built with the launcher's
 # windows-gnu toolchain, the launcher's native build of the check mods against it (patch crates, the
-# carried sunrise-mixins patch, the registry route), and the patched engine linked. No vanilla data in
+# carried horizon-mixins patch, the registry route), and the patched engine linked. No vanilla data in
 # CI, so the server does not start; the build and link are what this checks.
 on:
   push:

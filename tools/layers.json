@@ -57,7 +57,6 @@
     "sunrise-shaders": "platform",
     "sunrise-theme": "platform",
     "sunrise-addresses": "sunrise",
-    "sunrise-cosmetics": "sunrise",
     "sunrise-discord": "sunrise",
     "sunrise-friends": "sunrise",
     "sunrise-heartbeat": "sunrise",
@@ -65,7 +64,6 @@
     "sunrise-launcher-scenery": "sunrise",
     "sunrise-mod-registry": "sunrise",
     "sunrise-official": "sunrise",
-    "sunrise-official-servers": "sunrise",
     "sunrise-perf-share": "sunrise",
     "sunrise-relay": "sunrise",
     "sunrise-release-sign": "sunrise",
@@ -167,7 +165,6 @@
     "sunrise-launcher -> sunrise-mod-package",
     "sunrise-launcher -> sunrise-system",
     "sunrise-mod-registry -> sunrise-mod-package",
-    "sunrise-client -> sunrise-cosmetics",
     "sunrise-client -> sunrise-telemetry"
   ],
   "_fork_baselines": {
@@ -189,9 +186,7 @@
     "sunrise-launcher -> sunrise-mod-package": "Separate launcher workspace: reads and installs mod packages and modpacks (features index, prebuilt, runtime-process); recorded baseline, not a new dependency.",
     "sunrise-launcher -> sunrise-system": "Separate launcher workspace: bug reports use the game's machine probes and path scrubber; recorded baseline, not a new dependency.",
     "sunrise-mod-registry -> sunrise-mod-package": "Separate registry workspace: reads and writes the registry index format (feature index only); recorded baseline, not a new dependency.",
-    "sunrise-client -> sunrise-cosmetics": "Restored upstream Horizon layer: existing engine dependency pending the upstream layer extraction.",
     "sunrise-client -> sunrise-telemetry": "Restored upstream Horizon layer: existing engine dependency pending the upstream layer extraction.",
-    "sunrise-client-lib -> sunrise-telemetry": "Restored upstream Horizon layer: existing engine dependency pending the upstream layer extraction.",
-    "sunrise-client-render -> sunrise-cosmetics": "Restored upstream Horizon layer: existing engine dependency pending the upstream layer extraction."
+    "sunrise-client-lib -> sunrise-telemetry": "Restored upstream Horizon layer: existing engine dependency pending the upstream layer extraction."
   }
 }

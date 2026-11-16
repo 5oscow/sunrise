@@ -141,7 +141,7 @@ mod tests {
     fn refuses_old_paths_unsafe_entries_and_unknown_fields() {
         for (i, name) in [
             "sunrise-native.json",
-            "sunrise-mixin.toml",
+            "horizon-mixin.toml",
             "native/rust/src/lib.rs",
             "rust/src/lib.rs",
             "../escape.rs",

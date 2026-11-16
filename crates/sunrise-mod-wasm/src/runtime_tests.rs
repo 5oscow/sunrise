@@ -1,6 +1,8 @@
 use super::*;
 
 use crate::test_log::{CAPTURE, capture_logs};
+#[path = "runtime_tests/pending_children.rs"]
+mod pending_children;
 
 #[path = "runtime_tests/payload_busy.rs"]
 mod payload_busy;

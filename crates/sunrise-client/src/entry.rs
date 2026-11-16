@@ -118,9 +118,8 @@ pub fn start<G>(
     sunrise_client::telemetry::mark_start();
     // Opt-in telemetry keeps each crash report (docs/telemetry.md), whatever the mode.
     crash::on_report(sunrise_client::telemetry::keep_crash);
-    // Crates above the engine registered their hooks before this (sunrise-official's `main`),
-    // then the Sunrise parts still in this crate; none registers after this point.
-    game::player_hooks::register();
+    // Crates above the engine registered their hooks before this (sunrise-official's `main`);
+    // none registers after this point.
     sunrise_hooks::engine::seal();
     // The text crates ship (`sunrise_hooks::lang`), loaded with the game's own languages.
     sunrise_client::lang::install_crate_files(sunrise_hooks::lang::engine::all());
@@ -245,9 +244,6 @@ pub(crate) fn install_client_hooks() {
         menu_still_valid: game::api_values::menu_still_valid,
         menu_still_valid_listens: |menu| {
             mod_api::__private::menu_listens(mod_api::HookId::MenuStillValid, menu)
-        },
-        item_stacked_on_other: |context, event, canceled| {
-            game::api_values::stacked_on_other(context, event, canceled);
         },
         living_heal: |context, entity, amount, cancel| {
             if !mod_api::__private::listened(mod_api::HookId::LivingHeal) {

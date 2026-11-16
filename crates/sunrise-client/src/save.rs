@@ -712,8 +712,8 @@ pub fn decode_end_gateway(tag: &Tag) -> crate::containers::EndGateway {
 }
 /// A mod's block entity: its compound without `id` and the position, and
 /// its `Items` as slots (`ContainerHelper.loadAllItems`; the game sizes them
-/// to the block's container when it uses them). `Items` that are not an item
-/// list saved exactly so stay the mod's own.
+/// to the block's container when it uses them). `Items` that do not re-encode
+/// exactly (compared in slot order) stay the mod's own.
 fn decode_mod_block_entity(id: String, tag: &Tag) -> Option<crate::containers::ModBlockEntity> {
     let Tag::Compound(map) = tag else {
         return None;
@@ -724,7 +724,17 @@ fn decode_mod_block_entity(id: String, tag: &Tag) -> Option<crate::containers::M
     }
     // `Slot` is a byte: 256 slots at most.
     let mut items = decode_items(nbt.get(&"Items".into()), 256);
-    if nbt.get(&"Items".into()) == Some(&encode_items(&items)) {
+    // Compared in slot order, the order `encode_items` writes: vanilla loads by `Slot`.
+    let encoded = encode_items(&items);
+    let matches = match (nbt.get(&"Items".into()), &encoded) {
+        (Some(Tag::List(saved)), Tag::List(encoded)) => {
+            let mut saved: Vec<&Tag> = saved.iter().collect();
+            saved.sort_by_key(|entry| number(entry.get("Slot")).unwrap_or(0) as u8);
+            saved.into_iter().eq(encoded.iter())
+        }
+        (saved, encoded) => saved == Some(encoded),
+    };
+    if matches {
         nbt.remove(&"Items".into());
         while items.last().is_some_and(Option::is_none) {
             items.pop();
@@ -7304,6 +7314,58 @@ mod tests {
             r#"Items:[1,2,3]"#,
             r#"Items:[{Slot:0b,id:"minecraft:air",count:1}]"#,
             r#"Items:[{Slot:0b,id:"minecraft:stone",count:1,note:"mine"}]"#,
+        ] {
+            let saved = sunrise_core::nbt::parse_snbt(&format!(
+                r#"{{id:"gtmod:cable",x:0,y:0,z:0,{items}}}"#
+            ))
+            .unwrap()
+            .0;
+            let (pos, back) = decode_block_entity(&saved).expect("mod block entity");
+            let crate::containers::BlockEntity::Mod(m) = &back else {
+                panic!("not a mod's");
+            };
+            assert!(m.items.is_empty(), "{items}");
+            assert_eq!(
+                block_entity_encode::encode(pos, &back, "gtmod:cable"),
+                saved,
+                "{items}"
+            );
+        }
+        // Entries load by their own `Slot`, in any list order (`ContainerHelper.loadAllItems`).
+        let saved = sunrise_core::nbt::parse_snbt(
+            r#"{id:"gtmod:macerator",x:5,y:-60,z:12,Items:[{Slot:2b,id:"minecraft:stone",count:2},{Slot:0b,id:"minecraft:iron_ore",count:3}]}"#,
+        )
+        .unwrap()
+        .0;
+        let (pos, back) = decode_block_entity(&saved).expect("mod block entity");
+        let crate::containers::BlockEntity::Mod(m) = &back else {
+            panic!("not a mod's");
+        };
+        assert!(!m.nbt.contains_key(&"Items".into()));
+        assert_eq!(m.items.len(), 3);
+        assert_eq!(
+            m.items[0].as_ref().map(|s| (&*s.item, s.count)),
+            Some(("minecraft:iron_ore", 3))
+        );
+        assert!(m.items[1].is_none());
+        assert_eq!(
+            m.items[2].as_ref().map(|s| (&*s.item, s.count)),
+            Some(("minecraft:stone", 2))
+        );
+        // Saved again, they are written in slot order.
+        let reordered = sunrise_core::nbt::parse_snbt(
+            r#"{id:"gtmod:macerator",x:5,y:-60,z:12,Items:[{Slot:0b,id:"minecraft:iron_ore",count:3},{Slot:2b,id:"minecraft:stone",count:2}]}"#,
+        )
+        .unwrap()
+        .0;
+        assert_eq!(
+            block_entity_encode::encode(pos, &back, "gtmod:macerator"),
+            reordered
+        );
+        // Unordered lists the loader cannot read exactly stay the mod's, as saved.
+        for items in [
+            r#"Items:[{Slot:1b,id:"minecraft:stone",count:1,note:"mine"},{Slot:0b,id:"minecraft:stone",count:1}]"#,
+            r#"Items:[{Slot:1b,id:"minecraft:stone",count:1},{Slot:1b,id:"minecraft:dirt",count:1}]"#,
         ] {
             let saved = sunrise_core::nbt::parse_snbt(&format!(
                 r#"{{id:"gtmod:cable",x:0,y:0,z:0,{items}}}"#

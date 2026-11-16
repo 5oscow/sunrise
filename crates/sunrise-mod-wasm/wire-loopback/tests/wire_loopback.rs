@@ -1144,40 +1144,6 @@ fn wire_loopback_item_fished_edits_catch() {
     assert!(!event.cancelled);
     assert_eq!(drops, vec![mod_api::ItemStack::new(key, 2).unwrap()]);
 }
-#[test]
-fn wire_loopback_nested_tuple_reference_writes_back() {
-    mod_api::__private::initialize().unwrap();
-    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
-    let module = WasmMod {
-        subscribed: &[],
-        listeners: &[],
-        group: 0,
-        corrupt: false,
-    };
-    install_counter();
-    let mut carried = Some(mod_api::ItemStack::new(REGISTERED_ITEM.get().unwrap(), 1).unwrap());
-    let mut clicked = guest::Guest;
-    let mut stack = mod_api::StackedOnOther {
-        player: None,
-        player_entity_id: None,
-        slot: 0,
-        container: 0,
-        container_slot: 0,
-        primary: true,
-        carried: mod_api::item::menu::CarriedAccess(&mut carried),
-        clicked: &mut clicked,
-        cancellation_result: false,
-    };
-    module.item_stacked_on_other(
-        &Context,
-        &mut mod_api::ItemStackedOnOtherEvent {
-            event: &mut stack,
-            cancelled: false,
-        },
-    );
-    assert!(stack.carried.0.is_none());
-    assert!(stack.cancellation_result);
-}
 thread_local! {
     static REGISTERED_ITEM:std::cell::Cell<Option<mod_api::ItemKey>> = const {std::cell::Cell::new(None)};
     static REGISTERED_BLOCK:std::cell::Cell<Option<mod_api::BlockKey>> = const {std::cell::Cell::new(None)};

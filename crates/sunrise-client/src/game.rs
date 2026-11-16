@@ -228,8 +228,6 @@ const AUTO_UPLOADS_AT_ONCE: usize = 8;
 enum Screen {
     Playing,
     GameModeSwitcher,
-    /// Sunrise's emote wheel (`game/cosmetics/emote_wheel.rs`): over the world, not pausing.
-    EmoteWheel,
     Paused,
     Options,
     Chat,
@@ -278,7 +276,6 @@ impl Screen {
         match self {
             Screen::Playing => "playing",
             Screen::GameModeSwitcher => "game_mode_switcher",
-            Screen::EmoteWheel => "emote_wheel",
             Screen::Paused => "paused",
             Screen::Options => "options",
             Screen::Chat => "chat",
@@ -1577,8 +1574,6 @@ struct Game<'a> {
     /// and mannequins) resolve through the services in the background.
     skin_profiles: RefCell<sunrise_client::skins::Resolver>,
     skin_slots: sunrise_client::skins::SkinSlots,
-    /// Cosmetics on players (game/cosmetics.rs), off by default.
-    cosmetics: cosmetics::Cosmetics,
     /// 3D skin layers: each player's outer layer as one slab per painted
     /// texel, built once per (skin, slim) (`mobs::skin_layers`).
     skin_3d: RefCell<skin_models::SkinModels>,
@@ -5246,7 +5241,6 @@ impl Game<'_> {
                 );
             }
             Screen::GameModeSwitcher => self.draw_gamemode_switcher(&mut batch),
-            Screen::EmoteWheel => self.draw_emote_wheel(&mut batch),
             Screen::Dead => self.draw_death_screen(&mut batch),
             Screen::Stats => self.draw_stats(&mut batch),
             Screen::Advancements => self.draw_advancements(&mut batch),
@@ -8727,7 +8721,6 @@ impl Game<'_> {
         let border = (!title)
             .then(|| self.border_draw(camera.to_array(), alpha as f32))
             .flatten();
-        let see_through = std::mem::take(&mut self.see_through_vertices);
         pr.lap("pr_weather_border");
         if title {
             self.dynamic_lights.clear();
@@ -8755,6 +8748,8 @@ impl Game<'_> {
             &mut world_geometry,
             &mut entities,
         );
+        // After the mods' world geometry, whose labels add see-through copies.
+        let see_through = std::mem::take(&mut self.see_through_vertices);
         let colored_lights = if self.title.is_none() {
             visuals.finish(self, camera)
         } else {
@@ -9324,10 +9319,6 @@ impl Game<'_> {
                 && !self.pad_synthetic_input()
             {
                 self.track_drag_button(*button, *state == ElementState::Pressed);
-            }
-            // The emote key let go over the wheel, a click on it.
-            if self.screen == Screen::EmoteWheel && self.emote_wheel_event(&event) {
-                return Ok(());
             }
             if let WindowEvent::KeyboardInput { event, .. } = &event
                 && event.state == ElementState::Released
@@ -10976,7 +10967,6 @@ impl<'a> Game<'a> {
             }),
             skin_profiles: RefCell::new(sunrise_client::skins::Resolver::new()),
             skin_slots: sunrise_client::skins::SkinSlots::new(sunrise_client::hud::SKIN_SLOTS),
-            cosmetics: Default::default(),
             skin_3d: Default::default(),
             trim_slots: Default::default(),
             cart_models: prepared.cart_models,

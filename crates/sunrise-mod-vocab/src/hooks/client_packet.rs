@@ -28,6 +28,15 @@ The hook cannot cancel or replace a packet. It also observes chunk packets
 handled by the batching path, once each. Configuration packets and the network
 thread's own handling (including keep-alives and resource pack messages) do not fire it.
 
+`ClientHost::hold_packets` retains uncancelled play packets, unmodified and in order, up to 256
+packets or 1,048,576 encoded bytes. Release sends oldest first; drop discards them. Overflow ends
+and flushes the hold; its next release/drop returns `HoldError::Limit` with those configured bounds.
+A failed release reports `HoldError::Send { sent, error }` and discards the unsent tail.
+Starting another hold while one is active returns `HoldError::Limit` with the configured bounds.
+Disconnect, protocol incarnation changes
+and aborted travel invalidate holds. Network-thread keep-alives, configuration, cookies and pack
+answers bypass the queue. Held packets expose no additional inspection or editing API.
+
 `Hooks::client_packet_send` is the other direction: a `ClientPacketSendEvent` with the same
 `ClientPacket` view for each play packet the window's game is about to send (`Connection.send`),
 in order, including the selected slot sent before an attack or a use. Returning `Flow::Cancel` drops

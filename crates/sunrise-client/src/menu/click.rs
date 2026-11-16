@@ -24,8 +24,51 @@ impl Menu {
         self.state.quick_slots.clear();
     }
 
-    /// `AbstractContainerMenu.clicked`: Err carries a vanilla exception name.
+    /// The pickup click `click` would run on `slot_index` with `button`, as `item_stacked_on_other`
+    /// is asked about it: the stacks it finds. `None` for a click that never asks (not a pickup
+    /// button, not a slot, a hidden slot, or a drag in progress, which the click only ends).
+    pub fn stacked_click(
+        &self,
+        env: &Env,
+        slot_index: i32,
+        button: i32,
+        input: Input,
+    ) -> Option<StackedClick> {
+        let s = usize::try_from(slot_index).ok()?;
+        if input != Input::Pickup
+            || !(0..=1).contains(&button)
+            || self.state.quick_status != 0
+            || s >= self.state.slots.len()
+            || self.state.slots[s].role == Role::Hidden
+        {
+            return None;
+        }
+        let slot = self.state.slots[s];
+        Some(StackedClick {
+            player: env.player,
+            player_entity_id: env.player_entity_id,
+            slot: s,
+            container: slot.container,
+            container_slot: slot.index,
+            primary: button == 0,
+            carried: self.state.carried.clone(),
+            clicked: self.slot(s).cloned(),
+        })
+    }
+
+    /// `AbstractContainerMenu.clicked`: Err carries a vanilla exception name. The slot rules are
+    /// asked once for each slot and stack the click plans (`Asked`).
     pub fn click(
+        &mut self,
+        env: &Env,
+        slot_index: i32,
+        button: i32,
+        input: Input,
+    ) -> Result<(), &'static str> {
+        self.click_asked(env, slot_index, button, input, Asked::default())
+    }
+
+    pub(super) fn click_planned(
         &mut self,
         env: &Env,
         slot_index: i32,
@@ -252,30 +295,17 @@ impl Menu {
     /// plain click, ending with `slot.setChanged()`.
     pub(super) fn pickup(&mut self, env: &Env, s: usize, primary: bool) {
         self.touch();
-        let mut canceled = false;
-        let mut handled = false;
-        if crate::native_client_hooks::has_mods() {
-            let slot = self.state.slots[s];
-            let mut carried = self.state.carried.take();
-            let mut view = MenuSlotView {
-                menu: self,
-                env,
-                slot: s,
-            };
-            let mut event = StackedOnOther {
-                player: env.player,
-                player_entity_id: env.player_entity_id,
-                slot: s,
-                container: slot.container,
-                container_slot: slot.index,
-                primary,
-                carried: CarriedAccess(&mut carried),
-                clicked: &mut view,
-                cancellation_result: false,
-            };
-            native_item_stacked_on_other(env.loop_context, &mut event, &mut canceled);
-            handled = event.cancellation_result;
-            self.state.carried = carried;
+        let (mut canceled, mut handled) = (false, false);
+        if let Some(outcome) = env.stacked {
+            (canceled, handled) = (outcome.canceled, outcome.handled);
+            if canceled && handled {
+                if let Some(carried) = outcome.carried.clone() {
+                    self.state.carried = carried;
+                }
+                if let Some(clicked) = outcome.clicked.clone() {
+                    self.set_by_player(env, s, clicked);
+                }
+            }
         }
         let handled = if canceled {
             handled
@@ -480,12 +510,17 @@ impl Menu {
         }
         let container = self.state.slots[clicked].container;
         for t in 0..self.state.slots.len() {
-            if self.may_pickup(env, t)
-                && self.has_item(t)
-                && self.state.slots[t].container == container
-                && self.quick_replace(t, moved, env)
-            {
-                self.click(env, t as i32, 0, Input::QuickMove)?;
+            // The screen's `mayPickup` and the click it sends are one question about slot `t`:
+            // the server, which hears only the click, asks it once too.
+            let clicked = self.planned(Asked::default(), |menu| {
+                let sent = menu.has_item(t)
+                    && menu.state.slots[t].container == container
+                    && menu.quick_replace(t, moved, env)
+                    && menu.may_pickup(env, t);
+                sent.then(|| menu.click(env, t as i32, 0, Input::QuickMove))
+            });
+            if let Some(clicked) = clicked.0 {
+                clicked?;
                 each(self, t);
             }
         }

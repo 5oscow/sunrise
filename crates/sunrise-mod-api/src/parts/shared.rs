@@ -46,6 +46,7 @@ pub struct PartRegistrar {
     /// Loading warnings, by owning mod id, in registration order.
     pub(crate) warnings: Vec<(String, crate::LoadingMessage)>,
     pub(crate) recipe_book_types: HashMap<String, String>,
+    pub(crate) recipe_book_fields: HashMap<String, (String, String)>,
     pub(crate) game_rule_categories: Vec<String>,
     pub(crate) game_rules: Vec<crate::GameRuleDecl>,
     pub(crate) custom_stats: Vec<String>,
@@ -95,6 +96,7 @@ impl PartRegistrar {
             biome_regions: Vec::new(),
             datapack_registries: Vec::new(),
             recipe_book_types: HashMap::new(),
+            recipe_book_fields: HashMap::new(),
             game_rule_categories: Vec::new(),
             game_rules: Vec::new(),
             custom_stats: Vec::new(),
@@ -282,6 +284,7 @@ pub(crate) fn install_registrar(
         datapack_registries: registrar.datapack_registries,
         menu_recipe_books: registrar.menu_recipe_books,
         recipe_book_types: registrar.recipe_book_types,
+        recipe_book_fields: registrar.recipe_book_fields,
         game_rule_slots,
         game_rules: registrar.game_rules,
         game_rule_categories: registrar.game_rule_categories,

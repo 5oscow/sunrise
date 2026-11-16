@@ -39,6 +39,8 @@ pub mod mesher;
 pub(crate) mod model_instance;
 pub(crate) mod model_layers;
 pub(crate) mod model_loader;
+// #861 part 1: keys and views of the baked model cache.
+pub(crate) mod baked_models;
 // hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod music;

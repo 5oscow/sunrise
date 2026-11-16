@@ -162,8 +162,8 @@ mod tests {
                 false,
                 0,
             );
-            game.open_emote_wheel();
-            game.close_emote_wheel(None);
+            game.open_hud_editor(false);
+            game.close_hud_editor();
             assert!(!game.consume_click("test", "pending"));
         });
     }

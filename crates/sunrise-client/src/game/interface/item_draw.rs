@@ -29,11 +29,9 @@ struct ItemEntityDraw<'a> {
     entity: bool,
 }
 
-/// The game's painter for the HUD kit's icons (`hud_kit::icon`): items by their models, the
-/// player's face from `face`, their skin's texture.
+/// The game's painter for the HUD kit's icons (`hud_kit::icon`): items by their models.
 pub(super) struct IconPainter<'g, 'a> {
     pub(super) game: &'g Game<'a>,
-    pub(super) face: Option<&'g str>,
 }
 
 impl sunrise_client::hud_kit::icon::IconPainter for IconPainter<'_, '_> {
@@ -44,25 +42,6 @@ impl sunrise_client::hud_kit::icon::IconPainter for IconPainter<'_, '_> {
         let scale = size / sunrise_client::hud_kit::icon::ITEM_SIZE;
         batch.scale_since(start, x, y, scale, scale);
         batch.vertices.len() > start
-    }
-    fn face(&self, batch: &mut HudBatch, [x, y, size]: [f32; 3]) -> bool {
-        let Some(skin) = self.face else {
-            return false;
-        };
-        let mut draws = Vec::new();
-        // `PlayerFaceExtractor`: the face, then its hat layer.
-        sunrise_client::tab_list::face(
-            &mut draws,
-            skin,
-            x as i32,
-            y as i32,
-            size as i32,
-            true,
-            false,
-            u32::MAX,
-        );
-        sunrise_client::hud_layout::paint(batch, &self.game.gui.atlas, &draws);
-        true
     }
 }
 

@@ -204,6 +204,8 @@ impl Game<'_> {
                 pass.insert(0, d);
             }
         }
+        // Players carry passengers only when a mod seated a mob on one.
+        self.tell_vehicle_players(riding);
     }
 
     /// Boats, minecarts, armor stands, item frames, paintings and the

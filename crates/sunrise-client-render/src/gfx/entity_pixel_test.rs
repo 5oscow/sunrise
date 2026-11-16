@@ -31,12 +31,47 @@ fn software_adapter() -> std::result::Result<wgpu::Adapter, String> {
     Ok(adapter)
 }
 
+/// The lightmap most pixel tests draw with: every light level the same colour.
+const FLAT_LIGHTMAP: [u8; 4] = [128, 192, 255, 255];
+
+/// A lightmap whose grey rises with the block level (x) plus the sky level (y), so a quad's
+/// brightness shows its light: 0 at no light, 64 at sky and block 2, 240 at full light.
+pub fn graded_lightmap() -> Vec<u8> {
+    (0..16u8)
+        .flat_map(|sky| {
+            (0..16u8).flat_map(move |block| {
+                let grey = (block + sky) * 8;
+                [grey, grey, grey, 255]
+            })
+        })
+        .collect()
+}
+
 fn software_frame(
     atlas_size: [u32; 2],
     atlas: &[u8],
     view_proj: Mat4,
     sky: f32,
     size: [u32; 2],
+) -> std::result::Result<Frame, String> {
+    software_frame_lit(
+        atlas_size,
+        atlas,
+        view_proj,
+        sky,
+        size,
+        &FLAT_LIGHTMAP.repeat(16 * 16),
+    )
+}
+
+/// [`software_frame`] with a 16 by 16 RGBA `lightmap`, block level across, sky level down.
+fn software_frame_lit(
+    atlas_size: [u32; 2],
+    atlas: &[u8],
+    view_proj: Mat4,
+    sky: f32,
+    size: [u32; 2],
+    lightmap_pixels: &[u8],
 ) -> std::result::Result<Frame, String> {
     let adapter = software_adapter()?;
     let mut required_limits = wgpu::Limits::default();
@@ -102,7 +137,7 @@ fn software_frame(
     );
     queue.write_texture(
         lightmap.as_image_copy(),
-        &[128, 192, 255, 255].repeat(16 * 16),
+        lightmap_pixels,
         wgpu::TexelCopyBufferLayout {
             offset: 0,
             bytes_per_row: Some(64),
@@ -224,8 +259,73 @@ pub fn render(
     view_proj: Mat4,
     hdr: bool,
 ) -> std::result::Result<Vec<u8>, String> {
+    render_layers(vertices, &[], atlas_size, atlas, view_proj, hdr)
+}
+
+/// [`render`], then `see_through` quads as the game draws them (`RenderPipelines.TEXT_SEE_THROUGH`:
+/// no depth test or writes, culled, blended), over the entity quads.
+pub fn render_see_through(
+    vertices: &[Vertex],
+    see_through: &[Vertex],
+    atlas_size: [u32; 2],
+    atlas: &[u8],
+    view_proj: Mat4,
+) -> std::result::Result<Vec<u8>, String> {
+    render_layers(vertices, see_through, atlas_size, atlas, view_proj, false)
+}
+
+/// [`render_see_through`] lit by `lightmap` (16 by 16 RGBA, block level across, sky level down;
+/// [`graded_lightmap`] shows each quad's light), so a test can tell light levels apart.
+pub fn render_see_through_lit(
+    vertices: &[Vertex],
+    see_through: &[Vertex],
+    atlas_size: [u32; 2],
+    atlas: &[u8],
+    view_proj: Mat4,
+    lightmap: &[u8],
+) -> std::result::Result<Vec<u8>, String> {
+    render_layers_lit(
+        vertices,
+        see_through,
+        atlas_size,
+        atlas,
+        view_proj,
+        false,
+        lightmap,
+    )
+}
+
+fn render_layers(
+    vertices: &[Vertex],
+    see_through: &[Vertex],
+    atlas_size: [u32; 2],
+    atlas: &[u8],
+    view_proj: Mat4,
+    hdr: bool,
+) -> std::result::Result<Vec<u8>, String> {
+    let flat = FLAT_LIGHTMAP.repeat(16 * 16);
+    render_layers_lit(
+        vertices,
+        see_through,
+        atlas_size,
+        atlas,
+        view_proj,
+        hdr,
+        &flat,
+    )
+}
+
+fn render_layers_lit(
+    vertices: &[Vertex],
+    see_through: &[Vertex],
+    atlas_size: [u32; 2],
+    atlas: &[u8],
+    view_proj: Mat4,
+    hdr: bool,
+    lightmap: &[u8],
+) -> std::result::Result<Vec<u8>, String> {
     let _gpu = crate::gfx::test_gpu::lock();
-    let frame = software_frame(atlas_size, atlas, view_proj, 0.0, [SIZE, SIZE])?;
+    let frame = software_frame_lit(atlas_size, atlas, view_proj, 0.0, [SIZE, SIZE], lightmap)?;
     let shader = frame
         .device
         .create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -246,7 +346,7 @@ pub fn render(
     })];
     let reuse = reuse::Reuse::default();
     let kept = reuse.on(&frame.device);
-    let make = |fragment, depth_write, bias, blend, write_mask| {
+    let make_with = |fragment, depth_write, bias, blend, write_mask, compare, cull_mode| {
         entity_pipeline_factory(
             &kept,
             &layout,
@@ -257,9 +357,9 @@ pub fn render(
             false,
         )(EntityPipelineOptions {
             label: "Entities",
-            cull_mode: None,
+            cull_mode,
             depth_write,
-            compare: wgpu::CompareFunction::GreaterEqual,
+            compare,
             bias,
             blend,
             clouds: false,
@@ -267,6 +367,18 @@ pub fn render(
             fragment,
             write_mask,
         })
+    };
+    let make = |fragment, depth_write, bias, blend, write_mask| {
+        let compare = wgpu::CompareFunction::GreaterEqual;
+        make_with(
+            fragment,
+            depth_write,
+            bias,
+            blend,
+            write_mask,
+            compare,
+            None,
+        )
     };
     let pipeline = make(
         "fs_entity",
@@ -288,11 +400,22 @@ pub fn render(
             wgpu::ColorWrites::ALPHA,
         )
     });
+    let see_through_pipeline = make_with(
+        "fs_entity_unmarked",
+        false,
+        wgpu::DepthBiasState::default(),
+        wgpu::BlendState::ALPHA_BLENDING,
+        wgpu::ColorWrites::ALL,
+        wgpu::CompareFunction::Always,
+        Some(wgpu::Face::Back),
+    );
+    let entity_quads = vertices.len() as u32 / 4;
+    let vertices = [vertices, see_through].concat();
     let vertex = frame
         .device
         .create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: None,
-            contents: bytemuck::cast_slice(vertices),
+            contents: bytemuck::cast_slice(&vertices),
             usage: wgpu::BufferUsages::VERTEX,
         });
     let indices: Vec<u32> = (0..vertices.len() as u32 / 4)
@@ -334,13 +457,108 @@ pub fn render(
         pass.set_bind_group(0, &frame.group, &[]);
         pass.set_vertex_buffer(0, vertex.slice(..));
         pass.set_index_buffer(index.slice(..), wgpu::IndexFormat::Uint32);
-        pass.draw_indexed(0..indices.len() as u32, 0, 0..1);
+        pass.draw_indexed(0..entity_quads * 6, 0, 0..1);
         if let Some(hdr_pipeline) = &hdr_pipeline {
             pass.set_pipeline(hdr_pipeline);
-            pass.draw_indexed(0..indices.len() as u32, 0, 0..1);
+            pass.draw_indexed(0..entity_quads * 6, 0, 0..1);
+        }
+        if indices.len() as u32 > entity_quads * 6 {
+            pass.set_pipeline(&see_through_pipeline);
+            pass.draw_indexed(entity_quads * 6..indices.len() as u32, 0, 0..1);
         }
     }
     readback(&frame, encoder)
+}
+
+#[cfg(test)]
+mod see_through_tests {
+    use super::*;
+
+    /// A quad in clip space from `x0` to `x1`, half the height, at reversed depth `z`.
+    fn quad(x0: f32, x1: f32, z: f32, color: u32) -> [Vertex; 4] {
+        let corner = |x, y| Vertex {
+            pos: [x, y, z],
+            uv: [0.5, 0.5],
+            layer: 0,
+            color,
+            light: 0xF0,
+            normal: [0, 0, 127, 127],
+            glint_uv: [0.0, 0.0],
+        };
+        [
+            corner(x0, -0.5),
+            corner(x1, -0.5),
+            corner(x1, 0.5),
+            corner(x0, 0.5),
+        ]
+    }
+
+    fn centre(pixels: &[u8]) -> [u8; 4] {
+        pixels.as_chunks::<4>().0[(SIZE / 2 * SIZE + SIZE / 2) as usize]
+    }
+
+    /// A wall hides an entity quad behind it; the same quad drawn see-through shows over the
+    /// wall from the front, and not from behind (culled, as `TEXT_SEE_THROUGH` is).
+    #[test]
+    #[ignore = "daily"]
+    fn see_through_quads_draw_over_the_wall_that_hides_entity_quads() {
+        let atlas = [255u8; 4].repeat(16);
+        let draw = |world: &[Vertex], see_through: &[Vertex]| {
+            render_see_through(world, see_through, [4, 4], &atlas, Mat4::IDENTITY)
+                .expect("software Vulkan see-through pixels")
+        };
+        // Reversed depth: the wall (0.5) is nearer than the red quad (0.25).
+        let wall = quad(-1.0, 1.0, 0.5, 0xFF80_8080);
+        let red = quad(-0.5, 0.5, 0.25, 0xFF00_00FF);
+        let only_wall = draw(&wall, &[]);
+        assert_eq!(
+            draw(&[wall, red].concat(), &[]),
+            only_wall,
+            "hidden by the wall"
+        );
+        let shown = centre(&draw(&wall, &red));
+        assert!(
+            shown[0] > 0 && shown[1] == 0 && shown[2] == 0,
+            "red over the wall: {shown:?}"
+        );
+        let mut back = red;
+        back.reverse();
+        assert_eq!(draw(&wall, &back), only_wall, "its back is culled");
+    }
+
+    /// Under [`graded_lightmap`], a lit quad's brightness follows its light and the unlit
+    /// see-through layer (`TEXT_SEE_THROUGH`, layer 2) ignores it.
+    #[test]
+    #[ignore = "daily"]
+    fn graded_light_shows_on_lit_quads_and_not_on_unlit_see_through_ones() {
+        let atlas = [255u8; 4].repeat(16);
+        let lightmap = graded_lightmap();
+        let lit = |light: u8, layer: u32, see_through: bool| {
+            let mut quad = quad(-0.5, 0.5, 0.25, 0xFFFF_FFFF);
+            for v in &mut quad {
+                v.light = crate::block_entity_render::vertex_light(light);
+                v.layer = layer;
+                v.normal = [0; 4];
+            }
+            let (world, over): (&[Vertex], &[Vertex]) = if see_through {
+                (&[], &quad)
+            } else {
+                (&quad, &[])
+            };
+            centre(
+                &render_see_through_lit(world, over, [4, 4], &atlas, Mat4::IDENTITY, &lightmap)
+                    .expect("software Vulkan lit pixels"),
+            )
+        };
+        let [dark, two, full] = [0x00, 0x22, 0xFF].map(|light| lit(light, 0, false)[0]);
+        assert!(dark < two && two < full, "{dark} < {two} < {full}");
+        assert_eq!(
+            lit(0x00, 2, true),
+            lit(0xFF, 2, true),
+            "unlit over the wall"
+        );
+        assert_eq!(lit(0x00, 2, true)[0], 255);
+    }
 }
 
 /// Inputs for one offscreen prepared instance. Fields stay named so the draw is not a long argument list.

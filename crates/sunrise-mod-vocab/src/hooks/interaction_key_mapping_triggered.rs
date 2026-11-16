@@ -59,12 +59,15 @@ pub trait Hooks {
     /// its chunk must be entity-ticking and its tick must not have been canceled.
     /// A server player retries on its next vehicle tick. Either can be later in the
     /// same world tick. A rejected, nonresident passenger does not autonomously
-    /// tick or retry. Loading a save does not notify. Server-side.
+    /// tick or retry. A mob riding a player is compulsorily ejected on save, logout,
+    /// death or dimension change: the dismount notifies this hook, but cancellation
+    /// cannot keep the mob aboard. Loading a save does not notify. Server-side.
     #[hook(
         side = "server",
         contract = "cancel",
         out = "canceled",
         neoforge = "EntityMountEvent",
+        version = 2,
         cancellable = true
     )]
     fn entity_mount(

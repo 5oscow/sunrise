@@ -4,8 +4,8 @@ Sunrise is three layers:
 
 - a **vanilla engine**;
 - a **platform** that makes the vanilla game easier to change, port and run;
-- **Sunrise's own layer**: its extras and its product (cosmetics, the shop, telemetry, sponsors, official servers,
-  the launcher...).
+- **Sunrise's own layer**: its extras and its product (Play with Friends, Discord, telemetry, the launcher...).
+  It has no paid features, shop or ads.
 
 **The target** (Ludovic, 2026-11-09). This repository holds the engine and the platform. Built alone, it is a
 complete vanilla-like game. The Sunrise layer moves to its own repository, public if its license needs it, and
@@ -24,7 +24,7 @@ This page says:
 - the plan.
 
 CI checks the rules, so review doesn't have to. Contributors fixing vanilla behaviour never have to touch
-cosmetics, the shop or a server address. Mods and desktop-class ports (iOS, Android) build on the platform without
+Sunrise's extras or a server address. Mods and desktop-class ports (iOS, Android) build on the platform without
 editing engine files; ports to machines the desktop client can't run on (a handheld console, a browser) build on
 the [portable crates](#portable-crates).
 
@@ -106,7 +106,7 @@ public API that mods, desktop-class ports and the Sunrise layer build on.
   `sunrise-theme`. Still in engine crates today: `game/mod_api_host.rs`, `game/native_*.rs`, `shader_ui.rs`,
   `hdr_calibration.rs`.
 - **Never:** a built-in address (every address comes from the player, a file or a setting), anything that names
-  a Sunrise crate, cosmetics, the shop, official or partner servers, uploads to playsunrise.net.
+  a Sunrise crate, uploads to playsunrise.net.
 - **Network:** allowed, but never to a built-in address.
 
 ### Controllers, splitscreen, replays and UI pages
@@ -157,13 +157,12 @@ exposes. Ports to consoles and handhelds need them, and other projects can build
 Sunrise's own extras and its product, and every built-in address of an outside service vanilla doesn't contact.
 
 - **Belongs:** Sunrise's extras (zoom, Mouse Tweaks, sorting, smooth chat, the PvP & HUD presets and widgets, the
-  music page, keystrokes, auto-reconnect...), cosmetics, emotes, the wardrobe and the shop, sponsors, the official
-  and partner servers in the list, Play with Friends and its relay, Discord, the "I'm playing" ping, telemetry and
-  benchmark uploads, releases and updates, the hosting supervisor, the launcher.
-- **Examples:** `sunrise-addresses`, `sunrise-cosmetics`, `sunrise-friends`, `sunrise-relay`, `sunrise-telemetry`,
+  music page, keystrokes, auto-reconnect...), Play with Friends and its relay, Discord, the "I'm playing" ping,
+  telemetry and benchmark uploads, releases and updates, the hosting supervisor, the launcher.
+- **Examples:** `sunrise-addresses`, `sunrise-friends`, `sunrise-relay`, `sunrise-telemetry`,
   `sunrise-perf-share`, `sunrise-release-sign`, `sunrise-server`, `sunrise-mod-registry`, `sunrise-heartbeat`,
-  `sunrise-official`, `sunrise-official-servers`, `sunrise-discord`, `launcher/`. Still in engine crates today:
-  `game/cosmetics.rs`, `game/cosmetics/emotes.rs`, `game/extras.rs` and `game/extras/`, `extras_ui.rs`, `pvp.rs`.
+  `sunrise-official`, `sunrise-discord`, `launcher/`. Still in engine crates today:
+  `game/extras.rs` and `game/extras/`, `extras_ui.rs`, `pvp.rs`.
 - **Rules:**
   - It uses the platform's public API only, never the engine.
   - Until it moves, every Sunrise feature in the game sits behind the `sunrise-extras` feature
@@ -212,8 +211,8 @@ and Parts registration state; it is not yet a stateless or unsafe-free interface
 | A UI page others can add to, a HUD widget framework, replay recording and playback | platform | the page API, `hud_kit.rs` and `hud_kit/`, `studio/recorder.rs`, `mcpr.rs`, `replay.rs` |
 | A finished feature built on those (PvP presets, the replay editor) | Sunrise, or a native mod | behind `sunrise-extras` |
 | A Sunrise extra (a setting, screen or HUD element vanilla doesn't have) | Sunrise | its own module behind `sunrise-extras`, built on platform API; or an optional native mod that players add themselves |
-| Anything that talks to playsunrise.net, a partner or a third-party service by itself | Sunrise | a Sunrise crate, its address in `sunrise-addresses` |
-| Cosmetics, emotes, the shop, sponsors, Discord, telemetry, official servers | Sunrise | `sunrise-cosmetics`, `sunrise-telemetry`..., behind `sunrise-extras` |
+| Anything that talks to playsunrise.net or a third-party service by itself | Sunrise | a Sunrise crate, its address in `sunrise-addresses` |
+| Discord, telemetry, Play with Friends | Sunrise | `sunrise-discord`, `sunrise-telemetry`..., behind `sunrise-extras` |
 | A launcher page | Sunrise | `launcher/src/` |
 | A harness, script or dev tool | tool | `tools/`, `xtask/` |
 | A new crate | its layer | give it a layer in `tools/layers.json` in the same PR |
@@ -227,8 +226,8 @@ also goes behind `sunrise-extras`. That keeps each later move a pure file move.
 The target, after the split. It is not built yet: nothing moves before the split below is done.
 
 **What a build of this repository gives.** A complete game: vanilla play, the platform (mods, shader packs,
-controllers, splitscreen, replays, HDR, the dedicated server) and no Sunrise layer. That means no extras, cosmetics, shop, telemetry,
-sponsors or official server, no built-in outside address, and no launcher. Forks and builds from source get exactly
+controllers, splitscreen, replays, HDR, the dedicated server) and no Sunrise layer. That means no extras, telemetry or Discord,
+no built-in outside address, and no launcher. Forks and builds from source get exactly
 that. sunrise-plain becomes a plain build of this repository.
 
 **The seam.** The Sunrise repository has to plug into the game without changing it:
@@ -236,7 +235,7 @@ that. sunrise-plain becomes a plain build of this repository.
 1. No engine or platform code names a Sunrise crate. The layer check refuses it.
 2. The Sunrise layer uses the platform's public API only. The layer check refuses its engine dependencies, and
    today's are on the exceptions list.
-3. Sunrise's in-game parts (extras, cosmetics, emotes, Discord, Play with Friends, the ping) are crates linked into
+3. Sunrise's in-game parts (extras, Discord, Play with Friends, the ping) are crates linked into
    the official game build in CI, plugged in through the platform's hooks. Players never compile them: a native
    mod is source the launcher compiles per instance, so it is not the way. The official executable is a thin
    binary crate in the Sunrise repository that links the platform and the Sunrise crates; this repository keeps
@@ -260,7 +259,7 @@ it. Mods loaded as WebAssembly run as separate modules, not linked into the exec
 | playsunrise.net's download page | horizon-rust/horizon-site, reading `launcher/links.json` and the releases |
 | The launcher's self-update | `launcher/src/backend.rs` (`stage_update`), `launcher/src/update_handoff.rs`, `launcher/src/nightly.rs` |
 | The game builds the launcher installs, so the in-game part reaches every player | `.github/workflows/nightly-build.yml`, `release.yml`, `game-build.yml` |
-| The links the launcher and the site read (Discord, sponsors, website, official server) | `launcher/links.json` |
+| The links the launcher and the site read (Discord, website) | `launcher/links.json` |
 
 These stay without it: builds of this repository from source, sunrise-plain, and `packaging/server/install.sh`
 and `install.ps1` (the dedicated server). The server's anticheat and chat filter are platform features.
@@ -636,19 +635,16 @@ Sunrise's own and third-party addresses (Sunrise layer):
 
 | Address | For | Where today |
 |---|---|---|
-| `play.playsunrise.net` (status `:24454`), previously `sunrise.bunchy7s.dev` | the official server in the list, its status | `sunrise-addresses` (#12993), `launcher/links.json` |
-| `cosmetics.playsunrise.net` | cosmetics, emotes, presence | `sunrise-addresses` (#12993) |
 | `playsunrise.net/perf`, `playsunrise.net/api/perf/captures` | the performance viewer Open shows a saved capture in, and the upload behind Share (`SUNRISE_PERF_VIEWER`, `SUNRISE_PERF_CAPTURES` override them) | `sunrise-addresses`, used by `sunrise-perf-share` |
 | `telemetry.playsunrise.net` | opt-in telemetry, the "I'm playing" ping, benchmark uploads | `sunrise-addresses` (#12993) |
 | `stun.cloudflare.com`, `stun.l.google.com` | Play with Friends NAT discovery | `sunrise-addresses` (#12993) |
-| `afri-network.co.za` | the withdrawn partner server, so the game can remove the entry it added | `sunrise-addresses` |
 | `horizon-rust.github.io/horizon-mods`, `github.com/horizon-rust/horizon-mods` | the mod registry index and files: a build of this repository alone asks the player for a registry | `mod_registry.rs`, `sunrise-mods/src/index*.rs`, `cargo-sunrise-mod` |
 | `api.modrinth.com`, `cdn.modrinth.com` | the in-game resource pack browser, modpack porting | `pack_browser.rs`, `sunrise-port-pack` |
 | `github.com`, `raw.githubusercontent.com`, `gitlab.com`, `maven.neoforged.net` | modpack porting's sources | `sunrise-port-pack` |
 | `playsunrise.net` | the download link shown with no resources | `no_resources.rs` |
 | `api.github.com`, `discord.com` | hosting: updates, Discord webhooks | `sunrise-server` |
 | `api.github.com`, `uploads.github.com`, `playsunrise.net` | the registry's submission service | `sunrise-mod-registry` |
-| Modrinth, CurseForge, Fabric, Quilt, Forge, NeoForge, GitHub, Microsoft and Xbox sign-in, Tailscale, `discord.gg`, `mclo.gs`, Sculk Hosting, `static.rust-lang.org`, GitHub Sponsors | the launcher's browsers, loaders, sign-in, logs, hosting, partner and sponsor pages | `launcher/src/`, `launcher/links.json` |
+| Modrinth, CurseForge, Fabric, Quilt, Forge, NeoForge, GitHub, Microsoft and Xbox sign-in, Tailscale, `discord.gg`, `mclo.gs`, `static.rust-lang.org` | the launcher's browsers, loaders, sign-in, logs and hosting | `launcher/src/`, `launcher/links.json` |
 
 These are not addresses:
 
@@ -684,7 +680,7 @@ mechanical steps (checks, M1–M4) continue meanwhile. M5 and M6 started on 2026
 | M2 | `sunrise-system` (engine): the hardware probes leave `sunrise-telemetry`, and the crash report and GPU info read them there; `sunrise-platform`, the platform's public API, re-exports them for the Sunrise layer | prepares M3 | #13058, merged |
 | M3 | The renderer's telemetry module leaves `sunrise-client-render` for `sunrise-client-lib`, with Sunrise's other in-game parts; the renderer offers the adapter (`gfx::adapter`) and a crash-report hook (`crash::on_report`) | render → telemetry, bench | #13060, merged |
 | M4 | Cosmetics leave `sunrise-client-render`: the tab list's mark through a name-decoration callback (#13094); the settings lines leave with `extras.rs` and `extras_ui.rs` in M5, as clients of the UI page API | render → cosmetics | #13094, merged; the rest in M5 |
-| M5 | Sunrise's in-game parts (extras, cosmetics, emotes, Discord, Friends, ping, benchmark upload, official server) leave `sunrise-client` for Sunrise crates linked into the official build through platform hooks | client, client-lib → cosmetics, friends, telemetry, bench | started 2026-11-09 |
+| M5 | Sunrise's in-game parts (extras, Discord, Friends, ping, benchmark upload) leave `sunrise-client` for Sunrise crates linked into the official build through platform hooks | client, client-lib → friends, telemetry, bench | started 2026-11-09 |
 | M6 | The engine crates stop depending on platform crates: the renderer's shader-pack, pack-format, HDR and theme code moves behind engine extension points; the mod host and agent control move to platform crates; controllers, splitscreen, replay recording and the UI page API move to platform crates on the engine's input-source, compositor and screen hooks; the launcher and `sunrise-server` reach the engine through platform API (done, #13905) | the engine → platform and Sunrise → engine exceptions | started 2026-11-09; HDR's part with NikitaMGrimm, below |
 | P | Optional, longer: gameplay into the portable crates. `Game` holds the world and its presentation (renderer, screens, particles, sound): split its state module by module, turn gameplay's direct particle and sound calls into level events as vanilla's server sends them, then move each clean module into a portable crate | | any time, small PRs |
 | R | The Sunrise layer moves to its own repository and ships in every official download (the table above) | | after the split, Ludovic's call |

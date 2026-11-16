@@ -7,6 +7,7 @@
 //! (crate::auth): the login joins the server through the session service and
 //! encrypts the connection (ClientHandshakePacketListenerImpl.handleHello).
 use crate::auth::AuthSession;
+mod held_packets;
 pub mod ingress;
 mod known_packs;
 use known_packs::{fill_known_entries, select_known_packs};
@@ -494,7 +495,7 @@ impl Session {
             .as_ref()
             .cloned()
             .ok_or(SendPacketError::NotConnected)?;
-        writer.prepare_packet(encoded.data)
+        writer.prepare_packet(encoded.data, None)
     }
     /// The frozen receiving turn, retaining every input credit through its actor.
     #[sunrise_mod_api_macros::replaceable]
@@ -572,40 +573,6 @@ impl Session {
             .as_ref()
             .ok_or(mod_api::PayloadSendError::Disconnected)?
             .prepare_payload(body, id)
-    }
-    /// Send a play packet; silently dropped once the connection is gone,
-    /// and while the server has the connection back in configuration (a
-    /// proxy switching servers). Vanilla's `handleConfigurationStart` clears
-    /// the level before it acknowledges, so no play packet follows the
-    /// acknowledgement; one that did would reach the server as a
-    /// configuration packet, and Velocity drops such a client.
-    pub fn send(&self, packet: play::Serverbound) {
-        if self.debug
-            && !matches!(
-                packet,
-                play::Serverbound::ClientTickEnd(_)
-                    | play::Serverbound::MovePlayerPos(_)
-                    | play::Serverbound::MovePlayerPosRot(_)
-            )
-        {
-            eprintln!("[net] -> {packet:?}");
-        }
-        let body = match packet.try_encode() {
-            Ok(body) => body,
-            Err(error) => {
-                eprintln!("[net] send refused: {error}");
-                return;
-            }
-        };
-        let mut writer = self.writer.lock().unwrap();
-        if self.configuring.load(Ordering::Relaxed) {
-            return;
-        }
-        if let Some(w) = writer.as_mut()
-            && w.send(&body).is_err()
-        {
-            w.shutdown();
-        }
     }
     /// Far terrain the server samples, as it offered (`Event::FarTerrain`):
     /// biomes named by this client's indices, block states below `states`.

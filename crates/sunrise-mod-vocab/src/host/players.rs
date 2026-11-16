@@ -612,7 +612,7 @@ pub trait PlayersBackendMut {
     /// a player made an operator meanwhile sees them again. Kept by UUID, even
     /// after this handle disconnects (the player rejoins hidden), until a mod sets it again
     /// or the server stops. Works inside a player's hook too; false for a stale
-    /// world epoch, on a client and in a world nobody else can join.
+    /// world epoch and on a client.
     #[access(WorldOnly)]
     fn player_hide(&mut self, player: PlayerRef, level: Option<u8>) -> bool;
     /// Side: server.
@@ -846,6 +846,17 @@ pub trait PlayersBackendMut {
     /// progress and the total.
     #[access(WorldOnly)]
     fn player_set_experience_levels(&mut self, player: PlayerRef, levels: i32) -> bool;
+    /// Side: server.
+    /// Sets `Player.totalExperience`, the `total` that `PlayerRef::experience`
+    /// reports, keeping the level and the progress toward the next level.
+    /// Generated as `PlayerRef::set_total_experience`. A mod that moves
+    /// experience between a player and a block sets the level and progress
+    /// with `PlayerRef::set_experience_levels` and
+    /// `PlayerRef::set_experience_points`, and the total with this. False,
+    /// and nothing written, for a negative `total` or a stale or unavailable
+    /// player.
+    #[access(WorldOnly)]
+    fn player_set_total_experience(&mut self, player: PlayerRef, total: i32) -> bool;
     /// Side: server.
     /// Changes a player's game mode as `ServerPlayer.setGameMode` and
     /// `/gamemode` do, including the cancellable change hook and ability

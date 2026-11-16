@@ -216,6 +216,10 @@ pub struct Riding {
     pub passengers: crate::fast_hash::FxHashMap<i32, Vec<i32>>,
     /// Each passenger's vehicle.
     pub vehicle: crate::fast_hash::FxHashMap<i32, i32>,
+    /// The passengers each vehicle player's own client was last told it
+    /// carries (a mob a mod seated on it): no tracker tells a client of its
+    /// own entity. Kept across `clear`; empty in every vanilla game.
+    pub told_self: crate::fast_hash::FxHashMap<i32, Vec<i32>>,
 }
 
 impl Riding {

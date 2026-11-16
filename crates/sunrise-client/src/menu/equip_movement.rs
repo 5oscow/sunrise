@@ -82,23 +82,31 @@ impl Menu {
                 if stack.count == 0 {
                     break;
                 }
+                // Empty destinations belong only to the insertion pass. Do not ask their
+                // placement rule with a different top-up maximum first.
+                if !self.has_item(dest) {
+                    continue;
+                }
                 // A mod menu's result (unless a mod's hook opens it) and a
                 // hidden slot get no top-up either, as a furnace's quick move
                 // never aims at its result.
                 let refuses = if self.state.slots[dest].role == Role::Hidden {
                     true
                 } else if let Some(id) = self.registry_id() {
-                    !apply_menu_slot_rules(
-                        env.slot_rules,
-                        id,
-                        self.state.slots[dest].index,
-                        stack,
-                        self.slot_context(env, dest),
-                        self.state.slots[dest].role != Role::ModResult,
-                        CONTAINER_MAX,
-                        Self::max_stack(env, stack),
-                    )
-                    .0
+                    !self
+                        .ask_slot_rules(
+                            env,
+                            id,
+                            dest,
+                            stack,
+                            (
+                                self.state.slots[dest].role != Role::ModResult,
+                                true,
+                                CONTAINER_MAX,
+                            ),
+                            Self::max_stack(env, stack),
+                        )
+                        .0
                 } else {
                     false
                 };

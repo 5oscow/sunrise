@@ -199,7 +199,7 @@ jobs:
         run: |
           FNR_KEEP=1 FNR_ROUTE=prebuilt-api FNR_MODS="api_only" tools/ci/fn_replace_check.sh \
             "$LAUNCHER" "$FNR_SCRATCH/sdk-base" "$FNR_SCRATCH/check"
-      # It also builds sunrise-mixins from source, where the runs before it download the prebuilt tool.
+      # It also builds horizon-mixins from source, where the runs before it download the prebuilt tool.
       # On its own: with no mod filling the loop, a mixin on the loop's function is compiled for the
       # empty slot. Beside the `loop` mod it would be compiled for that mod's slots instead.
       - name: A mixin on a published loop's function, no slot filled (build and link)

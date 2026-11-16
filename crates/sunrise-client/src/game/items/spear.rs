@@ -495,7 +495,7 @@ impl Game<'_> {
                 None
             };
             if let Some(pkt) = pkt {
-                r.session.send(pkt);
+                self.send_or_hold_play(pkt);
             }
         }
     }

@@ -44,7 +44,7 @@ starts and writes them when the player changes a setting.
 - **When a change applies.** Every change above applies at the next start. While the game plays, its own
   screens switch packs, shader packs and assets-only content mods live; a content mod that adds blocks, items,
   entity types or world generation loads only at start ([mods.md](../mods.md)).
-- **Native mods** need Sunrise rebuilt with them (sunrise-mixins, [native-mods.md](../native-mods.md)). A launcher
+- **Native mods** need Sunrise rebuilt with them (horizon-mixins, [native-mods.md](../native-mods.md)). A launcher
   that doesn't build Sunrise doesn't offer them.
 - **A modpack** isn't copied into the game folder. A launcher reads its `sunrise-modpack.toml`, installs each mod
   it lists from the index with the checks below, writes `mod.<id>:true` for those with `on` (the default), and

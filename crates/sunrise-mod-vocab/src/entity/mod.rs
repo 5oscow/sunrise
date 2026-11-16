@@ -7,6 +7,7 @@ pub(crate) mod entity_reach;
 pub(crate) mod mob_ai_pause;
 pub(crate) mod player_data;
 pub(crate) mod player_world;
+pub(crate) mod ride_player;
 // hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod behaviors;
@@ -21,6 +22,7 @@ pub mod health;
 #[doc(hidden)]
 pub mod mobs;
 pub(crate) mod part_state;
+pub(crate) mod pending_children;
 pub(crate) mod player_bots;
 pub(crate) mod types;
 pub(crate) mod unspawned_mob;

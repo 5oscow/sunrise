@@ -39,9 +39,10 @@ The server reads its owning load; the client reads local preload sets before its
 `UpdateRecipes`, then the authoritative server generation. A packet replaces the entire
 generation, including an empty one. Closing a screen or changing dimension retains it;
 disconnecting discards it. Reads allocate nothing and do not rescan recipes or registries.
+A client without this mod predicts vanilla here; the server corrects it.
 
 Parts that read `context.setting(..)` or `side()` have no counterpart on the Host.
-Named injections for `menu_slot_rules` request `hook_version = 4`.
+Named injections for `menu_slot_rules` request `hook_version = 5`.
 
 ### Who and where: the slot's context
 
@@ -84,6 +85,44 @@ opened with no block by `player_open_mod_menu`, a vehicle's); a slot that cannot
 shows empty, and `slot` reads nothing for `MenuContainer::Player` or past a container's end. The
 context is built once per click plan, and only for a menu type a part answers: vanilla menus and
 types with no listening part never pay for it, and the asks of one click share one copy.
+## Slots that keep what they show
+
+On a mod menu type, `menu_slot_rules` also answers `Slot.mayPickup` in `event.may_pickup`. It arrives true and
+is asked with the stack the slot holds, on the server and in client prediction alike. A slot that only shows
+something, such as a cooking pot's preview of its result, refuses both rules: nothing can be taken from it and
+nothing put in it.
+
+```rust,ignore
+struct PotPreview;
+#[mod_api::sunrise_part]
+impl mod_api::MenuPart for PotPreview {
+    fn menu_slot_rules(
+        &self,
+        _: &dyn mod_api::Host,
+        event: &mut mod_api::MenuSlotRulesEvent<'_>,
+    ) {
+        if event.slot == 6 {
+            event.may_pickup = false;
+            event.may_place = false;
+        }
+    }
+}
+// In Hooks::register:
+// registrar.menu_part("mymod:cooking_pot", PotPreview);
+```
+
+Every click that would take from the slot asks it: a pickup click with either button (after
+`item_stacked_on_other`, before any take, merge or exchange), a shift-click (once, before the move), a hotbar or
+offhand swap that takes the slot's item, a throw (a refusal drops nothing), and a double-click's pick-all
+(it gathers from the other slots when the clicked one refuses, and skips each slot that refuses). A drag
+spread, a creative clone, putting a stack into an empty slot and a click outside the window never ask it; a drag
+that ends on a single slot is a pickup click on that slot. A refused click leaves the slot and the cursor as they
+were, and the server sends back the slots and cursor a client predicted otherwise. A slot that refuses placement
+gives up all of its stack or none of it. The slot's own rule comes first, and one ask answers `may_place` and
+`may_pickup` together. Vanilla menu types keep their slots' own `mayPickup`, and a shift-click a part answers
+with `menu_quick_move` is asked the pickup rule before that hook. A click asks once for each slot and stack: the
+take, the all-or-nothing check and a shift-click the parts leave to the game reuse that answer, so the server and
+the client's prediction ask the same number of times.
 
 ## Keeping a block menu open
 
@@ -182,6 +221,13 @@ host.transaction(|host, tx| {
     if took == 4 && slot.insert(host, tx, &emerald, 4) == 4 { Ok(()) } else { Err(()) }
 })
 ```
+
+`menu_clicked` and `menu_quick_move` (contract version 2) each run as one action: what a listener writes
+through the `Host` stays when it returns and is undone with the rest of the action when a listener fails. A
+`menu_quick_move` answer that is invalid, or a `Host` write to a player's inventory, cursor or menu storage,
+refuses the whole click instead of falling back to the game's routing. `menu_clicked` hears the raw slot, button
+and click type on a menu a mod opened (a single-slot drag once); menu-button clicks, recipe placement and creative
+set-slot never reach it, and it cannot know whether the click changes anything.
 
 Inside `menu_clicked`, `ItemPlace::MenuSlot` can take from and give to the clicking
 player's inventory and hotbar slots as well as the menu's own storage. Inserts fill

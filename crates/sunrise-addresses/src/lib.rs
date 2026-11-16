@@ -5,24 +5,6 @@
 //! This is a Sunrise-layer crate: the engine and the platform never depend on it. Platform code
 //! that talks to a service gets the address passed in from a Sunrise crate.
 
-/// Sunrise's official survival server (SMP), offered once at the top of the server list by the
-/// game and the launcher (`launcher/links.json` may name another). Its SRV record leads to the
-/// port. Empty for Sunrise until an official server exists.
-pub const OFFICIAL_SERVER: &str = "";
-
-/// The official server's earlier addresses: the game and the launcher move a server list's
-/// entries for them to [`OFFICIAL_SERVER`], once. A move appends the old address here (and to
-/// `official_server_previous` in `launcher/links.json`).
-pub const OFFICIAL_SERVER_PREVIOUS: &[&str] = &["sunrise.bunchy7s.dev"];
-
-/// Afri-Network, a partner server the game added once below the official server (#9299) until
-/// the partnership ended: kept so the game can take back out the entry it added.
-pub const WITHDRAWN_PARTNER_SERVER: &str = "afri-network.co.za";
-
-/// [`OFFICIAL_SERVER`] with the port its SRV record gives, for askers that don't look SRV up
-/// (the telemetry server's status checks).
-pub const OFFICIAL_SERVER_STATUS: &str = "";
-
 /// Sunrise's website, where the launcher is downloaded: the game started without its prepared
 /// files sends the player there.
 pub const WEBSITE: &str = "https://playsunrise.net";
@@ -32,10 +14,6 @@ pub const AGENT_DOCS: &str = "https://playsunrise.net/docs/agents";
 
 /// The mod registry's policy, which the launcher's mod pages link.
 pub const MOD_POLICY: &str = "https://playsunrise.net/mods/policy";
-
-/// The cosmetics service: cosmetics, emotes, "Show me as a Sunrise player"
-/// (`SUNRISE_COSMETICS_API` overrides it). Empty until Sunrise runs this service.
-pub const COSMETICS_API: &str = "";
 
 /// The telemetry ingest server (`crates/sunrise-telemetry-server`): opt-in telemetry, the
 /// "I'm playing" ping, benchmark uploads (`SUNRISE_TELEMETRY_URL` overrides it).
@@ -58,12 +36,6 @@ pub const FRIENDS_HELP: &str =
 /// Sunrise community invite used by launcher defaults.
 pub const COMMUNITY_DISCORD: &str = "https://discord.gg/eswQcHfRKC";
 
-/// The sponsoring hosting provider’s referral page.
-pub const HOSTING_PARTNER: &str = "";
-
-/// The cosmetics shop. Empty until Sunrise runs one.
-pub const SHOP: &str = "";
-
 /// The GitHub profile of who made the launcher's look, credited in Settings' About (its picture is
 /// `<this>.png`).
 pub const LAUNCHER_LOOK_CREDIT: &str = "https://github.com/Xmilon";
@@ -77,11 +49,11 @@ pub const FORK_LAUNCHER_ABOUT: &str = "https://github.com/sunrise-org/sunrise";
 /// Cargo's canonical source identity for the crates.io registry.
 pub const CARGO_CRATES_IO_SOURCE: &str = "registry+https://github.com/rust-lang/crates.io-index";
 
-/// The pinned sunrise-mixins archive the launcher downloads for `[[native.mixin]]` builds.
-pub const SUNRISE_MIXINS_SOURCE: &str =
+/// The pinned horizon-mixins archive the launcher downloads for `[[native.mixin]]` builds.
+pub const HORIZON_MIXINS_SOURCE: &str =
     "https://codeload.github.com/horizon-rust/horizon-mixins/tar.gz";
 
-/// Where the fork releases the prebuilt sunrise-mixins tool; a release's tag and file follow.
+/// Where the fork releases the prebuilt horizon-mixins tool; a release's tag and file follow.
 pub const MIXINS_TOOL_RELEASES: &str = "https://github.com/sunrise-org/sunrise/releases/download";
 
 /// Where the fork publishes each game build's mod SDK (`sdk-<build id>`) and the game releases

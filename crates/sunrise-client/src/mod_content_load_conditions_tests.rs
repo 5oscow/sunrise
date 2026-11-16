@@ -57,12 +57,10 @@ fn registered_conditions_select_content_root_tags_and_structure_modifiers() {
         .unwrap();
         let tag_file = out.join("data/testmod/tags/block/flag.json");
         assert!(tag_file.exists());
-        if enabled {
-            let value: serde_json::Value =
-                serde_json::from_slice(&fs::read(tag_file).unwrap()).unwrap();
-            assert_eq!(value["values"], serde_json::json!(["minecraft:stone"]));
-            assert!(value.get("neoforge:conditions").is_none());
-        }
+        let value: serde_json::Value =
+            serde_json::from_slice(&fs::read(tag_file).unwrap()).unwrap();
+        assert_eq!(value["values"], serde_json::json!(["minecraft:stone"]));
+        assert!(value.get("neoforge:conditions").is_none());
         let spawns = crate::mobs::spawn_selection::StructureSpawns::load(&out);
         let rabbits = spawns
             .get("minecraft:swamp_hut", "creature")
@@ -257,5 +255,37 @@ fn a_higher_mod_adds_back_what_a_lower_one_removed() {
     assert_eq!(
         layers.build(|_| Vec::new()),
         ["a:x", "minecraft:sand", "b:y"]
+    );
+}
+
+#[test]
+#[ignore = "daily"]
+fn content_root_tag_layers_ignore_failing_top_level_conditions() {
+    let Some(base) = prepared() else { return };
+    let scratch = tempfile::tempdir().unwrap();
+    let file = "data/minecraft/tags/block/conditional_probe.json";
+    let packages = [
+        ("lower", r#"{"values":["minecraft:stone"]}"#),
+        (
+            "conditional",
+            r#"{"neoforge:conditions":[{"type":"neoforge:false"}],"values":["minecraft:dirt"]}"#,
+        ),
+    ];
+    let mods: Vec<_> = packages
+        .into_iter()
+        .map(|(id, tag)| {
+            folder_mod(
+                &scratch.path().join(id),
+                &[("sunrise-mod.toml", &manifest(id, "")), (file, tag)],
+            )
+        })
+        .collect();
+    let root =
+        resource_root_fixture(&base, Path::new(""), &mods, &scratch.path().join("cache")).unwrap();
+    let merged: serde_json::Value =
+        serde_json::from_slice(&fs::read(root.join(file)).unwrap()).unwrap();
+    assert_eq!(
+        merged["values"],
+        serde_json::json!(["minecraft:stone", "minecraft:dirt"])
     );
 }

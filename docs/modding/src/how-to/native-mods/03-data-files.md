@@ -8,7 +8,7 @@ winning bytes from selected datapacks and the mod's own `data/`. Parse once in p
 apply, not on the tick. Server listener applies run before `data_pack_files`. A later refusal
 keeps the old engine tables and Parts, but cannot undo effects of listeners or hooks that already
 ran. Contributions share a list, so a failed file cannot be attributed to a particular mod.
-The original pack trees remain separate from the launcher's code-only sunrise-mixins input.
+The original pack trees remain separate from the launcher's code-only horizon-mixins input.
 
 Client-side asset reads use [client asset reload listeners](https://github.com/arismoko/horizon/blob/main/crates/horizon-mod-vocab/src/hooks/notes.rs#L2103); server
 listeners cannot read `assets/`. Packaged assets also participate in the game's normal resource

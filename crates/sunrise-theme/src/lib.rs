@@ -46,7 +46,7 @@ pub mod fonts {
 /// The glass look's icons: Hugeicons' free set (MIT, `icons/glass/LICENSE-hugeicons.txt`), the
 /// ones the mockup uses, 24 unit outlines stroked 1.6 in `currentColor`, by Hugeicons' name
 /// (`"folder-01"`, `"more-vertical"`…). `github` is GitHub's mark, drawn for Sunrise (filled,
-/// its cat cut out by a mask), beside the links to GitHub Sponsors. `sparkles` (Home's What's
+/// its cat cut out by a mask), for Settings' credit link. `sparkles` (Home's What's
 /// new) is drawn for Sunrise in the same 1.6 stroke.
 pub mod glass_icons {
     macro_rules! icons {
@@ -74,7 +74,6 @@ pub mod glass_icons {
         "discord",
         "download-04",
         "earth",
-        "favourite",
         "flash",
         "folder-01",
         "game-controller-01",
@@ -139,7 +138,6 @@ pub mod icons {
         "folder",
         "gamepad",
         "globe",
-        "heart",
         "home",
         "image",
         "info-box",

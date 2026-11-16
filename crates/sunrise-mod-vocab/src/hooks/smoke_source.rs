@@ -2,13 +2,15 @@
 // catalog-order: 0216
 
 pub trait Hooks {
-    /// On an authoritative server, `CampfireBlock.isSmokeSource` for the
+    /// `CampfireBlock.isSmokeSource` on both sides for the
     /// block `state` under a campfire, as the campfire is placed or the block
     /// under it changes: `Some(true)` for your own blocks makes the campfire a
     /// signal fire whose smoke rises higher, as over a hay bale. The level is
-    /// read-only.
+    /// read-only. The client asks during placement prediction. `None` keeps
+    /// vanilla's hay-bale check; `Some(false)` overrides it.
     #[hook(
-        side = "server",
+        side = "both",
+        version = 2,
         contract = "replace",
         out = "smoke",
         scope = "block",
