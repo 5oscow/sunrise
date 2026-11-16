@@ -98,7 +98,10 @@ console.log(JSON.stringify(eval(expression)));
         timeout = re.search(r"^\s*timeout-minutes:\s*\$\{\{(.*?)\}\}", workflow_jobs["build"], re.M).group(1)
         for repository, trusted, row in itertools.product(["sunrise-org/sunrise", "horizon-rust/horizon"], [False, True], rows):
             with self.subTest(repository=repository, trusted=trusted, entry=row["name"]):
-                expected = 60 if repository == "sunrise-org/sunrise" or row.get("mac") else 40
+                if repository == "sunrise-org/sunrise":
+                    expected = 100 if row.get("mac") else 60
+                else:
+                    expected = 60 if row.get("mac") else 40
                 self.assertEqual(evaluate(timeout, row, trusted, repository), expected)
 
     def test_every_shipped_glibc_program_is_checked_by_workflow_owned_tools(self):
