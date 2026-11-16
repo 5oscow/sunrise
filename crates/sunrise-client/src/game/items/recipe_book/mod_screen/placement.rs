@@ -212,6 +212,6 @@ mod tests {
     fn no_more_than_the_cap_are_kept() {
         let many = (0..300).map(|n| ghost(n % 10, "demo:a", false)).collect();
         let shown = shown_ghosts(many, |_| true, |_| vec![ItemStack::new("demo:a", 1)]);
-        assert_eq!(shown.len(), MAX_GHOSTS);
+        assert_eq!(shown.len(), 256);
     }
 }
