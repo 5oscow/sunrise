@@ -214,7 +214,39 @@ impl Game<'_> {
     }
 }
 
+/// The parameters a caller supplies around a roll besides its entity: the
+/// ORIGIN and level a mod's conditions read, and the TOOL.
+pub(in crate::game) struct CallerLoot {
+    place: sunrise_world::loot::LootPlace,
+    query: std::rc::Rc<sunrise_world::loot::query::LootQuery>,
+}
+
+impl CallerLoot {
+    /// Runs `roll` with these parameters in scope for every table it rolls.
+    pub(in crate::game) fn with<T>(self, roll: impl FnOnce() -> T) -> T {
+        sunrise_world::loot::query::with_query(self.query, || {
+            sunrise_world::loot::with_native_loot_place(self.place, roll)
+        })
+    }
+}
+
 impl Game<'_> {
+    /// A roll's `origin` (None when its parameter set has none) and `tool`,
+    /// taken before the roll borrows the game.
+    pub(in crate::game) fn caller_loot(
+        &self,
+        origin: Option<[f64; 3]>,
+        tool: Option<sunrise_world::loot::LootStack>,
+    ) -> CallerLoot {
+        CallerLoot {
+            place: sunrise_world::loot::LootPlace {
+                origin,
+                ..self.loot_place_at([0.0; 3], None)
+            },
+            query: std::rc::Rc::new(sunrise_world::loot::query::LootQuery::new(None, tool)),
+        }
+    }
+
     /// What a loot table reads of `target` as `THIS_ENTITY`: a mob's facts, a
     /// player's worn and held items, and the entity's type for the rest.
     pub(in crate::game) fn target_loot_entity(
@@ -257,11 +289,7 @@ impl Game<'_> {
                 &matcher as &dyn Fn(&serde_json::Value, &sunrise_world::loot::LootEntity) -> bool,
             )
         });
-        let place = sunrise_world::loot::LootPlace {
-            origin,
-            ..self.loot_place_at([0.0; 3], None)
-        };
-        sunrise_world::loot::with_native_loot_place(place, || {
+        self.caller_loot(origin, None).with(|| {
             let items = world_items!(self);
             match items.loot_sequence(table) {
                 Some(sequence) => {

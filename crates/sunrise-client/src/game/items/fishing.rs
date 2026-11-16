@@ -672,28 +672,22 @@ impl Game<'_> {
                 living: false,
                 ..sunrise_world::loot::LootEntity::new("minecraft:fishing_bobber")
             };
-            let query = std::rc::Rc::new(sunrise_world::loot::query::LootQuery::new(
-                None,
+            let caller = self.caller_loot(
+                Some([hook.position.x, hook.position.y, hook.position.z]),
                 Some(super::creatures::to_loot(rod)),
-            ));
-            let place = sunrise_world::loot::LootPlace {
-                origin: Some([hook.position.x, hook.position.y, hook.position.z]),
-                ..self.loot_place_at([0.0; 3], None)
-            };
-            let items = sunrise_world::loot::query::with_query(query, || {
-                sunrise_world::loot::with_native_loot_place(place, || {
-                    fishing_loot(
-                        &loot,
-                        table,
-                        &mut self.rand_sequences,
-                        &mut self.world.random,
-                        self.level.seed,
-                        luck,
-                        biome.as_deref(),
-                        hook.open_water,
-                        &this,
-                    )
-                })
+            );
+            let items = caller.with(|| {
+                fishing_loot(
+                    &loot,
+                    table,
+                    &mut self.rand_sequences,
+                    &mut self.world.random,
+                    self.level.seed,
+                    luck,
+                    biome.as_deref(),
+                    hook.open_water,
+                    &this,
+                )
             });
             let mut caught: Vec<ItemStack> = items
                 .into_iter()

@@ -134,31 +134,22 @@ impl Game<'_> {
                 };
                 // `LootContextParamSets.VAULT`: the vault's centre is the ORIGIN of
                 // every roll; the reward adds THIS_ENTITY, TOOL and luck.
-                let place = sunrise_world::loot::LootPlace {
-                    origin: Some([key.0, key.1, key.2].map(|v| f64::from(v) + 0.5)),
-                    ..players.game.loot_place_at([0.0; 3], None)
-                };
                 let reward = eject.filter(|_| sequence);
                 let context = sunrise_world::loot::ContainerLootContext {
                     luck: reward.map_or(0.0, |e| e.luck),
                     entity: reward.map(|e| &e.player),
                     ..Default::default()
                 };
-                let query = std::rc::Rc::new(sunrise_world::loot::query::LootQuery::new(
-                    None,
+                let caller = players.game.caller_loot(
+                    Some([key.0, key.1, key.2].map(|v| f64::from(v) + 0.5)),
                     reward.map(|e| e.tool.clone()),
-                ));
-                let drops = sunrise_world::loot::query::with_query(query, || {
-                    sunrise_world::loot::with_native_loot_place(place, || {
-                        match loot.random_sequence(table).filter(|_| sequence) {
-                            Some(s) => {
-                                loot.roll_container_with(table, sequences.get(s, seed), context)
-                            }
-                            None => loot.roll_container_with(table, random, context),
-                        }
+                );
+                let drops = caller
+                    .with(|| match loot.random_sequence(table).filter(|_| sequence) {
+                        Some(s) => loot.roll_container_with(table, sequences.get(s, seed), context),
+                        None => loot.roll_container_with(table, random, context),
                     })
-                })
-                .unwrap_or_default();
+                    .unwrap_or_default();
                 drops
                     .iter()
                     .map(sunrise_client::structure_blocks::loot_item_with_components)
