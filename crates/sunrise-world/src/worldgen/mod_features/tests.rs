@@ -466,6 +466,46 @@ fn a_fault_mid_root_keeps_the_earlier_calls() {
     assert_eq!(positions(&world), [[27, 4, 32], [16, 4, 36]]);
 }
 
+/// In one root a mod call writes state 1 at the origin, the built-in end platform then reads that
+/// position, sees the mod's block and replaces it with air (state 0), and a later mod call faults:
+/// the mod's block and the built-in's replacement both stay, and the faulting call's write
+/// (state 2) does not.
+#[test]
+fn a_built_in_step_sees_a_mod_write_and_a_later_fault_keeps_both() {
+    let log = Log::default();
+    with_test_feature_types(&types(&log), || {
+        let root = feature(
+            r#"{"type":"minecraft:sequence","features":[
+                {"feature":{"type":"test:marks"},"placement":[]},
+                {"feature":{"type":"minecraft:end_platform"},"placement":[]},
+                {"feature":{"type":"test:fails"},"placement":[]}]}"#,
+        );
+        let origin = [10, 4, 10];
+        let mut world = World::default();
+        assert!(place(&root, &mut world, origin).is_ok());
+        let at_origin: Vec<_> = world
+            .writes
+            .iter()
+            .filter(|w| w.0 == origin)
+            .map(|w| w.1)
+            .collect();
+        // The mod's block, then the built-in's replacement of it; the fault's block never.
+        assert_eq!(at_origin, [BlockStateId(1), BlockStateId(0)]);
+        assert_eq!(world.block(origin), Ok(BlockStateId(0)));
+        // The platform's obsidian layer (5 by 5) is the built-in's own writes.
+        assert_eq!(
+            world
+                .writes
+                .iter()
+                .filter(|w| w.1 == BlockStateId(4))
+                .count(),
+            25
+        );
+        assert!(world.writes.iter().all(|w| w.1 != BlockStateId(2)));
+        assert!(mod_feature_type("test:fails").unwrap().disabled());
+    });
+}
+
 /// A call that writes thousands of blocks with block entities, then reads thousands of other
 /// positions, stays within the budget and publishes every write and entity once: the staged
 /// state of a position is one lookup, not a scan of all that came before.

@@ -119,4 +119,4 @@ No Rust work is authorized by this note. These stages are implementation gates, 
 - Worker Host integration and wasm concurrency? Recommendation: review one restricted generated context with structure workers, then prove worker-local stores and dependency linkage before admission.
 - Reload and installation owner? Recommendation: trace the existing lifecycle holder through world entry, cancellation and installation; use its identity and root commit, never another generation allocator.
 - Custom budget policy? Recommendation: keep budgets explicit and configurable, measure real packs and verify vanilla capacity before freezing defaults.
-- Native callback failure recovery? Recommendation: fail the owning root action/job atomically, disable the callable for the session; document unrecoverable process aborts.
+- Native callback failure recovery? Recommendation: discard only the faulting call's staged writes, keeping earlier calls' output, and disable the callable for the session; document unrecoverable process aborts.
