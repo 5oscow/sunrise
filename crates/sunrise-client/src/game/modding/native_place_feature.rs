@@ -1,11 +1,11 @@
-//! A configured feature placed by a native mod (`LevelRef::place_feature`), as `/place feature`
-//! places one: `PlaceCommand.placeFeature` without the command's feedback.
+//! A feature placed by a native mod (`LevelRef::place_feature`), as `/place feature` places one:
+//! `PlaceCommand.placeFeature` without the command's feedback.
 use super::Game;
 use mod_api::{LevelReadError, LevelRef, PlaceFeatureRefusal};
 
 impl Game<'_> {
-    /// `ConfiguredFeature.place` of `feature` at `pos` in the level in place. `Ok(false)` when it
-    /// ran and placed nothing.
+    /// `Feature.place` of `feature` at `pos` in the level in place: the feature's own report of
+    /// success. Blocks it set before reporting `false` are kept, as the command keeps them.
     pub(super) fn level_place_feature(
         &mut self,
         level: LevelRef,

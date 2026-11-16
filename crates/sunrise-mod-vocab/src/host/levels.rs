@@ -1526,11 +1526,13 @@ pub trait LevelsBackendMut {
     #[access(WorldOnly)]
     fn level_bone_meal(&mut self, level: LevelRef, pos: [i32; 3]) -> bool;
     /// Side: server.
-    /// Place the configured feature `feature` (a `worldgen/configured_feature` id,
-    /// `minecraft:oak` or `mymod:ender_tree`) at `pos`, as `/place feature` does
-    /// (`ConfiguredFeature.place` with the level's random and chunk generator): the blocks it
-    /// sets reach players as any block change does. `Ok(true)` when it placed, `Ok(false)` when it
-    /// ran and found no room (a tree on stone). Refusals change nothing and are named by
+    /// Place the feature `feature` (a `minecraft:worldgen/feature` id, `minecraft:oak` or
+    /// `mymod:ender_tree`) at `pos`, as `/place feature` does (`Feature.place` with the level's
+    /// random and chunk generator): the blocks it sets reach players as any block change does.
+    /// The bool is what the feature reported: `Ok(true)` when it says it placed, `Ok(false)` when
+    /// it says it didn't (a tree with no room). A feature may set blocks before it reports
+    /// `false`; they are kept, as `/place feature` keeps them. Refusals are checked before the
+    /// feature runs, change nothing and are named by
     /// `PlaceFeatureRefusal`: `Stale`, `Client`, `NotInPlace` (only the level being ticked is
     /// written), `NotLoaded` (a chunk of the 3x3 around `pos` is not loaded, or `pos` is out of
     /// height) and `UnknownFeature`.
