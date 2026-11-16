@@ -229,8 +229,8 @@ class DynaRoutingTests(unittest.TestCase):
         # verify waits for the heavy gate (tools/ci/pr_gate.py); verify-static runs on every pull request.
         conditions = {
             id(runtime): "${{ always() && !cancelled() && needs.changes.result != 'skipped' && "
-                         "(needs.changes.result != 'success' || needs.changes.outputs.heavy == 'true') }}",
-            id(static): "${{ always() && !cancelled() && needs.changes.result != 'skipped' }}",
+                         "(needs.changes.result != 'success' || needs.changes.outputs.heavy == 'true') && !inputs.parity }}",
+            id(static): "${{ always() && !cancelled() && needs.changes.result != 'skipped' && !inputs.parity }}",
         }
         for block in (runtime, static):
             header, steps = block.split("    steps:\n", 1)
@@ -488,6 +488,12 @@ class DynaRoutingTests(unittest.TestCase):
         self.assertIn("github.repository == 'sunrise-org/sunrise'", parity)
         self.assertIn("runs-on: dyna-large", parity)
         self.assertIn("persist-credentials: false", parity)
+        # A parity dispatch on a pull request runs only this job, and never a fork's code beside the vanilla data.
+        self.assertIn("needs.changes.outputs.trusted == 'true'", parity)
+        self.assertIn("ref: ${{ needs.changes.outputs.pr_sha || github.sha }}", parity)
+        for name in ("lint", "verify", "verify-static", "format", "launcher", "pr-status"):
+            header = blocks[name].split("    steps:\n", 1)[0]
+            self.assertIn("!inputs.parity", header, name)
 
 
 if __name__ == "__main__":
