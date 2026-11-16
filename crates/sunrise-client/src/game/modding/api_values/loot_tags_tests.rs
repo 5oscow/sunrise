@@ -80,6 +80,7 @@ fn loot_types_read_current_membership_and_order_after_tag_reload() {
             super::super::prepare_stack_boundary_tests();
             mod_platform::__private::part_tests::install_parts_fixture(mod_api::__private::mods())
                 .unwrap();
+            super::super::resolve_stack_boundary_test_items();
             for (members, expected_count, expected_holds) in [
                 (
                     vec!["minecraft:potion".to_owned(), "minecraft:stick".to_owned()],

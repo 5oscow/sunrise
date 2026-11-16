@@ -406,6 +406,7 @@ mod tests {
             super::super::prepare_stack_boundary_tests();
             mod_platform::__private::part_tests::install_parts_fixture(mod_api::__private::mods())
                 .unwrap();
+            super::super::resolve_stack_boundary_test_items();
             apply_type(
                 "edit:edit",
                 &serde_json::json!({}),
@@ -555,6 +556,7 @@ mod tests {
                     mod_api::__private::mods(),
                 )
                 .unwrap();
+                super::super::resolve_stack_boundary_test_items();
                 apply_type(
                     "invalid:invalid",
                     &serde_json::json!({}),

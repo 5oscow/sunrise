@@ -303,7 +303,8 @@ impl Walker<'_> {
         }
         if function {
             if (builtin(kind, true) || self.types.conditional(kind))
-                && let Some(condition) = data.get("condition") {
+                && let Some(condition) = data.get("condition")
+            {
                 self.entry(condition, false, &format!("{path}.condition"))?;
             }
             match kind {

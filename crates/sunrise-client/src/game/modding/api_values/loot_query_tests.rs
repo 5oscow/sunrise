@@ -56,15 +56,16 @@ fn queried_parameters_reach_native_mod_condition() {
         block: None,
         luck: 0.0,
         biome: None,
-        seed: 7,
+        seed: 0,
         place: None,
     };
     mod_platform::testing::with_mods(
         vec![mod_api::ModEntry::new("reader", Box::new(Reader))].into(),
         || {
+            crate::game::api_values::prepare_stack_boundary_tests();
             mod_platform::__private::part_tests::install_parts_fixture(mod_api::__private::mods())
                 .unwrap();
-            crate::game::api_values::prepare_stack_boundary_tests();
+            crate::game::api_values::resolve_stack_boundary_test_items();
             let mut random = sunrise_core::random::LegacyRandom::new(0);
             let holds = crate::game::loot_types::capture()
                 .test(

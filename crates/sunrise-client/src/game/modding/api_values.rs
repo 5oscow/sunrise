@@ -1648,6 +1648,11 @@ mod enchantment_boundary_tests {
 fn prepare_stack_boundary_tests() {
     install_stack_hooks();
     install_parts(&[]).unwrap();
+    resolve_stack_boundary_test_items();
+}
+
+#[cfg(test)]
+fn resolve_stack_boundary_test_items() {
     mod_api::__private::resolve_items([
         "minecraft:iron_sword",
         "minecraft:stick",
