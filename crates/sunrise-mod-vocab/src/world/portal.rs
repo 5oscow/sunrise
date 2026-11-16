@@ -11,8 +11,8 @@ pub struct PortalExit {
     pub level: LevelRef,
     /// The bottom centre of its box there.
     pub pos: [f64; 3],
-    /// The degrees to add to its yaw: 0, or 90 when the two nether portals' axes differ.
-    pub yaw_turn: f32,
+    /// What happens to its yaw; its pitch is kept.
+    pub yaw: PortalYaw,
     /// The nether portal it arrives in (its bottom-left inside block, width, height and axis);
     /// None for an End portal and an End gateway.
     pub exit_portal: Option<PortalShape>,
@@ -23,16 +23,28 @@ impl PortalExit {
     pub fn new(
         level: LevelRef,
         pos: [f64; 3],
-        yaw_turn: f32,
+        yaw: PortalYaw,
         exit_portal: Option<PortalShape>,
     ) -> Self {
         Self {
             level,
             pos,
-            yaw_turn,
+            yaw,
             exit_portal,
         }
     }
+}
+
+/// How an entity's yaw changes through a portal, in degrees.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
+#[derive(sunrise_mod_api_macros::Wire)]
+pub enum PortalYaw {
+    /// Add to the entity's yaw: 0, or 90 between nether portals of different axes; the world
+    /// spawn's angle out of the End.
+    Turn(f32),
+    /// Replace the entity's yaw: west into the End.
+    Set(f32),
 }
 
 /// Why a portal destination is not answered.
@@ -50,6 +62,8 @@ pub enum PortalError {
     NoExit,
     /// Inside a transaction: a built portal cannot be rolled back.
     InTransaction,
+    /// The entity's width or height is not a finite, non-negative number a float holds.
+    InvalidSize,
     /// The destination level is not open, or a chunk the search or the build reads is not loaded.
     ChunksNotLoaded,
     /// This side or build cannot answer.

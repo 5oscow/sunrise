@@ -1,1 +1,1 @@
-pub use world::portal::{PortalError, PortalExit};
+pub use world::portal::{PortalError, PortalExit, PortalYaw};

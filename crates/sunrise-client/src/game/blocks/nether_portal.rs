@@ -266,7 +266,11 @@ fn touches_end_portal(from: Vec3, to: Vec3, width: f32, height: f32, pos: BlockP
 /// of an entity facing `[yaw, pitch]`: into the End it faces west and keeps
 /// its pitch (`Relative.X_ROT`); out of it both turn by the world spawn's
 /// angles (`Relative.ROTATION`). The pitch stays within ±90.
-fn end_portal_rotation(into_end: bool, [yaw, pitch]: [f32; 2], spawn: [f32; 2]) -> [f32; 2] {
+pub(in crate::game) fn end_portal_rotation(
+    into_end: bool,
+    [yaw, pitch]: [f32; 2],
+    spawn: [f32; 2],
+) -> [f32; 2] {
     let (yaw, pitch) = if into_end {
         // Direction.WEST.toYRot().
         (90.0, pitch)
