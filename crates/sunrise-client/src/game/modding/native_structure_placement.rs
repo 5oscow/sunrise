@@ -5,13 +5,13 @@ use super::{
     native_structures::{engine_mirror, engine_rotation, template_id},
     structure_blocks::load_settings,
 };
+use mod_api::{StructureMirror, StructureRotation, StructureTemplateSource};
 use sunrise_core::nbt::Limits;
 use sunrise_core::position::BlockPos;
 use sunrise_world::compression::Compression;
 use sunrise_world::level::TemplateSettings;
 use sunrise_world::registry::BlockRegistry;
 use sunrise_world::worldgen::structure::{StateTransforms, StructureTemplate};
-use mod_api::{StructureMirror, StructureRotation, StructureTemplateSource};
 
 /// Native mods use this; nothing in Sunrise does.
 impl Game<'_> {
