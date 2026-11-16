@@ -1510,8 +1510,7 @@ impl Game<'_> {
                     if !m.extra.fall_flying {
                         m.on_ground = true;
                     }
-                    m.position = v;
-                    m.previous = v;
+                    sunrise_client::mobs::living::teleports::snap_to(m, v);
                     m.needs_sync = true;
                     // Entity.teleportSetPosition: setYRot, setYHeadRot, setXRot
                     // (clamped to -90..90), then setOldRot.
@@ -1696,9 +1695,6 @@ impl Game<'_> {
             // dragon part its dragon's.
             Target::Frame(_) | Target::Painting(_) => self.teleport_hanging(t, v),
             Target::Hook(_) | Target::DragonPart(_) | Target::Knot(_) => {}
-        }
-        if let Target::Mob(id) = t {
-            self.sculk_mob_teleported(id);
         }
         if !matches!(t, Target::Player | Target::Guest(_) | Target::Mob(_)) {
             target_entity_mut!(self, t, entity => {

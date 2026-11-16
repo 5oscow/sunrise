@@ -1125,7 +1125,18 @@ mod tests {
                 let mut events = Vec::new();
                 set_peek(&mut m, 100, &mut events, world.attributes);
                 assert!(modifiers(&m, world.attributes).is_empty());
+                m.movement_emission = Some(super::super::MovementEmission {
+                    move_dist: 2.0,
+                    next_step: 3.0,
+                    last: [0.5, 64.0, 0.5],
+                    on_ground: true,
+                    in_water: false,
+                });
                 assert!((0..100).any(|_| teleport(&mut m, world, &mut events)));
+                let emission = m.movement_emission.unwrap();
+                assert_eq!(emission.last, [m.position.x, m.position.y, m.position.z]);
+                assert_eq!(emission.move_dist, 2.0);
+                assert_eq!(emission.next_step, 3.0);
                 assert_eq!(m.extra.counter, 0);
                 assert!(modifiers(&m, world.attributes).is_empty());
                 assert_eq!(super::super::armor::values(&m), (0.0, 0.0));

@@ -98,9 +98,6 @@ impl Game<'_> {
             self.mobs.swap(i, last);
             // The hurt's teleport (`teleportTo`) is one position update, told at once.
             self.entity_section_moved(id, Some([from.x, from.y, from.z]), [to.x, to.y, to.z]);
-            if from != to {
-                self.sculk_mob_teleported(id);
-            }
             self.handle_mob_events(events)?;
         }
         Ok(())

@@ -188,7 +188,7 @@ impl Game<'_> {
                 let slept = mobs.iter_mut().find(|m| m.id == id).is_some_and(|m| {
                     let slept = villager::start_sleeping(m, pos, &w, &mut events);
                     if slept {
-                        m.position = at;
+                        sunrise_client::mobs::living::teleports::set_pos(m, at);
                     }
                     slept
                 });

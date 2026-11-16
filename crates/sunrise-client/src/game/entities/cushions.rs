@@ -668,8 +668,7 @@ impl Game<'_> {
                 // Cushion's box is 1 wide.
                 let offset = sunrise_client::mobs::riders::vehicle_attachment(m, 1.0);
                 let at = Vec3::new(c.position.x, c.position.y + 0.25 - offset, c.position.z);
-                m.position = at;
-                m.previous = at;
+                sunrise_client::mobs::living::teleports::snap_to(m, at);
                 m.velocity = Vec3::ZERO;
                 m.fall_distance = 0.0;
                 m.on_ground = false;

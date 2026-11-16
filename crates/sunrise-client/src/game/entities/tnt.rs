@@ -868,7 +868,7 @@ impl Game<'_> {
                 // Primed TNT's box is 0.98 wide.
                 let offset = sunrise_client::mobs::riders::vehicle_attachment(m, 0.98);
                 m.seated(id, offset, tnt_box);
-                m.position = tnt_seat(pos, offset);
+                sunrise_client::mobs::living::teleports::set_pos(m, tnt_seat(pos, offset));
                 m.previous = tnt_seat(prev, offset);
                 m.velocity = Vec3::ZERO;
                 m.fall_distance = 0.0;

@@ -1451,6 +1451,17 @@ impl BoxReach {
     }
 }
 
+/// `Entity.moveDist` / `nextStep` and its last movement-emission state.
+/// Non-walking position writes reset the origin without adding distance.
+#[derive(Clone, Copy, Debug)]
+pub struct MovementEmission {
+    pub move_dist: f32,
+    pub next_step: f32,
+    pub last: [f64; 3],
+    pub on_ground: bool,
+    pub in_water: bool,
+}
+
 #[derive(Clone, Debug)]
 pub struct Mob {
     /// Entity-owned registration metadata; content clones are detached.
@@ -1483,6 +1494,8 @@ pub struct Mob {
     /// `Entity.syncPosition`: it bounced this tick (`restituteMovementAfterCollisions`),
     /// so its tracker keeps this position as a step of the next move it sends.
     pub sync_position: bool,
+    /// Footstep, splash and landing bookkeeping, retained across teleports.
+    pub movement_emission: Option<MovementEmission>,
     /// `getAttributeValue(KNOCKBACK_RESISTANCE)` with the modifiers of the
     /// items it wears or holds (`Extra::gear_knockback`), which the game
     /// works out each tick for a mob that has any (the mob itself knows no
@@ -3587,6 +3600,7 @@ impl Mob {
             needs_sync: false,
             pushed: Vec::new(),
             sync_position: false,
+            movement_emission: None,
             gear_knockback_resistance: None,
             hurt_time: 0,
             invulnerable: 0,
