@@ -90,8 +90,8 @@ draws.push(GuiDraw::Push(vec![PoseOp::Scale(scale, scale)]));
 for line in &lines.lines {
     draws.push(GuiDraw::Text {
         text: line.text.clone(),
-        x: (x + line.at[0]) as i32,
-        y: (y + line.at[1]) as i32,
+        x: (x + line.at[0] / scale) as i32,
+        y: (y + line.at[1] / scale) as i32,
         color: 0xFFFF_FFFF,
         shadow: false,
     });
@@ -104,7 +104,8 @@ draw.gui_paint(&draws)?;
 The layout is measured unscaled and answered scaled: the text wraps at `120 / scale` GUI pixels, and
 every dimension and position `text_lines` answers — each line's `at` and `width`, the block's `width`
 and `height` — is in scaled GUI pixels, which is why the lines are drawn inside the same
-`PoseOp::Scale`. A `scale` of one is the text at its own size.
+`PoseOp::Scale`. The positions are already post-scale coordinates, whereas coordinates inside the
+scale pose are unscaled, so the example divides each line's `at` by `scale` before drawing. A `scale` of one is the text at its own size.
 
 Wrapping is vanilla's: a line breaks at a space that fits, a single word wider than the box is broken at
 a character rather than dropped, and an explicit `\n` starts a new line, so a trailing `\n` leaves an
@@ -113,8 +114,8 @@ box gives one character a line rather than none, and one character alone can sti
 than the box. Leading spaces are characters like any other and stay in the line.
 
 Each line keeps its styles, and its legacy `§` codes are applied to those styles and dropped, so a line
-drawn alone draws exactly what it measured: `§r` goes back to no style even when the code sat in a span
-with a style of its own. Draw the line through `GuiDraw::Text`; `DrawContext::text` draws plain
+drawn alone draws exactly what it measured: a `§r` goes back to the style its run carried, so right
+after a break it restores the tail run's carried style (a bold run stays bold). Draw the line through `GuiDraw::Text`; `DrawContext::text` draws plain
 characters only. A centred line sits at `wrapping width / 2 - floor(line width / 2)`, as vanilla's
 `TextAlignment.CENTER.calculateLeft` floors the half line width. `height` is the last line's `at[1]`
 plus one line height, so a scroll container sizes its content from it, and an empty component has no

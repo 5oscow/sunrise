@@ -109,8 +109,9 @@ pub trait DrawContext {
     /// block's `width` and `height` — is in scaled GUI pixels. `scale` of one is the text as it
     /// draws at its own size; `scale` of two is the label at twice the size, in a box of the same
     /// `max_width`. Draw a line within [`GuiDraw::Push`](crate::GuiDraw::Push) of
-    /// [`PoseOp::Scale`](crate::client::hud_layout::PoseOp::Scale) at its `at`, and its glyphs
-    /// cover the scaled box it measured.
+    /// [`PoseOp::Scale`](crate::client::hud_layout::PoseOp::Scale) at its `at` divided by `scale`
+    /// (the answer's positions are already scaled, and the pose scales them again), and its
+    /// glyphs cover the scaled box it measured.
     ///
     /// Wrapping is vanilla's (`Font.split`, as [`crate::ClientTextClientHost::text_split`] wraps):
     /// a line breaks at a space that fits, a single word wider than the box is broken at a
@@ -122,10 +123,10 @@ pub trait DrawContext {
     ///
     /// Every style and colour inside the component is kept in each line's `Text`, and each line's
     /// `width` is what `Font.width` answers for it, styles included. The lines carry no `§` codes:
-    /// a code is applied to the characters that follow it and dropped, so a line drawn alone draws
-    /// exactly what it measured. `§r` therefore goes back to no style, the style the split measured
-    /// from, even when the code sat in a span carrying a style of its own, which is what the engine
-    /// would restore if the line kept the code.
+    /// the split keeps them, and each line's codes are then applied to the characters that follow
+    /// them and dropped, so a line drawn alone draws exactly what it measured. A `§r` goes back to
+    /// the style its run carried, so right after a break it restores the style the tail run
+    /// carried out of the break (a bold run stays bold), not no style.
     ///
     /// One line is `Font.lineHeight` times `scale` high, and the last line's `at[1]` plus one line
     /// height is exactly [`TextLines::height`]: a scroll container sizes its content from it. A

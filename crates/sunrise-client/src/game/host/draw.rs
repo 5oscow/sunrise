@@ -190,16 +190,16 @@ fn label_layout(
         return Err(TextLinesRefusal::WidthNotFinite);
     }
     let wrap_width = wrap_width.max(1.0);
-    let wrapped = font.split_formatted(&text.resolved(), wrap_width);
+    let wrapped = font.split_formatted(text, wrap_width);
     if wrapped.len() > MAX_LINES {
         return Err(TextLinesRefusal::TooManyLines);
     }
     let mut lines = Vec::with_capacity(wrapped.len());
     let mut glyphs = 0usize;
     for (i, piece) in wrapped.into_iter().enumerate() {
-        // The split measured the codes against no style; drawing a component restores the style of
-        // the span a code sits in. Apply them here so a line measures and draws the same way.
-        let piece = without_codes(&piece);
+        // The split keeps the legacy codes; applying them to each run's own style (a `§r` restores
+        // the style the run carried out of the break) lets a line measure and draw the same way.
+        let piece = piece.resolve_legacy();
         glyphs += piece.chars().count();
         if glyphs > MAX_GLYPHS {
             return Err(TextLinesRefusal::TooManyGlyphs);
@@ -215,38 +215,10 @@ fn label_layout(
         lines.push(TextLine::new(piece.try_into_api()?, at, width * scale));
     }
     let width = lines.iter().map(|line| line.width).fold(0.0, f32::max);
-    let height = lines.last().map_or(0.0, |line| line.at[1] + LINE_HEIGHT * scale);
+    let height = lines
+        .last()
+        .map_or(0.0, |line| line.at[1] + LINE_HEIGHT * scale);
     Ok(TextLines::new(lines, width, height))
-}
-/// `text` with its legacy `§` codes applied to explicit styles and dropped, so what a line draws is
-/// what it measured: a code restyles what follows it, and `§r` goes back to no style — the style
-/// the split measured from — instead of the style of the span the code sits in, which is what
-/// drawing the code itself would restore (`Text::resolve_legacy`'s reset).
-fn without_codes(text: &crate::text::Text) -> crate::text::Text {
-    if !text.chars().any(|(c, _)| c == '§') {
-        return text.clone();
-    }
-    let mut spans: Vec<crate::text::Span> = Vec::new();
-    for span in text.clone().into_spans() {
-        let mut style = span.style.clone();
-        let mut run = String::new();
-        let mut chars = span.text.chars();
-        while let Some(c) = chars.next() {
-            if c == '§' {
-                let Some(code) = chars.next() else { break };
-                if !run.is_empty() {
-                    spans.push(crate::text::Span::new(std::mem::take(&mut run), style.clone()));
-                }
-                style = crate::text::legacy_format(&style, code, &crate::text::Style::default());
-                continue;
-            }
-            run.push(c);
-        }
-        if !run.is_empty() {
-            spans.push(crate::text::Span::new(run, style));
-        }
-    }
-    crate::text::Text::from_spans(spans)
 }
 /// [`BlockEntityDrawContext`] on the game's `crate::game::native_block_entity_draw::BlockEntityDraw`.
 pub(crate) struct GameBlockEntityDrawContext<'a, 'g> {
@@ -587,6 +559,20 @@ mod tests {
     }
 
     #[test]
+    fn spaces_at_a_break_leave_empty_lines() {
+        // A leading space that does not fit is the break: an empty first line, then one character
+        // a line. The break at a run of spaces drops only the space it breaks at.
+        assert_eq!(
+            plain(&layout(" AA", 6.0, TextAlign::Left, 1.0)),
+            ["", "A", "A"]
+        );
+        assert_eq!(
+            plain(&layout("AA    BBBB", 24.0, TextAlign::Left, 1.0)),
+            ["AA  ", "", "BBBB"]
+        );
+    }
+
+    #[test]
     fn each_line_is_placed_by_the_alignment() {
         // 24 and 12 pixels wide, in a box of 100: left leaves them at 0, centre at 38 and 44,
         // right at 76 and 88.
@@ -644,20 +630,17 @@ mod tests {
     }
 
     #[test]
-    fn a_reset_code_does_not_put_back_the_style_a_line_came_from() {
-        // `§lAAA§rBBBB` in a 14-pixel box: two bold characters, then `§r` back to no style. The
-        // second line starts in the bold style the split broke in and resets halfway through it,
-        // so the reset must be on the characters, not left as a code the draw would resolve
-        // against the line's own bold style (7 + 7 = 14, against 7 + 6 = 13).
-        let lines = layout("§lAAA§rBBBB", 14.0, TextAlign::Left, 1.0);
-        assert_eq!(plain(&lines), ["AA", "AB", "BB", "B"]);
-        let widths: Vec<f32> = lines.lines.iter().map(|line| line.width).collect();
-        assert_eq!(widths, [14.0, 13.0, 12.0, 6.0]);
+    fn a_reset_after_a_break_restores_the_style_the_tail_carried() {
+        // `§lAA §rB` in a 14-pixel box: two bold characters fill the first line, the space is
+        // where it breaks, and the second line starts in the bold style the split carried over.
+        // Its `§r` goes back to that carried style, so `B` stays bold, and no line keeps a code.
+        let lines = layout("§lAA §rB", 14.0, TextAlign::Left, 1.0);
+        assert_eq!(plain(&lines), ["AA", "B"]);
         let bold: Vec<bool> = engine(&lines.lines[1].text)
             .chars()
             .map(|(_, style)| style.is_bold())
             .collect();
-        assert_eq!(bold, [true, false], "the reset applies from `§r` on");
+        assert_eq!(bold, [true], "the reset restores the carried bold style");
         for line in plain(&lines) {
             assert!(!line.contains('§'), "a line carries no code: {line:?}");
         }

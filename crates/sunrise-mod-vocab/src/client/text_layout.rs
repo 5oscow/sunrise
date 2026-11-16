@@ -22,7 +22,7 @@ pub enum TextAlign {
 #[derive(sunrise_mod_api_macros::Wire)]
 pub struct TextLine {
     /// The component's characters this line holds, styles and colours kept, its legacy `§` codes
-    /// already applied to those styles and dropped.
+    /// already applied to those styles and dropped (a `§r` restores the style its run carried).
     pub text: Text,
     /// Where to draw it, in scaled GUI pixels: `x` from the label's left edge, `y` from its top
     /// (`0` for the first line).
