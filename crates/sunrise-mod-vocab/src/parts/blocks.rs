@@ -3,6 +3,7 @@ use super::*;
 /// `explosion_resistance` impurely: plain bits, read on any thread. It holds no part, no mod
 /// handle and no callable, so a tick phase may hold an `Arc` of it for the phase's length while
 /// the tick thread replaces the table between phases.
+// no wire: engine-private routing snapshot; never a mod boundary value.
 #[derive(Clone, Debug, Default)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct ListenIndex {
@@ -87,6 +88,7 @@ pub fn game_listen_index() -> Arc<ListenIndex> {
 /// thread has no game parts and no state index of its own; inside [`enter`](Self::enter) the
 /// engine's routing questions (`scoped_state_listens`) are answered from this instead of
 /// answering "no listener".
+// no wire: engine-private routing snapshot; never a mod boundary value.
 #[derive(Clone, Debug)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct ListenScope {

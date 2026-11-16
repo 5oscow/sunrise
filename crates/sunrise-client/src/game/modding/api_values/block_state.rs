@@ -9,6 +9,7 @@ pub(crate) struct Index {
     forward: Vec<BlockState>,
     reverse: std::collections::HashMap<mod_api::BlockKey, Vec<Option<BlockStateId>>>,
     /// Each state's block key, shared with the phase views that tell who listens.
+    #[cfg(test)]
     blocks: Arc<[mod_api::BlockKey]>,
 }
 thread_local! {
@@ -82,10 +83,12 @@ pub(crate) fn prepare(registry: &BlockRegistry) -> Result<Arc<Index>, String> {
             return Err("duplicate block state in numeric registry".into());
         }
     }
+    #[cfg(test)]
     let blocks = forward.iter().map(|state| state.block()).collect();
     Ok(Arc::new(Index {
         forward,
         reverse,
+        #[cfg(test)]
         blocks,
     }))
 }
@@ -323,6 +326,7 @@ pub(crate) fn current() -> Result<Arc<Index>, BlockStateError> {
 }
 impl Index {
     /// Each state's block key, by state number.
+    #[cfg(test)]
     pub(crate) fn blocks(&self) -> Arc<[mod_api::BlockKey]> {
         self.blocks.clone()
     }

@@ -5,7 +5,9 @@
 mod ingredient_values;
 use mod_api::item::item_stack::{ItemStack as ApiStack, StackWriteError};
 use std::sync::Arc;
-use sunrise_client::parallel::{ListenSnapshot, TickThread};
+#[cfg(test)]
+use sunrise_client::parallel::ListenSnapshot;
+use sunrise_client::parallel::TickThread;
 use sunrise_core::nbt::{Compound, JavaString, Tag};
 use sunrise_items::items::{ItemStack as EngineStack, Items};
 #[path = "api_values/aggregates.rs"]
@@ -98,17 +100,13 @@ pub(in crate::game) fn install_block_states(_tick: &TickThread, prepared: Arc<bl
 
 /// Publish the parts table prepared for this game, and with it its listen index. Between a tick's
 /// phases only, like [`install_block_states`]: a phase keeps the `ListenSnapshot` it captured.
-pub(in crate::game) fn install_resolved_parts(
-    _tick: &TickThread,
-    parts: Option<mod_api::Parts>,
-) {
+pub(in crate::game) fn install_resolved_parts(_tick: &TickThread, parts: Option<mod_api::Parts>) {
     mod_api::__private::install_resolved_parts(parts);
 }
 
 /// Who listens, as the tick thread holds it now, for a phase view to keep: None before this
 /// game's block states are bound.
-// The first phase whose view tells who listens is its first non-test caller.
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg(test)]
 pub(in crate::game) fn listen_snapshot(tick: &TickThread) -> Option<ListenSnapshot> {
     let index = block_state::current().ok()?;
     Some(ListenSnapshot::capture(

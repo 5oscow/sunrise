@@ -1,6 +1,6 @@
-extern crate self as sunrise_world;
 extern crate self as log;
 extern crate self as mod_api;
+extern crate self as sunrise_world;
 #[macro_export]
 macro_rules! warn {
     ($($args:tt)*) => { eprintln!($($args)*) };
