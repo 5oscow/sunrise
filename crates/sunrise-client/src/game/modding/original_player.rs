@@ -350,6 +350,11 @@ mod tests {
 
     #[mod_api::__subscriptions]
     impl Hooks for Listener {
+        fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
+            r.register_attachment_type("clone:unsaved", false).unwrap();
+            r.register_attachment_type("clone:retained", false).unwrap();
+            r.register_attachment_type("clone:saved", false).unwrap();
+        }
         fn player_clone(&self, host: &mut dyn ServerHost, event: &mut PlayerCloneEvent<'_>) {
             assert_eq!(event.was_death, self.death);
             let original = event.original;
