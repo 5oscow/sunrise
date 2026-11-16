@@ -488,6 +488,8 @@ pub(super) struct Remote {
     pub custom_books: bool,
     /// The synced attachments the server sent, by holder.
     pub attachments: HashMap<Holder, ResidentAttachments>,
+    /// The colliders the server sent, by entity id (`sunrise:collider_sync`).
+    pub colliders: HashMap<u32, sunrise_client::colliders::ColliderState>,
     /// The server samples far terrain for us, this far at most (`lod_net`).
     pub far_terrain: Option<sunrise_client::lod_net::Offer>,
     pub(super) builtin: Arc<Builtin>,
@@ -1123,6 +1125,7 @@ impl Game<'_> {
             custom_books: false,
             logged_out: false,
             attachments: HashMap::new(),
+            colliders: HashMap::new(),
             far_terrain: None,
             builtin,
             status: lang
@@ -1368,6 +1371,7 @@ impl Game<'_> {
             quiet_commands: false,
             custom_books: false,
             attachments: HashMap::new(),
+            colliders: HashMap::new(),
             far_terrain: None,
             builtin,
             status: "Playing Studio Replay".into(),
@@ -3250,6 +3254,10 @@ impl Game<'_> {
             C::CustomPayload(p) if p.channel == sunrise_protocol::attachment_sync::CHANNEL => {
                 self.remote_attachment_sync(&p.data);
             }
+            // The collider boxes of an entity the server shows the window.
+            C::CustomPayload(p) if p.channel == sunrise_protocol::collider_sync::CHANNEL => {
+                self.remote_collider_sync(&p.data);
+            }
             // A mod menu type's block and its mod's bytes, just before the
             // menu's `OpenScreen`.
             C::CustomPayload(p) if p.channel == sunrise_protocol::menu_extra::CHANNEL => {
@@ -3617,6 +3625,7 @@ impl Game<'_> {
             C::RemoveEntities(p) => {
                 for &id in &p.ids {
                     self.forget_remote_entity_construction(id);
+                    self.forget_client_collider(id);
                     if let Some(r) = self.remote.as_mut() {
                         if let Some(uuid) = r.level_players.remove(&id) {
                             r.attachments.remove(&Holder::Player(uuid));

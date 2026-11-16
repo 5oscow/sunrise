@@ -222,6 +222,18 @@ pub struct OrientedCollider<'a> {
     pub boxes: &'a ColliderBoxes,
 }
 
+/// The axes of one query's separating-axis tests.
+struct Axes {
+    list: [Vec3; 15],
+    count: usize,
+}
+
+impl Axes {
+    fn iter(&self) -> impl Iterator<Item = Vec3> + '_ {
+        self.list[..self.count].iter().copied()
+    }
+}
+
 /// A box of the collider as a world oriented box: centre, half sizes along the frame's axes.
 struct Obb {
     centre: Vec3,
@@ -246,10 +258,13 @@ impl<'a> OrientedCollider<'a> {
         }
     }
 
+    /// The boxes whose own bounds meet the world box (tested in the collider's frame, where
+    /// they are axis-aligned): the grid's cells first, then each box's bounds.
     fn candidates_near(&self, world: Aabb) -> Vec<u32> {
+        let local = self.frame.local_bounds(world);
         let mut out = Vec::new();
-        self.boxes
-            .candidates(self.frame.local_bounds(world), &mut out);
+        self.boxes.candidates(local, &mut out);
+        out.retain(|&i| self.boxes.boxes[i as usize].intersects(local));
         out
     }
 
@@ -265,9 +280,10 @@ impl<'a> OrientedCollider<'a> {
         direction = direction.with_component(axis, amount);
         let sweep = mover.expand_towards(direction);
         let mut allowed = amount;
+        let axes = self.axes();
         for index in self.candidates_near(sweep) {
             let obb = self.obb(self.boxes.boxes[index as usize]);
-            if let Some(reach) = self.time_of_impact(mover, direction, &obb) {
+            if let Some(reach) = self.time_of_impact(&axes, mover, direction, &obb) {
                 if reach.abs() < allowed.abs() {
                     allowed = reach;
                 }
@@ -278,30 +294,39 @@ impl<'a> OrientedCollider<'a> {
 
     /// Whether the entity box overlaps any box deeper than the collision epsilon.
     pub fn intersects(&self, mover: Aabb) -> bool {
+        let axes = self.axes();
         self.candidates_near(mover).into_iter().any(|index| {
             let obb = self.obb(self.boxes.boxes[index as usize]);
-            self.overlap_depth(mover, &obb) > COLLISION_EPSILON
+            self.overlap_depth(&axes, mover, &obb) > COLLISION_EPSILON
         })
     }
 
-    /// The axes of the separating-axis test: the world axes, the box's, and their cross products.
-    fn axes(&self) -> impl Iterator<Item = Vec3> + '_ {
+    /// The axes of the separating-axis test: the world axes, the box's, and their cross
+    /// products (those not parallel), computed once for a query.
+    fn axes(&self) -> Axes {
         let world = [
             Vec3::new(1.0, 0.0, 0.0),
             Vec3::new(0.0, 1.0, 0.0),
             Vec3::new(0.0, 0.0, 1.0),
         ];
         let local = self.frame.axes;
-        world
-            .into_iter()
-            .chain(local)
-            .chain(world.into_iter().flat_map(move |w| {
-                local.into_iter().filter_map(move |l| {
-                    let c = w.cross(l);
-                    let n = c.length_squared();
-                    (n > DEGENERATE_AXIS).then(|| c.scale(1.0 / n.sqrt()))
-                })
-            }))
+        let mut list = [Vec3::ZERO; 15];
+        let mut count = 0;
+        for axis in world.into_iter().chain(local) {
+            list[count] = axis;
+            count += 1;
+        }
+        for w in world {
+            for l in local {
+                let c = w.cross(l);
+                let n = c.length_squared();
+                if n > DEGENERATE_AXIS {
+                    list[count] = c.scale(1.0 / n.sqrt());
+                    count += 1;
+                }
+            }
+        }
+        Axes { list, count }
     }
 
     /// Centre distance and summed radii of the two boxes on `axis`.
@@ -316,8 +341,8 @@ impl<'a> OrientedCollider<'a> {
     }
 
     /// The smallest overlap over all axes: positive when the boxes interpenetrate.
-    fn overlap_depth(&self, mover: Aabb, obb: &Obb) -> f64 {
-        self.axes()
+    fn overlap_depth(&self, axes: &Axes, mover: Aabb, obb: &Obb) -> f64 {
+        axes.iter()
             .map(|axis| {
                 let (distance, radii) = self.extents(mover, obb, axis);
                 radii - distance.abs()
@@ -327,13 +352,13 @@ impl<'a> OrientedCollider<'a> {
 
     /// How far along `direction` (one axis, signed) the box travels before meeting `obb`, if it
     /// does within the movement.
-    fn time_of_impact(&self, mover: Aabb, direction: Vec3, obb: &Obb) -> Option<f64> {
+    fn time_of_impact(&self, axes: &Axes, mover: Aabb, direction: Vec3, obb: &Obb) -> Option<f64> {
         let amount = direction.x + direction.y + direction.z;
         let (mut enter, mut exit) = (f64::NEG_INFINITY, f64::INFINITY);
         // The travel distance the entering axis gives; exact when that axis is the movement's.
         let mut reach = 0.0;
         let mut embedded = true;
-        for axis in self.axes() {
+        for axis in axes.iter() {
             let (distance, radii) = self.extents(mover, obb, axis);
             if radii - distance.abs() <= COLLISION_EPSILON {
                 embedded = false;
@@ -404,6 +429,15 @@ impl<'a> OrientedCollider<'a> {
         let centre = step_box.center();
         samples.push((centre.x, centre.z));
         samples.push((centre.x + horizontal.x, centre.z + horizontal.z));
+        // The samples in the collider's frame, and the world's up there: the same for every box.
+        let probes: Vec<Vec3> = samples
+            .iter()
+            .map(|&(x, z)| self.frame.to_local(Vec3::new(x, 0.0, z)))
+            .collect();
+        let up = self
+            .frame
+            .to_local(Vec3::new(0.0, 1.0, 0.0))
+            .subtract(self.frame.to_local(Vec3::ZERO));
         for index in self.candidates_near(reach) {
             let local = self.boxes.boxes[index as usize];
             for i in 0..8 {
@@ -448,19 +482,14 @@ impl<'a> OrientedCollider<'a> {
                 } else {
                     local.min(face)
                 };
-                for &(x, z) in &samples {
-                    // The point on the face's plane above (x, z), then whether the box is there.
-                    let probe_local = self.frame.to_local(Vec3::new(x, 0.0, z));
-                    let along_y = self
-                        .frame
-                        .to_local(Vec3::new(x, 1.0, z))
-                        .subtract(probe_local);
-                    let d = along_y.component(face);
-                    if d.abs() < 1.0e-9 {
-                        continue;
-                    }
-                    let t = (plane - probe_local.component(face)) / d;
-                    let p = probe_local.add_vector(along_y.scale(t));
+                let d = up.component(face);
+                if d.abs() < 1.0e-9 {
+                    continue;
+                }
+                for probe in &probes {
+                    // The point on the face's plane above the sample, then whether the box is there.
+                    let t = (plane - probe.component(face)) / d;
+                    let p = probe.add_vector(up.scale(t));
                     let inside = Axis::ALL.iter().all(|a| {
                         *a == face
                             || (p.component(*a) >= local.min(*a) - COLLISION_EPSILON

@@ -103,8 +103,21 @@ impl Game<'_> {
             return;
         };
         let snapshots = std::mem::take(&mut host.hub.attachment_snapshots);
+        // Colliders: the changes first, to those who already track the entity; the players who
+        // just started to are sent the whole collider below instead.
+        let fresh = Self::fresh_collider_pairs(
+            &snapshots
+                .iter()
+                .map(|s| (s.player, s.holder))
+                .collect::<Vec<_>>(),
+        );
+        self.flush_collider_sync(&fresh);
         for snapshot in snapshots {
             let AttachmentSnapshot { player, holder } = snapshot;
+            let collider_entity = match holder {
+                Holder::Entity(id) => Some(id),
+                _ => None,
+            };
             let Some(host) = self.lan.as_mut() else {
                 return;
             };
@@ -137,6 +150,9 @@ impl Game<'_> {
             if let Some(sender) = sender {
                 for message in &messages {
                     self.send_attachment_sync(std::slice::from_ref(&sender), message);
+                }
+                if let Some(id) = collider_entity {
+                    self.send_collider_snapshot(&sender, id);
                 }
             }
         }

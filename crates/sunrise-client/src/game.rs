@@ -146,6 +146,7 @@ use std::{
     time::{Duration, Instant},
 };
 use sunrise_client::actions::Action as Mapping;
+use sunrise_client::held::Source;
 use sunrise_client::spans::{startup, time as span};
 use sunrise_client::{
     Result,
@@ -189,7 +190,6 @@ use sunrise_client::{
     vanillagen::VanillaTerrain,
     world::World,
 };
-use sunrise_client::{fast_hash::FxHashMap, held::Source};
 use sunrise_core::{
     biome::{BiomeZoom, obfuscate_seed},
     geometry::{Aabb, Direction},
@@ -1753,7 +1753,9 @@ struct Game<'a> {
     persist: persist::EntityMemory,
     /// Missing profession IDs already reported for this world session.
     missing_professions: HashSet<String>,
-    entity_attachments: FxHashMap<u32, sunrise_mod_runtime::attachments::Attachments>,
+    entity_attachments: native_colliders::EntityMaps,
+    /// What changed in entities' colliders this tick, for the players who track them.
+    collider_changes: Vec<native_colliders::ColliderChange>,
     entity_initialization: entity_initialization::EntityInitialization,
     /// Typed per-level membership follows dimensions, not the temporary world swap.
     attachment_indexes: attachment_index::Indexes,
@@ -11053,6 +11055,7 @@ impl<'a> Game<'a> {
             persist: Default::default(),
             missing_professions: Default::default(),
             entity_attachments: Default::default(),
+            collider_changes: Vec::new(),
             entity_initialization: Default::default(),
             attachment_indexes: Default::default(),
             remote: None,

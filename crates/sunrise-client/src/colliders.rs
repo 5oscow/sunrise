@@ -24,8 +24,16 @@ pub struct ColliderState {
 
 fn aabb(b: &WireBox) -> Aabb {
     Aabb::new(
-        Vec3::new(f64::from(b.min[0]), f64::from(b.min[1]), f64::from(b.min[2])),
-        Vec3::new(f64::from(b.max[0]), f64::from(b.max[1]), f64::from(b.max[2])),
+        Vec3::new(
+            f64::from(b.min[0]),
+            f64::from(b.min[1]),
+            f64::from(b.min[2]),
+        ),
+        Vec3::new(
+            f64::from(b.max[0]),
+            f64::from(b.max[1]),
+            f64::from(b.max[2]),
+        ),
     )
 }
 
@@ -370,8 +378,8 @@ mod tests {
     /// What the server sends, applied as a client does, gives the server's collider.
     #[test]
     fn a_client_copy_follows_the_whole_and_the_changes() {
-        let server = ColliderState::from_api(&collider(40_000_usize.min(Collider::MAX_BOXES)))
-            .unwrap();
+        let server =
+            ColliderState::from_api(&collider(40_000_usize.min(Collider::MAX_BOXES))).unwrap();
         let mut held = None;
         for m in server.messages(7) {
             ColliderState::apply(&mut held, &m);
