@@ -19,6 +19,10 @@ pub trait FluidsHost {
     /// Always-full contents answer their maximum level.
     #[access(WorldOnly)]
     fn cauldron_level(&self, state: BlockState) -> Option<u32>;
+}
+/// The server host's methods of the `fluids` area, implemented by the game and reached through [`ServerHost`].
+#[sunrise_mod_api_macros::host_area]
+pub trait FluidsServerHost {
     /// Side: server.
     /// What a liquid cell of `source` becomes beside one cell (`neighbour`, a block state whose
     /// fluid is read through it, so a waterlogged block holds water) with `below` under it:
