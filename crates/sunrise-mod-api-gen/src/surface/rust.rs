@@ -222,6 +222,9 @@ pub(super) struct Layouts<'f> {
     pending: Vec<ItemId>,
     forms: &'f HashMap<ItemId, WireForm>,
     ids: &'f HashMap<ItemId, Vec<String>>,
+    /// A type that has no wire form of its own (a borrowed event, a view the boundary copies
+    /// field by field) is described by its Rust fields, as a derive would.
+    pub(super) fields_without_form: bool,
 }
 
 impl<'f> Layouts<'f> {
@@ -235,6 +238,7 @@ impl<'f> Layouts<'f> {
             pending: Vec::new(),
             forms,
             ids,
+            fields_without_form: false,
         }
     }
 
@@ -283,7 +287,12 @@ impl<'f> Layouts<'f> {
             };
             let names = param_names(generics);
             let derives = super::derives(attrs);
-            let body = match super::wire_forms::form_of(id, attrs, &derives, self.forms) {
+            let form = super::wire_forms::form_of(id, attrs, &derives, self.forms);
+            let form = match form {
+                None if self.fields_without_form => Some(WireForm::Derive),
+                form => form,
+            };
+            let body = match form {
                 None | Some(WireForm::Manual) => continue,
                 Some(WireForm::Via(ty, module)) => {
                     Body::Via(self.shape(index, module, &ty, &names, 0))

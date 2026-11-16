@@ -3,6 +3,7 @@
 //! sides and "Not on wasm" from the wire index; everything else from a walk of the public items
 //! of `sunrise-mod-api` and the vocabulary it re-exports.
 pub mod behaviours;
+pub(crate) mod calls;
 mod expand;
 pub mod notes;
 mod rust;
