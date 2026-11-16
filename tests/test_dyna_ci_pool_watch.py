@@ -27,8 +27,14 @@ def job(status, label="dyna-large", started=None, completed=None, runner=None):
 
 
 class Watch(unittest.TestCase):
-    def sweep(self, runs, jobs, me=999):
+    def sweep(self, runs, jobs, me=999, later=None):
+        """`later` changes `runs` and `jobs` during the pause between the two looks."""
         requests, cancelled, sleeps = [], [], []
+
+        def sleep(seconds):
+            sleeps.append(seconds)
+            if later:
+                later(runs, jobs)
 
         def api(path):
             requests.append(path)
@@ -41,7 +47,7 @@ class Watch(unittest.TestCase):
                 listed = [entry for entry in listed if datetime.fromisoformat(entry["created_at"]) >= since]
             return [{"workflow_runs": listed}]
 
-        code = watch.watch(api, cancelled.append, lambda: NOW, sleeps.append, "o/r", me, STALL)
+        code = watch.watch(api, cancelled.append, lambda: NOW, sleep, "o/r", me, STALL)
         return code, cancelled, sleeps, requests
 
     def test_a_dead_pool_has_its_stranded_runs_cancelled_after_a_second_quiet_look(self):
@@ -55,15 +61,26 @@ class Watch(unittest.TestCase):
 
     def test_a_pool_that_just_finished_a_whole_run_is_alive(self):
         # Run 2 ended on a Dyna runner a minute ago: only the finished runs show that.
-        runs = [run(1, "queued", 45), run(2, "completed", 30, updated=1), run(3, "completed", 2000, updated=1),
-                run(4, "completed", 40, updated=30)]
+        runs = [run(1, "queued", 45), run(2, "completed", 30, updated=1), run(4, "completed", 40, updated=30)]
         jobs = {1: [job("queued")], 2: [job("completed", started=15, completed=1, runner="dyna-ci-1")],
-                3: [job("completed", started=5, completed=1, runner="dyna-ci-2")],
                 4: [job("completed", started=35, completed=30, runner="dyna-ci-3")]}
         code, cancelled, _, requests = self.sweep(runs, jobs)
         self.assertEqual((code, cancelled), (0, []))
-        # A run created over a day ago is not listed, and one not updated since the stall is not read.
-        self.assertFalse([path for path in requests if "/runs/3/" in path or "/runs/4/" in path])
+        # A finished run not updated since the stall is not read.
+        self.assertFalse([path for path in requests if "/runs/4/" in path])
+
+    def test_a_rerun_of_an_old_run_that_finishes_on_the_pool_between_the_looks_is_alive(self):
+        # Run 3 was created two days ago and rerun: its pool job waits behind a runner starting up at the first look,
+        # and has run and finished on the pool by the second. It is the only sign of life.
+        runs = [run(1, "queued", 45), run(3, "in_progress", 2880, updated=2)]
+        jobs = {1: [job("queued")],
+                3: [job("completed", "ubuntu-latest", 3, 2, "GitHub Actions 3"), job("queued")]}
+
+        def finish(runs, jobs):
+            runs[1] = run(3, "completed", 2880, updated=1)
+            jobs[3][1] = job("completed", started=2, completed=1, runner="dyna-ci-2")
+
+        self.assertEqual(self.sweep(runs, jobs, later=finish)[:2], (0, []))
 
     def test_a_busy_pool_cancels_nothing(self):
         runs = [run(1, "queued", 45), run(2, "in_progress", 30)]
