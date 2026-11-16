@@ -419,25 +419,14 @@ impl Game<'_> {
         {
             return None;
         }
-        if let Some(entity) = entity {
-            self.native_entity_target(entity)?;
-        }
-        let place = self.loot_place_at(origin, None);
-        sunrise_world::loot::with_native_loot_place(place, || {
-            let this_entity = entity.is_some();
-            match world_items!(self).loot_sequence(table) {
-                Some(sequence) => {
-                    let random = self.rand_sequences.get(&sequence, self.level.seed);
-                    world_items!(self).roll_loot_table(table, tool, this_entity, random)
-                }
-                None => world_items!(self).roll_loot_table(
-                    table,
-                    tool,
-                    this_entity,
-                    &mut self.world.random,
-                ),
+        let this = match entity {
+            Some(entity) => {
+                let target = self.native_entity_target(entity)?;
+                Some(self.target_loot_entity(target))
             }
-        })
+            None => None,
+        };
+        self.roll_table_at(table, Some(origin), tool, this.as_ref())
     }
     /// Set a block through Level.setBlock. Typed errors distinguish stale/unavailable
     /// levels; Ok(false) preserves vanilla's position/no-change refusal.
