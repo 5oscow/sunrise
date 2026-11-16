@@ -130,7 +130,7 @@ jobs:
     uses: ./.github/workflows/launcher-windows-check.yml
     with:
       commit: ${{ needs.resolve.outputs.commit }}
-  # arismoko/horizon-machine-sample at its pin, compiled against this commit's mod API: a red means the sample must
+  # sunrise-org/sunrise-machine-sample at its pin, compiled against this commit's mod API: a red means the sample must
   # follow an API change (its issue says so), never that the change was wrong.
   machine-sample:
     needs: resolve
@@ -162,6 +162,7 @@ jobs:
       pull-requests: read  # which pull request closed a test's last issue, and whether this commit holds its fix
     outputs:
       green: ${{ steps.summary.outputs.green }}
+      sdk_green: ${{ steps.summary.outputs.sdk_green }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -182,13 +183,14 @@ jobs:
           REPORTS: ${{ runner.temp }}/reports
         run: python3 tools/ci/daily_summary.py
 
-  # The SDK of the daily-green commit, from the sdk leg's assets in this run (no rebuild), signed and published as
+  # The SDK of this commit, from the sdk leg's assets in this run (no rebuild), signed and published as
   # sdk-<sha> (sdk-publish.yml) before the nightly that needs it. A dry run moved no tag and publishes nothing: it
   # stops at the summary, which says what it would do. The sdk leg skips its build when sdk-<sha> already exists:
   # then there is nothing to publish.
+  # Gated on its own legs (summary sdk_green), not every leg, until a runner with prepared data exists (owner, 2026-11-16).
   sdk-publish:
     needs: [resolve, summary, sdk]
-    if: needs.summary.outputs.green == 'true' && needs.resolve.outputs.dry_run == 'false' && needs.sdk.outputs.needed == 'true'
+    if: "!cancelled() && needs.resolve.result == 'success' && needs.summary.result == 'success' && needs.sdk.result == 'success' && needs.summary.outputs.sdk_green == 'true' && needs.resolve.outputs.dry_run == 'false' && needs.sdk.outputs.needed == 'true'"
     permissions:
       contents: write  # the sdk-<sha> release
     uses: ./.github/workflows/sdk-publish.yml
@@ -201,7 +203,7 @@ jobs:
   # closes it. The summary ran before the publish, so it cannot see it.
   sdk-publish-report:
     needs: [resolve, summary, sdk-publish]
-    if: always() && needs.summary.outputs.green == 'true' && needs.resolve.outputs.dry_run == 'false' && contains(fromJSON('["success", "failure", "cancelled"]'), needs.sdk-publish.result)
+    if: always() && needs.summary.outputs.sdk_green == 'true' && needs.resolve.outputs.dry_run == 'false' && contains(fromJSON('["success", "failure", "cancelled"]'), needs.sdk-publish.result)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

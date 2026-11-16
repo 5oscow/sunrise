@@ -78,7 +78,7 @@ A reviewer runs your change in game at your head only when a test can't cover on
 - when or in what order something happens compared with vanilla, such as a hook's firing point.
 
 If your PR changes or removes something mods already use, the reviewer also runs
-[sunrise-machine-sample](https://github.com/arismoko/horizon-machine-sample) against it. A new item's `///` doc is its
+[sunrise-machine-sample](https://github.com/sunrise-org/sunrise-machine-sample) against it. A new item's `///` doc is its
 reference.
 
 ## A catalog point and the wasm fixture
