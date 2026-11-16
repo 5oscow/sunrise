@@ -58,8 +58,19 @@ fn a_state_is_fitted_to_its_neighbours_without_a_write() {
             game.level_set_block(level, [3, 70, 2], fence, BlockUpdateFlags::NONE),
             Ok(true)
         );
-        let fitted = game.level_update_from_neighbour_shapes(level, [2, 70, 2], fence);
-        assert_ne!(fitted, Ok(fence), "it connects to the fence at its east");
+        let fitted = game
+            .level_update_from_neighbour_shapes(level, [2, 70, 2], fence)
+            .unwrap();
+        let sides = game.pack.assets.registry.state(fitted).unwrap();
+        let side = |name: &str| sides.properties.get(name).map(String::as_str);
+        assert_eq!(
+            side("east"),
+            Some("true"),
+            "it connects to the fence at its east"
+        );
+        for other in ["north", "south", "west"] {
+            assert_eq!(side(other), Some("false"), "nothing stands on its {other}");
+        }
         assert_eq!(game.world.block(2, 70, 2), air, "nothing written");
         assert_eq!(
             game.level_update_from_neighbour_shapes(level, [9, 70, 9], fence),
