@@ -1111,8 +1111,8 @@ impl Game<'_> {
         self.player_read_both(player)?.abilities()
     }
 
-    /// The players on this server, in the order they joined. Empty on a
-    /// client and in a world nobody else can join.
+    /// The real players on this server, in join order, including an integrated
+    /// server's own player even when the world is not open to LAN. Empty on a client.
     pub(super) fn native_server_players(&self) -> Vec<PlayerRef> {
         let Some(epoch) = self.native_lifecycle.epoch() else {
             return Vec::new();
@@ -1133,7 +1133,8 @@ impl Game<'_> {
             .collect()
     }
 
-    /// Find a connected player by their account name, case-insensitively.
+    /// Find a connected player by their account name, case-insensitively,
+    /// including an integrated server's own player.
     pub(super) fn native_player_by_name(&self, name: &str) -> Option<PlayerRef> {
         let epoch = self.native_lifecycle.epoch()?;
         let player = self

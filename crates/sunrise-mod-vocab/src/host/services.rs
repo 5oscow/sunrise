@@ -214,8 +214,8 @@ pub trait Messages {
 /// The players service, reached through its host.
 pub trait Players {
     /// Side: server.
-    /// The players on this server, in the order they joined. Empty on a
-    /// client and in a world nobody else can join.
+    /// The real players on this server, in join order, including an integrated
+    /// server's own player even when the world is not open to LAN. Empty on a client.
     fn server_players(&self) -> Vec<PlayerRef> {
         crate::world::phase::unprovided(
             "Players::server_players",
@@ -224,7 +224,8 @@ pub trait Players {
         )
     }
     /// Side: server.
-    /// Find a connected player by their account name, case-insensitively.
+    /// Find a connected player by their account name, case-insensitively,
+    /// including an integrated server's own player.
     fn player_by_name(&self, name: &str) -> Option<PlayerRef> {
         crate::world::phase::unprovided(
             "Players::player_by_name",

@@ -68,6 +68,8 @@ static TOKENS: Mutex<Option<Tokens>> = Mutex::new(None);
 /// What the server handlers saw: channel, counter and the first peer's health then.
 static SERVER: Mutex<Vec<(&str, i32, Option<f32>)>> = Mutex::new(Vec::new());
 static CLIENT: Mutex<Vec<i32>> = Mutex::new(Vec::new());
+/// UUID and entity ID independently observed by the single-player client.
+static OWNER: Mutex<Option<(u128, u32)>> = Mutex::new(None);
 /// The first player to send 7, whose health the failing handler stages a write to.
 static WITNESS: Mutex<Option<PlayerRef>> = Mutex::new(None);
 
@@ -91,6 +93,30 @@ fn up(value: Probe, context: &mut dyn IPayloadContext) -> Result<(), String> {
     let health = witness_health(context);
     SERVER.lock().unwrap().push((UP, counter, health));
     match counter {
+        21 => {
+            let sender = context.player().map_err(|e| format!("{e:?}"))?;
+            let host = context.server_host().map_err(|e| format!("{e:?}"))?;
+            let players = host.players().server_players();
+            assert_eq!(
+                players,
+                [sender],
+                "the unpublished server lists its owner once"
+            );
+            let owner = players[0];
+            assert_eq!(
+                Some((owner.uuid(), owner.entity().id())),
+                *OWNER.lock().unwrap()
+            );
+            let name = owner.name(host).expect("connected owner's account name");
+            assert_eq!(
+                host.players().player_by_name(&name.to_uppercase()),
+                Some(owner)
+            );
+            down()
+                .send(host, owner, &probe(22))
+                .map(drop)
+                .map_err(|e| format!("send to listed owner: {e:?}"))
+        }
         7 => down()
             .reply(context, &probe(8))
             .map(drop)
@@ -148,7 +174,7 @@ fn typed_payloads_follow_the_raw_routes() {
     if super::super::native_entity_refs::tests::run_fresh_cases(
         NAME,
         "SUNRISE_TYPED_TRANSPORT_CHILD",
-        &["integrated", "lan"],
+        &["integrated", "singleplayer_list", "lan"],
     ) {
         return;
     }
@@ -176,12 +202,33 @@ fn typed_payloads_follow_the_raw_routes() {
             }
             match case.as_str() {
                 "integrated" => integrated(game),
+                "singleplayer_list" => singleplayer_list(game),
                 "lan" => lan(game),
                 other => panic!("unknown case {other}"),
             }
             game.leave_server(None).unwrap();
         });
     });
+}
+
+/// Exercise enumeration and a handle-addressed send, not a reply to the sender.
+fn singleplayer_list(game: &mut super::Game<'_>) {
+    assert_eq!(game.integrated.as_ref().unwrap().published(), None);
+    let owner = game.local_player().expect("logged-in local player");
+    *OWNER.lock().unwrap() = Some((owner.uuid(), owner.entity().id()));
+    let token = TOKENS.lock().unwrap().as_ref().unwrap().up.clone();
+    assert_eq!(token.send(game, &probe(21)), Ok(PayloadAccepted::Queued));
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while CLIENT.lock().unwrap().is_empty() {
+        game.poll_remote().unwrap();
+        assert!(
+            Instant::now() < deadline,
+            "payload to listed single-player owner"
+        );
+        std::thread::yield_now();
+    }
+    assert_eq!(*CLIENT.lock().unwrap(), [22]);
+    assert_eq!(game.integrated.as_ref().unwrap().published(), None);
 }
 
 fn integrated(game: &mut super::Game<'_>) {
