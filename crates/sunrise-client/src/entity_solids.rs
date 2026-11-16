@@ -1,11 +1,8 @@
-//! PURPOSE: the one place that says which entities are solid to a mover (`EntityGetter.getEntityCollisions`).
-//! WHY: each mover kind gathered its own boxes with its own copy of the rule; a collider that
-//! should stop everyone had to be added to each of them.
-//! REFS: vanilla `Entity.canBeCollidedWith`, `Entity.canCollideWith`, `AbstractBoat.canVehicleCollide`.
-//! LOGS: none. READS-BY: `mobs/living.rs` (a mob's move) and `game/entities/collision_source.rs`
-//! (every other mover). The callers own their inputs (the entity lists, a spatial query, a
-//! prebuilt grid) and ask about each candidate here.
-//! ENDS-WHEN: every entity shares one stored state and the candidates need no translation.
+//! The one rule for which entities are solid to a mover (`EntityGetter.getEntityCollisions`):
+//! vanilla's `Entity.canBeCollidedWith`, `Entity.canCollideWith` and
+//! `AbstractBoat.canVehicleCollide`, shared by a mob's move (`mobs/living.rs`) and every other
+//! mover (`game/entities/collision_source.rs`). The callers own their inputs (the entity lists,
+//! a spatial query, a prebuilt grid) and ask about each candidate here.
 use sunrise_core::geometry::Aabb;
 
 /// What a candidate is, as far as `canBeCollidedWith` tells them apart.
@@ -40,6 +37,24 @@ pub struct Candidate {
     pub pushable: bool,
     /// What it rides directly.
     pub mount: Option<u32>,
+}
+
+impl Candidate {
+    /// A live entity that is none of the mobs' states: a boat, a cart or a player.
+    pub fn fixed(kind: SolidKind, id: u32, bounds: Aabb) -> Self {
+        Self {
+            id,
+            kind,
+            bounds,
+            alive: true,
+            removed: false,
+            baby: false,
+            still: false,
+            carrying: false,
+            pushable: false,
+            mount: None,
+        }
+    }
 }
 
 /// Who is moving, which decides the rule.

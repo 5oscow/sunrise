@@ -952,7 +952,10 @@ mod tests {
                 .collect();
             met += walked.len();
             assert_eq!(
-                game.entity_collisions(crate::game::collision_source::Mover::Boat { id: u32::MAX, area }),
+                game.entity_collisions(crate::game::collision_source::Mover::Boat {
+                    id: u32::MAX,
+                    area
+                }),
                 walked,
                 "round {round}"
             );

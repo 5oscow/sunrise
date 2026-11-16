@@ -20,51 +20,21 @@ pub(in crate::game) enum Mover<'a> {
 }
 
 fn boat(b: &Boat) -> Candidate {
-    Candidate {
-        id: b.id,
-        kind: SolidKind::Boat,
-        bounds: b.bounds(),
-        alive: true,
-        removed: false,
-        baby: false,
-        still: false,
-        carrying: false,
-        pushable: false,
-        mount: None,
-    }
+    Candidate::fixed(SolidKind::Boat, b.id, b.bounds())
 }
 
 fn cart(c: &Minecart) -> Candidate {
-    Candidate {
-        kind: SolidKind::Cart,
-        id: c.id,
-        bounds: c.bounds(),
-        ..boat_like()
-    }
+    Candidate::fixed(SolidKind::Cart, c.id, c.bounds())
 }
 
-fn boat_like() -> Candidate {
-    Candidate {
-        id: 0,
-        kind: SolidKind::Boat,
-        bounds: Aabb::new(Vec3::ZERO, Vec3::ZERO),
-        alive: true,
-        removed: false,
-        baby: false,
-        still: false,
-        carrying: false,
-        pushable: false,
-        mount: None,
-    }
-}
-
-/// A player the rule may offer: it has no id of its own among the entities here.
+/// A player the rule may offer; the rule never reads its id.
 fn player(bounds: Aabb) -> Candidate {
-    Candidate {
-        kind: SolidKind::Player,
-        bounds,
-        ..boat_like()
-    }
+    Candidate::fixed(SolidKind::Player, 0, bounds)
+}
+
+/// What a moving cart asks about: two blocks around itself.
+fn cart_reach(c: &Minecart) -> Aabb {
+    c.bounds().inflate(Vec3::new(2.0, 2.0, 2.0))
 }
 
 impl Game<'_> {
@@ -107,10 +77,7 @@ impl Game<'_> {
                 )
             }
             Mover::Passive => (Rule::Passive, None),
-            Mover::Cart(c) => (
-                Rule::Cart { id: c.id },
-                Some(c.bounds().inflate(Vec3::new(2.0, 2.0, 2.0))),
-            ),
+            Mover::Cart(c) => (Rule::Cart { id: c.id }, Some(cart_reach(c))),
             Mover::Boat { id, area } => (Rule::Boat { id }, Some(area)),
         };
         let solids = Solids::new(rule, area);
@@ -142,7 +109,7 @@ impl Game<'_> {
                         each(&o, None);
                     }
                 }
-                self.mobs_meeting(area.unwrap(), |j, m, _| {
+                self.mobs_meeting(cart_reach(c), |j, m, _| {
                     let c = m.solid_candidate();
                     if solids.accepts(&c, || None) {
                         each(&c, Some(j));
