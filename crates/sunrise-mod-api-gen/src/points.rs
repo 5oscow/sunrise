@@ -1240,7 +1240,7 @@ mod tests {
     }
 
     #[test]
-    fn selected_guest_exports_keep_the_full_layout() {
+    fn selected_guest_exports_keep_the_full_place_table() {
         let make = |name: &str| {
             let sig: syn::Signature = syn::parse_str(&format!("fn {name}()")).unwrap();
             let shape = point_shape::shape(quote!(), &sig).unwrap();
@@ -1276,7 +1276,7 @@ mod tests {
                 .items
                 .into_iter()
                 .find_map(|item| match item {
-                    syn::Item::Const(c) if c.ident == "POINT_LAYOUT" => {
+                    syn::Item::Const(c) if c.ident == "POINT_CALLS" => {
                         Some(c.expr.to_token_stream().to_string())
                     }
                     _ => None,
