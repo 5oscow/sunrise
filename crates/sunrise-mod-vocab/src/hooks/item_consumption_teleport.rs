@@ -38,8 +38,9 @@ pub trait Hooks {
     /// before the next mob ticks. Listener writes survive; changing the consumer's
     /// item, position or eligibility refuses the captured effect instead of
     /// overwriting that write. Cancellation still finishes consumption.
-    /// Diverges from upstream: renamed from
-    /// `chorus_fruit_teleport`.
+    /// A consumed stack the API can't carry (a saved item whose id isn't registered) isn't
+    /// heard: the listeners aren't called for that consumption and the teleport goes on as
+    /// vanilla's.
     #[hook(
         side = "server",
         contract = "cancel",
