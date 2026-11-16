@@ -116,6 +116,8 @@ pub(super) struct Hook {
 /// What a hook keeps of the mod's fishing medium it floats in, on the server.
 #[derive(Clone, Debug, Default, PartialEq)]
 struct HookMedium {
+    /// The mod that answered.
+    mod_id: &'static str,
     /// The table the mod answered, as it answered it.
     answered: Option<String>,
     /// The table a catch rolls: the answer's, once checked; None rolls vanilla's.
@@ -1064,8 +1066,12 @@ impl Game<'_> {
         let surface = medium.as_ref().map(|m| m.answer.surface);
         match medium {
             Some(m) => {
-                let loot_table = match &h.medium {
-                    Some(kept) if kept.answered == m.answer.loot_table => kept.loot_table.clone(),
+                let loot_table = match h.medium.take() {
+                    Some(kept)
+                        if kept.mod_id == m.mod_id && kept.answered == m.answer.loot_table =>
+                    {
+                        kept.loot_table
+                    }
                     _ => m
                         .answer
                         .loot_table
@@ -1073,6 +1079,7 @@ impl Game<'_> {
                         .and_then(|id| self.medium_table(m.mod_id, id)),
                 };
                 h.medium = Some(HookMedium {
+                    mod_id: m.mod_id,
                     answered: m.answer.loot_table,
                     loot_table,
                     lure_ticks: m.answer.lure_ticks,
@@ -2308,6 +2315,8 @@ mod tests {
         let at = |y| Vec3::new(0.5, y, 0.5);
         assert!(super::inside_medium(at(64.9), &medium(64.0)));
         assert!(!super::inside_medium(at(65.0), &medium(64.0)));
+        assert!(super::inside_medium(at(-63.5), &medium(-64.0)));
+        assert!(!super::inside_medium(at(-62.5), &medium(-64.0)));
         for surface in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -5.0] {
             assert!(
                 !super::inside_medium(at(64.0), &medium(surface)),

@@ -91,6 +91,22 @@ stale teleport decision. A consumed stack the API can't carry, such as a saved i
 whose id isn't registered, isn't heard: the listeners aren't called and the teleport
 goes on as vanilla's.
 
+## Fishing medium
+
+`fishing_medium` lets a mod say that a bobber outside water floats and fishes where it is: lava,
+the void under an island, a cloud. The first mod in order to answer decides; later mods are not
+asked. The answer is a `FishingMedium` whose `surface` is the world Y the bobber floats at. The
+bobber is in the medium in the block of `surface` or below (its y under `floor(surface) + 1`),
+so a surface of -64.0 holds y -63.5 but not y -62.5, and negative heights work the same as
+positive ones. A `surface` that is not finite is no medium.
+
+On the server the answer also carries a `loot_table` and `lure_ticks`. The catch rolls the named
+table, and the wait for a fish is `min + nextInt(max - min + 1)` less the rod's Lure, with `min`
+raised to at least 1 and `max` to at least `min`. A table id that is malformed or names no table
+the server has rolls vanilla's `minecraft:gameplay/fishing`, with one warning naming the mod and
+the id. A client reads only the `surface`: it draws the bobber floating and ignores the table and
+the wait.
+
 #### Item use lifecycle (native and wasm)
 
 `living_entity_use_item_tick` runs after the may-still-use check. Its `duration`

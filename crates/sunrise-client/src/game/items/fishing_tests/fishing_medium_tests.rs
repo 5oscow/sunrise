@@ -101,7 +101,7 @@ fn bobber_y(game: &mut Game<'_>) -> f64 {
 }
 
 #[test]
-#[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn with_no_listener_the_bobber_falls() {
     mod_platform::testing::with_mods(Default::default(), || {
         with_game(|game| {
@@ -114,7 +114,7 @@ fn with_no_listener_the_bobber_falls() {
 }
 
 #[test]
-#[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn a_mods_medium_floats_the_bobber_and_its_catch_rolls_the_checked_table() {
     let medium = probe(None);
     mod_platform::testing::with_mods(mods(&[("medium", &medium)]), || {
@@ -204,7 +204,7 @@ fn a_mods_medium_floats_the_bobber_and_its_catch_rolls_the_checked_table() {
 }
 
 #[test]
-#[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn the_first_mod_in_order_to_answer_wins() {
     let first = probe(Some(Some(JUNK)));
     let second = probe(Some(Some("minecraft:gameplay/fishing/fish")));
@@ -225,7 +225,7 @@ fn the_first_mod_in_order_to_answer_wins() {
 }
 
 #[test]
-#[ignore = "needs prepared resources in SUNRISE_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn a_client_keeps_only_the_surface_and_draws_the_bobber_floating() {
     let medium = probe(Some(Some(JUNK)));
     mod_platform::testing::with_mods(mods(&[("medium", &medium)]), || {
