@@ -4,7 +4,10 @@
 pub trait Hooks {
     /// On an authoritative server, a cauldron at `pos` is about to change
     /// fill level from `from_level` to `to_level` for `reason`. Set `cancel`
-    /// to leave it unchanged.
+    /// to leave it unchanged. For `extinguishing` (a burning entity in a water
+    /// or powder snow cauldron), the game checks after the hook returns without
+    /// cancelling that the block at `pos` still has the block id and properties it
+    /// judged; if not, the block is not changed.
     #[hook(
         side = "server",
         contract = "cancel",
