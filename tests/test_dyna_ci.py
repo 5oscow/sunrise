@@ -229,7 +229,7 @@ class DynaRoutingTests(unittest.TestCase):
         for item in ("vars.DYNA_CI_SELF_HOSTED", "vars.DYNA_CI_POOL_UNTIL", "github.event_name",
                      "github.event.pull_request.head.repo.full_name == github.repository", "dyna_ci_route.sh"):
             self.assertIn(item, route)
-        for name, label in (("verify", "dyna-large"), ("verify-static", "dyna-large"), ("launcher", "dyna-medium")):
+        for name, label in (("verify", "dyna-large"), ("verify-static", "dyna-medium"), ("launcher", "dyna-medium")):
             block = blocks[name]
             self.assertIn("needs: changes", block)
             self.assertIn(f"needs.changes.outputs.self_hosted == 'true' && '{label}'", block)
@@ -264,7 +264,7 @@ class DynaRoutingTests(unittest.TestCase):
             self.assertEqual(guard["if"].strip(), "needs.changes.result != 'success'")
             self.assertEqual(guard["run"].strip(), "exit 1")
         # verify-static routes as verify does, except that a pull request outside the gate and a contributor's
-        # pull request stay on GitHub's runners.
+        # pull request stay on GitHub's runners, and our pool gives it a medium runner (it compiles nothing heavy).
         for field, outside, fork in (
                 ("runs-on", "needs.changes.outputs.heavy != 'true' && 'ubuntu-latest' || ",
                  "needs.changes.outputs.trusted != 'true' && 'ubuntu-latest' || "),
@@ -273,6 +273,8 @@ class DynaRoutingTests(unittest.TestCase):
             shared = runtime.split(f"{field}:", 1)[1].split("\n", 1)[0]
             if field == "runs-on":
                 shared = shared.replace("'ubuntu-latest') || ", "'ubuntu-latest') || " + fork, 1)
+                shared = shared.replace("needs.changes.outputs.self_hosted == 'true' && 'dyna-large'",
+                                        "needs.changes.outputs.self_hosted == 'true' && 'dyna-medium'", 1)
             else:
                 shared = shared.replace("${{ ", "${{ " + fork, 1)
             shared = shared.replace("${{ ", "${{ " + outside, 1)
