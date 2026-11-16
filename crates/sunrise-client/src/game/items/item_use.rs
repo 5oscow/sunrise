@@ -271,8 +271,8 @@ impl Game<'_> {
     }
     /// `LivingEntityUseItemEvent.Tick` for `stack` in use `ticks` so far, as
     /// `updatingUsingItem` starts: a mod may change the ticks left, which
-    /// moves the end. False when it ran the use out (`tick_ran_out`): the
-    /// item's tick and countdown are skipped.
+    /// moves the end. False when the remaining counter is nonpositive:
+    /// effects are skipped, but the countdown still decrements.
     pub(super) fn use_item_ticked(&mut self, stack: &ItemStack, ticks: u32) -> bool {
         let before = ticks_left(self.use_duration, ticks);
         let (mut remaining, mut canceled) = (before, false);
