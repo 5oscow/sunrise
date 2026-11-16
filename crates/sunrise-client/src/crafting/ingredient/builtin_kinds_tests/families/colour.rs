@@ -348,9 +348,10 @@ fn sheep_color_components_compile_recipes_and_match_live_values() {
     });
     assert_eq!(allocations.calls, 0, "{allocations:?}");
     assert_eq!(allocations.bytes, 0);
-    stack
-        .data_mut()
-        .set_loot_component("minecraft:custom_data", &Some(Tag::Int(1)));
+    stack.data_mut().set_loot_component(
+        "minecraft:custom_data",
+        &Some(Tag::compound([("extra", Tag::Int(1))])),
+    );
     assert!(loose.test_in(&context, &stack));
     assert!(!ingredient.test_in(&context, &stack));
     assert!(recipes.craft(&context, &[Some(stack.clone())], 1).is_none());
@@ -814,9 +815,10 @@ fn cat_collar_components_compile_recipes_match_live_values_and_preserve_defaults
         stack
             .data_mut()
             .set_loot_component("minecraft:cat/collar", &Some(Tag::String(color.into())));
-        stack
-            .data_mut()
-            .set_loot_component("minecraft:custom_data", &Some(Tag::Int(7)));
+        stack.data_mut().set_loot_component(
+            "minecraft:custom_data",
+            &Some(Tag::compound([("extra", Tag::Int(7))])),
+        );
         assert!(
             !ingredient.test_in(&context, &stack),
             "strict extra component"

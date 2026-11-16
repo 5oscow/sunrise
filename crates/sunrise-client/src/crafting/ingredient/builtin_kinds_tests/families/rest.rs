@@ -621,9 +621,10 @@ fn weapon_component_recipes_decode_defaults_and_match_live_borrowed_values() {
         .data_mut()
         .set_loot_component("minecraft:weapon", &Some(Tag::Compound(Default::default())));
     assert!(matches("fixture:weapon_default", &sword));
-    sword
-        .data_mut()
-        .set_loot_component("minecraft:custom_data", &Some(Tag::Int(7)));
+    sword.data_mut().set_loot_component(
+        "minecraft:custom_data",
+        &Some(Tag::compound([("extra", Tag::Int(7))])),
+    );
     assert!(!matches("fixture:weapon_default", &sword));
     sword
         .data_mut()
@@ -967,9 +968,10 @@ fn weapon_recipe_rejections_preserve_siblings_and_presence_strictness() {
     );
     assert!(strict.test_in(&context, &paper));
     assert!(!absent.test_in(&context, &paper));
-    paper
-        .data_mut()
-        .set_other("minecraft:custom_data", Some(Tag::Int(1)));
+    paper.data_mut().set_other(
+        "minecraft:custom_data",
+        Some(Tag::compound([("extra", Tag::Int(1))])),
+    );
     assert!(!strict.test_in(&context, &paper));
     assert!(relaxed.test_in(&context, &paper));
     paper
@@ -1162,9 +1164,10 @@ fn next_component_codecs_reject_bad_records_preserve_siblings_and_presence() {
         paper.data_mut().set_other(id, Some(raw.clone()));
         assert!(strict.test_in(&context, &paper));
         assert!(!absent.test_in(&context, &paper));
-        paper
-            .data_mut()
-            .set_other("minecraft:custom_data", Some(Tag::Int(1)));
+        paper.data_mut().set_other(
+            "minecraft:custom_data",
+            Some(Tag::compound([("extra", Tag::Int(1))])),
+        );
         assert!(!strict.test_in(&context, &paper));
         assert!(loose.test_in(&context, &paper));
         items.component_defaults = std::sync::Arc::new(std::collections::HashMap::from([(

@@ -160,9 +160,10 @@ fn villager_food_codec_compiles_recipes_and_matches_borrowed_nutrition() {
         assert!(predicate.test_in(&context, &carrot));
     });
     assert_eq!(allocations.calls, 0, "{allocations:?}");
-    carrot
-        .data_mut()
-        .set_loot_component("minecraft:custom_data", &Some(Tag::Int(1)));
+    carrot.data_mut().set_loot_component(
+        "minecraft:custom_data",
+        &Some(Tag::compound([("extra", Tag::Int(1))])),
+    );
     assert!(
         !matches(&carrot),
         "strict matching must reject extra components"

@@ -112,9 +112,10 @@ fn container_loot_component_recipe_decodes_validates_and_matches() {
     let loaded = recipes(source);
     let mut stack = ItemStack::new("minecraft:stick", 1);
     assert!(loaded.recipe_matches(&context, "fixture:loot", &[Some(stack.clone())], 1));
-    stack
-        .data_mut()
-        .set_loot_component("minecraft:custom_data", &Some(Tag::Int(1)));
+    stack.data_mut().set_loot_component(
+        "minecraft:custom_data",
+        &Some(Tag::compound([("extra", Tag::Int(1))])),
+    );
     assert!(ingredient.test_in(&context, &stack));
     let strict = recipes(ingredient_json(
         json!({"loot_table":"fixture:unregistered"}),
