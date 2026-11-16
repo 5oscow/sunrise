@@ -12,12 +12,13 @@ from tests.test_ci_concurrency import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 # A pull request's code, by name: its head commit or branch, its merge commit, or its refs.
-PULL_REQUEST_CODE = re.compile(r"pull_request\.head\.(sha|ref)\b|github\.head_ref\b|merge_commit_sha|refs/pull/")
+PULL_REQUEST_CODE = re.compile(r"pull_request\.head\.(sha|ref)\b|github\.head_ref\b|merge_commit_sha|refs/pull/|"
+                               r"\bpull/(\d+|\$\{\{[^}]*\}\})/(head|merge)\b")
 SWITCHES_TREE = re.compile(r"\bgit\s+(checkout|switch|worktree|reset\s+--hard|restore)\b|\bgh\s+pr\s+checkout\b")
 
 
 def pull_request_target_jobs():
-    for path in sorted((ROOT / ".github/workflows").glob("*.yml")):
+    for path in sorted((ROOT / ".github/workflows").glob("*.y*ml")):
         workflow = yaml.load(path.read_text(), Loader=yaml.BaseLoader)
         on = workflow.get("on", {})
         if "pull_request_target" in (on if isinstance(on, (dict, list)) else [on]):
@@ -59,7 +60,7 @@ class PullRequestTargetTests(unittest.TestCase):
         self.assertEqual(len(problems(head)), 2)
         self.assertEqual(problems(unpinned), ["actions/checkout@v7: checks out something other than main"])
         self.assertEqual([problem.split(": ")[-1] for problem in problems(fetched)],
-                         ["switches the working tree to another commit"])
+                         ["switches the working tree to another commit", "names the pull request's code"])
         self.assertEqual(problems({"steps": [{"uses": "actions/checkout@v7", "with": {"ref": "main"}}]}), [])
 
 
