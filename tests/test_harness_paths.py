@@ -1,10 +1,14 @@
-"""Every repository path a parity harness names exists.
+"""Every repository path a parity harness names exists, and every Cargo target a tool builds is in the package it names.
 
 A harness hashes its sources to key its cached results, and the hash fails on the first missing file, before the
-harness compares anything: eleven harnesses named files the game/ area moves had left behind (2026-11-16).
+harness compares anything: eleven harnesses named files the game/ area moves had left behind (2026-11-16). Five
+tools built `-p sunrise-client --bin sunrise-client` after the game binary moved to sunrise-game, so their harnesses
+failed in the build (2026-11-16).
 """
 import ast
+import json
 from pathlib import Path
+import subprocess
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,6 +30,37 @@ class HarnessPaths(unittest.TestCase):
                     continue
                 with self.subTest(harness=harness.name, line=node.lineno):
                     self.assertTrue((ROOT / path).exists(), f"{harness.name}:{node.lineno} names {path}")
+
+    def test_every_cargo_target_a_tool_builds_is_in_its_package(self):
+        metadata = json.loads(subprocess.check_output(
+            ["cargo", "metadata", "--no-deps", "--format-version", "1"], cwd=ROOT, text=True))
+        owners = {}
+        for package in metadata["packages"]:
+            for target in package["targets"]:
+                for kind in target["kind"]:
+                    owners.setdefault((kind, target["name"]), set()).add(package["name"])
+        kinds = {"--bin": "bin", "--example": "example", "--test": "test"}
+        tools = sorted(path for path in (ROOT / "tools").rglob("*.py") if "vendor" not in path.parts)
+        for tool in tools:
+            source = tool.read_text(encoding="utf-8")
+            for node in ast.walk(ast.parse(source)):
+                if not isinstance(node, ast.List):
+                    continue
+                words = [e.value if isinstance(e, ast.Constant) and isinstance(e.value, str) else None
+                         for e in node.elts]
+                packages = [words[i + 1] for i, word in enumerate(words[:-1]) if word in ("-p", "--package")]
+                # Only a command spelled out in full: a package given by a variable can't be checked here.
+                if "cargo" not in words or not packages or None in packages:
+                    continue
+                for flag, name in zip(words, words[1:]):
+                    # A tool that copies an example into place before building it (`examples/<name>.rs`) owns it.
+                    if flag not in kinds or name is None or f"examples/{name}.rs" in source:
+                        continue
+                    with self.subTest(tool=tool.name, line=node.lineno, target=name):
+                        owned = owners.get((kinds[flag], name), set())
+                        self.assertTrue(owned & set(packages),
+                                        f"{tool.relative_to(ROOT)}:{node.lineno} builds {flag} {name} from {packages}; "
+                                        f"it is in {sorted(owned) or 'no package'}")
 
 
 if __name__ == "__main__":
