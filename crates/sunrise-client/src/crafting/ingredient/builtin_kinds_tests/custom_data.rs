@@ -469,3 +469,17 @@ fn custom_data_refusals_name_the_component_and_keep_a_valid_sibling() {
         assert!(recipes.recipe("bad").is_none());
     }
 }
+
+#[test]
+fn optional_component_fields_treat_json_null_as_absent() {
+    let patch = serde_json::json!({"minecraft:use_effects":{"can_sprint":null,"interact_vibrations":null,"speed_multiplier":null}});
+    assert_eq!(
+        components::json_patch(patch.as_object().unwrap()).unwrap(),
+        [(
+            "minecraft:use_effects".into(),
+            Tag::compound([] as [(&str, Tag); 0])
+        )]
+        .into_iter()
+        .collect()
+    );
+}
