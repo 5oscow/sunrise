@@ -981,7 +981,6 @@ mod gradient_tests;
 #[path = "hud_layout_rotate_tests.rs"]
 mod rotate_tests;
 
-
 #[cfg(test)]
 mod faded_text_tests {
     use super::{background_color, faded_text_alpha};

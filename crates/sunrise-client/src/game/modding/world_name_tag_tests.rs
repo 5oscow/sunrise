@@ -5,9 +5,9 @@
 use super::host::draw::GameWorldDrawContext;
 use super::native_entity_refs::tests::with_client_game;
 use glam::{DVec3, Mat4, Vec3};
+use mod_api::{DrawError, Hooks, NameTagOptions, Text, WorldDrawContext};
 use sunrise_client::block_entity_render::vertex_light;
 use sunrise_client::{mesher::Vertex, world_geometry::WorldGeometry};
-use mod_api::{DrawError, Hooks, NameTagOptions, Text, WorldDrawContext};
 
 #[path = "../../../../sunrise-mod-wasm/tests/fixture/src/world_name_tags.rs"]
 mod scene;
