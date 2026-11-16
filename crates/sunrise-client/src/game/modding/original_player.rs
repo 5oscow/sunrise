@@ -372,7 +372,14 @@ mod tests {
                 name: "missing",
                 ..VALUE
             };
-            assert_eq!(original.attachment(host, &MISSING), Ok(0));
+            // Never declared, so refused by name (#1448), not read as its default.
+            assert_eq!(
+                original.attachment(host, &MISSING),
+                Err(mod_api::AttachmentError::Undeclared {
+                    package_id: "clone".into(),
+                    attachment_id: "clone:missing".into(),
+                })
+            );
             assert_eq!(original.attachment(host, &VALUE), Ok(73));
             assert_eq!(original.attachment(host, &RETAINED), Ok(17));
             // The saved import reads the raw codec-backed entry, before native reads decode it.
