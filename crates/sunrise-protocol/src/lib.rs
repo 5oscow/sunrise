@@ -8,6 +8,7 @@ pub mod anvil_cost;
 pub mod attachment_sync;
 pub mod buf;
 pub mod chunk;
+pub mod collider_sync;
 pub mod connection;
 pub mod crypto;
 pub mod custom_book;

@@ -58,6 +58,7 @@ pub mod cauldron;
 pub mod chunk_io;
 pub mod client_perf;
 pub mod clock;
+pub mod colliders;
 pub mod command_storage;
 pub mod confirm_screen;
 pub mod container_screen;
