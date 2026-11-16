@@ -52,7 +52,11 @@ impl mod_api::Hooks for BoundBookMod {
                     height: 166.0,
                     slots: vec![Some([8.0, 18.0]), Some([80.0, 18.0])],
                     recipe_book: Some(key.clone()),
-                    recipe_book_toggle: Some([153.0, 60.0]),
+                    recipe_book_toggle: Some(mod_api::RecipeBookToggle {
+                        x: 153.0,
+                        y: 60.0,
+                        from: mod_api::ToggleOrigin::Menu,
+                    }),
                     ..Default::default()
                 },
             )
