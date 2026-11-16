@@ -69,7 +69,7 @@ fn main() {
             Vec3::new(0.0, 64.0, 0.0),
             [half.sin() * 0.3, half.sin(), 0.0, half.cos()],
         );
-        let collider = OrientedCollider::new(frame, &grid);
+        let collider = OrientedCollider::new(frame, std::sync::Arc::new(grid));
         let mut seed = 0x1234_5678_9abc_def0u64;
         let movers: Vec<Aabb> = (0..MOVERS)
             .map(|_| {

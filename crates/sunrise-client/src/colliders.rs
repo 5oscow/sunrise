@@ -5,6 +5,7 @@
 //! sent. Both hold the boxes as `f32`, rounded when the mod sets them, so the two sides
 //! collide against the same numbers.
 use mod_api::{BlockStateId, Collider, ColliderBox, ColliderError};
+use std::sync::Arc;
 use sunrise_core::{
     geometry::{
         Aabb, Vec3,
@@ -19,7 +20,7 @@ use sunrise_world::{chunk::BlockState, registry::BlockRegistry};
 pub struct ColliderState {
     wire: Vec<WireBox>,
     rotation: [f32; 4],
-    geometry: ColliderBoxes,
+    geometry: Arc<ColliderBoxes>,
 }
 
 fn aabb(b: &WireBox) -> Aabb {
@@ -48,7 +49,7 @@ pub fn valid_rotation(q: [f32; 4]) -> bool {
 impl ColliderState {
     /// A collider from boxes and a rotation already checked (the wire's or a save's).
     pub fn new(wire: Vec<WireBox>, rotation: [f32; 4]) -> Self {
-        let geometry = ColliderBoxes::new(wire.iter().map(aabb).collect());
+        let geometry = Arc::new(ColliderBoxes::new(wire.iter().map(aabb).collect()));
         Self {
             wire,
             rotation,
@@ -129,8 +130,8 @@ impl ColliderState {
     }
 
     /// The collider placed at `origin`, for the collision queries.
-    pub fn oriented(&self, origin: Vec3) -> OrientedCollider<'_> {
-        OrientedCollider::new(self.frame(origin), &self.geometry)
+    pub fn oriented(&self, origin: Vec3) -> OrientedCollider {
+        OrientedCollider::new(self.frame(origin), self.geometry.clone())
     }
 
     /// The world box holding the collider at `origin`, or None for no boxes.

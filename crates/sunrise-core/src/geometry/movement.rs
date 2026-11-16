@@ -65,7 +65,7 @@ pub fn try_resolve_step_movement_oriented<S: std::borrow::Borrow<VoxelShape>, E>
     aabb: Aabb,
     max_step: f32,
     on_ground: bool,
-    oriented: &[OrientedCollider<'_>],
+    oriented: &[OrientedCollider],
     mut collect: impl FnMut(Aabb) -> Result<Vec<S>, E>,
 ) -> Result<Vec3, E> {
     let resolved = if movement.length_squared() == 0.0 {
@@ -127,7 +127,7 @@ fn resolve_borrowed_shape_movement<S: std::borrow::Borrow<VoxelShape>>(
     movement: Vec3,
     aabb: Aabb,
     shapes: &[S],
-    oriented: &[OrientedCollider<'_>],
+    oriented: &[OrientedCollider],
 ) -> Vec3 {
     if shapes.is_empty() && oriented.is_empty() {
         return movement;
@@ -167,7 +167,7 @@ pub fn candidate_step_heights(
 fn borrowed_step_heights<S: std::borrow::Borrow<VoxelShape>>(
     aabb: Aabb,
     shapes: &[S],
-    oriented: &[OrientedCollider<'_>],
+    oriented: &[OrientedCollider],
     horizontal: Vec3,
     max_step: f32,
     current_y: f32,
@@ -333,7 +333,7 @@ mod oriented_tests {
         movement: Vec3,
         mover: Aabb,
         on_ground: bool,
-        oriented: &[OrientedCollider<'_>],
+        oriented: &[OrientedCollider],
     ) -> Vec3 {
         resolve_oriented(movement, mover, 0.6, on_ground, oriented)
     }
@@ -343,7 +343,7 @@ mod oriented_tests {
         mover: Aabb,
         max_step: f32,
         on_ground: bool,
-        oriented: &[OrientedCollider<'_>],
+        oriented: &[OrientedCollider],
     ) -> Vec3 {
         try_resolve_step_movement_oriented(movement, mover, max_step, on_ground, oriented, |_| {
             Ok::<Vec<VoxelShape>, std::convert::Infallible>(Vec::new())
@@ -375,14 +375,14 @@ mod oriented_tests {
     #[test]
     fn a_walker_stands_on_a_turned_deck_and_is_stopped_by_its_side() {
         let (boxes, frame) = deck(30.0, 0.0);
-        let collider = OrientedCollider::new(frame, &boxes);
+        let collider = OrientedCollider::new(frame, std::sync::Arc::new(boxes));
         let stand = frame.to_world(Vec3::new(0.0, 0.0, 2.0));
         let walker = Aabb::new(
             Vec3::new(stand.x - 0.3, stand.y, stand.z - 0.3),
             Vec3::new(stand.x + 0.3, stand.y + 1.8, stand.z + 0.3),
         );
         let step = Vec3::new(0.1, -0.08, 0.1);
-        let got = resolve(step, walker, true, &[collider]);
+        let got = resolve(step, walker, true, std::slice::from_ref(&collider));
         assert_eq!((got.x, got.z), (0.1, 0.1));
         assert_eq!(got.y, 0.0, "held on the top");
         // Outside the deck's side, walking toward it stops at its face.
@@ -394,7 +394,12 @@ mod oriented_tests {
         let toward = frame
             .to_world(Vec3::new(1.0, 0.0, 0.0))
             .subtract(frame.origin);
-        let moved = resolve(toward.scale(3.0), outside, false, &[collider]);
+        let moved = resolve(
+            toward.scale(3.0),
+            outside,
+            false,
+            std::slice::from_ref(&collider),
+        );
         assert!(moved.length() < 3.0 * toward.length());
     }
 
@@ -403,7 +408,7 @@ mod oriented_tests {
     #[test]
     fn a_walker_climbs_a_pitched_deck() {
         let (boxes, frame) = deck(0.0, 15.0);
-        let collider = OrientedCollider::new(frame, &boxes);
+        let collider = OrientedCollider::new(frame, std::sync::Arc::new(boxes));
         // Start on the surface at local z = 4, the box's bottom on the highest point of the
         // surface under its footprint (its uphill edge), then walk uphill 0.2 per tick.
         let tan = 15.0_f64.to_radians().tan();
@@ -414,7 +419,12 @@ mod oriented_tests {
             Vec3::new(at.x + 0.3, high + 1.8, at.z + 0.3),
         );
         for _ in 0..10 {
-            let got = resolve(Vec3::new(0.0, -0.08, -0.2), walker, true, &[collider]);
+            let got = resolve(
+                Vec3::new(0.0, -0.08, -0.2),
+                walker,
+                true,
+                std::slice::from_ref(&collider),
+            );
             assert!((got.z + 0.2).abs() < 1.0e-6, "blocked: {got:?}");
             walker = walker.move_by(got);
             at = at.add_vector(got);

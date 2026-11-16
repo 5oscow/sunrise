@@ -8,7 +8,8 @@ use crate::{
     entity_obstruction::EntityIdentity,
 };
 use sunrise_core::geometry::{
-    Aabb, Axis, ShapeOp, Vec3, VoxelShape, entity_collision_bounds, try_resolve_step_movement,
+    Aabb, Axis, ShapeOp, Vec3, VoxelShape, entity_collision_bounds, oriented::OrientedCollider,
+    try_resolve_step_movement_oriented,
 };
 
 /// How far below the feet `Entity.getAvailableSpaceBelow` looks for ground.
@@ -30,6 +31,16 @@ pub trait EntityMovementWorld {
         entity: EntityIdentity,
         bounds: Aabb,
     ) -> Result<Option<VoxelShape>, Self::Error>;
+    /// The moving colliders meeting `bounds` that the entity collides with: boxes that are
+    /// oriented in the world (a mod entity's `set_collider`), which no `VoxelShape` holds.
+    /// Selected once with the entity shapes. A world with none answers none.
+    fn moving_colliders(
+        &mut self,
+        _entity: EntityIdentity,
+        _bounds: Aabb,
+    ) -> Result<Vec<OrientedCollider>, Self::Error> {
+        Ok(Vec::new())
+    }
 }
 
 pub struct MovementRequest<'a> {
@@ -58,6 +69,12 @@ where
             entity_collision_bounds(request.movement, request.bounds, request.max_step),
         )
         .map_err(CollisionScanError::World)?;
+    let colliders = world
+        .moving_colliders(
+            request.entity,
+            entity_collision_bounds(request.movement, request.bounds, request.max_step),
+        )
+        .map_err(CollisionScanError::World)?;
     // Vanilla walks the whole box a movement expands to with no candidate
     // counter, so a movement big enough to pass the caller's budget is slow
     // there, never fatal (#6124: a legal movement_speed of 400 crossed more
@@ -71,11 +88,12 @@ where
     let candidate_budget = scan_cells(sweep).map_or(request.candidate_budget, |cells| {
         cells.max(request.candidate_budget)
     });
-    try_resolve_step_movement(
+    try_resolve_step_movement_oriented(
         request.movement,
         request.bounds,
         request.max_step,
         request.on_ground,
+        &colliders,
         |bounds| {
             // A box's blocks are a few dozen shapes at most: one allocation,
             // not the doubling a push-by-push list makes.
@@ -126,6 +144,14 @@ where
         .entity_collisions(request.entity, request.bounds)
         .map_err(CollisionScanError::World)?
         .is_empty()
+    {
+        return Ok(false);
+    }
+    if world
+        .moving_colliders(request.entity, request.bounds)
+        .map_err(CollisionScanError::World)?
+        .iter()
+        .any(|collider| collider.intersects(request.bounds))
     {
         return Ok(false);
     }

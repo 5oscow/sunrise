@@ -12,7 +12,10 @@ use sunrise_client::{
     colliders::{ColliderState, valid_rotation},
     fast_hash::FxHashMap,
 };
-use sunrise_core::nbt::{Compound, Tag};
+use sunrise_core::{
+    geometry::{Aabb, Vec3, oriented::OrientedCollider},
+    nbt::{Compound, Tag},
+};
 use sunrise_mod_runtime::attachments::{Attachments, Holder};
 use sunrise_protocol::collider_sync::{self, Message};
 
@@ -191,6 +194,72 @@ impl Game<'_> {
         } else {
             self.remote.as_ref()?.colliders.get(&id)
         }
+    }
+
+    /// Where the collider entity `id` is, in the level in place: the server's entity, or a
+    /// client's copy of what its server shows it.
+    fn collider_origin(&self, id: u32) -> Option<Vec3> {
+        let at = if self.is_logical_server() {
+            self.target_position(self.level_entity(id as i32)?)?
+        } else {
+            let epoch = self.native_lifecycle.epoch()?;
+            self.native_client_tracked(EntityRef::new(epoch, id))?.1
+        };
+        Some(Vec3::new(at[0], at[1], at[2]))
+    }
+
+    /// Whether `mover` and the collider entity `id` are in one vehicle stack: neither rides
+    /// the other, directly or through others.
+    fn in_one_stack(&self, mover: u32, id: u32) -> bool {
+        let rides = |from: u32, target: u32| {
+            let mut at = from;
+            for _ in 0..64 {
+                match self.vehicle_of_any(at) {
+                    Some(vehicle) if vehicle == target => return true,
+                    Some(vehicle) => at = vehicle,
+                    None => return false,
+                }
+            }
+            false
+        };
+        rides(mover, id) || rides(id, mover)
+    }
+
+    /// The colliders meeting `bounds` that `mover` (an entity id, None for no mover) collides
+    /// with: every one in the level in place except the mover's own and those of its vehicle
+    /// stack. Spectators and entities with no physics are the caller's to exempt. A level with
+    /// no colliders answers at once.
+    pub(in crate::game) fn moving_colliders_near(
+        &self,
+        bounds: Aabb,
+        mover: Option<u32>,
+    ) -> Vec<OrientedCollider> {
+        let mut found = Vec::new();
+        let mut visit = |id: u32, state: &ColliderState| {
+            if Some(id) == mover || mover.is_some_and(|m| self.in_one_stack(m, id)) {
+                return;
+            }
+            let Some(origin) = self.collider_origin(id) else {
+                return;
+            };
+            let placed = state.oriented(origin);
+            if placed
+                .world_bounds()
+                .is_some_and(|b| b.intersects(bounds.inflate(Vec3::new(1.0e-7, 1.0e-7, 1.0e-7))))
+            {
+                found.push(placed);
+            }
+        };
+        if self.is_logical_server() {
+            for (&id, entry) in &self.entity_attachments.colliders {
+                visit(id, &entry.state);
+            }
+        } else if let Some(remote) = &self.remote {
+            for (&id, state) in &remote.colliders {
+                visit(id, state);
+            }
+        }
+        found
     }
 
     /// Sends what changed this tick to the clients that track each entity and have the

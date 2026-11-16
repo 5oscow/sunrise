@@ -194,6 +194,13 @@ impl<W: EntityMovementWorld<Error = io::Error>> EntityMovementWorld for EntityCo
         }
         border.collision_shape().map(Some).map_err(io::Error::other)
     }
+    fn moving_colliders(
+        &mut self,
+        entity: EntityIdentity,
+        bounds: Aabb,
+    ) -> io::Result<Vec<sunrise_core::geometry::oriented::OrientedCollider>> {
+        self.blocks.moving_colliders(entity, bounds)
+    }
 }
 impl<'a, W> EntityCollisions<'a, W>
 where

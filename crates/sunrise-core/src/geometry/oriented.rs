@@ -7,7 +7,7 @@
 //! uniform grid over the boxes in the collider's frame.
 
 use super::{Aabb, Axis, COLLISION_EPSILON, Vec3};
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 /// Side of a grid cell in the collider's frame, in blocks.
 const CELL: f64 = 4.0;
@@ -215,11 +215,12 @@ impl ColliderBoxes {
     }
 }
 
-/// One collider placed in the world: its boxes under a frame.
-#[derive(Clone, Copy)]
-pub struct OrientedCollider<'a> {
+/// One collider placed in the world: its boxes under a frame. The boxes are shared, so a
+/// placed collider is cheap to copy into a query that outlives the borrow of the game.
+#[derive(Clone)]
+pub struct OrientedCollider {
     pub frame: Frame,
-    pub boxes: &'a ColliderBoxes,
+    pub boxes: Arc<ColliderBoxes>,
 }
 
 /// The axes of one query's separating-axis tests.
@@ -240,8 +241,8 @@ struct Obb {
     half: [f64; 3],
 }
 
-impl<'a> OrientedCollider<'a> {
-    pub fn new(frame: Frame, boxes: &'a ColliderBoxes) -> Self {
+impl OrientedCollider {
+    pub fn new(frame: Frame, boxes: Arc<ColliderBoxes>) -> Self {
         Self { frame, boxes }
     }
 
@@ -557,7 +558,7 @@ mod tests {
     #[test]
     fn an_unturned_collider_stops_the_box_where_a_block_shape_would() {
         let wall = ColliderBoxes::new(vec![b([4.0, 0.0, 0.0], [5.0, 3.0, 3.0])]);
-        let collider = OrientedCollider::new(Frame::translation(Vec3::ZERO), &wall);
+        let collider = OrientedCollider::new(Frame::translation(Vec3::ZERO), Arc::new(wall));
         let mover = b([0.0, 0.0, 1.0], [0.6, 1.8, 1.6]);
         let reference =
             super::super::VoxelShape::from_box(b([4.0, 0.0, 0.0], [5.0, 3.0, 3.0])).unwrap();
@@ -580,7 +581,7 @@ mod tests {
     #[test]
     fn a_turned_box_stops_the_mover_at_its_corner() {
         let boxes = ColliderBoxes::new(vec![b([-1.0, 0.0, -1.0], [1.0, 2.0, 1.0])]);
-        let collider = OrientedCollider::new(yaw(Vec3::new(10.0, 0.0, 0.0), 45.0), &boxes);
+        let collider = OrientedCollider::new(yaw(Vec3::new(10.0, 0.0, 0.0), 45.0), Arc::new(boxes));
         let mover = b([0.0, 0.0, -0.3], [0.6, 1.8, 0.3]);
         let corner = 10.0 - 2.0_f64.sqrt();
         let expected = corner - 0.6;
@@ -600,7 +601,7 @@ mod tests {
             Vec3::new(0.0, 10.0, 0.0),
             [half.sin(), 0.0, 0.0, half.cos()],
         );
-        let collider = OrientedCollider::new(frame, &boxes);
+        let collider = OrientedCollider::new(frame, Arc::new(boxes));
         // A thin mover over the origin: the top face passes through the origin.
         let mover = b([-0.05, 12.0, -0.05], [0.05, 13.8, 0.05]);
         let fall = collider.collide(mover, Axis::Y, -5.0);
@@ -614,7 +615,7 @@ mod tests {
     #[test]
     fn standing_on_a_top_is_not_stopped_sideways_and_does_not_fall_through() {
         let boxes = ColliderBoxes::new(vec![b([-1.5, -1.0, -10.0], [1.5, 0.0, 10.0])]);
-        let collider = OrientedCollider::new(yaw(Vec3::new(0.0, 64.0, 0.0), 30.0), &boxes);
+        let collider = OrientedCollider::new(yaw(Vec3::new(0.0, 64.0, 0.0), 30.0), Arc::new(boxes));
         let stand = collider.frame.to_world(Vec3::new(0.0, 0.0, 3.0));
         let mover = b(
             [stand.x - 0.3, stand.y, stand.z - 0.3],
@@ -630,7 +631,7 @@ mod tests {
     #[test]
     fn an_embedded_mover_is_not_frozen_and_a_graze_is_not_embedded() {
         let boxes = ColliderBoxes::new(vec![b([0.0, 0.0, 0.0], [4.0, 1.0, 4.0])]);
-        let collider = OrientedCollider::new(Frame::translation(Vec3::ZERO), &boxes);
+        let collider = OrientedCollider::new(Frame::translation(Vec3::ZERO), Arc::new(boxes));
         let inside = b([1.0, 0.2, 1.0], [1.6, 2.0, 1.6]);
         assert!(collider.intersects(inside));
         assert_eq!(collider.collide(inside, Axis::X, 1.0), 1.0);
@@ -673,7 +674,7 @@ mod tests {
             Vec3::new(0.0, 64.0, 0.0),
             [half.sin(), 0.0, 0.0, half.cos()],
         );
-        let collider = OrientedCollider::new(frame, &boxes);
+        let collider = OrientedCollider::new(frame, Arc::new(boxes));
         // The mover stands just off the low edge; the surface ahead is a little higher.
         let mover = b([-0.3, 64.0, 0.2], [0.3, 65.8, 0.8]);
         let mut heights = Vec::new();
