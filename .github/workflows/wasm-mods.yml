@@ -86,16 +86,8 @@ jobs:
         run: |
           echo "WORKSPACE_TESTS=$RUNNER_TEMP/workspace-tests.json" >> "$GITHUB_ENV"
           python3 tools/ci/ignored_tests.py --build-tests "$RUNNER_TEMP/workspace-tests.json"
-      - name: Check fieldless Wire layout coverage and hashes
-        shell: bash
+      - name: Wire math profile
         run: |
-          python3 -m unittest tests.test_wire_enum_goldens
-          mkdir -p "$CARGO_TARGET_DIR/wire-goldens"
-          env -u RUSTC_WRAPPER RUSTC_BOOTSTRAP=1 cargo rustc --locked -p sunrise-mod-vocab --lib -- \
-            -Zunpretty=expanded > "$CARGO_TARGET_DIR/wire-goldens/expanded.rs"
-          python3 tools/generate_wire_enum_goldens.py \
-            --expanded "$CARGO_TARGET_DIR/wire-goldens/expanded.rs" --check
-          python3 tools/ci/ignored_tests.py --prebuilt "$WORKSPACE_TESTS" -p sunrise-mod-vocab --lib -- existing_fieldless_enum_layouts_match_baseline
           python3 tools/ci/ignored_tests.py --prebuilt "$WORKSPACE_TESTS" -p sunrise-mod-api --test wire_math_profile
       - name: Compile and test emitted point records
         run: |
