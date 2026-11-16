@@ -1221,6 +1221,8 @@ struct Game<'a> {
     fps_frames: u64,
     fps_at: Instant,
     ticks: u64,
+    /// `Hud.tickCount`, advanced on each unpaused client tick, including in menus.
+    gui_ticks: i32,
     /// The sprite animation clock (`TextureManager.tick`): counts only the ticks the level
     /// runs normally, so `/tick freeze` holds it and `/tick step` moves it on.
     texture_ticks: u64,
@@ -10749,6 +10751,7 @@ impl<'a> Game<'a> {
             fps_frames: 0,
             fps_at: now,
             ticks: 0,
+            gui_ticks: 0,
             texture_ticks: 0,
             error: None,
             message: None,

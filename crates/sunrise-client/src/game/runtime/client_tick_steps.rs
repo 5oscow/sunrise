@@ -38,7 +38,11 @@ impl Game<'_> {
             }
             self.tick_win_screen()?;
             self.native_configs_tick_client();
-            // Gui.tick runs ChatListener.tick paused or not.
+            // Gui.tick runs ChatListener.tick paused or not; Hud.tickCount advances
+            // only when unpaused, including when there is no level on the title screen.
+            if !self.pause {
+                self.gui_ticks = self.gui_ticks.wrapping_add(1);
+            }
             self.tick_chat_queue();
             self.tick_music();
             self.tick_sound_engine();

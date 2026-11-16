@@ -4,6 +4,11 @@
 screen is open. A multiplayer game continues running while its pause screen is open.
 The pause-change pre hook sees the old state; the post hook sees the new state.
 
+`ClientHost::gui_ticks()` reads the HUD's signed 32-bit tick counter (`Hud.getGuiTicks`).
+It advances once per unpaused client tick, including on the title screen, and wraps like
+Java's `int`. Pausing holds it; a server tick freeze does not. This is not world game time
+or the frame's animation clock.
+
 `ClientHost::gui_scale()` reads the GUI scale in effect (`Window.getGuiScale`), at least 1,
 or `None` without a window (a server, a headless run). Vanilla's `Window.calculateScale` resolves
 it from the GUI Scale option and the window size: the option is a maximum, where 0 means automatic,

@@ -136,3 +136,28 @@ fn a_client_reads_only_its_own_menu() {
         });
     });
 }
+
+/// The HUD clock is a client clock: pause stops it, server freeze does not.
+#[test]
+#[ignore = "daily"]
+fn gui_ticks_follow_unpaused_client_ticks() {
+    mod_platform::testing::with_mods(Vec::<mod_api::ModEntry>::new().into(), || {
+        super::native_entity_refs::tests::with_client_game(|game| {
+            // Isolate the client's own per-tick work from simulation and network setup.
+            game.agent.hold_server = true;
+            assert_eq!(game.gui_ticks(), 0);
+            game.client_tick_steps(2, None).unwrap();
+            assert_eq!(game.gui_ticks(), 2);
+            game.pause = true;
+            game.client_tick_steps(3, None).unwrap();
+            assert_eq!(game.gui_ticks(), 2);
+            game.pause = false;
+            game.clock.set_frozen(true);
+            game.client_tick_steps(1, None).unwrap();
+            assert_eq!(game.gui_ticks(), 3);
+            game.gui_ticks = i32::MAX;
+            game.client_tick_steps(1, None).unwrap();
+            assert_eq!(game.gui_ticks(), i32::MIN);
+        });
+    });
+}
