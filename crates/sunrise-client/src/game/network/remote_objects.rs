@@ -476,6 +476,9 @@ impl Game<'_> {
         for painting in &mut self.paintings {
             painting.ticks = painting.ticks.saturating_add(1);
         }
+        for frame in &mut self.item_frames {
+            frame.ticks = frame.ticks.saturating_add(1);
+        }
         self.tick_remote_boat_bubbles();
     }
 
