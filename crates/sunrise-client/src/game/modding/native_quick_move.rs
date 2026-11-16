@@ -383,6 +383,7 @@ impl Game<'_> {
         window: i32,
     ) -> Option<bool> {
         let (actor, route) = (self.guest_actor(conn)?, self.guest_route(conn)?);
+        let admitted = Admitted::of(self, conn, pos, size, window)?;
         let fired = Rc::new(RefCell::new(None));
         let handled = Rc::new(Cell::new(false));
         let untaken = Rc::new(Cell::new(false));
@@ -397,14 +398,8 @@ impl Game<'_> {
             route,
             actor,
             Epoch::Player,
-            // The menu is still the one the click found.
-            move |game| {
-                game.lan
-                    .as_ref()
-                    .and_then(|host| host.hub.guest(conn))
-                    .and_then(|g| g.menu.as_ref())
-                    .is_some_and(|m| m.window == window)
-            },
+            // Everything the click was admitted on is still so.
+            move |game| admitted.holds(game),
             move |game| match game
                 .as_guest(conn, |g| g.mod_menu_quick_move_fire(pos, size, slot, at))
             {
@@ -434,6 +429,60 @@ impl Game<'_> {
         } else {
             untaken.get().then_some(false)
         }
+    }
+}
+
+/// What `lan_mod_quick_move` admitted the click on, read again before the move is applied: the
+/// menu, the block entity behind it (a replaced one has another generation though its values may
+/// be equal) and the inputs a listener's command could change (the guest's mode and life, a drag).
+/// The validity hook and the slot rules are not asked again.
+pub(super) struct Admitted {
+    conn: u32,
+    window: i32,
+    pos: Pos,
+    size: usize,
+    hidden: Vec<usize>,
+    generation: Option<u64>,
+}
+
+impl Admitted {
+    pub(super) fn of(
+        game: &Game<'_>,
+        conn: u32,
+        pos: Pos,
+        size: usize,
+        window: i32,
+    ) -> Option<Self> {
+        let menu = game.lan.as_ref()?.hub.guest(conn)?.menu.as_ref()?;
+        Some(Self {
+            conn,
+            window,
+            pos,
+            size,
+            hidden: menu.hidden.clone(),
+            generation: game.world.block_entities.generation(&pos),
+        })
+    }
+
+    /// Whether everything admitted is still so. A block entity that is gone is not a replaced
+    /// one: the move's apply puts back or drops what it took.
+    pub(super) fn holds(&self, game: &Game<'_>) -> bool {
+        let Some(guest) = game.lan.as_ref().and_then(|host| host.hub.guest(self.conn)) else {
+            return false;
+        };
+        guest.menu.as_ref().is_some_and(|m| {
+            m.window == self.window
+                && m.slots == Slots::Block(self.pos)
+                && m.size == self.size
+                && m.hidden == self.hidden
+                && m.drag.is_none()
+        }) && !guest.spectator()
+            && !guest.dead
+            && game
+                .world
+                .block_entities
+                .generation(&self.pos)
+                .is_none_or(|now| Some(now) == self.generation)
     }
 }
 
