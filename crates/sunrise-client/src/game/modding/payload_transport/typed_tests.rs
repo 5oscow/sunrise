@@ -70,6 +70,8 @@ static SERVER: Mutex<Vec<(&str, i32, Option<f32>)>> = Mutex::new(Vec::new());
 static CLIENT: Mutex<Vec<i32>> = Mutex::new(Vec::new());
 /// UUID and entity ID independently observed by the single-player client.
 static OWNER: Mutex<Option<(u128, u32)>> = Mutex::new(None);
+/// Handler errors must reach the test before the payload wait times out.
+static OWNER_RESULT: Mutex<Option<Result<(), String>>> = Mutex::new(None);
 /// The first player to send 7, whose health the failing handler stages a write to.
 static WITNESS: Mutex<Option<PlayerRef>> = Mutex::new(None);
 
@@ -94,28 +96,38 @@ fn up(value: Probe, context: &mut dyn IPayloadContext) -> Result<(), String> {
     SERVER.lock().unwrap().push((UP, counter, health));
     match counter {
         21 => {
-            let sender = context.player().map_err(|e| format!("{e:?}"))?;
-            let host = context.server_host().map_err(|e| format!("{e:?}"))?;
-            let players = host.players().server_players();
-            assert_eq!(
-                players,
-                [sender],
-                "the unpublished server lists its owner once"
-            );
-            let owner = players[0];
-            assert_eq!(
-                Some((owner.uuid(), owner.entity().id())),
-                *OWNER.lock().unwrap()
-            );
-            let name = owner.name(host).expect("connected owner's account name");
-            assert_eq!(
-                host.players().player_by_name(&name.to_uppercase()),
-                Some(owner)
-            );
-            down()
-                .send(host, owner, &probe(22))
-                .map(drop)
-                .map_err(|e| format!("send to listed owner: {e:?}"))
+            let result = (|| {
+                let sender = context.player().map_err(|e| format!("{e:?}"))?;
+                let host = context.server_host().map_err(|e| format!("{e:?}"))?;
+                let players = host.players().server_players();
+                if players != [sender] {
+                    return Err(format!(
+                        "expected the owner once, got {players:?}; sender {sender:?}"
+                    ));
+                }
+                let owner = players[0];
+                let expected = *OWNER.lock().unwrap();
+                if Some((owner.uuid(), owner.entity().id())) != expected {
+                    return Err(format!(
+                        "listed owner {owner:?} differs from client {expected:?}"
+                    ));
+                }
+                let name = owner
+                    .name(host)
+                    .ok_or("connected owner's account name missing")?;
+                let found = host.players().player_by_name(&name.to_uppercase());
+                if found != Some(owner) {
+                    return Err(format!(
+                        "name lookup returned {found:?}, expected {owner:?}"
+                    ));
+                }
+                down()
+                    .send(host, owner, &probe(22))
+                    .map(drop)
+                    .map_err(|e| format!("send to listed owner: {e:?}"))
+            })();
+            *OWNER_RESULT.lock().unwrap() = Some(result.clone());
+            result
         }
         7 => down()
             .reply(context, &probe(8))
@@ -221,6 +233,9 @@ fn singleplayer_list(game: &mut super::Game<'_>) {
     let deadline = Instant::now() + Duration::from_secs(60);
     while CLIENT.lock().unwrap().is_empty() {
         game.poll_remote().unwrap();
+        if let Some(Err(error)) = OWNER_RESULT.lock().unwrap().as_ref() {
+            panic!("single-player owner check failed: {error}");
+        }
         assert!(
             Instant::now() < deadline,
             "payload to listed single-player owner"

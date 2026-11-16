@@ -9,12 +9,14 @@ players. Native and wasm mods use the same calls.
 |---|---|
 | `host.commands()` | `run_command(line)` runs through the console command path with permission level 4. `feedback(text)` answers the command source. |
 | `host.messages()` | `broadcast(text)` fires the broadcast hook and writes to the server log. `text_allowed(text)` checks the server chat filter. |
-| `host.players()` | `server_players()` returns `Vec<PlayerRef>` in connection order. `acting_player()` returns the optional player whose state is active in the hook. `player_by_name(name)` finds a connected real player by case-insensitive account name, not nickname. |
+| `host.players()` | `server_players()` returns `Vec<PlayerRef>` in join order. `acting_player()` returns the optional player whose state is active in the hook. `player_by_name(name)` finds a connected real player by case-insensitive account name, not nickname. |
 | `host.levels()` | `list_levels()` returns loaded server levels in vanilla dimension order, or an empty list before a server world opens. |
 
 The players list and name lookup include the single-player owner, even before
 opening the world to LAN. The owner joins the integrated server through memory
-and has an ordinary `PlayerRef`; no separate local-player send path is needed.
+and has an ordinary `PlayerRef`. Sending a payload to that ref reaches the client
+half through the same registration and negotiation as any other player; no
+separate local-player send path is needed.
 Fake players are not included in the connected-player list.
 
 Player and level lookup services accept `&dyn ServerHost` and do not mutate the
