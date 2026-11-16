@@ -784,8 +784,58 @@ pub(super) fn call_names(
         }
         .insert((owner, method), name);
     }
+    let areas: std::collections::HashMap<(String, String), String> = surface
+        .methods
+        .iter()
+        .filter(|m| imports().contains(&m.owner))
+        .map(|m| {
+            (
+                (m.owner.to_owned(), m.name.clone()),
+                m.via.clone().unwrap_or_else(|| m.owner.to_owned()),
+            )
+        })
+        .collect();
+    mix_areas(&mut table.by_method, &areas);
     table.check_ids()?;
     Ok(table)
+}
+
+/// A host call is refused when any method changes in the area it belongs to: each call's hash
+/// takes in the digest of every call of its area (the area trait that declares it, or its own
+/// trait when it has none). A hook, a Part method and a point keep their own hashes.
+fn mix_areas(
+    names: &mut std::collections::HashMap<(String, String), mod_surface::call::Name>,
+    areas: &std::collections::HashMap<(String, String), String>,
+) {
+    let mut members: std::collections::BTreeMap<&String, Vec<(&(String, String), &String)>> =
+        Default::default();
+    for (key, name) in names.iter() {
+        if name.kind == mod_surface::call::Kind::Call
+            && let Some(area) = areas.get(key)
+        {
+            members.entry(area).or_default().push((key, &name.hash));
+        }
+    }
+    let mut mixed = Vec::new();
+    for (area, mut calls) in members {
+        calls.sort();
+        let text: String = calls
+            .iter()
+            .map(|((owner, method), hash)| format!("{owner}::{method}={hash};"))
+            .collect();
+        let digest = mod_surface::shape::digest(&format!("area{{{area};{text}}}"));
+        for (key, hash) in calls {
+            mixed.push((
+                key.clone(),
+                mod_surface::shape::digest(&format!("{hash};{digest}")),
+            ));
+        }
+    }
+    for (key, hash) in mixed {
+        if let Some(name) = names.get_mut(&key) {
+            name.hash = hash;
+        }
+    }
 }
 
 /// The coverage check: every method of the bound traits crosses to wasm, or its doc says why
@@ -1117,6 +1167,56 @@ fn public_path(index: &Index<'_>, path: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_host_calls_hash_follows_every_call_of_its_area_and_no_other() {
+        use super::mix_areas;
+        use mod_surface::call::{Kind, Name};
+        let key = |owner: &str, method: &str| (owner.to_owned(), method.to_owned());
+        let name = |path: &str, hash: &str| Name {
+            kind: Kind::Call,
+            path: path.to_owned(),
+            version: None,
+            hash: hash.to_owned(),
+        };
+        let areas = std::collections::HashMap::from([
+            (key("Host", "a"), "ItemsHost".to_owned()),
+            (key("Host", "b"), "ItemsHost".to_owned()),
+            (key("Host", "c"), "LevelsHost".to_owned()),
+        ]);
+        let run = |b: &str| {
+            let mut names = std::collections::HashMap::from([
+                (key("Host", "a"), name("Host::a", "aa")),
+                (key("Host", "b"), name("Host::b", b)),
+                (key("Host", "c"), name("Host::c", "cc")),
+                // A hook has no area: its hash is its own.
+                (
+                    key("Hooks", "h"),
+                    Name {
+                        kind: Kind::Hook,
+                        ..name("Hooks::h", "hh")
+                    },
+                ),
+            ]);
+            mix_areas(&mut names, &areas);
+            names
+        };
+        let (before, after) = (run("bb"), run("changed"));
+        assert_ne!(
+            before[&key("Host", "a")].hash,
+            after[&key("Host", "a")].hash
+        );
+        assert_ne!(
+            before[&key("Host", "b")].hash,
+            after[&key("Host", "b")].hash
+        );
+        assert_eq!(
+            before[&key("Host", "c")].hash,
+            after[&key("Host", "c")].hash
+        );
+        assert_eq!(before[&key("Hooks", "h")].hash, "hh");
+        assert_ne!(before[&key("Host", "c")].hash, "cc");
+    }
+
     /// Every method that crosses gets a name, and no two share one: the table the guest imports
     /// from and the game serves is the real API's, computed from its source.
     #[test]
