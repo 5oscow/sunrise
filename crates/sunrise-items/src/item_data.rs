@@ -1354,12 +1354,13 @@ pub fn encode_components_with_items(stack: &ItemStack, items: &crate::items::Ite
     };
     // Equality belongs to the component codec, not its saved NBT numeric width.
     if let Tag::Compound(entries) = &mut components {
-        let mut key = [0; 64];
         entries.retain(|id, _| {
             !prototype.contains_key(id)
-                || !ascii_key(id, &mut key).is_some_and(|id| {
-                    ingredient_components::component_equal(id, stack, &info.component_prototype)
-                })
+                || !ingredient_components::component_equal(
+                    &id.to_string_lossy(),
+                    stack,
+                    &info.component_prototype,
+                )
         });
         if entries.is_empty() {
             return None;
