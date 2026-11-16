@@ -95,3 +95,44 @@ fn the_tick_rate_is_frozen_on_a_server_only() {
         assert_eq!(game.tick_rate_is_frozen(), None);
     });
 }
+
+/// Menu reads follow the local client's prediction and reject every other player.
+#[test]
+#[ignore = "daily"]
+fn a_client_reads_only_its_own_menu() {
+    mod_platform::testing::with_mods(Vec::<mod_api::ModEntry>::new().into(), || {
+        super::native_entity_refs::tests::with_client_game(|game| {
+            let (client, _server) = sunrise_protocol::connection::Pipe::pair();
+            game.connect_local(client, "MenuReadTest").unwrap();
+            game.remote.as_mut().unwrap().logged_in = true;
+            let player = game.local_player().unwrap();
+            let other = mod_api::__private::game::player_ref(
+                mod_api::EntityRef::new(player.entity().epoch(), player.entity().id() + 1),
+                42,
+            );
+            assert_eq!(game.player_container_menu(other), None);
+            let stack = sunrise_client::items::ItemStack::new("minecraft:stone", 7);
+            game.inventory[0] = Some(stack.clone());
+            game.carried = Some(stack.clone());
+            let inventory = game.player_container_menu(player).unwrap();
+            assert_eq!(game.menu_slot_count(inventory), Some(46));
+            assert_eq!(game.menu_slot(inventory, 36), Some(Some(stack.clone())));
+            assert_eq!(game.menu_carried(inventory), Some(Some(stack.clone())));
+            game.remote
+                .as_mut()
+                .unwrap()
+                .menu
+                .set(Some((1, "minecraft:generic_9x3".into())));
+            let open = game.player_container_menu(player).unwrap();
+            assert_eq!(game.menu_slot_count(open), Some(63));
+            assert_eq!(game.menu_slot(open, 54), Some(Some(stack)));
+            assert_eq!(game.menu_slot_count(inventory), None);
+            game.remote.as_mut().unwrap().menu.set(None);
+            assert_eq!(game.menu_slot_count(open), None);
+            assert_eq!(
+                game.menu_slot_count(game.player_container_menu(player).unwrap()),
+                Some(46)
+            );
+        });
+    });
+}
