@@ -318,26 +318,30 @@ impl AngerManagement {
         current
     }
     /// `increaseAnger` for a player suspect, whose entity is the player with
-    /// `uuid` (when the world knows it). Another player than the one `Who::Player`
-    /// stands for leaves that one's anger under its own UUID, as vanilla keeps one
-    /// entry per player entity, and the anger kept under `uuid` while that player
-    /// was away is added (`angerByUuid.removeInt(entity.getUUID())`).
+    /// `uuid` (`None`: one the world can't name). Another identity than the one
+    /// `Who::Player` stands for, a change to or from `None` included, is another
+    /// entity: the old one's live anger goes under its own UUID when it has one,
+    /// and the binding is forgotten. As vanilla, the increase is capped first, and
+    /// a new suspect then gets the anger kept under its UUID while it was away
+    /// (`angerByUuid.removeInt(entity.getUUID())`), uncapped.
     pub fn increase_player(&mut self, uuid: Option<[i32; 4]>, amount: i32) -> i32 {
-        if let (Some(old), Some(new)) = (self.player, uuid)
-            && old != new
+        if self.player != uuid
             && let Some(anger) = self.anger.get(&Who::Player).copied()
         {
-            *self.unloaded.entry(old).or_default() += anger;
+            if let Some(old) = self.player {
+                *self.unloaded.entry(old).or_default() += anger;
+            }
             self.forget(Who::Player);
         }
-        let kept = match uuid {
-            Some(uuid) => {
-                self.player = Some(uuid);
-                self.unloaded.remove(&uuid).unwrap_or(0)
-            }
-            None => 0,
-        };
-        self.increase(Who::Player, amount + kept)
+        let new_suspect = !self.anger.contains_key(&Who::Player);
+        self.player = uuid;
+        let mut current = self.increase(Who::Player, amount);
+        if new_suspect && let Some(kept) = uuid.and_then(|uuid| self.unloaded.remove(&uuid)) {
+            current += kept;
+            self.anger.insert(Who::Player, current);
+            self.sort_and_update_highest();
+        }
+        current
     }
     /// The UUID of the player suspect, when it is known.
     pub fn player_uuid(&self) -> Option<[i32; 4]> {
@@ -1345,6 +1349,34 @@ mod tests {
         assert_eq!(a.increase_player(Some(bob), 35), 115);
         assert_eq!(a.unloaded().count(), 0);
         assert_eq!(a.player_uuid(), Some(bob));
+    }
+
+    /// `increaseAnger` caps the increase at 150 first and adds the kept anger
+    /// after, uncapped: a saved 140 plus 35 is 175, nothing lost.
+    #[test]
+    fn kept_anger_is_added_after_the_cap() {
+        let bob = [5, 6, 7, 8];
+        let mut a = AngerManagement::from_saved([(bob, 140)]);
+        assert_eq!(a.increase_player(Some(bob), 35), 175);
+        assert_eq!(a.anger_of(Who::Player), 175);
+        assert_eq!(a.active_anger(None), 175);
+        assert_eq!(a.unloaded().count(), 0);
+    }
+
+    /// A player the world can't name is another entity: Alice's anger goes
+    /// under her UUID when it can't be named, the anonymous anger is its own,
+    /// and Alice coming back gets her kept anger, not the anonymous one.
+    #[test]
+    fn an_unnamed_player_is_another_suspect() {
+        let alice = [1, 2, 3, 4];
+        let mut a = AngerManagement::default();
+        a.increase_player(Some(alice), 50);
+        assert_eq!(a.increase_player(None, 20), 20);
+        assert_eq!(a.player_uuid(), None);
+        assert_eq!(a.unloaded().collect::<Vec<_>>(), vec![(alice, 50)]);
+        assert_eq!(a.increase_player(Some(alice), 10), 60);
+        assert_eq!(a.player_uuid(), Some(alice));
+        assert_eq!(a.unloaded().count(), 0);
     }
 
     #[test]

@@ -9053,6 +9053,32 @@ mod warden_anger_tests {
         );
     }
 
+    /// #486: after a named player and then an unnamed one anger the warden, the
+    /// save names the first under its own UUID and writes nothing for the second.
+    #[test]
+    fn a_named_then_unnamed_player_saves_only_the_named_one() {
+        let alice = [1, 2, 3, 4];
+        let mut m = warden(1);
+        let mut anger = AngerManagement::default();
+        anger.increase_player(Some(alice), 50);
+        anger.increase_player(None, 20);
+        m.extra.warden.as_mut().unwrap().anger = anger;
+        let tag = mob_to_nbt(&m, [9, 9, 9, 9], None, None, |_| None);
+        let Some(Tag::List(pairs)) = tag.get("anger").and_then(|t| t.get("suspects")) else {
+            panic!("the named player's anger is saved");
+        };
+        let pairs: Vec<_> = pairs
+            .iter()
+            .map(|t| {
+                (
+                    uuid_from_tag(t.get("uuid")).unwrap(),
+                    number(t.get("anger")),
+                )
+            })
+            .collect();
+        assert_eq!(pairs, vec![(alice, Some(50))]);
+    }
+
     /// #486: a player suspect whose UUID the anger never learned writes no
     /// pair, rather than a placeholder that names no player.
     #[test]
