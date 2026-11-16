@@ -1910,6 +1910,31 @@ mod flight_pose_tests {
     }
 
     #[test]
+    fn swimming_setup_returns_after_a_listener_writes_the_largest_finite_head_angle() {
+        use std::cell::Cell;
+        struct Listener(Cell<bool>);
+        impl HumanoidSetup for Listener {
+            fn before_arm_pose(&self, _: &Mob, _: &State<'_>, poses: &mut Poses) {
+                self.0.set(true);
+                poses.xrot("head", f32::MAX);
+            }
+        }
+        let listener = Listener(Cell::new(false));
+        let mut mob = player();
+        mob.extra.swim.old = 1.0;
+        mob.extra.swim.amount = 1.0;
+        mob.extra.swim.visually = true;
+        let state = state(&mob, 0.5).observed(&mob, Some(&listener));
+        let mut poses = Poses::default();
+        poses
+            .map
+            .insert(key("head"), [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0]);
+        setup(&mob, &state, &mut poses, &HashMap::new());
+        assert!(listener.0.get());
+        assert!(poses.get("head")[3].is_finite());
+    }
+
+    #[test]
     fn a_humanoid_mobs_two_handed_item_pose_keeps_vanillas_other_arm() {
         let mut m = player();
         Arc::make_mut(&mut m.kind).anim = Anim::Skeleton;
