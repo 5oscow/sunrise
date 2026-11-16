@@ -376,3 +376,45 @@ fn wasm_weapon_dispatch(
         "guest must assert the producer weapon and return successfully"
     );
 }
+
+#[test]
+#[ignore = "daily"]
+fn a_player_credited_death_drops_experience_without_a_loot_snapshot() {
+    if isolated() {
+        return;
+    }
+    crate::game::native_entity_refs::tests::with_game(|game| {
+        game.build_registries();
+        game.next_entity = 1000;
+        game.server_loot.set(None);
+        game.orbs.clear();
+        let pos = [2.0, 64.0, 0.0];
+        let mut mob = Mob::new(
+            70,
+            game.res
+                .mob_types()
+                .get("minecraft:zombie")
+                .unwrap()
+                .clone(),
+            Vec3::new(pos[0], pos[1], pos[2]),
+            0.0,
+        );
+        mob.health = 0.0;
+        game.mobs.push(mob.clone());
+        game.drop_death_loot(
+            &mut mob,
+            None,
+            true,
+            sunrise_world::loot::LootEntity::new("minecraft:player"),
+            false,
+            pos,
+            None,
+        );
+        let total: i64 = game
+            .orbs
+            .iter()
+            .map(|orb| i64::from(orb.value) * i64::from(orb.count))
+            .sum();
+        assert_eq!(total, 5, "an adult unequipped zombie's experience");
+    });
+}
