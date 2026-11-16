@@ -718,8 +718,9 @@ impl Game<'_> {
     }
 
     /// Clip an empty-context ray against collider or outline shapes, without fluids, in the
-    /// world `native_level_view_world` reads. None on failed reads, dynamic shapes, invalid
-    /// rays or traversal limits.
+    /// world `native_level_view_world` reads. None on failed reads, dynamic shapes (unless
+    /// the block's entity published its shapes, which stand over them), invalid rays or
+    /// traversal limits.
     pub(super) fn level_clip(
         &self,
         level: LevelRef,
