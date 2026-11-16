@@ -6259,6 +6259,7 @@ impl Game<'_> {
         if let Some(player) = player {
             self.native_player_tick_pre(mod_api::__private::PlayerTickPreCall { player });
         }
+        self.native_local_player_fit_sizes();
         let result = self.tick_local_player(entity_collisions, pushed, sprint_window);
         entity_section_steps::player_after(self, player_from);
         // `EntityEvent.Size` for the pose the tick set.
