@@ -310,8 +310,7 @@ fn update(dir: &Path, sunrise: Option<&str>, accept: &[&str]) -> Result<(), Stri
         doc["native"]["sunrise"].as_value_mut().expect("native pin"),
         &sunrise,
     );
-    let candidate = doc.to_string();
-    std::fs::write(&path, candidate).map_err(|e| format!("{}: {e}", path.display()))?;
+    internals::atomic_write_manifest(&path, doc.to_string())?;
     // The old pin's SDK goes; the next command fetches this one.
     sdk_fetch::repin(dir, &sunrise)?;
     println!("Pinned to Sunrise {sunrise}");

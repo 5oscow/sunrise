@@ -76,7 +76,7 @@ fn add(dir: &Path, paths: &[&str], kind: Option<&str>) -> Result<(), String> {
     for entry in entries {
         println!("Added internal {}", entry.path);
     }
-    fs::write(&path, doc.to_string()).map_err(|e| format!("{}: {e}", path.display()))
+    atomic_write_manifest(&path, doc.to_string())
 }
 
 /// Adds or refreshes `entries` in `internals`.
@@ -553,6 +553,48 @@ mod tests {
         assert_eq!(fs::read_to_string(&path).unwrap(), "written");
         assert_eq!(fs::read_to_string(&referent).unwrap(), "keep");
         assert!(!dangling.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn add_replaces_a_symlinked_manifest_at_its_real_path_and_keeps_its_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let project = Scratch::new("add-project");
+        let shared = Scratch::new("add-shared");
+        let build = "0123456789abcdef0123456789abcdef01234567";
+        let cache = project.join(".sunrise/cache").join(build);
+        fs::create_dir_all(cache.join("build-data")).unwrap();
+        fs::write(cache.join("build"), build).unwrap();
+        fs::write(cache.join("build-data/internals.json"), format!(r#"{{"schema":1,"build":{{"commit":"{build}"}},"internals":[{{"path":"Used","kind":"struct","signature":"struct Used","hash":"1111"}}]}}"#)).unwrap();
+        let before = format!(
+            "id = 'example'\nname = 'Example'\nversion = '0.1.0'\napi = '0.2'\ncapabilities = ['registries']\n[native]\ngame = '26.3'\nsunrise = '{build}'\nmixins = '{}'\n",
+            "a".repeat(40)
+        );
+        let real = shared.join(MANIFEST);
+        fs::write(&real, &before).unwrap();
+        fs::set_permissions(&real, fs::Permissions::from_mode(0o640)).unwrap();
+        // A second name for the old file: a replacement leaves it as it was.
+        fs::hard_link(&real, shared.join("previous")).unwrap();
+        std::os::unix::fs::symlink(&real, project.join(MANIFEST)).unwrap();
+        add(&project, &["Used"], None).unwrap();
+        assert!(
+            fs::symlink_metadata(project.join(MANIFEST))
+                .unwrap()
+                .is_symlink()
+        );
+        let manifest = Manifest::parse(&fs::read_to_string(&real).unwrap()).unwrap();
+        assert_eq!(manifest.internals[0].hash.as_deref(), Some("1111"));
+        assert_eq!(
+            fs::metadata(&real).unwrap().permissions().mode() & 0o777,
+            0o640
+        );
+        assert_eq!(fs::read_to_string(shared.join("previous")).unwrap(), before);
+        let mut names: Vec<_> = fs::read_dir(&*shared)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        names.sort();
+        assert_eq!(names, ["previous", "sunrise-mod.toml"]);
     }
 
     #[test]
