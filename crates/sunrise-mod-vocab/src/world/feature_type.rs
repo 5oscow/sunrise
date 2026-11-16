@@ -22,7 +22,7 @@
 //! world job runs. Native mods only.
 use crate::wire::{Reader, Wire, WireError, Writer};
 use crate::world::datapack_registry::{DatapackEntry, DatapackField};
-use crate::world::structure_type::{HeightmapType, StructureRandom};
+use crate::world::structure_type::{HeightmapType, RandomSource};
 use crate::{BlockKey, BlockMetadata, BlockState, BlockUpdateFlags};
 use std::sync::Arc;
 use sunrise_core::nbt::Compound;
@@ -90,7 +90,7 @@ pub trait FeatureContext {
     fn config(&self) -> &DatapackEntry;
     /// The caller's random: the same stream the placement modifiers before this feature drew
     /// from, so draws stay in vanilla's order.
-    fn random(&mut self) -> &mut dyn StructureRandom;
+    fn random(&mut self) -> &mut dyn RandomSource;
     /// The level's minimum block Y.
     fn min_y(&mut self) -> Option<i32>;
     /// The level's maximum block Y.

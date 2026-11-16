@@ -84,7 +84,7 @@ the modifiers before you drew from.
 | `FeatureContext` access | Purpose |
 |---|---|
 | `config` | The configured feature's decoded settings |
-| `random` | The caller's `StructureRandom`: `next_int_bound`, `next_long`, `next_float`, `next_double`, `next_boolean` |
+| `random` | The caller's `RandomSource`: `next_int_bound`, `next_long`, `next_float`, `next_double`, `next_boolean` |
 | `block`, `block_in_tag` | Read blocks and block tags, your own staged writes included |
 | `height` | Heightmap heights, as the level has them before this call's writes |
 | `set_block` | Write a `BlockState` with `BlockUpdateFlags`; `Feature.setBlock` uses `NEIGHBORS \| CLIENTS` |
