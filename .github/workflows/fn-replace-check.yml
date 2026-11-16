@@ -36,18 +36,25 @@ env:
 jobs:
   route:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read  # the run's creation time (tools/ci/dyna_ci_route.sh)
     outputs:
       self_hosted: ${{ steps.runner.outputs.self_hosted }}
     steps:
       - uses: actions/checkout@v4
+      # The pool's switch and lease (tools/ci/dyna_ci_route.sh): a snapshot is judged at the run's creation, so a
+      # run that waited in a concurrency group or GitHub's queue is not sent off the pool by a lease that lapsed
+      # meanwhile.
       - id: runner
         env:
-          ENABLED: ${{ vars.DYNA_CI_SELF_HOSTED }}
-          LEASE: ${{ vars.DYNA_CI_POOL_UNTIL }}
+          GH_TOKEN: ${{ github.token }}
+          VARS_ENABLED: ${{ vars.DYNA_CI_SELF_HOSTED }}
+          VARS_LEASE: ${{ vars.DYNA_CI_POOL_UNTIL }}
           # Only dispatches (the daily run's included) run this workflow, from this repository.
           SAME_REPO: true
           EVENT: ${{ github.event_name }}
-        run: bash tools/ci/dyna_ci_runner.sh >> "$GITHUB_OUTPUT"
+        run: bash tools/ci/dyna_ci_route.sh >> "$GITHUB_OUTPUT"
   fn-replace-check:
     needs: route
     runs-on: ${{ needs.route.outputs.self_hosted == 'true' && 'dyna-large' || 'ubuntu-latest' }}

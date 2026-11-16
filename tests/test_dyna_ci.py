@@ -36,28 +36,44 @@ class DynaRoutingTests(unittest.TestCase):
             self.assertEqual(self.route("push", lease=lease), "self_hosted=false")
 
     @unittest.skipUnless(POSIX_BASH, "needs a bash that is not WSL's")
-    def test_live_and_snapshot_lease_routing_on_main(self):
-        from test_ci_runners import jobs
-        import textwrap
-        route = dict(jobs((ROOT / ".github/workflows/dyna-ci.yml").read_text()))["changes"]
-        script = textwrap.dedent(route.split('        run: |\n          if [ "$SAME_REPO"', 1)[1]
-                                .split("      - id: hosted", 1)[0])
-        script = 'if [ "$SAME_REPO" ' + script
-        script = script.replace("${{ inputs.github-fallback }}", "false")
+    def test_route_reads_the_lease_live_else_judges_the_snapshot_at_the_runs_creation(self):
+        now = int(time.time())
+        # live lease, snapshot lease, the run's age in seconds, expected
+        cases = (("9999999999", "0", 60, "true"),
+                 ("0", "9999999999", 60, "false"),
+                 # The token can't read Variables: a run that waited 55 minutes keeps the lease it was created with.
+                 ("", str(now - 55 * 60 + 12 * 60), 55 * 60, "true"),
+                 ("", str(now - 55 * 60 - 1), 55 * 60, "false"),
+                 ("", "9999999999", 3601, "false"))
         with tempfile.TemporaryDirectory() as directory:
-            output = Path(directory) / "output"
-            for live, snapshot, expected in (("9999999999", "0", "true"),
-                                              ("", "9999999999", "true"),
-                                              ("", "1794272194", "false"),
-                                              ("0", "9999999999", "false")):
-                stub = 'gh() { case "$*" in *SELF_HOSTED*) echo true;; *created_at*) date -u +%FT%TZ;; *) echo "$LIVE";; esac; };\n'
-                env = dict(os.environ, EVENT="push", SAME_REPO="true", VARS_ENABLED="true",
-                           VARS_LEASE=snapshot, LIVE=live, GITHUB_REPOSITORY="sunrise-org/sunrise",
-                           GITHUB_OUTPUT=str(output), GITHUB_RUN_ID="1")
-                subprocess.run(["bash", "-e", "-c", stub + script], env=env, cwd=ROOT,
-                               capture_output=True, text=True, check=True)
-                self.assertIn(f"self_hosted={expected}\n", output.read_text())
-                output.unlink()
+            gh = Path(directory) / "gh"
+            gh.write_text('#!/usr/bin/env bash\ncase "$*" in *SELF_HOSTED*) echo "$LIVE_ENABLED";; '
+                          '*POOL_UNTIL*) echo "$LIVE";; *runs/7*) echo "$CREATED_AT";; *) exit 1;; esac\n')
+            gh.chmod(0o755)
+            for live, snapshot, age, expected in cases:
+                with self.subTest(live=live, snapshot=snapshot, age=age):
+                    created = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now - age))
+                    env = dict(os.environ, PATH=f"{directory}:{os.environ['PATH']}", EVENT="workflow_dispatch",
+                               SAME_REPO="true", VARS_ENABLED="true", VARS_LEASE=snapshot, LIVE=live,
+                               LIVE_ENABLED="true" if live else "", CREATED_AT=created,
+                               GITHUB_REPOSITORY="sunrise-org/sunrise", GITHUB_RUN_ID="7", NOW=str(now))
+                    env.pop("GITHUB_OUTPUT", None)
+                    result = subprocess.run(["bash", ROOT / "tools/ci/dyna_ci_route.sh"], env=env,
+                                            capture_output=True, text=True, check=True)
+                    self.assertEqual(result.stdout, f"self_hosted={expected}\n")
+
+    def test_every_workflow_routes_through_the_route_script(self):
+        # A job that handed the run's lease snapshot straight to dyna_ci_runner.sh judged it against the time the job
+        # started: a daily run that waited for GitHub's runners sent its data shards off the pool (2026-11-16).
+        for workflow in sorted((ROOT / ".github/workflows").glob("*.yml")):
+            text = workflow.read_text()
+            if "vars.DYNA_CI_POOL_UNTIL" not in text:
+                continue
+            with self.subTest(workflow=workflow.name):
+                self.assertNotIn("dyna_ci_runner.sh", text)
+                self.assertIn('bash tools/ci/dyna_ci_route.sh >> "$GITHUB_OUTPUT"', text)
+                self.assertIn("VARS_LEASE: ${{ vars.DYNA_CI_POOL_UNTIL }}", text)
+                self.assertIn("actions: read", text)
 
     @unittest.skipUnless(POSIX_BASH, "needs a bash that is not WSL's")
     def test_snapshot_lease_is_bounded_by_run_age(self):
@@ -211,7 +227,7 @@ class DynaRoutingTests(unittest.TestCase):
         blocks = dict(jobs(workflow))
         route = blocks["changes"]
         for item in ("vars.DYNA_CI_SELF_HOSTED", "vars.DYNA_CI_POOL_UNTIL", "github.event_name",
-                     "github.event.pull_request.head.repo.full_name == github.repository", "dyna_ci_runner.sh"):
+                     "github.event.pull_request.head.repo.full_name == github.repository", "dyna_ci_route.sh"):
             self.assertIn(item, route)
         for name, label in (("verify", "dyna-large"), ("verify-static", "dyna-large"), ("launcher", "dyna-medium")):
             block = blocks[name]

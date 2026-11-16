@@ -8,7 +8,10 @@ Waiting is not enough to call a job stuck, because a run queued behind a busy po
 stranded once it has a job queued for the pool and no job of it started or finished for STALL_MINUTES. Then the
 watch looks at the pool's jobs across the repository, and cancels the stranded runs only when, twice in a row
 QUIET_RECHECK apart, none of them is running or finished in that time, in an unfinished run or a finished one. That
-is a pool that is down, or one that cannot start a runner. The watch ends red. A rerun goes to the pool again while
+is a pool that is down, or one that cannot start a runner. A finished run is found two ways: a run the first look saw
+unfinished, whatever its age, and the newest runs GitHub lists as finished, by creation time. A rerun keeps its run's
+creation time, and GitHub's listing has no filter by update time, so a rerun of an older run that started and ended
+before the first look is the one completion neither way sees. The watch ends red. A rerun goes to the pool again while
 the repository's switch is on: dispatch dyna-ci.yml with github-fallback, or turn DYNA_CI_SELF_HOSTED off first.
 
 One sweep serves the whole repository: a watcher per run held one of GitHub's runners for as long as the run lasted.
@@ -66,11 +69,13 @@ def jobs_of(api, repo, run):
             for job in page["jobs"]]
 
 
-def stranded(api, repo, label, now, stall, me):
+def stranded(api, repo, label, now, stall, me, earlier=frozenset()):
     """The unfinished runs with a job queued for the pool and no progress for `stall` seconds, and none when the
-    pool served any job since then, in an unfinished run or one that has finished (a busy pool, not a dead one)."""
+    pool served any job since then, in an unfinished run or one that has finished (a busy pool, not a dead one).
+    Also the ids of the unfinished runs, which the next look passes back as `earlier`."""
     unfinished = [run for status in ("queued", "in_progress") for run in runs(api, repo, f"status={status}")
                   if run["id"] != me]
+    ids = {run["id"] for run in unfinished}
     found = []
     # The oldest runs reached the pool first, so a busy pool usually answers at once. A run younger than the stall
     # can't be stranded yet, and only a running one can show the pool working.
@@ -80,28 +85,35 @@ def stranded(api, repo, label, now, stall, me):
             continue
         jobs = jobs_of(api, repo, run)
         if pool_worked(jobs, label, now - stall):
-            return []
+            return [], ids
         queued = sum(job["status"] == "queued" and on_pool(job, label) for job in jobs)
         if old and queued and now - last_progress(run, jobs) >= stall:
             found.append((run, queued))
     if not found:
-        return []
-    # A pool that just finished a whole run's jobs shows it only in that finished run. GitHub gives up on a job that
-    # waited a day, so a finished run created before then held no runner since; of the rest, only one updated since
-    # can have.
+        return [], ids
+    # A pool that just finished a whole run's jobs shows it only in that finished run. A run the earlier look saw
+    # unfinished and that has finished since is read whatever its age: a rerun of an old run keeps its creation time.
+    for ident in earlier - ids:
+        if pool_worked(jobs_of(api, repo, {"id": ident}), label, now - stall):
+            return [], ids
+    # The other finished runs come from GitHub's listing by creation time, which has no filter by update time: the
+    # newest 1,000 it returns of those created within a day (GitHub gives up on a job that waited longer), read when
+    # updated since the stall. A rerun of an older run that ended before the first look is not among them, and
+    # nothing else lists it.
     created = datetime.fromtimestamp(now - 24 * 3600, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     for run in runs(api, repo, f"status=completed&created=%3E%3D{created}"):
         if seconds(run["updated_at"]) >= now - stall and pool_worked(jobs_of(api, repo, run), label, now - stall):
-            return []
-    return found
+            return [], ids
+    return found, ids
 
 
 def watch(api, cancel, clock, sleep, repo, me, stall, label=LABEL):
     """Returns the exit code: 1 when it cancelled runs, else 0."""
-    if not stranded(api, repo, label, clock(), stall, me):
+    found, seen = stranded(api, repo, label, clock(), stall, me)
+    if not found:
         return 0
     sleep(QUIET_RECHECK)
-    found = stranded(api, repo, label, clock(), stall, me)
+    found, _ = stranded(api, repo, label, clock(), stall, me, seen)
     if not found:
         return 0
     for run, queued in found:
