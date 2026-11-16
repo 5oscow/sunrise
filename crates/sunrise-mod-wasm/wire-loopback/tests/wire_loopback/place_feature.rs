@@ -19,7 +19,7 @@ const REFUSALS: [PlaceFeatureRefusal; 5] = [
     PlaceFeatureRefusal::UnknownFeature,
 ];
 
-/// What the server answers: x 1 placed, x 2 found no room, 3 to 7 are refused.
+/// What the server answers: x 1 placed, x 2 reported failure, 3 to 7 are refused.
 fn answer(pos: [i32; 3]) -> Result<bool, PlaceFeatureRefusal> {
     match pos[0] {
         1 => Ok(true),

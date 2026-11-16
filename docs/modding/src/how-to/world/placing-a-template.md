@@ -70,15 +70,16 @@ an id with a `..` in it all come back as a reason.
 
 ## Placing a feature
 
-`level.place_feature(host, "minecraft:oak", pos)` places a `worldgen/feature` registry entry by id, as
-`/place feature` does: `Feature.place` with the level's random and chunk generator, after
-the command's check that the 3x3 chunks around `pos` are loaded. The blocks it sets reach players
-as any block change does.
+`level.place_feature(host, "minecraft:oak", pos)` places a `minecraft:worldgen/feature` by id, as
+`/place feature` does: `Feature.place` with the level's random and chunk generator, after the
+command's check that the 3x3 chunks around `pos` are loaded. The blocks it sets reach players as
+any block change does. The answer is the feature's own report: `Ok(false)` means it reported
+failure, and blocks it set before that are kept, as the command keeps them.
 
 ```rust,ignore
 match level.place_feature(host, "mymod:ender_tree", pos) {
-    Ok(true) => { /* the feature reported that it placed */ }
-    Ok(false) => { /* it reported failure: a tree on stone; blocks may still have been written */ }
+    Ok(true) => { /* placed */ }
+    Ok(false) => { /* it reported failure: a tree with no room */ }
     Err(refusal) => { /* nothing changed; `refusal` names why */ }
 }
 ```
@@ -86,4 +87,4 @@ match level.place_feature(host, "mymod:ender_tree", pos) {
 Side: server, on the level being ticked. Each refusal changes nothing: `PlaceFeatureRefusal::Stale`,
 `Client`, `NotInPlace` (another level than the one in place), `NotLoaded` (a chunk of the ring is not
 loaded, or `pos` is out of height) and `UnknownFeature` (the id has no namespace or names no
-feature).
+feature). Each is checked before the feature runs.

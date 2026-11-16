@@ -52,7 +52,8 @@ fn a_tree_is_placed_as_the_command_places_it() {
     });
 }
 
-/// A tree with no room runs and places nothing: `Ok(false)`, the stone untouched.
+/// A tree buried in stone reports failure, `Ok(false)`, and this one set no block: the stone is
+/// untouched.
 #[test]
 #[ignore = "daily"]
 fn a_feature_with_no_room_places_nothing() {
@@ -65,7 +66,7 @@ fn a_feature_with_no_room_places_nothing() {
     });
 }
 
-/// An id that is not a configured feature, or has no namespace, is `UnknownFeature`.
+/// An id that is not a feature, or has no namespace, is `UnknownFeature`.
 #[test]
 #[ignore = "daily"]
 fn an_unknown_feature_is_refused_by_name() {
