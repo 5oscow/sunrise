@@ -240,6 +240,12 @@ impl<'a> DamageLevel<'a> {
         self.credit = Credit::Loan(credit);
         self
     }
+    /// Name a site that never makes a living push (a damage type tagged `no_knockback`, or a
+    /// check that pushes nothing).
+    pub fn no_push(mut self) -> Self {
+        self.credit = Credit::NoPush;
+        self
+    }
     /// Commit this accepted hit's responsibility at vanilla's pre-push memory point.
     pub fn accepted_mob_hit(&mut self, mob: &mut crate::mobs::Mob) {
         if let Credit::Loan(credit) = &mut self.credit {
@@ -254,8 +260,12 @@ impl<'a> DamageLevel<'a> {
         pushed: &Hurting<'_>,
     ) -> (i32, Option<&crate::items::ItemStack>) {
         match &self.credit {
-            Credit::Loan(credit) => credit.snapshot(pushed),
+            Credit::Loan(credit) => credit.snapshot(pushed, self.attack),
             Credit::Memory => kill_credit::from_memory(pushed, self.attack),
+            Credit::NoPush => {
+                debug_assert!(false, "living_knockback push from a no_push damage site");
+                kill_credit::from_memory(pushed, self.attack)
+            }
         }
     }
 

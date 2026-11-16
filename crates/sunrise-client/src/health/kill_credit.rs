@@ -11,12 +11,20 @@ pub trait KnockbackCredit {
     /// Commit accepted-hit player responsibility before the default push.
     fn accepted_mob_hit(&mut self, mob: &mut Mob);
     /// The credit entity and its main hand. Zero means a genuinely unresolved credit.
-    fn snapshot(&self, pushed: &Hurting<'_>) -> (i32, Option<&ItemStack>);
+    fn snapshot<'a>(
+        &'a self,
+        pushed: &Hurting<'_>,
+        attack: &'a Attack,
+    ) -> (i32, Option<&'a ItemStack>);
 }
 
-/// The credit a level carries: the site's loan, or none lent, resolved by [`from_memory`].
+/// The credit a level carries: the site's loan, or, only for a level built with no `Game`
+/// (the lower crates, a borrowed rider's tick), none lent, resolved by [`from_memory`].
 pub(super) enum Credit<'a> {
     Memory,
+    /// A game site that never makes a living push: a push through it is a wrong choice of
+    /// site, which debug builds and tests fail on and release resolves like `Memory`.
+    NoPush,
     Loan(&'a mut dyn KnockbackCredit),
 }
 
@@ -24,6 +32,7 @@ impl Credit<'_> {
     pub(super) fn reborrow(&mut self) -> Credit<'_> {
         match self {
             Credit::Memory => Credit::Memory,
+            Credit::NoPush => Credit::NoPush,
             Credit::Loan(credit) => Credit::Loan(&mut **credit),
         }
     }

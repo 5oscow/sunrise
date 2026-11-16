@@ -119,7 +119,11 @@ impl Game<'_> {
                 let _ = player.peaceful_regeneration(&game.loop_context, rules);
                 let _ = player.food_tick(
                     &game.loop_context,
-                    crate::game::entity::damage_level_of!(game),
+                    crate::game::entity::damage_level_of!(
+                        game,
+                        &sunrise_client::health::NO_ATTACK,
+                        no_push
+                    ),
                     &game.health_resources,
                     rules,
                 );
@@ -305,7 +309,11 @@ impl Game<'_> {
             let _ = player.peaceful_regeneration(&game.loop_context, rules);
             let _ = player.food_tick(
                 &game.loop_context,
-                crate::game::entity::damage_level_of!(game),
+                crate::game::entity::damage_level_of!(
+                    game,
+                    &sunrise_client::health::NO_ATTACK,
+                    no_push
+                ),
                 health,
                 rules,
             );

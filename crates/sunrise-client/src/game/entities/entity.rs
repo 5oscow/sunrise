@@ -1321,9 +1321,23 @@ mod list_borrows;
 pub(super) use list_borrows::entity_lists_of;
 pub(crate) use list_borrows::{borrow_level_list, borrow_lists};
 /// The level `$game` ticks, lent to a hit's damage hooks with its block registry and merged
-/// tag tables, so a mob or the player beside them can take the hit. With `$attack` (an
-/// [`Attack`](sunrise_client::health::Attack) the site took first), the level of that attack.
+/// tag tables, so a mob or the player beside them can take the hit. `$attack` is the
+/// [`Attack`](sunrise_client::health::Attack) the site took first. Every site names its
+/// credit: a per-victim plan's loan (`prepare_knockback_credit`), or `no_push` for a site
+/// that never makes a living push (a damage type tagged `no_knockback`, or a check that
+/// pushes nothing).
 macro_rules! damage_level_of {
+    ($game:ident, $attack:expr, no_push) => {
+        &mut sunrise_client::health::DamageLevel::of(
+            &mut $game.world,
+            $game.pack.assets.registry,
+            Some(world_items!($game)),
+            Some(&$game.pack.block_registries),
+            &$game.damage_hooks,
+        )
+        .attacked_by($attack)
+        .no_push()
+    };
     ($game:ident, $attack:expr, $credit:expr) => {
         &mut sunrise_client::health::DamageLevel::of(
             &mut $game.world,
@@ -1334,36 +1348,6 @@ macro_rules! damage_level_of {
         )
         .attacked_by($attack)
         .with_knockback_credit($credit)
-    };
-    // The level of the hit inside `Game::with_attack`: the attack that scope lends.
-    ($game:ident, scoped) => {
-        &mut sunrise_client::health::DamageLevel::of(
-            &mut $game.world,
-            $game.pack.assets.registry,
-            Some(world_items!($game)),
-            Some(&$game.pack.block_registries),
-            &$game.damage_hooks,
-        )
-        .attacked_by($game.combat.attack())
-    };
-    ($game:ident, $attack:expr) => {
-        &mut sunrise_client::health::DamageLevel::of(
-            &mut $game.world,
-            $game.pack.assets.registry,
-            Some(world_items!($game)),
-            Some(&$game.pack.block_registries),
-            &$game.damage_hooks,
-        )
-        .attacked_by($attack)
-    };
-    ($game:ident) => {
-        &mut sunrise_client::health::DamageLevel::of(
-            &mut $game.world,
-            $game.pack.assets.registry,
-            Some(world_items!($game)),
-            Some(&$game.pack.block_registries),
-            &$game.damage_hooks,
-        )
     };
 }
 pub(super) use damage_level_of;

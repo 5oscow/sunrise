@@ -1175,26 +1175,28 @@ impl Game<'_> {
                             self.saved_refuses_damage(id, "minecraft:trident", source_creative);
                         if let Some(i) = self.boats.iter().position(|b| b.id == id) {
                             let kind = self.boats[i].entity_type();
-                            if !crate::game::entity::damage_level_of!(self, scoped)
-                                .invulnerability_check(
-                                    sunrise_client::health::Hurting::Entity(
-                                        id as i32, &kind, source,
-                                    ),
-                                    vanilla,
-                                )
-                            {
+                            if !crate::game::entity::damage_level_of!(
+                                self,
+                                self.combat.attack(),
+                                no_push
+                            )
+                            .invulnerability_check(
+                                sunrise_client::health::Hurting::Entity(id as i32, &kind, source),
+                                vanilla,
+                            ) {
                                 self.hurt_boat(i, damage, creative);
                             }
                         } else if let Some(i) = self.carts.iter().position(|c| c.id == id) {
                             let kind = self.carts[i].kind.id();
-                            if !crate::game::entity::damage_level_of!(self, scoped)
-                                .invulnerability_check(
-                                    sunrise_client::health::Hurting::Entity(
-                                        id as i32, kind, source,
-                                    ),
-                                    vanilla,
-                                )
-                            {
+                            if !crate::game::entity::damage_level_of!(
+                                self,
+                                self.combat.attack(),
+                                no_push
+                            )
+                            .invulnerability_check(
+                                sunrise_client::health::Hurting::Entity(id as i32, kind, source),
+                                vanilla,
+                            ) {
                                 // `damageSources().trident(this, owner)`: the trident is the
                                 // direct entity, so no piglin anger.
                                 let by = t.guest.map_or(Target::Player, Target::Guest);

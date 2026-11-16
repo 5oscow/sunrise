@@ -230,6 +230,7 @@ impl Game<'_> {
                         Some(block_registries),
                         hooks,
                     )
+                    .no_push()
                     .invulnerability_check(
                         sunrise_client::health::Hurting::Entity(
                             item_id as i32,

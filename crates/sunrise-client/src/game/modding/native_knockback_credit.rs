@@ -53,7 +53,7 @@ impl KnockbackCredit for CreditLoan<'_> {
         }
     }
 
-    fn snapshot(&self, pushed: &Hurting<'_>) -> (i32, Option<&ItemStack>) {
+    fn snapshot<'a>(&'a self, pushed: &Hurting<'_>, _: &'a Attack) -> (i32, Option<&'a ItemStack>) {
         let selected = match pushed {
             Hurting::Mob(mob, _) => {
                 assert_eq!(mob.id as i32, self.plan.victim);

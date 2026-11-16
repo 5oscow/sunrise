@@ -161,7 +161,14 @@ mod tests {
             // The pig is the last mob, so it pops for the push as a hit does.
             let mut m = game.mobs.pop().unwrap();
             let hit = Damage::of(DamageKind::Generic);
-            m.knockback(damage_level_of!(game), 0.4, 0.0, 1.0, &hit, 0.0);
+            m.knockback(
+                damage_level_of!(game, &sunrise_client::health::NO_ATTACK, no_push),
+                0.4,
+                0.0,
+                1.0,
+                &hit,
+                0.0,
+            );
             game.mobs.push(m);
             tick(game, 20);
             let m = mob(game, pig);

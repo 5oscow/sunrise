@@ -2825,9 +2825,16 @@ impl Game<'_> {
                 MobEvent::Infested { at, velocities } => self.spawn_infested(at, velocities),
                 MobEvent::Gift { target, item } => self.receive_gift(target, item),
                 MobEvent::HurtSelf { mob, kind, amount } => {
+                    let plan =
+                        self.prepare_knockback_credit(mob as i32, None, self.combat.attack());
+                    let mut credit = plan.lend(&mut self.last_hurt_by_player);
                     if let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob) {
                         m.damage(
-                            crate::game::entity::damage_level_of!(self, scoped),
+                            crate::game::entity::damage_level_of!(
+                                self,
+                                self.combat.attack(),
+                                &mut credit
+                            ),
                             amount,
                             sunrise_client::mobs::Damage::of(kind),
                         );
@@ -4907,10 +4914,11 @@ impl Game<'_> {
             _ => false,
         };
         let vanilla = self.saved_refuses_damage(id, damage_type, creative);
-        crate::game::entity::damage_level_of!(self, scoped).invulnerability_check(
-            sunrise_client::health::Hurting::Entity(id as i32, kind, source),
-            vanilla,
-        )
+        crate::game::entity::damage_level_of!(self, self.combat.attack(), no_push)
+            .invulnerability_check(
+                sunrise_client::health::Hurting::Entity(id as i32, kind, source),
+                vanilla,
+            )
     }
     /// `BellBlock.onProjectileHit`: a projectile that strikes the bell proper
     /// rings it, and a player's shot counts as the player's ring.

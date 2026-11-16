@@ -457,10 +457,12 @@ impl Game<'_> {
             direct: entity_id(direct),
             position,
         };
-        if crate::game::entity::damage_level_of!(self, scoped).invulnerability_check(
-            sunrise_client::health::Hurting::Entity(id as i32, &entity_kind, source),
-            vanilla,
-        ) {
+        if crate::game::entity::damage_level_of!(self, self.combat.attack(), no_push)
+            .invulnerability_check(
+                sunrise_client::health::Hurting::Entity(id as i32, &entity_kind, source),
+                vanilla,
+            )
+        {
             return false;
         }
         match target {

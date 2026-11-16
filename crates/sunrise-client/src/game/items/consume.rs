@@ -233,7 +233,11 @@ impl Game<'_> {
                         }
                     } else if let Some(mob) = game.mobs.iter_mut().find(|m| m.id == decision.mob) {
                         mob.apply_consume_effect(
-                            crate::game::entity::damage_level_of!(game),
+                            crate::game::entity::damage_level_of!(
+                                game,
+                                &sunrise_client::health::NO_ATTACK,
+                                no_push
+                            ),
                             effect,
                         );
                     }

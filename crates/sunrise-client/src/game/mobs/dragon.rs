@@ -1699,7 +1699,7 @@ impl Game<'_> {
             direct: direct_entity,
             position: from.map(|p| [p.x, p.y, p.z]),
         };
-        let level = super::entity::damage_level_of!(self, scoped);
+        let level = super::entity::damage_level_of!(self, self.combat.attack(), no_push);
         let reaches_base = self.dragon.as_ref().is_some_and(|d| {
             d.reaches_base_check(
                 BODY,
@@ -1720,7 +1720,7 @@ impl Game<'_> {
                 let Some(d) = self.dragon.as_mut().filter(|d| d.id == id) else {
                     return false;
                 };
-                let level = super::entity::damage_level_of!(self, scoped);
+                let level = super::entity::damage_level_of!(self, self.combat.attack(), no_push);
                 return matches!(
                     d.hurt_from(
                         level,
@@ -1892,7 +1892,7 @@ impl Game<'_> {
             let creative = self.creative_source_of(attacker);
             let vanilla =
                 self.saved_refuses_damage(id, hit_source.damage_type, creative) || is_fire(kind);
-            let level = super::entity::damage_level_of!(self, scoped);
+            let level = super::entity::damage_level_of!(self, self.combat.attack(), no_push);
             if level.invulnerability_check(
                 sunrise_client::health::Hurting::Dragon(id as i32, hit_source),
                 vanilla,

@@ -1085,7 +1085,11 @@ impl Game<'_> {
                             // tick hurts with magic (6 << amp) or heals (4 << amp).
                             if (effect == "instant_damage") != inverted {
                                 m.damage(
-                                    crate::game::entity::damage_level_of!(self, scoped),
+                                    crate::game::entity::damage_level_of!(
+                                        self,
+                                        self.combat.attack(),
+                                        no_push
+                                    ),
                                     (6 << amp.min(30)) as f32,
                                     Damage::of(DamageKind::Magic),
                                 );
@@ -1150,7 +1154,7 @@ impl Game<'_> {
                 let mut canceled = false;
                 if let Some(id) = self.motion.health.damage.id(source)
                     && let Ok(o) = p.hurt_blocking(
-                        crate::game::entity::damage_level_of!(self, scoped),
+                        crate::game::entity::damage_level_of!(self, self.combat.attack(), no_push),
                         &self.motion.health,
                         rules,
                         id,
@@ -1168,7 +1172,7 @@ impl Game<'_> {
                     && let Some(id) = self.health_resources.damage.id("minecraft:magic")
                 {
                     let _ = p.hurt(
-                        crate::game::entity::damage_level_of!(self, scoped),
+                        crate::game::entity::damage_level_of!(self, self.combat.attack(), no_push),
                         &self.motion.health,
                         rules,
                         id,
@@ -2127,7 +2131,7 @@ impl Game<'_> {
                                 let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob) else {
                                     return;
                                 };
-                                if m.damage_by(
+                                m.damage_by(
                                     crate::game::entity::damage_level_of!(
                                         self,
                                         &attack,
@@ -2136,16 +2140,7 @@ impl Game<'_> {
                                     amount(6),
                                     source,
                                     "minecraft:area_effect_cloud",
-                                ) && owner == Some(Who::Player)
-                                    && let Some(uuid) = self.player_uuid_of(guest)
-                                {
-                                    self.last_hurt_by_player.insert(
-                                        mob,
-                                        super::combat::PlayerCredit(
-                                            sunrise_client::lan::playerdata::ints_uuid(uuid),
-                                        ),
-                                    );
-                                }
+                                );
                             } else {
                                 m.heal(&self.loop_context, amount(4));
                             }
@@ -2526,23 +2521,12 @@ impl Game<'_> {
                     let attack = self.potion_attack(owner.who(), owner.guest);
                     let plan = self.prepare_knockback_credit(id as i32, owner.who(), &attack);
                     let mut credit = plan.lend(&mut self.last_hurt_by_player);
-                    let hurt = self.mobs[i].damage_by(
+                    self.mobs[i].damage_by(
                         crate::game::entity::damage_level_of!(self, &attack, &mut credit),
                         harm,
                         source,
                         "minecraft:splash_potion",
                     );
-                    if hurt
-                        && owner.player
-                        && let Some(uuid) = self.player_uuid_of(owner.guest)
-                    {
-                        self.last_hurt_by_player.insert(
-                            id,
-                            super::combat::PlayerCredit(
-                                sunrise_client::lan::playerdata::ints_uuid(uuid),
-                            ),
-                        );
-                    }
                 } else {
                     m.heal(
                         &self.loop_context,

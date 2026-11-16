@@ -1928,7 +1928,11 @@ mod tests {
                 crate::game::native_entity_refs::tests::bind_local_player(game, 20, 123);
                 game.note_attacker("minecraft:mob_attack", 15);
                 let rules = game.world.health_rules;
-                let level = super::super::entity::damage_level_of!(game);
+                let level = super::super::entity::damage_level_of!(
+                    game,
+                    &sunrise_client::health::NO_ATTACK,
+                    no_push
+                );
                 let player = game.player.as_mut().unwrap();
                 assert!(
                     player
