@@ -35,9 +35,9 @@ NOTES = "crates/horizon-mod-vocab/src/hooks/notes.rs"
 # A chapter line, with an optional trailing HTML comment (mdBook still renders the chapter).
 SUMMARY_LINE = re.compile(r"^(\s*)(?:[-*] )?\[([^\]]*)\]\(([^)]*)\)\s*(?:<!--.*-->\s*)?$")
 # The labels and branch names of rollup and upstream-sync pull requests (AGENTS.md, handbook "Rollups"):
-# fork-review-rollup-<n>, rollup-<n>, sync-<n>, sync-after-<x>, upstream-sync-<n>.
+# fork-review-rollup-<n>, sunrise-review-rollup-<n>, rollup-<n>, sync-<n>, sync-after-<x>, upstream-sync-<n>.
 CARRIER_LABELS = {"rollup", "sync"}
-CARRIER_BRANCH = re.compile(r"(?:fork-review-rollup|rollup|upstream-sync|sync)-.+")
+CARRIER_BRANCH = re.compile(r"(?:fork-review-rollup|sunrise-review-rollup|rollup|upstream-sync|sync)-.+")
 
 
 def git(root, *args, check=True):
