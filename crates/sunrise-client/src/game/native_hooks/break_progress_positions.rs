@@ -29,19 +29,23 @@ impl Game<'_> {
         });
         let mut extras = Vec::new();
         let mut refused = 0_usize;
-        for candidate in positions {
+        let mut remaining = positions.into_iter();
+        while let Some(candidate) = remaining.next() {
             let candidate = [candidate.x, candidate.y, candidate.z];
             let delta: [i64; 3] =
                 std::array::from_fn(|i| i64::from(candidate[i]) - i64::from(pos[i]));
             if candidate == pos
                 || extras.contains(&candidate)
-                || extras.len() == 64
                 || !delta.iter().all(|d| d.abs() <= 8)
                 || delta.iter().map(|d| d * d).sum::<i64>() > 64
             {
                 refused += 1;
             } else {
                 extras.push(candidate);
+                if extras.len() == 64 {
+                    refused += remaining.len();
+                    break;
+                }
             }
         }
         if refused > 0 {
