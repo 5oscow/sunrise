@@ -3,6 +3,7 @@
 //! ([`modules`]) and the Wire types a mod lets cross ([`wire_types`]).
 pub mod index;
 pub mod layouts;
+pub mod library;
 pub mod mod_uses;
 pub mod modules;
 pub mod wire_types;

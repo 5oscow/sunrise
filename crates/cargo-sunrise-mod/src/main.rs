@@ -391,9 +391,13 @@ fn build(entry: mod_surface::child::ChildEntry) -> Result<PathBuf, String> {
     let root = Path::new(".");
     let package = Package::read(root)?;
     let code = package.manifest.native.is_some() || package.manifest.wasm.is_some();
+    let mut api = None;
     let uses = if code && sdk_fetch::game_tree(root)?.is_none() {
         let sdk = sdk_fetch::ensure_sdk(root)?;
-        match uses_table::scan(entry, root, &uses_table::surface_of(&sdk)?)? {
+        let surface = uses_table::surface_of(&sdk)?;
+        let scanned = uses_table::scan(entry, root, &surface)?;
+        api = Some(surface);
+        match scanned {
             uses_table::Scanned::Uses(uses) => Some(uses.table(sdk.build).to_json().into_bytes()),
             uses_table::Scanned::Exact(_) => None,
             uses_table::Scanned::Unread(why) => {
@@ -407,17 +411,27 @@ fn build(entry: mod_surface::child::ChildEntry) -> Result<PathBuf, String> {
     } else {
         None
     };
-    pack_into(root, &root.join("target/sunrise-mod"), uses.as_deref())
+    pack_into(
+        root,
+        &root.join("target/sunrise-mod"),
+        uses.as_deref(),
+        api.as_ref(),
+    )
 }
 
 fn build_in(root: &Path) -> Result<PathBuf, String> {
-    pack_into(root, &root.join("target/sunrise-mod"), None)
+    pack_into(root, &root.join("target/sunrise-mod"), None, None)
 }
 
-fn pack_into(root: &Path, dir: &Path, uses: Option<&[u8]>) -> Result<PathBuf, String> {
+fn pack_into(
+    root: &Path,
+    dir: &Path,
+    uses: Option<&[u8]>,
+    api: Option<&mod_surface::Surface>,
+) -> Result<PathBuf, String> {
     let package = Package::read(root)?;
     if package.manifest.native.is_some() || package.manifest.wasm.is_some() {
-        layouts::build(root)?;
+        layouts::build(root, api)?;
     }
     let bytes = Package::pack_directory_with(root, uses)?;
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
