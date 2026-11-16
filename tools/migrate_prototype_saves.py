@@ -19,7 +19,7 @@ for path in Path('crates/sunrise-client').rglob('*.rs'):
     if 'target' in path.parts:
         continue
     source = path.read_bytes()
-    if b'SaveDir::new' not in source:
+    if not any(token in source for token in (b'SaveDir::new', b'encode', b'Encoding')):
         continue
     changes = []
     for node in walk(parser.parse(source).root_node):
@@ -29,6 +29,8 @@ for path in Path('crates/sunrise-client').rglob('*.rs'):
         if not source[function.start_byte:function.end_byte].decode().endswith('SaveDir::new'):
             continue
         arguments = node.child_by_field_name('arguments')
+        if len(arguments.named_children) == 3:
+            continue
         assert len(arguments.named_children) == 2, (path, node.start_point)
         ancestors = []
         parent = node.parent
@@ -49,6 +51,32 @@ for path in Path('crates/sunrise-client').rglob('*.rs'):
             context = 'None'  # The title screen has no world catalog yet.
         last = arguments.named_children[-1]
         changes.append((last.end_byte, f', {context}'.encode()))
-    for offset, addition in reversed(changes):
+    relative = str(path.relative_to('crates/sunrise-client'))
+    for node in walk(parser.parse(source).root_node):
+        if node.type == 'struct_expression':
+            name = node.child_by_field_name('name')
+            if name is not None and source[name.start_byte:name.end_byte] == b'Encoding':
+                body = node.child_by_field_name('body')
+                if b'items:' not in source[body.start_byte:body.end_byte]:
+                    changes.append((body.start_byte + 1, b'items: Default::default(),'))
+        if node.type != 'call_expression':
+            continue
+        function = node.child_by_field_name('function')
+        name = source[function.start_byte:function.end_byte].decode()
+        short = name.split('::')[-1]
+        if short not in ('encode', 'encode_with', 'encode_proto'):
+            continue
+        is_save = 'save::' in name or relative == 'src/save.rs' or relative.startswith('src/save/')
+        if not is_save:
+            continue
+        arguments = node.child_by_field_name('arguments')
+        expected = 3 if short == 'encode' else 5
+        if len(arguments.named_children) != expected:
+            continue
+        context = '&Default::default()'
+        if relative == 'src/game/runtime/hot_paths/chunks.rs':
+            context = 'self.res.items()'
+        changes.append((arguments.named_children[-1].end_byte, f', {context}'.encode()))
+    for offset, addition in sorted(changes, reverse=True):
         source = source[:offset] + addition + source[offset:]
     path.write_bytes(source)
