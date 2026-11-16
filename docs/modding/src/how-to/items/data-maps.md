@@ -157,7 +157,7 @@ back to a block it already passed. Lightning's waxed check, the carved pumpkin a
 keep vanilla's own lists. A block the maps don't name keeps vanilla's behaviour.
 
 `generate_block_transform`, `neoforge:transformables` and `block_transform_appenders` are not read
-yet ([#3359](https://github.com/arismoko/horizon/issues/3359)).
+yet.
 
 `host.biome_key("minecraft:plains")` resolves a `BiomeKey` in the installed
 server world registry. Its `id(host)` returns `Ok(canonical_id)`, and

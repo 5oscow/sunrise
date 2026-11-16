@@ -1033,9 +1033,9 @@ for a stale handle, a client, the dragon, and a mob whose copy is held out — n
 as in vanilla: after a reload the mob has its species' set again, and a mod's `entity_join` adds its own back.
 
 These methods reuse built-in goal kinds; they do not define arbitrary goal callbacks or run at construction's
-`Mob.registerGoals` moment. [Custom mob goals at construction](https://github.com/arismoko/horizon/issues/1077)
-tracks a typed goal registrar and callbacks on `MobRef` and Parts, shared by native and wasm mods. NeoForge has
-no bus event at this moment. The upstream raw-`Mob` `register_goals` interface is not part of this fork's API.
+`Mob.registerGoals` moment. A typed goal registrar and callbacks on `MobRef` and Parts, shared by native and wasm
+mods, are not part of this API yet. NeoForge has no bus event at this moment. The upstream raw-`Mob`
+`register_goals` interface is not part of this fork's API.
 
 ### Mob AI controls
 
