@@ -178,8 +178,10 @@ fn parrot_variant_recipe_codec_presence_strictness_and_borrowed_matching() {
             "minecraft:parrot/variant",
             Some(Tag::String("green".into())),
         );
-        egg.data_mut()
-            .set_other("minecraft:custom_data", Some(Tag::Int(3)));
+        egg.data_mut().set_other(
+            "minecraft:custom_data",
+            Some(Tag::compound([("extra", Tag::Int(3))])),
+        );
         assert!(loose.craft(&context, &[Some(egg.clone())], 1).is_some());
         assert!(exact.craft(&context, &[Some(egg.clone())], 1).is_none());
         let removed = Tag::compound([(

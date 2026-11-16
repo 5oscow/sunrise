@@ -77,9 +77,10 @@ fn unbreakable_unit_recipe_matches_presence_defaults_and_removal() {
     });
     assert_eq!(allocations.calls, 0, "{allocations:?}");
     assert_eq!(allocations.bytes, 0);
-    stone
-        .data_mut()
-        .set_other("minecraft:custom_data", Some(Tag::Int(1)));
+    stone.data_mut().set_other(
+        "minecraft:custom_data",
+        Some(Tag::compound([("extra", Tag::Int(1))])),
+    );
     assert!(!matches(stone.clone()));
     stone.count = 0;
     assert!(!ingredient.test_in(&context, &stone));

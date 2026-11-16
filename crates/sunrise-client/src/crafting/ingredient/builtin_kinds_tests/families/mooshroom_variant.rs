@@ -130,8 +130,10 @@ fn mooshroom_variant_recipe_codec_preserves_names_defaults_removal_and_strictnes
     assert!(exact.craft(&context, &[Some(egg.clone())], 1).is_some());
     assert!(omitted.craft(&context, &[Some(egg.clone())], 1).is_none());
     assert!(removal.craft(&context, &[Some(egg.clone())], 1).is_none());
-    egg.data_mut()
-        .set_other("minecraft:custom_data", Some(Tag::Int(3)));
+    egg.data_mut().set_other(
+        "minecraft:custom_data",
+        Some(Tag::compound([("extra", Tag::Int(3))])),
+    );
     assert!(loose.craft(&context, &[Some(egg.clone())], 1).is_some());
     assert!(exact.craft(&context, &[Some(egg.clone())], 1).is_none());
     egg.data_mut().set_other("minecraft:custom_data", None);
