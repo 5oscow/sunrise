@@ -13,13 +13,10 @@ else (videos, Discord and other community material) lives elsewhere.
 suggest something. A pull request for a roadmap item carries its `roadmap:<id>` label; ideas go to the suggestion
 queue (the hub, or `/suggest` on Discord) rather than to issues, which are for bugs.
 
-**Mod-related pull requests go to [arismoko/horizon](https://github.com/arismoko/horizon)**, the fork that carries the
-mod API and reviews and merges that work. That covers the mod API, native hooks and events for mods, native mods,
-content mods (`.smod`), mixins, wasm mods, `cargo sunrise-mod`, `sunrise-mods`, mod builds and the registry, and
-their docs ([mods](docs/mods.md), [native mods](docs/native-mods.md)). Open the pull request there from your usual
-branch. Mod-related pull requests opened here are closed with a pointer to it. Engine extension points that Sunrise's
-own crates register (the [layer split](docs/layers.md)), resource and shader pack formats, and gameplay fixes stay
-here.
+**Mod-related pull requests come here too.** Sunrise is where the mod API is built: the mod API, native hooks and
+events for mods, native mods, content mods (`.smod`), mixins, wasm mods, `cargo sunrise-mod`, `sunrise-mods`, mod
+builds and the registry, and their docs ([mods](docs/mods.md), [native mods](docs/native-mods.md)). A change to the mod
+API follows its clean-break rules ([AGENTS.md](AGENTS.md#mod-api-on-this-fork-the-clean-break)).
 
 ## Build it
 
