@@ -113,11 +113,21 @@ fn nested_push_and_pop_scope_the_turn_and_what_is_drawn_follows_it() {
     // A quarter turn clockwise about (100, 50): x runs down, y runs left.
     assert_eq!(
         corners(&batch, 0..6),
-        [[98000, 50000], [98000, 54000], [100000, 50000], [100000, 54000]]
+        [
+            [98000, 50000],
+            [98000, 54000],
+            [100000, 50000],
+            [100000, 54000]
+        ]
     );
     assert_eq!(
         corners(&batch, 6..12),
-        [[100000, 50000], [100000, 52000], [104000, 50000], [104000, 52000]]
+        [
+            [100000, 50000],
+            [100000, 52000],
+            [104000, 50000],
+            [104000, 52000]
+        ]
     );
     assert_eq!(
         corners(&batch, 12..18),
@@ -147,7 +157,10 @@ fn text_turns_with_the_pose() {
     };
     let (mut flat, mut turned) = (HudBatch::scratch([854, 480]), HudBatch::scratch([854, 480]));
     text(&mut flat, vec![PoseOp::Translate(100.0, 50.0)]);
-    text(&mut turned, vec![PoseOp::Translate(100.0, 50.0), PoseOp::Rotate(FRAC_PI_2)]);
+    text(
+        &mut turned,
+        vec![PoseOp::Translate(100.0, 50.0), PoseOp::Rotate(FRAC_PI_2)],
+    );
     assert!(!flat.vertices.is_empty(), "no glyphs drawn");
     assert_eq!(flat.vertices.len(), turned.vertices.len());
     for (f, t) in flat.vertices.iter().zip(&turned.vertices) {
@@ -179,5 +192,8 @@ fn a_non_finite_angle_is_refused_and_leaves_the_pose_as_it_was() {
             matches!(pose_refused(&ops), Some(PoseOp::Rotate(a)) if a.is_nan() == angle.is_nan())
         );
     }
-    assert_eq!(pose_refused(&[PoseOp::Rotate(1.0), PoseOp::Scale(f32::NAN, 1.0)]), None);
+    assert_eq!(
+        pose_refused(&[PoseOp::Rotate(1.0), PoseOp::Scale(f32::NAN, 1.0)]),
+        None
+    );
 }
