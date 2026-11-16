@@ -1,23 +1,21 @@
 # Sunrise's mark and icons
 
-**The mark.** An H whose crossbar is the sunrise: the line runs edge to edge in Sunrise's violet,
-the stems above it in full strength and their reflection below at a third. It is drawn on whole
-units of a 16-unit grid, so it is sharp at 16 px and holds at 1024 px. `docs/design-system.md`
-places it in the design system; `candidates/` keeps the two alternatives that were shown with it.
+**The mark.** A pixel-art sunrise on a dark tile, the website's icon: rays, the sun's dome and the horizon
+on whole units of a 16-unit grid, drawn with crisp edges, so it is sharp at 16 px and holds at 1024 px.
 
 ## Masters (edit these)
 
 | File | What |
 |------|------|
-| `icon.svg` | the app icon on the 16 grid: the full square with 22 % corners (Windows, Linux, favicons) |
-| `icon-macos.svg` | the same tile on Apple's 1024 grid (824 px tile, 185 px corners, transparent margin) |
+| `icon.svg` | the app icon on the 16 grid: the full square with 3-unit (3/16) corners (Windows, Linux, favicons) |
+| `icon-macos.svg` | the same tile on Apple's 1024 grid (832 px tile, 156 px corners, transparent margin) |
 | `avatar.svg` | full-bleed square for services that round or crop the image (GitHub, Discord) |
 | `mark.svg`, `mark-dark.svg` | the mark alone, for light and for dark backgrounds |
 | `social/card.html` | the GitHub social preview, as a page |
 
 ## Generated (don't edit)
 
-`cargo run -p xtask -- icons` (needs `rsvg-convert` from librsvg) renders the masters into:
+`python3 tools/render_brand_icons.py` renders `icon.svg` pixel-exact (nearest neighbour) into:
 
 | Output | Used by |
 |--------|---------|
@@ -28,7 +26,7 @@ places it in the design system; `candidates/` keeps the two alternatives that we
 | `crates/sunrise-theme/icons/sunrise-64.png` | the game window's icon at run time (X11 and Windows title bars, `window::icon`) |
 | `web/favicon.svg`, `web/favicon-32.png`, `web/apple-touch-icon.png` | the website (its `npm run assets` copies them into its `public/`) |
 | `icon-1024.png`, `icon-macos-1024.png` | previews, store listings |
-| `social/github-avatar-500.png` | GitHub: the organisation or account avatar |
+| `social/github-avatar-500.png` (from `avatar.svg` by `cargo run -p xtask -- icons`, which needs `rsvg-convert`) | GitHub: the organisation or account avatar |
 
 The page in `social/` is a screenshot, at their exact size, with Playwright, from the repository's root:
 
