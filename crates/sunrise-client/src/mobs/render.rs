@@ -1064,6 +1064,7 @@ fn enderman_render_offset(m: &Mob, alpha: f32) -> glam::DVec3 {
 }
 /// `base_transform` from a pose of the entity's origin (`EntityRenderDispatcher.submit`
 /// under a pose stack, as `SpawnerRenderer` draws the mob inside a spawner).
+#[sunrise_mod_api_macros::replaceable]
 pub fn base_transform_at(m: &Mob, alpha: f32, origin: glam::Mat4) -> glam::Mat4 {
     let mut body = anim::body_rot(m, alpha);
     if shaking(m) {
