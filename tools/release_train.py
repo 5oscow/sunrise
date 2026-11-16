@@ -293,10 +293,12 @@ def merged_pull_request_metadata():
 
 
 def published_releases():
-    """Published releases with their tags and dates: no drafts, and no pre-releases (the old Alpha channel's)."""
+    """Published releases with their tags and dates: no drafts, and no pre-releases (the old Alpha channel's) but
+    the launcher's, which launcher.yml publishes as pre-releases."""
     releases = gh_json("api", f"repos/{REPO}/releases?per_page=100", "--paginate")
     flat = [release for page in releases for release in page]
-    return [release for release in flat if not release["draft"] and not release["prerelease"]]
+    return [release for release in flat
+            if not release["draft"] and (not release["prerelease"] or is_launcher_tag(release["tag_name"]))]
 
 
 def open_blockers():
