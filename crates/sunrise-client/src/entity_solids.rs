@@ -177,3 +177,38 @@ impl Solids {
         self.area.is_none_or(|area| c.bounds.intersects(area)) && self.mover.solid(c, root)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sunrise_core::geometry::Vec3;
+
+    /// `HappyGhast.canBeCollidedWith(Player)`: an adult alive ghast is solid to a player whose feet
+    /// are at or over its top, or while it is held still; never a baby or a dead one.
+    #[test]
+    fn a_players_feet_over_a_happy_ghasts_top_or_its_still_timeout_make_it_solid() {
+        let ghast = |alive, baby, still| Candidate {
+            alive,
+            baby,
+            still,
+            ..Candidate::fixed(
+                SolidKind::HappyGhast,
+                7,
+                Aabb::new(Vec3::new(0.0, 80.0, 0.0), Vec3::new(4.0, 84.0, 4.0)),
+            )
+        };
+        let solid = |feet_y, c: Candidate| {
+            Mover::Player {
+                feet_y,
+                riding: None,
+            }
+            .solid(&c, || None)
+        };
+        assert!(solid(84.0, ghast(true, false, false)));
+        assert!(solid(85.0, ghast(true, false, false)));
+        assert!(!solid(83.99, ghast(true, false, false)));
+        assert!(solid(83.99, ghast(true, false, true)));
+        assert!(!solid(84.0, ghast(true, true, true)));
+        assert!(!solid(84.0, ghast(false, false, true)));
+    }
+}
