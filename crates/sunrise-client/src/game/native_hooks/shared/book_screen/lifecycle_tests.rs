@@ -359,6 +359,15 @@ fn a_moved_slot_takes_its_place_for_drawing_and_input_from_the_next_frame() {
             assert_ne!(game.slot_at(&batch, 560.0, 295.0), Some(300));
             assert_eq!(game.slot_position(301), (26.0, 18.0));
 
+            // The controller's slot targets read the same committed position.
+            let pad: Vec<[f32; 4]> = game
+                .pad_slot_targets(&batch)
+                .iter()
+                .map(|t| t.rect)
+                .collect();
+            assert!(pad.contains(&[600.0, 337.0, 16.0, 16.0]));
+            assert!(!pad.contains(&[560.0, 295.0, 16.0, 16.0]));
+
             // Repeating the position, or the declared one, rebuilds nothing.
             let builds = crate::game::container_layout::LAYOUT_CONSTRUCTIONS.with(|c| c.get());
             assert!(game.set_screen_slot_position(0, 48.0, 60.0));

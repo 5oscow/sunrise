@@ -536,13 +536,13 @@ impl SlotMoves {
     /// build. False, changing nothing, for a slot the screen does not show or
     /// a position that is not finite.
     fn set(&self, slots: &[Option<[f32; 2]>], slot: u32, x: f32, y: f32) -> bool {
-        let shown = usize::try_from(slot)
+        let Some((slot, declared)) = usize::try_from(slot)
             .ok()
-            .filter(|&i| slots.get(i).is_some_and(|p| p.is_some()));
-        let Some(slot) = shown.filter(|_| x.is_finite() && y.is_finite()) else {
+            .and_then(|i| Some((i, slots.get(i).copied().flatten()?)))
+            .filter(|_| x.is_finite() && y.is_finite())
+        else {
             return false;
         };
-        let declared = slots[slot].expect("shown");
         let mut pending = self.pending.borrow_mut();
         let current = pending
             .get(&slot)
