@@ -21,6 +21,7 @@ pub mod health;
 #[doc(hidden)]
 pub mod mobs;
 pub(crate) mod part_state;
+pub(crate) mod pending_children;
 pub(crate) mod player_bots;
 pub(crate) mod types;
 pub(crate) mod unspawned_mob;
