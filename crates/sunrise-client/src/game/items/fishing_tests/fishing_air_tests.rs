@@ -1,7 +1,7 @@
 //! `FishingHook.getOpenWaterTypeForBlock` tests `!state.isAir()`, and `isAir()` covers
 //! cave_air and void_air: a hook over a source under a cave's air is open water, so its
 //! catch can be treasure. (A stone block is not air, so it is not open water either.)
-use super::{FISHING_TABLE, fishing_loot};
+use super::{FISHING_TABLE, fishing_loot, hook_params};
 use sunrise_world::loot::LootStack;
 
 #[test]
@@ -72,10 +72,9 @@ fn cave_air_above_a_water_source_is_open_water_and_catches_treasure() {
                     &mut sequences,
                     &mut level_random,
                     seed,
-                    0.0,
                     None,
                     open_water,
-                    &sunrise_world::loot::LootEntity::new("minecraft:fishing_bobber"),
+                    &hook_params(0.0, None),
                 )
             })
             .collect()

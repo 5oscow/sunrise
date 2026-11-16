@@ -28,6 +28,23 @@ mod impact;
 /// The table a catch rolls where no mod's fishing medium names one.
 const FISHING_TABLE: &str = "minecraft:gameplay/fishing";
 
+/// `LootContextParamSets.FISHING`'s entities: the hook is THIS_ENTITY and its
+/// owner the attacking entity, with the luck the hook and the owner add.
+fn hook_params(
+    luck: f32,
+    owner: Option<sunrise_world::loot::LootEntity>,
+) -> sunrise_world::loot::EntityLootParams {
+    sunrise_world::loot::EntityLootParams {
+        this: sunrise_world::loot::LootEntity {
+            living: false,
+            ..sunrise_world::loot::LootEntity::new("minecraft:fishing_bobber")
+        },
+        luck,
+        attacker: owner,
+        ..Default::default()
+    }
+}
+
 /// `FishingHook.retrieve`: the table's named random sequence, or the level
 /// random when a datapack table does not name one.
 #[allow(clippy::too_many_arguments)]
@@ -37,28 +54,19 @@ fn fishing_loot(
     sequences: &mut sunrise_client::random_sequences::RandomSequences,
     level_random: &mut LegacyRandom,
     world_seed: i64,
-    luck: f32,
     biome: Option<&str>,
     open_water: bool,
-    hook: &sunrise_world::loot::LootEntity,
+    params: &sunrise_world::loot::EntityLootParams,
 ) -> Vec<sunrise_world::loot::LootStack> {
     match loot.random_sequence(table) {
         Some(sequence) => loot.roll_as(
             table,
             sequences.get(sequence, world_seed),
-            luck,
             biome,
             Some(open_water),
-            Some(hook),
+            params,
         ),
-        None => loot.roll_as(
-            table,
-            level_random,
-            luck,
-            biome,
-            Some(open_water),
-            Some(hook),
-        ),
+        None => loot.roll_as(table, level_random, biome, Some(open_water), params),
     }
 }
 
@@ -667,11 +675,9 @@ impl Game<'_> {
                 .and_then(|m| m.loot_table.as_deref())
                 .unwrap_or(FISHING_TABLE);
             // `LootContextParamSets.FISHING`: the hook is THIS_ENTITY, the rod
-            // the TOOL, and the hook's position the ORIGIN.
-            let this = sunrise_world::loot::LootEntity {
-                living: false,
-                ..sunrise_world::loot::LootEntity::new("minecraft:fishing_bobber")
-            };
+            // the TOOL, and the hook's position the ORIGIN; its owner is the
+            // attacking entity.
+            let params = hook_params(luck, Some(self.killer_loot_entity(None)));
             let caller = self.caller_loot(
                 Some([hook.position.x, hook.position.y, hook.position.z]),
                 Some(super::creatures::to_loot(rod)),
@@ -683,10 +689,9 @@ impl Game<'_> {
                     &mut self.rand_sequences,
                     &mut self.world.random,
                     self.level.seed,
-                    luck,
                     biome.as_deref(),
                     hook.open_water,
-                    &this,
+                    &params,
                 )
             });
             let mut caught: Vec<ItemStack> = items
@@ -2229,10 +2234,9 @@ mod tests {
                 &mut sequences,
                 &mut level_random,
                 seed,
-                0.0,
                 None,
                 true,
-                &sunrise_world::loot::LootEntity::new("minecraft:fishing_bobber"),
+                &super::hook_params(0.0, None),
             );
             let drops = row["drops"].as_array().unwrap();
             let expected_items: Vec<_> = drops.iter().filter(|d| d.get("item").is_some()).collect();

@@ -116,10 +116,10 @@ Each caller supplies vanilla's parameters for its roll, and only those; the rest
 | --- | --- | --- | --- | --- |
 | Piglin barter | the piglin | none | none | 0 |
 | Advancement reward | the rewarded player | none | the player's position | 0 |
-| Fishing | the fishing hook | the rod | the hook's position | the hook's and the owner's luck |
+| Fishing | the fishing hook; its owner is the `attacker` entity target of conditions | the rod | the hook's position | the hook's and the owner's luck |
 | Brushing | the brusher | the brush | the block's centre | the brusher's luck |
 | Vault reward | the player | the inserted key | the vault's centre | the player's luck |
 | Vault display item | none | none | the vault's centre | 0 |
 | A mod's roll call | the entity it named, if any | the tool it gave | the origin it gave | 0 |
 
-`place.level` is present on all of them. A player's entity carries their worn and held items.
+The fishing owner is not a damage source: `damage` stays missing, and only a condition's `attacker` target reaches the owner. `place.level` is present on all of them. A player's entity carries their worn and held items.

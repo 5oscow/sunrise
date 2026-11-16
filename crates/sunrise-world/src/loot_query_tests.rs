@@ -383,11 +383,11 @@ type Seen = (Option<String>, Option<String>, Option<[f64; 3]>, f32);
 
 /// A `LootData` with `table` as `test:caller` and a modifier that records the
 /// facts of the one root pass.
-fn watched(table: Value) -> (LootData, Arc<std::sync::Mutex<Option<Seen>>>) {
+fn watched(table: Value, raw: Option<Value>) -> (LootData, Arc<std::sync::Mutex<Option<Seen>>>) {
     use global_modifiers::{
         DecodedModifier, GlobalLootModifiers, ModifierApply, ModifierFile, ModifierRoll,
     };
-    struct Watch(Arc<std::sync::Mutex<Option<Seen>>>);
+    struct Watch(Arc<std::sync::Mutex<Option<Seen>>>, bool);
     impl ModifierApply for Watch {
         fn apply(
             &self,
@@ -401,11 +401,18 @@ fn watched(table: Value) -> (LootData, Arc<std::sync::Mutex<Option<Seen>>>) {
                 facts.place.as_ref().and_then(|p| p.origin),
                 facts.luck,
             ));
-            Ok(generated.to_vec())
+            let mut out = generated.to_vec();
+            if self.1 {
+                out.extend(roll.roll_raw("test:raw")?);
+            }
+            Ok(out)
         }
     }
     let seen = Arc::new(std::sync::Mutex::new(None));
-    let mut data = data(vec![("test:caller", table)]);
+    let has_raw = raw.is_some();
+    let mut tables = vec![("test:caller", table)];
+    tables.extend(raw.map(|raw| ("test:raw", raw)));
+    let mut data = data(tables);
     let watch = seen.clone();
     data.set_global_modifiers(Arc::new(GlobalLootModifiers::load(
         [ModifierFile {
@@ -419,7 +426,7 @@ fn watched(table: Value) -> (LootData, Arc<std::sync::Mutex<Option<Seen>>>) {
             Ok(DecodedModifier {
                 priority: 1,
                 condition: None,
-                apply: Arc::new(Watch(watch.clone())),
+                apply: Arc::new(Watch(watch.clone(), has_raw)),
             })
         },
         |error| panic!("{error}"),
@@ -439,38 +446,81 @@ fn as_caller<T>(tool: Option<&str>, origin: [f64; 3], roll: impl FnOnce() -> T) 
     })
 }
 
-/// `LootContextParamSets.FISHING`: the hook is THIS_ENTITY, the rod the TOOL,
-/// the hook's position the ORIGIN, and the luck what the hook and its owner
-/// add. A hook predicate keeps reading whether the hook is in open water.
+/// `LootContextParamSets.FISHING`: the hook is THIS_ENTITY and its owner the
+/// attacking entity, the rod the TOOL, the hook's position the ORIGIN, and the
+/// luck what the hook and its owner add. A hook predicate keeps reading whether
+/// the hook is in open water, and a raw sub-roll sees the same entities.
 #[test]
-fn a_fishing_roll_names_the_hook_the_rod_and_the_position() {
-    let table = json!({"pools":[{"rolls":1,
-        "condition":
-            {"type":"minecraft:entity_properties","entity":"this",
-             "predicate":{"minecraft:type_specific/fishing_hook":{"in_open_water":true}}},
-        "entries":[{"type":"minecraft:item","name":"minecraft:pufferfish"}]},
-        {"rolls":1,
-        "condition":
-            {"type":"minecraft:entity_properties","entity":"this",
-             "predicate":{"minecraft:entity_type":"minecraft:fishing_bobber"}},
-        "entries":[{"type":"minecraft:item","name":"minecraft:cod"}]}]});
-    let (data, seen) = watched(table);
-    let hook = LootEntity {
-        living: false,
-        ..LootEntity::new("minecraft:fishing_bobber")
+fn a_fishing_roll_names_the_hook_its_owner_the_rod_and_the_position() {
+    let pool = |target: &str, predicate: Value, item: &str| {
+        json!({"rolls":1,
+            "condition":{"type":"minecraft:entity_properties","entity":target,"predicate":predicate},
+            "entries":[{"type":"minecraft:item","name":item}]})
     };
-    for (open, expected) in [
-        (true, vec!["minecraft:pufferfish", "minecraft:cod"]),
-        (false, vec!["minecraft:cod"]),
+    let hook = |item| {
+        pool(
+            "this",
+            json!({"minecraft:entity_type":"minecraft:fishing_bobber"}),
+            item,
+        )
+    };
+    let owner = |item| {
+        pool(
+            "attacker",
+            json!({"minecraft:entity_type":"minecraft:player"}),
+            item,
+        )
+    };
+    let table = json!({"pools":[
+        pool("this", json!({"minecraft:type_specific/fishing_hook":{"in_open_water":true}}), "minecraft:pufferfish"),
+        hook("minecraft:cod"),
+        owner("minecraft:name_tag"),
+        // The hook is not the attacker, and the owner is not THIS_ENTITY.
+        pool("attacker", json!({"minecraft:entity_type":"minecraft:fishing_bobber"}), "minecraft:bone"),
+        pool("this", json!({"minecraft:entity_type":"minecraft:player"}), "minecraft:stick"),
+    ]});
+    let raw = json!({"pools":[hook("minecraft:lily_pad"), owner("minecraft:saddle")]});
+    let (data, seen) = watched(table, Some(raw));
+    let params = |owner: Option<LootEntity>| EntityLootParams {
+        this: LootEntity {
+            living: false,
+            ..LootEntity::new("minecraft:fishing_bobber")
+        },
+        luck: 2.0,
+        attacker: owner,
+        ..Default::default()
+    };
+    for (open, owner, expected) in [
+        (
+            true,
+            Some(LootEntity::new("minecraft:player")),
+            vec![
+                "minecraft:pufferfish",
+                "minecraft:cod",
+                "minecraft:name_tag",
+                "minecraft:lily_pad",
+                "minecraft:saddle",
+            ],
+        ),
+        (
+            false,
+            Some(LootEntity::new("minecraft:player")),
+            vec![
+                "minecraft:cod",
+                "minecraft:name_tag",
+                "minecraft:lily_pad",
+                "minecraft:saddle",
+            ],
+        ),
+        (false, None, vec!["minecraft:cod", "minecraft:lily_pad"]),
     ] {
         let drops = as_caller(Some("minecraft:fishing_rod"), [4.5, 62.0, 9.5], || {
             data.roll_as(
                 "test:caller",
                 &mut LegacyRandom::new(3),
-                2.0,
                 None,
                 Some(open),
-                Some(&hook),
+                &params(owner),
             )
         });
         assert_eq!(
@@ -495,7 +545,7 @@ fn a_fishing_roll_names_the_hook_the_rod_and_the_position() {
 fn a_brushing_roll_names_the_brusher_the_brush_and_the_block() {
     let table = json!({"pools":[{"rolls":1,"entries":[
         {"type":"minecraft:item","name":"minecraft:pottery_sherd_arms_up"}]}]});
-    let (data, seen) = watched(table);
+    let (data, seen) = watched(table, None);
     let brusher = LootEntity::new("minecraft:player");
     let slots = as_caller(Some("minecraft:brush"), [8.5, 64.5, -7.5], || {
         data.fill_in(
@@ -531,7 +581,7 @@ fn a_brushing_roll_names_the_brusher_the_brush_and_the_block() {
 fn a_vault_reward_names_the_player_the_key_and_the_vault() {
     let table = json!({"pools":[{"rolls":1,"entries":[
         {"type":"minecraft:item","name":"minecraft:emerald"}]}]});
-    let (data, seen) = watched(table);
+    let (data, seen) = watched(table, None);
     let player = LootEntity::new("minecraft:player");
     as_caller(Some("minecraft:trial_key"), [0.5, 70.5, 0.5], || {
         data.roll_container_with(

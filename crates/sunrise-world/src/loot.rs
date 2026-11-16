@@ -415,6 +415,9 @@ pub struct EntityLootParams {
     pub player: Option<LootEntity>,
     /// The killing player's luck.
     pub luck: f32,
+    /// `ATTACKING_ENTITY` when the roll has no damage source to name it: a
+    /// fishing hook's owner.
+    pub attacker: Option<LootEntity>,
 }
 /// The most a table's read of an enchantment level counts as. A mod can answer
 /// any level, and what it answers drives loops: a stack of that size splits one
@@ -990,6 +993,7 @@ impl LootData {
             damage: params.damage.clone(),
             player: None,
             luck: 0.0,
+            attacker: params.attacker.clone(),
         };
         let mut c = Context {
             query: query::current_query(),
@@ -1242,7 +1246,11 @@ impl<R: RandomSource> Context<'_, R> {
         let p = self.entity?;
         match name {
             "this" => Some(&p.this),
-            "attacker" => p.damage.as_ref()?.source.as_ref(),
+            "attacker" => p
+                .damage
+                .as_ref()
+                .and_then(|d| d.source.as_ref())
+                .or(p.attacker.as_ref()),
             "direct_attacker" => p.damage.as_ref()?.direct.as_ref(),
             "attacking_player" => p.player.as_ref(),
             _ => None,
