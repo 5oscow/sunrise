@@ -1278,7 +1278,7 @@ fn a_reborrowed_array_has_no_redundant_parentheses() {
         ("mod_api_generated_host.rs", generated.host.as_str()),
         ("mod_api_host_areas.rs", generated.areas.as_str()),
     ];
-    let types = Types::new(crate::index::Index::new(&root, &included)).unwrap();
+    let types = Types::new(crate::index::game(&root, &included)).unwrap();
     let cube = Ty::Option(Box::new(Ty::Array(Box::new(Ty::Prim("f32")), 4)));
     assert_eq!(
         reborrow(&types, &cube, "p1").unwrap(),

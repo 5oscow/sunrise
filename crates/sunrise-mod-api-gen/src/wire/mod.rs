@@ -283,7 +283,7 @@ pub(super) fn surface_reading<'a>(
     included: &'a [(&'a str, &'a str)],
     mut missing: Option<&mut Vec<String>>,
 ) -> Result<Surface<'a>, String> {
-    let mut types = Types::new(Index::new(root, included))?;
+    let mut types = Types::new(crate::index::game(root, included))?;
     let api = types.index.module("mod_api", &[])?;
     let mut declared = trait_roles::declared(root)?;
     types
