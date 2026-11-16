@@ -1,4 +1,4 @@
-//! The engine side of pending children (docs/modding/src/concepts/pending-children.md):
+//! The engine side of pending children (docs/design/mod-api/pending-children.md):
 //! it constructs the children of a split or a breeding, lends them to `mob_split` and
 //! `baby_entity_spawn` listeners as an engine-owned, ordered list, then freezes, validates and
 //! hands back what is left, once. Native and wasm listeners reach the same arena through
