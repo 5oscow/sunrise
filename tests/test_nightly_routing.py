@@ -99,7 +99,7 @@ console.log(JSON.stringify(eval(expression)));
         for repository, trusted, row in itertools.product(["sunrise-org/sunrise", "horizon-rust/horizon"], [False, True], rows):
             with self.subTest(repository=repository, trusted=trusted, entry=row["name"]):
                 if repository == "sunrise-org/sunrise":
-                    expected = 100 if row.get("mac") else 60
+                    expected = 100 if row.get("mac") or row.get("musl") else 60
                 else:
                     expected = 60 if row.get("mac") else 40
                 self.assertEqual(evaluate(timeout, row, trusted, repository), expected)

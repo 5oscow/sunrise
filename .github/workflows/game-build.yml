@@ -187,8 +187,9 @@ jobs:
     # The fork's cold client + headless builds need both feature variants; keep upstream's limits unchanged.
     # GitHub's macOS runner builds Sunrise's game cold: 60 minutes ran out mid-build (nightly dry run
     # 43813225420), and a timed-out job counts as cancelled, which continue-on-error does not cover, so the
-    # whole build stopped before signing.
-    timeout-minutes: ${{ github.repository == 'sunrise-org/sunrise' && (matrix.mac && 100 || 60) || (matrix.mac && 60 || 40) }}
+    # whole build stopped before signing. The musl leg, built in Alpine on a hosted runner, took 53 minutes in
+    # nightly dry run 43838074073 and ran out at 60 in nightly 43869408636, cancelling it the same way.
+    timeout-minutes: ${{ github.repository == 'sunrise-org/sunrise' && ((matrix.mac || matrix.musl) && 100 || 60) || (matrix.mac && 60 || 40) }}
     env:
       RUSTFLAGS: ${{ matrix.rustflags }}
       # The release's version, built in (sunrise_core::release): --version, user agents and crash reports
