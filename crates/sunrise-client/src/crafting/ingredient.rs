@@ -353,5 +353,9 @@ mod builtin_kinds_tests;
 mod review_tests;
 
 #[cfg(test)]
+#[path = "ingredient/list_entry_tests.rs"]
+mod list_entry_tests;
+
+#[cfg(test)]
 #[path = "ingredient/second_review_tests.rs"]
 mod second_review_tests;

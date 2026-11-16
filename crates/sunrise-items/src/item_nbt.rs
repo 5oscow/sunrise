@@ -108,14 +108,24 @@ pub fn item_from_nbt(tag: &Tag) -> Option<crate::items::ItemStack> {
     })
 }
 pub fn encode_items(slots: &[Option<crate::items::ItemStack>]) -> Tag {
+    encode_items_using(slots, item_to_nbt)
+}
+
+/// Save an inventory with the stack encoder owned by its persistence boundary.
+pub fn encode_items_using(
+    slots: &[Option<crate::items::ItemStack>],
+    encode: impl Fn(&crate::items::ItemStack) -> Tag,
+) -> Tag {
     Tag::List(
         slots
             .iter()
             .enumerate()
             .filter_map(|(i, s)| {
-                let mut entries = vec![("Slot", Tag::Byte(i as i8))];
-                entries.extend(encode_item(s.as_ref()?));
-                Some(Tag::compound(entries))
+                let mut tag = encode(s.as_ref()?);
+                if let Tag::Compound(entries) = &mut tag {
+                    entries.insert("Slot".into(), Tag::Byte(i as i8));
+                }
+                Some(tag)
             })
             .collect(),
     )

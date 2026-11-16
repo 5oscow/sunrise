@@ -65,6 +65,9 @@ pub(crate) mod screenshot;
 pub(crate) mod skull_models;
 pub(crate) mod special_model_renderers;
 pub(crate) mod terrain_draw;
+// hidden: module of API-owned label layout values; mods use the re-export
+#[doc(hidden)]
+pub mod text_layout;
 pub(crate) mod types;
 /// Buttons and text fields for mod screens.
 pub mod widgets;

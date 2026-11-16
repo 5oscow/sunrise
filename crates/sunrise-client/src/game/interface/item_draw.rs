@@ -525,7 +525,19 @@ impl Game<'_> {
         seed: i32,
         hand: CitHand,
     ) -> ItemRenderState {
-        let level = self.item_level();
+        self.resolve_item_in_level(stack, display, owner, Some(&self.item_level()), seed, hand)
+    }
+    /// [`Self::resolve_item_in_hand`] with the level the model reads given: `None` for a
+    /// resolution that has no level, whose `context_dimension` selects take their fallback.
+    pub(super) fn resolve_item_in_level(
+        &self,
+        stack: &ItemStack,
+        display: DisplayContext,
+        owner: Option<&OwnerState>,
+        level: Option<&LevelState>,
+        seed: i32,
+        hand: CitHand,
+    ) -> ItemRenderState {
         let renderer = &self.pack.item_renderer;
         let (rule, glint) = renderer.cit.as_ref().map_or((None, None), |cit| {
             let item_max = self
@@ -544,7 +556,7 @@ impl Game<'_> {
             &item_render::stack_view(stack),
             display,
             owner,
-            Some(&level),
+            level,
             seed,
             &self.item_env(),
             rule,

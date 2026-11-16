@@ -269,6 +269,21 @@ impl Game<'_> {
         self.pack.assets.registry.state(state)?;
         Some(self.res.facts().get(state).map_color)
     }
+    /// `BlockState.getLightEmission()`. None for an unknown state.
+    pub(super) fn block_state_light_emission(&self, state: BlockStateId) -> Option<u8> {
+        self.pack.assets.registry.state(state)?;
+        Some(self.res.facts().get(state).emission)
+    }
+    /// `BlockBehaviour.getFriction()` of the state's block. None for an unknown state.
+    pub(super) fn block_state_friction(&self, state: BlockStateId) -> Option<f32> {
+        self.pack.assets.registry.state(state)?;
+        Some(self.res.facts().get(state).friction)
+    }
+    /// `BlockState.isSolidRender()`. None for an unknown state.
+    pub(super) fn block_state_is_solid_render(&self, state: BlockStateId) -> Option<bool> {
+        self.pack.assets.registry.state(state)?;
+        Some(self.res.facts().get(state).solid_render)
+    }
     /// The immutable local ordinals of `block`, independent of current world ID order.
     pub(super) fn block_states_of(&self, block: BlockKey) -> Option<BlockStateRange> {
         mod_api::__private::block_state_range(block).ok()
@@ -1055,6 +1070,21 @@ mod facts_tests {
             // MapColor.STONE is id 11 and air has none.
             assert_eq!(facts.map_color(stone), Some(11));
             assert_eq!(facts.map_color(air), Some(0));
+            // getLightEmission: a torch 14, glowstone 15, stone 0.
+            assert_eq!(facts.light_emission(state("minecraft:torch")), Some(14));
+            assert_eq!(facts.light_emission(state("minecraft:glowstone")), Some(15));
+            assert_eq!(facts.light_emission(stone), Some(0));
+            // getFriction: 0.6 by default, ice 0.98, slime 0.8.
+            assert_eq!(facts.friction(stone), Some(0.6));
+            assert_eq!(facts.friction(state("minecraft:ice")), Some(0.98));
+            assert_eq!(facts.friction(state("minecraft:slime_block")), Some(0.8));
+            // isSolidRender: a full occluding cube only.
+            assert_eq!(facts.is_solid_render(stone), Some(true));
+            assert_eq!(facts.is_solid_render(state("minecraft:glass")), Some(false));
+            assert_eq!(
+                facts.is_solid_render(state("minecraft:stone_slab")),
+                Some(false)
+            );
             // SoundType.STONE: its break event, at volume and pitch 1.
             let sound = facts.sound(stone).unwrap();
             assert_eq!(&*sound.break_sound, "minecraft:block.stone.break");

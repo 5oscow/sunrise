@@ -715,6 +715,7 @@ fn block_aliases_keep_the_original_item_in_placement_context() {
         }
         fn before_state_for_placement(
             &self,
+            _: &sunrise_world::level::Ticks,
             _: BlockStateId,
             c: &PlacementContext,
             _: sunrise_world::fluid::FluidState,
@@ -7414,4 +7415,182 @@ fn structure_modifiers_bundle_spawns_without_modifier_preserve_individual_files(
         10
     );
     fs::remove_dir_all(base.parent().unwrap()).unwrap();
+}
+
+/// The legacy solid bit of declared blocks in the generated behaviours table, through `Plan::new`
+/// and `Plan::json` over a hand-made base: the final flag integers, not only the helper's answer.
+#[test]
+fn declared_solid_reaches_the_behaviour_table() {
+    // Templates, one state each but `axis` (two): `plain` is not solid, `keeps` is, and the two
+    // forcing ones carry the opposite bit to what they force. Every row has the marker bit 64.
+    let facts = r#"{"states":[
+      ["minecraft:plain",false,false,"",{"id":"minecraft:plain"}],
+      ["minecraft:forced_on",false,false,"",{"id":"minecraft:forced_on"}],
+      ["minecraft:forced_off",false,false,"",{"id":"minecraft:forced_off"}],
+      ["minecraft:keeps",false,false,"",{"id":"minecraft:keeps"}],
+      ["minecraft:axis",false,false,"",{"id":"minecraft:axis","properties":{"axis":"x"}}],
+      ["minecraft:axis",false,false,"",{"id":"minecraft:axis","properties":{"axis":"y"}}]],
+      "defaults":{"minecraft:plain":0,"minecraft:forced_on":1,"minecraft:forced_off":2,
+        "minecraft:keeps":3,"minecraft:axis":4}}"#;
+    let (base, _) = block_base_of("declared-solid", &[], facts);
+    let template_flags = [64, 64, 64 | 1, 64 | 1, 64, 64 | 1];
+    let row = |name: &str, flags: i32| format!(r#"["{name}",{flags},0,0,false,{{"id":"{name}"}}]"#);
+    let rows: Vec<String> = ["plain", "forced_on", "forced_off", "keeps", "axis", "axis"]
+        .iter()
+        .zip(template_flags)
+        .map(|(name, flags)| row(&format!("minecraft:{name}"), flags))
+        .collect();
+    fs::write(
+        base.join("block-behaviours.json"),
+        format!(
+            r#"{{"blocks":[],"items":{{}},"states":[{}]}}"#,
+            rows.join(",")
+        ),
+    )
+    .unwrap();
+    // Block definition flags: bit 0 forces solid on, bit 1 forces it off.
+    let blocks = Compound::from(
+        [
+            ("minecraft:plain", 0),
+            ("minecraft:forced_on", 1),
+            ("minecraft:forced_off", 2),
+            ("minecraft:keeps", 0),
+            ("minecraft:axis", 0),
+        ]
+        .map(|(name, flags)| (JavaString::from(name), Tag::Byte(flags))),
+    );
+    fs::create_dir_all(base.join("worldgen/blocks")).unwrap();
+    fs::write(
+        base.join("worldgen/blocks/block-properties.nbt"),
+        nbt::write_named(
+            &nbt::NamedTag {
+                name: JavaString::from(""),
+                tag: Tag::Compound(Compound::from([(
+                    JavaString::from("blocks"),
+                    Tag::Compound(blocks),
+                )])),
+            },
+            Limits::tables(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let full = "[[0,0,0,1,1,1]]";
+    let thin = "[[0,0,0,1,0.1,1]]";
+    let declare = |template: &str, shapes: &str, collision: &str| {
+        format!(
+            r#"{{"template":"minecraft:{template}","item":false{shapes}{collision}}}"#,
+            shapes = if shapes.is_empty() {
+                String::new()
+            } else {
+                format!(r#","shapes":{shapes}"#)
+            },
+            collision = if collision.is_empty() {
+                String::new()
+            } else {
+                format!(r#","collision_shapes":{collision}"#)
+            },
+        )
+    };
+    let default = |boxes: &str| format!(r#"{{"default":{boxes}}}"#);
+    let files = [
+        // Collision wins over a full outline.
+        (
+            "collision_wins",
+            declare("plain", &default(full), &default(thin)),
+        ),
+        ("outline_only", declare("plain", &default(full), "")),
+        ("no_shape", declare("keeps", "", "")),
+        ("force_on", declare("forced_on", &default(thin), "")),
+        ("force_off", declare("forced_off", &default(full), "")),
+        ("cleared", declare("keeps", &default(thin), "")),
+        (
+            "per_state",
+            declare(
+                "axis",
+                &format!(r#"{{"properties":["axis"],"values":{{"x":{full}}},"default":{thin}}}"#),
+                "",
+            ),
+        ),
+    ];
+    let manifest = manifest("testmod", "");
+    let paths: Vec<String> = files
+        .iter()
+        .map(|(name, _)| format!("data/testmod/sunrise/block/{name}.json"))
+        .collect();
+    let mut entries: Vec<(&str, &str)> = vec![("sunrise-mod.toml", &manifest)];
+    entries.extend(
+        paths
+            .iter()
+            .zip(&files)
+            .map(|(path, (_, body))| (path.as_str(), body.as_str())),
+    );
+    let mods = vec![folder_mod(&base.parent().unwrap().join("mod"), &entries)];
+    let plan = Plan::new(&base, &mods).unwrap();
+    let mut doc: J = read_json(&base.join("block-behaviours.json")).unwrap();
+    plan.json("block-behaviours.json", &mut doc).unwrap();
+    let Some(J::Arr(table)) = doc.get("states") else {
+        panic!("states")
+    };
+    let flags = |index: usize| match &table[index] {
+        J::Arr(row) => match &row[1] {
+            J::Num(n) => n.as_i64().unwrap(),
+            other => panic!("flags {other:?}"),
+        },
+        other => panic!("row {other:?}"),
+    };
+    // Vanilla rows are as they were.
+    for (index, expected) in template_flags.into_iter().enumerate() {
+        assert_eq!(flags(index), i64::from(expected), "template row {index}");
+    }
+    let first = |id: &str| {
+        plan.blocks
+            .iter()
+            .find(|b| b.decl.id == id)
+            .unwrap_or_else(|| panic!("{id}"))
+            .rename
+            .first as usize
+    };
+    // The marker bit stays in every declared row; only bit 0 is recomputed.
+    for (id, solid) in [
+        ("testmod:collision_wins", 0),
+        ("testmod:outline_only", 1),
+        ("testmod:no_shape", 1),
+        ("testmod:force_on", 1),
+        ("testmod:force_off", 0),
+        ("testmod:cleared", 0),
+    ] {
+        assert_eq!(flags(first(id)), 64 | solid, "{id}");
+    }
+    // One row per state, in state order: x is the full shape, y the thin one.
+    let axis = first("testmod:per_state");
+    assert_eq!((flags(axis), flags(axis + 1)), (64 | 1, 64));
+    fs::remove_dir_all(base.parent().unwrap()).unwrap();
+}
+
+#[test]
+fn a_declared_shape_decides_the_legacy_solid_bit() {
+    let boxed =
+        |top: f64| VoxelShape::from_box(Aabb::new(Vec3::ZERO, Vec3::new(1.0, top, 1.0))).unwrap();
+    // The other flag bits stay as the template has them.
+    let flags = 0b10;
+    // A full cube and a slab (average size 0.83) are solid, a flat carpet-thin box is not, and a
+    // box a block and a half tall is.
+    assert_eq!(with_solid_bit(flags, None, &boxed(1.0)), 0b11);
+    assert_eq!(with_solid_bit(flags, None, &boxed(0.5)), 0b11);
+    assert_eq!(with_solid_bit(flags | 1, None, &boxed(0.1)), 0b10);
+    assert_eq!(with_solid_bit(flags, None, &boxed(1.5)), 0b11);
+    // A thin tall pole is solid by height alone; a thin short one is not.
+    let pole = |top: f64| {
+        VoxelShape::from_box(Aabb::new(
+            Vec3::new(0.4, 0.0, 0.4),
+            Vec3::new(0.6, top, 0.6),
+        ))
+        .unwrap()
+    };
+    assert_eq!(with_solid_bit(flags, None, &pole(1.0)), 0b11);
+    assert_eq!(with_solid_bit(flags, None, &pole(0.5)), 0b10);
+    // A template that forces solidity keeps its answer whatever the shape.
+    assert_eq!(with_solid_bit(flags, Some(true), &boxed(0.1)), 0b11);
+    assert_eq!(with_solid_bit(flags | 1, Some(false), &boxed(1.0)), 0b10);
 }

@@ -85,6 +85,19 @@ fn register(r: &mut dyn Registrar) {
   `sendToPlayersNear` and `sendToPlayersTrackingChunk`. A player whose send is refused (no
   channel, gone since the list was read, backpressure) is skipped and not counted; only a
   stale token or an encode failure is an `Err`, before anything is sent.
+- **To the players tracking an entity.** `send_tracking_entity(host, entity, and_self, &value)`
+  sends to the entity's trackers (`ChunkMap.TrackedEntity.seenBy`, NeoForge's
+  `sendToPlayersTrackingEntity`; `EntityRef::trackers(host)` is the same list), and
+  also to the entity itself when it is a player and `and_self` is set
+  (`sendToPlayersTrackingEntityAndSelf`), each player once. A stale or absent entity has no
+  trackers, so nothing is sent and the count is 0.
+- **The one-call send underneath.** `PayloadsServerHost::players_send_payload(players, id, bytes)`
+  queues the same bytes on each listed player's connection with one boundary call, where
+  `player_send_payload` crosses once per player; the group sends above use it. Each connection's
+  queue owns its own copy of the bytes. Every player is judged by `player_send_payload`'s rules on
+  its own: a player whose send is refused is skipped and not counted, and the result is how many
+  were accepted (0 for an empty list). A player listed twice is sent to twice. Like every send,
+  it is published when the root transaction commits, and an abort publishes nothing.
 - **Schema negotiation.** The derive gives the value type a schema fingerprint (field types in
   order, variant positions; not names), and it is part of the negotiated version. A peer whose
   type has another shape is refused at join when the payload is required; when both sides

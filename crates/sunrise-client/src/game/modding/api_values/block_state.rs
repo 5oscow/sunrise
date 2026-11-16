@@ -8,13 +8,21 @@ use sunrise_world::registry::{BlockRegistry, BlockStateId};
 pub(crate) struct Index {
     forward: Vec<BlockState>,
     reverse: std::collections::HashMap<mod_api::BlockKey, Vec<Option<BlockStateId>>>,
+    /// Each state's block key, shared with the phase views that tell who listens.
+    #[cfg(test)]
+    blocks: Arc<[mod_api::BlockKey]>,
 }
 thread_local! {
     static INDEX: RefCell<Option<Arc<Index>>> = const { RefCell::new(None) };
 }
 
-/// Routing reads the precomputed key only: no event value is converted here.
+/// Routing reads the precomputed key only: no event value is converted here. Inside a tick
+/// phase's worker the phase's `ListenScope` answers, so a worker never gets "no listener" from
+/// the empty tables of a thread that owns no game.
 pub(crate) fn block_listens(hook: mod_api::HookId, state: BlockStateId) -> bool {
+    if let Some(listens) = mod_api::__private::scoped_state_listens(hook, state.0) {
+        return listens;
+    }
     mod_api::__private::has_scoped_hook(hook)
         && INDEX.with_borrow(|index| {
             index
@@ -26,6 +34,9 @@ pub(crate) fn block_listens(hook: mod_api::HookId, state: BlockStateId) -> bool 
 
 /// Whether every part on `state` that answers `explosion_resistance` declares the answer pure.
 pub(crate) fn explosion_resistance_pure(state: BlockStateId) -> bool {
+    if let Some(pure) = mod_api::__private::scoped_explosion_resistance_pure(state.0) {
+        return pure;
+    }
     INDEX.with_borrow(|index| {
         index
             .as_ref()
@@ -72,7 +83,14 @@ pub(crate) fn prepare(registry: &BlockRegistry) -> Result<Arc<Index>, String> {
             return Err("duplicate block state in numeric registry".into());
         }
     }
-    Ok(Arc::new(Index { forward, reverse }))
+    #[cfg(test)]
+    let blocks = forward.iter().map(|state| state.block()).collect();
+    Ok(Arc::new(Index {
+        forward,
+        reverse,
+        #[cfg(test)]
+        blocks,
+    }))
 }
 #[cfg(test)]
 #[allow(clippy::items_after_test_module)] // TODO(#2273): move the module to the end of the file.
@@ -134,6 +152,104 @@ mod tests {
                 "actual Index and Parts: 1000 unrelated-block guards in {} ns",
                 start.elapsed().as_nanos()
             );
+        });
+    }
+
+    /// The listen snapshot answers on any thread and keeps the tables it captured, however the tick
+    /// thread's own tables change after; installing and resolving refuse a phase's worker by name.
+    #[test]
+    fn a_phase_keeps_the_listen_snapshot_it_captured() {
+        use sunrise_client::parallel::TickThread;
+        struct Part;
+        #[mod_api::sunrise_part]
+        impl mod_api::BlockPart for Part {
+            fn analog_output(
+                &self,
+                _: &dyn mod_api::LevelHost,
+                event: &mut mod_api::AnalogOutputEvent,
+            ) {
+                event.output += 1;
+            }
+        }
+        struct Listener;
+        #[mod_api::__subscriptions]
+        impl mod_api::Hooks for Listener {
+            fn register(
+                &self,
+                registrar: &mut dyn mod_api::Registrar,
+                _: &mod_api::RegistrationContext,
+            ) {
+                let key = registrar.block_key("minecraft:stone");
+                registrar.block_part(key, Part);
+            }
+        }
+        let mods: mod_api::Mods =
+            vec![mod_api::ModEntry::new("routing", Box::new(Listener))].into();
+        mod_platform::testing::with_mods(mods.clone(), || {
+            mod_platform::__private::part_tests::install_parts_fixture(&mods).unwrap();
+            let facts = r#"{"defaults":{"minecraft:air":2,"minecraft:stone":0,"minecraft:dirt":1},"states":[["s",false,false,"","minecraft:stone"],["d",false,false,"","minecraft:dirt"],["a",true,false,"","minecraft:air"]]}"#;
+            let registry = BlockRegistry::from_facts_json(facts.as_bytes()).unwrap();
+            super::super::resolve_block_definitions(&registry).unwrap();
+            mod_api::__private::resolve_parts(
+                &Default::default(),
+                &Default::default(),
+                mod_api::__private::KnownIds {
+                    block: &|_| true,
+                    item: &|_| false,
+                },
+            )
+            .unwrap();
+            let hook = mod_api::HookId::AnalogOutput;
+            let tick = TickThread::mint();
+            let snapshot = super::super::listen_snapshot(&tick).unwrap();
+            assert!(snapshot.listens(hook, BlockStateId(0)));
+            assert!(!snapshot.listens(hook, BlockStateId(1)));
+            assert!(!snapshot.listens(hook, BlockStateId(77)), "no such state");
+
+            // Pool threads own no game, so their thread-locals are empty; inside the snapshot's
+            // scope `block_listens` gives the tick thread's answer for every state.
+            let states: Vec<BlockStateId> = (0..3).map(BlockStateId).collect();
+            let on_tick: Vec<bool> = states.iter().map(|&s| block_listens(hook, s)).collect();
+            assert_eq!(on_tick, [true, false, false]);
+            let on_pool = sunrise_client::parallel::par_map_on(&states, 1, 4, |part, out| {
+                let ids: Vec<_> = part
+                    .iter()
+                    .map(|&s| (s, std::thread::current().id()))
+                    .collect();
+                out.extend(ids.into_iter().map(|(s, thread)| {
+                    (
+                        thread,
+                        snapshot.enter(|| block_listens(hook, s)),
+                        block_listens(hook, s),
+                    )
+                }));
+            });
+            let scoped: Vec<bool> = on_pool.iter().map(|(_, scoped, _)| *scoped).collect();
+            assert_eq!(scoped, on_tick);
+            // Outside the scope a pool thread is still told "no listener" by the empty thread-local;
+            // the main thread (this one) is never among them with a different answer.
+            for (thread, _, bare) in &on_pool {
+                if *thread != std::thread::current().id() {
+                    assert!(!bare);
+                }
+            }
+
+            // The tick thread replaces its tables: the captured snapshot keeps its answers.
+            mod_api::__private::clear_game_parts();
+            clear();
+            assert!(!block_listens(hook, BlockStateId(0)));
+            assert!(snapshot.listens(hook, BlockStateId(0)));
+
+            // An installer is the tick thread's: a phase's worker can't mint the token, and
+            // resolving a registry there is refused by name before it touches a table.
+            sunrise_core::tick_phase::as_tick_phase(|| {
+                assert!(std::panic::catch_unwind(TickThread::mint).is_err());
+                let refused = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    super::super::resolve_block_definitions(&registry)
+                }));
+                assert!(refused.is_err());
+            });
+            assert!(current().is_err(), "the refused resolve installed nothing");
         });
     }
 
@@ -209,6 +325,11 @@ pub(crate) fn current() -> Result<Arc<Index>, BlockStateError> {
     INDEX.with_borrow(|index| index.clone().ok_or(BlockStateError::Unavailable))
 }
 impl Index {
+    /// Each state's block key, by state number.
+    #[cfg(test)]
+    pub(crate) fn blocks(&self) -> Arc<[mod_api::BlockKey]> {
+        self.blocks.clone()
+    }
     /// Route on workers using the feature-pinned published Parts table, without conversion.
     pub(crate) fn worldgen_listens(&self, hook: mod_api::HookId, state: BlockStateId) -> bool {
         self.forward.get(state.0 as usize).is_some_and(|value| {

@@ -26,10 +26,12 @@ class NightlyRoutingTests(unittest.TestCase):
         workflow_jobs = dict(jobs(text))
         guard = workflow_jobs["runner-configuration"]
         guard_if = re.search(r"^\s*if:\s*(.*)$", guard, re.M).group(1)
-        self.assertEqual(runs_on(guard), "ubuntu-latest")
+        # The guard runs no build: Dyna's small runner for the events it takes, else GitHub's.
+        self.assertEqual(runs_on(guard), "${{ vars.DYNA_CI_SELF_HOSTED == 'true' && (github.event_name == 'push' || "
+                                         "github.event_name == 'workflow_dispatch') && 'dyna-small' || 'ubuntu-latest' }}")
         self.assertIn("needs: runner-configuration", workflow_jobs["exporters"])
         self.assertIn("needs: [runner-configuration, exporters]", workflow_jobs["build"])
-        expressions = re.findall(r"^\s*runs-on:\s*\$\{\{(.*?)\}\}\s*$", text, re.M)
+        expressions = re.findall(r"^\s*runs-on:\s*\$\{\{(.*?)\}\}\s*$", text, re.M)[1:]
         self.assertEqual(len(expressions), 3)
         smoke = workflow_jobs["linux-smoke"]
         smoke_if = re.search(r"^\s*if:\s*\$\{\{(.*?)\}\}\s*$", smoke, re.M).group(1)
@@ -63,7 +65,9 @@ console.log(JSON.stringify(eval(expression)));
             result = subprocess.run(["node", "-e", script], input=json.dumps({"expression": expression, "matrix": matrix, "inputs": {"trusted": trusted}, "vars": variables, "github": {"repository": repository}}), text=True, capture_output=True, check=True)
             return json.loads(result.stdout)
         default_mac = ["self-hosted", "macOS", "sunrise-nightly"]
-        bookkeeping = re.search(r"^\s*runs-on:\s*\$\{\{(.*?)\}\}\s*$", NIGHTLY.read_text(), re.M).group(1)
+        bookkeeping = next(expression for expression in re.findall(r"^\s*runs-on:\s*\$\{\{(.*?)\}\}\s*$",
+                                                                  NIGHTLY.read_text(), re.M)
+                           if "NIGHTLY_BOOKKEEPING_RUNNER" in expression)
         for configured, release_runner, disabled, trusted, dyna in itertools.product(
             [False, True], [False, True], [False, True], [False, True], [None, "false", "true"]
         ):
@@ -109,7 +113,7 @@ console.log(JSON.stringify(eval(expression)));
     def test_a_missing_leg_holds_the_build_only_when_it_is_required(self):
         workflow_jobs = dict(jobs(GAME.read_text()))
         optional = re.search(r"^\s*continue-on-error:\s*\$\{\{(.*?)\}\}", workflow_jobs["build"], re.M).group(1)
-        decide = workflow_jobs["legs"].split("        run: |\n", 1)[1]
+        decide = workflow_jobs["legs"].split("        run: |\n", 1)[1].split("\n      # ", 1)[0].split("\n      - ", 1)[0]
         decide = textwrap.dedent(decide)
         script = """const s = JSON.parse(require('fs').readFileSync(0, 'utf8'));
 const matrix = s.matrix, inputs = s.inputs, github = s.github;

@@ -34,6 +34,7 @@ use sunrise_mod_package::content::{
 use sunrise_mod_package::manifest::{
     JarInputsError, JarRef, collect_jar_requirements, missing_jars,
 };
+use sunrise_world::block_properties::BlockDefinitionProperties;
 
 /// A content mod to put in the root: its id, its content, and the Java jars
 /// it lists in manifest order — each an asset/data layer under the mod's own
@@ -514,6 +515,18 @@ fn combinations(
     Ok(combos)
 }
 
+/// `flags` with its legacy solid bit (bit 0) calculated from `shape`, unless the template forces it.
+fn with_solid_bit(flags: i64, force: Option<bool>, shape: &VoxelShape) -> i64 {
+    let definition = BlockDefinitionProperties {
+        force_solid_on: force == Some(true),
+        force_solid_off: force == Some(false),
+        replaceable: false,
+        liquid: false,
+        can_occlude: false,
+    };
+    (flags & !1) | i64::from(definition.calculate_solid(Some(shape)))
+}
+
 /// Puts a declared state property's values on one of a block's state rows.
 /// Only `facts.json` keeps a state's own row, whose fifth field is
 /// `{"id": …, "properties": {…}}`; the other files' rows are per block, so
@@ -733,6 +746,9 @@ struct NewBlock<'a> {
     has_fluid: Vec<bool>,
     skylight: SkylightRule,
     custom_dampening: bool,
+    /// The template's `forceSolidOn` (`Some(true)`) or `forceSolidOff` (`Some(false)`), which keeps
+    /// its answer over the declared shape's.
+    force_solid: Option<bool>,
     context_shapes: BTreeMap<String, Vec<VoxelShape>>,
     state_light: Option<Vec<u8>>,
     default: u32,
@@ -1089,6 +1105,23 @@ impl<'a> Plan<'a> {
                 }
             }
         }
+        let mut force_solid = BTreeMap::new();
+        if let Ok(bytes) = fs::read(base.join("worldgen/blocks/block-properties.nbt")) {
+            let (named, _) = nbt::read_named(&bytes, Limits::tables())
+                .map_err(|e| format!("block-properties.nbt: {e}"))?;
+            if let Some(Tag::Compound(blocks)) = named.tag.get("blocks") {
+                for (name, flags) in blocks {
+                    // Bit 0 is `forceSolidOn`, bit 1 `forceSolidOff`; force-on wins.
+                    if let (Ok(name), Tag::Byte(flags)) = (name.to_string(), flags) {
+                        match (flags & 1 != 0, flags & 2 != 0) {
+                            (true, _) => force_solid.insert(name, true),
+                            (_, true) => force_solid.insert(name, false),
+                            _ => None,
+                        };
+                    }
+                }
+            }
+        }
         let mut facts = read_json(&base.join("facts.json"))?;
         let names: Vec<String> = match facts.at("states") {
             Some(J::Arr(states)) => states
@@ -1404,6 +1437,7 @@ impl<'a> Plan<'a> {
                         .copied()
                         .unwrap_or(SkylightRule::Shape),
                     custom_dampening: custom_dampening.contains(&decl.template),
+                    force_solid: force_solid.get(&decl.template).copied(),
                     context_shapes,
                     state_light,
                     default,
@@ -1797,6 +1831,29 @@ impl<'a> Plan<'a> {
         Ok(())
     }
 
+    /// `BlockStateBase.calculateSolid` of every state that declares a collision shape, over the
+    /// template's flag: the legacy solid bit (bit 0 of a state row's flags) follows the declared
+    /// shape unless the template forces it.
+    fn declared_solid(&self, doc: &mut J) {
+        let Some(J::Arr(rows)) = doc.at("states") else {
+            return;
+        };
+        for b in &self.blocks {
+            let Some(shapes) = b.collision_shapes.as_ref().or(b.shapes.as_ref()) else {
+                continue;
+            };
+            for (offset, shape) in shapes.iter().enumerate() {
+                let Some(J::Arr(row)) = rows.get_mut(b.rename.first as usize + offset) else {
+                    continue;
+                };
+                if let Some(J::Num(flags)) = row.get_mut(1) {
+                    *flags =
+                        with_solid_bit(flags.as_i64().unwrap_or(0), b.force_solid, shape).into();
+                }
+            }
+        }
+    }
+
     /// One JSON table, rewritten.
     fn json(&self, name: &str, doc: &mut J) -> Result<()> {
         let states = |doc: &mut J, path: &str, ids: bool, gameplay: bool| -> Result<()> {
@@ -1819,6 +1876,7 @@ impl<'a> Plan<'a> {
             "creative-inventory.json" => self.creative_tabs(doc)?,
             "block-behaviours.json" => {
                 states(doc, "states", false, false)?;
+                self.declared_solid(doc);
                 let Some(J::Arr(blocks)) = doc.at("blocks") else {
                     return Err("no blocks".into());
                 };

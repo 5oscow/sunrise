@@ -5,7 +5,7 @@
 //! an earlier open, or for arguments the network can't carry.
 use super::native_hooks::{mod_particles_ok, mod_sound_ok};
 use super::{Game, creatures::NativeSound, lan_particles::QueuedParticle};
-use mod_api::{LevelRef, SoundSource};
+use mod_api::{LevelRef, PlayerRef, PlayerWorldRefusal, SoundSource};
 use sunrise_client::particles::ParticleOptions;
 use sunrise_world::registry::BlockStateId;
 
@@ -17,10 +17,11 @@ impl Game<'_> {
     }
     /// Plays sound event `sound` at `at` for the players in this level
     /// within range (16 blocks, times the volume above 1), as
-    /// `ServerLevel.playSound(null, ...)` does, under `source`'s volume
-    /// slider. A `minecraft:` event must be registered; a mod's goes by name
-    /// and is heard where its resources define it. True means queued, not
-    /// heard.
+    /// `ServerLevel.playSound(except, ...)` does, under `source`'s volume
+    /// slider, leaving out `except`'s client (a fake player has none, so it
+    /// leaves out no one; a stale one queues nothing). A `minecraft:` event
+    /// must be registered; a mod's goes by name and is heard where its
+    /// resources define it. True means queued, not heard.
     pub(super) fn level_play_sound(
         &mut self,
         level: LevelRef,
@@ -29,8 +30,18 @@ impl Game<'_> {
         source: SoundSource,
         volume: f32,
         pitch: f32,
+        except: Option<PlayerRef>,
     ) -> bool {
-        self.native_queue_sound(level, sound, at, source, volume, pitch, None)
+        let except = match except {
+            None => None,
+            Some(player) => match self.player_connection(player) {
+                Ok(conn) => Some(conn),
+                // A fake player has no client to leave out.
+                Err(PlayerWorldRefusal::NoConnection) => None,
+                Err(_) => return false,
+            },
+        };
+        self.native_queue_sound(level, sound, at, source, volume, pitch, except)
             .is_some()
     }
     /// `level_play_sound`, leaving out the player on connection

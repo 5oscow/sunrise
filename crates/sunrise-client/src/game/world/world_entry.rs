@@ -842,9 +842,9 @@ impl Game<'_> {
                 self.pack.assets.registry,
             );
         }
-        api_values::install_block_states(prepared.block_states);
+        api_values::install_block_states(&self.tick, prepared.block_states);
         native_world_read::install_block_tags(prepared.tags);
-        mod_api::__private::install_resolved_parts(prepared.parts);
+        api_values::install_resolved_parts(&self.tick, prepared.parts);
         self.resolve_block_paths();
         self.resolve_piston_reactions();
         self.resolve_primary_items();
