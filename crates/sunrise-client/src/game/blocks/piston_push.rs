@@ -590,8 +590,11 @@ impl Game<'_> {
     }
 
     /// A mod's `Entity.move(cause, movement)` for the listed entity `handle` (never the player
-    /// or a guest: their clients own their positions): the same collided move a lid's push
-    /// makes, with no piston limit. Returns how far it moved.
+    /// or a guest: their clients own their positions), in `Entity.move`'s order: the
+    /// `entity_move` gate, a `noPhysics` body's whole-delta `setPos`, then for a piston's cause
+    /// the per-tick limit (`move_pushed`; a mob's budget is its own, any other kind's lasts the
+    /// call), else the collided move a lid's push makes. The entity's velocity is left as it
+    /// is. Returns how far it moved.
     pub(in crate::game) fn move_listed_entity(
         &mut self,
         handle: EntityHandle,
@@ -601,8 +604,38 @@ impl Game<'_> {
         let target = MoveWho::Entity(handle);
         let from = with_entity!(self, handle, entity => entity.position());
         let body = self.listed_body(handle, None);
-        let no_physics = self.pushed_no_physics(target);
-        self.move_pushed_body(cause, None, target, body, movement, no_physics, &mut None);
+        if self.pushed_no_physics(target) {
+            let mut gate = self.entity_move(target, cause, movement);
+            let movement = gate.delta();
+            self.apply_push(&mut gate, target, movement);
+        } else if let Some(direction) = (cause == MoverType::Piston)
+            .then(|| first_axis_direction(movement))
+            .flatten()
+        {
+            let mut pricked = Vec::new();
+            self.move_pushed(
+                target,
+                body.bounds,
+                [body.position.x, body.position.z],
+                body.step_height,
+                body.on_ground,
+                movement,
+                direction,
+                &mut std::collections::HashMap::new(),
+                &mut pricked,
+            );
+            self.hurt_cactus_pricked_vehicles(pricked);
+        } else {
+            // A stand's shove zeroes the velocity a collision blocks; a mod's move keeps it.
+            let stand = match handle {
+                EntityHandle::ArmorStand(i) => Some((i, self.armor_stands[i].velocity)),
+                _ => None,
+            };
+            self.move_pushed_body(cause, None, target, body, movement, false, &mut None);
+            if let Some((i, velocity)) = stand {
+                self.armor_stands[i].velocity = velocity;
+            }
+        }
         with_entity!(self, handle, entity => entity.position()).subtract(from)
     }
 
@@ -1304,6 +1337,31 @@ fn shulker_lid(facing: u8, lid: [f64; 6]) -> (Vec3, Aabb) {
 /// `Entity.collectCollidersIgnoringWorldBorder` adds the border's walls when
 /// the body is inside close to the border, as ordinary movement does. The
 /// `gate` is the push's armed move gate (#2414); the resolve goes through it.
+/// The direction of a movement's first non-zero axis, the one `limitPistonMovement` keeps.
+fn first_axis_direction(movement: Vec3) -> Option<Direction> {
+    if movement.x != 0.0 {
+        Some(if movement.x > 0.0 {
+            Direction::East
+        } else {
+            Direction::West
+        })
+    } else if movement.y != 0.0 {
+        Some(if movement.y > 0.0 {
+            Direction::Up
+        } else {
+            Direction::Down
+        })
+    } else if movement.z != 0.0 {
+        Some(if movement.z > 0.0 {
+            Direction::South
+        } else {
+            Direction::North
+        })
+    } else {
+        None
+    }
+}
+
 fn pushed_movement<W>(
     gate: &mut MoveGate,
     blocks: W,

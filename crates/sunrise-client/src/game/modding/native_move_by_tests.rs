@@ -8,6 +8,7 @@ use sunrise_core::geometry::Vec3;
 const STAND: u32 = 910;
 const FRAME: u32 = 911;
 const PAINTING: u32 = 912;
+const PIG: u32 = 913;
 
 /// A server's game with an armor stand at 0.5, 64, 0.5, an item frame at 4, 70, 4 and a painting
 /// at 4, 70, 6 (the frame's and painting's boxes are a block wide, thin in depth).
@@ -43,7 +44,7 @@ fn with_scene(test: impl FnOnce(&mut super::Game<'_>)) {
             height: 1,
             check_interval: 0,
         });
-        game.next_entity = game.next_entity.max(PAINTING);
+        game.next_entity = game.next_entity.max(PIG);
         test(game);
     });
 }
@@ -75,8 +76,13 @@ fn move_by_stops_at_a_wall_and_refuses_what_has_no_physics() {
             .registry
             .default_state("minecraft:stone")
             .unwrap();
+        // A wall in the stand's column once it has moved north to z = 1.5.
+        game.world.chunks.insert(
+            (0, 0),
+            std::sync::Arc::new(sunrise_client::chunk::Chunk::empty(0, 0)),
+        );
         for y in 63..67 {
-            game.world.set(2, y, 0, stone).unwrap();
+            game.world.set(2, y, 1, stone).unwrap();
         }
         let stand = game.entity(STAND).unwrap();
         // Open air: the whole way.
@@ -85,12 +91,43 @@ fn move_by_stops_at_a_wall_and_refuses_what_has_no_physics() {
             Some([0.0, 0.0, 1.0])
         );
         assert_eq!(game.armor_stands[0].position.z, 1.5);
+        game.armor_stands[0].velocity = Vec3::new(0.3, 0.0, 0.1);
         // Towards the wall at x = 2: the stand's half width (0.25) stops it at x = 1.75.
         let moved = game
             .entity_move_by(stand, [3.0, 0.0, 0.0], MoveCause::SelfMovement)
             .unwrap();
-        assert!((moved[0] - 1.0).abs() < 1.0e-6 && moved[1] == 0.0 && moved[2] == 0.0);
-        assert!((game.armor_stands[0].position.x - 1.5).abs() < 1.0e-6);
+        assert!((moved[0] - 1.25).abs() < 1.0e-6 && moved[1] == 0.0 && moved[2] == 0.0);
+        assert!((game.armor_stands[0].position.x - 1.75).abs() < 1.0e-6);
+        assert_eq!(
+            game.armor_stands[0].velocity,
+            Vec3::new(0.3, 0.0, 0.1),
+            "a blocked move keeps the velocity"
+        );
+        // A marker stand has no physics: the whole delta, through the wall.
+        game.armor_stands[0].marker = true;
+        let moved = game
+            .entity_move_by(stand, [1.0, 0.0, 0.0], MoveCause::SelfMovement)
+            .unwrap();
+        assert_eq!(moved, [1.0, 0.0, 0.0]);
+        game.armor_stands[0].marker = false;
+        // A piston's cause applies its per-tick limit, 0.51 a block on an axis: a second move in
+        // the same tick (a mob keeps its own budget) goes nowhere.
+        let kind = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+        game.mobs.push(sunrise_client::mobs::Mob::new(
+            PIG,
+            kind,
+            Vec3::new(8.5, 80.0, 8.5),
+            0.0,
+        ));
+        let pig = game.entity(PIG).unwrap();
+        let first = game
+            .entity_move_by(pig, [1.0, 0.0, 0.0], MoveCause::Piston)
+            .unwrap();
+        assert!((first[0] - 0.51).abs() < 1.0e-6);
+        assert_eq!(
+            game.entity_move_by(pig, [1.0, 0.0, 0.0], MoveCause::Piston),
+            Some([0.0; 3])
+        );
         // Bad deltas, hanging entities and a stale handle.
         assert_eq!(
             game.entity_move_by(stand, [f64::NAN; 3], MoveCause::Piston),

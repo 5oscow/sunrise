@@ -650,9 +650,13 @@ pub trait EntitiesBackendMut {
     /// Moves the entity by `delta` blocks as `Entity.move(cause, delta)` does: the block,
     /// entity and world border collision scan stops it at what is in the way, it steps up what
     /// its step height allows, and its ground flag follows the move. It is not a teleport
-    /// (nothing is skipped over) and not a velocity: the entity's motion is left as it is. The
-    /// `entity_move` hook fires for it with `cause`, once, so a listener may replace or cancel
-    /// the delta as for any other move; a cancelled move is `Some([0.0; 3])`. Returns how far
+    /// (nothing is skipped over) and not a velocity: the entity's velocity is left as it is,
+    /// blocked components included. The `entity_move` hook fires for it with `cause`, once, so
+    /// a listener may replace or cancel the delta as for any other move; a cancelled move is
+    /// `Some([0.0; 3])`. A body with no physics (a marker or `NoGravity` armor stand, or one a
+    /// mod set) moves the whole delta with no collision. `MoveCause::Piston` also applies a
+    /// piston's per-tick limit, 0.51 blocks per axis, on the first non-zero axis only; a
+    /// mob's budget carries across calls in a tick, any other kind's lasts the call. Returns how far
     /// the entity moved, `delta` less what the collisions took. None for a stale handle, on a
     /// client, for a player (its client owns its position; teleport it instead), for an entity
     /// outside the game's entity walk (a display, a painting, an item frame, an End crystal, a

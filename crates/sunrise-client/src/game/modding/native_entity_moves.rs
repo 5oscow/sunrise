@@ -119,8 +119,8 @@ impl Game<'_> {
     }
     /// Moves the entity by `delta` as `Entity.move(cause, delta)` does: collided, stepping,
     /// through the `entity_move` hook. How far it moved; None for a stale handle, on a client,
-    /// for a player, for an entity outside the entity walk, and for a delta that is not finite
-    /// or beyond 64 blocks on an axis.
+    /// for a player, for an entity outside the entity walk, and for an unknown cause and for a delta
+    /// that is not finite or beyond 64 blocks on an axis.
     pub(super) fn entity_move_by(
         &mut self,
         entity: EntityRef,
@@ -133,13 +133,10 @@ impl Game<'_> {
         {
             return None;
         }
+        let mover = sunrise_client::move_gate::mover_of(cause)?;
         let handle = self.native_walk_entity(entity.id())?;
         let [x, y, z] = delta;
-        let moved = self.move_listed_entity(
-            handle,
-            sunrise_client::move_gate::mover_of(cause),
-            Vec3::new(x, y, z),
-        );
+        let moved = self.move_listed_entity(handle, mover, Vec3::new(x, y, z));
         Some(moved.components())
     }
     /// Turns the entity to `yaw` and `pitch` in degrees (`Entity.setYRot`,
