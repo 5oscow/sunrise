@@ -89,20 +89,32 @@ impl CommandError {
         e.key = key.to_owned();
         e
     }
+    /// The cursor as Java counts it (`CommandSyntaxException.getCursor`): UTF-16 code units
+    /// before it, where `cursor` is a byte offset into `input`. Without an input, the byte
+    /// offset itself.
+    pub fn java_cursor(&self) -> usize {
+        match &self.input {
+            Some(input) => utf16_units(input, self.cursor),
+            None => self.cursor,
+        }
+    }
     /// CommandSyntaxException.getContext: up to ten characters before the
-    /// cursor followed by "<--[HERE]".
+    /// cursor followed by "<--[HERE]". Java's characters are UTF-16 code units, so a
+    /// character outside the Basic Multilingual Plane counts two, and a pair the ten-unit
+    /// window cuts in half shows its kept half as U+FFFD.
     pub fn context(&self) -> Option<String> {
         let input = self.input.as_ref()?;
-        let cursor = self.cursor.min(input.len());
-        let start = (0..=cursor.saturating_sub(10))
-            .rev()
-            .find(|&i| input.is_char_boundary(i))
-            .unwrap_or(0);
+        let before: Vec<u16> = input[..floor_char_boundary(input, self.cursor)]
+            .encode_utf16()
+            .collect();
+        let cursor = before.len();
         let mut out = String::new();
         if cursor > 10 {
             out.push_str("...");
         }
-        out.push_str(&input[start..cursor]);
+        out.push_str(&String::from_utf16_lossy(
+            &before[cursor.saturating_sub(10)..],
+        ));
         out.push_str("<--[HERE]");
         Some(out)
     }
@@ -113,7 +125,7 @@ impl CommandError {
                 "command.context.parse_error",
                 &[
                     self.message.clone(),
-                    Text::literal(self.cursor.to_string()),
+                    Text::literal(self.java_cursor().to_string()),
                     Text::literal(context),
                 ],
             ),
@@ -122,6 +134,22 @@ impl CommandError {
     }
 }
 pub type CmdResult<T> = Result<T, CommandError>;
+
+/// The largest char boundary of `text` at or before byte `byte`.
+fn floor_char_boundary(text: &str, byte: usize) -> usize {
+    let byte = byte.min(text.len());
+    (0..=byte)
+        .rev()
+        .find(|&i| text.is_char_boundary(i))
+        .unwrap_or(0)
+}
+
+/// UTF-16 code units in `text` before byte `byte`: a byte cursor as a Java string index.
+pub fn utf16_units(text: &str, byte: usize) -> usize {
+    text[..floor_char_boundary(text, byte)]
+        .encode_utf16()
+        .count()
+}
 
 /// Brigadier StringReader over a command line (byte cursor on char boundaries).
 #[derive(Clone, Debug)]
