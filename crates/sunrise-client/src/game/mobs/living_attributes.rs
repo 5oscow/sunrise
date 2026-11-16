@@ -637,8 +637,14 @@ mod tests {
                     },
                 )
                 .unwrap();
-            let saved =
-                sunrise_client::entity_nbt::mob_to_nbt(&game.mobs[0], [0; 4], None, None, |_| None);
+            let saved = sunrise_client::entity_nbt::mob_to_nbt(
+                &game.mobs[0],
+                [0; 4],
+                None,
+                None,
+                |_| None,
+                &Default::default(),
+            );
             let loaded_id = game.load_mob(saved.clone(), None).unwrap();
             let loaded = game.mobs.iter().find(|m| m.id == loaded_id).unwrap();
             assert_eq!(sunrise_client::mobs::armor::values(loaded), (20.0, 0.0));

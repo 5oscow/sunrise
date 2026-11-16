@@ -412,7 +412,7 @@ impl Game<'_> {
                         p.0,
                         p.1,
                         p.2,
-                        canon_stack(Some(stack))
+                        canon_stack(Some(stack), self.res.items())
                     ));
                 }
             }
@@ -476,7 +476,7 @@ impl Game<'_> {
             for item in &self.dropped {
                 out.push(format!(
                     "pickup {} {}",
-                    canon_stack(Some(&item.stack)),
+                    canon_stack(Some(&item.stack), self.res.items()),
                     item.pickup_delay
                 ));
             }
@@ -617,7 +617,7 @@ impl Game<'_> {
         out.push(format!(
             "use {} held {}",
             if consumed { "consumed" } else { "pass" },
-            canon_stack(self.inventory[self.selected].as_ref())
+            canon_stack(self.inventory[self.selected].as_ref(), self.res.items())
         ));
         Ok(out)
     }
@@ -723,8 +723,8 @@ impl Game<'_> {
             .map_or("-".to_owned(), |s| s.item.to_string());
         out.push(format!(
             "held {} offhand {} using {using}",
-            canon_stack(self.inventory[self.selected].as_ref()),
-            canon_stack(self.offhand.as_ref())
+            canon_stack(self.inventory[self.selected].as_ref(), self.res.items()),
+            canon_stack(self.offhand.as_ref(), self.res.items())
         ));
         out.push(match self.respawn_config {
             Some(c) => format!(
@@ -747,7 +747,7 @@ impl Game<'_> {
         let stack = parse_stack(op["item"].as_str().ok_or("missing blocking stack")?)?
             .ok_or("empty blocking stack")?;
         // Reload the stack just as a player inventory does between sessions.
-        let saved = sunrise_items::item_nbt::item_to_nbt(&stack);
+        let saved = sunrise_items::item_nbt::item_to_nbt(&stack, self.res.items());
         self.inventory[self.selected] = sunrise_items::item_nbt::item_from_nbt(&saved);
         let (creative, mode) = (self.creative, self.mode);
         self.creative = op["creative"].as_bool().unwrap_or(false);
@@ -939,7 +939,10 @@ impl Game<'_> {
                 (f::HEAD, "head"),
             ] {
                 if let Some(s) = f::item_stack(m, slot) {
-                    out.push(format!("W {name} {}", canon_stack(Some(&s))));
+                    out.push(format!(
+                        "W {name} {}",
+                        canon_stack(Some(&s), self.res.items())
+                    ));
                 }
             }
         }
@@ -962,7 +965,7 @@ impl Game<'_> {
         }
         out.push(format!(
             "held {}",
-            canon_stack(self.inventory[self.selected].as_ref())
+            canon_stack(self.inventory[self.selected].as_ref(), self.res.items())
         ));
         Ok(out)
     }
@@ -1048,10 +1051,13 @@ impl Game<'_> {
         };
         let Some(stack) = stack else { return };
         if id == "minecraft:decorated_pot" {
-            map.insert("item".into(), sunrise_client::save::item_to_nbt(&stack));
+            map.insert(
+                "item".into(),
+                sunrise_client::save::item_to_nbt(&stack, self.res.items()),
+            );
             return;
         }
-        let mut item = sunrise_client::save::item_to_nbt(&stack);
+        let mut item = sunrise_client::save::item_to_nbt(&stack, self.res.items());
         if let Tag::Compound(c) = &mut item {
             c.insert("Slot".into(), Tag::Byte(slot as i8));
         }
@@ -1136,7 +1142,7 @@ impl Game<'_> {
         }
         out.push(format!(
             "mine held {}",
-            canon_stack(self.inventory[self.selected].as_ref())
+            canon_stack(self.inventory[self.selected].as_ref(), self.res.items())
         ));
         Ok(out)
     }
@@ -1291,7 +1297,10 @@ impl Game<'_> {
         };
         for (slot, stack) in items.into_iter().flatten().enumerate() {
             if let Some(stack) = stack {
-                out.push(format!("Tinv {index} {slot} {}", canon_stack(Some(stack))));
+                out.push(format!(
+                    "Tinv {index} {slot} {}",
+                    canon_stack(Some(stack), self.res.items())
+                ));
             }
         }
     }
@@ -1437,7 +1446,7 @@ impl Game<'_> {
                 "minecraft:item",
                 [p.x, p.y, p.z],
                 [v.x, v.y, v.z],
-                &canon_stack(Some(&d.stack)),
+                &canon_stack(Some(&d.stack), self.res.items()),
             ));
         }
         for shot in &self.creatures.projectiles {

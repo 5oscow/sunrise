@@ -2781,7 +2781,7 @@ pub(super) mod tests {
                     g.game_mode = 1;
                     g.abilities.update_for_mode(1);
                     assert!(g.abilities.may_fly && g.abilities.instabuild);
-                    sunrise_client::lan::playerdata::save(g, &root);
+                    sunrise_client::lan::playerdata::save(g, &root, &Default::default());
                 })
                 .unwrap();
             let joined = |game: &mut super::super::Game<'_>, force| {
@@ -2907,6 +2907,7 @@ pub(super) mod tests {
                 &sunrise_protocol::registry::Builtin::default(),
                 &[],
                 &[],
+                Default::default(),
             );
             let config = HubConfig {
                 default_game_mode: 0,

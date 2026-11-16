@@ -475,6 +475,7 @@ fn deferred_zombie_finalization_keeps_unknown_profession_through_save_and_cure()
             None,
             Some(game.pack.assets.registry),
             |_| None,
+            &Default::default(),
         );
         let restored = entity_nbt::mob_from_nbt(
             &saved,

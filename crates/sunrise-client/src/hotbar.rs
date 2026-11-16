@@ -129,7 +129,7 @@ pub fn save(path: &Path, rows: &[Hotbar], items: &crate::items::Items) -> crate:
     )];
     for (i, row) in rows.iter().enumerate() {
         let stacks = row.iter().map(|s| match s {
-            Some(s) => sunrise_items::item_nbt::item_to_nbt_with_items(s, items),
+            Some(s) => sunrise_items::item_nbt::item_to_nbt(s, items),
             None => Tag::compound(Vec::<(&str, Tag)>::new()),
         });
         entries.push((

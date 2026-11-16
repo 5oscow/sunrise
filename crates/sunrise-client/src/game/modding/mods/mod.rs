@@ -2104,8 +2104,16 @@ mod tests {
             Mob::new(2, ghoul.clone(), at, 0.0),
         );
         assert_eq!(ghoul.health, 40.0);
-        let saved =
-            |m: &Mob| sunrise_client::entity_nbt::mob_to_nbt(m, [0, 0, 0, 2], None, None, |_| None);
+        let saved = |m: &Mob| {
+            sunrise_client::entity_nbt::mob_to_nbt(
+                m,
+                [0, 0, 0, 2],
+                None,
+                None,
+                |_| None,
+                &Default::default(),
+            )
+        };
         let keys = |tag: &sunrise_core::nbt::Tag| -> Vec<String> {
             let sunrise_core::nbt::Tag::Compound(map) = tag else {
                 panic!("a mob saves a compound");
@@ -2167,8 +2175,14 @@ mod tests {
                 Species::Parrot => pet.extra.variant = 2,
                 _ => pet.extra.color = if species == Species::Wolf { 14 } else { 3 },
             }
-            let tag =
-                sunrise_client::entity_nbt::mob_to_nbt(&pet, [0, 0, 0, 1], None, None, |_| None);
+            let tag = sunrise_client::entity_nbt::mob_to_nbt(
+                &pet,
+                [0, 0, 0, 1],
+                None,
+                None,
+                |_| None,
+                &Default::default(),
+            );
             let get = |key: &str| tag.get(key).cloned();
             assert_eq!(
                 get("id"),
@@ -2625,8 +2639,16 @@ mod tests {
         let trader = Mob::new(1, types["minecraft:wandering_trader"].clone(), at, 0.0);
         let merchant = Mob::new(2, merchant.clone(), at, 0.0);
         assert!(merchant.ai.goals.has("Float") && trader.ai.goals.has("Float"));
-        let saved =
-            |m: &Mob| sunrise_client::entity_nbt::mob_to_nbt(m, [0, 0, 0, 2], None, None, |_| None);
+        let saved = |m: &Mob| {
+            sunrise_client::entity_nbt::mob_to_nbt(
+                m,
+                [0, 0, 0, 2],
+                None,
+                None,
+                |_| None,
+                &Default::default(),
+            )
+        };
         let keys = |tag: &Tag| -> Vec<String> {
             let Tag::Compound(map) = tag else {
                 panic!("a mob saves a compound");

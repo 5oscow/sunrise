@@ -177,7 +177,7 @@ impl Template {
 /// Assembly also carries the transient map postprocess component; the saved
 /// ItemStack codec deliberately omits it. Do not turn it into saved data.
 fn assembly_components(stack: &ItemStack) -> Tag {
-    let mut components = match crate::item_data::encode_components(stack) {
+    let mut components = match crate::item_data::component_snapshot(stack) {
         Some(Tag::Compound(map)) => map,
         _ => Default::default(),
     };
@@ -2225,7 +2225,7 @@ mod tests {
             let output = template.over(&input, 0);
             assert_eq!(output.item.as_ref(), "minecraft:stone_sword");
             assert_eq!(output.damage, expected_damage);
-            let encoded = crate::item_data::encode_components(&output).unwrap();
+            let encoded = crate::item_data::component_snapshot(&output).unwrap();
             assert_eq!(
                 encoded.get("minecraft:lore"),
                 input_tag.get("minecraft:lore")
@@ -2248,7 +2248,7 @@ mod tests {
         let output = template.over(&map, 0);
         assert_eq!(output.data().unwrap().map_post_processing, Some(1));
         assert!(
-            crate::item_data::encode_components(&output)
+            crate::item_data::component_snapshot(&output)
                 .unwrap()
                 .get("minecraft:map_post_processing")
                 .is_none()
@@ -3382,7 +3382,7 @@ mod tests {
             ],
         )
         .unwrap();
-        let patch = crate::item_data::encode_components(&out).unwrap();
+        let patch = crate::item_data::component_snapshot(&out).unwrap();
         assert_eq!(
             patch.get("minecraft:base_color"),
             Some(&Tag::String("red".into()))

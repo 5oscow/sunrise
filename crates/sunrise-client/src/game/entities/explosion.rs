@@ -1847,8 +1847,14 @@ impl Game<'_> {
         }
         if let Some(entity) = self.world.block_entities.get(&key).cloned() {
             let custom = self.world.block_names.get(&key).cloned();
-            self.pending
-                .record(pos, &entity, &name, custom, self.world.block_lock(key));
+            self.pending.record(
+                pos,
+                &entity,
+                &name,
+                custom,
+                self.world.block_lock(key),
+                self.res.items(),
+            );
         } else if let Some(tag) = super::spill::saved_entity(&self.world, pos) {
             self.pending.record_saved(pos, &tag);
         }
@@ -2978,9 +2984,14 @@ mod shulker_lock_drop_tests {
                 .get(&key)
                 .expect("actual command-created source");
             assert!(
-                save::block_entity_encode::encode(key, entity, &format!("minecraft:{kind}"))
-                    .get("lock")
-                    .is_none(),
+                save::block_entity_encode::encode(
+                    key,
+                    entity,
+                    &format!("minecraft:{kind}"),
+                    &Default::default()
+                )
+                .get("lock")
+                .is_none(),
                 "external lock must not be invented in modeled serializer"
             );
             if shulker {

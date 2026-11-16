@@ -144,6 +144,7 @@ impl ThrownTrident {
         uuid: [i32; 4],
         registry: &sunrise_world::registry::BlockRegistry,
         raw: Option<&sunrise_core::nbt::Tag>,
+        items: &crate::items::Items,
     ) -> sunrise_core::nbt::Tag {
         let mut tag = sunrise_client::entity_nbt::trident_to_nbt(
             &sunrise_client::entity_nbt::TridentSave {
@@ -168,6 +169,7 @@ impl ThrownTrident {
             },
             uuid,
             raw,
+            items,
         );
         // `AbstractArrow.addAdditionalSaveData`: `storeNullable("inBlockState")`,
         // never a stale value from the loaded compound.
@@ -1607,14 +1609,17 @@ mod tests {
     fn a_trident_hits_with_its_own_sound_once() {
         use sunrise_core::nbt::Tag;
         let registry = stone_registry();
-        let saved =
-            |t: &ThrownTrident| t.to_nbt([0; 4], &registry, None).get("SoundEvent").cloned();
+        let saved = |t: &ThrownTrident| {
+            t.to_nbt([0; 4], &registry, None, &Default::default())
+                .get("SoundEvent")
+                .cloned()
+        };
         let sound = |id: &str| Some(Tag::String(id.into()));
         let mut t = ThrownTrident::remote(1, Vec3::ZERO, 0.0, 0.0);
         assert_eq!(saved(&t), sound("minecraft:item.trident.hit_ground"));
         assert_eq!(t.hit_ground_sound(), "minecraft:item.trident.hit_ground");
         assert_eq!(saved(&t), sound("minecraft:entity.arrow.hit"));
-        let tag = t.to_nbt([0; 4], &registry, None);
+        let tag = t.to_nbt([0; 4], &registry, None, &Default::default());
         let n = sunrise_client::entity_nbt::trident_from_nbt(&tag).unwrap();
         let mut back = ThrownTrident::from_nbt(n, &tag, &registry);
         assert_eq!(back.hit_ground_sound(), "minecraft:entity.arrow.hit");
@@ -1656,7 +1661,7 @@ mod tests {
         // `inGroundTime` is not saved: Loyalty's count starts at 0 whatever
         // `life` was, so a negative `life` does not hold the trident back.
         assert_eq!((back.life, back.in_ground_time), (-1, 0));
-        let saved = back.to_nbt([1; 4], &registry, None);
+        let saved = back.to_nbt([1; 4], &registry, None, &Default::default());
         assert_eq!(saved.get("life"), Some(&Tag::Short(-1)));
         assert_eq!(saved.get("shake"), Some(&Tag::Byte(-1)));
     }
@@ -1668,12 +1673,12 @@ mod tests {
         let registry = stone_registry();
         let mut t = ThrownTrident::remote(1, Vec3::ZERO, 0.0, 0.0);
         assert!(
-            t.to_nbt([1; 4], &registry, None)
+            t.to_nbt([1; 4], &registry, None, &Default::default())
                 .get("inBlockState")
                 .is_none()
         );
         t.last_state = registry.default_state("minecraft:stone");
-        let tag = t.to_nbt([1; 4], &registry, None);
+        let tag = t.to_nbt([1; 4], &registry, None, &Default::default());
         assert_eq!(
             tag.get("inBlockState"),
             Some(&Tag::String("minecraft:stone".into()))
@@ -1694,14 +1699,20 @@ mod tests {
             _ => None,
         };
         let fresh = ThrownTrident::remote(1, Vec3::ZERO, 0.0, 0.0);
-        assert_eq!(fall(&fresh.to_nbt([1; 4], &registry, None)), Some(0.0));
+        assert_eq!(
+            fall(&fresh.to_nbt([1; 4], &registry, None, &Default::default())),
+            Some(0.0)
+        );
         let tag = Tag::compound([
             ("Pos", Tag::List(vec![Tag::Double(0); 3])),
             ("fall_distance", Tag::Double(5.0_f64.to_bits())),
         ]);
         let loaded = sunrise_client::entity_nbt::trident_from_nbt(&tag).unwrap();
         let back = ThrownTrident::from_nbt(loaded, &tag, &registry);
-        assert_eq!(fall(&back.to_nbt([1; 4], &registry, None)), Some(5.0));
+        assert_eq!(
+            fall(&back.to_nbt([1; 4], &registry, None, &Default::default())),
+            Some(5.0)
+        );
     }
 
     /// `AbstractArrow.startFalling` on `new Random(42)`: its first three

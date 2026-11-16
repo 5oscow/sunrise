@@ -798,9 +798,14 @@ impl Game<'_> {
             let uuid = self.persist.uuids.get(&m.id).copied().unwrap_or_default();
             let raw = self.persist.raw.get(&m.id);
             let registry = Some(self.pack.assets.registry);
-            let mut tag = sunrise_client::entity_nbt::mob_to_nbt(m, uuid, raw, registry, |other| {
-                self.persist.uuid_of(other)
-            });
+            let mut tag = sunrise_client::entity_nbt::mob_to_nbt(
+                m,
+                uuid,
+                raw,
+                registry,
+                |other| self.persist.uuid_of(other),
+                self.res.items(),
+            );
             self.put_last_hurt_by_mob(m, &mut tag);
             let riders = passengers.iter().filter_map(|r| r.nbt.clone()).collect();
             super::persist::add_passengers(&mut tag, riders);
@@ -3582,7 +3587,7 @@ mod custom_data_equipment_tests {
                 let stack = finalize::item_stack(mob, finalize::MAINHAND)
                     .expect("actual loaded equipment stack");
                 assert_eq!((&*stack.item, stack.count), ("minecraft:stick", 1));
-                let saved = save::item_to_nbt(&stack);
+                let saved = save::item_to_nbt(&stack, &Default::default());
                 if let Some(data) = data {
                     let (expected, used) = parse_snbt(data).unwrap();
                     assert_eq!(used, data.len());

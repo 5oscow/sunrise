@@ -3860,7 +3860,12 @@ impl Dragon {
     pub(super) fn first_tick(&self) -> bool {
         self.ticks == 0
     }
-    pub(super) fn to_nbt(&self, uuid: [i32; 4], raw: Option<&Tag>) -> Tag {
+    pub(super) fn to_nbt(
+        &self,
+        uuid: [i32; 4],
+        raw: Option<&Tag>,
+        items: &sunrise_client::items::Items,
+    ) -> Tag {
         let mut tag = sunrise_client::entity_nbt::vehicle_to_nbt(
             "minecraft:ender_dragon",
             self.position,
@@ -3885,7 +3890,7 @@ impl Dragon {
                 "sitting_damage_received".into(),
                 Tag::Float(self.sitting_damage.to_bits()),
             );
-            self.equipment.store(map);
+            self.equipment.store(map, items);
             sunrise_client::entity_nbt::put_live_attributes(map, &self.live);
         }
         tag
@@ -5347,7 +5352,7 @@ mod tests {
         use sunrise_items::equipment::{BODY, SADDLE};
         let mut d = Dragon::new(Vec3::ZERO, 0.0, 0);
         // An old save has no `equipment` key: the dragon loads empty and saves none.
-        let old = d.to_nbt([0; 4], None);
+        let old = d.to_nbt([0; 4], None, &Default::default());
         assert!(old.get("equipment").is_none());
         assert!(Dragon::from_nbt(&old, 0).unwrap().equipment.is_empty());
         // Body and saddle round-trip with their name and damage.
@@ -5356,11 +5361,15 @@ mod tests {
         body.data_mut().custom_name = Some(Tag::String("Plate".into()));
         d.equipment[BODY] = Some(body);
         d.equipment[SADDLE] = Some(ItemStack::new("minecraft:saddle", 1));
-        let saved = d.to_nbt([0; 4], None);
+        let saved = d.to_nbt([0; 4], None, &Default::default());
         assert_eq!(Dragon::from_nbt(&saved, 0).unwrap().equipment, d.equipment);
         // Saving over a raw save that holds a stale key removes it once emptied.
         d.equipment.take_all().for_each(drop);
-        assert!(d.to_nbt([0; 4], Some(&saved)).get("equipment").is_none());
+        assert!(
+            d.to_nbt([0; 4], Some(&saved), &Default::default())
+                .get("equipment")
+                .is_none()
+        );
     }
 
     fn player_box(feet: [f64; 3]) -> (Aabb, Vec3) {
@@ -5630,7 +5639,7 @@ mod tests {
     fn a_perched_dragons_damage_survives_the_chunk_save() {
         let mut d = dragon(Phase::Flaming { ticks: 0 });
         d.sitting_damage = 12.5;
-        let tag = d.to_nbt([1, 2, 3, 4], None);
+        let tag = d.to_nbt([1, 2, 3, 4], None, &Default::default());
         let back = Dragon::from_nbt(&tag, 0).unwrap();
         assert_eq!(back.sitting_damage, 12.5);
         // No key at all reads as no damage accumulated.

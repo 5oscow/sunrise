@@ -1419,8 +1419,14 @@ mod tests {
                         expected.next_long(),
                         "{name}: RNG continuation"
                     );
-                    let saved =
-                        crate::entity_nbt::mob_to_nbt(&m, [93, 0, 0, 1], None, None, |_| None);
+                    let saved = crate::entity_nbt::mob_to_nbt(
+                        &m,
+                        [93, 0, 0, 1],
+                        None,
+                        None,
+                        |_| None,
+                        &Default::default(),
+                    );
                     assert_eq!(
                         saved.get("Temper"),
                         Some(&sunrise_core::nbt::Tag::Int(if value < 0 {

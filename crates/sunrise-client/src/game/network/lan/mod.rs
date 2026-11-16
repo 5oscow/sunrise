@@ -1262,6 +1262,7 @@ impl Game<'_> {
             &sync.builtin,
             &biome_names,
             &registry,
+            self.res.shared_items(),
         );
         encoder.tables = Some(
             self.save
@@ -1426,9 +1427,10 @@ impl Game<'_> {
                 .and_then(|host| host.owner.as_ref())
                 .is_some_and(|o| o.uuid == guest.uuid)
             {
-                playerdata::save_owner(guest, &mut self.level, &self.world_root);
+                playerdata::save_owner(guest, &mut self.level, &self.world_root, self.res.items());
             } else {
-                self.player_autosaves.save_after(guest, &self.world_root);
+                self.player_autosaves
+                    .save_after(guest, &self.world_root, self.res.items());
             }
             let directory = playerdata::directory(&self.world_root);
             self.native_player_save_to_file(guest.uuid, &guest.name, &directory);
@@ -3700,6 +3702,7 @@ mod tests {
             &sunrise_protocol::registry::Builtin::default(),
             &[],
             &[],
+            Default::default(),
         );
         let config = sunrise_client::lan::hub::HubConfig {
             default_game_mode: 0,
@@ -5823,6 +5826,7 @@ mod merchant_packet_tests {
                 &sunrise_protocol::registry::Builtin::default(),
                 &[],
                 &[],
+                Default::default(),
             );
             let config = sunrise_client::lan::hub::HubConfig {
                 default_game_mode: 0,

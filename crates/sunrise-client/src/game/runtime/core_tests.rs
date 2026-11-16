@@ -1116,7 +1116,7 @@ fn integrated_server_save_persists_owner_player_data() {
         game_mode: 1,
         ..Level::default()
     };
-    level.write(&dir).unwrap();
+    level.write(&dir, &Default::default()).unwrap();
 
     // The integrated server stores the owner's state in `level` and saves the world.
     level.position = Some([128.5, 72.0, -64.25]);
@@ -1125,6 +1125,7 @@ fn integrated_server_save_persists_owner_player_data() {
         &mut level,
         &dir,
         execution_role::ExecutionRole::IntegratedServer,
+        &Default::default(),
     )
     .unwrap();
 
@@ -1145,6 +1146,7 @@ fn integrated_server_save_persists_owner_player_data() {
         &mut dedicated,
         &dir,
         execution_role::ExecutionRole::DedicatedServer,
+        &Default::default(),
     )
     .unwrap();
 

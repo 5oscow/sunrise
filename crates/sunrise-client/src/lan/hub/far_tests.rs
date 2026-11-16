@@ -82,6 +82,7 @@ fn far_buffer_edge_sends_all_light_and_live_block_entities_without_neighbours() 
         &builtin,
         &[],
         &[],
+        Default::default(),
     );
     let mut world = World::new(sunrise_world::registry::BlockStateId(0), 0);
     lit(&mut world, (12, 0));
@@ -149,6 +150,7 @@ fn missing_far_column_retries_after_a_change_without_player_movement() {
         &sunrise_protocol::registry::Builtin::default(),
         &[],
         &[],
+        Default::default(),
     );
     let body = encoder.body_alone(&chunk);
     let (mut hub, rx) = far_hub(move |_, _| ready.load(Ordering::Relaxed).then(|| body.clone()));

@@ -15,7 +15,7 @@ use sunrise_world::{
 
 /// The component patch of `stack`.
 fn components(stack: &ItemStack) -> Compound {
-    match item_data::encode_components(stack) {
+    match item_data::component_snapshot(stack) {
         Some(Tag::Compound(c)) => c,
         _ => Compound::new(),
     }
@@ -97,7 +97,7 @@ impl Game<'_> {
             .facts()
             .get(self.world.block(key.0, key.1, key.2))
             .name;
-        let mut tag = save::block_entity_encode::encode(key, entity, block);
+        let mut tag = save::block_entity_encode::encode(key, entity, block, self.res.items());
         if let (Some(name), Tag::Compound(map)) = (self.world.block_names.get(&key), &mut tag) {
             map.insert("CustomName".into(), name.clone());
         }

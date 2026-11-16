@@ -371,6 +371,7 @@ mod tests {
             &Builtin::default(),
             &[],
             &[],
+            Default::default(),
         );
         far.set_level("overworld", &save, &encoder);
         far

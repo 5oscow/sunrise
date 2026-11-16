@@ -50,6 +50,46 @@ pub(super) fn fixture() -> (BlockRegistry, Biomes) {
     (registry, biomes)
 }
 
+#[test]
+fn queued_chunk_stacks_save_against_the_loaded_item_prototypes() {
+    let (registry, biomes) = fixture();
+    let registry = Box::leak(Box::new(registry));
+    let biomes = Arc::new(biomes);
+    let scratch = tempfile::tempdir().unwrap();
+    fs::create_dir_all(scratch.path().join("data/minecraft/loot_table")).unwrap();
+    fs::write(scratch.path().join("items.json"), r#"{"minecraft:red_banner":{"minecraft:banner_patterns":[]},"minecraft:diamond_pickaxe":{"minecraft:damage":0}}"#).unwrap();
+    let defaults = sunrise_world::item_defaults::read(scratch.path()).unwrap();
+    let items = Arc::new(
+        crate::items::Items::catalog(
+            scratch.path(),
+            &sunrise_world::loot::PackOverlay::NONE,
+            &defaults,
+        )
+        .unwrap(),
+    );
+    let parse = |value| crate::item_data::parse_stack(value).unwrap();
+    let mut chunk = Chunk::empty(0, 0);
+    chunk.set(1, 64, 2, 1);
+    chunk.block_entities.push(((1, 64, 2), crate::containers::BlockEntity::Chest(vec![
+        parse(r#"{id:"minecraft:red_banner",count:1,components:{"minecraft:banner_patterns":[]}}"#),
+        parse(r#"{id:"minecraft:diamond_pickaxe",count:1,components:{"minecraft:damage":0,"minecraft:custom_data":{keep:87}}}"#),
+    ])));
+    mod_platform::testing::with_mods(Vec::new().into(), || {
+        let root = scratch.path().join("world");
+        let save = SaveDir::new(root.clone(), LevelShape::OVERWORLD, Some(items));
+        save.save_later(&[Arc::new(chunk)], registry, &biomes)
+            .unwrap();
+        save.flush().unwrap();
+        let disk = SaveDir::new(root, LevelShape::OVERWORLD, None);
+        let saved = disk.raw_chunk(0, 0).unwrap();
+        let Some(Tag::List(entities)) = saved.tag.get("block_entities") else {
+            panic!("block entities")
+        };
+        let expected = sunrise_core::nbt::parse_snbt(r#"[{Slot:0b,id:"minecraft:red_banner",count:1},{Slot:1b,id:"minecraft:diamond_pickaxe",count:1,components:{"minecraft:custom_data":{keep:87}}}]"#).unwrap().0;
+        assert_eq!(entities[0].get("Items"), Some(&expected));
+    });
+}
+
 fn reload_loot_case(
     registry: &BlockRegistry,
     biomes: &Biomes,

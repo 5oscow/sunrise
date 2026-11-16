@@ -277,7 +277,12 @@ impl Game<'_> {
                 .block_entities
                 .get(&(key[0], key[1], key[2]))
                 .map(|entity| {
-                    block_entity_encode::encode((key[0], key[1], key[2]), entity, &descriptor.name)
+                    block_entity_encode::encode(
+                        (key[0], key[1], key[2]),
+                        entity,
+                        &descriptor.name,
+                        self.res.items(),
+                    )
                 });
             operation_cells.push(OperationCell {
                 world: key,
@@ -850,7 +855,12 @@ impl Game<'_> {
                         .state(state)
                         .map(|descriptor| descriptor.name.as_str())
                         .unwrap_or("");
-                    let encoded = block_entity_encode::encode((pos[0], pos[1], pos[2]), live, name);
+                    let encoded = block_entity_encode::encode(
+                        (pos[0], pos[1], pos[2]),
+                        live,
+                        name,
+                        self.res.items(),
+                    );
                     if !entities_content_equal(&encoded, image) {
                         return Err(TransferError::Revalidation(pos));
                     }
@@ -1377,6 +1387,7 @@ mod tests {
                 (4, 64, 4),
                 &entity,
                 "minecraft:chest",
+                &Default::default(),
             );
             spill::put_saved_entity(&mut game.world, [4, 64, 4], tag.clone());
             assert!(matches!(
@@ -1453,6 +1464,7 @@ mod tests {
                 (4, 64, 4),
                 &entity,
                 "minecraft:chest",
+                &Default::default(),
             );
             spill::put_saved_entity(&mut game.world, [4, 64, 4], tag.clone());
             let images = [crate::carrier_store::OperationCell {

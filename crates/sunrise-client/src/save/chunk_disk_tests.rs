@@ -165,7 +165,7 @@ fn full_and_proto_writer_records_each_invoke_once_before_encode() {
         assert_eq!(saves.load(Ordering::Relaxed), 2);
         assert_eq!(
             value(
-                &mut SaveDir::new(path.clone(), LevelShape::OVERWORLD)
+                &mut SaveDir::new(path.clone(), LevelShape::OVERWORLD, None)
                     .load_proto(2, -3, registry, &biomes)
                     .unwrap()
                     .column

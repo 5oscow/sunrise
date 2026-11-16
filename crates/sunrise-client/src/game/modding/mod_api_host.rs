@@ -406,7 +406,9 @@ impl mod_api::LevelHost for super::GameLevel<'_> {
         }
         let entity = self.world.block_entities.get(&key)?;
         let name = &self.facts.get(self.world.block(x, y, z)).name;
-        super::native_block_entity_refs::save_without_metadata(self.world, key, entity, name)
+        super::native_block_entity_refs::save_without_metadata(
+            self.world, key, entity, name, self.items,
+        )
     }
 
     fn block_state_id(&self, name: &str) -> Option<mod_api::BlockState> {

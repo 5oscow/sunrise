@@ -72,7 +72,15 @@ fn a_biome_the_world_lacks_is_saved_back_unchanged() {
         assert!(id > 255);
         assert_eq!(again.saved_name(id), format!("gone_mod:cell_{i}"));
     }
-    assert_eq!(palette(&encode(&reloaded, assets.registry, &again)), names);
+    assert_eq!(
+        palette(&encode(
+            &reloaded,
+            assets.registry,
+            &again,
+            &Default::default()
+        )),
+        names
+    );
 }
 
 #[test]

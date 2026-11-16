@@ -679,30 +679,15 @@ fn merge_block_entity(original: &Tag, loaded: &Tag, current: &Tag) -> Tag {
 /// chunk-only `keepPacked`, and with the fields Sunrise keeps outside its
 /// model: a container's `lock` (`LockCode`), from the tag it was loaded or set
 /// with.
-pub fn block_entity_data(
-    p: (i32, i32, i32),
-    e: &crate::containers::BlockEntity,
-    block: &str,
-    lock: Option<&Tag>,
-) -> Tag {
-    block_entity_data_tag(block_entity_encode::encode(p, e, block), lock)
-}
-
 /// Command-visible block-entity data, saved against loaded item prototypes.
-pub fn block_entity_data_with_items(
+pub fn block_entity_data(
     p: (i32, i32, i32),
     e: &crate::containers::BlockEntity,
     block: &str,
     lock: Option<&Tag>,
     items: &crate::items::Items,
 ) -> Tag {
-    block_entity_data_tag(
-        block_entity_encode::encode_with_items(p, e, block, items),
-        lock,
-    )
-}
-
-fn block_entity_data_tag(mut tag: Tag, lock: Option<&Tag>) -> Tag {
+    let mut tag = block_entity_encode::encode(p, e, block, items);
     if let Tag::Compound(map) = &mut tag {
         map.remove(&"keepPacked".into());
         if let Some(lock) = lock {
@@ -747,7 +732,7 @@ fn decode_mod_block_entity(id: String, tag: &Tag) -> Option<crate::containers::M
     // `Slot` is a byte: 256 slots at most.
     let mut items = decode_items(nbt.get(&"Items".into()), 256);
     // Compared in slot order, the order `encode_items` writes: vanilla loads by `Slot`.
-    let encoded = encode_items(&items);
+    let encoded = sunrise_items::item_nbt::encode_items_using(&items, |stack| Tag::from(stack));
     let matches = match (nbt.get(&"Items".into()), &encoded) {
         (Some(Tag::List(saved)), Tag::List(encoded)) => {
             let mut saved: Vec<&Tag> = saved.iter().collect();
@@ -1364,7 +1349,7 @@ pub fn encode_with(
         .filter(|(_, e)| !block_entity_placeholder(e))
         .map(|(p, e)| {
             let block = block_name(p);
-            let mut current = block_entity_encode::encode_with_items(*p, e, &block, items);
+            let mut current = block_entity_encode::encode(*p, e, &block, items);
             if let Some((_, name)) = chunk.block_names.iter().find(|(q, _)| q == p)
                 && let Tag::Compound(map) = &mut current
             {
@@ -1381,8 +1366,7 @@ pub fn encode_with(
                     let loaded = decode_block_entity(original).map_or_else(
                         || current.clone(),
                         |(q, e)| {
-                            let mut loaded =
-                                block_entity_encode::encode_with_items(q, &e, &block, items);
+                            let mut loaded = block_entity_encode::encode(q, &e, &block, items);
                             if !matches!(
                                 e,
                                 crate::containers::BlockEntity::Banner(_)
@@ -1433,7 +1417,7 @@ pub fn encode_with(
                 if let Some(pending) = extras.and_then(|x| x.pending_loot.get(p)) {
                     pending.write_tags(map);
                     if e.slots().iter().any(Option::is_some) {
-                        map.insert("Items".into(), encode_items(e.slots()));
+                        map.insert("Items".into(), encode_items(e.slots(), items));
                     }
                 }
             }
@@ -3912,7 +3896,7 @@ impl Level {
     /// The player compound: loaded data with current state written over it.
     /// `LivingEntity.addAdditionalSaveData` / `ServerPlayer.addAdditionalSaveData`:
     /// the live fall fields and the player's empty brain are saved too.
-    pub fn player_tag(&self) -> Tag {
+    pub fn player_tag(&self, items: &crate::items::Items) -> Tag {
         let mut p = compound_or_empty(self.player_extra.clone());
         // Keys rewritten from scratch.
         if let Tag::Compound(map) = &mut p {
@@ -3944,7 +3928,7 @@ impl Level {
             match *slot {
                 0..=35 => {
                     let mut entries = vec![("Slot", Tag::Byte(*slot as i8))];
-                    entries.extend(encode_item(&stack));
+                    entries.extend(encode_item(&stack, items));
                     inventory.push(Tag::compound(entries));
                 }
                 _ => {
@@ -4067,7 +4051,7 @@ impl Level {
             ),
             ("playerGameType", Tag::Int(self.mode())),
             ("Inventory", Tag::List(inventory)),
-            ("EnderItems", encode_items(&self.ender_items)),
+            ("EnderItems", encode_items(&self.ender_items, items)),
             ("recipeBook", self.recipe_book.write()),
             ("abilities", abilities),
             (
@@ -4086,7 +4070,7 @@ impl Level {
             .inventory
             .iter()
             .any(|(slot, _, count, _)| i32::from(*slot) == self.selected_slot && *count > 0);
-        match equipment.write() {
+        match equipment.write(items) {
             Some(tag) => entries.push(("equipment", tag)),
             None if holding => entries.push(("equipment", Tag::Compound(Default::default()))),
             None => {}
@@ -4174,13 +4158,13 @@ impl Level {
         p
     }
     /// Write every file; a world without a player UUID gets a random one.
-    pub fn write(&mut self, dir: &Path) -> Result<()> {
-        self.write_internal(dir, true, false)
+    pub fn write(&mut self, dir: &Path, items: &crate::items::Items) -> Result<()> {
+        self.write_internal(dir, Some(items), false)
     }
 
     /// Dedicated servers save connected players separately.
     pub fn write_without_player(&mut self, dir: &Path) -> Result<()> {
-        self.write_internal(dir, false, false)
+        self.write_internal(dir, None, false)
     }
 
     /// The temporary world a Realms upload packs
@@ -4189,22 +4173,27 @@ impl Level {
     /// generation and game rules, and no player file or weather/clocks the server makes
     /// on its own. The caller writes the data packs and removes the folder.
     pub fn write_upload(&mut self, dir: &Path) -> Result<()> {
-        self.write_internal(dir, false, true)
+        self.write_internal(dir, None, true)
     }
 
     /// The player's file alone, `players/data/<singleplayer_uuid>.dat`
     /// (`PlayerDataStorage.save`): the one level.dat names.
-    pub fn write_player(&mut self, dir: &Path) -> Result<()> {
+    pub fn write_player(&mut self, dir: &Path, items: &crate::items::Items) -> Result<()> {
         let uuid = self.ensure_player_uuid();
         let player_file = dir
             .join("players")
             .join("data")
             .join(format!("{}.dat", uuid_text(uuid)));
         back_up_unreadable_player(&player_file);
-        write_dat(&player_file, self.player_tag())
+        write_dat(&player_file, self.player_tag(items))
     }
 
-    fn write_internal(&mut self, dir: &Path, write_player: bool, upload: bool) -> Result<()> {
+    fn write_internal(
+        &mut self,
+        dir: &Path,
+        items: Option<&crate::items::Items>,
+        upload: bool,
+    ) -> Result<()> {
         fs::create_dir_all(dir)?;
         restore_level_dat(dir);
         let mut root = compound_or_empty(read_dat(&dir.join("level.dat")));
@@ -4457,8 +4446,8 @@ impl Level {
             }
             write_saved_data(dir, "game_rules", rules)?;
         }
-        if write_player {
-            self.write_player(dir)?;
+        if let Some(items) = items {
+            self.write_player(dir, items)?;
         }
         put(&mut root, "Data", data);
         write_dat(&dir.join("level.dat"), root)?;
@@ -5191,6 +5180,7 @@ mod tests {
             (1, 2, 3),
             &BlockEntity::Chest(slots.clone()),
             "minecraft:chest",
+            &Default::default(),
         );
         assert!(
             chest.get("Items").is_some(),
@@ -5200,6 +5190,7 @@ mod tests {
             (1, 2, 3),
             &BlockEntity::Chest(slots),
             "minecraft:ender_chest",
+            &Default::default(),
         );
         assert_eq!(
             ender.get("id"),
@@ -5227,7 +5218,7 @@ mod tests {
             ..Default::default()
         };
         level.game_rules.insert("example:enabled".into(), 0);
-        level.write(&dir).unwrap();
+        level.write(&dir, &Default::default()).unwrap();
         assert_eq!(
             super::read_saved_data(&dir, "game_rules")
                 .unwrap()
@@ -5235,7 +5226,7 @@ mod tests {
             Some(&super::Tag::Byte(0))
         );
         let mut absent = super::Level::read(&dir).unwrap();
-        absent.write(&dir).unwrap();
+        absent.write(&dir, &Default::default()).unwrap();
         assert_eq!(
             super::read_saved_data(&dir, "game_rules")
                 .unwrap()
@@ -5244,7 +5235,7 @@ mod tests {
         );
         let mut returned = super::Level::read_with_registry(&dir, registry).unwrap();
         assert_eq!(returned.game_rules.get("example:enabled"), Some(&0));
-        returned.write(&dir).unwrap();
+        returned.write(&dir, &Default::default()).unwrap();
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -5427,7 +5418,7 @@ mod tests {
             .unwrap();
         save.flush().unwrap();
         assert_eq!(
-            sections(&SaveDir::new(dir.clone(), LevelShape::OVERWORLD)),
+            sections(&SaveDir::new(dir.clone(), LevelShape::OVERWORLD, None)),
             Some(0)
         );
         let _ = fs::remove_dir_all(&dir);
@@ -6511,7 +6502,9 @@ mod tests {
         let encode = |entries: &[((i32, i32, i32), BlockEntity)]| {
             entries
                 .iter()
-                .map(|(p, e)| block_entity_encode::encode(*p, e, "minecraft:chest"))
+                .map(|(p, e)| {
+                    block_entity_encode::encode(*p, e, "minecraft:chest", &Default::default())
+                })
                 .collect::<Vec<_>>()
         };
         for input in [&batch[..0], &batch[..1], &batch[..]] {
@@ -6758,7 +6751,7 @@ mod tests {
         save.save_entities_later(vec![((1, 2), vec![])]).unwrap();
         save.flush().unwrap();
         assert!(
-            super::SaveDir::new(dir.clone(), LevelShape::OVERWORLD)
+            super::SaveDir::new(dir.clone(), LevelShape::OVERWORLD, None)
                 .load_entities(1, 2)
                 .is_empty()
         );
@@ -6826,6 +6819,7 @@ mod tests {
             (7, 8, 9),
             &crate::containers::BlockEntity::Crafter(crafter),
             "minecraft:crafter",
+            &Default::default(),
         );
         let (pos, back) = decode_block_entity(&tag).expect("crafter");
         assert_eq!(pos, (7, 8, 9));
@@ -6851,6 +6845,7 @@ mod tests {
                 (0, 0, 0),
                 &crate::containers::BlockEntity::Crafter(crafter),
                 "minecraft:crafter",
+                &Default::default(),
             );
             let (_, back) = decode_block_entity(&tag).expect("crafter");
             let crate::containers::BlockEntity::Crafter(back) = back else {
@@ -6888,6 +6883,7 @@ mod tests {
             (3, 64, -2),
             &crate::containers::BlockEntity::Campfire(Box::new(c.clone())),
             "minecraft:soul_campfire",
+            &Default::default(),
         );
         // One block entity type for both campfires.
         assert_eq!(text(tag.get("id")).as_deref(), Some("minecraft:campfire"));
@@ -6899,7 +6895,8 @@ mod tests {
         assert_eq!(*back, c);
         // The update tag a server's clients get: the items alone.
         let campfire = crate::containers::BlockEntity::Campfire(Box::new(c));
-        let update = crate::lan::chunks::entity_tag(&campfire, false).expect("update tag");
+        let update = crate::lan::chunks::entity_tag(&campfire, false, &Default::default())
+            .expect("update tag");
         assert!(update.get("Items").is_some() && update.get("CookingTimes").is_none());
     }
     /// `LecternBlockEntity.loadAdditional`: `Page` is clamped to
@@ -6958,6 +6955,7 @@ mod tests {
             pos,
             &crate::containers::BlockEntity::Lectern(l),
             "minecraft:lectern",
+            &Default::default(),
         );
         assert_eq!(number(saved.get("Page")), Some(1));
     }
@@ -6976,7 +6974,13 @@ mod tests {
         // The command path keeps an empty inventory and the pending table/seed
         // for data get and saving. No loot resources are needed to keep that state.
         let pending = PendingContainerLoot::from_tag(&saved).unwrap();
-        let mut stored = block_entity_data((1, 2, 3), &chest, "minecraft:chest", None);
+        let mut stored = block_entity_data(
+            (1, 2, 3),
+            &chest,
+            "minecraft:chest",
+            None,
+            &Default::default(),
+        );
         let Tag::Compound(fields) = &mut stored else {
             panic!("compound");
         };
@@ -7019,7 +7023,8 @@ mod tests {
                 "{id}: loadAdditional ignores Items when a loot table loads"
             );
             let pending = PendingContainerLoot::from_tag(&saved).unwrap();
-            let mut stored = block_entity_data((1, 2, 3), &container, id, None);
+            let mut stored =
+                block_entity_data((1, 2, 3), &container, id, None, &Default::default());
             let Tag::Compound(fields) = &mut stored else {
                 panic!("compound");
             };
@@ -7082,10 +7087,17 @@ mod tests {
         assert_eq!(chest.slots().len(), 27);
         assert_eq!(pos, (1, 2, 3));
         // The encoded entity has no field to carry the lock...
-        let plain = block_entity_encode::encode(pos, &chest, "minecraft:chest");
+        let plain =
+            block_entity_encode::encode(pos, &chest, "minecraft:chest", &Default::default());
         assert!(plain.get("lock").is_none());
         // ...so `data get` puts back the one it was loaded with.
-        let data = block_entity_data(pos, &chest, "minecraft:chest", saved.get("lock"));
+        let data = block_entity_data(
+            pos,
+            &chest,
+            "minecraft:chest",
+            saved.get("lock"),
+            &Default::default(),
+        );
         let lock = sunrise_core::nbt::parse_snbt(r#"{items:"minecraft:gold_ingot"}"#)
             .unwrap()
             .0;
@@ -7106,7 +7118,7 @@ mod tests {
         };
         let next = spawner.next_data().and_then(|d| d.id());
         assert_eq!(next.as_deref(), Some("minecraft:zombie"));
-        let tag = block_entity_encode::encode(pos, &back, "minecraft:spawner");
+        let tag = block_entity_encode::encode(pos, &back, "minecraft:spawner", &Default::default());
         let (_, again) = decode_block_entity(&tag).expect("spawner again");
         let crate::containers::BlockEntity::Spawner(again) = again else {
             panic!("not a spawner");
@@ -7308,7 +7320,7 @@ mod tests {
         let batch = Compound::from([("effect".into(), Tag::Int(23))]);
         machine.set_client_update_fields(batch.clone());
         assert_eq!(
-            block_entity_encode::encode(pos, &entity, "test:machine"),
+            block_entity_encode::encode(pos, &entity, "test:machine", &Default::default()),
             saved
         );
         assert_eq!(machine.take_client_update_fields(), Some(batch));
@@ -7337,7 +7349,7 @@ mod tests {
         assert_eq!(m.items.len(), 1);
         assert_eq!(m.items[0].as_ref().map(|s| s.count), Some(3));
         assert_eq!(
-            block_entity_encode::encode(pos, &back, "gtmod:macerator"),
+            block_entity_encode::encode(pos, &back, "gtmod:macerator", &Default::default()),
             saved
         );
         // `Items` that are not an item list stay the mod's, as saved.
@@ -7358,7 +7370,7 @@ mod tests {
             };
             assert!(m.items.is_empty(), "{items}");
             assert_eq!(
-                block_entity_encode::encode(pos, &back, "gtmod:cable"),
+                block_entity_encode::encode(pos, &back, "gtmod:cable", &Default::default()),
                 saved,
                 "{items}"
             );
@@ -7391,7 +7403,7 @@ mod tests {
         .unwrap()
         .0;
         assert_eq!(
-            block_entity_encode::encode(pos, &back, "gtmod:macerator"),
+            block_entity_encode::encode(pos, &back, "gtmod:macerator", &Default::default()),
             reordered
         );
         // Unordered lists the loader cannot read exactly stay the mod's, as saved.
@@ -7410,7 +7422,7 @@ mod tests {
             };
             assert!(m.items.is_empty(), "{items}");
             assert_eq!(
-                block_entity_encode::encode(pos, &back, "gtmod:cable"),
+                block_entity_encode::encode(pos, &back, "gtmod:cable", &Default::default()),
                 saved,
                 "{items}"
             );
@@ -7455,6 +7467,7 @@ mod tests {
             (1, 2, 3),
             &entity,
             "minecraft:oxidized_copper_golem_statue",
+            &Default::default(),
         );
         assert_eq!(
             tag.get("id"),
@@ -7475,6 +7488,7 @@ mod tests {
             (1, 2, 3),
             &BlockEntity::CopperGolemStatue(Compound::new()),
             "minecraft:copper_golem_statue",
+            &Default::default(),
         ))
         .expect("canonical statue");
         let placed = crate::block_entity_item::place(&fresh, &patch, false);
@@ -7492,6 +7506,7 @@ mod tests {
             (1, 2, 3),
             &crate::containers::BlockEntity::Banner(banner.clone()),
             "minecraft:red_banner",
+            &Default::default(),
         );
         let (pos, back) = decode_block_entity(&tag).expect("banner");
         assert_eq!(pos, (1, 2, 3));
@@ -7636,6 +7651,7 @@ mod tests {
                     (702, 100, 0),
                     &BlockEntity::EndGateway(gateway.clone()),
                     "minecraft:end_gateway",
+                    &Default::default(),
                 );
                 assert_eq!(
                     text(tag.get("id")).as_deref(),
@@ -7713,7 +7729,8 @@ mod tests {
             Some("minecraft:entity.player.hurt")
         );
         assert_eq!(back.id(), "minecraft:skull");
-        let tag = block_entity_encode::encode(pos, &back, "minecraft:player_head");
+        let tag =
+            block_entity_encode::encode(pos, &back, "minecraft:player_head", &Default::default());
         assert_eq!(
             crate::block_entity_nbt::id(&tag).as_deref(),
             Some("minecraft:skull")
@@ -7729,6 +7746,7 @@ mod tests {
             pos,
             &crate::containers::BlockEntity::Skull(crate::containers::Skull::default()),
             "minecraft:creeper_head",
+            &Default::default(),
         );
         let (_, decoded) = decode_block_entity(&plain).expect("plain skull");
         assert!(matches!(decoded, crate::containers::BlockEntity::Skull(_)));
@@ -7769,6 +7787,7 @@ mod tests {
             (3, 70, -5),
             &BlockEntity::CreakingHeart(Box::new(heart)),
             "minecraft:creaking_heart",
+            &Default::default(),
         );
         assert_eq!(
             tag.get("creaking"),
@@ -7786,6 +7805,7 @@ mod tests {
             (0, 0, 0),
             &BlockEntity::CreakingHeart(Box::default()),
             "minecraft:creaking_heart",
+            &Default::default(),
         );
         assert!(lonely.get("creaking").is_none());
     }
@@ -8040,7 +8060,7 @@ mod tests {
         assert_eq!(level.difficulty, "hard");
         assert_eq!(level.difficulty_id(), 3);
         // It survives the save, so the world comes back with it.
-        level.write(&dir).unwrap();
+        level.write(&dir, &Default::default()).unwrap();
         let back = Level::read(&dir).unwrap();
         assert_eq!(back.difficulty, "hard");
         assert_eq!(back.difficulty_id(), 3);
@@ -8070,7 +8090,7 @@ mod tests {
         };
 
         // Create a real player file using the existing singleplayer writer.
-        level.write(&dir).unwrap();
+        level.write(&dir, &Default::default()).unwrap();
         let uuid = level.player_uuid.unwrap();
         let player_file = dir
             .join("players")
@@ -8108,12 +8128,12 @@ mod tests {
             ..Level::default()
         };
         // A world without one starts the End's clock at its game time.
-        level.write(&dir).unwrap();
+        level.write(&dir, &Default::default()).unwrap();
         assert_eq!(Level::read(&dir).unwrap().end_clock, Some(5000));
         // Then it keeps its own count, apart from the game time and the day.
         level.time = 8000;
         level.end_clock = Some(321);
-        level.write(&dir).unwrap();
+        level.write(&dir, &Default::default()).unwrap();
         let back = Level::read(&dir).unwrap();
         assert_eq!(
             (back.time, back.day_time, back.end_clock),
@@ -8159,7 +8179,7 @@ mod tests {
         level
             .game_rules
             .insert("minecraft:keep_inventory".into(), 1);
-        level.write(&dir).unwrap();
+        level.write(&dir, &Default::default()).unwrap();
         let back = Level::read(&dir).unwrap();
         assert_eq!(back.name, "Test");
         assert_eq!(back.seed, -42);
@@ -8213,7 +8233,7 @@ mod tests {
             absorption: 2.0,
             ..back
         };
-        again.write(&dir).unwrap();
+        again.write(&dir, &Default::default()).unwrap();
         let third = Level::read(&dir).unwrap();
         assert_eq!(third.absorption, 2.0);
         assert!(matches!(
@@ -8233,7 +8253,7 @@ mod tests {
         dead.health = 0.0;
         dead.inventory.clear();
         dead.inventory_components.clear();
-        dead.write(&dir).unwrap();
+        dead.write(&dir, &Default::default()).unwrap();
         let dead = Level::read(&dir).unwrap();
         assert_eq!(dead.health, 0.0);
         assert!(dead.inventory.is_empty());
@@ -8308,7 +8328,7 @@ mod tests {
         assert_eq!(level.active_effects, [expected]);
         // Written back, the chain is the same compound.
         assert_eq!(
-            level.player_tag().get("active_effects"),
+            level.player_tag(&Default::default()).get("active_effects"),
             tag.get("active_effects")
         );
     }
@@ -8350,11 +8370,16 @@ mod tests {
             active_effects: vec![eff("minecraft:speed", 200, 1, false, true, true)],
             ..Level::default()
         };
-        let loaded = level.player_tag();
+        let loaded = level.player_tag(&Default::default());
         assert!(loaded.get("active_effects").is_some());
         level.player_extra = Some(loaded);
         level.active_effects.clear();
-        assert!(level.player_tag().get("active_effects").is_none());
+        assert!(
+            level
+                .player_tag(&Default::default())
+                .get("active_effects")
+                .is_none()
+        );
     }
 
     #[test]
@@ -8383,7 +8408,7 @@ mod tests {
                 player_extra: raw.clone(),
                 ..Level::default()
             };
-            let saved = level.player_tag();
+            let saved = level.player_tag(&Default::default());
             let Some(Tag::List(entries)) = saved.get("active_effects") else {
                 panic!("modeled live effects must be saved even without raw input")
             };
@@ -8436,7 +8461,7 @@ mod tests {
             active_effects: effects.clone(),
             ..Level::default()
         };
-        let tag = level.player_tag();
+        let tag = level.player_tag(&Default::default());
         let Tag::List(saved) = tag.get("active_effects").expect("active_effects") else {
             panic!("active_effects list");
         };
@@ -8471,12 +8496,12 @@ mod tests {
                 world_spawn: Some([0, 80, 0]),
                 ..Level::default()
             };
-            loaded.read_player(&level.player_tag());
+            loaded.read_player(&level.player_tag(&Default::default()));
             assert_eq!(loaded.respawn_elsewhere, Some(point));
             assert_eq!(loaded.spawn, Some([0.0, 80.0, 0.0]));
             assert_eq!(
-                loaded.player_tag().get("respawn"),
-                level.player_tag().get("respawn")
+                loaded.player_tag(&Default::default()).get("respawn"),
+                level.player_tag(&Default::default()).get("respawn")
             );
         }
     }
@@ -8488,7 +8513,7 @@ mod tests {
             flying: true,
             ..Level::default()
         };
-        let tag = level.player_tag();
+        let tag = level.player_tag(&Default::default());
         let flying_byte = tag
             .get("abilities")
             .and_then(|a| number(a.get("flying")))
@@ -8502,7 +8527,7 @@ mod tests {
         // Survival mode resets flying ability to 0 in save.
         level.creative = false;
         level.game_mode = 0;
-        let tag_survival = level.player_tag();
+        let tag_survival = level.player_tag(&Default::default());
         let flying_survival = tag_survival
             .get("abilities")
             .and_then(|a| number(a.get("flying")))
@@ -8529,10 +8554,16 @@ mod tests {
         level.read_player(&raw);
         level.player_extra = Some(raw);
         assert_eq!(level.root_vehicle, Some([1, 2, 3, 4]));
-        assert_eq!(level.player_tag().get("RootVehicle"), Some(&vehicle));
+        assert_eq!(
+            level.player_tag(&Default::default()).get("RootVehicle"),
+            Some(&vehicle)
+        );
         // Even saving before the vehicle is restored must not destroy it.
         level.root_vehicle = None;
-        assert_eq!(level.player_tag().get("RootVehicle"), Some(&vehicle));
+        assert_eq!(
+            level.player_tag(&Default::default()).get("RootVehicle"),
+            Some(&vehicle)
+        );
     }
 
     /// `RecipesUsed` is what a furnace owes in experience, so a save that drops it pays the
@@ -8545,8 +8576,12 @@ mod tests {
         };
         f.recipes_used
             .insert("minecraft:cooked_porkchop".to_owned(), 3);
-        let tag =
-            block_entity_encode::encode((1, 64, 2), &BlockEntity::Furnace(f), "minecraft:furnace");
+        let tag = block_entity_encode::encode(
+            (1, 64, 2),
+            &BlockEntity::Furnace(f),
+            "minecraft:furnace",
+            &Default::default(),
+        );
         let Some((_, BlockEntity::Furnace(back))) = decode_block_entity(&tag) else {
             panic!("a furnace back");
         };
@@ -8561,7 +8596,7 @@ mod tests {
             std::env::temp_dir().join(format!("sunrise-gamerules-level-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let mut level = super::Level::default();
-        level.write(&dir).unwrap();
+        level.write(&dir, &Default::default()).unwrap();
         // Rules changed while playing, then saved and loaded again.
         let mut rules = GameRules::load(&dir);
         assert_eq!(rules, GameRules::default());
@@ -8569,7 +8604,7 @@ mod tests {
         assert!(rules.set("advance_weather", Value::Bool(false)));
         assert!(rules.set("random_tick_speed", Value::Int(0)));
         level.game_rules = rules.by_name();
-        level.write(&dir).unwrap();
+        level.write(&dir, &Default::default()).unwrap();
         assert_eq!(GameRules::load(&dir), rules);
         let read = super::Level::read(&dir).unwrap();
         assert_eq!(read.game_rules, rules.by_name());
@@ -8586,7 +8621,7 @@ mod tests {
             ));
             let _ = std::fs::remove_dir_all(&dir);
             let mut level = super::Level::default();
-            level.write(&dir).unwrap();
+            level.write(&dir, &Default::default()).unwrap();
             if absent_mod {
                 let mut data = super::read_saved_data(&dir, "game_rules").unwrap();
                 super::put(&mut data, "absent:rule", super::Tag::Long(42));
@@ -8595,7 +8630,10 @@ mod tests {
             let mut before_level = super::read_dat(&dir.join("level.dat")).unwrap();
             let path = super::saved_data_path(&dir, "game_rules");
             let before_rules = std::fs::read(&path).unwrap();
-            super::Level::read(&dir).unwrap().write(&dir).unwrap();
+            super::Level::read(&dir)
+                .unwrap()
+                .write(&dir, &Default::default())
+                .unwrap();
             let mut after_level = super::read_dat(&dir.join("level.dat")).unwrap();
             for level in [&mut before_level, &mut after_level] {
                 if let super::Tag::Compound(root) = level
@@ -8621,7 +8659,7 @@ mod tests {
             rule_registry: first.clone(),
             ..Default::default()
         };
-        level.write(&dir).unwrap();
+        level.write(&dir, &Default::default()).unwrap();
         let loaded = super::Level::read_with_registry(&dir, first.clone()).unwrap();
         assert!(std::sync::Arc::ptr_eq(&loaded.rule_registry, &first));
         let next = super::Level::read_with_registry(&dir, second.clone()).unwrap();
@@ -8638,7 +8676,7 @@ mod tests {
             std::env::temp_dir().join(format!("sunrise-rule-defaults-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let mut level = super::Level::default();
-        level.write(&dir).unwrap();
+        level.write(&dir, &Default::default()).unwrap();
         let super::Tag::Compound(rules) = super::read_saved_data(&dir, "game_rules").unwrap()
         else {
             panic!("rule compound")
@@ -8665,7 +8703,7 @@ mod tests {
         level.enabled_features = [crate::gamerules::MINECART_IMPROVEMENTS.to_owned()].into();
         level.game_rules =
             crate::gamerules::GameRules::with_features(&level.enabled_features).by_name();
-        level.write(&dir).unwrap();
+        level.write(&dir, &Default::default()).unwrap();
         assert_eq!(
             super::read_saved_data(&dir, "game_rules")
                 .unwrap()
@@ -8679,7 +8717,9 @@ mod tests {
     fn legacy_bare_saved_rules_load_under_canonical_keys() {
         let dir = std::env::temp_dir().join(format!("sunrise-rule-legacy-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        super::Level::default().write(&dir).unwrap();
+        super::Level::default()
+            .write(&dir, &Default::default())
+            .unwrap();
         super::write_saved_data(
             &dir,
             "game_rules",
@@ -8705,7 +8745,7 @@ mod tests {
             std::env::temp_dir().join(format!("sunrise-gamerules-unknown-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let mut level = super::Level::default();
-        level.write(&dir).unwrap();
+        level.write(&dir, &Default::default()).unwrap();
         super::write_saved_data(
             &dir,
             "game_rules",
@@ -8713,7 +8753,7 @@ mod tests {
         )
         .unwrap();
         level.game_rules.insert("minecraft:advance_time".into(), 0);
-        level.write(&dir).unwrap();
+        level.write(&dir, &Default::default()).unwrap();
         assert_eq!(
             super::read_saved_data(&dir, "game_rules")
                 .unwrap()
@@ -8735,8 +8775,12 @@ mod tests {
             .insert("iron_ingot_from_smelting_iron_ore".to_owned(), 2);
         f.recipes_used
             .insert("minecraft:iron_ingot_from_smelting_iron_ore".to_owned(), 3);
-        let tag =
-            block_entity_encode::encode((1, 64, 2), &BlockEntity::Furnace(f), "minecraft:furnace");
+        let tag = block_entity_encode::encode(
+            (1, 64, 2),
+            &BlockEntity::Furnace(f),
+            "minecraft:furnace",
+            &Default::default(),
+        );
         let Some((_, BlockEntity::Furnace(back))) = decode_block_entity(&tag) else {
             panic!("a furnace back");
         };
@@ -8763,7 +8807,7 @@ mod tests {
             .into(),
             ..Level::default()
         };
-        level.write(&dir).unwrap();
+        level.write(&dir, &Default::default()).unwrap();
         let back = Level::read(&dir).unwrap();
         assert_eq!(back.enabled_features, level.enabled_features);
         // The tag is in the file.
@@ -8777,7 +8821,7 @@ mod tests {
         // older file's fields.
         let dir2 = gen_world("enabled-features-vanilla");
         level.enabled_features = ["minecraft:vanilla".into()].into();
-        level.write(&dir2).unwrap();
+        level.write(&dir2, &Default::default()).unwrap();
         let raw = crate::save::read_level_dat(&dir2).unwrap();
         if let Tag::Compound(data) = &raw {
             let data = data.get(&JavaString::from("Data")).unwrap();
@@ -9110,7 +9154,7 @@ mod tests {
             assert_eq!(reopened.load_forced_chunks(), forced);
             reopened.save_chunk_tickets(&HashSet::new(), &[]).unwrap();
             assert!(
-                SaveDir::new(path.clone(), LevelShape::OVERWORLD)
+                SaveDir::new(path.clone(), LevelShape::OVERWORLD, None)
                     .load_forced_chunks()
                     .is_empty()
             );
@@ -9992,8 +10036,10 @@ mod jukebox_song_clock_tests {
             // `setSongWithoutPlaying`: a saved clock, unstarted; else no song.
             assert_eq!(j.playing, clock.is_some());
             assert_eq!(j.loaded_clock, clock.is_some());
-            let saved = block_entity_encode::encode(pos, &model, "minecraft:jukebox");
-            let command = block_entity_data(pos, &model, "minecraft:jukebox", None);
+            let saved =
+                block_entity_encode::encode(pos, &model, "minecraft:jukebox", &Default::default());
+            let command =
+                block_entity_data(pos, &model, "minecraft:jukebox", None, &Default::default());
             check(label, &saved, clock);
             check(label, &command, clock);
             if with_record {
@@ -10009,7 +10055,12 @@ mod jukebox_song_clock_tests {
                 };
                 j.playing = false;
                 // Decoded clock state, not this separate legacy flag, owns saving.
-                let saved = block_entity_encode::encode(pos, &detached, "minecraft:jukebox");
+                let saved = block_entity_encode::encode(
+                    pos,
+                    &detached,
+                    "minecraft:jukebox",
+                    &Default::default(),
+                );
                 check("clock independent of legacy playing", &saved, clock);
                 record_kept(&saved);
             }
@@ -10017,12 +10068,22 @@ mod jukebox_song_clock_tests {
         let empty = BlockEntity::Jukebox(Jukebox::default());
         check(
             "default modeled/no raw",
-            &block_entity_encode::encode((4, 200, 4), &empty, "minecraft:jukebox"),
+            &block_entity_encode::encode(
+                (4, 200, 4),
+                &empty,
+                "minecraft:jukebox",
+                &Default::default(),
+            ),
             None,
         );
         let raw = input(Some(41), true);
         let (pos, loaded_model) = decode_block_entity(&raw).unwrap();
-        let loaded = block_entity_encode::encode(pos, &loaded_model, "minecraft:jukebox");
+        let loaded = block_entity_encode::encode(
+            pos,
+            &loaded_model,
+            "minecraft:jukebox",
+            &Default::default(),
+        );
         let BlockEntity::Jukebox(j) = loaded_model else {
             unreachable!()
         };
@@ -10031,7 +10092,8 @@ mod jukebox_song_clock_tests {
             playing: true,
             ..Default::default()
         });
-        let current = block_entity_encode::encode(pos, &current, "minecraft:jukebox");
+        let current =
+            block_entity_encode::encode(pos, &current, "minecraft:jukebox", &Default::default());
         check("modeled record-only/no raw", &current, None);
         record_kept(&current);
         // The chunk writer uses this real overlay after encoding its model.

@@ -1267,10 +1267,18 @@ impl Game<'_> {
                         let Some(de) = de else {
                             return Ok((false, 0));
                         };
-                        let st =
-                            sunrise_client::save::block_entity_encode::encode((0, 0, 0), se, &name);
-                        let dt =
-                            sunrise_client::save::block_entity_encode::encode((0, 0, 0), de, &name);
+                        let st = sunrise_client::save::block_entity_encode::encode(
+                            (0, 0, 0),
+                            se,
+                            &name,
+                            self.res.items(),
+                        );
+                        let dt = sunrise_client::save::block_entity_encode::encode(
+                            (0, 0, 0),
+                            de,
+                            &name,
+                            self.res.items(),
+                        );
                         if st != dt {
                             return Ok((false, 0));
                         }

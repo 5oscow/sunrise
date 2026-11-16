@@ -2297,11 +2297,20 @@ mod tests {
                     assert_eq!(game.living_equipment(living, slot), Some(stack));
                 }
             }
-            let saved = game.dragon.as_ref().unwrap().to_nbt([0; 4], None);
+            let saved = game
+                .dragon
+                .as_ref()
+                .unwrap()
+                .to_nbt([0; 4], None, &Default::default());
             let loaded = super::super::dragon::Dragon::from_nbt(&saved, 0).unwrap();
             assert_eq!(loaded.equipment, game.dragon.as_ref().unwrap().equipment);
             let stored = game.armor_stands.last().unwrap();
-            let saved = sunrise_client::entity_nbt::armor_stand_to_nbt(stored, [0; 4], None);
+            let saved = sunrise_client::entity_nbt::armor_stand_to_nbt(
+                stored,
+                [0; 4],
+                None,
+                &Default::default(),
+            );
             let loaded = sunrise_client::entity_nbt::armor_stand_from_nbt(&saved, 16).unwrap();
             assert_eq!(loaded.equipment, stored.equipment);
             for living in [dragon, stand] {
@@ -2312,7 +2321,11 @@ mod tests {
             for slot in EquipmentSlot::ALL {
                 assert!(game.living_set_equipment(dragon, slot, None));
             }
-            let stale = game.dragon.as_ref().unwrap().to_nbt([0; 4], Some(&saved));
+            let stale =
+                game.dragon
+                    .as_ref()
+                    .unwrap()
+                    .to_nbt([0; 4], Some(&saved), &Default::default());
             assert!(stale.get("equipment").is_none());
         });
     }
@@ -2346,7 +2359,7 @@ mod tests {
             // onEquipItem: each item in its own slot plays its equip sound.
             assert_eq!(game.audio.capture.as_ref().unwrap().len(), 2);
             game.sync_level();
-            let tag = game.level.player_tag();
+            let tag = game.level.player_tag(&Default::default());
             let equipment = tag.get("equipment").unwrap();
             assert!(equipment.get("body").is_some() && equipment.get("saddle").is_some());
             let mut read = sunrise_client::save::Level::default();
