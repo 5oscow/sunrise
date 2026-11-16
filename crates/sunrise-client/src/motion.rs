@@ -5659,6 +5659,49 @@ mod tests {
 
     #[test]
     #[ignore = "daily"]
+    fn client_air_stays_synced_while_server_air_drops() {
+        let Some(v) = crate::test_fixtures::vanilla() else {
+            return;
+        };
+        let (assets, render, binding, resources) = (&v.assets, &v.render, &v.collision, &v.motion);
+        let mut scene = World::test_scene(assets, render, 3).unwrap();
+        let water = assets.registry.default_state("minecraft:water").unwrap();
+        scene.set(20, 4, 20, water).unwrap();
+        scene.set(20, 5, 20, water).unwrap();
+        let mut player = PlayerMotion::new(resources, Vec3::new(20.5, 4.0, 20.5)).unwrap();
+        let mut w = MotionWorld {
+            tag_items: None,
+            block_registries: None,
+            loop_context: crate::test_resources::server_loop_context(),
+            damage_hooks: &crate::health::DamageHooks::NONE,
+            entities: &[],
+            player: &mut player,
+            scene: &mut scene,
+            assets,
+            collision_binding: binding,
+            resources,
+            health: &resources.health,
+        };
+        w.player.air = 123;
+        w.player.client_side = true;
+        w.player.respiration = 3;
+        let mut untouched_random = w.scene.random.clone();
+        for _ in 0..10 {
+            w.fluid_base_tick().unwrap();
+            w.tick_environment_damage().unwrap();
+        }
+        assert_eq!(w.player.air, 123);
+        assert_eq!(w.scene.random.next_double(), untouched_random.next_double());
+        w.player.client_side = false;
+        w.player.respiration = 0;
+        for _ in 0..10 {
+            w.tick_environment_damage().unwrap();
+        }
+        assert_eq!(w.player.air, 113);
+    }
+
+    #[test]
+    #[ignore = "daily"]
     fn resident_bubble_columns_and_nautilus_preserve_their_air_rules() {
         let Some(v) = crate::test_fixtures::vanilla() else {
             return;
