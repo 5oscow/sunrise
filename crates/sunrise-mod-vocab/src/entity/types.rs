@@ -1516,16 +1516,21 @@ pub enum MoveCause {
     ShulkerBox,
     /// `MoverType.SHULKER`: a shulker mob's opening lid pushes it away.
     Shulker,
+    /// Sunrise's own: a moving collider (an entity's `set_collider`) carries the body standing on
+    /// it by the displacement of the contact point, once a tick after the level's entities ticked.
+    /// Vanilla has no such mover.
+    Carried,
 }
 
 impl MoveCause {
     /// Every cause, in ordinal order.
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::SelfMovement,
         Self::Player,
         Self::Piston,
         Self::ShulkerBox,
         Self::Shulker,
+        Self::Carried,
     ];
 }
 

@@ -1198,6 +1198,7 @@ impl Game<'_> {
         shulker: Option<u32>,
         delta: Vec3,
         grid: &mut Option<sunrise_client::entities::ObstacleGrid>,
+        carried: bool,
     ) {
         let joined = shulker.and_then(|id| self.mobs.iter().find(|m| m.id == id).map(|m| m.join));
         let grid = grid.get_or_insert_with(|| self.stand_entity_collisions());
@@ -1219,7 +1220,9 @@ impl Game<'_> {
             Some(self.border.geometry()),
             &nearby,
             travels_after,
-            if shulker.is_some() {
+            if carried {
+                sunrise_world::entity_move::MoverType::Carried
+            } else if shulker.is_some() {
                 sunrise_world::entity_move::MoverType::Shulker
             } else {
                 sunrise_world::entity_move::MoverType::ShulkerBox

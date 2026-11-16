@@ -25,7 +25,7 @@ use crate::blocks::Fluid;
 use crate::breathing::{Breath, breathe, drown, own_air};
 use crate::health::DamageLevel;
 use sunrise_core::{
-    geometry::{Aabb, ShapeOp, Vec3, VoxelShape},
+    geometry::{Aabb, Axis, ShapeOp, Vec3, VoxelShape},
     random::RandomSource,
 };
 use sunrise_world::native_load_context::LoopContext;
@@ -1818,6 +1818,18 @@ fn nautilus_air_supply(m: &mut Mob, w: &MobWorld, level: &mut DamageLevel<'_>) {
         m.damage(level, damage, Damage::of(DamageKind::DryOut));
     }
 }
+/// The thin box at a body's eyes `Entity.isInWall` tests: 0.8 of the width wide (a float
+/// multiplication) and 1e-6 high.
+fn eye_bounds(width: f32, eye: [f64; 3]) -> Aabb {
+    let side = f64::from(width * 0.8_f32);
+    let half = [side / 2.0, 1.0e-6 / 2.0, side / 2.0];
+    let lo = [0, 1, 2].map(|i| eye[i] - half[i]);
+    let hi = [0, 1, 2].map(|i| eye[i] + half[i]);
+    Aabb::new(
+        Vec3::new(lo[0], lo[1], lo[2]),
+        Vec3::new(hi[0], hi[1], hi[2]),
+    )
+}
 /// `Entity.isInWall` (minus the noPhysics early-out, which the caller applies):
 /// visit every cell covered by the thin eye box and ask whether a suffocating
 /// collision shape actually intersects it. Width multiplication is a float.
@@ -1826,14 +1838,17 @@ fn in_wall(
     eye: [f64; 3],
     mut intersects: impl FnMut(i32, i32, i32, &Aabb) -> bool,
 ) -> bool {
-    let side = f64::from(width * 0.8_f32);
-    let half = [side / 2.0, 1.0e-6 / 2.0, side / 2.0];
-    let lo = [0, 1, 2].map(|i| eye[i] - half[i]);
-    let hi = [0, 1, 2].map(|i| eye[i] + half[i]);
-    let bounds = Aabb::new(
-        Vec3::new(lo[0], lo[1], lo[2]),
-        Vec3::new(hi[0], hi[1], hi[2]),
-    );
+    let bounds = eye_bounds(width, eye);
+    let lo = [
+        bounds.min(Axis::X),
+        bounds.min(Axis::Y),
+        bounds.min(Axis::Z),
+    ];
+    let hi = [
+        bounds.max(Axis::X),
+        bounds.max(Axis::Y),
+        bounds.max(Axis::Z),
+    ];
     let c0 = lo.map(|v| v.floor() as i32);
     let c1 = hi.map(|v| v.floor() as i32);
     (c0[0]..=c1[0])
@@ -1939,34 +1954,41 @@ fn base_tick(
             binding: w.collision,
             subject: None,
         };
-        if m.species() != Species::Vex
-            && in_wall(
-                m.width(),
-                [m.position.x, m.eye_y(), m.position.z],
-                |x, y, z, eye_bounds| {
-                    let p = [x, y, z];
-                    let state = w.world.block(x, y, z);
-                    if !w
-                        .suffocation
-                        .is_suffocating(&mut scene, state, p)
-                        .unwrap_or(false)
-                    {
-                        return false;
-                    }
-                    w.collision
-                        .collision_shape(&mut scene, state, p)
-                        .ok()
-                        .is_some_and(|shape| {
-                            let Ok(eye_shape) = VoxelShape::from_box(*eye_bounds) else {
-                                return false;
-                            };
-                            shape
-                                .moved(Vec3::new(f64::from(x), f64::from(y), f64::from(z)))
-                                .join_is_not_empty(&eye_shape, ShapeOp::AND)
-                                .unwrap_or(false)
-                        })
-                },
-            )
+        // A collider box at the eyes is a wall as well: the crush a moving collider gives.
+        let in_collider = m.species() != Species::Vex
+            && sunrise_client_render::moving_colliders::overlaps(
+                sunrise_world::entity_obstruction::EntityIdentity(u64::from(m.id)),
+                eye_bounds(m.width(), [m.position.x, m.eye_y(), m.position.z]),
+            );
+        if in_collider
+            || m.species() != Species::Vex
+                && in_wall(
+                    m.width(),
+                    [m.position.x, m.eye_y(), m.position.z],
+                    |x, y, z, eye_bounds| {
+                        let p = [x, y, z];
+                        let state = w.world.block(x, y, z);
+                        if !w
+                            .suffocation
+                            .is_suffocating(&mut scene, state, p)
+                            .unwrap_or(false)
+                        {
+                            return false;
+                        }
+                        w.collision
+                            .collision_shape(&mut scene, state, p)
+                            .ok()
+                            .is_some_and(|shape| {
+                                let Ok(eye_shape) = VoxelShape::from_box(*eye_bounds) else {
+                                    return false;
+                                };
+                                shape
+                                    .moved(Vec3::new(f64::from(x), f64::from(y), f64::from(z)))
+                                    .join_is_not_empty(&eye_shape, ShapeOp::AND)
+                                    .unwrap_or(false)
+                            })
+                    },
+                )
         {
             m.damage(level, 1.0, Damage::of(DamageKind::InWall));
             hurt_teleports(m, w, events);

@@ -46,6 +46,7 @@ fn cause_of(cause: MoverType) -> MoveCause {
         MoverType::Piston => MoveCause::Piston,
         MoverType::ShulkerBox => MoveCause::ShulkerBox,
         MoverType::Shulker => MoveCause::Shulker,
+        MoverType::Carried => MoveCause::Carried,
     }
 }
 

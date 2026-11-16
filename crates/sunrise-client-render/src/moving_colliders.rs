@@ -24,6 +24,8 @@ const BIG_CELLS: i64 = 64;
 
 /// One collider entity, placed where it stood at the start of the pass.
 pub struct Placed {
+    /// The collider's entity.
+    pub id: u32,
     pub collider: OrientedCollider,
     /// The collider's own entity and every entity in its vehicle stack: the root vehicle and
     /// each passenger at any depth, those the collider's entity rides with included. The mover
@@ -103,6 +105,11 @@ impl Prepared {
     /// The entities exempt from the `at`th collider.
     pub fn exempt(&self, at: usize) -> Option<&[u32]> {
         self.0.placed.get(at).map(|(_, p)| p.exempt.as_slice())
+    }
+
+    /// The colliders, in the order they were placed.
+    pub fn placed(&self) -> impl Iterator<Item = &Placed> {
+        self.0.placed.iter().map(|(_, p)| p)
     }
 
     /// No collider at all, without building anything.
@@ -207,6 +214,14 @@ pub fn near(entity: EntityIdentity, bounds: Aabb, out: &mut Vec<OrientedCollider
     });
 }
 
+/// Whether a collider box `entity` collides with overlaps `bounds` (the thin box at a body's
+/// eyes, for the in-wall damage a block's suffocation gives).
+pub fn overlaps(entity: EntityIdentity, bounds: Aabb) -> bool {
+    let mut found = Vec::new();
+    near(entity, bounds, &mut found);
+    found.iter().any(|collider| collider.intersects(bounds))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -219,6 +234,7 @@ mod tests {
             Vec3::new(1.0, 1.0, 1.0),
         )]);
         Placed {
+            id: 1,
             collider: OrientedCollider::new(
                 Frame::translation(Vec3::new(x, 0.0, 0.0)),
                 Arc::new(boxes),
@@ -259,6 +275,19 @@ mod tests {
             },
         );
         assert_eq!(found(5, 0.0), 0, "outside a scope there is none");
+    }
+
+    /// A thin box at a body's eyes inside a collider box is in it; outside, or in its own
+    /// stack's, it is not.
+    #[test]
+    fn an_eye_inside_a_box_is_in_the_wall_unless_it_is_the_stacks_own() {
+        let eye = Aabb::new(Vec3::new(0.5, 0.5, 0.5), Vec3::new(0.7, 0.500_001, 0.7));
+        let outside = Aabb::new(Vec3::new(5.0, 0.5, 0.5), Vec3::new(5.2, 0.500_001, 0.7));
+        in_level(Prepared::new(vec![block_at(0.0, &[7])]), || {
+            assert!(overlaps(EntityIdentity(5), eye));
+            assert!(!overlaps(EntityIdentity(5), outside));
+            assert!(!overlaps(EntityIdentity(7), eye));
+        });
     }
 
     #[test]

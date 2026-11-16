@@ -10,6 +10,8 @@
 //! then run through the block collision scan, so a pushed entity stops at a
 //! wall instead of passing through it.
 //!
+#[path = "piston_push/carrying.rs"]
+mod carrying;
 use super::{
     Game,
     entity::{Entity, EntityHandle, with_entity, with_entity_mut},
@@ -50,6 +52,9 @@ pub(super) enum Lid {
     /// (`MoverType.SHULKER`): it leaves out the shulkers, the bodies with
     /// `noPhysics` and those sharing its root vehicle (`isPassengerOfSameVehicle`).
     Shulker(u32),
+    /// A moving collider carrying the body that stands on it (`MoverType.Carried`, Sunrise's
+    /// own): a lid's collided move, spared nobody.
+    Carried,
 }
 
 impl Lid {
@@ -57,11 +62,12 @@ impl Lid {
         match self {
             Lid::Box => MoverType::ShulkerBox,
             Lid::Shulker(_) => MoverType::Shulker,
+            Lid::Carried => MoverType::Carried,
         }
     }
     fn shulker(self) -> Option<u32> {
         match self {
-            Lid::Box => None,
+            Lid::Box | Lid::Carried => None,
             Lid::Shulker(id) => Some(id),
         }
     }
@@ -535,7 +541,13 @@ impl Game<'_> {
         }
         // Armor stands arm their gate in their own collided shove.
         if let MoveWho::Entity(EntityHandle::ArmorStand(i)) = target {
-            self.lid_shoves_armor_stand(i, lid.shulker(), movement, stand_grid);
+            self.lid_shoves_armor_stand(
+                i,
+                lid.shulker(),
+                movement,
+                stand_grid,
+                lid == Lid::Carried,
+            );
             return;
         }
         let mut gate = self.entity_move(target, lid.mover(), movement);

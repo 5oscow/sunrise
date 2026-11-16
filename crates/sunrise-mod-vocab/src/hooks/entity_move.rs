@@ -5,7 +5,8 @@ pub trait Hooks {
     /// maintainer ruling of the same issue): the entity `entity` of `kind`
     /// (`minecraft:zombie`) is about to move by `delta` (blocks this tick) for
     /// `cause`'s sake - itself, the player behind a position packet, a piston,
-    /// a shulker box lid, a shulker mob's opening lid. It fires before the
+    /// a shulker box lid, a shulker mob's opening lid, a moving collider carrying the body
+    /// that stands on it. It fires before the
     /// move's own handling, no-physics and the stuck multiplier included, in
     /// the one gate every kind's physics resolves through, so a forgotten
     /// family cannot move around it. Change `delta` to replace the movement

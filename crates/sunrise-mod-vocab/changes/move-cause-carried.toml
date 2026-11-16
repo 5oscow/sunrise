@@ -1,0 +1,4 @@
+ids = [
+    "type:MoveCause.Carried",
+]
+why = "A moving collider carries the entities standing on it as a collided move with the new cause Carried, so an entity_move listener sees it (a listener may cancel or replace the delta like any other cause). The enum is non_exhaustive, so a listener that matches causes has a wildcard arm already; built wasm mods that implement entity_move are refused anyway under #1279."
