@@ -16,6 +16,152 @@ fn table(id: &str) -> Value {
     json!({"pools":[{"rolls":1,"condition":{"type":"neoforge:loot_table_id","loot_table_id":id},"entries":[{"type":"minecraft:item","name":"minecraft:diamond"}]}]})
 }
 #[test]
+fn root_adapters_preserve_output_policy_and_random_without_modifiers() {
+    let nested = json!({"pools":[{"rolls":1,
+        "condition":{"type":"neoforge:loot_table_id","loot_table_id":"neoforge:unknown_loot_table"},
+        "entries":[{"type":"minecraft:item","name":"minecraft:gold_ingot"},
+                   {"type":"minecraft:item","name":"minecraft:diamond"}]}],
+        "modifier":{"type":"minecraft:set_count","count":200}});
+    let root = json!({"pools":[{"rolls":1,"entries":[
+        {"type":"minecraft:loot_table","value":"test:nested"}]}],
+        "modifier":[{"type":"minecraft:set_count","count":130},
+                    {"type":"minecraft:set_components","components":{"minecraft:max_stack_size":64}}]});
+    let id = "minecraft:entities/zombie";
+    let data = data(vec![(id, root.clone()), ("test:nested", nested)]);
+    let properties = sunrise_world::chunk::BlockProperties::new();
+    // Only the child's two-entry weighted choice advances this random.
+    let mut expected_random = LegacyRandom::new(0);
+    assert_eq!(expected_random.next_int_bound(2).unwrap(), 1);
+    let expected_state = <(u64, Option<f64>)>::from(&expected_random);
+    for adapter in 0..7 {
+        let query = Rc::new(query::LootQuery::default());
+        let mut random = LegacyRandom::new(0);
+        let drops = query::with_query(query.clone(), || match adapter {
+            0 => data.loot_table(id, false, None, &mut random),
+            1 => data.roll_loot_table(id, None, false, &mut random).unwrap(),
+            2 => data.inline_loot_table(&root, &mut random),
+            3 => data.entity_drops("zombie", false, None, &mut random),
+            4 => data.loot_table_from(id, false, None, &mut random),
+            5 => data.roll_block_table(
+                id,
+                &root,
+                "minecraft:stone",
+                &properties,
+                Default::default(),
+                &mut random,
+            ),
+            _ => data.interact_roll(id, &root, "minecraft:stone", &properties, &mut random),
+        });
+        let observed: Vec<_> = drops.iter().map(|s| (&*s.item, s.count)).collect();
+        let expected = if adapter == 1 {
+            vec![
+                ("minecraft:diamond", 64),
+                ("minecraft:diamond", 64),
+                ("minecraft:diamond", 2),
+            ]
+        } else {
+            vec![("minecraft:diamond", 130)]
+        };
+        assert_eq!(observed, expected, "adapter {adapter}");
+        assert_eq!(
+            <(u64, Option<f64>)>::from(&random),
+            expected_state,
+            "adapter {adapter}"
+        );
+        assert_eq!(
+            query.id().as_deref(),
+            Some(if adapter == 2 {
+                "neoforge:unknown_loot_table"
+            } else {
+                id
+            })
+        );
+    }
+}
+
+#[test]
+fn public_block_and_interaction_roots_complete_on_the_selected_random() {
+    use crate::random_sequences::RandomSequences;
+    use sunrise_core::nbt::Tag;
+
+    // A wall block resolves the standing block's actual table, not its own name.
+    let registry = BlockRegistry::from_facts_json(&br#"{"defaults":{"minecraft:oak_wall_sign":0},"states":[["oak_wall_sign",false,false,"","minecraft:oak_wall_sign"]]}"#[..]).unwrap();
+    for interaction in [false, true] {
+        for named_sequence in [false, true] {
+            let id = if interaction {
+                "test:interact"
+            } else {
+                "minecraft:blocks/oak_sign"
+            };
+            let mut root = json!({"pools":[{"rolls":1,
+                "condition":{"type":"neoforge:loot_table_id","loot_table_id":"neoforge:unknown_loot_table"},
+                "entries":[{"type":"minecraft:item","name":"minecraft:gold_ingot"},
+                           {"type":"minecraft:item","name":"minecraft:diamond"}]}]});
+            if named_sequence {
+                root["random_sequence"] = json!("test:selected");
+            }
+            let items = data(vec![(id, root)]);
+            let mut sequences = RandomSequences::from_nbt(&Tag::compound([(
+                "sequences",
+                Tag::compound([
+                    (
+                        "test:selected",
+                        Tag::compound([("source", Tag::LongArray(vec![17, 23]))]),
+                    ),
+                    (
+                        "test:untouched",
+                        Tag::compound([("source", Tag::LongArray(vec![31, 47]))]),
+                    ),
+                ]),
+            )]));
+            let mut expected_sequence = sequences.get("test:selected", 0).clone();
+            let untouched = sequences.get("test:untouched", 0).state_words();
+            let mut random = LegacyRandom::new(0);
+            let mut expected_random = random.clone();
+            let pick = if named_sequence {
+                expected_sequence.next_int_bound(2).unwrap()
+            } else {
+                expected_random.next_int_bound(2).unwrap()
+            };
+            let expected_item = ["minecraft:gold_ingot", "minecraft:diamond"][pick as usize];
+            let query = Rc::new(query::LootQuery::default());
+            let drops = query::with_query(query.clone(), || {
+                if interaction {
+                    items.interact_loot(
+                        id,
+                        &registry,
+                        BlockStateId(0),
+                        &mut random,
+                        &mut sequences,
+                        0,
+                    )
+                } else {
+                    items.block_drops(
+                        &registry,
+                        BlockStateId(0),
+                        Default::default(),
+                        &mut random,
+                        Some((&mut sequences, 0)),
+                    )
+                }
+            });
+            assert_eq!(drops.len(), 1);
+            assert_eq!((&*drops[0].item, drops[0].count), (expected_item, 1));
+            assert_eq!(query.id().as_deref(), Some(id));
+            assert_eq!(
+                <(u64, Option<f64>)>::from(&random),
+                <(u64, Option<f64>)>::from(&expected_random)
+            );
+            assert_eq!(
+                sequences.get("test:selected", 0).state_words(),
+                expected_sequence.state_words()
+            );
+            assert_eq!(sequences.get("test:untouched", 0).state_words(), untouched);
+        }
+    }
+}
+
+#[test]
 fn queried_id_is_written_after_root_and_first_wins() {
     for (guard, preset, count) in [
         ("minecraft:blocks/short_grass", None, 0),

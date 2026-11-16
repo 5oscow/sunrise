@@ -12,6 +12,7 @@ mod fill;
 pub mod query;
 #[path = "loot_query.rs"]
 mod query_context;
+mod root;
 pub use fill::ContainerLootContext;
 #[path = "loot/tags.rs"]
 mod loot_tags;
@@ -1072,9 +1073,7 @@ impl LootData {
             entity: Some(params),
             enchanted_level,
         };
-        let mut items = Vec::new();
-        c.table_raw(table, json, &mut |c, stack| c.data.split(stack, &mut items));
-        c.query.finish(Some(table));
+        let items = c.roll_root(Some(table), json);
         *random = c.random;
         items
     }
