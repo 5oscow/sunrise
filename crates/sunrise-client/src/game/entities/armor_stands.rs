@@ -9,7 +9,6 @@ use sunrise_assets::resource_source::ResourceSource;
 use sunrise_client::{
     Result,
     cit::{Hand, Kind, Rule},
-    cit_armor,
     entities::ArmorStand,
     items::ItemStack,
     mesher::Vertex,
@@ -141,19 +140,21 @@ fn armor_stand_cart_shove(
         stand_z: za / 4.0,
     })
 }
-/// `EquipmentLayerRenderer.getColorForLayer`: a dyeable layer (one with a
-/// colour when undyed) takes the stack's `minecraft:dyed_color`, else that
-/// colour; any other layer stays white, dyed or not. The result is in the
-/// renderer's byte order (R and B swapped).
-fn layer_color(undyed: Option<u32>, stack: Option<&ItemStack>) -> u32 {
+/// `EquipmentLayerRenderer.getColorForLayer`: a dyeable layer takes the stack's
+/// `minecraft:dyed_color`, else its optional undyed colour, else zero to skip it.
+/// Nondyeable layers stay white. The result uses the renderer's byte order (R and B swapped).
+pub(super) fn layer_color(dyeable: bool, undyed: Option<u32>, stack: Option<&ItemStack>) -> u32 {
     let dyed = stack
         .and_then(|s| s.data())
         .and_then(|d| d.dyed_color)
         .map(|c| c as u32 & 0xFF_FFFF);
-    undyed.map_or(0xFFFF_FFFF, |undyed| {
-        let c = dyed.unwrap_or(undyed);
-        0xFF00_0000 | (c & 0xFF) << 16 | (c & 0xFF00) | (c >> 16) & 0xFF
-    })
+    if !dyeable {
+        return 0xFFFF_FFFF;
+    }
+    let Some(c) = dyed.or(undyed) else {
+        return 0;
+    };
+    0xFF00_0000 | (c & 0xFF) << 16 | (c & 0xFF00) | (c >> 16) & 0xFF
 }
 
 /// Armor stand models and the humanoid layers of every equipment asset.
@@ -165,8 +166,8 @@ pub(super) struct ArmorStandAssets {
     pub layers: HashMap<(&'static str, bool), Arc<Part>>,
     /// The player's armour models by slot (helmet, chestplate, leggings, boots).
     pub player: HashMap<&'static str, Part>,
-    /// asset id -> layer kind (humanoid / humanoid_leggings) -> each layer's (texture, undyed colour), in order.
-    pub equipment: HashMap<String, HashMap<String, Vec<(String, Option<u32>)>>>,
+    /// Asset id -> layer kind -> ordered textures with dyeability and optional undyed colour.
+    pub equipment: super::equipment_piece::EquipmentAssets,
     /// asset id -> `trim_overrides`.
     pub trim_overrides: HashMap<String, Vec<TrimOverride>>,
     pub trims: TrimRegistry,
@@ -220,9 +221,10 @@ impl ArmorStandAssets {
                 let Ok(v) = v else { continue };
                 let id = format!("{namespace}:{name}");
                 let mut kinds = HashMap::new();
-                for kind in ["humanoid", "humanoid_leggings", "wings"] {
+                for kind in ["humanoid", "humanoid_leggings", "humanoid_baby", "wings"] {
                     // Every layer of the kind: leather's overlay is layer 1.
-                    let layers: Vec<(String, Option<u32>)> = v["layers"][kind]
+                    let layers: Vec<super::equipment_piece::EquipmentAssetLayer> = v["layers"]
+                        [kind]
                         .as_array()
                         .into_iter()
                         .flatten()
@@ -237,7 +239,13 @@ impl ArmorStandAssets {
                             let undyed = layer["dyeable"]["color_when_undyed"]
                                 .as_i64()
                                 .map(|c| c as u32 & 0xFF_FFFF);
-                            (sprite, undyed)
+                            super::equipment_piece::EquipmentAssetLayer {
+                                texture: sprite,
+                                dyeable: layer
+                                    .get("dyeable")
+                                    .is_some_and(serde_json::Value::is_object),
+                                color_when_undyed: undyed,
+                            }
                         })
                         .collect();
                     if !layers.is_empty() {
@@ -268,7 +276,12 @@ impl ArmorStandAssets {
     }
     /// `TrimTextureKey`: the trim texture of `stack` on its humanoid
     /// layer (`humanoid` or `humanoid_leggings`), if it has a trim.
-    fn trim_texture(&self, asset: &str, kind: &str, stack: &ItemStack) -> Option<TrimTexture> {
+    pub(super) fn trim_texture(
+        &self,
+        asset: &str,
+        kind: &str,
+        stack: &ItemStack,
+    ) -> Option<TrimTexture> {
         let (material, pattern) =
             sunrise_client::item_data::trim::named(stack.extra.as_ref()?.trim.as_ref()?)?;
         let overrides = self
@@ -286,19 +299,6 @@ impl Game<'_> {
         let item_max = self.items().get(&stack.item).map_or(0, |i| i.max_damage);
         sunrise_client::item_render::cit::worn_rule(rules, kind, stack, item_max)
             .and_then(|i| rules.rules.get(i))
-    }
-    /// The atlas rect of an armour layer `texture` of equipment asset `asset`, or of the one CIT
-    /// armour rule `cit` puts there when the atlas has it.
-    fn armor_layer_rect(
-        &self,
-        cit: Option<&Rule>,
-        asset: &str,
-        kind: &str,
-        texture: &str,
-    ) -> Option<[f32; 4]> {
-        let sprites = &self.gui.atlas.sprites;
-        let r = cit_armor::worn_layer(cit, asset, kind, texture, |s| sprites.get(s))?;
-        Some([r.u0, r.v0, r.u1, r.v1])
     }
     /// `HumanoidArmorLayer` for the player: (model, texture rect, colour,
     /// overlay) of each worn piece, head to feet.
@@ -332,12 +332,6 @@ impl Game<'_> {
         worn: [Option<(&str, Option<&ItemStack>)>; 4],
     ) -> Vec<(&Part, [f32; 4], u32, u32, bool)> {
         let assets = &self.armor_stand_assets;
-        let emissive = self
-            .res
-            .mob_data()
-            .emissive
-            .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut out = Vec::new();
         for (item, (layer, slot)) in worn.into_iter().zip([
             ("helmet", "head"),
@@ -348,65 +342,21 @@ impl Game<'_> {
             let Some((item, stack)) = item else {
                 continue;
             };
-            // HumanoidArmorLayer.renderArmorPiece: the stack's own
-            // `equippable`, drawn when it has an asset and is worn in its slot.
-            let equippable = match stack {
-                Some(s) => sunrise_client::item_sync::equippable(s, self.res.items()),
-                None => sunrise_client::item_sync::item_equippable(item, self.res.items()),
-            };
-            let Some(asset) = equippable
-                .filter(|e| e.slot == slot)
-                .and_then(|e| e.asset_id)
+            let Some(piece) = self.equipment_piece(item, stack, slot, layer == "leggings", false)
             else {
-                continue;
-            };
-            let kind = if layer == "leggings" {
-                "humanoid_leggings"
-            } else {
-                "humanoid"
-            };
-            let Some(layers) = assets.equipment.get(&asset).and_then(|k| k.get(kind)) else {
                 continue;
             };
             let Some(part) = assets.player.get(layer) else {
                 continue;
             };
-            // EquipmentLayerRenderer.renderLayers: NO_OVERLAY, the armour
-            // glint on the first layer and on the trim when `stack.hasFoil()`.
-            let item_glint = self
-                .res
-                .items()
-                .enchantments
-                .props
-                .get(item)
-                .and_then(|p| p.glint);
-            let overlay = if stack.is_some_and(|s| s.has_foil(item_glint)) {
-                sunrise_client::mobs::render::ARMOR_GLINT
-            } else {
-                0
-            };
-            // Every layer of the asset, the leather overlay too, then the
-            // trim layer over the armour.
-            let cit = stack.and_then(|s| self.cit_worn_rule(Kind::Armor, s));
-            for (i, (texture, undyed)) in layers.iter().enumerate() {
-                let Some(uv) = self.armor_layer_rect(cit, &asset, kind, texture) else {
-                    continue;
-                };
-                let color = layer_color(*undyed, stack);
-                out.push((part, uv, color, if i == 0 { overlay } else { 0 }, false));
-                // The layer's OptiFine emissive overlay, full bright without the glint.
-                if let Some(g) = emissive
-                    .overlay(texture)
-                    .and_then(|e| self.gui.atlas.sprites.get(e))
-                {
-                    out.push((part, [g.u0, g.v0, g.u1, g.v1], color, 0, true));
-                }
-            }
-            if let Some(r) = stack
-                .and_then(|s| assets.trim_texture(&asset, kind, s))
-                .and_then(|t| self.gui.atlas.sprites.get(&t.sprite()))
-            {
-                out.push((part, [r.u0, r.v0, r.u1, r.v1], 0xFFFF_FFFF, overlay, false));
+            for material in self.equipment_materials(&piece, stack) {
+                out.push((
+                    part,
+                    material.binding.uv,
+                    material.color,
+                    material.overlay,
+                    material.glows,
+                ));
             }
         }
         out
@@ -1839,93 +1789,32 @@ impl Game<'_> {
             let Some(stack) = &a.equipment[slot] else {
                 continue;
             };
-            // HumanoidArmorLayer.renderArmorPiece: the stack's own
-            // `equippable`, drawn when it has an asset and is worn in its slot.
-            let Some(asset) = sunrise_client::item_sync::equippable(stack, self.res.items())
-                .filter(|e| e.slot == worn)
-                .and_then(|e| e.asset_id)
+            let Some(piece) =
+                self.equipment_piece(&stack.item, Some(stack), worn, layer == "leggings", false)
             else {
-                continue;
-            };
-            let kind = if layer == "leggings" {
-                "humanoid_leggings"
-            } else {
-                "humanoid"
-            };
-            let Some(layers) = assets.equipment.get(&asset).and_then(|k| k.get(kind)) else {
                 continue;
             };
             let Some(part) = assets.layers.get(&(layer, a.small)) else {
                 continue;
             };
-            // ArmorStandRenderer's HumanoidArmorLayer: the armour glint
-            // when `stack.hasFoil()`, as on a living entity.
-            let item_glint = self
-                .res
-                .items()
-                .enchantments
-                .props
-                .get(&stack.item)
-                .and_then(|p| p.glint);
-            let overlay = if stack.has_foil(item_glint) {
-                sunrise_client::mobs::render::ARMOR_GLINT
-            } else {
-                0
-            };
             // ArmorStandArmorModel.setupAnim runs humanoid setup independently.
             layer_poses.reset(part);
             self.setup_armor_stand_pose(a, partial, &mut layer_poses);
-            // EquipmentLayerRenderer: every layer of the asset, the leather overlay
-            // too; the shader glint goes on the first layer only (renderShaderGlint).
-            let cit = self.cit_worn_rule(Kind::Armor, stack);
-            for (i, (texture, undyed)) in layers.iter().enumerate() {
-                let Some(uv) = self.armor_layer_rect(cit, &asset, kind, texture) else {
-                    continue;
-                };
-                let color = layer_color(*undyed, Some(stack));
+            for material in self.equipment_materials(&piece, Some(stack)) {
                 put(
                     &mut skin,
                     part,
                     base,
                     &layer_poses,
-                    uv,
+                    material.binding.uv,
                     0.0,
-                    color,
-                    packed,
-                    if i == 0 { overlay } else { 0 },
-                    out,
-                );
-                // The layer's OptiFine emissive overlay, full bright without the glint.
-                if let Some(glow) = glow_of(texture) {
-                    put(
-                        &mut skin,
-                        part,
-                        base,
-                        &layer_poses,
-                        glow,
-                        0.0,
-                        color,
-                        sunrise_client::mobs::render::FULL_BRIGHT,
-                        0,
-                        out,
-                    );
-                }
-            }
-            // EquipmentLayerRenderer: the trim layer over the armour.
-            if let Some(trim) = assets
-                .trim_texture(&asset, kind, stack)
-                .and_then(|t| uv_of(&t.sprite()))
-            {
-                put(
-                    &mut skin,
-                    part,
-                    base,
-                    &layer_poses,
-                    trim,
-                    0.0,
-                    0xFFFF_FFFF,
-                    packed,
-                    overlay,
+                    material.color,
+                    if material.glows {
+                        sunrise_client::mobs::render::FULL_BRIGHT
+                    } else {
+                        packed
+                    },
+                    material.overlay,
                     out,
                 );
             }
@@ -2582,14 +2471,14 @@ mod layer_color_tests {
         let mut dyed = ItemStack::new("minecraft:leather_helmet", 1);
         dyed.data_mut().dyed_color = Some(0x1E_90FF);
         // Dyed blue, R and B swapped into the renderer's order, opaque.
-        assert_eq!(layer_color(Some(0xA06540), Some(&dyed)), 0xFFFF_901E);
+        assert_eq!(layer_color(true, Some(0xA06540), Some(&dyed)), 0xFFFF_901E);
         // An undyed stack keeps the asset's brown.
         let plain = ItemStack::new("minecraft:leather_helmet", 1);
-        assert_eq!(layer_color(Some(0xA06540), Some(&plain)), 0xFF40_65A0);
+        assert_eq!(layer_color(true, Some(0xA06540), Some(&plain)), 0xFF40_65A0);
         // No dye and no undyed colour: white.
-        assert_eq!(layer_color(None, Some(&plain)), 0xFFFF_FFFF);
+        assert_eq!(layer_color(false, None, Some(&plain)), 0xFFFF_FFFF);
         // A layer that isn't dyeable stays white even on a dyed stack.
-        assert_eq!(layer_color(None, Some(&dyed)), 0xFFFF_FFFF);
+        assert_eq!(layer_color(false, None, Some(&dyed)), 0xFFFF_FFFF);
     }
 }
 
