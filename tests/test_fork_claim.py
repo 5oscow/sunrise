@@ -1,5 +1,6 @@
 import importlib.util
 import os
+import sys
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -14,14 +15,21 @@ class ForkClaimReviewersTest(unittest.TestCase):
     in the repository and be in each job's sparse checkout, or every `/claim` fails with FileNotFoundError."""
 
     def reviewers_path(self):
-        before = ns.REVIEWERS
+        """The reviewers path `claim.py` sets on the `nightly_set` module it loads itself
+        (through its own `sys.path` entry, a module object apart from `tools.ci.nightly_set`).
+        The import's `sys.path` and `sys.modules` changes are undone afterwards."""
+        path, modules = list(sys.path), dict(sys.modules)
         try:
             with mock.patch.dict(os.environ, {"FORK_OWNER": "owner", "FORK_OWNER_ID": "1"}):
                 spec = importlib.util.spec_from_file_location("fork_claim", ROOT / "tools/fork/claim.py")
-                spec.loader.exec_module(importlib.util.module_from_spec(spec))
-            return ns.REVIEWERS
+                claim = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(claim)
+            return claim.ns.REVIEWERS
         finally:
-            ns.REVIEWERS = before
+            sys.path[:] = path
+            for name in set(sys.modules) - set(modules):
+                del sys.modules[name]
+            sys.modules.update(modules)
 
     def test_the_reviewers_file_exists_and_reads(self):
         path = ROOT / self.reviewers_path()
