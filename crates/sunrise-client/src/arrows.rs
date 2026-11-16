@@ -13,7 +13,7 @@ use crate::{
     projectiles::{Hit, Projectile, ProjectileKind},
     world::World,
 };
-use std::{collections::HashSet, fmt};
+use std::fmt;
 use sunrise_core::nbt::Tag;
 use sunrise_core::{
     geometry::{Aabb, Direction, Vec3},
