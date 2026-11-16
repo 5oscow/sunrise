@@ -310,22 +310,20 @@ screen by screen, replacing Night where they differ; the mockup is the reference
 colour, state and motion. Its tokens are `sunrise_theme::glass`; `tokens.css` carries the colours
 as `--glass-*`.
 
-- **The scene is the background**: a pixel sunset over three ridges with trees, clouds, stars, a
-  meteor now and then and fireflies (`launcher/scenery/src/scene.rs`), a port of the website's
-  `SunriseScene` with its seeds and sums, so a window shows the picture the mockup shows at the
-  same size. It eases with the pointer and stops 10 s after the window loses focus;
-  `SUNRISE_LAUNCHER_MOTION` works as for Night. Dark appearance only so far; Light keeps the dawn.
-- **Frosted plates, round corners, no borders.** A plate is the scene behind it blurred 24 px and
-  saturated 140 %, under white at 6 % and the accent's dark violet (`base`) at 22 %. Menus and
-  popovers take the same glass with a shadow (the mockup's darker `hzl-float` read as another
-  material beside the cards); toasts keep it. Corners (`glass::radius`): dialogs 28, panels 20,
-  menus 16, the Play group 14, rows and chips 12, buttons and tabs 10. No pixel steps, no strokes.
+- **The scene is the background**, on Home only, between the sidebars: Sunrise's own coast at
+  first light (`launcher/scenery/src/coast.rs`: dithered bands from night to amber, the sun half
+  out of a still sea, a block island with a tree, glints, ripples, clouds, birds and stars) or a
+  theme's painted sky (`sky.rs`). It moves a texel at a time on a slow beat and stops 10 s after
+  the window loses focus; `SUNRISE_LAUNCHER_MOTION` works as for Night. The setup window draws
+  the coast too.
+- **Solid plates, the player's corners.** A plate is the theme's card colour under a faint 1 px
+  line (`launcher/scenery/src/glass.rs`), so nothing under a dialog reads through it; menus and
+  popovers take the same fill with a shadow. Corners are the player's (Settings › Appearance ›
+  Corners, 4 px unless changed), the same on every element.
 - **Motion as the website plays it** (`launcher/src/motion.rs`): hovers ease over `quick`'s
   150 ms curve, toasts and a new page arrive as `hzl-pop` (a fade and a 6 px rise over 200 ms,
   `cubic-bezier(0.2, 0.7, 0.2, 1)`), a switch's knob slides for 200 ms. Menus open at once. Under
   reduced motion each is drawn where it ends.
-- **Light**: plates are white at 84 % over the dawn sky washed with white (55 %), so the page
-  reads white; icons and text on the accent keep `on-accent`.
 - **One accent, mixed like the mockup.** `accent` (`#6b4bff`) fills the main action;
   `accent-soft` (half accent, half white in OKLab) draws progress, ticks, links and the focus ring;
   text on the accent turns dark when a player's accent is light. `Glass::new` does the mockup's
