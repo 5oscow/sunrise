@@ -284,7 +284,7 @@ def verdicts(jobs, reports, results):
                           "failed tests whose names are withheld" if problems else "failed outside its tests")
                 unfinished.append((job["name"], job["conclusion"], steps, reason))
         elif job["name"] == "wasm-mods / fixture" and len(steps) == 1 and steps[0] in FIXTURE_TESTS_STEPS and (
-                by_name or report["incomplete"]):
+                by_name or (report or {}).get("incomplete")):
             tests += by_name
             # A command that failed without naming a test (a build failure beside a named one) is the leg's item too.
             if report["incomplete"] or len(by_name) < len(problems):

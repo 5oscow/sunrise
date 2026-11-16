@@ -356,6 +356,11 @@ class DailySummaryTests(unittest.TestCase):
                                            "Daily: wasm-mods / fixture did not complete"])
         self.assertIn("`sunrise-mod-points`: failed without a failed test (a build failure) (cargo exit 101)",
                       created["Daily: wasm-mods / fixture did not complete"])
+        # The step failed before any report was uploaded: the leg's one issue, never a crash of the filing.
+        api = Api(jobs)
+        self.run_summary(api, [], results=dict(LEGS, **{"wasm-mods": {"result": "failure"}}))
+        self.assertEqual([body["title"] for _, path, body in api.writes if path == "issues"],
+                         ["Daily: wasm-mods / fixture did not complete"])
         # A failure there without a test name (a build error) is still the leg's one issue.
         api = Api(jobs)
         self.run_summary(api, [dict(own, problems=[])], results=dict(LEGS, **{"wasm-mods": {"result": "failure"}}))
