@@ -12,7 +12,7 @@ folder.
 | `hooks <text> [--all]` | Searches the pinned build's hooks offline, by id, doc and their NeoForge, Fabric and Paper names; every word must match. `--all` searches every record. Matches in the id come first, then in a counterpart, then in the doc. |
 | `sdk diff <build> <build>` | What changed in the surface from the first build to the second, [classified](02-surface.md#what-a-change-is), with the second build's change notes (why, and what a mod does now) under the changes they name: the notes of the changes since the SDK published before it. It reads only the builds' small files, so it works for builds whose compiled files are pruned. |
 | `fits [<file.smod>] [--build <build>]…` | Whether the mod, or a package, fits the current Nightly or each build named: one line per build, `made for`, `fits`, or `does not fit` with the changed items. |
-| `update [--sunrise <build>] [--accept <id>]…` | For a native mod: prints what moving the pin to the current Nightly (or the build named) breaks in this mod, then moves it. |
+| `update [--sunrise <build>] [--accept <id>]…` | Prints what moving the pin to the current Nightly (or the build named) breaks in this mod, then moves it. |
 
 ## `fits`
 

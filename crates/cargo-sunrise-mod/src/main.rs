@@ -5,7 +5,7 @@
 //!   `--template native|wasm [--sunrise <build>]`, a code mod pinned to the current Nightly's
 //!   SDK unless `--sunrise` names another build (`nightly-<date>` or a sha), with that SDK fetched
 //!   into `.sunrise/sdk/` (`sdk_fetch.rs`).
-//! - `update [--sunrise <build>]`: repin this native mod and diff/refresh declared internals.
+//! - `update [--sunrise <build>]`: repin this mod; for a native mod, also diff/refresh declared internals.
 //! - `inject update [--accept <id>]…`: refresh declarations without repinning.
 //! - `inject sync --repo <game checkout>`: validate API injection pins against a game catalog.
 //! - `inject add <at> --kind <kind> [--call <callee>] [--nth N] [--with <fn>]`: pin an inject.
