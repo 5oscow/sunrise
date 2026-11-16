@@ -6,6 +6,7 @@ use std::{cell::RefCell, rc::Rc, sync::Arc, sync::atomic::Ordering};
 use sunrise_client_render::moving_colliders::{History, HistoryScope, Placed, Prepared, in_level};
 use sunrise_core::geometry::{
     Aabb, Vec3,
+    carried::Carried,
     oriented::{ColliderBoxes, Frame, OrientedCollider},
 };
 
@@ -118,6 +119,13 @@ struct Guestside<'a> {
     fixture: &'a crate::test_fixtures::Vanilla,
     world: World,
     border: crate::worldborder::WorldBorder,
+    /// What the hub warned of in the last report (`moved wrongly`, `moved too quickly`).
+    warnings: Vec<String>,
+    /// Where the last refusal put the player back.
+    corrected: Option<[f64; 3]>,
+    /// Whether the client answers a correction at once (the default); a test that looks at the
+    /// server while the correction is on its way turns it off and calls [`Self::confirm`].
+    answers: bool,
 }
 
 impl<'a> Guestside<'a> {
@@ -126,25 +134,32 @@ impl<'a> Guestside<'a> {
         hub.guests.update(0, |g| {
             g.latency.store(rtt_ms, Ordering::Relaxed);
             g.on_ground = true;
+            // The client has loaded: its moves are read.
+            g.load_timeout = 0;
         });
         Self {
             hub,
             fixture,
             world: scene(fixture, walls),
             border: Default::default(),
+            warnings: Vec::new(),
+            corrected: None,
+            answers: true,
         }
     }
 
-    /// The server's answer to a report at `to`, and the guest takes it where the answer is yes
-    /// (`accept_move`).
-    fn report(&mut self, rig: &Rig, to: [f64; 3], hint: Option<u8>) -> (bool, bool, bool) {
-        if let Some(ticks) = hint {
+    /// One server tick of the hub with these packets in the guest's inbox: the same handling a
+    /// client's packets get (the speed test, the move check, the commit, the teleport handshake).
+    fn tick(&mut self, rig: &Rig, packets: Vec<S>) -> Vec<HostEvent> {
+        for packet in packets {
             self.hub
                 .guests
-                .update(0, |g| g.carry_hint = Some((DECK, ticks)));
+                .inbox_mut(0)
+                .unwrap()
+                .push_back(sunrise_client::lan::guest::InboxItem::uncredited(packet));
         }
         let mut next = 2;
-        let ctx = TickCtx {
+        let mut ctx = TickCtx {
             sea_level: 63,
             world: &mut self.world,
             entities: &[],
@@ -162,11 +177,105 @@ impl<'a> Guestside<'a> {
             streaming: None,
         };
         let hub = &mut self.hub;
-        let answer = rig.within(|| hub.collide_carried(0, to, &ctx));
-        if !answer.1 {
-            self.hub.guests.update(0, |g| g.position = to);
+        rig.within(|| hub.drain_packets(&mut ctx))
+    }
+
+    /// A client's position report, with the age of its copy of the collider if it says, and the
+    /// ground flag. Then, if the server refused it, the client's answer to the correction.
+    /// Answers (moved wrongly, refused, stands).
+    fn send(
+        &mut self,
+        rig: &Rig,
+        to: [f64; 3],
+        hint: Option<u8>,
+        on_ground: bool,
+    ) -> (bool, bool, bool) {
+        self.hub.guests.update(0, |g| g.position_this_tick = false);
+        let mut packets = Vec::new();
+        if let Some(ticks) = hint {
+            packets.push(S::CustomPayload(
+                sunrise_protocol::packets::configuration::CustomPayload {
+                    channel: sunrise_protocol::carry_age::CHANNEL.into(),
+                    data: sunrise_protocol::carry_age::encode(sunrise_protocol::carry_age::Hint {
+                        collider: DECK,
+                        ticks,
+                    }),
+                },
+            ));
         }
-        answer
+        packets.push(S::MovePlayerPos(play::MovePlayerPos {
+            x: to[0],
+            y: to[1],
+            z: to[2],
+            flags: u8::from(on_ground),
+        }));
+        let handled = (
+            self.hub.guests[0].received_moves,
+            self.hub.guests[0].moves.len(),
+        );
+        let events = self.tick(rig, packets);
+        // The move was read: counted, and either committed or answered with a teleport to wait
+        // for. A guest that silently ignores its input fails here, not by passing.
+        let g = &self.hub.guests[0];
+        assert_eq!(g.received_moves, handled.0 + 1, "the move was read");
+        assert!(
+            g.moves.len() == handled.1 + 1 || g.awaiting_teleport.is_some(),
+            "the move was committed or a teleport is awaited"
+        );
+        self.warnings = events
+            .into_iter()
+            .filter_map(|e| match e {
+                HostEvent::Warn(line) => Some(line),
+                _ => None,
+            })
+            .collect();
+        let refused = self.hub.guests[0].awaiting_teleport.is_some();
+        self.corrected = None;
+        if refused {
+            // A move while the correction is unanswered is ignored.
+            let before = self.hub.guests[0].position;
+            self.hub.guests.update(0, |g| g.position_this_tick = false);
+            self.tick(
+                rig,
+                vec![S::MovePlayerPos(play::MovePlayerPos {
+                    x: to[0] + 1.0,
+                    y: to[1],
+                    z: to[2],
+                    flags: 1,
+                })],
+            );
+            assert_eq!(self.hub.guests[0].position, before, "ignored while awaited");
+            self.corrected = self.hub.guests[0].awaiting_teleport.map(|(_, at)| at);
+            if self.answers {
+                self.confirm(rig);
+            }
+        }
+        let wrongly = self.warnings.iter().any(|w| w.contains("moved wrongly"));
+        (wrongly, refused, self.hub.guests[0].rests_on_ground)
+    }
+
+    /// The client's answer to the server's teleport: it stands where the server put it.
+    fn confirm(&mut self, rig: &Rig) {
+        let g = &self.hub.guests[0];
+        let (id, at) = g.awaiting_teleport.expect("a teleport is awaited");
+        let (yaw, pitch) = (g.yaw, g.pitch);
+        self.tick(
+            rig,
+            vec![S::AcceptTeleportation(play::AcceptTeleportation {
+                id,
+                x: at[0],
+                y: at[1],
+                z: at[2],
+                yaw,
+                pitch,
+            })],
+        );
+        assert!(self.hub.guests[0].awaiting_teleport.is_none(), "confirmed");
+    }
+
+    /// [`Self::send`] on the ground, no hint.
+    fn report(&mut self, rig: &Rig, to: [f64; 3], hint: Option<u8>) -> (bool, bool, bool) {
+        self.send(rig, to, hint, true)
     }
 
     fn guest(&self) -> &Guest {
@@ -237,7 +346,7 @@ fn an_honest_rider_at_train_speed_is_never_rejected() {
                     );
                     assert!(stands, "supported");
                     assert!(side.guest().on_collider.is_some());
-                    assert!(side.guest().carried_standing);
+                    assert!(!side.guest().client_is_floating, "held up by the deck");
                 }
                 assert_eq!(
                     side.guest().carry_rejects,
@@ -346,16 +455,17 @@ fn jumping_onto_a_deck_at_two_blocks_a_tick_attaches_on_landing() {
             "step {i}"
         );
     }
-    assert!(side.guest().carried_standing);
+    assert!(!side.guest().client_is_floating, "held up by the deck");
     assert_eq!(side.guest().carry_rejects, 0);
 }
 
-/// A report that fits the deck at no age is corrected to where the server last had the player
-/// on it, placed under the deck as it is now, and counted; arbitrary reports never leave the
-/// player off the deck or inside it while it is carried.
+/// A report that is refused while a collider carries the player is corrected to where the server
+/// last had the player on it, placed under the collider as it is now, counted, and answered by the
+/// client's confirmation; the server's own position of an accepted rider is the same local
+/// position under the collider as it is now, never the frame the client held.
 #[test]
 #[ignore = "daily"]
-fn a_report_off_the_train_is_corrected_to_the_server_local_position_and_counted() {
+fn a_refused_rider_is_corrected_under_the_transform_now_and_an_accepted_one_is_kept_there() {
     let Some(fixture) = crate::test_fixtures::vanilla() else {
         return;
     };
@@ -368,48 +478,303 @@ fn a_report_off_the_train_is_corrected_to_the_server_local_position_and_counted(
     let to = honest(&rig, 4.0, local);
     side.hub.guests.update(0, |g| g.position = to);
     assert!(!side.report(&rig, to, None).1);
+    // Accepted: the server has the player at its local position under the deck as it is now,
+    // 8 blocks ahead of the position in the frame the client held.
+    let kept = side.guest().position;
+    let now = rig.frame(DECK, 0.0).to_world(local);
+    assert!(
+        (kept[0] - now.x).abs() < 0.01
+            && (kept[1] - now.y).abs() < 0.01
+            && (kept[2] - now.z).abs() < 0.01,
+        "kept {kept:?} vs the deck now {now:?}"
+    );
+    assert!(
+        (kept[2] - to[2] - 8.0).abs() < 0.5,
+        "{kept:?} vs the reported {to:?}"
+    );
+    // The next tick's honest report moves it on with the deck.
+    rig.tick(|_| along(ORIGIN[2] + 2.0 * 41.0));
+    let local = Vec3::new(0.5, 0.0, 1.2);
+    let to = honest(&rig, 4.0, local);
+    assert!(!side.report(&rig, to, None).1);
+    let now = rig.frame(DECK, 0.0).to_world(local);
+    let kept = side.guest().position;
+    assert!((kept[2] - now.z).abs() < 0.01, "kept {kept:?} vs {now:?}");
+    // A report inside the deck is refused: the player goes back to where the server last had it
+    // on the deck, under the deck as it is now.
     let held = side.guest().on_collider.expect("attached");
-    // 30 blocks ahead of the deck at every age the window reaches.
-    let far = [to[0], to[1], to[2] + 60.0];
-    let refused = side.report(&rig, far, None).1;
-    // A free move of 60 blocks is not a carried move: the ordinary rules decide it. What the
-    // carried check promises is the correction of one it refuses.
-    if refused {
-        let corrected = side.guest().carry_correction.expect("a correction");
-        let now = rig.frame(DECK, 0.0).to_world(held.local);
-        assert!(
-            (corrected[0] - now.x).abs() < 1e-9 && (corrected[2] - now.z).abs() < 1e-9,
-            "{corrected:?} vs {now:?}"
-        );
-        assert_eq!(side.guest().carry_rejects, 1);
-    }
-    // Arbitrary reports: whenever one is accepted while attached, the player is over the deck
-    // in the frame it matched, never inside it.
-    let mut rng = Lcg(99);
-    let mut fits = 0;
-    for _ in 0..2_000 {
-        side.hub.guests.update(0, |g| {
-            g.position = to;
-            g.on_collider = Some(held);
-        });
-        let at = [
-            to[0] + (rng.unit() - 0.5) * 8.0,
-            to[1] + (rng.unit() - 0.5) * 3.0,
-            to[2] + (rng.unit() - 0.5) * 40.0,
-        ];
-        let (_, refused, _) = side.report(&rig, at, None);
-        let Some(now) = side.guest().on_collider else {
-            continue;
-        };
-        if refused {
-            continue;
+    rig.tick(|_| along(ORIGIN[2] + 2.0 * 42.0));
+    let inside = honest(&rig, 4.0, Vec3::new(0.5, -0.6, 1.2));
+    let (_, refused, _) = side.report(&rig, inside, None);
+    assert!(refused, "inside the deck");
+    let corrected = side.corrected.expect("a correction was sent");
+    let now = rig.frame(DECK, 0.0).to_world(held.local);
+    assert!(
+        (corrected[0] - now.x).abs() < 1e-9
+            && (corrected[1] - now.y).abs() < 1e-9
+            && (corrected[2] - now.z).abs() < 1e-9,
+        "{corrected:?} vs {now:?}"
+    );
+    assert_eq!(side.guest().carry_rejects, 1);
+    assert!(side.guest().on_collider.is_some(), "still carried");
+    // The player's confirmed position is the correction, and it rides on from there.
+    assert_eq!(side.guest().position, corrected);
+    rig.tick(|_| along(ORIGIN[2] + 2.0 * 43.0));
+    let to = honest(&rig, 4.0, Vec3::new(0.5, 0.0, 1.2));
+    assert!(
+        !side.report(&rig, to, None).1,
+        "carried on after the correction"
+    );
+}
+
+/// The speed test holds in the collider's frame: a client that changes the age it says its copy
+/// is, to turn the same world position into a move of 12 blocks along the deck, is refused as
+/// having moved too quickly, and the same report with the honest age is not.
+#[test]
+#[ignore = "daily"]
+fn a_changing_age_cannot_hide_a_large_local_move_behind_a_small_world_one() {
+    let Some(fixture) = crate::test_fixtures::vanilla() else {
+        return;
+    };
+    for cheat in [false, true] {
+        let mut rig = Rig::new(vec![(DECK, deck(40.0), along(ORIGIN[2]))]);
+        let mut side = Guestside::new(fixture, &[], 100);
+        for t in 1..=40 {
+            rig.tick(|_| along(ORIGIN[2] + 2.0 * f64::from(t)));
         }
-        fits += 1;
-        assert!(now.local.x.abs() <= 1.8 + 1e-9, "{now:?}");
-        assert!(now.local.z.abs() <= 10.3 + 1e-9, "{now:?}");
-        assert!(now.local.y >= -0.05 - 1e-9, "inside the deck: {now:?}");
+        let local = Vec3::new(0.0, 0.0, -6.0);
+        let to = honest(&rig, 2.0, local);
+        side.hub.guests.update(0, |g| g.position = to);
+        assert!(!side.report(&rig, to, Some(0)).1, "attached");
+        rig.tick(|_| along(ORIGIN[2] + 2.0 * 41.0));
+        // The honest report of this tick, as the client's copy of age 2 puts it; the cheat tells
+        // the server the copy is 6 ticks older, which puts the same world position 12 blocks along.
+        let to = honest(&rig, 2.0, local);
+        let (_, refused, _) = side.report(&rig, to, Some(if cheat { 6 } else { 0 }));
+        assert_eq!(refused, cheat, "cheat {cheat}");
+        if cheat {
+            assert!(
+                side.warnings
+                    .iter()
+                    .any(|w| w.contains("moved too quickly")),
+                "{:?}",
+                side.warnings
+            );
+            assert_eq!(side.guest().carry_rejects, 1);
+        }
     }
-    assert!(fits > 20, "the reports reach the deck: {fits}");
+}
+
+/// A body that already overlaps one box of a collider may not walk into another it did not
+/// overlap, a box of the same collider or of another.
+#[test]
+#[ignore = "daily"]
+fn walking_from_one_box_into_another_is_a_new_collision_even_when_already_inside_one() {
+    let Some(fixture) = crate::test_fixtures::vanilla() else {
+        return;
+    };
+    let two = |gap: f64| {
+        Arc::new(ColliderBoxes::new(vec![
+            Aabb::new(Vec3::new(-6.0, -1.0, -2.0), Vec3::new(-1.0, 3.0, 2.0)),
+            Aabb::new(Vec3::new(1.0 + gap, -1.0, -2.0), Vec3::new(6.0, 3.0, 2.0)),
+        ]))
+    };
+    for (id, other) in [(DECK, false), (OTHER, true)] {
+        // The body is inside the first box (a collider that moved into it); the second box is a
+        // box of the same collider, or of another collider.
+        let boxes = if other {
+            Arc::new(ColliderBoxes::new(vec![Aabb::new(
+                Vec3::new(-6.0, -1.0, -2.0),
+                Vec3::new(-1.0, 3.0, 2.0),
+            )]))
+        } else {
+            two(0.0)
+        };
+        let mut colliders = vec![(id, boxes, along(ORIGIN[2]))];
+        if other {
+            colliders.push((
+                102,
+                Arc::new(ColliderBoxes::new(vec![Aabb::new(
+                    Vec3::new(1.0, -1.0, -2.0),
+                    Vec3::new(6.0, 3.0, 2.0),
+                )])),
+                along(ORIGIN[2]),
+            ));
+        }
+        let mut rig = Rig::new(colliders);
+        for _ in 0..10 {
+            rig.tick(|_| along(ORIGIN[2]));
+        }
+        let mut side = Guestside::new(fixture, &[], 100);
+        // In the first box at its feet, 0.3 inside, and not carried.
+        let at = |x: f64| {
+            let p = rig.frame(id, 0.0).to_world(Vec3::new(x, 0.0, 0.0));
+            [p.x, p.y, p.z]
+        };
+        side.hub.guests.update(0, |g| g.position = at(-1.2));
+        // Staying inside it, or leaving into the open, is allowed: the gap between the boxes is 2.
+        assert!(
+            !side.send(&rig, at(-1.0), None, true).1,
+            "other={other}: stays"
+        );
+        // Walking on into the second box: a collision with something new, refused.
+        side.hub.guests.update(0, |g| g.position = at(-0.5));
+        assert!(
+            side.send(&rig, at(0.95), None, true).1,
+            "other={other}: into the next box"
+        );
+    }
+}
+
+/// An attached rider that jumps across a grid cell boundary of the collider keeps its support:
+/// the deck's top is 3.9 local, in the cell below the one the feet reach at 4.3.
+#[test]
+#[ignore = "daily"]
+fn an_attached_jump_across_a_grid_cell_boundary_stays_carried() {
+    let Some(fixture) = crate::test_fixtures::vanilla() else {
+        return;
+    };
+    let wide = Arc::new(ColliderBoxes::new(vec![Aabb::new(
+        Vec3::new(-20.0, 3.0, -20.0),
+        Vec3::new(20.0, 3.9, 20.0),
+    )]));
+    let mut rig = Rig::new(vec![(DECK, wide, along(ORIGIN[2]))]);
+    let mut side = Guestside::new(fixture, &[], 100);
+    for t in 1..=30 {
+        rig.tick(|_| along(ORIGIN[2] + 2.0 * f64::from(t)));
+    }
+    let mut t = 30;
+    for (y, ground) in [
+        (3.9, true),
+        (4.15, false),
+        (4.3, false),
+        (4.4, false),
+        (4.1, false),
+        (3.9, true),
+    ] {
+        t += 1;
+        rig.tick(|_| along(ORIGIN[2] + 2.0 * f64::from(t)));
+        let to = honest(&rig, 4.0, Vec3::new(0.0, y, 0.0));
+        if y == 3.9 && t == 31 {
+            side.hub.guests.update(0, |g| g.position = to);
+        }
+        assert!(!side.send(&rig, to, None, ground).1, "y {y}");
+        assert!(side.guest().on_collider.is_some(), "carried at y {y}");
+    }
+}
+
+/// A rider that was airborne when its last report was accepted is counted as floating; a
+/// refusal of the next report clears that, so the server's floating ticks do not run on and kick
+/// a player it is correcting.
+#[test]
+#[ignore = "daily"]
+fn a_refused_rider_is_not_counted_toward_the_flying_kick() {
+    let Some(fixture) = crate::test_fixtures::vanilla() else {
+        return;
+    };
+    let mut rig = Rig::new(vec![(DECK, deck(20.0), along(ORIGIN[2]))]);
+    let mut side = Guestside::new(fixture, &[], 100);
+    for t in 1..=30 {
+        rig.tick(|_| along(ORIGIN[2] + 2.0 * f64::from(t)));
+    }
+    let to = honest(&rig, 4.0, Vec3::new(0.0, 0.0, 0.0));
+    side.hub.guests.update(0, |g| g.position = to);
+    assert!(!side.send(&rig, to, None, true).1);
+    // A jump: above the deck, no step up, nothing but air around: floating.
+    rig.tick(|_| along(ORIGIN[2] + 2.0 * 31.0));
+    let up = honest(&rig, 4.0, Vec3::new(0.0, 1.5, 0.0));
+    assert!(!side.send(&rig, up, None, false).1);
+    assert!(side.guest().client_is_floating, "an airborne rider floats");
+    // The next report is refused: inside the deck. The correction is on its way, unanswered.
+    rig.tick(|_| along(ORIGIN[2] + 2.0 * 32.0));
+    let inside = honest(&rig, 4.0, Vec3::new(0.0, -0.6, 0.0));
+    side.answers = false;
+    assert!(side.send(&rig, inside, None, true).1);
+    assert!(
+        !side.guest().client_is_floating,
+        "a refusal is not floating"
+    );
+    let mut events = Vec::new();
+    for _ in 0..120 {
+        side.hub.tick_floating(0, &mut events);
+    }
+    assert!(
+        events.is_empty(),
+        "the server warned of {} things",
+        events.len()
+    );
+    assert!(side.hub.pending_kicks.is_empty(), "nobody kicked for it");
+    assert_eq!(side.guest().carry_rejects, 1);
+}
+
+/// Honest riders on a collider that rises, falls, rocks about each horizontal axis and does all of
+/// them at once are never refused, and the server keeps them under the collider as it is now.
+#[test]
+#[ignore = "daily"]
+fn an_honest_rider_on_a_rising_pitching_and_rolling_deck_is_never_refused() {
+    let Some(fixture) = crate::test_fixtures::vanilla() else {
+        return;
+    };
+    // (rise per tick, pitch amplitude, roll amplitude), degrees.
+    for (rise, pitch, roll) in [
+        (0.2_f64, 0.0_f64, 0.0_f64),
+        (-0.05, 0.0, 0.0),
+        (0.0, 5.0, 0.0),
+        (0.0, 0.0, 5.0),
+        (0.1, 4.0, 4.0),
+    ] {
+        let frame = |t: f64| {
+            let (p, r) = (
+                pitch.to_radians() * (t * 0.5).sin() / 2.0,
+                roll.to_radians() * (t * 0.37).sin() / 2.0,
+            );
+            // Pitch about x, roll about z, composed as quaternions [x, y, z, w].
+            let (qx, qz) = ([p.sin(), 0.0, 0.0, p.cos()], [0.0, 0.0, r.sin(), r.cos()]);
+            let q = [
+                qz[3] * qx[0] + qz[0] * qx[3] + qz[1] * qx[2] - qz[2] * qx[1],
+                qz[3] * qx[1] - qz[0] * qx[2] + qz[1] * qx[3] + qz[2] * qx[0],
+                qz[3] * qx[2] + qz[0] * qx[1] - qz[1] * qx[0] + qz[2] * qx[3],
+                qz[3] * qx[3] - qz[0] * qx[0] - qz[1] * qx[1] - qz[2] * qx[2],
+            ];
+            Frame::from_quaternion(
+                Vec3::new(ORIGIN[0], ORIGIN[1] + rise * t, ORIGIN[2] + 0.5 * t),
+                q,
+            )
+        };
+        let mut rig = Rig::new(vec![(DECK, deck(20.0), frame(0.0))]);
+        let mut side = Guestside::new(fixture, &[], 100);
+        let mut rng = Lcg(5);
+        let mut local = Vec3::new(0.0, 0.0, 0.0);
+        for t in 1..=50 {
+            rig.tick(|_| frame(f64::from(t)));
+            if t < 20 {
+                continue;
+            }
+            local = Vec3::new(
+                (local.x + (rng.unit() - 0.5) * 0.4).clamp(-1.0, 1.0),
+                0.0,
+                (local.z + (rng.unit() - 0.5) * 0.4).clamp(-6.0, 6.0),
+            );
+            // The client rests the box on the tilted top: the feet are a little over it.
+            let lift = Vec3::new(local.x, 0.3 * 5.0_f64.to_radians().tan() + 0.002, local.z);
+            let to = honest(&rig, 4.0, lift);
+            if t == 20 {
+                side.hub.guests.update(0, |g| g.position = to);
+            }
+            let (_, refused, _) = side.report(&rig, to, None);
+            assert!(!refused, "rise {rise} pitch {pitch} roll {roll} tick {t}");
+            let kept = side.guest().position;
+            let now = rig.frame(DECK, 0.0).to_world(lift);
+            assert!(
+                (kept[0] - now.x).abs() < 0.02
+                    // The tilted top lifts or sinks the feet by a little as it rocks.
+                    && (kept[1] - now.y).abs() < 0.15
+                    && (kept[2] - now.z).abs() < 0.02,
+                "rise {rise} pitch {pitch} roll {roll} tick {t}: kept {kept:?} vs {now:?}"
+            );
+        }
+        assert_eq!(side.guest().carry_rejects, 0);
+    }
 }
 
 /// Stepping from one collider to another detaches from the first and attaches to the second,
@@ -424,7 +789,12 @@ fn stepping_between_colliders_hands_the_player_over_each_way() {
     let frames = |t: f64| {
         move |id: u32| match id {
             DECK => along(ORIGIN[2] + 1.0 * t),
-            _ => Frame::translation(Vec3::new(ORIGIN[0] + 4.0, ORIGIN[1], ORIGIN[2] + 1.6 * t)),
+            // 0.2 a tick faster, alongside at tick 31 and drifting two blocks either way.
+            _ => Frame::translation(Vec3::new(
+                ORIGIN[0] + 4.0,
+                ORIGIN[1],
+                ORIGIN[2] + 1.2 * t - 0.2 * 31.0,
+            )),
         }
     };
     let mut rig = Rig::new(vec![
@@ -573,7 +943,6 @@ fn a_disassembled_collider_and_a_teleport_let_the_rider_go() {
     let (wrongly, refused, _) = side.report(&rig, fall, None);
     assert_eq!((wrongly, refused), (false, false));
     assert!(side.guest().on_collider.is_none());
-    assert!(!side.guest().carried_standing);
     // A teleport lets go of a rider.
     let (rig, mut side) = first(fixture);
     let to = honest(&rig, 4.0, Vec3::new(0.0, 0.0, 0.0));
@@ -648,5 +1017,109 @@ fn past_a_second_of_round_trip_the_rider_is_no_longer_carried() {
     side.hub.guests.update(0, |g| g.position = to);
     side.report(&rig, to, None);
     assert!(side.guest().on_collider.is_none());
-    assert!(!side.guest().carried_standing);
+}
+
+/// What the costly paths take, on a collider at the box cap (a 32 x 32 x 32 lump of 32768
+/// boxes, its top at its origin), the lump moving 2.0 blocks a tick, so every report meets a new
+/// tick's frames: a report that fits no age (the whole search), one that is refused and
+/// corrected, a guest walking beside the lump without touching it, and a second report of the
+/// same tick (the aged placement shared). The numbers go to stderr (`--nocapture`).
+#[test]
+#[ignore = "daily"]
+fn the_costly_paths_are_timed_on_a_collider_at_the_box_cap() {
+    let Some(fixture) = crate::test_fixtures::vanilla() else {
+        return;
+    };
+    const SIDE: usize = 32;
+    let lump = Arc::new(ColliderBoxes::new(
+        (0..SIDE * SIDE * SIDE)
+            .map(|i| {
+                let (x, y, z) = (i % SIDE, i / SIDE % SIDE, i / SIDE / SIDE);
+                Aabb::new(
+                    Vec3::new(x as f64 - 16.0, y as f64 - 32.0, z as f64 - 16.0),
+                    Vec3::new(x as f64 - 15.0, y as f64 - 31.0, z as f64 - 15.0),
+                )
+            })
+            .collect(),
+    ));
+    let mut rig = Rig::new(vec![(DECK, lump, along(ORIGIN[2]))]);
+    let mut side = Guestside::new(fixture, &[], 100);
+    for t in 1..=40 {
+        rig.tick(|_| along(ORIGIN[2] + 2.0 * f64::from(t)));
+    }
+    let held = |local: Vec3| Carried {
+        collider: DECK,
+        age: 4.0,
+        local,
+        reported: local,
+        committed: local,
+    };
+    let mut time = |name: &str, again: bool, report: &mut dyn FnMut(&mut Guestside<'_>, &Rig)| {
+        let mut spent = std::time::Duration::ZERO;
+        let mut reports = 0u32;
+        for t in 41..241u32 {
+            rig.tick(|_| along(ORIGIN[2] + 2.0 * f64::from(t)));
+            for second in [false, true] {
+                if second && !again {
+                    continue;
+                }
+                // Hovering beside the lump for 200 ticks is not what is timed: nobody is kicked for it.
+                side.hub.pending_kicks.clear();
+                side.hub.guests.update(0, |g| {
+                    g.client_is_floating = false;
+                    g.above_ground_ticks = 0;
+                });
+                let began = std::time::Instant::now();
+                report(&mut side, &rig);
+                if second == again {
+                    spent += began.elapsed();
+                    reports += 1;
+                }
+            }
+        }
+        eprintln!(
+            "carried check, collider at the box cap, {name}: {:.1} us per report over {reports}",
+            spent.as_secs_f64() * 1.0e6 / f64::from(reports)
+        );
+    };
+    let on = Vec3::new(0.0, 0.0, 0.0);
+    // Attached, and the report is 25 blocks along the lump's length: over nothing at any age.
+    time("fits no age", false, &mut |side, rig| {
+        let to = honest(rig, 4.0, Vec3::new(0.0, 0.0, 25.0));
+        side.hub.guests.update(0, |g| {
+            g.position = honest(rig, 4.0, on);
+            g.on_collider = Some(held(on));
+        });
+        side.report(rig, to, None);
+    });
+    // Attached, and the report is inside the lump: refused and corrected.
+    time("refused and corrected", false, &mut |side, rig| {
+        let to = honest(rig, 4.0, Vec3::new(0.0, -3.0, 0.0));
+        side.hub.guests.update(0, |g| {
+            g.position = honest(rig, 4.0, on);
+            g.on_collider = Some(held(on));
+        });
+        side.report(rig, to, None);
+    });
+    // Not attached, beside the lump, on nothing.
+    time("walking beside it", false, &mut |side, rig| {
+        let to = honest(rig, 4.0, Vec3::new(16.8, 0.0, 0.0));
+        side.hub.guests.update(0, |g| {
+            g.position = honest(rig, 4.0, Vec3::new(16.7, 0.0, 0.0));
+            g.on_collider = None;
+        });
+        side.report(rig, to, None);
+    });
+    time(
+        "walking beside it, second report of a tick",
+        true,
+        &mut |side, rig| {
+            let to = honest(rig, 4.0, Vec3::new(16.8, 0.0, 0.0));
+            side.hub.guests.update(0, |g| {
+                g.position = honest(rig, 4.0, Vec3::new(16.7, 0.0, 0.0));
+                g.on_collider = None;
+            });
+            side.report(rig, to, None);
+        },
+    );
 }

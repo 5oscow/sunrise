@@ -17,6 +17,49 @@ use sunrise_world::{
 };
 
 impl Hub {
+    /// Where the guest ends moving from `from` towards `to` through the level as it stands now:
+    /// where a carried player is committed. Nowhere to collide (no collision data) it is `to`.
+    pub(super) fn settle(&self, i: usize, from: [f64; 3], to: [f64; 3], ctx: &TickCtx) -> [f64; 3] {
+        let g = &self.guests[i];
+        let Some(binding) = ctx.collision else {
+            return to;
+        };
+        let movement = Vec3::new(to[0] - from[0], to[1] - from[1], to[2] - from[2]);
+        let d = g.dimensions();
+        let half = f64::from(d.width) / 2.0;
+        let bounds = Aabb::new(
+            Vec3::new(from[0] - half, from[1], from[2] - half),
+            Vec3::new(
+                from[0] + half,
+                from[1] + f64::from(d.height),
+                from[2] + half,
+            ),
+        );
+        let context = CollisionContext::position(from[1]).with_descending(g.sneaking);
+        let mut scene = SceneCollisions {
+            world: ctx.world,
+            binding,
+            subject: None,
+        };
+        let done = if g.collision_exclusions.is_empty() {
+            settled(g, bounds, movement, context, &mut scene)
+        } else {
+            settled(
+                g,
+                bounds,
+                movement,
+                context,
+                &mut Excluding {
+                    world: &mut scene,
+                    boxes: g.collision_exclusions.boxes(),
+                },
+            )
+        };
+        done.map_or(to, |done| {
+            [from[0] + done.x, from[1] + done.y, from[2] + done.z]
+        })
+    }
+
     /// The collision part of handlePlayerPositionChange: whether the move
     /// counts as moved wrongly (logged), and whether it is refused (the
     /// player is sent back where they were).
@@ -82,6 +125,32 @@ impl Hub {
     }
 }
 
+/// How far the guest's box `bounds` gets by `movement` in `world`, as `Entity.move` resolves it.
+fn settled<W>(
+    g: &Guest,
+    bounds: Aabb,
+    movement: Vec3,
+    context: CollisionContext,
+    world: &mut W,
+) -> Option<Vec3>
+where
+    W: BlockCollisionWorld<Error = io::Error> + EntityMovementWorld<Error = io::Error>,
+{
+    resolve_world_movement(
+        world,
+        MovementRequest {
+            entity: EntityIdentity(0),
+            context,
+            bounds,
+            movement,
+            max_step: 0.6,
+            on_ground: g.on_ground,
+            candidate_budget: 1_000_000,
+        },
+    )
+    .ok()
+}
+
 /// [`Hub::collide`] against `world`'s blocks.
 fn check_move<W>(
     g: &Guest,
@@ -111,19 +180,7 @@ where
     // The mover's own sneaking, as CollisionContext.of(player): a sneaking
     // player descends through scaffolding.
     let context = CollisionContext::position(from[1]).with_descending(g.sneaking);
-    let done = resolve_world_movement(
-        world,
-        MovementRequest {
-            entity: EntityIdentity(0),
-            context,
-            bounds: old,
-            movement,
-            max_step: 0.6,
-            on_ground: g.on_ground,
-            candidate_budget: 1_000_000,
-        },
-    )
-    .ok();
+    let done = settled(g, old, movement, context, world);
     // The gate decides what actually moves: the requested delta, a listener's
     // replacement, or nothing (a cancel). «Moved wrongly» still measures the
     // **requested** move against what happened, as vanilla measures the
@@ -164,13 +221,13 @@ where
     // already touch.
     let shrink = f64::from(1.0E-5_f32);
     let shrink = Vec3::new(shrink, shrink, shrink);
-    // The same for a moving collider's box (a mod's `set_collider`): one the old box was not
-    // already in. Outside a level that holds colliders this answers at once.
-    let identity = EntityIdentity(g.entity_id as u64);
-    let colliding = |bounds: Aabb| {
-        sunrise_client_render::moving_colliders::overlaps(identity, bounds.deflate(shrink))
-    };
-    if colliding(new) && !colliding(old) {
+    // The same for each box of a moving collider (a mod's `set_collider`): one the old box was
+    // not already in, box by box. Outside a level that holds colliders this answers at once.
+    if sunrise_client_render::moving_colliders::new_collision(
+        EntityIdentity(g.entity_id as u64),
+        old.deflate(shrink),
+        new.deflate(shrink),
+    ) {
         return (fail, true, stands);
     }
     let Ok(old_shape) = VoxelShape::from_box(old.deflate(shrink)) else {

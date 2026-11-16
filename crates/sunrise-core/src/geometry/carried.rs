@@ -28,6 +28,9 @@ pub const WINDOW: f64 = 4.0;
 /// than that is judged as if it were this far: its reports run past the window and are
 /// corrected.
 pub const MAX_ROUND_TRIP_TICKS: f64 = 20.0;
+/// How far above a box's top a rider that is attached may be, in blocks: a jump, a fall off
+/// a short drop. Higher, it is no longer carried.
+pub const JUMP_REACH: f64 = 8.0;
 /// What the client's own interpolation adds to the age in steady state, in ticks.
 pub const LAG_TICKS: f64 = 2.0;
 /// How many ticks of a collider's history the server keeps: the oldest age the window can ask.
@@ -126,7 +129,6 @@ pub enum Footing {
 /// How the feet at `local` (in the collider's frame) stand to `boxes`: `None` when the body is
 /// inside a box deeper than [`TOP_TOLERANCE`], or not over any box at or above its top.
 pub fn footing(boxes: &ColliderBoxes, local: Vec3, body: Body) -> Option<Footing> {
-    let reach = Vec3::new(EDGE_MARGIN + 0.05, TOP_TOLERANCE + 0.05, EDGE_MARGIN + 0.05);
     let around = Aabb::new(
         Vec3::new(
             local.x - body.half_width,
@@ -139,30 +141,47 @@ pub fn footing(boxes: &ColliderBoxes, local: Vec3, body: Body) -> Option<Footing
             local.z + body.half_width,
         ),
     );
-    let mut near = Vec::new();
-    boxes.candidates(around.inflate(reach), &mut near);
-    let mut result = None;
-    for &index in &near {
+    // Inside: the body's box meets a box below its top by more than the tolerance.
+    let mut inside = false;
+    boxes.visit_candidates(around.inflate(Vec3::new(0.05, 0.05, 0.05)), |index| {
         let b = boxes.boxes()[index as usize];
-        // Inside: the body's box meets the box below its top by more than the tolerance.
         let below_top = Aabb::new(b.min, Vec3::new(b.max.x, b.max.y - TOP_TOLERANCE, b.max.z));
-        if around.intersects(below_top) {
-            return None;
-        }
+        inside = around.intersects(below_top);
+        inside
+    });
+    if inside {
+        return None;
+    }
+    // Support: the boxes under the feet, in a column from the feet down to the highest the
+    // player can be above a top, asked apart from the body's own box so that it never depends
+    // on where the grid's cells fall.
+    let column = Aabb::new(
+        Vec3::new(
+            local.x - EDGE_MARGIN,
+            local.y - JUMP_REACH,
+            local.z - EDGE_MARGIN,
+        ),
+        Vec3::new(
+            local.x + EDGE_MARGIN,
+            local.y + TOP_TOLERANCE,
+            local.z + EDGE_MARGIN,
+        ),
+    );
+    let mut result = None;
+    boxes.visit_candidates(column, |index| {
+        let b = boxes.boxes()[index as usize];
         let over = local.x >= b.min.x - EDGE_MARGIN
             && local.x <= b.max.x + EDGE_MARGIN
             && local.z >= b.min.z - EDGE_MARGIN
             && local.z <= b.max.z + EDGE_MARGIN;
-        if !over {
-            continue;
-        }
         let height = local.y - b.max.y;
-        if height.abs() <= TOP_TOLERANCE {
+        if over && height.abs() <= TOP_TOLERANCE {
             result = Some(Footing::Standing);
-        } else if height > TOP_TOLERANCE && result.is_none() {
+        } else if over && height > TOP_TOLERANCE && height <= JUMP_REACH && result.is_none() {
             result = Some(Footing::Above);
         }
-    }
+        false
+    });
     result
 }
 
@@ -251,6 +270,12 @@ pub struct Carried {
     pub age: f64,
     /// The feet at the last accepted report, in the collider's frame.
     pub local: Vec3,
+    /// The last accepted report as the client sent it: a position in the frame the client held,
+    /// which is only ever compared with the next report of that client.
+    pub reported: Vec3,
+    /// Where the server put the player: `local` under the collider's transform when it was
+    /// accepted, after the ordinary collision of the world.
+    pub committed: Vec3,
 }
 
 #[cfg(test)]
@@ -349,6 +374,21 @@ mod tests {
         assert_eq!(f(-3.0, 0.0), None, "under it");
         assert_eq!(f(0.0, 1.7), Some(Footing::Standing), "over its edge margin");
         assert_eq!(f(0.0, 2.0), None, "past the edge");
+    }
+
+    #[test]
+    fn support_is_found_across_a_grid_cell_boundary_and_up_to_the_jump_reach() {
+        // A wide deck whose top is 3.9, in the cell below the one the feet are in at 4.3.
+        let wide = ColliderBoxes::new(vec![Aabb::new(
+            Vec3::new(-20.0, 3.0, -20.0),
+            Vec3::new(20.0, 3.9, 20.0),
+        )]);
+        let at = |y: f64| footing(&wide, Vec3::new(0.0, y, 0.0), BODY);
+        assert_eq!(at(3.9), Some(Footing::Standing));
+        assert_eq!(at(4.3), Some(Footing::Above));
+        assert_eq!(at(3.9 + JUMP_REACH), Some(Footing::Above));
+        assert_eq!(at(3.9 + JUMP_REACH + 0.5), None, "too high to be carried");
+        assert_eq!(at(3.5), None, "inside it");
     }
 
     #[test]

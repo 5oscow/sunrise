@@ -262,6 +262,32 @@ impl ColliderBoxes {
         self.bounds
     }
 
+    /// Calls `f` with the index of each box that may meet `local` until it answers true; no
+    /// allocation, and a box in several cells of the query may be named more than once.
+    pub fn visit_candidates(&self, local: Aabb, mut f: impl FnMut(u32) -> bool) {
+        if self.solid.is_empty() {
+            return;
+        }
+        let (lo, hi) = cell_range(local);
+        let count = (0..3).map(|i| hi[i] - lo[i] + 1).product::<i64>();
+        if count > self.cells.len() as i64 {
+            self.solid.iter().any(|&index| f(index));
+            return;
+        }
+        for x in lo[0]..=hi[0] {
+            for y in lo[1]..=hi[1] {
+                for z in lo[2]..=hi[2] {
+                    if let Some(list) = self.cells.get(&[x as i32, y as i32, z as i32])
+                        && list.iter().any(|&index| f(index))
+                    {
+                        return;
+                    }
+                }
+            }
+        }
+        self.oversized.iter().any(|&index| f(index));
+    }
+
     /// Indices of the boxes that may meet `local` (a superset: each box is then tested).
     pub fn candidates(&self, local: Aabb, out: &mut Vec<u32>) {
         out.clear();
@@ -381,6 +407,29 @@ impl OrientedCollider {
                 self.overlap_depth(&axes, mover, &obb) > COLLISION_EPSILON
             })
         })
+    }
+
+    /// Calls `f` with the index of each box the entity box overlaps deeper than the collision
+    /// epsilon, until it answers true.
+    pub fn overlapping(&self, mover: Aabb, mut f: impl FnMut(u32) -> bool) {
+        let axes = self.axes();
+        self.with_candidates(mover, |candidates| {
+            for &index in candidates {
+                let obb = self.obb(self.boxes.boxes[index as usize]);
+                if self.overlap_depth(&axes, mover, &obb) > COLLISION_EPSILON && f(index) {
+                    break;
+                }
+            }
+        });
+    }
+
+    /// Whether the entity box overlaps box `index` of the collider deeper than the collision
+    /// epsilon.
+    pub fn overlaps_box(&self, index: u32, mover: Aabb) -> bool {
+        let Some(&local) = self.boxes.boxes.get(index as usize) else {
+            return false;
+        };
+        self.overlap_depth(&self.axes(), mover, &self.obb(local)) > COLLISION_EPSILON
     }
 
     /// The axes of the separating-axis test: the world axes, the box's, and their cross

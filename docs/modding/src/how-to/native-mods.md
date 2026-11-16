@@ -121,14 +121,19 @@ a living body takes `in_wall` damage while a box covers its eyes, as it does in 
 
 A client moves its player with the collider as it last heard of it, so the position it reports is in a
 frame that is some ticks old: the round trip, plus how stale its copy was. The server therefore keeps
-each collider's recent transforms (about a second of them, a few hundred bytes per collider that moves,
-one entry for one that stands still) and judges a report against the collider as it was at some age
+each collider's recent transforms (about a second of them: about 2.8 KiB of frame data per collider that
+moves, plus the container and index around it, and one entry for one that stands still) and judges a report against the collider as it was at some age
 around the one it expects, the player's round-trip time plus two ticks, give or take four. A report
 fits an age when the player stands on the top of a box (within 0.05 blocks) or is above one, is over
 it, and is not inside any box deeper than that. Of the ages that fit, the one nearest the expected age
-wins. The move from the last accepted position, held in the collider's frame, then goes through the
+wins. The move from the last accepted position, measured in the collider's frame (so the speed test sees how far the
+player walked on the collider, not how far the collider carried it), then goes through the
 ordinary move check of a walking player, with the colliders placed where they stood at that age, so
-walls, blocks beside the track and the collider itself stop a carried player as they stop any other. A
+walls, blocks beside the track and the collider itself stop a carried player as they stop any other,
+and a player already touching one box of a collider may not walk into another box it did not touch.
+The position the server keeps for an accepted report is the same place on the collider under its
+transform now, not the position in the older frame the client reported in. A player on a collider's box
+is held up by it, so standing on a collider is never counted as floating. A
 Sunrise client also says how old its copy of the collider was before each report
 (`sunrise:carry_age`); the server only starts its search there, and the report is still checked
 against the same window.
@@ -147,6 +152,5 @@ report held to a wrong age moves the far end of a long collider sideways, so a r
 is off by more than the window, or a client that is more than four ticks stale, is refused. A collider
 that goes faster or turns harder than 2.0 blocks and 4 degrees a tick is not covered by any test.
 Past a second of round trip the window stops growing: a player whose copy is
-older than it reaches is judged as a walker in the frame the cap allows, not carried, and counted as
-floating while it stands on the collider. A vanilla client, which sends no age, gets the
+older than it reaches is judged as a walker in the frame the cap allows, not carried. A vanilla client, which sends no age, gets the
 window around the expected age.

@@ -892,14 +892,15 @@ fn the_level_records_its_colliders_as_each_tick_begins() {
                 .unwrap()
         };
         let mut began = Vec::new();
-        let mut history = None;
         for _ in 0..8 {
-            let placed = game.placed_moving_colliders();
-            history = game.collider_history(&placed);
             began.push(x_of(game));
-            tick_level_moving(game, |g| shift_stand(g, holder, Vec3::new(0.5, 0.0, 0.0)));
+            // The level's own tick records the colliders as it begins.
+            game.tick_server(false).unwrap();
+            shift_stand(game, holder, Vec3::new(0.5, 0.0, 0.0));
         }
-        let history = history.expect("a server records a level that has a collider");
+        let history = game
+            .level_collider_history()
+            .expect("a server records a level that has a collider");
         let history = history.borrow();
         let (log, _) = history.get(holder).expect("the collider's frames");
         for age in 0..8usize {
@@ -917,7 +918,7 @@ fn the_level_records_its_colliders_as_each_tick_begins() {
         drop(history);
         // The collider goes: the level keeps no history.
         holder_ref.set_collider(game, None).unwrap();
-        let placed = game.placed_moving_colliders();
-        assert!(game.collider_history(&placed).is_none());
+        game.tick_server(false).unwrap();
+        assert!(game.level_collider_history().is_none());
     });
 }

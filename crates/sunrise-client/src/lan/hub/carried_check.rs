@@ -1,14 +1,16 @@
 //! The move check of a player a moving collider carries (docs/modding/src/how-to/native-mods.md,
 //! "Moving colliders").
 //!
-//! A client moves its player with the collider as it last heard of it, so the position it
-//! reports is in a frame that is some ticks old. The server keeps each collider's recent
-//! transforms (`moving_colliders::History`) and judges a report in the world as the client saw
-//! it: the collider placed at the age the report fits (`sunrise_core::geometry::carried`), the
-//! move from the last accepted position, held in the collider's frame, run through the same
-//! check a walking player gets. A report that fits no age in the window is corrected to where
-//! the server last had the player on the collider, placed under the collider's transform now.
-//! A correction is not a reason to count the player as floating or to kick it, and is counted.
+//! A client moves its player with the collider as it last heard of it, so the position it reports
+//! is in a frame that is some ticks old. The server keeps each collider's recent transforms
+//! (`moving_colliders::History`) and judges a report in the world as the client saw it: the
+//! collider placed at the age the report fits (`sunrise_core::geometry::carried`), the move from
+//! the last accepted position, held in the collider's frame, run through the same speed test and
+//! collision check a walking player gets. What the server then keeps is that local position
+//! under the collider's transform now, after the world's collision: the frame the client held
+//! never enters the server's state. A report that fits no age in the window is corrected to
+//! where the server last had the player on the collider, placed under the collider's transform
+//! now. A correction is counted, and never counts toward the floating kick.
 use super::{Hub, TickCtx};
 use std::sync::atomic::Ordering;
 use sunrise_client_render::moving_colliders::{at_age, with_history};
@@ -18,7 +20,7 @@ use sunrise_core::geometry::{
 };
 
 /// How a report stands to the colliders of the level.
-enum Plan {
+pub(super) enum Plan {
     /// It fits a collider at an age.
     Fits {
         collider: u32,
@@ -33,83 +35,12 @@ enum Plan {
 }
 
 impl Hub {
-    /// [`Hub::collide`] for a guest that may be on a moving collider: the same answer, with the
-    /// collision in the colliders' frames as the client saw them.
-    pub(super) fn collide_carried(
-        &mut self,
-        i: usize,
-        to: [f64; 3],
-        ctx: &TickCtx,
-    ) -> (bool, bool, bool) {
-        let plan = self.carry_plan(i, to);
-        self.guests.update(i, |g| {
-            g.carry_hint = None;
-            g.carry_correction = None;
-        });
-        let Some(plan) = plan else {
-            // No collider matters: the player is not carried, if it was.
-            self.guests.update(i, |g| {
-                g.on_collider = None;
-                g.carried_standing = false;
-            });
-            return self.collide(i, to, ctx);
-        };
-        match plan {
-            Plan::Near { age } => {
-                self.guests.update(i, |g| g.carried_standing = false);
-                at_age(age, || self.collide(i, to, ctx))
-            }
-            Plan::Left { age } => {
-                let result = at_age(age, || self.collide(i, to, ctx));
-                if result.1 {
-                    self.carry_reject(i);
-                } else {
-                    self.guests.update(i, |g| {
-                        g.on_collider = None;
-                        g.carried_standing = false;
-                    });
-                }
-                result
-            }
-            Plan::Fits {
-                collider,
-                attached,
-                fit,
-            } => {
-                let from = match self.guests[i].on_collider {
-                    Some(held) if attached => fit.frame.to_world(held.local),
-                    _ => Vec3::new(
-                        self.guests[i].position[0],
-                        self.guests[i].position[1],
-                        self.guests[i].position[2],
-                    ),
-                };
-                let from = [from.x, from.y, from.z];
-                let (wrongly, refused, stands) =
-                    at_age(fit.age, || self.collide_from(i, from, to, ctx));
-                if refused {
-                    if attached {
-                        self.carry_reject(i);
-                    }
-                    return (wrongly, refused, stands);
-                }
-                let standing = fit.footing == Footing::Standing;
-                self.guests.update(i, |g| {
-                    g.on_collider = Some(Carried {
-                        collider,
-                        age: fit.age,
-                        local: fit.local,
-                    });
-                    g.carried_standing = standing;
-                });
-                (wrongly, refused, stands || standing)
-            }
-        }
-    }
-
     /// Where guest `i`'s report at `to` stands to the level's colliders; `None` when none matters.
-    fn carry_plan(&self, i: usize, to: [f64; 3]) -> Option<Plan> {
+    pub(super) fn carry_plan(&self, i: usize, to: [f64; 3]) -> Option<Plan> {
         let g = &self.guests[i];
+        if g.vehicle.is_some() || g.spectator() || g.sleeping {
+            return None;
+        }
         let dimensions = g.dimensions();
         let body = Body {
             half_width: f64::from(dimensions.width) / 2.0,
@@ -150,23 +81,26 @@ impl Hub {
                 Vec3::new(feet.x - 1.0, feet.y - 0.5, feet.z - 1.0),
                 Vec3::new(feet.x + 1.0, feet.y + body.height + 0.5, feet.z + 1.0),
             );
-            let near = history.near(around);
-            if near.is_empty() {
+            let mut found = None;
+            let mut any = false;
+            history.near(around, |collider| {
+                any = true;
+                let Some((log, boxes)) = history.get(collider) else {
+                    return false;
+                };
+                found = judge(log, history.now(), boxes, feet, body, ages(collider), true)
+                    .map(|fit| (collider, fit));
+                found.is_some()
+            });
+            if !any {
                 return None;
             }
-            for collider in near {
-                let Some((log, boxes)) = history.get(collider) else {
-                    continue;
-                };
-                if let Some(fit) =
-                    judge(log, history.now(), boxes, feet, body, ages(collider), true)
-                {
-                    return Some(Plan::Fits {
-                        collider,
-                        attached: false,
-                        fit,
-                    });
-                }
+            if let Some((collider, fit)) = found {
+                return Some(Plan::Fits {
+                    collider,
+                    attached: false,
+                    fit,
+                });
             }
             Some(Plan::Near {
                 age: Ages::new(round_trip, None).anchor,
@@ -175,9 +109,136 @@ impl Hub {
         .flatten()
     }
 
-    /// A rejected report of a carried player: counted, and the correction is where the server
-    /// last had the player on the collider, under the collider's transform now.
-    fn carry_reject(&mut self, i: usize) {
+    /// The move the speed test (`moved too quickly`) measures for a report that a plan judges, in
+    /// the frame the move is made in; `None` for the ordinary one, from where the tick began. A
+    /// carried player's is the local move, so a changing age cannot hide a large move in the
+    /// collider's frame behind a small one in the world.
+    pub(super) fn carry_speed_delta(
+        &self,
+        i: usize,
+        to: [f64; 3],
+        plan: Option<&Plan>,
+    ) -> Option<[f64; 3]> {
+        let held = self.guests[i].on_collider?;
+        match plan? {
+            Plan::Fits {
+                attached: true,
+                fit,
+                ..
+            } => Some([
+                fit.local.x - held.local.x,
+                fit.local.y - held.local.y,
+                fit.local.z - held.local.z,
+            ]),
+            Plan::Left { .. } => Some([
+                to[0] - held.reported.x,
+                to[1] - held.reported.y,
+                to[2] - held.reported.z,
+            ]),
+            _ => None,
+        }
+    }
+
+    /// [`Hub::collide`] for a guest that may be on a moving collider: the same answer, with the
+    /// collision in the colliders' frames as the client saw them. The commit of an accepted
+    /// carried report is left in `carry_commit`.
+    pub(super) fn collide_carried(
+        &mut self,
+        i: usize,
+        to: [f64; 3],
+        ctx: &TickCtx,
+        plan: Option<Plan>,
+    ) -> (bool, bool, bool) {
+        self.guests.update(i, |g| {
+            g.carry_hint = None;
+            g.carry_correction = None;
+            g.carry_commit = None;
+        });
+        let Some(plan) = plan else {
+            // No collider matters: the player is not carried, if it was.
+            self.guests.update(i, |g| {
+                g.on_collider = None;
+            });
+            return self.collide(i, to, ctx);
+        };
+        match plan {
+            Plan::Near { age } => at_age(age, || self.collide(i, to, ctx)),
+            Plan::Left { age } => {
+                let from = self.guests[i]
+                    .on_collider
+                    .map_or(self.guests[i].position, |held| {
+                        [held.reported.x, held.reported.y, held.reported.z]
+                    });
+                let result = at_age(age, || self.collide_from(i, from, to, ctx));
+                if result.1 {
+                    self.carry_rejected(i);
+                } else {
+                    self.guests.update(i, |g| {
+                        g.on_collider = None;
+                    });
+                }
+                result
+            }
+            Plan::Fits {
+                collider,
+                attached,
+                fit,
+            } => {
+                let held = self.guests[i].on_collider.filter(|_| attached);
+                let from = match held {
+                    Some(held) => {
+                        let at = fit.frame.to_world(held.local);
+                        [at.x, at.y, at.z]
+                    }
+                    None => self.guests[i].position,
+                };
+                let (wrongly, refused, stands) =
+                    at_age(fit.age, || self.collide_from(i, from, to, ctx));
+                if refused {
+                    if attached {
+                        self.carry_rejected(i);
+                    }
+                    return (wrongly, refused, stands);
+                }
+                // Where the server puts the player: the local position under the collider as
+                // it is now, moved there through the world's collision.
+                let now = with_history(|history| {
+                    let (log, _) = history.get(collider)?;
+                    log.frame_at(history.now(), 0.0)
+                })
+                .flatten();
+                let target = now.map_or(fit.local, |frame| frame.to_world(fit.local));
+                let target = [target.x, target.y, target.z];
+                let committed = match held {
+                    Some(held) => self.settle(
+                        i,
+                        [held.committed.x, held.committed.y, held.committed.z],
+                        target,
+                        ctx,
+                    ),
+                    None => target,
+                };
+                let standing = fit.footing == Footing::Standing;
+                self.guests.update(i, |g| {
+                    g.on_collider = Some(Carried {
+                        collider,
+                        age: fit.age,
+                        local: fit.local,
+                        reported: Vec3::new(to[0], to[1], to[2]),
+                        committed: Vec3::new(committed[0], committed[1], committed[2]),
+                    });
+                    g.carry_commit = Some(committed);
+                });
+                (wrongly, refused, stands || standing)
+            }
+        }
+    }
+
+    /// A rejected report of a carried player: counted, never a floating tick (the flag of the
+    /// last accepted report is cleared, so no tick counts while the correction is on its way),
+    /// and the correction is where the server last had the player on the collider, under the
+    /// collider's transform now.
+    pub(super) fn carry_rejected(&mut self, i: usize) {
         let corrected = self.guests[i].on_collider.and_then(|held| {
             with_history(|history| {
                 let (log, _) = history.get(held.collider)?;
@@ -189,6 +250,24 @@ impl Hub {
         self.guests.update(i, |g| {
             g.carry_rejects += 1;
             g.carry_correction = corrected;
+            g.client_is_floating = false;
+        });
+    }
+
+    /// Puts a carried player's attachment back after the teleport of its correction, which
+    /// lets go of one: the same collider and local position, committed where it was sent.
+    pub(super) fn keep_carried(
+        &mut self,
+        i: usize,
+        carried: Option<Carried>,
+        back: Option<[f64; 3]>,
+    ) {
+        let Some(held) = carried else { return };
+        self.guests.update(i, |g| {
+            g.on_collider = Some(Carried {
+                committed: back.map_or(held.committed, |b| Vec3::new(b[0], b[1], b[2])),
+                ..held
+            });
         });
     }
 }

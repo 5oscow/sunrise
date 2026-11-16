@@ -360,15 +360,15 @@ pub struct Guest {
     /// The moving collider carrying the player, and where the last accepted report put its
     /// feet in the collider's frame (`lan/hub/carried_check.rs`). Not saved.
     pub on_collider: Option<sunrise_core::geometry::carried::Carried>,
-    /// Whether the last accepted report stood on a collider's box: no floating, whatever the
-    /// blocks around say.
-    pub carried_standing: bool,
     /// What the player's client last said about the age of its copy of the collider
     /// (`sunrise:carry_age`): the collider and the ticks. Used by the next report only.
     pub carry_hint: Option<(u32, u8)>,
     /// Where a rejected report puts the player back: the feet as the server last accepted
     /// them, in the collider's frame, under the collider's transform now.
     pub carry_correction: Option<[f64; 3]>,
+    /// Where the accepted report of a carried player is committed: its local position under
+    /// the collider's transform now, after the world's collision. Read by the same report.
+    pub carry_commit: Option<[f64; 3]>,
     /// The reports rejected while a collider carried the player. They never count toward the
     /// flying kick.
     pub carry_rejects: u32,
@@ -794,9 +794,9 @@ impl Guest {
             batch_quota: 0.0,
             collision_exclusions: Default::default(),
             on_collider: None,
-            carried_standing: false,
             carry_hint: None,
             carry_correction: None,
+            carry_commit: None,
             carry_rejects: 0,
             tracker: Tracker::default(),
             motion: None,

@@ -459,6 +459,15 @@ impl Game<'_> {
         prepared
     }
 
+    /// The history the level keeps of its colliders, if it has any.
+    #[cfg(test)]
+    pub(in crate::game) fn level_collider_history(
+        &self,
+    ) -> Option<std::rc::Rc<std::cell::RefCell<sunrise_client_render::moving_colliders::History>>>
+    {
+        self.collider_histories.0.get(&self.dim).cloned()
+    }
+
     /// Records the level's colliders as its tick begins into the level's history and answers it,
     /// for a server; a client keeps none. A level with no collider keeps nothing.
     pub(in crate::game) fn collider_history(

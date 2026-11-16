@@ -4501,6 +4501,11 @@ impl Hub {
             to[2].clamp(-3.0E7, 3.0E7),
         ];
         let (yaw, pitch) = (wrap_degrees(yaw), wrap_degrees(pitch));
+        // A carried player's report is measured in the collider's frame, and judged in it.
+        let plan = (hearing != Hearing::Confirmation)
+            .then(|| self.carry_plan(i, to))
+            .flatten();
+        let reference = self.carry_speed_delta(i, to, plan.as_ref());
         let begin = self.guests.update(i, |g| {
             let owner = self.singleplayer_owner == Some(g.uuid);
             // A passenger only turns: its vehicle carries it (absSnapTo where it is).
@@ -4509,7 +4514,7 @@ impl Hub {
                 g.release_tickets();
                 return std::ops::ControlFlow::Break(false);
             }
-            let d = [0, 1, 2].map(|k| to[k] - g.first_good[k]);
+            let d = reference.unwrap_or_else(|| [0, 1, 2].map(|k| to[k] - g.first_good[k]));
             let moved = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
             if g.sleeping {
                 if moved > 1.0 {
@@ -4554,12 +4559,27 @@ impl Hub {
             std::ops::ControlFlow::Continue(start) => start,
             std::ops::ControlFlow::Break(resend) => {
                 if resend {
-                    self.resend_teleport(i, None);
+                    // A carried player's refusal puts it back where the server has it on its
+                    // collider, and is counted like any other.
+                    let carried = self.guests[i].on_collider;
+                    if carried.is_some() && reference.is_some() {
+                        self.carry_rejected(i);
+                    }
+                    let back = self.guests[i].carry_correction;
+                    self.guests.update(i, |g| g.carry_correction = None);
+                    self.resend_teleport(i, back);
+                    self.keep_carried(i, carried, back);
                 }
                 return;
             }
         };
-        let (wrongly, refused, stands) = self.collide_carried(i, to, ctx);
+        // The confirmation of a teleport (a carried player's correction included) is committed in
+        // place against the world as it stands.
+        let (wrongly, refused, stands) = if hearing == Hearing::Confirmation {
+            self.collide(i, to, ctx)
+        } else {
+            self.collide_carried(i, to, ctx, plan)
+        };
         if wrongly {
             let line = format!("{} moved wrongly!", self.guests[i].name);
             events.push(HostEvent::Warn(line));
@@ -4571,11 +4591,14 @@ impl Hub {
             self.guests.update(i, |g| g.carry_correction = None);
             let carried = self.guests[i].on_collider;
             self.resend_teleport(i, Some(back));
-            if carried.is_some() {
-                self.guests.update(i, |g| g.on_collider = carried);
-            }
+            self.keep_carried(i, carried, Some(back));
             return;
         }
+        // A carried player is where the server puts it: its local position under the
+        // collider's transform now, not the position in the frame the client held.
+        let committed = self.guests[i].carry_commit;
+        self.guests.update(i, |g| g.carry_commit = None);
+        let to = committed.unwrap_or(to);
         // The anticheat's `ground`: a claim of the ground with nothing to
         // stand on is dropped (no-fall, walking on water).
         let (mut flags, mut corrected) = (flags, false);
@@ -4601,7 +4624,6 @@ impl Hub {
                 && !g.spectator()
                 && !self.config.allow_flight
                 && !g.creative()
-                && !g.carried_standing
                 && g.effects.get("levitation").is_none()
                 && !g.fall_flying
                 && !g
@@ -4641,7 +4663,16 @@ impl Hub {
             at[1] + f64::from(d.height) + 0.0625,
             at[2] + half,
         ];
+        // A moving collider's box under the feet holds the player up as a block does: it is not
+        // floating on one, and the colliders are where they stand now, as the player is committed.
         no_blocks_in(world, lo, hi, &self.encoder)
+            && !sunrise_client_render::moving_colliders::overlaps(
+                sunrise_world::entity_obstruction::EntityIdentity(self.guests[i].entity_id as u64),
+                sunrise_core::geometry::Aabb::new(
+                    sunrise_core::geometry::Vec3::new(lo[0], lo[1], lo[2]),
+                    sunrise_core::geometry::Vec3::new(hi[0], hi[1], hi[2]),
+                ),
+            )
     }
 
     /// `ServerGamePacketListenerImpl.forceSendPlayerSupportBlocks`: the blocks just under the
