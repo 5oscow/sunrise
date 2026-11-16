@@ -6,6 +6,7 @@ A `BlockState` is an API-owned value pairing a `BlockKey` with a block-local can
 |---|---|
 | `replaceable(state) -> Option<bool>` | `BlockState.canBeReplaced()` |
 | `destroy_speed(state) -> Option<f32>` | `BlockBehaviour.Properties.destroyTime` (`getDestroySpeed`): stone 1.5, -1 unbreakable |
+| `is_correct_tool_for_drops(stack, state) -> Option<bool>` | `ItemStack.isCorrectToolForDrops(state)`: the stack's `minecraft:tool` rules only; see [Is this the right tool](harvest-queries.md) |
 | `sound(state) -> Option<BlockSoundType>` | `BlockState.getSoundType()`: volume, pitch and the break, step, place, hit and fall events |
 | `has_block_entity(state) -> Option<bool>` | `BlockState.hasBlockEntity()` |
 | `map_color(state) -> Option<u8>` | `BlockState.getMapColor`: the `MapColor.id` a map item colours a column by, 0 for none |
