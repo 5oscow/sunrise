@@ -258,6 +258,13 @@ pub fn sunrise_mod(_: TokenStream, input: TokenStream) -> TokenStream { input }
 "#,
     ),
     (
+        "crates/sunrise-mod-package/src/fixture.extension-tags.json",
+        r#"[
+    {"registry": "item", "id": "sunrise:fixture", "doc": "Fixture items."},
+    {"registry": "block", "id": "sunrise:fixture", "doc": "Fixture blocks."}
+]"#,
+    ),
+    (
         "crates/sunrise-mod-package/src/manifest.rs",
         r#"
 #[serde(rename_all = "kebab-case")]
