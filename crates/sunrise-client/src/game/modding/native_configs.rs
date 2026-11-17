@@ -235,6 +235,7 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::game::Role;
     use mod_api::ConfigKind::{Client, Common, Server};
 
     #[test]

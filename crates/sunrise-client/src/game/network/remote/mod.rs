@@ -25,7 +25,7 @@ mod block_entity_data_tests;
 use super::raw_backlog::Received;
 use super::remote_chunks::{ChunkDecoder, ChunkFormat, Next};
 use super::render_tick::{mob_tracking_body, player_tracking_body};
-use super::{Dim, Game, Mining, Screen, item_use::ticks_left, level_sounds::LevelSound};
+use super::{Dim, Game, Mining, Role, Screen, item_use::ticks_left, level_sounds::LevelSound};
 use crate::game::api_values::TryIntoApi;
 use mod_api::InteractionKey;
 use std::{

@@ -1,4 +1,5 @@
 use super::*;
+use crate::game::Role;
 use mod_api::{
     ClientReloadContext, ClientReloadListener, ClientReloadListeners, FileToIdConverter,
     Identifier, ReloadApply, ReloadResourceError,

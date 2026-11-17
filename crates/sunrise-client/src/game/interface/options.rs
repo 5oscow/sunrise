@@ -1,6 +1,6 @@
 //! The options screens bound to the game: drawing, input, applying settings
 //! (video, sound, chat, font, language) and the F11 fullscreen toggle.
-use super::{Game, ResizeState, Screen};
+use super::{Game, ResizeState, Role, Screen};
 use serde_json::{Value, json};
 use sunrise_client::{
     Result,
