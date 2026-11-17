@@ -37,11 +37,7 @@ impl Game<'_> {
     /// the level it shows. An entity taken out for its tick cannot be read in that tick.
     pub(super) fn block_entity(&self, level: LevelRef, pos: [i32; 3]) -> Option<BlockEntityRef> {
         let world = self.native_level_read_world(level)?;
-        loaded_block_entity(world, pos)?;
-        let generation = world.block_entities.generation(&(pos[0], pos[1], pos[2]))?;
-        Some(mod_api::__private::game::block_entity_ref(
-            level, pos, generation,
-        ))
+        world_block_entity(world, level, pos)
     }
 
     /// `block_entity`, also for a block entity taken out for its own tick: its generation
@@ -794,6 +790,62 @@ fn mod_item_slots(
         });
     }
     Ok(slots)
+}
+
+pub(super) fn part_snapshot(
+    world: &World,
+    level: Option<LevelRef>,
+    authoritative: bool,
+    index: Option<
+        &std::sync::Arc<
+            std::sync::Mutex<
+                sunrise_mod_runtime::attachments::index::AttachmentIndex<mod_api::AttachmentHolder>,
+            >,
+        >,
+    >,
+    entity: BlockEntityRef,
+    namespace: &str,
+    name: &str,
+) -> Result<mod_api::AttachmentBatch, mod_api::PartStateError> {
+    let fields = entity.fields();
+    if level != Some(fields.level) {
+        return Err(mod_api::PartStateError::OtherLevel);
+    }
+    let key = (fields.position[0], fields.position[1], fields.position[2]);
+    if !world.is_loaded_at(key.0, key.1, key.2)
+        || world.block_entities.generation(&key) != Some(fields.generation)
+    {
+        return Err(mod_api::PartStateError::Stale);
+    }
+    mod_api::__private::validate_attachment_use(namespace, name, false).map_err(|error| {
+        mod_api::PartStateError::Attachment {
+            namespace: "",
+            name: "",
+            error,
+        }
+    })?;
+    let empty = || sunrise_mod_runtime::attachments::AttachmentBatch::empty().into();
+    if !authoritative {
+        return Ok(empty());
+    }
+    Ok(index.map_or_else(empty, |index| {
+        sunrise_mod_runtime::attachments::AttachmentBatch::new(
+            index.lock().unwrap().snapshot_named(namespace, name),
+        )
+        .into()
+    }))
+}
+
+pub(super) fn world_block_entity(
+    world: &World,
+    level: LevelRef,
+    pos: [i32; 3],
+) -> Option<BlockEntityRef> {
+    loaded_block_entity(world, pos)?;
+    let generation = world.block_entities.generation(&(pos[0], pos[1], pos[2]))?;
+    Some(mod_api::__private::game::block_entity_ref(
+        level, pos, generation,
+    ))
 }
 
 fn loaded_block_entity(world: &World, [x, y, z]: [i32; 3]) -> Option<&BlockEntity> {

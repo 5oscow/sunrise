@@ -385,6 +385,46 @@ pub(super) fn level_side(level: &impl SidedLevel) -> mod_api::LevelSide<'_> {
 }
 
 impl mod_api::LevelHost for super::GameLevel<'_> {
+    fn block_entity(&self, pos: [i32; 3]) -> Option<mod_api::BlockEntityRef> {
+        super::native_block_entity_refs::world_block_entity(self.world, self.api_level?, pos)
+    }
+    fn container_size(&self, at: mod_api::BlockSide) -> Option<usize> {
+        if !self.native_authoritative
+            || self.api_level != Some(at.level)
+            || !self.world.is_loaded_at(at.pos[0], at.pos[1], at.pos[2])
+        {
+            return None;
+        }
+        self.containers().capability_size(at)
+    }
+    fn container_stack(&self, at: mod_api::BlockSide, slot: usize) -> Option<mod_api::ItemStack> {
+        if !self.native_authoritative
+            || self.api_level != Some(at.level)
+            || !self.world.is_loaded_at(at.pos[0], at.pos[1], at.pos[2])
+        {
+            return None;
+        }
+        self.containers()
+            .capability_stack(at, slot)?
+            .try_into_api()
+            .ok()
+    }
+    fn block_entity_part_snapshot(
+        &self,
+        entity: mod_api::BlockEntityRef,
+        namespace: &str,
+        name: &str,
+    ) -> Result<mod_api::AttachmentBatch, mod_api::PartStateError> {
+        super::native_block_entity_refs::part_snapshot(
+            self.world,
+            self.api_level,
+            self.native_authoritative,
+            self.part_state_index.as_ref(),
+            entity,
+            namespace,
+            name,
+        )
+    }
     fn block_entity_data(&self, entity: mod_api::BlockEntityRef) -> Option<mod_api::Compound> {
         use mod_api::__private::game::Fields;
         let fields = entity.fields();
@@ -556,6 +596,7 @@ impl mod_api::AttachmentHost for super::GameLevel<'_> {
 }
 
 impl mod_api::LevelRandomHost for super::GameLevel<'_> {
+
     fn attachments(&mut self) -> &mut dyn mod_api::AttachmentStore {
         self
     }
@@ -746,6 +787,23 @@ impl<
     T: std::ops::Deref<Target = Ticks>,
 > mod_api::LevelHost for LevelTicks<'b, L, T>
 {
+    fn block_entity(&self, pos: [i32; 3]) -> Option<mod_api::BlockEntityRef> {
+        mod_api::LevelHost::block_entity(&*self.level, pos)
+    }
+    fn container_size(&self, at: mod_api::BlockSide) -> Option<usize> {
+        mod_api::LevelHost::container_size(&*self.level, at)
+    }
+    fn container_stack(&self, at: mod_api::BlockSide, slot: usize) -> Option<mod_api::ItemStack> {
+        mod_api::LevelHost::container_stack(&*self.level, at, slot)
+    }
+    fn block_entity_part_snapshot(
+        &self,
+        entity: mod_api::BlockEntityRef,
+        namespace: &str,
+        name: &str,
+    ) -> Result<mod_api::AttachmentBatch, mod_api::PartStateError> {
+        mod_api::LevelHost::block_entity_part_snapshot(&*self.level, entity, namespace, name)
+    }
     fn block_entity_data(&self, entity: mod_api::BlockEntityRef) -> Option<mod_api::Compound> {
         mod_api::LevelHost::block_entity_data(&*self.level, entity)
     }

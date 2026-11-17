@@ -1327,6 +1327,39 @@ impl TriState {
 /// }
 /// ```
 pub trait LevelHost {
+    /// `BlockGetter.getBlockEntity` in this level. None if absent, unloaded or out for its
+    /// own tick. Never loads chunks or opens loot containers. Clients return their local
+    /// block entity handle, not unsynced server contents. Owning game thread only, never
+    /// reachable from a worker-thread hook body.
+    fn block_entity(&self, _pos: [i32; 3]) -> Option<crate::BlockEntityRef> {
+        None
+    }
+    /// The slots on this side, as `ItemsHost::container_size` reads them.
+    /// Snapshot only: never generates loot or loads chunks. None for unloaded positions,
+    /// clients or unsupported storage. Owning game thread only, never in worker hook bodies.
+    fn container_size(&self, _at: crate::BlockSide) -> Option<usize> {
+        None
+    }
+    /// A side-local slot snapshot, as `ItemsHost::container_stack` reads it.
+    /// Never generates unopened container loot or loads chunks; unopened slots remain empty.
+    /// None for unloaded positions, clients, empty slots or unsupported storage.
+    /// Owning game thread only, never reachable from a worker-thread hook body.
+    fn container_stack(&self, _at: crate::BlockSide, _slot: usize) -> Option<crate::ItemStack> {
+        None
+    }
+    /// Capture Part state using the same attachment snapshot as `Host::query`.
+    /// No chunk loading or loot generation. Refuses unloaded or stale holders; clients
+    /// have no server Part state. Owning game thread only, never in worker hook bodies.
+    // hidden: typed BlockEntityPartState read implementation.
+    #[doc(hidden)]
+    fn block_entity_part_snapshot(
+        &self,
+        _entity: crate::BlockEntityRef,
+        _namespace: &str,
+        _name: &str,
+    ) -> Result<crate::AttachmentBatch, crate::PartStateError> {
+        Err(crate::PartStateError::Stale)
+    }
     /// Read a block entity's saved data without identity metadata from this level.
     /// Stale generations and handles from another level or world return None.
     fn block_entity_data(&self, _entity: crate::BlockEntityRef) -> Option<crate::Compound> {
