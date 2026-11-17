@@ -2,6 +2,9 @@
 mod book_screen;
 #[path = "shared/item_fallthrough.rs"]
 mod item_fallthrough;
+#[cfg(test)]
+#[path = "shared/label_tests.rs"]
+mod label_tests;
 #[path = "shared/loot.rs"]
 mod loot;
 #[cfg(test)]
@@ -3219,11 +3222,15 @@ impl Game<'_> {
         }
         let grey = rgba(64, 64, 64, 255);
         if let Some(title) = self.remote_menu_title() {
-            batch.text_styled(atlas, &title, ox + 8.0, oy + 6.0, grey, false);
+            let [x, y] = s.screen.title_label.unwrap_or([8.0, 6.0]);
+            batch.text_styled(atlas, &title, ox + x, oy + y, grey, false);
         }
         let inventory = self.translate_with_fallback("container.inventory", "Inventory");
-        let label_y = oy + s.screen.inventory_y - 11.0;
-        batch.text(atlas, &inventory, ox + 8.0, label_y, grey, false);
+        let [x, y] = s
+            .screen
+            .inventory_label
+            .unwrap_or([8.0, s.screen.height - 94.0]);
+        batch.text(atlas, &inventory, ox + x, oy + y, grey, false);
         true
     }
     /// Puts back a mod block entity taken out for a call, unless the call
