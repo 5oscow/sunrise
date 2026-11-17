@@ -313,7 +313,7 @@ class SdkPairTests(unittest.TestCase):
                     mock.patch.object(nightly, "git", return_value=NOW), \
                     mock.patch.object(nightly, "sdk_ready", side_effect=AssertionError("build_set checks the SDK")):
                 self.assertEqual(nightly.green_base("sunrise-org/sunrise", "").sha, "a" * 40)
-                gate.assert_called_once_with("nightly", explicit)
+                gate.assert_called_once_with("nightly", explicit, "")
         with mock.patch.object(nightly.train, "channel_head", side_effect=SystemExit("gate failed")):
             with self.assertRaisesRegex(SystemExit, "gate failed"):
                 nightly.green_base("sunrise-org/sunrise", "")

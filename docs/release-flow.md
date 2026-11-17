@@ -540,8 +540,13 @@ launcher and the website read: both then look the newest launcher tags up one by
 
 ## Nightly channel
 
-On Sunrise, Nightly builds main's head (or an explicit `base` on main) only after its dyna-checks main-push
-gate passes, using the same selection check as Snapshot. No daily-green tag is required. A complete published
+On Sunrise, a Nightly builds the commit the `daily-green` tag points to (the newest fully green daily run), after
+its dyna-checks main-push gate passes; any other commit is refused. The owner may grant a one-time exception for
+another commit of main: root then runs `gh workflow run release.yml -f kind=nightly -f dry_run=false -f commit=<full sha>
+-f exception="<who, when, why>"` (or `nightly-build.yml` with `base` and `exception`), and the run names the grant in
+a warning. A grant names its commit in full; a blank one is no grant. The commit's SDK, `sdk-<sha>`, is published
+first, as for every Nightly. The gate
+still holds, and an exception never changes the rule (owner, 2026-11-17). A complete published
 `sdk-<sha>` is verified and carried when available; without it, notes say native mods cannot be built for this
 build and no `sdk.json` is signed or published. Linux and Windows x64 are required. macOS, Windows ARM64 and
 musl Linux are optional: failed archives are omitted from signed checksums and publication with a warning.
