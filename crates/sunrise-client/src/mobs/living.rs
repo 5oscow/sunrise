@@ -3798,15 +3798,15 @@ mod tests {
     #[test]
     #[ignore = "daily"]
     fn a_mob_jump_fires_living_jump_once_with_its_velocity() {
-        use crate::native_client_hooks::test_hooks::{install, jumps};
+        use crate::native_client_hooks::test_hooks::{install, jumps, record_jumps};
         install();
+        let _recording = record_jumps();
         let ran = crate::mobs::world::with_test_world(&[], |w, types| {
             let mob = |id, kind: &str| {
                 let kind = std::sync::Arc::new(types.types[kind].clone());
                 Mob::new(id, kind, Vec3::new(0.5, 1.0, 0.5), 0.0)
             };
             let mut cow = mob(7, "minecraft:cow");
-            jumps();
             cow.jump_from_ground(w);
             assert_eq!(jumps(), [(7, [0.0, f64::from(0.42_f32), 0.0])]);
             for (id, kind) in [(8, "minecraft:rabbit"), (9, "minecraft:sniffer")] {

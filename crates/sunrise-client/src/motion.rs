@@ -3328,7 +3328,7 @@ mod tests {
     #[test]
     #[ignore = "daily"]
     fn a_player_jump_fires_living_jump_once_with_its_velocity() {
-        use crate::native_client_hooks::test_hooks::{install, jumps};
+        use crate::native_client_hooks::test_hooks::{install, jumps, record_jumps};
         let v = crate::test_fixtures::vanilla().expect("prepared resources");
         let (assets, render, binding, resources) = (&v.assets, &v.render, &v.collision, &v.motion);
         let mut scene = World::test_scene(assets, render, 1).unwrap();
@@ -3336,7 +3336,7 @@ mod tests {
         player.entity_id = 5;
         player.ground.on_ground = true;
         install();
-        jumps();
+        let _recording = record_jumps();
         MotionWorld {
             tag_items: None,
             block_registries: None,
