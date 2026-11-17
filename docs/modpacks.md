@@ -331,6 +331,7 @@ cargo run -p sunrise-port-pack -- events ~/.sunrise/ports/pack/jars   # NeoForge
 cargo run -p sunrise-port-pack -- port ~/Downloads/pack.zip ~/.sunrise/ports/pack [--from <folder>] [--resources <root>]
 cargo run -p sunrise-port-pack -- port-work ~/.sunrise/ports/pack      # the port step alone, on an imported folder
 cargo run -p sunrise-port-pack -- status ~/.sunrise/ports/pack         # what the folder holds, as the launcher shows it
+cargo run -p sunrise-port-pack -- profile ~/.sunrise/ports/pack        # the staged resource packs into the profile's home
 ```
 
 ### Data packs in mod jars
@@ -366,7 +367,8 @@ conflicting and unsupported entries; they also appear in `coverage.json` and `co
 reported as partial, not as a rendering-verified port. Shader packs are reported as pending conversion.
 Old import folders without this report still open.
 
-The launcher copies staged packs into `<work>/home/resourcepacks/` on import, port and launch. It preserves any
+`sunrise-port-pack profile <work>` copies staged packs into `<work>/home/resourcepacks/`; the launcher runs it on
+import, port and launch. It preserves any
 existing profile pack as a whole, including edits inside a directory pack, and lists name/content conflicts.
 `<work>/profile-resourcepacks.json` records those results. A profile with resource packs and no carried mods can
 play. Enable packs in the game's Resource Packs screen; importing never changes the enabled-pack list.

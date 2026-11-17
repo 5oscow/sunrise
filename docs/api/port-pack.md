@@ -10,7 +10,7 @@ steps do is in [modpacks.md](../modpacks.md#the-pipeline-sunrise-port-pack).
 | --- | --- |
 | Format | `"format": 1` in every reply |
 | Level | experimental ([stability.md](stability.md)): its first user is the launcher, after the launcher split |
-| Covers | `--json` on `import`, `inventory`, `fetch`, `carry`, `report`, `port`, `port-work`, `status` and `check`; `--version`; the program in the release folders |
+| Covers | `--json` on `import`, `inventory`, `fetch`, `carry`, `report`, `port`, `port-work`, `status`, `profile` and `check`; `--version`; the program in the release folders |
 | Not in | `upgrade-datapack` and `events`, which refuse `--json` (exit 2) |
 
 The launcher's steps, each one process:
@@ -20,6 +20,7 @@ sunrise-port-pack import PACK WORK --json          # Import: pack.json
 sunrise-port-pack inventory WORK --json            # then: Modrinth metadata, classes and tiers (--offline reuses it)
 sunrise-port-pack report WORK --json               # then: coverage.json
 sunrise-port-pack port-work WORK --resources PREPARED --json   # Port: jars, data packs, carry, report again
+sunrise-port-pack profile WORK --json              # after Import and Port, and before Play: the profile's resource packs
 sunrise-port-pack status WORK --json               # a page that opens: read only
 sunrise-port-pack check JAR OUT --json             # the mod browser's check of one jar
 ```
@@ -53,6 +54,7 @@ Exit 0 with a reply. Exit 1 with an error reply, and the message after `error:` 
 | `report` | writing the coverage report | `report` |
 | `check` | checking one mod jar | `check` |
 | `port` | the port step (fetch, carry, report and the profile's packs) | `port`, `port-work` |
+| `profile` | installing the staged resource packs into the profile | `profile` |
 | `status` | reading the work folder back for the reply | every command that ends with a status |
 
 Exit 2, with the usage on stderr and no JSON: a command line it doesn't understand (an unknown command, a missing
@@ -60,8 +62,8 @@ argument, an option without its value), and `--json` on `upgrade-datapack` or `e
 
 ### Status reply
 
-`import`, `inventory`, `fetch`, `carry`, `report`, `port`, `port-work` and `status` end with the work folder's
-status, read from the files the steps wrote:
+`import`, `inventory`, `fetch`, `carry`, `report`, `port`, `port-work`, `profile` and `status` end with the work
+folder's status, read from the files the steps wrote:
 
 ```json
 {"format": 1, "work": "/home/a/.local/share/sunrise/ports/cozy",
@@ -91,6 +93,12 @@ status, read from the files the steps wrote:
   can get; `datapacks`: data packs from jars that hold nothing else, on in the profile's new worlds.
 - `resource_reports`: `resourcepacks.json` (`staged`) and `profile-resourcepacks.json` (`profile`): `files`, by
   path, with `state` and `detail`.
+
+### Profile
+
+`profile WORK` copies each resource pack staged in `WORK/resourcepacks/` into the profile's game home,
+`WORK/home/resourcepacks/`, and writes what happened to each to `WORK/profile-resourcepacks.json` (the reply's
+`resource_reports.profile`). A pack already in the profile is never overwritten or merged into.
 
 ### Check reply
 
@@ -122,5 +130,5 @@ are the work folder's files, so a change to those files is a change here. `statu
 
 ## Changelog
 
-- format 1: `--json` on the launcher's commands, `port-work`, `status`, `--version` and `--help`; the program
+- format 1: `--json` on the launcher's commands, `port-work`, `status`, `profile`, `--version` and `--help`; the program
   ships in the game's release folders.
