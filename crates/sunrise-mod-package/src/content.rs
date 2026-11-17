@@ -3672,7 +3672,7 @@ capabilities = ["registries"]
             ("data/sunrise/loot_table/a.json", "own namespaces"),
             ("assets/sunrise/lang/en_us.json", "own namespaces"),
         ] {
-            let error = refused("extension-refused", &[(path, b"{}")]);
+            let error = smod("extension-refused", MANIFEST_TEXT, &[(path, b"{}")]).unwrap_err();
             assert!(error.contains(path) && error.contains(hint), "{error}");
         }
     }

@@ -6,9 +6,6 @@ license.workspace = true
 rust-version.workspace = true
 description = "Sunrise's mod files: content mods, modpacks and the registry index (docs/modding/src/how-to/content-mods.md)"
 
-[build-dependencies]
-serde_json = "1"
-
 [dependencies]
 sunrise-mod-vocab = { path = "../sunrise-mod-vocab" }
 sunrise-mod-api-macros = { path = "../sunrise-mod-api-macros" }

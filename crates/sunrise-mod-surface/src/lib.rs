@@ -118,6 +118,10 @@ pub struct Surface {
     /// list, so adding it kept the schema number.
     #[serde(default)]
     pub behaviours: Vec<Behaviour>,
+    /// Reserved-namespace tags that packages may extend, declared beside engine readers.
+    /// Older readers ignore this additive collection without a schema change.
+    #[serde(default)]
+    pub extension_tags: Vec<ExtensionTag>,
 }
 
 /// Why a document was refused.
@@ -465,6 +469,7 @@ impl Surface {
             parts,
             capabilities,
             behaviours: Vec::new(),
+            extension_tags: Vec::new(),
         };
         surface.hash = surface.document_hash();
         surface
@@ -478,7 +483,16 @@ impl Surface {
         self
     }
 
-    /// Every record and member record as (id, hash), in no promised order.
+    /// Add the declared extension tags and update the document hash.
+    pub fn with_extension_tags(mut self, mut tags: Vec<ExtensionTag>) -> Self {
+        tags.sort_by(|a, b| (&a.registry, &a.id).cmp(&(&b.registry, &b.id)));
+        self.extension_tags = tags;
+        self.hash = self.document_hash();
+        self
+    }
+
+    /// Every named API record and member record as (id, hash), in no promised order.
+    /// Extension tags have registry-scoped IDs and are hashed separately by `document_hash`.
     pub fn entries(&self) -> impl Iterator<Item = (&str, &str)> {
         let hooks = self.hooks.iter().flat_map(|r| {
             std::iter::once((r.id.as_str(), r.hash.as_str()))
@@ -525,7 +539,20 @@ impl Surface {
 
     /// The SHA-256 (first 128 bits, hex) of `<id> <hash>\n` for every entry, in byte order of id.
     pub fn document_hash(&self) -> String {
-        let mut entries: Vec<(&str, &str)> = self.entries().collect();
+        let tags: Vec<_> = self
+            .extension_tags
+            .iter()
+            .map(|tag| {
+                (
+                    format!("extension_tag:{}/{}", tag.registry, tag.id),
+                    contract_hash(&(&tag.registry, &tag.id)),
+                )
+            })
+            .collect();
+        let mut entries: Vec<(&str, &str)> = self
+            .entries()
+            .chain(tags.iter().map(|(id, hash)| (id.as_str(), hash.as_str())))
+            .collect();
         entries.sort_unstable();
         let mut text = String::new();
         for (id, hash) in entries {
@@ -668,6 +695,15 @@ impl Surface {
         for (id, _) in surface.entries() {
             if !seen.insert(id) {
                 return Err(ReadError::DuplicateId(id.to_owned()));
+            }
+        }
+        let mut tags = BTreeSet::new();
+        for tag in &surface.extension_tags {
+            if !tags.insert((&tag.registry, &tag.id)) {
+                return Err(ReadError::DuplicateId(format!(
+                    "extension_tag:{}/{}",
+                    tag.registry, tag.id
+                )));
             }
         }
         Ok(surface)

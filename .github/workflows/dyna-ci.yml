@@ -766,6 +766,9 @@ jobs:
         id: setup
         run: 'true'
       # A pull request adds only its own commits to main, so it reads those; main's pushes read every ref's history.
+      - name: Check generated extension tag catalog
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: python3 tools/ci/surface_extension_tags.py --check
       - name: Keep game artifacts out of Git
         id: keep_game_artifacts_out_of_git
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
