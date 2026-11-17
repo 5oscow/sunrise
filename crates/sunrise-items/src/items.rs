@@ -1138,7 +1138,7 @@ impl Items {
         // gameplay/chicken_lay, shearing/sheep/red...), of every namespace
         // (content mods' tables, docs/modpacks.md), with the packs' over the
         // game's own: one map with the loot data of the same root and packs.
-        let loot_data = sunrise_world::loot::LootData::load(root, overlay, defaults)?;
+        let loot_data = sunrise_world::loot::LootData::load_table_data(root, overlay, defaults)?;
         let loot = loot_data.tables().clone();
         let predicates = loot_data.predicates().clone();
         let loot_modifiers = loot_data.modifiers().clone();
