@@ -14,7 +14,11 @@
 //!
 //! The loaders need no mod code, vanilla state ids never move, and with no
 //! content mod the root is the base root itself.
-use crate::{Result, blocks::MAP_COLORS};
+use crate::{
+    Result,
+    blocks::MAP_COLORS,
+    mobs::data::{PartAnswers, PathComputationType, VALID_EMPTY_SPAWN},
+};
 use serde::{Deserialize, Serialize, de};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -35,7 +39,9 @@ use sunrise_mod_package::manifest::{
     JarInputsError, JarRef, collect_jar_requirements, missing_jars,
 };
 use sunrise_world::{
-    block_collision::ScaffoldingCollision, block_properties::BlockDefinitionProperties,
+    block_collision::ScaffoldingCollision,
+    block_properties::BlockDefinitionProperties,
+    fluid::{FluidKind, FluidState},
 };
 
 /// A content mod to put in the root: its id, its content, and the Java jars
@@ -755,6 +761,8 @@ struct NewBlock<'a> {
     item: Option<String>,
     shapes: Option<Vec<VoxelShape>>,
     collision_shapes: Option<Vec<VoxelShape>>,
+    /// The template's `isAir` property, which precedes the fluid check in the walk evaluator.
+    is_air: bool,
     /// Whether each shaped state contains fluid, including intrinsic template fluids.
     has_fluid: Vec<bool>,
     skylight: SkylightRule,
@@ -1098,13 +1106,9 @@ impl<'a> Plan<'a> {
                         J::Arr(row) => row.get(2).and_then(J::as_u32),
                         _ => None,
                     }
-                    .and_then(|index| sunrise_world::fluid::FluidKind::ALL.get(index as usize))
+                    .and_then(|index| FluidKind::ALL.get(index as usize))
                     .ok_or("block-behaviours.json has an invalid state fluid")?;
-                    water_states.push(matches!(
-                        kind,
-                        sunrise_world::fluid::FluidKind::Water
-                            | sunrise_world::fluid::FluidKind::FlowingWater
-                    ));
+                    water_states.push(matches!(kind, FluidKind::Water | FluidKind::FlowingWater));
                 }
             }
             let Some(J::Arr(blocks)) = behaviors.get("blocks") else {
@@ -1314,6 +1318,10 @@ impl<'a> Plan<'a> {
                 let Some(J::Arr(rows)) = facts.get("states") else {
                     unreachable!()
                 };
+                let is_air = matches!(
+                    rows.get(default as usize),
+                    Some(J::Arr(row)) if matches!(row.get(1), Some(J::Bool(true)))
+                );
                 let properties = |id: u32| -> Option<&J> {
                     let J::Arr(row) = rows.get(id as usize)? else {
                         return None;
@@ -1497,6 +1505,7 @@ impl<'a> Plan<'a> {
                     item: None,
                     shapes,
                     collision_shapes,
+                    is_air,
                     has_fluid,
                     skylight: skylight_rules
                         .get(&decl.template)
@@ -1666,10 +1675,15 @@ impl<'a> Plan<'a> {
                 if !combo.is_empty() {
                     set_state_properties(&mut row, combo);
                 }
-                if matches!(name, "block-behaviours.json" | "facts.json")
-                    && combo
-                        .iter()
-                        .any(|(key, value)| key == "waterlogged" && value == "true")
+                if matches!(
+                    name,
+                    "block-behaviours.json"
+                        | "facts.json"
+                        | "mob-data.json"
+                        | "worldgen/block_flags.json"
+                ) && combo
+                    .iter()
+                    .any(|(key, value)| key == "waterlogged" && value == "true")
                 {
                     let J::Arr(columns) = &mut row else {
                         return Err(format!("{name}: missing state row {id}").into());
@@ -1678,16 +1692,37 @@ impl<'a> Plan<'a> {
                         let fluid = columns
                             .get_mut(2..5)
                             .ok_or("block-behaviours.json: missing state fluid")?;
-                        // Vanilla's compact row: water registry ordinal, source amount, not falling.
+                        let water = FluidState::WATER;
+                        let ordinal = FluidKind::ALL
+                            .iter()
+                            .position(|&kind| kind == water.kind())
+                            .expect("source water belongs to the vanilla fluid registry");
                         fluid.clone_from_slice(&[
-                            J::Num(2.into()),
-                            J::Num(8.into()),
-                            J::Bool(false),
+                            J::Num(ordinal.into()),
+                            J::Num(water.amount().into()),
+                            J::Bool(water.falling()),
                         ]);
+                    } else if name == "mob-data.json" {
+                        let [path, flags, ..] = columns.as_mut_slice() else {
+                            return Err("mob-data.json: missing state pathfinding data".into());
+                        };
+                        // Only the walk evaluator's generic OPEN result looks at the fluid here.
+                        // Air, blocked and special paths keep their template's answer.
+                        if !b.is_air && path.as_str() == Some("OPEN") {
+                            *path = J::Str("WATER".into());
+                        }
+                        let mask = flags.as_u32().ok_or("mob-data.json: invalid state flags")?;
+                        // Inherited waterlogged properties never take this branch: their exported
+                        // WATER answer is kept. For a new declaration use BlockBehaviour's default.
+                        let water =
+                            u32::from(PartAnswers::pathfindable_bit(PathComputationType::Water));
+                        *flags = J::Num(((mask | water) & !u32::from(VALID_EMPTY_SPAWN)).into());
                     } else {
+                        let has_fluid = if name == "facts.json" { 2 } else { 1 };
                         *columns
-                            .get_mut(2)
-                            .ok_or("facts.json: missing state fluid flag")? = J::Bool(true);
+                            .get_mut(has_fluid)
+                            .ok_or_else(|| format!("{name}: missing state fluid flag"))? =
+                            J::Bool(true);
                     }
                 }
                 if name == "gameplay-facts.json" {

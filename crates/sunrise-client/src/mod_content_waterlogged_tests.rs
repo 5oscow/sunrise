@@ -1,5 +1,10 @@
 use super::*;
+use crate::mobs::{
+    data::{MobData, PathComputationType, VALID_EMPTY_SPAWN},
+    path::PathType,
+};
 use std::collections::HashMap;
+use sunrise_assets::resource_source::ResourceRoot;
 use sunrise_core::{
     geometry::{Direction, Vec3},
     position::{BlockPos, ChunkPos},
@@ -122,6 +127,10 @@ fn declared_waterlogged_blocks_keep_their_class_and_gain_liquid_defaults() {
                 "data/wet/sunrise/block/stone.json",
                 r#"{"template":"minecraft:stone","state_properties":{"waterlogged":{"type":"boolean"}},"collision_shapes":{"default":[]}}"#,
             ),
+            (
+                "data/wet/sunrise/block/stairs.json",
+                r#"{"template":"minecraft:oak_stairs","default_state":{"waterlogged":"true"}}"#,
+            ),
         ],
     );
     let root = resource_root_fixture(&base, Path::new(""), &[m], &scratch.join("cache")).unwrap();
@@ -131,6 +140,26 @@ fn declared_waterlogged_blocks_keep_their_class_and_gain_liquid_defaults() {
     let water = registry.default_state("minecraft:water").unwrap();
     let stone = registry.default_state("wet:stone").unwrap();
     let plant = registry.default_state("wet:plant").unwrap();
+    let dry_plant = b.table.set_bool(plant, b.props.waterlogged, false);
+    let stairs = registry.default_state("wet:stairs").unwrap();
+    let wet_stone = b.table.set_bool(stone, b.props.waterlogged, true);
+    let block_flags: Vec<(bool, bool)> =
+        serde_json::from_slice(&fs::read(root.join("worldgen/block_flags.json")).unwrap()).unwrap();
+    assert_eq!(block_flags[plant.0 as usize], (false, true));
+    assert_eq!(block_flags[dry_plant.0 as usize], (false, false));
+
+    let facts = BlockFacts::load(&root, &registry).unwrap();
+    let mobs = MobData::load(&ResourceRoot::directory(root), &facts);
+    assert_eq!(mobs.path_type(plant), PathType::Water);
+    assert_eq!(mobs.path_type(dry_plant), PathType::Open);
+    assert!(mobs.pathfindable(plant, PathComputationType::Water));
+    assert!(!mobs.pathfindable(dry_plant, PathComputationType::Water));
+    assert_eq!(mobs.state(plant).flags & VALID_EMPTY_SPAWN, 0);
+    assert_ne!(mobs.state(dry_plant).flags & VALID_EMPTY_SPAWN, 0);
+    assert_eq!(mobs.path_type(wet_stone), PathType::Blocked);
+    assert_eq!(b.fluid(stairs), FluidState::WATER);
+    assert!(!mobs.pathfindable(stairs, PathComputationType::Water));
+
     let is_waterlogged = |state| b.table.bool(state, b.props.waterlogged);
     let pos = BlockPos::new(4, 64, 4);
     let above = BlockPos::new(4, 65, 4);
