@@ -65,6 +65,8 @@ impl Hooks for Parts {
         r.item_part(sand, Invalid);
         let poppy = r.item_key("minecraft:poppy");
         r.item_part(poppy, Survival(false));
+        let torch = r.item_key("minecraft:torch");
+        r.item_part(torch, Survival(false));
         let scaffolding = r.item_key("minecraft:scaffolding");
         r.item_part(scaffolding, Survival(true));
     }
@@ -129,11 +131,16 @@ fn item_parts_rewrite_or_refuse_context_and_control_survival_on_both_sides() {
                             .is_none(),
                         "survival can be required where vanilla skips it"
                     );
-                    // A rewritten target cannot overwrite an occupied cell.
+                    assert!(
+                        b.placement_preview(level, ticks, &context("minecraft:torch"))
+                            .is_none(),
+                        "standing/wall candidates must survive even when final survival is skipped"
+                    );
+                    // Vanilla checks replaceability before the rewrite, not after it.
                     b.set_block(level, ticks, BlockPos::new(4, 62, 4), fallback.state, 3);
                     assert!(
                         b.placement_preview(level, ticks, &context("minecraft:stone"))
-                            .is_none()
+                            .is_some()
                     );
                     b.set_block(level, ticks, BlockPos::new(4, 62, 4), air, 3);
                 });

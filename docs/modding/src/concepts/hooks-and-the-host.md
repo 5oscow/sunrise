@@ -184,10 +184,12 @@ A signal read never asks `state_for_placement` or `can_survive`, so it cannot re
 Before a block's placement state is selected, `ItemPart::placement_context` replaces the item's
 `BlockItem.updatePlacementContext` rewrite: `Some(Some(context))` rewrites the target and click,
 `Some(None)` refuses, and `None` runs vanilla (including scaffolding's column walk). The placing
-item cannot change, click and view values must be finite, and the target must be within bounds
-and replaceable. `ItemPart::must_survive` then decides whether placement must pass `can_survive`:
-`Some(false)` skips it, `Some(true)` requires it, and `None` keeps vanilla (scaffolding false,
-other block items true). Entity obstruction is still checked. Both hooks run on both sides with
+item cannot change, click and view values must be finite, and the target must be within bounds.
+Replaceability is checked before the rewrite, not again on its answer. At the final `BlockItem.canPlace`
+check, `ItemPart::must_survive` decides whether placement must pass `can_survive`: `Some(false)`
+skips it, `Some(true)` requires it, and `None` keeps vanilla (scaffolding false, other block items
+true). Standing/wall items retain their own unconditional candidate-survival checks. Entity
+obstruction is still checked. Both hooks run on both sides with
 a read-only `LevelSide`, dispatched by item id. These events have no stack yet: they decide from
 the item and level, not held components. Neither changes the sides of the block placement or
 survival hooks.

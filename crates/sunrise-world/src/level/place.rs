@@ -1639,9 +1639,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         match self.level.placement_context(&input.item, &ctx) {
             Some(Some(replacement)) => {
                 ctx = replacement;
-                if !self.is_in_valid_bounds(ctx.pos)
-                    || !self.can_be_replaced(self.state(ctx.pos), &ctx)
-                {
+                if !self.is_in_valid_bounds(ctx.pos) {
                     return None;
                 }
             }
@@ -1651,10 +1649,6 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             }
             None => {}
         }
-        let must_survive = self
-            .level
-            .must_survive(&input.item)
-            .unwrap_or(binding.kind != ItemKind::Scaffolding);
         if binding.game_master && !input.can_use_game_master_blocks {
             return None;
         }
@@ -1678,7 +1672,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                         let hanging_ok = binding.kind != ItemKind::HangingSign
                             || !b.instance_of(candidate, Class::WallHangingSign)
                             || self.wall_hanging_sign_can_place(candidate, ctx.pos);
-                        if hanging_ok && (!must_survive || self.can_survive(candidate, ctx.pos)) {
+                        if hanging_ok && self.can_survive(candidate, ctx.pos) {
                             chosen = Some(candidate);
                             break;
                         }
@@ -1689,6 +1683,10 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             _ => self
                 .state_for_placement(binding.block, &ctx)
                 .filter(|state| {
+                    let must_survive = self
+                        .level
+                        .must_survive(&input.item)
+                        .unwrap_or(binding.kind != ItemKind::Scaffolding);
                     (!must_survive || self.can_survive(*state, ctx.pos))
                         && self.level.is_unobstructed(ctx.pos, *state)
                 }),

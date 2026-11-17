@@ -7,7 +7,8 @@ pub trait Hooks {
     /// placement, and `None` keeps the item's vanilla rewrite (including
     /// scaffolding's column walk). The placing item cannot be changed.
     /// Non-finite click or view values are refused. The rewritten target must
-    /// be inside the level's bounds and replaceable. This does not bypass
+    /// be inside the level's bounds; its replaceability is not rechecked, as
+    /// vanilla checks the original context before rewriting. This does not bypass
     /// survival or obstruction checks; see `must_survive` for the former.
     /// Dispatch is by `item` id. This event has no stack: the decision is from
     /// the item and level, not held-stack components.

@@ -2,8 +2,10 @@
 
 pub trait Hooks {
     /// `BlockItem.mustSurvive`: whether placing this item must pass the block's
-    /// `can_survive` predicate. Asked on both sides, after `placement_context`
-    /// and before placement state selection, with a read-only level host.
+    /// `can_survive` predicate in the final `BlockItem.canPlace` check. Asked
+    /// on both sides after placement state selection, with a read-only level
+    /// host. Standing/wall items select candidates using unconditional survival
+    /// checks and their own placement-state override; this hook does not skip them.
     /// `Some(false)` skips survival only, not replaceability, bounds or entity
     /// obstruction. `Some(true)` requires survival. `None` keeps vanilla's
     /// requirement (false for scaffolding, true for other block items).
