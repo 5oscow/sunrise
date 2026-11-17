@@ -319,6 +319,55 @@ fn another_guest_and_online_players_are_visible_during_a_turn() {
     });
 }
 
+/// `entity_move_by` moves a guest the server holds, acting or not, through its own body and the
+/// hub's copy together, tells its client, and refuses what it cannot move without changing
+/// anything.
+#[test]
+#[ignore = "daily"]
+fn move_by_moves_a_player_and_refuses_what_it_cannot() {
+    with_guests(|game| {
+        // A guest has a body once it has had a turn.
+        for conn in [12, 13] {
+            game.as_guest(conn, |_| {}).unwrap();
+        }
+        let a = game.player(12).unwrap();
+        let b = game.player(13).unwrap();
+        let before = b.entity().position(game).unwrap();
+        let by = game.entity_move_by(b.entity(), [0.5, 0.0, 0.25]).unwrap();
+        assert_eq!(by, [0.5, 0.0, 0.25]);
+        let now = [before[0] + 0.5, before[1], before[2] + 0.25];
+        assert_eq!(b.entity().position(game), Some(now));
+        let hub = &game.lan.as_ref().unwrap().hub;
+        let guest = hub.guest(13).unwrap();
+        assert_eq!(guest.position, now, "the hub's copy follows the body");
+        assert!(guest.awaiting_teleport.is_some(), "the client is told");
+        // The acting player is moved in its turn, and another during it.
+        game.as_guest(12, |game| {
+            let own = a.entity().position(game).unwrap();
+            assert_eq!(
+                game.entity_move_by(a.entity(), [0.0, 0.0, -2.0]),
+                Some([0.0, 0.0, -2.0])
+            );
+            assert_eq!(
+                a.entity().position(game),
+                Some([own[0], own[1], own[2] - 2.0])
+            );
+            assert!(game.entity_move_by(b.entity(), [1.0, 0.0, 0.0]).is_some());
+        })
+        .unwrap();
+        // Nothing moves for a value that is not finite or a target outside the world.
+        let held = b.entity().position(game);
+        for delta in [
+            [f64::NAN, 0.0, 0.0],
+            [0.0, f64::INFINITY, 0.0],
+            [4.0e7, 0.0, 0.0],
+        ] {
+            assert_eq!(game.entity_move_by(b.entity(), delta), None, "{delta:?}");
+        }
+        assert_eq!(b.entity().position(game), held);
+    });
+}
+
 /// B's live menu and motion stay available while A acts, but displaced
 /// menus and an outer turn's motion must not use the swapped-out records.
 #[test]

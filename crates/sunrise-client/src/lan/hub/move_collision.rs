@@ -2,10 +2,11 @@
 //! guest's collision exclusions (#3717): a mod's boxes in which the level's blocks don't stop the
 //! player are the same boxes its client moves it through.
 use super::{Guest, Hub, TickCtx};
-use crate::collisions::SceneCollisions;
+use crate::{collisions::SceneCollisions, world::World};
 use std::io;
 use sunrise_core::geometry::{Aabb, ShapeOp, Vec3, VoxelShape};
 use sunrise_world::{
+    block_collision::BlockCollisionRegistry,
     block_collision_scan::{BlockCollisionScan, BlockCollisionWorld},
     collision_context::CollisionContext,
     collision_exclusions::Excluding,
@@ -20,10 +21,43 @@ impl Hub {
     /// Where the guest ends moving from `from` towards `to` through the level as it stands now:
     /// where a carried player is committed. Nowhere to collide (no collision data) it is `to`.
     pub(super) fn settle(&self, i: usize, from: [f64; 3], to: [f64; 3], ctx: &TickCtx) -> [f64; 3] {
-        let g = &self.guests[i];
         let Some(binding) = ctx.collision else {
             return to;
         };
+        self.settle_in(i, from, to, ctx.world, binding)
+            .unwrap_or(to)
+    }
+
+    /// [`Self::settle_in`] for the guest of connection `conn`; `None` for one the hub has no more.
+    pub fn settle_conn(
+        &self,
+        conn: u32,
+        from: [f64; 3],
+        to: [f64; 3],
+        world: &World,
+        binding: &BlockCollisionRegistry<'_>,
+    ) -> Option<[f64; 3]> {
+        self.settle_in(
+            self.guests.connection_index(conn)?,
+            from,
+            to,
+            world,
+            binding,
+        )
+    }
+
+    /// [`Self::settle`] through `world` and its collision data, `None` when the level cannot
+    /// answer (a move too long for the collision query's budget): a caller that must not pass
+    /// a wall on failure moves nothing.
+    pub fn settle_in(
+        &self,
+        i: usize,
+        from: [f64; 3],
+        to: [f64; 3],
+        world: &World,
+        binding: &BlockCollisionRegistry<'_>,
+    ) -> Option<[f64; 3]> {
+        let g = &self.guests[i];
         let movement = Vec3::new(to[0] - from[0], to[1] - from[1], to[2] - from[2]);
         let d = g.dimensions();
         let half = f64::from(d.width) / 2.0;
@@ -37,7 +71,7 @@ impl Hub {
         );
         let context = CollisionContext::position(from[1]).with_descending(g.sneaking);
         let mut scene = SceneCollisions {
-            world: ctx.world,
+            world,
             binding,
             subject: None,
         };
@@ -55,9 +89,7 @@ impl Hub {
                 },
             )
         };
-        done.map_or(to, |done| {
-            [from[0] + done.x, from[1] + done.y, from[2] + done.z]
-        })
+        done.map(|done| [from[0] + done.x, from[1] + done.y, from[2] + done.z])
     }
 
     /// The collision part of handlePlayerPositionChange: whether the move

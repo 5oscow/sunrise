@@ -1,0 +1,9 @@
+# A mod's displacement of a player (Hub::displace): the relative teleport and its confirmation.
+sunrise-client game::native_guest_turn_tests::move_by_moves_a_player_and_refuses_what_it_cannot lib daily resources
+sunrise-client-lib lan::hub::tests::displace_tests::a_carried_player_stays_on_its_deck_or_lets_go_and_nothing_is_counted lib daily resources
+sunrise-client-lib lan::hub::tests::displace_tests::a_client_that_keeps_walking_ends_at_its_walk_plus_the_displacement lib daily resources
+sunrise-client-lib lan::hub::tests::displace_tests::a_confirmation_and_the_next_report_in_one_tick_are_not_a_duplicate lib daily resources
+sunrise-client-lib lan::hub::tests::displace_tests::a_second_displacement_while_one_is_awaited_composes_and_the_old_id_is_ignored lib daily resources
+sunrise-client-lib lan::hub::tests::displace_tests::an_unconfirmed_displacement_is_resent_absolute_with_no_velocity lib daily resources
+sunrise-client-lib lan::hub::tests::displace_tests::the_move_stops_at_a_wall lib daily resources
+sunrise-client-lib lan::hub::tests::displace_tests::the_streak_of_displaced_ticks_counts_in_a_row_and_a_gap_starts_it_again lib daily resources

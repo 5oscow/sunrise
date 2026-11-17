@@ -302,6 +302,67 @@ impl Game<'_> {
         }
         true
     }
+    /// Moves a player by `delta` through the level (`Entity.move`, `MoverType.SELF`) and tells
+    /// its client with a relative teleport (`Hub::displace`). The displacement made, or `None`
+    /// (see the host trait for what is refused).
+    pub(super) fn entity_move_by(
+        &mut self,
+        entity: EntityRef,
+        delta: [f64; 3],
+    ) -> Option<[f64; 3]> {
+        if !delta.iter().all(|v| v.is_finite()) {
+            return None;
+        }
+        let t = self.native_entity_target(entity)?;
+        let conn = match t {
+            Target::Player => self.lan_acting?,
+            Target::Guest(conn) => conn,
+            _ => return None,
+        };
+        // The level the player is in, as a teleport is made in it.
+        self.in_target_level(t, |game| game.move_player_by(t, conn, delta))?
+    }
+    fn move_player_by(&mut self, t: Target, conn: u32, delta: [f64; 3]) -> Option<[f64; 3]> {
+        let acting = t == Target::Player;
+        let host = self.lan.as_ref()?;
+        let guest = host.hub.guest(conn)?;
+        if guest.vehicle.is_some() || guest.sleeping {
+            return None;
+        }
+        let body = if acting {
+            self.player.as_ref()
+        } else {
+            guest.motion.as_deref()
+        }?;
+        let from = [body.position.x, body.position.y, body.position.z];
+        let to = [from[0] + delta[0], from[1] + delta[1], from[2] + delta[2]];
+        if !in_bounds(to) {
+            return None;
+        }
+        // A spectator goes through everything, as its moves are not checked.
+        let reached = if guest.spectator() {
+            to
+        } else {
+            host.hub
+                .settle_conn(conn, from, to, &self.world, self.collision)?
+        };
+        let target = Vec3::new(reached[0], reached[1], reached[2]);
+        if acting {
+            self.player.as_mut()?.position = target;
+        } else {
+            let host = self.lan.as_mut()?;
+            host.hub.update_guest(conn, |g| {
+                g.motion.as_deref_mut().map(|m| m.position = target)
+            })??;
+        }
+        let by = [
+            reached[0] - from[0],
+            reached[1] - from[1],
+            reached[2] - from[2],
+        ];
+        self.lan.as_mut()?.hub.displace(conn, reached, by);
+        Some(by)
+    }
 }
 
 #[cfg(test)]
