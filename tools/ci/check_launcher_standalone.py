@@ -20,6 +20,7 @@ JOINED = re.compile(r'\.join\(\s*' + STRING + r'\s*\)')
 # A build script runs in its crate's folder: a literal it reads or opens, reruns on, or starts a path from (joined in turn) is a path from there.
 BUILD_READ = re.compile(r'\b(?:read_to_string|read|read_dir|copy|open)\(\s*' + STRING + r'|cargo::?rerun-if-changed=([^"\\]+)')
 BUILD_PATH = re.compile(r'\b(?:Path::new|PathBuf::from)\(\s*' + STRING + r'\s*\)((?:\s*\.join\(\s*' + STRING + r'\s*\))*)')
+BUILD_EMPTY = re.compile(r'\b(?:PathBuf::new|PathBuf::default)\(\s*\)((?:\s*\.join\(\s*' + STRING + r'\s*\))+)')
 ABSOLUTE = re.compile(r'^(?:/|[A-Za-z]:|//)')
 
 
@@ -114,6 +115,7 @@ def problems(root: Path, files: list[str]) -> list[str]:
             if path.name == "build.rs":
                 checks += [(m, here, unescaped(m.group(1) or m.group(2))) for m in BUILD_READ.finditer(text)]
                 checks += [(m, here, joined([m.group(1), *JOINED.findall(m.group(2))])) for m in BUILD_PATH.finditer(text)]
+                checks += [(m, here, joined(JOINED.findall(m.group(1)))) for m in BUILD_EMPTY.finditer(text)]
             for match, base, value in checks:
                 if not inside(base, value):
                     line = text.count("\n", 0, match.start()) + 1
