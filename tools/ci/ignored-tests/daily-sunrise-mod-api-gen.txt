@@ -41,6 +41,8 @@ sunrise-mod-api-gen points::tests::point_inventory lib daily slow
 sunrise-mod-api-gen replace::tests::trait_installers_compile_with_warnings_denied lib daily child-process
 sunrise-mod-api-gen retained_knockback_entries_apply_hook_edits_cancel_and_delegate_once test:knockback_entries daily child-process
 sunrise-mod-api-gen surface::tests::the_real_tree_exports lib daily slow
+sunrise-mod-api-gen wire::tests::every_crossing_method_has_one_distinct_call_name lib daily slow
+sunrise-mod-api-gen surface::tests::every_crossing_method_lists_one_distinct_call_name lib daily slow
 sunrise-mod-api-gen tests::fragment_hooks_generate lib daily slow
 sunrise-mod-api-gen tests::new_hook_placeholder_is_reported_then_filled lib daily slow
 sunrise-mod-api-gen tests::only_a_game_hooks_placeholder_body_is_filled lib daily child-process
