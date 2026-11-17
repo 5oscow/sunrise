@@ -387,25 +387,22 @@ mod inside_walk_tests {
         assert!(ran, "the vanilla test resources must be available");
     }
 
-    /// #478: a part's `AddEffect` write is `LivingEntity.addEffect` on a mob:
-    /// the effect's attribute modifier is stored (`onEffectAdded`), and a
-    /// second write updates the one instance instead of listing it twice.
+    /// #478: a part's `AddEffect` write is `LivingEntity.addEffect` on a mob,
+    /// so a second write updates the one instance instead of listing it
+    /// twice. It installs the same Wither-only registry as `reset`, so the
+    /// process-wide `OnceLock` holds the same keys whichever test runs first;
+    /// the stored modifier `addEffect` adds is covered by
+    /// `effect_modifier_tests`, which read no registry.
     #[test]
-    fn a_parts_add_effect_write_adds_the_effect_and_its_modifier() {
+    fn a_parts_add_effect_write_merges_into_one_instance() {
         let _test = TEST_LOCK
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        mod_api::__private::resolve_effects(["minecraft:speed"], |_| Some(0)).unwrap();
-        let mut kind = (*crate::mobs::sensor_scan_tests::kind()).clone();
-        kind.speed = 0.25;
-        kind.attributes = Arc::new(std::collections::HashMap::from([(
-            "minecraft:movement_speed".to_owned(),
-            0.25,
-        )]));
-        let mut mob = Mob::new(1, Arc::new(kind), Vec3::ZERO, 0.0);
+        reset(usize::MAX, usize::MAX, false);
+        let mut mob = Mob::new(1, crate::mobs::sensor_scan_tests::kind(), Vec3::ZERO, 0.0);
         let mut level = crate::health::TestLevel::new(0);
         let write = |amplifier| mod_api::EntityWrite::AddEffect {
-            effect: mod_api::__private::effect_key("minecraft:speed").expect("a resolved key"),
+            effect: mod_api::__private::effect_key("minecraft:wither").expect("a resolved key"),
             duration: 40,
             amplifier,
         };
@@ -413,15 +410,7 @@ mod inside_walk_tests {
         apply_entity_write(&mut mob, &mut level.level(), write(0));
         assert_eq!(
             mob.extra.effects,
-            vec![crate::mobs::StoredEffect::new("minecraft:speed", 40, 1)]
-        );
-        assert_eq!(
-            crate::mobs::finalize::modifier_amount(
-                &mob,
-                crate::mobs::finalize::Attr::MovementSpeed,
-                "minecraft:effect.speed"
-            ),
-            Some(0.400_000_005_960_464_5)
+            vec![crate::mobs::StoredEffect::new("minecraft:wither", 40, 1)]
         );
     }
 }
