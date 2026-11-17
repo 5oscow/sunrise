@@ -495,7 +495,7 @@ mod tests {
         }
         let events = Arc::new(Mutex::new(Vec::new()));
         let mods: Mods = vec![ModEntry::new("watch", Box::new(Watch(events.clone())))].into();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             with_game(|game| {
                 let _rx = watched_guest(game);
                 game.world
