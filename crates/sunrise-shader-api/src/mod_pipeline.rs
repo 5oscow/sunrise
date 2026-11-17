@@ -9,7 +9,8 @@
 //! the mod's function reads and returns linear light, and the generated entry points convert
 //! from the quad's vanilla-space colour and to the frame, which stores vanilla's 2.2 encoding
 //! in every format the renderer draws today.
-use naga::valid::{Capabilities, ValidationFlags, Validator};
+use crate::check::{Problem, cost, cost_problems, located, problem, translate, validate};
+use crate::stages::Composed;
 
 /// The folder under each namespace's `shaders` the fragment files are read from.
 pub const FOLDER: &str = "shaders/pipeline";
@@ -114,33 +115,34 @@ fn prelude(textured: bool) -> String {
     )
 }
 
-/// The whole shader of an untextured pipeline whose file is `text` ([`compose_with`]).
-pub fn compose(text: &str) -> Result<String, String> {
-    compose_with(text, false)
+/// The whole shader of an untextured pipeline whose file `file` holds `text` ([`compose_with`]).
+pub fn compose(file: &str, text: &str) -> Result<String, Vec<Problem>> {
+    compose_with(file, text, false)
 }
 
-/// The whole shader of a pipeline whose file is `text`, with `pipeline_texture` when it is
-/// `textured`, or why the file is refused, with the file's own line where there is one.
-pub fn compose_with(text: &str, textured: bool) -> Result<String, String> {
+/// The whole shader of a pipeline whose file `file` holds `text`, with `pipeline_texture` when
+/// it is `textured`, or each reason the file is refused, located in the file where it has a
+/// span (the pack checker's [`Problem`], which prints `<file>:<line>:<column>: <message>`).
+///
+/// The checks are the pack checker's, on the whole composed module, so the renderer's own
+/// prelude and entry points count as the mod's: its rules above, then naga validation,
+/// [`MAX_EXPRESSIONS`](crate::check::MAX_EXPRESSIONS) and [`MAX_TEXTURE_READS`](crate::check::MAX_TEXTURE_READS) over every function, and translation of the
+/// module to SPIR-V, MSL and HLSL with wgpu's options, refused naming the backend.
+pub fn compose_with(file: &str, text: &str, textured: bool) -> Result<String, Vec<Problem>> {
     let prelude = prelude(textured);
-    let mut shader = format!("{prelude}{text}\n");
-    let located = |at: Option<usize>, message: String| match at
-        .and_then(|at| at.checked_sub(prelude.len()))
-        .filter(|at| *at <= text.len())
-    {
-        Some(at) => format!(
-            "line {}: {message}",
-            text.as_bytes()[..at]
-                .iter()
-                .filter(|b| **b == b'\n')
-                .count()
-                + 1
-        ),
-        None => message,
+    let own = prelude.len()..prelude.len() + text.len() + 1;
+    let entries = own.end..own.end + ENTRIES.len();
+    let mut composed = Composed {
+        text: format!("{prelude}{text}\n"),
+        parts: vec![
+            ("<prelude>".to_owned(), 0..prelude.len()),
+            (file.to_owned(), own),
+            ("<entries>".to_owned(), entries),
+        ],
     };
     // First without the entry points, so a missing or mistyped function is reported as such
     // rather than as a call that doesn't resolve.
-    let module = naga::front::wgsl::parse_str(&shader).map_err(|e| {
+    let module = naga::front::wgsl::parse_str(&composed.text).map_err(|e| {
         let at = e
             .labels()
             .next()
@@ -150,20 +152,23 @@ pub fn compose_with(text: &str, textured: bool) -> Result<String, String> {
         if !textured && text.contains("pipeline_texture") {
             message += " (`pipeline_texture` needs a texture: RenderPipeline::textured)";
         }
-        located(at, message)
+        vec![located(&composed, at, message)]
     })?;
+    let refuse = |message: &str| Err(vec![problem(file, message)]);
     for (_, function) in module.functions.iter() {
         if function.expressions.iter().any(|(_, expression)| matches!(expression,
             naga::Expression::GlobalVariable(handle) if module.global_variables[*handle].name.as_deref() == Some("sunrise_pipeline_view"))) {
-            return Err("sunrise_pipeline_view is vertex-only".into());
+            return refuse("sunrise_pipeline_view is vertex-only");
         }
     }
     if !module.overrides.is_empty() {
-        return Err("override declarations are not supported".into());
+        return refuse("override declarations are not supported");
     }
-    signature(&module)?;
+    if let Err(message) = signature(&module) {
+        return refuse(&message);
+    }
     if !module.entry_points.is_empty() {
-        return Err("it declares an entry point; the game supplies both stages".into());
+        return refuse("it declares an entry point; the game supplies both stages");
     }
     if module
         .global_variables
@@ -172,27 +177,19 @@ pub fn compose_with(text: &str, textured: bool) -> Result<String, String> {
         .count()
         != if textured { 5 } else { 2 }
     {
-        return Err("it declares a binding; a pipeline reads only `frame` and its input".into());
+        return refuse("it declares a binding; a pipeline reads only `frame` and its input");
     }
-    shader.push_str(ENTRIES);
-    let module = naga::front::wgsl::parse_str(&shader).map_err(|e| e.message().to_owned())?;
-    Validator::new(ValidationFlags::all(), Capabilities::default())
-        .validate(&module)
-        .map_err(|e| {
-            let at = e
-                .spans()
-                .next()
-                .and_then(|(span, _)| span.to_range())
-                .map(|range| range.start);
-            let mut message = e.as_inner().to_string();
-            let mut source = std::error::Error::source(e.as_inner());
-            while let Some(inner) = source {
-                message += &format!(": {inner}");
-                source = inner.source();
-            }
-            located(at, message)
-        })?;
-    Ok(shader)
+    composed.text.push_str(ENTRIES);
+    let module = naga::front::wgsl::parse_str(&composed.text)
+        .map_err(|e| vec![located(&composed, None, e.message().to_owned())])?;
+    let info = validate(&composed, &module)?;
+    let mut problems = cost_problems(cost(&module), file, "pipeline shader");
+    problems.extend(translate(&module, &info, None, file));
+    if problems.is_empty() {
+        Ok(composed.text)
+    } else {
+        Err(problems)
+    }
 }
 
 /// `fn pipeline_fragment(input: PipelineInput) -> vec4<f32>`, or what the file has instead.
@@ -227,6 +224,21 @@ fn signature(module: &naga::Module) -> Result<(), String> {
 mod tests {
     use super::*;
 
+    /// The file the tests' shaders are in.
+    const FILE: &str = "assets/m/shaders/pipeline/t.wgsl";
+
+    fn compose(text: &str) -> Result<String, String> {
+        compose_with(FILE, text, false).map_err(join)
+    }
+
+    fn join(problems: Vec<Problem>) -> String {
+        problems
+            .iter()
+            .map(Problem::to_string)
+            .collect::<Vec<_>>()
+            .join("; ")
+    }
+
     #[test]
     fn fragment_cannot_read_vertex_uniform() {
         assert!(compose("fn pipeline_fragment(input: PipelineInput) -> vec4<f32> { return sunrise_pipeline_view * input.color; }").unwrap_err().contains("sunrise_pipeline_view"));
@@ -258,7 +270,7 @@ fn pipeline_fragment(input: PipelineInput) -> vec4<f32> {
     #[test]
     fn a_refused_file_says_what_is_wrong_and_where() {
         let refused = |text: &str| compose(text).unwrap_err();
-        assert!(refused("").starts_with("no function `pipeline_fragment`"));
+        assert!(refused("").starts_with(&format!("{FILE}: no function `pipeline_fragment`")));
         assert!(
             refused("fn pipeline_fragment(uv: vec2<f32>) -> vec4<f32> { return vec4<f32>(1.0); }")
                 .contains("another signature")
@@ -269,17 +281,17 @@ fn pipeline_fragment(input: PipelineInput) -> vec4<f32> {
             )
             .contains("another signature")
         );
-        // A syntax error is reported on the file's own line, not the composed shader's.
+        // A refusal with a span names the file's own line and column, not the composed shader's.
         let broken = "// a comment\nfn pipeline_fragment(input: PipelineInput) -> vec4<f32> {\n    return vec4<f32>(1.0)\n}\n";
         let message = refused(broken);
         assert!(
-            message.starts_with("line 3:") || message.starts_with("line 4:"),
-            "{message}"
+            message.starts_with(&format!("{FILE}:4:1: ")),
+            "the closing brace, where the `;` was needed: {message}"
         );
-        // A type error is found by validation, with the file's line too.
+        // A type error is found by validation, at the binding `x`: column 9 of line 2.
         let mistyped = "fn pipeline_fragment(input: PipelineInput) -> vec4<f32> {\n    let x: f32 = input.uv;\n    return vec4<f32>(x);\n}\n";
         assert!(
-            refused(mistyped).starts_with("line 2:"),
+            refused(mistyped).starts_with(&format!("{FILE}:2:9: ")),
             "{}",
             refused(mistyped)
         );
@@ -302,7 +314,7 @@ fn pipeline_fragment(input: PipelineInput) -> vec4<f32> {
     #[test]
     fn only_a_textured_pipeline_samples_and_neither_binds_its_own() {
         let sample = "fn pipeline_fragment(input: PipelineInput) -> vec4<f32> { return pipeline_texture(input.uv) * input.color; }";
-        let shader = compose_with(sample, true).unwrap();
+        let shader = compose_with(FILE, sample, true).unwrap();
         assert!(shader.contains("@group(1) @binding(0) var sunrise_pipeline_texture"));
         assert!(
             compose(sample)
@@ -312,12 +324,105 @@ fn pipeline_fragment(input: PipelineInput) -> vec4<f32> {
         let own = "@group(1) @binding(3) var<uniform> mine: f32;
 fn pipeline_fragment(input: PipelineInput) -> vec4<f32> { return pipeline_texture(input.uv) * mine; }";
         assert!(
-            compose_with(own, true)
+            compose_with(FILE, own, true)
+                .map_err(join)
                 .unwrap_err()
                 .contains("declares a binding")
         );
         // Untextured pipelines compose as before: no group 1.
         assert!(!compose(GLOW).unwrap().contains("@group(1)"));
+    }
+
+    /// The number a refusal gives before `what`, as in `20123 expressions; ...`.
+    fn count_before(message: &str, what: &str) -> usize {
+        let before = &message[..message.find(what).unwrap()];
+        before
+            .rsplit(' ')
+            .find(|word| !word.is_empty())
+            .unwrap()
+            .parse()
+            .unwrap()
+    }
+
+    /// The caps are the pack checker's: more than 20,000 expressions in the composed module is
+    /// refused naming the count and the cap, and a shader well under both passes.
+    #[test]
+    #[ignore = "daily"]
+    fn a_shader_over_the_expression_cap_is_refused_with_its_count() {
+        // Each `x = x + 1.0;` is a load, a literal and an addition: three expressions.
+        let steps = 7_000;
+        let big = format!(
+            "fn pipeline_fragment(input: PipelineInput) -> vec4<f32> {{\n    var x = input.color.r;\n{}    return vec4<f32>(x);\n}}\n",
+            "    x = x + 1.0;\n".repeat(steps)
+        );
+        let message = compose(&big).unwrap_err();
+        assert!(
+            message.starts_with(&format!("{FILE}: "))
+                && message.ends_with("a pipeline shader may hold 20000"),
+            "{message}"
+        );
+        let count = count_before(&message, " expressions;");
+        assert!(
+            (3 * steps..3 * steps + 1_000).contains(&count),
+            "the mod's {} expressions and the renderer's few hundred: {count}",
+            3 * steps
+        );
+        assert!(compose(GLOW).is_ok());
+    }
+
+    /// The cap is on the count itself: 20,000 expressions pass, one more is refused.
+    #[test]
+    fn the_expression_cap_is_exact() {
+        assert!(cost_problems((20_000, 64), FILE, "pipeline shader").is_empty());
+        let over = cost_problems((20_001, 65), FILE, "pipeline shader");
+        assert_eq!(
+            over.iter().map(Problem::to_string).collect::<Vec<_>>(),
+            [
+                format!("{FILE}: 20001 expressions; a pipeline shader may hold 20000"),
+                format!("{FILE}: 65 texture reads; a pipeline shader may write 64"),
+            ]
+        );
+    }
+
+    /// A textured pipeline reading its texture 64 times in its own code is refused: the
+    /// prelude's `pipeline_texture` is one more read, so the 64th of the mod's is over.
+    #[test]
+    fn a_textured_shader_over_the_texture_read_cap_is_refused() {
+        let shader = |reads: usize| {
+            let loads: String = (0..reads)
+                .map(|i| format!("    sum = sum + textureLoad(sunrise_pipeline_texture, vec2<i32>({i}, 0), 0);\n"))
+                .collect();
+            format!(
+                "fn pipeline_fragment(input: PipelineInput) -> vec4<f32> {{\n    var sum = vec4<f32>(0.0);\n{loads}    return sum * input.color;\n}}\n"
+            )
+        };
+        // 63 of the mod's reads and the prelude's one make the cap exactly.
+        assert!(compose_with(FILE, &shader(63), true).is_ok());
+        let message = join(compose_with(FILE, &shader(64), true).unwrap_err());
+        assert_eq!(
+            message,
+            format!("{FILE}: 65 texture reads; a pipeline shader may write 64")
+        );
+    }
+
+    /// naga validates a pointer to a vector of a local matrix passed to a function, and its
+    /// SPIR-V writer then panics on it: the check turns that into a refusal naming the backend,
+    /// and Metal and HLSL, which write it, are not blamed.
+    #[test]
+    fn a_shader_that_validates_but_fails_a_backend_is_refused_naming_it() {
+        let shader = "fn second(p: ptr<function, vec3<f32>>) -> f32 { return (*p).y; }
+fn pipeline_fragment(input: PipelineInput) -> vec4<f32> {
+    var m = mat3x3<f32>();
+    return vec4<f32>(second(&m[1]));
+}
+";
+        let problems = compose_with(FILE, shader, false).unwrap_err();
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        let message = problems[0].to_string();
+        assert!(
+            message.starts_with(&format!("{FILE}: Vulkan (SPIR-V) refuses it: ")),
+            "{message}"
+        );
     }
 
     /// `pipeline_texture`'s texel arithmetic: `uv` 0 to 1 spans the sprite's rect once, the far
