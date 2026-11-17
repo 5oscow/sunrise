@@ -1589,16 +1589,16 @@ impl<R: RandomSource> Context<'_, R> {
                 let Ok(tag) = crate::custom_data::borrow(&encoded) else {
                     return stack;
                 };
-                let mut data = stack
-                    .components
-                    .iter()
-                    .find(|(k, _)| k == id)
-                    .and_then(|(_, value)| value.as_ref())
-                    .and_then(|value| crate::custom_data::borrow(value).ok())
+                let Ok(original) = self.effective_custom_data(&stack) else {
+                    return stack;
+                };
+                let mut data = original
                     .map(std::borrow::Cow::into_owned)
                     .unwrap_or_default();
                 crate::nbt_path::merge_compound(&mut data, &tag);
-                stack.components.retain(|(k, _)| k != id);
+                stack
+                    .components
+                    .retain(|(key, _)| key != id && key != "!minecraft:custom_data");
                 stack
                     .components
                     .push((id.to_owned(), Some(Tag::Compound(data))));

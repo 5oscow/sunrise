@@ -750,3 +750,75 @@ fn set_custom_data_preserves_nbt_types_and_nested_merges_in_both_evaluators() {
     }
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn set_custom_data_merges_effective_prototypes_and_respects_removal_in_both_evaluators() {
+    let root = std::env::temp_dir().join(format!("sunrise-set-prototype-{}", std::process::id()));
+    let folder = root.join("data/test/loot_table");
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(
+        root.join("items.json"),
+        r#"{"minecraft:stick":{"minecraft:custom_data":{"old":1}}}"#,
+    )
+    .unwrap();
+    for (name, removal) in [
+        ("prototype", None),
+        ("removed", Some(json!({"!minecraft:custom_data":{}}))),
+        ("null", Some(json!({"minecraft:custom_data":null}))),
+    ] {
+        let mut functions = Vec::new();
+        if let Some(removal) = removal {
+            functions.push(json!({"type":"minecraft:set_components","components":removal}));
+        }
+        functions.push(json!({"type":"minecraft:set_custom_data","tag":"{fresh:2L}"}));
+        // A second update must see the newly written value, not a stale removal marker.
+        functions.push(json!({"type":"minecraft:set_custom_data","tag":"{later:3L}"}));
+        let table = json!({"pools":[{"rolls":1,"entries":[{
+            "type":"minecraft:item","name":"minecraft:stick",
+            "modifier":{"type":"minecraft:sequence","functions":functions}
+        }]}]});
+        std::fs::write(folder.join(format!("{name}.json")), table.to_string()).unwrap();
+    }
+    let data = loot::LootData::load(
+        &root,
+        &loot::PackOverlay::NONE,
+        &sunrise_world::item_defaults::read(&root).unwrap(),
+    )
+    .unwrap();
+    let mut items = Items::for_tests(HashMap::new());
+    items.set_loot_data(&data);
+    items.component_defaults = data.component_defaults().clone();
+    for name in ["prototype", "removed", "null"] {
+        let expected = if name == "prototype" {
+            Tag::compound([
+                ("old", Tag::Byte(1)),
+                ("fresh", Tag::Long(2)),
+                ("later", Tag::Long(3)),
+            ])
+        } else {
+            Tag::compound([("fresh", Tag::Long(2)), ("later", Tag::Long(3))])
+        };
+        for item_engine in [false, true] {
+            let mut random = LegacyRandom::new(45);
+            let id = format!("test:{name}");
+            let actual = if item_engine {
+                let mut output = items.roll_loot_table(&id, None, None, &mut random).unwrap();
+                assert_eq!(output.len(), 1);
+                Tag::Compound(output.remove(0).custom_data().unwrap().clone())
+            } else {
+                let mut output = data.roll(&id, &mut random, 0.0, None, None);
+                assert_eq!(output.len(), 1);
+                output
+                    .remove(0)
+                    .components
+                    .into_iter()
+                    .find(|(id, _)| id == "minecraft:custom_data")
+                    .unwrap()
+                    .1
+                    .unwrap()
+            };
+            assert_eq!(actual, expected, "{name}, items = {item_engine}");
+        }
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}

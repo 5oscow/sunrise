@@ -255,7 +255,10 @@ impl super::LootData {
 }
 
 impl<R: sunrise_core::random::RandomSource> super::Context<'_, R> {
-    pub(super) fn copy_source_custom_data(&self, function: &Value, stack: &mut LootStack) {
+    pub(super) fn effective_custom_data<'a>(
+        &'a self,
+        stack: &'a LootStack,
+    ) -> Result<Option<Cow<'a, Compound>>, String> {
         let id = "minecraft:custom_data";
         let default = self
             .data
@@ -272,10 +275,13 @@ impl<R: sunrise_core::random::RandomSource> super::Context<'_, R> {
             None => default,
             _ => None,
         };
-        let original = match raw.map(crate::custom_data::borrow) {
-            Some(Ok(value)) => Some(value),
-            Some(Err(_)) => return,
-            None => None,
+        raw.map(crate::custom_data::borrow).transpose()
+    }
+
+    pub(super) fn copy_source_custom_data(&self, function: &Value, stack: &mut LootStack) {
+        let id = "minecraft:custom_data";
+        let Ok(original) = self.effective_custom_data(stack) else {
+            return;
         };
         let place = current_native_loot_place();
         if let Some(data) = copy_custom_data(function, original.as_deref(), |source| {
