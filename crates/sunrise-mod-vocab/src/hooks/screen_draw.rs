@@ -26,5 +26,13 @@ pub trait Hooks {
         key = "block",
         neoforge = "none (see screen)"
     )]
-    fn screen_draw();
+    fn screen_draw(
+        block: &str,
+        pos: Option<[i32; 3]>,
+        data: &[i32],
+        draw: &mut dyn DrawContext,
+        origin: [f32; 2],
+        pointer: [i32; 2],
+        gui_size: [i32; 2],
+    );
 }

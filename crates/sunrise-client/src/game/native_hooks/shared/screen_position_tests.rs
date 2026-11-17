@@ -7,9 +7,15 @@ impl mod_api::BlockPart for Position {}
 #[mod_api::sunrise_part]
 impl mod_api::BlockEntityPart for Position {
     fn screen_draw(&self, _: &dyn mod_api::ClientHost, event: &mut mod_api::ScreenDrawEvent<'_>) {
-        self.0.lock().unwrap().push(event.pos);
+        let mut seen = self.0.lock().unwrap();
+        let expected_size = if seen.is_empty() {
+            [128, 128]
+        } else {
+            [256, 192]
+        };
+        seen.push(event.pos);
         assert_eq!(event.pointer, [-3, 129]);
-        assert_eq!(event.gui_size, [128, 128]);
+        assert_eq!(event.gui_size, expected_size);
         assert_eq!(event.origin, [0.0, 0.0]);
     }
 }
@@ -56,7 +62,9 @@ fn screen_draw_receives_open_blocks_position() {
             game.cursor = (-3.75, 129.75);
             let mut batch = HudBatch::scratch([128, 128]);
             assert!(game.draw_native_screen(&mut batch, 0.0, 0.0));
-            assert_eq!(*seen.lock().unwrap(), [Some([17, 63, -9])]);
+            let mut resized = HudBatch::scratch([256, 192]);
+            assert!(game.draw_native_screen(&mut resized, 0.0, 0.0));
+            assert_eq!(*seen.lock().unwrap(), [Some([17, 63, -9]); 2]);
         });
     });
 }

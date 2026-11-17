@@ -23,5 +23,14 @@ pub trait Hooks {
         key = "block",
         neoforge = "none (see screen)"
     )]
-    fn screen_tooltip();
+    fn screen_tooltip(
+        block: &str,
+        data: &[i32],
+        at: [f32; 2],
+        slot: Option<u32>,
+        origin: [f32; 2],
+        pointer: [i32; 2],
+        gui_size: [i32; 2],
+        lines: &mut Vec<(Text, u32)>,
+    );
 }
