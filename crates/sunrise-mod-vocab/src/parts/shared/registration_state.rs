@@ -46,6 +46,8 @@ pub(crate) struct Installed {
     pub(crate) feature_types: Vec<crate::world::feature_type::FeatureTypeInfo>,
     pub(crate) loot_modifier_serializers:
         Vec<crate::parts::loot_modifiers::LootModifierSerializerInfo>,
+    pub(crate) loot_function_types: Vec<crate::parts::loot_types::LootFunctionTypeInfo>,
+    pub(crate) loot_condition_types: Vec<crate::parts::loot_types::LootConditionTypeInfo>,
     pub(crate) dimensions: Vec<crate::world::dimension::DimensionInfo>,
     pub(crate) chunk_generators: Vec<crate::world::chunk_generator::ChunkGeneratorInfo>,
     pub(crate) biome_sources: Vec<crate::world::biome_source::BiomeSourceInfo>,
