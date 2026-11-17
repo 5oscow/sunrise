@@ -1,3 +1,4 @@
+// exports: none (the registrar is generated; declarations are engine-only).
 use super::*;
 
 /// Registration operations for the two unsynced loot map-codec registries.
