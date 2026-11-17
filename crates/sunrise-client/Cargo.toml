@@ -127,6 +127,8 @@ wgpu = { version = "30.0.1", default-features = false, features = ["gles"] }
 default = ["audio", "controllers", "sunrise-extras"]
 # Scoped trait-mod installation for a mod's own tests.
 testing = []
+# Per-level-tick state digest for determinism checks (game/world/state_digest.rs).
+state-digest = []
 # Sound output. Without it (and `controllers`) the program links neither libasound nor libudev on
 # Linux: the server build (`--no-default-features`, released as sunrise-engine; docs/server.md).
 audio = ["sunrise-client-render/audio", "sunrise-client-lib/audio"]
