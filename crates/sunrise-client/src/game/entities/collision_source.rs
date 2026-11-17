@@ -2,7 +2,7 @@
 //! queries and the stand's root-vehicle grid, offered to the one rule in
 //! `sunrise_client::entity_solids` (which a mob's own move reads too).
 use super::{Game, boats::Boat, minecarts::Minecart};
-use sunrise_client::entity_solids::{Candidate, Mover as Rule, SolidKind, Solids};
+use sunrise_client::entity_solids::{Candidate, Mover as Rule, Side, SolidKind, Solids};
 use sunrise_core::geometry::{Aabb, Vec3};
 
 /// The mover asking, as the game's callers name it.
@@ -74,6 +74,11 @@ impl Game<'_> {
                     Rule::Player {
                         feet_y: p.position.y,
                         riding: self.riding,
+                        side: if self.remote.is_some() {
+                            Side::Client
+                        } else {
+                            Side::Server
+                        },
                     },
                     None,
                 )
@@ -82,6 +87,7 @@ impl Game<'_> {
                 Rule::Player {
                     feet_y,
                     riding: None,
+                    side: Side::Server,
                 },
                 None,
             ),

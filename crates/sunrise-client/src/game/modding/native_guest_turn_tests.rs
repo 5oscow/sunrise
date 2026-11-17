@@ -456,6 +456,36 @@ fn a_players_move_by_stops_at_a_boat() {
     });
 }
 
+/// The server has no predictive landing on a happy ghast: a player over a ghast that is not held
+/// still falls through it (`HappyGhast.canBeCollidedWith`, `isClientSide` branch), so a mod's
+/// move down is not stopped at its top the way the client's own walk is.
+#[test]
+#[ignore = "daily"]
+fn a_players_move_by_falls_through_a_happy_ghast_that_is_not_held_still() {
+    with_guests(|game| {
+        game.as_guest(13, |_| {}).unwrap();
+        let b = game.player(13).unwrap();
+        let [x, y, z] = b.entity().position(game).unwrap();
+        game.next_entity += 1;
+        let id = game.next_entity;
+        let kind = game
+            .res
+            .mob_types()
+            .get("minecraft:happy_ghast")
+            .unwrap()
+            .clone();
+        game.mobs.push(Mob::new(id, kind, Vec3::new(x, y, z), 0.0));
+        let up = game
+            .entity_move_by(b.entity(), [0.0, 6.0, 0.0], MoveCause::SelfMovement)
+            .unwrap();
+        assert_eq!(up, [0.0, 6.0, 0.0], "room to rise past the ghast's top");
+        let down = game
+            .entity_move_by(b.entity(), [0.0, -6.0, 0.0], MoveCause::SelfMovement)
+            .unwrap();
+        assert_eq!(down, [0.0, -6.0, 0.0], "not stopped on a ghast's top");
+    });
+}
+
 /// B's live menu and motion stay available while A acts, but displaced
 /// menus and an outer turn's motion must not use the swapped-out records.
 #[test]
