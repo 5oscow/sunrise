@@ -70,10 +70,10 @@ dependents; the wire format has no compatibility versions or default fields.
 to public type paths and their identities (the same shape function, 32 hexadecimal digits). It
 includes the mod libraries it builds against. The identities are computed from the libraries' source,
 with no compile: nested types enter through their own shapes, a `mod_api` type by its shape in the
-pinned SDK's `surface.json` (a build with no SDK refuses a library type that names one), and a type
+pinned SDK's `surface.json` (inside the game checkout, where no SDK is published, the surface exported from that checkout), and a type
 of another mod library by that library's identity. Fields under `#[cfg]` all count. When
 there are no concrete crossing types, no file is written.
-If `layouts.json` already exists, the build refuses to discard its recorded types.
+A `layouts.json` of the old 16-digit format is read as legacy and the build writes it again. If `layouts.json` already exists, the build refuses to discard its recorded types.
 Review the removal of the final public crossing type, then remove the file explicitly.
 Private types without a public path and uninstantiated generic declarations are
 not listed; a public re-export can give a private module's type a public path.

@@ -1064,7 +1064,12 @@ impl Package {
             file.take((1 << 20) + 1)
                 .read_to_end(&mut bytes)
                 .map_err(|e| e.to_string())?;
-            crate::layouts::Layouts::read(bytes.as_slice())?;
+            if crate::layouts::Layouts::read(bytes.as_slice())?.is_legacy() {
+                return Err(format!(
+                    "{}: a file of the old format: build the mod again to write it",
+                    crate::layouts::FILE
+                ));
+            }
             files.insert(crate::layouts::FILE.into(), bytes);
         }
         if let Some(icon) = &self.icon {

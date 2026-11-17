@@ -179,7 +179,7 @@ item's signature and the shapes of the types it carries, so adding a method refu
 them all. A hook hands a mod `&mut dyn ServerHost`, whose vtable keeps every host method, so a built mod
 imports every host call whether it calls it or not: changing or removing any host call refuses every
 built wasm mod (a new method refuses none), while a changed hook, Part method or point refuses only
-the mods that implement it (a point's hash covers its own signature, not every type reachable from it). A package rebuild with the same source is not a source change: it carries the same names. Known gap: a behaviour change under an unchanged signature is not caught; the hook's
+the mods that implement it (a point's hash covers its own signature, not every type reachable from it). One exception: the shared resource codec keeps one Part marker (`part:BlockCapabilityProvider<dyn ItemStorage>::provide`), so a mod that implements no Part still imports it, and a game build that changes that one method refuses it (#2517). A package rebuild with the same source is not a source change: rebuilding against a new SDK can change import names with no source edit, and a mod that decodes an `EntityWrite` or `InsideEffects` by hand must change its decoder for the derive's bytes. Known gap: a behaviour change under an unchanged signature is not caught; the hook's
 `hook_version` is how the game says one happened.
 
 Each guest exports:
