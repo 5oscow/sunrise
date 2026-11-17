@@ -4706,6 +4706,7 @@ name = "sunrise-core"
 version = "0.1.0"
 dependencies = [
  "libm",
+ "rustc-hash 2.1.3",
  "serde",
  "serde_json",
  "unicode_names2",
