@@ -36,9 +36,10 @@ pub struct ItemKey(pub(crate) u32);
 
 impl ItemKey {
     /// The numeric registry id used by the game's item-scatter seeds, on either side.
-    /// Returns `None` before registry completion or if this key does not resolve.
-    /// A connected client reads its server's numbering. Stable for that session only:
-    /// save and send identifiers, never these numbers.
+    /// Reads this side's prepared registry, with mod items after vanilla in content-plan order;
+    /// the number is not synced by the server. Returns `None` before registry completion or
+    /// if this key does not resolve. Unlike [`KeysHost::registry_protocol_id`], this read does
+    /// not require a connection. Save and send identifiers, never these session-local numbers.
     pub fn registry_id(self, host: &dyn Host) -> Option<u32> {
         crate::backend_of(host)?.item_registry_id(self)
     }

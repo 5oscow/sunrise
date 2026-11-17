@@ -82,7 +82,9 @@ pub trait KeysHost {
     /// connection's registries, a server the ones it sends. The id holds for one connection and one
     /// data reload: do not keep it across a reconnect, a reconfiguration or `/reload`. None for an
     /// unknown registry or name, on a client before that registry was synced, and with no
-    /// connection. Allocates nothing; each registry is searched in order.
+    /// connection. Allocates nothing; each registry is searched in order. Use
+    /// [`ItemKey::registry_id`] for the local prepared item number used by scatter rendering;
+    /// that read is available without a connection and is not a packet lookup.
     #[access(WorldOnly)]
     fn registry_protocol_id(&self, registry: &Identifier, name: &Identifier) -> Option<i32>;
 }
