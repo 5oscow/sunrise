@@ -203,9 +203,11 @@ impl Part {
     /// Points the mesh where its range moved.
     pub(super) fn set(self, s: &mut SectionGpu, to: (u32, u64)) {
         match self {
-            Self::Section { .. } => {
-                s.page = to.0;
-                s.start = to.1;
+            Self::Section { split } => {
+                (s.page, s.start) = to;
+                if !split {
+                    s.translucent_at = (to.0, to.1 + s.solid_slots);
+                }
             }
             Self::Translucent => s.translucent_at = to,
             Self::Indices => s.sorted_indices = Some(to),
