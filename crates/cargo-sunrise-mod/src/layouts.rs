@@ -58,9 +58,32 @@ type Tool<'a> = &'a dyn Fn(&str) -> Command;
 /// Writes `layouts.json`: for each mod library the mod builds against, the identity of each of
 /// its public wire types, read from its source with the launcher's pinned toolchain's metadata.
 /// `api` is the pinned SDK's surface, which shapes the `mod_api` types they name; a build with
-/// none (inside the game's own checkout) refuses a library type that names one.
+/// none (inside the game's own checkout) takes it from that checkout's source, as the SDK's
+/// surface is exported from it.
 pub fn build(root: &Path, api: Option<&Surface>) -> Result<(), String> {
     build_with(&crate::wasm::pinned, root, api)
+}
+
+/// The surface of the game checkout the project at `root` builds against, exported from its
+/// source; none for a project outside one.
+fn checkout_surface(root: &Path) -> Result<Option<Surface>, String> {
+    let Some(tree) = crate::sdk_fetch::game_tree(root)? else {
+        return Ok(None);
+    };
+    sunrise_mod_api_gen::surface::export(&tree).map(|export| Some(export.surface))
+}
+
+/// Removes a `layouts.json` the reader no longer accepts (a build before the current identity
+/// width wrote one): it is derived output, and the build writes it again.
+pub fn discard_stale(root: &Path) -> Result<(), String> {
+    let path = root.join(sunrise_mod_package::layouts::FILE);
+    let Ok(file) = fs::File::open(&path) else {
+        return Ok(());
+    };
+    if sunrise_mod_package::layouts::Layouts::read(file).is_err() {
+        fs::remove_file(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    }
+    Ok(())
 }
 
 fn build_with(tool: Tool, root: &Path, api: Option<&Surface>) -> Result<(), String> {
@@ -129,6 +152,7 @@ fn build_with(tool: Tool, root: &Path, api: Option<&Surface>) -> Result<(), Stri
     }
     visit(&owner.id, &metadata, &mut seen, &mut order);
     let mut libraries: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
+    let mut in_tree: Option<Surface> = None;
     let mut recorded: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
     for id in order {
         let package = metadata
@@ -157,12 +181,15 @@ fn build_with(tool: Tool, root: &Path, api: Option<&Surface>) -> Result<(), Stri
         if types.is_empty() {
             continue;
         }
+        if api.is_none() && in_tree.is_none() {
+            in_tree = checkout_surface(&root)?;
+        }
         let found = identities(
             &krate,
             &target.src_path,
             &types,
             &Environment {
-                api,
+                api: api.or(in_tree.as_ref()),
                 libraries: &libraries,
             },
         )?;
@@ -241,6 +268,26 @@ mod tests {
             "pub fn run() {}\n",
         );
         build(&root).unwrap();
+        // What the writer wrote goes through packing and reading back as it is.
+        let packed = root.join("addon.smod");
+        fs::write(
+            &packed,
+            sunrise_mod_package::Package::write_files(
+                &fs::read_to_string(root.join("sunrise-mod.toml")).unwrap(),
+                &[(
+                    "layouts.json",
+                    &fs::read(root.join("layouts.json")).unwrap(),
+                )],
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let read = sunrise_mod_package::Package::read(&packed).unwrap();
+        let none = sunrise_mod_package::layouts::Layouts::read(&b"{}"[..]).unwrap();
+        assert_eq!(
+            read.layouts.first_difference("library", &none),
+            Some("library::Record")
+        );
         let before = recorded(&root);
         let record = before["library"]["library::Record"]
             .as_str()
@@ -291,17 +338,59 @@ mod tests {
 
     #[test]
     #[ignore = "daily"]
-    fn a_library_type_naming_a_mod_api_type_needs_the_pinned_surface() {
+    fn a_library_type_naming_a_mod_api_type_builds_without_an_sdk_inside_the_checkout() {
         let root = project(
             "api",
             "#[derive(mod_api::Wire)] pub struct Held { pub stack: mod_api::ItemStack }\n",
             "pub fn run() {}\n",
         );
-        let error = build(&root).unwrap_err();
-        assert!(
-            error.contains("ItemStack") && error.contains("no pinned SDK"),
-            "{error}"
-        );
+        build(&root).unwrap();
+        let held = recorded(&root)["library"]["library::Held"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        assert_eq!(held.len(), 32);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn a_library_whose_root_is_not_lib_rs_is_read() {
+        let root = project("root", "", "pub fn run() {}\n");
+        fs::rename(
+            root.join("library/src/lib.rs"),
+            root.join("library/src/core.rs"),
+        )
+        .unwrap();
+        fs::write(
+            root.join("library/src/core.rs"),
+            "#[derive(mod_api::Wire)] pub struct Record { pub field: u32 }\n",
+        )
+        .unwrap();
+        let manifest = fs::read_to_string(root.join("library/Cargo.toml")).unwrap();
+        fs::write(
+            root.join("library/Cargo.toml"),
+            format!("{manifest}[lib]\npath = \"src/core.rs\"\n"),
+        )
+        .unwrap();
+        build(&root).unwrap();
+        assert!(recorded(&root)["library"]["library::Record"].is_string());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_layouts_file_of_the_old_width_is_discarded_for_the_build_to_write_again() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join(format!("../../target/layouts-stale-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        let file = root.join("layouts.json");
+        fs::write(&file, r#"{"library":{"library::T":"0123456789abcdef"}}"#).unwrap();
+        discard_stale(&root).unwrap();
+        assert!(!file.exists());
+        let current = br#"{"library":{"library::T":"0123456789abcdef0123456789abcdef"}}"#;
+        fs::write(&file, current).unwrap();
+        discard_stale(&root).unwrap();
+        assert_eq!(fs::read(&file).unwrap(), current);
         fs::remove_dir_all(root).unwrap();
     }
 }

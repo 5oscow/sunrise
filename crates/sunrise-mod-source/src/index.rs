@@ -41,6 +41,8 @@ pub struct Index<'a> {
     expand: fn(&Path, &str) -> Result<String, String>,
     /// Crates added for one consumer beside its crates ([`Index::add_crate`]).
     extra: Vec<(&'static str, &'static str)>,
+    /// A crate's root file where it is not `lib.rs` (a library's `[lib] path`).
+    root_files: HashMap<&'static str, String>,
 }
 
 /// The file a module's `#[path = "..."]` names.
@@ -80,7 +82,13 @@ impl<'a> Index<'a> {
             depth: 0,
             read: Default::default(),
             extra: Vec::new(),
+            root_files: HashMap::new(),
         }
+    }
+
+    /// Names the file `krate`'s root module lives in, below its source directory.
+    pub fn set_root_file(&mut self, krate: &'static str, file: &str) {
+        self.root_files.insert(krate, file.to_owned());
     }
 
     /// Reads each source file through `expand` before parsing it.
@@ -119,7 +127,10 @@ impl<'a> Index<'a> {
             return Ok(id);
         }
         let items = match path.split_last() {
-            None => self.parse(krate, "lib.rs")?,
+            None => {
+                let file = self.root_files.get(krate).map_or("lib.rs", String::as_str);
+                self.parse(krate, &file.to_owned())?
+            }
             Some((last, parent)) => {
                 let parent = self.module(krate, parent)?;
                 let declared = self.modules[parent]

@@ -98,15 +98,14 @@ pub fn identities(
     environment: &Environment<'_>,
 ) -> Result<BTreeMap<String, String>, String> {
     let directory = lib.parent().ok_or("library has no source directory")?;
-    if lib.file_name().and_then(|name| name.to_str()) != Some("lib.rs") {
-        return Err(format!(
-            "layouts: {}: the library's root file must be lib.rs",
-            lib.display()
-        ));
-    }
+    let file = lib
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or("library root has no file name")?;
     let krate: &'static str = Box::leak(krate.to_owned().into_boxed_str());
     let mut index = Index::new(directory, &[], &[]);
     index.add_crate(krate, "");
+    index.set_root_file(krate, file);
     let mut layouts = Layouts::new(LibraryWires {
         environment,
         problems: RefCell::new(Vec::new()),

@@ -408,6 +408,7 @@ fn new_code(
 /// checkout it lies in, which has no published surface to scan against).
 fn build(entry: mod_surface::child::ChildEntry) -> Result<PathBuf, String> {
     let root = Path::new(".");
+    layouts::discard_stale(root)?;
     let package = Package::read(root)?;
     let code = package.manifest.native.is_some() || package.manifest.wasm.is_some();
     let mut api = None;
@@ -448,6 +449,7 @@ fn pack_into(
     uses: Option<&[u8]>,
     api: Option<&mod_surface::Surface>,
 ) -> Result<PathBuf, String> {
+    layouts::discard_stale(root)?;
     let package = Package::read(root)?;
     if package.manifest.native.is_some() || package.manifest.wasm.is_some() {
         layouts::build(root, api)?;
