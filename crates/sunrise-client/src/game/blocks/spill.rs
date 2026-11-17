@@ -547,6 +547,14 @@ pub(super) fn put_saved_entity(
     }
 }
 
+#[derive(Default)]
+pub(in crate::game) struct RemovalOutputs {
+    pub keep_contents: bool,
+    pub drops: Vec<Option<ItemStack>>,
+    pub spawns: Vec<(ItemStack, [f64; 3])>,
+    pub experience: Vec<(u32, [f64; 3])>,
+}
+
 impl GameLevel<'_> {
     fn pop_resource(&mut self, pos: [i32; 3], mut stack: ItemStack) {
         self.pending.attach(pos, &mut stack);
@@ -878,7 +886,7 @@ impl GameLevel<'_> {
         // attachments, stay until `put`), as vanilla's override runs on `this`.
         // One out for its own tick or menu button, which an empty id stands in
         // for, isn't here to answer: its part isn't asked.
-        let mut part_drops = Vec::new();
+        let mut outputs = RemovalOutputs::default();
         if side_effects
             && matches!(
                 self.world.block_entities.get(&key),
@@ -886,7 +894,7 @@ impl GameLevel<'_> {
             )
             && let Some((lease, BlockEntity::Mod(entity))) = self.world.block_entities.take(&key)
         {
-            self.api_pre_remove_side_effects(pos, old, &entity, &mut part_drops);
+            outputs = self.api_pre_remove_side_effects(pos, old, &entity);
             self.world
                 .block_entities
                 .put(lease, BlockEntity::Mod(entity));
@@ -914,7 +922,7 @@ impl GameLevel<'_> {
             match kind {
                 PreRemove::Contents { slots, furnace } => {
                     let items = entity.as_ref().map_or(&[][..], BlockEntity::slots);
-                    for slot in 0..slots {
+                    for slot in 0..if outputs.keep_contents { 0 } else { slots } {
                         let stack = items.get(slot).cloned().flatten();
                         self.drop_item_stack(pos, stack);
                     }
@@ -957,13 +965,7 @@ impl GameLevel<'_> {
                             neighbour_updates += 1;
                         }
                         let at = removal::jukebox_pop_position(&mut self.world.random, pos);
-                        self.spill.spawns.push(Spawn {
-                            random: None,
-                            stack: record,
-                            pos: at,
-                            motion: None,
-                            delay: 10,
-                        });
+                        self.spawn_removal_item(record, at);
                         neighbour_updates += 1;
                     }
                 }
@@ -982,13 +984,7 @@ impl GameLevel<'_> {
                         && let Some(BlockEntity::Lectern(l)) = &entity
                         && let Some(book) = l.book.clone()
                     {
-                        self.spill.spawns.push(Spawn {
-                            random: None,
-                            stack: book,
-                            pos: removal::lectern_book_position(pos, step),
-                            motion: None,
-                            delay: 10,
-                        });
+                        self.spawn_removal_item(book, removal::lectern_book_position(pos, step));
                     }
                 }
                 PreRemove::ShulkerBox
@@ -997,8 +993,14 @@ impl GameLevel<'_> {
                 | PreRemove::Beacon
                 | PreRemove::Nothing => {}
             }
-            for stack in part_drops {
-                self.drop_item_stack(pos, Some(stack));
+            for stack in outputs.drops {
+                self.drop_item_stack(pos, stack);
+            }
+            for (stack, at) in outputs.spawns {
+                self.spawn_removal_item(stack, at);
+            }
+            for (amount, at) in outputs.experience {
+                self.award_orbs(at, amount);
             }
         }
         // BlockEntity.setRemoved: a jukebox always reports its song stopping,
@@ -1017,6 +1019,16 @@ impl GameLevel<'_> {
             self.spill.removed.push(([pos.x, pos.y, pos.z], entity));
         }
         neighbour_updates
+    }
+    /// ItemEntity(level, x, y, z, stack), followed by setDefaultPickUpDelay.
+    fn spawn_removal_item(&mut self, stack: ItemStack, pos: [f64; 3]) {
+        self.spill.spawns.push(Spawn {
+            random: None,
+            stack,
+            pos,
+            motion: None,
+            delay: 10,
+        });
     }
     /// The jukebox's `JUKEBOX_STOP_PLAY` game event and level event 1011.
     fn jukebox_stopped(&mut self, pos: BlockPos, state: BlockStateId) {
@@ -1220,6 +1232,172 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct RemovalMod(u8);
+    struct RemovalPart(u8, mod_api::ItemKey);
+    #[mod_api::sunrise_part]
+    impl mod_api::BlockPart for RemovalPart {}
+    #[mod_api::sunrise_part]
+    impl mod_api::BlockEntityPart for RemovalPart {
+        fn pre_remove_side_effects(
+            &self,
+            _: &mut dyn mod_api::LevelRandomHost,
+            event: &mut mod_api::PreRemoveSideEffectsEvent<'_>,
+        ) {
+            match self.0 {
+                1 => event.keep_contents = true,
+                2 => {
+                    let key = self.1;
+                    event.spawns.push((
+                        mod_api::ItemStack::new(key, 1).unwrap(),
+                        [1.25, 65.75, -2.5],
+                    ));
+                }
+                3 => event.experience.push((10, [1.25, 65.75, -2.5])),
+                4 => {
+                    event.drops.push(None);
+                    let key = self.1;
+                    event
+                        .drops
+                        .push(Some(mod_api::ItemStack::new(key, 1).unwrap()));
+                }
+                _ => {}
+            }
+        }
+    }
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for RemovalMod {
+        fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
+            let kind = r.block_entity_type("machine").blocks(&[]).build();
+            let diamond = r.item_key("minecraft:diamond");
+            r.block_entity_part(&kind, RemovalPart(self.0, diamond))
+                .unwrap();
+        }
+    }
+    fn removal_outputs(
+        mode: u8,
+        check: impl FnOnce(&mut GameLevel<'_>, &mut sunrise_core::random::LevelRandom),
+    ) {
+        use std::sync::Arc;
+        use sunrise_client::containers::{ModBlockEntity, ModBlockEntityFields, ModContainer};
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+            "removal",
+            Box::new(RemovalMod(mode)),
+        )]
+        .into();
+        mod_platform::testing::with_mods(mods, || {
+            crate::game::native_entity_refs::tests::with_game(|game| {
+                game.options.dedicated = Some(Vec::new());
+                game.world
+                    .chunks
+                    .insert((0, 0), Arc::new(sunrise_client::chunk::Chunk::empty(0, 0)));
+                let state = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:stone")
+                    .unwrap();
+                let mut entity =
+                    ModBlockEntity::new("removal:machine".into(), ModBlockEntityFields::default());
+                if mode == 1 {
+                    entity.items = vec![Some(ItemStack::new("minecraft:diamond", 1))];
+                    game.world.block_entities.set_mod_containers(
+                        [(
+                            state.0,
+                            Arc::new(ModContainer {
+                                slots: 1,
+                                ..Default::default()
+                            }),
+                        )]
+                        .into_iter()
+                        .collect(),
+                    );
+                }
+                game.world
+                    .block_entities
+                    .insert((1, 64, 2), BlockEntity::Mod(Box::new(entity)));
+                game.with_level(|_, level, _| {
+                    let mut reference = level.world.random.clone();
+                    level.remove_entity(BlockPos::new(1, 64, 2), state, true);
+                    check(level, &mut reference);
+                });
+            });
+        });
+    }
+    #[test]
+    #[ignore = "daily"]
+    fn removal_keep_contents_suppresses_slot_scatter() {
+        removal_outputs(1, |level, reference| {
+            assert!(level.spill.spawns.is_empty());
+            assert_eq!(level.world.random.next_int(), reference.next_int());
+        });
+    }
+    #[test]
+    #[ignore = "daily"]
+    fn removal_spawn_has_exact_position_and_default_delay() {
+        removal_outputs(2, |level, _| {
+            assert_eq!(level.spill.spawns.len(), 1);
+            let spawn = &level.spill.spawns[0];
+            assert_eq!(spawn.pos, [1.25, 65.75, -2.5]);
+            assert_eq!(spawn.delay, 10);
+            assert_eq!(&*spawn.stack.item, "minecraft:diamond");
+            assert_eq!(spawn.stack.count, 1);
+            assert!(spawn.motion.is_none());
+        });
+    }
+    #[test]
+    #[ignore = "daily"]
+    fn removal_experience_awards_positioned_orbs() {
+        removal_outputs(3, |level, reference| {
+            assert_eq!(
+                level
+                    .spill
+                    .orbs
+                    .iter()
+                    .map(|(_, value, _)| *value)
+                    .collect::<Vec<_>>(),
+                [7, 3]
+            );
+            for (at, _, merge) in &level.spill.orbs {
+                assert_eq!(*at, [1.25, 65.75, -2.5]);
+                assert_eq!(*merge, reference.next_int_bound(40).unwrap());
+            }
+            assert_eq!(level.world.random.next_int(), reference.next_int());
+        });
+    }
+    #[test]
+    #[ignore = "daily"]
+    fn removal_empty_slot_draws_three_doubles_without_spawning() {
+        removal_outputs(4, |level, reference| {
+            // Containers.dropItemStack draws x, y, z before its isEmpty loop.
+            for _ in 0..3 {
+                reference.next_double();
+            }
+            // The filled slot follows the empty one, using its own three draws.
+            let at = [
+                1.125 + reference.next_double() * 0.75,
+                64.0 + reference.next_double() * 0.75,
+                2.125 + reference.next_double() * 0.75,
+            ];
+            reference.next_int_bound(21).unwrap();
+            for _ in 0..6 {
+                reference.next_double();
+            }
+            assert_eq!(level.spill.spawns.len(), 1);
+            assert_eq!(level.spill.spawns[0].pos, at);
+            assert_eq!(level.spill.spawns[0].stack.count, 1);
+            assert_eq!(level.world.random.next_int(), reference.next_int());
+        });
+    }
+    #[test]
+    #[ignore = "daily"]
+    fn removal_unanswered_part_leaves_random_untouched() {
+        removal_outputs(0, |level, reference| {
+            assert!(level.spill.spawns.is_empty());
+            assert!(level.spill.orbs.is_empty());
+            assert_eq!(level.world.random.next_int(), reference.next_int());
+        });
+    }
 
     /// Listens to `block_drops`: takes any break of dirt, adds 2 points to the rest.
     struct DropsMod;
