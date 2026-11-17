@@ -752,6 +752,77 @@ fn set_custom_data_preserves_nbt_types_and_nested_merges_in_both_evaluators() {
 }
 
 #[test]
+fn set_custom_data_removes_empty_effective_results_in_both_evaluators() {
+    let root = std::env::temp_dir().join(format!("sunrise-set-empty-{}", std::process::id()));
+    let folder = root.join("data/test/loot_table");
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(
+        root.join("items.json"),
+        r#"{
+        "minecraft:stick":{},
+        "minecraft:paper":{"minecraft:custom_data":{}},
+        "minecraft:book":{"minecraft:custom_data":{"old":1}}
+    }"#,
+    )
+    .unwrap();
+    for (name, item, remove) in [
+        ("absent", "minecraft:stick", false),
+        ("empty", "minecraft:paper", false),
+        ("removed", "minecraft:book", true),
+        ("retained", "minecraft:book", false),
+    ] {
+        let mut functions = Vec::new();
+        if remove {
+            functions.push(json!({"type":"minecraft:set_components",
+                "components":{"!minecraft:custom_data":{}}}));
+        }
+        functions.push(json!({"type":"minecraft:set_custom_data","tag":{}}));
+        let table = json!({"pools":[{"rolls":1,"entries":[{
+            "type":"minecraft:item","name":item,
+            "modifier":{"type":"minecraft:sequence","functions":functions}
+        }]}]});
+        std::fs::write(folder.join(format!("{name}.json")), table.to_string()).unwrap();
+    }
+    let data = loot::LootData::load(
+        &root,
+        &loot::PackOverlay::NONE,
+        &sunrise_world::item_defaults::read(&root).unwrap(),
+    )
+    .unwrap();
+    let mut items = Items::for_tests(HashMap::new());
+    items.set_loot_data(&data);
+    items.component_defaults = data.component_defaults().clone();
+    for name in ["absent", "empty", "removed", "retained"] {
+        let expected = (name == "retained").then(|| Tag::compound([("old", Tag::Byte(1))]));
+        for item_engine in [false, true] {
+            let mut random = LegacyRandom::new(45);
+            let id = format!("test:{name}");
+            let mut components = if item_engine {
+                let output = items.roll_loot_table(&id, None, None, &mut random).unwrap();
+                assert_eq!(output.len(), 1);
+                loot::copy::components_with_patch(
+                    data.component_defaults().get(output[0].item.as_ref()),
+                    crate::item_data::component_snapshot(&output[0]).as_ref(),
+                )
+            } else {
+                let output = data.roll(&id, &mut random, 0.0, None, None);
+                assert_eq!(output.len(), 1);
+                loot::copy::stack_components(
+                    &output[0],
+                    data.component_defaults().get(&output[0].item),
+                )
+            };
+            assert_eq!(
+                components.remove(&"minecraft:custom_data".into()),
+                expected,
+                "{name}, items = {item_engine}"
+            );
+        }
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn set_custom_data_merges_effective_prototypes_and_respects_removal_in_both_evaluators() {
     let root = std::env::temp_dir().join(format!("sunrise-set-prototype-{}", std::process::id()));
     let folder = root.join("data/test/loot_table");

@@ -1599,9 +1599,10 @@ impl<R: RandomSource> Context<'_, R> {
                 stack
                     .components
                     .retain(|(key, _)| key != id && key != "!minecraft:custom_data");
-                stack
-                    .components
-                    .push((id.to_owned(), Some(Tag::Compound(data))));
+                stack.components.push((
+                    id.to_owned(),
+                    (!data.is_empty()).then_some(Tag::Compound(data)),
+                ));
             }
             "minecraft:enchanted_count_increase" => {
                 let level = self.attacker_level(f["enchantment"].as_str().unwrap_or(""));

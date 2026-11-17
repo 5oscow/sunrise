@@ -2455,14 +2455,16 @@ impl<R: RandomSource> LootContext<'_, R> {
                         .map(std::borrow::Cow::into_owned)
                         .unwrap_or_default();
                     sunrise_world::nbt_path::merge_compound(&mut data, &tag);
+                    let id = if data.is_empty() {
+                        "!minecraft:custom_data"
+                    } else {
+                        "minecraft:custom_data"
+                    };
                     apply_component_patch(
                         stack,
-                        [(
-                            "minecraft:custom_data".into(),
-                            sunrise_core::nbt::Tag::Compound(data),
-                        )]
-                        .into_iter()
-                        .collect(),
+                        [(id.into(), sunrise_core::nbt::Tag::Compound(data))]
+                            .into_iter()
+                            .collect(),
                     );
                 }
                 "minecraft:copy_components" => {
