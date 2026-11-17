@@ -173,8 +173,7 @@ path never enters it. A hook's `@<version>` is its `hook_version`, which a refus
 
 **Compatibility.** A built wasm mod loads on a newer game build as long as every item it names is
 unchanged. Each host call, hook, Part method and point is hashed on its own: the hash covers that
-item's signature and the shapes of the types it carries, so adding a method, or changing one a mod
-does not use, refuses nothing. A mod is refused, by name, when an item it uses changed or is gone
+item's signature and the shapes of the types it carries, so adding a method refuses nothing. A mod is refused, by name, when an item it uses changed or is gone
 ("or a type it carries changed"). The refusal reads "built for an older Sunrise, rebuild with SDK
 `sdk-<build id>`", with the first eight mismatched items and the count of the rest; the log lists
 them all. A hook hands a mod `&mut dyn ServerHost`, whose vtable keeps every host method, so a built mod
