@@ -24,7 +24,7 @@ use std::{
 };
 
 const MAGIC: &[u8; 8] = b"HZBEHAV\0";
-const VERSION: u32 = 3;
+const VERSION: u32 = 4;
 const FILE_NAME: &str = "behaviours-v3.bin";
 const REGISTRY_MAGIC: &[u8; 8] = b"HZREGIS\0";
 const REGISTRY_VERSION: u32 = 1;
@@ -133,6 +133,7 @@ struct Block {
     sounds: SoundsSnapshot,
     item: String,
     dynamic_shape: bool,
+    declared_vegetation: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -533,6 +534,7 @@ impl Snapshot {
                 sounds: SoundsSnapshot::from(block.sounds.as_ref()),
                 item: block.item.to_string(),
                 dynamic_shape: block.dynamic_shape,
+                declared_vegetation: block.declared_vegetation,
             })
             .collect();
         let items = behaviours
@@ -708,6 +710,7 @@ impl Snapshot {
                     sounds: Arc::new(Sounds::from(wire.sounds)),
                     item: Arc::from(wire.item),
                     dynamic_shape: wire.dynamic_shape,
+                    declared_vegetation: wire.declared_vegetation,
                 })
             })
             .collect::<io::Result<Vec<_>>>()?;
@@ -993,6 +996,34 @@ mod tests {
             serde_json::to_value(Snapshot::capture(&restored)).unwrap(),
             "all resolved fields, shape grids and identities should roundtrip",
         );
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn declared_vegetation_survives_a_warm_cache() {
+        let root = fixture().expect("prepared block behaviour resources");
+        let path = root.0.join("block-behaviours.json");
+        let mut behaviour: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        let glass = behaviour["blocks"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|block| block["name"] == "minecraft:glass")
+            .unwrap();
+        glass["declared_vegetation"] = serde_json::Value::Bool(true);
+        fs::write(path, serde_json::to_vec(&behaviour).unwrap()).unwrap();
+
+        let registry = super::super::load_registry(&root.0).unwrap();
+        let vegetation = registry.default_state("minecraft:glass").unwrap();
+        let ordinary = registry.default_state("minecraft:stone").unwrap();
+        let cold = super::super::load_uncached(&registry, &root.0).unwrap();
+        assert!(cold.data(vegetation).declared_vegetation);
+        let dir = root.0.join("game/.sunrise-cache");
+        write(&dir, &registry, &root.0, &cold).unwrap();
+        let warm = load_from(&dir, &registry, &root.0).expect("cache hit");
+        assert!(warm.data(vegetation).declared_vegetation);
+        assert!(!warm.data(ordinary).declared_vegetation);
     }
 
     /// A folder's sources are hashed once while they stay as they are; a
