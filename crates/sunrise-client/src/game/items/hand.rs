@@ -399,8 +399,10 @@ impl Game<'_> {
         };
         let reach = attack_reach(range, self.creative);
         let camera = self.remote_camera_id();
+        // AttackRange uses getManyEntityHitResult, which does not exclude
+        // entities sharing the camera's root vehicle.
         let boxes = (self.mobs.iter().enumerate())
-            .filter(|(_, m)| !m.removed && Some(m.id) != self.riding && Some(m.id) != camera)
+            .filter(|(_, m)| !m.removed && Some(m.id) != camera)
             .map(|(i, m)| (i, m.bounds()));
         let clip = |from: Vec3, to: Vec3| {
             let length = from.distance_squared(to).sqrt();
