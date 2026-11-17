@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 
 /// A fence gate's sound override, resolved once when content loads.
 /// A missing site keeps the template wood's sound for that site.
+// exhaustive: the declaration format has exactly an all-sites sound or named-site overrides.
 #[derive(Clone, Debug, PartialEq, sunrise_mod_api_macros::Wire)]
 pub enum GateSound {
     /// Use one sound event at every site.
