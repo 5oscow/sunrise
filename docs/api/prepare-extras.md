@@ -11,7 +11,7 @@ never compiles one in.
 | --- | --- |
 | Format | `"format": 1` in every reply |
 | Level | experimental ([stability.md](stability.md)): its first user is the launcher, after the launcher split |
-| Covers | `sunrise-prepare needs`, `missing-extras` and `extras` with `--json`: the replies, the message lines and the exit codes |
+| Covers | `sunrise-prepare needs`, `missing-extras`, `extras` and `data-file` with `--json`: the replies, the message lines and the exit codes |
 | Not in | the Launch API's `--launch-api` options: these are subcommands, as `sounds` and `fonts` are |
 
 ```sh
@@ -77,6 +77,19 @@ store for every folder. Nothing is downloaded and nothing else is prepared.
   because no folder was given is in `missing`, not `failed`.
 - Resources that aren't prepared are an error: prepare them first.
 
+### `data-file --json`
+
+Writes the prepared resources' cache of prepared data, `sunrise-data.bin`, when they have none, so the game's first
+start reads one file instead of thousands (#1961). A launcher asks it after preparing or adding extras; the game
+writes the file itself on a start that finds none. One already there is kept.
+
+```json
+{"format": 1, "written": true}
+```
+
+- `written`: whether it wrote one now (`false`: one was there).
+- Resources that aren't prepared are an error (`unprepared`): prepare them first.
+
 ### Errors and exit codes
 
 An error reply is the last line on stdout, with `error:` and the message on stderr, and exits 1. It has the
@@ -89,8 +102,8 @@ An error reply is the last line on stdout, with `error:` and the message on stde
 | `kind` | Means |
 | --- | --- |
 | `lock` | `--root` has no `research-lock.json`, or it doesn't name a safe version |
-| `unprepared` | `extras` was asked to add to resources that aren't prepared: prepare them first |
-| `io` | a file couldn't be read, linked or removed (reusing a sibling's import, removing `sunrise-data.bin`) |
+| `unprepared` | `extras` or `data-file` was asked about resources that aren't prepared: prepare them first |
+| `io` | a file couldn't be read, written, linked or removed (reusing a sibling's import, writing or removing `sunrise-data.bin`) |
 
 These three are every kind: each is one case of `extras::Error::kind`, with no catch-all. An extra that couldn't be
 added is not an error: it is in `extras`' `failed`.
@@ -111,4 +124,4 @@ in `crates/sunrise-prepare/src/sounds.rs` pin the replies and what `extras` adds
 
 ## Changelog
 
-- format 1: `needs`, `missing-extras` and `extras` with `--json`.
+- format 1: `needs`, `missing-extras`, `extras` and `data-file` with `--json`.
