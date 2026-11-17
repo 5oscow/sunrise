@@ -14,6 +14,8 @@ pub(in crate::game) struct ComputeContext {
     pub block: Option<[i32; 3]>,
     /// `TARGET_ENTITY` (`compute entity <target>`).
     pub target: Option<Target>,
+    /// `INTERACTING_ENTITY` (the player a composter's `addLayer` names).
+    pub interacting: Option<Target>,
 }
 
 /// An ArithmeticException's message.
@@ -526,8 +528,16 @@ impl Game<'_> {
                     }
                     _ => {
                         let source = self.command_source.unwrap_or_else(|| self.player_source());
-                        let view = source.entity.map(|t| self.entity_view_asked(t, cond));
-                        self.conditions_hold(cond, view.as_ref(), source.pos)
+                        let this = source.entity.map(|t| self.entity_view_asked(t, cond));
+                        let target = c.target.map(|t| self.entity_view_asked(t, cond));
+                        let interacting = c.interacting.map(|t| self.entity_view_asked(t, cond));
+                        self.conditions_hold_among(
+                            cond,
+                            this.as_ref(),
+                            target.as_ref(),
+                            interacting.as_ref(),
+                            source.pos,
+                        )
                     }
                 }
             }
@@ -645,5 +655,38 @@ mod tests {
                 Ok(2.5),
             );
         }
+        // `/compute entity`: `target_entity` is the selected entity, and the
+        // source (here with no entity) is only `this`.
+        let mut source = game.player_source();
+        source.entity = None;
+        game.command_source = Some(source);
+        let on_target = |kind: &str| {
+            json!({
+                "type": "minecraft:conditional",
+                "condition": {"condition": "minecraft:entity_properties", "entity": "target_entity",
+                    "predicate": {"minecraft:entity_type": kind}},
+                "on_true": 1, "on_false": 0
+            })
+        };
+        let entity = ComputeContext {
+            target: Some(Target::Player),
+            ..ComputeContext::default()
+        };
+        assert_eq!(
+            game.provider_int(&on_target("minecraft:player"), &entity, 0),
+            Ok(1)
+        );
+        assert_eq!(
+            game.provider_int(&on_target("minecraft:cow"), &entity, 0),
+            Ok(0)
+        );
+        assert_eq!(
+            game.provider_int(
+                &on_target("minecraft:player"),
+                &ComputeContext::default(),
+                0
+            ),
+            Ok(0)
+        );
     }
 }

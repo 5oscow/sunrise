@@ -478,6 +478,9 @@ struct GameLevel<'w> {
     native_particles: &'w mut Vec<lan_particles::QueuedParticle>,
     sound_seeds: Option<&'w sunrise_client::lan::hub::Hub>,
     drop_entity: Option<mod_api::EntityRef>,
+    /// `LootContextParams.INTERACTING_ENTITY` of a block-interaction drop: the
+    /// player whose click `use_without_item` runs for.
+    interacting: Option<sunrise_world::loot::LootEntity>,
     /// The block a mod's machine breaks and the tool it breaks it with
     /// (`native_machine_destroy_block`): `Block.dropResources` rolls that
     /// block's loot with the tool instead of with none. Neighbours that pop
@@ -3006,6 +3009,7 @@ impl Game<'_> {
             sound_seeds: self.lan.as_ref().map(|host| &host.hub),
             drop_tool: None,
             drop_entity: None,
+            interacting: None,
             drop_breaker_at: None,
             drop_into: None,
         };

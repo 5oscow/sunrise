@@ -1306,6 +1306,8 @@ pub fn killed_by_arrow(
             origin: me.position,
             tool: None,
             block_pos: None,
+            target: None,
+            interacting: None,
         }
     }
     if !conditions(&c["player"], &ctx(me, me), w) {
@@ -1341,6 +1343,8 @@ pub fn killed(
         origin: me.position,
         tool: None,
         block_pos: None,
+        target: None,
+        interacting: None,
     };
     let ectx = Entities {
         this: Some(target),
@@ -1433,6 +1437,23 @@ pub struct Entities<'a> {
     pub origin: [f64; 3],
     pub tool: Option<&'a ItemView>,
     pub block_pos: Option<[i32; 3]>,
+    /// `LootContextParams.TARGET_ENTITY`.
+    pub target: Option<&'a EntityView>,
+    /// `LootContextParams.INTERACTING_ENTITY`.
+    pub interacting: Option<&'a EntityView>,
+}
+impl<'a> Entities<'a> {
+    /// A `LootContext.EntityTarget` of this context; the targets a context
+    /// does not carry (`attacker`, `direct_attacker`, `attacking_player`)
+    /// select nothing.
+    fn entity(&self, name: &str) -> Option<&'a EntityView> {
+        match name {
+            "this" => self.this,
+            "target_entity" => self.target,
+            "interacting_entity" => self.interacting,
+            _ => None,
+        }
+    }
 }
 /// Conditions shared by item/entity interactions and thrown-item pickups.
 pub fn item_entity(
@@ -1447,6 +1468,8 @@ pub fn item_entity(
         origin: player.position,
         tool: None,
         block_pos: None,
+        target: None,
+        interacting: None,
     };
     let ectx = Entities {
         this: Some(target),
@@ -1595,8 +1618,10 @@ fn condition_leaf(v: &Value, ctx: &Entities, w: &dyn World) -> bool {
             match &*full(ty) {
                 // EntityHasScoreCondition.test/hasScore: missing objective or
                 // score fails; this bounded path supports constant integer ranges.
-                "minecraft:entity_scores" if v["entity"].as_str() == Some("this") => {
-                    let scores = ctx.this.and_then(|e| e.scores.as_ref());
+                "minecraft:entity_scores" => {
+                    let scores = ctx
+                        .entity(v["entity"].as_str().unwrap_or("this"))
+                        .and_then(|e| e.scores.as_ref());
                     v["scores"].as_object().is_some_and(|tests| {
                         scores.is_some_and(|scores| {
                             tests.iter().all(|(objective, range)| {
@@ -1618,7 +1643,7 @@ fn condition_leaf(v: &Value, ctx: &Entities, w: &dyn World) -> bool {
                     })
                 }
                 "minecraft:entity_properties" => ctx
-                    .this
+                    .entity(v["entity"].as_str().unwrap_or("this"))
                     .is_some_and(|e| entity(&v["predicate"], e, w, ctx.origin)),
                 "minecraft:location_check" => {
                     let base = ctx.block_pos.map_or(ctx.origin, |b| {
@@ -2213,6 +2238,8 @@ mod tests {
             origin: [0.0; 3],
             tool: None,
             block_pos: None,
+            target: None,
+            interacting: None,
         };
         for (mut predicate, expected) in [
             (serde_json::json!({}), true),
@@ -2727,6 +2754,8 @@ mod tests {
             origin: [0.0; 3],
             tool: None,
             block_pos: Some([0; 3]),
+            target: None,
+            interacting: None,
         };
         let stone = serde_json::json!({"type":"minecraft:match_block","blocks":"minecraft:stone"});
         let wheat = serde_json::json!({"type":"minecraft:match_block","blocks":"minecraft:wheat"});
@@ -2737,6 +2766,61 @@ mod tests {
             ..ctx
         };
         assert!(!conditions(&stone, &absent, &Flat));
+    }
+    /// `LootContext.EntityTarget`: `entity_properties` and `entity_scores`
+    /// select `target_entity` and `interacting_entity`, never `this` by default.
+    #[test]
+    fn entity_conditions_select_the_named_target() {
+        let view = |kind: &str, score: i32| EntityView {
+            kind: kind.into(),
+            scores: Some([("points".to_owned(), score)].into()),
+            ..Default::default()
+        };
+        let (source, target, actor) = (
+            view("minecraft:player", 1),
+            view("minecraft:cow", 2),
+            view("minecraft:zombie", 3),
+        );
+        let ctx = Entities {
+            this: Some(&source),
+            origin: [0.0; 3],
+            tool: None,
+            block_pos: None,
+            target: Some(&target),
+            interacting: Some(&actor),
+        };
+        let props = |who: &str, kind: &str| {
+            serde_json::json!({"condition":"minecraft:entity_properties","entity":who,
+                "predicate":{"minecraft:entity_type":kind}})
+        };
+        assert!(conditions(
+            &props("target_entity", "minecraft:cow"),
+            &ctx,
+            &Flat
+        ));
+        assert!(!conditions(
+            &props("target_entity", "minecraft:player"),
+            &ctx,
+            &Flat
+        ));
+        assert!(conditions(
+            &props("interacting_entity", "minecraft:zombie"),
+            &ctx,
+            &Flat
+        ));
+        assert!(conditions(&props("this", "minecraft:player"), &ctx, &Flat));
+        assert!(!conditions(
+            &props("attacker", "minecraft:player"),
+            &ctx,
+            &Flat
+        ));
+        let score = |who: &str, n: i32| {
+            serde_json::json!({"condition":"minecraft:entity_scores","entity":who,
+                "scores":{"points":n}})
+        };
+        assert!(conditions(&score("target_entity", 2), &ctx, &Flat));
+        assert!(conditions(&score("interacting_entity", 3), &ctx, &Flat));
+        assert!(!conditions(&score("target_entity", 1), &ctx, &Flat));
     }
     /// Data pack ids, tags and registry keys written without a namespace are
     /// `minecraft:` ones (`Identifier.parse`), wherever a predicate reads one.
@@ -2759,6 +2843,8 @@ mod tests {
             origin: player.position,
             tool: None,
             block_pos: None,
+            target: None,
+            interacting: None,
         };
         let arrow = DamageView {
             kind: "minecraft:arrow".into(),
@@ -2936,6 +3022,8 @@ mod tests {
             origin: player.position,
             tool: None,
             block_pos: None,
+            target: None,
+            interacting: None,
         };
         assert!(conditions(&cond, &ctx, &w));
         let mut p = Progress::default();
@@ -3603,6 +3691,8 @@ mod tests {
             origin: [0.0; 3],
             tool: None,
             block_pos: None,
+            target: None,
+            interacting: None,
         };
         for line in include_str!("../../../docs/parity/random-chance-seeded.jsonl").lines() {
             let row: Value = serde_json::from_str(line).unwrap();
@@ -3629,6 +3719,8 @@ mod tests {
             origin: [0.0; 3],
             tool: None,
             block_pos: None,
+            target: None,
+            interacting: None,
         };
         let z = json!({"type":"minecraft:random_chance","chance":0});
         let o = json!({"type":"minecraft:random_chance","chance":1});
@@ -3666,6 +3758,8 @@ mod tests {
             origin: [0.0; 3],
             tool: None,
             block_pos: None,
+            target: None,
+            interacting: None,
         };
         let mut draws = 0;
         for v in [

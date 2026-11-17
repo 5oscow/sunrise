@@ -1516,6 +1516,8 @@ impl Items {
             entity_levels: None,
             block_levels: None,
             target: None,
+            target_entity: None,
+            interacting_entity: None,
             location: None,
             keep_empty,
         };
@@ -1614,6 +1616,8 @@ impl Items {
             entity_levels: None,
             block_levels: roll.levels.map(|_| &ask as &LootLevels<'_, R>),
             target: None,
+            target_entity: None,
+            interacting_entity: None,
             location: roll.location,
             keep_empty: roll.keep_empty,
         };
@@ -1681,6 +1685,8 @@ impl Items {
             entity_levels: None,
             block_levels: None,
             target,
+            target_entity: None,
+            interacting_entity: None,
             location: None,
             keep_empty,
         };
@@ -1704,6 +1710,7 @@ impl Items {
         table: &Value,
         block: &str,
         properties: &sunrise_world::chunk::BlockProperties,
+        interacting: Option<EntityTarget<'_>>,
         random: &mut R,
     ) -> Vec<ItemStack> {
         let ctx = LootContext {
@@ -1718,6 +1725,8 @@ impl Items {
             entity_levels: None,
             block_levels: None,
             target: None,
+            target_entity: None,
+            interacting_entity: interacting,
             location: None,
             keep_empty: false,
         };
@@ -1747,6 +1756,8 @@ impl Items {
             entity_levels: None,
             block_levels: None,
             target: None,
+            target_entity: None,
+            interacting_entity: None,
             location: None,
             keep_empty: false,
         };
@@ -1884,6 +1895,8 @@ impl Items {
             entity_levels: levels,
             block_levels: None,
             target,
+            target_entity: None,
+            interacting_entity: None,
             location: None,
             keep_empty,
         };
@@ -1893,6 +1906,16 @@ impl Items {
 /// `DataComponents.BLOCK_STATE`.
 const BLOCK_STATE: &str = "minecraft:block_state";
 impl<R: RandomSource> LootContext<'_, R> {
+    /// The entity a condition's `entity` field (a `LootContext.EntityTarget`)
+    /// names, when the roll carries it.
+    fn named_entity(&self, name: &Value) -> Option<&EntityTarget<'_>> {
+        match name.as_str()? {
+            "this" => self.target.as_ref(),
+            "target_entity" => self.target_entity.as_ref(),
+            "interacting_entity" => self.interacting_entity.as_ref(),
+            _ => None,
+        }
+    }
     /// Raw evaluation: nested tables share this context, without splitting
     /// output or completing the queried table id.
     fn evaluate(&self, table: &Value, random: &mut R) -> Vec<ItemStack> {
@@ -1974,6 +1997,10 @@ struct LootContext<'a, R> {
     /// Asked only at block enchantment readers; None keeps vanilla's level.
     block_levels: Option<&'a LootLevels<'a, R>>,
     target: Option<EntityTarget<'a>>,
+    /// `LootContextParams.TARGET_ENTITY`.
+    target_entity: Option<EntityTarget<'a>>,
+    /// `LootContextParams.INTERACTING_ENTITY`.
+    interacting_entity: Option<EntityTarget<'a>>,
     /// Bound only for the actual loot-mine location subset.
     location: Option<&'a dyn Fn(&Value) -> Option<bool>>,
     /// Command replacement consumes the emitted list positions, including empty stacks.
@@ -2146,10 +2173,8 @@ impl<R: RandomSource> LootContext<'_, R> {
                 };
                 random.next_float() < chance
             }
-            "minecraft:entity_properties"
-                if c["entity"].as_str() == Some("this") && self.target.is_some() =>
-            {
-                let (target, matcher) = self.target.unwrap();
+            "minecraft:entity_properties" if self.named_entity(&c["entity"]).is_some() => {
+                let (target, matcher) = self.named_entity(&c["entity"]).unwrap();
                 matcher(&c["predicate"], target)
             }
             // `this` with no checks (snow, chorus flower) holds when an entity
@@ -4000,6 +4025,8 @@ mod tests {
             entity_levels: None,
             block_levels: None,
             target: None,
+            target_entity: None,
+            interacting_entity: None,
             location: None,
             keep_empty: false,
         }
@@ -4719,6 +4746,8 @@ mod tests {
         let answered = |pick| LootContext {
             block_levels: Some(&levels),
             target: None,
+            target_entity: None,
+            interacting_entity: None,
             ..ctx(&items, pick, &props, "minecraft:stone")
         };
         let count = json!({"pools":[{"rolls":1,"entries":[{"type":"minecraft:item","name":"minecraft:diamond","modifier":[{"type":"minecraft:apply_bonus","enchantment":"minecraft:fortune","formula":"minecraft:uniform_bonus_count","parameters":{"bonusMultiplier":2}}]}]}]});
@@ -4753,6 +4782,8 @@ mod tests {
         let context = LootContext {
             block_levels: Some(&levels),
             target: None,
+            target_entity: None,
+            interacting_entity: None,
             ..ctx(&items, None, &props, "minecraft:stone")
         };
         for bonus in [

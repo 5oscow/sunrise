@@ -206,11 +206,13 @@ impl Items {
     /// `Block.dropFromBlockInteractLootTable`: the `block_interact` table `id`
     /// for a right click on `state` (its `match_block` conditions see the
     /// state), from the table's random sequence when it has one.
+    /// `interacting` is `INTERACTING_ENTITY`, the player or mob that clicked.
     pub fn interact_loot(
         &self,
         id: &str,
         registry: &BlockRegistry,
         state: BlockStateId,
+        interacting: Option<crate::items::EntityTarget<'_>>,
         random: &mut impl RandomSource,
         sequences: &mut crate::random_sequences::RandomSequences,
         seed: i64,
@@ -222,9 +224,23 @@ impl Items {
             match table.get("random_sequence").and_then(Value::as_str) {
                 Some(sequence) => {
                     let random = sequences.get(sequence, seed);
-                    self.interact_roll(id, table, &block.name, &block.properties, random)
+                    self.interact_roll(
+                        id,
+                        table,
+                        &block.name,
+                        &block.properties,
+                        interacting,
+                        random,
+                    )
                 }
-                None => self.interact_roll(id, table, &block.name, &block.properties, random),
+                None => self.interact_roll(
+                    id,
+                    table,
+                    &block.name,
+                    &block.properties,
+                    interacting,
+                    random,
+                ),
             }
         })
     }
@@ -302,6 +318,8 @@ impl<R: RandomSource> sunrise_world::loot::global_modifiers::ModifierRoll
             entity_levels: context.entity_levels,
             block_levels: context.block_levels,
             target: context.target,
+            target_entity: context.target_entity,
+            interacting_entity: context.interacting_entity,
             location: context.location,
             keep_empty: true,
         }

@@ -593,10 +593,22 @@ impl GameLevel<'_> {
         state: BlockStateId,
         table: &'static str,
     ) {
+        let loot = self.loot.clone();
+        let matcher = |predicate: &serde_json::Value, entity: &sunrise_world::loot::LootEntity| {
+            loot.as_ref()
+                .is_some_and(|data| data.entity_matches(predicate, Some(entity)))
+        };
+        let interacting = self.interacting.as_ref().map(|entity| {
+            (
+                entity,
+                &matcher as &dyn Fn(&serde_json::Value, &sunrise_world::loot::LootEntity) -> bool,
+            )
+        });
         let drops = self.items.interact_loot(
             table,
             self.registry,
             state,
+            interacting,
             &mut self.world.random,
             self.rand_sequences,
             self.seed,
