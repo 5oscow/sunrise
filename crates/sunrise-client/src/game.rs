@@ -10620,6 +10620,8 @@ impl<'a> Game<'a> {
             mod_api::__private::ModPhase::Packages => mod_api::__private::ModPhase::Setup,
             phase => phase,
         };
+        #[cfg(test)]
+        test_game_dir::enter();
         let mod_phase = mod_api::__private::PhaseOwner::new(phase);
         // A scoped hook on this thread asks this game's parts.
         mod_api::__private::mark_game_thread();
@@ -11670,6 +11672,43 @@ use inventory_input::drop_whole_stack;
 use subtitles::{Subtitles, in_game_ui, subtitles};
 
 use hud_render::{block_outline_drawn, debug_crosshair_drawn, is_game_master_block};
+#[cfg(test)]
+mod test_game_dir {
+    //! The game folder of a test process. The game's folder is its working directory (saves, `config/`,
+    //! `options.txt`, `level.dat` of an unnamed world, the caches), so a test that builds a `Game`
+    //! would write them into the crate's folder, shared by every test and every run. The first `Game`
+    //! of the process moves the working directory into a folder of its own beside the test binary
+    //! (so `cargo clean` removes it, and a later run drops the ones a day old); production still
+    //! defaults to the folder the launcher starts the game in.
+    use std::path::PathBuf;
+    use std::sync::OnceLock;
+    use std::time::{Duration, SystemTime};
+
+    static FOLDER: OnceLock<PathBuf> = OnceLock::new();
+
+    pub(super) fn enter() {
+        FOLDER.get_or_init(|| {
+            let parent = std::env::current_exe()
+                .unwrap()
+                .with_file_name("sunrise-client-test-game-dirs");
+            let day_ago = SystemTime::now() - Duration::from_secs(24 * 60 * 60);
+            for old in std::fs::read_dir(&parent).into_iter().flatten().flatten() {
+                if old
+                    .metadata()
+                    .and_then(|meta| meta.modified())
+                    .is_ok_and(|at| at < day_ago)
+                {
+                    let _ = std::fs::remove_dir_all(old.path());
+                }
+            }
+            let folder = parent.join(std::process::id().to_string());
+            let _ = std::fs::remove_dir_all(&folder);
+            std::fs::create_dir_all(&folder).unwrap();
+            std::env::set_current_dir(&folder).unwrap();
+            folder
+        });
+    }
+}
 #[cfg(test)]
 mod test_neighbourhood {
     //! Shared fixture step for tests that tick entities on prepared data.
