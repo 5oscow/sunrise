@@ -4,6 +4,8 @@ use super::*;
 /// What every mod's [`Hooks::register`](crate::Hooks::register) attached.
 #[derive(Default)]
 pub(crate) struct Installed {
+    /// Names this installation among all of the process's; never reused, unlike an address.
+    pub(crate) epoch: u64,
     pub(crate) menu_recipe_books: HashMap<String, crate::parts::menus::MenuBookDeclaration>,
     pub(crate) recipe_book_types: HashMap<String, String>,
     pub(crate) recipe_book_fields: HashMap<String, (String, String)>,
@@ -37,7 +39,7 @@ pub(crate) struct Installed {
     pub(crate) resolved_items: OnceLock<sunrise_mod_runtime::registry_keys::Names>,
     pub(crate) resolved_game_events: OnceLock<sunrise_mod_runtime::registry_keys::Names>,
     pub(crate) resolved_entity_types: OnceLock<sunrise_mod_runtime::registry_keys::Names>,
-    pub(crate) resolved_blocks: OnceLock<sunrise_mod_runtime::block_definitions::Blocks>,
+    pub(crate) resolved_blocks: OnceLock<Arc<sunrise_mod_runtime::block_definitions::Blocks>>,
     pub(crate) particles: OnceLock<sunrise_mod_runtime::registry_keys::Particles>,
     /// The ticket controllers the mods registered; a [`TicketController`]'s slot indexes it.
     pub(crate) controllers: Vec<ControllerInfo>,
