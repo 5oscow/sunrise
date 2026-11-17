@@ -181,6 +181,11 @@ impl std::fmt::Display for PlanError {
 /// Reads the plan from the first line of `input`. The contract is checked first, so a plan of another contract is
 /// refused for that and never for a field this contract doesn't have.
 pub fn read_plan(input: &mut dyn BufRead) -> Result<Plan, PlanError> {
+    read_line(input)
+}
+
+/// Reads one line of `input` as a `T` of this contract: [`read_plan`] for `native-build`, and `native-check`'s plan.
+pub fn read_line<T: serde::de::DeserializeOwned>(input: &mut dyn BufRead) -> Result<T, PlanError> {
     let mut line = String::new();
     input
         .read_line(&mut line)

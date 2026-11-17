@@ -2,7 +2,7 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::OnceLock;
-use sunrise_native_build::{contract, host};
+use sunrise_native_build::{check as checks, contract, host};
 
 /// The plan's build folder, the host's root.
 static WORK: OnceLock<PathBuf> = OnceLock::new();
@@ -45,5 +45,37 @@ fn get(url: &str) -> Result<host::Body, String> {
         Ok(response) => Ok(Some(Box::new(response.into_reader()))),
         Err(ureq::Error::Status(404, _)) => Ok(None),
         Err(error) => Err(format!("{url}: {error}")),
+    }
+}
+
+/// Reads a check plan from standard input and prints the reply: 0 checked, 1 a file it names didn't read, 2 no plan, 3 another contract.
+pub fn check(args: &[String]) -> ExitCode {
+    if !args.is_empty() {
+        eprintln!(
+            "usage: cargo sunrise-mod native-check < plan.json (docs/modding/src/reference/sdk/08-native-build.md)"
+        );
+        return ExitCode::from(2);
+    }
+    let plan: checks::Plan = match contract::read_line(&mut std::io::stdin().lock()) {
+        Ok(plan) => plan,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return ExitCode::from(match error {
+                contract::PlanError::Contract(_) => 3,
+                contract::PlanError::Invalid(_) => 2,
+            });
+        }
+    };
+    match checks::check(&plan)
+        .and_then(|reply| serde_json::to_string(&reply).map_err(|e| e.to_string()))
+    {
+        Ok(line) => {
+            println!("{line}");
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("error: {error}");
+            ExitCode::FAILURE
+        }
     }
 }
