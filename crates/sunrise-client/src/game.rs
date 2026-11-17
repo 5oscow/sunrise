@@ -2580,7 +2580,21 @@ impl Game<'_> {
     /// (PowderSnowBlock.canEntityWalkOnPowderSnow), freeze-immune wear
     /// (LivingEntity.canFreeze), the dimension's FAST_LAVA, the sleeping
     /// pose and blindness (Player.isMobilityRestricted, which stops a sprint).
+    /// The window's or the guest's own body reads the item in its selected slot
+    /// (`getMainHandItem`) for the shapes that depend on it.
+    pub(crate) fn sync_main_hand(&mut self) {
+        let held = self
+            .inventory
+            .get(self.selected)
+            .and_then(Option::as_ref)
+            .filter(|stack| stack.count > 0)
+            .map(|stack| stack.item.clone());
+        if let Some(player) = self.player.as_mut() {
+            player.main_hand = held;
+        }
+    }
     pub(crate) fn sync_player_body(&mut self) {
+        self.sync_main_hand();
         let glider = self.glider_worn();
         let sleeping = self.sleeping.is_some();
         let item_in_use = self
@@ -4578,6 +4592,9 @@ impl Game<'_> {
             return Ok(());
         }
         self.abort_open_transactions();
+        let _parts = (!self.is_logical_server())
+            .then(|| self.collision_parts())
+            .flatten();
         // `Player.entityInteractionRange`/`blockInteractionRange` for the tick's
         // picks: the attribute carries creative's and a server's modifiers.
         self.entity_reach = self.interaction_range("minecraft:entity_interaction_range", 3.0, 5.0);

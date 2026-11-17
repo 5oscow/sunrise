@@ -169,6 +169,25 @@ impl<'a> CollisionContext<'a> {
     pub fn always_collide_with_fluid(&self) -> bool {
         self.always_fluid
     }
+    /// The entity's `Entity.getY()` the context captured, none for a context without one.
+    pub fn bottom(&self) -> Option<f64> {
+        match self.height {
+            Height::Default => None,
+            Height::Bottom(bottom) => Some(bottom),
+        }
+    }
+    /// The item id in a living entity's main hand (`minecraft:air` when empty); none for a
+    /// context that holds nothing for `is_holding_item` to ask.
+    pub fn held_item(&self) -> Option<&str> {
+        if !self.living || self.position_only {
+            return None;
+        }
+        Some(if self.held.count <= 0 {
+            "minecraft:air"
+        } else {
+            self.held.item
+        })
+    }
     pub fn is_holding_item(&self, item: &str) -> bool {
         !self.position_only && self.held.is_item(item)
     }

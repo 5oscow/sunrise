@@ -1251,6 +1251,7 @@ impl Game<'_> {
             let tick_span = sunrise_client::spans::guard("level_tick");
             // This level's moving colliders, solid to its movers for this tick only.
             let colliders = self.placed_moving_colliders();
+            let parts = self.collision_parts();
             let history = self
                 .collider_history(&colliders)
                 .map(sunrise_client_render::moving_colliders::HistoryScope::enter);
@@ -1275,6 +1276,7 @@ impl Game<'_> {
                 )
             });
             drop(history);
+            drop(parts);
             // Then the bodies standing on a collider that moved are carried with it.
             if result.is_ok() && !paused {
                 sunrise_client::block_contact::in_level(

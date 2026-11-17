@@ -476,6 +476,10 @@ pub struct PlayerMotion {
     /// next refreshes.
     pub scale: f32,
     pub speed: f32,
+    /// The item in the selected hotbar slot (`getMainHandItem`), `None` for an empty hand: what a
+    /// block's collision shape reads through `EntityCollisionContext`. Kept by the side that owns
+    /// the body, like `item_use_speed`.
+    pub main_hand: Option<std::sync::Arc<str>>,
     /// `LocalPlayer.itemUseSpeedMultiplier` while using an item (not riding).
     pub item_use_speed: Option<f32>,
     /// `LocalPlayer.isSlowDueToUsingItem`: an item in use whose `use_effects`
@@ -986,18 +990,26 @@ enum TickInput {
     Living([f32; 3]),
     PreparedLocal { direction: [f32; 2], jumping: bool },
 }
+/// The context `player` moves through: a player at its height holding `held`, as
+/// `CollisionContext.of(player)`.
+fn player_context<'a>(player: &PlayerMotion, held: Option<&'a str>) -> CollisionContext<'a> {
+    CollisionContext::for_entity(
+        CollisionEntity {
+            identity: EntityIdentity(0),
+            kind: sunrise_world::collision_context::EntityContextKind::Player,
+            y: player.position.y,
+            descending: player.shift_key_down,
+            main_hand: Some(held.map_or(CollisionItem::EMPTY, |item| CollisionItem {
+                item,
+                count: 1,
+            })),
+        },
+        false,
+    )
+}
 impl MotionWorld<'_, '_, '_> {
-    fn context(&self) -> CollisionContext<'static> {
-        CollisionContext::for_entity(
-            CollisionEntity {
-                identity: EntityIdentity(0),
-                kind: sunrise_world::collision_context::EntityContextKind::Player,
-                y: self.player.position.y,
-                descending: self.player.shift_key_down,
-                main_hand: Some(CollisionItem::EMPTY),
-            },
-            false,
-        )
+    fn context(&self) -> CollisionContext<'_> {
+        player_context(self.player, self.player.main_hand.as_deref())
     }
     fn collisions(&self) -> SceneCollisions<'_, '_> {
         SceneCollisions {
@@ -2306,7 +2318,8 @@ impl EntityMoveWorld for MotionWorld<'_, '_, '_> {
     ) -> Result<()> {
         let position = self.player.position;
         let bounds = self.player.bounds();
-        let context = self.context();
+        let held = self.player.main_hand.clone();
+        let context = player_context(self.player, held.as_deref());
         let mut collisions = SceneCollisions {
             world: self.scene,
             binding: self.collision_binding,
