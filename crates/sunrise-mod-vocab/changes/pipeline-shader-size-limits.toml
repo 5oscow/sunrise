@@ -1,5 +1,0 @@
-ids = [
-    "hook:register_render_pipelines",
-]
-why = "A render pipeline's fragment file is checked on a thread of its own and refused by name, instead of crashing the game, when it is longer than 131072 bytes (the whole composed shader) or when one expression chains more than 200 binary operators, member accesses or indexings: naga's parser overflowed its stack on a chain of ten thousand terms, which aborts the process. Shader pack stage files have the same bounds."
-migrate = "No change for a shader written in ordinary statements. A file with a very long expression (`a + b + c + ...`) splits it over several `let` statements."
