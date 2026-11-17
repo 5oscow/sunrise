@@ -21,6 +21,7 @@ struct Level {
     placement_answer: Option<BlockStateId>,
     shape_answer: bool,
     client: bool,
+    time: i64,
 }
 impl BlockEntityNeighbors for Level {}
 impl LevelAccess for Level {
@@ -37,7 +38,7 @@ impl LevelAccess for Level {
         &mut self.random
     }
     fn game_time(&self) -> i64 {
-        0
+        self.time
     }
     fn emit(&mut self, _: LevelEvent) {}
     fn is_client_side(&self) -> bool {
@@ -103,7 +104,7 @@ fn declared_waterlogged_blocks_keep_their_class_and_gain_liquid_defaults() {
         .unwrap_err()
         .to_string();
         assert!(
-            error.contains("plant.json")
+            error.contains("wet:plant")
                 && error.contains("state_properties.waterlogged")
                 && error.contains(template),
             "{error}"
@@ -119,7 +120,7 @@ fn declared_waterlogged_blocks_keep_their_class_and_gain_liquid_defaults() {
             ),
             (
                 "data/wet/sunrise/block/stone.json",
-                r#"{"template":"minecraft:stone","state_properties":{"waterlogged":{"type":"boolean"}}}"#,
+                r#"{"template":"minecraft:stone","state_properties":{"waterlogged":{"type":"boolean"}},"collision_shapes":{"default":[]}}"#,
             ),
         ],
     );
@@ -153,6 +154,7 @@ fn declared_waterlogged_blocks_keep_their_class_and_gain_liquid_defaults() {
             placement_answer: None,
             shape_answer: false,
             client,
+            time: 0,
         };
         let mut ticks = Ticks::default();
         ticks.add_empty_chunk(ChunkPos::new(0, 0)).unwrap();
@@ -166,6 +168,7 @@ fn declared_waterlogged_blocks_keep_their_class_and_gain_liquid_defaults() {
             )
             .unwrap();
         assert!(is_waterlogged(wet));
+        assert_eq!(b.fluid(wet), FluidState::WATER);
         level
             .blocks
             .insert(pos, b.table.set_int(water, b.props.level, 1));
@@ -191,6 +194,7 @@ fn declared_waterlogged_blocks_keep_their_class_and_gain_liquid_defaults() {
             )
             .unwrap();
         assert!(!is_waterlogged(dry));
+        assert_eq!(b.fluid(dry).kind(), FluidKind::Empty);
         level.blocks.insert(pos, water);
         level.placement_answer = Some(dry);
         assert_eq!(
@@ -273,11 +277,22 @@ fn declared_waterlogged_blocks_keep_their_class_and_gain_liquid_defaults() {
                 sunrise_core::ticks::TickTypeId(FluidKind::Water.tick_id())
             ));
             level.shape_answer = false;
+            level.blocks.insert(
+                BlockPos::new(4, 63, 4),
+                registry.default_state("minecraft:stone").unwrap(),
+            );
             b.set_block(&mut level, &mut shape_ticks, beside, air, 3);
             assert!(shape_ticks.fluids.has_scheduled(
                 pos,
                 sunrise_core::ticks::TickTypeId(FluidKind::Water.tick_id())
             ));
+            assert_eq!(level.block_state(beside), air);
+            level.time = 5;
+            b.tick_scheduled(&mut level, &mut shape_ticks);
+            assert_eq!(
+                b.fluid(level.block_state(beside)).kind(),
+                FluidKind::FlowingWater
+            );
         }
     }
     fs::remove_dir_all(scratch).unwrap();

@@ -1335,8 +1335,8 @@ impl<'a> Plan<'a> {
                         .ok_or("block-behaviours.json is missing template state fluids")?;
                     if template_water.iter().all(|water| *water) {
                         return Err(format!(
-                            "data/{}.json: state_properties.waterlogged cannot be added: every state of template {} already holds water",
-                            decl.id.replacen(':', "/sunrise/block/", 1), decl.template
+                            "{}: state_properties.waterlogged cannot be added: every state of template {} already holds water",
+                            decl.id, decl.template
                         ).into());
                     }
                 }
@@ -1647,9 +1647,9 @@ impl<'a> Plan<'a> {
         out
     }
 
-    /// Appends each new block's copies of the template's states to `list`;
-    /// `gameplay` rows get their index and the declared overrides.
-    fn states(&self, list: &mut Vec<J>, ids: bool, gameplay: bool) -> Result<()> {
+    /// Appends each new block's copies of the template's states to `list`,
+    /// writing the declared overrides in the table's row format.
+    fn states(&self, list: &mut Vec<J>, ids: bool, name: &str) -> Result<()> {
         if list.len() != self.states {
             return Err(format!("{} states, not {}", list.len(), self.states).into());
         }
@@ -1666,7 +1666,31 @@ impl<'a> Plan<'a> {
                 if !combo.is_empty() {
                     set_state_properties(&mut row, combo);
                 }
-                if gameplay {
+                if matches!(name, "block-behaviours.json" | "facts.json")
+                    && combo
+                        .iter()
+                        .any(|(key, value)| key == "waterlogged" && value == "true")
+                {
+                    let J::Arr(columns) = &mut row else {
+                        return Err(format!("{name}: missing state row {id}").into());
+                    };
+                    if name == "block-behaviours.json" {
+                        let fluid = columns
+                            .get_mut(2..5)
+                            .ok_or("block-behaviours.json: missing state fluid")?;
+                        // Vanilla's compact row: water registry ordinal, source amount, not falling.
+                        fluid.clone_from_slice(&[
+                            J::Num(2.into()),
+                            J::Num(8.into()),
+                            J::Bool(false),
+                        ]);
+                    } else {
+                        *columns
+                            .get_mut(2)
+                            .ok_or("facts.json: missing state fluid flag")? = J::Bool(true);
+                    }
+                }
+                if name == "gameplay-facts.json" {
                     row.set("id", J::Num(next.into()));
                     if let Some(item) = b.item_row() {
                         row.set("item", J::Str(item.into()));
@@ -1922,15 +1946,15 @@ impl<'a> Plan<'a> {
 
     /// One JSON table, rewritten.
     fn json(&self, name: &str, doc: &mut J) -> Result<()> {
-        let states = |doc: &mut J, path: &str, ids: bool, gameplay: bool| -> Result<()> {
+        let states = |doc: &mut J, path: &str, ids: bool| -> Result<()> {
             match doc.at(path) {
-                Some(J::Arr(a)) => self.states(a, ids, gameplay),
+                Some(J::Arr(a)) => self.states(a, ids, name),
                 _ => Err(format!("no list at /{path}").into()),
             }
         };
         match name {
             "facts.json" => {
-                states(doc, "states", false, false)?;
+                states(doc, "states", false)?;
                 let defaults = doc.at("defaults").ok_or("no defaults")?;
                 for b in &self.blocks {
                     let default = b.default;
@@ -1938,10 +1962,10 @@ impl<'a> Plan<'a> {
                     defaults.set(&b.decl.id, J::Num(id.into()));
                 }
             }
-            "gameplay-facts.json" => states(doc, "states", false, true)?,
+            "gameplay-facts.json" => states(doc, "states", false)?,
             "creative-inventory.json" => self.creative_tabs(doc)?,
             "block-behaviours.json" => {
-                states(doc, "states", false, false)?;
+                states(doc, "states", false)?;
                 self.declared_solid(doc);
                 let Some(J::Arr(blocks)) = doc.at("blocks") else {
                     return Err("no blocks".into());
@@ -2216,11 +2240,11 @@ impl<'a> Plan<'a> {
                     ids.extend(new_types());
                 }
             }
-            "mob-data.json" => states(doc, "states", false, false)?,
-            "worldgen/block_flags.json" => states(doc, "", false, false)?,
+            "mob-data.json" => states(doc, "states", false)?,
+            "worldgen/block_flags.json" => states(doc, "", false)?,
             "worldgen/blocks/structure-blocks.json" => {
                 for key in ["rotate", "mirror", "full_block"] {
-                    states(doc, key, true, false)?;
+                    states(doc, key, true)?;
                 }
                 let added: usize = self
                     .blocks

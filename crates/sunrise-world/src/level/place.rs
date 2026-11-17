@@ -335,7 +335,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             Some(self.b.table.set_bool(
                 placed,
                 self.b.props.waterlogged,
-                self.b.fluid(self.state(ctx.pos)).kind() == crate::fluid::FluidKind::Water,
+                fluid.kind() == crate::fluid::FluidKind::Water,
             ))
         } else {
             Some(placed)
