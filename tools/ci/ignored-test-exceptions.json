@@ -1070,5 +1070,21 @@
     "path": "crates/sunrise-mod-wasm/tests/import_identity.rs",
     "reason": "needs SUNRISE_WASM_FIXTURE and SUNRISE_WASM_STD, which the wasm-mods workflow builds",
     "rationale": "Existing explicit manual runner wasm-mods.yml in tools/ci/ignored-tests/manual-sunrise-mod-wasm.txt: needs SUNRISE_WASM_FIXTURE and SUNRISE_WASM_STD, which the wasm-mods workflow builds. Not selected by daily shards."
+  },
+  {
+    "package": "sunrise-mod-wasm",
+    "target": "test:import_identity",
+    "test": "an_unrelated_host_method_added_to_the_game_refuses_nothing",
+    "path": "crates/sunrise-mod-wasm/tests/import_identity.rs",
+    "reason": "needs SUNRISE_WASM_FIXTURE and SUNRISE_WASM_STD, which the wasm-mods workflow builds",
+    "rationale": "Existing explicit manual runner wasm-mods.yml in tools/ci/ignored-tests/manual-sunrise-mod-wasm.txt: needs SUNRISE_WASM_FIXTURE and SUNRISE_WASM_STD, which the wasm-mods workflow builds. Not selected by daily shards."
+  },
+  {
+    "package": "sunrise-mod-wasm",
+    "target": "test:import_identity",
+    "test": "a_mod_built_before_the_break_is_refused_once_with_the_rebuild_text",
+    "path": "crates/sunrise-mod-wasm/tests/import_identity.rs",
+    "reason": "needs SUNRISE_WASM_OLD_FIXTURE and SUNRISE_WASM_OLD_STD: the fixture and std built by the SDK before the per-item imports",
+    "rationale": "Existing explicit manual runner by-hand in tools/ci/ignored-tests/manual-sunrise-mod-wasm.txt: needs SUNRISE_WASM_OLD_FIXTURE and SUNRISE_WASM_OLD_STD: the fixture and std built by the SDK before the per-item imports. Not selected by daily shards."
   }
 ]

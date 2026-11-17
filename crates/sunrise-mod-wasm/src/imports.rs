@@ -112,8 +112,33 @@ fn partition<'t>(
     low
 }
 
+/// What the game serves a name with, before the table's row is turned into its function.
+enum Found {
+    /// The row of the call table.
+    Call(usize),
+    Mark,
+    HostReply,
+    Release,
+    Log,
+}
+
 /// What `name`, an import of module `sunrise`, is to this game.
 pub(crate) fn resolve(name: &str) -> Result<Bound, Mismatch> {
+    resolve_in(name, &|i| CALLS[i].name, CALLS.len()).map(|found| match found {
+        Found::Call(at) => Bound::Call(CALLS[at].invoke),
+        Found::Mark => Bound::Mark,
+        Found::HostReply => Bound::HostReply,
+        Found::Release => Bound::Release,
+        Found::Log => Bound::Log,
+    })
+}
+
+/// [`resolve`] against a call table given as `len` names, sorted.
+fn resolve_in<'t>(
+    name: &str,
+    calls: &dyn Fn(usize) -> &'t str,
+    len: usize,
+) -> Result<Found, Mismatch> {
     let built = Name::parse(name).map_err(|error| Mismatch {
         item: shown(name),
         why: Why::Malformed(error.to_string()),
@@ -137,14 +162,14 @@ pub(crate) fn resolve(name: &str) -> Result<Bound, Mismatch> {
     match built.kind {
         Kind::Protocol => {
             let expected = protocol_name(&built.path, SHARED_PROTOCOL);
-            let bound = match built.path.as_str() {
-                "host_reply" => Bound::HostReply,
-                "release" => Bound::Release,
-                "log" => Bound::Log,
+            let found = match built.path.as_str() {
+                "host_reply" => Found::HostReply,
+                "release" => Found::Release,
+                "log" => Found::Log,
                 _ => return Err(missing()),
             };
             if expected.text() == name {
-                Ok(bound)
+                Ok(found)
             } else {
                 Err(Mismatch {
                     item: built.item(),
@@ -157,9 +182,9 @@ pub(crate) fn resolve(name: &str) -> Result<Bound, Mismatch> {
                 })
             }
         }
-        Kind::Call => match find(|i| CALLS[i].name, CALLS.len(), Kind::Call, &built.path) {
-            Some(at) if CALLS[at].name == name => Ok(Bound::Call(CALLS[at].invoke)),
-            Some(at) => Err(changed(CALLS[at].name)),
+        Kind::Call => match find(calls, len, Kind::Call, &built.path) {
+            Some(at) if calls(at) == name => Ok(Found::Call(at)),
+            Some(at) => Err(changed(calls(at))),
             None => Err(missing()),
         },
         Kind::Hook | Kind::Part => {
@@ -169,7 +194,7 @@ pub(crate) fn resolve(name: &str) -> Result<Bound, Mismatch> {
                 built.kind,
                 &built.path,
             ) {
-                Some(at) if EXPORT_CALLS[at] == name => Ok(Bound::Mark),
+                Some(at) if EXPORT_CALLS[at] == name => Ok(Found::Mark),
                 Some(at) => Err(changed(EXPORT_CALLS[at])),
                 None => Err(missing()),
             }
@@ -177,12 +202,31 @@ pub(crate) fn resolve(name: &str) -> Result<Bound, Mismatch> {
         Kind::Point => {
             let points = mod_points::POINT_CALLS;
             match find(|i| points[i], points.len(), Kind::Point, &built.path) {
-                Some(at) if points[at] == name => Ok(Bound::Mark),
+                Some(at) if points[at] == name => Ok(Found::Mark),
                 Some(at) => Err(changed(points[at])),
                 None => Err(missing()),
             }
         }
     }
+}
+
+/// The mismatches of a module's imports against this game's table with one more call in it: a
+/// method added to the API since the mod was built. A mod that uses none of it has none.
+#[cfg(feature = "runtime-fixture")]
+pub(crate) fn mismatches_with_added_call(
+    module: &[u8],
+    added: &str,
+) -> Result<Vec<Mismatch>, String> {
+    let mut table: Vec<&str> = CALLS.iter().map(|call| call.name).collect();
+    table.push(added);
+    table.sort_unstable();
+    let mut found = Vec::new();
+    for name in sunrise_imports(module)? {
+        if let Err(mismatch) = resolve_in(&name, &|i| table[i], table.len()) {
+            found.push(mismatch);
+        }
+    }
+    Ok(found)
 }
 
 /// A name for a message: bounded, whatever the module wrote.

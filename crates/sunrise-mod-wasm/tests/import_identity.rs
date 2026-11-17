@@ -77,3 +77,56 @@ fn a_changed_call_the_fixture_uses_refuses_it_by_name() {
         }
     })
 }
+
+/// A mod built before a method was added to the API loads on the game that has it: the table is
+/// searched by name, so an entry no import names changes nothing for the mod.
+#[test]
+#[ignore = "needs SUNRISE_WASM_FIXTURE and SUNRISE_WASM_STD, which the wasm-mods workflow builds"]
+fn an_unrelated_host_method_added_to_the_game_refuses_nothing() {
+    let (package, _) = fixture();
+    let imports_before = sunrise_mod_wasm::fixture::mismatches_with_added_call(
+        &package.module,
+        "call:Host::a_method_added_after_this_mod_was_built#00112233445566778899aabbccddeeff",
+    )
+    .unwrap();
+    assert!(imports_before.is_empty(), "{imports_before:?}");
+    // The same table with a changed method the mod uses is refused, so the check above bites.
+    let (module, _) = changed(&package.module, b"call:");
+    let refused = sunrise_mod_wasm::fixture::mismatches_with_added_call(
+        &module,
+        "call:Host::a_method_added_after_this_mod_was_built#00112233445566778899aabbccddeeff",
+    )
+    .unwrap();
+    assert_eq!(refused.len(), 1, "{refused:?}");
+}
+
+/// A mod built before this change, by the SDK of the base commit 36839e7ce7d (the one numbered
+/// `host` import and the whole-API layout export), is refused once, with the rebuild text.
+#[test]
+#[ignore = "needs SUNRISE_WASM_OLD_FIXTURE and SUNRISE_WASM_OLD_STD: the fixture and std built by the SDK before the per-item imports"]
+fn a_mod_built_before_the_break_is_refused_once_with_the_rebuild_text() {
+    test_stack::on_guest_stack(|| {
+        mod_api::__private::initialize().unwrap();
+        let (Ok(old), Ok(std)) = (
+            std::env::var("SUNRISE_WASM_OLD_FIXTURE"),
+            std::env::var("SUNRISE_WASM_OLD_STD"),
+        ) else {
+            panic!("SUNRISE_WASM_OLD_FIXTURE and SUNRISE_WASM_OLD_STD must be set");
+        };
+        let path = std::path::Path::new(&old);
+        let mut package = WasmPackage {
+            manifest: Package::read(path).unwrap().manifest,
+            module: Package::read_wasm(path).unwrap(),
+        };
+        package.manifest.inject.clear();
+        sunrise_mod_wasm::set_game_build("0123abcd");
+        let loaded = load(&std::fs::read(std).unwrap(), vec![package]);
+        assert!(loaded.mods.is_empty());
+        assert_eq!(loaded.refused.len(), 1, "{:?}", loaded.refused);
+        let reason = loaded.refused[0].1.to_string();
+        assert!(
+            reason.starts_with("built for an older Sunrise, rebuild with SDK sdk-0123abcd: "),
+            "{reason}"
+        );
+    })
+}
