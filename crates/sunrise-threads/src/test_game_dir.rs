@@ -8,8 +8,9 @@
 //! working directory into `sunrise-client-test-game-dirs/<pid>` beside the binary, so `cargo clean`
 //! removes it, and a later run drops the ones a day old.
 //!
-//! The hook acts only when the process was started in its package's folder, as cargo does: a child a
-//! test starts in a folder of its own, or a binary run by hand from elsewhere, keeps its directory.
+//! The hook acts only in a cargo test binary (its executable sits in a `deps` folder) that was started
+//! in its package's folder, as cargo does: an example or a binary linked with the same feature, a child
+//! a test starts in a folder of its own, or a binary run by hand from elsewhere, keeps its directory.
 //! A relative `SUNRISE_TEST_RESOURCES` is made absolute first. Production never links this module.
 
 use std::path::PathBuf;
@@ -40,7 +41,19 @@ extern "C" fn enter() {
     }
 }
 
+/// Whether `exe` is a cargo test harness binary: those, and only those, are built into `deps`
+/// (examples go to `examples`, the package's own binaries beside `deps`).
+fn is_test_binary(exe: &std::path::Path) -> bool {
+    exe.parent()
+        .and_then(|folder| folder.file_name())
+        .is_some_and(|name| name == "deps")
+}
+
 fn move_into_own_folder() -> std::io::Result<()> {
+    let exe = std::env::current_exe()?;
+    if !is_test_binary(&exe) {
+        return Ok(());
+    }
     let cwd = std::env::current_dir()?;
     let Some(manifest) = std::env::var_os("CARGO_MANIFEST_DIR") else {
         return Ok(());
@@ -55,7 +68,7 @@ fn move_into_own_folder() -> std::io::Result<()> {
             unsafe { std::env::set_var("SUNRISE_TEST_RESOURCES", cwd.join(resources)) };
         }
     }
-    let parent = std::env::current_exe()?.with_file_name("sunrise-client-test-game-dirs");
+    let parent = exe.with_file_name("sunrise-client-test-game-dirs");
     let day_ago = SystemTime::now() - Duration::from_secs(24 * 60 * 60);
     for old in std::fs::read_dir(&parent).into_iter().flatten().flatten() {
         if old
@@ -70,4 +83,24 @@ fn move_into_own_folder() -> std::io::Result<()> {
     let _ = std::fs::remove_dir_all(&folder);
     std::fs::create_dir_all(&folder)?;
     std::env::set_current_dir(folder)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_test_binary;
+    use std::path::Path;
+
+    #[test]
+    fn only_a_binary_in_a_deps_folder_is_a_test_binary() {
+        assert!(is_test_binary(Path::new(
+            "/work/target/debug/deps/sunrise_client-79655a9fd47b6a15"
+        )));
+        assert!(!is_test_binary(Path::new(
+            "/work/target/debug/examples/old_world_fixture"
+        )));
+        assert!(!is_test_binary(Path::new(
+            "/work/target/debug/sunrise-client"
+        )));
+        assert!(!is_test_binary(Path::new("sunrise-client")));
+    }
 }
