@@ -4,4 +4,4 @@ sunrise-launcher backend::tests::prepared_versions_get_the_extras_their_own_prep
 sunrise-launcher net::tests::a_request_goes_through_a_socks_proxy lib daily network
 sunrise-launcher porter::tests::a_porter_run_logs_its_lines_keeps_its_status_and_says_what_failed lib daily child-process
 sunrise-launcher preparer::tests::a_preparers_log_lines_reach_the_log_and_an_old_one_answers_nothing lib daily child-process
-sunrise-launcher process::owned::tests::quitting_stops_the_children_still_running lib daily child-process
+sunrise-launcher process::owned::tests::quitting_stops_the_children_and_groups_still_running lib daily child-process
