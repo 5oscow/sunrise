@@ -157,6 +157,13 @@ struct Placement {
     prepared: sunrise_client_render::moving_colliders::Prepared,
 }
 
+/// The recent frames of each level's colliders, on a server, for the move check of a player a
+/// collider carries.
+#[derive(Default)]
+pub(in crate::game) struct Histories(
+    HashMap<Dim, std::rc::Rc<std::cell::RefCell<sunrise_client_render::moving_colliders::History>>>,
+);
+
 /// The placements of each level's colliders, kept from tick to tick.
 #[derive(Default)]
 pub(in crate::game) struct Placements(HashMap<Dim, Placement>);
@@ -450,6 +457,35 @@ impl Game<'_> {
             },
         );
         prepared
+    }
+
+    /// The history the level keeps of its colliders, if it has any.
+    #[cfg(test)]
+    pub(in crate::game) fn level_collider_history(
+        &self,
+    ) -> Option<std::rc::Rc<std::cell::RefCell<sunrise_client_render::moving_colliders::History>>>
+    {
+        self.collider_histories.0.get(&self.dim).cloned()
+    }
+
+    /// Records the level's colliders as its tick begins into the level's history and answers it,
+    /// for a server; a client keeps none. A level with no collider keeps nothing.
+    pub(in crate::game) fn collider_history(
+        &mut self,
+        placed: &sunrise_client_render::moving_colliders::Prepared,
+    ) -> Option<std::rc::Rc<std::cell::RefCell<sunrise_client_render::moving_colliders::History>>>
+    {
+        if !self.is_logical_server() {
+            return None;
+        }
+        let level = self.dim;
+        if placed.is_empty() {
+            self.collider_histories.0.remove(&level);
+            return None;
+        }
+        let history = self.collider_histories.0.entry(level).or_default().clone();
+        history.borrow_mut().record(placed);
+        Some(history)
     }
 
     /// Sends what changed this tick to the clients that track each entity and have the
