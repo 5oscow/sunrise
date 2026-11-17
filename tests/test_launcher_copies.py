@@ -35,6 +35,7 @@ SAME_BYTES = (
     ("crates/sunrise-prepare/tests/support/java_probe.rs", "../tests/support/java_probe.rs"),
     ("crates/sunrise-port-pack/src/zip_intake/source.rs", "../src/zip_intake/source.rs"),
     ("crates/sunrise-port-pack/src/zip_intake/tests.rs", "../src/zip_intake/tests.rs"),
+    ("crates/sunrise-shader-api/src/guard.rs", "shader-api/src/guard.rs"),
 )
 
 # (the game's source, the launcher's copy, the edits that turn one into the other): compared as code, ignoring
@@ -79,6 +80,12 @@ MIRRORED = (
      "052665a32cf9980ffcd1d1cb51f72a918e6613d89fb2097562afb306ca4f4fe2", "launcher/src/browser/java.rs jar_title"),
     ("crates/sunrise-port-pack/src/jar.rs", "manifest_value",
      "8eba4a800351645479e1f2fc79c727bf2e3aee7bdcc97b27a3fa249791a2b33e", "launcher/src/browser/java.rs jar_title"),
+    ("crates/sunrise-shader-api/src/check.rs", "check_stage",
+     "11a32ab40d842e8135ac55efbd0928913204f0a223e3798a99b245f8d2c345b2",
+     "launcher/crates/shader-api/src/check.rs check_stage"),
+    ("crates/sunrise-shader-api/src/check.rs", "build_stage",
+     "551276c594c3d5b3cb2a071fb6431d3296844318b2b26f3a9621bbb0feabf3dc",
+     "launcher/crates/shader-api/src/check.rs build_stage"),
 )
 
 
