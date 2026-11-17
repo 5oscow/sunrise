@@ -64,9 +64,8 @@ struct GridKey {
 pub enum ShapeChannel {
     Collision = 1,
     ContextCollision = 2,
-    Outline = 4,
-    ContextOutline = 8,
-    Interaction = 16,
+    ContextOutline = 4,
+    Interaction = 8,
 }
 #[derive(Clone, Copy)]
 struct ShapeOffset {
@@ -367,7 +366,7 @@ impl<'r> CachedCollisionRegistry<'r> {
                     .and_then(|id| offsets.get_mut(id))
                     .ok_or_else(|| invalid("shape offset state outside registry"))?;
                 if slot.is_some()
-                    || !(1..=31).contains(channels)
+                    || !(1..=15).contains(channels)
                     || !valid_offset_limits((horizontal, vertical))
                 {
                     return Err(invalid(

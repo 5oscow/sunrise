@@ -790,6 +790,17 @@ impl NewBlock<'_> {
         }
     }
 
+    /// Vanilla caches occlusion using the outline at BlockPos.ZERO, not the block-local outline.
+    fn declared_occlusion(&self, index: usize, shape: &VoxelShape) -> VoxelShape {
+        self.offset_limits[index].map_or_else(
+            || shape.clone(),
+            |limits| {
+                let [x, y, z] = sunrise_core::random::column_offset(limits, 0, 0);
+                shape.moved(Vec3::new(x, y, z))
+            },
+        )
+    }
+
     /// Template states and declared combinations in registry order.
     fn state_combinations(&self) -> impl Iterator<Item = (u32, &[(String, String)])> {
         let start = self.rename.states.start;
@@ -1703,8 +1714,10 @@ impl<'a> Plan<'a> {
                             })
                             .collect();
                         // BlockState.initCache and BlockBehaviour.getLightDampening:
-                        // the declared outline is the block's occlusion shape.
-                        let full = !shape.join_is_not_empty(&VoxelShape::block(), ShapeOp::XOR)?;
+                        // the occlusion shape uses the offset at the cache's origin.
+                        let occlusion = b.declared_occlusion(state_index, shape);
+                        let full =
+                            !occlusion.join_is_not_empty(&VoxelShape::block(), ShapeOp::XOR)?;
                         let can_occlude = matches!(row.get("can_occlude"), Some(J::Bool(true)));
                         let solid = can_occlude && full;
                         let down = match b.skylight {
@@ -2271,6 +2284,13 @@ impl<'a> Plan<'a> {
             if let Some(shapes) = shapes {
                 let mut encoded = BTreeMap::new();
                 for (offset, shape) in shapes.iter().enumerate() {
+                    let occlusion;
+                    let shape = if collision {
+                        shape
+                    } else {
+                        occlusion = block.declared_occlusion(offset, shape);
+                        &occlusion
+                    };
                     let key: Vec<_> = shape
                         .boxes()
                         .iter()
@@ -2351,18 +2371,15 @@ impl<'a> Plan<'a> {
                 {
                     channels |= 2;
                 }
-                if block.shapes.is_some() {
-                    channels |= 4;
-                }
                 if block
                     .context_shapes
                     .keys()
                     .any(|key| key.starts_with("outline_"))
                 {
-                    channels |= 8;
+                    channels |= 4;
                 }
                 if block.context_shapes.contains_key("interaction") {
-                    channels |= 16;
+                    channels |= 8;
                 }
                 if channels == 0 {
                     continue;

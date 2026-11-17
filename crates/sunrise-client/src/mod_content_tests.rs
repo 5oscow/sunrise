@@ -4271,6 +4271,50 @@ fn declared_shapes_drive_lighting_and_occlusion() {
 }
 
 #[test]
+fn declared_offset_occlusion_uses_origin_without_shifting_the_local_outline() {
+    let declaration = r#"{"template":"minecraft:test","item":false,"properties":{"offset":"XZ"},
+      "shapes":{"default":[[0,0,0,1,1,1]]}}"#;
+    let (base, mods) = block_base("offset-occlusion-origin", &[declaration]);
+    let plan = Plan::new(&base, &mods).unwrap();
+    let row = r#"{"can_occlude":true,"solid_render":true,"dampening":15}"#;
+    let mut gameplay: J = serde_json::from_str(&format!(r#"{{"states":[{row},{row}]}}"#)).unwrap();
+    plan.json("gameplay-facts.json", &mut gameplay).unwrap();
+    let Some(J::Arr(rows)) = gameplay.get("states") else {
+        panic!("states")
+    };
+    assert_eq!(rows[2].get("solid_render"), Some(&J::Bool(false)));
+    assert_eq!(rows[2].get("shape_occlusion"), Some(&J::Bool(true)));
+    assert_eq!(rows[2].get("dampening"), Some(&J::Num(0.into())));
+    assert_eq!(
+        rows[2].get("outline"),
+        Some(&J::Arr(vec![J::Arr(
+            [0., 0., 0., 1., 1., 1.].into_iter().map(J::f64).collect()
+        )]))
+    );
+    let mut occlusion = Tag::compound([
+        (
+            "states",
+            Tag::List(vec![test_state_row("x"), test_state_row("y")]),
+        ),
+        ("shapes", Tag::List(vec![])),
+        ("cached_shapes", Tag::IntArray(vec![-1, -1])),
+    ]);
+    plan.nbt(&mut occlusion);
+    plan.declared_shapes(&mut occlusion, false).unwrap();
+    let Some(Tag::List(shapes)) = occlusion.get("shapes") else {
+        panic!("shapes")
+    };
+    let Some(Tag::IntArray(mapping)) = occlusion.get("cached_shapes") else {
+        panic!("mapping")
+    };
+    let shifted = &shapes[mapping[2] as usize];
+    let offset_axis = Tag::LongArray(vec![(-0.25f64).to_bits() as i64, 0.75f64.to_bits() as i64]);
+    assert_eq!(shifted.get("x"), Some(&offset_axis));
+    assert_eq!(shifted.get("z"), Some(&offset_axis));
+    fs::remove_dir_all(base.parent().unwrap()).unwrap();
+}
+
+#[test]
 fn declared_partial_shapes_observe_waterlogging_and_template_light_overrides() {
     let declaration = r#"{"template":"minecraft:test","item":false,
       "shapes":{"default":[[0,0,0,1,0.5,1]]}}"#;
@@ -7646,7 +7690,6 @@ fn context_only_property_outline_moves_without_moving_the_fallback() {
                 .is_none()
         );
         let fallback = cached.cached_shape(state).unwrap().unwrap();
-        let fallback = cached.positioned_shape(state, ShapeChannel::Outline, pos, fallback);
         assert_eq!(
             fallback.bounds(),
             Some(Aabb::new(Vec3::ZERO, Vec3::new(1.0, 1.0, 1.0)))
@@ -7725,8 +7768,8 @@ fn declared_offsets_resolve_modes_and_publish_only_declared_shape_channels() {
                 panic!("offsets")
             };
             assert_eq!(offsets.len(), 2);
-            // Default collision and outline, plus interaction; no contextual channels were declared.
-            assert_eq!(offsets[0].get("channels"), Some(&Tag::Byte(21)));
+            // Default collision plus interaction; no contextual channels were declared.
+            assert_eq!(offsets[0].get("channels"), Some(&Tag::Byte(9)));
         } else {
             assert!(tag.get("shape_offsets").is_none());
         }

@@ -153,14 +153,10 @@ impl StateFacts {
     /// `BlockState.getOffset(pos)`: the column's jitter, zero without an
     /// offset function.
     pub fn offset_at(&self, x: i32, z: i32) -> [f64; 3] {
-        self.max_offset()
-            .map_or([0.0; 3], |max| column_offset(max, x, z))
+        self.max_offset().map_or([0.0; 3], |max| {
+            sunrise_core::random::column_offset(max, x, z)
+        })
     }
-}
-/// The `OffsetType.XZ`/`XYZ` jitter of column (x, z) from `Mth.getSeed(x, 0, z)`,
-/// for a block with `max` = (max horizontal, max vertical) offset.
-pub fn column_offset((horizontal, vertical): (f32, f32), x: i32, z: i32) -> [f64; 3] {
-    sunrise_core::random::column_offset((horizontal, vertical), x, z)
 }
 /// The prepared vanilla rows predate explicit offset limits; preserve their class defaults.
 pub fn inherited_offset_limits(name: &str, speleothem: bool) -> (f32, f32) {

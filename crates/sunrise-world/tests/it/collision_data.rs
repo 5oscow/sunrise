@@ -548,7 +548,7 @@ fn declared_shape_offsets_match_vanilla_xz_xyz_and_clamp_without_moving_the_cach
             "shape_offsets".into(),
             Tag::List(vec![Tag::compound([
                 ("state", Tag::Int(1)),
-                ("channels", Tag::Byte(31)),
+                ("channels", Tag::Byte(15)),
                 ("horizontal", Tag::Float(limits.0.to_bits())),
                 ("vertical", Tag::Float(limits.1.to_bits())),
             ])]),
@@ -559,7 +559,6 @@ fn declared_shape_offsets_match_vanilla_xz_xyz_and_clamp_without_moving_the_cach
         for channel in [
             ShapeChannel::Collision,
             ShapeChannel::ContextCollision,
-            ShapeChannel::Outline,
             ShapeChannel::ContextOutline,
             ShapeChannel::Interaction,
         ] {
