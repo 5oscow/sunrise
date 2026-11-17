@@ -566,12 +566,16 @@ class ReleaseTrainTests(unittest.TestCase):
                          (False, [("gh", "run", "rerun", "7", "--failed", "--repo", train.REPO)]))
         # A dry run or a by-hand check only reads.
         self.assertEqual(gate([cancelled], [False], publishing=False), (False, []))
-        # Only release.yml's publishing runs set GATE_RERUN, with the right to start the run again.
+        # Only publishing runs (release.yml's decide, nightly-build.yml's pick) set GATE_RERUN, with the right to start the run again.
         sys.path.insert(0, str(train.ROOT / "tools/ci/vendor/pyyaml-6.0.3.zip"))
         import yaml
         decide = yaml.safe_load((train.ROOT / ".github/workflows/release.yml").read_text())["jobs"]["decide"]
         self.assertEqual(decide["permissions"]["actions"], "write")
         self.assertEqual(decide["steps"][-1]["env"]["GATE_RERUN"], "${{ steps.mode.outputs.dry_run == 'false' && '1' || '' }}")
+        pick = yaml.safe_load((train.ROOT / ".github/workflows/nightly-build.yml").read_text())["jobs"]["pick"]
+        self.assertEqual(pick["permissions"]["actions"], "write")
+        step = next(step for step in pick["steps"] if step.get("id") == "pick")
+        self.assertEqual(step["env"]["GATE_RERUN"], "${{ steps.mode.outputs.dry_run != 'true' && '1' || '' }}")
 
     def test_a_snapshot_is_tagged_by_kind_date_and_commit(self):
         sha = "0c02067" + "a" * 33

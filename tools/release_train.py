@@ -13,7 +13,7 @@ On the fork (CI tiers, owner 2026-11-13) `--channel` names the kind of build: `n
 refuses any other --head (an older commit had no daily run of its own, and no SDK); `snapshot` takes main's head (or
 a --head on main) and refuses a commit whose gate jobs (dyna-checks' main-push lint, verify, verify-static, launcher)
 did not all pass (pending is not passed). The next push cancels a main push run (dyna-ci.yml), so a publishing run
-(GATE_RERUN=1, release.yml's decide) waits for the commit's run and starts it again once when it was cancelled, in a
+(GATE_RERUN=1: release.yml's decide and nightly-build.yml's pick, real runs) waits for the commit's run and starts it again once when it was cancelled, in a
 group no push cancels (gate_again); otherwise it always builds, as snapshot-<date>-<short> (no batch rules,
 cap, pause or release-blocker: a snapshot is for testing main, never for players).
 
