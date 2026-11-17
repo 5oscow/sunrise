@@ -4,6 +4,9 @@ mod book_screen;
 mod item_fallthrough;
 #[path = "shared/loot.rs"]
 mod loot;
+#[cfg(test)]
+#[path = "shared/slot_tooltip_tests.rs"]
+mod slot_tooltip_tests;
 
 use super::screen_build::ObservedScreen;
 use crate::game::api_values::{TryIntoApi, TryIntoEngine};
@@ -3252,16 +3255,30 @@ impl Game<'_> {
         if slot.is_some_and(|i| self.slot_view(i).is_some()) {
             return;
         }
-        let Some((block, data, at)) = self.native_screen_at() else {
+        let mut lines = Vec::new();
+        self.native_screen_tooltip_lines(batch, slot, &mut lines);
+        self.draw_tooltip_lines(batch, &lines, self.cursor.0, self.cursor.1);
+    }
+    /// The screen-specific line override, shared by filled-slot and empty-space tooltips.
+    /// Item images and component gathering remain on the stack's normal drawing path.
+    pub(super) fn native_screen_tooltip_lines(
+        &self,
+        batch: &HudBatch,
+        slot: Option<usize>,
+        lines: &mut Vec<(sunrise_client::text::Text, u32)>,
+    ) {
+        if !mod_api::__private::has_scoped_hook(mod_api::HookId::ScreenTooltip) {
+            return;
+        }
+        let Some(screen) = self.shown_native_screen() else {
             return;
         };
-        let mut lines = Vec::new();
-        self.native_screen_tooltip(&block, &data, at, &mut lines);
-        let lines: Vec<(sunrise_client::text::Text, u32)> = lines
-            .into_iter()
-            .map(|l| (sunrise_client::text::Text::literal(l), u32::MAX))
-            .collect();
-        self.draw_tooltip_lines(batch, &lines, self.cursor.0, self.cursor.1);
+        let menu_slot = slot.and_then(|slot| {
+            Self::menu_slot_index(self.native_screen_menu()?, slot).map(|slot| slot as u32)
+        });
+        let (ox, oy) = self.inventory_origin(batch);
+        let at = [self.cursor.0 - ox, self.cursor.1 - oy];
+        self.native_screen_tooltip(&screen.block, &screen.data, at, menu_slot, lines);
     }
     /// Options > Mods' rows for loaded code mods, after the content-only rows.
     pub(super) fn list_native_mods(&mut self) {
