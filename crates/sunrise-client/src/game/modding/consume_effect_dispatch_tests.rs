@@ -18,6 +18,13 @@ impl Hooks for First {
         }
         self.0.lock().unwrap().push("first");
         let source = host.entity(21).unwrap();
+        assert_eq!(event.user, source);
+        assert_eq!(event.stack.count(), 1);
+        assert_eq!(
+            event.stack.item(),
+            host.item_key(&mod_api::Identifier::new("minecraft:pufferfish").unwrap())
+                .unwrap()
+        );
         let living = host.living(source).unwrap();
         let same = ItemStack::new("minecraft:pufferfish", 1)
             .try_into_api()

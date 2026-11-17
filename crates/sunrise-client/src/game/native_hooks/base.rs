@@ -1024,18 +1024,16 @@ impl Game<'_> {
     ) {
         *energy = mod_api::__private::parts_installation::block_energy(block);
     }
-    /// A consumable's effect of a mod's own kind: the item's `on_consume_effects`
-    /// entry is of a type in a namespace of its own, and the loader kept it
-    /// for this call. The kind and the definition payload as a borrowed `Tag` are here; the acting
-    /// player is the one consuming, and the game's own effects,
-    /// sounds, teleports and drops are open. An unclaimed kind does
-    /// nothing.
+    /// A custom entry of the effective consumable, with its pre-shrink stack
+    /// and the living entity consuming it. Unclaimed kinds do nothing.
     pub(in crate::game) fn native_consume_effect(
         &mut self,
         kind: &str,
         data: &sunrise_core::nbt::Tag,
+        stack: &ItemStack,
+        user: mod_api::EntityRef,
     ) {
-        self.fire_consume_effect(kind, data);
+        self.fire_consume_effect(kind, data, stack, user);
     }
     /// What clients get of the block entity at `pos` when its `id` is
     /// yours (`BlockEntity.getUpdateTag`): set `tag` to it, read from

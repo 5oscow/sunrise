@@ -210,7 +210,10 @@ impl Game<'_> {
                     return Ok(false);
                 }
                 for effect in &consumable.effects {
-                    if let ConsumeEffect::PlaySound(_) = effect {
+                    if matches!(
+                        effect,
+                        ConsumeEffect::PlaySound(_) | ConsumeEffect::Native { .. }
+                    ) {
                         // The level-style sound uses the user's block center and
                         // category, not Entity.playSound's silent guard or RNG.
                         if game

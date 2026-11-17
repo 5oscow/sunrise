@@ -811,7 +811,13 @@ impl Game<'_> {
                 true
             }
             ConsumeEffect::Native { kind, data } => {
-                consume_effect_dispatch::dispatch(kind, || self.native_consume_effect(kind, data))
+                let user = match mob {
+                    Some(living) => living.entity(),
+                    None => self.native_acting_player()?.entity(),
+                };
+                consume_effect_dispatch::dispatch(kind, || {
+                    self.native_consume_effect(kind, data, consumed, user)
+                })
             }
         })
     }
