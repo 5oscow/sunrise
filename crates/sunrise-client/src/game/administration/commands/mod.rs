@@ -2445,7 +2445,8 @@ impl Game<'_> {
                     // counter, and the crystal is shown with its base.
                     self.next_entity += 1;
                     let at = Vec3::new(pos[0], pos[1], pos[2]);
-                    let drawn = self.world.random.next_int_bound(100_000).unwrap_or(0);
+                    let (drawn, uuid) = super::dragon::Crystal::own_draws();
+                    self.persist.uuids.insert(self.next_entity, uuid);
                     let time = super::dragon::Crystal::start_time(at, drawn, self.clock.still());
                     let crystal = super::dragon::Crystal::new(self.next_entity, at, true, time);
                     self.crystals.push(crystal);

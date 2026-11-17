@@ -119,13 +119,18 @@ def creeper_cloud():
 def end_crystal():
     """`EndCrystal.hurtServer`: any damage removes the crystal with a radius 6 blast."""
     s = Scene(2, 7)
-    ops = s.enter() + s.cube('dirt') + setup(f'/setblock {s.cx} {s.cy} {s.cz} air', f'/setblock {s.cx} {s.cy + 1} {s.cz} air')
-    # Synced after the summon, so this compares the blast alone; the damage comes while ticks are frozen, with
-    # nothing between the sync and the blast.
-    ops += [cmd(f'/summon end_crystal {s.cx}.5 {s.cy} {s.cz}.5 {{ShowBottom:0b}}'), s.sync(0),
-            cmd(f'/damage @e[type=end_crystal,{s.box()},limit=1] 1'),
-            *setup('/tick unfreeze'), {'op': 'tick', 'n': 2}, *setup('/tick freeze')]
-    ops += [cmd(f'/execute if entity @e[type=end_crystal,{s.box()}]')] + s.air() + s.items('dirt')
+    ops = s.enter()
+    summon = cmd(f'/summon end_crystal {s.cx}.5 {s.cy} {s.cz}.5 {{ShowBottom:0b}}')
+    # Case 0 syncs before the summon: a new crystal draws from its own random only (`EndCrystal.<init>`), so the
+    # level's random, read by `/random value` and then by the blast's rays, is where the sync left it. Case 1 syncs
+    # after the summon and compares the blast alone. The damage comes while ticks are frozen, with nothing between
+    # the sync and the blast.
+    for case, steps in enumerate([[s.sync(0), summon, cmd('/random value 1..1000000')], [summon, s.sync(1)]]):
+        ops += s.clear() + s.cube('dirt') + setup(f'/setblock {s.cx} {s.cy} {s.cz} air',
+                                                  f'/setblock {s.cx} {s.cy + 1} {s.cz} air')
+        ops += [*steps, cmd(f'/damage @e[type=end_crystal,{s.box()},limit=1] 1'),
+                *setup('/tick unfreeze'), {'op': 'tick', 'n': 2}, *setup('/tick freeze')]
+        ops += [cmd(f'/execute if entity @e[type=end_crystal,{s.box()}]')] + s.air() + s.items('dirt')
     return [('explosion end crystal', ops + s.leave())]
 
 
