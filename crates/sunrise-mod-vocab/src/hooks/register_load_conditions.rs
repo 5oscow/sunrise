@@ -8,7 +8,6 @@ pub trait Hooks {
     /// whoever registered it; an unknown condition there refuses data reload.
     /// Foreign unknown ids omit their file with one ERROR-level log entry,
     /// even inside `or(true, unknown)`; every combinator branch is visited.
-    /// Named injections request `hook_version = 2`.
     #[hook(
         side = "server",
         version = 2,
