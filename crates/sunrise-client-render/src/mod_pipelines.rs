@@ -91,11 +91,16 @@ impl Pipelines {
             .map(|pipeline| {
                 let file = fragment_file(&pipeline.fragment);
                 // A refusal reads `<file>[:<line>:<column>]: <message>`, the shader's own
-                // `Problem`s printed as the pack checker prints them.
+                // `Problem`s printed as the pack checker prints them. The checks run contained:
+                // a panic in naga on a mod's shader refuses the pipeline, with no crash report.
                 let loaded = read(&file)
                     .map_err(|cause| format!("{file}: {cause}"))
                     .and_then(|text| {
-                        compose_with(&file, &text, pipeline.texture.is_some()).map_err(|problems| {
+                        crate::crash::contain(|| {
+                            compose_with(&file, &text, pipeline.texture.is_some())
+                        })
+                        .map_err(|panic| format!("{file}: checking it panicked: {panic}"))?
+                        .map_err(|problems| {
                             problems
                                 .iter()
                                 .map(ToString::to_string)
