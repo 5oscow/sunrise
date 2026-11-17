@@ -101,7 +101,7 @@ pub use entity_batch::{
     WATER_MASK_OVERLAY, WORLD_TEXT_OVERLAY, WORLD_TEXT_POLYGON_OFFSET_OVERLAY, is_native_terrain,
     mark_oit,
 };
-use external::{shadow_box, shadow_runs};
+use external::{ExternalPipeline, shadow_box, shadow_runs};
 pub use frustum::{Cull, Frusta, JoinedFrusta, ShadowCull};
 use frustum::{block_entities_within_reach, frustum, shadow_casters, taa_frustum};
 use section_fade::{
@@ -4108,10 +4108,10 @@ impl Renderer {
         // here.
         self.land_frame();
         if let Some(pipeline) = &mut self.external {
-            pipeline.reset_history();
+            pipeline.reset_history(&self.device);
         }
         if let Some((_, Some(post))) = &mut self.pack_post {
-            post.reset_history(&self.device);
+            ExternalPipeline::reset_history(post, &self.device);
         }
         if let Some(native) = &mut self.native {
             native.frame.reset_history();
@@ -4144,7 +4144,7 @@ impl Renderer {
             return Err("the graphics device was lost".into());
         }
         if let Some((_, Some(post))) = &mut self.pack_post {
-            post.take_center_depth(&self.device)?;
+            ExternalPipeline::take_center_depth(post, &self.device)?;
         }
         Ok(())
     }

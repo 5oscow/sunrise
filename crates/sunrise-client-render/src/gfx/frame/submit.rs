@@ -1,3 +1,4 @@
+use super::super::external::ExternalPipeline;
 use super::super::*;
 
 pub(in super::super) struct SubmitFrameArgs<'a, 'b> {
@@ -126,7 +127,7 @@ impl Renderer {
             // depth are read back as soon as the frame is submitted, as here.
             let culling = self.after_submit();
             let center = match &mut self.pack_post {
-                Some((_, Some(post))) => post.submitted(),
+                Some((_, Some(post))) => ExternalPipeline::submitted(post),
                 _ => None,
             };
             let after = (culling.is_some() || center.is_some()).then(|| {
@@ -180,7 +181,7 @@ impl Renderer {
             timer.submitted(&self.queue);
         }
         if let Some((_, Some(post))) = &mut self.pack_post
-            && let Some(read) = post.submitted()
+            && let Some(read) = ExternalPipeline::submitted(post)
         {
             read();
         }

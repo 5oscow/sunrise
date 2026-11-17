@@ -8,6 +8,7 @@ use super::external::{
     ShadowView,
 };
 use super::pack_post::{PackPost, TerrainPage};
+use super::pack_timing::PassTiming as PackTiming;
 use super::pack_weather::PackWeather;
 
 /// A `shaders/` pack with what its frames keep beside the program: rain and snow, and the
@@ -157,5 +158,21 @@ impl ExternalPipeline for PackPipeline {
         // Keep the capacity, not the buffers: a page the arena frees must not stay alive here
         // until the next shader-pack frame (or forever once the pack is off).
         self.pages.clear();
+    }
+
+    fn reset_history(&mut self, device: &wgpu::Device) {
+        PackPost::reset_history(&mut self.post, device);
+    }
+
+    fn submitted(&mut self) -> Option<Box<dyn FnOnce() + Send>> {
+        PackPost::submitted(&mut self.post).map(|f| Box::new(f) as Box<dyn FnOnce() + Send>)
+    }
+
+    fn take_center_depth(&mut self, device: &wgpu::Device) -> Result<(), String> {
+        PackPost::take_center_depth(&mut self.post, device)
+    }
+
+    fn timing(&mut self) -> Option<&mut Option<PackTiming>> {
+        Some(&mut self.post.timing)
     }
 }

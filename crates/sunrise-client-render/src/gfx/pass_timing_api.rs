@@ -1,4 +1,5 @@
 //! The world pass after culling, and the renderer's GPU pass timing switches and readings.
+use super::external::ExternalPipeline;
 use super::{Renderer, native_pack, pack_timing};
 
 pub(super) fn world_pass_after_culling<'e>(
@@ -97,7 +98,7 @@ impl Renderer {
         native: &'a mut Option<native_pack::NativePack>,
     ) -> Option<&'a mut Option<pack_timing::PassTiming>> {
         match (pack, native) {
-            (Some((_, Some(post))), _) => Some(&mut post.timing),
+            (Some((_, Some(post))), _) => ExternalPipeline::timing(post),
             (_, Some(native)) => Some(&mut native.timing),
             _ => None,
         }

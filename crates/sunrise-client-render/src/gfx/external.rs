@@ -193,7 +193,21 @@ pub trait ExternalPipeline: Send {
     /// The window's drawable size changed.
     fn resize(&mut self, _size: [u32; 2]) {}
     /// Forget what was kept from earlier frames: the next is drawn as a fresh pipeline's first.
-    fn reset_history(&mut self) {}
+    fn reset_history(&mut self, _device: &wgpu::Device) {}
+    /// Right after the frame's submission: what to run once the GPU has it (a readback of what
+    /// the frame copied), if anything.
+    fn submitted(&mut self) -> Option<Box<dyn FnOnce() + Send>> {
+        None
+    }
+    /// The depth under the screen's centre, copied by a finished frame, taken after the GPU
+    /// waited for it. Errors when the pipeline copied none.
+    fn take_center_depth(&mut self, _device: &wgpu::Device) -> Result<(), String> {
+        Err("the shader pack copied no centre depth".into())
+    }
+    /// The pipeline's pass timer, while it has one slot to time into (`Renderer::set_pass_timing`).
+    fn timing(&mut self) -> Option<&mut Option<super::pack_timing::PassTiming>> {
+        None
+    }
 }
 
 /// What the shadow camera sees of the terrain, for the game's draw lists: its view and
