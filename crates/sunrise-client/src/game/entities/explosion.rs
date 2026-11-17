@@ -1698,7 +1698,7 @@ impl Game<'_> {
                 p.position.z - center[2],
             ];
             let distance = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
-            self.input_feedback(sunrise_client::input_source::Feedback::Explosion {
+            self.input_feedback(sunrise_hooks::input::Feedback::Explosion {
                 distance,
                 radius,
             });

@@ -315,7 +315,10 @@ impl Game<'_> {
         if self.pending_save.is_some() {
             return;
         }
-        sunrise_client::spans::time("pads", || self.poll_pads(event_loop));
+        sunrise_client::spans::time("pads", || {
+            self.input_frame();
+            self.poll_pads(event_loop)
+        });
         self.settle_after_run(event_loop);
         self.pause_if_inactive();
         if let Some(limit) = self.options.time_limit()

@@ -4559,6 +4559,7 @@ dependencies = [
  "png",
  "sunrise-client-core",
  "sunrise-engine-slots",
+ "sunrise-hooks",
  "sunrise-mod-api-macros",
  "sunrise-theme",
  "winit",

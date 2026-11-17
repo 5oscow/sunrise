@@ -1198,6 +1198,9 @@ struct Game<'a> {
     last_input: Instant,
     /// Controllers (Sunrise's own).
     pad: pad::Pads,
+    /// The input source a crate above the engine offered, if one did (`sunrise_hooks::input`):
+    /// it answers in the place of `pad` while it is set.
+    input_source: Option<Box<dyn sunrise_hooks::input::InputSource>>,
     frames: u64,
     /// The glint clock and options, read once per frame (game/interface/item_draw.rs).
     glint_frame: sunrise_client::item_render::GlintFrame,
@@ -4111,7 +4114,7 @@ impl Game<'_> {
         if canceled {
             return Ok(false);
         }
-        self.input_feedback(sunrise_client::input_source::Feedback::BlockBroken);
+        self.input_feedback(sunrise_hooks::input::Feedback::BlockBroken);
         let broken = state;
         let facts = self.res.facts().get(state).clone();
         let held = self.held().cloned();
@@ -10840,6 +10843,7 @@ impl<'a> Game<'a> {
             previous: now,
             last_input: now,
             pad: Default::default(),
+            input_source: sunrise_hooks::engine::input_source(),
             frames: 0,
             glint_frame: Default::default(),
             kept_block_entities: Default::default(),

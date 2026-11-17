@@ -18,6 +18,7 @@
 #![forbid(unsafe_code)]
 
 pub mod hud;
+pub mod input;
 pub mod lang;
 pub mod pages;
 pub mod perf;
@@ -108,6 +109,13 @@ pub trait Hooks: Sync {
     /// used; with none, the screen says how to prepare the files and opens no page. Asked once,
     /// before that screen's window opens.
     fn get_the_game(&self) -> Option<GetTheGame> {
+        None
+    }
+
+    /// The input source this crate offers a game ([`input`]): called once for each `Game` as it
+    /// is made (each splitscreen player's, with its [`seat`] set), never per frame. The first
+    /// hook that offers one is used; with none the game has no source.
+    fn input_source(&self) -> Option<Box<dyn input::InputSource>> {
         None
     }
 }
@@ -374,6 +382,11 @@ pub mod engine {
     pub fn get_the_game() -> Option<GetTheGame> {
         all().iter().find_map(|hooks| hooks.get_the_game())
     }
+
+    /// [`Hooks::input_source`]: the first registered hook's.
+    pub fn input_source() -> Option<Box<dyn input::InputSource>> {
+        all().iter().find_map(|hooks| hooks.input_source())
+    }
 }
 
 #[cfg(test)]
@@ -401,6 +414,9 @@ mod tests {
         }
         fn activity(&self, now: Activity) {
             self.0.lock().unwrap().push(format!("{now:?}"));
+        }
+        fn input_source(&self) -> Option<Box<dyn input::InputSource>> {
+            Some(Box::new(Still))
         }
         fn get_the_game(&self) -> Option<GetTheGame> {
             Some(GetTheGame {
@@ -460,6 +476,26 @@ mod tests {
 
     #[derive(Debug)]
     struct Still;
+    impl input::InputSource for Still {
+        fn frame(&mut self, _: &mut dyn input::InputHost) {}
+        fn move_vector(&self, _: &dyn input::InputHost) -> Option<[f32; 2]> {
+            Some([0.0, 1.0])
+        }
+        fn holds(&self, mapping: &str) -> bool {
+            mapping == "key.use"
+        }
+        fn look(&mut self, _: &mut dyn input::InputHost, _: f32) {}
+        fn keyboard_used(&mut self) {}
+        fn made_pointer_event(&self) -> bool {
+            false
+        }
+        fn player_replaced(&mut self, _: &mut dyn input::InputHost) {}
+        fn takes_stack_drop(&mut self) -> bool {
+            false
+        }
+        fn hud_begin(&mut self) {}
+        fn feedback(&mut self, _: input::Feedback) {}
+    }
     impl players::BodyPose for Still {
         fn pose(&self, _: f32, _: &[[f32; 9]; 6], _: &mut [[f32; 9]; 6]) -> bool {
             false
@@ -600,6 +636,8 @@ mod tests {
         }
         engine::shutdown();
         assert!(engine::any());
+        let source = engine::input_source().unwrap();
+        assert!(source.holds("key.use") && !source.holds("key.jump"));
         assert_eq!(
             engine::get_the_game().map(|g| g.address),
             Some("https://example.org")
