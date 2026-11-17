@@ -20,7 +20,7 @@ fn signature(
         query.is_descending(),
         query.is_placement(),
         query.always_collide_with_fluid(),
-        query.is_holding_item("minecraft:air"),
+        query.is_holding_item("minecraft:stick"),
     )
 }
 
@@ -68,6 +68,7 @@ fn a_client_and_a_server_that_disagree_about_a_parts_state_get_a_correction() {
     let resources = &fixture.motion;
     let mut client = PlayerMotion::new(resources, Vec3::new(20.5, 5.0, 20.5)).unwrap();
     client.client_side = true;
+    client.main_hand = Some("minecraft:stick".into());
     client.yaw = -90.0;
     let forward = Keys {
         forward: true,
@@ -139,14 +140,17 @@ fn a_client_and_a_server_that_disagree_about_a_parts_state_get_a_correction() {
     } else {
         walk[into - 1]
     };
-    hub.guests
-        .update(0, |g| (g.position, g.on_ground) = (before, true));
+    hub.guests.update(0, |g| {
+        (g.position, g.on_ground) = (before, true);
+        let selected = g.selected;
+        g.inventory[selected] = Some(crate::items::ItemStack::new("minecraft:stick", 1));
+    });
     let _parts = InParts::enter(Rc::new(crate::collision_parts::ModParts::new(Arc::new(
         loop_context(),
     ))));
     let (_, refused, _) = hub.collide(0, walk[into], &ctx);
     assert!(refused, "the server sends the guest back");
-    // Both sides asked the same query about the same player: a player with an empty hand.
+    // Both sides asked the same query about the same player: a player holding a stick.
     {
         let (client, server) = (client_asked.borrow(), server_asked.borrow());
         assert!(!client.is_empty() && !server.is_empty());

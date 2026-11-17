@@ -176,6 +176,7 @@ pub(crate) fn install() {
                     }
                 });
             },
+            collision_shape_refused: |_, _| {},
             player_stays_on_ground_surface: |context, _, staying| {
                 *staying |= context.setting("rules_mod", "stack").is_some();
             },

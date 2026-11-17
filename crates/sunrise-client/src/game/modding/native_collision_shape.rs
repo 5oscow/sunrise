@@ -51,17 +51,27 @@ pub(crate) fn collision_shape(
             &mut boxes,
         );
     });
-    let fault = match (ran, &boxes) {
-        (Err(error), _) => Some(format!("panicked: {error}")),
-        (Ok(()), Some(boxes)) => sunrise_client::collision_parts::check_shape(boxes)
-            .err()
-            .map(|error| format!("answered a shape that was refused: {error}")),
-        (Ok(()), None) => None,
-    };
-    let Some(fault) = fault else {
-        *shape = boxes;
+    match ran {
+        Ok(()) => *shape = boxes,
+        Err(error) => disable(state, &format!("panicked: {error}")),
+    }
+}
+
+/// A part answered a shape the bounds refuse: the block keeps its normal shape.
+pub(crate) fn refused(state: BlockStateId, error: &str) {
+    disable(
+        state,
+        &format!("answered a shape that was refused: {error}"),
+    );
+}
+
+/// Switches the block of `state` off for the session and logs it once, naming the mods and the
+/// block.
+fn disable(state: BlockStateId, fault: &str) {
+    let Ok(api_state) = state.try_into_api() else {
         return;
     };
+    let block = api_state.block();
     if DISABLED.with_borrow_mut(|disabled| disabled.insert(block)) {
         use mod_api::BlockMetadata;
         let name = mod_api::__private::block_definitions()
@@ -204,13 +214,17 @@ mod tests {
             assert_eq!(ask(0), Some(vec![[0.0, 0.0, 0.0, 1.0, 0.5, 1.0]]));
             assert_eq!(ask(0), Some(vec![[0.0, 0.0, 0.0, 1.0, 0.5, 1.0]]));
             assert_eq!(calls[0].load(Ordering::SeqCst), 2);
-            // A panic and a refused shape each keep the normal shape (none) and switch the
-            // block off: the part is not called a second time.
-            for (state, block) in [(1, 1), (2, 2)] {
-                assert_eq!(ask(state), None);
-                assert_eq!(ask(state), None);
-                assert_eq!(calls[block].load(Ordering::SeqCst), 1, "state {state}");
-            }
+            // A panic keeps the normal shape (none) and switches the block off: the part is not
+            // called a second time.
+            assert_eq!(ask(1), None);
+            assert_eq!(ask(1), None);
+            assert_eq!(calls[1].load(Ordering::SeqCst), 1);
+            // A refused answer reaches the adapter as boxes: the one check is made where the shape
+            // is built, which reports the refusal here and switches the block off.
+            assert!(ask(2).is_some());
+            refused(BlockStateId(2), "TooManyBoxes");
+            assert_eq!(ask(2), None);
+            assert_eq!(calls[2].load(Ordering::SeqCst), 1);
             assert_eq!(DISABLED.with_borrow(HashSet::len), 2);
             // A state with no part is not asked and keeps its shape.
             assert_eq!(ask(3), None);

@@ -23,6 +23,21 @@ pub struct PublishedShapes {
     collision: VoxelShape,
 }
 
+/// A collision shape built from boxes that passed the bounds of a published shape: only
+/// [`CheckedShape::new`] makes one, so whoever holds it needs no second check.
+#[derive(Clone, Debug)]
+pub struct CheckedShape(VoxelShape);
+impl CheckedShape {
+    /// Checks `boxes` against the bounds (at most 64, finite, minimum at most maximum) and
+    /// builds the shape they make.
+    pub fn new(boxes: &[[f64; 6]]) -> Result<Self, BlockEntityShapesError> {
+        PublishedShapes::build(boxes, true).map(Self)
+    }
+    pub fn into_shape(self) -> VoxelShape {
+        self.0
+    }
+}
+
 impl PublishedShapes {
     /// Checks `shapes` against the limits of `BlockEntityShapes` and builds them. A box under
     /// 1e-7 thick on an axis builds an empty shape, as vanilla's `Shapes.create` does.
@@ -60,10 +75,7 @@ impl PublishedShapes {
     }
 
     /// The shape `boxes` build once they pass [`Self::check_boxes`].
-    pub fn build(
-        boxes: &[[f64; 6]],
-        collision: bool,
-    ) -> Result<VoxelShape, BlockEntityShapesError> {
+    fn build(boxes: &[[f64; 6]], collision: bool) -> Result<VoxelShape, BlockEntityShapesError> {
         Self::check_boxes(boxes, collision)?;
         let mut shape = VoxelShape::empty();
         for bounds in boxes {

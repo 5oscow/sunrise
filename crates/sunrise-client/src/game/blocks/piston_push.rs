@@ -10,6 +10,8 @@
 //! then run through the block collision scan, so a pushed entity stops at a
 //! wall instead of passing through it.
 //!
+#[path = "piston_push/carrying.rs"]
+mod carrying;
 use super::{
     Game,
     entity::{Entity, EntityHandle, with_entity, with_entity_mut},

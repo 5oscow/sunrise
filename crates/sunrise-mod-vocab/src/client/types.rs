@@ -876,7 +876,7 @@ pub struct Screen {
     /// The screen's height in GUI pixels; vanilla's is 166.
     pub height: f32,
     /// Each menu slot's top-left (x, y), or `None` to hide it.
-    pub slots: Vec<Option<[f32; 2]>>,
+    pub slots: Vec<Option<ScreenSlot>>,
     /// The y of the player inventory's first row; vanilla's is 84.
     pub inventory_y: f32,
     /// The inventory's left column (vanilla's is 8).
@@ -901,6 +901,19 @@ pub struct Screen {
     /// `AbstractRecipeBookScreen.isBiggerResultSlot` for a crafting-table-sized result. Off by
     /// default.
     pub recipe_book_big_result: bool,
+}
+
+/// One visible container slot, including vanilla's `Slot.getNoItemIcon`.
+#[derive(Clone, Debug, Default, PartialEq)]
+// exhaustive: mods declare both geometry and the optional empty-slot sprite
+#[derive(sunrise_mod_api_macros::Wire)]
+pub struct ScreenSlot {
+    /// Top-left in GUI pixels relative to the screen.
+    pub position: [f32; 2],
+    /// GUI sprite identifier, such as `minecraft:container/slot/ingot`.
+    /// Drawn at 16 × 16 only when the displayed stack is empty, including
+    /// quick-craft previews. Unknown sprites refuse the client screen at open.
+    pub no_item_icon: Option<String>,
 }
 
 /// An item the panel shows (`panel_items`): its id

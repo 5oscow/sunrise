@@ -5,7 +5,7 @@
 //! collision query that meets a state whose parts opt in asks it, once for each entity,
 //! position and tick. It runs on the thread that ticks the level and nowhere else, so a worker
 //! reads the normal shape. The part holds no `Host`: it answers from the query.
-use crate::chunk::block_entity::published_shapes::PublishedShapes;
+use crate::chunk::block_entity::published_shapes::CheckedShape;
 use mod_api::{CollisionEntityKind, CollisionQuery};
 use std::{
     cell::{Cell, RefCell},
@@ -34,17 +34,6 @@ pub fn native_collision_shape(
     shape: &mut Option<Vec<[f64; 6]>>,
 ) {
     crate::native_client_hooks::collision_shape(context, pos, state, query, shape);
-}
-
-/// Whether `boxes` pass the bounds of a published shape: at most 64 boxes, each finite and with
-/// its minimum at most its maximum.
-pub fn check_shape(boxes: &[[f64; 6]]) -> Result<(), String> {
-    PublishedShapes::check_boxes(boxes, true).map_err(|error| format!("{error:?}"))
-}
-
-/// The shape `boxes` build, checked as [`check_shape`] does.
-pub fn build_shape(boxes: &[[f64; 6]]) -> Result<VoxelShape, String> {
-    PublishedShapes::build(boxes, true).map_err(|error| format!("{error:?}"))
 }
 
 /// The entity a query is for: the context's own, else the one whose move the move gate is
@@ -169,8 +158,14 @@ impl PartShapes for ModParts {
         let mut boxes = None;
         native_collision_shape(&self.context.borrow(), position, state, &query, &mut boxes);
         drop(running);
-        // The game checked the boxes against the bounds; they build once, here.
-        let answer = boxes.and_then(|boxes| build_shape(&boxes).ok());
+        // The one check of the answer: only `CheckedShape::new` makes a shape of the boxes.
+        let answer = boxes.and_then(|boxes| match CheckedShape::new(&boxes) {
+            Ok(checked) => Some(checked.into_shape()),
+            Err(error) => {
+                crate::native_client_hooks::collision_shape_refused(state, &format!("{error:?}"));
+                None
+            }
+        });
         self.cache.borrow_mut().insert(key, answer.clone());
         answer
     }
@@ -314,15 +309,18 @@ mod tests {
     #[test]
     fn a_shape_over_the_bounds_is_refused() {
         let unit = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
-        assert!(build_shape(&[unit; 64]).is_ok());
-        assert!(build_shape(&[unit; 65]).is_err(), "more than 64 boxes");
-        assert!(build_shape(&[[f64::NAN, 0.0, 0.0, 1.0, 1.0, 1.0]]).is_err());
-        assert!(build_shape(&[[0.0, 0.0, 0.0, f64::INFINITY, 1.0, 1.0]]).is_err());
+        assert!(CheckedShape::new(&[unit; 64]).is_ok());
         assert!(
-            build_shape(&[[0.5, 0.0, 0.0, 0.25, 1.0, 1.0]]).is_err(),
+            CheckedShape::new(&[unit; 65]).is_err(),
+            "more than 64 boxes"
+        );
+        assert!(CheckedShape::new(&[[f64::NAN, 0.0, 0.0, 1.0, 1.0, 1.0]]).is_err());
+        assert!(CheckedShape::new(&[[0.0, 0.0, 0.0, f64::INFINITY, 1.0, 1.0]]).is_err());
+        assert!(
+            CheckedShape::new(&[[0.5, 0.0, 0.0, 0.25, 1.0, 1.0]]).is_err(),
             "inverted"
         );
-        assert!(build_shape(&[]).unwrap().is_empty());
+        assert!(CheckedShape::new(&[]).unwrap().into_shape().is_empty());
     }
 }
 

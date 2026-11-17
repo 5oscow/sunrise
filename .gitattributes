@@ -3,8 +3,12 @@
 launcher/docs/launcher-commands.md text eol=lf
 docs/sunrise-ctl-commands.md text eol=lf
 crates/sunrise-theme/tokens.css text eol=lf
+launcher/crates/theme/tokens.css text eol=lf
 docs/api/*-reference.md text eol=lf
 crates/sunrise-mod-api-gen/crossing-foreign.json text eol=lf
+# Signed test fixtures, checked byte for byte against their signatures and hashes: never converted.
+launcher/crates/release-verify/tests/signed/** -text
+launcher/crates/smod/tests/index/** -text
 # The package layout's one number, read by Rust, Python and shell alike.
 crates/sunrise-mod-package/src/sdk/package-format text eol=lf
 

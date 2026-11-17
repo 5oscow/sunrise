@@ -229,13 +229,15 @@ impl Game<'_> {
     /// The renderer for the window, with the current block sprites, GUI
     /// atlas and world border texture.
     /// A new renderer's atlas holds only the pack's sprites: what was drawn into it at run time
-    /// (skins, maps, the themed UI's glyphs and corners) has to be drawn again.
+    /// (skins, maps, mods' dynamic textures, the themed UI's glyphs and corners) has to be drawn
+    /// again.
     pub(super) fn forget_atlas_slots(&mut self) {
         self.skin_slots.forget();
         self.maps.slots.forget();
         self.trim_slots.forget();
         self.map_patches.clear();
         self.text_patches.get_mut().clear();
+        self.dynamic_textures.forget_uploads();
         self.kept_block_entities.get_mut().clear();
         sunrise_client::ui_theme::reset_atlas();
     }

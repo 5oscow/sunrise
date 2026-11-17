@@ -98,4 +98,59 @@ A collider is saved with the entity. The server sends it only to Sunrise clients
 the whole collider when they start to (in messages of at most 64 KiB), then only what changed, by box
 index, and the rotation alone for `set_collider_transform`. **A vanilla client does not see a collider**:
 it sees the entity and walks through it. A mod that needs players to stand on one requires the Sunrise
-client at join. Carrying whoever stands on a moving collider is a later step; this one only makes it solid.
+client at join.
+
+### Carrying
+
+A collider that moves carries what stands on it. Once a tick, after the level's entities ticked
+(so whatever order they ticked in), every body standing on a box of a collider that moved or turned
+this tick moves by the displacement of its contact point, the point of the box under its feet: the
+translation and the rotation of the collider's change, as an ordinary collided `Entity.move` with the
+cause `MoveCause::Carried`. An `entity_move` listener sees it and may cancel or replace it like any other
+move. It stops at walls and steps up like any move, and yaw is never turned. A body's support is the box
+under its feet with the highest top (a tie goes to the lower entity id). A collider standing on another
+collider is carried first, and the bodies on it take its whole displacement. A body that rides something is not carried itself; it
+follows its vehicle. The server carries the entities it simulates, and each Sunrise client its own player.
+
+Carrying never pushes through a wall and the collider is never stopped by what is in its way: a
+body caught between a collider and a wall stays where the collision leaves it, overlapping the collider, and
+a living body takes `in_wall` damage while a box covers its eyes, as it does in a block. (A vanilla armor stand takes no
+`in_wall` damage and so none here.) A vanilla client does not carry its player: only the Sunrise client does.
+
+### Players on a moving collider
+
+A client moves its player with the collider as it last heard of it, so the position it reports is in a
+frame that is some ticks old: the round trip, plus how stale its copy was. The server therefore keeps
+each collider's recent transforms (about a second of them: about 2.8 KiB of frame data per collider that
+moves, plus the container and index around it, and one entry for one that stands still) and judges a report against the collider as it was at some age
+around the one it expects, the player's round-trip time plus two ticks, give or take four. A report
+fits an age when the player stands on the top of a box (within 0.05 blocks) or is above one, is over
+it, and is not inside any box deeper than that. Of the ages that fit, the one nearest the expected age
+wins. The move from the last accepted position, measured in the collider's frame (so the speed test sees how far the
+player walked on the collider, not how far the collider carried it), then goes through the
+ordinary move check of a walking player, with the colliders placed where they stood at that age, so
+walls, blocks beside the track and the collider itself stop a carried player as they stop any other,
+and a player already touching one box of a collider may not walk into another box it did not touch.
+The position the server keeps for an accepted report is the same place on the collider under its
+transform now, not the position in the older frame the client reported in. A player on a collider's box
+is held up by it, so standing on a collider is never counted as floating. A
+Sunrise client also says how old its copy of the collider was before each report
+(`sunrise:carry_age`); the server only starts its search there, and the report is still checked
+against the same window.
+
+A report that fits no age in the window is not carried: if the player was on the collider, the ordinary
+rules judge the move, and if they refuse it the player is sent back to where the server last had it
+on the collider, placed under the collider's transform now. Such a correction is counted per player and
+never counts toward the floating-player kick. A teleport (a portal, a command) and a collider
+that is gone let go of the player.
+
+What it holds for: Create's speeds, 1.4 blocks a tick on straight track (2.0 powered), and 0.7 and 1.0
+on a curve of 4 degrees a tick, at round trips from 50 to 200 ms and a tick of jitter either way, never
+refuse an honest player, and the daily tests run curves up to 2.0 blocks a tick the same way. **The
+limit is the age:** the window is four ticks either side of the age the server expects, and on a curve a
+report held to a wrong age moves the far end of a long collider sideways, so a round-trip estimate that
+is off by more than the window, or a client that is more than four ticks stale, is refused. A collider
+that goes faster or turns harder than 2.0 blocks and 4 degrees a tick is not covered by any test.
+Past a second of round trip the window stops growing: a player whose copy is
+older than it reaches is judged as a walker in the frame the cap allows, not carried. A vanilla client, which sends no age, gets the
+window around the expected age.

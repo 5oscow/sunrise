@@ -16,19 +16,6 @@ pub(in crate::game) fn click_of(p: &play::ContainerClick) -> Click {
     (i32::from(p.slot), i32::from(p.button), input(p.input))
 }
 
-/// `op` on the guest's menu, then `write_back`: the click with no decision to run inside.
-fn plain<R>(
-    game: &mut Game<'_>,
-    gi: usize,
-    menu: &mut Menu,
-    op: impl FnOnce(&mut Menu, &Env) -> R,
-    write_back: impl FnOnce(&mut Game<'_>, &mut Menu, &R),
-) -> Option<R> {
-    let ran = game.guest_menu_op(gi, menu, op)?;
-    write_back(game, menu, &ran);
-    Some(ran)
-}
-
 impl Game<'_> {
     /// `guest_menu_op`, with `click` (the click `op` makes, if it makes one) decided by the mods
     /// first. With no listener, no click or a click that is not a pickup this is `guest_menu_op`.
@@ -60,11 +47,33 @@ impl Game<'_> {
         op: impl FnOnce(&mut Menu, &Env) -> R,
         write_back: impl FnOnce(&mut Game<'_>, &mut Menu, &R),
     ) -> Option<R> {
+        self.guest_menu_action_settled(gi, menu, click, prepare, |game, menu, rules, answer| {
+            let ran = game.guest_menu_op_with(gi, menu, rules, answer, op)?;
+            write_back(game, menu, &ran);
+            Some(ran)
+        })
+    }
+
+    /// The same pickup decision, with a game-owned performer that releases the environment
+    /// between steps. The decision's savepoint encloses the complete performer.
+    pub(super) fn guest_menu_action_settled<R>(
+        &mut self,
+        gi: usize,
+        menu: &mut Menu,
+        click: Option<Click>,
+        prepare: Option<&dyn Fn(&mut Menu, &Env)>,
+        perform: impl FnOnce(
+            &mut Game<'_>,
+            &mut Menu,
+            Option<&dyn sunrise_client::menu::SlotRules>,
+            Option<&sunrise_client::menu::StackedOutcome>,
+        ) -> Option<R>,
+    ) -> Option<R> {
         let Some((slot, button, mode)) = click.filter(|c| c.2 == Input::Pickup) else {
-            return plain(self, gi, menu, op, write_back);
+            return perform(self, menu, None, None);
         };
         if !Self::stacked_listened() {
-            return plain(self, gi, menu, op, write_back);
+            return perform(self, menu, None, None);
         }
         // Plan on a copy: what the click finds, and what the slot rules say to it.
         let answers = Rc::new(RuleAnswers::default());
@@ -80,7 +89,7 @@ impl Game<'_> {
             }
         });
         let (Some(frozen), Some(())) = (found, planned) else {
-            return plain(self, gi, menu, op, write_back);
+            return perform(self, menu, None, None);
         };
         let conn = self.lan.as_ref()?.hub.guests[gi].conn;
         let route = self.lan.as_mut()?.menus.entry(conn).or_default().hub.id();
@@ -96,10 +105,7 @@ impl Game<'_> {
             |game, answer| {
                 game.journal_guest_click(conn);
                 let rules = StoredRules(&answers);
-                ran = game.guest_menu_op_with(gi, menu, Some(&rules), answer, op);
-                if let Some(ran) = &ran {
-                    write_back(game, menu, ran);
-                }
+                ran = perform(game, menu, Some(&rules), answer);
             },
         );
         ran

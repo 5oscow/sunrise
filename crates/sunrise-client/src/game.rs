@@ -1197,6 +1197,8 @@ struct Game<'a> {
     kept_block_entities: std::cell::RefCell<native_block_entity_draw::KeptGeometry>,
     /// Mod screens' living scenes, per mod and clock id (game/modding/native_scene_live.rs).
     live_scenes: std::cell::RefCell<native_scene_live::LiveScenes>,
+    /// Client mods' dynamic textures in the GUI atlas's pool (game/modding/native_dynamic_textures.rs).
+    dynamic_textures: sunrise_client::hud::dynamic_textures::DynamicTextures,
     /// Glyphs from `native_draw_text` (`&self`): uploaded to the font atlas with the frame.
     text_patches: std::cell::RefCell<Vec<sunrise_client::font::Patch>>,
     /// Prepared block-entity copies for this frame, in entity-stream order.
@@ -1223,6 +1225,8 @@ struct Game<'a> {
     fps_frames: u64,
     fps_at: Instant,
     ticks: u64,
+    /// `Hud.tickCount`, advanced on each unpaused client tick, including in menus.
+    gui_ticks: i32,
     /// The sprite animation clock (`TextureManager.tick`): counts only the ticks the level
     /// runs normally, so `/tick freeze` holds it and `/tick step` moves it on.
     texture_ticks: u64,
@@ -1759,6 +1763,7 @@ struct Game<'a> {
     /// What changed in entities' colliders this tick, for the players who track them.
     collider_changes: Vec<native_colliders::ColliderChange>,
     collider_placements: native_colliders::Placements,
+    collider_histories: native_colliders::Histories,
     entity_initialization: entity_initialization::EntityInitialization,
     /// Typed per-level membership follows dimensions, not the temporary world swap.
     attachment_indexes: attachment_index::Indexes,
@@ -2567,7 +2572,21 @@ impl Game<'_> {
     /// (PowderSnowBlock.canEntityWalkOnPowderSnow), freeze-immune wear
     /// (LivingEntity.canFreeze), the dimension's FAST_LAVA, the sleeping
     /// pose and blindness (Player.isMobilityRestricted, which stops a sprint).
+    /// The window's or the guest's own body reads the item in its selected slot
+    /// (`getMainHandItem`) for the shapes that depend on it.
+    pub(crate) fn sync_main_hand(&mut self) {
+        let held = self
+            .inventory
+            .get(self.selected)
+            .and_then(Option::as_ref)
+            .filter(|stack| stack.count > 0)
+            .map(|stack| stack.item.clone());
+        if let Some(player) = self.player.as_mut() {
+            player.main_hand = held;
+        }
+    }
     pub(crate) fn sync_player_body(&mut self) {
+        self.sync_main_hand();
         let glider = self.glider_worn();
         let sleeping = self.sleeping.is_some();
         let item_in_use = self
@@ -4531,15 +4550,26 @@ impl Game<'_> {
         cancel
     }
     fn tick(&mut self) -> Result<()> {
+        // A client's tick of the level it shows holds the colliders as it began, then carries
+        // its own player with the one it stands on; a server's level tick holds its own scope.
+        let start = (!self.is_logical_server()).then(|| self.placed_moving_colliders());
+        let scope = start
+            .clone()
+            .map(sunrise_client_render::moving_colliders::Scope::enter);
+        let result = self.tick_body();
+        drop(scope);
+        if let (Some(start), Ok(())) = (&start, &result) {
+            self.carry_pass(start);
+            self.observe_carry_age(start);
+        }
+        result
+    }
+    fn tick_body(&mut self) -> Result<()> {
         self.expire_client_cracks();
         if self.agent.hold_server {
             return Ok(());
         }
         self.abort_open_transactions();
-        // A client's tick of the level it shows; a server's level tick holds its own scope.
-        let _colliders = (!self.is_logical_server()).then(|| {
-            sunrise_client_render::moving_colliders::Scope::enter(self.placed_moving_colliders())
-        });
         let _parts = (!self.is_logical_server())
             .then(|| self.collision_parts())
             .flatten();
@@ -8818,6 +8848,7 @@ impl Game<'_> {
         // map_patches any earlier leaves them a frame behind.
         hud.patches.append(&mut self.map_patches);
         hud.patches.append(self.text_patches.get_mut());
+        self.dynamic_texture_patches(&mut hud.image_patches);
         let entity_spans = std::mem::take(self.entity_spans.get_mut());
         let entity_motion = std::mem::take(self.entity_motion.get_mut());
         let entity_motion_posed = std::mem::take(self.entity_motion_posed.get_mut());
@@ -10805,6 +10836,7 @@ impl<'a> Game<'a> {
             glint_frame: Default::default(),
             kept_block_entities: Default::default(),
             live_scenes: Default::default(),
+            dynamic_textures: Default::default(),
             text_patches: Default::default(),
             prepared_model_draws: Default::default(),
             world_geometry: Some(Default::default()),
@@ -10818,6 +10850,7 @@ impl<'a> Game<'a> {
             fps_frames: 0,
             fps_at: now,
             ticks: 0,
+            gui_ticks: 0,
             texture_ticks: 0,
             error: None,
             message: None,
@@ -11124,6 +11157,7 @@ impl<'a> Game<'a> {
             entity_attachments: Default::default(),
             collider_changes: Vec::new(),
             collider_placements: Default::default(),
+            collider_histories: Default::default(),
             entity_initialization: Default::default(),
             attachment_indexes: Default::default(),
             remote: None,

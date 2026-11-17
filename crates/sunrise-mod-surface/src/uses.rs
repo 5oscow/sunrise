@@ -2240,7 +2240,8 @@ fn list(
 }
 
 /// How a used item differs in the target build.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum Change {
     /// The target has no record with its id.
     Removed,
@@ -2264,7 +2265,7 @@ pub enum Change {
 }
 
 /// A used item that is not the same in the target build.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
 pub struct Misfit {
     pub id: String,
     pub change: Change,

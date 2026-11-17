@@ -35,6 +35,58 @@ pub struct Plan {
     pub mixins_from_source: bool,
 }
 
+/// What `native-discover` reads: one mod's internals, or its pinned game's build data with its modules applied.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DiscoverPlan {
+    /// Must be [`CONTRACT`].
+    pub contract: u32,
+    /// The tool's own folder: the pinned game's source and the discovery caches.
+    pub work: PathBuf,
+    /// The Rust toolchain the mod's SDK was built with.
+    pub toolchain: Unpacked,
+    /// The mod's folder.
+    pub mods: PathBuf,
+    /// Where to copy the build data (`internals.json`, `points.json`), a folder that doesn't exist yet; absent, the reply lists the mod's internals.
+    #[serde(default)]
+    pub catalog: Option<PathBuf>,
+}
+
+/// What `native-lock` reads: the mod whose registry dependencies to pin in its `Cargo.lock`.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct LockPlan {
+    /// Must be [`CONTRACT`].
+    pub contract: u32,
+    /// The tool's own folder.
+    pub work: PathBuf,
+    /// The Rust toolchain the mod's SDK was built with.
+    pub toolchain: Unpacked,
+    /// The mod's folder.
+    pub mods: PathBuf,
+    /// Resolve again even when the mod has a lock.
+    #[serde(default)]
+    pub update: bool,
+}
+
+/// What `native-layout` reads: a local prebuilt game (`tools/prebuilt_game.py build`) to check and lay out as an SDK's slices.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct LayoutPlan {
+    /// Must be [`CONTRACT`].
+    pub contract: u32,
+    /// The local prebuilt game's folder; it is never changed.
+    pub prebuilt: PathBuf,
+    /// The build id (the game's full commit) it must be.
+    pub build: String,
+    /// The host triple it must be built for.
+    pub host: String,
+    /// `client` or `server`: the side it must be.
+    pub target: TargetName,
+    /// Where to lay out its slices, by links: replaced when it exists.
+    pub out: PathBuf,
+}
+
 /// [`Target`] as a plan names it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -181,6 +233,11 @@ impl std::fmt::Display for PlanError {
 /// Reads the plan from the first line of `input`. The contract is checked first, so a plan of another contract is
 /// refused for that and never for a field this contract doesn't have.
 pub fn read_plan(input: &mut dyn BufRead) -> Result<Plan, PlanError> {
+    read_line(input)
+}
+
+/// Reads one line of `input` as a `T` of this contract: [`read_plan`] for `native-build`, and `native-check`'s plan.
+pub fn read_line<T: serde::de::DeserializeOwned>(input: &mut dyn BufRead) -> Result<T, PlanError> {
     let mut line = String::new();
     input
         .read_line(&mut line)

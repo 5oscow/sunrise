@@ -78,6 +78,7 @@ impl PlayerMotion {
             air: 300,
             respiration: 0,
             speed: 0.0,
+            main_hand: None,
             item_use_speed: None,
             item_use_slows_sprint: false,
             nudge: [None; 2],

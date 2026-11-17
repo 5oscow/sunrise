@@ -3,7 +3,13 @@ fn screen(book: &crate::RecipeBookTypeKey) -> crate::Screen {
     crate::Screen {
         width: 176.0,
         height: 166.0,
-        slots: vec![Some([8.0, 8.0]); 3],
+        slots: vec![
+            Some(crate::ScreenSlot {
+                position: [8.0, 8.0],
+                ..Default::default()
+            });
+            3
+        ],
         recipe_book: Some(book.clone()),
         ..Default::default()
     }
@@ -78,7 +84,10 @@ fn missing_nonfinite_and_wrong_book_geometry_refuse_registration() {
         .unwrap_err();
     assert!(error.contains("mod demo menu \"demo:missing\"") && error.contains("slot 1"));
     let mut bad = screen(&book);
-    bad.slots[1] = Some([f32::NAN, 0.0]);
+    bad.slots[1] = Some(crate::ScreenSlot {
+        position: [f32::NAN, 0.0],
+        ..Default::default()
+    });
     assert!(
         registrar
             .menu_recipe_book("demo:nan", &book, "demo:cooking", roles(), bad)

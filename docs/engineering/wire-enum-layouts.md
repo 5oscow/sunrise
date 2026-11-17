@@ -16,6 +16,10 @@ There are 148 absolute hash pins plus a same-source equivalence guard for HookId
 HookId is the only fieldless enum among these 151 defined in generator output;
 the other generated provider/host enums have payloads and are not in this set.
 
+`MoveCause` gained the variant `Carried` (a moving collider carrying a body, with its change note
+`crates/sunrise-mod-vocab/changes/move-cause-carried.toml`): a reviewed contract change that appends one
+variant to a non-exhaustive enum, so its pin is `deed7d85fc9ecdfb` now, not the captured value.
+
 HookId grows whenever hooks are added. Its captured `baseline_hash` is historical,
 not an assertion about future builds. The vocabulary build script emits a private
 OUT_DIR array from that build's generated variant names. The ordinary test compares

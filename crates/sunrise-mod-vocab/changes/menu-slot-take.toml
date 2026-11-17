@@ -1,0 +1,3 @@
+ids = ["hook:menu_slot_take"]
+why = "Mod-owned menu slots had no authoritative take boundary for rewards or effects. menu_slot_take reports each positive transferred portion once, before the click continues, with a server Host, backing slot and container, player/menu context and quick-craft accounting. Listener storage changes are visible before repeated transfers. Vanilla slots, the built-in crafting result and client prediction retain their existing behavior."
+migrate = "Register a MenuPart for the menu type and implement menu_slot_take. Grant experience, recipe unlocks, crafted statistics and custom effects through the existing Host operations. This notice does not trigger recipe_crafted or perform onCraftedBy item post-processing."
