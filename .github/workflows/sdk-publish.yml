@@ -43,8 +43,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # The history, to find the SDK published before this one on it.
+          # The history, to find the SDK published before this one on it: its commits and trees, without the older
+          # files' contents, which Git fetches if a step reads one (the change notes `git archive` takes).
           fetch-depth: 0
+          filter: blob:none
           persist-credentials: false
           ref: ${{ inputs.commit }}
       - name: The launcher's pinned Rust
@@ -55,9 +57,11 @@ jobs:
           toolchain: ${{ steps.rust.outputs.version }}
           # The API source is checked for wasm32 too (tools/sdk_api_source.py build).
           targets: wasm32-unknown-unknown
+      # As the legs' caches: main's runs save it, every branch restores it.
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: sdk-publish
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       # Each leg's assets in a folder of its own (sdk-leg-<leg>), so a file two legs both made is seen, not
       # overwritten. Only the legs' artifacts: never this workflow's own from an earlier attempt.
       - uses: actions/download-artifact@v4

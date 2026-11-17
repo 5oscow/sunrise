@@ -1290,8 +1290,12 @@ mod conduit_target_tests {
         let uuid = server.persist.uuids[&drowned];
         let key = (CONDUIT[0], CONDUIT[1], CONDUIT[2]);
         // What `sendBlockUpdated` puts on the wire.
-        let tag = crate::lan::chunks::entity_tag(&server.world.block_entities[&key], false)
-            .expect("a conduit has an update tag");
+        let tag = crate::lan::chunks::entity_tag(
+            &server.world.block_entities[&key],
+            false,
+            &Default::default(),
+        )
+        .expect("a conduit has an update tag");
         assert_eq!(tag.get("Target"), Some(&Tag::IntArray(uuid.to_vec())));
         assert!(
             server.world.block_log.as_ref().unwrap().contains(&key),

@@ -555,6 +555,7 @@ fn villager_game_load_resolves_saved_names_for_both_species_without_reroll() {
                     None,
                     Some(game.pack.assets.registry),
                     |_| None,
+                    &Default::default(),
                 );
                 assert_eq!(
                     sunrise_client::save::text(

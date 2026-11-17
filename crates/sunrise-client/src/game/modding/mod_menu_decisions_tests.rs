@@ -26,6 +26,7 @@ struct Script {
     panic: bool,
     /// `menu_quick_move`: take 9 of the stack into slots 1 and 2 of the block (4, then 5).
     take: bool,
+    all: bool,
     /// ...and answer with a stack past the item's maximum in slot 1.
     invalid: bool,
     /// `menu_quick_move`: move 4 of the stack into the second block through its `ITEMS`
@@ -84,8 +85,12 @@ impl BlockEntityPart for Part {
         if s.take {
             event.entity.items.resize(9, None);
             event.entity.items[1] = Some(stone(if s.invalid { 65 } else { 4 }));
-            event.entity.items[2] = Some(stone(5));
-            event.stack.set_count(1).unwrap();
+            event.entity.items[2] = Some(stone(if s.all { 6 } else { 5 }));
+            if s.all {
+                *event.stack = None;
+            } else {
+                event.stack.as_mut().unwrap().set_count(1).unwrap();
+            }
         }
         if s.cross {
             let level = host.level("minecraft:overworld").expect("the level");
@@ -97,7 +102,7 @@ impl BlockEntityPart for Part {
                 items.insert(host, &tx, 0, &ItemResource::of(&stone(1)), 4),
                 4
             );
-            event.stack.set_count(6).unwrap();
+            event.stack.as_mut().unwrap().set_count(6).unwrap();
         }
         if s.panic {
             panic!("a listener failed");
@@ -388,6 +393,15 @@ fn a_mod_quick_move_is_one_action_and_a_refusal_leaves_no_prefix() {
             assert_eq!(IN_ACTION.with(|a| a.borrow().clone()), [true]);
             assert_eq!(depot(game), (1, 4, 5, 0));
             assert!(game.transactions.is_empty());
+            // A complete move empties the source through the optional API remainder.
+            open_depot(game);
+            script(Script {
+                take: true,
+                all: true,
+                ..Script::default()
+            });
+            click(game);
+            assert_eq!(depot(game), (0, 4, 6, 0));
             // Row 77: the same move, and the listener also writes the guest's inventory: stale,
             // so the whole move is refused: the source keeps its 10 and neither target slot is
             // left holding a prefix of the move.
