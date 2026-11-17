@@ -53,7 +53,7 @@ impl BlockRegistry {
     /// This is host plumbing, not a mod API. `mods` identifies the retained mod list;
     /// `parts` identifies its immutable Parts installation. Without a Parts identity,
     /// a future metadata owner is unknown, so only imported data may be shared.
-    /// Worker resources and saved-state caches remain attached to each registry wrapper.
+    /// Saved-state caches remain attached to each registry wrapper; equal payloads may share worker resources under equal owner keys.
     #[doc(hidden)]
     pub fn intern(self, (mods, parts): (usize, Option<usize>)) -> &'static Self {
         let mut snapshots = SNAPSHOTS.lock().unwrap_or_else(|error| error.into_inner());

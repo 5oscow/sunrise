@@ -157,14 +157,13 @@ mod tests {
         with_game(|game| {
             let registry = game.pack.assets.registry;
             assert!(!std::ptr::eq(old_registry, registry));
-            assert_eq!(
-                prepare(old_registry).err().unwrap(),
-                "worker block registry belongs to a different metadata snapshot"
-            );
+            // Equal installations share one immutable snapshot; the wrapper and the generator
+            // data below stay per game.
+            assert!(Arc::ptr_eq(&prepare(old_registry).unwrap(), &old_index));
             let index = prepare(registry).unwrap();
-            assert!(!Arc::ptr_eq(&old_index, &index));
+            assert!(Arc::ptr_eq(&old_index, &index));
             let metadata = WorkerResources::get(registry).unwrap().metadata;
-            assert!(!std::ptr::eq(old_metadata, metadata));
+            assert!(std::ptr::eq(old_metadata, metadata));
             // Repeated queries within a lifetime share the retained index and generator data.
             assert!(Arc::ptr_eq(&index, &prepare(registry).unwrap()));
             let data = sunrise_client::vanillagen::shared_data(&root, registry).unwrap();
