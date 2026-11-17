@@ -107,32 +107,31 @@ impl Renderer {
             && let Some((dimension, Some(mut post))) = self.pack_post.take()
         {
             let size = self.world_post.size().unwrap_or([1, 1]);
-            let weather = match &self.hud.atlas_texture {
-                Some(atlas) if pack_draws_weather => self
-                    .pack_weather
-                    .get_or_insert_with(|| pack_weather::PackWeather::new(&self.device))
-                    .prepare(
-                        &self.device,
-                        &mut encoder,
-                        &mut self.uploads,
-                        atlas,
-                        frame.weather,
-                        frame.weather_time,
-                        &self.indices,
-                    ),
-                _ => None,
-            };
-            post.set_weather(weather);
             let flat = self.flat.as_ref().filter(|_| flat_frame);
-            self.pack_pages.clear();
-            if flat.is_some() && (pack_draws_terrain || pack_draws_shadow) {
-                self.pack_pages.extend(
-                    self.arena
-                        .page_buffers()
-                        .map(|(p, b)| (p, b.clone(), self.arena.sources(p).cloned())),
-                );
-            }
-            let pages = &self.pack_pages;
+            // Both strokes of a high contrast outline, the black one first.
+            let lines = pack_draws_outline.then(|| external::Lines {
+                edges: self.outline.clone(),
+                count: outline_edges as u32 * if frame.outline_high_contrast { 2 } else { 1 },
+            });
+            let clouds = pack_draws_clouds.then(|| external::Clouds {
+                vertices: self.cloud_buffer.clone(),
+                group: self.cloud_group.clone(),
+                indices: self.indices.clone(),
+                quads: cloud_quads,
+            });
+            post.feed_post(external::PostFeed {
+                device: &self.device,
+                encoder: &mut encoder,
+                uploads: &mut self.uploads,
+                frame,
+                weather: pack_draws_weather,
+                atlas: self.hud.atlas_texture.as_ref(),
+                flat_pages: (flat.is_some() && (pack_draws_terrain || pack_draws_shadow))
+                    .then_some(&self.arena),
+                quad_indices: &self.indices,
+                lines,
+                clouds,
+            });
             let mut terrain =
                 |rp: &mut wgpu::RenderPass<'_>,
                  list: pack_post::TerrainList,
@@ -197,34 +196,18 @@ impl Renderer {
                         }
                     }
                 };
-            // Both strokes of a high contrast outline, the black one first.
-            post.set_lines(pack_draws_outline.then(|| pack_post::Lines {
-                edges: self.outline.clone(),
-                count: outline_edges as u32 * if frame.outline_high_contrast { 2 } else { 1 },
-            }));
-            post.set_clouds(pack_draws_clouds.then(|| pack_post::Clouds {
-                vertices: self.cloud_buffer.clone(),
-                group: self.cloud_group.clone(),
-                indices: self.indices.clone(),
-                quads: cloud_quads,
-            }));
-            post.run(
-                &self.device,
-                &self.queue,
-                &mut encoder,
+            post.post(external::PostContext {
+                device: &self.device,
+                queue: &self.queue,
+                encoder: &mut encoder,
+                frame,
                 color,
                 depth,
-                &view_target,
-                frame,
-                &frame.pack,
+                target: &view_target,
                 size,
-                [self.config.width, self.config.height],
-                pages,
-                &mut terrain,
-            );
-            // Keep the capacity, not the buffers: a page the arena frees must not stay alive
-            // here until the next shader-pack frame (or forever once the pack is off).
-            self.pack_pages.clear();
+                window: [self.config.width, self.config.height],
+                terrain: &mut terrain,
+            });
             self.pack_post = Some((dimension, Some(post)));
         } else if let Some((color, depth)) = &scaled
             && native_post

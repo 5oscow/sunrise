@@ -1,5 +1,5 @@
 //! The world pass after culling, and the renderer's GPU pass timing switches and readings.
-use super::{Renderer, native_pack, pack_post, pack_timing};
+use super::{Renderer, native_pack, pack_timing};
 
 pub(super) fn world_pass_after_culling<'e>(
     encoder: &'e mut wgpu::CommandEncoder,
@@ -93,7 +93,7 @@ impl Renderer {
     }
     /// The running shader pack's timer, of either kind.
     pub(super) fn pass_timer<'a>(
-        pack: &'a mut Option<(i32, Option<pack_post::PackPost>)>,
+        pack: &'a mut Option<(i32, Option<super::pack_external::PackPipeline>)>,
         native: &'a mut Option<native_pack::NativePack>,
     ) -> Option<&'a mut Option<pack_timing::PassTiming>> {
         match (pack, native) {

@@ -125,10 +125,11 @@ pub struct PostFeed<'a> {
     pub encoder: &'a mut wgpu::CommandEncoder,
     pub uploads: &'a mut super::upload::Uploads,
     pub frame: &'a Frame<'a>,
-    pub draws: Draws,
+    /// Whether it draws rain and snow this frame.
+    pub weather: bool,
     /// The GUI atlas, which rain and snow take their sprites from.
     pub atlas: Option<&'a wgpu::Texture>,
-    /// The terrain arena's pages, when terrain is drawn flat (`None` otherwise).
+    /// The terrain arena's pages, when the pipeline draws terrain flat this frame (`None` otherwise).
     pub flat_pages: Option<&'a super::arena::Arena>,
     pub quad_indices: &'a wgpu::Buffer,
     pub lines: Option<Lines>,

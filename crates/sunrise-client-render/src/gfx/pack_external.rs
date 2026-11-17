@@ -1,12 +1,47 @@
 //! A `shaders/` pack as an external pipeline (`external::ExternalPipeline`): what the renderer
 //! asks of it at the frame's points, answered from the pack's programs.
 
-use super::external::{
-    Draws, EntityInput, ExternalPipeline, FrameState, ShadowCasters, ShadowView,
-};
-use super::pack_post::PackPost;
+use std::ops::{Deref, DerefMut};
 
-impl ExternalPipeline for PackPost {
+use super::external::{
+    Draws, EntityInput, ExternalPipeline, FrameState, PostContext, PostFeed, ShadowCasters,
+    ShadowView,
+};
+use super::pack_post::{PackPost, TerrainPage};
+use super::pack_weather::PackWeather;
+
+/// A `shaders/` pack with what its frames keep beside the program: rain and snow, and the
+/// terrain pages it reads this frame.
+pub(super) struct PackPipeline {
+    post: PackPost,
+    weather: Option<PackWeather>,
+    pages: Vec<TerrainPage>,
+}
+
+impl PackPipeline {
+    pub(super) fn new(post: PackPost) -> Self {
+        Self {
+            post,
+            weather: None,
+            pages: Vec::new(),
+        }
+    }
+}
+
+impl Deref for PackPipeline {
+    type Target = PackPost;
+    fn deref(&self) -> &PackPost {
+        &self.post
+    }
+}
+
+impl DerefMut for PackPipeline {
+    fn deref_mut(&mut self) -> &mut PackPost {
+        &mut self.post
+    }
+}
+
+impl ExternalPipeline for PackPipeline {
     fn draws(&self, _state: &FrameState<'_>) -> Draws {
         Draws {
             reads_world: true,
@@ -30,7 +65,7 @@ impl ExternalPipeline for PackPost {
     }
 
     fn shadow_casters(&self) -> ShadowCasters {
-        let c = PackPost::shadow_casters(self);
+        let c = PackPost::shadow_casters(&self.post);
         ShadowCasters {
             others: (c.entities && !c.only_player) || c.blocks,
             player: c.entities,
@@ -46,7 +81,7 @@ impl ExternalPipeline for PackPost {
         rest: &mut Vec<super::Vertex>,
     ) {
         PackPost::prepare_entities(
-            self,
+            &mut self.post,
             device,
             queue,
             input.entities,
@@ -60,6 +95,67 @@ impl ExternalPipeline for PackPost {
     }
 
     fn skin_target(&self) -> Option<&wgpu::Buffer> {
-        PackPost::skin_target(self)
+        PackPost::skin_target(&self.post)
+    }
+
+    fn feed_post(&mut self, feed: PostFeed<'_>) {
+        let PostFeed {
+            device,
+            encoder,
+            uploads,
+            frame,
+            weather,
+            atlas,
+            flat_pages,
+            quad_indices,
+            lines,
+            clouds,
+        } = feed;
+        let weather = match atlas {
+            Some(atlas) if weather => self
+                .weather
+                .get_or_insert_with(|| PackWeather::new(device))
+                .prepare(
+                    device,
+                    encoder,
+                    uploads,
+                    atlas,
+                    frame.weather,
+                    frame.weather_time,
+                    quad_indices,
+                ),
+            _ => None,
+        };
+        self.post.set_weather(weather);
+        self.pages.clear();
+        if let Some(arena) = flat_pages {
+            self.pages.extend(
+                arena
+                    .page_buffers()
+                    .map(|(p, b)| (p, b.clone(), arena.sources(p).cloned())),
+            );
+        }
+        self.post.set_lines(lines);
+        self.post.set_clouds(clouds);
+    }
+
+    fn post(&mut self, ctx: PostContext<'_, '_>) {
+        self.post.run(
+            ctx.device,
+            ctx.queue,
+            ctx.encoder,
+            ctx.color,
+            ctx.depth,
+            ctx.target,
+            ctx.frame,
+            &ctx.frame.pack,
+            ctx.size,
+            ctx.window,
+            &self.pages,
+            ctx.terrain,
+        );
+        // Keep the capacity, not the buffers: a page the arena frees must not stay alive here
+        // until the next shader-pack frame (or forever once the pack is off).
+        self.pages.clear();
     }
 }

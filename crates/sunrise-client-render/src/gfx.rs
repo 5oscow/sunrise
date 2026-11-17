@@ -1015,7 +1015,7 @@ pub struct Renderer {
     /// The HDR Lighting setting, kept for the HDR output made when HDR turns on.
     hdr_lighting_setting: bool,
     /// The shader pack's post-processing, and the dimension (legacy id) it was loaded for.
-    pack_post: Option<(i32, Option<pack_post::PackPost>)>,
+    pack_post: Option<(i32, Option<pack_external::PackPipeline>)>,
     /// A `shaders/` pack whose pipelines build on a thread of their own (`load_shader_pack`).
     pack_loading: Option<PackLoading>,
     /// The post passes of one of Sunrise's own shader packs; never beside `pack_post`'s.
@@ -1034,8 +1034,6 @@ pub struct Renderer {
     pack_entity_rest: Vec<Vertex>,
     /// Set 1 of the cloud pipeline, for a shader pack's `gbuffers_clouds`.
     cloud_bindings: wgpu::BindGroupLayout,
-    /// Rain and snow handed to a shader pack's `gbuffers_weather`, once a pack draws them.
-    pack_weather: Option<pack_weather::PackWeather>,
     /// The block sprites as one atlas, while a shader pack is loaded.
     pack_atlas: Option<pack_atlas::PackAtlas>,
     pack_material_atlases: Option<[pack_atlas::PackAtlas; 2]>,
@@ -1046,8 +1044,6 @@ pub struct Renderer {
     pack_terrain_flat: bool,
     /// OptiFine/Iris separate ambient occlusion: pass vertex alpha to hz_Color.a.
     pub separate_ao: bool,
-    /// Shader-pack terrain pages used by post processing, retained between frames.
-    pack_pages: Vec<pack_post::TerrainPage>,
     /// Camera-relative selection outline vertices, retained between frames.
     outline_edges_scratch: Vec<[f32; 6]>,
     /// Selection outline line vertices, retained between frames.
@@ -3742,13 +3738,11 @@ impl Renderer {
             own_timing: None,
             pack_entity_rest: Vec::new(),
             cloud_bindings,
-            pack_weather: None,
             pack_atlas: None,
             pack_material_atlases: None,
             shared_material_maps: [None, None],
             pack_terrain_flat: false,
             separate_ao: false,
-            pack_pages: Vec::new(),
             outline_edges_scratch: Vec::new(),
             outline_lines_scratch: Vec::new(),
             debug_lines_scratch: Vec::new(),
@@ -4097,7 +4091,7 @@ impl Renderer {
             let programs = p.programs().into_iter().map(str::to_owned).collect();
             (programs, p.notes.clone())
         });
-        self.pack_post = Some((dimension, post));
+        self.pack_post = Some((dimension, post.map(pack_external::PackPipeline::new)));
         if self.pack_post.as_ref().is_some_and(|p| p.1.is_some()) {
             self.native = None;
         }
