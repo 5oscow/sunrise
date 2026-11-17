@@ -95,18 +95,7 @@ pub(in crate::game) fn local_menu_id(local: Local) -> Option<String> {
 /// What tells two stacks apart that don't merge: the item, its damage and its components.
 fn kind_of(stack: &ItemStack) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    (&*stack.item, stack.damage).hash(&mut hasher);
-    match stack.data() {
-        // Enchantments compare as a multiset, so they are sorted before they are printed.
-        Some(data) if data.enchantments.len() > 1 || data.stored_enchantments.len() > 1 => {
-            let mut data = data.clone();
-            data.enchantments.sort();
-            data.stored_enchantments.sort();
-            format!("{:?}", Some(&data))
-        }
-        data => format!("{data:?}"),
-    }
-    .hash(&mut hasher);
+    (&*stack.item, stack.damage, stack.data()).hash(&mut hasher);
     hasher.finish()
 }
 
@@ -509,7 +498,7 @@ mod tests {
     static TAKE: Take = Take;
 
     #[test]
-    fn a_local_chest_and_a_servers_have_the_same_menu() {
+    fn a_local_container_has_vanillas_menu_id() {
         let chest = |rows| Local::Chest {
             rows: Some(rows),
             shulker: false,
@@ -546,16 +535,38 @@ mod tests {
         assert_ne!(kind_of(&a), kind_of(&ItemStack::new("minecraft:enchanted_book", 1)));
     }
 
+    /// Picks up slot 9 on every press.
+    struct PickNine;
+    impl ContainerHooks for PickNine {
+        fn press(&self, c: &mut dyn Container, _: Option<SlotId>, _: bool) -> bool {
+            c.click(SlotId(9), Click::Pick { right: false })
+        }
+    }
+    static PICK_NINE: PickNine = PickNine;
+
     #[test]
     #[ignore = "daily"]
-    fn a_hooks_clicks_go_out_as_container_clicks_and_a_taken_press_suppresses_vanillas() {
+    fn a_hooks_click_goes_through_the_menu() {
         let mut resources = None;
         let mut game = server_game(&mut resources);
         game.screen = Screen::Inventory;
-        // A press on a slot that a hook takes sends nothing of vanilla's.
-        game.container_press(Some(9), false);
-        with_registrants(&[&TAKE], || assert!(game.container_press(Some(9), false)));
-        assert!(game.carried.is_none());
+        let stone = ItemStack::new("minecraft:stone", 5);
+        game.inventory[9] = Some(stone.clone());
+        with_registrants(&[&PICK_NINE], || assert!(game.container_press(None, false)));
+        assert_eq!(game.carried, Some(stone));
+        assert!(game.inventory[9].is_none());
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn a_taken_press_leaves_the_hand_and_starts_no_drag() {
+        let mut resources = None;
+        let mut game = server_game(&mut resources);
+        game.screen = Screen::Inventory;
+        let stone = ItemStack::new("minecraft:stone", 5);
+        game.carried = Some(stone.clone());
+        with_registrants(&[&TAKE], || game.inventory_press(false));
+        assert_eq!(game.carried, Some(stone));
         assert!(game.inv_drag.is_none());
     }
 
@@ -565,11 +576,14 @@ mod tests {
         let mut resources = None;
         let mut game = server_game(&mut resources);
         game.screen = Screen::Inventory;
+        with_registrants(&[&TAKE], || assert!(game.container_key("key.keyboard.r")));
+        game.level.recipe_book.open[sunrise_client::recipe_book::BookType::Crafting.index()] = true;
+        game.ensure_recipe_search();
+        game.recipe_focus_search();
+        assert!(game.recipe_search_focused());
         BUILT.with(|n| n.set(0));
-        if game.recipe_search_focused() {
-            with_registrants(&[&TAKE], || assert!(!game.container_key("key.keyboard.r")));
-            assert_eq!(BUILT.with(|n| n.get()), 0);
-        }
+        with_registrants(&[&TAKE], || assert!(!game.container_key("key.keyboard.r")));
+        assert_eq!(BUILT.with(|n| n.get()), 0);
     }
 
     #[test]
