@@ -54,55 +54,68 @@ fn player_tick_hooks_observe_advanced_dig_progress_and_skipped_body_still_ticks_
                 game.world
                     .chunks
                     .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
-                let pos = [8, 63, 8];
                 let stone = game
                     .pack
                     .assets
                     .registry
                     .default_state("minecraft:stone")
                     .unwrap();
-                game.world.set(pos[0], pos[1], pos[2], stone).unwrap();
-                let mut miner = guest(1);
-                miner.loaded = true;
-                miner.position = [8.5, 64.0, 8.5];
-                let mut spectator = guest(2);
+                for (conn, x) in [(1, 8), (2, 10)] {
+                    let pos = [x, 63, 8];
+                    game.world.set(pos[0], pos[1], pos[2], stone).unwrap();
+                    let mut miner = guest(conn);
+                    miner.loaded = true;
+                    miner.position = [f64::from(x) + 0.5, 64.0, 8.5];
+                    let host = game.lan.as_mut().unwrap();
+                    host.hub.guests.push(miner);
+                    let play = host.play.entry(conn).or_default();
+                    play.digging = Some((pos, [0, 1, 0]));
+                    play.mining = Some(Mining {
+                        pos,
+                        progress: 0.0,
+                        per_tick: 0.0,
+                        ticks: 1,
+                        crack: None,
+                    });
+                    play.dig_start = 0;
+                    // START_DESTROY_BLOCK resets the last-sent crack stage.
+                    play.last_progress = -1;
+                }
+                let mut spectator = guest(3);
                 spectator.loaded = true;
                 spectator.game_mode = SPECTATOR;
                 spectator.position = [15.5, 64.0, 8.5];
                 assert!(!game.guest_body_ticks(&spectator));
                 let host = game.lan.as_mut().unwrap();
-                host.hub.guests.extend([miner, spectator]);
+                host.hub.guests.push(spectator);
                 host.hub.ticks = 1;
-                let play = host.play.entry(1).or_default();
-                play.digging = Some((pos, [0, 1, 0]));
-                play.mining = Some(Mining {
-                    pos,
-                    progress: 0.0,
-                    per_tick: 0.0,
-                    ticks: 1,
-                    crack: None,
-                });
-                play.dig_start = 0;
-                // START_DESTROY_BLOCK resets the last-sent crack stage.
-                play.last_progress = -1;
-                host.play.entry(2).or_default().destroy_delay = 5;
+                host.play.entry(3).or_default().destroy_delay = 5;
 
                 game.tick_guests();
 
                 let host = game.lan.as_ref().unwrap();
-                let mining = host.play[&1].mining.as_ref().unwrap();
-                assert_eq!(mining.ticks, 2);
-                assert!(mining.progress > 0.0);
+                for conn in [1, 2] {
+                    let mining = host.play[&conn].mining.as_ref().unwrap();
+                    assert_eq!(mining.ticks, 2);
+                    assert!(mining.progress > 0.0);
+                }
                 assert_eq!(
-                    host.play[&2].destroy_delay, 4,
+                    host.play[&3].destroy_delay, 4,
                     "the unloaded spectator's game-mode clock runs without a body tick"
                 );
                 let heard = heard.lock().unwrap();
                 assert_eq!(heard.progress, 0, "the first crack stage is published");
                 assert_eq!(
                     heard.ticks,
-                    [("dig", 0), ("pre", 0), ("post", 0)],
-                    "both hooks see the updated crack; the skipped spectator hears neither"
+                    [
+                        ("dig", 0),
+                        ("dig", 0),
+                        ("pre", 0),
+                        ("post", 0),
+                        ("pre", 0),
+                        ("post", 0)
+                    ],
+                    "both miners publish a crack before either hook bracket; the spectator hears neither"
                 );
             })
         },

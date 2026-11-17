@@ -52,27 +52,16 @@ impl Game<'_> {
         if host.play.values().any(|p| p.hook.is_some()) {
             self.refresh_hook_targets();
         }
-        for conn in conns {
+        // ServerPlayer.tick runs each player's game mode on the level path.
+        // Finish that phase for this level before any connection doTick work,
+        // even for players whose later body skips.
+        for &conn in &conns {
             let Some(host) = self.lan.as_mut() else {
                 return;
             };
-            let Some(gi) = host.hub.guests.iter().position(|g| g.conn == conn) else {
+            if !host.hub.guest(conn).is_some_and(|g| host.hub.here(g)) {
                 continue;
-            };
-            // ServerGamePacketListenerImpl.tick: the chat and command throttlers
-            // decay one a tick, dead or alive.
-            let play = host.play.entry(conn).or_default();
-            play.chat_spam = play.chat_spam.saturating_sub(1);
-            play.command_spam = play.command_spam.saturating_sub(1);
-            play.recipe_checks = play.recipe_checks.saturating_sub(1);
-            // commandSuggestionsProvider.tick: one answer a tick, to the latest request.
-            play.suggestion_budget = true;
-            self.guest_try_suggestions(conn);
-            // ServerPlayer.tick runs the game mode on the level path, before the
-            // connection's doTick/Player.tick and its hooks, even when the body skips.
-            let Some(host) = self.lan.as_mut() else {
-                return;
-            };
+            }
             if let Some((pos, _)) = host.play.get(&conn).and_then(|play| play.digging)
                 && self
                     .res
@@ -107,13 +96,30 @@ impl Game<'_> {
                 if digging.is_some()
                     && let Some(host) = self.lan.as_mut()
                     && let Some(play) = host.play.get_mut(&conn)
-                    && (host.hub.guests[gi].creative() || play.mining.is_none())
+                    && (host.hub.guest(conn).is_some_and(|g| g.creative()) || play.mining.is_none())
                 {
                     play.digging = None;
                 }
             }
             self.guest_delayed_destroy(conn);
             self.guest_dig_feedback(conn);
+        }
+        for conn in conns {
+            let Some(host) = self.lan.as_mut() else {
+                return;
+            };
+            let Some(gi) = host.hub.guests.connection_index(conn) else {
+                continue;
+            };
+            // ServerGamePacketListenerImpl.tick: the chat and command throttlers
+            // decay one a tick, dead or alive.
+            let play = host.play.entry(conn).or_default();
+            play.chat_spam = play.chat_spam.saturating_sub(1);
+            play.command_spam = play.command_spam.saturating_sub(1);
+            play.recipe_checks = play.recipe_checks.saturating_sub(1);
+            // commandSuggestionsProvider.tick: one answer a tick, to the latest request.
+            play.suggestion_budget = true;
+            self.guest_try_suggestions(conn);
             // ServerPlayer.doTick runs the body (`super.tick()`: Player.tick,
             // where NeoForge posts PlayerTickEvent.Pre/Post) unless the player
             // is a spectator touching an unloaded chunk. Decided once, before
