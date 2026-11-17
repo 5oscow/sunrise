@@ -423,6 +423,49 @@ mod tests {
         assert_eq!(level.count(), 0);
     }
     #[test]
+    fn copying_saved_duplicates_prefers_the_held_due_tick() {
+        let mut level = level();
+        let due = tick(0, 0, 10, -1, -2);
+        let future = tick(0, 0, 30, 0, -1);
+        let chunk = due.pos.chunk();
+        level.remove_chunk(chunk).unwrap();
+        level
+            .add_chunk(
+                chunk,
+                ChunkTicks::from_saved(vec![due.saved(10), future.saved(10)]),
+            )
+            .unwrap();
+        level.unpack_chunk(chunk, 10);
+        level.begin_tick_where(10, 1, |_| true, |_| false).unwrap();
+        level.finish_tick().unwrap();
+
+        let offset = BlockPos::new(16, 0, 0);
+        level.copy_area(TickArea::new(due.pos, due.pos), offset);
+        assert_eq!(
+            level.chunk(offset.chunk()).unwrap().queued(),
+            &[ScheduledTick {
+                pos: due.pos.offset(16, 0, 0),
+                sub_tick_order: 0,
+                ..due
+            }]
+        );
+    }
+    #[test]
+    fn all_queued_includes_held_occurrences_but_heap_traversal_does_not() {
+        let mut level = level();
+        let held = tick(0, 0, 10, -1, -2);
+        let future = tick(0, 1, 30, 0, -1);
+        level.schedule(held);
+        level.schedule(future);
+        level.begin_tick_where(10, 1, |_| true, |_| false).unwrap();
+        level.finish_tick().unwrap();
+        assert_eq!(level.chunk(held.pos.chunk()).unwrap().queued(), &[future]);
+        assert_eq!(
+            level.all_queued().copied().collect::<Vec<_>>(),
+            [future, held]
+        );
+    }
+    #[test]
     fn collection_guards_and_membership_survive_area_mutation() {
         let mut level = level();
         level.schedule(tick(0, 0, 0, 0, 0));
@@ -584,9 +627,11 @@ impl LevelTicks {
     pub fn count(&self) -> usize {
         self.chunks.values().map(ChunkTicks::count).sum()
     }
-    /// Every unpacked queued tick, in no particular order.
+    /// Every unpacked queued tick, including held occurrences, in no particular order.
     pub fn all_queued(&self) -> impl Iterator<Item = &ScheduledTick> {
-        self.chunks.values().flat_map(|c| c.queued())
+        self.chunks
+            .values()
+            .flat_map(|c| c.queued().iter().chain(c.held()))
     }
     pub fn begin_tick(
         &mut self,
@@ -825,11 +870,13 @@ impl LevelTicks {
             .filter(|t| area.contains(t.pos))
             .collect();
         for key in self.chunks_in_area(area) {
+            let chunk = &self.chunks[&key];
+            // Copying is first-schedule-wins. Prefer a due, held occurrence over a
+            // future occurrence of the same kind at the same position in the heap.
             ticks.extend(
-                self.chunks[&key]
-                    .queued()
-                    .iter()
-                    .chain(self.chunks[&key].held())
+                chunk
+                    .held()
+                    .chain(chunk.queued())
                     .copied()
                     .filter(|t| area.contains(t.pos)),
             );
