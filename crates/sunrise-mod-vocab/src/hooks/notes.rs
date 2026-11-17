@@ -2779,8 +2779,8 @@ registration path.
   (`menu_clicked`, `menu_closed`), and trades on them between the players'
   [`ENTITY_ITEMS`](../concepts/capabilities/entity-items.md) handlers in one transaction ([Server menus](#server-menus)).
 
-- Item tooltips: an `ItemPart`'s `tooltip` adds its item's own lines where `Item.appendHoverText` does, after
-  the name and before the components' lines, never for a tooltip the stack hides.
+- Item tooltips: unless the stack hides them, `ItemPart::tooltip` adds lines where `Item.appendHoverText` does,
+  after the name and before the components, with the same `TooltipAppendContext` as appenders in `event.context`.
   `Hooks::item_tooltip` (NeoForge's `ItemTooltipEvent`) then gets every item's whole tooltip once it is
   complete, with the local player, the stack's `TooltipDisplay` and its `TooltipFlag` (`advanced`, `creative`),
   and may add, change or remove any line. Sunrise's creative search reads vanilla's exported tooltip text, so it
@@ -2791,9 +2791,9 @@ registration path.
   or `Before(id)` and `After(id)` for a component detail Sunrise lists (`minecraft:lore`, `minecraft:enchantments`...), where
   the lines go among the other components' lines. The game asks only that appender, only for a stack that carries the
   component (live, transient ones included) and whose `tooltip_display` shows it, and only while its mod is enabled. It gets
-  the stack and a `TooltipAppendContext` (the local player, `advanced`, `creative`, and `nested` for a crossbow's projectile),
-  and adds its lines after the item's own lines and before the durability and advanced lines. The creative search doesn't read
-  these lines, as it doesn't `item_tooltip`. A mod that reacts to every item keeps `item_tooltip`.
+  the stack and a `TooltipAppendContext` (local player, `advanced`/`creative`/`nested` flags, and the client level's
+  `tick_rate`, or 20 without a level). Its lines go after the item's own and before durability and advanced lines.
+  Creative search doesn't read these lines or `item_tooltip`; mods reacting to every item use `item_tooltip`.
   `Before`/`After` accept only the 23 vanilla anchors listed in `tooltip_appender.rs`, not other registered
   components. The `registerAppender(TooltipLocation, ...)` overload is not represented. Several appenders may register
   for one component; all run in registration order at an equal placement. The player is always the local player,
