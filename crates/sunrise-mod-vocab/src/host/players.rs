@@ -190,8 +190,9 @@ pub trait PlayersBackend {
     fn player_selected_slot(&self, player: PlayerRef) -> Option<usize>;
     /// Side: both.
     /// A player's current supported menu. Refuses crafting tables, merchants,
-    /// workstations, lecterns, mounts and menus with hidden slots; also refuses
-    /// clients, stale players and players whose state is swapped out.
+    /// workstations, lecterns, mounts and menus with hidden slots on the server.
+    /// Refuses stale players and players held out by another active turn. Reads for
+    /// the acting player use their current inventory, equipment, cursor and ender contents.
     #[access(WorldOnly)]
     fn player_container_menu(&self, player: PlayerRef) -> Option<MenuRef>;
     /// Side: server.

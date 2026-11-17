@@ -465,6 +465,14 @@ mod tests {
                     "minecraft:furnace" => {
                         let menu = event.menu.expect("furnace has a handle during open");
                         assert_eq!(
+                            menu.slot(host, 3),
+                            Some(Some(
+                                ItemStack::new("minecraft:iron_ingot", 5)
+                                    .try_into_api()
+                                    .unwrap()
+                            ))
+                        );
+                        assert_eq!(
                             menu.slot(host, 0),
                             Some(Some(
                                 ItemStack::new("minecraft:iron_ore", 3)
@@ -498,6 +506,9 @@ mod tests {
         mod_platform::testing::with_mods(mods, || {
             with_game(|game| {
                 let _rx = watched_guest(game);
+                game.lan.as_mut().unwrap().hub.guests.update(0, |guest| {
+                    guest.inventory[9] = Some(ItemStack::new("minecraft:iron_ingot", 5));
+                });
                 game.world
                     .chunks
                     .insert((0, 0), Arc::new(sunrise_client::chunk::Chunk::empty(0, 0)));
@@ -530,6 +541,35 @@ mod tests {
                     } else {
                         assert!(game.lan_open_container(1, (0, 64, 0)));
                     }
+                    // The same accessor works in any acting server turn, not only the notice.
+                    game.as_guest(1, |game| {
+                        let player = game.player(123).unwrap();
+                        let menu = game.player_container_menu(player);
+                        if name == "minecraft:crafting_table" {
+                            assert!(menu.is_none());
+                        } else {
+                            let menu = menu.unwrap();
+                            assert!(game.menu_slot_count(menu).is_some());
+                            // The cursor is swapped out of Guest for this turn.
+                            let cursor = Some(ItemStack::new("minecraft:stone", 2));
+                            game.carried = cursor.clone();
+                            assert_eq!(game.menu_carried(menu), Some(cursor));
+                            game.carried = None;
+                            let fields = menu.fields();
+                            let stale = mod_api::__private::game::menu_ref(
+                                player,
+                                fields.window,
+                                fields.generation + 1,
+                            );
+                            assert_eq!(game.menu_slot(stale, 0), None);
+                            let wrong_window = mod_api::__private::game::menu_ref(
+                                player,
+                                fields.window + 1,
+                                fields.generation,
+                            );
+                            assert_eq!(game.menu_slot(wrong_window, 0), None);
+                        }
+                    });
                     game.guest_close_all(1);
                 }
                 assert_eq!(
