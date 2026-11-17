@@ -1477,6 +1477,8 @@ mod loot_kill_target_tests {
         )
         .unwrap();
         game.build_registries();
+        // A real world open publishes its owned loot evaluator before commands run.
+        game.load_server_loot();
         game.set_allow_commands(true);
         game.world
             .chunks
