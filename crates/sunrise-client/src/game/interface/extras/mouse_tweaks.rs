@@ -27,6 +27,12 @@ pub(in crate::game) struct Tweaks {
     /// Wheel steps not yet acted on (a trackpad scrolls in fractions).
     wheel: f32,
 }
+impl Tweaks {
+    /// Ends the drag a press that was taken elsewhere didn't reset.
+    pub(in crate::game) fn end_drag(&mut self) {
+        self.drag = None;
+    }
+}
 /// A server's menu the tweaks run in: their clicks are vanilla's in these,
 /// and the menu engine knows which slot takes what. Not the menus whose slots
 /// cost or trigger something (anvils, enchanting, merchants, beacons, crafters).
@@ -71,41 +77,6 @@ impl Game<'_> {
         } else {
             matches!(self.container_kind(), None | Some(BlockEntity::Chest(_)))
         }
-    }
-    /// One ordinary click on a game slot. False when nothing took it.
-    pub(in crate::game) fn tweak_click(&mut self, slot: usize, button: i32, input: Input) -> bool {
-        if self.remote.is_some() {
-            return self.remote_menu_ops(&[(Some(slot), button, input)]);
-        }
-        if !self.click_open_inventory(Some(slot), button, input) {
-            return false;
-        }
-        if let Some(key) = self.container {
-            self.container_changed(key);
-        }
-        true
-    }
-    /// Puts the hand's stack (`right`: one of it) in `slot`, as a one-slot
-    /// drag (`QUICK_CRAFT`) and not a click: a server that has the hand empty
-    /// (the stack it was to come from just burned as fuel) ignores a drag, but
-    /// a click would pick up what's in `slot`.
-    fn tweak_put(&mut self, slot: usize, right: bool) -> bool {
-        let kind = i32::from(right) << 2;
-        let ops = [
-            (None, kind, Input::QuickCraft),
-            (Some(slot), kind | 1, Input::QuickCraft),
-            (None, kind | 2, Input::QuickCraft),
-        ];
-        if self.remote.is_some() {
-            return self.remote_menu_ops(&ops);
-        }
-        if !self.menu_ops(&ops) {
-            return false;
-        }
-        if let Some(key) = self.container {
-            self.container_changed(key);
-        }
-        true
     }
     /// A press on `slot`: true when the tweaks took it (a right-drag
     /// placing), else vanilla's press runs and the tweaks watch the drag.
@@ -236,59 +207,6 @@ impl Game<'_> {
             }
         }
         true
-    }
-    /// `slot` is a result slot of the open menu.
-    fn tweak_result(&mut self, slot: usize) -> bool {
-        let mut result = false;
-        self.menu_session(|menu, _, to_menu| {
-            result = to_menu(slot).is_some_and(|i| menu.is_result(i));
-            Some(false)
-        });
-        result
-    }
-    /// `slot` takes one more of `stack`, by the open menu's rules.
-    fn tweak_takes_one(&mut self, slot: usize, stack: &ItemStack) -> bool {
-        let mut takes = false;
-        self.menu_session(|menu, env, to_menu| {
-            takes = to_menu(slot).is_some_and(|i| menu.takes_one(env, i, stack));
-            Some(false)
-        });
-        takes
-    }
-    /// Where vanilla's quick move would put `slot`'s items, tried on a copy
-    /// of the menu that's dropped (`Some(false)` keeps nothing).
-    fn tweak_landing(&mut self, slot: usize) -> Vec<usize> {
-        let slots = self.slots();
-        let mut landing = Vec::new();
-        self.menu_session(|menu, env, to_menu| {
-            let from = to_menu(slot)?;
-            landing = menu
-                .quick_move_landing(env, from)
-                .into_iter()
-                .filter_map(|i| slots.iter().copied().find(|&g| to_menu(g) == Some(i)))
-                .collect();
-            Some(false)
-        });
-        landing
-    }
-    /// The slots across from `slot`: a container's or crafting grid's face
-    /// the inventory (hotbar first, from the right), the inventory's face
-    /// them; without one, hotbar and main inventory trade.
-    fn other_side(&self, slot: usize) -> Vec<usize> {
-        let table = self.craft_size == 3;
-        let own: Vec<usize> = self
-            .slots()
-            .into_iter()
-            .filter(|s| (300..500).contains(s) || (table && (100..109).contains(s)))
-            .collect();
-        let player = || (0..9).rev().chain((9..36).rev());
-        match slot {
-            100..109 | 300..500 => player().collect(),
-            0..36 if !own.is_empty() => own,
-            0..9 => (9..36).collect(),
-            9..36 => (0..9).collect(),
-            _ => Vec::new(),
-        }
     }
     /// Wheel down: one item of `slot` to where a quick move sends it. A
     /// result can't be split or put back: one craft (or the furnace's whole

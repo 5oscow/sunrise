@@ -88,6 +88,14 @@ pub mod lang {
     pub use sunrise_hooks::lang::{Files, register};
 }
 
+/// Input and drawing on an open container screen, for the extras that act on one (docs/layers.md,
+/// "Container screens"); offered through [`hooks::Hooks::containers`].
+pub mod containers {
+    pub use sunrise_hooks::containers::{
+        Click, Container, ContainerHooks, Panel, Role, Slot, SlotId, Stack,
+    };
+}
+
 /// Drawing on the HUD (docs/layers.md, "Platform registries").
 pub mod hud {
     pub use sunrise_hooks::hud::{Canvas, Corner, Layer, register};
