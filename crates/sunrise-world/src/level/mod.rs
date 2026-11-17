@@ -1207,7 +1207,7 @@ pub trait LevelAccess: BlockEntityNeighbors {
     /// library answered `vanilla`, `direction` pointing from the block to the
     /// comparator reading it: the output to use. The default keeps it.
     fn adjust_analog_output(
-        &self,
+        &mut self,
         _pos: BlockPos,
         _state: BlockStateId,
         _direction: Direction,

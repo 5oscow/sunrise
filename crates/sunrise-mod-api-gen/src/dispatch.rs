@@ -460,7 +460,7 @@ pub(super) fn emit<'a>(
             .map(|(name, _)| format!("let mut __previous_{name} = {name}.clone();"))
             .collect::<String>();
         let stack_after = stack_outputs.iter().map(|(output, _)| format!(
-            "if *{event}.{output} != __previous_{output} {{ match __validate_{output}({event}.{output}) {{ Ok(()) => __previous_{output} = {event}.{output}.clone(), Err(error) => {{ *{event}.{output} = __previous_{output}.clone(); log::warn!(\"mod {{}} hook {name} output {output} refused: {{error:?}}\", super::content::crash::current_native_mod().unwrap_or(\"unknown\")); }} }} }}"
+            "if *{event}.{output} != __previous_{output} {{ match __validate_{output}({event}.{output}) {{ Ok(()) => __previous_{output} = {event}.{output}.clone(), Err(error) => {{ *{event}.{output} = __previous_{output}.clone(); log::warn!(\"mod {{}} hook {name} output {output} refused: {{error:?}}\", super::content::crash::current_native_mod().unwrap_or(\"unknown\")); }} }} }}\n"
         )).collect::<String>();
         let collected = output.as_ref().filter(|_| contract == Contract::Collect);
         // A draw surface reaches mods as its context's trait object, which the native call

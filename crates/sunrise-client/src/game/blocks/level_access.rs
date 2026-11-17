@@ -536,7 +536,7 @@ impl LevelAccess for GameLevel<'_> {
         output
     }
     fn adjust_analog_output(
-        &self,
+        &mut self,
         pos: BlockPos,
         state: BlockStateId,
         direction: Direction,
