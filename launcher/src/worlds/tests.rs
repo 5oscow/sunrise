@@ -225,3 +225,23 @@ fn the_mods_a_world_was_saved_with_are_read_and_matched() {
     assert!(saved_with(&all, &["other".into()]).is_empty());
     fs::remove_dir_all(home).unwrap();
 }
+
+#[test]
+fn a_last_played_too_far_ahead_for_a_system_time_is_clamped_not_a_panic() {
+    let home = scratch("last-played-far");
+    world(
+        &home,
+        "Far",
+        vec![
+            ("LevelName", name("Far")),
+            ("LastPlayed", Tag::Long(i64::MAX)),
+        ],
+    );
+    let worlds = list(&home);
+    assert_eq!(worlds.len(), 1);
+    assert_eq!(
+        worlds[0].last_played,
+        UNIX_EPOCH + Duration::from_millis(253_402_300_799_000)
+    );
+    fs::remove_dir_all(home).unwrap();
+}

@@ -572,6 +572,16 @@ pub fn parse_seed(text: &str) -> Option<i64> {
         )
     }))
 }
+/// The latest `LastPlayed` kept: the end of year 9999, in milliseconds. A later time does not fit a
+/// Windows `SystemTime`, and adding it panics.
+const MAX_LAST_PLAYED_MILLIS: u64 = 253_402_300_799_000;
+
+/// The time a world's `LastPlayed` (milliseconds since the epoch) names, clamped so that a damaged
+/// or hostile `level.dat` cannot panic the world list.
+fn last_played(millis: u64) -> std::time::SystemTime {
+    std::time::UNIX_EPOCH + std::time::Duration::from_millis(millis.min(MAX_LAST_PLAYED_MILLIS))
+}
+
 pub fn list_worlds(saves: &Path) -> Vec<WorldEntry> {
     let mut worlds: Vec<WorldEntry> = std::fs::read_dir(saves)
         .into_iter()
@@ -594,7 +604,7 @@ pub fn list_worlds(saves: &Path) -> Vec<WorldEntry> {
             };
             let data = root.get("Data")?;
             let modified = match data.get("LastPlayed") {
-                Some(sunrise_core::nbt::Tag::Long(millis)) if *millis >= 0 => std::time::UNIX_EPOCH + std::time::Duration::from_millis(*millis as u64),
+                Some(sunrise_core::nbt::Tag::Long(millis)) if *millis >= 0 => last_played(*millis as u64),
                 _ => modified,
             };
             Some(WorldEntry {
@@ -4158,5 +4168,25 @@ mod classic_tests {
                     .any(|v| v.color == rgba(255, 255, 0, 255))
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod last_played_tests {
+    use super::*;
+    use std::time::{Duration, UNIX_EPOCH};
+
+    /// A `LastPlayed` too far ahead for a Windows `SystemTime` is clamped to the end of year 9999
+    /// instead of panicking the Singleplayer list; an ordinary one is kept as it is.
+    #[test]
+    fn a_last_played_too_far_ahead_is_clamped_not_a_panic() {
+        let end = UNIX_EPOCH + Duration::from_millis(253_402_300_799_000);
+        assert_eq!(last_played(i64::MAX as u64), end);
+        assert_eq!(last_played(1_000_000_000_000_000), end);
+        assert_eq!(last_played(253_402_300_799_000), end);
+        assert_eq!(
+            last_played(1_700_000_000_000),
+            UNIX_EPOCH + Duration::from_millis(1_700_000_000_000)
+        );
     }
 }
