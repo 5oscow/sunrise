@@ -9,12 +9,14 @@ use sunrise_world::native_load_context::{
     DataLoadOrigin, LoadContext, LoadInputs, LoopContext, LoopSide,
 };
 
-/// The server-side jumps the installed `living_jump` heard.
-pub(crate) static JUMPS: AtomicUsize = AtomicUsize::new(0);
-/// The asks the installed `menu_still_valid` heard.
-pub(crate) static STILL_VALID_ASKED: AtomicUsize = AtomicUsize::new(0);
-
 thread_local! {
+    /// The server-side jumps the installed `living_jump` heard on this thread. Per thread,
+    /// because every test whose mob or player jumps on a server loop context reaches it once
+    /// the callbacks are installed; a test that counts sets it to zero first.
+    pub(crate) static JUMPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// The asks the installed `menu_still_valid` heard on this thread, per thread for the same
+    /// reason.
+    pub(crate) static STILL_VALID_ASKED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     /// The item hooks this thread asked: the hook, the stack's item, and the answer it arrived
     /// with.
     static ITEM_ASKS: std::cell::RefCell<Vec<(&'static str, String, bool)>> =
@@ -90,7 +92,7 @@ pub(crate) fn install() {
     ONCE.call_once(|| {
         let installed = super::install(NativeClientHooks {
             menu_still_valid: |context, player, menu, _, eye, valid| {
-                STILL_VALID_ASKED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                STILL_VALID_ASKED.set(STILL_VALID_ASKED.get() + 1);
                 if menu == "test:rules" && player == 2 && eye[2] == 0.0 {
                     *valid = context.setting("rules_mod", "stack").is_some();
                 }
@@ -148,11 +150,8 @@ pub(crate) fn install() {
                         .map(|jumps| jumps.push((entity, velocity)))
                         .is_some()
                 });
-                if !recorded {
-                    JUMPS.fetch_add(
-                        usize::from(context.side() == LoopSide::Server),
-                        std::sync::atomic::Ordering::Relaxed,
-                    );
+                if !recorded && context.side() == LoopSide::Server {
+                    JUMPS.set(JUMPS.get() + 1);
                 }
             },
             living_jump_power: |context, _, _, power| {
