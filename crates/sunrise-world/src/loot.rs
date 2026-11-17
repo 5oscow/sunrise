@@ -22,7 +22,6 @@ mod loot_tags;
 pub use loot_tags::LootTags;
 use serde_json::Value;
 use std::{
-    cell::RefCell,
     collections::HashMap,
     fs, io,
     path::Path,
@@ -31,7 +30,7 @@ use std::{
 use sunrise_core::random::{LegacyRandom, RandomSource};
 use {
     crate::{lazy_json::LazyJson, native_load_context::LoadContext},
-    sunrise_core::nbt::Tag,
+    sunrise_core::nbt::{Compound, Tag},
 };
 
 /// Raw files a world's data packs add over the game's own data, by
@@ -137,63 +136,6 @@ pub struct LootContext<'a> {
     /// when the game rolled the table at a place (a broken block's drops,
     /// a mob's death loot); None for the other rolls. Either engine fills it.
     pub place: Option<Arc<LootPlace>>,
-}
-
-/// Where a loot roll happens, as a mod's own loot kinds see it:
-/// `LootContextParams.ORIGIN`, `LootContextParams.BLOCK_ENTITY`, and what
-/// vanilla's own conditions read of `LootContext.getLevel` (`TimeCheck`:
-/// the time; `WeatherCheck`: the rain and the thunder). The game sets it
-/// around a roll with [`with_native_loot_place`].
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct LootPlace {
-    /// `ORIGIN`: a broken block's centre, a dead mob's position.
-    pub origin: Option<[f64; 3]>,
-    /// `BLOCK_ENTITY`: the broken block's entity as it was before the
-    /// break, saved with its id and position (`saveWithFullMetadata`); a
-    /// mod's block entity carries its own data and its `Items`.
-    pub block_entity: Option<Tag>,
-    /// The level the roll is in.
-    pub level: Option<LootLevel>,
-}
-
-/// The level a loot roll is in, as a mod's own loot kinds see it.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct LootLevel {
-    /// The dimension's id (`minecraft:overworld`).
-    pub dimension: String,
-    /// `Level.getGameTime`.
-    pub game_time: i64,
-    /// `Level.getDayTime`: it counts on from day to day, so the time of
-    /// day is `day_time % 24000` (night from 13000 to 23000).
-    pub day_time: i64,
-    /// `Level.isRaining`.
-    pub raining: bool,
-    /// `Level.isThundering`.
-    pub thundering: bool,
-}
-
-thread_local! {
-    static NATIVE_LOOT_PLACE: RefCell<Option<Arc<LootPlace>>> = const { RefCell::new(None) };
-}
-
-/// Runs `roll` with `place` as where its loot rolls happen: every
-/// [`LootContext`] made inside it, by either engine, carries it. The
-/// place before is back when `roll` returns, so these nest.
-pub fn with_native_loot_place<T>(place: LootPlace, roll: impl FnOnce() -> T) -> T {
-    struct Restore(Option<Arc<LootPlace>>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            let before = self.0.take();
-            NATIVE_LOOT_PLACE.with(|p| *p.borrow_mut() = before);
-        }
-    }
-    let _restore = Restore(NATIVE_LOOT_PLACE.with(|p| p.replace(Some(Arc::new(place)))));
-    roll()
-}
-
-/// The place [`with_native_loot_place`] set for the rolls now running, if any.
-pub fn current_native_loot_place() -> Option<Arc<LootPlace>> {
-    NATIVE_LOOT_PLACE.with(|p| p.borrow().clone())
 }
 
 /// One generated item stack.
@@ -312,6 +254,7 @@ mod holder_sets;
 pub struct LootData {
     holder_sets: holder_sets::Binding,
     types: types::Types,
+    component_defaults: Arc<HashMap<String, Compound>>,
     tables: Arc<LootTables>,
     global_modifiers: Arc<global_modifiers::GlobalLootModifiers>,
     modifiers: HashMap<String, Value>,
@@ -353,6 +296,8 @@ pub struct LootEntity {
     /// Worn and held items by `EquipmentSlot` name (mainhand, offhand,
     /// feet, legs, chest, head, body, saddle).
     pub equipment: Vec<(String, LootStack)>,
+    /// Components exposed by this entity as a loot source.
+    pub components: Compound,
 }
 impl LootEntity {
     pub fn new(kind: &str) -> Self {
@@ -627,6 +572,9 @@ fn int_value(v: &Value) -> Option<i64> {
 #[path = "loot_conditions.rs"]
 mod loot_conditions;
 use loot_conditions::overlay_map;
+#[path = "loot_copy.rs"]
+pub mod copy;
+pub use copy::{LootLevel, LootPlace, current_native_loot_place, with_native_loot_place};
 #[path = "loot_item_predicates.rs"]
 pub mod item_predicates;
 mod predicates;
@@ -871,6 +819,8 @@ impl LootData {
         let binding = holder_sets::Binding::load(root, overlay, &items, &enchantments)?;
         let mut loaded = Self {
             holder_sets: Default::default(),
+            component_defaults: copy::component_defaults(defaults)
+                .map_err(|reason| io::Error::new(io::ErrorKind::InvalidData, reason))?,
             types,
             tables,
             global_modifiers: Arc::default(),
@@ -1641,6 +1591,7 @@ impl<R: RandomSource> Context<'_, R> {
                     stack.exploration = Some(Box::new(ExplorationMap::from_json(f)));
                 }
             }
+            "minecraft:copy_components" => self.copy_source_components(f, &mut stack),
             "minecraft:filtered" => {
                 let pass = self.item_matches(&f["item_filter"], &stack);
                 let branch = if pass { &f["on_pass"] } else { &f["on_fail"] };

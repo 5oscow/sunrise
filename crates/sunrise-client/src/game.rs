@@ -2611,6 +2611,13 @@ impl Game<'_> {
         origin: [f64; 3],
         block_entity: Option<sunrise_core::nbt::Tag>,
     ) -> sunrise_world::loot::LootPlace {
+        let (block_entity, block_components) = match block_entity {
+            Some(saved) => {
+                let source = spill::source_snapshot(saved, None, None);
+                (Some(source.nbt), Some(source.components))
+            }
+            None => (None, None),
+        };
         let (rain, thunder) = self.world.weather.levels(1.0);
         // Level.canHaveWeather: sky light, no ceiling and not the End.
         let weather =
@@ -2618,6 +2625,7 @@ impl Game<'_> {
         sunrise_world::loot::LootPlace {
             origin: Some(origin),
             block_entity,
+            block_components,
             level: Some(sunrise_world::loot::LootLevel {
                 dimension: self.dim.id().to_owned(),
                 game_time: self.world.game_time,

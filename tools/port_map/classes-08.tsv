@@ -101,7 +101,7 @@ ApplyBonusCount.UniformBonusCount.calculateNewCount	inline	crates/sunrise-items/
 ApplyExplosionDecay.run	port	crates/sunrise-items/src/items.rs::LootContext::modifiers	explosion_decay arm
 CopyBlockState.run	port	crates/sunrise-items/src/items.rs::LootContext::modifiers	copy_state arm; copies the listed properties
 CopyBlockState.Builder	skip:java		builder (build, copy)
-CopyComponentsFunction.run	port	crates/sunrise-client/src/game/blocks/spill.rs::Pending::record	gap: minor: copies only what spill.rs keeps for block entities (shulker, banner, names, heads, bees)
+CopyComponentsFunction.run	port	crates/sunrise-world/src/loot_copy.rs::copy_components	shared include/exclude evaluation for collected block, tool and available entity components
 CopyComponentsFunction.Builder	skip:java		builder (build, exclude, include)
 CopyCustomDataFunction.run	missing		minor: no vanilla loot table or item modifier uses copy_custom_data
 CopyCustomDataFunction.copyData	skip:java		builder factory

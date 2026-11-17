@@ -25,45 +25,53 @@ impl GameLevel<'_> {
         entity: Option<EntityRef>,
         roll: BlockLootRoll<'_>,
     ) -> Vec<ItemStack> {
-        let (items, registry, seed) = (self.items, self.registry, self.seed);
-        if !self.native_authoritative
-            || !mod_api::__private::listened(mod_api::HookId::EnchantedBlockLoot)
-        {
-            let sequences = Some((&mut *self.rand_sequences, seed));
-            return items.block_drops(registry, state, roll, &mut self.world.random, sequences);
-        }
-        let mut random = self.world.random.clone();
-        let mut sequences = std::mem::take(&mut *self.rand_sequences);
-        let tool = roll.held;
-        let level = &*self;
-        let levels = |enchantment: &str, mut read: u32| {
-            if let Some(enchantment) = sunrise_client::enchantment_levels::identifier(enchantment) {
-                level.native_enchanted_block_loot(super::fire::EnchantedBlockLootCall {
-                    dimension: level.dimension,
-                    pos,
-                    state,
-                    tool,
-                    enchantment: &enchantment,
-                    level: &mut read,
-                    entity,
-                });
+        let at = [pos.x, pos.y, pos.z];
+        let source = self.pending.source(at).or_else(|| {
+            crate::game::spill::world_source(self.world, at, &self.facts.get(state).name)
+        });
+        sunrise_world::loot::copy::with_block_source(source.as_deref(), || {
+            let (items, registry, seed) = (self.items, self.registry, self.seed);
+            if !self.native_authoritative
+                || !mod_api::__private::listened(mod_api::HookId::EnchantedBlockLoot)
+            {
+                let sequences = Some((&mut *self.rand_sequences, seed));
+                return items.block_drops(registry, state, roll, &mut self.world.random, sequences);
             }
-            read
-        };
-        let roll = BlockLootRoll {
-            levels: Some(&levels),
-            ..roll
-        };
-        let drops = items.block_drops(
-            registry,
-            state,
-            roll,
-            &mut random,
-            Some((&mut sequences, seed)),
-        );
-        self.world.random = random;
-        *self.rand_sequences = sequences;
-        drops
+            let mut random = self.world.random.clone();
+            let mut sequences = std::mem::take(&mut *self.rand_sequences);
+            let tool = roll.held;
+            let level = &*self;
+            let levels = |enchantment: &str, mut read: u32| {
+                if let Some(enchantment) =
+                    sunrise_client::enchantment_levels::identifier(enchantment)
+                {
+                    level.native_enchanted_block_loot(super::fire::EnchantedBlockLootCall {
+                        dimension: level.dimension,
+                        pos,
+                        state,
+                        tool,
+                        enchantment: &enchantment,
+                        level: &mut read,
+                        entity,
+                    });
+                }
+                read
+            };
+            let roll = BlockLootRoll {
+                levels: Some(&levels),
+                ..roll
+            };
+            let drops = items.block_drops(
+                registry,
+                state,
+                roll,
+                &mut random,
+                Some((&mut sequences, seed)),
+            );
+            self.world.random = random;
+            *self.rand_sequences = sequences;
+            drops
+        })
     }
 }
 

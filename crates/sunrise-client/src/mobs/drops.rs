@@ -424,6 +424,9 @@ pub fn loot_entity(m: &Mob, vehicle: Option<LootEntity>) -> LootEntity {
     use Species as S;
     let s = m.species();
     let mut e = LootEntity::new(&m.kind.id);
+    if let Some(name) = m.custom_name_tag() {
+        e.components.insert("minecraft:custom_name".into(), name);
+    }
     e.on_fire = m.fire_ticks > 0 && !m.kind.flags.fire_immune;
     e.baby = m.is_baby();
     e.vehicle = vehicle.map(Box::new);

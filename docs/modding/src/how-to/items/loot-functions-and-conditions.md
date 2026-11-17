@@ -102,3 +102,19 @@ on the completed output list, and `loot_table_load`, which edits table data,
 remain separate mechanisms. Use a custom type for logic not expressible by a
 standard operation; `copy_components`, `copy_custom_data`, `copy_state` and
 `match_block` are vanilla built-ins, not names for custom registration.
+
+## Copying components
+
+`minecraft:copy_components` reads `source` as `block_entity`, `tool`, or an
+available entity target (`this`, `attacker`, `direct_attacker`,
+`attacking_player`, `target_entity`, or `interacting_entity`).
+The block source is its collected component map, including a mod block entity's
+stored components, retained before removal; it is not restricted to particular
+vanilla block classes. A tool includes its loaded prototype and live component
+patch, with removals respected.
+
+An optional `include` list selects component IDs; omitting it selects every
+source component, while an empty list selects none. `exclude` is applied after
+`include`, so exclusion always wins. Selected values replace their destination
+components without removing unselected values. An absent source makes no edit.
+This is the same operation in both loot evaluators.
