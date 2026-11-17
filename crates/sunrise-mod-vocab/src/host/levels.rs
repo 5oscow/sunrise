@@ -775,6 +775,22 @@ pub trait LevelsBackend {
     /// height. Constant time, no allocation.
     #[access(WorldOnly)]
     fn level_capability_generation(&self, level: LevelRef, pos: [i32; 3]) -> Option<u64>;
+    /// Side: server.
+    /// Where an entity of box `size` (width, height), not a player, centred in the portal block
+    /// at `portal_pos` of this level arrives through it
+    /// (`getPortalDestination`), changing nothing. Nether portals search the closest portal
+    /// around the scaled, border-clamped exit; End portals answer the End's fixed spawn point or
+    /// the Overworld's shared spawn; End gateways answer their stored exit. No platform, ticket,
+    /// sound or hook. Diverges from vanilla, which loads chunks: loaded state only, and
+    /// `ChunksNotLoaded` for a level not open or a chunk of the search (16 blocks into the
+    /// Nether, 128 out, plus a chunk) not loaded.
+    #[access(WorldOnly)]
+    fn level_portal_destination(
+        &self,
+        level: LevelRef,
+        portal_pos: [i32; 3],
+        size: [f64; 2],
+    ) -> Result<PortalExit, PortalError>;
 }
 /// The handles' writes of the `levels` area, implemented by the game and reached through [`BackendMut`].
 // hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
@@ -1571,6 +1587,20 @@ pub trait LevelsBackendMut {
         source: BlockState,
     ) -> Result<bool, LevelWriteError>;
     /// Side: server.
+    /// `LevelRef::portal_destination`, then the exit portal built by `PortalForcer.createPortal`
+    /// (the spiral search, obsidian frame and the entry's axis) when none was found, with the
+    /// `portal_create` hook told as for travel, which cannot veto it. Refused inside a transaction
+    /// (`InTransaction`): a built portal cannot be rolled back. Needs the chunks around the
+    /// built exit loaded (`ChunksNotLoaded`); opens no level. `NoExit` when none was found and
+    /// none could be built.
+    #[access(WorldOnly)]
+    fn level_find_or_create_portal_exit(
+        &mut self,
+        level: LevelRef,
+        portal_pos: [i32; 3],
+        size: [f64; 2],
+    ) -> Result<PortalExit, PortalError>;
+    /// Side: server.
     /// Replace the random of the server level `level` names with `random`,
     /// a stream `native_level_random` gave and the mod drew from. False where
     /// that gives `None`.
@@ -1599,6 +1629,27 @@ pub trait LevelsBackendMut {
         &mut self,
         level: LevelRef,
         feature: &str,
+        pos: [i32; 3],
+    ) -> Result<bool, PlaceFeatureRefusal>;
+    /// Side: server.
+    /// Place the placed feature `placed_feature` (a `minecraft:worldgen/placed_feature` id,
+    /// `minecraft:oak_checked` or `mymod:ender_tree_checked`) at `pos`, as
+    /// `PlacedFeature.place` does with the level's random and chunk generator:
+    /// its placement modifiers run in order from `pos`, depth first, and its feature is placed at
+    /// every position they give. Direct placement has no top feature: a position reaching a
+    /// `minecraft:biome` modifier refuses with `PlaceFeatureRefusal::BiomeFilter`, rather than
+    /// checking biome membership. If earlier modifiers yield no positions, it returns `Ok(false)`.
+    /// Earlier modifiers consume random draws even when the filter refuses. This call's feature
+    /// has not run when its filter refuses; nested placement may have written before an inner
+    /// refusal. `Ok(true)` means any invocation reported success; `Ok(false)` means no positions
+    /// remained or all invocations failed. Blocks set before failure are kept. Other refusals
+    /// are checked before placement, as for `level_place_feature`, with `UnknownFeature` for an
+    /// id the placed-feature registry lacks.
+    #[access(WorldOnly)]
+    fn level_place_placed_feature(
+        &mut self,
+        level: LevelRef,
+        placed_feature: &str,
         pos: [i32; 3],
     ) -> Result<bool, PlaceFeatureRefusal>;
     /// Side: both.

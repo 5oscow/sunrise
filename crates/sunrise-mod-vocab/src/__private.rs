@@ -209,6 +209,10 @@ pub mod built {
             quads: Vec::new(),
         }
     }
+    /// What a mod may still create of its dynamic textures: `images` and `bytes` of pixels left.
+    pub fn dynamic_texture_budget(images: u32, bytes: u64) -> crate::DynamicTextureBudget {
+        crate::DynamicTextureBudget { images, bytes }
+    }
     /// Wrap a slot of the baked model store's published generation.
     pub fn baked_model_key(generation: u64, slot: u32) -> crate::BakedModelKey {
         crate::BakedModelKey(generation, slot)
@@ -257,6 +261,10 @@ pub mod game {
     /// A scoreboard objective handle the game names.
     pub fn objective_ref(epoch: WorldEpoch, id: u64) -> ObjectiveRef {
         ObjectiveRef { epoch, id }
+    }
+    /// A scoreboard team handle the game names.
+    pub fn team_ref(epoch: WorldEpoch, id: u64) -> TeamRef {
+        TeamRef { epoch, id }
     }
     /// A chunk handle the game names.
     pub fn chunk_ref(level: LevelRef, pos: [i32; 2]) -> ChunkRef {
@@ -395,6 +403,21 @@ pub mod game {
         type Fields<'a> = ObjectiveRefFields;
         fn fields(&self) -> ObjectiveRefFields {
             ObjectiveRefFields {
+                epoch: self.epoch,
+                id: self.id,
+            }
+        }
+    }
+
+    #[non_exhaustive]
+    pub struct TeamRefFields {
+        pub epoch: WorldEpoch,
+        pub id: u64,
+    }
+    impl Fields for TeamRef {
+        type Fields<'a> = TeamRefFields;
+        fn fields(&self) -> TeamRefFields {
+            TeamRefFields {
                 epoch: self.epoch,
                 id: self.id,
             }

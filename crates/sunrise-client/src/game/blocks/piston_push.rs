@@ -10,12 +10,15 @@
 //! then run through the block collision scan, so a pushed entity stops at a
 //! wall instead of passing through it.
 //!
+#[path = "piston_push/carrying.rs"]
+mod carrying;
 use super::{
     Game,
     entity::{Entity, EntityHandle, with_entity, with_entity_mut},
     minecarts::CartHit,
     move_gate::MoveWho,
 };
+use crate::game::collision_source::Mover;
 use sunrise_client::collisions::{
     EntityCollisions, SceneCollisions, no_collision_empty, with_piston_noclip,
 };
@@ -321,7 +324,7 @@ impl Game<'_> {
             MoveWho::Entity(EntityHandle::Boat(_) | EntityHandle::Cart(_)) => Vec::new(),
             MoveWho::Entity(handle) => {
                 let own = with_entity!(self, handle, entity => Entity::bounds(entity));
-                let mut boxes = self.item_entity_collisions();
+                let mut boxes = self.entity_collisions(Mover::Passive);
                 boxes.retain(|b| *b != own);
                 boxes
             }
@@ -645,7 +648,7 @@ impl Game<'_> {
     /// lifting the body off the ground leaves it airborne, and the next tick's
     /// gravity lands it on the lid instead of a stale ground flag holding it.
     fn shulker_push_player(&mut self, mover: MoverType, movement: Vec3) {
-        let entities = self.player_entity_collisions();
+        let entities = self.entity_collisions(Mover::Player);
         if let Some(player) = self.player.as_mut() {
             let _ = MotionWorld {
                 entities: &entities,

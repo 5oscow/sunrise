@@ -6,7 +6,7 @@ kind. You attach parts once, at startup, in `Hooks::register`. For example, this
 
 ```rust,ignore
 use mod_api::{
-    AnalogOutputEvent, BlockPart, HasAnalogOutputEvent, Hooks, LevelHost, Registrar,
+    AnalogOutputEvent, BlockPart, HasAnalogOutputEvent, Hooks, LevelHost, LevelRandomHost, Registrar,
     RegistrationContext,
 };
 
@@ -19,7 +19,7 @@ impl BlockPart for Gauge {
     fn has_analog_output(&self, _: &dyn LevelHost, event: &mut HasAnalogOutputEvent) {
         event.output = true;
     }
-    fn analog_output(&self, _: &dyn LevelHost, event: &mut AnalogOutputEvent) {
+    fn analog_output(&self, _: &mut dyn LevelRandomHost, event: &mut AnalogOutputEvent) {
         event.output = 15;
     }
 }

@@ -3,12 +3,12 @@ name = "sunrise-launcher-scenery"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-description = "The Sunrise launcher's scenery: the sunset scene, painted skies, rain and frosted glass"
+description = "The Sunrise launcher's scenery: its pixel scenes and plates"
 publish = false
 
 [dependencies]
 gpui = { package = "gpui-fast", version = "0.1.13" }
-sunrise-theme = { path = "../../crates/sunrise-theme" }
+sunrise-launcher-theme = { path = "../crates/theme" }
 image = { version = "0.25", default-features = false }
 
 [target.'cfg(target_os = "macos")'.dependencies]

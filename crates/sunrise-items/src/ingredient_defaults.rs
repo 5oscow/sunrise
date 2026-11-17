@@ -27,6 +27,8 @@ impl Items {
             block_tag_order: load_tag_lists(root, "block", overlay)?,
             fluid_tag_order: load_tag_lists(root, "fluid", overlay)?,
             loot: Default::default(),
+            loot_types: Default::default(),
+            loot_modifiers: Default::default(),
             global_modifiers: Arc::default(),
             predicates: Default::default(),
             songs: HashMap::new(),
@@ -76,20 +78,7 @@ pub(super) fn load_component_damage_registry(
 pub(super) fn component_defaults(
     defaults: &ItemDefaults,
 ) -> Result<Arc<HashMap<String, sunrise_core::nbt::Compound>>> {
-    defaults
-        .entries()
-        .iter()
-        .map(|(id, value)| {
-            let object = value
-                .as_object()
-                .ok_or_else(|| format!("{id}: component prototype is not an object"))?;
-            Ok((
-                id.clone(),
-                sunrise_core::json_nbt::json_to_compound(object)?,
-            ))
-        })
-        .collect::<Result<_>>()
-        .map(Arc::new)
+    Ok(sunrise_world::loot::copy::component_defaults(defaults)?)
 }
 
 /// Catalogs also need Block.getItem for block-tag ingredients, without full block facts.

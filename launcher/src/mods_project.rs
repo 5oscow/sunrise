@@ -103,7 +103,7 @@ pub(super) struct Opened {
     details: Option<Result<Arc<Details>, String>>,
     versions: Option<Result<Arc<[ProjectVersion]>, String>>,
     version_list: cull::Cull,
-    checked_versions: HashMap<String, sunrise_port_pack::check::Verdict>,
+    checked_versions: HashMap<String, sunrise_launcher::porter::Verdict>,
     /// The gallery image shown large.
     shot: usize,
 }
@@ -112,7 +112,7 @@ pub(super) struct Opened {
 #[derive(Clone)]
 pub(super) struct ProjectVersion {
     version: Version,
-    verdict: Option<sunrise_port_pack::check::Verdict>,
+    verdict: Option<sunrise_launcher::porter::Verdict>,
 }
 
 /// The project page, filters and images' share of the Mods page's state.
@@ -137,7 +137,7 @@ pub(super) enum Loaded {
     Checked(
         (SourceId, String),
         String,
-        sunrise_port_pack::check::Verdict,
+        sunrise_launcher::porter::Verdict,
     ),
     Image((String, u32), Option<PathBuf>),
     Tags((SourceId, PackKind), Result<Tags, String>),
@@ -705,7 +705,7 @@ impl Launcher {
             }
         }
         if !p.license.is_empty() {
-            meta.push(p.license.clone());
+            meta.push(browser::license_label(&p.license));
         }
         if let Some(source) = p.source.shown_for(&p.id) {
             meta.push(trf("from {source}", &[("source", source)]));
@@ -760,40 +760,47 @@ impl Launcher {
             }
             action = action.child(install);
         }
-        let head = div()
-            .flex()
-            .items_center()
-            .gap(px(20.))
-            .child(icon)
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .flex_1()
-                    .min_w_0()
-                    .gap(px(4.))
-                    .child(text(theme::TITLE).text_color(t.ink).child(p.title.clone()))
-                    .child(
-                        text(theme::UI)
-                            .text_color(t.muted)
-                            .child(if authors.is_empty() {
-                                p.summary.clone()
-                            } else {
-                                format!(
-                                    "{} · {}",
-                                    trf("by {author}", &[("author", &authors)]),
-                                    p.summary
-                                )
-                            }),
-                    )
-                    .child(
-                        text(theme::CAPTION)
-                            .text_color(t.muted)
-                            .child(meta.join(" · ")),
-                    )
-                    .children(categories),
-            )
-            .child(action);
+        let head = div().flex().items_start().gap(px(20.)).child(icon).child(
+            div()
+                .flex()
+                .flex_col()
+                .flex_1()
+                .min_w_0()
+                .gap(px(4.))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(16.))
+                        .child(
+                            text(theme::TITLE)
+                                .flex_1()
+                                .min_w_0()
+                                .text_color(t.ink)
+                                .child(p.title.clone()),
+                        )
+                        .child(action),
+                )
+                .child(
+                    text(theme::UI)
+                        .text_color(t.muted)
+                        .child(if authors.is_empty() {
+                            p.summary.clone()
+                        } else {
+                            format!(
+                                "{} · {}",
+                                trf("by {author}", &[("author", &authors)]),
+                                p.summary
+                            )
+                        }),
+                )
+                .child(
+                    text(theme::CAPTION)
+                        .text_color(t.muted)
+                        .child(meta.join(" · ")),
+                )
+                .children(categories),
+        );
         let mut page = div()
             .flex()
             .flex_col()

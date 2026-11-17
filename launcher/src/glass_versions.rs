@@ -9,7 +9,7 @@
 use super::*;
 use crate::glass_home_tabs::PatchNotes;
 use crate::glass_ui::{self as ui, Tone};
-use sunrise_theme::glass::{ink, radius};
+use sunrise_launcher_theme::glass::{ink, radius};
 
 /// A release's day as the mockup writes it ("Nov 1"), with its time in UTC when known.
 pub(super) fn published(date: &str, time: &str) -> String {
@@ -622,7 +622,7 @@ impl Launcher {
                 .gap(px(10.))
                 .mb(px(24.))
                 .child(ui::card_heading(tr(title).to_string()))
-                .children(notice_.map(|n| notice(n.to_string(), &self.theme)));
+                .children(notice_.map(|n| hint(n.to_string(), &self.theme)));
             for tag in tags {
                 let mut line = Vec::new();
                 if let Some(about) = native_mods::about(&tag) {
@@ -723,22 +723,6 @@ impl Launcher {
 }
 
 impl Launcher {
-    /// The tag Home's "What's new" opens: the played build's, else the newest with notes.
-    pub(super) fn whats_new_tag(&self) -> Option<String> {
-        let Load::Ready(list) = &self.releases else {
-            return None;
-        };
-        let has = |r: &&Release| crate::glass_home_tabs::patch_notes(&r.body).is_some();
-        let played = self
-            .selected()
-            .filter(|_| self.selected_instance().is_some_and(|i| i.java.is_none()));
-        list.iter()
-            .filter(has)
-            .find(|r| Some(&r.tag) == played)
-            .or_else(|| list.iter().filter(has).find(|r| r.nightly.is_some()))
-            .map(|r| r.tag.clone())
-    }
-
     /// A card's "What's new" toggle and, opened, its notes by section. None without notes.
     fn glass_whats_new(
         &self,
