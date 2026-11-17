@@ -181,6 +181,17 @@ and `collision_shape` alike.
 A signal read never asks `state_for_placement` or `can_survive`, so it cannot re-enter the hook it was read in.
 `LevelTicksHost`'s signal reads moved here and now return `Option`.
 
+Before a block's placement state is selected, `ItemPart::placement_context` replaces the item's
+`BlockItem.updatePlacementContext` rewrite: `Some(Some(context))` rewrites the target and click,
+`Some(None)` refuses, and `None` runs vanilla (including scaffolding's column walk). The placing
+item cannot change, click and view values must be finite, and the target must be within bounds
+and replaceable. `ItemPart::must_survive` then decides whether placement must pass `can_survive`:
+`Some(false)` skips it, `Some(true)` requires it, and `None` keeps vanilla (scaffolding false,
+other block items true). Entity obstruction is still checked. Both hooks run on both sides with
+a read-only `LevelSide`, dispatched by item id. These events have no stack yet: they decide from
+the item and level, not held components. Neither changes the sides of the block placement or
+survival hooks.
+
 `LevelHost` has no random access: a draw from a read-only hook inside a level write would shift the level's random sequence away from vanilla's order. A hook that may draw is given a `LevelRandomHost`.
 `LevelRandomHost` provides vanilla's `Level.random` so
 mod draws come in vanilla's order. `LevelTicksHost` adds scheduling through

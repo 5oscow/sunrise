@@ -626,6 +626,47 @@ impl LevelAccess for GameLevel<'_> {
             );
         }
     }
+    #[allow(clippy::option_option)]
+    fn placement_context(
+        &self,
+        item: &str,
+        context: &PlacementContext,
+    ) -> Option<Option<PlacementContext>> {
+        let mut answer = None;
+        self.native_placement_context(item, context, &mut answer);
+        answer.map(|answer| {
+            answer.and_then(|snapshot| {
+                if !snapshot.hit.iter().all(|n| n.is_finite())
+                    || !snapshot.yaw.is_finite()
+                    || !snapshot.pitch.is_finite()
+                    || snapshot.item.and_then(mod_api::__private::item_key_id) != Some(item)
+                {
+                    return None;
+                }
+                Some(PlacementContext {
+                    pos: snapshot.pos,
+                    hit_pos: snapshot.hit_pos,
+                    face: snapshot.face,
+                    hit: sunrise_core::geometry::Vec3::new(
+                        snapshot.hit[0],
+                        snapshot.hit[1],
+                        snapshot.hit[2],
+                    ),
+                    inside: snapshot.inside,
+                    yaw: snapshot.yaw,
+                    pitch: snapshot.pitch,
+                    sneaking: snapshot.sneaking,
+                    item: context.item.clone(),
+                    replace_clicked: snapshot.replace_clicked,
+                })
+            })
+        })
+    }
+    fn must_survive(&self, item: &str) -> Option<bool> {
+        let mut answer = None;
+        self.native_must_survive(item, &mut answer);
+        answer
+    }
     fn before_can_survive(
         &self,
         ticks: &Ticks,

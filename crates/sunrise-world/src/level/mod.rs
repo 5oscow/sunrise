@@ -782,6 +782,20 @@ pub trait LevelAccess: BlockEntityNeighbors {
         _answer: &mut Option<Option<BlockStateId>>,
     ) {
     }
+    /// `BlockItem.updatePlacementContext`: replace or refuse the item context.
+    /// None retains the vanilla item rewrite, including scaffolding's walk.
+    #[allow(clippy::option_option)]
+    fn placement_context(
+        &self,
+        _item: &str,
+        _context: &PlacementContext,
+    ) -> Option<Option<PlacementContext>> {
+        None
+    }
+    /// `BlockItem.mustSurvive`: None retains the item's vanilla requirement.
+    fn must_survive(&self, _item: &str) -> Option<bool> {
+        None
+    }
     /// `BlockState.canSurvive(level, pos)` for `state` at `pos`, before the
     /// block answers it: placing it (`BlockItem.canPlace`), a plant's or an
     /// attached block's shape update, and every other rule that asks. `state`
