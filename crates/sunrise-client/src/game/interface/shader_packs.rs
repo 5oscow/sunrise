@@ -1141,10 +1141,10 @@ mod native_pack_tests {
         remember(&path, fingerprint(&path), Some(Api::V0_2));
         let shape = picked_pack_shape(&settings);
         assert_eq!(shape.linear, switch.then_some(Blend::Linear));
-        assert_eq!(shape.frame().linear_blend, switch);
+        assert_eq!(shape.frame().linear_blend(), switch);
         std::fs::write(&manifest, text).unwrap();
         remember(&path, fingerprint(&path), Some(Api::V0_2));
-        assert!(!picked_pack_shape(&settings).frame().linear_blend);
+        assert!(!picked_pack_shape(&settings).frame().linear_blend());
         settings.mods.disabled.insert("frame_owner".into());
         let shape = picked_pack_shape(&settings);
         assert_eq!(shape.linear, None);
