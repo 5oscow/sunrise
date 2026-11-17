@@ -22,4 +22,3 @@ through `host.living(event.player.entity())`. On the client these are the local
 player's copies of server-sent state. Return `Some(true)` to permit eating,
 `Some(false)` to refuse it, or `None` to keep `vanilla_can_eat`. Always-eat
 eligibility comes from the food component, not a separate event field.
-
