@@ -109,11 +109,10 @@ pub(crate) struct PickedPack {
 impl PickedPack {
     /// What it asks of the renderer's frame.
     pub(crate) fn frame(self) -> sunrise_client::gfx::FrameRequest {
-        sunrise_client::gfx::FrameRequest {
-            linear_pack: self.linear.is_some(),
-            linear_blend: self.linear == Some(sunrise_shader_api::Blend::Linear),
-            hdr_float: self.hdr_float,
-        }
+        sunrise_client::gfx::FrameRequest::new()
+            .with_linear_pack(self.linear.is_some())
+            .with_linear_blend(self.linear == Some(sunrise_shader_api::Blend::Linear))
+            .with_hdr_float(self.hdr_float)
     }
 }
 
