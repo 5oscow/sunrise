@@ -182,8 +182,8 @@ jobs:
       commit: ${{ needs.resolve.outputs.commit }}
       legs: windows-macos
 
-  # Every vanilla parity harness on this commit (parity.yml, tools/parity.py --all): parity runs here, never on a
-  # rollup or a pull request (owner, 2026-11-17). After the test shards, so its large runner is never one of three
+  # Every automatic vanilla parity harness on the main head captured at dispatch. Never on a rollup or a pull
+  # request (owner, 2026-11-17). After the test shards, so its large runner is never one of three
   # beside them while gates wait. The summary requires this leg for the nightly and files its failures.
   parity:
     needs: [resolve, shards]

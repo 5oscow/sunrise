@@ -43,7 +43,8 @@ on `PATH`, rather than copying Java to each fixture directory. Keep the firewall
 python3 tools/parity.py              # harnesses whose inputs changed, or that never passed
 python3 tools/parity.py food light   # these harnesses, whatever their state
 python3 tools/parity.py --failed     # the ones that failed last time
-python3 tools/parity.py --all        # everything, from scratch: the audit (26 minutes on the Mac mini alone)
+python3 tools/parity.py --all        # everything, from scratch
+python3 tools/parity.py --all --skip-named-only  # the daily’s automatic set, from scratch
 python3 tools/parity.py --fresh food # don't reuse vanilla oracle results
 python3 tools/parity.py --repeat 3 food   # run it three times; the runs must agree
 python3 tools/parity.py --hosts macmini,playsunrise   # with other machines (default: tools/parity_hosts.json's default list, empty)

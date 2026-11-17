@@ -601,6 +601,7 @@ class ParityWorkflowTests(unittest.TestCase):
         self.initialise()
         (self.root / "tools/parity.py").write_text(
             "import os, sys\nfrom pathlib import Path\n"
+            "assert {'--all', '--skip-named-only'} <= set(sys.argv)\n"
             "Path(sys.argv[-1]).write_text('[\"loot_a\", \"loot_b\"]')\n"
             "Path(os.environ['GITHUB_STEP_SUMMARY']).write_text('private retry reason')\n"
             "print('PASS loot_a 3s')\nprint('FAIL loot_b 2s  (private path)')\n"

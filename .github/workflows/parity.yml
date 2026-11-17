@@ -17,7 +17,7 @@ env:
 jobs:
   vanilla-parity:
     runs-on: dyna-large
-    # Every harness (`all`) takes about 11 harness-hours, 4 at a time (tools/parity.py -j 4); a runner ends at 6 h.
+    # Run four harnesses at a time; a Dyna runner ends at 6 h.
     timeout-minutes: 330
     permissions:
       contents: read
@@ -133,7 +133,8 @@ jobs:
           export GITHUB_STEP_SUMMARY="$RUNNER_TEMP/parity-private-summary"
           log="$PARITY_LOG_DIR/parity.log"
           status=0
-          python3 tools/parity.py --all -j 4 --timeout 2400 --selection-file "$PARITY_LOG_DIR/selection.json" \
+          python3 tools/parity.py --all --skip-named-only -j 4 --timeout 2400 \
+            --selection-file "$PARITY_LOG_DIR/selection.json" \
             > "$log" 2>&1 || status=$?
           printf '%s\n' "$status" > "$PARITY_LOG_DIR/exit"
           echo "Parity exited $status"
