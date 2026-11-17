@@ -65,7 +65,7 @@ pub fn resolve_items<'a>(
             mod_id,
             id: id.to_owned(),
         })?;
-    let _ = resolved_items().set(names);
+    let _ = resolved_items().set(share_names(names));
     Ok(())
 }
 
@@ -108,6 +108,16 @@ fn share_blocks(
     blocks: sunrise_mod_runtime::block_definitions::Blocks,
 ) -> Arc<sunrise_mod_runtime::block_definitions::Blocks> {
     Arc::new(blocks)
+}
+
+/// Retain one copy of equal tables across test installations; see [`share_blocks`].
+fn share_names(
+    names: sunrise_mod_runtime::registry_keys::Names,
+) -> sunrise_mod_runtime::registry_keys::Names {
+    #[cfg(any(test, feature = "testing"))]
+    return names.interned();
+    #[cfg(not(any(test, feature = "testing")))]
+    names
 }
 
 /// Publish completed identities and immutable definitions together before constructing mesh tables.
@@ -223,7 +233,7 @@ pub fn resolve_entity_types<'a>(ids: impl IntoIterator<Item = &'a str>) -> Resul
         .complete(ids, |mod_id, id| {
             format!("mod {mod_id} requested unknown entity type {id}")
         })?;
-    let _ = resolved_entity_types().set(names);
+    let _ = resolved_entity_types().set(share_names(names));
     Ok(())
 }
 
@@ -462,21 +472,22 @@ pub fn resolve_fluids(ids: &[&str], world_fluids: &[&str]) -> Result<(), Vec<Unk
             .request("sunrise", id)
             .expect("registry owns valid ids");
     }
-    for (slot, entry) in names.entries.iter().enumerate() {
-        names
+    let table = &mut *names;
+    for (slot, entry) in table.entries.iter().enumerate() {
+        table
             .utf16_slots
             .insert(entry.id.encode_utf16().collect(), slot as u32);
         if let Some(path) = entry.id.strip_prefix("minecraft:") {
-            names
+            table
                 .utf16_slots
                 .insert(path.encode_utf16().collect(), slot as u32);
         }
     }
-    names.world_fluids = world_fluids
+    table.world_fluids = world_fluids
         .iter()
-        .map(|name| names.slots.get(*name).copied())
+        .map(|name| table.slots.get(*name).copied())
         .collect();
-    let _ = crate::parts::resolved_fluids().set(names);
+    let _ = crate::parts::resolved_fluids().set(share_names(names));
     Ok(())
 }
 
@@ -524,7 +535,7 @@ pub fn resolve_block_entity_types<'a, T>(
         ids,
         resolve,
     )?;
-    let _ = crate::parts::resolved_block_entity_types().set(names);
+    let _ = crate::parts::resolved_block_entity_types().set(share_names(names));
     Ok(())
 }
 
@@ -652,7 +663,7 @@ pub fn resolve_game_events<'a>(ids: impl IntoIterator<Item = &'a str>) -> Result
             format!("mod {mod_id} requested unknown game event {id}")
         })?;
     if let Some(installed) = crate::parts::installed() {
-        let _ = installed.resolved_game_events.set(names);
+        let _ = installed.resolved_game_events.set(share_names(names));
     }
     Ok(())
 }

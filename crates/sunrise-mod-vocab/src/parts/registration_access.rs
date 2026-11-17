@@ -113,6 +113,10 @@ pub fn install_input(input: super::installation::InstalledInput) {
         }
     }
     #[cfg(any(test, feature = "testing"))]
+    {
+        installed.registry_keys = std::mem::take(&mut installed.registry_keys).interned();
+    }
+    #[cfg(any(test, feature = "testing"))]
     TEST_PARTS.set(Some(Box::leak(Box::new(installed))));
     #[cfg(not(any(test, feature = "testing")))]
     if INSTALLED.set(installed).is_err() {
