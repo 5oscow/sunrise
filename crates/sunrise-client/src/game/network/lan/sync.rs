@@ -480,13 +480,31 @@ mod initial_source_tests {
         let folder = root.path().join("data/minecraft/recipe");
         std::fs::create_dir_all(&folder).unwrap();
         std::fs::write(folder.join("a.json"), r#"{"type":"absent:serializer"}"#).unwrap();
+        std::fs::write(
+            folder.join("b.json"),
+            r#"{"type":"minecraft:crafting_shapeless","ingredients":[],"result":{"id":"minecraft:stick"}}"#,
+        )
+        .unwrap();
         let inputs = Arc::new(LoadInputs::new(Default::default(), Default::default()));
         let context = LoadContext::new(DataLoadOrigin::ClientPreload, inputs, [] as [&str; 0]);
         let data = ItemData::load(root.path(), context).unwrap();
         let sources =
             initial_sources(root.path(), &data, &sunrise_world::loot::PackOverlay::NONE).unwrap();
         assert!(!sources.is_complete());
-        let error = sources.check().unwrap_err().to_string();
-        assert!(error.contains("data/minecraft/recipe/a.json"), "{error}");
+        let none = sunrise_world::loot::PackOverlay::NONE;
+        let error = sunrise_client::crafting::Recipes::from_resolved(
+            root.path(),
+            &sunrise_client::items::Items::for_tests(Default::default()),
+            &none,
+            &sources,
+        )
+        .err()
+        .unwrap()
+        .to_string();
+        assert!(error.starts_with("2 recipes failed to load:"), "{error}");
+        assert!(
+            error.find("recipe/a.json").unwrap() < error.find("recipe/b.json").unwrap(),
+            "{error}"
+        );
     }
 }
