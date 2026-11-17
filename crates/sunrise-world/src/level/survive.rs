@@ -14,8 +14,16 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     /// `BlockState.canSurvive(level, pos)`.
     pub fn can_survive(&self, state: BlockStateId, pos: BlockPos) -> bool {
         let mut survives = None;
-        self.level
-            .before_can_survive(&*self.ticks, pos, state, &mut survives);
+        if self
+            .level
+            .before_can_survive(&*self.ticks, pos, state, &mut survives)
+        {
+            let block = self.b.block(state);
+            return self
+                .piston_landing
+                .is_some_and(|(target, moved)| target == pos && self.b.block(moved) == block)
+                || self.block_of(self.state(pos)) == block;
+        }
         survives.unwrap_or_else(|| self.can_survive_at(0, state, pos))
     }
     fn can_survive_at(&self, depth: usize, state: BlockStateId, pos: BlockPos) -> bool {

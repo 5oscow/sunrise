@@ -7,10 +7,9 @@ behaviour, the disabled block is inert rather than inheriting its vanilla templa
 - `random_tick` skips the template tick. `tick_block` holds the scheduled occurrence before dispatch
   to any Part, including enabled Parts. Re-enabling the owner dispatches each held occurrence once,
   with its original deadline, priority and order.
-- `update_shape` keeps the input state. `can_survive` keeps the existing block, and
-  `may_place_on` and `can_sustain_plant` keep the existing plant. These three survival rules
-  compare the block type already in the world, so they do not let a player place a new block
-  or plant by bypassing its support check.
+- `update_shape` keeps the input state. `can_survive` keeps the existing block, including the
+  block a piston is settling, and `may_place_on` and `can_sustain_plant` keep the existing plant.
+  These survival rules do not let a player bypass support checks to place a new block or plant.
 - `use_item_on` and `use_without_item` pass without invoking the block template's interaction.
 - `is_valid_bonemeal_target` refuses bone meal. For `on_tree_grow`, the soil under the trunk stays
   unchanged and the rest of the tree grows normally.
@@ -27,7 +26,9 @@ dispatch: earlier enabled Parts can answer first. A disabled mod's Part attached
 block does not make that block inert. Read-only queries such as path classification, light, fluid
 state and loot retain their ordinary answers. Attacks, explosions, environmental hazards and
 player-initiated removal still use data and template rules: switching the owner off does not make a
-block immune to those actions. These rules are the same on native and wasm.
+block immune to those actions. `piston_push_reaction` has no inert answer: the disabled owner's
+Part does not override the data or template reaction. Pistons may still move or break the block
+according to those rules. These rules are the same on native and wasm.
 
 Known gap: `can_be_hydrated` alone does not keep a farmland-template block inert. If the owner
 subscribed that query but not `random_tick`, the template still runs its moisture and dry-out rules.

@@ -85,17 +85,34 @@ mod tests {
             Flow::Continue
         }
     }
+    struct Carpet;
+    #[mod_api::sunrise_part]
+    impl BlockPart for Carpet {
+        fn can_survive(
+            &self,
+            _: &dyn mod_api::LevelHost,
+            _: &mut mod_api::CanSurviveEvent,
+        ) -> Option<bool> {
+            Some(true)
+        }
+    }
+
     struct Owner(Arc<Probe>);
     #[mod_api::__subscriptions]
     impl Hooks for Owner {
         fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
             let block = r.block_key("inert_test:machine");
             r.block_part(block, Machine(self.0.clone()));
+            let carpet = r.block_key("inert_test:carpet");
+            r.block_part(carpet, Carpet);
         }
         fn blocks(&self, _: &RegistrationContext, e: &mut mod_api::BlocksEvent<'_>) {
             e.blocks.push(
                 mod_api::Block::new("inert_test:machine", "minecraft:observer").with_item(false),
             );
+            let mut carpet = mod_api::Block::new("inert_test:carpet", "minecraft:white_carpet");
+            carpet.properties.push_reaction = Some(mod_api::PushReaction::PushPull);
+            e.blocks.push(carpet);
         }
     }
     struct Observer(Arc<Probe>);
@@ -222,6 +239,61 @@ mod tests {
                         assert_eq!(calls(), expected, "the held tick runs exactly once");
                     }
                 }
+            },
+        );
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn disabled_carpet_survives_a_piston_push_without_authorizing_placement() {
+        with_inert_block(
+            "disabled_carpet_survives_a_piston_push_without_authorizing_placement",
+            |game, _, _| {
+                let piston_pos = BlockPos::new(3, 70, 5);
+                let start = piston_pos.offset(1, 0, 0);
+                let end = piston_pos.offset(2, 0, 0);
+                let registry = &game.pack.assets.registry;
+                let piston = registry
+                    .resolve(&sunrise_world::chunk::BlockState {
+                        name: "minecraft:piston".into(),
+                        properties: [
+                            ("facing".into(), "east".into()),
+                            ("extended".into(), "false".into()),
+                        ]
+                        .into(),
+                    })
+                    .unwrap();
+                let carpet = registry.default_state("inert_test:carpet").unwrap();
+                let stone = registry.default_state("minecraft:stone").unwrap();
+                let moving = registry.default_state("minecraft:moving_piston").unwrap();
+                let redstone = registry.default_state("minecraft:redstone_block").unwrap();
+                game.tickets
+                    .update(Some(sunrise_client::ticket_levels::Sources {
+                        forced: vec![(0, 0)],
+                        ..Default::default()
+                    }));
+                game.with_level(|b, level, ticks| {
+                    ticks.add_empty_chunk(start.chunk()).unwrap();
+                    level.set_raw(piston_pos, piston).unwrap();
+                    level.set_raw(start.offset(0, -1, 0), stone).unwrap();
+                    level.set_raw(start, carpet).unwrap();
+                    assert!(mod_api::__private::set_mod_enabled("inert_test", false));
+                    assert!(b.can_survive(level, ticks, start, carpet));
+                    assert!(!b.can_survive(level, ticks, end, carpet));
+                    b.set_block(level, ticks, piston_pos.offset(-1, 0, 0), redstone, 3);
+                    b.run_block_events(level, ticks);
+                    assert_eq!(b.block(level.block_state(end)), b.block(moving));
+                    assert!(b.is_air(level.block_state(end.offset(0, -1, 0))));
+                    for _ in 0..4 {
+                        b.tick_block_entities(level, ticks);
+                    }
+                    assert_eq!(
+                        level.block_state(end),
+                        carpet,
+                        "the moved carpet must not pop off"
+                    );
+                    assert!(!b.can_survive(level, ticks, start, carpet));
+                });
             },
         );
     }

@@ -642,11 +642,13 @@ impl LevelAccess for GameLevel<'_> {
         pos: BlockPos,
         state: BlockStateId,
         survives: &mut Option<bool>,
-    ) {
+    ) -> bool {
+        let mut inert = false;
         if self.native_authoritative {
             self.view(ticks)
-                .native_can_survive(self.dimension, pos, state, survives);
+                .native_can_survive(self.dimension, pos, state, survives, &mut inert);
         }
+        inert
     }
     fn before_can_sustain_plant(
         &self,

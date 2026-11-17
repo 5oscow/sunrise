@@ -481,8 +481,20 @@ fn inert_support_preserves_existing_blocks_without_authorizing_new_placement() {
     ] {
         let level = PlantAt([3, 64, 5], present);
         let mut survives = None;
-        dispatch_can_survive(&level, LevelDimension, pos, owner_state, &mut survives);
-        assert_eq!(survives, Some(expected));
+        let mut inert = false;
+        dispatch_can_survive(
+            &level,
+            LevelDimension,
+            pos,
+            owner_state,
+            &mut survives,
+            &mut inert,
+        );
+        assert_eq!(
+            (survives, inert),
+            (None, true),
+            "the simulation resolves inert survival"
+        );
         let mut may = None;
         dispatch_may_place_on(
             &level,

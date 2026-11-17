@@ -4306,13 +4306,14 @@ fn survive_hooks_answer_for_the_block() {
             _pos: BlockPos,
             state: BlockStateId,
             survives: &mut Option<bool>,
-        ) {
+        ) -> bool {
             self.asked.set(self.asked.get() + 1);
             if let Some((block, answer)) = self.survive
                 && self.b.block(state) == block
             {
                 *survives = Some(answer);
             }
+            false
         }
         fn before_may_place_on(
             &self,

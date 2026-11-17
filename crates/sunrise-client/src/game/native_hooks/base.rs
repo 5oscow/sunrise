@@ -4845,8 +4845,9 @@ impl LevelView<'_> {
         pos: BlockPos,
         state: BlockStateId,
         survives: &mut Option<bool>,
+        inert: &mut bool,
     ) {
-        self.fire_can_survive(dimension, pos, state, survives);
+        self.fire_can_survive(dimension, pos, state, survives, inert);
     }
 
     /// A block is about to take the state it is placed in

@@ -186,6 +186,14 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             self.level.remove_block_entity(pos, moved, side_effects);
         }
     }
+    /// Compute the landing state while the real cell still contains `moving_piston`.
+    fn pushed_block_landing_state(&mut self, pos: BlockPos, state: BlockStateId) -> BlockStateId {
+        let previous = self.piston_landing.replace((pos, state));
+        let new = self.update_from_neighbour_shapes(state, pos);
+        self.piston_landing = previous;
+        new
+    }
+
     /// `PistonMovingBlockEntity.finalTick`.
     fn moving_piston_final_tick(&mut self, pos: BlockPos) {
         let Some(piston) = self.moving_piston(pos) else {
@@ -202,7 +210,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             let new = if piston.source {
                 b.air()
             } else {
-                self.update_from_neighbour_shapes(piston.moved_state, pos)
+                self.pushed_block_landing_state(pos, piston.moved_state)
             };
             self.land_carried(pos, piston.moved_state, !b.is_air(new), true);
             self.set_block_and_update(pos, new);
@@ -233,7 +241,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             }
             self.remove_moving_piston(pos);
             if b.is_block(self.state(pos), b.named.moving_piston) {
-                let mut new = self.update_from_neighbour_shapes(piston.moved_state, pos);
+                let mut new = self.pushed_block_landing_state(pos, piston.moved_state);
                 // Before the block: one that `update_or_destroy` breaks takes
                 // its block entity with it, side effects and all.
                 self.land_carried(pos, piston.moved_state, true, true);

@@ -796,14 +796,17 @@ pub trait LevelAccess: BlockEntityNeighbors {
     /// attached block's shape update, and every other rule that asks. `state`
     /// may not be in the level yet (it is being placed). An answer put in
     /// `survives` is the result, and the block's own rule doesn't run. `ticks` is as for
-    /// `before_state_for_placement`. The default does nothing.
+    /// `before_state_for_placement`. Return true only if the disabled owner's
+    /// rule should keep an existing block in place instead of running vanilla's rule.
+    /// The default leaves the answer unset and returns false.
     fn before_can_survive(
         &self,
         _ticks: &Ticks,
         _pos: BlockPos,
         _state: BlockStateId,
         _survives: &mut Option<bool>,
-    ) {
+    ) -> bool {
+        false
     }
     /// `IBlockExtension.canSustainPlant` for the soil `ground` at `ground_pos`
     /// and the plant `state` above it, before the plant answers `mayPlaceOn`.
@@ -1994,6 +1997,8 @@ pub(crate) struct Sim<'a, L: LevelAccess + ?Sized> {
     pub b: &'a Behaviours,
     pub level: &'a mut L,
     pub ticks: &'a mut Ticks,
+    /// The moved block being settled, while the cell still holds a moving piston.
+    piston_landing: Option<(BlockPos, BlockStateId)>,
     /// `RedstoneWireBlock.shouldSignal` is false while a wire samples its
     /// neighbours (`getBlockSignal`).
     pub wire_signal_off: std::cell::Cell<bool>,
@@ -2044,6 +2049,7 @@ impl Behaviours {
             b: self,
             level,
             ticks,
+            piston_landing: None,
             wire_signal_off: std::cell::Cell::new(false),
         }
     }
