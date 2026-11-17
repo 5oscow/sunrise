@@ -17,8 +17,11 @@ calls both.
 
 Queued actions are taken oldest first, at most **64 entries per queue per drain**, with at most
 **1024 pending entries**. A burst spills into later drains, normally later client ticks, rather than
-all acting on the next tick. Hotbar selection can drain more than once per tick, so its limit is per
-drain, not per tick. A full queue refuses the new entry, logs its first refusal once for that queue's
+all acting on the next tick. The hotbar differs: each number key keeps its own counter of up to
+**1024 pending clicks**, and a selection drain consumes **one click per key**, in order from key 1 to
+key 9, so the highest key clicked wins and a key's further clicks wait for later drains. Hotbar
+selection can drain more than once per tick, so its limit is per drain, not per tick: there is no
+once-per-tick guard. A full queue refuses the new entry, logs its first refusal once for that queue's
 lifetime, and the call returns normally (`Ok(())`), like a lost physical press. Clearing pending
 input does not reset that diagnostic. Physical input using these queues has the same limits; ordinary
 input below the limits keeps its order and timing.
