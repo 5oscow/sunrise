@@ -4535,15 +4535,25 @@ impl Game<'_> {
         cancel
     }
     fn tick(&mut self) -> Result<()> {
+        // A client's tick of the level it shows holds the colliders as it began, then carries
+        // its own player with the one it stands on; a server's level tick holds its own scope.
+        let start = (!self.is_logical_server()).then(|| self.placed_moving_colliders());
+        let scope = start
+            .clone()
+            .map(sunrise_client_render::moving_colliders::Scope::enter);
+        let result = self.tick_body();
+        drop(scope);
+        if let (Some(start), Ok(())) = (&start, &result) {
+            self.carry_pass(start);
+        }
+        result
+    }
+    fn tick_body(&mut self) -> Result<()> {
         self.expire_client_cracks();
         if self.agent.hold_server {
             return Ok(());
         }
         self.abort_open_transactions();
-        // A client's tick of the level it shows; a server's level tick holds its own scope.
-        let _colliders = (!self.is_logical_server()).then(|| {
-            sunrise_client_render::moving_colliders::Scope::enter(self.placed_moving_colliders())
-        });
         // `Player.entityInteractionRange`/`blockInteractionRange` for the tick's
         // picks: the attribute carries creative's and a server's modifiers.
         self.entity_reach = self.interaction_range("minecraft:entity_interaction_range", 3.0, 5.0);
