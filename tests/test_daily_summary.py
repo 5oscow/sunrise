@@ -187,6 +187,22 @@ class DailySummaryTests(unittest.TestCase):
         self.assertEqual([body["title"] for _, path, body in api.writes if path == "issues"],
                          ["Daily: sdk / build windows did not complete"])
 
+    def test_the_sdk_legs_other_call_is_part_of_the_sdk_leg(self):
+        # daily.yml names both calls `sdk`: a Windows leg that failed in the second call is the sdk leg's, by name.
+        jobs = [job for job in GREEN_JOBS if not job["name"].startswith("sdk")] + [
+            job("sdk / fresh"), job("sdk / build linux"), job("sdk / fresh"),
+            job("sdk / build windows", "failure", ["Build and collect"])]
+        api = Api(jobs)
+        _, out = self.run_summary(api, [shard_report()], results=dict(LEGS, **{"sdk-windows-macos": {"result": "failure"}}))
+        self.assertIn("green=false", out)
+        self.assertIn("sdk_green=false", out)
+        self.assertEqual([body["title"] for _, path, body in api.writes if path == "issues"],
+                         ["Daily: sdk / build windows did not complete"])
+        # A second call that was cancelled before any of its jobs ran leaves the sdk leg not green either.
+        jobs = [job for job in GREEN_JOBS if not job["name"].startswith("sdk")] + [job("sdk / fresh"), job("sdk / build linux")]
+        _, out = self.run_summary(Api(jobs), [shard_report()], results=dict(LEGS, **{"sdk-windows-macos": {"result": "cancelled"}}))
+        self.assertIn("sdk_green=false", out)
+
     def test_the_sdk_legs_alone_decide_sdk_green(self):
         jobs = [job("shards / ignored-tests-shards (sunrise-world)", "failure", ["Run"])] + GREEN_JOBS[2:]
         _, out = self.run_summary(Api(jobs), [], results=dict(LEGS, shards={"result": "failure"}))
@@ -618,12 +634,21 @@ class DailyWorkflowTests(unittest.TestCase):
                          "always() && needs.summary.outputs.green == 'true' && needs.resolve.outputs.dry_run == 'false'"
                          " && (needs.sdk-publish.result == 'success' || needs.sdk-publish.result == 'skipped')")
         self.assertEqual(self.workflow["concurrency"]["cancel-in-progress"], "false")
-        self.assertEqual(jobs["sdk"]["with"], {"commit": "${{ needs.resolve.outputs.commit }}"})
+        self.assertEqual(jobs["sdk"]["with"]["commit"], "${{ needs.resolve.outputs.commit }}")
         self.assertNotIn("permissions", jobs["sdk"], "the build leg publishes nothing")
+        # The SDK is two calls named `sdk`: the Linux legs, which fn-replace-check needs alone, and the others.
+        self.assertEqual(jobs["sdk"]["with"]["legs"], "linux")
+        self.assertEqual(jobs["sdk-windows-macos"]["with"], {"commit": "${{ needs.resolve.outputs.commit }}",
+                                                             "legs": "windows-macos"})
+        self.assertEqual(jobs["sdk-windows-macos"]["name"], "sdk")
+        self.assertEqual(summary.PART_OF, {"sdk-windows-macos": "sdk"})
+        self.assertEqual(jobs["fn-replace-check"]["needs"], ["resolve", "sdk"])
+        self.assertIn("sdk-windows-macos", jobs["summary"]["needs"])
         publish = jobs["sdk-publish"]
-        self.assertEqual(publish["needs"], ["resolve", "summary", "sdk"])
+        self.assertEqual(publish["needs"], ["resolve", "summary", "sdk", "sdk-windows-macos"])
         self.assertEqual(publish["if"], "!cancelled() && needs.resolve.result == 'success' && needs.summary.result == 'success'"
-                                        " && needs.sdk.result == 'success' && needs.summary.outputs.sdk_green == 'true'"
+                                        " && needs.sdk.result == 'success' && needs.sdk-windows-macos.result == 'success'"
+                                        " && needs.summary.outputs.sdk_green == 'true'"
                                         " && needs.resolve.outputs.dry_run == 'false' && needs.sdk.outputs.needed == 'true'")
         self.assertEqual(jobs["summary"]["outputs"]["sdk_green"], "${{ steps.summary.outputs.sdk_green }}")
         self.assertIn("needs.summary.outputs.sdk_green == 'true'", jobs["sdk-publish-report"]["if"])
@@ -645,10 +670,12 @@ class DailyWorkflowTests(unittest.TestCase):
     def test_the_sdk_build_packs_exactly_the_archives_a_release_needs(self):
         from tests.test_ci_concurrency import ROOT, yaml
         from tools.ci import nightly
-        build = yaml.load((ROOT / ".github/workflows/prebuilt-game-build.yml").read_text(),
-                          Loader=yaml.BaseLoader)["jobs"]["build"]
+        workflow = yaml.load((ROOT / ".github/workflows/prebuilt-game-build.yml").read_text(), Loader=yaml.BaseLoader)
+        build = workflow["jobs"]["build"]
         # Each leg packs its three slices and a client leg its target's tool; build data and surface are gathered once.
-        legs = build["strategy"]["matrix"]["include"]
+        choose = next(step for step in workflow["jobs"]["fresh"]["steps"] if step.get("id") == "legs")
+        legs = [{key: str(value).lower() for key, value in leg.items()} for leg in json.loads(choose["env"]["ALL"])]
+        self.assertEqual(build["strategy"]["matrix"], "${{ fromJSON(needs.fresh.outputs.matrix) }}")
         names = {f"{kind}-{entry['target']}{'-server' if entry.get('server') == 'true' else ''}.tar.xz"
                  for entry in legs for kind in ("runtime", "api", "engine")}
         names |= {f"tool-{entry['target']}.tar.xz" for entry in legs if entry.get("server") != "true"}
