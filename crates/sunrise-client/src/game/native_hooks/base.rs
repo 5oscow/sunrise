@@ -349,13 +349,13 @@ impl GameLevel<'_> {
         self.fire_update_shape(ticks, call);
     }
 
-    /// On an authoritative server, `VegetationBlock.mayPlaceOn` for the
-    /// plant `state` on `ground` at `ground_pos`, before the plant answers
-    /// it: the blocks a mod plant (one whose template is a vanilla plant,
-    /// such as a crop) can stand on. Its template's `canSurvive` asks it, so
-    /// the plant is refused there and pops off when its ground changes to
-    /// one it can't stand on. Answer only for your own blocks. The level is
-    /// read-only.
+    /// `VegetationBlock.mayPlaceOn` for the plant `state` on `ground` at
+    /// `ground_pos`, before the plant answers it: the blocks a mod plant (one
+    /// whose template is a vanilla plant, such as a crop) can stand on. Its
+    /// template's `canSurvive` asks it, so the plant is refused there and pops
+    /// off when its ground changes to one it can't stand on. Answer only for your
+    /// own blocks. The level is read-only. Asked on both sides: a client asks it
+    /// from its placement prediction and its own shape updates.
     #[inline(always)]
     pub(in crate::game) fn native_may_place_on(
         &self,
@@ -4829,15 +4829,16 @@ impl GameLevel<'_> {
     }
 }
 impl LevelView<'_> {
-    /// On an authoritative server, `BlockState.canSurvive` for `state` at
-    /// `pos` (`BlockBehaviour.canSurvive`), before the block answers it: as
-    /// it is placed (`BlockItem.canPlace`), from a shape update of a block
-    /// whose template checks it (a plant, a torch, a sign: false breaks the
-    /// block with its drops), and wherever else vanilla asks. `state` may not
-    /// be in the world yet, so decide from `state`. Answer only for your own
-    /// blocks: `Some(false)` refuses the spot, `Some(true)` allows it, and
-    /// the block's own rule doesn't run. The level is read-only. Asked on
-    /// every shape update of such a block: keep it short.
+    /// `BlockState.canSurvive` for `state` at `pos`
+    /// (`BlockBehaviour.canSurvive`), before the block answers it: as it is
+    /// placed (`BlockItem.canPlace`), from a shape update of a block whose
+    /// template checks it (a plant, a torch, a sign: false breaks the block with
+    /// its drops), and wherever else vanilla asks. `state` may not be in the
+    /// world yet, so decide from `state`. Answer only for your own blocks:
+    /// `Some(false)` refuses the spot, `Some(true)` allows it, and the block's
+    /// own rule doesn't run. The level is read-only. Asked on every shape update
+    /// of such a block: keep it short. Asked on both sides: a client asks it from
+    /// its placement prediction and its own shape updates.
     #[inline(always)]
     pub(in crate::game) fn native_can_survive(
         &self,
@@ -4867,8 +4868,8 @@ impl LevelView<'_> {
     /// dispenser's `DirectionalPlaceContext`), and the answer still takes its
     /// survival and entity obstruction checks. A trait mod returns
     /// `Some(Some(state))` to choose a state, `Some(None)` to refuse, or
-    /// `None` to leave the answer to the next mod or vanilla.
-    /// Authoritative servers only.
+    /// `None` to leave the answer to the next mod or vanilla. Asked on both
+    /// sides: a client asks it from its placement prediction.
     #[inline(always)]
     #[allow(clippy::option_option)]
     pub(in crate::game) fn native_state_for_placement(

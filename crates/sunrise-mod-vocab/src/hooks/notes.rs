@@ -1738,7 +1738,7 @@ still go on each event or registrar.
   an advancement of a content mod or a data pack names (`mymod:pipe_connected`) for one player, as a NeoForge mod's
   `SimpleCriterionTrigger.trigger`.
 
-- Where a mod block can stay, on an authoritative server. `can_survive(dimension, pos, state, survives)` answers
+- Where a mod block can stay. `can_survive(dimension, pos, state, survives)` answers
   `BlockState.canSurvive` before the block does: as it is placed (`BlockItem.canPlace`: `Some(false)` refuses the spot),
   from the shape update of a block whose template checks it (a plant, a torch, a sign: `Some(false)` breaks it with its
   drops when a neighbour changes), and wherever else vanilla asks. `state` may not be in the world yet, so decide from
@@ -1746,7 +1746,10 @@ still go on each event or registrar.
   mod plant (a block whose template is a vanilla plant, such as a crop): the blocks it can stand on, which its
   template's `canSurvive` asks, so it is refused elsewhere and pops off when its ground changes. Answer only for your
   own blocks and leave the answer empty otherwise; the level is read-only. Both run on every shape update of such a
-  block: keep them short.
+  block: keep them short. Both, `can_sustain_plant` and `state_for_placement` are asked on both sides, as vanilla asks
+  them: a client asks them from its placement prediction and its own shape updates, of its loaded copy of the level,
+  and tells its side by `LevelSide`. A mod that can decide only on a server answers `None` on a client, and the
+  template's rule predicts. Named injections request `hook_version = 2`.
 
 - Drawing mod block entities on the client. `block_entity_submit(pos, block, state, entity, draw)` runs once a frame
   for each mod block entity in view, as vanilla's `BlockEntityRenderer.submit` does (within its view distance, 64 blocks
@@ -1800,7 +1803,7 @@ still go on each event or registrar.
   waterlogged block reads. It is asked for every placer that goes through vanilla's placement (a player's
   `BlockItem.place`, a dispenser's `DirectionalPlaceContext`), and the answer still takes its survival and entity
   obstruction checks. `native_state_with_property(state, key, value)` builds the state from `state` and one of its
-  properties, its own declared ones included. Authoritative servers only.
+  properties, its own declared ones included. Asked on both sides (see above): a client refusal keeps its stack unspent.
 
 - A `minecraft:post_attack` enchantment effect of a mod's own kind, on a mob a player's weapon hit: `enchant_effect` (see
   [A mod's own enchantment effect kinds](../how-to/items/enchantment-effect-kinds.md)).

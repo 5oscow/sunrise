@@ -112,6 +112,48 @@ impl sunrise_world::level::LevelAccess for DryLevel<'_> {
     ) -> Option<bool> {
         self.base.is_valid_bonemeal_target(pos, state)
     }
+    /// A mod's placement and survival answers are the level's: vanilla's
+    /// client prediction asks them as the server does.
+    #[allow(clippy::option_option)]
+    fn before_state_for_placement(
+        &self,
+        ticks: &sunrise_world::level::Ticks,
+        state: BlockStateId,
+        context: &sunrise_world::level::PlacementContext,
+        fluid: sunrise_world::fluid::FluidState,
+        answer: &mut Option<Option<BlockStateId>>,
+    ) {
+        self.base
+            .before_state_for_placement(ticks, state, context, fluid, answer);
+    }
+    fn before_can_survive(
+        &self,
+        ticks: &sunrise_world::level::Ticks,
+        pos: sunrise_core::position::BlockPos,
+        state: BlockStateId,
+        survives: &mut Option<bool>,
+    ) {
+        self.base.before_can_survive(ticks, pos, state, survives);
+    }
+    fn before_can_sustain_plant(
+        &self,
+        state: BlockStateId,
+        ground: BlockStateId,
+        ground_pos: sunrise_core::position::BlockPos,
+        sustains: &mut Option<bool>,
+    ) {
+        self.base
+            .before_can_sustain_plant(state, ground, ground_pos, sustains);
+    }
+    fn before_may_place_on(
+        &self,
+        state: BlockStateId,
+        ground: BlockStateId,
+        ground_pos: sunrise_core::position::BlockPos,
+        may: &mut Option<bool>,
+    ) {
+        self.base.before_may_place_on(state, ground, ground_pos, may);
+    }
     fn game_time(&self) -> i64 {
         self.base.game_time()
     }

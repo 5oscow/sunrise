@@ -15195,4 +15195,6 @@ mod item_use_tick_tests {
     }
 }
 #[cfg(test)]
+mod placement_prediction_tests;
+#[cfg(test)]
 mod smoke_source_tests;

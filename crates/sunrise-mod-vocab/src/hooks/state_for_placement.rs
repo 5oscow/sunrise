@@ -22,9 +22,14 @@ pub trait Hooks {
     /// `Some(Some(state))` to choose a state, `Some(None)` to refuse, or
     /// `None` to leave the answer to the next mod or vanilla. Changes to the event's fluid
     /// copy are mod-provided data forwarded to later Parts, never consumed by the engine.
-    /// Authoritative servers only.
+    /// Asked on both sides, as vanilla asks it on both: a client asks it from its placement
+    /// prediction, of its loaded copy of the level (match `LevelSide`; a read the client can't
+    /// answer is `None`), and a client refusal keeps its stack unspent until the server answers. Answer `None` on a client where only a server can
+    /// decide: the template's rule then predicts, and the server still decides. Named injections
+    /// request `hook_version = 2`.
     #[hook(
-        side = "server",
+        side = "both",
+        version = 2,
         contract = "replace",
         out = "answer",
         scope = "block",

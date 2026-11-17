@@ -1,0 +1,1 @@
+sunrise-client game::remote::placement_prediction_tests::client_placement_prediction_asks_placement_and_survival_parts lib daily resources

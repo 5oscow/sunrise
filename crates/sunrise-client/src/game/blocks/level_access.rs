@@ -614,9 +614,8 @@ impl LevelAccess for GameLevel<'_> {
         fluid: FluidState,
         answer: &mut Option<Option<BlockStateId>>,
     ) {
-        if self.native_authoritative
-            && let Some(fluid) = native_world_read::api_fluid_state(fluid)
-        {
+        // Asked on both sides: a client's placement prediction asks it too.
+        if let Some(fluid) = native_world_read::api_fluid_state(fluid) {
             self.view(ticks).native_state_for_placement(
                 self.dimension,
                 state,
@@ -633,10 +632,8 @@ impl LevelAccess for GameLevel<'_> {
         state: BlockStateId,
         survives: &mut Option<bool>,
     ) {
-        if self.native_authoritative {
-            self.view(ticks)
-                .native_can_survive(self.dimension, pos, state, survives);
-        }
+        self.view(ticks)
+            .native_can_survive(self.dimension, pos, state, survives);
     }
     fn before_can_sustain_plant(
         &self,
@@ -645,9 +642,7 @@ impl LevelAccess for GameLevel<'_> {
         ground_pos: BlockPos,
         sustains: &mut Option<bool>,
     ) {
-        if self.native_authoritative {
-            self.native_can_sustain_plant(self.dimension, state, ground, ground_pos, sustains);
-        }
+        self.native_can_sustain_plant(self.dimension, state, ground, ground_pos, sustains);
     }
     fn asks_is_fertile(&self) -> bool {
         self.native_authoritative && mod_api::__private::has_scoped_hook(mod_api::HookId::IsFertile)
@@ -681,9 +676,7 @@ impl LevelAccess for GameLevel<'_> {
         ground_pos: BlockPos,
         may: &mut Option<bool>,
     ) {
-        if self.native_authoritative {
-            self.native_may_place_on(self.dimension, state, ground, ground_pos, may);
-        }
+        self.native_may_place_on(self.dimension, state, ground, ground_pos, may);
     }
     fn is_client_side(&self) -> bool {
         self.client_side

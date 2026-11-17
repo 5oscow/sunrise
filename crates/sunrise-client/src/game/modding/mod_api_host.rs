@@ -370,6 +370,14 @@ impl SidedLevel for super::GameLevel<'_> {
     }
 }
 
+impl<'a: 'b, 'b, L: std::ops::Deref<Target = super::GameLevel<'a>>, T: std::ops::Deref<Target = Ticks>>
+    SidedLevel for LevelTicks<'b, L, T>
+{
+    fn client_side(&self) -> bool {
+        self.level.client_side()
+    }
+}
+
 impl SidedLevel for super::native_hooks::HitLevel<'_> {
     fn client_side(&self) -> bool {
         self.0.client_side()
