@@ -635,7 +635,7 @@ impl Game<'_> {
                 let m = &mut self.mobs[j];
                 m.seated(id, offset, boat_box);
                 m.fluids.boat = Some((id, ridden));
-                m.position = at;
+                sunrise_client::mobs::living::teleports::set_pos(m, at);
                 m.previous = previous;
                 m.velocity = Vec3::ZERO;
                 m.fall_distance = 0.0;
@@ -793,8 +793,7 @@ impl Game<'_> {
             m.extra.mount = None;
             m.extra.passenger = false;
             m.extra.boarding_cooldown = BOARDING_COOLDOWN;
-            m.position = at;
-            m.previous = at;
+            sunrise_client::mobs::living::teleports::snap_to(m, at);
             self.snap_mob_passengers(rider);
         }
     }

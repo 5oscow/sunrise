@@ -992,6 +992,7 @@ mod tests {
                 None,
                 Some(game.pack.assets.registry),
                 |_| None,
+                &Default::default(),
             );
             game.apply_entity_nbt(super::super::commands::Target::Mob(40), tag)
                 .unwrap();
@@ -1003,6 +1004,7 @@ mod tests {
                 None,
                 Some(game.pack.assets.registry),
                 |_| None,
+                &Default::default(),
             );
             if let Tag::Compound(data) = &mut tag {
                 data.insert(
@@ -1083,7 +1085,10 @@ mod tests {
                 ),
                 (
                     "Offers",
-                    sunrise_client::entity_nbt::offers_to_nbt(std::slice::from_ref(&replacement)),
+                    sunrise_client::entity_nbt::offers_to_nbt(
+                        std::slice::from_ref(&replacement),
+                        &Default::default(),
+                    ),
                 ),
                 ("Xp", Tag::Int(9)),
             ]);

@@ -393,6 +393,7 @@ mod tests {
                 width: 1,
                 height: 1,
                 check_interval: 0,
+                ticks: 0,
             });
             let painting = game.entity(15).unwrap();
             assert!(!painting.teleport_to(game, [1.0, 64.0, 0.0], None));
