@@ -11,8 +11,16 @@ use crate::boundary::{CALLS, EXPORT_CALLS};
 use mod_surface::call::{Kind, MODULE, Name, SHARED_PROTOCOL, protocol_name};
 use std::fmt;
 
-/// How many mismatches a refusal lists before it counts the rest.
-const LISTED: usize = 8;
+/// How many mismatches a refusal shows a player before it counts the rest; the log lists all.
+pub(crate) const LISTED: usize = 8;
+
+static GAME_BUILD: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// Records the game's build id, which names the SDK a refused mod is rebuilt with
+/// (`sdk-<build id>`). The game sets it once before loading mods.
+pub fn set_game_build(id: &str) {
+    let _ = GAME_BUILD.set(id.to_owned());
+}
 
 /// What the game serves a name with.
 pub(crate) enum Bound {
@@ -232,11 +240,9 @@ pub(crate) fn check(members: &[crate::link::Member<'_>]) -> Result<(), crate::Re
     if mismatches.is_empty() {
         return Ok(());
     }
-    let omitted = mismatches.len().saturating_sub(LISTED);
-    mismatches.truncate(LISTED);
     Err(crate::Refusal::Boundary {
         mismatches,
-        omitted,
+        build: GAME_BUILD.get().cloned(),
     })
 }
 
@@ -287,10 +293,10 @@ mod tests {
 
     fn mismatches(imports: &[(String, &str)]) -> (Vec<Mismatch>, usize) {
         match load(imports).unwrap_err() {
-            Refusal::Boundary {
-                mismatches,
-                omitted,
-            } => (mismatches, omitted),
+            Refusal::Boundary { mismatches, .. } => {
+                let omitted = mismatches.len().saturating_sub(LISTED);
+                (mismatches.into_iter().take(LISTED).collect(), omitted)
+            }
             other => panic!("{other}"),
         }
     }
@@ -392,6 +398,59 @@ mod tests {
             .collect();
         let (list, omitted) = mismatches(&imports);
         assert_eq!((list.len(), omitted), (LISTED, 3));
+    }
+
+    #[test]
+    fn a_mod_built_against_the_numbered_host_is_refused_once_telling_the_sdk_to_rebuild_with() {
+        set_game_build("0123abcd");
+        // What a mod built before this change imports: the one numbered `host` entry and a
+        // whole-API layout export, with no shared protocol.
+        let bytes = wat::parse_str(
+            r#"(module (@custom "dylink.0" "\01\04\00\00\00\00")
+            (import "env" "memory" (memory 1))
+            (import "sunrise" "host" (func (param i32 i32 i32 i32 i32) (result i32)))
+            (func (export "sunrise_layout") (result i64) i64.const 7)
+            (func (export "sunrise_hook") (param i32) (result i64) i64.const 0))"#,
+        )
+        .unwrap();
+        let refused = crate::test_stack::on_guest_stack(|| {
+            runtime::WasmMod::instantiate(
+                &runtime::engine().unwrap(),
+                runtime::DEFAULT_GROUP_MEMORY_MIB,
+                &[crate::link::Member {
+                    name: "old",
+                    module: &bytes,
+                }],
+                None,
+            )
+            .map(|_| ())
+        })
+        .unwrap_err();
+        let text = refused.to_string();
+        assert!(
+            text.starts_with("built for an older Sunrise, rebuild with SDK sdk-0123abcd: uses "),
+            "{text}"
+        );
+        assert!(text.contains("import \"host\""), "{text}");
+    }
+
+    #[test]
+    fn checking_a_few_hundred_imports_is_a_binary_search_per_name() {
+        let names: Vec<_> = CALLS
+            .iter()
+            .step_by(CALLS.len() / 400)
+            .map(|c| c.name)
+            .collect();
+        let started = std::time::Instant::now();
+        for name in &names {
+            resolve(name).map_err(|m| m.to_string()).unwrap();
+        }
+        eprintln!(
+            "resolved {} imports in {:?}",
+            names.len(),
+            started.elapsed()
+        );
+        assert!(started.elapsed() < std::time::Duration::from_millis(250));
     }
 
     #[test]
