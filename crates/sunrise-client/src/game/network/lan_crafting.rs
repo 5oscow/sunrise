@@ -2341,6 +2341,27 @@ mod empty_ingredient_placement_tests {
                         &[],
                         &[],
                     );
+                    // Malformed recipes abort registry loading; keep each refusal isolated
+                    // from the valid recipes whose empty ingredients we test over the wire.
+                    let invalid = ["direct", "missing", "a_invalid"].map(|id| {
+                        let path = pack.join(format!("data/empty_fixture/recipe/{id}.json"));
+                        let json = std::fs::read(&path).unwrap();
+                        std::fs::remove_file(&path).unwrap();
+                        (id, path, json)
+                    });
+                    for (id, path, json) in invalid {
+                        std::fs::write(&path, json).unwrap();
+                        let error = game
+                            .stage_world_tables(&stack, false, &resources)
+                            .err()
+                            .expect("malformed recipe must refuse the load")
+                            .to_string();
+                        assert!(
+                            error.contains(&format!("data/empty_fixture/recipe/{id}.json")),
+                            "{error}"
+                        );
+                        std::fs::remove_file(path).unwrap();
+                    }
                     game.world_tables = game
                         .stage_world_tables(&stack, false, &resources)
                         .unwrap()

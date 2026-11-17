@@ -8,6 +8,8 @@ description = "Prepares Sunrise's resources from the player's own Minecraft: imp
 
 [dependencies]
 crc32fast = "1"
+# Writes the game's cache of prepared data (`data-file`), in the game's own format.
+sunrise-core = { path = "../sunrise-core" }
 regex = { version = "1", default-features = false, features = ["std", "unicode-perl"] }
 sha1 = "0.10"
 sha2 = "0.10"
@@ -15,9 +17,6 @@ zip = { version = "9.1.3", default-features = false, features = ["deflate"] }
 
 [target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
 libc = "0.2"
-
-[dev-dependencies]
-sunrise-core = { path = "../sunrise-core" }
 
 [build-dependencies]
 sha2 = "0.10"
