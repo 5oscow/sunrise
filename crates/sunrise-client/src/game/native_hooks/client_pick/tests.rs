@@ -358,8 +358,10 @@ fn sent_actions(
     game: &Game<'_>,
     server: &mut sunrise_protocol::connection::Connection,
 ) -> Vec<(&'static str, i32)> {
-    use sunrise_protocol::packets::{Empty, play::Serverbound as S};
-    game.send(S::Punch(Empty));
+    use sunrise_protocol::packets::{configuration::Ping, play::Serverbound as S};
+    // An attack can already have queued Punch. Fence with a distinct packet so
+    // that attack's swing cannot terminate observation before the following use.
+    game.send(S::Pong(Ping { id: i32::MIN }));
     let mut actions = Vec::new();
     loop {
         let (id, payload) = server.recv().unwrap();
@@ -368,7 +370,7 @@ fn sent_actions(
             S::Interact(hit) => actions.push(("interact", hit.id)),
             S::UseItem(_) => actions.push(("item", 0)),
             S::UseItemOn(hit) => actions.push(("block", hit.pos[0])),
-            S::Punch(_) => return actions,
+            S::Pong(ping) if ping.id == i32::MIN => return actions,
             _ => {}
         }
     }
