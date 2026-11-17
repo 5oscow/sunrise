@@ -1997,8 +1997,8 @@ pub(crate) struct Sim<'a, L: LevelAccess + ?Sized> {
     pub b: &'a Behaviours,
     pub level: &'a mut L,
     pub ticks: &'a mut Ticks,
-    /// The moved block being settled, while the cell still holds a moving piston.
-    piston_landing: Option<(BlockPos, BlockStateId)>,
+    /// The carried block being settled, before it is written into the cell.
+    landing_block: Option<(BlockPos, BlockStateId)>,
     /// `RedstoneWireBlock.shouldSignal` is false while a wire samples its
     /// neighbours (`getBlockSignal`).
     pub wire_signal_off: std::cell::Cell<bool>,
@@ -2049,7 +2049,7 @@ impl Behaviours {
             b: self,
             level,
             ticks,
-            piston_landing: None,
+            landing_block: None,
             wire_signal_off: std::cell::Cell::new(false),
         }
     }

@@ -12,7 +12,7 @@ pub trait Hooks {
     /// the block's own rule doesn't run. The level is read-only. Asked on
     /// every shape update of such a block: keep it short.
     /// A disabled owner's subscribed rule keeps that block type where it is already present
-    /// or landing after a piston push, but refuses a new placement.
+    /// or settling after a piston move or fall, but refuses a new placement.
     #[hook(
         side = "server",
         contract = "replace",

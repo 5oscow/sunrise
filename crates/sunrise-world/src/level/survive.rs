@@ -11,6 +11,19 @@ use crate::registry::BlockStateId;
 use sunrise_core::{geometry::Direction, position::BlockPos};
 
 impl<L: LevelAccess + ?Sized> Sim<'_, L> {
+    /// Count the carried block as already present for inert survival only.
+    pub(super) fn while_landing<T>(
+        &mut self,
+        pos: BlockPos,
+        state: BlockStateId,
+        check: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        let previous = self.landing_block.replace((pos, state));
+        let answer = check(self);
+        self.landing_block = previous;
+        answer
+    }
+
     /// `BlockState.canSurvive(level, pos)`.
     pub fn can_survive(&self, state: BlockStateId, pos: BlockPos) -> bool {
         let mut survives = None;
@@ -20,7 +33,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         {
             let block = self.b.block(state);
             return self
-                .piston_landing
+                .landing_block
                 .is_some_and(|(target, moved)| target == pos && self.b.block(moved) == block)
                 || self.block_of(self.state(pos)) == block;
         }

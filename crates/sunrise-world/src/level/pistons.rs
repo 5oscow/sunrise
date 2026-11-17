@@ -188,10 +188,9 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     }
     /// Compute the landing state while the real cell still contains `moving_piston`.
     fn pushed_block_landing_state(&mut self, pos: BlockPos, state: BlockStateId) -> BlockStateId {
-        let previous = self.piston_landing.replace((pos, state));
-        let new = self.update_from_neighbour_shapes(state, pos);
-        self.piston_landing = previous;
-        new
+        self.while_landing(pos, state, |sim| {
+            sim.update_from_neighbour_shapes(state, pos)
+        })
     }
 
     /// `PistonMovingBlockEntity.finalTick`.

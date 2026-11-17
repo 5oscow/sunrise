@@ -18,7 +18,7 @@ mod tests {
     use sunrise_client::{chunk::Chunk, items::ItemStack};
     use sunrise_core::{geometry::Direction, position::BlockPos, ticks::TickPriority};
     use sunrise_world::{
-        level::{BlockMaps, LevelAccess},
+        level::{BlockMaps, Landing, LevelAccess},
         registry::BlockStateId,
     };
 
@@ -85,9 +85,9 @@ mod tests {
             Flow::Continue
         }
     }
-    struct Carpet;
+    struct Survival;
     #[mod_api::sunrise_part]
-    impl BlockPart for Carpet {
+    impl BlockPart for Survival {
         fn can_survive(
             &self,
             _: &dyn mod_api::LevelHost,
@@ -104,7 +104,9 @@ mod tests {
             let block = r.block_key("inert_test:machine");
             r.block_part(block, Machine(self.0.clone()));
             let carpet = r.block_key("inert_test:carpet");
-            r.block_part(carpet, Carpet);
+            r.block_part(carpet, Survival);
+            let sand = r.block_key("inert_test:sand");
+            r.block_part(sand, Survival);
         }
         fn blocks(&self, _: &RegistrationContext, e: &mut mod_api::BlocksEvent<'_>) {
             e.blocks.push(
@@ -113,6 +115,8 @@ mod tests {
             let mut carpet = mod_api::Block::new("inert_test:carpet", "minecraft:white_carpet");
             carpet.properties.push_reaction = Some(mod_api::PushReaction::PushPull);
             e.blocks.push(carpet);
+            e.blocks
+                .push(mod_api::Block::new("inert_test:sand", "minecraft:sand"));
         }
     }
     struct Observer(Arc<Probe>);
@@ -293,6 +297,39 @@ mod tests {
                         "the moved carpet must not pop off"
                     );
                     assert!(!b.can_survive(level, ticks, start, carpet));
+                });
+            },
+        );
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn disabled_sand_survives_falling_entity_landing() {
+        with_inert_block(
+            "disabled_sand_survives_falling_entity_landing",
+            |game, _, _| {
+                let target = POS.offset(1, 0, 0);
+                let sand = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("inert_test:sand")
+                    .unwrap();
+                let stone = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:stone")
+                    .unwrap();
+                game.with_level(|b, level, ticks| {
+                    level.set_raw(target.offset(0, -1, 0), stone).unwrap();
+                    assert!(mod_api::__private::set_mod_enabled("inert_test", false));
+                    assert!(!b.can_survive(level, ticks, target, sand));
+                    assert_eq!(
+                        b.falling_block_landed(level, ticks, target, sand, false),
+                        Landing::Placed(sand)
+                    );
+                    assert_eq!(level.block_state(target), sand);
                 });
             },
         );

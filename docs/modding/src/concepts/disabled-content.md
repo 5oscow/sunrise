@@ -7,9 +7,9 @@ behaviour, the disabled block is inert rather than inheriting its vanilla templa
 - `random_tick` skips the template tick. `tick_block` holds the scheduled occurrence before dispatch
   to any Part, including enabled Parts. Re-enabling the owner dispatches each held occurrence once,
   with its original deadline, priority and order.
-- `update_shape` keeps the input state. `can_survive` keeps the existing block, including the
-  block a piston is settling, and `may_place_on` and `can_sustain_plant` keep the existing plant.
-  These survival rules do not let a player bypass support checks to place a new block or plant.
+- `update_shape` keeps the input state. `can_survive` keeps the existing block, including a block
+  settling after a piston move or a fall. `may_place_on` and `can_sustain_plant` keep the existing
+  plant. These survival rules do not let a player bypass support checks to place a new block or plant.
 - `use_item_on` and `use_without_item` pass without invoking the block template's interaction.
 - `is_valid_bonemeal_target` refuses bone meal. For `on_tree_grow`, the soil under the trunk stays
   unchanged and the rest of the tree grows normally.
