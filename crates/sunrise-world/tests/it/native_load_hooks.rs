@@ -114,7 +114,9 @@ fn load_hooks_are_noops_before_install_and_use_first_callbacks_after() {
         .unwrap_err()
         .to_string();
     assert!(
-        error.contains("loot_table minecraft:bad_codec $.modifier")
+        error.contains("loot_table minecraft:bad_codec")
+            && error.contains("[data/minecraft/loot_table/bad_codec.json]")
+            && error.contains("$.modifier")
             && error.contains("missing:codec"),
         "{error}"
     );

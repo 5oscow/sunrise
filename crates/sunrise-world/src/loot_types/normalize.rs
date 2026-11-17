@@ -128,62 +128,64 @@ fn fields(value: &mut Value, tags: &Tags, types: &Types) {
 }
 fn typed(value: &mut Value, function: bool, tags: &Tags, types: &Types) {
     if let Some(id) = value.as_str() {
-        if !id.contains(':') {
-            *value = Value::String(format!("minecraft:{id}"));
+        if function && id.starts_with('#') {
+            set(value, true, tags, types);
+        } else if let Ok(id) = sunrise_core::identifier::Identifier::parse(id) {
+            *value = Value::String(id.to_string());
         }
         return;
     }
     if let Some(id) = value.get("type").and_then(Value::as_str)
-        && !id.contains(':')
+        && let Ok(id) = sunrise_core::identifier::Identifier::parse(id)
     {
-        value["type"] = Value::String(format!("minecraft:{id}"));
+        value["type"] = Value::String(id.to_string());
     }
-    if function && let Some(values) = value.as_array_mut() {
-        for value in values {
-            typed(value, true, tags, types);
-        }
+    if function && value.is_array() {
+        set(value, true, tags, types);
         return;
     }
     let kind = value["type"].as_str().unwrap_or("");
-    let conditional = types.conditional(kind);
-    match (function, kind) {
-        (true, "minecraft:sequence" | "sequence") => list(value, "functions", true, tags, types),
-        (false, "minecraft:all_of" | "all_of" | "minecraft:any_of" | "any_of") => {
-            list(value, "terms", false, tags, types)
-        }
-        (false, "minecraft:inverted" | "inverted") => typed(&mut value["term"], false, tags, types),
-        (true, "minecraft:filtered" | "filtered") => {
-            for field in ["on_pass", "on_fail"] {
-                if let Some(value) = value.get_mut(field) {
-                    typed(value, true, tags, types);
-                }
+    let conditional = shapes::contains(kind, true) || types.conditional(kind);
+    // Locate only schema-owned edges; scalar/text decoding belongs to the
+    // validation pass, and registered payloads remain opaque.
+    let children = shapes::children(value, function, kind)
+        .into_iter()
+        .map(|child| (child.kind, child.pointer))
+        .collect::<Vec<_>>();
+    for (kind, pointer) in children {
+        if let Some(child) = value.pointer_mut(&pointer) {
+            match kind {
+                shapes::ChildKind::Function => typed(child, true, tags, types),
+                shapes::ChildKind::Condition => typed(child, false, tags, types),
+                shapes::ChildKind::Set(function) => set(child, function, tags, types),
+                shapes::ChildKind::Table => {}
             }
         }
-        _ => {}
     }
     if function
         && conditional
-        && let Some(condition) = value.get_mut("condition")
+        && let Some(condition) = value.get_mut("condition").filter(|value| !value.is_null())
     {
         typed(condition, false, tags, types);
     }
 }
-fn list(value: &mut Value, field: &str, function: bool, tags: &Tags, types: &Types) {
-    if let Some(tag) = value[field].as_str().and_then(|id| id.strip_prefix('#')) {
+
+fn set(value: &mut Value, function: bool, tags: &Tags, types: &Types) {
+    if let Some(tag) = value.as_str().and_then(|id| id.strip_prefix('#')) {
+        let Ok(tag) = sunrise_core::identifier::Identifier::parse(tag) else {
+            return;
+        };
         let registry = if function {
             "item_modifier"
         } else {
             "predicate"
         };
-        let ids = super::super::loot_tags::members(tags, registry, tag);
-        value[field] = Value::Array(ids.into_iter().map(Value::String).collect());
+        let ids = super::super::loot_tags::members(tags, registry, &tag.to_string());
+        *value = Value::Array(ids.into_iter().map(Value::String).collect());
+    } else if !value.is_array() {
+        *value = Value::Array(vec![std::mem::take(value)]);
     }
-    for term in value
-        .get_mut(field)
-        .and_then(Value::as_array_mut)
-        .into_iter()
-        .flatten()
-    {
+    for term in value.as_array_mut().into_iter().flatten() {
         typed(term, function, tags, types);
     }
 }
