@@ -466,7 +466,8 @@ pub struct Modifier {
     pub op: Op,
 }
 /// Attribute base values that differ from the type's and the permanent
-/// modifiers finalizeSpawn added, in the order vanilla adds them.
+/// modifiers finalizeSpawn, a load, `/attribute` and the mob's effects
+/// ([`Mob::set_effect_modifiers`]) added, in the order vanilla adds them.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Attributes {
     pub bases: Vec<(Attr, f64)>,
@@ -584,7 +585,9 @@ pub fn transient(m: &Mob, a: Attr) -> Option<(f64, Op)> {
     }
 }
 /// The attribute modifier one status effect grants (`MobEffect.addAttributeModifier`),
-/// scaled by the amplifier plus one; `None` when the effect does not touch `a`.
+/// scaled by the amplifier plus one (`MobEffect.AttributeTemplate.create`);
+/// `None` when the effect does not touch `a`. Vanilla's amounts are `float`
+/// literals widened to `double`, so `f64::from` the `f32`.
 fn effect_modifier(effect: &str, amplifier: i32, a: Attr) -> Option<(f64, Op)> {
     let level = f64::from(amplifier + 1);
     match (effect.trim_start_matches("minecraft:"), a) {
@@ -598,57 +601,106 @@ fn effect_modifier(effect: &str, amplifier: i32, a: Attr) -> Option<(f64, Op)> {
         _ => None,
     }
 }
-/// The attribute modifiers of the mob's effects (`MobEffect.addAttributeModifier`),
-/// scaled by the amplifier plus one.
-fn effect_modifiers(m: &Mob, a: Attr) -> impl Iterator<Item = (f64, Op)> + '_ {
-    m.extra
-        .effects
-        .iter()
-        .filter_map(move |effect| effect_modifier(effect.id, effect.amplifier, a))
+impl Mob {
+    /// The one place a mob's effect attribute modifiers change (#478). They
+    /// are permanent modifiers in the attribute store, so they are saved and
+    /// synced as any other, and a read derives nothing from the effect list.
+    ///
+    /// `Some(amplifier)` is vanilla's `LivingEntity.onEffectAdded` (a new
+    /// effect) and `onEffectUpdated(instance, true, _)` (an `addEffect` whose
+    /// `MobEffectInstance.update` changed the active instance, or a hidden
+    /// instance taking over in `tickServer`): `MobEffect.addAttributeModifiers`
+    /// removes each `minecraft:effect.<name>` modifier, then adds it again
+    /// with `amount * (amplifier + 1)`. `None` is `onEffectsRemoved`
+    /// (`removeEffect`, `removeAllEffects`, the effect running out):
+    /// `removeAttributeModifiers` removes them. Both skip an attribute the
+    /// mob has no instance of (`AttributeMap.getInstance` is null: a pig has
+    /// no attack damage, so Strength adds nothing to it).
+    ///
+    /// Loading `active_effects` calls none of these (`readAdditionalSaveData`
+    /// puts the instances straight into the map), so a loaded effect has the
+    /// modifier only if the saved `attributes` kept it.
+    ///
+    /// A max health change then runs `health_boost_changed`, which lowers a
+    /// health above the new maximum as `onAttributeUpdated(MAX_HEALTH)` does
+    /// and never heals.
+    pub fn set_effect_modifiers(&mut self, effect: &str, amplifier: Option<i32>) {
+        let name = effect.trim_start_matches("minecraft:");
+        for a in Attr::ALL {
+            if effect_modifier(name, 0, a).is_none() || default_value(self, a).is_none() {
+                continue;
+            }
+            let id = format!("minecraft:effect.{name}");
+            if let Some(s) = self.extra.attributes.as_mut() {
+                s.modifiers.retain(|x| x.attr != a || x.id != id);
+                s.transient.retain(|x| x.attr != a || x.id != id);
+            }
+            if let Some((amount, op)) = amplifier.and_then(|amp| effect_modifier(name, amp, a)) {
+                let s = self.extra.attributes.get_or_insert_with(Box::default);
+                s.modifiers.push(Modifier {
+                    attr: a,
+                    id: id.into(),
+                    amount,
+                    op,
+                });
+            }
+            self.extra.live.invalidate();
+            if a == Attr::MaxHealth {
+                health_boost_changed(self);
+            } else {
+                refresh(self, a);
+            }
+        }
+    }
 }
 /// `AttributeInstance.getValue`: the base, then the modifiers by operation.
 pub fn value(m: &Mob, a: Attr) -> f64 {
-    compute(m, a, true, &[])
+    compute(m, a, true, std::iter::empty())
 }
-/// `value` with more modifiers, such as the ones worn equipment grants.
-pub fn value_with(m: &Mob, a: Attr, extra: &[(f64, Op)]) -> f64 {
+/// `value` with modifiers no store holds: the ones worn equipment grants, or
+/// those of the mob's own state (a witch's drinking, a strider's suffocation).
+pub fn value_with(m: &Mob, a: Attr, extra: impl Iterator<Item = (f64, Op)> + Clone) -> f64 {
     compute(m, a, true, extra)
 }
-fn compute(m: &Mob, a: Attr, with_transient: bool, extra: &[(f64, Op)]) -> f64 {
+/// `AttributeInstance.calculateValue`: the base plus every `ADD_VALUE`, then
+/// each `ADD_MULTIPLIED_BASE` on that sum, then each `ADD_MULTIPLIED_TOTAL`
+/// multiplying, then `sanitizeValue`. The modifiers are read in place, three
+/// passes over the stored, the mods' transient, the baby's and `extra`, with
+/// nothing allocated.
+fn compute(
+    m: &Mob,
+    a: Attr,
+    with_transient: bool,
+    extra: impl Iterator<Item = (f64, Op)> + Clone,
+) -> f64 {
+    let held = m.extra.attributes.as_deref();
+    let baby = if with_transient {
+        transient(m, a)
+    } else {
+        None
+    };
+    let ops = || {
+        held.into_iter()
+            .flat_map(|s| s.modifiers.iter().chain(&s.transient))
+            .filter(move |x| x.attr == a)
+            .map(|x| (x.amount, x.op))
+            .chain(baby)
+            .chain(extra.clone())
+    };
     let mut base = base_value(m, a);
-    let empty = Vec::new();
-    let mods = m.extra.attributes.as_ref().map_or(&empty, |s| &s.modifiers);
-    let mut ops: Vec<(f64, Op)> = mods
-        .iter()
-        .filter(|x| x.attr == a)
-        .map(|x| (x.amount, x.op))
-        .collect();
-    if let Some(s) = m.extra.attributes.as_deref() {
-        ops.extend(
-            s.transient
-                .iter()
-                .filter(|x| x.attr == a)
-                .map(|x| (x.amount, x.op)),
-        );
-    }
-    if with_transient {
-        ops.extend(transient(m, a));
-        ops.extend(effect_modifiers(m, a));
-    }
-    ops.extend(extra.iter().copied());
-    for (amount, op) in &ops {
-        if *op == Op::AddValue {
+    for (amount, op) in ops() {
+        if op == Op::AddValue {
             base += amount;
         }
     }
     let mut result = base;
-    for (amount, op) in &ops {
-        if *op == Op::AddMultipliedBase {
+    for (amount, op) in ops() {
+        if op == Op::AddMultipliedBase {
             result += base * amount;
         }
     }
-    for (amount, op) in &ops {
-        if *op == Op::AddMultipliedTotal {
+    for (amount, op) in ops() {
+        if op == Op::AddMultipliedTotal {
             result *= 1.0 + amount;
         }
     }
@@ -670,10 +722,10 @@ fn refresh(m: &mut Mob, a: Attr) {
         Attr::Armor | Attr::BurningTime | Attr::FlyingSpeed => {}
     }
 }
-/// The value without the transient baby modifier (`speed_bonus` applies
-/// that one to movement speed).
+/// The value without the transient baby modifier, which `Mob::movement_speed`
+/// adds in its own `calculateValue` with the mob's other state modifiers.
 fn base_with_modifiers(m: &Mob, a: Attr) -> f64 {
-    compute(m, a, false, &[])
+    compute(m, a, false, std::iter::empty())
 }
 /// `AttributeInstance.setBaseValue`.
 pub fn set_base(m: &mut Mob, a: Attr, v: f64) {
