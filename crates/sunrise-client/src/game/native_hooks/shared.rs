@@ -4,6 +4,12 @@ mod book_screen;
 mod item_fallthrough;
 #[path = "shared/loot.rs"]
 mod loot;
+#[cfg(test)]
+#[path = "shared/screen_position_tests.rs"]
+mod screen_position_tests;
+#[cfg(test)]
+#[path = "shared/slot_icon_tests.rs"]
+mod slot_icon_tests;
 
 use super::screen_build::ObservedScreen;
 use crate::game::api_values::{TryIntoApi, TryIntoEngine};
@@ -535,10 +541,10 @@ impl SlotMoves {
     /// Moves slot `slot` of a screen that declared `slots`, from the next
     /// build. False, changing nothing, for a slot the screen does not show or
     /// a position that is not finite.
-    fn set(&self, slots: &[Option<[f32; 2]>], slot: u32, x: f32, y: f32) -> bool {
+    fn set(&self, slots: &[Option<mod_api::ScreenSlot>], slot: u32, x: f32, y: f32) -> bool {
         let Some((slot, declared)) = usize::try_from(slot)
             .ok()
-            .and_then(|i| Some((i, slots.get(i).copied().flatten()?)))
+            .and_then(|i| Some((i, slots.get(i)?.as_ref()?.position)))
             .filter(|_| x.is_finite() && y.is_finite())
         else {
             return false;
@@ -3051,9 +3057,18 @@ impl Game<'_> {
     /// moved it, else where the screen declared it.
     pub(super) fn native_screen_slot(&self, slot: usize) -> Option<(f32, f32)> {
         let s = self.shown_native_screen()?;
-        let declared = s.screen.slots.get(slot).copied().flatten()?;
+        let declared = s.screen.slots.get(slot)?.as_ref()?.position;
         let [x, y] = s.slot_moves.position(slot, declared);
         Some((x, y))
+    }
+    pub(in crate::game) fn native_screen_slot_icon(&self, slot: usize) -> Option<&str> {
+        self.shown_native_screen()?
+            .screen
+            .slots
+            .get(slot)?
+            .as_ref()?
+            .no_item_icon
+            .as_deref()
     }
     /// Moves container slot `slot` of the open mod screen to `x`, `y`
     /// (relative to the screen's origin) from the next frame. False, changing
@@ -3134,7 +3149,7 @@ impl Game<'_> {
                 );
             }
         }
-        self.native_screen_draw(&s.block, &s.data, batch, [ox, oy]);
+        self.native_screen_draw(&s.block, s.pos(), &s.data, batch, [ox, oy]);
         self.draw_screen_phase(batch, sunrise_client::screen_draw::RenderPhase::Background);
         if s.screen.own_labels {
             return true;
@@ -4752,7 +4767,17 @@ mod tests {
     /// repeat of the effective position, declared or moved, keeps the layout).
     #[test]
     fn slot_moves_refuse_what_the_screen_does_not_show() {
-        let declared = [Some([8.0, 18.0]), None, Some([26.0, 18.0])];
+        let declared = [
+            Some(mod_api::ScreenSlot {
+                position: [8.0, 18.0],
+                ..Default::default()
+            }),
+            None,
+            Some(mod_api::ScreenSlot {
+                position: [26.0, 18.0],
+                ..Default::default()
+            }),
+        ];
         let moves = super::SlotMoves::default();
         assert!(moves.set(&declared, 0, 8.0, 18.0));
         assert_eq!(moves.count.get(), 0);

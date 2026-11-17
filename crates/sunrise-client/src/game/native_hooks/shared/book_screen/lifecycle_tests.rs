@@ -51,7 +51,16 @@ impl mod_api::Hooks for BoundBookMod {
                 mod_api::Screen {
                     width: 176.0,
                     height: 166.0,
-                    slots: vec![Some([8.0, 18.0]), Some([80.0, 18.0])],
+                    slots: vec![
+                        Some(mod_api::ScreenSlot {
+                            position: [8.0, 18.0],
+                            ..Default::default()
+                        }),
+                        Some(mod_api::ScreenSlot {
+                            position: [80.0, 18.0],
+                            ..Default::default()
+                        }),
+                    ],
                     recipe_book: Some(key.clone()),
                     recipe_book_toggle: Some(mod_api::RecipeBookToggle {
                         x: 153.0,
@@ -156,7 +165,10 @@ fn authoritative_custom_book_rebuilds_cached_geometry_without_observe_screen() {
                 screen: mod_api::Screen {
                     width: 176.0,
                     height: 166.0,
-                    slots: vec![Some([8.0, 18.0])],
+                    slots: vec![Some(mod_api::ScreenSlot {
+                        position: [8.0, 18.0],
+                        ..Default::default()
+                    })],
                     inventory_y: 84.0,
                     inventory_x: 8.0,
                     own_labels: false,
@@ -330,7 +342,17 @@ fn a_moved_slot_takes_its_place_for_drawing_and_input_from_the_next_frame() {
                 screen: mod_api::Screen {
                     width: 176.0,
                     height: 166.0,
-                    slots: vec![Some([8.0, 18.0]), Some([26.0, 18.0]), None],
+                    slots: vec![
+                        Some(mod_api::ScreenSlot {
+                            position: [8.0, 18.0],
+                            ..Default::default()
+                        }),
+                        Some(mod_api::ScreenSlot {
+                            position: [26.0, 18.0],
+                            ..Default::default()
+                        }),
+                        None,
+                    ],
                     inventory_y: 84.0,
                     inventory_x: 8.0,
                     ..Default::default()
