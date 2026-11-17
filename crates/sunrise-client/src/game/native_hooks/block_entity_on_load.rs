@@ -18,9 +18,10 @@ impl Game<'_> {
     /// A replacement can inherit a ticker slot later in the current pass.
     /// Deliver its attachment notice before taking it out for that tick.
     pub(in crate::game) fn tick_mod_block_entity(&mut self, pos: Pos) {
-        if self.world.block_entities.get(&pos).is_some_and(|entity| {
-            matches!(entity, BlockEntity::Mod(m) if mod_api::__private::content_owner_disabled(m.id()))
-        }) {
+        if mod_api::__private::any_mod_disabled()
+            && let Some(BlockEntity::Mod(entity)) = self.world.block_entities.get(&pos)
+            && mod_api::__private::content_owner_disabled(entity.id())
+        {
             return;
         }
         if self.world.block_entities.has_pending_on_load() {

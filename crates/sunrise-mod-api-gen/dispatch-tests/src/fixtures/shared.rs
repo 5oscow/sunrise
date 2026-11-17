@@ -439,7 +439,7 @@ fn inert_growth_answers_keep_subscribed_crop_and_soil() {
         dispatch_is_valid_bonemeal_target(
             LevelSide::Server(&TestLevel),
             LevelDimension,
-            BlockPos,
+            BlockPos::default(),
             state,
             &mut valid,
         );
@@ -447,6 +447,62 @@ fn inert_growth_answers_keep_subscribed_crop_and_soil() {
         let mut soil = None;
         dispatch_on_tree_grow(&Worldgen, state, [1, 64, 2], &mut Draws, &mut soil);
         assert_eq!(soil, expected_soil);
+    }
+    DISABLED_BLOCK_PART.set(None);
+}
+
+#[test]
+fn inert_support_preserves_existing_blocks_without_authorizing_new_placement() {
+    struct PlantAt([i32; 3], Option<BlockKey>);
+    impl LevelHost for PlantAt {
+        fn block_state(&self, pos: [i32; 3]) -> Option<BlockState> {
+            assert_eq!(pos, self.0);
+            // A different state of the same block type (e.g. an older crop) still counts.
+            self.1.map(|key| BlockState::new(key, 1))
+        }
+    }
+    let owner: &dyn BlockPart = leak(Mod {
+        id: 0,
+        calls: Arc::default(),
+    });
+    DISABLED_BLOCK_PART.set(Some(("test", std::ptr::from_ref(owner).cast())));
+    install_parts(Parts {
+        blocks: vec![(BlockKey::Test, vec![owner])],
+        ..Parts::default()
+    });
+    let pos = BlockPos::new(3, 64, 5);
+    let below = BlockPos::new(3, 63, 5);
+    let owner_state = BlockState::new(BlockKey::Test, 0);
+    let other_state = BlockState::new(BlockKey::Other, 0);
+    for (present, expected) in [
+        (Some(BlockKey::Test), true),
+        (Some(BlockKey::Other), false),
+        (None, false),
+    ] {
+        let level = PlantAt([3, 64, 5], present);
+        let mut survives = None;
+        dispatch_can_survive(&level, LevelDimension, pos, owner_state, &mut survives);
+        assert_eq!(survives, Some(expected));
+        let mut may = None;
+        dispatch_may_place_on(
+            &level,
+            LevelDimension,
+            owner_state,
+            other_state,
+            below,
+            &mut may,
+        );
+        assert_eq!(may, Some(expected));
+        let mut sustains = None;
+        dispatch_can_sustain_plant(
+            &level,
+            LevelDimension,
+            other_state,
+            owner_state,
+            below,
+            &mut sustains,
+        );
+        assert_eq!(sustains, Some(present == Some(BlockKey::Other)));
     }
     DISABLED_BLOCK_PART.set(None);
 }

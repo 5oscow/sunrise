@@ -7,8 +7,10 @@ behaviour, the disabled block is inert rather than inheriting its vanilla templa
 - `random_tick` skips the template tick. `tick_block` holds the scheduled occurrence before dispatch
   to any Part, including enabled Parts. Re-enabling the owner dispatches each held occurrence once,
   with its original deadline, priority and order.
-- `update_shape` keeps the input state and `can_survive` answers true, so the template cannot
-  replace the block or make it pop off.
+- `update_shape` keeps the input state. `can_survive` keeps the existing block, and
+  `may_place_on` and `can_sustain_plant` keep the existing plant. These three survival rules
+  compare the block type already in the world, so they do not let a player place a new block
+  or plant by bypassing its support check.
 - `use_item_on` and `use_without_item` pass without invoking the block template's interaction.
 - `is_valid_bonemeal_target` refuses bone meal. For `on_tree_grow`, the soil under the trunk stays
   unchanged and the rest of the tree grows normally.
@@ -22,8 +24,15 @@ behaviour, the disabled block is inert rather than inheriting its vanilla templa
 
 Except for scheduled block ticks, these defaults occupy the disabled owner's usual place in Part
 dispatch: earlier enabled Parts can answer first. A disabled mod's Part attached to another owner's
-block does not make that block inert. Read-only queries (such as shapes, fluid state and loot) retain
-their ordinary data/template fallback. These rules are the same on native and wasm.
+block does not make that block inert. Read-only queries such as path classification, light, fluid
+state and loot retain their ordinary answers. Attacks, explosions, environmental hazards and
+player-initiated removal still use data and template rules: switching the owner off does not make a
+block immune to those actions. These rules are the same on native and wasm.
+
+Known gap: `can_be_hydrated` alone does not keep a farmland-template block inert. If the owner
+subscribed that query but not `random_tick`, the template still runs its moisture and dry-out rules.
+A block whose only source of hydration was the disabled Part can dry out and revert to the
+template's base block.
 
 Items and entities keep their registered data and default engine behaviour while their Part
 callbacks are disabled. They are not globally frozen by this block-specific policy. In particular,

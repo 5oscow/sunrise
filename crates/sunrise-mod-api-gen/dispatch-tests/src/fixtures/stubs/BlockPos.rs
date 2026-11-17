@@ -1,2 +1,1 @@
-#[derive(Clone, Copy)]
-pub(super) struct BlockPos;
+pub(super) use sunrise_core::position::BlockPos;
