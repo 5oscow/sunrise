@@ -4016,7 +4016,15 @@ mod tests {
             let error = root.unwrap_err().to_string();
             assert!(error.contains("be_test:shared"), "{error}");
             assert!(error.contains("be_test:missing"), "{error}");
-            assert!(!std::path::Path::new(".sunrise-cache").exists());
+            // A refused declaration builds no content root. The roots folder's own `.lock`
+            // is made by every start and never deleted, so it is not a root.
+            let built: Vec<_> = std::fs::read_dir(".sunrise-cache/mod-content")
+                .into_iter()
+                .flatten()
+                .map(|entry| entry.unwrap().file_name())
+                .filter(|name| name != ".lock")
+                .collect();
+            assert!(built.is_empty(), "{built:?}");
             return;
         }
         if let Some(id) = unknown {
