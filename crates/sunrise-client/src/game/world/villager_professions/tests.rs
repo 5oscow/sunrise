@@ -308,8 +308,6 @@ fn wasm_profession(value: ProfessionDefinition, owner: &str) -> mod_api::ModEntr
     let operation = sunrise_mod_wasm::fixture_import_id("VillagerProfessions", "register").unwrap();
     let hook =
         sunrise_mod_wasm::fixture_export_id("Hooks", "register_villager_professions").unwrap();
-    // The call table follows the role files' order, so `subscribed` has no fixed id.
-    let subscribed = sunrise_mod_wasm::fixture_export_id("Hooks", "subscribed").unwrap();
     let std = wat::parse_str(
         r#"(module (@custom "dylink.0" "\01\04\00\00\00\00") (import "env" "memory" (memory 1)))"#,
     )
@@ -322,8 +320,8 @@ fn wasm_profession(value: ProfessionDefinition, owner: &str) -> mod_api::ModEntr
         (data (i32.const 2048) "{subscriptions}")
         (data (i32.const 4096) "{declaration}")
         (func (export "sunrise_in") (param i32) (result i32) i32.const 512)
-        (func (export "sunrise_hook") (param i32) (result i64)
-            local.get 0 i32.const {subscribed} i32.eq if (result i64)
+        (func (export "sunrise_hook") (param i64) (result i64)
+            local.get 0 i64.const {subscribed} i64.eq if (result i64)
                 i64.const {sub_reply}
             else local.get 0 i64.const {hook} i64.eq if (result i64)
                 i32.const {operation} i32.const 4096 i32.const {length} i32.const 0 i32.const 0 call $host
