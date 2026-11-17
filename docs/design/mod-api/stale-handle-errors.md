@@ -18,8 +18,8 @@ Current owners below were inspected; they establish entry points, not complete m
 
 | Route | Verified file:line owner |
 | --- | --- |
-| Entity position / level | `crates/sunrise-mod-vocab/src/host/entity_position.rs:13`, `crates/sunrise-mod-vocab/src/host/entity_identity.rs:36`; `crates/sunrise-client/src/game/modding/native_entity_refs.rs:675,735` |
-| Entity clear_fire | `crates/sunrise-mod-vocab/src/host/entity_fire_frost.rs:36`; `crates/sunrise-client/src/game/modding/native_entity_state.rs:232` |
+| Entity position / level | `crates/sunrise-mod-vocab/src/host/entity_position.rs:13`, `crates/sunrise-mod-vocab/src/host/entity_identity.rs:43`; `crates/sunrise-client/src/game/modding/native_entity_refs.rs:675,735` |
+| Entity clear_fire | `crates/sunrise-mod-vocab/src/host/entity_fire_frost.rs:43`; `crates/sunrise-client/src/game/modding/native_entity_state.rs:232` |
 | Player name / action_bar | `crates/sunrise-mod-vocab/src/host/player_session.rs:20`, `crates/sunrise-mod-vocab/src/host/player_messages.rs:20`; `crates/sunrise-client/src/game/modding/native_server.rs:1152,1196` |
 | Level block reads | `crates/sunrise-mod-vocab/src/host/level_blocks.rs:29`, `crates/sunrise-mod-vocab/src/host/level_blocks.rs:50`; `crates/sunrise-client/src/game/modding/native_level_refs.rs:433,518,530` |
 | Lifecycle lookup | `crates/sunrise-client/src/join_seq/residency/table.rs:24` defines Found, Taken, Missing |
