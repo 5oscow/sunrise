@@ -21,6 +21,7 @@
 pub mod containers;
 pub mod hud;
 pub mod lang;
+pub mod look;
 pub mod mod_rows;
 pub mod pages;
 pub mod perf;
