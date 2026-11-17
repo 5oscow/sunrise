@@ -79,9 +79,12 @@ rejects the shader. The game never panics over a pipeline's shader.
 `cargo sunrise-mod check`, run in the mod's folder, composes and validates every
 `assets/<namespace>/shaders/pipeline/**/*.wgsl` file with the code the game uses, and fails with
 `<file>: <reason>` for each one the game would refuse (the same text the game logs after the
-pipeline's id). The tool cannot see your `RenderPipeline` registration, so it takes a file that
-calls `pipeline_texture` as textured and any other file as untextured. A file the check accepts
-can still be refused at load when the GPU rejects it.
+pipeline's id). The tool cannot see your `RenderPipeline` registration, so it takes a file whose
+text contains `pipeline_texture` anywhere (a comment included) as textured and any other file as
+untextured; the game goes by the registration's `.textured(...)` instead. A file the check accepts
+can still be refused at load: when its registration declares no texture but the file samples one
+(or the reverse), when the registration's texture or another resource it names is missing, or
+when the GPU rejects the shader.
 
 ## 3. Resolve and draw
 

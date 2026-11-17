@@ -181,10 +181,10 @@ mod tests {
         assert_eq!(count, 3);
         assert_eq!(
             refused,
-            [format!(
-                "assets/m/shaders/pipeline/broken.wgsl: {}",
-                mod_pipeline::compose_with("fn nothing() {}", false).unwrap_err()
-            )]
+            [
+                "assets/m/shaders/pipeline/broken.wgsl: no function `pipeline_fragment`: \
+                 expected `fn pipeline_fragment(input: PipelineInput) -> vec4<f32>`"
+            ]
         );
     }
 
