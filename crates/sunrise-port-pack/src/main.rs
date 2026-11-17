@@ -38,6 +38,8 @@
 //!
 //! - `port-work <work> [--from <folder>] [--resources <prepared>]`: the port step alone, on an imported work folder.
 //! - `status <work>`: what the work folder holds, as the launcher shows it.
+//! - `profile <work>`: the staged resource packs installed into the profile's home, recorded in
+//!   `<work>/profile-resourcepacks.json`.
 //! - `--json` (not `upgrade-datapack` or `events`): JSON lines on stdout, the reply last (`docs/api/port-pack.md`).
 //!
 //! The work folder belongs to the user: jars and carried-over files stay
@@ -49,7 +51,7 @@ use std::{
 };
 use sunrise_port_pack::{events, fetch, inventory::Record, pipeline, status, upgrade};
 
-const USAGE: &str = "usage: sunrise-port-pack import <pack> <work> | inventory <work> [--offline] | fetch <work> [--from <folder>] [<mod id>...] | carry <work> [--resources <prepared>] [<mod id>...] | report <work> | check <jar> <out> | port <pack> <work> [--from <folder>] [--resources <prepared>] | port-work <work> [--from <folder>] [--resources <prepared>] | status <work> | upgrade-datapack <pack> (<out> | --world <world>) | events <jar or folder> [--hooks <hook-counterparts.json>]; --json for JSON lines (not upgrade-datapack or events); --version; --help";
+const USAGE: &str = "usage: sunrise-port-pack import <pack> <work> | inventory <work> [--offline] | fetch <work> [--from <folder>] [<mod id>...] | carry <work> [--resources <prepared>] [<mod id>...] | report <work> | check <jar> <out> | port <pack> <work> [--from <folder>] [--resources <prepared>] | port-work <work> [--from <folder>] [--resources <prepared>] | status <work> | profile <work> | upgrade-datapack <pack> (<out> | --world <world>) | events <jar or folder> [--hooks <hook-counterparts.json>]; --json for JSON lines (not upgrade-datapack or events); --version; --help";
 
 /// This release's version: release builds set `SUNRISE_VERSION` from the tag (docs/versioning.md).
 const VERSION: &str = match option_env!("SUNRISE_VERSION") {
@@ -106,6 +108,7 @@ enum Step {
     Check,
     Port,
     Status,
+    Profile,
     UpgradeDatapack,
     Events,
 }
@@ -121,6 +124,7 @@ impl Step {
             Step::Check => "check",
             Step::Port => "port",
             Step::Status => "status",
+            Step::Profile => "profile",
             Step::UpgradeDatapack => "upgrade-datapack",
             Step::Events => "events",
         }
@@ -275,6 +279,14 @@ fn run(args: &mut Vec<String>, json: bool, say: &dyn Fn(String)) -> Result<Optio
             }
             Ok(None)
         }
+        Some("profile") => {
+            let work = path(1)?;
+            let report = pipeline::profile(work).map_err(at(Step::Profile))?;
+            for (pack, outcome) in &report.files {
+                plain(format!("{pack}: {:?}", outcome.state));
+            }
+            state(work)
+        }
         Some("upgrade-datapack") => {
             let pack = path(1)?;
             let out = match &world {
@@ -366,5 +378,40 @@ mod tests {
                 .contains("inventory.json")
         );
         assert_eq!(ran(&["fetch", work], false), (1, None));
+    }
+
+    #[test]
+    fn profile_installs_the_staged_packs_into_the_profiles_home_once() {
+        let work =
+            std::env::temp_dir().join(format!("sunrise-port-pack-profile-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&work);
+        let pack = work.join("resourcepacks/glow");
+        std::fs::create_dir_all(pack.join("assets/minecraft/textures")).unwrap();
+        std::fs::write(
+            pack.join("pack.mcmeta"),
+            r#"{"pack": {"pack_format": 34, "description": "glow"}}"#,
+        )
+        .unwrap();
+        std::fs::write(pack.join("assets/minecraft/textures/a.png"), b"png").unwrap();
+        std::fs::write(
+            work.join("pack.json"),
+            r#"{"name": "Cozy", "format": "mrpack", "minecraft": "1.21.1", "loader": "neoforge",
+                "loader_version": "21.1.1", "files": [], "overrides": {}}"#,
+        )
+        .unwrap();
+        let installed = work.join("home/resourcepacks/glow/pack.mcmeta");
+        let (code, reply) = ran(&["profile", work.to_str().unwrap()], true);
+        let reply = reply.unwrap();
+        assert_eq!(code, 0, "{reply}");
+        assert!(installed.is_file());
+        let profile = &reply["resource_reports"]["profile"]["files"]["resourcepacks/glow"];
+        assert!(profile["state"].is_string(), "{reply}");
+        std::fs::write(&installed, "the player's own").unwrap();
+        assert_eq!(ran(&["profile", work.to_str().unwrap()], true).0, 0);
+        assert_eq!(
+            std::fs::read_to_string(&installed).unwrap(),
+            "the player's own"
+        );
+        std::fs::remove_dir_all(&work).unwrap();
     }
 }

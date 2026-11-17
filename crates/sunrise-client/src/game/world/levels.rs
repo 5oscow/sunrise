@@ -1245,7 +1245,10 @@ impl Game<'_> {
             let tick_span = sunrise_client::spans::guard("level_tick");
             // This level's moving colliders, solid to its movers for this tick only.
             let colliders = self.placed_moving_colliders();
-            result = sunrise_client_render::moving_colliders::in_level(colliders, || {
+            let history = self
+                .collider_history(&colliders)
+                .map(sunrise_client_render::moving_colliders::HistoryScope::enter);
+            result = sunrise_client_render::moving_colliders::in_level(colliders.clone(), || {
                 sunrise_client::block_contact::in_level(
                     self.tick,
                     (self.serving.is_some() || self.options.dedicated.is_some())
@@ -1265,6 +1268,16 @@ impl Game<'_> {
                     },
                 )
             });
+            drop(history);
+            // Then the bodies standing on a collider that moved are carried with it.
+            if result.is_ok() && !paused {
+                sunrise_client::block_contact::in_level(
+                    self.tick,
+                    (self.serving.is_some() || self.options.dedicated.is_some())
+                        .then_some(dim.id()),
+                    || self.carry_pass(&colliders),
+                );
+            }
             drop(tick_span);
             self.drain_entity_inside();
             if result.is_err() {
@@ -1687,7 +1700,9 @@ mod tests {
 
     /// A game on the prepared resources in `SUNRISE_TEST_RESOURCES`, with no
     /// world opened and commands allowed.
-    fn prepared_game() -> Game<'static> {
+    fn prepared_game<'a>(
+        resources: &'a mut Option<std::sync::Arc<crate::game::Resources>>,
+    ) -> Game<'a> {
         use crate::game::{Audio, Options, Progress, Settings, load_resources};
         let root = std::path::PathBuf::from(std::env::var_os("SUNRISE_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
@@ -1708,7 +1723,7 @@ mod tests {
         options.resources = root.clone();
         options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
         // The game keeps its resources for the whole test.
-        let resources: &'static _ = Box::leak(Box::new(loaded.resources));
+        let resources = &*resources.insert(loaded.resources);
         let mut game = Game::new(
             resources,
             loaded.pack,
@@ -1732,7 +1747,8 @@ mod tests {
     #[test]
     #[ignore = "daily"]
     fn worldborder_add_extends_a_change_in_flight() {
-        let mut game = prepared_game();
+        let mut resources = None;
+        let mut game = prepared_game(&mut resources);
         assert!(game.run_command("worldborder set 100 1000"));
         assert_eq!(game.border.remaining_ticks(), 1000);
         // Part way through the change, where the size is between its ends.
@@ -1757,7 +1773,8 @@ mod tests {
     #[test]
     #[ignore = "daily"]
     fn each_level_keeps_its_own_world_border() {
-        let mut game = prepared_game();
+        let mut resources = None;
+        let mut game = prepared_game(&mut resources);
         assert!(game.run_command("worldborder set 1000"));
         assert!(game.run_command("execute in minecraft:the_nether run worldborder set 100"));
         assert_eq!(game.dim, Dim::Overworld);

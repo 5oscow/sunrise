@@ -1,5 +1,6 @@
 """The launcher's copies of game files (launcher/crates/, launcher/assets/) stay byte- and value-equal to the originals."""
 import ast
+import hashlib
 import re
 import unittest
 from pathlib import Path
@@ -32,6 +33,95 @@ SAME_BYTES = (
     ("LICENSE", "../assets/LICENSE"),
     ("LICENSES/MIT-Horizon.txt", "../assets/LICENSES/MIT-Horizon.txt"),
     ("crates/sunrise-prepare/tests/support/java_probe.rs", "../tests/support/java_probe.rs"),
+    ("crates/sunrise-port-pack/src/zip_intake/source.rs", "../src/zip_intake/source.rs"),
+    ("crates/sunrise-port-pack/src/zip_intake/tests.rs", "../src/zip_intake/tests.rs"),
+)
+
+# (the game's source, the launcher's copy, the edits that turn one into the other): compared as code, ignoring
+# layout, module docs and `use` items, which the launcher's edition formats and orders its own way.
+SAME_CODE = (
+    ("crates/sunrise-port-pack/src/net.rs", "launcher/src/net.rs", (
+        ("pub(crate) fn get_from_hosts", "pub fn get_from_hosts"),
+        ('.set("User-Agent", crate::modrinth::AGENT)',
+         '.set("User-Agent", concat!("sunrise-launcher/", env!("CARGO_PKG_VERSION")))'),
+    )),
+    ("crates/sunrise-port-pack/src/zip_intake.rs", "launcher/src/zip_intake.rs", (
+        ("""if let Ok(directory) = zip64
+            && (directory.entries, directory.size, directory.offset)
+                == (classic.entries, classic.size, classic.offset)
+        {
+            return Ok((directory, Some(at)));
+        }""", """if let Ok(directory) = zip64 {
+            if (directory.entries, directory.size, directory.offset)
+                == (classic.entries, classic.size, classic.offset)
+            {
+                return Ok((directory, Some(at)));
+            }
+        }"""),
+    )),
+)
+
+
+# (the game's file, a function in it, the SHA-256 of its code, the launcher's function that does the same for show):
+# the launcher reads these few things itself, so a change to the game's function is a change to make there too.
+MIRRORED = (
+    ("crates/sunrise-port-pack/src/import.rs", "prism_archive_layout",
+     "9c5580515b41ec63c768d9de42054348e3dec65cc7c04705b0f48cb721929b67", "launcher/src/import.rs prism_instance"),
+    ("crates/sunrise-port-pack/src/import.rs", "curseforge_instance_target",
+     "59251c22e6e81e67985e2436edfbc7d92f1c5a4b8302f65bae4f901c7d67e2da",
+     "launcher/src/other_launchers.rs curseforge_instance_target"),
+    ("crates/sunrise-port-pack/src/import.rs", "curseforge",
+     "85ff06bf7e97dd51c6d2410587acd3c3d5519fec93e6734b87cef0309003d29c",
+     "launcher/src/other_launchers.rs curseforge_instance_target"),
+    ("crates/sunrise-port-pack/src/jar.rs", "read_inner",
+     "a1fdeb9b3daaf5fbd74cd4e18185beb452759b24e3e2cedabd17595ec5d5850d", "launcher/src/browser/java.rs jar_title"),
+    ("crates/sunrise-port-pack/src/jar.rs", "fabric",
+     "052665a32cf9980ffcd1d1cb51f72a918e6613d89fb2097562afb306ca4f4fe2", "launcher/src/browser/java.rs jar_title"),
+    ("crates/sunrise-port-pack/src/jar.rs", "manifest_value",
+     "8eba4a800351645479e1f2fc79c727bf2e3aee7bdcc97b27a3fa249791a2b33e", "launcher/src/browser/java.rs jar_title"),
+)
+
+
+def function(path: str, name: str) -> str:
+    """The text of `fn name` in the Rust file at `path`, from `fn` to its closing brace."""
+    source = (ROOT / path).read_text(encoding="utf-8")
+    found = re.search(rf"\bfn {name}\b", source)
+    if not found:
+        raise AssertionError(f"{path} has no fn {name}")
+    depth, at = 0, source.index("{", found.end())
+    while at < len(source):
+        rest = source[at:]
+        raw = re.match(r'r(#*)"', rest)
+        char = re.match(r"'(\\.|[^\\'])'", rest)
+        if rest.startswith("//"):
+            at = source.find("\n", at)
+        elif raw and (at == 0 or not (source[at - 1].isalnum() or source[at - 1] == "_")):
+            at = source.index('"' + raw.group(1), at + len(raw.group(0))) + len(raw.group(1))
+        elif rest.startswith('"'):
+            at = re.compile(r'"(\\.|[^"\\])*"', re.S).match(source, at).end() - 1
+        elif char:
+            at += len(char.group(0)) - 1
+        elif rest[0] in "{}":
+            depth += 1 if rest[0] == "{" else -1
+            if depth == 0:
+                return source[found.start():at + 1]
+        at += 1
+    raise AssertionError(f"{path}: fn {name} never closes")
+
+
+def code(text: str) -> str:
+    """Rust source as this test compares it: no module docs, `use` items, whitespace or trailing commas."""
+    text = re.sub(r"^\s*//!.*$", "", text, flags=re.M)
+    text = re.sub(r"^\s*(pub(\(crate\))? )?use [^;]*;", "", text, flags=re.M | re.S)
+    return re.sub(r",([)\]}])", r"\1", re.sub(r"\s+", "", text))
+
+
+# (the game's file, the launcher's copy, the functions copied whole): compared as code, as `code` reads it.
+SAME_FUNCTIONS = (
+    ("crates/sunrise-prepare/src/java.rs", "launcher/src/jdk.rs", (
+        "command", "executable", "real_path", "without_verbatim", "path_homes", "tool_major", "jdk_parents",
+        "installed_jdks", "find", "find_runtime", "find_tools", "home",
+    )),
 )
 
 
@@ -82,6 +172,29 @@ class LauncherCopies(unittest.TestCase):
                     where = f"{name} in " if name else ""
                     self.assertEqual(copied[name], original[name], f"{where}{copy} differs from {game}")
 
+    def test_rewritten_copies_are_the_games_code_with_their_listed_edits(self):
+        for game, copy, edits in SAME_CODE:
+            with self.subTest(copy=copy):
+                original = code((ROOT / game).read_text(encoding="utf-8"))
+                for old, new in edits:
+                    self.assertIn(code(old), original, f"{game} no longer has the code {copy} edits: update both")
+                    original = original.replace(code(old), code(new))
+                self.assertEqual(code((ROOT / copy).read_text(encoding="utf-8")), original,
+                                 f"{copy} differs from {game} beyond its listed edits: copy the change, or list it")
+
+    def test_mirrored_game_functions_are_unchanged(self):
+        for path, name, pinned, mirror in MIRRORED:
+            with self.subTest(function=name):
+                digest = hashlib.sha256(code(function(path, name)).encode()).hexdigest()
+                self.assertEqual(digest, pinned, f"{path}'s {name} changed: change {mirror} to match, then pin {digest}")
+
+    def test_functions_copied_whole_are_the_games(self):
+        for game, copy, names in SAME_FUNCTIONS:
+            for name in names:
+                with self.subTest(function=name):
+                    self.assertEqual(code(function(copy, name)), code(function(game, name)),
+                                     f"{copy}'s {name} differs from {game}'s: copy the change")
+
     def test_format_constants_match_the_games(self):
         package_format = int((ROOT / "crates/sunrise-mod-package/src/sdk/package-format").read_text().strip())
         self.assertEqual(constant("launcher/crates/smod/src/index/native.rs", "PACKAGE_FORMAT"), package_format)
@@ -89,8 +202,12 @@ class LauncherCopies(unittest.TestCase):
                          constant("crates/sunrise-mod-surface/src/uses.rs", "USES_FILE"))
         self.assertEqual(constant("launcher/crates/smod/src/manifest.rs", "MAX_USES"),
                          constant("crates/sunrise-mod-surface/src/uses.rs", "MAX_USES_BYTES"))
+        self.assertEqual(constant("launcher/src/preparer.rs", "DATA_FILE"),
+                         constant("crates/sunrise-core/src/prepared_files.rs", "FILE_NAME"))
 
     def test_a_drifted_copy_is_caught(self):
+        self.assertEqual(code("//! Doc.\nuse a::{b,\n c};\nfn f() { g( 1 ) }\n"), "fnf(){g(1)}")
+        self.assertNotEqual(code("fn f() { g(1) }"), code("fn f() { g(2) }"))
         self.assertEqual(value("4 << 20"), 4 * 1024 * 1024)
         self.assertEqual(value("1_000"), 1000)
         self.assertEqual(value('"uses.json"'), "uses.json")

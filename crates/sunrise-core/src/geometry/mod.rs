@@ -4,6 +4,7 @@
 //! simulation coordinates; rendering may use a separate camera-relative format.
 
 pub mod border;
+pub mod carried;
 mod movement;
 pub mod oriented;
 mod shape;

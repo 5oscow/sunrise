@@ -4,6 +4,12 @@ mod book_screen;
 mod item_fallthrough;
 #[path = "shared/loot.rs"]
 mod loot;
+#[cfg(test)]
+#[path = "shared/screen_position_tests.rs"]
+mod screen_position_tests;
+#[cfg(test)]
+#[path = "shared/slot_icon_tests.rs"]
+mod slot_icon_tests;
 
 use super::screen_build::ObservedScreen;
 use crate::game::api_values::{TryIntoApi, TryIntoEngine};
@@ -535,10 +541,10 @@ impl SlotMoves {
     /// Moves slot `slot` of a screen that declared `slots`, from the next
     /// build. False, changing nothing, for a slot the screen does not show or
     /// a position that is not finite.
-    fn set(&self, slots: &[Option<[f32; 2]>], slot: u32, x: f32, y: f32) -> bool {
+    fn set(&self, slots: &[Option<mod_api::ScreenSlot>], slot: u32, x: f32, y: f32) -> bool {
         let Some((slot, declared)) = usize::try_from(slot)
             .ok()
-            .and_then(|i| Some((i, slots.get(i).copied().flatten()?)))
+            .and_then(|i| Some((i, slots.get(i)?.as_ref()?.position)))
             .filter(|_| x.is_finite() && y.is_finite())
         else {
             return false;
@@ -3069,9 +3075,18 @@ impl Game<'_> {
     /// moved it, else where the screen declared it.
     pub(super) fn native_screen_slot(&self, slot: usize) -> Option<(f32, f32)> {
         let s = self.shown_native_screen()?;
-        let declared = s.screen.slots.get(slot).copied().flatten()?;
+        let declared = s.screen.slots.get(slot)?.as_ref()?.position;
         let [x, y] = s.slot_moves.position(slot, declared);
         Some((x, y))
+    }
+    pub(in crate::game) fn native_screen_slot_icon(&self, slot: usize) -> Option<&str> {
+        self.shown_native_screen()?
+            .screen
+            .slots
+            .get(slot)?
+            .as_ref()?
+            .no_item_icon
+            .as_deref()
     }
     /// Moves container slot `slot` of the open mod screen to `x`, `y`
     /// (relative to the screen's origin) from the next frame. False, changing
@@ -3152,7 +3167,7 @@ impl Game<'_> {
                 );
             }
         }
-        self.native_screen_draw(&s.block, &s.data, batch, [ox, oy]);
+        self.native_screen_draw(&s.block, s.pos(), &s.data, batch, [ox, oy]);
         self.draw_screen_phase(batch, sunrise_client::screen_draw::RenderPhase::Background);
         if s.screen.own_labels {
             return true;
@@ -3492,16 +3507,6 @@ impl Game<'_> {
             ..m
         })
     }
-}
-
-/// Whether `rgba` is a whole `width` x `height` image that fits a
-/// `slot_width` x `slot_height` atlas slot (a native mod's `mod_image`).
-fn mod_image_fits(width: u32, height: u32, rgba: usize, slot_width: u32, slot_height: u32) -> bool {
-    width > 0
-        && height > 0
-        && width <= slot_width
-        && height <= slot_height
-        && rgba == width as usize * height as usize * 4
 }
 
 /// Whether F3's debug screen, open when `debug`, covers `corner`
@@ -4780,7 +4785,17 @@ mod tests {
     /// repeat of the effective position, declared or moved, keeps the layout).
     #[test]
     fn slot_moves_refuse_what_the_screen_does_not_show() {
-        let declared = [Some([8.0, 18.0]), None, Some([26.0, 18.0])];
+        let declared = [
+            Some(mod_api::ScreenSlot {
+                position: [8.0, 18.0],
+                ..Default::default()
+            }),
+            None,
+            Some(mod_api::ScreenSlot {
+                position: [26.0, 18.0],
+                ..Default::default()
+            }),
+        ];
         let moves = super::SlotMoves::default();
         assert!(moves.set(&declared, 0, 8.0, 18.0));
         assert_eq!(moves.count.get(), 0);
@@ -5027,18 +5042,6 @@ mod tests {
         assert!(debug_takes(Corner::BottomLeft, true, [true, false]));
         assert!(!debug_takes(Corner::BottomRight, true, [true, false]));
         assert!(debug_takes(Corner::BottomRight, true, [false, true]));
-    }
-
-    /// An image is taken whole, and only when it fits its slot.
-    #[test]
-    fn a_mod_image_is_taken_whole_and_only_when_it_fits() {
-        use super::mod_image_fits;
-        assert!(mod_image_fits(4, 2, 32, 1024, 1024));
-        assert!(mod_image_fits(1024, 1024, 1024 * 1024 * 4, 1024, 1024));
-        assert!(!mod_image_fits(0, 2, 0, 1024, 1024));
-        assert!(!mod_image_fits(4, 2, 31, 1024, 1024));
-        assert!(!mod_image_fits(4, 2, 33, 1024, 1024));
-        assert!(!mod_image_fits(2048, 1, 2048 * 4, 1024, 1024));
     }
 }
 
