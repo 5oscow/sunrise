@@ -13,12 +13,13 @@ use sunrise_client::{
     hud::HudBatch,
     items::ItemStack,
     mesher::Vertex,
-    mobs::render::{DYE, DYE_NAMES},
+    mobs::render::DYE,
     test_instance_block::Status,
     text::Text,
 };
 use sunrise_core::position::BlockPos;
 use sunrise_protocol::packets::play::{self, Serverbound as S};
+use sunrise_world::entity_components::DYE_NAMES;
 use sunrise_world::registry::BlockStateId;
 
 /// The beacon screen is 54 px wider than the 176-px menus it shares an origin with.

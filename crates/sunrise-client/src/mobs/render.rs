@@ -147,7 +147,6 @@ pub const DYE: [u32; 16] = [
     0xF9FFFE, 0xF9801D, 0xC74EBD, 0x3AB3DA, 0xFED83D, 0x80C71F, 0xF38BAA, 0x474F52, 0x9D9D97,
     0x169C9C, 0x8932B8, 0x3C44AA, 0x835432, 0x5E7C16, 0xB02E26, 0x1D1D21,
 ];
-pub use sunrise_world::entity_components::DYE_NAMES;
 /// ABGR vertex colour from an RGB value.
 pub fn abgr(rgb: u32) -> u32 {
     let (r, g, b) = ((rgb >> 16) & 255, (rgb >> 8) & 255, rgb & 255);

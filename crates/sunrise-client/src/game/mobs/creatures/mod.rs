@@ -6781,7 +6781,8 @@ impl Game<'_> {
                     None,
                 );
                 m.extra.sheared = true;
-                let color = sunrise_client::mobs::render::DYE_NAMES[m.extra.color as usize & 15];
+                let color =
+                    sunrise_world::entity_components::DYE_NAMES[m.extra.color as usize & 15];
                 drops_table = format!("minecraft:shearing/sheep/{color}");
                 let stacks = world_items!(self).loot_table(
                     &drops_table,
@@ -6860,7 +6861,7 @@ impl Game<'_> {
                 if m.extra.tame
                     && m.extra.owner == Some(acting)
                     && item.ends_with("_dye")
-                    && sunrise_client::mobs::render::DYE_NAMES
+                    && sunrise_world::entity_components::DYE_NAMES
                         .iter()
                         .position(|d| {
                             item.trim_start_matches("minecraft:")
@@ -6872,7 +6873,7 @@ impl Game<'_> {
                 let name = item
                     .trim_start_matches("minecraft:")
                     .trim_end_matches("_dye");
-                if let Some(c) = sunrise_client::mobs::render::DYE_NAMES
+                if let Some(c) = sunrise_world::entity_components::DYE_NAMES
                     .iter()
                     .position(|d| *d == name)
                 {
@@ -6934,7 +6935,7 @@ impl Game<'_> {
                 if m.extra.tame
                     && m.extra.owner == Some(acting)
                     && item.ends_with("_dye")
-                    && sunrise_client::mobs::render::DYE_NAMES
+                    && sunrise_world::entity_components::DYE_NAMES
                         .iter()
                         .position(|d| {
                             item.trim_start_matches("minecraft:")
@@ -6946,7 +6947,7 @@ impl Game<'_> {
                 let name = item
                     .trim_start_matches("minecraft:")
                     .trim_end_matches("_dye");
-                if let Some(c) = sunrise_client::mobs::render::DYE_NAMES
+                if let Some(c) = sunrise_world::entity_components::DYE_NAMES
                     .iter()
                     .position(|d| *d == name)
                 {
@@ -9454,7 +9455,7 @@ fn dye_color_mix_in_recipes(
     b: u8,
 ) -> Option<u8> {
     let dye = |c: u8| {
-        let name = sunrise_client::mobs::render::DYE_NAMES[usize::from(c) & 15];
+        let name = sunrise_world::entity_components::DYE_NAMES[usize::from(c) & 15];
         Some(ItemStack::new(&format!("minecraft:{name}_dye"), 1))
     };
     let grid = [dye(a), dye(b), None, None];
@@ -9463,7 +9464,7 @@ fn dye_color_mix_in_recipes(
         .item
         .strip_prefix("minecraft:")?
         .strip_suffix("_dye")?;
-    let index = sunrise_client::mobs::render::DYE_NAMES
+    let index = sunrise_world::entity_components::DYE_NAMES
         .iter()
         .position(|n| *n == name)?;
     u8::try_from(index).ok()
@@ -10849,7 +10850,7 @@ mod dye_mix_tests {
             Recipes::load(&root, &items, &overlay, &crate::game::test_server_load()).unwrap();
         let dye = |name: &str| {
             u8::try_from(
-                sunrise_client::mobs::render::DYE_NAMES
+                sunrise_world::entity_components::DYE_NAMES
                     .iter()
                     .position(|n| *n == name)
                     .unwrap_or_else(|| panic!("{name} is not a dye colour")),

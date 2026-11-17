@@ -16,11 +16,11 @@
 
 #[cfg(test)]
 use super::MobData;
-use super::render::DYE_NAMES;
 use super::{Mob, Species};
 use std::sync::atomic::{AtomicBool, Ordering};
 use sunrise_optifine::random::{self, Block, Facts, Weather};
 use sunrise_optifine::random_textures::RandomTextures;
+use sunrise_world::entity_components::DYE_NAMES;
 
 /// Where the mob was when the client first saw it.
 #[derive(Clone, Debug)]

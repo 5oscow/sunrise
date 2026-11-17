@@ -9,8 +9,8 @@ use sunrise_client::{
     blocks::BlockFacts,
     items::Items,
     mobs::{
-        Mob, MobTypes, Species, cube, drops, enderman, gear, raider, render::DYE_NAMES,
-        species::can_be_a_baby, sulfur_cube,
+        Mob, MobTypes, Species, cube, drops, enderman, gear, raider, species::can_be_a_baby,
+        sulfur_cube,
     },
     random_sequences::RandomSequences,
 };
@@ -18,6 +18,7 @@ use sunrise_core::{
     geometry::Vec3,
     random::{LegacyRandom, RandomSource},
 };
+use sunrise_world::entity_components::DYE_NAMES;
 use sunrise_world::loot::{LootDamage, LootData, LootEntity, LootStack, PackOverlay};
 
 /// `id[;enchantment:level...]`.

@@ -16,7 +16,7 @@ use sunrise_client::{
         data::MobData,
         finalize::{self, Attr, Ctx, FinalizeLevel, SpawnData, SpawnRegistries},
         gear,
-        render::{DYE_NAMES, VILLAGER_TYPES},
+        render::VILLAGER_TYPES,
         spawn_rules::Reason,
         spawning::LocalDifficulty,
     },
@@ -25,6 +25,7 @@ use sunrise_core::{
     geometry::{Aabb, Vec3},
     random::{LegacyRandom, RandomSource},
 };
+use sunrise_world::entity_components::DYE_NAMES;
 use sunrise_world::loot::PackOverlay;
 
 struct Level<'a> {

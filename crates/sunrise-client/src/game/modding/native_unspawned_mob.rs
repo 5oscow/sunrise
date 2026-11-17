@@ -20,7 +20,7 @@ use mod_api::{
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::{cell::RefCell, rc::Rc};
 use sunrise_client::mobs::finalize::{Ageable, Group};
-use sunrise_client::mobs::{Mob, equine, llama, render, tame};
+use sunrise_client::mobs::{Mob, equine, llama, tame};
 use sunrise_client::text::Text;
 use sunrise_mod_runtime::pending_children::PendingChildren;
 use sunrise_world::attribute_map::ValueKind;
@@ -371,8 +371,8 @@ pub(in crate::game) fn native_spawn_group(group: &Group, epoch: WorldEpoch) -> O
         Group::Axolotl(a, [first, second]) => SpawnGroup::Axolotl {
             ageable: native_ageable(a),
             variants: [
-                named(&sunrise_client::entity_nbt::AXOLOTL_VARIANTS, *first)?,
-                named(&sunrise_client::entity_nbt::AXOLOTL_VARIANTS, *second)?,
+                named(&sunrise_world::entity_components::AXOLOTL_VARIANTS, *first)?,
+                named(&sunrise_world::entity_components::AXOLOTL_VARIANTS, *second)?,
             ],
         },
         Group::Wolf(a, v) => SpawnGroup::Wolf {
@@ -383,9 +383,12 @@ pub(in crate::game) fn native_spawn_group(group: &Group, epoch: WorldEpoch) -> O
             leader: EntityRef::new(epoch, *leader),
             tropical: match look {
                 Some((pattern, base, color)) => Some(TropicalVariant::new(
-                    named(&sunrise_client::entity_nbt::TROPICAL_PATTERNS, *pattern)?,
-                    named(&render::DYE_NAMES, *base)?,
-                    named(&render::DYE_NAMES, *color)?,
+                    named(
+                        &sunrise_world::entity_components::TROPICAL_PATTERNS,
+                        *pattern,
+                    )?,
+                    named(&sunrise_world::entity_components::DYE_NAMES, *base)?,
+                    named(&sunrise_world::entity_components::DYE_NAMES, *color)?,
                 )),
                 None => None,
             },
@@ -440,8 +443,8 @@ pub(in crate::game) fn spawn_group(group: &SpawnGroup) -> Option<Group> {
         } => Group::Axolotl(
             ageable(a),
             [
-                index(&sunrise_client::entity_nbt::AXOLOTL_VARIANTS, first)?,
-                index(&sunrise_client::entity_nbt::AXOLOTL_VARIANTS, second)?,
+                index(&sunrise_world::entity_components::AXOLOTL_VARIANTS, first)?,
+                index(&sunrise_world::entity_components::AXOLOTL_VARIANTS, second)?,
             ],
         ),
         SpawnGroup::Wolf {
@@ -460,11 +463,17 @@ pub(in crate::game) fn spawn_group(group: &SpawnGroup) -> Option<Group> {
             match tropical {
                 Some(look) => Some((
                     index(
-                        &sunrise_client::entity_nbt::TROPICAL_PATTERNS,
+                        &sunrise_world::entity_components::TROPICAL_PATTERNS,
                         &look.pattern,
                     )?,
-                    index(&render::DYE_NAMES, &look.base_color)?,
-                    index(&render::DYE_NAMES, &look.pattern_color)?,
+                    index(
+                        &sunrise_world::entity_components::DYE_NAMES,
+                        &look.base_color,
+                    )?,
+                    index(
+                        &sunrise_world::entity_components::DYE_NAMES,
+                        &look.pattern_color,
+                    )?,
                 )),
                 None => None,
             },

@@ -6758,7 +6758,7 @@ fn restore_axolotl_memories(m: &mut Mob, tag: &Tag) {
         }
     }
 }
-pub use sunrise_world::entity_components::{AXOLOTL_VARIANTS, SALMON_SIZES, TROPICAL_PATTERNS};
+use sunrise_world::entity_components::{AXOLOTL_VARIANTS, SALMON_SIZES, TROPICAL_PATTERNS};
 /// `Bucketable.saveDefaultDataToBucketTag`, with the age an axolotl and a
 /// tadpole add (`saveToBucketTag`).
 pub fn bucket_data(m: &Mob) -> Tag {
@@ -6831,7 +6831,7 @@ pub fn bucket_components(m: &Mob) -> crate::item_data::StackData {
     }
     // TropicalFish.saveToBucketTag: the pattern and both colours.
     if m.species() == crate::mobs::Species::TropicalFish {
-        let dye = |i: u8| crate::mobs::render::DYE_NAMES[usize::from(i) & 15];
+        let dye = |i: u8| sunrise_world::entity_components::DYE_NAMES[usize::from(i) & 15];
         let pattern = TROPICAL_PATTERNS
             .get(usize::from(m.extra.variant))
             .unwrap_or(&"kob");
@@ -6913,7 +6913,7 @@ pub fn apply_item_components(m: &mut Mob, stack: &crate::items::ItemStack) {
         let name = |key| text(components.other(key));
         let dye = |key| {
             name(key).and_then(|n| {
-                crate::mobs::render::DYE_NAMES
+                sunrise_world::entity_components::DYE_NAMES
                     .iter()
                     .position(|&v| v == n.trim_start_matches("minecraft:"))
             })
@@ -6985,7 +6985,7 @@ pub fn apply_item_components(m: &mut Mob, stack: &crate::items::ItemStack) {
     // Sheep.applyImplicitComponents: the wool colour, a DyeColor id.
     if species == crate::mobs::Species::Sheep
         && let Some(name) = text(components.other("minecraft:sheep/color"))
-        && let Some(i) = crate::mobs::render::DYE_NAMES
+        && let Some(i) = sunrise_world::entity_components::DYE_NAMES
             .iter()
             .position(|c| *c == name.trim_start_matches("minecraft:"))
     {

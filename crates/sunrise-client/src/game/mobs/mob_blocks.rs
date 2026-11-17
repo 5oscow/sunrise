@@ -172,7 +172,7 @@ impl Game<'_> {
             let Some(r) = uv(&format!("entity/banner/{pattern}")) else {
                 continue;
             };
-            let index = render::DYE_NAMES
+            let index = sunrise_world::entity_components::DYE_NAMES
                 .iter()
                 .position(|n| *n == dye)
                 .unwrap_or(0);

@@ -1598,7 +1598,7 @@ impl Painting {
 /// The `DyeColor` ordinal of a colour name (`DyeColor.byName`), white when
 /// the name is unknown.
 pub fn dye_index(name: &str) -> u8 {
-    crate::mobs::render::DYE_NAMES
+    sunrise_world::entity_components::DYE_NAMES
         .iter()
         .position(|n| *n == name)
         .unwrap_or(0) as u8
@@ -1635,7 +1635,7 @@ impl Cushion {
     }
     /// The `DyeColor` name of the cushion.
     pub fn color_name(&self) -> &'static str {
-        crate::mobs::render::DYE_NAMES[usize::from(self.color.min(15))]
+        sunrise_world::entity_components::DYE_NAMES[usize::from(self.color.min(15))]
     }
     /// `Cushion.getCushionItemStackWithData`: the matching coloured item.
     pub fn item(&self) -> String {
