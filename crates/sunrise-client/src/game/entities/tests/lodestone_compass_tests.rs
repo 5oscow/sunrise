@@ -36,6 +36,7 @@ fn framed_compass(id: u32, pos: [i32; 3], facing: u8, rotation: i8) -> ItemFrame
         fixed: false,
         invisible: false,
         check_interval: 0,
+        ticks: 0,
         attachment_lifetime: Default::default(),
         join: Default::default(),
         custom_name: None,
@@ -91,7 +92,7 @@ fn drawn_needle(game: &mut Game<'_>, frame: ItemFrame) -> String {
     // The camera sits at the frame, so the frame passes `shouldRender`.
     let camera = glam::DVec3::from(super::center(&game.item_frames[0]));
     let mut out = Vec::new();
-    game.frame_geometry(camera, &mut out);
+    game.frame_geometry(camera, 0.0, &mut out);
     let near =
         |a: [f32; 2], b: [f32; 2]| (a[0] - b[0]).abs() < 1.0e-5 && (a[1] - b[1]).abs() < 1.0e-5;
     let drawn: Vec<&str> = game

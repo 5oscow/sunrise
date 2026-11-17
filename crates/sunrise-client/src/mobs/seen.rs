@@ -128,24 +128,32 @@ impl Seen {
     pub fn may_block_mobs(&self) -> bool {
         matches!(self.species, Species::Shulker | Species::HappyGhast)
     }
-    /// `canBeCollidedWith(mover)` for a mob of species `mover` moving into
-    /// it (`EntityGetter.getEntityCollisions`): a living shulker
-    /// (`Shulker`), or an adult happy ghast held still, or carrying someone
-    /// when the mover is a happy ghast too (`HappyGhast`). Every other mob
-    /// keeps `Entity`'s false.
-    pub fn blocks_mob(&self, mover: Species) -> bool {
-        match self.species {
-            Species::Shulker => self.alive,
-            Species::HappyGhast => {
-                self.alive
-                    && !self.baby
-                    && (self.still || (self.carrying && mover == Species::HappyGhast))
-            }
-            _ => false,
+    /// This snapshot as an obstacle for [`crate::entity_solids::Solids`].
+    pub fn solid_candidate(&self) -> crate::entity_solids::Candidate {
+        crate::entity_solids::Candidate {
+            id: self.id,
+            kind: solid_kind(self.species),
+            bounds: self.bounds,
+            alive: self.alive,
+            removed: self.removed,
+            baby: self.baby,
+            still: self.still,
+            carrying: self.carrying,
+            pushable: self.pushable,
+            mount: self.vehicle,
         }
     }
     /// `LivingEntity.hasEffect`, by id without namespace.
     pub fn has_effect(&self, effect: &str) -> bool {
         self.effects.contains(&effect)
+    }
+}
+/// How `canBeCollidedWith` tells a mob's species apart.
+pub(crate) fn solid_kind(species: Species) -> crate::entity_solids::SolidKind {
+    use crate::entity_solids::SolidKind;
+    match species {
+        Species::Shulker => SolidKind::Shulker,
+        Species::HappyGhast => SolidKind::HappyGhast,
+        _ => SolidKind::Mob,
     }
 }

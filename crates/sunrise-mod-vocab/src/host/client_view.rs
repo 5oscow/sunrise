@@ -111,23 +111,13 @@ pub trait ClientViewClientHost {
     #[access(WorldOnly)]
     fn set_camera_entity(&mut self, entity: EntityRef) -> bool;
     /// Side: client.
-    /// The ordinary block-or-entity pick (Minecraft.hitResult), using the
-    /// game's targeting ray, reach and occlusion. None without a client world
-    /// or on a miss. Entity hits carry this client level's epoch. Unlike
-    /// native_view_hit, this never traces distant terrain.
+    /// The committed `client_pick` result (Minecraft.hitResult), computed
+    /// at partial tick 1.0 before each tick's inputs, including while paused,
+    /// and at the frame's partial tick before extraction. Each input reads its
+    /// tick's result; the highlight reads the frame's result. Reads during
+    /// dispatch see original. None before the first pick, without a client world
+    /// or on a miss. Consumption never recasts or rechecks target liveness;
+    /// a block broken earlier in a tick remains that tick's use target.
     #[access(ClientSetup)]
     fn crosshair_target(&self) -> Option<CrosshairTarget>;
-    /// Side: client.
-    /// Current targeting controls. Stale entity overrides are omitted. Reach comes from the
-    /// player's vanilla interaction-range attributes, including server and equipment modifiers:
-    /// this is the read for the player's block and entity reach.
-    #[access(WorldOnly)]
-    fn targeting(&self) -> ClientTargeting;
-    /// Side: client.
-    /// Set the window's targeting controls for subsequent picks. False, without changing any
-    /// control, outside a client world or for a stale/self entity. Entity range, item attack
-    /// range and (unless enabled here) occlusion are checked again when attacking. This does
-    /// not change server reach checks or attack cooldowns. None clears an entity override.
-    #[access(WorldOnly)]
-    fn set_targeting(&self, targeting: ClientTargeting) -> bool;
 }

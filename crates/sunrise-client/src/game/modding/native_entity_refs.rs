@@ -83,7 +83,7 @@ fn entity_ray_hits(
 
 impl Game<'_> {
     /// An entity tracked by the remote client but absent from local entity lists.
-    fn native_client_tracked(&self, entity: EntityRef) -> Option<(&str, [f64; 3])> {
+    pub(super) fn native_client_tracked(&self, entity: EntityRef) -> Option<(&str, [f64; 3])> {
         let remote = self.remote.as_ref()?;
         if !remote.logged_in || self.native_lifecycle.epoch() != Some(entity.epoch()) {
             return None;
@@ -187,7 +187,7 @@ impl Game<'_> {
     /// the level it shows, whatever the server calls it, or one the server opened
     /// for viewing (`client_level_key`). None with no world open, or for a
     /// dimension the server hasn't loaded. API 373.
-    pub(super) fn level(&self, dimension: &str) -> Option<LevelRef> {
+    pub(in crate::game) fn level(&self, dimension: &str) -> Option<LevelRef> {
         let epoch = self.native_lifecycle.epoch()?;
         if !self.is_logical_server() {
             return Some(LevelRef::new(epoch, self.client_level_key(dimension)?));
@@ -199,7 +199,7 @@ impl Game<'_> {
     }
     /// The client level in place as a handle: the level this window shows and
     /// ticks. None before login, while reconfiguring, or with no world open.
-    pub(super) fn native_client_level(&self) -> Option<LevelRef> {
+    pub(in crate::game) fn native_client_level(&self) -> Option<LevelRef> {
         let epoch = self.native_lifecycle.epoch()?;
         let remote = self.remote.as_ref().filter(|r| r.has_level())?;
         Some(LevelRef::new(epoch, remote.level_key))
@@ -1398,6 +1398,7 @@ pub(super) mod tests {
         game.save = std::sync::Arc::new(sunrise_client::save::SaveDir::new(
             saves.path().to_path_buf(),
             sunrise_client::save::LevelShape::OVERWORLD,
+            Some(Default::default()),
         ));
         test(&mut game);
     }
@@ -2880,7 +2881,7 @@ pub(super) mod tests {
                     g.game_mode = 1;
                     g.abilities.update_for_mode(1);
                     assert!(g.abilities.may_fly && g.abilities.instabuild);
-                    sunrise_client::lan::playerdata::save(g, &root);
+                    sunrise_client::lan::playerdata::save(g, &root, &Default::default());
                 })
                 .unwrap();
             let joined = |game: &mut super::super::Game<'_>, force| {
@@ -3006,6 +3007,7 @@ pub(super) mod tests {
                 &sunrise_protocol::registry::Builtin::default(),
                 &[],
                 &[],
+                Default::default(),
             );
             let config = HubConfig {
                 default_game_mode: 0,

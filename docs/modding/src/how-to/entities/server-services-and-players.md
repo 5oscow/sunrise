@@ -188,9 +188,10 @@ For mods that copy or edit a player whole (a player-data sync, `/invsee`, `/ende
 
 | Method | Behavior |
 |---|---|
-| `inventory_slots(host)` | The non-empty slots by `Inventory`'s numbers, lowest first: 0 to 35 the main inventory (0 to 8 the hotbar), 36 feet, 37 legs, 38 chest, 39 head, 40 off hand, 41 body, 42 saddle. `None` when no online player is behind the handle. |
+| `inventory_slots(host)` | The non-empty slots by `Inventory`'s numbers, lowest first: 0 to 35 the main inventory (0 to 8 the hotbar), 36 feet, 37 legs, 38 chest, 39 head, 40 off hand, 41 body, 42 saddle. `None` when no online player is behind the handle. On a client, reads only the local player's inventory menu (server slot packets plus local edits), not authoritative server state. |
 | `set_inventory_slot(host, slot, stack)` | `Inventory.setItem`: `None` empties the slot; there is no item check, so a worn slot takes any item. The client is sent the slot with the tick's inventory sync, and an open inventory menu shows the written stack. Returns `Result<(), PlayerDataRefusal>`; each refusal writes nothing: `Stale` (no online player), `Client`, `Dead`, `SlotOutOfRange { slot, last: 42 }` (never a panic) and `Stack(StackWriteError)` (a count or damage the item does not allow, an item the world lacks). |
 | `ender_chest(host)` / `set_ender_chest_slot(host, slot, stack)` | The same pair for the 27 ender chest slots, 0 to 26, with `SlotOutOfRange { last: 26 }`; an open ender chest menu shows the written stack. |
+| `open_ender_chest(host, title)` | Opens the player's own ender chest with no block, as a satchel or a command would: `ChestMenu.threeRows` over `PlayerEnderChestContainer` with no active chest, titled `title`, so it stays valid wherever the player goes. The game moves the stacks for every click, shift-click, drag and the close, exactly as for an ender chest block's menu. It replaces the menu they had open, and `container_opened` may cancel it (`player_container_open` is the notice after it opened and cannot). Called inside a hook of the player's own action (`use_item`, `right_click_item`, `right_click_block`, their command), it opens when that action ends, as a block's menu does. `Ok(true)` inside an action means queued, and still subject to cancellation when the queue runs; outside one, it opened. `Ok(false)` is an immediate cancellation by a mod, `Err(PlayerUnavailable)` for a stale, dead or fake player or on a client, `Err(Title)` for a title that could not cross. |
 | `give_stack(host, stack)` | Gives one stack as `/give` does: matching stacks, then empty slots, and what does not fit is thrown from the player's eyes for that player alone, with no pickup delay. Refuses with `Stale`, `Client`, `Dead` or `Stack`, giving nothing. |
 | `persistent_data(host)` / `set_persistent_data(host, data)` | The compound mods keep on a player (NeoForge's `getPersistentData`), saved with the player under `NeoForgeData`; an empty compound removes it. It is never sent to a client and a change raises no notification. On a death respawn and on the first exit from the End only its `PlayerPersisted` sub-compound is carried over, whatever its type, and every other key is lost; dimension changes, later End exits and teleports keep all of it. Refuses with `Stale`, `Client`, `Dead` and `TooDeep` (data 512 levels deep or more in the player's file). For ports; new mods use attachments. |
 | `host.item_from_snbt(snbt)` | The stack an SNBT item compound stands for, read as a saved item is: `{id:"minecraft:stone",count:3,components:{...}}` (`count` 1 when missing). Returns `None` for text that is not one compound (anything but whitespace after it included), a `count` outside 1 to 99 (refused, not clamped), air and an item the world lacks. It also refuses text over 2 MiB or nested past 512 levels: that is this API's own safety bound, the one place it differs from vanilla, whose SNBT parser has no size or depth limit (deep text overflows its stack); the figures are binary NBT's limits, taken so mod-supplied text cannot overflow the parser. |
@@ -204,3 +205,23 @@ The inventory menu has no slot for body or saddle. All four player data writes
 (`set_inventory_slot`, `set_ender_chest_slot`, `give_stack`, `set_persistent_data`)
 are undone by an open transaction abort; equipment effects and overflow drops
 wait for the outermost commit.
+
+## Local player reads on a client
+
+These entity reads also accept a client host. They return `None` for a stale handle or
+an entity whose body the client doesn't keep; another player the client tracks is such a
+kept body:
+
+| Read | Client value |
+| --- | --- |
+| `air_supply` | Last server-synced air; the client never predicts air loss or refill. |
+| `max_air_supply` | Maximum for the kept entity's kind (300 for the local player). |
+| `on_ground` | The local player's own predicted flag; for another kept entity, its client copy's flag. |
+| `is_in_water` | The local player's own fluid state, or a kept entity's last client update. |
+| `is_swimming` | The local player's swimming flag, not the pose (crawling can share that pose). `None` for other players and other entity kinds. |
+
+Client reads are views, not server authority. Inventory access here is read-only;
+inventory and movement writes still require a server host.
+
+The local player's `abilities` read takes `flying` from current client prediction;
+the other flags and speeds stay as supplied by the last abilities packet.

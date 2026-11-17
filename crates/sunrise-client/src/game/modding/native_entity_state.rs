@@ -153,10 +153,17 @@ impl Game<'_> {
     /// Whether the entity touched water at its last fluid update
     /// (`Entity.isInWater`): players and mobs.
     pub(super) fn entity_is_in_water(&self, entity: EntityRef) -> Option<bool> {
-        match self.native_entity_body(entity)? {
+        match self.native_target_body(self.native_entity_read_target(entity)?)? {
             Body::Player(p) => Some(p.fluids.was_touching_water),
             Body::Mob(m) => Some(m.fluids.in_water),
             Body::Other(_) => None,
+        }
+    }
+    /// The player's swimming flag, distinct from its pose (which also covers crawling).
+    pub(super) fn entity_is_swimming(&self, entity: EntityRef) -> Option<bool> {
+        match self.native_target_body(self.native_entity_read_target(entity)?)? {
+            Body::Player(p) => Some(p.swimming),
+            _ => None,
         }
     }
     /// Whether the entity is in lava (`Entity.isInLava`): players and mobs.
@@ -366,7 +373,7 @@ impl Game<'_> {
     }
     /// The entity's air (`Entity.getAirSupply`): players and mobs.
     pub(super) fn entity_air_supply(&self, entity: EntityRef) -> Option<i32> {
-        match self.native_entity_body(entity)? {
+        match self.native_target_body(self.native_entity_read_target(entity)?)? {
             Body::Player(p) => Some(p.air),
             Body::Mob(m) => Some(m.air),
             Body::Other(_) => None,
@@ -407,7 +414,7 @@ impl Game<'_> {
     /// The most air the entity holds (`Entity.getMaxAirSupply`): 300, a
     /// dolphin's 4800, an axolotl's 6000.
     pub(super) fn entity_max_air_supply(&self, entity: EntityRef) -> Option<i32> {
-        match self.native_entity_body(entity)? {
+        match self.native_target_body(self.native_entity_read_target(entity)?)? {
             Body::Mob(m) => Some(max_air(Some(m.species()))),
             _ => Some(max_air(None)),
         }

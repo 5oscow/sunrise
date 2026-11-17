@@ -239,10 +239,11 @@ pub trait EntitiesBackend {
     /// sent it (`Entity.lerpMotion`). API 379.
     #[access(WorldOnly)]
     fn entity_velocity(&self, entity: EntityRef) -> Option<[f64; 3]>;
-    /// Side: server.
-    /// Whether the entity stands on a block (`Entity.onGround`).
-    /// Whether the entity stands on a block (`Entity.onGround`). API
-    /// 379.
+    /// Side: both.
+    /// Whether the entity stands on a block (`Entity.onGround`). API 379.
+    /// On a client, the local player's own predicted flag (the one it sends); for another
+    /// kept entity, including a tracked player, its client copy's flag. Neither is server
+    /// authority. None for a stale handle or an entity whose body the client doesn't keep.
     #[access(WorldOnly)]
     fn entity_on_ground(&self, entity: EntityRef) -> Option<bool>;
     /// Side: both.
@@ -430,6 +431,11 @@ pub trait EntitiesBackend {
     /// every other entity.
     #[access(WorldOnly)]
     fn entity_spectator(&self, entity: EntityRef) -> Option<bool>;
+    /// Side: server.
+    /// The collider the entity carries (`set_collider`), or None for none, a stale handle, or a
+    /// client.
+    #[access(WorldOnly)]
+    fn entity_collider(&self, entity: EntityRef) -> Option<Collider>;
     /// Side: both.
     /// `isSecondaryUseActive`: the local client's live semantic sneak state (not the
     /// physical key binding or last tick's crouching pose); the server's shift-key flag.
@@ -464,11 +470,21 @@ pub trait EntitiesBackend {
     /// client, reads its own copy as `entity_fluid_heights` does.
     #[access(WorldOnly)]
     fn entity_eye_fluid(&self, entity: EntityRef) -> Option<Option<String>>;
-    /// Side: server.
+    /// Side: both.
     /// Whether the entity touched water at its last fluid update
     /// (`Entity.isInWater`): players and mobs.
+    /// On a client, the local player's own fluid state, or a kept entity's (a tracked player
+    /// or mob) last client update. None for a stale handle or an entity whose body the client
+    /// doesn't keep.
     #[access(WorldOnly)]
     fn entity_is_in_water(&self, entity: EntityRef) -> Option<bool>;
+    /// Side: both.
+    /// The player's swimming flag (`Entity.isSwimming`), not the swimming pose
+    /// (which also covers crawling). On a client, the local player's own state,
+    /// not an authoritative server answer. None for other players (a client keeps them as
+    /// tracked bodies without the flag), other kinds and stale handles.
+    #[access(WorldOnly)]
+    fn entity_is_swimming(&self, entity: EntityRef) -> Option<bool>;
     /// Side: server.
     /// Whether the entity is in lava (`Entity.isInLava`): players and mobs.
     #[access(WorldOnly)]
@@ -489,13 +505,17 @@ pub trait EntitiesBackend {
     /// kinds its portal walk carries (zero when it keeps no state for one).
     #[access(WorldOnly)]
     fn entity_portal_cooldown(&self, entity: EntityRef) -> Option<i32>;
-    /// Side: server.
+    /// Side: both.
     /// The entity's air (`Entity.getAirSupply`): players and mobs.
+    /// On a client this is the last server-synced air, never predicted. None for a stale
+    /// handle or an entity whose body the client doesn't keep.
     #[access(WorldOnly)]
     fn entity_air_supply(&self, entity: EntityRef) -> Option<i32>;
-    /// Side: server.
+    /// Side: both.
     /// The most air the entity holds (`Entity.getMaxAirSupply`): 300, a
     /// dolphin's 4800, an axolotl's 6000.
+    /// On a client this is the maximum for its kept copy's kind, not a new server query.
+    /// None for a stale handle or an entity whose body the client doesn't keep.
     #[access(WorldOnly)]
     fn entity_max_air_supply(&self, entity: EntityRef) -> Option<i32>;
     /// Side: server.
@@ -996,6 +1016,37 @@ pub trait EntitiesBackendMut {
     /// Sets the mob's no-gravity flag (`Entity.setNoGravity`). Returns false for players and guests.
     #[access(WorldOnly)]
     fn entity_set_no_gravity(&mut self, entity: EntityRef, no_gravity: bool) -> bool;
+    /// Side: server.
+    /// Gives the entity boxes that every other entity collides with, or removes them with None.
+    /// The boxes are in the entity's frame (its position is the origin), turned by the
+    /// collider's rotation; see [`Collider`] for what collides, who is exempt, the limits and
+    /// that a vanilla client does not see them. Contact effects (step sounds, sprint particles,
+    /// friction, bounce) are not applied yet: a box is solid ground and walls only
+    /// (sunrise-org/sunrise#1909). The collider is saved with the entity, sent to
+    /// the Sunrise clients that track it when they start to (and then only what changed), and
+    /// dropped with the entity. Replacing a collider sends the boxes that were added or removed
+    /// by index. An entity the new boxes overlap is treated as vanilla treats a block that
+    /// appears inside it, with no push-out. Refused by name, with the old collider kept, when
+    /// the handle is stale, a value is not finite, the rotation is not a unit quaternion,
+    /// there are too many boxes, or a box lies too far from the entity (see
+    /// [`ColliderError`]).
+    #[access(WorldOnly)]
+    fn entity_set_collider(
+        &mut self,
+        entity: EntityRef,
+        collider: Option<Collider>,
+    ) -> Result<(), ColliderError>;
+    /// Side: server.
+    /// Turns the entity's collider (a unit quaternion `[x, y, z, w]`) without sending its boxes
+    /// again: only the rotation reaches the clients that track it. Refused by name for a stale
+    /// handle, a rotation that is not finite or not a unit quaternion, or an entity with no
+    /// collider.
+    #[access(WorldOnly)]
+    fn entity_set_collider_transform(
+        &mut self,
+        entity: EntityRef,
+        rotation: [f32; 4],
+    ) -> Result<(), ColliderError>;
     /// Side: server.
     /// Sets the entity's no-physics flag (`Entity.noPhysics`), the value
     /// `entity_no_physics` reads: its moves pass through blocks. Refused, and

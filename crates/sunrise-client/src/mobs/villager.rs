@@ -998,7 +998,7 @@ pub fn eat_and_digest_in(m: &mut Mob, w: &MobWorld) {
 
 /// The saved fields (`FoodLevel`, `Gossips`, `LastGossipDecay`, `Inventory`,
 /// `LivingEntity`'s `sleeping_pos` and the sleep and golem memories).
-pub fn write_nbt(m: &Mob, map: &mut sunrise_core::nbt::Compound) {
+pub fn write_nbt(m: &Mob, map: &mut sunrise_core::nbt::Compound, items: &crate::items::Items) {
     use sunrise_core::nbt::Tag;
     if let Some(p) = sleeping_pos(m) {
         map.insert("sleeping_pos".into(), Tag::IntArray(p.to_vec()));
@@ -1015,7 +1015,12 @@ pub fn write_nbt(m: &Mob, map: &mut sunrise_core::nbt::Compound) {
     map.insert("LastGossipDecay".into(), Tag::Long(e.last_gossip_decay));
     map.insert(
         "Inventory".into(),
-        Tag::List(e.inventory.iter().map(crate::save::item_to_nbt).collect()),
+        Tag::List(
+            e.inventory
+                .iter()
+                .map(|stack| crate::save::item_to_nbt(stack, items))
+                .collect(),
+        ),
     );
 }
 /// The memories of `Brain.memories` the villager keeps besides positions.
@@ -1595,14 +1600,14 @@ mod tests {
         m.extra.ints[1] = bed_facing_code(Some("north"));
         ext_mut(&mut m).sleeping_pos = Some([3, 64, -7]);
         let mut map = sunrise_core::nbt::Compound::new();
-        write_nbt(&m, &mut map);
+        write_nbt(&m, &mut map, &Default::default());
         let mut loaded = villager();
         read_nbt(&mut loaded, &sunrise_core::nbt::Tag::Compound(map));
         assert!(sleeping(&loaded));
         assert_eq!(sleeping_pos(&loaded), Some([3, 64, -7]));
         let mut awake = villager();
         let mut map = sunrise_core::nbt::Compound::new();
-        write_nbt(&awake, &mut map);
+        write_nbt(&awake, &mut map, &Default::default());
         assert!(!map.contains_key(&"sleeping_pos".into()));
         read_nbt(&mut awake, &sunrise_core::nbt::Tag::Compound(map));
         assert!(!sleeping(&awake));
@@ -1623,11 +1628,18 @@ mod tests {
                 if stale {
                     map.insert("sleeping_pos".into(), Tag::IntArray(vec![9, 90, 9]));
                 }
-                write_nbt(&m, &mut map);
+                write_nbt(&m, &mut map, &Default::default());
                 assert_eq!(map.get(&"sleeping_pos".into()), expected.as_ref());
                 assert_eq!(map.get(&"h232_control".into()), Some(&Tag::Int(42)));
             }
-            let saved = crate::entity_nbt::mob_to_nbt(&m, [0; 4], None, None, |_| None);
+            let saved = crate::entity_nbt::mob_to_nbt(
+                &m,
+                [0; 4],
+                None,
+                None,
+                |_| None,
+                &Default::default(),
+            );
             assert_eq!(saved.get("sleeping_pos"), expected.as_ref());
         }
     }

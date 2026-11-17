@@ -522,6 +522,7 @@ dependencies = [
  "sunrise-mod-source",
  "sunrise-mod-surface",
  "sunrise-mod-wasm",
+ "sunrise-native-build",
  "sunrise-port-pack",
  "sunrise-release-sign",
  "tempfile",
@@ -5158,6 +5159,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "sunrise-native-build"
+version = "0.1.0"
+dependencies = [
+ "flate2",
+ "libc",
+ "object 0.39.1",
+ "proc-macro2",
+ "quote",
+ "semver",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sunrise-addresses",
+ "sunrise-mod-package",
+ "sunrise-mod-point-emit",
+ "sunrise-mod-vocab",
+ "sunrise-platform",
+ "syn 2.0.119",
+ "tar",
+ "tempfile",
+ "toml",
+]
+
+[[package]]
 name = "sunrise-official"
 version = "0.1.0"
 dependencies = [
@@ -5278,6 +5303,7 @@ dependencies = [
  "regex",
  "sha1",
  "sha2",
+ "sunrise-core",
  "zip",
 ]
 
@@ -5324,6 +5350,7 @@ dependencies = [
  "ab_glyph",
  "base64 0.22.1",
  "chrono",
+ "dunce",
  "getrandom 0.3.4",
  "libc",
  "p12-keystore",

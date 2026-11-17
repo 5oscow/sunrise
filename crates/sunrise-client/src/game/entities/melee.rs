@@ -27,6 +27,14 @@ impl Game<'_> {
         Some(((self.attack_ticks as f32 + partial) / delay).clamp(0.0, 1.0))
     }
 
+    /// Sets the player in place's `attackStrengthTicker` to the fewest ticks for which
+    /// `getAttackStrengthScale(0.5)` is 1.0 with the main hand's attack speed.
+    pub(super) fn charge_attack_fully(&mut self) {
+        let delay = sunrise_client::attack_strength::delay(self.main_hand_attack_speed());
+        // The cast saturates: with no attack speed the delay is infinite and no ticker reaches it.
+        self.attack_ticks = (delay - 0.5).ceil() as u32;
+    }
+
     /// `Player.isSweepAttack`: a charged, grounded sword hit below the movement
     /// limit, which `native_sweep_attack` may force or stop for the hit on `target`.
     pub(super) fn sweep_attack_position(

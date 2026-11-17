@@ -358,7 +358,7 @@ the notes.
 | `sunrise-macos-arm64.zip` | The Mac mini's runner (`vars.MAC_RUNNER=macos-latest` sends it to GitHub) | system libraries only (`otool -L`); a 1500-frame offscreen run of a new world (about 12 s; 300 frames end before the world has loaded) with resources prepared from the runner's own Minecraft (`--offscreen --world smoke --frames 1500 --smoke-report`: frames drawn, chunks generated and meshed, a player, no error) |
 | `sunrise-macos-x64.zip` | The same runner, cross-built for `x86_64-apple-darwin` and signed there (#1161) | system libraries only (`otool -L`); startup checks of every program from the packaged archive on native Intel (`macos-15-intel`, #1602), which the archive must pass to ship; no Intel world smoke, so only the arm64 build's `smoke-test.json` is published |
 
-Each builds `sunrise-client`, `sunrise-ctl`, `sunrise-prepare` and `sunrise-server` in release mode, checks they
+Each builds `sunrise-client`, `sunrise-ctl`, `sunrise-prepare`, `sunrise-server` and `sunrise-port-pack` in release mode, checks they
 exist, verifies Windows PE architectures, checks the `--help` and `--version` entry points, packages the folder with
 `cargo run -p xtask -- package` and archives it. The
 GitHub jobs keep their Cargo caches (`Swatinem/rust-cache`); the Mac mini keeps its `target/`. Only the Mac
@@ -483,7 +483,9 @@ known issue: native mods cannot be built for this build. A complete SDK means a 
 `nightly.py sdk-assets` names: `sdk.json`, `SHA256SUMS` signed for `sdk-<sha>` (`SHA256SUMS.sig`), `surface.json`,
 `build-data.tar.xz` and the `runtime`, `api` and `engine` slices of the four packages (Linux client, Linux server,
 Windows GNU and macOS ARM64); its `sdk.json` must match those sums and name that build and this package format. The
-Nightly carries that `sdk.json` in its own signed sums. The SDK signature's message names `sdk-<sha>`, so it never
+Nightly carries that `sdk.json` in its own signed sums. Every Nightly and snapshot also carries
+`sunrise-release.json` in them, the facts a launcher reads before it runs anything in the build
+([api/release-file.md](api/release-file.md)). The SDK signature's message names `sdk-<sha>`, so it never
 passes for a game release, nor a game release's for an SDK (`sunrise-release-sign`: `signed_digest`, `sdk_digest`).
 One publish step ([sdk-publish.yml](../.github/workflows/sdk-publish.yml)), called by the daily run (`sdk-publish`
 in [daily.yml](../.github/workflows/daily.yml)), by a [snapshot](#snapshot) and by the [SDK workflow](../.github/workflows/prebuilt-game.yml)'s

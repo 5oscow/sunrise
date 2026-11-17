@@ -15,6 +15,7 @@ use sunrise_client::{
     world::World,
 };
 use sunrise_core::nbt::{Compound, Tag};
+use sunrise_core::position::BlockPos;
 use sunrise_items::items::ItemStack;
 use sunrise_world::registry::BlockStateId;
 
@@ -75,7 +76,13 @@ impl Game<'_> {
         }
         let entity = loaded_block_entity(&self.world, pos)?;
         let block = &self.pack.assets.registry.state(state)?.name;
-        save_without_metadata(&self.world, (pos[0], pos[1], pos[2]), entity, block)
+        save_without_metadata(
+            &self.world,
+            (pos[0], pos[1], pos[2]),
+            entity,
+            block,
+            self.res.items(),
+        )
     }
 
     /// The saved data of `entity` at `key` without identity or position metadata, with its
@@ -86,7 +93,7 @@ impl Game<'_> {
         entity: &BlockEntity,
         block: &str,
     ) -> Option<Compound> {
-        save_without_metadata(&self.world, key, entity, block)
+        save_without_metadata(&self.world, key, entity, block, self.res.items())
     }
 
     /// Opens a block entity's menu for a connected player (`ServerPlayer.openMenu`).
@@ -149,7 +156,7 @@ impl Game<'_> {
         let (world, block_entity) = self.native_block_entity_target(entity)?;
         let [x, y, z] = entity.fields().position;
         let block = &self.pack.assets.registry.state(world.block(x, y, z))?.name;
-        save_without_metadata(world, (x, y, z), block_entity, block)
+        save_without_metadata(world, (x, y, z), block_entity, block, self.res.items())
     }
 
     /// The vanilla lock's item predicate, if present on a loaded block entity.
@@ -176,12 +183,9 @@ impl Game<'_> {
         {
             return Ok(false);
         }
-        let Some(mut tag) = self
-            .world
-            .block_entities
-            .get(&key)
-            .and_then(|current| save_with_metadata(&self.world, key, current, &block))
-        else {
+        let Some(mut tag) = self.world.block_entities.get(&key).and_then(|current| {
+            save_with_metadata(&self.world, key, current, &block, self.res.items())
+        }) else {
             return Ok(false);
         };
         match lock {
@@ -433,7 +437,9 @@ impl Game<'_> {
             .world
             .block_entities
             .get(&key)
-            .and_then(|current| save_with_metadata(&self.world, key, current, &block))
+            .and_then(|current| {
+                save_with_metadata(&self.world, key, current, &block, self.res.items())
+            })
             .map(Tag::Compound)
         else {
             return Ok(false);
@@ -502,8 +508,9 @@ impl Game<'_> {
     }
 
     /// Publishes the shapes the block entity's block has in place of its declared ones, or
-    /// clears them with None. Applied at once, to the queries that follow; clients get them
-    /// with the block entity update. Inside a transaction an abort puts the old ones back.
+    /// clears them with None. Applied at once, to the queries that follow, and the block's
+    /// neighbours are notified; clients get them with the block entity update. Inside a
+    /// transaction an abort puts the old ones back.
     pub(super) fn block_entity_set_shapes(
         &mut self,
         entity: BlockEntityRef,
@@ -551,6 +558,13 @@ impl Game<'_> {
             block_entity.set_shapes(shapes);
         });
         self.block_entity_updated(key);
+        // Fluids and other neighbours read the shape: tell them it changed (the shulker lid's
+        // `doNeighborUpdates`, without its shape updates).
+        let at = BlockPos::new(key.0, key.1, key.2);
+        self.with_level(|b, level, ticks| {
+            let block = b.block(state);
+            b.update_neighbors_at(level, ticks, at, block);
+        });
         Ok(true)
     }
 
@@ -638,7 +652,7 @@ impl Game<'_> {
             .world
             .block_entities
             .get(&key)
-            .is_some_and(|current| nameable(key, current, &block));
+            .is_some_and(|current| nameable(key, current, &block, self.res.items()));
         if !nameable {
             return Ok(false);
         }
@@ -731,8 +745,9 @@ fn save_with_metadata(
     pos: (i32, i32, i32),
     entity: &BlockEntity,
     block: &str,
+    items: &crate::items::Items,
 ) -> Option<Compound> {
-    let mut tag = save::block_entity_data(pos, entity, block, world.block_lock(pos));
+    let mut tag = save::block_entity_data(pos, entity, block, world.block_lock(pos), items);
     Game::write_pending_loot(world, pos, &mut tag);
     let Tag::Compound(mut data) = tag else {
         return None;
@@ -748,8 +763,9 @@ pub(super) fn save_without_metadata(
     pos: (i32, i32, i32),
     entity: &BlockEntity,
     block: &str,
+    items: &crate::items::Items,
 ) -> Option<Compound> {
-    let mut data = save_with_metadata(world, pos, entity, block)?;
+    let mut data = save_with_metadata(world, pos, entity, block, items)?;
     for key in ["id", "x", "y", "z"] {
         data.remove(&key.into());
     }
@@ -757,8 +773,13 @@ pub(super) fn save_without_metadata(
 }
 
 /// Whether the block entity keeps a `CustomName` (`Nameable`): its saved form does.
-fn nameable(pos: (i32, i32, i32), entity: &BlockEntity, block: &str) -> bool {
-    let mut tag = save::block_entity_encode::encode(pos, entity, block);
+fn nameable(
+    pos: (i32, i32, i32),
+    entity: &BlockEntity,
+    block: &str,
+    items: &crate::items::Items,
+) -> bool {
+    let mut tag = save::block_entity_encode::encode(pos, entity, block, items);
     if let Tag::Compound(map) = &mut tag {
         map.insert("CustomName".into(), Tag::String("x".into()));
     }
@@ -818,7 +839,14 @@ mod tests {
     fn saved_data_omits_metadata_but_keeps_contents() {
         let world = World::new(BlockStateId(0), 0);
         let entity = BlockEntity::Chest(vec![None; 27]);
-        let data = save_without_metadata(&world, (1, 64, 2), &entity, "minecraft:chest").unwrap();
+        let data = save_without_metadata(
+            &world,
+            (1, 64, 2),
+            &entity,
+            "minecraft:chest",
+            &Default::default(),
+        )
+        .unwrap();
         for key in ["id", "x", "y", "z"] {
             assert!(!data.contains_key(&key.into()));
         }

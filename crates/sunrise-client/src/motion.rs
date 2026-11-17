@@ -468,6 +468,8 @@ pub struct PlayerMotion {
     /// What `entity_size` answered for this body's pose and vanilla size (see
     /// `game/modding/entity_sizes.rs`); `refresh_dimensions` keeps it while it holds.
     pub size_answer: Option<crate::pose::SizeAnswer>,
+    /// Standing, crouching and swimming answers resolved before motion; cloned with replay state.
+    pub pose_fit_sizes: [Option<crate::pose::SizeAnswer>; 3],
     /// The `minecraft:scale` the dimensions were last built with
     /// (`Entity.refreshDimensions`), for the poses the body takes before it
     /// next refreshes.
@@ -3301,7 +3303,7 @@ mod tests {
             ..Default::default()
         };
         // Through the player compound as the file holds it.
-        let tag = level.player_tag();
+        let tag = level.player_tag(&Default::default());
         level = crate::save::Level::default();
         level.read_player(&tag);
         level.player_extra = Some(tag);
@@ -5653,6 +5655,49 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn client_air_stays_synced_while_server_air_drops() {
+        let Some(v) = crate::test_fixtures::vanilla() else {
+            return;
+        };
+        let (assets, render, binding, resources) = (&v.assets, &v.render, &v.collision, &v.motion);
+        let mut scene = World::test_scene(assets, render, 3).unwrap();
+        let water = assets.registry.default_state("minecraft:water").unwrap();
+        scene.set(20, 4, 20, water).unwrap();
+        scene.set(20, 5, 20, water).unwrap();
+        let mut player = PlayerMotion::new(resources, Vec3::new(20.5, 4.0, 20.5)).unwrap();
+        let mut w = MotionWorld {
+            tag_items: None,
+            block_registries: None,
+            loop_context: crate::test_resources::server_loop_context(),
+            damage_hooks: &crate::health::DamageHooks::NONE,
+            entities: &[],
+            player: &mut player,
+            scene: &mut scene,
+            assets,
+            collision_binding: binding,
+            resources,
+            health: &resources.health,
+        };
+        w.player.air = 123;
+        w.player.client_side = true;
+        w.player.respiration = 3;
+        let mut untouched_random = w.scene.random.clone();
+        for _ in 0..10 {
+            w.fluid_base_tick().unwrap();
+            w.tick_environment_damage().unwrap();
+        }
+        assert_eq!(w.player.air, 123);
+        assert_eq!(w.scene.random.next_double(), untouched_random.next_double());
+        w.player.client_side = false;
+        w.player.respiration = 0;
+        for _ in 0..10 {
+            w.tick_environment_damage().unwrap();
+        }
+        assert_eq!(w.player.air, 113);
     }
 
     #[test]

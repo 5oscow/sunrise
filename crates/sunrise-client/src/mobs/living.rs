@@ -708,29 +708,34 @@ impl Mob {
             return Vec::new();
         }
         let area = area.inflate(Vec3::new(1.0e-7, 1.0e-7, 1.0e-7));
-        let mover = self.species();
-        let blocks = |s: &&super::Seen| {
-            s.id != self.id
-                && s.blocks_mob(mover)
-                && s.bounds.intersects(area)
-                && !self.passenger_of_same_vehicle(s.id, s.vehicle)
-        };
+        let mut boxes = Vec::new();
+        let solids = crate::entity_solids::Solids::new(
+            crate::entity_solids::Mover::Mob {
+                id: self.id,
+                happy_ghast: self.species() == super::Species::HappyGhast,
+                mount: self.extra.mount,
+            },
+            Some(area),
+        );
         match w.others_solid {
-            Some(slots) => slots
-                .iter()
-                .map(|&i| &w.others[i as usize])
-                .filter(blocks)
-                .map(|s| s.bounds)
-                .collect(),
-            None => w.others.iter().filter(blocks).map(|s| s.bounds).collect(),
+            Some(slots) => {
+                for &i in slots {
+                    let c = w.others[i as usize].solid_candidate();
+                    if solids.accepts(&c, || None) {
+                        boxes.push(c.bounds);
+                    }
+                }
+            }
+            None => {
+                for s in w.others.iter().filter(|s| s.may_block_mobs()) {
+                    let c = s.solid_candidate();
+                    if solids.accepts(&c, || None) {
+                        boxes.push(c.bounds);
+                    }
+                }
+            }
         }
-    }
-    /// `Entity.isPassengerOfSameVehicle` toward the entity `id` riding
-    /// `vehicle`: one rides the other, or both ride the same one.
-    fn passenger_of_same_vehicle(&self, id: u32, vehicle: Option<u32>) -> bool {
-        self.extra.mount == Some(id)
-            || vehicle == Some(self.id)
-            || (self.extra.mount.is_some() && vehicle == self.extra.mount)
+        boxes
     }
     pub fn do_move(
         &mut self,
@@ -1299,9 +1304,9 @@ impl Mob {
         level: &mut DamageLevel<'_>,
         contact: Option<(&MobWorld, [i32; 3])>,
         distance: f64,
-        damage: f32,
-    ) -> f32 {
-        contact.map_or(damage, |(w, p)| {
+        multiplier: f32,
+    ) -> (f64, f32) {
+        contact.map_or((distance, multiplier), |(w, p)| {
             crate::block_contact::fall(
                 level,
                 crate::block_contact::Contact {
@@ -1311,7 +1316,7 @@ impl Mob {
                     position: sunrise_core::position::BlockPos::new(p[0], p[1], p[2]),
                 },
                 distance,
-                damage,
+                multiplier,
             )
         })
     }
@@ -1400,6 +1405,7 @@ impl Mob {
             self.mod_block_fall(level, contact, landed, 0.0);
             return false;
         }
+        let (distance, modifier) = self.mod_block_fall(level, contact, distance, modifier);
         let power = distance + 1.0e-6 - self.kind.safe_fall_distance;
         let mut damage = (power * f64::from(modifier) * self.kind.fall_damage_multiplier).floor();
         // Frog.calculateFallDamage: five points less than the base damage;
@@ -1409,7 +1415,7 @@ impl Mob {
             super::Species::Goat => damage -= 10.0,
             _ => {}
         }
-        let damage = f64::from(self.mod_block_fall(level, contact, landed, damage as f32));
+
         // LivingEntity.causeFallDamage lets the riders fall first.
         if !horse {
             self.fall_to_passengers(distance, modifier, events);

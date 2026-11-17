@@ -202,7 +202,7 @@ sunrise-client game::client_reload::tests::only_the_first_local_client_is_the_cl
 sunrise-client game::client_reload::tests::refused_client_context_keeps_pack_and_listeners lib daily resources
 sunrise-client game::client_reload::tests::the_lifecycle_moments_fire_once_each_in_order lib daily resources
 sunrise-client game::client_reload::texture_atlases::tests::a_mod_atlas_sprite_is_stitched_into_the_gui_atlas_until_a_reload_drops_it lib daily resources
-sunrise-client game::client_targeting::tests::client_targeting_respects_range_walls_liquids_and_handle_lifetime lib daily resources
+sunrise-client game::client_attack_targets::tests::client_attack_batch_keeps_order_deduplication_and_server_constraints lib daily resources
 sunrise-client game::clipboard::tests::a_mod_reaches_the_clipboard_only_while_input_is_handled lib daily resources
 sunrise-client game::clone_block_ticks_tests::a_strict_clone_copies_the_pending_block_ticks_of_its_source lib daily resources
 sunrise-client game::clone_block_ticks_tests::copied_block_ticks_keep_order_priority_and_dedup lib daily resources
@@ -308,6 +308,7 @@ sunrise-client game::commands::teleport_level_tests::portal_arrival_effects_expl
 sunrise-client game::commands::teleport_level_tests::portal_arrival_effects_mod_items_merge_immediately lib daily resources
 sunrise-client game::commands::teleport_mob_tests::command_stops_navigation_and_dismounts lib daily resources
 sunrise-client game::commands::teleport_pitch_tests::teleport_and_rotate_resolve_pitch_at_their_own_boundary lib daily resources
+sunrise-client game::commands::teleport_pitch_tests::teleport_to_the_current_position_marks_the_player_for_sync lib daily resources
 sunrise-client game::commands::teleport_player_tests::command_moves_velocity_per_axis_and_keeps_fall_distance lib daily resources
 sunrise-client game::commands::teleport_rider_tests::a_vehicle_carries_its_riders_and_a_rider_leaves_its_vehicle lib daily resources
 sunrise-client game::commands::terrain_cmds::loot_kill_target_tests::loot_kill_uses_actual_sheep_state_without_killing_the_target lib daily resources
@@ -646,6 +647,10 @@ sunrise-client game::fishing::fishing_catch_tests::fishing_catch_empty_keeps_dam
 sunrise-client game::fishing::fishing_catch_tests::fishing_catch_invalid_drops_keep_the_earlier_listeners_outputs lib daily child-process
 sunrise-client game::fishing::fishing_catch_tests::fishing_catch_noop_listener_preserves_randomness lib daily resources
 sunrise-client game::fishing::fishing_catch_tests::fishing_catch_replaces_rolled_stack lib daily resources
+sunrise-client game::fishing::fishing_medium_tests::a_client_keeps_only_the_surface_and_draws_the_bobber_floating lib daily resources
+sunrise-client game::fishing::fishing_medium_tests::a_mods_medium_floats_the_bobber_and_its_catch_rolls_the_checked_table lib daily resources
+sunrise-client game::fishing::fishing_medium_tests::the_first_mod_in_order_to_answer_wins lib daily resources
+sunrise-client game::fishing::fishing_medium_tests::with_no_listener_the_bobber_falls lib daily resources
 sunrise-client game::fishing::incoming_block_hit_tests::a_bobber_powers_a_target_block_and_counts_the_hit lib daily resources
 sunrise-client game::fishing::incoming_block_hit_tests::a_bobber_rings_a_floor_bell_on_its_side lib daily resources
 sunrise-client game::focused_text_field::tests::a_mod_edits_the_focused_box_before_each_character lib daily resources

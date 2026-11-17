@@ -1265,6 +1265,7 @@
   "sunrise.tempban.success": "%1$s for %2$s, until %3$s",
   "sunrise.tempban.usage": "/tempban <player> <duration> [reason]",
   "sunrise.title.not_affiliated": "Not affiliated with Mojang or Microsoft",
+  "sunrise.title.playing_offline": "Playing offline",
   "sunrise.touch.attack": "Attack",
   "sunrise.touch.chat": "Chat",
   "sunrise.touch.dismount": "Dismount",

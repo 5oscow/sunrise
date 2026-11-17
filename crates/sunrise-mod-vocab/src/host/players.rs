@@ -349,13 +349,15 @@ pub trait PlayersBackend {
     /// local player's inventory is available.
     #[access(WorldOnly)]
     fn player_inventory(&self, player: PlayerRef) -> Option<Vec<ItemStack>>;
-    /// Side: server.
+    /// Side: both.
     /// The player's non-empty inventory slots by `Inventory`'s numbers, with their
     /// components: 0 to 35 the main inventory (0 to 8 the hotbar), 36 feet, 37 legs, 38
     /// chest, 39 head, 40 the off hand, 41 body and 42 saddle
     /// (`Inventory.EQUIPMENT_SLOT_MAPPING`), lowest first. The numbers
     /// `player_set_inventory_slot` takes, and for 0 to 35 the `Slot` of a saved player's
-    /// `Inventory` list. None for a player that is not online (stale handle) and on a client.
+    /// `Inventory` list. None for a stale or unavailable player. On a client, only the local player's
+    /// inventory menu is available: server slot packets plus the client's own changes.
+    /// This read-only view is not authoritative server inventory.
     #[access(WorldOnly)]
     fn player_inventory_slots(&self, player: PlayerRef) -> Option<Vec<(u32, ItemStack)>>;
     /// Side: server.
@@ -395,6 +397,8 @@ pub trait PlayersBackend {
     fn player_food(&self, player: PlayerRef) -> Option<PlayerFood>;
     /// Side: both.
     /// `Player.getAbilities`; Paper `Player#getAllowFlight/isFlying/getFlySpeed/getWalkSpeed`.
+    /// On a client, flying is the local body's current prediction; the packet supplies
+    /// the other ability flags and speeds. None for any other player.
     #[access(WorldOnly)]
     fn player_abilities(&self, player: PlayerRef) -> Option<PlayerAbilities>;
     /// Side: both.
@@ -693,6 +697,28 @@ pub trait PlayersBackendMut {
         window: i32,
         places: Vec<MenuSlotPlace>,
     ) -> Result<(), MenuSlotBackRefusal>;
+    /// Side: server.
+    /// Opens the player's own ender chest for them with no block, titled `title`: a three-row
+    /// `ChestMenu` over their `PlayerEnderChestContainer`, as `EnderChestBlock.useWithoutItem`
+    /// opens it (`ChestMenu.threeRows`) but with no active chest, so it stays valid wherever
+    /// they go. An item's use, a command or a tick can open it. Its slots are the player's
+    /// ender chest itself: clicks, shift-clicks, drags and the close move stacks as an ender
+    /// chest block's menu does, and the game writes and saves them. The menu replaces the one
+    /// they had open, as `ServerPlayer.openMenu` does, and the mods may cancel it with
+    /// `container_opened` (`player_container_open` is the notice after it opened, and cannot
+    /// cancel). Inside a hook of the player's own action (`use_item`, `right_click_item`,
+    /// `right_click_block`, their command), the menu opens when that action ends, as a block's
+    /// menu the same action opens does. Ok(true) inside an action means queued: the menu is
+    /// still subject to cancellation when the queue runs; outside one it opened. Ok(false) is an
+    /// immediate cancellation by a mod. Errors:
+    /// `PlayerUnavailable` (stale, dead, fake, or on a client), or `Title` for a title that
+    /// could not cross; nothing opens then.
+    #[access(WorldOnly)]
+    fn player_open_ender_chest(
+        &mut self,
+        player: PlayerRef,
+        title: Text,
+    ) -> Result<bool, OpenMenuError>;
     /// Side: server.
     /// Sends the player `uuid` the whole picture of map `map_id`: 128 x 128
     /// colours (`MapColor` ids times 4 plus the shade, row by row), scale 0,

@@ -1287,7 +1287,10 @@ fn dropper_routes_saved_pot_directly_even_with_a_storage_provider() {
                     ("z", Tag::Int(8)),
                     (
                         "item",
-                        sunrise_client::save::item_to_nbt(&ItemStack::new("minecraft:stone", 63)),
+                        sunrise_client::save::item_to_nbt(
+                            &ItemStack::new("minecraft:stone", 63),
+                            &Default::default(),
+                        ),
                     ),
                 ]),
             );

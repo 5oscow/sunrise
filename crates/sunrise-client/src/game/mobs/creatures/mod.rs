@@ -1033,14 +1033,24 @@ impl Game<'_> {
     }
     /// Highest motion-blocking (no leaves) block + 1 (Heightmap MOTION_BLOCKING_NO_LEAVES).
     pub(super) fn motion_top(&self, x: i32, z: i32) -> i32 {
-        let top = if self.dim == Dim::Nether { 127 } else { 319 };
-        for y in (self.world.bottom_y()..=top).rev() {
-            let f = self.res.facts().get(self.world.block(x, y, z));
+        self.motion_top_in(&self.world, self.dim, x, z)
+    }
+    /// [`Self::motion_top`] in the loaded level `world` of `dim`.
+    pub(in crate::game) fn motion_top_in(
+        &self,
+        world: &sunrise_client::world::World,
+        dim: Dim,
+        x: i32,
+        z: i32,
+    ) -> i32 {
+        let top = if dim == Dim::Nether { 127 } else { 319 };
+        for y in (world.bottom_y()..=top).rev() {
+            let f = self.res.facts().get(world.block(x, y, z));
             if (f.full_collision || f.fluid != Fluid::None) && !f.name.ends_with("leaves") {
                 return y + 1;
             }
         }
-        self.world.bottom_y()
+        world.bottom_y()
     }
     /// What the generator finalizes this level's structure mobs with.
     pub(super) fn share_spawn_conditions(&self) {
@@ -6416,6 +6426,7 @@ impl Game<'_> {
         })?;
         // Only a client's own pick is stopped by a block: the range check passed.
         if target.is_none()
+            && !self.uses_stored_pick()
             && let Some(hit) = self.pick_unfiltered()
             && let Some(eye) = self.eye_position()
         {
@@ -12924,9 +12935,15 @@ mod loaded_mob_arrow_permission_tests {
                 assert!(!p.arrow.as_ref().unwrap().in_ground);
                 game.persist.raw.remove(&p.id);
                 for (route, raw) in [("no-raw", None), ("stale-raw", Some(&stale))] {
-                    let saved =
-                        entity_nbt::arrow_to_nbt(&p, [197, 0, n, 2], p.owner_uuid, None, raw)
-                            .unwrap();
+                    let saved = entity_nbt::arrow_to_nbt(
+                        &p,
+                        [197, 0, n, 2],
+                        p.owner_uuid,
+                        None,
+                        raw,
+                        &Default::default(),
+                    )
+                    .unwrap();
                     let want = predicate.map(|id| parse(&format!("{{blocks:\"minecraft:{id}\"}}")));
                     if saved.get("can_break") != want.as_ref() {
                         missing.push(format!(
