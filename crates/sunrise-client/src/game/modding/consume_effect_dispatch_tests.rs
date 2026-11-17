@@ -22,7 +22,7 @@ impl Hooks for First {
         assert_eq!(event.stack.count(), 1);
         assert_eq!(
             event.stack.item(),
-            host.item_key(&mod_api::Identifier::new("minecraft:pufferfish").unwrap())
+            host.item_key(&mod_api::Identifier::parse("minecraft:pufferfish").unwrap())
                 .unwrap()
         );
         let living = host.living(source).unwrap();

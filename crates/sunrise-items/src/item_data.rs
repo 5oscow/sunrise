@@ -1880,17 +1880,23 @@ pub fn command_components(text: &str) -> Result<Tag, String> {
 #[cfg(test)]
 #[test]
 fn villager_food_stack_override_and_removal() {
+    let mut info = prototype_items()
+        .get("minecraft:red_banner")
+        .unwrap()
+        .clone();
+    info.villager_food = Some(4);
+    let info = Some(&info);
     let mut stack = ItemStack::new("test:meal", 3);
-    assert_eq!(stack.villager_food(None), None);
+    assert_eq!(stack.villager_food(info), Some(4));
     stack.data_mut().set_loot_component(
         "minecraft:villager_food",
         &Some(Tag::compound([("nutrition", Tag::Int(7))])),
     );
-    assert_eq!(stack.villager_food(None), Some(7));
+    assert_eq!(stack.villager_food(info), Some(7));
     stack
         .data_mut()
         .set_loot_component("minecraft:villager_food", &None);
-    assert_eq!(stack.villager_food(None), None);
+    assert_eq!(stack.villager_food(info), None);
 }
 
 #[cfg(test)]
