@@ -62,6 +62,7 @@ pub(crate) mod posed_parts;
 pub(crate) mod recipe_page;
 pub(crate) mod render_pipeline;
 pub(crate) mod scene;
+pub(crate) mod screen_slot_refusal;
 pub(crate) mod screenshot;
 pub(crate) mod skull_models;
 pub(crate) mod special_model_renderers;

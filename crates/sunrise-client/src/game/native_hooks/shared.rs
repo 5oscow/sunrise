@@ -516,43 +516,59 @@ pub(super) struct OpenNativeScreen {
 /// take a move together from the next.
 #[derive(Default)]
 pub(super) struct SlotMoves {
-    committed: std::cell::RefCell<std::collections::HashMap<usize, [f32; 2]>>,
-    pending: std::cell::RefCell<std::collections::HashMap<usize, [f32; 2]>>,
+    /// Each moved slot's position, or None for a slot a mod hid.
+    committed: std::cell::RefCell<std::collections::HashMap<usize, Option<[f32; 2]>>>,
+    pending: std::cell::RefCell<std::collections::HashMap<usize, Option<[f32; 2]>>>,
     /// How many moves changed a position, for the layout build's cache key.
     count: std::cell::Cell<u32>,
 }
 
 impl SlotMoves {
-    /// Slot `slot`'s position this frame: where the last build committed it,
-    /// else `declared`.
-    fn position(&self, slot: usize, declared: [f32; 2]) -> [f32; 2] {
+    /// Slot `slot`'s position this frame: where the last build committed it
+    /// (None once hidden), else `declared`.
+    fn position(&self, slot: usize, declared: [f32; 2]) -> Option<[f32; 2]> {
         self.committed
             .borrow()
             .get(&slot)
             .copied()
-            .unwrap_or(declared)
+            .unwrap_or(Some(declared))
     }
-    /// Moves slot `slot` of a screen that declared `slots`, from the next
-    /// build. False, changing nothing, for a slot the screen does not show or
-    /// a position that is not finite.
-    fn set(&self, slots: &[Option<[f32; 2]>], slot: u32, x: f32, y: f32) -> bool {
-        let Some((slot, declared)) = usize::try_from(slot)
-            .ok()
-            .and_then(|i| Some((i, slots.get(i).copied().flatten()?)))
-            .filter(|_| x.is_finite() && y.is_finite())
-        else {
-            return false;
-        };
-        let mut pending = self.pending.borrow_mut();
-        let current = pending
-            .get(&slot)
-            .copied()
-            .unwrap_or_else(|| self.position(slot, declared));
-        if current != [x, y] {
-            pending.insert(slot, [x, y]);
+    /// Where slot `slot` of a screen that declared `slots` will be from the
+    /// next build: the last move, pending or committed, else its declaration.
+    fn latest(&self, slots: &[Option<[f32; 2]>], slot: usize) -> Option<[f32; 2]> {
+        let declared = slots.get(slot).copied().flatten()?;
+        let pending = self.pending.borrow().get(&slot).copied();
+        match pending {
+            Some(pending) => pending,
+            None => self.position(slot, declared),
+        }
+    }
+    /// Moves slot `slot` of a screen that declared `slots` to `pos`, or hides
+    /// it with None, from the next build. A slot the screen hid when it opened
+    /// (the server's menu has no such slot) is never shown. Each refusal
+    /// changes nothing; repeating the slot's current place changes nothing
+    /// either, not even the move count.
+    fn set(
+        &self,
+        slots: &[Option<[f32; 2]>],
+        slot: usize,
+        pos: Option<[f32; 2]>,
+    ) -> Result<(), mod_api::ScreenSlotRefusal> {
+        use mod_api::ScreenSlotRefusal;
+        match slots.get(slot) {
+            None => return Err(ScreenSlotRefusal::NoSuchSlot),
+            Some(None) if pos.is_some() => return Err(ScreenSlotRefusal::HiddenAtOpen),
+            Some(None) => return Ok(()),
+            Some(Some(_)) => {}
+        }
+        if pos.is_some_and(|[x, y]| !x.is_finite() || !y.is_finite()) {
+            return Err(ScreenSlotRefusal::BadPosition);
+        }
+        if self.latest(slots, slot) != pos {
+            self.pending.borrow_mut().insert(slot, pos);
             self.count.set(self.count.get().wrapping_add(1));
         }
-        true
+        Ok(())
     }
     /// Makes the pending moves the positions drawing and hit-testing read.
     fn commit(&self) {
@@ -3065,29 +3081,44 @@ impl Game<'_> {
             .as_mut()
             .is_some_and(|s| s.set_data(window, id, value))
     }
-    /// Where the open mod screen puts container slot `slot`: where a mod last
-    /// moved it, else where the screen declared it.
+    /// Where the open mod screen puts container slot `slot` this frame: where
+    /// a mod last moved it, else where the screen declared it; None once a mod
+    /// hid it.
     pub(super) fn native_screen_slot(&self, slot: usize) -> Option<(f32, f32)> {
         let s = self.shown_native_screen()?;
         let declared = s.screen.slots.get(slot).copied().flatten()?;
-        let [x, y] = s.slot_moves.position(slot, declared);
+        let [x, y] = s.slot_moves.position(slot, declared)?;
         Some((x, y))
     }
-    /// Moves container slot `slot` of the open mod screen to `x`, `y`
-    /// (relative to the screen's origin) from the next frame. False, changing
-    /// nothing, with no mod screen open, for a slot the screen does not show
-    /// or a position that is not finite.
-    pub(in crate::game) fn set_screen_slot_position(&self, slot: u32, x: f32, y: f32) -> bool {
-        self.shown_native_screen()
-            .is_some_and(|s| s.slot_moves.set(&s.screen.slots, slot, x, y))
+    /// Where the open mod screen of `block` puts container slot `slot` from
+    /// the next frame: the mod's last move, else the screen's declaration;
+    /// None for a hidden slot, another block's screen or none.
+    pub(in crate::game) fn screen_slot(&self, block: &str, slot: usize) -> Option<[f32; 2]> {
+        let s = self.shown_native_screen().filter(|s| s.block == block)?;
+        s.slot_moves.latest(&s.screen.slots, slot)
     }
-    /// The container slots the open mod screen shows (300.. ids).
+    /// Moves container slot `slot` of the open mod screen of `block` to `pos`
+    /// (relative to the screen's origin), or hides it with None, from the
+    /// next frame (`SlotMoves::set`).
+    pub(in crate::game) fn set_screen_slot(
+        &self,
+        block: &str,
+        slot: usize,
+        pos: Option<[f32; 2]>,
+    ) -> Result<(), mod_api::ScreenSlotRefusal> {
+        let s = self
+            .shown_native_screen()
+            .filter(|s| s.block == block)
+            .ok_or(mod_api::ScreenSlotRefusal::NoScreen)?;
+        s.slot_moves.set(&s.screen.slots, slot, pos)
+    }
+    /// The container slots the open mod screen shows this frame (300.. ids).
     pub(super) fn native_screen_slots(&self) -> Option<Vec<usize>> {
         let s = self.shown_native_screen()?;
         let shown = s.screen.slots.iter().enumerate();
         Some(
             shown
-                .filter(|(_, p)| p.is_some())
+                .filter(|&(i, p)| p.is_some_and(|p| s.slot_moves.position(i, p).is_some()))
                 .map(|(i, _)| 300 + i)
                 .collect(),
         )
@@ -3096,7 +3127,12 @@ impl Game<'_> {
     /// it (`Game::slot_count` asks every frame).
     pub(super) fn native_screen_slot_count(&self) -> Option<usize> {
         let s = self.shown_native_screen()?;
-        Some(s.screen.slots.iter().filter(|p| p.is_some()).count())
+        let shown = s.screen.slots.iter().enumerate();
+        Some(
+            shown
+                .filter(|&(i, p)| p.is_some_and(|p| s.slot_moves.position(i, p).is_some()))
+                .count(),
+        )
     }
     /// The first row of the player's inventory on the open mod screen.
     pub(super) fn native_screen_inventory_y(&self) -> Option<f32> {
@@ -4780,31 +4816,50 @@ mod tests {
     /// repeat of the effective position, declared or moved, keeps the layout).
     #[test]
     fn slot_moves_refuse_what_the_screen_does_not_show() {
+        use mod_api::ScreenSlotRefusal::*;
         let declared = [Some([8.0, 18.0]), None, Some([26.0, 18.0])];
         let moves = super::SlotMoves::default();
-        assert!(moves.set(&declared, 0, 8.0, 18.0));
+        // The current place again changes nothing, not even the count.
+        assert_eq!(moves.set(&declared, 0, Some([8.0, 18.0])), Ok(()));
         assert_eq!(moves.count.get(), 0);
-        assert!(moves.set(&declared, 2, 100.5, -4.0));
+        assert_eq!(moves.set(&declared, 2, Some([100.5, -4.0])), Ok(()));
         assert_eq!(moves.count.get(), 1);
-        // Pending until the build commits it.
-        assert_eq!(moves.position(2, [26.0, 18.0]), [26.0, 18.0]);
+        // Pending until the build commits it; the read-back sees it at once.
+        assert_eq!(moves.position(2, [26.0, 18.0]), Some([26.0, 18.0]));
+        assert_eq!(moves.latest(&declared, 2), Some([100.5, -4.0]));
         moves.commit();
-        assert_eq!(moves.position(2, [26.0, 18.0]), [100.5, -4.0]);
-        assert_eq!(moves.position(0, [8.0, 18.0]), [8.0, 18.0]);
-        for (slot, x, y) in [
-            (1, 0.0, 0.0),
-            (3, 0.0, 0.0),
-            (u32::MAX, 0.0, 0.0),
-            (0, f32::NAN, 0.0),
-            (0, 0.0, f32::INFINITY),
+        assert_eq!(moves.position(2, [26.0, 18.0]), Some([100.5, -4.0]));
+        assert_eq!(moves.position(0, [8.0, 18.0]), Some([8.0, 18.0]));
+        // Refusals change nothing.
+        for (slot, pos, refusal) in [
+            (1, Some([0.0, 0.0]), HiddenAtOpen),
+            (3, Some([0.0, 0.0]), NoSuchSlot),
+            (usize::MAX, None, NoSuchSlot),
+            (0, Some([f32::NAN, 0.0]), BadPosition),
+            (0, Some([0.0, f32::INFINITY]), BadPosition),
         ] {
-            assert!(!moves.set(&declared, slot, x, y), "{slot} {x} {y}");
+            assert_eq!(
+                moves.set(&declared, slot, pos),
+                Err(refusal),
+                "{slot} {pos:?}"
+            );
         }
-        assert_eq!(moves.position(0, [8.0, 18.0]), [8.0, 18.0]);
-        assert!(moves.set(&declared, 2, 100.5, -4.0));
         assert_eq!(moves.count.get(), 1);
-        assert!(moves.set(&declared, 2, 100.5, -3.0));
+        assert_eq!(moves.position(0, [8.0, 18.0]), Some([8.0, 18.0]));
+        // Hiding a slot hidden at open is already so.
+        assert_eq!(moves.set(&declared, 1, None), Ok(()));
+        assert_eq!(moves.count.get(), 1);
+        // Hidden, then shown again where the mod puts it.
+        assert_eq!(moves.set(&declared, 2, None), Ok(()));
         assert_eq!(moves.count.get(), 2);
+        assert_eq!(moves.set(&declared, 2, None), Ok(()));
+        assert_eq!(moves.count.get(), 2);
+        moves.commit();
+        assert_eq!(moves.position(2, [26.0, 18.0]), None);
+        assert_eq!(moves.set(&declared, 2, Some([26.0, 18.0])), Ok(()));
+        moves.commit();
+        assert_eq!(moves.position(2, [26.0, 18.0]), Some([26.0, 18.0]));
+        assert_eq!(moves.count.get(), 3);
     }
 
     #[test]
