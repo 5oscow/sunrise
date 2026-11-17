@@ -830,10 +830,27 @@ impl Game<'_> {
     }
 
     pub(super) fn settle_title_toasts(&mut self) {
-        let pending = self.title.as_mut().and_then(|title| {
-            title.poll_backup();
-            title.take_pending_toast()
-        });
+        let pending = self
+            .title
+            .as_mut()
+            .and_then(|title| {
+                title.poll_backup();
+                title.take_pending_toast()
+            })
+            .or_else(|| {
+                // The launcher's "Playing offline" can sit behind this window: say it here too.
+                let reason = self
+                    .options
+                    .offline_reason
+                    .take_if(|_| self.title.is_some())?;
+                Some(
+                    sunrise_client::toasts::SystemToast::new(
+                        sunrise_client::text::Text::tr("sunrise.title.playing_offline", &[]),
+                        Some(sunrise_client::text::Text::literal(reason)),
+                    )
+                    .with_display_time(sunrise_client::toasts::SystemToast::LONG_DISPLAY_TIME),
+                )
+            });
         if let Some(toast) = pending.and_then(|toast| self.add_system_toast(toast))
             && let Some(title) = self.title.as_mut()
         {
