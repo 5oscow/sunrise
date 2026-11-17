@@ -32,10 +32,19 @@ impl PartRegistrar {
                         })
                         .map(|dependency| dependency.kind());
                     match dependency {
-                        Some(crate::DependencyKind::Optional) if absent => log::debug!(
-                            "mod {} skipped {} on block entity type {id}: optional dependency {dependency_id} is absent",
-                            part.mod_id, part.type_name
-                        ),
+                        Some(crate::DependencyKind::Optional) if absent => {
+                            log::debug!(
+                                "mod {} skipped {} on block entity type {id}: optional dependency {dependency_id} is absent",
+                                part.mod_id,
+                                part.type_name
+                            );
+                            // Its type key asked for a type that, with the dependency absent,
+                            // nobody declares: that request is not a load error.
+                            self.registry_keys
+                                .borrow_mut()
+                                .block_entity_types
+                                .withdraw(part.mod_id, id);
+                        }
                         Some(crate::DependencyKind::Required) => self.refused.push(format!(
                             "mod {} attached {} to block entity type {id}, which its required dependency {dependency_id} does not declare",
                             part.mod_id, part.type_name
@@ -508,6 +517,56 @@ pub mod tests {
                     "mod b attached {} to undeclared native block entity type owner:press",
                     type_name::<FromB>()
                 )]
+            );
+        });
+    }
+
+    #[test]
+    pub(crate) fn an_absent_optional_dependency_loads_and_an_unknown_required_key_is_still_refused()
+    {
+        struct RequestsOnly;
+        impl Hooks for RequestsOnly {
+            fn subscribed(&self) -> &'static [Option<HookId>] {
+                &[]
+            }
+            fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
+                r.block_entity_type_key("owner:press");
+            }
+        }
+        let resolve = || {
+            let known = ["minecraft:chest"];
+            mod_vocab::__private::resolve_block_entity_types(known, |id| {
+                known.iter().position(|name| *name == id)
+            })
+        };
+        let optional = || {
+            vec![package_of(
+                "b",
+                Side::Both,
+                &["owner"],
+                DependencyKind::Optional,
+            )]
+        };
+        crate::load_state::with_test_package_inventory(optional(), || {
+            let mods = [ModEntry::new("b", Box::new(Attaches(FromB)))];
+            crate::__private::install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false)
+                .unwrap();
+            assert_eq!(resolve(), Ok(()));
+        });
+        let mut packages = optional();
+        packages.push(package("c", Side::Both, &[]));
+        crate::load_state::with_test_package_inventory(packages, || {
+            let mods = [
+                ModEntry::new("b", Box::new(Attaches(FromB))),
+                ModEntry::new("c", Box::new(RequestsOnly)),
+            ];
+            crate::__private::install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false)
+                .unwrap();
+            assert_eq!(
+                resolve(),
+                Err(vec![
+                    "mod c requested unknown block entity type owner:press".to_owned()
+                ])
             );
         });
     }
