@@ -5579,6 +5579,10 @@ impl Game<'_> {
         {
             const OFFLINE: &str = "capes/offline";
             if !self.skin_slots.contains(OFFLINE) || !self.gui.atlas.sprites.contains_key(OFFLINE) {
+                // Kept for `again`, which finds no download or disk file for this cape.
+                self.skin_downloads
+                    .borrow_mut()
+                    .remember_image(OFFLINE, rgba);
                 self.store_skin(OFFLINE.into(), rgba.to_vec());
             }
             capes.insert(local, OFFLINE.into());
@@ -5716,10 +5720,6 @@ impl Game<'_> {
     /// Puts a downloaded skin in an atlas skin slot (`SkinSlots::place`),
     /// unless every slot holds a skin drawn in the last frame.
     pub(super) fn store_skin(&mut self, location: String, rgba: Vec<u8>) {
-        // 3D skin layers reads the pixels back when it builds the slabs.
-        self.skin_downloads
-            .borrow_mut()
-            .remember_image(&location, &rgba);
         let Some((slot, evicted)) = self.skin_slots.place(location.clone()) else {
             return;
         };
