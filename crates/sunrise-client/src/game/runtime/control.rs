@@ -1465,7 +1465,6 @@ impl Game<'_> {
             Screen::DebugOptions => "debug-options",
             Screen::Mod => "mod",
             Screen::HudEditor => "hud-editor",
-            Screen::Studio => "studio",
         }
     }
 
