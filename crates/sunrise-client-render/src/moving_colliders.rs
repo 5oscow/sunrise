@@ -11,10 +11,15 @@
 //! from every collider pays one lookup however many the level holds.
 use std::{
     cell::{Cell, RefCell},
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
+    rc::Rc,
     sync::{Arc, OnceLock},
 };
-use sunrise_core::geometry::{Aabb, Axis, Vec3, oriented::OrientedCollider};
+use sunrise_core::geometry::{
+    Aabb, Axis, Vec3,
+    carried::FrameLog,
+    oriented::{ColliderBoxes, OrientedCollider},
+};
 use sunrise_world::entity_obstruction::EntityIdentity;
 
 /// Side of an index cell, in blocks.
@@ -133,6 +138,8 @@ thread_local! {
     /// The entity whose move is being resolved, for the moves that do not say who they are.
     static MOVER: Cell<u64> = const { Cell::new(0) };
     static SCRATCH: RefCell<Vec<u32>> = const { RefCell::new(Vec::new()) };
+    /// The age the level's colliders are queried at (`at_age`), None for where they stand now.
+    static AGE: Cell<Option<f64>> = const { Cell::new(None) };
 }
 
 /// The colliders placed for the level being ticked, for as long as the guard lives; the
@@ -222,32 +229,193 @@ fn mover_of(entity: EntityIdentity) -> u64 {
     }
 }
 
+/// Calls `f` with each collider of the level meeting `area` that `mover` collides with, until it
+/// answers true: where the colliders stand now, or, inside [`at_age`], where they stood.
+fn visit_scene(area: Aabb, mover: u64, mut f: impl FnMut(&OrientedCollider) -> bool) {
+    if let Some(age) = AGE.with(Cell::get)
+        && let Some(history) = HISTORY.with(|cell| cell.borrow().clone())
+    {
+        let history = history.borrow();
+        for tracked in history.tracked.values() {
+            if !tracked.swept.is_some_and(|swept| swept.intersects(area))
+                || (mover != 0 && tracked.exempt.iter().any(|id| u64::from(*id) == mover))
+            {
+                continue;
+            }
+            let Some(frame) = tracked.log.frame_at(history.now, age) else {
+                continue;
+            };
+            let collider = OrientedCollider::new(frame, tracked.boxes.clone());
+            if collider.world_bounds().is_some_and(|w| w.intersects(area)) && f(&collider) {
+                return;
+            }
+        }
+        return;
+    }
+    PLACED.with(|cell| visit(&cell.borrow(), area, mover, |p| f(&p.collider)));
+}
+
 /// Appends to `out` the colliders meeting `bounds` that `entity` collides with. An identity of
 /// 0 is the move [`as_mover`] names; with none named (a ray, a projectile's path) it is exempt
 /// from nothing and meets every collider.
 pub fn near(entity: EntityIdentity, bounds: Aabb, out: &mut Vec<OrientedCollider>) {
-    PLACED.with(|cell| {
-        // EntityGetter.getEntityCollisions expands its query by 1e-7.
-        let area = bounds.inflate(Vec3::new(1.0e-7, 1.0e-7, 1.0e-7));
-        visit(&cell.borrow(), area, mover_of(entity), |p| {
-            out.push(p.collider.clone());
-            false
-        });
+    // EntityGetter.getEntityCollisions expands its query by 1e-7.
+    let area = bounds.inflate(Vec3::new(1.0e-7, 1.0e-7, 1.0e-7));
+    visit_scene(area, mover_of(entity), |collider| {
+        out.push(collider.clone());
+        false
     });
 }
 
 /// Whether a collider box `entity` collides with overlaps `bounds` (the thin box at a body's
 /// eyes, for the in-wall damage a block's suffocation gives). Allocates nothing.
 pub fn overlaps(entity: EntityIdentity, bounds: Aabb) -> bool {
-    PLACED.with(|cell| {
-        let area = bounds.inflate(Vec3::new(1.0e-7, 1.0e-7, 1.0e-7));
-        let mut hit = false;
-        visit(&cell.borrow(), area, mover_of(entity), |p| {
-            hit = p.collider.intersects(bounds);
-            hit
-        });
+    let area = bounds.inflate(Vec3::new(1.0e-7, 1.0e-7, 1.0e-7));
+    let mut hit = false;
+    visit_scene(area, mover_of(entity), |collider| {
+        hit = collider.intersects(bounds);
         hit
-    })
+    });
+    hit
+}
+
+/// Whether the entity box `new` is in a box of a collider `entity` collides with that the box
+/// `old` was not already in, box by box: a body that already overlaps one box may not walk into
+/// another, of the same collider or of another. The entity-collision half of vanilla's
+/// "colliding with anything new". Allocates nothing.
+pub fn new_collision(entity: EntityIdentity, old: Aabb, new: Aabb) -> bool {
+    let area = new.inflate(Vec3::new(1.0e-7, 1.0e-7, 1.0e-7));
+    let mut found = false;
+    visit_scene(area, mover_of(entity), |collider| {
+        collider.overlapping(new, |index| {
+            found = !collider.overlaps_box(index, old);
+            found
+        });
+        found
+    });
+    found
+}
+
+/// One collider's recent frames, with the boxes it had when they were recorded.
+struct Tracked {
+    log: FrameLog,
+    boxes: Arc<ColliderBoxes>,
+    /// Everywhere the collider has been over the log, for finding what a position can have
+    /// stood on.
+    swept: Option<Aabb>,
+    /// The collider's own entity and its vehicle stack (`Placed::exempt`).
+    exempt: Vec<u32>,
+}
+
+/// The recent frames of a level's colliders, for judging a player a collider carries
+/// (`sunrise_core::geometry::carried`). The game keeps one per level and records the level's
+/// colliders into it at the start of each of the level's ticks; only a server needs it.
+#[derive(Default)]
+pub struct History {
+    now: u64,
+    /// By entity id, so a walk over them is in id order.
+    tracked: BTreeMap<u32, Tracked>,
+}
+
+impl History {
+    /// Records the colliders as the level's tick began. A collider that stood still adds
+    /// nothing; one that is gone is forgotten.
+    pub fn record(&mut self, placed: &Prepared) {
+        self.now += 1;
+        let now = self.now;
+        for p in placed.placed() {
+            let entry = self.tracked.entry(p.id).or_insert_with(|| Tracked {
+                log: FrameLog::default(),
+                boxes: p.collider.boxes.clone(),
+                swept: None,
+                exempt: p.exempt.clone(),
+            });
+            if entry.exempt != p.exempt {
+                entry.exempt.clone_from(&p.exempt);
+            }
+            let new_boxes = !Arc::ptr_eq(&entry.boxes, &p.collider.boxes);
+            if new_boxes {
+                entry.boxes = p.collider.boxes.clone();
+            }
+            if entry.log.record(now, p.collider.frame) || new_boxes || entry.swept.is_none() {
+                entry.swept = entry
+                    .boxes
+                    .bounds()
+                    .and_then(|local| entry.log.swept(local));
+            }
+        }
+        if self.tracked.len() != placed.len() {
+            let ids: std::collections::HashSet<u32> = placed.placed().map(|p| p.id).collect();
+            self.tracked.retain(|id, _| ids.contains(id));
+        }
+    }
+
+    /// The tick of the newest frames: age 0.
+    pub fn now(&self) -> u64 {
+        self.now
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.tracked.is_empty()
+    }
+
+    /// A collider's frames and boxes.
+    pub fn get(&self, id: u32) -> Option<(&FrameLog, &ColliderBoxes)> {
+        self.tracked.get(&id).map(|t| (&t.log, &*t.boxes))
+    }
+
+    /// Calls `f` with each collider that has been in `area` at some tick of the log, in entity
+    /// id order, until it answers true.
+    pub fn near(&self, area: Aabb, mut f: impl FnMut(u32) -> bool) {
+        for (id, tracked) in &self.tracked {
+            if tracked.swept.is_some_and(|s| s.intersects(area)) && f(*id) {
+                return;
+            }
+        }
+    }
+}
+
+thread_local! {
+    static HISTORY: RefCell<Option<Rc<RefCell<History>>>> = const { RefCell::new(None) };
+}
+
+/// The history of the level being ticked, for as long as the guard lives (like [`Scope`]).
+pub struct HistoryScope {
+    before: Option<Rc<RefCell<History>>>,
+}
+
+impl HistoryScope {
+    pub fn enter(history: Rc<RefCell<History>>) -> Self {
+        Self {
+            before: HISTORY.with(|cell| cell.borrow_mut().replace(history)),
+        }
+    }
+}
+
+impl Drop for HistoryScope {
+    fn drop(&mut self) {
+        let before = self.before.take();
+        HISTORY.with(|cell| *cell.borrow_mut() = before);
+    }
+}
+
+/// Calls `f` with the level's history; `None` outside a level that keeps one.
+pub fn with_history<R>(f: impl FnOnce(&History) -> R) -> Option<R> {
+    let history = HISTORY.with(|cell| cell.borrow().clone())?;
+    let history = history.borrow();
+    Some(f(&history))
+}
+
+/// Runs `f` with the level's colliders where they stood `age` ticks before the tick began (a
+/// fractional age is interpolated): the world a client saw, which is what a carried player's
+/// move is checked in. Outside a level with a history it just runs `f`.
+pub fn at_age<R>(age: f64, f: impl FnOnce() -> R) -> R {
+    // The colliders are read from the history at the age, a collider at a time, as the query
+    // meets them: nothing is built.
+    let before = AGE.with(|cell| cell.replace(Some(age)));
+    let result = f();
+    AGE.with(|cell| cell.set(before));
+    result
 }
 
 #[cfg(test)]

@@ -43,7 +43,53 @@ thread_local! {
     static SCRATCH: std::cell::RefCell<Scratch> = std::cell::RefCell::new(Scratch::default());
 }
 
+/// The collider a body with `bounds` and entity `id` stands on: the one box under its feet with
+/// the highest top (a tie to the lower collider entity id), found through the level's index.
+fn support_of(start: &Prepared, bounds: Aabb, id: u32) -> Option<u32> {
+    let mut best: Option<(f64, u32)> = None;
+    let probe = Aabb::new(
+        bounds
+            .min_position()
+            .subtract(Vec3::new(0.0, SUPPORT_PROBE, 0.0)),
+        bounds.max_position(),
+    );
+    start.meeting(probe, |placed| {
+        if placed.exempt.contains(&id) {
+            return;
+        }
+        let allowed = placed.collider.collide(bounds, Axis::Y, -SUPPORT_PROBE);
+        if allowed <= -SUPPORT_PROBE {
+            return;
+        }
+        let gap = -allowed;
+        let better =
+            best.is_none_or(|(g, c)| gap < g - 1.0e-9 || (gap <= g + 1.0e-9 && placed.id < c));
+        if better {
+            best = Some((gap, placed.id));
+        }
+    });
+    best.map(|(_, support)| support)
+}
+
 impl Game<'_> {
+    /// Notes, on a client, the collider carrying the player and how old the client's copy of it
+    /// is, for the hint sent with the next position report.
+    pub(in crate::game) fn observe_carry_age(&mut self, start: &Prepared) {
+        let carrier = (!start.is_empty())
+            .then(|| {
+                let p = self.player.as_ref()?;
+                if p.spectator || !p.ground.on_ground || self.riding.is_some() {
+                    return None;
+                }
+                support_of(start, p.bounds(), p.entity_id as u32)
+            })
+            .flatten()
+            .and_then(|id| Some((id, self.collider_now_frame(id)?)));
+        if let Some(remote) = self.remote.as_mut() {
+            remote.carry_age.observe(carrier);
+        }
+    }
+
     /// Carries the bodies standing on the colliders of the level that moved this tick.
     /// `start` is the colliders as the tick began, where the bodies stood. A tick where no
     /// collider moved does nothing; the bodies are found through the level's collider index.
@@ -154,33 +200,8 @@ impl Game<'_> {
             if no_physics || rides {
                 continue;
             }
-            // The colliders the level's index finds under its feet: the highest top, a tie to
-            // the lower collider entity id.
-            let mut best: Option<(f64, u32)> = None;
-            let probe = Aabb::new(
-                body.bounds
-                    .min_position()
-                    .subtract(Vec3::new(0.0, SUPPORT_PROBE, 0.0)),
-                body.bounds.max_position(),
-            );
-            start.meeting(probe, |placed| {
-                if placed.exempt.contains(&id) {
-                    return;
-                }
-                let allowed = placed
-                    .collider
-                    .collide(body.bounds, Axis::Y, -SUPPORT_PROBE);
-                if allowed <= -SUPPORT_PROBE {
-                    return;
-                }
-                let gap = -allowed;
-                let better = best
-                    .is_none_or(|(g, c)| gap < g - 1.0e-9 || (gap <= g + 1.0e-9 && placed.id < c));
-                if better {
-                    best = Some((gap, placed.id));
-                }
-            });
-            if let Some((_, support)) = best {
+            let best = support_of(start, body.bounds, id);
+            if let Some(support) = best {
                 scratch.riders.push(Rider {
                     target,
                     id,
