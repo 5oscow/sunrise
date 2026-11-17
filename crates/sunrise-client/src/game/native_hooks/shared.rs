@@ -5180,6 +5180,8 @@ mod item_fall_on_tests {
     #[mod_api::__subscriptions]
     impl Hooks for LoanMod {
         fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
+            r.register_attachment_type("loan_test:progress", false)
+                .unwrap();
             let key = r.block_key("minecraft:stone");
             r.block_part(key, LoanPart(self.0.clone()));
         }
