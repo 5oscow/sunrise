@@ -23,7 +23,7 @@ use sunrise_world::{
 /// The collision shape of a block state is being read for the query `query`
 /// (`BlockBehaviour.getCollisionShape`). `shape` starts as `None`, which keeps the shape the block
 /// would otherwise have, and the block's parts may answer boxes to replace it for this query.
-/// Fires on the side that ticks the entity, once for each entity, position and tick, so a listener
+/// Fires on the side that ticks the entity, once for each distinct question in a tick, so a listener
 /// must be a pure function of its inputs and the state it keeps itself.
 #[inline(never)]
 pub fn native_collision_shape(
@@ -48,13 +48,32 @@ fn entity_of(context: &CollisionContext<'_>) -> u32 {
     }) as u32
 }
 
+/// What tells one question to a part from another: the block state at a position and every input
+/// of the [`CollisionQuery`]. The held item is the shared name's address, so a key owns nothing.
+#[derive(PartialEq, Eq, Hash)]
+struct AnswerKey {
+    state: BlockStateId,
+    position: [i32; 3],
+    /// The entity, 0 for none.
+    entity: u32,
+    /// The standing height the query is above or below blocks by, as bits.
+    bottom: u64,
+    kind: EntityContextKind,
+    living: bool,
+    descending: bool,
+    placement: bool,
+    always_collide_with_fluid: bool,
+    held_item: Option<usize>,
+}
+
 /// The parts of one level's tick: answers collision queries from the mods, remembering each
 /// answer for the rest of the tick. One value serves every tick: [`Self::begin_tick`] empties the
 /// answers and keeps their storage and the shared names.
 pub struct ModParts {
     context: RefCell<Arc<LoopContext>>,
-    /// The answer for an entity (0: none), a position and whether the query was a placement.
-    cache: RefCell<HashMap<(u32, [i32; 3], bool), Option<VoxelShape>>>,
+    /// The answer for each distinct question: the state, the position and everything of the
+    /// query that a part can read.
+    cache: RefCell<HashMap<AnswerKey, Option<VoxelShape>>>,
     /// Whether a part is running: a query made inside it gets the normal shape, never a nested
     /// call.
     busy: Cell<bool>,
@@ -83,10 +102,20 @@ impl ModParts {
         self.cache.borrow_mut().clear();
     }
 
+    /// The shared name of an item id.
+    fn shared_item(&self, item: &str) -> Arc<str> {
+        let mut items = self.items.borrow_mut();
+        match items.get(item) {
+            Some(shared) => Arc::clone(shared),
+            None => Arc::clone(items.entry(item.to_owned()).or_insert_with(|| item.into())),
+        }
+    }
+
     fn query(
         &self,
         context: &CollisionContext<'_>,
         entity: u32,
+        held_item: Option<Arc<str>>,
         standable: &mut dyn FnMut() -> &'static [&'static str],
     ) -> CollisionQuery {
         let kind = match context.entity_kind() {
@@ -100,13 +129,8 @@ impl ModParts {
                 .with_descending(context.is_descending())
                 .with_placement(context.is_placement())
                 .with_always_collide_with_fluid(context.always_collide_with_fluid());
-        if let Some(item) = context.held_item() {
-            let mut items = self.items.borrow_mut();
-            let shared = match items.get(item) {
-                Some(shared) => Arc::clone(shared),
-                None => Arc::clone(items.entry(item.to_owned()).or_insert_with(|| item.into())),
-            };
-            query = query.with_held_item(shared);
+        if let Some(item) = held_item {
+            query = query.with_held_item(item);
         }
         if context.living_entity().is_some() {
             let names = standable();
@@ -138,15 +162,25 @@ impl PartShapes for ModParts {
             return None;
         }
         let entity = entity_of(context);
-        let key = (
+        let held_item = context.held_item().map(|item| self.shared_item(item));
+        let key = AnswerKey {
+            state,
+            position: [position.x, position.y, position.z],
             entity,
-            [position.x, position.y, position.z],
-            context.is_placement(),
-        );
+            bottom: context.bottom().to_bits(),
+            kind: context.entity_kind(),
+            living: context.living_entity().is_some(),
+            descending: context.is_descending(),
+            placement: context.is_placement(),
+            always_collide_with_fluid: context.always_collide_with_fluid(),
+            held_item: held_item
+                .as_ref()
+                .map(|item| Arc::as_ptr(item).cast::<u8>() as usize),
+        };
         if let Some(answer) = self.cache.borrow().get(&key) {
             return answer.clone();
         }
-        let query = self.query(context, entity, standable);
+        let query = self.query(context, entity, held_item, standable);
         struct Running<'a>(&'a Cell<bool>);
         impl Drop for Running<'_> {
             fn drop(&mut self) {
@@ -265,6 +299,57 @@ mod tests {
         parts.begin_tick(&Arc::new(loop_context()));
         ask(&parts, 7, [1, 64, 1]);
         assert_eq!(COLLISION_ASKS.get(), 5);
+    }
+
+    #[test]
+    fn queries_that_differ_in_any_input_get_their_own_answer() {
+        let parts = parts();
+        COLLISION_ANSWER.with_borrow_mut(|answer| {
+            *answer = Some(Box::new(|query| {
+                Some(vec![[
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                    if query.is_descending() { 0.5 } else { 1.0 },
+                    1.0,
+                ]])
+            }));
+        });
+        let at = BlockPos::new(1, 64, 1);
+        let mut ask = |context: &CollisionContext<'_>, state: u32| {
+            parts.shape(BlockStateId(state), at, context, &mut || &[])
+        };
+        // Unnamed position queries that differ in height, descending or held item.
+        ask(&CollisionContext::position(65.0), 1);
+        ask(&CollisionContext::position(66.0), 1);
+        ask(&CollisionContext::position(66.0).with_descending(true), 1);
+        assert_eq!(COLLISION_ASKS.get(), 3);
+        // The same question again, and the same block at the same place in another state.
+        ask(&CollisionContext::position(65.0), 1);
+        assert_eq!(COLLISION_ASKS.get(), 3);
+        ask(&CollisionContext::position(65.0), 2);
+        assert_eq!(COLLISION_ASKS.get(), 4);
+        // A different held item.
+        let holding = |item| {
+            CollisionContext::for_entity(
+                CollisionEntity {
+                    identity: EntityIdentity(7),
+                    kind: EntityContextKind::Player,
+                    y: 65.0,
+                    descending: false,
+                    main_hand: Some(sunrise_world::collision_context::CollisionItem {
+                        item,
+                        count: 1,
+                    }),
+                },
+                false,
+            )
+        };
+        ask(&holding("minecraft:stick"), 1);
+        ask(&holding("minecraft:stick"), 1);
+        ask(&holding("minecraft:bone"), 1);
+        assert_eq!(COLLISION_ASKS.get(), 6);
     }
 
     #[test]

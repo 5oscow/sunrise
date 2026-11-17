@@ -33,7 +33,7 @@ impl CollisionItem<'_> {
 /// Classification supplied by the caller that owns the actual entity, never inferred
 /// from its runtime ID. Living means a non-player living entity. None preserves
 /// defaults for entity-less queries and callers which have not captured a class.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum EntityContextKind {
     Item,
     Player,

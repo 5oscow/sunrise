@@ -497,8 +497,9 @@ was made: `entity()` (the entity's id, `None` for the empty, position and cache 
   paths, on the thread that owns the level: the server tick, and the client's own prediction. A
   guest's move is checked by the server with the same entity id. Fluid passage and face-support
   checks never ask. Another thread (the mesher, world generation) reads the normal shape.
-- **Once a tick.** A part is asked once for each entity, position and tick (a placement query
-  separately); a step-up retry or a second sweep reads the first answer, so the shape cannot change
+- **Once a tick.** A part is asked once for each distinct question in a tick: the state, the
+  position and every input of the query (entity, kind, height, descending, placement, held item)
+  make one question. A step-up retry or a second sweep reads the first answer, so the shape cannot change
   in the middle of a move.
 - **No re-entry.** The query holds the entity's state from before the move, and a collision query
   made inside the callback gets the empty-context answer, never a nested call.
@@ -513,9 +514,10 @@ was made: `entity()` (the entity's id, `None` for the empty, position and cache 
 - **Bounds**, as for a published shape: at most 64 boxes, every coordinate finite and each minimum
   at most its maximum. These bound what crosses the Wire from a wasm part too.
 - **Faults.** A panic, a trap or a refused shape keeps the normal shape, switches that block's
-  `collision_shape` off for the session, and logs once, naming the mods and the block.
+  `collision_shape` off for the session, for every mod's part on that block, and logs once,
+  naming the mods and the block.
 - **Cost.** Nothing for a block without such a part. An opted-in block costs one call per
-  entity, position and tick, and a wasm part adds a Wire crossing to each.
+  distinct question in a tick, and a wasm part adds a Wire crossing to each.
 
 An item copies its template's data components, with `max_stack_size` and
 `rarity` changed, and any other 26.3 component set or removed in

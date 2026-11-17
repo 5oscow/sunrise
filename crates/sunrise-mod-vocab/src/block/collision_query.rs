@@ -132,19 +132,53 @@ impl CollisionQuery {
     }
 
     /// `CollisionContext.isHoldingItem`: whether the entity's main hand holds the item `item`
-    /// (an item id, `minecraft:air` for an empty hand). False for a query with no living entity.
+    /// (an item id, `minecraft:air` for an empty hand). A query that captured no held item (no
+    /// living entity) holds `ItemStack.EMPTY`, so only `minecraft:air` is held.
     pub fn is_holding_item(&self, item: &str) -> bool {
-        self.held_item.as_deref() == Some(item)
+        self.held_item
+            .as_deref()
+            .map_or(item == "minecraft:air", |held| held == item)
     }
 
     /// `CollisionContext.canStandOnFluid(above, fluid)`: whether the living entity can stand on
-    /// `fluid` (a fluid id) under `above`, which is not the same fluid. False for an entity that
-    /// is not a living one.
+    /// `fluid` (a fluid id; a flowing fluid counts as its source, as `FluidTags` do) under
+    /// `above`, which is not the same fluid. False for an entity that is not a living one.
     pub fn can_stand_on_fluid(&self, above: &str, fluid: &str) -> bool {
+        // The id with its namespace and `flowing_` prefix removed, so a flowing fluid and its
+        // source compare equal; another namespace keeps its whole id.
         let family = |id: &str| {
             id.strip_prefix("minecraft:flowing_")
-                .map_or_else(|| id.to_owned(), |rest| format!("minecraft:{rest}"))
+                .or_else(|| id.strip_prefix("minecraft:"))
+                .unwrap_or(id)
         };
-        self.standable_fluids.iter().any(|f| &**f == fluid) && family(above) != family(fluid)
+        let fluid = family(fluid);
+        self.standable_fluids.iter().any(|f| family(f) == fluid) && family(above) != fluid
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_strider_stands_on_flowing_lava_but_not_under_it() {
+        let query = CollisionQuery::default()
+            .with_standable_fluids(Arc::from([Arc::<str>::from("minecraft:lava")]));
+        assert!(query.can_stand_on_fluid("minecraft:water", "minecraft:lava"));
+        assert!(query.can_stand_on_fluid("minecraft:water", "minecraft:flowing_lava"));
+        assert!(!query.can_stand_on_fluid("minecraft:flowing_lava", "minecraft:lava"));
+        assert!(!query.can_stand_on_fluid("minecraft:lava", "minecraft:flowing_lava"));
+        assert!(!query.can_stand_on_fluid("minecraft:lava", "minecraft:water"));
+    }
+
+    #[test]
+    fn an_entity_without_a_captured_hand_holds_air() {
+        let query = CollisionQuery::default();
+        assert!(query.is_holding_item("minecraft:air"));
+        assert!(!query.is_holding_item("minecraft:stick"));
+        let holding = query.with_held_item("minecraft:stick".into());
+        assert!(
+            holding.is_holding_item("minecraft:stick") && !holding.is_holding_item("minecraft:air")
+        );
     }
 }

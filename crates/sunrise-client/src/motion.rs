@@ -991,11 +991,12 @@ enum TickInput {
     PreparedLocal { direction: [f32; 2], jumping: bool },
 }
 /// The context `player` moves through: a player at its height holding `held`, as
-/// `CollisionContext.of(player)`.
+/// `CollisionContext.of(player)`. It names the player by its entity id, so a block's parts are
+/// asked about the same entity as when the server checks this move inside `as_mover`.
 fn player_context<'a>(player: &PlayerMotion, held: Option<&'a str>) -> CollisionContext<'a> {
     CollisionContext::for_entity(
         CollisionEntity {
-            identity: EntityIdentity(0),
+            identity: EntityIdentity(u64::from(player.entity_id as u32)),
             kind: sunrise_world::collision_context::EntityContextKind::Player,
             y: player.position.y,
             descending: player.shift_key_down,

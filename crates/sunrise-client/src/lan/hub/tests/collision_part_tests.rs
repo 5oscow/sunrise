@@ -14,8 +14,16 @@ use sunrise_world::part_collision::InParts;
 /// two ask about the same player.
 fn signature(
     query: &mod_api::CollisionQuery,
-) -> (mod_api::CollisionEntityKind, bool, bool, bool, bool) {
+) -> (
+    Option<u32>,
+    mod_api::CollisionEntityKind,
+    bool,
+    bool,
+    bool,
+    bool,
+) {
     (
+        query.entity(),
         query.kind(),
         query.is_descending(),
         query.is_placement(),
@@ -23,6 +31,9 @@ fn signature(
         query.is_holding_item("minecraft:stick"),
     )
 }
+
+/// The entity id both sides know the guest by.
+const GUEST_ENTITY: i32 = 41;
 
 fn scene(fixture: &crate::test_fixtures::Vanilla) -> World {
     let assets = &fixture.assets;
@@ -68,6 +79,7 @@ fn a_client_and_a_server_that_disagree_about_a_parts_state_get_a_correction() {
     let resources = &fixture.motion;
     let mut client = PlayerMotion::new(resources, Vec3::new(20.5, 5.0, 20.5)).unwrap();
     client.client_side = true;
+    client.entity_id = GUEST_ENTITY;
     client.main_hand = Some("minecraft:stick".into());
     client.yaw = -90.0;
     let forward = Keys {
@@ -142,6 +154,7 @@ fn a_client_and_a_server_that_disagree_about_a_parts_state_get_a_correction() {
     };
     hub.guests.update(0, |g| {
         (g.position, g.on_ground) = (before, true);
+        g.entity_id = GUEST_ENTITY;
         let selected = g.selected;
         g.inventory[selected] = Some(crate::items::ItemStack::new("minecraft:stick", 1));
     });
@@ -158,6 +171,7 @@ fn a_client_and_a_server_that_disagree_about_a_parts_state_get_a_correction() {
         assert_eq!(
             server.last(),
             Some(&(
+                Some(GUEST_ENTITY as u32),
                 mod_api::CollisionEntityKind::Player,
                 false,
                 false,
