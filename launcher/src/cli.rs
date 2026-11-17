@@ -2362,6 +2362,7 @@ fn mods(action: ModsCmd, as_json: bool) -> Result<(), String> {
             }
             let query = Query {
                 everything,
+                game: game.clone(),
                 ..Query::new(&text.join(" "), kind)
             };
             let found = source.get()?.search(&query)?;
