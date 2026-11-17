@@ -16,6 +16,15 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 
+# These fixtures test pointer routing, not the launch options' choice of role.
+WINDOW_OPTIONS = '''
+#[derive(Default)]
+struct Options { offscreen: bool, visible_view: bool }
+impl Options {
+    fn has_visible_window(&self) -> bool { !self.offscreen || self.visible_view }
+}
+'''
+
 
 def method(source, name):
     # A method moved out of game.rs is `pub(super)` in its own file; the fixtures paste it as a
@@ -135,13 +144,12 @@ impl Studio { fn flying(&self) -> bool { self.freecam.active } }
 #[derive(Default)]
 struct Replay { driver: Option<()> }
 impl Replay { fn playing(&self) -> bool { self.driver.is_some() } }
-#[derive(Default)]
-struct Options { offscreen: bool }
+WINDOW_OPTIONS
 #[derive(Default)]
 struct ServerPacks { prompt: Option<()> }
 struct Game {
     focused: bool, agent_pointer: bool, window: Option<Window>, mouse: Mouse,
-    keyboard_mouse: bool, split_window: bool, view_at: [u32; 2],
+    keyboard_mouse: bool, view_at: [u32; 2],
     captured: bool, capture_mode: Option<CursorGrabMode>, regrab_on_refocus: bool, title: Option<()>, screen: Screen,
     remote: Option<Remote>,
     studio: Studio, replay: Replay,
@@ -153,7 +161,7 @@ struct Game {
 impl Default for Game {
     fn default() -> Self {
         Self { focused: true, agent_pointer: false, window: Some(Window::default()),
-            keyboard_mouse: true, split_window: false, view_at: [0, 0],
+            keyboard_mouse: true, view_at: [0, 0],
             mouse: Mouse::default(), captured: false, capture_mode: None, regrab_on_refocus: false, title: None,
             screen: Screen::Playing, remote: None, studio: Studio::default(), replay: Replay::default(),
             mining: false, lan_acting: None,
@@ -346,7 +354,7 @@ fn main() {
     {
         let mut game = Game::default();
         game.options.offscreen = true;
-        game.split_window = true;
+        game.options.visible_view = true;
         game.window.as_ref().unwrap().visible.set(true);
         game.capture(true);
         assert!(game.captured);
@@ -527,6 +535,7 @@ fn main() {
         capture = method(source, "capture").replace(
             "sunrise_client::mouse::mouse_position_after_grab_change",
             "mouse_position_after_grab_change")
+        fixture = fixture.replace("WINDOW_OPTIONS", WINDOW_OPTIONS)
         fixture = fixture.replace("HELPER", function(mouse, "mouse_position_after_grab_change"))
         fixture = fixture.replace("METHODS", capture + "\n" +
                                   method(source, "capture_loaded_world") + "\n" +
@@ -534,14 +543,7 @@ fn main() {
                                   method(source, "internal_grab") + "\n" +
                                   method(source, "claim_window") + "\n" +
                                   method(source, "settle_after_run"))
-        with tempfile.TemporaryDirectory(prefix="sunrise-input-") as folder:
-            folder = Path(folder)
-            rust = folder / "capture.rs"
-            binary = folder / ("capture.exe" if os.name == "nt" else "capture")
-            rust.write_text(fixture, encoding="utf-8")
-            subprocess.run(["rustc", "--edition=2024", str(rust), "-o", str(binary)],
-                           check=True, capture_output=True, text=True, timeout=60)
-            subprocess.run([str(binary)], check=True, capture_output=True, text=True, timeout=10)
+        self.run_fixture(fixture, "capture")
 
 
     @unittest.skipUnless(shutil.which("rustc"), "requires Rust")
@@ -556,7 +558,7 @@ struct ActiveEventLoop;
 struct DeviceId;
 enum DeviceEvent { MouseMotion { delta: (f64, f64) }, Other }
 #[derive(PartialEq)] enum Screen { Playing, Paused }
-struct Options { offscreen: bool }
+WINDOW_OPTIONS
 mod input_trace {
     pub enum InputOrigin { User }
     pub enum TraceKind { Motion { x: f64, y: f64 } }
@@ -565,7 +567,7 @@ struct Radial(bool);
 impl Radial { fn is_open(&self) -> bool { self.0 } }
 struct Pad { radial: Radial }
 struct Game {
-    pending_save: Option<()>, captured: bool, focused: bool, keyboard_mouse: bool, split_window: bool,
+    pending_save: Option<()>, captured: bool, focused: bool, keyboard_mouse: bool,
     options: Options, screen: Screen, mouse: MouseLook, last_input: Instant, pad: Pad, scripted: bool,
     unclaimed_window: bool,
 }
@@ -596,7 +598,7 @@ fn main() {
     ] {
         let mut game = Game {
             pending_save: saving.then_some(()), captured: true, focused: active,
-            keyboard_mouse: owner, split_window: split, options: Options { offscreen },
+            keyboard_mouse: owner, options: Options { offscreen, visible_view: split },
             screen: if playing { Screen::Playing } else { Screen::Paused },
             mouse: MouseLook::default(), last_input: Instant::now(), pad: Pad { radial: Radial(radial) },
             scripted, unclaimed_window: unclaimed,
@@ -614,6 +616,7 @@ fn main() {
 }
 '''
         fixture = fixture.replace("MOUSE_PATH", (ROOT / "crates/sunrise-client-input/src/mouse.rs").as_posix())
+        fixture = fixture.replace("WINDOW_OPTIONS", WINDOW_OPTIONS)
         fixture = fixture.replace("METHOD", method(source, "device_event"))
         self.run_fixture(fixture, "native-mouse")
 
