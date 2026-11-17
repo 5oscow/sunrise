@@ -299,7 +299,7 @@ fn health_boost_raises_the_maximum_and_its_end_clamps_the_health() {
 fn a_given_modifier_round_trips_through_the_save() {
     let mut m = pig();
     m.add_effect("minecraft:speed", -1, 1);
-    let saved = mob_to_nbt(&m, [1, 0, 0, 1], None, None, |_| None);
+    let saved = mob_to_nbt(&m, [1, 0, 0, 1], None, None, |_| None, &Default::default());
     let Some(Tag::List(list)) = saved.get("attributes") else {
         panic!("no attributes: {saved:?}");
     };

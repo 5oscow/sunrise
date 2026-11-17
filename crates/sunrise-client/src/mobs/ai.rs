@@ -394,6 +394,7 @@ mod inside_walk_tests {
     /// the stored modifier `addEffect` adds is covered by
     /// `effect_modifier_tests`, which read no registry.
     #[test]
+    #[ignore = "daily"]
     fn a_parts_add_effect_write_merges_into_one_instance() {
         let _test = TEST_LOCK
             .lock()
@@ -406,8 +407,12 @@ mod inside_walk_tests {
             duration: 40,
             amplifier,
         };
-        apply_entity_write(&mut mob, &mut level.level(), write(1));
-        apply_entity_write(&mut mob, &mut level.level(), write(0));
+        let ran = crate::mobs::world::with_test_world(&[], |w, _| {
+            let mut events = Vec::new();
+            apply_entity_write(&mut mob, w, &mut level.level(), &mut events, write(1));
+            apply_entity_write(&mut mob, w, &mut level.level(), &mut events, write(0));
+        });
+        assert!(ran, "the vanilla test resources must be available");
         assert_eq!(
             mob.extra.effects,
             vec![crate::mobs::StoredEffect::new("minecraft:wither", 40, 1)]
