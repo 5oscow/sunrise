@@ -8,9 +8,9 @@ mod descriptors;
 mod host;
 mod prepared;
 #[cfg(test)]
-mod protocol_pin;
-#[cfg(test)]
 mod prepared_tests;
+#[cfg(test)]
+mod protocol_pin;
 pub use host::{generate_coverage, generate_host};
 mod trait_roles;
 mod ty;
@@ -579,7 +579,15 @@ pub(crate) fn exported_calls(
     surface: &mut Surface<'_>,
     hooks: &[crate::catalog::Hook],
 ) -> Result<std::collections::BTreeMap<(String, String), String>, String> {
-    let names = call_names(surface, hooks)?;
+    let prepared: Vec<(String, String)> = hooks
+        .iter()
+        .filter_map(|hook| {
+            hook.prepared
+                .clone()
+                .map(|field| (hook.name.clone(), field))
+        })
+        .collect();
+    let names = call_names(surface, hooks, &prepared)?;
     Ok(names
         .by_method
         .iter()
