@@ -241,7 +241,7 @@ fn registered_kind_receives_the_full_empty_grid_at_every_match_entry() {
                 ItemStack::new("test:output", 3)
             );
             assert_eq!(
-                recipes.remainders("test:empty", &grid, 2, &|_| None),
+                recipes.remainders(context, "test:empty", &grid, 2, &|_| None),
                 [None, None, None, None]
             );
         },
