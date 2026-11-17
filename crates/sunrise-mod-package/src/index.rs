@@ -852,6 +852,7 @@ pub fn inspect(kind: &Kind, path: &Path) -> Result<Facts, String> {
             if package.is_native() {
                 return Err("it has native code: it is a native-mod".into());
             }
+            package.read_runtime(path)?;
             let m = package.manifest;
             crate::Content::read(path, &m)?;
             Ok(Facts {
