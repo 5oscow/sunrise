@@ -129,7 +129,6 @@ fn with_machine(
     TAKES.with(|s| s.borrow_mut().clear());
     let mods: Mods = vec![ModEntry::new("take_test", Box::new(TestMod))].into();
     crate::game::api_values::install_parts(&mods).unwrap();
-    crate::entry::install_client_hooks();
     mod_platform::testing::with_mods(mods, || {
         with_guests(|game| {
             game.world
