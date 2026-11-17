@@ -123,7 +123,9 @@ pub struct BlockProperties {
     #[serde(default, deserialize_with = "deserialize_push_reaction")]
     pub push_reaction: Option<PushReaction>,
     /// `false`: the block occludes nothing, so its neighbours' faces are drawn and light passes
-    /// it (`BlockBehaviour.Properties.noOcclusion`); unset or `true`: as its template.
+    /// it (`BlockBehaviour.Properties.noOcclusion`); `true`: occludes whatever the template
+    /// does, using the declared outline or the template's published occlusion shape. Unset
+    /// inherits the template.
     pub occludes: Option<bool>,
     /// `false`: the breaking crack (`destroy_stage_0..9`) is not drawn on the block, as for a
     /// block broken by use; unset or `true`, it is drawn. Only the overlay: the break and the

@@ -4220,8 +4220,9 @@ fn declared_shapes_drive_lighting_and_occlusion() {
         );
         let (base, mods) = block_base(label, &[&declaration]);
         let plan = Plan::new(&base, &mods).unwrap();
+        // A non-occluding template must not suppress an explicit true, even for a partial outline.
         let row =
-            r#"{"can_occlude":true,"solid_render":true,"dampening":15,"skylight_down":false}"#;
+            r#"{"can_occlude":false,"solid_render":false,"dampening":1,"skylight_down":false}"#;
         let mut gameplay: J =
             serde_json::from_str(&format!(r#"{{"states":[{row},{row}]}}"#)).unwrap();
         plan.json("gameplay-facts.json", &mut gameplay).unwrap();
@@ -4268,6 +4269,68 @@ fn declared_shapes_drive_lighting_and_occlusion() {
         }
         fs::remove_dir_all(base.parent().unwrap()).unwrap();
     }
+}
+
+#[test]
+fn enabling_occlusion_uses_the_templates_published_shape() {
+    let declaration =
+        r#"{"template":"minecraft:test","item":false,"properties":{"occludes":true}}"#;
+    let (base, mods) = block_base("enable-template-occlusion", &[declaration]);
+    let tag = Tag::compound([
+        ("DataVersion", Tag::Int(sunrise_world::DATA_VERSION)),
+        (
+            "states",
+            Tag::List(vec![test_state_row("x"), test_state_row("y")]),
+        ),
+        (
+            "shapes",
+            Tag::List(vec![
+                encode_shape(&VoxelShape::block()),
+                encode_shape(&VoxelShape::empty()),
+            ]),
+        ),
+        ("cached_shapes", Tag::IntArray(vec![0, 1])),
+    ]);
+    fs::write(
+        base.join("occlusion.nbt"),
+        nbt::write_named(
+            &nbt::NamedTag {
+                name: "".into(),
+                tag,
+            },
+            Limits::tables(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let plan = Plan::new(&base, &mods).unwrap();
+    let row = r#"{"can_occlude":false,"solid_render":false,"dampening":0,"skylight_down":true}"#;
+    let mut gameplay: J = serde_json::from_str(&format!(r#"{{"states":[{row},{row}]}}"#)).unwrap();
+    plan.json("gameplay-facts.json", &mut gameplay).unwrap();
+    let Some(J::Arr(rows)) = gameplay.get("states") else {
+        panic!("states")
+    };
+    assert_eq!(rows[2].get("can_occlude"), Some(&J::Bool(true)));
+    assert_eq!(rows[2].get("solid_render"), Some(&J::Bool(true)));
+    assert_eq!(rows[2].get("dampening"), Some(&J::Num(15.into())));
+    assert_eq!(rows[3].get("solid_render"), Some(&J::Bool(false)));
+    assert_eq!(rows[3].get("dampening"), Some(&J::Num(0.into())));
+    assert_eq!(rows[2].get("skylight_down"), Some(&J::Bool(true)));
+    let mut definitions: J =
+        serde_json::from_str(r#"{"minecraft:test":{"can_occlude":false}}"#).unwrap();
+    plan.json("render-definitions.json", &mut definitions)
+        .unwrap();
+    assert_eq!(
+        definitions.at("testmod:test/can_occlude"),
+        Some(&mut J::Bool(true))
+    );
+    let mut flags = Tag::compound([("blocks", Tag::compound([("minecraft:test", Tag::Byte(0))]))]);
+    plan.nbt(&mut flags);
+    assert_eq!(
+        flags.get("blocks").unwrap().get("testmod:test"),
+        Some(&Tag::Byte(16))
+    );
+    fs::remove_dir_all(base.parent().unwrap()).unwrap();
 }
 
 #[test]

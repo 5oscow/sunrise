@@ -746,6 +746,8 @@ struct NewBlock<'a> {
     has_fluid: Vec<bool>,
     skylight: SkylightRule,
     custom_dampening: bool,
+    /// Fullness of the published occlusion shape when explicitly enabling occlusion.
+    template_occlusion_full: Vec<bool>,
     /// The template's `forceSolidOn` (`Some(true)`) or `forceSolidOff` (`Some(false)`), which keeps
     /// its answer over the declared shape's.
     force_solid: Option<bool>,
@@ -1366,6 +1368,24 @@ impl<'a> Plan<'a> {
                     })
                 };
                 let collision_shapes = decl.collision_shapes.as_ref().map(resolve).transpose()?;
+                let mut template_occlusion_full = Vec::new();
+                if decl.properties.occludes == Some(true) && shapes.is_none() {
+                    use sunrise_world::{
+                        collision::CachedCollisionRegistry,
+                        registry::{BlockRegistry, BlockStateId, BlockTableFile},
+                    };
+                    let registry =
+                        BlockRegistry::from_facts_json(fs::File::open(base.join("facts.json"))?)?;
+                    let file = BlockTableFile::open(&base.join("occlusion.nbt"), &registry)?;
+                    let cached = CachedCollisionRegistry::from_table(file.table("occlusion")?)?;
+                    for &(state, _) in &order {
+                        let shape = cached
+                            .cached_shape(BlockStateId(states.start + state))?
+                            .ok_or("template has no published occlusion shape")?;
+                        template_occlusion_full
+                            .push(!shape.join_is_not_empty(&VoxelShape::block(), ShapeOp::XOR)?);
+                    }
+                }
                 let mut has_fluid = Vec::new();
                 if shapes.is_some() {
                     for &(state, combo) in &order {
@@ -1431,6 +1451,7 @@ impl<'a> Plan<'a> {
                     item: None,
                     shapes,
                     collision_shapes,
+                    template_occlusion_full,
                     has_fluid,
                     skylight: skylight_rules
                         .get(&decl.template)
@@ -1706,6 +1727,20 @@ impl<'a> Plan<'a> {
         // `noOcclusion`: a block that can't occlude is never a solid render either, and a solid
         // render's full light dampening becomes a non-solid block's (`getLightDampening`: 0 when
         // skylight passes down, else 1, as for leaves and spawners).
+        if let Some(can_occlude) = p.occludes {
+            row.set("can_occlude", J::Bool(can_occlude));
+        }
+        if p.occludes == Some(true) && b.shapes.is_none() {
+            let solid = b.template_occlusion_full[state_index];
+            row.set("solid_render", J::Bool(solid));
+            if !b.custom_dampening {
+                let down = matches!(row.get("skylight_down"), Some(J::Bool(true)));
+                row.set(
+                    "dampening",
+                    J::Num((if solid { 15 } else { i64::from(!down) }).into()),
+                );
+            }
+        }
         if p.occludes == Some(false) {
             let solid = matches!(row.get("solid_render"), Some(J::Bool(true)));
             if solid {
@@ -1958,8 +1993,8 @@ impl<'a> Plan<'a> {
                         continue;
                     };
                     // Faces beside a block that occludes nothing are drawn (`Block.shouldRenderFace`).
-                    if !model && b.decl.properties.occludes == Some(false) {
-                        entry.set("can_occlude", J::Bool(false));
+                    if !model && let Some(can_occlude) = b.decl.properties.occludes {
+                        entry.set("can_occlude", J::Bool(can_occlude));
                     }
                     if model && let Some(schema) = entry.get_mut("schema") {
                         for (property_name, property) in &b.decl.state_properties {
@@ -2360,10 +2395,10 @@ impl<'a> Plan<'a> {
                         else {
                             continue;
                         };
-                        if b.decl.properties.occludes == Some(false)
+                        if let Some(can_occlude) = b.decl.properties.occludes
                             && let Tag::Byte(flags) = &mut v
                         {
-                            *flags &= !16;
+                            *flags = (*flags & !16) | if can_occlude { 16 } else { 0 };
                         }
                         if let (Some(f), Some(slot)) =
                             (b.decl.properties.friction, v.get_mut("friction"))

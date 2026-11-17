@@ -241,7 +241,10 @@ covers stay hidden unless it also sets `occludes`.
 of the blocks beside it are drawn, so a thin panel or a block drawn by its block entity on a full-cube template
 doesn't leave a hole in the floor under it. It is not a solid render either, so light passes it as it passes
 leaves: dampened by 1, or not at all if skylight passes down; special template light rules remain inherited.
-Unset or `true` preserves the template's ability to occlude, using the declared outline when one is supplied.
+`occludes: true` occludes whatever the template does, using the declared outline when supplied, otherwise the
+template's published occlusion shape. A full shape is a solid render with light dampening 15; a partial or empty
+shape is not. Unset preserves the template's ability to occlude. Skylight-down and special template light rules
+remain inherited. Partial declared outlines retain the existing directional shape-light occlusion rule.
 
 `destroy_overlay: false` hides the breaking crack (`destroy_stage_0` to `9`) on the block, for one broken by use
 (a feast or a cake taken apart bite by bite). It is read once at load into the block's facts, and only the overlay
