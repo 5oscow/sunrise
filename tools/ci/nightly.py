@@ -234,6 +234,11 @@ def build_set(main: Ref, prs: list[dict], left_out: list[str], today: str, force
     issues = train.known_issues()
     if not sdk:
         issues.append("- Native mods cannot be built for this build: its SDK is not published.")
+    if force and previous == sha:
+        # A forced rebuild of the published Nightly's commit (the macOS legs it lacked, 2026-11-17) replaces that
+        # Nightly, so its notes list what the replaced one did: since the newest Nightly kept on an older commit.
+        older = [c for c in remote_refs(f"refs/tags/{SOURCE_TAG}*").values() if c != sha and is_ancestor(c, sha)]
+        previous = max(older, key=lambda c: int(git("rev-list", "--count", c)), default=None)
     with open("nightly-notes.md", "w") as f:
         f.write(notes(today, chosen, main, kept, left_out, merged_since(previous, main.sha), issues))
     output(build=str(build).lower(), sha=sha, short=sha[:7], source=name, date=today, version=f"nightly-{today}",
