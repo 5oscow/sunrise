@@ -151,7 +151,7 @@ Pointers and lengths below are wasm32 `u32` values. The game provides these impo
 identity:
 
 ```
-host:<Owner>::<method>#<hash>          a host call the mod makes
+call:<Owner>::<method>#<hash>          a host call the mod makes
 hook:<Owner>::<method>@<version>#<hash>   a hook the mod implements (a marker; nothing runs)
 part:<Owner>::<method>#<hash>          a Part or handler method the mod implements (a marker)
 point:Points::<place>#<hash>           an injection point the mod listens at (a marker)
@@ -179,7 +179,7 @@ item's signature and the shapes of the types it carries, so adding a method refu
 them all. A hook hands a mod `&mut dyn ServerHost`, whose vtable keeps every host method, so a built mod
 imports every host call whether it calls it or not: changing or removing any host call refuses every
 built wasm mod (a new method refuses none), while a changed hook, Part method or point refuses only
-the mods that implement it. Known gap: a behaviour change under an unchanged signature is not caught; the hook's
+the mods that implement it (a point's hash covers its own signature, not every type reachable from it). A package rebuild with the same source is not a source change: it carries the same names. Known gap: a behaviour change under an unchanged signature is not caught; the hook's
 `hook_version` is how the game says one happened.
 
 Each guest exports:
