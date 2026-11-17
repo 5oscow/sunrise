@@ -107,7 +107,7 @@ class NightlyTests(unittest.TestCase):
             # An older selected checkout may not contain the template. It must already be loaded.
             with mock.patch.object(Path, "read_text", side_effect=AssertionError("late template read")):
                 text = notes(merged=[merged_pr(9, "Fix fork install", [])], issues=["- Known issue"])
-        self.assertTrue(text.startswith(nightly.FORK_PLAYERS + "\n\n"))
+        self.assertTrue(text.startswith(nightly.SUNRISE_PLAYERS + "\n\n"))
         self.assertNotIn(nightly.PLAYERS, text)
         self.assertIn("Nightly 2026-10-28 · bbbbbbb: main (mmmmmmm)", text)
         self.assertIn("nightly-source/2026-10-28-bbbbbbb", text)
@@ -353,6 +353,41 @@ class SdkPairTests(unittest.TestCase):
                     nightly.build_set(nightly.Ref("main", "a" * 40, T), [], [], "2026-11-11", False, dry_run)
                     push.assert_called_once()
                     self.assertEqual(output.call_args.kwargs["sdk"], str(ready).lower())
+
+    def test_forced_rebuild_of_the_published_commit_lists_the_changes_since_the_nightly_before(self):
+        import io, os, subprocess, tempfile
+        with tempfile.TemporaryDirectory() as repo:
+            def sh(*args):
+                return subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, text=True).stdout.strip()
+            sh("init", "-q")
+            commits = []
+            for n in range(3):
+                sh("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", str(n))
+                commits.append(sh("rev-parse", "HEAD"))
+            first, second, published = commits
+            sh("remote", "add", "origin", repo)
+            sh("tag", "nightly-source/2026-11-15-aaaaaaa", first)
+            sh("tag", "nightly-source/2026-11-16-bbbbbbb", second)
+            sh("tag", "nightly-source/2026-11-17-ccccccc", published)
+            sh("tag", "nightly", published)
+            cwd = os.getcwd()
+            os.chdir(repo)
+            try:
+                with mock.patch.dict(nightly.os.environ, {"GITHUB_REPOSITORY": "sunrise-org/sunrise"}), \
+                        mock.patch.object(nightly.ns, "fetch_heads", return_value=[]), \
+                        mock.patch.object(nightly.ns, "assemble", return_value=published), \
+                        mock.patch.object(nightly.ns, "builds_today", return_value=["nightly/build-2026-11-17-1"]), \
+                        mock.patch.object(nightly.ns, "push", return_value=True), \
+                        mock.patch.object(nightly.ns, "update_state"), \
+                        mock.patch.object(nightly, "sdk_ready", return_value=True), \
+                        mock.patch.object(nightly, "merged_since", return_value=[]) as since, \
+                        mock.patch.object(nightly.train, "known_issues", return_value=[]), \
+                        mock.patch("builtins.open", return_value=mock.MagicMock(__enter__=lambda _: io.StringIO())), \
+                        mock.patch.object(nightly, "output"):
+                    nightly.build_set(nightly.Ref("main", published, T), [], [], "2026-11-17", True, False)
+            finally:
+                os.chdir(cwd)
+        since.assert_called_once_with(second, published)
 
     def test_publication_checks_fresh_inventory_and_leaves_upstream_unchanged(self):
         with mock.patch.dict(nightly.os.environ, {"GITHUB_REPOSITORY": "sunrise-org/sunrise"}), \
