@@ -200,6 +200,12 @@ def parse_shard(shard):
     return found["package"], number, count
 
 
+# Each sunrise-client half runs its tests as this many test processes, one after another: one process for all of a
+# half's ~2,700 tests grew past the runner's 32 GiB (the dry-run daily 44022251929 killed both halves; on ovh-rise5
+# the test process alone went from 1.6 to 6.3 GiB over its first 465 tests). A fresh process per batch starts empty.
+CLIENT_BATCHES = 4
+
+
 def in_leg(test, number, count):
     """Whether `test` belongs to leg `number` of `count` (every test to exactly one leg; all, with no legs)."""
     return number is None or zlib.crc32(test.encode()) % count == number - 1
@@ -809,7 +815,7 @@ def run(package, skip, number=None, count=None, only=None):
             env["CARGO_PROFILE_TEST_OPT_LEVEL"] = "3"
         # --no-fail-fast: a target with accepted known failures must not stop the targets after it.
         # Owner-approved stopgap; #2944 removes this when the legs run under 15 minutes.
-        client_half = package == "sunrise-client" and count == 2 and number in (1, 2)
+        client_half = package == "sunrise-client" and count in (2, 2 * CLIENT_BATCHES)
         command = ["cargo", "test", "-p", package, "--lib", *(["--bins", "--tests"] if package in INTEGRATION_TESTS else []), "--no-fail-fast"]
         workspace = "."
         if only:
@@ -1036,13 +1042,11 @@ def main(shards, report=None):
         # names the run in progress; the run's own outcome replaces it.
         write_report(report, dict(verdict, incomplete=[*verdict["incomplete"], {
             "shard": shard, "in_progress": True, "started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}]))
-        _stopped.clear()
-        _reported.clear()
         daily_group = shard.split(":", 1)[0] in ignored_shards.DAILY_ROWS_LEGS.values()
         if daily_group:
             _, package, target = shard.split(":", 2)
             print(f"{package} {target}: {len(groups[package, target])} daily tests", flush=True)
-            results = run(package, [], only=(target, groups[package, target]))
+            runs = [lambda: run(package, [], only=(target, groups[package, target]))]
             expected_daily = groups[package, target]
         else:
             package, number, count = parse_shard(shard)
@@ -1056,15 +1060,26 @@ def main(shards, report=None):
             # The daily rows whose input only another job builds (DAILY_INPUTS) run there, never here.
             skip += [row.test for row in listed_entries() if row.mark == "daily" and row.reason in DAILY_INPUTS
                      and row.package == package and in_leg(row.test, number, count)]
-            results = run(package, skip, number, count) if number is not None else run(package, skip)
-        complete = results is not None
-        if not complete:
-            print(f"{shard}: did not complete: " + json.dumps(_stopped, sort_keys=True), flush=True)
-            problems.append(f"{shard}: the test run did not complete")
-            verdict["incomplete"].append({"shard": shard, **_stopped})
-            # The tests that reported before the run stopped keep their verdicts (an out-of-memory kill of the
-            # test process loses only the rest); what never reported is judged by the next complete run.
-            results = dict(_reported)
+            if package == "sunrise-client" and count == 2:
+                # Half `number` of 2 is legs number, number + 2, ... of 2 * CLIENT_BATCHES (in_leg's crc32 modulo).
+                runs = [lambda sub=number + 2 * batch: run(package, skip, sub, 2 * CLIENT_BATCHES)
+                        for batch in range(CLIENT_BATCHES)]
+            else:
+                runs = [lambda: run(package, skip, number, count) if number is not None else run(package, skip)]
+        results, complete = {}, True
+        for one in runs:
+            _stopped.clear()
+            _reported.clear()
+            found = one()
+            if found is None:
+                complete = False
+                print(f"{shard}: did not complete: " + json.dumps(_stopped, sort_keys=True), flush=True)
+                problems.append(f"{shard}: the test run did not complete")
+                verdict["incomplete"].append({"shard": shard, **_stopped})
+                # The tests that reported before the run stopped keep their verdicts (an out-of-memory kill of the
+                # test process loses only the rest); what never reported is judged by the next complete run.
+                found = dict(_reported)
+            results.update(found)
         for test, passed in sorted(results.items()):
             listed = (package, test) in known
             policy_test = test

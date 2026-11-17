@@ -98,6 +98,28 @@ class IgnoredTests(unittest.TestCase):
         self.assertEqual({(item["test"], item["kind"]) for item in report["problems"]}, {("broken", "failed")})
         self.assertEqual([item["shard"] for item in report["incomplete"]], ["example"])
 
+    def test_a_client_half_runs_as_batches_of_fresh_processes_and_a_killed_one_stops_none_of_the_others(self):
+        calls = []
+
+        def run(package, skip, number=None, count=None):
+            calls.append((number, count))
+            if number == 3:
+                return ignored_tests.stopped("a test process crashed", 0.0, None, results={"third::passed": True})
+            return {f"batch{number}::test": True}
+
+        with tempfile.TemporaryDirectory() as folder, \
+                patch.object(ignored_tests, "CGROUP", Path(folder)), \
+                patch.object(ignored_tests, "known_failures", return_value={}), \
+                patch.object(ignored_tests, "run", side_effect=run), contextlib.redirect_stdout(io.StringIO()):
+            path = Path(folder) / "report.json"
+            self.assertEqual(ignored_tests.main(["sunrise-client#1of2"], str(path)), 1)
+            report = json.loads(path.read_text())
+        # Half 1 of 2 is every test whose leg of 8 is odd: legs 1, 3, 5 and 7, one process each, in that order.
+        self.assertEqual(calls, [(1, 8), (3, 8), (5, 8), (7, 8)])
+        self.assertEqual({item["test"] for item in report["passed"]},
+                         {"batch1::test", "third::passed", "batch5::test", "batch7::test"})
+        self.assertEqual([item["shard"] for item in report["incomplete"]], ["sunrise-client#1of2"])
+
     def test_a_test_process_killed_for_memory_reports_signal_memory_time_and_what_still_ran(self):
         # The shape of the first daily's sunrise-client#1of2 (run 43499359519): the library's test process killed by
         # the out-of-memory killer with one test past 60 s; the later targets finished; cargo exits 101.
