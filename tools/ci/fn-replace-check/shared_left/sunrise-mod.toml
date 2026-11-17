@@ -1,7 +1,7 @@
-id = "fnr_diamond_right"
+id = "fnr_shared_left"
 name = "Function replacement check: one side of a diamond of mods sharing a crates.io crate"
 version = "0.1.0"
-description = "fn-replace: a mod whose library carries itoa, a dependency of fnr_diamond"
+description = "fn-replace: a mod whose library carries itoa, a dependency of fnr_shared_tip"
 authors = []
 api = "0.2"
 side = "both"

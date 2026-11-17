@@ -3,7 +3,7 @@
 version = 4
 
 [[package]]
-name = "fnr-diamond"
+name = "fnr-shared-right"
 version = "0.1.0"
 dependencies = [
  "itoa",

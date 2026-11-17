@@ -10,9 +10,9 @@ struct Mod;
 impl Hooks for Mod {
     fn server_started(&self, _: &mut dyn ServerHost, _: &mut mod_api::ServerStartedEvent) {
         eprintln!(
-            "fnr: diamond left {} right {} own {}",
-            fnr_diamond_left::format(1),
-            fnr_diamond_right::format(2),
+            "fnr: shared_tip left {} right {} own {}",
+            fnr_shared_left::format(1),
+            fnr_shared_right::format(2),
             itoa::Buffer::new().format(3)
         );
     }

@@ -3,7 +3,7 @@
 version = 4
 
 [[package]]
-name = "fnr-diamond-left"
+name = "fnr-shared-tip"
 version = "0.1.0"
 dependencies = [
  "itoa",
