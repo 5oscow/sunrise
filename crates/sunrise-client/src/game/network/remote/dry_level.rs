@@ -27,6 +27,15 @@ impl sunrise_world::level::LevelAccess for DryLevel<'_> {
     fn before_smoke_source(&self, state: BlockStateId, smoke: &mut Option<bool>) {
         self.base.before_smoke_source(state, smoke);
     }
+    fn before_fire_odds(
+        &self,
+        state: BlockStateId,
+        pos: sunrise_core::position::BlockPos,
+        face: sunrise_core::geometry::Direction,
+        odds: &mut Option<(i32, i32)>,
+    ) {
+        self.base.before_fire_odds(state, pos, face, odds);
+    }
     fn cake_can_eat(&self, vanilla: bool) -> bool {
         self.base.cake_can_eat(vanilla)
     }

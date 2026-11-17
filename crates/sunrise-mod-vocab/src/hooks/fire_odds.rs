@@ -2,10 +2,10 @@
 // catalog-order: 0215
 
 pub trait Hooks {
-    /// How fire treats the block `state` at `pos` on either side. The client
+    /// How fire treats the block `state` at `pos` on either side
+    /// (`FireBlock.setFlammable(block, igniteOdds, burnOdds)`). The client
     /// reads ignite odds for placement and shape prediction; only the server burns blocks.
-    /// (`FireBlock.setFlammable(block, igniteOdds, burnOdds)`), asked from its
-    /// side `face`, the one that faces the fire or the air fire may take: put
+    /// From the block's side `face`, the one facing the fire or the air fire may take, put
     /// `(ignite, burn)` in `odds` for your own blocks, and vanilla's table
     /// isn't read. Ignite odds above zero let fire stand beside the block and
     /// spread into the air around it (planks 5, wool 30, leaves 30); burn odds
