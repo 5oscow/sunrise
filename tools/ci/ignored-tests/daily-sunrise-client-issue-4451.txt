@@ -2267,6 +2267,7 @@ sunrise-client game::remote::level_sound_tests::packets_ask_client_level_before_
 sunrise-client game::remote::movement_input_tests::movement_input_disabled_listener_keeps_vanilla_keys lib daily resources
 sunrise-client game::remote::movement_input_tests::movement_input_without_listeners_keeps_vanilla_latch_double_tap_and_controller lib daily resources
 sunrise-client game::remote::movement_input_tests::native_movement_input_keys_axes_and_sprint lib daily resources
+sunrise-client game::remote::movement_input_tests::the_sneak_key_counts_while_riding lib daily resources
 sunrise-client game::remote::native_entity_tests::a_villager_raid_sweat_event_draws_particles lib daily resources
 sunrise-client game::remote::passage_cross_tests::a_crossing_a_mod_cancels_on_the_wire_moves_nothing lib daily resources
 sunrise-client game::remote::passage_cross_tests::a_window_crosses_and_keeps_its_velocity_through_the_acceptance lib daily resources

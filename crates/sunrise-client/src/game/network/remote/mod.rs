@@ -6357,6 +6357,11 @@ impl Game<'_> {
         self.rope_rot_old = (self.yaw, self.pitch);
         // A passenger moves with its vehicle (Entity.rideTick), not by itself.
         let riding = self.screen != Screen::Dead && self.remote_ride(keys, sprint_window)?;
+        // LocalPlayer.isShiftKeyDown is the input's sneak, riding or not: the tick after a
+        // dismount crouches (a passenger never does) on the sneak held to get off.
+        if riding && let Some(p) = self.player.as_mut() {
+            p.shift_key_down = keys.shift;
+        }
         // The server sends no passenger's position: they sit where their
         // vehicles are now.
         self.position_riders();
