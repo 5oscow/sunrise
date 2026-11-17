@@ -74,7 +74,12 @@ concurrency:
 jobs:
   decide:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # A publishing run may wait for its commit's gate, run again when the next push cancelled it (GATE_RERUN).
+    timeout-minutes: 170
+    permissions:
+      contents: read
+      issues: read   # the open release-blocker issues
+      actions: write # dyna-checks' gate jobs, and running a cancelled one again (tools/release_train.py gate_again)
     outputs:
       release: ${{ steps.decide.outputs.release }}
       head: ${{ steps.decide.outputs.head }}
@@ -98,6 +103,8 @@ jobs:
           HEAD_SHA: ${{ inputs.commit }}
           FORCE: ${{ inputs.force && 'yes' || '' }}
           DAILY: ${{ inputs.daily && 'yes' || '' }}
+          # A publishing run (not a dry run, on main) runs its commit's gate again if the next push cancelled it.
+          GATE_RERUN: ${{ steps.mode.outputs.dry_run == 'false' && '1' || '' }}
         run: |
           python3 tools/release_train.py decide --kind game --channel "$KIND" ${HEAD_SHA:+--head "$HEAD_SHA"} ${FORCE:+--force} ${DAILY:+--daily} | tee decision.json
           echo "### $KIND: $(jq -r '.reason' decision.json)" >> "$GITHUB_STEP_SUMMARY"

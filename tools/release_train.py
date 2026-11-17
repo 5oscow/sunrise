@@ -12,7 +12,9 @@ The game ships only the Nightly since 2026-10-28 (Ludovic): when `decide --kind 
 On the fork (CI tiers, owner 2026-11-13) `--channel` names the kind of build: `nightly` takes `daily-green` and
 refuses any other --head (an older commit had no daily run of its own, and no SDK); `snapshot` takes main's head (or
 a --head on main) and refuses a commit whose gate jobs (dyna-checks' main-push lint, verify, verify-static, launcher)
-did not all pass (pending is not passed); otherwise it always builds, as snapshot-<date>-<short> (no batch rules,
+did not all pass (pending is not passed). The next push cancels a main push run (dyna-ci.yml), so a publishing run
+(GATE_RERUN=1, release.yml's decide) waits for the commit's run and starts it again once when it was cancelled, in a
+group no push cancels (gate_again); otherwise it always builds, as snapshot-<date>-<short> (no batch rules,
 cap, pause or release-blocker: a snapshot is for testing main, never for players).
 
 A kind releases when a pull request merged into main since its last published release changed one of its
@@ -46,6 +48,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import time
 
 ROOT = Path(__file__).resolve().parents[1]
 REPO = os.environ.get("GITHUB_REPOSITORY", "sunrise-org/sunrise")
@@ -630,13 +633,48 @@ def daily_green_commit():
     return run("git", "rev-parse", "--verify", "--quiet", f"refs/tags/{DAILY_GREEN}^{{commit}}", check=False).strip()
 
 
-def fork_gate_passed(sha):
-    """Whether the newest dyna-checks main-push run on sha passed every gate job (the snapshot's check)."""
+GATE_WAIT = 150 * 60  # seconds: a gate run's queue wait and its longest job, lint (about 25 min), with room
+GATE_POLL = 60
+
+
+def push_gate_run(sha):
+    """The newest dyna-checks main-push run on sha (its API record), or None."""
     pages = gh_json("api", "--paginate",
                     f"repos/{REPO}/actions/workflows/dyna-ci.yml/runs?branch=main&event=push&head_sha={sha}&per_page=100")
     runs = [entry for page in pages for entry in page["workflow_runs"]
             if entry["head_sha"] == sha and entry["head_branch"] == "main" and entry["event"] == "push"]
-    return bool(runs) and gate_jobs_passed(runs[0]["id"], GATE)
+    return runs[0] if runs else None
+
+
+def fork_gate_passed(sha):
+    """Whether the newest dyna-checks main-push run on sha passed every gate job (the snapshot's check)."""
+    found = push_gate_run(sha)
+    return found is not None and gate_jobs_passed(found["id"], GATE)
+
+
+def gate_again(sha):
+    """Whether sha's gate passes once its main push run ends, the run started again (its cancelled and failed jobs,
+    `gh run rerun --failed`) when the next push cancelled it: that run's later attempt has a concurrency group of its
+    own (dyna-ci.yml), so it finishes. A gate job that failed is a red gate, never run again. Waits GATE_WAIT at most."""
+    deadline, again = time.monotonic() + GATE_WAIT, False
+    while True:
+        found = push_gate_run(sha)
+        if found is None:
+            return False
+        if found["status"] != "completed":
+            if time.monotonic() > deadline:
+                return False
+            time.sleep(GATE_POLL)
+            continue
+        if gate_jobs_passed(found["id"], GATE):
+            return True
+        if again or found["conclusion"] != "cancelled":
+            return False
+        print(f"dyna-checks' main push run {found['id']} on {sha[:9]} was cancelled by a later push: running its gate "
+              "again", file=sys.stderr)
+        run("gh", "run", "rerun", str(found["id"]), "--failed", "--repo", REPO)
+        again = True
+        time.sleep(GATE_POLL)
 
 
 def channel_head(channel, head):
@@ -647,7 +685,7 @@ def channel_head(channel, head):
         raise SystemExit(f"::error::refused: {head} is not a commit of this repository")
     if subprocess.run(["git", "merge-base", "--is-ancestor", sha, "refs/remotes/origin/main"], cwd=ROOT).returncode:
         raise SystemExit(f"::error::refused: {sha} is not on main; a {channel} builds only a commit of main")
-    if not fork_gate_passed(sha):
+    if not fork_gate_passed(sha) and not (os.environ.get("GATE_RERUN") == "1" and gate_again(sha)):
         raise SystemExit(f"::error::refused: dyna-checks' gate jobs ({', '.join(sorted(GATE))}) "
                          f"did not all pass on a main push of {sha}; a {channel} needs the gate green on its commit")
     return sha
