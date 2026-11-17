@@ -51,9 +51,13 @@ pub(crate) fn resolve(root: &Path, catalog: &mut Catalog) -> Result<(), String> 
                 .strip_prefix("sunrise_client::game::native_hooks::")
                 .unwrap();
             let name = tail.split("::").skip(1).collect::<Vec<_>>().join("::");
-            let (target, signature) = targets
-                .get(&name)
-                .ok_or_else(|| format!("{}: no native definition", hook.name))?;
+            let Some((target, signature)) = targets.get(&name) else {
+                if !hook.call.is_empty() {
+                    // The catalog owns this signature; no engine wrapper is required.
+                    continue;
+                }
+                return Err(format!("{}: no native definition", hook.name));
+            };
             if hook.stack_count.is_some() && hook.call.is_empty() {
                 let output = signature.inputs.iter().find_map(|input| {
                     let syn::FnArg::Typed(input) = input else {
@@ -77,6 +81,32 @@ pub(crate) fn resolve(root: &Path, catalog: &mut Catalog) -> Result<(), String> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn explicit_signatures_need_no_wrapper_regardless_of_scope() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let declared = Catalog::load_declarations(&root).unwrap();
+        let mut hook = declared
+            .hooks
+            .into_iter()
+            .find(|hook| !hook.call.is_empty())
+            .unwrap();
+        hook.target =
+            "sunrise_client::game::native_hooks::base::Game::native_missing_fixture".into();
+        hook.scope = None;
+        let mut catalog = Catalog {
+            hooks: vec![hook],
+            draw_contexts: Vec::new(),
+            general_notes: None,
+        };
+        resolve(&root, &mut catalog).unwrap();
+        catalog.hooks[0].call.clear();
+        assert!(
+            resolve(&root, &mut catalog)
+                .unwrap_err()
+                .contains("no native definition")
+        );
+    }
 
     #[test]
     #[ignore = "daily"]

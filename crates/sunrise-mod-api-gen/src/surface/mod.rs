@@ -1434,6 +1434,7 @@ fn hook_records(hooks: &[catalog::Hook], types: &[Type], notes: &mut Vec<String>
             catalog::PartKind::BlockEntity => "block_entity",
             catalog::PartKind::Item => "item",
             catalog::PartKind::Menu => "menu",
+            catalog::PartKind::Effect => "effect",
             catalog::PartKind::Fluid => "fluid",
             catalog::PartKind::Entity => "entity",
         };

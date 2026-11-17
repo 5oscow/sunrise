@@ -1031,6 +1031,10 @@ pub(in crate::game) fn content_root(
         |id| sunrise_client_core::potions::effect(id).map(|def| def.index),
     )
     .map_err(|errors| errors.join("\n"))?;
+    mod_api::__private::validate_effect_part_owners(|id| {
+        sunrise_client_core::potions::effect(id)?.owner
+    })
+    .map_err(|errors| errors.join("\n"))?;
     let behavior: serde_json::Value =
         sunrise_world::json_file::read(&overlay.root.prepared().join("block-behaviours.json"))?;
     let fluids = behavior["fluids"]

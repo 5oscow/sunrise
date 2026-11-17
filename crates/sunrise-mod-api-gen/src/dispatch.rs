@@ -80,7 +80,24 @@ pub(super) fn emit<'a>(
         let is_render = is_render(hook);
         let external = free_function_source(target);
         let in_game = external.is_none();
-        let (method, call) = if let Some((krate, path)) = external {
+        // An explicit catalog signature can stand on its own. Existing engine
+        // wrappers remain optional conversion boundaries, not signature owners.
+        let declaration_only = !hook.call.is_empty()
+            && external.is_none()
+            && !methods.iter().any(|method| method.sig.ident == native);
+        let (method, call) = if declaration_only {
+            let carrier = format!("{}Call", hook_id(name));
+            let receiver = if hook.host == Some(crate::catalog::HostAccess::Read) {
+                "&self"
+            } else {
+                "&mut self"
+            };
+            let method = syn::parse_str(&format!(
+                "fn {native}({receiver}, call: {carrier}<'_>) {{}}"
+            ))
+            .map_err(|error| format!("invalid declared signature for {name}: {error}"))?;
+            (method, format!("dispatch_{name}"))
+        } else if let Some((krate, path)) = external {
             let Some((module, function)) = path.rsplit_once("::") else {
                 return Err(format!("wrong target for {name}"));
             };
@@ -133,7 +150,7 @@ pub(super) fn emit<'a>(
                 format!("dispatch_{name}"),
             )
         };
-        let fill = !is_render && needs_fill(&method, &call, in_game)?;
+        let fill = !declaration_only && !is_render && needs_fill(&method, &call, in_game)?;
         let sig = &method.sig;
         let mut native_args = Vec::new();
         let mut receiver_mut = None;
@@ -325,6 +342,7 @@ pub(super) fn emit<'a>(
                     PartKind::BlockEntity => ("BlockEntityPart", "block_entity"),
                     PartKind::Item => ("ItemPart", "item"),
                     PartKind::Menu => ("MenuPart", "menu"),
+                    PartKind::Effect => ("MobEffectPart", "effect"),
                     PartKind::Fluid => ("FluidPart", "fluid"),
                     PartKind::Entity => ("EntityPart", "entity"),
                 };
@@ -354,6 +372,9 @@ pub(super) fn emit<'a>(
                     }
                     "& ItemStack" => {
                         format!("{table}(|| super::content::registry_keys::item_id({key}.item()))")
+                    }
+                    "EffectKey" if table == "effect" => {
+                        format!("effect(|| super::content::registry_keys::effect_id({key}))")
                     }
                     "BlockEntityTypeKey" if table == "block_entity" => format!(
                         "block_entity_kind(|| super::content::registry_keys::block_entity_type_name({key}))"
@@ -593,7 +614,7 @@ pub(super) fn emit<'a>(
             _ => "",
         };
         // Reuse the exact host and drawing conversions for generated game-side calls.
-        if in_game {
+        if in_game && !declaration_only {
             // A scoped read hook can run against either the game or a borrowed
             // tick view. Its native receiver carries the selected host.
             let scoped_read_host = target.contains("::NativeHookHost<");

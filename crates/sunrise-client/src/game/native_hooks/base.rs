@@ -4065,39 +4065,8 @@ impl Game<'_> {
     pub(in crate::game) fn native_on_equip(&mut self, slot: &str, new: Option<&ItemStack>) {
         self.fire_on_equip(slot, new);
     }
-    /// `MobEffect.shouldApplyEffectTickThisTick` for a content mod's effect
-    /// `effect` (`ruby:bleeding`), each tick a player or a mob has it, in
-    /// `MobEffectInstance.tickServer` before it counts down: `tick_count` is
-    /// the ticks left (the entity's tick count when infinite). Set `apply`
-    /// and `native_apply_effect_tick` follows. Server-side.
-    pub(in crate::game) fn native_should_apply_effect_tick_this_tick(
-        &self,
-        mod_id: &str,
-        effect: EffectKey,
-        tick_count: i32,
-        amplifier: i32,
-        apply: &mut bool,
-    ) {
-        self.fire_should_apply_effect_tick_this_tick(mod_id, effect, tick_count, amplifier, apply);
-    }
-    /// `MobEffect.applyEffectTick`: the content mod's effect `effect` acts on
-    /// `entity` in `dimension` (`minecraft:overworld`). Clear `keep` and the
-    /// effect ends now, before it counts down. `entity` is a mob's
-    /// `Entity.getId`, None for a player (`native_acting_player` says who).
-    /// It runs inside the entity's tick: a mob's world borrows the game
-    /// there, so the game is read-only, and it does not hold the ticking
-    /// mobs, nor the player's effects. `holder` identifies the holder; Host
-    /// reads of a mob holder are unavailable while it is ticking. Queued
-    /// changes apply after the hook; clearing `keep` ends the effect.
-    /// Server-side.
-    pub(in crate::game) fn native_apply_effect_tick(
-        &self,
-        call: mod_api::__private::ApplyEffectTickCall<'_>,
-    ) {
-        self.fire_apply_effect_tick(call);
-    }
     /// `MobEffect.onEffectAdded`: `LivingEntity.addEffect` gave `entity`
-    /// (as in `native_apply_effect_tick`) the content mod's effect `effect`,
+    /// the content mod's effect `effect`,
     /// which it didn't have. Server-side.
     pub(in crate::game) fn native_on_effect_added(
         &mut self,

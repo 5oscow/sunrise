@@ -45,6 +45,9 @@ mod content {
         pub(in crate::tests) fn item_id(key: super::super::ItemKey<'_>) -> Option<&str> {
             Some(key.0)
         }
+        pub(in crate::tests) fn effect_id(_: super::super::EffectKey) -> Option<&'static str> {
+            Some("test:effect")
+        }
     }
 }
 
@@ -247,6 +250,7 @@ struct Parts {
     block_entities: Vec<&'static dyn BlockEntityPart>,
     items: Vec<&'static dyn ItemPart>,
     menus: Vec<&'static dyn MenuPart>,
+    effects: Vec<&'static dyn MobEffectPart>,
     fluids: Vec<&'static dyn FluidPart>,
     entities: Vec<&'static dyn EntityPart>,
 }
@@ -255,6 +259,7 @@ static NO_PARTS: Parts = Parts {
     block_entities: Vec::new(),
     items: Vec::new(),
     menus: Vec::new(),
+    effects: Vec::new(),
     fluids: Vec::new(),
     entities: Vec::new(),
 };
@@ -276,12 +281,16 @@ fn has_part_hook(_: HookId) -> bool {
         || !parts.block_entities.is_empty()
         || !parts.items.is_empty()
         || !parts.menus.is_empty()
+        || !parts.effects.is_empty()
         || !parts.entities.is_empty()
 }
 fn parts(_: HookId, _: &'static str) -> &'static Parts {
     PARTS.get()
 }
 impl Parts {
+    fn effect<'a>(&self, _: impl FnOnce() -> Option<&'a str>) -> &[&'static dyn MobEffectPart] {
+        &self.effects
+    }
     fn for_hook(&self, _: HookId) -> Option<&Self> {
         Some(self)
     }
@@ -432,6 +441,23 @@ impl ItemPart for Mod {
         }
     }
 }
+impl MobEffectPart for Mod {
+    fn effect_subscribed(&self) -> &'static [Option<HookId>] {
+        &[]
+    }
+    fn should_apply_effect_tick_this_tick(
+        &self,
+        _: &dyn Host,
+        event: &mut ShouldApplyEffectTickThisTickEvent,
+    ) {
+        assert_eq!(
+            (event.effect, event.tick_count, event.amplifier),
+            (EffectKey(7), 19, 2)
+        );
+        event.apply = !event.apply;
+        self.calls.lock().unwrap().push(self.id);
+    }
+}
 #[mod_api::__subscriptions]
 impl Hooks for Mod {
     fn living_entity_use_item_finish(
@@ -482,18 +508,6 @@ impl Hooks for Mod {
     fn zoom(&self, _: &dyn ClientHost, _: &mut ZoomEvent) -> Option<Zoom> {
         self.calls.lock().unwrap().push(self.id);
         Some(Zoom(self.id))
-    }
-    fn should_apply_effect_tick_this_tick(
-        &self,
-        _: &dyn Host,
-        event: &mut ShouldApplyEffectTickThisTickEvent,
-    ) {
-        assert_eq!(
-            (event.effect, event.tick_count, event.amplifier),
-            (EffectKey(7), 19, 2)
-        );
-        event.apply = !event.apply;
-        self.calls.lock().unwrap().push(self.id);
     }
     fn living_incoming_damage(
         &self,

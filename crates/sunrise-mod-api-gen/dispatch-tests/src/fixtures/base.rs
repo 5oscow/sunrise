@@ -647,13 +647,18 @@ fn dispatch_contracts() {
     assert_eq!(lines.iter().map(|line| line.1).collect::<Vec<_>>(), [1, 2]);
     let mut apply = false;
     calls.lock().unwrap().clear();
+    install_parts(Parts {
+        effects: vec![part(1, &calls)],
+        ..Parts::default()
+    });
     dispatch_should_apply_effect_tick_this_tick(
         &host,
-        "effect-owner",
-        EffectKey(7),
-        19,
-        2,
-        &mut apply,
+        calls::ShouldApplyEffectTickThisTickCall {
+            effect: EffectKey(7),
+            tick_count: 19,
+            amplifier: 2,
+            apply: &mut apply,
+        },
     );
     assert!(apply);
     assert_eq!(*calls.lock().unwrap(), [1]);

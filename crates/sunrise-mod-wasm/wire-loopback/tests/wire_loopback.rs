@@ -715,24 +715,41 @@ fn wire_loopback_checked_append_is_atomic_and_bit_exact() {
     mod_api::__private::initialize().unwrap();
     let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
     use mod_api::EffectTickChange;
+    struct TickOwner;
+    #[mod_api::__subscriptions]
+    impl Hooks for TickOwner {
+        fn register(
+            &self,
+            registrar: &mut dyn mod_api::Registrar,
+            _: &mod_api::RegistrationContext,
+        ) {
+            let effect = registrar.effect_key("wire_test:tick");
+            REGISTERED_EFFECT.set(Some(effect));
+            let handler = WasmHandler {
+                index: guest::add_handler(vec![guest::view::<dyn mod_api::MobEffectPart>(
+                    Arc::new(apply_effect_tick_hook::ApplyEffectTickHooks),
+                )]),
+                module: WasmMod {
+                    group: 0,
+                    subscribed: &[],
+                    listeners: &[],
+                    corrupt: false,
+                },
+            };
+            registrar.mob_effect_part(&effect, handler).unwrap();
+        }
+    }
     struct World;
     impl mod_api::Host for World {}
     mod_api::impl_host_areas!(World);
-    let mods = [mod_api::ModEntry::new(
-        "wire_test",
-        Box::new(WasmMod {
-            group: 0,
-            subscribed: &[Some(mod_api::HookId::ApplyEffectTick)],
-            listeners: &[],
-            corrupt: false,
-        }),
-    )];
+    let mods = [mod_api::ModEntry::new("wire_test", Box::new(TickOwner))];
     mod_api::__private::install_parts(
         &mods,
         &mod_api::__private::part_tests::rule_schema(),
         |_| false,
     )
     .unwrap();
+    mod_api::__private::resolve_effects(["wire_test:tick"], |_| Some(0)).unwrap();
     let holder = mod_api::LivingRef::new(mod_api::EntityRef::new(mod_api::WorldEpoch::new(1), 7));
     mod_api::testing::with_mods(Arc::from(mods), || {
         for attack in [0, 1, 2, 3] {
@@ -742,7 +759,6 @@ fn wire_loopback_checked_append_is_atomic_and_bit_exact() {
             mod_api::dispatch_apply_effect_tick(
                 &World,
                 mod_api::__private::ApplyEffectTickCall {
-                    mod_id: "wire_test",
                     effect: REGISTERED_EFFECT.get().unwrap(),
                     dimension: "test:world",
                     entity: Some(7),

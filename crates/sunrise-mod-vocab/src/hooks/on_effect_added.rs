@@ -14,19 +14,19 @@ pub trait Hooks {
     /// `active_effects` is the holder's live active-effect snapshot at this point in the
     /// pass; `has_effect(key)` reads it, reflecting removals earlier in the pass.
     /// The current level's game rules remain readable through `host.level(dimension)`.
-    /// Version 2: only the content mod `mod_id` that declared `effect` is dispatched.
-    /// All snapshots and queued changes cross the shared Wire boundary on both targets.
-    /// Server-side.
+    /// Called only when this Part's own cadence requests it. All Parts see
+    /// the same snapshots; their queued changes apply in Part order afterward.
+    /// Clearing `keep` skips later Parts. Server-side on both targets.
     #[hook(
         side = "server",
-        owner = "mod_id",
-        version = 2,
+        scope = "effect",
+        key = "effect",
+        version = 3,
         contract = "listen",
         host = "read",
         neoforge = "none (vanilla MobEffect.applyEffectTick; NeoForge adds no event or extension for it)"
     )]
     fn apply_effect_tick(
-        mod_id: &str,
         effect: EffectKey,
         dimension: &str,
         entity: Option<i32>,
