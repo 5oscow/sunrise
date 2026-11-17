@@ -42,14 +42,12 @@ pub const MAX_WASM_MEMORY_MIB: u32 = 4096;
 /// Maximum manifest bytes accepted by package readers and developer tools.
 pub const MAX_MANIFEST: u64 = 32 << 20;
 
-/// A mod's version as semver, padding an omitted minor and patch (`1` is `1.0.0`, `1.2-rc1` is
-/// `1.2.0-rc1`). Pre-release and build metadata are allowed.
+/// A mod's version as semver, padding an omitted minor and patch (`1` is `1.0.0`, `1.2` is
+/// `1.2.0`). Pre-release and build metadata are allowed.
 pub fn parse_version(version: &str) -> Result<semver::Version, String> {
-    let at = version.find(['-', '+']).unwrap_or(version.len());
-    let (core, rest) = version.split_at(at);
-    let padded = match core.matches('.').count() {
-        0 => format!("{core}.0.0{rest}"),
-        1 => format!("{core}.0{rest}"),
+    let padded = match version.matches('.').count() {
+        0 => format!("{version}.0.0"),
+        1 => format!("{version}.0"),
         _ => version.to_owned(),
     };
     semver::Version::parse(&padded).map_err(|_| {
@@ -1379,6 +1377,34 @@ mod tests {
             error.contains("chemlib::transfer") && error.contains("own hooks and functions"),
             "{error}"
         );
+    }
+
+    #[test]
+    fn a_version_that_is_not_semver_refuses_the_manifest_when_read() {
+        let with = |v: &str| {
+            Manifest::parse(&EXAMPLE.replace("version = \"0.1.0\"", &format!("version = '{v}'")))
+        };
+        let error = with("26.3-3.6.30+refabricated").unwrap_err();
+        assert!(
+            error.contains(
+                "version \"26.3-3.6.30+refabricated\" is not a semver version (MAJOR.MINOR.PATCH, e.g. 3.6.30+refabricated)"
+            ),
+            "{error}"
+        );
+        assert!(with("").is_err());
+    }
+
+    #[test]
+    fn an_omitted_minor_and_patch_are_padded() {
+        let with = |v: &str| {
+            Manifest::parse(&EXAMPLE.replace("version = \"0.1.0\"", &format!("version = '{v}'")))
+                .unwrap()
+                .version
+                .to_string()
+        };
+        assert_eq!(with("1"), "1.0.0");
+        assert_eq!(with("1.2"), "1.2.0");
+        assert_eq!(with("3.6.30+refabricated"), "3.6.30+refabricated");
     }
 
     #[test]

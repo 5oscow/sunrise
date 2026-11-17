@@ -331,6 +331,16 @@ cargo run -p sunrise-port-pack -- events ~/.sunrise/ports/pack/jars   # NeoForge
 cargo run -p sunrise-port-pack -- port ~/Downloads/pack.zip ~/.sunrise/ports/pack [--from <folder>] [--resources <root>]
 ```
 
+### Versions of carried mods
+
+A manifest's `version` must be semver, and a Java jar's version often isn't. The carry drops a leading
+`<Minecraft version>-` when it equals the pack's own (`26.3-3.6.30+refabricated` becomes
+`3.6.30+refabricated`) and pads an omitted minor or patch. A version that is still not semver is written
+as `0.0.0+<the jar's version, with characters outside [0-9A-Za-z-.] replaced by '-'>`. The jar's original
+string stays in the manifest's header comment. `0.0.0+…` sorts below every real version, so a requirement
+such as `^3.6` can never match it: the port report says that the mod's version couldn't be read, and it
+must be set by hand in the carried `sunrise-mod.toml` before anything can depend on the mod.
+
 ### Data packs in mod jars
 
 Some mods are a data pack in a jar: no classes, a `pack.mcmeta` and a `data/` folder (the skyblock

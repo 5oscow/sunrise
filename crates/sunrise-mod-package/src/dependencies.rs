@@ -408,16 +408,14 @@ fn resolve_all(
                     note,
                 });
             }
-            if !links {
-                if !dep.requirement.matches(other.version) {
-                    return Err(Error::Version {
-                        owner: item.id.into(),
-                        target: dep.id.clone(),
-                        version: other.version.to_string(),
-                        requirement: dep.requirement.to_string(),
-                        note,
-                    });
-                }
+            if !links && !dep.requirement.matches(other.version) {
+                return Err(Error::Version {
+                    owner: item.id.into(),
+                    target: dep.id.clone(),
+                    version: other.version.to_string(),
+                    requirement: dep.requirement.to_string(),
+                    note,
+                });
             }
             use mod_vocab::DependencyOrder;
             if links || dep.order == DependencyOrder::After {
@@ -852,7 +850,7 @@ mod tests {
         let refused = with(&[("broken", "1.5")], &server, &none).unwrap_err();
         assert_eq!(
             refused.to_string(),
-            "user is incompatible with broken 1.5 (Corrupts saves https://example.com/why)"
+            "user is incompatible with broken 1.5.0 (Corrupts saves https://example.com/why)"
         );
         assert!(with(&[("broken", "2.0")], &server, &none).is_ok());
         // A client-only rule holds nothing on a dedicated server.
@@ -864,7 +862,7 @@ mod tests {
                 .iter()
                 .map(ToString::to_string)
                 .collect::<Vec<_>>(),
-            ["user works badly with slow 3"]
+            ["user works badly with slow 3.0.0"]
         );
         // Before a present mod it doesn't depend on; an absent one is ignored.
         let mods = [item("late", "1", &[]), item("user", "1", &[])];
@@ -883,7 +881,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             [
                 "dependency override: user -> broken only discouraged",
-                "user works badly with broken 1.5 (Corrupts saves https://example.com/why)"
+                "user works badly with broken 1.5.0 (Corrupts saves https://example.com/why)"
             ]
         );
         let drop: Overrides = toml::from_str("[user]\nbroken = 'drop'\n").unwrap();
@@ -965,7 +963,7 @@ mod tests {
                 .unwrap_err();
             assert_eq!(
                 error.to_string(),
-                "owner is incompatible with other 1 (Bad interaction https://example.test/why)"
+                "owner is incompatible with other 1.0.0 (Bad interaction https://example.test/why)"
             );
         }
         let mut dependent = manifest("dependent", "[dependencies]\nother='^1'");

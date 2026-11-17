@@ -42,7 +42,11 @@ folders are unsupported.
 ## `sunrise-mod.toml`
 
 The shared [manifest fields](../how-to/content-mods.md#the-manifest) include `id`, `name`, `version`, `api = "0.2"`
-and `capabilities = ["registries"]`. The content API is checked for exact equality. Unknown fields
+and `capabilities = ["registries"]`. `version` is semver (`MAJOR.MINOR.PATCH`, with an optional
+pre-release and build metadata such as `3.6.30+refabricated`); an omitted minor or patch is padded
+(`1` is `1.0.0`, `1.2` is `1.2.0`). The manifest is refused when it is read if the value is not
+semver, naming it: `version "26.3-3.6.30+refabricated" is not a semver version (MAJOR.MINOR.PATCH,
+e.g. 3.6.30+refabricated)`. The content API is checked for exact equality. Unknown fields
 refuse the manifest. Native mods may declare top-level `internals`, an array of tables with
 `path`, optional `hash`, and `kind` when a path names several member kinds. Without `hash`, the build uses the fingerprint from the pinned game’s catalog. An explicitly empty `hash` is refused. Native code adds `[native]`:
 

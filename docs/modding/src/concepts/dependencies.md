@@ -10,7 +10,8 @@ extra_mod = { version = "^2", optional = true }
 ```
 
 Requirements use Cargo semver syntax and are checked against each installed mod's `sunrise-mod.toml`
-`version`, not its Cargo package version. Content-only mods use these declarations to validate their
+`version`, not its Cargo package version. That version is semver, checked when the manifest is read,
+so a mod whose version isn't semver never loads, whatever requirement a dependent states. Content-only mods use these declarations to validate their
 requirements and, by default, load their layers after dependencies. Code dependencies additionally require
 API packages for the dependent and every installed dependency. Missing required dependencies,
 incompatible versions and cycles refuse resolution with the mods named. An absent optional dependency
