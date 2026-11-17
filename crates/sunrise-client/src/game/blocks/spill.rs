@@ -59,7 +59,19 @@ pub(super) fn world_source(
     let key = (pos[0], pos[1], pos[2]);
     let saved = match world.block_entities.get(&key) {
         Some(entity) => save::block_entity_encode::encode(key, entity, block, items),
-        None => saved_entity(world, pos)?,
+        None => saved_entity(world, pos).or_else(|| {
+            // Empty pots have no saved record in our sparse world storage, but
+            // vanilla still has a DecoratedPotBlockEntity. Its empty decorations
+            // must be available to the table's copy_components function too.
+            (block == "minecraft:decorated_pot").then(|| {
+                Tag::compound([
+                    ("id", Tag::String(block.into())),
+                    ("x", Tag::Int(pos[0])),
+                    ("y", Tag::Int(pos[1])),
+                    ("z", Tag::Int(pos[2])),
+                ])
+            })
+        })?,
     };
     Some(std::sync::Arc::new(source_snapshot(
         saved,
