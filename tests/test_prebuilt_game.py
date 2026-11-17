@@ -27,8 +27,9 @@ def write_build_data(root: Path, identity: dict | None = None, commit: str = COM
     lib = prebuilt_game.dylib_prefix()
     members = {"runtime": [f"bin/sunrise-client{exe}",
                            f"deps/{lib}sunrise_mod_host{so}", f"deps/{lib}sunrise_mod_wasm{so}",
-                           *[f"deps/{lib}{crate}{so}" for crate in ("mod_api", "mod_vocab", "mod_points")]],
-               "api": [prebuilt_game.NATIVE_MODS_TEMPLATE, "deps/libmod_api-1.rmeta", "deps/libmod_points-1.rmeta"]}
+                           *[f"deps/{lib}{crate}{so}" for crate in ("mod_api", "mod_vocab", "mod_points", "sunrise_wasmtime")]],
+               "api": [prebuilt_game.NATIVE_MODS_TEMPLATE, "deps/libmod_api-1.rmeta", "deps/libmod_points-1.rmeta",
+                       "deps/libwasmtime-1.rmeta"]}
     for name in members["runtime"] + members["api"]:
         (root / name).parent.mkdir(parents=True, exist_ok=True)
         (root / name).write_bytes(b"")
@@ -149,8 +150,10 @@ class RegistryPatchTests(unittest.TestCase):
 
 class SdkAssetTests(unittest.TestCase):
     RUNTIME = ["deps/libsunrise_mod_host.so", "deps/libsunrise_mod_wasm.so", "bin/sunrise-client",
-               "deps/libmod_api.so", "deps/libmod_vocab.so", "deps/libmod_points.so"]
-    API = ["deps/libmod_api-1.rmeta", "deps/libmod_points-1.rmeta", "host/libserde_derive.so"]
+               "deps/libmod_api.so", "deps/libmod_vocab.so", "deps/libmod_points.so",
+               "deps/libsunrise_wasmtime.so"]
+    API = ["deps/libmod_api-1.rmeta", "deps/libmod_points-1.rmeta", "deps/libwasmtime-1.rmeta",
+           "host/libserde_derive.so"]
     ENGINE = ["deps/libsunrise_client-1.rmeta", "native/libwindows.a"]
 
     def out(self, root: Path, mtime: int) -> Path:

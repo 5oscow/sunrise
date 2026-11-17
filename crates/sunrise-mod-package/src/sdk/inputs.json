@@ -53,7 +53,8 @@
       "deps/@dylib:sunrise_mod_wasm",
       "deps/@dylib:mod_api",
       "deps/@dylib:mod_vocab",
-      "deps/@dylib:mod_points"
+      "deps/@dylib:mod_points",
+      "deps/@dylib:sunrise_wasmtime"
     ],
     "api": [
       "native_mod_entry.rs.template",
@@ -61,7 +62,8 @@
       "internals.json",
       "loops.json",
       "deps/@rmeta:mod_api",
-      "deps/@rmeta:mod_points"
+      "deps/@rmeta:mod_points",
+      "deps/@rmeta:wasmtime"
     ]
   }
 }

@@ -42,6 +42,8 @@ else:
 
 ROOT = Path(__file__).resolve().parent.parent
 API = "sunrise-mod-api"
+# The game's one wasmtime, a crate of its own beside the API: native mods only, so no wasm32 build of it.
+WASMTIME = "sunrise-wasmtime"
 WASM = "wasm32-unknown-unknown"
 GENERATED = "generated"
 ROOT_TOKEN = "{sunrise-api-source-root}"
@@ -93,15 +95,15 @@ def run(command: list[str], **kwargs) -> str:
     return subprocess.run(command, check=True, text=True, stdout=subprocess.PIPE, **kwargs).stdout
 
 
-def closure(metadata: dict, root: str = API) -> list[Crate]:
-    """The workspace crates the API's library needs: its normal dependencies, transitively, proc macros and
+def closure(metadata: dict, roots: tuple[str, ...] = (API,)) -> list[Crate]:
+    """The workspace crates the roots' libraries need: their normal dependencies, transitively, proc macros and
     theirs included. Build-dependencies are not followed: a crate's build script either runs the generator, whose
     output the API source carries, or is refused."""
     packages = {package["id"]: package for package in metadata["packages"]}
     nodes = {node["id"]: node for node in metadata["resolve"]["nodes"]}
-    start = [package["id"] for package in metadata["packages"] if package["name"] == root and package["source"] is None]
-    if len(start) != 1:
-        raise Refusal("E_API_ROOT", f"expected one workspace package named {root}")
+    start = [package["id"] for package in metadata["packages"] if package["name"] in roots and package["source"] is None]
+    if len(start) != len(roots):
+        raise Refusal("E_API_ROOT", f"expected one workspace package named each of {', '.join(roots)}")
     workspace = Path(metadata["workspace_root"])
     pending, seen, crates = start, set(), []
     while pending:
@@ -366,8 +368,9 @@ def lock_disagreements(slice_lock: dict, game_lock: dict) -> list[str]:
                   if (package["name"], package["version"], package.get("source"), package.get("checksum")) not in game)
 
 
-def build_messages(arguments: list[str], target_dir: Path) -> list[dict]:
-    output = run(["cargo", "check", "--locked", "-p", API, "--message-format", "json", *arguments], cwd=ROOT,
+def build_messages(arguments: list[str], target_dir: Path, packages: tuple[str, ...] = (API, WASMTIME)) -> list[dict]:
+    output = run(["cargo", "check", "--locked", *(f"-p{package}" for package in packages), "--message-format", "json",
+                  *arguments], cwd=ROOT,
                  env={**os.environ, "CARGO_TARGET_DIR": str(target_dir)})
     return [json.loads(line) for line in output.splitlines() if line.startswith("{")]
 
@@ -378,6 +381,8 @@ def collect(crates: list[Crate], features: dict[str, dict], workspace_root: Path
     by_directory = {(workspace_root / crate.directory).resolve(): crate for crate in crates}
     every = [f"{crate.name}/{feature}" for crate in crates for feature in sorted(features[crate.name])]
     builds = {"host": [], WASM: ["--target", WASM], "host, all features": ["--features", ",".join(every)]}
+    # The game's wasmtime is for native mods: it is read on the host, never built for wasm32.
+    only = {WASM: (API,)}
     files: dict[str, bytes] = {}
     generated: dict[str, tuple[str, dict[str, bytes]]] = {}
     # A target folder of its own, fresh: no build script output folder holds a file an older generator wrote.
@@ -385,7 +390,7 @@ def collect(crates: list[Crate], features: dict[str, dict], workspace_root: Path
     target_root.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=target_root, prefix="sdk-api-source-build.") as target_dir:
         for label, arguments in builds.items():
-            collect_build(build_messages(arguments, Path(target_dir)), label, by_directory, workspace_root,
+            collect_build(build_messages(arguments, Path(target_dir), only.get(label, (API, WASMTIME))), label, by_directory, workspace_root,
                           files, generated)
     return files
 
@@ -443,7 +448,7 @@ def build(out: Path) -> dict[str, bytes]:
         raise Refusal("E_OUT_NOT_EMPTY", f"{out} is not empty")
     metadata = json.loads(run(["cargo", "metadata", "--locked", "--format-version", "1"], cwd=ROOT))
     workspace_root = Path(metadata["workspace_root"])
-    crates = closure(metadata)
+    crates = closure(metadata, (API, WASMTIME))
     by_name = {crate.name: crate for crate in crates}
     workspace = tomllib.loads((workspace_root / "Cargo.toml").read_text())
     manifests = {crate.name: tomllib.loads((workspace_root / crate.directory / "Cargo.toml").read_text())
@@ -570,7 +575,7 @@ def check(api: Path, scratch: Path) -> None:
     def api_closure(metadata: dict) -> set[tuple[str, str]]:
         packages = {package["id"]: package for package in metadata["packages"]}
         return {(packages[package]["name"], packages[package]["version"])
-                for package in prebuilt_game.runtime_packages(metadata, API)}
+                for root in (API, WASMTIME) for package in prebuilt_game.runtime_packages(metadata, root)}
 
     if api_closure(game) != api_closure(ours):
         raise Refusal("E_CLOSURE", f"the prebuilt game's API closure {sorted(api_closure(game) - api_closure(ours))} "

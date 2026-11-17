@@ -63,8 +63,9 @@ API_MAIN = ROOT / "crates/sunrise-client/src/native_main.rs.template"
 RUNTIME = "bin"
 # The required inputs (`sunrise_mod_package::sdk::Inputs`): `members` lists what each slice must hold.
 INPUTS = ROOT / "crates/sunrise-mod-package/src/sdk/inputs.json"
-# The crates an API-only mod may name; their closure is the `api` archive.
-API_ROOTS = ("sunrise-mod-api", "sunrise-mod-points")
+# The crates a native mod may name; their closure is the `api` archive. `sunrise-wasmtime` carries the game's one
+# wasmtime: its dylib is in the runtime archive and wasmtime's metadata beside the API's.
+API_ROOTS = ("sunrise-mod-api", "sunrise-mod-points", "sunrise-wasmtime")
 # The game libraries outside the API closure, in the runtime archive.
 GAME_LIBRARIES = ("sunrise_mod_host", "sunrise_mod_wasm")
 # A crate the wasm runtime depends on normally links into its dylib alone, and a C library inside a Rust dylib is

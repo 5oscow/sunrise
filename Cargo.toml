@@ -3,6 +3,7 @@ exclude = ["crates/sunrise-telemetry-server", "launcher", "crates/sunrise-mod-re
 members = [
     "crates/sunrise-guest-stack",
     "crates/sunrise-mod-vocab",
+    "crates/sunrise-wasmtime",
     "crates/sunrise-game-discovery",
     "crates/sunrise-telemetry",
     "crates/sunrise-hooks",
