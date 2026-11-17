@@ -37,8 +37,8 @@ fn a_block_part_answers_fire_odds_for_one_face() {
 
     let mods: mod_api::Mods =
         vec![mod_api::ModEntry::new("fire_odds", Box::new(FireOddsMod))].into();
-    crate::game::api_values::install_parts(&mods).unwrap();
-    mod_platform::testing::with_mods(mods, || {
+    mod_platform::testing::with_mods(mods.clone(), || {
+        crate::game::api_values::install_parts(&mods).unwrap();
         with_game(|game| {
             game.options.dedicated = Some(Vec::new());
             game.world
@@ -59,6 +59,7 @@ fn a_block_part_answers_fire_odds_for_one_face() {
             assert!(!stands(game, 2), "the east face keeps vanilla's never");
             // A client's placement/shape reads ask the same Part.
             game.options.dedicated = None;
+            game.options.execution_role = crate::game::execution_role::ExecutionRole::Client;
             assert!(stands(game, 0));
             assert!(!stands(game, 2));
         })
