@@ -839,7 +839,9 @@ mod tests {
             (
                 "sunrise-wasmtime={path='../sunrise-wasmtime'}",
                 None,
-                Some("example: E_SDK_SOURCE: sunrise-wasmtime: the path must be \".sunrise/sdk/api/crates/sunrise-wasmtime\""),
+                Some(
+                    "example: E_SDK_SOURCE: sunrise-wasmtime: the path must be \".sunrise/sdk/api/crates/sunrise-wasmtime\"",
+                ),
             ),
         ] {
             let text = format!(
@@ -849,7 +851,11 @@ mod tests {
             let bundle = super::super::bundle_in(&dir).unwrap().unwrap();
             match (Project::read(&bundle), libraries, refusal) {
                 (Ok(project), Some(library), None) => {
-                    assert!(project.api_dependencies().contains(&(library.0.to_owned(), library.1)));
+                    assert!(
+                        project
+                            .api_dependencies()
+                            .contains(&(library.0.to_owned(), library.1))
+                    );
                     // The game's features are the only ones: a mod asking for its own is refused on the prebuilt route.
                     assert!(super::super::prebuilt::project_refusal(&project).is_none());
                 }
