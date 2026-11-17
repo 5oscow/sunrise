@@ -44,7 +44,7 @@ pub fn read_dat(path: &Path) -> io::Result<Option<Tag>> {
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(e),
     };
-    let limits = Limits::default();
+    let limits = Limits::saved();
     let raw = Compression::Gzip.decode(&bytes, limits.max_bytes)?;
     let (root, _) = nbt::read_named(&raw, limits).map_err(|e| invalid(e.to_string()))?;
     Ok(Some(root.tag))
@@ -57,7 +57,7 @@ pub fn read_saved_dat(path: &Path) -> io::Result<Option<Tag>> {
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(e),
     };
-    let limits = Limits::default();
+    let limits = Limits::saved();
     let raw = if bytes.starts_with(&[0x1f, 0x8b]) {
         Compression::Gzip.decode(&bytes, limits.max_bytes)?
     } else {
@@ -76,7 +76,7 @@ pub fn write_dat(path: &Path, tag: &Tag) -> io::Result<()> {
         name: JavaString::default(),
         tag: tag.clone(),
     };
-    let raw = nbt::write_named(&root, Limits::default()).map_err(|e| invalid(e.to_string()))?;
+    let raw = nbt::write_named(&root, Limits::saved()).map_err(|e| invalid(e.to_string()))?;
     fs::write(path, Compression::Gzip.encode(&raw)?)
 }
 
@@ -807,7 +807,7 @@ fn upgrade_regions_with_threads(
 /// anew in `staging` and moved over the old one. A file without chunks (most
 /// of a large world's are empty) has nothing to fix and is left as it is.
 fn upgrade_region_file(path: &Path, staging: &Path, fix: &impl Fn(&mut Tag)) -> io::Result<()> {
-    let limits = Limits::default();
+    let limits = Limits::saved();
     let mut region = RegionFile::open(path)?;
     let positions: Vec<_> = region.chunks().map(|(p, _)| p).collect();
     if positions.is_empty() {
@@ -1331,6 +1331,48 @@ mod upgrade_tests {
             converted
         );
         assert!(!dir.join(".datafix").exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A chunk past the default node cap (a storage room's worth of tags)
+    /// upgrades, as normal loading reads it: vanilla reads saved chunks with
+    /// no node limit.
+    #[test]
+    fn region_upgrade_reads_a_chunk_past_the_default_node_cap() {
+        let dir = std::env::temp_dir().join(format!("sunrise-big-chunk-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let mut tag = old_chunk(0, 0);
+        set(&mut tag, "Items", Tag::List(vec![Tag::Byte(1); 1_000_001]));
+        let root = NamedTag {
+            name: "".into(),
+            tag,
+        };
+        let pos = sunrise_core::position::ChunkPos::new(0, 0);
+        let record = ChunkRecord::from_nbt(&root, Compression::Zlib, 7, Limits::saved()).unwrap();
+        let mut region = RegionFile::open_writable(dir.join("r.0.0.mca"), true).unwrap();
+        region.write(pos, &record).unwrap();
+        drop(region);
+
+        let progress = UpgradeProgress::new();
+        let run = Progress {
+            progress: &progress,
+            cancelable: true,
+        };
+        upgrade_regions_with_threads(&dir, &run, fix_overworld_chunk, 1).unwrap();
+        let mut region = RegionFile::open(dir.join("r.0.0.mca")).unwrap();
+        let chunk = region
+            .read(pos)
+            .unwrap()
+            .unwrap()
+            .nbt(Limits::saved())
+            .unwrap();
+        assert_eq!(data_version(&chunk.tag, -1), CURRENT);
+        let Some(Tag::List(items)) = chunk.tag.get("Items") else {
+            panic!("the list is gone");
+        };
+        assert_eq!(items.len(), 1_000_001);
+        drop(region);
         let _ = fs::remove_dir_all(&dir);
     }
 }
