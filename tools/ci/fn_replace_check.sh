@@ -286,6 +286,10 @@ fill 0 100 0 9 100 9 minecraft:hopper[facing=east]{Items:[{Slot:0b,id:"minecraft
     # The mod's own engine ran a module in the game's one wasmtime.
     grep -F 'fnr: wasmtime add 2+3=5' "$scratch/server.log"
   fi
+  if [[ " ${FNR_MODS:-alpha beta} " == *" diamond "* ]]; then
+    # A mod depending on two mods that use the same crates.io crate linked, and runs (#1379).
+    grep -F 'fnr: diamond left 1 right 2 own 3' "$scratch/server.log"
+  fi
   if [[ " ${FNR_MODS:-alpha beta} " == *" fdshape "* ]]; then
     grep -F 'fnr: native_server_started dedicated=true' "$scratch/server.log"
   fi

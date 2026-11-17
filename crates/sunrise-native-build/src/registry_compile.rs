@@ -1,5 +1,7 @@
 //! Cargo builds each mod as a Rust dylib; the SDK executable remains unchanged.
-use super::{api, dependencies, internals, prebuilt, registry_plan, registry_rustc};
+use super::{
+    api, dependencies, internals, prebuilt, registry_plan, registry_rustc, registry_shared,
+};
 use crate::{
     host::{tr, trf},
     rust::Toolchain,
@@ -97,6 +99,21 @@ pub fn compile(
     let mut members = Vec::new();
     let mut wrapper_deps = toml::Table::new();
     let deps = game.join("deps");
+    // Linked like a mod: not with the game executable's link policy, and with the library's own
+    // folder on its search path.
+    let mod_link_args = || {
+        let mut link_args = Vec::new();
+        if cfg!(target_os = "linux") {
+            link_args.push("-Wl,--disable-new-dtags".into());
+            link_args.push("-Wl,-rpath,$ORIGIN".into());
+        }
+        if cfg!(target_os = "macos") {
+            link_args.push("-Wl,-rpath,@loader_path".into());
+        }
+        link_args
+    };
+    let mut shared = registry_shared::Shared::default();
+    let mut mod_roots = BTreeMap::new();
     let packages: BTreeMap<_, _> = projects
         .iter()
         .map(|project| {
@@ -205,8 +222,10 @@ pub fn compile(
                 if project.uses_wasmtime() {
                     source.push_str(prebuilt::WASMTIME_LINK);
                 }
-                fs::write(root, source).map_err(|e| e.to_string())?;
+                fs::write(&root, source).map_err(|e| e.to_string())?;
+                mod_roots.insert(id.clone(), root);
             }
+            shared.add(id, &manifest);
             fs::write(path, manifest.to_string()).map_err(|e| e.to_string())?;
         }
         let mut externs: BTreeMap<String, PathBuf> = BTreeMap::from([
@@ -287,16 +306,44 @@ pub fn compile(
                 toml::toml! { path = facade_relative package = facade_package }.into(),
             );
         }
-        let mut link_args = Vec::new();
-        if cfg!(target_os = "linux") {
-            link_args.push("-Wl,--disable-new-dtags".into());
-            link_args.push("-Wl,-rpath,$ORIGIN".into());
-        }
-        if cfg!(target_os = "macos") {
-            link_args.push("-Wl,-rpath,@loader_path".into());
-        }
-        bindings.insert(dest, registry_rustc::Bindings { externs, link_args });
+        bindings.insert(
+            dest,
+            registry_rustc::Bindings {
+                externs,
+                link_args: mod_link_args(),
+            },
+        );
         members.push(relative);
+    }
+    // When two or more mods use registry crates, those crates come from one library, so a mod
+    // depending on several mods doesn't reach a copy of each through each of them
+    // (`registry_shared`).
+    let shared_users = shared.write(out)?;
+    for (id, root) in &mod_roots {
+        if !shared_users.contains(id) {
+            continue;
+        }
+        let path = out.join("native-api").join(id).join("Cargo.toml");
+        let mut manifest: toml::Table = fs::read_to_string(&path)
+            .map_err(|e| e.to_string())?
+            .parse()
+            .map_err(|e| format!("Cargo.toml: {e}"))?;
+        let mut source = fs::read_to_string(root).map_err(|e| e.to_string())?;
+        registry_shared::link(&mut manifest, &mut source).map_err(|e| format!("{id}: {e}"))?;
+        fs::write(&path, manifest.to_string()).map_err(|e| e.to_string())?;
+        fs::write(root, source).map_err(|e| e.to_string())?;
+    }
+    if !shared_users.is_empty() {
+        // Bindings with no `--extern`, so the compiler wrapper still gives it the mods' dynamic
+        // linking and the SDK's arguments.
+        bindings.insert(
+            out.join(registry_shared::RELATIVE),
+            registry_rustc::Bindings {
+                externs: BTreeMap::new(),
+                link_args: mod_link_args(),
+            },
+        );
+        members.push(registry_shared::RELATIVE.into());
     }
     // `[[native.mixin]]` rows: the patched crates join the workspace beside the mods, whose
     // crates their helpers call, and compile against the SDK like a mod.
@@ -510,6 +557,12 @@ pub fn compile(
             &project.bundle.manifest.version.to_string(),
             false,
         )?;
+        runtime.push(library);
+    }
+    if !shared_users.is_empty() {
+        // Installed beside the mods with no identity record: a library they load, not a mod.
+        let library = release.join(prebuilt::dylib_name(registry_shared::CRATE));
+        super::library_record::validate_exports(&library, registry_shared::CRATE)?;
         runtime.push(library);
     }
     let library = release.join(prebuilt::dylib_name("sunrise_patch"));

@@ -191,6 +191,12 @@ pub fn wanted(
                 {
                     continue;
                 }
+                // The registry crates the mods share, at the path `registry_shared::link` gives.
+                if package == super::registry_shared::PACKAGE
+                    && path == super::registry_shared::DEPENDENCY_PATH
+                {
+                    continue;
+                }
                 if super::api::PACKAGES.iter().any(|(game, _)| {
                     *game != super::api::INTERNALS_PACKAGE
                         && package == *game
