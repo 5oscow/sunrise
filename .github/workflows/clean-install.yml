@@ -107,3 +107,39 @@ jobs:
           if r.get("error") is not None or r.get("frames", 0) < 1500 or not r.get("chunks") or not r.get("player"):
               sys.exit("the game did not draw a world")
           PY
+  self-update:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2025
+            asset: sunrise-launcher-setup.exe
+          - os: ubuntu-24.04
+            asset: sunrise-launcher-linux-x86_64.tar.gz
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Launcher 1.0.0, installed as a player does, updates itself to the newest launcher
+        run: |
+          set -euo pipefail
+          home="${RUNNER_TEMP//\\//}/home"; mkdir -p "$home/programs" && cd "$RUNNER_TEMP"
+          base="https://github.com/sunrise-org/sunrise/releases/download/launcher%401.0.0"
+          curl -fsSLO "$base/${{ matrix.asset }}"; curl -fsSLO "$base/SHA256SUMS"
+          grep " ${{ matrix.asset }}\$" SHA256SUMS | sha256sum -c -
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            "./${{ matrix.asset }}" setup --quiet --dir "$home/programs"
+            launcher=$(find "$home/programs" -name 'sunrise-launcher.exe' | head -1)
+          else
+            tar xzf "${{ matrix.asset }}" -C "$home/programs"; launcher="$home/programs/sunrise-launcher"
+          fi
+          export SUNRISE_LAUNCHER_HOME="$home/launcher" SUNRISE_HOME="$home/game" XDG_DATA_HOME="$home/data" \
+            XDG_CONFIG_HOME="$home/config" SUNRISE_LAUNCHER_TRASH="$home/trash" SUNRISE_LAUNCHER_CLIPBOARD="$home/clip" \
+            SUNRISE_LAUNCHER_DESKTOP="$home/desktop"
+          "$launcher" --version
+          "$launcher" update --check
+          "$launcher" update
+          after=$("$launcher" --version); echo "after: $after"
+          [[ "$after" == "sunrise-launcher 1.0.1" ]] || { echo "::error::the launcher did not update itself"; exit 1; }
