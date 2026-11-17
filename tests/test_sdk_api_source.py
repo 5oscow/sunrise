@@ -197,13 +197,20 @@ class RootTests(unittest.TestCase):
         game = "\n".join([self.GAME, "1subtle v0.1.0|"])
         args = ("sunrise-wasmtime", game, self.NATIVE, "consumer")
         self.assertEqual(api_source.check_root(wider, self.metadata(), *args, exact=False), 2)
-        # Fewer features than the game is fine for such a root; a feature the game lacks is not.
-        fewer = self.NATIVE.replace("cranelift,std", "std")
-        self.assertEqual(api_source.check_root(wider, self.metadata(), "sunrise-wasmtime", game, fewer, "consumer",
+        # Wasmtime itself is exact: a feature the game lacks fails, and so does one the game has that it misses.
+        for consumer in (self.NATIVE.replace("cranelift,std", "cranelift,std,wat"),
+                         self.NATIVE.replace("cranelift,std", "std")):
+            with self.subTest(consumer), self.assertRaises(Refusal) as refused:
+                api_source.check_root(wider, self.metadata(), "sunrise-wasmtime", game, consumer, "consumer",
+                                      exact=False)
+            self.assertEqual(refused.exception.code, "E_FEATURES")
+        # A transitive crate may have fewer features than the game's, never more.
+        loose = self.NATIVE + "\n1subtle v0.1.0|"
+        self.assertEqual(api_source.check_root(wider, self.metadata(), "sunrise-wasmtime", game, loose, "consumer",
                                                exact=False), 2)
         with self.assertRaises(Refusal) as refused:
             api_source.check_root(wider, self.metadata(), "sunrise-wasmtime", game,
-                                  self.NATIVE.replace("cranelift,std", "cranelift,std,wat"), "consumer", exact=False)
+                                  self.NATIVE + "\n1subtle v0.1.0|extra", "consumer", exact=False)
         self.assertEqual(refused.exception.code, "E_FEATURES")
         with self.assertRaises(Refusal) as refused:
             api_source.check_root(wider, self.metadata(), *args)

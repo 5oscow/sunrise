@@ -551,7 +551,8 @@ def check_root(game: dict, ours: dict, root: str, game_tree: str, consumer_tree:
     that names only `sunrise-mod-api` says nothing of `sunrise-wasmtime`. Returns the closure's size. A root that is
     not `exact` may resolve fewer packages and features than the game: the game's other crates turn on features of
     wasmtime's dependencies (rustls and ring turn on `digest`'s `subtle` and `rand_core`), which the API source does
-    not have; it must still resolve nothing, and turn on no feature, that the game does not."""
+    not have; it must still resolve nothing, and turn on no feature, that the game does not. The root and `wasmtime` themselves
+    are exact: a mod's local check sees the surface the launcher binds."""
 
     def closure(metadata: dict) -> set[tuple[str, str]]:
         packages = {package["id"]: package for package in metadata["packages"]}
@@ -570,6 +571,10 @@ def check_root(game: dict, ours: dict, root: str, game_tree: str, consumer_tree:
                      f"ours {sorted(features - {'default'})}"
                      for key, features in sorted(own_features.items())
                      if key in game_features and features - game_features[key]]
+        # The root itself and wasmtime are the surface a mod names: exactly the game's, as the launcher binds them.
+        named = {key for key in game_features.keys() | own_features.keys() if key.split(" ")[0] in (root, "wasmtime")}
+        differing += [line for line in feature_disagreements(game_features, own_features, named)
+                      if line not in differing]
     if differing:
         raise Refusal("E_FEATURES", f"{consumer} compiles {root} with other features than the game: "
                       + "; ".join(differing))
