@@ -1520,6 +1520,14 @@ pub struct Renderer {
     /// The external shader pipeline world frames call (`external`); `None` draws vanilla's way.
     external: Option<Box<dyn external::ExternalPipeline>>,
     translucent_draws: Vec<(u64, usize, [u32; 5], (u32, Option<u32>))>,
+    /// Per visible section: the occlusion test that also sees its translucent quads
+    /// (`NO_TEST` without one): the section is left to phase 2.
+    translucent_tests: Vec<u32>,
+    /// This frame's translucent draws that a test sees: (index among them, test).
+    translucent_marks: Vec<(u32, u32)>,
+    /// Phase 2's draws and the translucent ones after them, with the instance counts the
+    /// tests give (`Cull::upload`).
+    phase2_upload: Vec<[u32; 5]>,
     origins: Vec<[f32; 4]>,
     /// `DrawIndexedIndirectArgs` words: index count, instance count, first
     /// index, base vertex, first instance.
@@ -4524,6 +4532,9 @@ impl Renderer {
             visible_lods: Vec::new(),
             shadow_visible: Vec::new(),
             translucent_draws: Vec::new(),
+            translucent_tests: Vec::new(),
+            translucent_marks: Vec::new(),
+            phase2_upload: Vec::new(),
             origins: Vec::new(),
             draws: Vec::new(),
             draw_pages: Vec::new(),
@@ -4650,6 +4661,7 @@ impl Renderer {
         &self,
         pass: &mut wgpu::RenderPass<'_>,
         flat: Option<&flat::Flat>,
+        (indirect, base): (&wgpu::Buffer, u32),
         solid_draws: u32,
         translucent_draws: u32,
     ) {
@@ -4671,7 +4683,7 @@ impl Renderer {
             None => {
                 pass.set_pipeline(&self.translucent_mark);
                 pass.set_vertex_buffer(1, self.instances.slice(..));
-                self.draw_sections(pass, &self.indirect, 0, solid_draws, translucent_draws);
+                self.draw_sections(pass, indirect, base, solid_draws, translucent_draws);
             }
         }
         pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
@@ -8028,6 +8040,8 @@ impl Renderer {
         // Listed sections whose solid quads the pass draws: it counts them among the
         // sections it kept.
         let mut gpu_solid = 0;
+        self.translucent_tests.clear();
+        self.translucent_tests.resize(visible.len(), cull::NO_TEST);
         for (i, v) in visible.iter().enumerate() {
             let s = self.sections.get(v.slot);
             if gpu_frame
@@ -8060,6 +8074,13 @@ impl Renderer {
                 *run = (group, start, draws.len() - start);
             }
             let runs = &runs[..parts.len()];
+            // The test's weight is the translucent quads' indices too: they are the work a
+            // hidden section saves.
+            let translucent_indices = if s.sorted_indices.is_some() {
+                s.translucent * 6
+            } else {
+                0
+            };
             if first_phase {
                 for &(group, start, len) in runs {
                     if group == 0 {
@@ -8072,20 +8093,24 @@ impl Renderer {
                     c.drawn(
                         i,
                         v.slot,
-                        indices,
+                        indices + translucent_indices,
                         cull::section_box(self.sections.bounds(v.slot)),
                     );
                 }
             } else if let Some(c) = &mut cull {
-                // One test sees the section's draws in both passes.
-                let total: usize = runs.iter().map(|r| r.2).sum();
+                // One test sees the section's draws in both passes, and its translucent ones.
+                let total: usize =
+                    runs.iter().map(|r| r.2).sum::<usize>() + usize::from(translucent_indices > 0);
                 if let Some(test) = c.deferred(
                     i,
                     v.slot,
                     total,
-                    indices,
+                    indices + translucent_indices,
                     cull::section_box(self.sections.bounds(v.slot)),
                 ) {
+                    if translucent_indices > 0 {
+                        self.translucent_tests[i] = test;
+                    }
                     for &(group, start, len) in runs {
                         if group == 0 {
                             phase2_opaque += len;
@@ -8296,7 +8321,13 @@ impl Renderer {
                     )
                 });
         }
-        for &(_, _, draw, pages) in &self.translucent_draws {
+        self.translucent_marks.clear();
+        for (k, &(_, instance, draw, pages)) in self.translucent_draws.iter().enumerate() {
+            if let Some(&test) = self.translucent_tests.get(instance)
+                && test != cull::NO_TEST
+            {
+                self.translucent_marks.push((k as u32, test));
+            }
             self.draws.push(draw);
             self.draw_pages.push(pages);
         }
@@ -9000,12 +9031,46 @@ impl Renderer {
             frame.hud,
             [self.config.width, self.config.height],
         );
+        // The translucent terrain pass reads its draws from phase 2's buffer, where the tests of
+        // the sections left to phase 2 give them their instance. Where it draws from
+        // `self.indirect` (flat draws, improved transparency, a pack's material), or no test
+        // runs (no solid draws), every translucent draw stays.
+        let flat_frame_possible = self.flat_on
+            && self
+                .flat
+                .as_ref()
+                .is_some_and(|f| listed >= f.min_sections || pack_terrain || shadow_view.is_some());
+        let translucent_culled = culling
+            && solid_draws > 0
+            && !flat_frame_possible
+            && !oit_on
+            && self.native.is_none()
+            && !self.translucent_marks.is_empty();
+        let phase2_end = if translucent_culled {
+            let (skip, tail) = (solid_draws - phase1_draws, solid_draws + translucent_draws);
+            self.phase2_upload.clear();
+            self.phase2_upload
+                .extend_from_slice(&self.draws[phase1_draws as usize..tail as usize]);
+            if let Some(cull) = &mut self.cull {
+                for &(k, test) in &self.translucent_marks {
+                    self.phase2_upload[(skip + k) as usize][1] = 0;
+                    cull.place_translucent(test, skip + k);
+                }
+            }
+            tail
+        } else {
+            solid_draws
+        };
         if culling && let Some(cull) = &mut self.cull {
             cull.upload(
                 &self.device,
                 &mut self.uploads,
                 &mut encoder,
-                &self.draws[phase1_draws as usize..solid_draws as usize],
+                if translucent_culled {
+                    &self.phase2_upload
+                } else {
+                    &self.draws[phase1_draws as usize..phase2_end as usize]
+                },
                 &self.instances,
                 &self.globals,
             );
@@ -10572,7 +10637,13 @@ impl Renderer {
                         }
                         pass.set_bind_group(0, &self.group, &[]);
                     }
-                    self.mark_translucent_terrain(&mut pass, flat, solid_draws, translucent_draws);
+                    self.mark_translucent_terrain(
+                        &mut pass,
+                        flat,
+                        (&self.indirect, 0),
+                        solid_draws,
+                        translucent_draws,
+                    );
                 }
                 Some(flat) => {
                     pass.split(self.own_timing.as_mut(), "translucent terrain");
@@ -10588,6 +10659,7 @@ impl Renderer {
                     self.mark_translucent_terrain(
                         &mut pass,
                         Some(flat),
+                        (&self.indirect, 0),
                         solid_draws,
                         translucent_draws,
                     );
@@ -10599,14 +10671,18 @@ impl Renderer {
                     pass.set_pipeline(translucent_pipeline);
                     pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
                     pass.set_vertex_buffer(1, self.instances.slice(..));
-                    self.draw_sections(
+                    let from = match &self.cull {
+                        Some(cull) if translucent_culled => (&cull.phase2, phase1_draws),
+                        _ => (&self.indirect, 0),
+                    };
+                    self.draw_sections(&mut pass, from.0, from.1, solid_draws, translucent_draws);
+                    self.mark_translucent_terrain(
                         &mut pass,
-                        &self.indirect,
-                        0,
+                        None,
+                        from,
                         solid_draws,
                         translucent_draws,
                     );
-                    self.mark_translucent_terrain(&mut pass, None, solid_draws, translucent_draws);
                     pass.split(self.own_timing.as_mut(), "after translucent");
                 }
             }
