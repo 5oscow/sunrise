@@ -17,12 +17,10 @@ PATH_ATTR = re.compile(r'#\[\s*path\s*=\s*' + STRING + r'\s*\]')
 MANIFEST_JOIN = re.compile(r'env!\(\s*"CARGO_MANIFEST_DIR"\s*\)\s*\)?((?:\s*\.join\(\s*' + STRING + r'\s*\))+)')
 MANIFEST_CONCAT = re.compile(r'concat!\(\s*env!\(\s*"CARGO_MANIFEST_DIR"\s*\)\s*,\s*' + STRING)
 JOINED = re.compile(r'\.join\(\s*' + STRING + r'\s*\)')
-# A build script runs in its crate's folder: a literal it reads, opens, joins or reruns on is a path from there.
-BUILD_READ = re.compile(
-    r'(?:\b(?:read_to_string|read|read_dir|copy|open|new|from)|\.join)\(\s*' + STRING
-    + r'|cargo:rerun-if-changed=([^"\\]+)'
-)
-ABSOLUTE = re.compile(r'^(?:/|[A-Za-z]:/|//)')
+# A build script runs in its crate's folder: a literal it reads or opens, reruns on, or starts a path from (joined in turn) is a path from there.
+BUILD_READ = re.compile(r'\b(?:read_to_string|read|read_dir|copy|open)\(\s*' + STRING + r'|cargo::?rerun-if-changed=([^"\\]+)')
+BUILD_PATH = re.compile(r'\b(?:Path::new|PathBuf::from)\(\s*' + STRING + r'\s*\)((?:\s*\.join\(\s*' + STRING + r'\s*\))*)')
+ABSOLUTE = re.compile(r'^(?:/|[A-Za-z]:|//)')
 
 
 def tracked(root: Path) -> list[str]:
@@ -111,10 +109,11 @@ def problems(root: Path, files: list[str]) -> list[str]:
             here = crate_dir(path, manifests)
             checks = [(m, path.parent, unescaped(m.group(2))) for m in INCLUDE.finditer(text)]
             checks += [(m, path.parent, unescaped(m.group(1))) for m in PATH_ATTR.finditer(text)]
-            checks += [(m, here, unescaped(m.group(1)).lstrip("/")) for m in MANIFEST_CONCAT.finditer(text)]
+            checks += [(m, here, unescaped(m.group(1)).replace("\\", "/").lstrip("/")) for m in MANIFEST_CONCAT.finditer(text)]
             checks += [(m, here, joined(JOINED.findall(m.group(1)))) for m in MANIFEST_JOIN.finditer(text)]
             if path.name == "build.rs":
                 checks += [(m, here, unescaped(m.group(1) or m.group(2))) for m in BUILD_READ.finditer(text)]
+                checks += [(m, here, joined([m.group(1), *JOINED.findall(m.group(2))])) for m in BUILD_PATH.finditer(text)]
             for match, base, value in checks:
                 if not inside(base, value):
                     line = text.count("\n", 0, match.start()) + 1
