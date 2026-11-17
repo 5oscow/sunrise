@@ -187,6 +187,14 @@ impl BlockSet {
     }
 }
 
+/// Index into a fence gate's load-resolved sounds.
+#[derive(Clone, Copy, Debug)]
+pub enum GateSoundSite {
+    Use,
+    Explosion,
+    Redstone,
+}
+
 #[derive(Clone, Debug)]
 pub struct BlockData {
     pub class: Class,
@@ -196,8 +204,9 @@ pub struct BlockData {
     pub classes: ClassSet,
     pub interfaces: u16,
     pub set_type: Option<Arc<SetType>>,
-    pub gate_open: Option<Arc<str>>,
-    pub gate_close: Option<Arc<str>>,
+    /// Resolved sounds in use, explosion, redstone order.
+    pub gate_open: [Option<Arc<str>>; 3],
+    pub gate_close: [Option<Arc<str>>; 3],
     pub open_sound: Option<Arc<str>>,
     pub close_sound: Option<Arc<str>>,
     pub ticks_to_stay_pressed: i32,
@@ -961,8 +970,17 @@ fn build_with_gameplay<G: GameplayStateSource>(
         let text = |value: Option<&Value>, strings: &mut HashMap<String, Arc<str>>| {
             value.and_then(Value::as_str).map(|s| interned(strings, s))
         };
-        let gate_open = text(wood.and_then(|w| w.get("fenceGateOpen")), &mut strings);
-        let gate_close = text(wood.and_then(|w| w.get("fenceGateClose")), &mut strings);
+        let mut gate_sounds = |key: &str, vanilla: &str| {
+            let fallback = wood.and_then(|w| w.get(vanilla));
+            std::array::from_fn(|site| {
+                let value = field(key)
+                    .and_then(|v| v.get(site))
+                    .filter(|v| !v.is_null());
+                text(value.or(fallback), &mut strings)
+            })
+        };
+        let gate_open = gate_sounds("gateOpenSounds", "fenceGateOpen");
+        let gate_close = gate_sounds("gateCloseSounds", "fenceGateClose");
         let open_sound = text(field("openSound"), &mut strings);
         let close_sound = text(field("closeSound"), &mut strings);
         let link = [

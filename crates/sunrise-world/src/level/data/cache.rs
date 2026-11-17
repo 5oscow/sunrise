@@ -24,8 +24,8 @@ use std::{
 };
 
 const MAGIC: &[u8; 8] = b"HZBEHAV\0";
-const VERSION: u32 = 3;
-const FILE_NAME: &str = "behaviours-v3.bin";
+const VERSION: u32 = 4;
+const FILE_NAME: &str = "behaviours-v4.bin";
 const REGISTRY_MAGIC: &[u8; 8] = b"HZREGIS\0";
 const REGISTRY_VERSION: u32 = 1;
 const REGISTRY_FILE_NAME: &str = "registry-v1.bin";
@@ -113,8 +113,8 @@ struct Block {
     chain: Vec<u16>,
     interfaces: u16,
     set_type: Option<SetTypeSnapshot>,
-    gate_open: Option<String>,
-    gate_close: Option<String>,
+    gate_open: [Option<String>; 3],
+    gate_close: [Option<String>; 3],
     open_sound: Option<String>,
     close_sound: Option<String>,
     ticks_to_stay_pressed: i32,
@@ -513,8 +513,12 @@ impl Snapshot {
                     .set_type
                     .as_ref()
                     .map(|value| SetTypeSnapshot::from(value.as_ref())),
-                gate_open: block.gate_open.as_ref().map(|v| v.to_string()),
-                gate_close: block.gate_close.as_ref().map(|v| v.to_string()),
+                gate_open: std::array::from_fn(|i| {
+                    block.gate_open[i].as_ref().map(|v| v.to_string())
+                }),
+                gate_close: std::array::from_fn(|i| {
+                    block.gate_close[i].as_ref().map(|v| v.to_string())
+                }),
                 open_sound: block.open_sound.as_ref().map(|v| v.to_string()),
                 close_sound: block.close_sound.as_ref().map(|v| v.to_string()),
                 ticks_to_stay_pressed: block.ticks_to_stay_pressed,
@@ -688,8 +692,8 @@ impl Snapshot {
                     classes,
                     interfaces: wire.interfaces,
                     set_type: wire.set_type.map(|v| Arc::new(SetType::from(v))),
-                    gate_open: wire.gate_open.map(Arc::from),
-                    gate_close: wire.gate_close.map(Arc::from),
+                    gate_open: wire.gate_open.map(|v| v.map(Arc::from)),
+                    gate_close: wire.gate_close.map(|v| v.map(Arc::from)),
                     open_sound: wire.open_sound.map(Arc::from),
                     close_sound: wire.close_sound.map(Arc::from),
                     ticks_to_stay_pressed: wire.ticks_to_stay_pressed,

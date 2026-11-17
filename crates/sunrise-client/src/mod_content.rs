@@ -1898,13 +1898,39 @@ impl<'a> Plan<'a> {
                         {
                             *name = J::Str(wood.clone());
                         }
-                        // `new FenceGateBlock(woodType, ..)`: the gate's own sounds replace its wood's.
-                        if let Some(fields) = v.at("fields/type") {
-                            if let Some(sound) = &b.decl.open_sound {
-                                fields.set("fenceGateOpen", J::Str(sound.clone()));
-                            }
-                            if let Some(sound) = &b.decl.close_sound {
-                                fields.set("fenceGateClose", J::Str(sound.clone()));
+                        // Resolve each gate site against the untouched template wood sound.
+                        if let Some(fields) = v.at("fields") {
+                            for (key, sound) in [
+                                ("gateOpenSounds", &b.decl.open_sound),
+                                ("gateCloseSounds", &b.decl.close_sound),
+                            ] {
+                                let Some(sound) = sound else { continue };
+                                use sunrise_mod_package::content::GateSound;
+                                let sites = match sound {
+                                    GateSound::All(sound) => {
+                                        [Some(sound), Some(sound), Some(sound)]
+                                    }
+                                    GateSound::Sites {
+                                        on_use,
+                                        on_explosion,
+                                        on_redstone,
+                                    } => [
+                                        on_use.as_ref(),
+                                        on_explosion.as_ref(),
+                                        on_redstone.as_ref(),
+                                    ],
+                                };
+                                fields.set(
+                                    key,
+                                    J::Arr(
+                                        sites
+                                            .into_iter()
+                                            .map(|sound| {
+                                                sound.map_or(J::Null, |sound| J::Str(sound.clone()))
+                                            })
+                                            .collect(),
+                                    ),
+                                );
                             }
                         }
                         // `createDefaultSignText`: the colour and glow a new sign's text starts with.

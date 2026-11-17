@@ -416,10 +416,10 @@ struct BlockFile {
     base_block: Option<String>,
     #[serde(default = "yes")]
     item: bool,
-    #[serde(default)]
-    open_sound: Option<String>,
-    #[serde(default)]
-    close_sound: Option<String>,
+    #[serde(default, deserialize_with = "GateSound::deserialize_open")]
+    open_sound: Option<GateSound>,
+    #[serde(default, deserialize_with = "GateSound::deserialize_close")]
+    close_sound: Option<GateSound>,
     block_item: Option<String>,
     #[serde(default)]
     pick_item: Option<String>,
@@ -428,6 +428,33 @@ struct BlockFile {
 }
 fn yes() -> bool {
     true
+}
+
+/// A fence gate's sound event at every site, or only the named sites.
+/// Missing sites keep the template wood's sounds.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(untagged, deny_unknown_fields)]
+pub enum GateSound {
+    All(String),
+    Sites {
+        #[serde(rename = "use")]
+        on_use: Option<String>,
+        #[serde(rename = "explosion")]
+        on_explosion: Option<String>,
+        #[serde(rename = "redstone")]
+        on_redstone: Option<String>,
+    },
+}
+
+impl GateSound {
+    fn deserialize_open<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Self>, D::Error> {
+        Option::<Self>::deserialize(d)
+            .map_err(|e| serde::de::Error::custom(format!("open_sound: {e}")))
+    }
+    fn deserialize_close<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Self>, D::Error> {
+        Option::<Self>::deserialize(d)
+            .map_err(|e| serde::de::Error::custom(format!("close_sound: {e}")))
+    }
 }
 
 /// A block the mod adds: a vanilla template's behaviour, states and shapes
@@ -460,11 +487,13 @@ pub struct Block {
     pub default_state: BTreeMap<String, String>,
     /// Also add a block item with the same id.
     pub item: bool,
-    /// The sound event a fence gate plays opening, instead of its wood's
-    /// (`WoodType.fenceGateOpen`); needs a `*_fence_gate` template.
-    pub open_sound: Option<String>,
-    /// The sound event a fence gate plays closing (`WoodType.fenceGateClose`).
-    pub close_sound: Option<String>,
+    /// A fence gate's opening sounds (`WoodType.fenceGateOpen`). `All` replaces
+    /// every site; `Sites` keeps the template wood's sound for each missing site.
+    /// Needs a `*_fence_gate` template.
+    pub open_sound: Option<GateSound>,
+    /// A fence gate's closing sounds (`WoodType.fenceGateClose`), with the same
+    /// per-site fallback as `open_sound`.
+    pub close_sound: Option<GateSound>,
     /// The item this block is, for pick-block and `Block.asItem`, when
     /// it is not a block item of its own: an item of this mod or a vanilla
     /// one, checked to exist when the content loads. Needs `item` false.
@@ -1736,10 +1765,26 @@ fn check_block(file: &Block) -> Result<(), String> {
                 file.template
             ));
         }
-        if !namespaced_id(sound) {
-            return Err(format!(
-                "{key} {sound:?} is a sound event id, namespace:path"
-            ));
+        let sites = match sound {
+            GateSound::All(sound) => [("", Some(sound)), ("", None), ("", None)],
+            GateSound::Sites {
+                on_use,
+                on_explosion,
+                on_redstone,
+            } => [
+                (".use", on_use.as_ref()),
+                (".explosion", on_explosion.as_ref()),
+                (".redstone", on_redstone.as_ref()),
+            ],
+        };
+        for (site, sound) in sites {
+            if let Some(sound) = sound
+                && !namespaced_id(sound)
+            {
+                return Err(format!(
+                    "{key}{site} {sound:?} is a sound event id, namespace:path"
+                ));
+            }
         }
     }
     if let Some(item) = &file.block_item {
@@ -2946,12 +2991,29 @@ capabilities = ["registries"]
         )
         .unwrap();
         assert_eq!(
-            parsed.blocks[0].open_sound.as_deref(),
-            Some("ruby:gate.open")
+            parsed.blocks[0].open_sound,
+            Some(GateSound::All("ruby:gate.open".into()))
         );
         assert_eq!(
-            parsed.blocks[0].close_sound.as_deref(),
-            Some("minecraft:block.chain.break")
+            parsed.blocks[0].close_sound,
+            Some(GateSound::All("minecraft:block.chain.break".into()))
+        );
+        let sites = block(r#"{"template":"minecraft:oak_fence_gate","open_sound":{"use":"ruby:rope.open","redstone":"ruby:wire.open"},"close_sound":{"explosion":"ruby:blast.close"}}"#).unwrap();
+        assert_eq!(
+            sites.blocks[0].open_sound,
+            Some(GateSound::Sites {
+                on_use: Some("ruby:rope.open".into()),
+                on_explosion: None,
+                on_redstone: Some("ruby:wire.open".into()),
+            })
+        );
+        assert_eq!(
+            sites.blocks[0].close_sound,
+            Some(GateSound::Sites {
+                on_use: None,
+                on_explosion: Some("ruby:blast.close".into()),
+                on_redstone: None,
+            })
         );
         let plain = block(r#"{"template": "minecraft:oak_fence_gate"}"#).unwrap();
         assert_eq!(
@@ -2967,8 +3029,21 @@ capabilities = ["registries"]
                 r#"{"template": "minecraft:oak_fence_gate", "close_sound": "gate"}"#,
                 "namespace:path",
             ),
+            (
+                r#"{"template":"minecraft:oak_fence","open_sound":{"use":"ruby:open"}}"#,
+                "open_sound",
+            ),
+            (
+                r#"{"template":"minecraft:oak_fence_gate","open_sound":{"other":"ruby:open"}}"#,
+                "open_sound",
+            ),
+            (
+                r#"{"template":"minecraft:oak_fence_gate","close_sound":{"redstone":"bad"}}"#,
+                "close_sound.redstone",
+            ),
         ] {
             let e = block(bad).unwrap_err();
+            assert!(e.contains("data/ruby/sunrise/block/gate.json"), "{e}");
             assert!(e.contains(word), "{bad}: {e}");
         }
     }

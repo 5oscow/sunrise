@@ -1,0 +1,2 @@
+ids = ["type:Block", "type:GateSound"]
+why = "Block.open_sound and Block.close_sound now take Option<GateSound>: All overrides every site; Sites overrides use, explosion and redstone separately, retaining the template wood sound for missing sites. Native and wasm declarations share this clean-break Wire form."
