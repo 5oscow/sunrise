@@ -3,8 +3,8 @@ use super::*;
 
 mod saved_portals;
 
-/// The background thread that encodes chunks and writes them into the region files, in
-/// submission order.
+/// The background thread that encodes chunks and writes them into the region files, grouped
+/// by folder within each drained pass. Submission order is preserved within each folder.
 pub(super) struct Writer {
     send: mpsc::Sender<WriteBatch>,
     thread: std::thread::JoinHandle<()>,
