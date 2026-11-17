@@ -1893,6 +1893,7 @@ impl<'a> Plan<'a> {
                                     );
                                 };
                                 row.resize(row.len().max(9), J::Null);
+                                // Instrument column, read by sunrise_world::level::data's state facts decoder.
                                 row[8] = J::Str(instrument.name().to_ascii_uppercase());
                             }
                         }
