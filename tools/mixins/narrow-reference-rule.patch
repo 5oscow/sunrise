@@ -293,6 +293,100 @@ index fcf5a46..40c84a0 100644
              "E_UNSUPPORTED_CONTROL_FLOW",
          ),
          (
+diff --git a/crates/horizon-mixins-core/src/helpers.rs b/crates/horizon-mixins-core/src/helpers.rs
+index 55a9372..7a5386d 100644
+--- a/crates/horizon-mixins-core/src/helpers.rs
++++ b/crates/horizon-mixins-core/src/helpers.rs
+@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
+ use syn::{
+     Expr, FnArg, Item, ReturnType, Type,
+     visit::{self, Visit},
++    visit_mut::{self, VisitMut},
+ };
+ 
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+@@ -82,8 +83,50 @@ pub fn return_type(sig: &syn::Signature) -> Type {
+         ReturnType::Type(_, ty) => *ty.clone(),
+     }
+ }
++/// A type's comparable text: the same type written with or without a trailing comma in a list
++/// (`Vec<T,>`, `fn(A,)`, `(A, B,)`) compares equal, as the compiler treats it. A one-element
++/// tuple keeps its comma, which is what makes it a tuple.
+ pub fn normalize_type(ty: &Type) -> String {
+-    tokens(ty)
++    struct TrailingCommas;
++    impl VisitMut for TrailingCommas {
++        fn visit_angle_bracketed_generic_arguments_mut(
++            &mut self,
++            args: &mut syn::AngleBracketedGenericArguments,
++        ) {
++            args.args.pop_punct();
++            visit_mut::visit_angle_bracketed_generic_arguments_mut(self, args);
++        }
++        fn visit_parenthesized_generic_arguments_mut(
++            &mut self,
++            args: &mut syn::ParenthesizedGenericArguments,
++        ) {
++            args.inputs.pop_punct();
++            visit_mut::visit_parenthesized_generic_arguments_mut(self, args);
++        }
++        fn visit_type_bare_fn_mut(&mut self, f: &mut syn::TypeBareFn) {
++            if f.variadic.is_none() {
++                f.inputs.pop_punct();
++            }
++            visit_mut::visit_type_bare_fn_mut(self, f);
++        }
++        fn visit_type_tuple_mut(&mut self, tuple: &mut syn::TypeTuple) {
++            if tuple.elems.len() > 1 {
++                tuple.elems.pop_punct();
++            }
++            visit_mut::visit_type_tuple_mut(self, tuple);
++        }
++        fn visit_type_impl_trait_mut(&mut self, ty: &mut syn::TypeImplTrait) {
++            ty.bounds.pop_punct();
++            visit_mut::visit_type_impl_trait_mut(self, ty);
++        }
++        fn visit_type_trait_object_mut(&mut self, ty: &mut syn::TypeTraitObject) {
++            ty.bounds.pop_punct();
++            visit_mut::visit_type_trait_object_mut(self, ty);
++        }
++    }
++    let mut ty = ty.clone();
++    TrailingCommas.visit_type_mut(&mut ty);
++    tokens(&ty)
+         .replace(' ', "")
+         .replace("::core::ops::", "")
+         .replace("::std::ops::", "")
+@@ -528,3 +571,29 @@ fn binding_expr(expr: &Expr, parameters: &std::collections::BTreeSet<String>) ->
+         _ => false,
+     }
+ }
++
++#[cfg(test)]
++mod normalize_tests {
++    use super::normalize_type;
++
++    fn same(a: &str, b: &str) -> bool {
++        normalize_type(&syn::parse_str(a).unwrap()) == normalize_type(&syn::parse_str(b).unwrap())
++    }
++
++    #[test]
++    fn a_trailing_comma_in_a_list_does_not_change_the_type() {
++        assert!(same("Vec<T,>", "Vec<T>"));
++        assert!(same("HashMap<K, Option<V,>,>", "HashMap<K, Option<V>>"));
++        assert!(same("Box<dyn Fn(i32,) -> u8>", "Box<dyn Fn(i32) -> u8>"));
++        assert!(same("fn(i32, u8,) -> i32", "fn(i32, u8) -> i32"));
++        assert!(same("(i32, u8,)", "(i32, u8)"));
++        assert!(same("&mut Vec<&'static str,>", "&mut Vec<&'static str>"));
++    }
++
++    #[test]
++    fn a_one_element_tuple_keeps_its_comma_and_other_types_stay_apart() {
++        assert!(!same("(i32,)", "(i32)"));
++        assert!(!same("Vec<T>", "Vec<U>"));
++        assert!(!same("Option<Vec<T>>", "Vec<Option<T>>"));
++    }
++}
 diff --git a/crates/horizon-mixins-core/src/plan.rs b/crates/horizon-mixins-core/src/plan.rs
 index 848dcc0..153c68d 100644
 --- a/crates/horizon-mixins-core/src/plan.rs
