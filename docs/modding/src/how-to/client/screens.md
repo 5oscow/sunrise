@@ -40,6 +40,26 @@ the sign's block position and whether its front side is being edited. It returns
 editor open, or outside a world. A close of the sign editor always sends the sign update, however it
 closes; there is no close that skips it, because the vanilla client never omits that packet.
 
+## Replacing a mod container slot's tooltip
+
+`BlockEntityPart::screen_tooltip` version 2 runs for a hovered filled slot as well
+as an empty slot or screen space. `event.slot` is the **menu index**, including
+the player inventory, or `None` outside a mapped slot. It is not the engine's
+internal slot encoding. `event.at` remains GUI pixels from the screen's origin.
+
+On a filled slot, `event.lines` starts as the item's tooltip after item tooltip
+hooks. Edit, replace or clear those lines: the final list replaces the screen's
+`getTooltipFromContainerItem` result before the stack's tooltip image and
+`RenderTooltipEvent.GatherComponents`. Empty slots and screen space start with
+an empty list. Lines are `(Text, u32)` pairs, not strings: preserve their rich
+components and colors when adding a hint or editing another line.
+
+The stack's tooltip image and style, and the rule hiding slot tooltips while
+carrying an item (except items such as bundles), are unchanged. This is the
+screen-side replacement point, not a second item-tooltip hook. NeoForge's
+tooltip events do not carry a slot index; the index here is a Sunrise convenience
+over the screen override. Native and wasm use the same hook and menu indices.
+
 ## Moving or hiding a mod screen's slots
 
 A mod screen declares where each slot sits in `Screen::slots`. A screen whose layout changes while it is
