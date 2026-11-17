@@ -225,6 +225,7 @@ impl Game<'_> {
                         .restore(mobs, sunrise_client::join_seq::RestoreOrder::SpawnsFirst);
                     return Ok(false);
                 }
+                let mut can_finish = true;
                 for effect in &consumable.effects {
                     if matches!(
                         effect,
@@ -234,12 +235,14 @@ impl Game<'_> {
                         // category, not Entity.playSound's silent guard or RNG.
                         // A lost body can make a built-in a no-op, but later custom
                         // entries still receive this use's original user and stack.
-                        let _ = game.apply_consume_effect(
-                            &decision.stack,
-                            effect,
-                            Some(consumer),
-                            consumer.entity(),
-                        );
+                        can_finish &= game
+                            .apply_consume_effect(
+                                &decision.stack,
+                                effect,
+                                Some(consumer),
+                                consumer.entity(),
+                            )
+                            .is_some();
                     } else if let ConsumeEffect::TeleportRandomly(teleport) = effect {
                         let consumed = consumed.get_or_init(|| consumed_snapshot(&decision.stack));
                         let mut actor = FoxTeleporter {
@@ -249,7 +252,7 @@ impl Game<'_> {
                             dim,
                             consumed: consumed.as_ref(),
                         };
-                        let _ = teleport.apply(&mut actor, dim);
+                        can_finish &= teleport.apply(&mut actor, dim).is_ok();
                     } else if let Some(mob) = game
                         .mobs
                         .iter_mut()
@@ -265,6 +268,11 @@ impl Game<'_> {
                             effect,
                         );
                     }
+                }
+                // A refusal (for example, a listener moved the fox under the
+                // pending teleport) still invalidates the original finish.
+                if !can_finish {
+                    return Ok(false);
                 }
                 if let Some(mob) = game
                     .mobs
