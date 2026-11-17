@@ -92,6 +92,8 @@ pub mod flatgen;
 pub mod fluid_tooltip;
 pub mod furnace;
 pub mod game_mode_switcher;
+#[cfg(test)]
+mod test_game_dir;
 pub mod game_rules_screen;
 pub mod gizmos;
 pub mod gossip;
