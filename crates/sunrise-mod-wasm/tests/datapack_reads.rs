@@ -14,7 +14,14 @@ impl Host for World {
     }
 }
 impl Backend for World {}
-mod_api::impl_backend_areas!(World, except(levels));
+mod_api::impl_backend_areas!(World, except(levels, keys));
+impl mod_api::prelude::KeysBackend for World {
+    fn registry_entry_key_slot(&self, entry: &RegistryEntry) -> Option<u32> {
+        (entry.registry.to_string() == "minecraft:block"
+            && entry.id.to_string() == "minecraft:stone")
+            .then_some(5)
+    }
+}
 mod_api::impl_host_areas!(World, except(levels, keys));
 impl mod_api::prelude::LevelsHost for World {
     fn is_loaded(&self, id: &str) -> bool {
@@ -43,11 +50,6 @@ impl mod_api::prelude::KeysHost for World {
             .into_iter()
             .map(|id| Identifier::parse(id).ok())
             .collect()
-    }
-    fn registry_entry_key_slot(&self, entry: &RegistryEntry) -> Option<u32> {
-        (entry.registry.to_string() == "minecraft:block"
-            && entry.id.to_string() == "minecraft:stone")
-            .then_some(5)
     }
     fn registry_entry_in_tag(&self, entry: &RegistryEntry, tag: &str) -> Option<bool> {
         self.0
@@ -165,6 +167,11 @@ fn real_wasm_datapack_reads_preserve_values_and_ordering() {
             std::cell::Cell::new([0; 3]),
             std::cell::Cell::new(false),
         );
+        // The fixture guest declares a general entity type in `register`, which only the registration
+        // phase accepts. The scope follows `initialize`: the phase lives in the backend it installs.
+        mod_api::__private::initialize().unwrap();
+        let _registration =
+            mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::Registration);
         mod_api::testing::with_mods(loaded.mods.into(), || {
             mod_api::__private::mark_game_thread();
             let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);

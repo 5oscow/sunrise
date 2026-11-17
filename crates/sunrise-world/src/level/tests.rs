@@ -240,7 +240,7 @@ impl LevelAccess for TestLevel {
             .unwrap_or(vanilla)
     }
     fn adjust_analog_output(
-        &self,
+        &mut self,
         pos: BlockPos,
         _state: BlockStateId,
         _direction: Direction,

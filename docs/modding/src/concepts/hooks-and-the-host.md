@@ -168,6 +168,10 @@ load or reload, and `ClientPacketReceived { integrated_server }` for a client's 
 integrated client, whose server already updated the shared static data. Installing client tags
 announces the bound defaults; it does not rebind those defaults.
 
+`block_entity(pos)` reads this level's block entity without loading a chunk; it returns `None` when absent, unloaded or out for its tick. On a client it returns only the local block entity handle. `container_size(at)` and `container_stack(at, slot)` are the same side-local capability snapshots as `ItemsHost` supplies; neither generates unopened loot, and both refuse clients and unloaded positions. `BlockEntityPartState::state_in(level, entity)` and `state_existing_in` read the same attachment snapshots as their `Host` equivalents, without inserting a default, generating loot or loading chunks. Unloaded or stale holders fail; clients have no server Part state. All are owning-game-thread reads, never available in worker hook bodies.
+
+`LevelRandomHost::container_signal(pos)` is the engine comparator container read. Unlike the immutable slot snapshot, it generates unopened loot once, as vanilla's `getItem` does, then calculates 0 to 15 using each stack's maximum size. It returns `None` on clients and unloaded positions, never loads a chunk, and runs only on the owning game thread. `analog_output` version 2 receives this mutable host so the loot generation and random draws happen in vanilla order; it permits no other world edit.
+
 Redstone and shape reads on `LevelHost`, for placement and survival: `signal(pos, direction)`
 (`SignalGetter.getSignal`), `direct_signal`, `direct_signal_to`, `best_neighbor_signal(pos)`,
 `has_neighbor_signal(pos)` (what a lamp's or a door's placement reads) and `collision_shape(pos)` (the block's

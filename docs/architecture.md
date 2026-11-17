@@ -11,6 +11,8 @@ The gameplay library re-exports the reusable API, keeping existing mod targets u
 Gameplay tests run in its library test target, separately from the reusable library's tests.
 There is no copy of gameplay in the executable's test target. Tools and probes depend only
 on the reusable library, so gameplay edits do not invalidate their builds.
+Gameplay is moving out of it (#2210): `sunrise-gameplay` takes the server side (vanilla's logical side) and
+`sunrise-client-gameplay` the client-only side, each module leaving a shim at its old path in `game/`.
 
 Paths: `L/` = `crates/sunrise-client/src/`, `G/` = `crates/sunrise-client/src/game/`, `W/` =
 `crates/sunrise-world/src/`, `K/` = `crates/sunrise-client-core/src/`, `C/` = `crates/sunrise-command/src/`,

@@ -1487,6 +1487,8 @@ pub(super) mod interact_vibration_tests {
             stick_info.id = std::sync::Arc::from("ruby:stick");
             stick_info.template = Some(std::sync::Arc::from("minecraft:stick"));
             items.insert(stick_info.id.clone(), stick_info);
+            // Publish the edited tables as world open or reload would.
+            game.load_server_loot();
             let stick = ItemStack::new("ruby:stick", 1);
             assert!(!game.use_fishing_rod(&stick), "a content stick is no rod");
             assert!(game.hook.is_none());

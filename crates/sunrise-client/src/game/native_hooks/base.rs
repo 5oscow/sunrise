@@ -296,7 +296,7 @@ impl GameLevel<'_> {
     /// Authoritative servers only.
     #[inline(always)]
     pub(in crate::game) fn native_analog_output(
-        &self,
+        &mut self,
         dimension: LevelDimension,
         pos: BlockPos,
         state: BlockStateId,
@@ -1357,17 +1357,18 @@ impl Game<'_> {
     ) {
         self.fire_screen_click(block, data, at, right, button);
     }
-    /// The tooltip at `at` (as in `native_screen_click`) on block `block`'s
-    /// screen, a mod's, over no item: push its lines when it is over
-    /// something of yours. Legacy colour codes (§) work.
+    /// A mod screen's tooltip after item tooltip hooks, before its image and
+    /// component gathering. `slot` is the hovered menu index, or None outside
+    /// a mapped slot. The listener's final lines replace the item's lines.
     pub(in crate::game) fn native_screen_tooltip(
         &self,
         block: &str,
         data: &[i32],
         at: [f32; 2],
-        lines: &mut Vec<String>,
+        slot: Option<u32>,
+        lines: &mut Vec<(Text, u32)>,
     ) {
-        self.fire_screen_tooltip(block, data, at, lines);
+        self.fire_screen_tooltip(block, data, at, slot, lines);
     }
     /// A player pressed a mod container's button (`clickMenuButton`), on
     /// the server. The block entity is out of the world during the call;
@@ -3647,7 +3648,7 @@ impl Game<'_> {
     }
     /// `player` (`name`) opened a menu (NeoForge's `PlayerContainerEvent.Open`,
     /// posted when `ServerPlayer.openMenu` sets the new `containerMenu`): any
-    /// menu, vanilla or a mod's. `menu` is the menu type's name
+    /// menu, vanilla or a mod's. `menu_type` is the menu type's name
     /// (`minecraft:generic_9x3`, `minecraft:furnace`, `minecraft:merchant`,
     /// `minecraft:crafting`, `minecraft:lectern`, a mod's own), `pos` the
     /// block it is of in `dimension` (none for a trade, a vehicle's, a mod's
@@ -3662,10 +3663,11 @@ impl Game<'_> {
         player: u128,
         name: &str,
         dimension: &str,
-        menu: &str,
+        menu_type: &str,
         pos: Option<[i32; 3]>,
+        menu: Option<mod_api::MenuRef>,
     ) {
-        self.fire_player_container_open(player, name, dimension, menu, pos);
+        self.fire_player_container_open(player, name, dimension, menu_type, pos, menu);
     }
     /// `player` (`name`) closed the menu `native_player_container_open` told
     /// of (NeoForge's `PlayerContainerEvent.Close`, posted in
@@ -3682,10 +3684,10 @@ impl Game<'_> {
         player: u128,
         name: &str,
         dimension: &str,
-        menu: &str,
+        menu_type: &str,
         pos: Option<[i32; 3]>,
     ) {
-        self.fire_player_container_close(player, name, dimension, menu, pos);
+        self.fire_player_container_close(player, name, dimension, menu_type, pos);
     }
     /// A client started tracking an entity (NeoForge's
     /// `PlayerEvent.StartTracking`, posted at the end of

@@ -629,6 +629,19 @@ class DynaRoutingTests(unittest.TestCase):
             self.assertEqual(sorted(p.name for p in (build / "parity-keep").iterdir()), ["77-1", "77-2"])
             self.assertEqual({name: (kept / name).read_bytes() for name in first}, first)
             self.assertEqual((build / "parity-keep" / "77-2" / "loot_b.log").read_text(), "second attempt\n")
+            # A harness that failed once and passed its retry: the run passes, and its first run's log is kept.
+            (tree / "tools" / "parity.py").write_text(
+                "import sys\nprint('PASS menu_click 5s')\n"
+                "print('RETRIED menu_click: failed, then passed on its one retry (vanilla 0.7231)')\nsys.exit(0)\n")
+            (logs / "menu_click.first-run.log").write_text("mismatch: vanilla 0.7231\n")
+            retried = subprocess.run([str(shim), "tools/parity.py", "menu_click"], cwd=tree,
+                                     env={**env, "GITHUB_RUN_ID": "78"}, capture_output=True, text=True)
+            self.assertEqual(retried.returncode, 0)
+            self.assertNotIn("vanilla", retried.stdout + retried.stderr)
+            kept_first = build / "parity-keep" / "78-1"
+            self.assertEqual(sorted(p.name for p in kept_first.iterdir()), ["menu_click.first-run.log"])
+            self.assertIn(f"menu_click: its first run's log is kept on runner slot-1 in {kept_first}", retried.stdout)
+            self.assertEqual(retried.stdout.splitlines()[-1], "PASS parity")
 
 
 if __name__ == "__main__":

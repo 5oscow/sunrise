@@ -193,8 +193,9 @@ pub trait PlayersBackend {
     /// On a client, only the local player's menu is available: its slots and carried stack
     /// are the client's view (server updates plus local prediction), not server authority.
     /// On a server, refuses crafting tables, merchants, workstations, lecterns, mounts,
-    /// menus with hidden slots, stale players and players whose state is swapped out.
-    /// On a client, refuses stale players and unsupported menu layouts.
+    /// menus with hidden slots, stale players and players held out by another active turn;
+    /// reads for the acting player use their current inventory, equipment, cursor and ender
+    /// contents. On a client, refuses stale players and unsupported menu layouts.
     #[access(WorldOnly)]
     fn player_container_menu(&self, player: PlayerRef) -> Option<MenuRef>;
     /// Side: server.
@@ -848,6 +849,20 @@ pub trait PlayersBackendMut {
         player: PlayerRef,
         pos: [i32; 3],
         original: &ItemStack,
+    ) -> Result<(), TriggerCriterionError>;
+    /// Side: server.
+    /// Vanilla `CriteriaTriggers.CONSUME_ITEM.trigger(serverPlayer, stack)`, also public
+    /// to NeoForge mods. Fires only `minecraft:consume_item` through the food-eating
+    /// criterion path, without consuming a stack, awarding a used statistic or reading inventory.
+    /// Predicates and rewards run in the player's own level. `Ok(())` means reached,
+    /// even if nothing matched. Refuses clients (`NotServer`), stale/offline/displaced
+    /// players (`PlayerUnavailable`) and invalid stacks (`Stack(StackWriteError)`)
+    /// before firing.
+    #[access(WorldOnly)]
+    fn player_trigger_consume_item(
+        &mut self,
+        player: PlayerRef,
+        stack: &ItemStack,
     ) -> Result<(), TriggerCriterionError>;
     /// Side: server.
     /// `Player.setLastDeathLocation`: stores where the player died, or

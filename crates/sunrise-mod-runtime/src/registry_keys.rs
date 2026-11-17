@@ -16,7 +16,7 @@ pub struct Requests {
     pub game_events: Names,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, PartialEq)]
 pub struct Names {
     pub entries: Vec<Request>,
     pub slots: HashMap<String, u32>,
@@ -29,7 +29,7 @@ pub struct Names {
     pub order: Vec<u32>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct Request {
     pub id: String,
     pub mods: Vec<&'static str>,
