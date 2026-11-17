@@ -22,7 +22,7 @@ impl View {
 }
 
 impl super::Containers<'_> {
-    pub(in crate::game) fn capability_view(&self, at: BlockSide) -> Option<View> {
+    fn capability_view(&self, at: BlockSide) -> Option<View> {
         if !self.world.is_loaded_at(at.pos[0], at.pos[1], at.pos[2]) {
             return None;
         }
