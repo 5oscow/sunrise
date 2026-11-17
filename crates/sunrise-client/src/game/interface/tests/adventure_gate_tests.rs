@@ -10,9 +10,10 @@ use sunrise_core::nbt::Tag;
 type Posted = (&'static str, [f64; 3], Option<Who>);
 
 /// A server's game with nobody playing, or `None` without prepared resources.
-fn game() -> Option<crate::game::Game<'static>> {
+fn game<'a>(
+    resources: &'a mut Option<std::sync::Arc<crate::game::Resources>>,
+) -> Option<crate::game::Game<'a>> {
     std::env::var_os("SUNRISE_TEST_RESOURCES")?;
-    let resources = Box::leak(Box::new(None));
     let mut game = server_game(resources);
     game.build_registries();
     game.set_allow_commands(true);
@@ -66,7 +67,10 @@ fn click(game: &mut crate::game::Game<'_>, pos: [i32; 3]) -> (bool, Vec<Posted>)
 /// SUCCESS, so nothing but the swing happens: no fuse, no sound, no wear.
 #[test]
 fn an_adventure_click_primes_tnt_only_with_a_can_break_that_names_it() {
-    let Some(mut game) = game() else { return };
+    let mut resources = None;
+    let Some(mut game) = game(&mut resources) else {
+        return;
+    };
     assert!(
         game.ui
             .rules
@@ -121,7 +125,10 @@ fn an_adventure_click_primes_tnt_only_with_a_can_break_that_names_it() {
 /// `BlockItem.place` and predict where the block goes.
 #[test]
 fn an_adventure_placement_is_predicted_when_can_place_on_names_the_clicked_block() {
-    let Some(mut game) = game() else { return };
+    let mut resources = None;
+    let Some(mut game) = game(&mut resources) else {
+        return;
+    };
     let pos = [2, 4, 2];
     let stone = game
         .pack
