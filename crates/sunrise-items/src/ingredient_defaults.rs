@@ -27,6 +27,8 @@ impl Items {
             block_tag_order: load_tag_lists(root, "block", overlay)?,
             fluid_tag_order: load_tag_lists(root, "fluid", overlay)?,
             loot: Default::default(),
+            loot_types: Default::default(),
+            loot_modifiers: Default::default(),
             global_modifiers: Arc::default(),
             predicates: Default::default(),
             songs: HashMap::new(),
