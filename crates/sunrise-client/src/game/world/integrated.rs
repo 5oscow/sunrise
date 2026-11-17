@@ -282,20 +282,22 @@ impl Integrated {
     pub(super) fn tell(&self, request: OwnerRequest) -> bool {
         self.tasks.send(request).is_ok()
     }
-    /// Transitional: `f` on the server thread between two ticks, its answer awaited as `ask` does.
+    /// Tests only: `f` on the server thread between two ticks, its answer awaited as `ask` does.
+    #[cfg(test)]
     pub fn call<T: Send + 'static>(
         &self,
         f: impl FnOnce(&mut Game<'_>) -> T + Send + 'static,
     ) -> Option<T> {
         self.ask(|reply| {
-            OwnerRequest::Closure(Box::new(move |g| {
+            OwnerRequest::InTest(Box::new(move |g| {
                 let _ = reply.send(f(g));
             }))
         })
     }
-    /// Transitional: `f` on the server thread between two ticks, not awaited.
+    /// Tests only: `f` on the server thread between two ticks, not awaited.
+    #[cfg(test)]
     pub fn post(&self, f: impl FnOnce(&mut Game<'_>) + Send + 'static) -> bool {
-        self.tell(OwnerRequest::Closure(Box::new(f)))
+        self.tell(OwnerRequest::InTest(Box::new(f)))
     }
     /// `IntegratedServer.halt(true)`: returns once the world is saved and let go.
     pub fn stop(mut self) -> Result<()> {

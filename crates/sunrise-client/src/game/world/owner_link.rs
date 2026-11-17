@@ -7,15 +7,18 @@ use super::{
     },
     lan::LanSettings,
     lan_screen::Snapshot,
+    memory::ServerSide,
     mods::ModsReload,
 };
+use serde_json::{Value, json};
 use std::{
     path::PathBuf,
     sync::{
         Arc,
-        mpsc::{Sender, SyncSender},
+        mpsc::{Receiver, Sender, SyncSender},
     },
 };
+use sunrise_core::geometry::Vec3;
 use sunrise_perf_format::v1::StopReason;
 use sunrise_protocol::connection::Pipe;
 
@@ -63,8 +66,72 @@ pub(super) enum OwnerRequest {
     StopServerCapture(StopReason, Option<Sender<String>>),
     /// `/profiler mark`: a named moment in the server thread's capture.
     MarkServerCapture(String),
-    /// Transitional: the agent-control asks, typed in the next step.
-    Closure(Box<dyn FnOnce(&mut Game<'_>) + Send>),
+    /// What agent control asks of the world.
+    Control(ControlRequest),
+    /// Tests reach into the server thread's `Game` (`Integrated::call`, `Integrated::post`).
+    #[cfg(test)]
+    InTest(Box<dyn FnOnce(&mut Game<'_>) + Send>),
+}
+
+/// The agent-control asks, answered on the server thread in the owner's level.
+pub(super) enum ControlRequest {
+    /// `simulation blocks`: the server's own blocks in a box.
+    Blocks {
+        lo: [i32; 3],
+        hi: [i32; 3],
+        reply: Reply<Value>,
+    },
+    /// `simulation`: the server's clock and projectiles.
+    Simulation(Reply<Value>),
+    /// `server-hold`: stop or resume the server's tick.
+    HoldServer { held: bool, done: Reply<()> },
+    /// A console command run as the owner: the chat lines it produced and its outcome.
+    ConsoleCommand {
+        command: String,
+        reply: Reply<(Vec<String>, Option<(bool, i32)>)>,
+    },
+    /// `time`: the server's day time.
+    SetDayTime { time: i64, done: Reply<()> },
+    /// `summon`: the new mob's id.
+    Summon {
+        kind: String,
+        at: [f64; 3],
+        baby: bool,
+        reply: Reply<Result<u32, String>>,
+    },
+    /// `mobs`: the mobs near `center`.
+    MobsAt {
+        radius: f64,
+        center: Vec3,
+        reply: Reply<Value>,
+    },
+    /// `hurtlog`.
+    HurtLog(Reply<Value>),
+    /// `save` and `save-all`.
+    Save {
+        all: bool,
+        reply: Reply<Result<(), String>>,
+    },
+    /// `setblock`, `fill`, `getblock` and `container`, with their words.
+    BlockCommand {
+        words: Vec<String>,
+        reply: Reply<Result<Option<Value>, String>>,
+    },
+    /// The memory report: the server's own parts.
+    ServerSide(Reply<ServerSide>),
+    /// `lan op NAME LEVEL`: whether a guest of that name was found.
+    SetOp {
+        name: String,
+        level: u8,
+        reply: Reply<bool>,
+    },
+    /// The save folder of the server's world.
+    WorldRoot(Reply<PathBuf>),
+    /// The recording's copy: save, then hold the server thread until `copied` is dropped.
+    SaveThenWait {
+        saved: Sender<Result<(), String>>,
+        copied: Receiver<()>,
+    },
 }
 
 impl Game<'_> {
@@ -130,7 +197,78 @@ impl Game<'_> {
                 self.stop_server_capture(reason, reply)
             }
             OwnerRequest::MarkServerCapture(name) => self.mark_server_capture(&name),
-            OwnerRequest::Closure(task) => task(self),
+            OwnerRequest::Control(request) => self.serve_control_request(request),
+            #[cfg(test)]
+            OwnerRequest::InTest(task) => task(self),
+        }
+    }
+
+    /// Answers one agent-control ask, on the server thread.
+    fn serve_control_request(&mut self, request: ControlRequest) {
+        match request {
+            ControlRequest::Blocks { lo, hi, reply } => {
+                let _ = reply.send(self.in_owner_level(|g| g.blocks_json(lo, hi)));
+            }
+            ControlRequest::Simulation(reply) => {
+                let _ = reply.send(self.in_owner_level(|g| {
+                    json!({ "game_time": g.world.game_time, "projectiles": g.projectiles_status() })
+                }));
+            }
+            ControlRequest::HoldServer { held, done } => {
+                self.agent.hold_server = held;
+                let _ = done.send(());
+            }
+            ControlRequest::ConsoleCommand { command, reply } => {
+                let _ = reply.send(self.owner_console_command(&command));
+            }
+            ControlRequest::SetDayTime { time, done } => {
+                self.world.day_time = time;
+                let _ = done.send(());
+            }
+            ControlRequest::Summon {
+                kind,
+                at,
+                baby,
+                reply,
+            } => {
+                let id = self.in_owner_level(|g| {
+                    g.summon_command_mob(&kind, Some(at), baby)
+                        .map_err(|e| e.to_string())
+                });
+                let _ = reply.send(id);
+            }
+            ControlRequest::MobsAt {
+                radius,
+                center,
+                reply,
+            } => {
+                let _ = reply.send(self.in_owner_level(|g| g.control_mobs_at(radius, center)));
+            }
+            ControlRequest::HurtLog(reply) => {
+                let _ = reply.send(self.control_hurt_log());
+            }
+            ControlRequest::Save { all, reply } => {
+                let _ = reply.send(self.control_save(all).map_err(|e| e.to_string()));
+            }
+            ControlRequest::BlockCommand { words, reply } => {
+                let words: Vec<&str> = words.iter().map(String::as_str).collect();
+                let out =
+                    self.in_owner_level(|g| g.block_command(&words).map_err(|e| e.to_string()));
+                let _ = reply.send(out);
+            }
+            ControlRequest::ServerSide(reply) => {
+                let _ = reply.send(self.server_side());
+            }
+            ControlRequest::SetOp { name, level, reply } => {
+                let _ = reply.send(self.lan_set_op(&name, level));
+            }
+            ControlRequest::WorldRoot(reply) => {
+                let _ = reply.send(self.world_root.clone());
+            }
+            ControlRequest::SaveThenWait { saved, copied } => {
+                let _ = saved.send(self.save_game().map_err(|e| e.to_string()));
+                let _ = copied.recv();
+            }
         }
     }
 
