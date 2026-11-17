@@ -1124,7 +1124,10 @@ impl<'a> Plan<'a> {
                 }
             }
         }
-        let mut facts = read_json(&base.join("facts.json"))?;
+        let facts_path = base.join("facts.json");
+        let facts_bytes = fs::read(&facts_path)?;
+        let mut facts: J = serde_json::from_slice(&facts_bytes)
+            .map_err(|e| format!("{}: {e}", facts_path.display()))?;
         let names: Vec<String> = match facts.at("states") {
             Some(J::Arr(states)) => states
                 .iter()
@@ -1218,6 +1221,8 @@ impl<'a> Plan<'a> {
         let mut sorted: Vec<&ContentMod> = mods.iter().collect();
         sorted.sort_by(|a, b| a.id.cmp(&b.id));
         let mut wanted_sounds = Vec::new();
+        let template_registry = std::cell::OnceCell::new();
+        let mut template_occlusion = None;
         for m in &sorted {
             let mut declared: Vec<&Block> = m.content.blocks.iter().collect();
             declared.sort_by(|a, b| a.id.cmp(&b.id));
@@ -1374,10 +1379,17 @@ impl<'a> Plan<'a> {
                         collision::CachedCollisionRegistry,
                         registry::{BlockRegistry, BlockStateId, BlockTableFile},
                     };
-                    let registry =
-                        BlockRegistry::from_facts_json(fs::File::open(base.join("facts.json"))?)?;
-                    let file = BlockTableFile::open(&base.join("occlusion.nbt"), &registry)?;
-                    let cached = CachedCollisionRegistry::from_table(file.table("occlusion")?)?;
+                    let cached = match &template_occlusion {
+                        Some(cached) => cached,
+                        None => {
+                            let (registry, _) = BlockRegistry::from_facts_json_bytes(&facts_bytes)?;
+                            let registry = template_registry.get_or_init(|| registry);
+                            let file = BlockTableFile::open(&base.join("occlusion.nbt"), registry)?;
+                            template_occlusion.insert(CachedCollisionRegistry::from_table(
+                                file.table("occlusion")?,
+                            )?)
+                        }
+                    };
                     for &(state, _) in &order {
                         let shape = cached
                             .cached_shape(BlockStateId(states.start + state))?
