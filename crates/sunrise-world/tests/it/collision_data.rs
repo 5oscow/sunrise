@@ -237,6 +237,148 @@ fn canonical_identity_claims_require_exact_geometry_and_unique_exports() {
 }
 
 #[test]
+fn displaced_collision_declines_static_rays_and_reaches_the_next_face_cell() {
+    use std::{collections::BTreeSet, convert::Infallible, sync::Arc};
+    use sunrise_core::{
+        geometry::{Aabb, Vec3, VoxelShape},
+        position::{BlockPos, ChunkPos},
+    };
+    use sunrise_world::{
+        block_collision::{BlockCollisionRegistry, DynamicCollisionWorld, ShulkerCollisionState},
+        block_collision_scan::BlockCollisionScan,
+        collision_context::CollisionContext,
+        dynamic_support::DynamicSupportWorld,
+        entity_obstruction::EntityIdentity,
+        fluid::FluidState,
+        liquid_collision::LiquidCollisionWorld,
+        powder_snow_collision::{PowderSnowEntity, PowderSnowWorld},
+        registry_collision_scan::{CollisionChunks, RegistryCollisionWorld},
+        suffocation::{SuffocationDefinition, SuffocationRegistry},
+    };
+    const AT: BlockPos = BlockPos::new(1, 64, 2);
+    const SOLID: BlockStateId = BlockStateId(1);
+    struct Scene;
+    impl DynamicSupportWorld for Scene {
+        type Error = Infallible;
+        fn shulker_is_closed(&mut self, _: [i32; 3]) -> Result<Option<bool>, Infallible> {
+            Ok(None)
+        }
+        fn moving_piston_shape(&mut self, _: [i32; 3]) -> Result<Option<VoxelShape>, Infallible> {
+            Ok(None)
+        }
+    }
+    impl DynamicCollisionWorld for Scene {
+        fn shulker_collision_state(
+            &mut self,
+            _: [i32; 3],
+        ) -> Result<Option<ShulkerCollisionState>, Infallible> {
+            Ok(None)
+        }
+    }
+    impl LiquidCollisionWorld for Scene {
+        type Error = Infallible;
+        fn entity_liquid_shape(&mut self, _: EntityIdentity) -> Result<VoxelShape, Infallible> {
+            unreachable!()
+        }
+        fn fluid(&mut self, _: BlockPos) -> Result<FluidState, Infallible> {
+            unreachable!()
+        }
+        fn entity_can_stand(
+            &mut self,
+            _: EntityIdentity,
+            _: FluidState,
+        ) -> Result<bool, Infallible> {
+            unreachable!()
+        }
+    }
+    impl PowderSnowWorld for Scene {
+        type Error = Infallible;
+        fn powder_snow_entity(
+            &mut self,
+            _: EntityIdentity,
+        ) -> Result<PowderSnowEntity, Infallible> {
+            unreachable!()
+        }
+        fn powder_snow_walkable_tag(&mut self, _: EntityIdentity) -> Result<bool, Infallible> {
+            unreachable!()
+        }
+        fn feet_are_leather_boots(&mut self, _: EntityIdentity) -> Result<bool, Infallible> {
+            unreachable!()
+        }
+    }
+    impl CollisionChunks for Scene {
+        type Chunk = ();
+        type ChunkWorld = Self;
+        fn collision_chunk(&mut self, _: ChunkPos) -> Result<Option<()>, Infallible> {
+            Ok(Some(()))
+        }
+        fn block_state(&mut self, (): (), position: BlockPos) -> Result<BlockStateId, Infallible> {
+            Ok(if position == AT {
+                SOLID
+            } else {
+                BlockStateId(0)
+            })
+        }
+        fn chunk_world(&mut self, (): ()) -> &mut Self {
+            self
+        }
+    }
+    let (registry_tag, mut collision_tag) = fixture();
+    let registry = BlockRegistry::from_nbt(&registry_tag).unwrap();
+    let Some(Tag::List(shapes)) = collision_tag.get_mut("shapes") else {
+        unreachable!()
+    };
+    canonical_marker(&mut shapes[0], Tag::Byte(1));
+    canonical_marker(&mut shapes[1], Tag::Byte(2));
+    let Tag::Compound(root) = &mut collision_tag else {
+        unreachable!()
+    };
+    root.insert(
+        "shape_offsets".into(),
+        Tag::List(vec![Tag::compound([
+            ("state", Tag::Int(1)),
+            ("channels", Tag::Byte(1)),
+            ("horizontal", Tag::Float(0.25f32.to_bits())),
+            ("vertical", Tag::Float(0.2f32.to_bits())),
+        ])]),
+    );
+    let cached = Arc::new(CachedCollisionRegistry::from_nbt(&collision_tag, &registry).unwrap());
+    let binding = Arc::new(BlockCollisionRegistry::new(cached).unwrap());
+    assert!(binding.static_shape(SOLID).unwrap().is_none());
+    assert!(
+        binding
+            .static_shape(BlockStateId(0))
+            .unwrap()
+            .unwrap()
+            .is_empty()
+    );
+    let mut scene = Scene;
+    let shape = binding
+        .collision_shape(&mut scene, SOLID, [AT.x, AT.y, AT.z])
+        .unwrap();
+    // A downward ray through the narrow strip of the unshifted east edge must miss;
+    // the centre ray must hit the independently known height of the displaced cube.
+    let clip = |x| shape.clip(Vec3::new(x, 66.0, 2.5), Vec3::new(x, 63.0, 2.5), AT);
+    assert!(clip(1.95).is_none());
+    assert!((clip(1.5).unwrap().location.y - 64.83999999821186).abs() < 1.0e-12);
+    let definitions = ["minecraft:air", "minecraft:stone", "minecraft:context"]
+        .map(|name| (name.to_owned(), SuffocationDefinition::Never))
+        .into_iter()
+        .collect();
+    let binding = SuffocationRegistry::new(binding, &definitions, &BTreeSet::new()).unwrap();
+    let mut scene = RegistryCollisionWorld::new(&binding, &mut scene).unwrap();
+    // The box is wholly in the cell west of AT: only the face halo can find this block.
+    let probe = Aabb::new(Vec3::new(0.92, 64.2, 2.3), Vec3::new(0.98, 64.4, 2.6));
+    let hits =
+        BlockCollisionScan::new(&mut scene, CollisionContext::empty(false), probe, false, 27)
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].position, AT);
+}
+
+#[test]
 fn registry_scan_binding_requires_complete_canonical_metadata() {
     use std::{collections::BTreeSet, sync::Arc};
     use sunrise_world::{

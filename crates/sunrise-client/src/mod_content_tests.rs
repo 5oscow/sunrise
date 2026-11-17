@@ -7596,6 +7596,66 @@ fn a_declared_shape_decides_the_legacy_solid_bit() {
 }
 
 #[test]
+fn context_only_property_outline_moves_without_moving_the_fallback() {
+    use sunrise_world::{
+        collision::{CachedCollisionRegistry, ShapeChannel},
+        collision_context::EntityContextKind,
+        registry::{BlockRegistry, BlockStateId},
+    };
+    let declaration = r#"{"template":"minecraft:test","item":false,"properties":{"offset":"XZ"},
+      "outline_context_shapes":{"living":{"properties":["axis"],
+        "values":{"x":[[0.25,0,0.25,0.75,1,0.75]]},"default":[]}}}"#;
+    let (base, mods) = block_base("offset-context-variant", &[declaration]);
+    let plan = Plan::new(&base, &mods).unwrap();
+    let mut facts: J = read_json(&base.join("facts.json")).unwrap();
+    plan.json("facts.json", &mut facts).unwrap();
+    let registry =
+        BlockRegistry::from_facts_json(serde_json::to_vec(&facts).unwrap().as_slice()).unwrap();
+    let mut tag = Tag::compound([
+        ("DataVersion", Tag::Int(sunrise_world::DATA_VERSION)),
+        (
+            "states",
+            Tag::List(vec![test_state_row("x"), test_state_row("y")]),
+        ),
+        (
+            "shapes",
+            Tag::List(vec![encode_shape(&VoxelShape::block())]),
+        ),
+        ("cached_shapes", Tag::IntArray(vec![0, 0])),
+    ]);
+    plan.nbt(&mut tag);
+    plan.declared_shapes(&mut tag, true).unwrap();
+    let cached = CachedCollisionRegistry::from_nbt(&tag, &registry).unwrap();
+    for (id, axis) in [(2, "x"), (3, "y")] {
+        let state = BlockStateId(id);
+        assert_eq!(registry.state(state).unwrap().properties["axis"], axis);
+        let outline = cached
+            .context_outline_shape(state, EntityContextKind::Living)
+            .unwrap();
+        let pos = [1, 64, 2];
+        let outline = cached.positioned_shape(state, ShapeChannel::ContextOutline, pos, outline);
+        if axis == "x" {
+            assert_eq!(outline.min(Axis::X), 0.13333334028720856);
+            assert_eq!(outline.min(Axis::Z), 0.06666667014360428);
+        } else {
+            assert!(outline.is_empty());
+        }
+        assert!(
+            cached
+                .context_outline_shape(state, EntityContextKind::Other)
+                .is_none()
+        );
+        let fallback = cached.cached_shape(state).unwrap().unwrap();
+        let fallback = cached.positioned_shape(state, ShapeChannel::Outline, pos, fallback);
+        assert_eq!(
+            fallback.bounds(),
+            Some(Aabb::new(Vec3::ZERO, Vec3::new(1.0, 1.0, 1.0)))
+        );
+    }
+    fs::remove_dir_all(base.parent().unwrap()).unwrap();
+}
+
+#[test]
 fn declared_offsets_resolve_modes_and_publish_only_declared_shape_channels() {
     for (label, properties, expected) in [
         ("none", r#""offset":"NONE""#, None),

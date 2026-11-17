@@ -184,11 +184,18 @@ impl<'r> BlockCollisionRegistry<'r> {
             .get(state.0 as usize)
             .is_some_and(|flags| flags & 16 != 0)
     }
-    /// The state's cached shape, unless it may publish its own: a cached shape of such a state
-    /// stands only when its block entity holds none, so callers that read the cache go through
-    /// [`Self::collision_shape`] for it.
+    /// Whether the default collision can change with position through publication or an offset.
+    pub fn has_positioned_collision(&self, state: BlockStateId) -> bool {
+        self.publishes_shapes(state)
+            || self
+                .cached
+                .offset_limits(state, ShapeChannel::Collision)
+                .is_some()
+    }
+    /// The state's cached shape, unless it depends on the position. For those states,
+    /// callers go through [`Self::collision_shape`].
     pub fn static_shape(&self, state: BlockStateId) -> io::Result<Option<&VoxelShape>> {
-        if self.publishes_shapes(state) {
+        if self.has_positioned_collision(state) {
             return Ok(None);
         }
         self.cached.cached_shape(state)

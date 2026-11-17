@@ -252,8 +252,8 @@ mode and default limits are inherited, and supplied maxima adjust that mode with
 
 The model and **declared** outline, collision and interaction shapes follow the same column seed
 (`BlockState.getOffset`, x and z only), including declared entity-context variants. Shape caches stay
-block-local; the position is applied at query time. Block-entity published shapes remain exactly as
-published, without an added offset. Occlusion caches remain at the origin, as vanilla's state cache does.
+block-local; the position is applied at query time. Occlusion caches remain at the origin, as vanilla's
+state cache does.
 This works on both sides and does not require a hook.
 
 `destroy_overlay: false` hides the breaking crack (`destroy_stage_0` to `9`) on the block, for one broken by use

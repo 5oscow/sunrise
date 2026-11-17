@@ -104,11 +104,11 @@ impl MobWorld<'_> {
         f64::from(below) + self.collision_top(x, below, z)
     }
     /// The block's collision top (0 for an empty shape), as `getFloorLevel` and
-    /// `MoveControl.tick` read it: for a state that takes its shapes from its block entity,
-    /// the published collision shape's, else the state's own (#1666).
+    /// `MoveControl.tick` read it: use the shape at this cell for published or displaced
+    /// collision, and otherwise the state's cached height.
     pub fn collision_top(&self, x: i32, y: i32, z: i32) -> f64 {
         let state = self.world.block(x, y, z);
-        if !self.collision.publishes_shapes(state) {
+        if !self.collision.has_positioned_collision(state) {
             return f64::from(self.data.state(state).top);
         }
         let mut scene = crate::collisions::SceneCollisions {

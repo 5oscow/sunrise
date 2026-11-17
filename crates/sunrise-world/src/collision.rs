@@ -74,6 +74,18 @@ struct ShapeOffset {
     limits: (f32, f32),
 }
 
+pub(crate) fn valid_offset_limits((horizontal, vertical): (f32, f32)) -> bool {
+    (0.0..=0.25).contains(&horizontal) && (0.0..=0.2).contains(&vertical)
+}
+
+pub(crate) fn translate_shape(shape: &VoxelShape, [x, y, z]: [f64; 3]) -> VoxelShape {
+    if [x, y, z] == [0.0; 3] {
+        shape.clone()
+    } else {
+        shape.moved(sunrise_core::geometry::Vec3::new(x, y, z))
+    }
+}
+
 pub struct CachedCollisionRegistry<'r> {
     registry: &'r BlockRegistry,
     shapes: Vec<VoxelShape>,
@@ -356,10 +368,7 @@ impl<'r> CachedCollisionRegistry<'r> {
                     .ok_or_else(|| invalid("shape offset state outside registry"))?;
                 if slot.is_some()
                     || !(1..=31).contains(channels)
-                    || !horizontal.is_finite()
-                    || !(0.0..=0.25).contains(&horizontal)
-                    || !vertical.is_finite()
-                    || !(0.0..=0.2).contains(&vertical)
+                    || !valid_offset_limits((horizontal, vertical))
                 {
                     return Err(invalid(
                         "shape offset: duplicate state, invalid channels or limits",
@@ -392,20 +401,30 @@ impl<'r> CachedCollisionRegistry<'r> {
             .copied()
             .unwrap_or(false)
     }
-    /// The per-position translation for a declared channel. Published shapes bypass this.
+    /// Nonzero offset limits for a declared channel; none for a block-local shape.
+    pub(crate) fn offset_limits(
+        &self,
+        state: BlockStateId,
+        channel: ShapeChannel,
+    ) -> Option<(f32, f32)> {
+        self.offsets
+            .get(state.0 as usize)
+            .copied()
+            .flatten()
+            .filter(|offset| offset.channels & channel as u8 != 0 && offset.limits != (0.0, 0.0))
+            .map(|offset| offset.limits)
+    }
+
+    /// The per-position translation for a declared channel. Publication is resolved separately.
     pub fn shape_offset(
         &self,
         state: BlockStateId,
         channel: ShapeChannel,
         position: [i32; 3],
     ) -> [f64; 3] {
-        self.offsets
-            .get(state.0 as usize)
-            .copied()
-            .flatten()
-            .filter(|offset| offset.channels & channel as u8 != 0)
-            .map_or([0.0; 3], |offset| {
-                sunrise_core::random::column_offset(offset.limits, position[0], position[2])
+        self.offset_limits(state, channel)
+            .map_or([0.0; 3], |limits| {
+                sunrise_core::random::column_offset(limits, position[0], position[2])
             })
     }
     /// A block-local declared shape at this position, never changing its cached source.
@@ -416,12 +435,26 @@ impl<'r> CachedCollisionRegistry<'r> {
         position: [i32; 3],
         shape: &VoxelShape,
     ) -> VoxelShape {
-        let [x, y, z] = self.shape_offset(state, channel, position);
-        if [x, y, z] == [0.0; 3] {
-            shape.clone()
-        } else {
-            shape.moved(sunrise_core::geometry::Vec3::new(x, y, z))
-        }
+        translate_shape(shape, self.shape_offset(state, channel, position))
+    }
+    /// Sample the cached default collision at the position without allocating a moved shape.
+    /// The two transverse coordinates follow `VoxelShape::max_at`'s cyclic order (Z, X for Y).
+    pub fn cached_collision_top(
+        &self,
+        state: BlockStateId,
+        position: [i32; 3],
+        first: f64,
+        second: f64,
+    ) -> io::Result<Option<f64>> {
+        self.cached_shape(state).map(|shape| {
+            shape.map(|shape| {
+                if shape.is_empty() {
+                    return 0.0;
+                }
+                let [x, y, z] = self.shape_offset(state, ShapeChannel::Collision, position);
+                shape.max_at(Axis::Y, first - z, second - x) + y
+            })
+        })
     }
     /// Whether translated collision geometry can leave the cell, for collision scan bounds.
     pub fn offset_collision(&self, state: BlockStateId) -> bool {

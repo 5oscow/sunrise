@@ -109,8 +109,20 @@ impl RayWorld for ColliderRays<'_, '_> {
             }
             if mode == RayBlockMode::Outline {
                 let facts = data.facts.get(state);
+                let offset = super::perspective::outline_offset(
+                    data.tables,
+                    state,
+                    p.x,
+                    p.z,
+                    facts.outline_offset,
+                );
+                let offset = Vec3::new(offset[0], offset[1], offset[2]);
                 if let Some(shape) = published {
-                    return Ok(shape.clone());
+                    return Ok(if offset == Vec3::ZERO {
+                        shape.clone()
+                    } else {
+                        shape.moved(offset)
+                    });
                 }
                 let cached = self.scene.binding.cached_shapes();
                 if let Some(shape) = cached.context_outline_shape(state, self.context.entity_kind())
@@ -123,14 +135,11 @@ impl RayWorld for ColliderRays<'_, '_> {
                     ));
                 }
                 let shape = super::perspective::ray_shape_from_boxes(&facts.outline)?;
-                let offset = super::perspective::outline_offset(
-                    data.tables,
-                    state,
-                    p.x,
-                    p.z,
-                    facts.outline_offset,
-                );
-                return Ok(shape.moved(Vec3::new(offset[0], offset[1], offset[2])));
+                return Ok(if offset == Vec3::ZERO {
+                    shape
+                } else {
+                    shape.moved(offset)
+                });
             }
         }
         let binding = self.scene.binding;
