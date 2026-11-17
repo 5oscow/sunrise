@@ -30,6 +30,7 @@ fn console_probe() -> &'static Path {
 }
 
 #[test]
+#[ignore = "daily"]
 fn exporters_write_to_their_log_file_without_a_console() {
     let root = console_probe().parent().unwrap();
     let path = root.join("exporter.log");
