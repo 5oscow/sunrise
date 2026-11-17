@@ -421,10 +421,12 @@ This differs from NeoForge, where `getShape` is asked for on every query: here a
 **published when it changes, not asked for per query**, and a port of a `getShape` override calls
 `set_shapes` wherever that state changes (a part attached, a lid opened). Physics, selection,
 ray casts (outline and collider, over a dynamic template's shape too), support, the floor a
-mob's path stands on and its move control's jump read the published value at the position;
-nothing calls into the mod.
+mob's path stands on, its move control's jump, the height of an evoker's fangs, a panicking mob's
+search for water and whether a summoned iron golem can stand there read the published value at
+the position; nothing calls into the mod.
 Face sturdiness and multiface attachment between neighbouring blocks (placement, survival,
 shape updates, as for lichen and sculk veins) read the published collision shape at the position too.
+The sturdy floor an evoker's fangs look for under them still reads the declared shape.
 Fluid passage reads it as well: water and lava pass between two cells by their collision shapes at
 their positions. A publish, a clear and an aborted publish (the old shapes put back) each notify the
 block's neighbours, so a fluid beside it reads the new shape; publishing an unchanged value notifies nothing.
