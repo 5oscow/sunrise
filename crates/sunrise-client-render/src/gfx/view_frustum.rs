@@ -5,7 +5,7 @@ use glam::{Vec3, Vec4};
 /// Camera-relative clip planes (`Frustum`).
 #[derive(Clone, Copy, Debug)]
 pub struct Frustum {
-    pub(crate) planes: [Vec4; 6],
+    planes: [Vec4; 6],
 }
 impl Frustum {
     /// Construct a frustum from six camera-relative clip planes.

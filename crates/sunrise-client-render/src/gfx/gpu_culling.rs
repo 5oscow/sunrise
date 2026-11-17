@@ -2549,7 +2549,9 @@ mod tests {
             };
             if case == 9 {
                 // Not finite: it rejects nothing, as in `intersects`.
-                frustum.planes[3] = Vec4::NAN;
+                let mut planes = *frustum.planes();
+                planes[3] = Vec4::NAN;
+                frustum = Frustum::from_planes(planes);
             }
             let rows = if ahead { 3..6 } else { 0..24 };
             // Each section's value is its record's box.
@@ -2921,7 +2923,9 @@ mod tests {
             }
             let (mut frustum, center) = view(&mut rng);
             if case == 9 {
-                frustum.planes[rng.below(6) as usize] = Vec4::NAN;
+                let mut planes = *frustum.planes();
+                planes[rng.below(6) as usize] = Vec4::NAN;
+                frustum = Frustum::from_planes(planes);
             }
             // The eye in two cases of three, the view's own (`projection_center`).
             let eye = if at_edge {
