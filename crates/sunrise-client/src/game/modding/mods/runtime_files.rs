@@ -14,20 +14,20 @@ impl mod_api::RuntimeFileSource for PackageRuntime {
     fn file(&self, name: &str) -> Option<Vec<u8>> {
         self.0.file(name).map(|bytes| bytes.to_vec())
     }
-    fn path(&self, name: &str) -> Option<String> {
-        self.0
-            .path(name)
-            .map(|path| path.to_string_lossy().into_owned())
+    fn path(&self, name: &str) -> Option<mod_api::InstanceDirectory> {
+        mod_api::InstanceDirectory::from_path(&self.0.path(name)?)
     }
 }
 
 /// The runtime files of every package that declares `[runtime]`, by mod id. A compiled native
-/// mod's were checked when the game validated its package at startup; a selected package
-/// (a `.smod`, a wasm mod, a folder) is opened here, and a file that does not match its hash
-/// refuses the start, naming the package and file.
+/// mod's were checked when the game validated its package at startup (a mismatch ends the
+/// start there, as any compiled mod's package failing to read does: `mod-host/src/loading.rs`).
+/// A wasm mod's were checked when the wasm loader opened its package (`sunrise-mod-wasm/src/lib.rs`),
+/// which refuses a mismatch for that mod alone, by name, and kept the bytes it verified; they are
+/// served from there, so no file is hashed twice.
 pub(in crate::game) fn sources(
     mods: &ModsState,
-) -> Result<BTreeMap<String, Arc<dyn mod_api::RuntimeFileSource>>, String> {
+) -> BTreeMap<String, Arc<dyn mod_api::RuntimeFileSource>> {
     let mut sources: BTreeMap<String, Arc<dyn mod_api::RuntimeFileSource>> = BTreeMap::new();
     for package in mods.native.packages() {
         if let Some(runtime) = &package.runtime {
@@ -42,15 +42,11 @@ pub(in crate::game) fn sources(
         if sources.contains_key(id) {
             continue;
         }
-        if let Some(runtime) = selected
-            .package
-            .read_runtime(&selected.path)
-            .map_err(|error| format!("{id}: {error}"))?
-        {
+        if let Some(runtime) = RuntimeData::opened(id) {
             sources.insert(id.clone(), Arc::new(PackageRuntime(runtime)));
         }
     }
-    Ok(sources)
+    sources
 }
 
 #[cfg(test)]
@@ -90,6 +86,22 @@ mod tests {
         std::fs::write(folder.join("runtime/nav.bin"), BYTES).unwrap();
         let package = Package::read(folder).unwrap();
         package.read_runtime(folder).unwrap().unwrap()
+    }
+
+    /// A package folder whose name is not UTF-8 gives its files' paths back byte for byte.
+    #[cfg(unix)]
+    #[test]
+    fn a_non_unicode_package_folder_keeps_its_exact_path() {
+        use mod_api::RuntimeFileSource as _;
+        use std::os::unix::ffi::OsStrExt;
+        let parent = tempfile::tempdir().unwrap();
+        let folder = parent
+            .path()
+            .join(std::ffi::OsStr::from_bytes(b"ruby-\xff\x80"));
+        let source = PackageRuntime(open_package(&folder));
+        let path = source.path("nav.bin").unwrap().to_path_buf().unwrap();
+        assert_eq!(path, folder.join("runtime/nav.bin"));
+        assert_eq!(std::fs::read(path).unwrap(), BYTES);
     }
 
     /// What each mod's registration saw of its runtime files.

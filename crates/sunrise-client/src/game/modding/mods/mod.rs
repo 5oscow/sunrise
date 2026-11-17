@@ -231,16 +231,8 @@ pub(super) fn install_registration_data(
 ) -> sunrise_client::Result<()> {
     let packages = mod_api::__private::loaded_mods();
     let directory = Game::game_dir();
-    #[cfg(unix)]
-    let directory = {
-        use std::os::unix::ffi::OsStrExt;
-        mod_api::InstanceDirectory::Unix(directory.as_os_str().as_bytes().to_vec())
-    };
-    #[cfg(windows)]
-    let directory = {
-        use std::os::windows::ffi::OsStrExt;
-        mod_api::InstanceDirectory::Windows(directory.as_os_str().encode_wide().collect())
-    };
+    let directory = mod_api::InstanceDirectory::from_path(&directory)
+        .expect("the host's paths have an encoding the mod API carries");
     (sunrise_engine_slots::platform()?.install_registration_data)(
         mod_api::__private::RegistrationData::new(
             builtin_registry_names(root)?,

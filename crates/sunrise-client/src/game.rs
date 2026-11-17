@@ -11380,7 +11380,7 @@ pub(crate) fn run_with(
         .select(&std::env::current_dir()?, &early_settings.mods.enabled);
     let mod_phase = mod_api::__private::PhaseOwner::new(mod_api::__private::ModPhase::Packages);
     api_values::install_packages(options.mods.native.packages(), &options.mods.selected)?;
-    mods::install_registration_data(&vanilla_root, mods::runtime_files::sources(&options.mods)?)?;
+    mods::install_registration_data(&vanilla_root, mods::runtime_files::sources(&options.mods))?;
     {
         use mod_api::__private::game::RegistrationContextNew;
         let context = mod_api::RegistrationContext::new();

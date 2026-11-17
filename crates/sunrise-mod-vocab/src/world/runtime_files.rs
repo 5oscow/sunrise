@@ -15,8 +15,9 @@ pub trait RuntimeFileSource: Send + Sync + 'static {
     fn names(&self) -> Vec<String>;
     /// The checked bytes of `name`; `None` for a name the manifest does not list.
     fn file(&self, name: &str) -> Option<Vec<u8>>;
-    /// Where `name` sits on disk, when the package is a folder and lists it.
-    fn path(&self, name: &str) -> Option<String>;
+    /// Where `name` sits on disk, when the package is a folder and lists it, as the host's own
+    /// path (never through UTF-8 text).
+    fn path(&self, name: &str) -> Option<crate::InstanceDirectory>;
 }
 crate::wire::wire_handlers::handler!(dyn RuntimeFileSource, "RuntimeFileSource");
 
@@ -89,9 +90,12 @@ impl RuntimeFiles {
     }
 
     /// Where `name` sits on disk, so native code can map or cache-compile a large file without a
-    /// copy. Native only: a wasm mod is refused with [`RuntimePathError::WasmMod`]. A package
-    /// that is a `.smod` archive has no path ([`RuntimePathError::NotAFolder`]). The file was
-    /// checked when the package opened; a later edit of the folder is the mod's to guard against.
+    /// copy. A package that is a `.smod` archive has no path ([`RuntimePathError::NotAFolder`]).
+    /// The file was checked when the package opened; a later edit of the folder is the mod's to
+    /// guard against.
+    ///
+    /// Not on wasm: a wasm mod has no host path to map, and is refused with
+    /// [`RuntimePathError::WasmMod`]. Read the bytes with [`file`](Self::file) instead.
     pub fn file_path(&self, name: &str) -> Result<std::path::PathBuf, RuntimePathError> {
         if cfg!(target_arch = "wasm32") {
             return Err(RuntimePathError::WasmMod);
@@ -101,7 +105,7 @@ impl RuntimeFiles {
         }
         self.source
             .path(name)
-            .map(std::path::PathBuf::from)
+            .and_then(|path| path.to_path_buf())
             .ok_or(RuntimePathError::NotAFolder)
     }
 }
@@ -141,8 +145,10 @@ mod tests {
         fn file(&self, name: &str) -> Option<Vec<u8>> {
             (name == "nav.bin").then(|| b"tables".to_vec())
         }
-        fn path(&self, name: &str) -> Option<String> {
-            (self.folder && name == "nav.bin").then(|| "/mods/ruby/runtime/nav.bin".to_owned())
+        fn path(&self, name: &str) -> Option<crate::InstanceDirectory> {
+            (self.folder && name == "nav.bin").then(|| {
+                crate::InstanceDirectory::Unix(b"/mods/\xff ruby/runtime/nav.bin".to_vec())
+            })
         }
     }
 
@@ -182,10 +188,12 @@ mod tests {
         if cfg!(target_arch = "wasm32") {
             assert_eq!(folder.file_path("nav.bin"), Err(RuntimePathError::WasmMod));
         } else {
-            assert_eq!(
-                folder.file_path("nav.bin"),
-                Ok(std::path::PathBuf::from("/mods/ruby/runtime/nav.bin"))
-            );
+            assert_eq!(folder.file_path("nav.bin"), {
+                use std::os::unix::ffi::OsStrExt;
+                Ok(std::path::PathBuf::from(std::ffi::OsStr::from_bytes(
+                    b"/mods/\xff ruby/runtime/nav.bin",
+                )))
+            });
             assert_eq!(
                 folder.file_path("other.bin"),
                 Err(RuntimePathError::NotListed)

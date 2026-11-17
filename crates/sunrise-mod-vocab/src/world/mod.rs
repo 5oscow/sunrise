@@ -47,12 +47,12 @@ pub(crate) mod reload_order;
 // hidden: a module of game-side entry points; mods use their re-exports
 #[doc(hidden)]
 pub mod rotation;
+pub(crate) mod runtime_files;
 pub(crate) mod runtime_levels;
 pub(crate) mod scheduler;
 pub(crate) mod server_console;
 pub(crate) mod server_reload;
 pub mod snapshots;
-pub(crate) mod runtime_files;
 pub(crate) mod startup_progress;
 pub(crate) mod structure_template;
 pub(crate) mod structure_type;

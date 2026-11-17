@@ -130,7 +130,9 @@ pub fn decode(data: &[u8]) -> Result<Vec<Entry>> {
                 return Err(Error::new("mod list: a runtime digest for an unlisted mod"));
             };
             if !valid || !seen.insert(id) {
-                return Err(Error::new("mod list: a malformed or repeated runtime digest"));
+                return Err(Error::new(
+                    "mod list: a malformed or repeated runtime digest",
+                ));
             }
             entry.runtime = Some(digest);
         }
@@ -270,7 +272,10 @@ mod tests {
 
     #[test]
     fn a_bad_runtime_section_is_refused() {
-        let list = [entry("ruby", "1", Side::Both)];
+        let list = [
+            entry("ruby", "1", Side::Both),
+            entry("agate", "1", Side::Both),
+        ];
         let digest = "c".repeat(RUNTIME_DIGEST);
         let section = |count: i32, id: &str, digest: &str, repeats: usize| {
             let mut data = encode(&list);
@@ -284,10 +289,20 @@ mod tests {
             data
         };
         assert!(decode(&section(1, "ruby", &digest, 1)).is_ok());
-        assert!(decode(&section(0, "ruby", &digest, 0)).is_err(), "an empty section");
-        assert!(decode(&section(1, "other", &digest, 1)).is_err(), "an unlisted mod");
-        assert!(decode(&section(1, "ruby", "short", 1)).is_err(), "a short digest");
+        assert!(
+            decode(&section(0, "ruby", &digest, 0)).is_err(),
+            "an empty section"
+        );
+        assert!(
+            decode(&section(1, "other", &digest, 1)).is_err(),
+            "an unlisted mod"
+        );
+        assert!(
+            decode(&section(1, "ruby", "short", 1)).is_err(),
+            "a short digest"
+        );
         assert!(decode(&section(1, "ruby", &"G".repeat(RUNTIME_DIGEST), 1)).is_err());
+        // Two entries are listed and the section names `ruby` twice: refused for the repeat.
         assert!(decode(&section(2, "ruby", &digest, 2)).is_err(), "a repeat");
     }
 
