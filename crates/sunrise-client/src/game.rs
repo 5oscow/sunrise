@@ -1045,6 +1045,7 @@ struct Game<'a> {
     craft_table: Option<[i32; 3]>,
     /// A quick craft drag over inventory slots: (button, game slots so far).
     inv_drag: Option<(i32, Vec<usize>)>,
+    inv_held: bool,
     /// `AbstractContainerScreen`'s quick craft and skip-release state.
     inv_clicks: sunrise_client::container_screen::Clicks,
     /// The Mouse Tweaks extra's drag and wheel (`tweaks`).
@@ -9684,6 +9685,7 @@ impl Game<'_> {
                     if self.screen == Screen::Inventory
                         && d != 0.0
                         && !bundle
+                        && !self.container_wheel(d)
                         && !self.tweak_scroll(d, self.inventory_target().0)
                     {
                         self.station_scroll(d);
@@ -9849,7 +9851,8 @@ impl Game<'_> {
                         return Ok(());
                     }
                     if pressed
-                        && (self.sort_mouse_press(button)
+                        && (self.container_mouse(button)
+                            || self.sort_mouse_press(button)
                             || self.hud_editor_key_press(&sunrise_client::keybinds::mouse_name(
                                 button,
                             )))
@@ -10718,6 +10721,7 @@ impl<'a> Game<'a> {
             craft_size: 2,
             craft_table: None,
             inv_drag: None,
+            inv_held: false,
             tweaks: Default::default(),
             bundle_mouse: Default::default(),
             inv_clicks: Default::default(),
