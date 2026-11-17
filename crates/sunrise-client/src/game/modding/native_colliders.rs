@@ -279,7 +279,7 @@ impl Game<'_> {
 
     /// Where the collider entity `id` is, in the level in place: the server's entity, or a
     /// client's copy of what its server shows it.
-    fn collider_origin(&self, id: u32) -> Option<Vec3> {
+    pub(in crate::game) fn collider_origin(&self, id: u32) -> Option<Vec3> {
         let at = if self.is_logical_server() {
             self.target_position(self.level_entity(id as i32)?)?
         } else {
@@ -315,6 +315,19 @@ impl Game<'_> {
             return vec![id];
         };
         stack_in_graph(&remote.passenger_vehicles, id)
+    }
+
+    /// The frame the collider of entity `id` has now: where its entity stands and its rotation.
+    pub(in crate::game) fn collider_now_frame(
+        &self,
+        id: u32,
+    ) -> Option<sunrise_core::geometry::oriented::Frame> {
+        let state = if self.is_logical_server() {
+            self.entity_attachments.collider(id).map(|e| &e.state)?
+        } else {
+            self.remote.as_ref()?.colliders.get(&id)?
+        };
+        Some(state.frame(self.collider_origin(id)?))
     }
 
     /// Calls `f` with each collider of the level in place, in an order that is the same from
@@ -421,6 +434,7 @@ impl Game<'_> {
                     stack: stack.clone(),
                 });
                 placed.push(Placed {
+                    id,
                     collider: state.oriented(origin),
                     exempt: stack,
                 });
@@ -602,6 +616,7 @@ mod tests {
             Vec3::new(2.0, 1.0, 2.0),
         )]);
         let placed = Prepared::new(vec![Placed {
+            id: 10,
             collider: OrientedCollider::new(Frame::translation(Vec3::ZERO), Arc::new(boxes)),
             exempt: stack_in_graph(&graph, 10),
         }]);

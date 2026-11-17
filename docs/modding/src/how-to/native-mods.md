@@ -98,4 +98,21 @@ A collider is saved with the entity. The server sends it only to Sunrise clients
 the whole collider when they start to (in messages of at most 64 KiB), then only what changed, by box
 index, and the rotation alone for `set_collider_transform`. **A vanilla client does not see a collider**:
 it sees the entity and walks through it. A mod that needs players to stand on one requires the Sunrise
-client at join. Carrying whoever stands on a moving collider is a later step; this one only makes it solid.
+client at join.
+
+### Carrying
+
+A collider that moves carries what stands on it. Once a tick, after the level's entities ticked
+(so whatever order they ticked in), every body standing on a box of a collider that moved or turned
+this tick moves by the displacement of its contact point, the point of the box under its feet: the
+translation and the rotation of the collider's change, as an ordinary collided `Entity.move` with the
+cause `MoveCause::Carried`. An `entity_move` listener sees it and may cancel or replace it like any other
+move. It stops at walls and steps up like any move, and yaw is never turned. A body's support is the box
+under its feet with the highest top (a tie goes to the lower entity id). A collider standing on another
+collider is carried first, and the bodies on it take its whole displacement. A body that rides something is not carried itself; it
+follows its vehicle. The server carries the entities it simulates, and each Sunrise client its own player.
+
+Carrying never pushes through a wall and the collider is never stopped by what is in its way: a
+body caught between a collider and a wall stays where the collision leaves it, overlapping the collider, and
+a living body takes `in_wall` damage while a box covers its eyes, as it does in a block. (A vanilla armor stand takes no
+`in_wall` damage and so none here.) A vanilla client does not carry its player: only the Sunrise client does.

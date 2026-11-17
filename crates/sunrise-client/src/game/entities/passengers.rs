@@ -238,7 +238,7 @@ impl Game<'_> {
     /// `Entity.positionRider` for every mob passenger: in its boat, then on
     /// its mob. A server's client places them itself too, as the server sends
     /// no passenger's position.
-    pub(super) fn position_riders(&mut self) {
+    pub(in crate::game) fn position_riders(&mut self) {
         let blocked = self.mobs_below_off_level();
         // Every vehicle's riders in one pass over the mobs, not one pass per
         // boat, minecart and primed TNT. Seating moves the riders but changes
