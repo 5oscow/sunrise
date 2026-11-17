@@ -997,7 +997,9 @@ impl Game<'_> {
                     "size": m.extra.size,
                     "leash": m.extra.leash.map(|h| format!("{h:?}")),
                     "tame": m.extra.tame,
-                    "sitting": m.extra.sitting,
+                    // TamableAnimal.isInSittingPose, what this side draws: a server's client
+                    // has only that bit of DATA_FLAGS_ID, never the saved order to sit.
+                    "sitting": m.extra.sitting_pose,
                     "temper": if sunrise_client::mobs::equine::is_equine(m.species()) {
                         sunrise_client::mobs::equine::temper(m)
                     } else { i32::from(m.extra.variant3) },
@@ -8449,6 +8451,9 @@ impl Game<'_> {
 #[cfg(test)]
 #[path = "mob_griefing_tests.rs"]
 mod mob_griefing_tests;
+
+#[cfg(test)]
+mod control_mobs_sitting_tests;
 
 #[cfg(test)]
 mod living_visibility_tests;

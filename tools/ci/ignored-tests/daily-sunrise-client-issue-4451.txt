@@ -390,6 +390,7 @@ sunrise-client game::creatures::chorus_projectile_drop_tests::a_registered_snowb
 sunrise-client game::creatures::chorus_projectile_drop_tests::breaker_context_is_target_only_and_does_not_escape_its_level_call lib daily resources
 sunrise-client game::creatures::chorus_projectile_drop_tests::default_drop_rng_continues_identically_with_table_sequence_or_level_fallback lib daily resources
 sunrise-client game::creatures::chorus_projectile_drop_tests::denied_hits_other_blocks_and_direct_destroy_keep_their_drop_contracts lib daily resources
+sunrise-client game::creatures::control_mobs_sitting_tests::the_mobs_command_reports_the_sitting_pose lib daily resources
 sunrise-client game::creatures::conversion_identity::tests::a_converted_mob_keeps_its_serializable_attachments lib daily resources
 sunrise-client game::creatures::conversion_subscriber_tests::post_only_listener_is_subscribed_without_a_pre_listener lib daily resources
 sunrise-client game::creatures::conversion_tag_tests::converted_mobs_keep_command_tags_at_the_new_id_and_on_save lib daily resources
