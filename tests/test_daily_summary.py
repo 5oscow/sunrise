@@ -110,7 +110,7 @@ def git(merged=(), tag=True, ancestors=()):
 
 class DailySummaryTests(unittest.TestCase):
     def run_summary(self, api, reports=(), results=LEGS, ref="refs/heads/main", dry_run="false", merged=(), tag=True,
-                    fixes=None, ancestors=(), parity=PARITY_PASS, run="77", parity_scope=None):
+                    fixes=None, ancestors=(), parity=PARITY_PASS, run="77", parity_scope=None, history=None):
         with tempfile.TemporaryDirectory() as folder:
             for index, report in enumerate(reports):
                 path = Path(folder, "reports", f"daily-report-{index}")
@@ -126,7 +126,7 @@ class DailySummaryTests(unittest.TestCase):
                    "RESULTS": json.dumps(results), "REPORTS": str(Path(folder, "reports")),
                    "GITHUB_STEP_SUMMARY": str(Path(folder, "summary")), "GITHUB_OUTPUT": str(Path(folder, "out"))}
             with mock.patch.dict(os.environ, env, clear=True), contextlib.redirect_stdout(io.StringIO()):
-                summary.main(api, git(merged, tag, ancestors), closers(fixes or {}))
+                summary.main(api, history or git(merged, tag, ancestors), closers(fixes or {}))
             return Path(folder, "summary").read_text(), Path(folder, "out").read_text()
 
     def run_after(self, api, result, ref="refs/heads/main", run="77", fixes=None):
@@ -187,6 +187,28 @@ class DailySummaryTests(unittest.TestCase):
                         "2 passed, 1 failed in 290.0 min.\n", ["boat_rider", "sculk#1", "sculk#2"], run="78")
         self.assertEqual([(method, path) for method, path, _ in next_run.writes],
                          [("POST", "issues/1000/comments"), ("POST", "issues/1001/comments"), ("PATCH", "issues/1001")])
+
+    def test_a_failing_harness_uses_the_prior_green_and_names_rollup_members(self):
+        api = Api([j for j in GREEN_JOBS if j["name"] != PARITY_JOB] + [job(PARITY_JOB, "failure")], tag=True)
+        previous_green = "d" * 40
+        calls = []
+
+        def history(*args):
+            calls.append(args)
+            self.assertEqual(api.writes, [], "read suspects before applying the summary's writes")
+            if args[0] == "rev-parse":
+                self.assertEqual(args[-1], "refs/tags/daily-green^{commit}")
+                return previous_green
+            self.assertEqual(args, ("log", "--merges", "--format=%s", f"{previous_green}..{COMMIT}"))
+            return ("Merge pull request #2110 from org/rollup\nMerge #2105 at abcdef0\n"
+                    "Merge #2103 at fedcba0\nMerge #2105 at abcdef0\nMerge branch 'topic'\n")
+
+        self.run_summary(api, results=dict(LEGS, parity={"result": "failure"}), history=history,
+                         parity={"passed": [], "failed": ["loot_a"], "complete": True})
+        self.assertEqual([args[0] for args in calls], ["rev-parse", "log"])
+        self.assertEqual([path for _, path, _ in api.writes], ["issues"])
+        self.assertIn(f"merged since the last green daily (`daily-green`..`{COMMIT[:9]}`): #2103, #2105, #2110",
+                      api.issues[-1]["body"])
 
     def test_a_required_parity_call_with_no_verdict_holds_green_but_not_the_sdk(self):
         for status in ("skipped", "cancelled", "failure", "success"):

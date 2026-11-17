@@ -77,9 +77,8 @@ FRESH = "sdk / fresh"
 # The wasm fixture job's steps whose failures its verdict file names test by test: the fixture's own tests
 # (tools/ci/cargo_test_verdict.py) and the client tests that load it (ignored_tests.py --needs).
 FIXTURE_TESTS_STEPS = ("Validate and load the fixture", "Run the client tests that load the compiled fixture")
-MERGE = re.compile(r"^Merge pull request #(\d+) from ")
 # A pull request merged on its own (`Merge pull request #N from`) or as a rollup's member (`Merge #N at <sha>`).
-BROUGHT_IN = re.compile(r"^Merge (?:pull request #(\d+) from |#(\d+) at )")
+MERGE = re.compile(r"^Merge (?:pull request #(\d+) from |#(\d+) at )")
 MAX_PAGES = 100
 # How far back a closed issue's fix is looked for: a fix that merged after the commit under test is hours old.
 FIX_LOOKBACK = dt.timedelta(days=14)
@@ -370,10 +369,11 @@ def legs_green(legs, jobs, results, tests, unfinished):
 
 def suspects(commit, git):
     """The pull requests merged since the last green daily (`daily-green..commit`), or None with no green daily yet."""
-    if git("rev-parse", "--verify", "--quiet", f"refs/tags/{TAG}^{{commit}}") is None:
+    previous_green = git("rev-parse", "--verify", "--quiet", f"refs/tags/{TAG}^{{commit}}")
+    if previous_green is None:
         return None
-    log = git("log", "--merges", "--format=%s", f"refs/tags/{TAG}..{commit}") or ""
-    return sorted({int(found[1]) for line in log.splitlines() if (found := MERGE.match(line))})
+    log = git("log", "--merges", "--format=%s", f"{previous_green}..{commit}") or ""
+    return sorted({int(found[1] or found[2]) for line in log.splitlines() if (found := MERGE.match(line))})
 
 
 def fixes_after(commit, titles, call, query, git):
@@ -431,7 +431,7 @@ def pull_requests_touching(base, commit, folders, git):
     numbers = set()
     for change in (git("log", "--no-merges", "--format=%H", f"{base}..{commit}", "--", *folders) or "").split():
         merges = (git("log", "--merges", "--ancestry-path", "--format=%s", f"{change}..{commit}") or "").splitlines()
-        named = [found for line in merges if (found := BROUGHT_IN.match(line))]
+        named = [found for line in merges if (found := MERGE.match(line))]
         if named:
             numbers.add(int(named[-1][1] or named[-1][2]))
     return sorted(numbers)
@@ -621,6 +621,7 @@ def main(call=api, run_git=git, query=graphql):
     open_issues = {issue["title"]: issue["number"]
                    for issue in pages(call, f"issues?state=open&labels={LABEL}")
                    if "pull_request" not in issue and issue["title"].startswith(PREFIX)}
+    # Resolve the prior green before planning or applying any writes, including the tag move.
     numbers = suspects(commit, run_git) if tests or unfinished else []
     reds = {test_title(item) for item in tests} | {leg_title(leg) for leg, *_ in unfinished}
     fixes = fixes_after(commit, reds - open_issues.keys(), call, query, run_git)
