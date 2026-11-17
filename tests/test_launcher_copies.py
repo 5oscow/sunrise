@@ -1,4 +1,4 @@
-"""The launcher's copies of game crates (launcher/crates/) stay byte- and value-equal to the game's originals."""
+"""The launcher's copies of game files (launcher/crates/, launcher/assets/) stay byte- and value-equal to the originals."""
 import ast
 import re
 import unittest
@@ -14,6 +14,24 @@ SAME_BYTES = (
     ("crates/sunrise-release-sign/tests/signed", "release-verify/tests/signed"),
     ("crates/sunrise-mod-package/tests/index", "smod/tests/index"),
     ("crates/sunrise-theme/tokens.css", "theme/tokens.css"),
+    ("packaging/icons/hicolor/16x16/apps/sunrise.png", "../assets/icons/hicolor/16x16/apps/sunrise.png"),
+    ("packaging/icons/hicolor/24x24/apps/sunrise.png", "../assets/icons/hicolor/24x24/apps/sunrise.png"),
+    ("packaging/icons/hicolor/32x32/apps/sunrise.png", "../assets/icons/hicolor/32x32/apps/sunrise.png"),
+    ("packaging/icons/hicolor/48x48/apps/sunrise.png", "../assets/icons/hicolor/48x48/apps/sunrise.png"),
+    ("packaging/icons/hicolor/64x64/apps/sunrise.png", "../assets/icons/hicolor/64x64/apps/sunrise.png"),
+    ("packaging/icons/hicolor/128x128/apps/sunrise.png", "../assets/icons/hicolor/128x128/apps/sunrise.png"),
+    ("packaging/icons/hicolor/256x256/apps/sunrise.png", "../assets/icons/hicolor/256x256/apps/sunrise.png"),
+    ("packaging/icons/hicolor/512x512/apps/sunrise.png", "../assets/icons/hicolor/512x512/apps/sunrise.png"),
+    ("packaging/icons/hicolor/scalable/apps/sunrise.svg", "../assets/icons/hicolor/scalable/apps/sunrise.svg"),
+    ("packaging/icons/sunrise.icns", "../assets/icons/sunrise.icns"),
+    ("packaging/icons/sunrise.ico", "../assets/icons/sunrise.ico"),
+    ("packaging/linux/sunrise.desktop", "../assets/linux/sunrise.desktop"),
+    ("docs/media/village.webp", "../assets/media/village.webp"),
+    ("docs/media/underwater.webp", "../assets/media/underwater.webp"),
+    ("docs/media/nether.webp", "../assets/media/nether.webp"),
+    ("LICENSE", "../assets/licenses/LICENSE"),
+    ("LICENSES/MIT-Horizon.txt", "../assets/licenses/MIT-Horizon.txt"),
+    ("crates/sunrise-prepare/tests/support/java_probe.rs", "../tests/support/java_probe.rs"),
 )
 
 
