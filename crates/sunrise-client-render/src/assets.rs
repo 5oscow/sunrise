@@ -381,14 +381,15 @@ impl RenderAssets {
         };
         // Connected-texture rules find their faces by sprite layer: what they match by name keeps a
         // layer of its own, decided before the models insert their textures.
-        let ctm_rules = if draws {
-            sunrise_optifine::ctm::load(root.source())
+        let formats = crate::pack_hooks::formats();
+        let connected_rules = if draws {
+            formats.connected_texture_rules(root.source())
         } else {
-            Vec::new()
+            None
         };
-        sprites.keep_apart(crate::connected::ConnectedTextures::matched_sprites(
-            &ctm_rules,
-        ));
+        if let Some(rules) = &connected_rules {
+            rules.keep_sprites_apart(&mut sprites);
+        }
         let mut models = if draws {
             let _step = crate::spans::startup::step("core.models_bake");
             crate::models::prepare_with_models(root, registry, &mut sprites, &parsed)?
@@ -428,50 +429,23 @@ impl RenderAssets {
         }
         let fusion = if draws {
             let _step = crate::spans::startup::step("core.fusion");
-            crate::fusion::FusionTextures::load(
-                root.source(),
-                registry,
-                &mut sprites,
-                &mut models.catalog,
-            )
+            formats.connecting_models(root.source(), registry, &mut sprites, &mut models.catalog)
         } else {
             Default::default()
         };
-        let mut emissive = Vec::new();
-        let connected = if draws {
+        if draws {
             crate::native_emissive::load(root.source(), &mut sprites);
-            // A side's sprite, for rules that connect by tile: the first quad facing it.
-            let catalog = &models.catalog;
-            let mut found = Vec::new();
-            crate::connected::ConnectedTextures::load(
-                root.source(),
-                ctm_rules,
-                registry,
-                &mut sprites,
-                |state, face| {
-                    let side = sunrise_assets::model::Direction::ALL[face as usize];
-                    catalog
-                        .models_at(
-                            state,
-                            sunrise_core::position::BlockPos::new(0, 0, 0),
-                            &mut found,
-                        )
-                        .ok()?;
-                    found
-                        .iter()
-                        .flat_map(|m| &m.faces)
-                        .find(|f| f.quad.facing == side)
-                        .map(|f| f.layer)
-                },
-            )
-        } else {
-            Default::default()
-        };
+        }
+        let connected = connected_rules
+            .map(|rules| rules.bake(root.source(), registry, &mut sprites, &models.catalog))
+            .unwrap_or_default();
         // After the connected tiles: a tile identical to a block shares its layer, and the
         // overlays skip shared layers.
-        if draws {
-            emissive = crate::native_emissive::load_optifine(root.source(), &mut sprites);
-        }
+        let emissive = if draws {
+            crate::native_emissive::load_optifine(root.source(), &mut sprites)
+        } else {
+            Vec::new()
+        };
         sprites.save_disk_cache();
         if draws {
             sprites.finish();

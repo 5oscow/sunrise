@@ -4,12 +4,51 @@
 //! own types. The platform installs its formats at startup ([`install`]); with none installed,
 //! packs load as vanilla reads them.
 
-use crate::resource_source::ResourceSource;
+use crate::{
+    connected::ConnectedTextures, fusion::FusionTextures, models::StateModels,
+    resource_source::ResourceSource, sprites::Sprites,
+};
 use std::sync::{Arc, OnceLock};
+use sunrise_world::registry::BlockRegistry;
+
+/// Connected-texture rules that affect both sprite allocation and block-model baking.
+/// Only the pack loader calls this; mesh workers read the baked tables directly.
+pub trait ConnectedTextureRules {
+    /// Reserve distinct layers for the sprites the rules match by name, before baking models.
+    fn keep_sprites_apart(&self, sprites: &mut Sprites);
+
+    /// Insert the rule tiles and resolve the rules against the baked models.
+    fn bake(
+        self: Box<Self>,
+        root: &ResourceSource,
+        registry: &BlockRegistry,
+        sprites: &mut Sprites,
+        models: &StateModels,
+    ) -> ConnectedTextures;
+}
 
 /// What the pack formats beyond vanilla's add to a pack. Each method reads one overlay of a pack
 /// (its folder at `root`); the default is "nothing in this format".
 pub trait PackFormats: Send + Sync {
+    /// Rules that need to reserve sprite layers before model baking.
+    fn connected_texture_rules(
+        &self,
+        _root: &ResourceSource,
+    ) -> Option<Box<dyn ConnectedTextureRules>> {
+        None
+    }
+
+    /// Connecting model faces whose rules are resolved after model baking.
+    fn connecting_models(
+        &self,
+        _root: &ResourceSource,
+        _registry: &BlockRegistry,
+        _sprites: &mut Sprites,
+        _models: &mut StateModels,
+    ) -> FusionTextures {
+        FusionTextures::default()
+    }
+
     /// The colours the overlay replaces where vanilla hardcodes them.
     fn colors(&self, _root: &ResourceSource) -> Option<crate::pack_palette::PackColors> {
         None
