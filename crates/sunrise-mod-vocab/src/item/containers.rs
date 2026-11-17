@@ -203,6 +203,30 @@ impl std::ops::DerefMut for ModBlockEntity {
 /// and the slots hoppers may put into (`canPlaceItemThroughFace`) and take
 /// from (`canTakeItemThroughFace`); and the vanilla menu that shows its
 /// slots when the block is used, if any (`MOD_MENUS`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, sunrise_mod_api_macros::Wire)]
+pub enum ModContainerInsertRule {
+    /// Accept any item that the slot's other container rules allow.
+    #[default]
+    Any,
+    /// Accept an item only while the slot is empty.
+    OnlyWhenEmpty,
+    /// Accept an item while the slot is empty or already holds the same item and components.
+    SameKind,
+}
+
+impl ModContainerInsertRule {
+    /// Whether this rule admits `offered` for the slot's current contents.
+    pub fn allows(self, current: Option<&ItemStack>, offered: &ItemStack) -> bool {
+        match self {
+            Self::Any => true,
+            Self::OnlyWhenEmpty => current.is_none(),
+            Self::SameKind => {
+                current.is_none_or(|held| held.same_item(offered) && held.same_components(offered))
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 // exhaustive: the game builds it with a literal; mods only read it
 #[derive(sunrise_mod_api_macros::Wire)]
@@ -211,6 +235,8 @@ pub struct ModContainer {
     pub faces: [Vec<usize>; 6],
     pub inputs: Vec<usize>,
     pub outputs: Vec<usize>,
+    /// The admission rule for each slot, by slot index. Missing entries mean [`Any`](ModContainerInsertRule::Any).
+    pub insert_rules: Vec<ModContainerInsertRule>,
     pub menu: Option<String>,
 }
 /// The fluid tanks of a mod block's block entity, in the container's shape:
@@ -397,5 +423,17 @@ mod tests {
                 ("fuel".into(), Tag::Int(9)),
             ])
         );
+    }
+
+    #[test]
+    fn mod_container_insert_rules_match_empty_and_same_kind_slots() {
+        let stone = ItemStack::new(ItemKey(0), 1).unwrap();
+        let other = ItemStack::new(ItemKey(1), 1).unwrap();
+        assert!(ModContainerInsertRule::Any.allows(Some(&stone), &other));
+        assert!(!ModContainerInsertRule::OnlyWhenEmpty.allows(Some(&stone), &stone));
+        assert!(ModContainerInsertRule::OnlyWhenEmpty.allows(None, &stone));
+        assert!(ModContainerInsertRule::SameKind.allows(None, &stone));
+        assert!(ModContainerInsertRule::SameKind.allows(Some(&stone), &stone));
+        assert!(!ModContainerInsertRule::SameKind.allows(Some(&stone), &other));
     }
 }
