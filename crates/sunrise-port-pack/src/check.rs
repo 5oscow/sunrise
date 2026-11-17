@@ -201,6 +201,13 @@ pub fn check(jar_path: &Path, out: &Path) -> Result<Check, String> {
             "recipes of types Sunrise doesn't have (moved to outside/)",
         ));
     }
+    if report.recipes_old_result > 0 {
+        skipped.push(plural(
+            report.recipes_old_result,
+            "recipe written before 1.20.5 (moved to outside/)",
+            "recipes written before 1.20.5 (moved to outside/)",
+        ));
+    }
     if !report.unreadable.is_empty() {
         skipped.push(plural(
             report.unreadable.len(),
@@ -396,10 +403,13 @@ displayName = "Ruby"
     fn recipes_of_unknown_types_are_moved_out_and_reported() {
         let dir = temp("custom");
         let custom = br#"{"type": "ruby:cutting", "ingredient": {"item": "ruby:ruby"}, "neoforge:conditions": [{"type": "neoforge:true"}]}"#;
+        let bare = br#"{"type": "crafting_shapeless", "ingredients": ["minecraft:red_dye"], "result": {"id": "ruby:ruby"}}"#;
         let files = [
             ("META-INF/neoforge.mods.toml", TOML),
             ("assets/ruby/models/item/ruby.json", b"{}"),
             ("data/ruby/recipe/cutting.json", custom.as_slice()),
+            // No namespace: 26.3 reads it as `minecraft:`, so it loads and stays.
+            ("data/ruby/recipe/bare.json", bare.as_slice()),
         ];
         let c = check(&jar(&dir, &files), &dir.join("out")).unwrap();
         assert!(
