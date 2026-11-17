@@ -78,13 +78,30 @@ rejects the shader. The game never panics over a pipeline's shader.
 
 `cargo sunrise-mod check`, run in the mod's folder, composes and validates every
 `assets/<namespace>/shaders/pipeline/**/*.wgsl` file with the code the game uses, and fails with
-`<file>: <reason>` for each one the game would refuse (the same text the game logs after the
-pipeline's id). The tool cannot see your `RenderPipeline` registration, so it takes a file whose
-text contains `pipeline_texture` anywhere (a comment included) as textured and any other file as
-untextured; the game goes by the registration's `.textured(...)` instead. A file the check accepts
-can still be refused at load: when its registration declares no texture but the file samples one
-(or the reverse), when the registration's texture or another resource it names is missing, or
-when the GPU rejects the shader.
+`<file>:<line>:<column>: <reason>` for each one the game would refuse (the same text the game logs
+after the pipeline's id; a refusal with no place in the file, such as a missing function, is
+`<file>: <reason>`, and a place in the game's own prelude reads `<prelude>:<line>:<column>`). The
+tool cannot see your `RenderPipeline` registration, so it takes a file whose text contains
+`pipeline_texture` anywhere (a comment included) as textured and any other file as untextured; the
+game goes by the registration's `.textured(...)` instead. A file the check accepts can still be
+refused at load: when its registration declares no texture but the file samples one (or the
+reverse), when the registration's texture or another resource it names is missing, or when the GPU
+rejects the shader.
+
+The check, and the load, also refuse a shader that is too costly or that a player's system could
+not translate:
+
+- **Expressions.** The composed shader (your file with the game's prelude and entry points, which
+  are small and fixed) may hold 20,000 expressions over all its functions. The refusal gives the
+  count: `21066 expressions; a pipeline shader may hold 20000`.
+- **Texture reads.** It may hold 64 texture reads (`textureLoad` and `textureSample*` expressions
+  written in the code, not executions). A textured pipeline's `pipeline_texture` function is one of
+  them, so your own code has 63. The refusal gives the count.
+- **Backends.** The shader is translated to SPIR-V (Vulkan), MSL (Metal) and HLSL (DirectX 12) as
+  the GPU library does, and a shader that any of them refuses is refused naming it, as in
+  `Vulkan (SPIR-V) refuses it: ...`. Some shaders pass validation and still fail here, such as
+  passing a pointer to a matrix column or to an element of a local array to a function; copy the
+  value into a function argument instead.
 
 ## 3. Resolve and draw
 
