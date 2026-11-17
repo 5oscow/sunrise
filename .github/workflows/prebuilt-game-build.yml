@@ -119,3 +119,14 @@ jobs:
           if-no-files-found: error
           retention-days: 7
           overwrite: true
+      # The sunrise-stage `build` compiled from this commit, for sdk-publish.yml's surface diff on Linux, which
+      # otherwise compiled it again (80 to 87 s). Not an SDK asset: its name is outside `sdk-leg-*`.
+      - name: The stage tool for the index
+        uses: actions/upload-artifact@v4
+        if: matrix.name == 'linux'
+        with:
+          name: sdk-stage-tool
+          path: target/prebuilt/tools/release/sunrise-stage
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: true
