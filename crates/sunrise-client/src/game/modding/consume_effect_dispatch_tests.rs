@@ -103,8 +103,9 @@ fn a_living_handle_dispatches_custom_kinds_with_same_kind_recursion_refused() {
 struct PlayerConsumption(Arc<Mutex<Vec<(mod_api::EntityRef, u32)>>>);
 #[mod_api::__subscriptions]
 impl Hooks for PlayerConsumption {
-    fn consume_effect(&self, _: &mut dyn ServerHost, event: &mut ConsumeEffectEvent<'_>) {
+    fn consume_effect(&self, host: &mut dyn ServerHost, event: &mut ConsumeEffectEvent<'_>) {
         if event.kind == "player_meal:effect" {
+            assert_eq!(host.entity(event.user.id()), Some(event.user));
             self.0
                 .lock()
                 .unwrap()
@@ -125,15 +126,16 @@ fn consuming_player_is_supplied_outside_a_guest_action() {
         .into(),
         || {
             with_game(|game| {
-                game.player = Some(
-                    sunrise_client::motion::PlayerMotion::new(
-                        game.motion,
-                        Vec3::new(0.0, 65.0, 0.0),
-                    )
-                    .unwrap(),
-                );
+                let mut body = sunrise_client::motion::PlayerMotion::new(
+                    game.motion,
+                    Vec3::new(0.0, 65.0, 0.0),
+                )
+                .unwrap();
+                body.entity_id = 7;
+                game.player = Some(body);
+                game.bind_local_player_residency();
                 assert!(game.native_acting_player().is_none());
-                let user = game.entity(0).unwrap();
+                let user = game.entity(7).unwrap();
                 let stack = ItemStack::new("minecraft:pufferfish", 4);
                 let info = game.items().get(&stack.item).unwrap().clone();
                 let mut consumable = game.consumable(&stack).unwrap();
@@ -149,4 +151,76 @@ fn consuming_player_is_supplied_outside_a_guest_action() {
             })
         },
     );
+}
+
+struct FoxConsumption(Arc<Mutex<Vec<(mod_api::EntityRef, mod_api::ItemStack)>>>);
+#[mod_api::__subscriptions]
+impl Hooks for FoxConsumption {
+    fn consume_effect(&self, host: &mut dyn ServerHost, event: &mut ConsumeEffectEvent<'_>) {
+        match event.kind {
+            "fox_meal:discard" => assert!(event.user.discard(host)),
+            "fox_meal:remember" => {
+                self.0
+                    .lock()
+                    .unwrap()
+                    .push((event.user, event.stack.clone()));
+            }
+            _ => {}
+        }
+    }
+}
+
+#[test]
+#[ignore = "daily"]
+fn a_foxs_later_custom_effect_keeps_the_original_user_and_stack_after_discard() {
+    let heard = Arc::new(Mutex::new(Vec::new()));
+    let mods = vec![ModEntry::new(
+        "fox_meal",
+        Box::new(FoxConsumption(heard.clone())),
+    )];
+    mod_platform::testing::with_mods(mods.into(), || {
+        with_game(|game| {
+            let mut items = game.items().clone();
+            let effects = &mut items
+                .items
+                .get_mut("minecraft:chorus_fruit")
+                .unwrap()
+                .consumable
+                .as_mut()
+                .unwrap()
+                .effects;
+            assert!(
+                effects
+                    .iter()
+                    .any(|effect| matches!(effect, ConsumeEffect::TeleportRandomly(_)))
+            );
+            let custom = |kind: &str| ConsumeEffect::Native {
+                kind: kind.into(),
+                data: Arc::new(Tag::Compound(Default::default())),
+            };
+            effects.insert(0, custom("fox_meal:discard"));
+            effects.push(ConsumeEffect::PlaySound("minecraft:entity.fox.eat".into()));
+            effects.push(custom("fox_meal:remember"));
+            game.server_items = Some(Arc::new(items));
+
+            let kind = game.res.mob_types().get("minecraft:fox").unwrap().clone();
+            let mut fox = Mob::new(21, kind, Vec3::new(8.5, 64.0, 8.5), 0.0);
+            fox.on_ground = true;
+            fox.extra.ints[1] = 601;
+            let mut stack = ItemStack::new("minecraft:chorus_fruit", 7);
+            stack
+                .data_mut()
+                .set_loot_name("minecraft:custom_name", &serde_json::json!("Fox fruit"));
+            let expected_stack = stack.try_into_api().unwrap();
+            fox.extra.set_main_hand_stack(Some(stack));
+            let decision =
+                sunrise_client::mobs::fox::decide_consumption(&fox, &game.mob_world_base(&[]))
+                    .unwrap();
+            game.mobs.push(fox);
+            let user = game.entity(21).unwrap();
+            assert!(!game.apply_fox_consumption(&decision));
+            assert!(game.entity(21).is_none());
+            assert_eq!(*heard.lock().unwrap(), [(user, expected_stack)]);
+        });
+    });
 }

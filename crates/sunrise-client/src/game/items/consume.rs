@@ -45,7 +45,11 @@ impl Game<'_> {
             self.native_lifecycle
                 .epoch()
                 .unwrap_or(mod_api::WorldEpoch::new(0)),
-            self.native_acting_entity(),
+            if self.lan_acting.is_some() {
+                self.native_acting_entity()
+            } else {
+                self.own_entity_id() as u32
+            },
         )
     }
 
@@ -228,17 +232,14 @@ impl Game<'_> {
                     ) {
                         // The level-style sound uses the user's block center and
                         // category, not Entity.playSound's silent guard or RNG.
-                        if game
-                            .apply_consume_effect(
-                                &decision.stack,
-                                effect,
-                                Some(consumer),
-                                consumer.entity(),
-                            )
-                            .is_none()
-                        {
-                            return Ok(false);
-                        }
+                        // A lost body can make a built-in a no-op, but later custom
+                        // entries still receive this use's original user and stack.
+                        let _ = game.apply_consume_effect(
+                            &decision.stack,
+                            effect,
+                            Some(consumer),
+                            consumer.entity(),
+                        );
                     } else if let ConsumeEffect::TeleportRandomly(teleport) = effect {
                         let consumed = consumed.get_or_init(|| consumed_snapshot(&decision.stack));
                         let mut actor = FoxTeleporter {
@@ -248,10 +249,12 @@ impl Game<'_> {
                             dim,
                             consumed: consumed.as_ref(),
                         };
-                        if teleport.apply(&mut actor, dim).is_err() {
-                            return Ok(false);
-                        }
-                    } else if let Some(mob) = game.mobs.iter_mut().find(|m| m.id == decision.mob) {
+                        let _ = teleport.apply(&mut actor, dim);
+                    } else if let Some(mob) = game
+                        .mobs
+                        .iter_mut()
+                        .find(|m| m.id == decision.mob && m.alive() && !m.removed)
+                    {
                         mob.apply_consume_effect(
                             crate::game::entity::damage_level_of!(
                                 game,
@@ -263,7 +266,11 @@ impl Game<'_> {
                         );
                     }
                 }
-                if let Some(mob) = game.mobs.iter().find(|m| m.id == decision.mob) {
+                if let Some(mob) = game
+                    .mobs
+                    .iter()
+                    .find(|m| m.id == decision.mob && m.alive() && !m.removed)
+                {
                     let event = sunrise_client::mobs::MobEvent::GameEvent {
                         event: if consumable.animation == UseAnimation::Drink {
                             "minecraft:drink"

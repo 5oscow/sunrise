@@ -1,1 +1,2 @@
+sunrise-client game::consume_effect_dispatch_tests::a_foxs_later_custom_effect_keeps_the_original_user_and_stack_after_discard lib daily resources
 sunrise-client game::consume_effect_dispatch_tests::consuming_player_is_supplied_outside_a_guest_action lib daily resources
