@@ -75,6 +75,21 @@ It refuses, returning `false` and changing nothing, with no mod screen open, for
 It moves only the slots a mod screen declares; the player's inventory stays under `inventory_x` and
 `inventory_y`, and showing or hiding a slot stays with `Screen::slots`.
 
+## Mod container title and inventory labels
+
+`Screen::title_label` and `Screen::inventory_label` optionally place those two labels,
+independently of slot positions. `Some([x, y])` is relative to the screen image's
+top-left corner, in GUI pixels. `None` uses vanilla's defaults: title `[8, 6]` and
+inventory `[8, height - 94]`. Moving `inventory_x` or `inventory_y` moves slots,
+not labels. `own_labels: true` suppresses both engine labels even when positions
+are supplied; draw them yourself from `screen_draw` instead.
+
+The default inventory label is at y 72 for a standard 166-high screen and y 39
+for a 133-high hopper layout. Chest layouts use `height - 94`; a shulker box's
+167-high image places it at y 73. Native and wasm use the same declaration.
+When building a complete `Screen` literal, include `title_label: None` and
+`inventory_label: None`, or use `..Default::default()`.
+
 ## Labels: wrapped text without a widget
 
 A label is text laid out in a box: measured, wrapped and placed, and nothing else. Call

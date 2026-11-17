@@ -881,6 +881,13 @@ pub struct Screen {
     pub inventory_y: f32,
     /// The inventory's left column (vanilla's is 8).
     pub inventory_x: f32,
+    /// Title label position in GUI pixels from the screen's top-left corner.
+    /// `None` uses vanilla's `[8, 6]`. Ignored when `own_labels` is true.
+    pub title_label: Option<[f32; 2]>,
+    /// Inventory label position in GUI pixels from the screen's top-left corner.
+    /// `None` uses `[8, height - 94]`, independently of inventory slot positions.
+    /// Ignored when `own_labels` is true.
+    pub inventory_label: Option<[f32; 2]>,
     /// The mod draws the title and the "Inventory" label itself
     /// (`screen_draw`); Sunrise leaves them out.
     pub own_labels: bool,

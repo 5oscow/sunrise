@@ -5,6 +5,8 @@ use super::*;
 fn inventory_label_default_follows_image_height_not_inventory_slots() {
     mod_platform::testing::with_mods(mod_api::Mods::default(), || {
         crate::game::native_entity_refs::tests::with_client_game(|game| {
+            let (pipe, _server) = sunrise_protocol::connection::Pipe::pair();
+            game.connect_local(pipe, "labels").unwrap();
             game.screen = Screen::Inventory;
             game.container = Some((1, 2, 3));
             game.mod_screen = Some(OpenNativeScreen {
@@ -52,6 +54,58 @@ fn inventory_label_default_follows_image_height_not_inventory_slots() {
                         .collect::<Vec<_>>()
                 };
                 assert_eq!(geometry(&actual), geometry(&expected), "height {height}");
+            }
+            // A server title lets the actual drawing path exercise both labels.
+            let title = sunrise_client::text::Text::literal("Title");
+            game.remote
+                .as_mut()
+                .unwrap()
+                .set_menu_title(Some(title.clone()));
+            for (title_at, inventory_at, title_expected, inventory_expected, own_labels) in [
+                (None, None, [8.0, 6.0], [8.0, 72.0], false),
+                (Some([44.0, 15.0]), None, [44.0, 15.0], [8.0, 72.0], false),
+                (None, Some([107.0, 41.0]), [8.0, 6.0], [107.0, 41.0], false),
+                (
+                    Some([44.0, 15.0]),
+                    Some([107.0, 41.0]),
+                    [44.0, 15.0],
+                    [107.0, 41.0],
+                    true,
+                ),
+            ] {
+                let screen = &mut game.mod_screen.as_mut().unwrap().screen;
+                screen.title_label = title_at;
+                screen.inventory_label = inventory_at;
+                screen.own_labels = own_labels;
+                let mut actual = HudBatch::scratch([512, 512]);
+                assert!(game.draw_native_screen(&mut actual, ox, oy));
+                let mut expected = HudBatch::scratch([512, 512]);
+                if !own_labels {
+                    expected.text_styled(
+                        &game.gui.atlas,
+                        &title,
+                        ox + title_expected[0],
+                        oy + title_expected[1],
+                        rgba(64, 64, 64, 255),
+                        false,
+                    );
+                    expected.text(
+                        &game.gui.atlas,
+                        &game.translate_with_fallback("container.inventory", "Inventory"),
+                        ox + inventory_expected[0],
+                        oy + inventory_expected[1],
+                        rgba(64, 64, 64, 255),
+                        false,
+                    );
+                }
+                let geometry = |batch: &HudBatch| {
+                    batch
+                        .vertices
+                        .iter()
+                        .map(|v| (v.pos, v.uv))
+                        .collect::<Vec<_>>()
+                };
+                assert_eq!(geometry(&actual), geometry(&expected));
             }
         });
     });
