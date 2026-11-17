@@ -558,8 +558,8 @@ pub(super) fn load_resources(
 }
 
 /// A synchronous launch loads both phases; an ordinary launch returns the
-/// core bundle while the rest worker keeps loading. If `launch_world` is set,
-/// its data is preloaded during that second phase.
+/// core bundle while the rest worker keeps loading. `launch_world` names the
+/// world to open, whose data is preloaded during startup.
 ///
 /// The owning mod state supplies the same cached condition table used to build
 /// content roots and reload data.
