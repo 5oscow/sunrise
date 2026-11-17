@@ -108,6 +108,9 @@ pub trait KeysBackend {
     /// The canonical item id retained by the load-owned registration slot.
     #[access(Metadata)]
     fn item_key_id(&self, key: ItemKey) -> String;
+    /// Side: both. Current numeric item registry id, unavailable before completion.
+    #[access(Metadata)]
+    fn item_registry_id(&self, key: ItemKey) -> Option<u32>;
     /// Side: both.
     /// The canonical effect id retained by the load-owned registration slot.
     #[access(Metadata)]

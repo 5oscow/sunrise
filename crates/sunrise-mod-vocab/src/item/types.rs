@@ -34,6 +34,16 @@ pub enum ModelError {
 // exhaustive: only registration creates a key
 pub struct ItemKey(pub(crate) u32);
 
+impl ItemKey {
+    /// The numeric registry id used by the game's item-scatter seeds, on either side.
+    /// Returns `None` before registry completion or if this key does not resolve.
+    /// A connected client reads its server's numbering. Stable for that session only:
+    /// save and send identifiers, never these numbers.
+    pub fn registry_id(self, host: &dyn Host) -> Option<u32> {
+        crate::backend_of(host)?.item_registry_id(self)
+    }
+}
+
 /// A menu type (`minecraft:generic_9x3`) in the built-in menu registry, in
 /// registration order. A key stays valid until the game exits.
 // no wire: decoding validates the u32 slot with MenuKey::from_slot on the host; wasm carries the host-issued opaque token without consulting guest tables.

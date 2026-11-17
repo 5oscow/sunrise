@@ -16,6 +16,17 @@ Keys identify entries for the running mod load, not persistent data. Persist can
 and property strings rather than registration slots or state ordinals. Reload preserves key identity;
 world numeric mappings and tag membership are separate reloadable data.
 
+## Item registry numbers
+
+`ItemKey::registry_id(host)` returns `Option<u32>` on either side and on both targets.
+This is the number the game uses for dropped-item scatter seeds, not the key's opaque slot.
+It returns `None` before registry completion or for an unresolved item. Mod items are
+numbered after vanilla items in registration order. A connected client reads the numbering
+of its server's registry, shared with the game's own scatter drawing.
+
+Numbers are stable only within that game session. Save and send identifiers, never numbers.
+Add the stack's damage separately when reproducing vanilla's nonempty stack scatter seed.
+
 ## Entity-type reads
 
 `EntityRef::kind(host)` and the handles that delegate to it return
