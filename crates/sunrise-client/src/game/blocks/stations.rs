@@ -695,9 +695,14 @@ impl Game<'_> {
             }
             Kind::Anvil => {
                 let name = self.anvil_item_name(&s);
+                // createResult's getHoverName().getString(), as vanilla resolves it.
                 let hover = s.inputs[0]
                     .as_ref()
-                    .map(|i| stations::hover_name(&self.pack.names, i))
+                    .map(|i| {
+                        sunrise_client::lang::returned_to_server(|| {
+                            stations::hover_name(&self.pack.names, i)
+                        })
+                    })
                     .unwrap_or_default();
                 s.anvil = stations::anvil_result(
                     &enchantments,
@@ -1178,11 +1183,16 @@ impl Game<'_> {
             return;
         };
         if s.kind == Kind::Anvil && s.inputs[0] != s.anvil_last {
-            // AnvilScreen.slotChanged: the box follows its input item.
+            // AnvilScreen.slotChanged: the box follows its input item, named as vanilla's
+            // client names it (the box's text goes back to a server).
             s.anvil_last = s.inputs[0].clone();
             let name = s.inputs[0]
                 .as_ref()
-                .map(|i| stations::hover_name(&self.pack.names, i))
+                .map(|i| {
+                    sunrise_client::lang::returned_to_server(|| {
+                        stations::hover_name(&self.pack.names, i)
+                    })
+                })
                 .unwrap_or_default();
             anvil::input_changed(s, name);
         }

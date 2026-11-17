@@ -111,3 +111,45 @@ fn dfa_baseline_recipe_take_consumes_one_per_cell() {
         "requires prepared resources in SUNRISE_TEST_RESOURCES or .local/sunrise-client/26.3"
     );
 }
+
+/// AnvilScreen.slotChanged inside the click that puts an item in (a server's client predicting
+/// with the screen open): the name box takes the input's name and onNameChanged gives the menu
+/// that name, sent before the click; it is the input's own, so the result stays empty. A plain
+/// item's name goes to the menu blank. Without the screen (a server's own menu) nothing renames,
+/// and slots set before the screen listens are no change it hears of.
+#[test]
+fn an_anvil_screen_names_the_input_a_click_puts_in() {
+    bare_env(|env| {
+        let named = |name: &str| {
+            let mut paper = stack("paper", 1).unwrap();
+            paper.data_mut().custom_name = Some(sunrise_core::nbt::Tag::String(name.into()));
+            paper
+        };
+        let mut menu = Menu::new(Kind::Anvil);
+        menu.anvil.screen = true;
+        menu.carried = Some(named("Note"));
+        menu.click(env, 0, 0, Input::Pickup).unwrap();
+        assert_eq!(menu.anvil.renamed, ["Note"]);
+        assert_eq!(menu.anvil.name.as_deref(), Some("Note"));
+        assert_eq!(menu.slot(2), None);
+
+        let mut plain = Menu::new(Kind::Anvil);
+        plain.anvil.screen = true;
+        plain.carried = stack("paper", 1);
+        plain.click(env, 0, 0, Input::Pickup).unwrap();
+        assert_eq!(plain.anvil.renamed, [""]);
+
+        let mut server = Menu::new(Kind::Anvil);
+        server.carried = Some(named("Note"));
+        server.click(env, 0, 0, Input::Pickup).unwrap();
+        assert!(server.anvil.renamed.is_empty());
+
+        let mut loaded = Menu::new(Kind::Anvil);
+        loaded.set_slot(env, 0, Some(named("Note")));
+        loaded.anvil.seen_input = loaded.slot(0).cloned();
+        loaded.anvil.screen = true;
+        loaded.carried = stack("stone", 1);
+        loaded.click(env, 1, 0, Input::Pickup).unwrap();
+        assert!(loaded.anvil.renamed.is_empty());
+    });
+}
