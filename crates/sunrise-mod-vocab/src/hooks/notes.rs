@@ -1747,7 +1747,7 @@ still go on each event or registrar.
   template's `canSurvive` asks, so it is refused elsewhere and pops off when its ground changes. Answer only for your
   own blocks and leave the answer empty otherwise; the level is read-only. Both run on every shape update of such a
   block: keep them short. These two, `can_sustain_plant` and `state_for_placement` are asked on both sides, as vanilla asks
-  them: a client asks them from its placement prediction and its own shape updates, of its loaded copy of the level,
+  them: a client asks them from its placement prediction and its own shape updates, with its loaded copy of the level,
   and tells its side by `LevelSide`. Reads a client can't answer, tag tests among them, are `None` there, and
   `BlockEntityPartState::state_in` gives its default: never answer from those as if they were the server's. A mod
   that can decide only on a server answers `None` on a client, and the template's rule predicts. Named injections
