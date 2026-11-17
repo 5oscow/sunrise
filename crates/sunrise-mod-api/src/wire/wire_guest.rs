@@ -515,6 +515,8 @@ fn reply_buffer() -> Vec<u8> {
 #[macro_export]
 macro_rules! __sunrise_host_call {
     ($name:literal, $args:expr) => {{
+        // The caller's expression runs here, outside the unsafe block that authorises the import.
+        let args = $args;
         #[cfg(target_arch = "wasm32")]
         {
             #[link(wasm_import_module = "sunrise")]
@@ -526,13 +528,13 @@ macro_rules! __sunrise_host_call {
             unsafe {
                 $crate::wire::guest::host_with(
                     |in_ptr, in_len, out_ptr, out_cap| import(in_ptr, in_len, out_ptr, out_cap),
-                    $args,
+                    args,
                 )
             }
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
-            $crate::wire::guest::host_named($name, $args)
+            $crate::wire::guest::host_named($name, args)
         }
     }};
 }
