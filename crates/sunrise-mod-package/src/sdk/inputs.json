@@ -62,8 +62,7 @@
       "internals.json",
       "loops.json",
       "deps/@rmeta:mod_api",
-      "deps/@rmeta:mod_points",
-      "deps/@rmeta:wasmtime"
+      "deps/@rmeta:mod_points"
     ]
   }
 }

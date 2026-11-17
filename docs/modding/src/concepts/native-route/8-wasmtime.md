@@ -49,8 +49,12 @@ so a trap in either depends on which loaded first. It also adds about 110 crates
 allow, and compiles them all again. `sunrise-wasmtime` is the game's library, so the mod links that one copy, with
 nothing extra to compile or approve.
 
-## Wasm mods
+## Who may use it
+
+Only a native mod with a `[[native.*]]` row, because that mod is built for one exact game build, as is the wasmtime it
+links. An API-only native mod (no `[[native.*]]` row) installs on any build where the surface items it uses are
+unchanged, and a dependency on the game's wasmtime would break that, so the launcher refuses it under
+`E_NATIVE_ONLY_PACKAGE`.
 
 A wasm mod runs inside this wasmtime and cannot link it. `cargo sunrise-mod build` refuses a wasm mod that depends
-on `sunrise-wasmtime`, under `E_WASM_NATIVE_PACKAGE`. Only a mod with a `[native]` table can use it: an API-only
-native mod (no `[[native.*]]` row) and a mod with rows alike.
+on `sunrise-wasmtime`, under `E_WASM_NATIVE_PACKAGE`.
