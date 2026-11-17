@@ -41,6 +41,11 @@ fn compiled_guest_reads_predicted_like_native() {
         assert!(loaded.refused.is_empty(), "{:?}", loaded.refused);
         assert_eq!(loaded.mods.len(), 1);
         loaded.initialize(&infos).unwrap();
+        // The fixture guest declares a general entity type in `register`, which only the registration
+        // phase accepts. The scope follows `initialize`: the phase lives in the backend it installs.
+        mod_api::__private::initialize().unwrap();
+        let _registration =
+            mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::Registration);
         mod_api::testing::with_mods(loaded.mods.into(), || {
             mod_api::__private::install_packages(&infos, &[]);
             mod_api::__private::part_tests::install_parts_fixture(mod_api::__private::mods())

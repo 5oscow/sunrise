@@ -37,6 +37,11 @@ fn real_member_self_refusal() {
         );
         assert!(loaded.refused.is_empty(), "{:?}", loaded.refused);
         loaded.initialize(&[info, marker]).unwrap();
+        // The fixture guest declares a general entity type in `register`, which only the registration
+        // phase accepts. The scope follows `initialize`: the phase lives in the backend it installs.
+        mod_api::__private::initialize().unwrap();
+        let _registration =
+            mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::Registration);
         let errors = mod_api::__private::install_parts(
             &loaded.mods,
             &mod_api::__private::part_tests::rule_schema(),
