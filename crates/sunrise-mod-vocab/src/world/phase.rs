@@ -817,7 +817,7 @@ pub trait LoopContext {
     fn is_in_tag(&self, item: crate::ItemKey, tag: crate::TagKey) -> Option<bool>;
 
     /// Number of authoritative item members, or None before tags/keys are loaded.
-    /// Unknown loaded tags have zero members. Reads allocate nothing or do I/O.
+    /// Unknown loaded tags have zero members. Reads allocate nothing and do no I/O.
     fn item_count(&self, tag: crate::TagKey) -> Option<usize>;
 
     /// Item member in authoritative order from this same frozen generation.
