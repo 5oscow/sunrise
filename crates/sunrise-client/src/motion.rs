@@ -6388,6 +6388,82 @@ mod tests {
             assert_eq!(player.velocity.y, want, "client_side={client_side}");
         }
     }
+    /// `LivingEntity.aiStep`'s "freezing" part runs on a `ServerLevel` only: a client's player
+    /// keeps the frost modifier and the frozen ticks the server sent, takes no freeze damage, and
+    /// does not make the modifier again once the server's attributes remove it.
+    #[test]
+    #[ignore = "daily"]
+    fn a_clients_player_takes_its_frost_from_the_server() {
+        use sunrise_protocol::packets::play::{AttributeModifier, AttributeSnapshot};
+        let Some(v) = crate::test_fixtures::vanilla() else {
+            return;
+        };
+        let (assets, render, binding, resources) = (&v.assets, &v.render, &v.collision, &v.motion);
+        let mut scene = World::test_scene(assets, render, 1).unwrap();
+        let mut player = PlayerMotion::new(resources, Vec3::new(20.5, 4.0, 20.5)).unwrap();
+        player.client_side = true;
+        let speed = player
+            .attributes
+            .key("minecraft:movement_speed")
+            .unwrap()
+            .attribute()
+            .registry_id();
+        // The server's frost at 100% frozen: movement_speed takes -0.05 (a float) from 0.1 (a float).
+        let from_server = |modifiers: Vec<AttributeModifier>| AttributeSnapshot {
+            attribute: speed,
+            base: f64::from(0.1f32),
+            modifiers,
+        };
+        crate::lan::attributes::apply(
+            &mut player.attributes,
+            &[from_server(vec![AttributeModifier {
+                id: "minecraft:powder_snow".into(),
+                amount: f64::from(-0.05f32),
+                operation: 0,
+            }])],
+        );
+        player.ticks_frozen = 140;
+        let frozen_speed = f64::from(0.1f32) + f64::from(-0.05f32);
+        let mut run = |player: &mut PlayerMotion, ticks: usize| {
+            for _ in 0..ticks {
+                MotionWorld {
+                    tag_items: None,
+                    block_registries: None,
+                    loop_context: crate::test_resources::server_loop_context(),
+                    damage_hooks: &crate::health::DamageHooks::NONE,
+                    entities: &[],
+                    player,
+                    scene: &mut scene,
+                    assets,
+                    collision_binding: binding,
+                    resources,
+                    health: &resources.health,
+                }
+                .controlled_simulation_tick(Default::default())
+                .unwrap();
+            }
+        };
+        // Forty ticks reach a multiple of the freeze damage's forty.
+        run(&mut player, 40);
+        assert_eq!(
+            player.attribute("minecraft:movement_speed").unwrap(),
+            frozen_speed
+        );
+        assert_eq!(player.ticks_frozen, 140);
+        assert_eq!(player.health.health(), 20.0);
+        assert!(!player.events.iter().any(|e| matches!(
+            e,
+            MotionEvent::Health(crate::health::HealthEvent::FreezeDamage(_))
+        )));
+        // The server's next attributes carry no frost: the client's ticks do not bring it back.
+        crate::lan::attributes::apply(&mut player.attributes, &[from_server(Vec::new())]);
+        run(&mut player, 40);
+        assert_eq!(
+            player.attribute("minecraft:movement_speed").unwrap(),
+            f64::from(0.1f32)
+        );
+        assert_eq!(player.ticks_frozen, 140);
+    }
     /// `LocalPlayer.isSuppressingSlidingDownLadder` is `!abilities.flying && super...()`, where
     /// `LivingEntity`'s is `isShiftKeyDown()`: a flying player on the client keeps sliding down a
     /// ladder whether it sneaks or not. The server's player (`ServerPlayer` has no override) only
