@@ -393,19 +393,25 @@ mod collision_parts_bench {
             let _parts =
                 with_parts.then(|| InParts::enter(Rc::new(ModParts::new(Arc::clone(&context)))));
             for i in 0..MOVERS {
-                let x = 1.2 + f64::from(i % 100);
-                let z = 1.2 + f64::from(i / 100) * 3.0;
+                let x = 1.2 + f64::from(i % 14);
+                let z = 1.2 + f64::from(i / 14 % 14);
                 let body = Aabb::new(Vec3::new(x, 65.0, z), Vec3::new(x + 0.6, 66.8, z + 0.6));
                 let mut scene = SceneCollisions {
                     world,
                     binding,
                     subject: None,
                 };
-                let moved = sunrise_client_render::moving_colliders::as_mover(i + 1, || {
-                    scene
-                        .resolve(body, Vec3::new(0.1, -0.08, 0.1), 0.6, true)
-                        .unwrap()
-                });
+                let delta = Vec3::new(0.1, -0.08, 0.1);
+                let mut gate = crate::move_gate::armed(
+                    &context,
+                    i + 1,
+                    "minecraft:player",
+                    sunrise_world::entity_move::MoverType::Player,
+                    delta,
+                );
+                let moved =
+                    crate::move_gate::scene_resolve(&mut gate, &mut scene, body, delta, 0.6, true)
+                        .unwrap();
                 acc += moved.y;
             }
         }
@@ -420,7 +426,7 @@ mod collision_parts_bench {
         let (registry, table) = tables();
         let cached = CachedCollisionRegistry::from_nbt(&table, &registry).unwrap();
         let binding = BlockCollisionRegistry::new(Arc::new(cached)).unwrap();
-        // A floor of belts, one block wide and 100 long, and a floor of plain blocks beside it.
+        // A floor of belts under every mover.
         let mut world = World::new(BlockStateId(0), 0);
         world
             .chunks

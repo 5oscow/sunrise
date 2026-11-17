@@ -179,12 +179,13 @@ impl<'a> CollisionContext<'a> {
     /// The item id in a living entity's main hand (`minecraft:air` when empty); none for a
     /// context that holds nothing for `is_holding_item` to ask.
     pub fn held_item(&self) -> Option<&str> {
-        (self.living && !self.position_only).then(|| {
-            if self.held.count <= 0 {
-                "minecraft:air"
-            } else {
-                self.held.item
-            }
+        if !self.living || self.position_only {
+            return None;
+        }
+        Some(if self.held.count <= 0 {
+            "minecraft:air"
+        } else {
+            self.held.item
         })
     }
     pub fn is_holding_item(&self, item: &str) -> bool {
