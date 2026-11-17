@@ -12,7 +12,7 @@ sunrise-mod-api = { path = ".sunrise/sdk/api/crates/sunrise-mod-api" }
 sunrise-wasmtime = { path = ".sunrise/sdk/api/crates/sunrise-wasmtime" }
 ```
 
-It is named by the same path form as the other SDK packages ([In a mod project](../reference/sdk/03-in-a-project.md));
+It is named by the same path form as the other SDK packages ([In a mod project](../../reference/sdk/03-in-a-project.md));
 every other form is refused under `E_SDK_SOURCE`. The crate re-exports everything `wasmtime` exports, so
 `sunrise_wasmtime::Engine` is wasmtime's `Engine`. To keep writing `wasmtime::…` in your code, rename it:
 
