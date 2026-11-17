@@ -3656,9 +3656,6 @@ impl Renderer {
             view_formats: &config.view_formats,
         })
     }
-    /// Hand the window surface over to the renderer that replaces this one on
-    /// the same device (it takes `spare_surface`).
-    #[sunrise_mod_api_macros::replaceable]
     /// The share of real frames frame generation shows a made frame before (1 while it
     /// keeps up), `None` while it isn't running.
     /// The posed models' store size (`SkinFrame::base`), with entity skinning.

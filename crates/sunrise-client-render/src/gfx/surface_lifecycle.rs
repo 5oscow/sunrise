@@ -1,6 +1,9 @@
 use super::*;
 
 impl Renderer {
+    /// Hand the window surface over to the renderer that replaces this one on
+    /// the same device (it takes `spare_surface`).
+    #[sunrise_mod_api_macros::replaceable]
     pub fn release_surface(&mut self) {
         self.frame_gen.stop();
         self.queue.wait();
