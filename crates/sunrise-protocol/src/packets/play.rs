@@ -29,6 +29,7 @@ mod merchant;
 mod players;
 mod waypoints;
 pub use advancements::{Advancement, AdvancementDisplay, SeenAdvancements, UpdateAdvancements};
+pub use advancements::{AwardStats, StatList};
 pub use commands::{ARGUMENT_TYPES, ArgumentProperties, CommandNode, Commands};
 pub use hud::{
     BossAction, BossEvent, NumberFormat, ResetScore, SetDisplayObjective, SetObjective,
@@ -832,28 +833,6 @@ impl Codec<StopSound> for StopSound {
         }
         if let Some(sound) = &p.sound {
             w.string(sound);
-        }
-    }
-}
-packet!(
-    /// ClientboundAwardStatsPacket: (stat type, value, count) by network id.
-    AwardStats { stats: Vec<(i32, i32, i32)> => StatList }
-);
-/// `Object2IntMap<Stat<?>>`: each stat's type and value ids, then its count.
-pub struct StatList;
-impl Codec<Vec<(i32, i32, i32)>> for StatList {
-    fn read(r: &mut Reader) -> Result<Vec<(i32, i32, i32)>> {
-        let n = r.count(r.remaining())?;
-        (0..n)
-            .map(|_| Ok((r.varint()?, r.varint()?, r.varint()?)))
-            .collect()
-    }
-    fn write(v: &Vec<(i32, i32, i32)>, w: &mut Writer) {
-        w.varint(v.len() as i32);
-        for &(a, b, c) in v {
-            w.varint(a);
-            w.varint(b);
-            w.varint(c);
         }
     }
 }
