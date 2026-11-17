@@ -12,7 +12,7 @@ use acquire_frame::AcquiredFrame;
 mod post;
 #[path = "frame/water_mirror.rs"]
 mod water_mirror;
-use super::external::ExternalPipeline as _;
+use super::external::ExternalPipeline;
 use super::*;
 use post::{PostPassArgs, PostPassResult};
 
@@ -1311,16 +1311,19 @@ impl Renderer {
             && let Some((_, Some(post))) = &mut self.pack_post
         {
             pack_entities = true;
-            post.prepare_entities(
+            ExternalPipeline::prepare_entities(
+                post,
                 &self.device,
                 &self.queue,
-                frame.entities,
-                frame.entity_spans,
-                frame.crumbling_sprite,
-                frame.end_portal_sprites[1],
+                &external::EntityInput {
+                    entities: frame.entities,
+                    spans: frame.entity_spans,
+                    crumbling: frame.crumbling_sprite,
+                    portal: frame.end_portal_sprites[1],
+                    skin: skin.filter(|_| pack_skin),
+                    motion: (frame.entity_motion, frame.entity_motion_posed),
+                },
                 &mut self.pack_entity_rest,
-                skin.filter(|_| pack_skin),
-                (frame.entity_motion, frame.entity_motion_posed),
             );
             entities = &self.pack_entity_rest;
         }
@@ -1529,7 +1532,7 @@ impl Renderer {
                     .pack_post
                     .as_ref()
                     .and_then(|(_, post)| post.as_ref())
-                    .and_then(|post| post.skin_target())
+                    .and_then(|post| ExternalPipeline::skin_target(post))
                     .expect("GPU pack entity target");
                 skinner.dispatch_pack(
                     &self.device,

@@ -1,7 +1,9 @@
 //! A `shaders/` pack as an external pipeline (`external::ExternalPipeline`): what the renderer
 //! asks of it at the frame's points, answered from the pack's programs.
 
-use super::external::{Draws, ExternalPipeline, FrameState, ShadowCasters, ShadowView};
+use super::external::{
+    Draws, EntityInput, ExternalPipeline, FrameState, ShadowCasters, ShadowView,
+};
 use super::pack_post::PackPost;
 
 impl ExternalPipeline for PackPost {
@@ -34,5 +36,30 @@ impl ExternalPipeline for PackPost {
             player: c.entities,
             mobs: c.entities && !c.only_player,
         }
+    }
+
+    fn prepare_entities(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        input: &EntityInput<'_>,
+        rest: &mut Vec<super::Vertex>,
+    ) {
+        PackPost::prepare_entities(
+            self,
+            device,
+            queue,
+            input.entities,
+            input.spans,
+            input.crumbling,
+            input.portal,
+            rest,
+            input.skin,
+            input.motion,
+        );
+    }
+
+    fn skin_target(&self) -> Option<&wgpu::Buffer> {
+        PackPost::skin_target(self)
     }
 }

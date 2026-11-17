@@ -69,6 +69,19 @@ pub struct ShadowCasters {
     pub mobs: bool,
 }
 
+/// A world frame's entity vertices and what goes with them, for a pipeline that draws some of
+/// them (`ExternalPipeline::prepare_entities`).
+pub struct EntityInput<'a> {
+    pub entities: &'a [super::Vertex],
+    /// The runs of `entities` by what they draw (`Frame::entity_spans`).
+    pub spans: &'a [crate::render_geometry::EntitySpan],
+    pub crumbling: [f32; 4],
+    pub portal: [f32; 4],
+    /// The models posed on the GPU, when the pipeline skins them (`Draws::skins_entities`).
+    pub skin: Option<&'a super::entity_skin::SkinFrame>,
+    pub motion: (&'a [(u32, u64)], &'a [u32]),
+}
+
 /// An external shader pipeline, called by the renderer at fixed points of a world frame (not
 /// title frames). Every method has a default that leaves vanilla's way in place.
 pub trait ExternalPipeline: Send {
@@ -80,6 +93,20 @@ pub trait ExternalPipeline: Send {
     }
     /// The shadow pass this frame wants; `None` draws none.
     fn shadow_request(&self, _state: &FrameState<'_>) -> Option<ShadowView> {
+        None
+    }
+    /// Takes the entities it draws (`Draws::entities`) out of `input` for this frame's draw and
+    /// puts the rest, which the renderer draws, in `rest`.
+    fn prepare_entities(
+        &mut self,
+        _device: &wgpu::Device,
+        _queue: &wgpu::Queue,
+        _input: &EntityInput<'_>,
+        _rest: &mut Vec<super::Vertex>,
+    ) {
+    }
+    /// Where entity models posed on the GPU go, with `Draws::skins_entities`.
+    fn skin_target(&self) -> Option<&wgpu::Buffer> {
         None
     }
     /// The entities its shadow pass draws this frame.
