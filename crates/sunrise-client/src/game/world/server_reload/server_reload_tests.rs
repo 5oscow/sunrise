@@ -274,7 +274,7 @@ fn dedicated_world_open_publishes_crafting_item_tags() {
     );
     write(
         &root.join("datapacks/crafting_tags/data/test/tags/item/crafting_inputs.json"),
-        r#"{"values":["minecraft:stick"]}"#,
+        r#"{"values":[{"id":"test:absent_optional","required":false},"minecraft:stick"]}"#,
     );
     write(
         &root.join("datapacks.json"),
@@ -285,16 +285,21 @@ fn dedicated_world_open_publishes_crafting_item_tags() {
             game.options.execution_role =
                 crate::game::execution_role::ExecutionRole::DedicatedServer;
             game.load_world(request(root)).unwrap();
-            assert_eq!(
-                game.loop_context
-                    .item_is_in_tag("minecraft:stick", "test:crafting_inputs"),
-                Some(true)
-            );
-            assert_eq!(
-                game.loop_context
-                    .item_is_in_tag("minecraft:dirt", "test:crafting_inputs"),
-                Some(false)
-            );
+            use mod_api::LoopContext;
+            use sunrise_client_render::api_context::LoopReader;
+            let tag = mod_api::__private::tag_key(
+                &mod_api::Identifier::parse("test:crafting_inputs").unwrap(),
+            )
+            .unwrap();
+            let stick = mod_api::__private::item_key("minecraft:stick").unwrap();
+            let dirt = mod_api::__private::item_key("minecraft:dirt").unwrap();
+            let reader = LoopReader(&game.loop_context);
+            let view = reader.context();
+            assert_eq!(view.is_in_tag(stick, tag), Some(true));
+            assert_eq!(view.is_in_tag(dirt, tag), Some(false));
+            assert_eq!(view.item_count(tag), Some(1));
+            assert_eq!(view.item_at(tag, 0), Some(stick));
+            assert_eq!(view.item_at(tag, 1), None);
         });
     });
 }

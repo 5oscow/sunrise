@@ -795,8 +795,9 @@ impl DataLoadContext for OwningLoad<'_> {
 
 /// The frozen resource-generation view of a hook fired inside a menu, recipe or
 /// player-list loop: the side, registries, settings, mod list and authoritative item
-/// tags. Unloaded or unsynced tags are unavailable (`None`), not false membership.
-/// The side that owns the loop builds this view; its answers never change while held.
+/// tags. A loop without a tag-bearing snapshot (for example, the sound engine) returns
+/// `None` from tag reads even after world tags sync. The side that owns the loop builds
+/// this view; its answers never change while held.
 ///
 /// ```compile_fail
 /// use mod_api::{Host, LoopContext};
@@ -811,13 +812,14 @@ impl DataLoadContext for OwningLoad<'_> {
 /// }
 /// ```
 pub trait LoopContext {
-    /// Membership in this generation's authoritative item tags. None means tags or
-    /// their key tables are not loaded (not synced yet on a client); unknown loaded tags
-    /// answer Some(false). Reads allocate nothing and perform no file I/O.
+    /// Membership in this generation's authoritative item tags. `None` means the
+    /// snapshot or item keys are unavailable. Unknown tags in a loaded snapshot
+    /// answer `Some(false)`. Reads allocate nothing and perform no file I/O.
     fn is_in_tag(&self, item: crate::ItemKey, tag: crate::TagKey) -> Option<bool>;
 
-    /// Number of authoritative item members, or None before tags/keys are loaded.
-    /// Unknown loaded tags have zero members. Reads allocate nothing and do no I/O.
+    /// Number of authoritative item members, or `None` if the snapshot or item
+    /// keys are unavailable. Unknown tags in a loaded snapshot have zero members.
+    /// Reads allocate nothing and do no I/O.
     fn item_count(&self, tag: crate::TagKey) -> Option<usize>;
 
     /// Item member in authoritative order from this same frozen generation.
