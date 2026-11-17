@@ -135,17 +135,17 @@ mod tests {
                 game.player_menu_closing(12);
                 assert_eq!(&notices.lock().unwrap()[before..], [(0, 1), (1, 1)]);
 
-                // A scheduled check cannot close a cabinet after its block entity is removed.
+                // A recheck for the old cabinet must not report on its same-type replacement.
                 let before_notices = notices.lock().unwrap().len();
                 let before_events = events.lock().unwrap().len();
-                let entity = game.world.block_entities.remove(&pos).unwrap();
+                let entity = game.world.block_entities.get(&pos).unwrap().clone();
+                game.world.block_entities.replace(pos, entity).unwrap();
                 game.world.game_time = start + 15;
                 game.tick_mod_container_viewers();
                 game.player_menu_closing(13);
                 assert_eq!(notices.lock().unwrap().len(), before_notices);
                 assert_eq!(events.lock().unwrap().len(), before_events);
                 assert!(game.mod_container_viewers.is_empty());
-                game.world.block_entities.insert(pos, entity);
 
                 // Combined menus count each block entity; an ordinary close retains its source.
                 let other = (4, 64, 5);
