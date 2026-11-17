@@ -68,6 +68,52 @@ impl Game<'_> {
             // commandSuggestionsProvider.tick: one answer a tick, to the latest request.
             play.suggestion_budget = true;
             self.guest_try_suggestions(conn);
+            // ServerPlayer.tick runs the game mode on the level path, before the
+            // connection's doTick/Player.tick and its hooks, even when the body skips.
+            let Some(host) = self.lan.as_mut() else {
+                return;
+            };
+            if let Some((pos, _)) = host.play.get(&conn).and_then(|play| play.digging)
+                && self
+                    .res
+                    .facts()
+                    .is_air(self.world.block(pos[0], pos[1], pos[2]))
+                && let Some(play) = host.play.get_mut(&conn)
+            {
+                play.digging = None;
+                play.mining = None;
+            }
+            let play = host.play.entry(conn).or_default();
+            let digging = play.digging;
+            if digging.is_some() || play.mining.is_some() || play.destroy_delay > 0 {
+                self.as_guest(conn, |g| {
+                    if let Some((pos, face)) = digging {
+                        g.forced_hit = Some(Hit {
+                            pos,
+                            face,
+                            point: [
+                                f64::from(pos[0]) + 0.5,
+                                f64::from(pos[1]) + 0.5,
+                                f64::from(pos[2]) + 0.5,
+                            ],
+                            inside: false,
+                        });
+                    }
+                    let _ = g.tick_mining();
+                    g.forced_hit = None;
+                });
+                // Instant STARTs complete without a STOP; do not break a later
+                // block planted in the same position again.
+                if digging.is_some()
+                    && let Some(host) = self.lan.as_mut()
+                    && let Some(play) = host.play.get_mut(&conn)
+                    && (host.hub.guests[gi].creative() || play.mining.is_none())
+                {
+                    play.digging = None;
+                }
+            }
+            self.guest_delayed_destroy(conn);
+            self.guest_dig_feedback(conn);
             // ServerPlayer.doTick runs the body (`super.tick()`: Player.tick,
             // where NeoForge posts PlayerTickEvent.Pre/Post) unless the player
             // is a spectator touching an unloaded chunk. Decided once, before
@@ -131,27 +177,15 @@ impl Game<'_> {
                 }
                 continue;
             }
-            // ServerPlayerGameMode.tick stops an active destroy when its block is air.
             let Some(host) = self.lan.as_mut() else {
                 return;
             };
-            if let Some((pos, _)) = host.play.get(&conn).and_then(|play| play.digging)
-                && self
-                    .res
-                    .facts()
-                    .is_air(self.world.block(pos[0], pos[1], pos[2]))
-                && let Some(play) = host.play.get_mut(&conn)
-            {
-                play.digging = None;
-                play.mining = None;
-            }
             let play = host.play.entry(conn).or_default();
             // ServerGamePacketListenerImpl.tick's dropSpamThrottler.
             play.creative_drops = play.creative_drops.saturating_sub(1);
-            let digging = play.digging;
             let using = play.using.is_some();
-            let delayed = play.destroy_delay > 0 || play.use_delay > 0 || play.attack_ticks < 100;
-            if digging.is_some() || using || delayed {
+            let delayed = play.use_delay > 0 || play.attack_ticks < 100;
+            if using || delayed {
                 let players = if using {
                     self.stab_players_for(conn)
                 } else {
@@ -163,20 +197,6 @@ impl Game<'_> {
                     if body {
                         g.attack_ticks = g.attack_ticks.saturating_add(1);
                     }
-                    if let Some((pos, face)) = digging {
-                        g.forced_hit = Some(Hit {
-                            pos,
-                            face,
-                            point: [
-                                f64::from(pos[0]) + 0.5,
-                                f64::from(pos[1]) + 0.5,
-                                f64::from(pos[2]) + 0.5,
-                            ],
-                            inside: false,
-                        });
-                    }
-                    let _ = g.tick_mining();
-                    g.forced_hit = None;
                     g.right = g.using.is_some();
                     g.tick_using();
                     g.stab_players = outer;
@@ -185,17 +205,6 @@ impl Game<'_> {
                     }
                 });
                 self.land_player_stabs();
-                // ServerPlayerGameMode.handleBlockBreakAction: creative and
-                // instant survival STARTs finish without a STOP from the client.
-                // tick_mining clears mining on completion; forget the START too,
-                // so a flower or crop planted here later is not broken again.
-                if digging.is_some()
-                    && let Some(host) = self.lan.as_mut()
-                    && let Some(play) = host.play.get_mut(&conn)
-                    && (host.hub.guests[gi].creative() || play.mining.is_none())
-                {
-                    play.digging = None;
-                }
             }
             if body {
                 // Player.tick's ItemCooldowns.tick, once a tick for each player
@@ -229,7 +238,6 @@ impl Game<'_> {
                     play.attack_item = held.cloned();
                 }
             }
-            self.guest_delayed_destroy(conn);
             self.guest_server_tick(conn, body);
             // Player.tick's statistics and ServerPlayer.tick's triggers, then
             // PlayerAdvancements.flushDirty.
@@ -261,7 +269,6 @@ impl Game<'_> {
             if let Some(host) = self.lan.as_mut() {
                 host.hub.flush_progress(conn);
             }
-            self.guest_dig_feedback(conn);
             // A hand-over freezes this player's inventory until its record is released.
             if self
                 .lan
@@ -410,3 +417,7 @@ mod fall_sound_tests;
 #[cfg(test)]
 #[path = "tests/spectator_body_tick_tests.rs"]
 mod spectator_body_tick_tests;
+
+#[cfg(test)]
+#[path = "tests/dig_tick_order_tests.rs"]
+mod dig_tick_order_tests;
