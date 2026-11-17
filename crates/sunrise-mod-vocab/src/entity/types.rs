@@ -1347,6 +1347,10 @@ pub enum EffectTickChange {
 }
 
 impl ApplyEffectTickEvent<'_> {
+    /// `LivingEntity.hasEffect`: whether the holder currently has `effect`.
+    pub fn has_effect(&self, effect: crate::EffectKey) -> bool {
+        self.active_effects.contains(&effect)
+    }
     /// Queue `LivingEntity.heal` on the holder.
     pub fn heal(&mut self, amount: f32) {
         self.changes.push(EffectTickChange::Heal(amount));

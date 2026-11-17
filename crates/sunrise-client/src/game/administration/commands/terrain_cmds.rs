@@ -749,6 +749,7 @@ impl Game<'_> {
                         &name,
                         self.world.block_names.get(&key).cloned(),
                         self.world.block_lock(key),
+                        self.res.items(),
                     );
                     true
                 } else if let Some(saved) = self.block_entity_nbt(p) {
@@ -1013,7 +1014,7 @@ mod loot_mine_component_tests {
     }
 
     fn decorations(stack: &ItemStack) -> Option<Tag> {
-        save::item_to_nbt(stack)
+        save::item_to_nbt(stack, &Default::default())
             .get("components")?
             .get("minecraft:pot_decorations")
             .cloned()

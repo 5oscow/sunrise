@@ -349,13 +349,15 @@ pub trait PlayersBackend {
     /// local player's inventory is available.
     #[access(WorldOnly)]
     fn player_inventory(&self, player: PlayerRef) -> Option<Vec<ItemStack>>;
-    /// Side: server.
+    /// Side: both.
     /// The player's non-empty inventory slots by `Inventory`'s numbers, with their
     /// components: 0 to 35 the main inventory (0 to 8 the hotbar), 36 feet, 37 legs, 38
     /// chest, 39 head, 40 the off hand, 41 body and 42 saddle
     /// (`Inventory.EQUIPMENT_SLOT_MAPPING`), lowest first. The numbers
     /// `player_set_inventory_slot` takes, and for 0 to 35 the `Slot` of a saved player's
-    /// `Inventory` list. None for a player that is not online (stale handle) and on a client.
+    /// `Inventory` list. None for a stale or unavailable player. On a client, only the local player's
+    /// inventory menu is available: server slot packets plus the client's own changes.
+    /// This read-only view is not authoritative server inventory.
     #[access(WorldOnly)]
     fn player_inventory_slots(&self, player: PlayerRef) -> Option<Vec<(u32, ItemStack)>>;
     /// Side: server.
@@ -395,6 +397,8 @@ pub trait PlayersBackend {
     fn player_food(&self, player: PlayerRef) -> Option<PlayerFood>;
     /// Side: both.
     /// `Player.getAbilities`; Paper `Player#getAllowFlight/isFlying/getFlySpeed/getWalkSpeed`.
+    /// On a client, flying is the local body's current prediction; the packet supplies
+    /// the other ability flags and speeds. None for any other player.
     #[access(WorldOnly)]
     fn player_abilities(&self, player: PlayerRef) -> Option<PlayerAbilities>;
     /// Side: both.

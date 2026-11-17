@@ -909,7 +909,7 @@ impl Menu {
                 if let Some(mut book) = book
                     && !self.inventory_add(env, &mut book)
                 {
-                    self.drop_stack(&book);
+                    self.drop_stack(&book, env.items);
                 }
             }
             _ => return false,
@@ -2013,12 +2013,12 @@ impl Menu {
         }
     }
 
-    fn drop_stack(&mut self, stack: &ItemStack) {
+    fn drop_stack(&mut self, stack: &ItemStack, items: &Items) {
         self.touch();
         if stack.count > 0 {
             self.state
                 .drops
-                .push(crate::item_data::canon_stack(Some(stack)));
+                .push(crate::item_data::canon_stack(Some(stack), items));
             self.state.dropped.push(stack.clone());
         }
     }
@@ -2751,7 +2751,7 @@ impl Menu {
             || (matches!(self.state.kind, Kind::Mod(_))
                 && self.state.slots[index].role == Role::CraftResult)
         {
-            self.drop_stack(&stack);
+            self.drop_stack(&stack, env.items);
         }
         Some(clicked)
     }

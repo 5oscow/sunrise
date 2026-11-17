@@ -77,6 +77,7 @@ impl PartRegistrar {
             controllers,
             arm_poses,
             structure_types,
+            feature_types,
             loot_modifier_serializers,
             loot_function_types,
             loot_condition_types,

@@ -11,14 +11,22 @@ pub trait Hooks {
     /// mobs, nor the player's effects. `holder` identifies the holder; Host
     /// reads of a mob holder are unavailable while it is ticking. Queued
     /// changes apply after the hook; clearing `keep` ends the effect.
+    /// `active_effects` is the holder's live active-effect snapshot at this point in the
+    /// pass; `has_effect(key)` reads it, reflecting removals earlier in the pass.
+    /// The current level's game rules remain readable through `host.level(dimension)`.
+    /// Version 2: only the content mod `mod_id` that declared `effect` is dispatched.
+    /// All snapshots and queued changes cross the shared Wire boundary on both targets.
     /// Server-side.
     #[hook(
         side = "server",
+        owner = "mod_id",
+        version = 2,
         contract = "listen",
         host = "read",
         neoforge = "none (vanilla MobEffect.applyEffectTick; NeoForge adds no event or extension for it)"
     )]
     fn apply_effect_tick(
+        mod_id: &str,
         effect: EffectKey,
         dimension: &str,
         entity: Option<i32>,
@@ -27,6 +35,7 @@ pub trait Hooks {
         health: f32,
         max_health: f32,
         food: Option<PlayerFood>,
+        active_effects: &[EffectKey],
         changes: &mut Vec<EffectTickChange>,
         keep: &mut bool,
     );
