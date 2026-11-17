@@ -1,7 +1,6 @@
 use super::super::*;
 
 impl Renderer {
-    #[allow(clippy::too_many_arguments)]
     pub(in super::super) fn draw_sky_pass_content(
         &self,
         pass: &mut pack_timing::CountedPass<'_>,

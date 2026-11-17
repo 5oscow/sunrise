@@ -1,7 +1,6 @@
 use super::super::*;
 
 impl Renderer {
-    #[allow(clippy::too_many_arguments)]
     pub(in super::super) fn draw_water_mirror(
         &mut self,
         mut encoder: &mut wgpu::CommandEncoder,
