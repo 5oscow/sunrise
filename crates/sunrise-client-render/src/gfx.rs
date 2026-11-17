@@ -796,7 +796,7 @@ impl Part {
             Self::Translucent => s.vertex_ranges(true).1,
             Self::Indices => s
                 .sorted_indices
-                .map(|(page, at)| (page, at, u64::from(s.translucent) * 6)),
+                .map(|(page, at)| (page, at, translucency::index_words(s.translucent))),
         }
     }
     /// Points the mesh where its range moved.
@@ -1520,6 +1520,14 @@ pub struct Renderer {
     /// The external shader pipeline world frames call (`external`); `None` draws vanilla's way.
     external: Option<Box<dyn external::ExternalPipeline>>,
     translucent_draws: Vec<(u64, usize, [u32; 5], (u32, Option<u32>))>,
+    /// Per visible section: the occlusion test that also sees its translucent quads
+    /// (`NO_TEST` without one): the section is left to phase 2.
+    translucent_tests: Vec<u32>,
+    /// This frame's translucent draws that a test sees: (index among them, test).
+    translucent_marks: Vec<(u32, u32)>,
+    /// Phase 2's draws and the translucent ones after them, with the instance counts the
+    /// tests give (`Cull::upload`).
+    phase2_upload: Vec<[u32; 5]>,
     origins: Vec<[f32; 4]>,
     /// `DrawIndexedIndirectArgs` words: index count, instance count, first
     /// index, base vertex, first instance.
@@ -4524,6 +4532,9 @@ impl Renderer {
             visible_lods: Vec::new(),
             shadow_visible: Vec::new(),
             translucent_draws: Vec::new(),
+            translucent_tests: Vec::new(),
+            translucent_marks: Vec::new(),
+            phase2_upload: Vec::new(),
             origins: Vec::new(),
             draws: Vec::new(),
             draw_pages: Vec::new(),
@@ -4650,6 +4661,7 @@ impl Renderer {
         &self,
         pass: &mut wgpu::RenderPass<'_>,
         flat: Option<&flat::Flat>,
+        (indirect, base): (&wgpu::Buffer, u32),
         solid_draws: u32,
         translucent_draws: u32,
     ) {
@@ -4671,7 +4683,7 @@ impl Renderer {
             None => {
                 pass.set_pipeline(&self.translucent_mark);
                 pass.set_vertex_buffer(1, self.instances.slice(..));
-                self.draw_sections(pass, &self.indirect, 0, solid_draws, translucent_draws);
+                self.draw_sections(pass, indirect, base, solid_draws, translucent_draws);
             }
         }
         pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
@@ -5269,9 +5281,11 @@ impl Renderer {
             _ => (page, start + solid_slots),
         };
         let sorted_indices = if translucent > 0 {
-            let indices =
-                self.sorted_indices
-                    .alloc(&self.device, encoder, u64::from(translucent) * 6);
+            let indices = self.sorted_indices.alloc(
+                &self.device,
+                encoder,
+                translucency::index_words(translucent),
+            );
             if indices.is_none() {
                 release_main(&mut self.arena);
                 if let Some(arena) = &mut self.translucent_arena {
@@ -5373,13 +5387,12 @@ impl Renderer {
                 Sides::unsorted(solid)
             },
             translucent,
-            sort: translucency::SortState::new(
+            sort: translucency::SortState::of_quads(
                 mesh.translucent
                     .as_chunks::<4>()
                     .0
                     .iter()
-                    .map(|q| translucency::quad_center(q[0].pos, q[2].pos))
-                    .collect(),
+                    .map(|q| q.map(|v| v.pos)),
             ),
             sorted_indices,
             flat_id,
@@ -5491,7 +5504,7 @@ impl Renderer {
         }
         if let Some((page, start)) = s.sorted_indices {
             self.sorted_indices
-                .release(page, start, u64::from(s.translucent) * 6);
+                .release(page, start, translucency::index_words(s.translucent));
         }
         let (main, translucent) = s.vertex_ranges(self.translucent_arena.is_some());
         if let Some((page, start, vertices)) = main {
@@ -6051,7 +6064,7 @@ impl Renderer {
         self.sorted_indices
             .release_all(released.iter().filter_map(|s| {
                 let (page, start) = s.sorted_indices?;
-                Some((page, start, u64::from(s.translucent) * 6))
+                Some((page, start, translucency::index_words(s.translucent)))
             }));
         let split = self.translucent_arena.is_some();
         self.arena
@@ -7608,7 +7621,8 @@ impl Renderer {
         // Solid quads facing away from the eye are left out: the bob moves
         // the eye off `camera`, so it is found from the projection. With the mirror, those
         // facing its eye are kept too: it sits straight below, at this camera-relative y.
-        let eye = view::projection_center(cull_proj).filter(|_| self.sides_on);
+        let rendered_eye = view::projection_center(cull_proj);
+        let eye = rendered_eye.filter(|_| self.sides_on);
         let mirror_low = mirror_plane
             .zip(eye)
             .map(|(plane, eye)| 2.0 * (plane - frame.camera.y as f32) - eye.y);
@@ -8029,6 +8043,8 @@ impl Renderer {
         // Listed sections whose solid quads the pass draws: it counts them among the
         // sections it kept.
         let mut gpu_solid = 0;
+        self.translucent_tests.clear();
+        self.translucent_tests.resize(visible.len(), cull::NO_TEST);
         for (i, v) in visible.iter().enumerate() {
             let s = self.sections.get(v.slot);
             if gpu_frame
@@ -8061,6 +8077,13 @@ impl Renderer {
                 *run = (group, start, draws.len() - start);
             }
             let runs = &runs[..parts.len()];
+            // The test's weight is the translucent quads' indices too: they are the work a
+            // hidden section saves.
+            let translucent_indices = if s.sorted_indices.is_some() {
+                s.translucent * 6
+            } else {
+                0
+            };
             if first_phase {
                 for &(group, start, len) in runs {
                     if group == 0 {
@@ -8073,20 +8096,24 @@ impl Renderer {
                     c.drawn(
                         i,
                         v.slot,
-                        indices,
+                        indices + translucent_indices,
                         cull::section_box(self.sections.bounds(v.slot)),
                     );
                 }
             } else if let Some(c) = &mut cull {
-                // One test sees the section's draws in both passes.
-                let total: usize = runs.iter().map(|r| r.2).sum();
+                // One test sees the section's draws in both passes, and its translucent ones.
+                let total: usize =
+                    runs.iter().map(|r| r.2).sum::<usize>() + usize::from(translucent_indices > 0);
                 if let Some(test) = c.deferred(
                     i,
                     v.slot,
                     total,
-                    indices,
+                    indices + translucent_indices,
                     cull::section_box(self.sections.bounds(v.slot)),
                 ) {
+                    if translucent_indices > 0 {
+                        self.translucent_tests[i] = test;
+                    }
                     for &(group, start, len) in runs {
                         if group == 0 {
                             phase2_opaque += len;
@@ -8189,9 +8216,19 @@ impl Renderer {
         // LevelRenderer: nearby sections each frame, plus a rotating eighth
         // (at least 15) of the visible list. Cached views avoid needless sorts.
         self.translucent_draws.clear();
+        // Only the camera's own pass takes a section's translucent order with the quads that face
+        // away left out: a shadow, a mirrored view or a pack's own pipelines draw them all.
+        // The eye it keeps them for is the projection's (`rendered_eye`), not the camera: the bob
+        // moves it, and the water mirror draws no translucent terrain.
+        let cull_back = shadow_view.is_none()
+            && rendered_eye.is_some()
+            && !pack_terrain
+            && self.native.is_none()
+            && self.world_views.sections.sections().next().is_none();
         let count = visible.len() + visible_lods.len();
         let budget = (count / 8).max(15).min(count);
         self.translucency_cursor %= count.max(1);
+        let eye = camera + rendered_eye.map_or(DVec3::ZERO, |e| e.as_dvec3());
         for (i, v) in visible.iter().enumerate().rev() {
             let s = self.sections.get_mut(v.slot);
             if let Some((index_page, index_start)) = s.sorted_indices {
@@ -8205,9 +8242,13 @@ impl Renderer {
                     v.key.2 * 16,
                 ];
                 if (!s.sort.is_sorted() || nearby || scheduled)
-                    && let Some(indices) =
-                        s.sort
-                            .update(camera.to_array(), origin, &mut self.translucent_sorter)
+                    && let Some(indices) = s.sort.update(
+                        camera.to_array(),
+                        eye.to_array(),
+                        origin,
+                        cull_back,
+                        &mut self.translucent_sorter,
+                    )
                 {
                     self.uploads.buffer(
                         &mut encoder,
@@ -8217,18 +8258,22 @@ impl Renderer {
                     );
                 }
                 let (page, first) = s.translucent_at;
-                self.translucent_draws.push((
-                    v.distance,
-                    i,
-                    [
-                        s.translucent * 6,
-                        1,
-                        index_start as u32,
-                        first as u32,
-                        i as u32,
-                    ],
-                    (page, Some(index_page)),
-                ));
+                let pov = translucency::viewpoint(eye.to_array(), origin);
+                let (skip, quads) = s.sort.drawn(s.translucent, cull_back, pov);
+                if quads > 0 {
+                    self.translucent_draws.push((
+                        v.distance,
+                        i,
+                        [
+                            quads * 6,
+                            1,
+                            (index_start + u64::from(skip) * 6) as u32,
+                            first as u32,
+                            i as u32,
+                        ],
+                        (page, Some(index_page)),
+                    ));
+                }
             }
         }
         // Sections went back to front (`visible` is sorted by distance, then
@@ -8290,7 +8335,13 @@ impl Renderer {
                     )
                 });
         }
-        for &(_, _, draw, pages) in &self.translucent_draws {
+        self.translucent_marks.clear();
+        for (k, &(_, instance, draw, pages)) in self.translucent_draws.iter().enumerate() {
+            if let Some(&test) = self.translucent_tests.get(instance)
+                && test != cull::NO_TEST
+            {
+                self.translucent_marks.push((k as u32, test));
+            }
             self.draws.push(draw);
             self.draw_pages.push(pages);
         }
@@ -8994,12 +9045,46 @@ impl Renderer {
             frame.hud,
             [self.config.width, self.config.height],
         );
+        // The translucent terrain pass reads its draws from phase 2's buffer, where the tests of
+        // the sections left to phase 2 give them their instance. Where it draws from
+        // `self.indirect` (flat draws, improved transparency, a pack's material), or no test
+        // runs (no solid draws), every translucent draw stays.
+        let flat_frame_possible = self.flat_on
+            && self
+                .flat
+                .as_ref()
+                .is_some_and(|f| listed >= f.min_sections || pack_terrain || shadow_view.is_some());
+        let translucent_culled = culling
+            && solid_draws > 0
+            && !flat_frame_possible
+            && !oit_on
+            && self.native.is_none()
+            && !self.translucent_marks.is_empty();
+        let phase2_end = if translucent_culled {
+            let (skip, tail) = (solid_draws - phase1_draws, solid_draws + translucent_draws);
+            self.phase2_upload.clear();
+            self.phase2_upload
+                .extend_from_slice(&self.draws[phase1_draws as usize..tail as usize]);
+            if let Some(cull) = &mut self.cull {
+                for &(k, test) in &self.translucent_marks {
+                    self.phase2_upload[(skip + k) as usize][1] = 0;
+                    cull.place_translucent(test, skip + k);
+                }
+            }
+            tail
+        } else {
+            solid_draws
+        };
         if culling && let Some(cull) = &mut self.cull {
             cull.upload(
                 &self.device,
                 &mut self.uploads,
                 &mut encoder,
-                &self.draws[phase1_draws as usize..solid_draws as usize],
+                if translucent_culled {
+                    &self.phase2_upload
+                } else {
+                    &self.draws[phase1_draws as usize..phase2_end as usize]
+                },
                 &self.instances,
                 &self.globals,
             );
@@ -10566,7 +10651,13 @@ impl Renderer {
                         }
                         pass.set_bind_group(0, &self.group, &[]);
                     }
-                    self.mark_translucent_terrain(&mut pass, flat, solid_draws, translucent_draws);
+                    self.mark_translucent_terrain(
+                        &mut pass,
+                        flat,
+                        (&self.indirect, 0),
+                        solid_draws,
+                        translucent_draws,
+                    );
                 }
                 Some(flat) => {
                     pass.split(self.own_timing.as_mut(), "translucent terrain");
@@ -10582,6 +10673,7 @@ impl Renderer {
                     self.mark_translucent_terrain(
                         &mut pass,
                         Some(flat),
+                        (&self.indirect, 0),
                         solid_draws,
                         translucent_draws,
                     );
@@ -10593,14 +10685,18 @@ impl Renderer {
                     pass.set_pipeline(translucent_pipeline);
                     pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
                     pass.set_vertex_buffer(1, self.instances.slice(..));
-                    self.draw_sections(
+                    let from = match &self.cull {
+                        Some(cull) if translucent_culled => (&cull.phase2, phase1_draws),
+                        _ => (&self.indirect, 0),
+                    };
+                    self.draw_sections(&mut pass, from.0, from.1, solid_draws, translucent_draws);
+                    self.mark_translucent_terrain(
                         &mut pass,
-                        &self.indirect,
-                        0,
+                        None,
+                        from,
                         solid_draws,
                         translucent_draws,
                     );
-                    self.mark_translucent_terrain(&mut pass, None, solid_draws, translucent_draws);
                     pass.split(self.own_timing.as_mut(), "after translucent");
                 }
             }
