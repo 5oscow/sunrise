@@ -2,12 +2,14 @@
 """Compares two state digests step by step and names the first differing step per group: A/digest.txt B/digest.txt."""
 import sys
 
-GROUPS = ['entities', 'randoms', 'block_entities', 'level_random', 'counters', 'scheduled']
+# `tick` and `dim` are compared too: a changed game time or level routing is a behaviour change.
+GROUPS = ['tick', 'dim', 'entities', 'randoms', 'block_entities', 'level_random', 'counters', 'scheduled']
 
 
-def read(path):
+def parse(lines):
+    """The running ticks' fields, and how many frozen ticks moved the level random."""
     running, frozen_moves, last_random = [], 0, None
-    for line in open(path):
+    for line in lines:
         if not line.startswith('tick='):
             continue
         fields = dict(part.split('=', 1) for part in line.split())
@@ -19,23 +21,34 @@ def read(path):
     return running, frozen_moves
 
 
-def main():
-    (a, fa), (b, fb) = read(sys.argv[1]), read(sys.argv[2])
-    ticks = range(min(len(a), len(b)))
-    missing = [] if len(a) == len(b) else [len(ticks)]
-    print(f'running ticks: {len(a)} vs {len(b)}, game time {a[0]["tick"]}..{a[-1]["tick"]} vs {b[0]["tick"]}..{b[-1]["tick"]}')
-    print(f'frozen ticks that moved the level random: {fa} vs {fb}')
-    same = True
+def compare(a_lines, b_lines):
+    """The report lines, and whether every step of every group matches and both ran the same number of steps."""
+    (a, fa), (b, fb) = parse(a_lines), parse(b_lines)
+    if not a or not b:
+        return [f'running ticks: {len(a)} vs {len(b)}', 'DIFFERENT'], False
+    steps = range(min(len(a), len(b)))
+    report = [f'running ticks: {len(a)} vs {len(b)}, game time {a[0]["tick"]}..{a[-1]["tick"]} vs '
+              f'{b[0]["tick"]}..{b[-1]["tick"]}',
+              f'frozen ticks that moved the level random: {fa} vs {fb}']
+    same = len(a) == len(b)
     for group in GROUPS:
-        diff = [t for t in ticks if a[t][group] != b[t][group]]
+        diff = [t for t in steps if a[t][group] != b[t][group]]
         if diff:
             same = False
             t = diff[0]
-            print(f'{group:15} DIFFERS on {len(diff)} steps, first step {t + 1} (tick {a[t]["tick"]}): {a[t][group]} vs {b[t][group]}')
+            report.append(f'{group:15} DIFFERS on {len(diff)} steps, first step {t + 1} (tick {a[t]["tick"]}): '
+                          f'{a[t][group]} vs {b[t][group]}')
         else:
-            print(f'{group:15} identical')
-    print('IDENTICAL' if same and not missing else 'DIFFERENT')
-    return 0 if same and not missing else 1
+            report.append(f'{group:15} identical')
+    report.append('IDENTICAL' if same else 'DIFFERENT')
+    return report, same
+
+
+def main():
+    with open(sys.argv[1]) as a, open(sys.argv[2]) as b:
+        report, same = compare(a, b)
+    print('\n'.join(report))
+    return 0 if same else 1
 
 
 if __name__ == '__main__':

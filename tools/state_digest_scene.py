@@ -130,7 +130,8 @@ def prepare_dir(directory):
 
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith('--')]
-    binary, resources, template, out = map(Path, args[:4])
+    # Resolved here: the server runs in OUT/server, where relative paths would point elsewhere.
+    binary, resources, template, out = (Path(a).resolve() for a in args[:4])
     ticks = int(sys.argv[sys.argv.index('--ticks') + 1]) if '--ticks' in sys.argv else 200
     out.mkdir(parents=True, exist_ok=True)
     home = Path(tempfile.mkdtemp(prefix='state-digest-home-'))
