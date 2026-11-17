@@ -18,9 +18,9 @@
                                    surface.json to <out>, checked; prints nothing when there is none
 
 A nightly builds main plus the pull requests the trusted reviewers picked (the set: tools/ci/nightly_set.py), merged
-in their order and pushed as nightly/build-<date>-<n>; with no set, main alone. Main is its newest commit where
-this repository's checks passed (`dyna-checks` on the fork, `checks` and `parity-main` upstream), as for a release
-(release_train.green_main_head), or NIGHTLY_BASE when the caller gives that commit. It is published as the
+in their order and pushed as nightly/build-<date>-<n>; with no set, main alone. Main is the commit the
+`daily-green` tag points to (release_train.daily_green_commit; on Sunrise through release_train.channel_head, below),
+or NIGHTLY_BASE when the caller gives that commit. It is published as the
 `nightly` pre-release; the previous one stays a week as nightly-<date>.
 On sunrise-org/sunrise only, the base is the commit `daily-green` points to (the newest daily run that passed every
 leg, which also published its SDK: release_train.daily_green_commit), with a complete published `sdk-<sha>` release
@@ -361,15 +361,14 @@ def require_sdk(sha: str) -> None:
 
 
 def green_base(repo: str, issue: str) -> Ref:
-    """NIGHTLY_BASE, else a green main commit from this repository's checks
-    (dyna-checks on the fork, checks plus parity-main upstream), never an untested fallback."""
+    """NIGHTLY_BASE, else a green main commit (the dyna-checks gate on Sunrise, the green daily tag elsewhere)."""
     explicit = os.environ.get("NIGHTLY_BASE", "").strip()
     if repo == "sunrise-org/sunrise":
         sha = train.channel_head("nightly", explicit)
     else:
-        sha = explicit or train.green_main_head(parity=True)
+        sha = explicit or train.daily_green_commit()
         if not sha:
-            stop(repo, issue, "the build stopped: no recent commit of main passed checks and parity-main.")
+            stop(repo, issue, "the build stopped: no fully green daily run yet.")
         if not is_ancestor(sha, "refs/remotes/origin/main"):
             stop(repo, issue, f"the build stopped: {sha[:9]} is not on main.")
         sha = git("rev-parse", sha)
