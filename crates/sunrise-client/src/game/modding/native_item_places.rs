@@ -4,10 +4,11 @@
 //! them through `ItemPlace`'s `stack`, `insert` and `extract`, which come here for these places; a block entity's slots,
 //! a stack inside an item and a mod's own places go through their handlers.
 use super::Game;
+use super::api_values::{TryIntoApi, stack_value};
 use super::transactions::After;
 use mod_api::__private::game::*;
-use mod_api::{EquipmentSlot, ItemPlace, LivingRef, Transaction};
-use sunrise_client::{first_person::Hand, items::ItemStack};
+use mod_api::{CraftedByError, EquipmentSlot, ItemPlace, ItemResource, LivingRef, Transaction};
+use sunrise_client::{first_person::Hand, items::ItemStack, menu::Menu};
 
 impl Game<'_> {
     /// The player a place belongs to, if a player's: a cursor's only while its menu is open.
@@ -163,6 +164,49 @@ impl Game<'_> {
             return self.scoped_game_stack(place);
         }
         self.unscoped_game_stack(place)
+    }
+    /// Runs the vanilla `ItemStack.onCraftedBy` effects for a stack a mod-delivered menu result
+    /// owns. The stack mutation is journaled through the caller's transaction and the statistic
+    /// is deferred until its root commit.
+    pub(super) fn game_on_crafted_by(
+        &mut self,
+        place: &ItemPlace,
+        tx: &Transaction,
+        amount: i32,
+    ) -> Result<(), CraftedByError> {
+        if !self.transaction_holds(tx) {
+            return Err(CraftedByError::Unavailable);
+        }
+        let player = match place {
+            ItemPlace::MenuSlot { menu, .. } | ItemPlace::PlayerCursor { menu } => {
+                menu.fields().player.uuid()
+            }
+            _ => return Err(CraftedByError::NotHeld),
+        };
+        let Some(before) = place.stack(self) else {
+            return Err(CraftedByError::NotHeld);
+        };
+        let before_engine = stack_value(&before).map_err(|_| CraftedByError::Unavailable)?;
+        let mut after_engine = before_engine.clone();
+        let maps = self.level_maps([&before_engine]);
+        Menu::map_crafted(Some(&maps), &mut after_engine);
+        if after_engine != before_engine {
+            let after = after_engine
+                .try_into_api()
+                .map_err(|_| CraftedByError::Unavailable)?;
+            if place.exchange(self, tx, &ItemResource::of(&after), before.count()) != before.count()
+            {
+                return Err(CraftedByError::Unavailable);
+            }
+            self.defer_effect(super::transactions::DeferredEffect::MapCrafted(maps));
+        }
+        self.defer_effect(super::transactions::DeferredEffect::ItemStat {
+            player,
+            stat: "crafted",
+            item: before_engine.item.clone(),
+            amount,
+        });
+        Ok(())
     }
     /// `ItemAccess.insert` at a player's place, an item entity's or an entity's slot: up to
     /// `stack.count` of `stack`, into the place where it's empty or holds the same item and
@@ -476,7 +520,9 @@ pub(super) mod tests {
     use super::super::native_entity_refs::tests::with_game;
     use mod_api::HostTransaction;
     use mod_api::ServerHost;
-    use mod_api::{ENTITY_AUTOMATION, ENTITY_ITEMS, ItemPlace, ItemResource, MenuRef};
+    use mod_api::{
+        CraftedByError, ENTITY_AUTOMATION, ENTITY_ITEMS, ItemPlace, ItemResource, MenuRef,
+    };
     use std::sync::{Arc, atomic::AtomicI32, mpsc};
     use sunrise_client::{
         items::ItemStack,
@@ -1235,6 +1281,110 @@ pub(super) mod tests {
             if commit { Ok(()) } else { Err(()) }
         });
         moved
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn crafted_by_processes_a_held_map_and_defers_the_stat_and_new_map_until_commit() {
+        use crate::game::maps::MapData;
+
+        super::super::native_guest_turn_tests::with_guests(|game| {
+            let source = game.new_map_id(MapData::fresh(0.0, 0.0, 0, "minecraft:overworld"));
+            let mut map = ItemStack::new("minecraft:filled_map", 1);
+            map.data_mut().map_id = Some(source);
+            map.data_mut().map_post_processing = Some(1);
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .guests
+                .update(0, |guest| guest.carried = Some(map.clone()));
+            let menu = game
+                .player_container_menu(game.player(12).unwrap())
+                .unwrap();
+            let cursor = menu.cursor();
+            let other = ItemPlace::PlayerSlot {
+                player: 12,
+                slot: 0,
+            };
+            let host: &mut dyn ServerHost = game;
+            let aborted = host.transaction(|host, tx| {
+                assert_eq!(
+                    other.on_crafted_by(host, tx, 1),
+                    Err(CraftedByError::NotHeld)
+                );
+                cursor.on_crafted_by(host, tx, 3)?;
+                Err::<(), CraftedByError>(CraftedByError::Unavailable)
+            });
+            assert_eq!(aborted, Err(CraftedByError::Unavailable));
+            let guest = &game.lan.as_ref().unwrap().hub.guests[0];
+            assert_eq!(guest.carried, Some(map.clone()));
+            let conn = guest.conn;
+            assert_eq!(
+                game.lan
+                    .as_ref()
+                    .unwrap()
+                    .play
+                    .get(&conn)
+                    .unwrap()
+                    .stats
+                    .get("crafted", "minecraft:filled_map"),
+                0
+            );
+            assert!(game.map(source + 1).is_none());
+
+            let host: &mut dyn ServerHost = game;
+            assert_eq!(
+                host.transaction(|host, tx| cursor.on_crafted_by(host, tx, 3)),
+                Ok(())
+            );
+            let guest = &game.lan.as_ref().unwrap().hub.guests[0];
+            let carried = guest.carried.as_ref().unwrap();
+            assert_eq!(
+                carried.data().and_then(|data| data.map_id),
+                Some(source + 1)
+            );
+            assert_eq!(
+                carried.data().and_then(|data| data.map_post_processing),
+                None
+            );
+            assert_eq!(game.map(source + 1).unwrap().scale, 1);
+            assert_eq!(
+                game.lan
+                    .as_ref()
+                    .unwrap()
+                    .play
+                    .get(&conn)
+                    .unwrap()
+                    .stats
+                    .get("crafted", "minecraft:filled_map"),
+                3
+            );
+
+            game.lan.as_mut().unwrap().hub.guests.update(0, |guest| {
+                guest.carried = Some(ItemStack::new("minecraft:stick", 2))
+            });
+            let host: &mut dyn ServerHost = game;
+            assert_eq!(
+                host.transaction(|host, tx| cursor.on_crafted_by(host, tx, 2)),
+                Ok(())
+            );
+            assert_eq!(
+                game.lan.as_ref().unwrap().hub.guests[0].carried,
+                Some(ItemStack::new("minecraft:stick", 2))
+            );
+            assert_eq!(
+                game.lan
+                    .as_ref()
+                    .unwrap()
+                    .play
+                    .get(&conn)
+                    .unwrap()
+                    .stats
+                    .get("crafted", "minecraft:stick"),
+                2
+            );
+        });
     }
 
     #[test]

@@ -11,9 +11,12 @@ pub trait Hooks {
     /// reported once, not once for each vanilla callback.
     ///
     /// Use the server Host to grant experience, unlock recipes, award crafted
-    /// statistics or emit effects. This notice does not itself grant rewards,
-    /// trigger the `recipe_crafted` criterion or run `onCraftedBy` item
-    /// post-processing. It cannot change the delivered stack. The built-in
+    /// statistics or emit effects. This notice does not itself grant rewards or
+    /// trigger the `recipe_crafted` criterion. To apply vanilla `onCraftedBy`
+    /// processing to a delivered stack, use `ItemPlace::on_crafted_by` on the
+    /// menu cursor (or another held menu slot) in the shared transaction. It
+    /// applies item post-processing and the crafted statistic; it cannot change
+    /// `event.stack` itself. The built-in
     /// crafting-grid result uses `item_crafted`, not this hook. Player inventory
     /// slots and vanilla menu types do not fire it. Client prediction transfers
     /// items without firing the notice; authoritative slots and effects follow.

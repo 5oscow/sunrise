@@ -339,6 +339,8 @@ pub(super) enum DeferredEffect {
         item: std::sync::Arc<str>,
         amount: i32,
     },
+    /// A filled map's pending crafted-by copy, materialized only after its transaction commits.
+    MapCrafted(super::cartography::LevelMaps),
     Sound {
         sound: &'static str,
         at: [f64; 3],
@@ -1013,6 +1015,7 @@ impl Game<'_> {
                 } => {
                     self.native_as_player(player, |g| g.award_stat(stat, &item, amount));
                 }
+                DeferredEffect::MapCrafted(maps) => self.register_made_maps(maps),
                 DeferredEffect::Sound {
                     sound,
                     at,

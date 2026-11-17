@@ -171,10 +171,27 @@ exchange, player-inventory slots, vanilla menu types or the built-in crafting-gr
 sends the resulting slots, cursor and effects.
 
 Use existing Host operations for experience, recipe unlocks, crafted statistics, sounds and
-particles. The notice grants nothing automatically and cannot change the delivered stack.
-It does **not** perform `RecipeCraftingHolder.awardUsedRecipes`'s `recipe_crafted` criterion
-([tracking](https://github.com/sunrise-org/sunrise/issues/1977)) or `onCraftedBy` item
-post-processing ([tracking](https://github.com/sunrise-org/sunrise/issues/1976)).
+particles. The notice grants nothing automatically and cannot change `event.stack` itself. To
+apply vanilla `ItemStack.onCraftedBy` processing to the delivered stack, get the player's open
+menu and call `ItemPlace::on_crafted_by` on its cursor (for a pickup) or another held menu place
+inside the notice's transaction:
+
+```rust,ignore
+if let Some(player) = host.players().acting_player()
+    && let Some(menu) = player.container_menu(host)
+{
+    let place = menu.cursor();
+    let tx = host.transaction_current().expect("menu take transaction");
+    place
+        .on_crafted_by(host, &tx, event.stack.count() as i32)
+        .expect("the delivered stack is still held");
+}
+```
+
+That operation awards the crafted statistic, applies item-specific post-processing such as a
+filled map's pending scale or lock, and runs the normal stat hook. A stack not held in a menu slot
+or cursor is refused with `CraftedByError::NotHeld`. The notice still does **not** perform
+`RecipeCraftingHolder.awardUsedRecipes`'s `recipe_crafted` criterion ([tracking](https://github.com/sunrise-org/sunrise/issues/1977)).
 
 ## Keeping a block menu open
 

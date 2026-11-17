@@ -17,7 +17,7 @@ use sunrise_client::{hud::HudBatch, items::ItemStack, menu::Maps};
 /// The level's maps as a menu sees them (`ContainerLevelAccess`): the
 /// states of the maps the click can reach, and the copies it makes.
 #[derive(Clone)]
-pub(super) struct LevelMaps {
+pub(in crate::game) struct LevelMaps {
     states: RefCell<HashMap<i32, (bool, u8)>>,
     next_id: Cell<i32>,
     /// (new id, source id, scaled) for each copy made.
