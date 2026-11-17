@@ -1124,9 +1124,17 @@ pub fn carry(
                             .as_object_mut()
                             .map(|o| o.remove("neoforge:conditions"));
                     }
+                    // The game looks serializers up by their full id.
+                    let qualified = match recipe["type"].as_str() {
+                        Some(t) if !t.contains(':') => {
+                            recipe["type"] = Value::from(format!("minecraft:{t}"));
+                            true
+                        }
+                        _ => false,
+                    };
                     let upgraded = upgrade_recipe(&mut recipe);
                     report.recipes_upgraded += usize::from(upgraded);
-                    if upgraded || renamed {
+                    if upgraded || renamed || qualified {
                         bytes = serde_json::to_vec_pretty(&recipe).unwrap_or(bytes);
                     }
                 }

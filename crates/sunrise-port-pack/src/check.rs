@@ -402,13 +402,13 @@ displayName = "Ruby"
     #[test]
     fn recipes_of_unknown_types_are_moved_out_and_reported() {
         let dir = temp("custom");
-        let custom = br#"{"type": "ruby:cutting", "ingredient": {"item": "ruby:ruby"}, "neoforge:conditions": [{"type": "neoforge:true"}]}"#;
+        let custom = br#"{"type": "ruby:cutting", "ingredient": {"item": "ruby:ruby"}, "neoforge:conditions": [{"type": "neoforge:mod_loaded", "modid": "ruby"}]}"#;
         let bare = br#"{"type": "crafting_shapeless", "ingredients": ["minecraft:red_dye"], "result": {"id": "ruby:ruby"}}"#;
         let files = [
             ("META-INF/neoforge.mods.toml", TOML),
             ("assets/ruby/models/item/ruby.json", b"{}"),
             ("data/ruby/recipe/cutting.json", custom.as_slice()),
-            // No namespace: 26.3 reads it as `minecraft:`, so it loads and stays.
+            // No namespace: written out as `minecraft:`, so it loads and stays.
             ("data/ruby/recipe/bare.json", bare.as_slice()),
         ];
         let c = check(&jar(&dir, &files), &dir.join("out")).unwrap();
