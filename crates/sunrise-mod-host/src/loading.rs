@@ -133,7 +133,7 @@ pub fn main_with(
                     .filter(|&&i| code_ids.contains(manifests[i].id.as_str()))
                     .map(|&i| sunrise_client::save::level_mods::ModRecord {
                         id: manifests[i].id.clone(),
-                        version: manifests[i].version.clone(),
+                        version: manifests[i].version.to_string(),
                     })
                     .collect(),
             ));

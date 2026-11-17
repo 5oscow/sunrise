@@ -3291,7 +3291,7 @@ impl Game<'_> {
                 .insert(m.id.clone(), sunrise_client::mod_list::ModInfo::of(m, None));
             Installed {
                 id: m.id.clone(),
-                title: [m.name.as_str(), " ", m.version.as_str()].concat(),
+                title: format!("{} {}", m.name, m.version),
                 description: m.description.clone(),
                 problem: None,
                 dev: false,
