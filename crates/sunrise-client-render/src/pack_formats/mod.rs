@@ -6,10 +6,14 @@
 mod colors;
 mod connected;
 mod custom_sky;
+mod fusion;
 mod item_bars;
+mod optifine_ctm;
+
+pub use fusion::FusionTextures;
+pub use optifine_ctm::ConnectedTextures;
 
 use crate::{
-    fusion::FusionTextures,
     models::StateModels,
     pack_hooks::{ConnectedTextureRules, PackFormats},
     resource_source::ResourceSource,
