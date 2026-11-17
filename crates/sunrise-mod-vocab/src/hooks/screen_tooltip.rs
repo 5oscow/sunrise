@@ -2,11 +2,17 @@
 // catalog-order: 0030
 
 pub trait Hooks {
-    /// The tooltip at `at` (as in `screen_click`) on block `block`'s
-    /// screen, a mod's, over no item: push its lines when it is over
-    /// something of yours. Legacy colour codes (§) work.
+    /// The tooltip at `at` (GUI pixels from the mod screen's top-left).
+    /// `slot` is the hovered menu index, including player inventory slots,
+    /// or `None` outside a mapped slot. On a filled slot, `lines` starts as
+    /// the item's tooltip after item tooltip hooks; your final lines replace
+    /// it, as `AbstractContainerScreen.getTooltipFromContainerItem` does.
+    /// Empty slots and screen space start empty. Images, style and the carried
+    /// stack visibility rule are unchanged. Lines are rich Text/color pairs,
+    /// so editing one line does not flatten the styling of the others.
     #[hook(
         side = "client",
+        version = 2,
         contract = "collect",
         out = "lines",
         scope = "block_entity",

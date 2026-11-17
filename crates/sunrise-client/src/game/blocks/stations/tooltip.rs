@@ -101,6 +101,17 @@ impl Game<'_> {
         }
         let after_name_index = lines.len().min(1);
         lines.splice(after_name_index..after_name_index, after_name);
+        self.draw_stack_tooltip_lines(batch, stack, lines, x, y);
+    }
+    /// Draw already-built item lines, keeping the stack's image, style and gather hooks.
+    pub(in crate::game) fn draw_stack_tooltip_lines(
+        &mut self,
+        batch: &mut HudBatch,
+        stack: &ItemStack,
+        lines: Vec<(sunrise_client::text::Text, u32)>,
+        x: f32,
+        y: f32,
+    ) {
         let mut component = None;
         self.native_tooltip_component(stack, &mut component);
         let images: Vec<TooltipImage> = tooltip_component_size(component)
