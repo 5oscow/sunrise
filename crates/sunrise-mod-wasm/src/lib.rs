@@ -34,7 +34,7 @@ use runtime::take_refusal as wasm_call_refusal;
 pub(crate) mod boundary {
     include!(concat!(env!("OUT_DIR"), "/wire_host_generated.rs"));
 }
-pub use imports::{Mismatch, Why};
+pub use imports::{Mismatch, Why, set_game_build};
 pub(crate) use runtime::WeakWasmMod;
 pub use runtime::{CallClass, WasmHandler, WasmMod};
 
@@ -102,11 +102,12 @@ pub enum Refusal {
         budget: compile_budget::CompileBudget,
         why: String,
     },
-    /// The mod uses items of the game's API that this game does not have as the mod was built:
-    /// each is named, up to a limit, with how many more there were.
+    /// The mod uses items of the game's API that this game does not have as the mod was built.
+    /// Every mismatch is kept (the log lists them all); the text a player reads names the first
+    /// few and counts the rest. `build` is the game's build id, whose SDK the mod is rebuilt with.
     Boundary {
         mismatches: Vec<imports::Mismatch>,
-        omitted: usize,
+        build: Option<String>,
     },
     /// The game has no shared Rust standard library beside its executable.
     NoStd,
@@ -156,18 +157,20 @@ impl std::fmt::Display for Refusal {
                 f,
                 "{member}: cannot enforce compilation budget {budget}: {why}; restore a private writable .sunrise-cache/wasm directory and a working compiler executable"
             ),
-            Self::Boundary {
-                mismatches,
-                omitted,
-            } => {
-                write!(f, "uses ")?;
-                for (i, mismatch) in mismatches.iter().enumerate() {
+            Self::Boundary { mismatches, build } => {
+                write!(f, "built for an older Sunrise")?;
+                if let Some(build) = build {
+                    write!(f, ", rebuild with SDK sdk-{build}")?;
+                }
+                write!(f, ": uses ")?;
+                for (i, mismatch) in mismatches.iter().take(imports::LISTED).enumerate() {
                     if i > 0 {
                         write!(f, "; ")?;
                     }
                     write!(f, "{mismatch}")?;
                 }
-                if *omitted > 0 {
+                let omitted = mismatches.len().saturating_sub(imports::LISTED);
+                if omitted > 0 {
                     write!(f, "; and {omitted} more")?;
                 }
                 write!(f, " (or a type it carries changed)")
@@ -429,6 +432,13 @@ static INITIALIZED_REFUSALS: OnceLock<Vec<(String, Refusal)>> = OnceLock::new();
 fn report_refusals(refused: &[(String, Refusal)], stdout: &mut impl std::io::Write) {
     for (id, why) in refused {
         log::warn!("wasm mod {id} refused: {why}");
+        if let Refusal::Boundary { mismatches, .. } = why
+            && mismatches.len() > imports::LISTED
+        {
+            for mismatch in mismatches {
+                log::warn!("wasm mod {id}: {mismatch}");
+            }
+        }
         let _ = writeln!(stdout, "wasm mod {id} refused: {why}");
     }
 }
@@ -880,14 +890,14 @@ mod tests {
                         ),
                         mismatch("host:Players::kick", Why::Missing),
                     ],
-                    omitted: 2,
+                    build: Some("abc123".into()),
                 },
             )],
             &mut console,
         );
         assert_eq!(
             String::from_utf8(console).unwrap(),
-            "wasm mod old_mod refused: uses host:ServerHost::give_item changed (mod #01234567, game #fedcba98); hook:Hooks::block_click@3 changed (version 2 → 3); host:Players::kick is not in this game; and 2 more (or a type it carries changed)\n"
+            "wasm mod old_mod refused: built for an older Sunrise, rebuild with SDK sdk-abc123: uses host:ServerHost::give_item changed (mod #01234567, game #fedcba98); hook:Hooks::block_click@3 changed (version 2 → 3); host:Players::kick is not in this game (or a type it carries changed)\n"
         );
     }
 

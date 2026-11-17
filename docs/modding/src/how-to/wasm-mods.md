@@ -172,13 +172,13 @@ path never enters it. A hook's `@<version>` is its `hook_version`, which a refus
 "version 2 → 3".
 
 **Compatibility.** A built wasm mod loads on a newer game build as long as every item it names is
-unchanged. It is refused, by name, when any method changes in a host area it calls, or in a hook,
-part or point it implements ("or a type it carries changed"). A host call is hashed per area, not
-per method: the `Host`-style area traits are the unit, so a changed signature anywhere in an area a
-mod calls refuses it, while an area it does not call cannot. A hook, a Part method and a point are
-hashed one by one. A refusal lists every mismatch, up to a cap, and counts the rest. Known gap: a
-behaviour change under an unchanged signature is not caught; the hook's `hook_version` is how the
-game says one happened.
+unchanged. Each host call, hook, Part method and point is hashed on its own: the hash covers that
+item's signature and the shapes of the types it carries, so adding a method, or changing one a mod
+does not use, refuses nothing. A mod is refused, by name, when an item it uses changed or is gone
+("or a type it carries changed"). The refusal reads "built for an older Sunrise, rebuild with SDK
+`sdk-<build id>`", with the first eight mismatched items and the count of the rest; the log lists
+them all. Known gap: a behaviour change under an unchanged signature is not caught; the hook's
+`hook_version` is how the game says one happened.
 
 Each guest exports:
 
