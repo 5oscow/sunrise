@@ -2,19 +2,77 @@
 use super::*;
 
 impl PartRegistrar {
+    /// Attaches each declared type's parts to its blocks. A type is found by id whichever mod
+    /// declared it, but another mod's type only for a package that lists the declaring package
+    /// in its `[dependencies]`: otherwise resolution would depend on what else is installed.
     pub(crate) fn expand_block_entity_parts(&mut self) {
-        for (id, parts) in &self.parts.block_entity_kinds {
+        let packages = crate::load_state::current_packages();
+        let mut ids: Vec<_> = self.parts.block_entity_kinds.keys().collect();
+        ids.sort_unstable();
+        for id in ids {
+            let parts = &self.parts.block_entity_kinds[id];
             let Some(kind) = self.block_entity_types.iter().find(|kind| kind.id == **id) else {
+                let namespace = id.split_once(':').map_or("", |(namespace, _)| namespace);
                 for part in parts {
-                    self.refused.push(format!(
-                        "mod {} attached {} to undeclared native block entity type {id}",
-                        part.mod_id, part.type_name
-                    ));
+                    let dependency = packages
+                        .iter()
+                        .find(|package| package.id() == part.mod_id)
+                        .and_then(|package| {
+                            package
+                                .dependencies()
+                                .iter()
+                                .find(|dependency| dependency.id() == namespace)
+                        })
+                        .map(|dependency| dependency.kind());
+                    let absent = !packages.iter().any(|package| package.id() == namespace);
+                    match dependency {
+                        Some(crate::DependencyKind::Optional) if absent => log::debug!(
+                            "mod {} skipped {} on block entity type {id}: optional dependency {namespace} is absent",
+                            part.mod_id, part.type_name
+                        ),
+                        Some(crate::DependencyKind::Required) => self.refused.push(format!(
+                            "mod {} attached {} to block entity type {id}, which its required dependency {namespace} does not declare",
+                            part.mod_id, part.type_name
+                        )),
+                        _ => self.refused.push(format!(
+                            "mod {} attached {} to undeclared native block entity type {id}",
+                            part.mod_id, part.type_name
+                        )),
+                    }
                 }
                 continue;
             };
+            let owner = self.block_entity_owners.get(&**id).copied();
+            let allowed: Vec<_> = parts
+                .iter()
+                .filter(|part| {
+                    let Some(owner) = owner.filter(|owner| *owner != part.mod_id) else {
+                        return true;
+                    };
+                    let depends = packages
+                        .iter()
+                        .find(|package| package.id() == part.mod_id)
+                        .is_some_and(|package| {
+                            package.dependencies().iter().any(|dependency| {
+                                dependency.id() == owner
+                                    && matches!(
+                                        dependency.kind(),
+                                        crate::DependencyKind::Required
+                                            | crate::DependencyKind::Optional
+                                    )
+                            })
+                        });
+                    if !depends {
+                        self.refused.push(format!(
+                            "mod {} attached {} to block entity type {id}, declared by package {owner}; declare {owner} as a dependency",
+                            part.mod_id, part.type_name
+                        ));
+                    }
+                    depends
+                })
+                .collect();
             for block in &kind.blocks {
-                for part in parts {
+                for part in allowed.iter().copied() {
                     let block_part: Arc<dyn BlockPart> = part.part.clone();
                     if insert_part(
                         &mut self.parts.blocks,
@@ -289,6 +347,376 @@ pub mod tests {
         assert_eq!(r.parts.block_entity_kinds["test:press"].len(), 1);
     }
 
+    /// A part with no hooks: it only shows who attached it, and in what order.
+    macro_rules! quiet_part {
+        ($name:ident) => {
+            struct $name;
+            #[mod_api::sunrise_part]
+            impl BlockPart for $name {}
+            #[mod_api::sunrise_part]
+            impl BlockEntityPart for $name {}
+        };
+    }
+    quiet_part!(FromB);
+    quiet_part!(FromC);
+
+    struct Owner;
+    #[mod_api::__subscriptions]
+    impl Hooks for Owner {
+        fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
+            r.block_entity_type("press")
+                .blocks(&["owner:block"])
+                .build();
+        }
+    }
+    struct Attaches<P: BlockEntityPart + Clone>(P);
+    impl<P: BlockEntityPart + Clone> Hooks for Attaches<P> {
+        fn subscribed(&self) -> &'static [Option<HookId>] {
+            &[]
+        }
+        fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
+            let press = r.block_entity_type_key("owner:press");
+            r.block_entity_part(&press, self.0.clone()).unwrap();
+        }
+    }
+    macro_rules! attach_part {
+        ($name:ident) => {
+            impl Clone for $name {
+                fn clone(&self) -> Self {
+                    Self
+                }
+            }
+        };
+    }
+    attach_part!(FromB);
+    attach_part!(FromC);
+
+    fn package(id: &str, side: Side, depends_on: &[&str]) -> PackageInfo {
+        package_of(id, side, depends_on, DependencyKind::Required)
+    }
+
+    fn package_of(id: &str, side: Side, depends_on: &[&str], kind: DependencyKind) -> PackageInfo {
+        PackageInfo::new(
+            id.into(),
+            "1".into(),
+            PackageKind::Code,
+            side,
+            vec![id.into()],
+            depends_on
+                .iter()
+                .map(|owner| {
+                    PackageDependency::new(
+                        (*owner).into(),
+                        "*".into(),
+                        kind,
+                        DependencyOrder::After,
+                        Side::Both,
+                        None,
+                        None,
+                    )
+                })
+                .collect(),
+        )
+    }
+
+    fn attached_to_owner_block(mods: &[ModEntry]) -> (Vec<&'static str>, Vec<String>) {
+        let registrar = crate::parts::shared::register_all(mods, |_| false);
+        let attached = registrar
+            .parts
+            .block_entities
+            .get("owner:block")
+            .map(|parts| parts.iter().map(|part| part.mod_id).collect())
+            .unwrap_or_default();
+        (attached, registrar.refused)
+    }
+
+    #[test]
+    pub(crate) fn a_part_attaches_to_a_type_its_dependency_declared() {
+        let mods = [
+            ModEntry::new("owner", Box::new(Owner)),
+            ModEntry::new("b", Box::new(Attaches(FromB))),
+        ];
+        crate::load_state::with_test_package_inventory(
+            vec![
+                package("owner", Side::Both, &[]),
+                package("b", Side::Both, &["owner"]),
+            ],
+            || {
+                let (attached, refused) = attached_to_owner_block(&mods);
+                assert_eq!(refused, Vec::<String>::new());
+                assert_eq!(attached, ["b"]);
+            },
+        );
+    }
+
+    #[test]
+    pub(crate) fn a_type_of_an_undeclared_package_is_refused_with_the_dependency_to_add() {
+        let mods = [
+            ModEntry::new("owner", Box::new(Owner)),
+            ModEntry::new("b", Box::new(Attaches(FromB))),
+        ];
+        // `owner` is installed, but `b` does not list it.
+        crate::load_state::with_test_package_inventory(
+            vec![
+                package("owner", Side::Both, &[]),
+                package("b", Side::Both, &[]),
+            ],
+            || {
+                let (attached, refused) = attached_to_owner_block(&mods);
+                assert!(attached.is_empty());
+                assert_eq!(
+                    refused,
+                    [format!(
+                        "mod b attached {} to block entity type owner:press, declared by package owner; declare owner as a dependency",
+                        type_name::<FromB>()
+                    )]
+                );
+            },
+        );
+    }
+
+    #[test]
+    pub(crate) fn a_type_declared_nowhere_is_refused_by_id_and_mod() {
+        let mods = [ModEntry::new("b", Box::new(Attaches(FromB)))];
+        crate::load_state::with_test_package_inventory(
+            vec![package("b", Side::Both, &["owner"])],
+            || {
+                let (attached, refused) = attached_to_owner_block(&mods);
+                assert!(attached.is_empty());
+                assert_eq!(
+                    refused,
+                    [format!(
+                        "mod b attached {} to block entity type owner:press, which its required dependency owner does not declare",
+                        type_name::<FromB>()
+                    )]
+                );
+            },
+        );
+        // No dependency on it at all: today's refusal.
+        let mods = [ModEntry::new("b", Box::new(Attaches(FromB)))];
+        crate::load_state::with_test_package_inventory(vec![package("b", Side::Both, &[])], || {
+            let (_, refused) = attached_to_owner_block(&mods);
+            assert_eq!(
+                refused,
+                [format!(
+                    "mod b attached {} to undeclared native block entity type owner:press",
+                    type_name::<FromB>()
+                )]
+            );
+        });
+    }
+
+    #[test]
+    pub(crate) fn an_optional_dependencys_type_attaches_when_present_and_is_skipped_when_absent() {
+        let optional = |installed: &[&str]| {
+            let mut packages = vec![package_of(
+                "b",
+                Side::Both,
+                &["owner"],
+                DependencyKind::Optional,
+            )];
+            packages.extend(installed.iter().map(|id| package(id, Side::Both, &[])));
+            packages
+        };
+        crate::load_state::with_test_package_inventory(optional(&["owner"]), || {
+            let mods = [
+                ModEntry::new("owner", Box::new(Owner)),
+                ModEntry::new("b", Box::new(Attaches(FromB))),
+            ];
+            let (attached, refused) = attached_to_owner_block(&mods);
+            assert_eq!(refused, Vec::<String>::new());
+            assert_eq!(attached, ["b"]);
+        });
+        crate::load_state::with_test_package_inventory(optional(&[]), || {
+            let mods = [ModEntry::new("b", Box::new(Attaches(FromB)))];
+            let (attached, refused) = attached_to_owner_block(&mods);
+            assert_eq!(refused, Vec::<String>::new());
+            assert!(attached.is_empty());
+        });
+    }
+
+    #[test]
+    pub(crate) fn parts_of_two_packages_attach_in_dispatch_order_on_every_load() {
+        let inventory = || {
+            vec![
+                package("owner", Side::Both, &[]),
+                package("c", Side::Both, &["owner"]),
+                package("b", Side::Both, &["owner"]),
+            ]
+        };
+        crate::load_state::with_test_package_inventory(inventory(), || {
+            for _load in 0..16 {
+                let mods = [
+                    ModEntry::new("owner", Box::new(Owner)),
+                    ModEntry::new("c", Box::new(Attaches(FromC))),
+                    ModEntry::new("b", Box::new(Attaches(FromB))),
+                ];
+                let (attached, refused) = attached_to_owner_block(&mods);
+                assert_eq!(refused, Vec::<String>::new());
+                assert_eq!(attached, ["c", "b"]);
+            }
+        });
+    }
+
+    static OWNERS_PROGRESS: AttachmentType<u32> = AttachmentType {
+        namespace: "owner",
+        name: "progress",
+        default: || 0,
+        codec: None,
+        copy_on_death: false,
+        sync: false,
+    };
+    static B_PROGRESS: AttachmentType<u32> = AttachmentType {
+        namespace: "b",
+        name: "progress",
+        default: || 0,
+        codec: None,
+        copy_on_death: false,
+        sync: false,
+    };
+    struct Keeps<const OWNERS: bool>;
+    #[mod_api::sunrise_part]
+    impl BlockPart for Keeps<true> {}
+    #[mod_api::sunrise_part]
+    impl BlockEntityPart for Keeps<true> {}
+    impl BlockEntityPartState for Keeps<true> {
+        type Data = u32;
+        const DATA: &'static AttachmentType<u32> = &OWNERS_PROGRESS;
+    }
+    #[mod_api::sunrise_part]
+    impl BlockPart for Keeps<false> {}
+    #[mod_api::sunrise_part]
+    impl BlockEntityPart for Keeps<false> {}
+    impl BlockEntityPartState for Keeps<false> {
+        type Data = u32;
+        const DATA: &'static AttachmentType<u32> = &B_PROGRESS;
+    }
+    struct KeepsState<const OWNERS: bool>;
+    #[mod_api::__subscriptions]
+    impl<const OWNERS: bool> Hooks for KeepsState<OWNERS>
+    where
+        Keeps<OWNERS>: BlockEntityPartState + 'static,
+    {
+        fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
+            r.register_attachment_type("b:progress", false).unwrap();
+            let press = r.block_entity_type_key("owner:press");
+            let _ = r.block_entity_part_with_state(&press, Keeps::<OWNERS>);
+        }
+    }
+
+    #[test]
+    pub(crate) fn a_foreign_parts_state_is_declared_and_keyed_by_its_own_package() {
+        struct OwnerWithState;
+        #[mod_api::__subscriptions]
+        impl Hooks for OwnerWithState {
+            fn register(&self, r: &mut dyn Registrar, cx: &RegistrationContext) {
+                Owner.register(r, cx);
+            }
+        }
+        struct OwnerDeclaresKey;
+        #[mod_api::__subscriptions]
+        impl Hooks for OwnerDeclaresKey {
+            fn register(&self, r: &mut dyn Registrar, cx: &RegistrationContext) {
+                r.register_attachment_type("owner:progress", false).unwrap();
+                Owner.register(r, cx);
+            }
+        }
+        let packages = || {
+            vec![
+                package("owner", Side::Both, &[]),
+                package("b", Side::Both, &["owner"]),
+            ]
+        };
+        // The part's own key: declared by `b` in `b`'s namespace, saved under `b`.
+        crate::load_state::with_test_package_inventory(packages(), || {
+            let mods = [
+                ModEntry::new("owner", Box::new(OwnerWithState)),
+                ModEntry::new("b", Box::new(KeepsState::<false>)),
+            ];
+            let registrar = crate::parts::shared::register_all(&mods, |_| false);
+            assert_eq!(registrar.refused, Vec::<String>::new());
+            assert_eq!(
+                registrar.attachment_uses,
+                [("b".to_owned(), "b".to_owned(), "progress".to_owned())]
+            );
+        });
+        // The owner's key is only usable when the owner declared it (its public attachment);
+        // a part cannot invent a key under the owner's namespace.
+        crate::load_state::with_test_package_inventory(packages(), || {
+            let mods = [
+                ModEntry::new("owner", Box::new(OwnerWithState)),
+                ModEntry::new("b", Box::new(KeepsState::<true>)),
+            ];
+            let errors =
+                crate::__private::install_parts(&mods, &crate::parts::tests::rule_schema(), |_| {
+                    false
+                })
+                .unwrap_err();
+            assert_eq!(
+                errors,
+                ["package b attachment owner:progress: undeclared attachment use"]
+            );
+        });
+        crate::load_state::with_test_package_inventory(packages(), || {
+            let mods = [
+                ModEntry::new("owner", Box::new(OwnerDeclaresKey)),
+                ModEntry::new("b", Box::new(KeepsState::<true>)),
+            ];
+            let registrar = crate::parts::shared::register_all(&mods, |_| false);
+            assert_eq!(
+                registrar.attachment_uses,
+                [("b".to_owned(), "owner".to_owned(), "progress".to_owned())],
+                "a declared key is the owner's public attachment"
+            );
+        });
+    }
+
+    #[test]
+    pub(crate) fn a_server_package_with_a_client_part_on_a_dependencys_type_is_refused() {
+        struct ClientHooked;
+        #[mod_api::sunrise_part]
+        impl BlockPart for ClientHooked {}
+        #[mod_api::sunrise_part]
+        impl BlockEntityPart for ClientHooked {
+            fn block_entity_view_distance(
+                &self,
+                _: &dyn ClientHost,
+                event: &mut BlockEntityViewDistanceEvent<'_>,
+            ) {
+                event.distance = 128.0;
+            }
+        }
+        impl Clone for ClientHooked {
+            fn clone(&self) -> Self {
+                Self
+            }
+        }
+        crate::load_state::with_test_package_inventory(
+            vec![
+                package("owner", Side::Both, &[]),
+                package("b", Side::Server, &["owner"]),
+            ],
+            || {
+                let mods = [
+                    ModEntry::new("owner", Box::new(Owner)),
+                    ModEntry::new("b", Box::new(Attaches(ClientHooked))),
+                ];
+                crate::__private::install_parts(&mods, &crate::parts::tests::rule_schema(), |_| {
+                    false
+                })
+                .unwrap();
+                assert_eq!(
+                    crate::__private::client_requirement("b"),
+                    Some(format!(
+                        "attaches the part {}, which listens to the client hook block_entity_view_distance",
+                        type_name::<ClientHooked>()
+                    ))
+                );
+                assert_eq!(crate::__private::client_requirement("owner"), None);
+            },
+        );
+    }
+
     #[test]
     pub(crate) fn a_block_entity_part_answers_by_block_and_by_entity_type() {
         game_thread();
@@ -380,6 +808,9 @@ impl BlockEntitiesRegistrar for PartRegistrar {
             .iter()
             .map(|block| mod_vocab::__private::qualified(self.mod_id, block))
             .collect();
+        self.block_entity_owners
+            .entry(id.clone())
+            .or_insert(self.mod_id);
         self.block_entity_types
             .push(mod_vocab::__private::parts_installation::block_entity_declaration(id, blocks));
         key
