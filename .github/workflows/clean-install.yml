@@ -133,6 +133,7 @@ jobs:
             "./${{ matrix.asset }}" setup --quiet --dir "$home/programs"
             launcher=$(find "$home/programs" -name 'sunrise-launcher.exe' | head -1)
           else
+            sudo apt-get update -qq && sudo apt-get install -y -qq libxkbcommon-x11-0 libxcb-xkb1 >/dev/null
             tar xzf "${{ matrix.asset }}" -C "$home/programs"; launcher="$home/programs/sunrise-launcher"
           fi
           export SUNRISE_LAUNCHER_HOME="$home/launcher" SUNRISE_HOME="$home/game" XDG_DATA_HOME="$home/data" \
