@@ -14,9 +14,11 @@ pub trait Hooks {
     /// `Some(true)` to let a full player eat; `can_eat` left `None` keeps
     /// `vanilla_can_eat`. Both sides (the client starts eating as the
     /// server does), so answer from the stack and the player alone.
+    /// Not asked without a resident eater or an open lifecycle epoch; vanilla's
+    /// answer stands during those world/login lifecycle gaps.
     #[hook(
         side = "both",
-        version = 2,
+        version = 3,
         contract = "replace",
         out = "can_eat",
         host = "read",
