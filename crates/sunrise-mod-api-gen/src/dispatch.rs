@@ -1014,6 +1014,24 @@ pub(super) fn emit<'a>(
                 ),
             ),
         };
+        // A disabled content owner's subscribed world-writing behaviour is inert, not
+        // the vanilla template's. Keep reads (shapes, loot, etc.) on their normal fallback.
+        let inert = match name {
+            "random_tick" | "tick_block" => Some("*handled = true;"),
+            "update_shape" => Some("*new = Some(state);"),
+            "can_survive" => Some("*survives = Some(true);"),
+            "use_item_on" | "use_without_item" => Some("*answer = Some(InteractionResult::Pass);"),
+            "dispense_method" => Some("*answer = Some((Some(stack.clone()), 0));"),
+            "tool_modified_state" => Some("*cancel = true;"),
+            _ => None,
+        };
+        let lookup = if let Some(inert) = inert {
+            format!(
+                "{lookup}\nif super::disabled_owner_part({part_list}, super::content::registry_keys::block_id(state.block())) {{ {inert} return; }}\n"
+            )
+        } else {
+            lookup
+        };
         let write_back = if name == "block_entity_tick" {
             format!(
                 "*{event}.reply = if tick_changed {{ BlockEntityTickReply::Changed }} else {{ BlockEntityTickReply::Unchanged }}; {write_back}"

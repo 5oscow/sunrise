@@ -11,6 +11,7 @@ pub trait Hooks {
     /// own way); a block changed without `handled` takes its own random tick
     /// as it is now, if it still ticks randomly. Lava's fluid random tick
     /// runs either way.
+    /// Its disabled owner's subscribed Part keeps the block inert instead of running the template tick.
     #[hook(
         side = "server",
         contract = "cancel",

@@ -69,6 +69,7 @@ pub(crate) struct Installed {
     pub(crate) mods: Mods,
     pub(crate) subscribers: sunrise_mod_runtime::subscribers::Subscribers,
     pub(crate) disabled: Box<[std::sync::atomic::AtomicBool]>,
+    namespace_owners: std::collections::HashMap<Box<str>, usize>,
     /// The poison sets of the hooks whose dispatch isolates every listener
     /// (#2414 ruling): a listener that unwound is skipped by that one hook
     /// for the rest of the session. One set per hook, filled only on a panic;
@@ -107,10 +108,20 @@ impl Installed {
             .iter()
             .map(|_| std::sync::atomic::AtomicBool::new(false))
             .collect();
+        let mut namespace_owners = std::collections::HashMap::new();
+        for (index, entry) in mods.iter().enumerate() {
+            namespace_owners.insert(entry.id.into(), index);
+            if let Some(package) = crate::LoadedMods::new().get(entry.id) {
+                for namespace in package.namespaces() {
+                    namespace_owners.insert(namespace.into(), index);
+                }
+            }
+        }
         Self {
             mods,
             subscribers,
             disabled,
+            namespace_owners,
             poisons: std::sync::Mutex::new(None),
             poison_free: std::sync::atomic::AtomicBool::new(true),
         }
@@ -250,6 +261,27 @@ pub(crate) fn mod_index_on(index: usize) -> bool {
             .get(index)
             .is_none_or(|disabled| !disabled.load(std::sync::atomic::Ordering::Relaxed))
     })
+}
+
+/// Content ownership is resolved at installation, not by scanning mods on a tick.
+pub(crate) fn content_owner_disabled(id: &str) -> bool {
+    let Some((namespace, _)) = id.split_once(':') else {
+        return false;
+    };
+    installed()
+        .and_then(|installed| installed.namespace_owners.get(namespace))
+        .is_some_and(|index| !mod_index_on(*index))
+}
+
+/// Only a subscribed Part belonging to the disabled content owner makes a block inert.
+pub(crate) fn disabled_owner_part<P: ?Sized>(parts: &[Attached<P>], id: Option<&str>) -> bool {
+    let Some((namespace, _)) = id.and_then(|id| id.split_once(':')) else {
+        return false;
+    };
+    let Some(owner) = installed().and_then(|installed| installed.namespace_owners.get(namespace)) else {
+        return false;
+    };
+    !mod_index_on(*owner) && parts.iter().any(|part| part.mod_index == *owner)
 }
 
 /// `mods` in order, each marked as running `hook` until the next one is (or the loop ends), so a

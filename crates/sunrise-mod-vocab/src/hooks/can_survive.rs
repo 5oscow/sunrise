@@ -11,6 +11,7 @@ pub trait Hooks {
     /// blocks: `Some(false)` refuses the spot, `Some(true)` allows it, and
     /// the block's own rule doesn't run. The level is read-only. Asked on
     /// every shape update of such a block: keep it short.
+    /// A disabled owner's subscribed rule answers true, so the template cannot pop its block.
     #[hook(
         side = "server",
         contract = "replace",

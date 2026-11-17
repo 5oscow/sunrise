@@ -408,6 +408,11 @@ impl Game<'_> {
             else {
                 continue;
             };
+            if this.world.block_entities.get(&pos).is_some_and(|entity| {
+                matches!(entity, BlockEntity::Mod(m) if mod_api::__private::content_owner_disabled(m.id()))
+            }) {
+                continue;
+            }
             match slot.before(&mut BlockEntityTick {
                 game: this,
                 pos,

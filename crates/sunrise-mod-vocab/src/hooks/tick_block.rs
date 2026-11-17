@@ -8,6 +8,7 @@ pub trait Hooks {
     /// block with `native_set_block_property` and set `handled` to skip the
     /// block's own tick; a block changed without `handled` takes its own
     /// tick as it is now, if it is still the tick's block.
+    /// While its owner is disabled, a subscribed tick is held with its deadline and order until re-enabled.
     #[hook(
         side = "server",
         contract = "cancel",

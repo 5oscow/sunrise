@@ -564,6 +564,13 @@ impl LevelAccess for GameLevel<'_> {
             }
         }
     }
+    fn hold_block_tick(&self, state: BlockStateId) -> bool {
+        self.native_authoritative
+            && api_values::block_state::block_listens(mod_api::HookId::TickBlock, state)
+            && state.try_into_api().is_ok_and(|state| {
+                mod_api::__private::block_hook_inert(mod_api::HookId::TickBlock, state)
+            })
+    }
     fn before_tick_block(
         &mut self,
         ticks: &mut Ticks,

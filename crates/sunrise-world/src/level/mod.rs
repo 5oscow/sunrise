@@ -692,6 +692,11 @@ pub trait LevelAccess: BlockEntityNeighbors {
         _handled: &mut bool,
     ) {
     }
+    /// Hold a due block tick without running its body or changing its deadline/order.
+    /// Used while the owner of a subscribed block behaviour is switched off.
+    fn hold_block_tick(&self, _state: BlockStateId) -> bool {
+        false
+    }
     /// `BlockState.tick` from `ServerLevel.tickBlock` (a due scheduled tick
     /// whose block is still there), before the block handles it. The level
     /// may change the block (`Behaviours::set_block` with `ticks`); setting

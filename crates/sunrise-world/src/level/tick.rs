@@ -1869,7 +1869,12 @@ impl Behaviours {
             sunrise_threads::work::set_chunk(tick.pos.x >> 4, tick.pos.z >> 4);
             sunrise_threads::work::set_block(self.block(state).0);
             if u32::from(self.block(state).0) == tick.kind.0 {
-                sim.tick_due_block(state, tick.pos);
+                if sim.level.hold_block_tick(state) {
+                    // Collection is finished: this exact tick stays queued for the next pass.
+                    sim.ticks.blocks.schedule(tick);
+                } else {
+                    sim.tick_due_block(state, tick.pos);
+                }
             }
         }
         let _ = ticks.blocks.finish_tick();
@@ -1956,7 +1961,11 @@ impl Behaviours {
             sunrise_threads::work::set_chunk(tick.pos.x >> 4, tick.pos.z >> 4);
             sunrise_threads::work::set_block(self.block(state).0);
             if u32::from(self.block(state).0) == tick.kind.0 {
-                sim.tick_due_block(state, tick.pos);
+                if sim.level.hold_block_tick(state) {
+                    sim.ticks.blocks.schedule(tick);
+                } else {
+                    sim.tick_due_block(state, tick.pos);
+                }
             }
         }
         true
