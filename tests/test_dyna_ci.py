@@ -580,8 +580,10 @@ class DynaRoutingTests(unittest.TestCase):
                 "print('  process didn\\'t exit successfully: `/t/deps/sunrise_client-0a1b vanilla` (signal: 9, SIGKILL: kill)')\n"
                 "sys.exit(3)\n")
             (tree / "tools" / "parity.py").write_text(
-                "import sys\nprint('PASS loot_a 3s')\nprint('vanilla 0.7231')\n"
-                "print('FAIL loot_b 2s  (log)')\nprint('    vanilla 9')\nsys.exit(1)\n")
+                "import sys\nprint('Probes built in 12s.')\nprint('Running 2 harnesses, 4 at a time here...')\n"
+                "print('PASS loot_a 3s')\nprint('vanilla 0.7231')\n"
+                "print('FAIL loot_b 2s  (log)')\nprint('    vanilla 9')\nprint('1 passed, 1 failed in 0.1 min.')\n"
+                "sys.exit(1)\n")
             # tools/parity.py's own log of each harness; the failing one's is kept past the slot's reuse.
             logs = tree / ".local" / "parity-runner" / "logs"
             logs.mkdir(parents=True)
@@ -607,8 +609,11 @@ class DynaRoutingTests(unittest.TestCase):
             for result in (harness, runner):
                 self.assertNotIn("vanilla", result.stdout + result.stderr)
             self.assertIn("FAIL test_old_parity (exit 3", harness.stdout)
-            self.assertEqual(runner.stdout.splitlines()[:2], ["PASS loot_a", "FAIL loot_b"])
-            self.assertEqual(runner.stdout.splitlines()[2:5], [
+            # Names, verdicts and seconds, and the run's counts: nothing else of parity.py's output.
+            self.assertEqual(runner.stdout.splitlines()[:5], [
+                "Probes built in 12s.", "Running 2 harnesses, 4 at a time", "PASS loot_a 3s", "FAIL loot_b 2s",
+                "1 passed, 1 failed in 0.1 min."])
+            self.assertEqual(runner.stdout.splitlines()[5:8], [
                 "  loot_b: could not compile sunrise-client-lib (lib test)",
                 "  loot_b: rustc for sunrise_client_lib killed by signal 9 (SIGKILL)",
                 "  loot_b: panicked at crates/a/src/b.rs:12:5"])

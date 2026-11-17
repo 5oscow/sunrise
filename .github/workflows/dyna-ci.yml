@@ -1127,7 +1127,10 @@ jobs:
               -e 's/^--- [a-z0-9_#]+: timed out after ([0-9]+)s$/timed out after \1 s/p' \
               "$1" | awk '!seen[$0]++' | head -n 12 | sed "s/^/  $2: /"
           }
-          if [ "$name" = parity ]; then grep -aoE '^(PASS|FAIL|RETRIED|FLAKY) [a-z0-9_#]+' "$log" || true; fi
+          # Each harness's name, verdict and seconds, and the run's own counts: names and numbers only.
+          if [ "$name" = parity ]; then
+            grep -aoE '^((PASS|FAIL|RETRIED|FLAKY) [a-z0-9_#]+( [0-9]+s)?|Probes built in [0-9]+s\.|Running [0-9]+ harnesses, [0-9]+ at a time|[0-9]+ passed, [0-9]+ failed in [0-9.]+ min\.)' "$log" || true
+          fi
           if [ "$status" -eq 0 ]; then echo "PASS $name"; exit 0; fi
           keep="$DYNA_CI_BUILD/parity-keep/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           mkdir -p "$keep"
@@ -1177,6 +1180,14 @@ jobs:
           # tools/parity.py keeps pass records beside .local/minecraft, which is the read-only cache and holds
           # other trees' passes: this run's records start empty, on the slot.
           echo "PARITY_SHARED=$DYNA_CI_BUILD/parity-out/shared" >> "$GITHUB_ENV"
+          # Except each harness's dependency list (the files it read and the probes it built), kept on the slot
+          # from earlier runs: tools/parity.py builds the probes they name before any harness starts, instead of
+          # the first harness to need one building it while the others wait on Cargo's lock. A named harness
+          # always runs: these lists never stand for a pass.
+          mkdir -p "$DYNA_CI_BUILD/parity-out/shared/dependencies"
+          if [ -d "$DYNA_CI_BUILD/parity-dependencies" ]; then
+            cp -a "$DYNA_CI_BUILD/parity-dependencies/." "$DYNA_CI_BUILD/parity-out/shared/dependencies/"
+          fi
           SUNRISE_DYNA_CACHE=true SUNRISE_PREPARED_CACHE="$DYNA_CI_BUILD/vanilla" SUNRISE_SHARED_SOURCE=/cache/sunrise-local bash tools/ci/vanilla-data.sh
       # The game opens a window even with --offscreen, and the runner has no display: a virtual X display for every
       # harness, started from this workflow and left running for the job.
@@ -1236,7 +1247,15 @@ jobs:
           for name in "${names[@]}"; do
             [[ "$name" =~ ^[a-z0-9_]+(#[0-9]+)?$ ]] || { echo "::error::not a harness name: $name"; exit 1; }
           done
-          python tools/parity.py -j 4 --timeout 2400 "${names[@]}"
+          # tools/parity.py's probe build runs at the runner's size (cargo_jobs.py), not the host's CPU count.
+          PARITY_BUILD_JOBS="${CI_JOBS:?}" python tools/parity.py -j 4 --timeout 2400 "${names[@]}"
+      # The dependency lists this run wrote, for the slot's next run (see the scratch step).
+      - name: Keep the harnesses' dependency lists on the slot
+        if: always() && inputs.harnesses != ''
+        run: |
+          [ -d "$DYNA_CI_BUILD/parity-out/shared/dependencies" ] || exit 0
+          mkdir -p "$DYNA_CI_BUILD/parity-dependencies"
+          cp -a "$DYNA_CI_BUILD/parity-out/shared/dependencies/." "$DYNA_CI_BUILD/parity-dependencies/"
       # Harness subprocess timeouts can be shorter than a cold release build. Match their build commands and target dir.
       - name: Build parity probes
         if: inputs.harnesses == ''
