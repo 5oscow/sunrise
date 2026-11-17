@@ -5,7 +5,7 @@ use super::native_entity_refs::tests::{with_client_game, with_game};
 use mod_api::{self, BlockPart, FireOddsEvent, Hooks, LevelSide, Registrar};
 use sunrise_core::{geometry::Direction, position::BlockPos};
 
-/// Glass that ignites from its west face only.
+/// Glass that ignites from its west face only while the square south of the fire is air.
 struct WestFace {
     client: bool,
 }
@@ -14,7 +14,16 @@ struct WestFace {
 impl BlockPart for WestFace {
     fn fire_odds(&self, host: LevelSide<'_>, event: &mut FireOddsEvent) -> Option<(i32, i32)> {
         assert_eq!(matches!(host, LevelSide::Client(_)), self.client);
-        (event.face == Direction::West).then_some((5, 0))
+        if event.face != Direction::West {
+            return None;
+        }
+        let level = match host {
+            LevelSide::Client(level) | LevelSide::Server(level) => level,
+        };
+        let pos = event.pos;
+        let neighbor = level.block_state([pos.x - 1, pos.y, pos.z + 1]);
+        let air = level.block_state_id("minecraft:air").expect("air state");
+        (neighbor == Some(air)).then_some((5, 0))
     }
 }
 
@@ -74,21 +83,22 @@ fn a_block_part_answers_fire_odds_for_one_face() {
             let stone = registry.default_state("minecraft:stone").unwrap();
             let air = game.res.facts().air;
             // Putting stone beside the fire forces a dry neighbour shape update.
-            // The glass face is the only possible support for the fire.
-            for (x, glass_x, stands) in [(2, 3, true), (6, 5, false)] {
+            // The glass is the only possible support. The west face keeps fire when
+            // the placement is north of it, but loses it when stone goes to its south.
+            for (x, glass_x, z, stands) in [(2, 3, 1, true), (6, 5, 3, false), (10, 11, 3, false)] {
                 game.world.set(glass_x, 65, 2, glass).unwrap();
                 game.world.set(x, 65, 2, fire).unwrap();
-                game.world.set(x, 64, 3, stone).unwrap();
+                game.world.set(x, 64, z, stone).unwrap();
                 let hit = crate::game::Hit {
-                    pos: [x, 64, 3],
+                    pos: [x, 64, z],
                     face: [0, 1, 0],
-                    point: [f64::from(x) + 0.5, 65.0, 3.5],
+                    point: [f64::from(x) + 0.5, 65.0, f64::from(z) + 0.5],
                     inside: false,
                 };
                 let (placed, changes) = game
                     .remote_can_place(&hit, &ItemStack::new("minecraft:stone", 1))
                     .expect("stone placement prediction");
-                assert_eq!(placed, BlockPos::new(x, 65, 3));
+                assert_eq!(placed, BlockPos::new(x, 65, z));
                 let pos = BlockPos::new(x, 65, 2);
                 let predicted = changes
                     .iter()
@@ -97,9 +107,13 @@ fn a_block_part_answers_fire_odds_for_one_face() {
                 if stands {
                     assert_eq!(registry.state(predicted).unwrap().name, "minecraft:fire");
                 } else {
-                    assert_eq!(predicted, air, "non-flammable face loses the fire");
+                    assert_eq!(
+                        predicted, air,
+                        "non-flammable face loses the fire at {pos:?}"
+                    );
                 }
-                assert_eq!(game.world.block(x, 65, 2), fire, "prediction stays dry");
+                assert_eq!(game.world.block(x, 65, 2), fire, "fire stays live");
+                assert_eq!(game.world.block(x, 65, z), air, "placement stays dry");
             }
         });
     });

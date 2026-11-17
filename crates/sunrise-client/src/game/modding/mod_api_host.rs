@@ -384,6 +384,134 @@ pub(super) fn level_side(level: &impl SidedLevel) -> mod_api::LevelSide<'_> {
     }
 }
 
+/// The level read by fire-odds listeners, including edits already made in a dry prediction.
+pub(in crate::game) struct FireOddsLevel<'a> {
+    pub(in crate::game) base: &'a super::GameLevel<'a>,
+    pub(in crate::game) changed:
+        Option<&'a std::collections::HashMap<BlockPos, sunrise_world::registry::BlockStateId>>,
+}
+
+impl FireOddsLevel<'_> {
+    fn staged_block(&self, [x, y, z]: [i32; 3]) -> Option<sunrise_world::registry::BlockStateId> {
+        self.changed?.get(&BlockPos::new(x, y, z)).copied()
+    }
+
+    fn block(&self, [x, y, z]: [i32; 3]) -> sunrise_world::registry::BlockStateId {
+        self.staged_block([x, y, z]).unwrap_or_else(|| {
+            sunrise_world::level::LevelAccess::block_state(self.base, BlockPos::new(x, y, z))
+        })
+    }
+}
+
+impl SidedLevel for FireOddsLevel<'_> {
+    fn client_side(&self) -> bool {
+        self.base.client_side()
+    }
+}
+
+// Prediction uses the same implementation for reads not affected by staged blocks.
+macro_rules! base_level_reads {
+    ($(fn $method:ident($($arg:ident: $ty:ty),*) -> $ret:ty;)*) => {
+        $(fn $method(&self, $($arg: $ty),*) -> $ret {
+            mod_api::LevelHost::$method(self.base, $($arg),*)
+        })*
+    };
+}
+
+impl mod_api::LevelHost for FireOddsLevel<'_> {
+    base_level_reads! {
+        fn container_size(at: mod_api::BlockSide) -> Option<usize>;
+        fn container_stack(at: mod_api::BlockSide, slot: usize) -> Option<mod_api::ItemStack>;
+        fn block_state_id(name: &str) -> Option<mod_api::BlockState>;
+        fn block_state_default(block: mod_api::BlockKey) -> Option<mod_api::BlockState>;
+        fn state_block(state: mod_api::BlockState) -> Option<&str>;
+        fn state_string(state: mod_api::BlockState) -> Option<String>;
+        fn min_y() -> i32;
+        fn height() -> i32;
+        fn block_in_tag(block: mod_api::BlockKey, tag: &str) -> Option<bool>;
+        fn tags() -> &dyn mod_api::Tags;
+        fn state_fluid_state(state: mod_api::BlockState) -> Option<mod_api::FluidState>;
+        fn fluid_in_tag(fluid: &str, tag: &str) -> Option<bool>;
+        fn state_with_property(state: mod_api::BlockState, key: &str, value: &str) -> Option<mod_api::BlockState>;
+        fn brightness(layer: mod_api::LightLayer, pos: [i32; 3]) -> i32;
+        fn raw_brightness(pos: [i32; 3], sky_darken: i32) -> i32;
+        fn is_loaded(pos: [i32; 3]) -> bool;
+        fn is_raining_at(pos: [i32; 3]) -> bool;
+        fn enabled_features() -> mod_api::FeatureFlags;
+    }
+
+    fn block_entity(&self, pos: [i32; 3]) -> Option<mod_api::BlockEntityRef> {
+        self.staged_block(pos).is_none().then_some(())?;
+        mod_api::LevelHost::block_entity(self.base, pos)
+    }
+    fn block_entity_part_snapshot(
+        &self,
+        entity: mod_api::BlockEntityRef,
+        namespace: &str,
+        name: &str,
+    ) -> Result<mod_api::AttachmentBatch, mod_api::PartStateError> {
+        use mod_api::__private::game::Fields;
+        if self.staged_block(entity.fields().position).is_some() {
+            return Err(mod_api::PartStateError::Stale);
+        }
+        mod_api::LevelHost::block_entity_part_snapshot(self.base, entity, namespace, name)
+    }
+    fn block_entity_data(&self, entity: mod_api::BlockEntityRef) -> Option<mod_api::Compound> {
+        use mod_api::__private::game::Fields;
+        self.staged_block(entity.fields().position)
+            .is_none()
+            .then_some(())?;
+        mod_api::LevelHost::block_entity_data(self.base, entity)
+    }
+    fn block_state(&self, pos: [i32; 3]) -> Option<mod_api::BlockState> {
+        self.block(pos).try_into_api().ok()
+    }
+    fn fluid_state(&self, pos: [i32; 3]) -> Option<mod_api::FluidState> {
+        let Some(state) = self.staged_block(pos) else {
+            return mod_api::LevelHost::fluid_state(self.base, pos);
+        };
+        if !self.is_loaded(pos) {
+            return None;
+        }
+        super::native_world_read::state_fluid(self.base.behaviours, self.base.registry, state)
+    }
+    fn collision_shape(&self, pos: [i32; 3]) -> Option<Vec<[f64; 6]>> {
+        let Some(state) = self.staged_block(pos) else {
+            return mod_api::LevelHost::collision_shape(self.base, pos);
+        };
+        if !self.is_loaded(pos) {
+            return None;
+        }
+        // A changed position has no live block entity in the dry level.
+        let binding = self.base.collision;
+        let mut scene = sunrise_client::collisions::LookupCollisions {
+            block: &|x, y, z| self.block([x, y, z]),
+            binding,
+        };
+        let [x, y, z] = pos;
+        let shape = binding.collision_shape_with_context(
+            &mut scene,
+            state,
+            BlockPos::new(x, y, z),
+            &sunrise_world::collision_context::CollisionContext::empty(false),
+        );
+        Some(shape.map_or_else(
+            |_| Vec::new(),
+            |shape| {
+                shape
+                    .boxes()
+                    .iter()
+                    .map(|bounds| {
+                        let min = bounds.min_position();
+                        let max = bounds.max_position();
+                        [min.x, min.y, min.z, max.x, max.y, max.z]
+                    })
+                    .collect()
+            },
+        ))
+    }
+}
+
 impl mod_api::LevelHost for super::GameLevel<'_> {
     fn block_entity(&self, pos: [i32; 3]) -> Option<mod_api::BlockEntityRef> {
         super::native_block_entity_refs::world_block_entity(self.world, self.api_level?, pos)

@@ -1,6 +1,8 @@
 use super::*;
 
-impl GameLevel<'_> {
+use super::mod_api_host::FireOddsLevel;
+
+impl FireOddsLevel<'_> {
     /// How fire treats the block `state` at `pos` on either side
     /// (`FireBlock.setFlammable(block, igniteOdds, burnOdds)`). The client
     /// reads ignite odds for placement and shape prediction; only the server burns blocks.

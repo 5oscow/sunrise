@@ -23,7 +23,8 @@ pub trait Hooks {
         out = "odds",
         scope = "block",
         key = "state",
-        target = "sunrise_client::game::native_hooks::fire_odds::GameLevel<'_>::native_fire_odds",
+        host = "level",
+        target = "sunrise_client::game::native_hooks::fire_odds::FireOddsLevel<'_>::native_fire_odds",
         neoforge = [
             "IBlockExtension.getFlammability",
             "IBlockExtension.getFireSpreadSpeed",

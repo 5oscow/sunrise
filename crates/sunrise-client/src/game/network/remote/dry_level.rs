@@ -1,17 +1,43 @@
 use super::*;
+use sunrise_core::{geometry::Direction, position::BlockPos};
+use sunrise_world::level::LevelAccess;
+
+use crate::game::mod_api_host::FireOddsLevel;
+
+/// The live level behind a prediction, providing mod dispatch when it has a game host.
+pub(super) trait PredictionBase: LevelAccess {
+    fn fire_odds_level<'a>(
+        &'a self,
+        _changed: &'a HashMap<BlockPos, BlockStateId>,
+    ) -> Option<FireOddsLevel<'a>> {
+        None
+    }
+}
+
+impl PredictionBase for crate::game::GameLevel<'_> {
+    fn fire_odds_level<'a>(
+        &'a self,
+        changed: &'a HashMap<BlockPos, BlockStateId>,
+    ) -> Option<FireOddsLevel<'a>> {
+        Some(FireOddsLevel {
+            base: self,
+            changed: Some(changed),
+        })
+    }
+}
 
 /// The client's world for a guess at what a click does: reads go to the
 /// world, writes stay here and are dropped.
 pub(super) struct DryLevel<'w> {
-    base: &'w dyn sunrise_world::level::LevelAccess,
-    pub(super) changed: HashMap<sunrise_core::position::BlockPos, BlockStateId>,
+    base: &'w dyn PredictionBase,
+    pub(super) changed: HashMap<BlockPos, BlockStateId>,
     random: sunrise_core::random::LegacyRandom,
     /// The sounds the use plays (a door's creak).
     pub(super) sounds: Vec<DrySound>,
 }
 
 impl<'w> DryLevel<'w> {
-    pub(super) fn new(base: &'w dyn sunrise_world::level::LevelAccess) -> Self {
+    pub(super) fn new(base: &'w dyn PredictionBase) -> Self {
         Self {
             base,
             changed: HashMap::new(),
@@ -30,11 +56,13 @@ impl sunrise_world::level::LevelAccess for DryLevel<'_> {
     fn before_fire_odds(
         &self,
         state: BlockStateId,
-        pos: sunrise_core::position::BlockPos,
-        face: sunrise_core::geometry::Direction,
+        pos: BlockPos,
+        face: Direction,
         odds: &mut Option<(i32, i32)>,
     ) {
-        self.base.before_fire_odds(state, pos, face, odds);
+        if let Some(level) = self.base.fire_odds_level(&self.changed) {
+            level.native_fire_odds(level.base.dimension, state, pos, face, odds);
+        }
     }
     fn cake_can_eat(&self, vanilla: bool) -> bool {
         self.base.cake_can_eat(vanilla)
