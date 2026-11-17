@@ -32,7 +32,7 @@ impl GameLevel<'_> {
     ) {
         super::mod_api_host::FireOddsLevel {
             base: self,
-            changed: None,
+            prediction: None,
         }
         .native_fire_odds(self.dimension, state, pos, face, odds);
     }

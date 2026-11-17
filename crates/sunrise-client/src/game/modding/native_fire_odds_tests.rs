@@ -115,6 +115,106 @@ fn a_block_part_answers_fire_odds_for_one_face() {
                 assert_eq!(game.world.block(x, 65, 2), fire, "fire stays live");
                 assert_eq!(game.world.block(x, 65, z), air, "placement stays dry");
             }
+
+            // Stage block updates in the same adapter the fire-odds Part reads.
+            game.remote.as_mut().unwrap().logged_in = true;
+            let campfire = [4, 65, 8];
+            let at = BlockPos::new(campfire[0], campfire[1], campfire[2]);
+            let campfire_state = registry.default_state("minecraft:campfire").unwrap();
+            let hay = registry.default_state("minecraft:hay_block").unwrap();
+            game.world.set(at.x, at.y, at.z, campfire_state).unwrap();
+            let key = (at.x, at.y, at.z);
+            game.world.block_entities.insert(
+                key,
+                sunrise_client::containers::BlockEntity::Campfire(Box::default()),
+            );
+            let client_level = game.native_client_level().expect("connected client level");
+            let entity = game
+                .block_entity(client_level, campfire)
+                .expect("campfire entity");
+            let original_data = game.with_level(|_, live, _| {
+                mod_api::LevelHost::block_entity_data(live, entity).expect("campfire data")
+            });
+            let foreign = mod_api::__private::game::block_entity_ref(
+                mod_api::LevelRef::new(client_level.epoch(), mod_api::DimensionKey::NETHER),
+                campfire,
+                game.world.block_entities.generation(&key).unwrap(),
+            );
+            game.check_dry_fire_odds_view(
+                |b, dry, ticks| {
+                    assert!(b.set_block(dry, ticks, at.offset(0, -1, 0), hay, 3));
+                },
+                |host| {
+                    let staged = host.block_state(campfire).unwrap();
+                    assert!(
+                        host.state_string(staged)
+                            .unwrap()
+                            .contains("signal_fire=true"),
+                        "the hay bale changed the campfire state"
+                    );
+                    assert_eq!(host.block_entity(campfire), Some(entity));
+                    assert_eq!(host.block_entity_data(entity), Some(original_data));
+                },
+            );
+            game.check_dry_fire_odds_view(
+                |b, dry, ticks| {
+                    assert!(b.set_block(dry, ticks, at, stone, 3));
+                },
+                |host| {
+                    assert!(host.block_entity(campfire).is_none());
+                    assert!(host.block_entity_data(entity).is_none());
+                    assert!(matches!(
+                        host.block_entity_part_snapshot(entity, "fire_odds", "test"),
+                        Err(mod_api::PartStateError::Stale)
+                    ));
+                    assert!(matches!(
+                        host.block_entity_part_snapshot(foreign, "fire_odds", "test"),
+                        Err(mod_api::PartStateError::OtherLevel)
+                    ));
+                },
+            );
+            assert_eq!(game.world.block(at.x, at.y, at.z), campfire_state);
+            assert_eq!(game.block_entity(client_level, campfire), Some(entity));
+
+            super::growth::install_live_features(
+                &game.res,
+                &game.pack,
+                &game.options,
+                &Default::default(),
+            );
+            game.world.weather.raining = true;
+            game.world.weather.settle_levels();
+            let rain = [12, 65, 10];
+            let plains = game.res.biomes().id("minecraft:plains");
+            let qy = (rain[1] - game.world.bottom_y()) >> 2;
+            Arc::make_mut(game.world.chunks.get_mut(&(0, 0)).unwrap()).set_biome_cell(
+                rain[0] >> 2,
+                qy,
+                rain[2] >> 2,
+                plains,
+            );
+            let raining_live = |game: &mut super::Game<'_>| {
+                game.with_level(|_, live, _| mod_api::LevelHost::is_raining_at(live, rain))
+            };
+            assert!(raining_live(game), "the live sky is open to rain");
+            game.check_dry_fire_odds_view(
+                |_, _, _| {},
+                |host| {
+                    assert!(
+                        host.is_raining_at(rain),
+                        "an open dry column still sees rain"
+                    )
+                },
+            );
+            let roof = BlockPos::new(rain[0], rain[1] + 1, rain[2]);
+            game.check_dry_fire_odds_view(
+                |b, dry, ticks| assert!(b.set_block(dry, ticks, roof, stone, 3)),
+                |host| assert!(!host.is_raining_at(rain), "the staged roof blocks rain"),
+            );
+            assert!(
+                raining_live(game),
+                "the roof was not placed in the live level"
+            );
         });
     });
 }

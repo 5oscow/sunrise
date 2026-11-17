@@ -1,14 +1,17 @@
 use super::*;
 use sunrise_core::{geometry::Direction, position::BlockPos};
 use sunrise_world::level::LevelAccess;
+#[cfg(test)]
+use sunrise_world::level::Ticks;
 
-use crate::game::mod_api_host::FireOddsLevel;
+use crate::game::mod_api_host::{FireOddsLevel, PredictedLevel};
+use std::collections::HashSet;
 
 /// The live level behind a prediction, providing mod dispatch when it has a game host.
 pub(super) trait PredictionBase: LevelAccess {
     fn fire_odds_level<'a>(
         &'a self,
-        _changed: &'a HashMap<BlockPos, BlockStateId>,
+        _prediction: &'a dyn PredictedLevel,
     ) -> Option<FireOddsLevel<'a>> {
         None
     }
@@ -17,11 +20,11 @@ pub(super) trait PredictionBase: LevelAccess {
 impl PredictionBase for crate::game::GameLevel<'_> {
     fn fire_odds_level<'a>(
         &'a self,
-        changed: &'a HashMap<BlockPos, BlockStateId>,
+        prediction: &'a dyn PredictedLevel,
     ) -> Option<FireOddsLevel<'a>> {
         Some(FireOddsLevel {
             base: self,
-            changed: Some(changed),
+            prediction: Some(prediction),
         })
     }
 }
@@ -31,6 +34,7 @@ impl PredictionBase for crate::game::GameLevel<'_> {
 pub(super) struct DryLevel<'w> {
     base: &'w dyn PredictionBase,
     pub(super) changed: HashMap<BlockPos, BlockStateId>,
+    removed_entities: HashSet<BlockPos>,
     random: sunrise_core::random::LegacyRandom,
     /// The sounds the use plays (a door's creak).
     pub(super) sounds: Vec<DrySound>,
@@ -41,13 +45,39 @@ impl<'w> DryLevel<'w> {
         Self {
             base,
             changed: HashMap::new(),
+            removed_entities: HashSet::new(),
             random: sunrise_core::random::LegacyRandom::new(0),
             sounds: Vec::new(),
         }
     }
 }
 
+#[cfg(test)]
+impl crate::game::Game<'_> {
+    pub(in crate::game) fn check_dry_fire_odds_view(
+        &mut self,
+        stage: impl FnOnce(&sunrise_world::level::Behaviours, &mut dyn LevelAccess, &mut Ticks),
+        check: impl FnOnce(&dyn mod_api::LevelHost),
+    ) {
+        self.with_level(|behaviours, base, _| {
+            let mut dry = DryLevel::new(base);
+            stage(behaviours, &mut dry, &mut Ticks::default());
+            check(
+                &base
+                    .fire_odds_level(&dry)
+                    .expect("game prediction has a host"),
+            );
+        });
+    }
+}
+
 impl sunrise_world::level::BlockEntityNeighbors for DryLevel<'_> {}
+
+impl PredictedLevel for DryLevel<'_> {
+    fn block_entity_removed(&self, pos: BlockPos) -> bool {
+        self.removed_entities.contains(&pos)
+    }
+}
 
 impl sunrise_world::level::LevelAccess for DryLevel<'_> {
     fn before_smoke_source(&self, state: BlockStateId, smoke: &mut Option<bool>) {
@@ -60,7 +90,7 @@ impl sunrise_world::level::LevelAccess for DryLevel<'_> {
         face: Direction,
         odds: &mut Option<(i32, i32)>,
     ) {
-        if let Some(level) = self.base.fire_odds_level(&self.changed) {
+        if let Some(level) = self.base.fire_odds_level(self) {
             level.native_fire_odds(level.base.dimension, state, pos, face, odds);
         }
     }
@@ -100,10 +130,20 @@ impl sunrise_world::level::LevelAccess for DryLevel<'_> {
     fn is_client_side(&self) -> bool {
         self.base.is_client_side()
     }
-    /// A block this guess changed has no block entity left, so it reads as a
-    /// missing one; every other position asks the level it stands in for.
-    fn shulker_is_closed(&self, pos: sunrise_core::position::BlockPos) -> Option<bool> {
-        if self.changed.contains_key(&pos) {
+    fn has_native_block_entity(&self, state: BlockStateId) -> bool {
+        self.base.has_native_block_entity(state)
+    }
+    fn has_mod_block_entity(&self, pos: BlockPos) -> bool {
+        !self.block_entity_removed(pos) && self.base.has_mod_block_entity(pos)
+    }
+    fn remove_block_entity(&mut self, pos: BlockPos, _: BlockStateId, _: bool) -> u8 {
+        // The simulation decides what survives a state write. Record its removal
+        // without running live entity effects or touching the base.
+        self.removed_entities.insert(pos);
+        0
+    }
+    fn shulker_is_closed(&self, pos: BlockPos) -> Option<bool> {
+        if self.block_entity_removed(pos) {
             return None;
         }
         self.base.shulker_is_closed(pos)
@@ -113,7 +153,7 @@ impl sunrise_world::level::LevelAccess for DryLevel<'_> {
         pos: sunrise_core::position::BlockPos,
         state: sunrise_world::registry::BlockStateId,
     ) -> Option<sunrise_core::geometry::VoxelShape> {
-        if self.changed.contains_key(&pos) {
+        if self.block_entity_removed(pos) {
             return None;
         }
         self.base.published_collision_shape(pos, state)
@@ -132,6 +172,23 @@ impl sunrise_world::level::LevelAccess for DryLevel<'_> {
     }
     fn sky_darken(&self) -> i32 {
         self.base.sky_darken()
+    }
+    fn is_raining(&self) -> bool {
+        self.base.is_raining()
+    }
+    fn biome_name(&self, pos: BlockPos) -> Option<&str> {
+        self.base.biome_name(pos)
+    }
+    fn sea_level(&self) -> i32 {
+        self.base.sea_level()
+    }
+    fn world_surface(&self, x: i32, z: i32) -> i32 {
+        // The motion-blocking scan reads staged states; start above both the
+        // live surface and any blocks staged above it in this column.
+        self.changed
+            .keys()
+            .filter(|pos| pos.x == x && pos.z == z)
+            .fold(self.base.world_surface(x, z), |top, pos| top.max(pos.y + 1))
     }
     fn is_unobstructed(&self, pos: sunrise_core::position::BlockPos, state: BlockStateId) -> bool {
         self.base.is_unobstructed(pos, state)
