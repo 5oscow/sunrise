@@ -450,6 +450,104 @@ mod tests {
 
     #[test]
     #[ignore = "daily"]
+    fn acting_menu_storage_extraction_rolls_back() {
+        mod_platform::testing::with_mods(Vec::<mod_api::ModEntry>::new().into(), || {
+            with_game(|game| {
+                let _rx = watched_guest(game);
+                let stack = ItemStack::new("minecraft:diamond", 5);
+                let resource = ItemResource::of(&stack.clone().try_into_api().unwrap());
+                let mut restored = Vec::new();
+                for ender in [true, false] {
+                    let host = game.lan.as_mut().unwrap();
+                    if ender {
+                        host.hub
+                            .guests
+                            .update(0, |g| g.ender_items[0] = Some(stack.clone()));
+                        host.hub.open_container(
+                            1,
+                            "minecraft:generic_9x3",
+                            sunrise_core::nbt::Tag::String("ender".into()),
+                            (0, 64, 0),
+                            sunrise_client::lan::menu::Slots::Ender,
+                            vec![Some(stack.clone())],
+                            None,
+                        );
+                    } else {
+                        host.hub
+                            .open_native_menu(
+                                1,
+                                3,
+                                sunrise_core::nbt::Tag::String("native".into()),
+                                vec![Some(stack.clone())],
+                            )
+                            .unwrap();
+                    }
+                    game.as_guest(1, |game| {
+                        let menu = game
+                            .player_container_menu(game.player(123).unwrap())
+                            .unwrap();
+                        let place = ItemPlace::MenuSlot { menu, slot: 0 };
+                        let mut inner_restored = None;
+                        let host: &mut dyn ServerHost = game;
+                        let aborted = host.transaction(|host, tx| {
+                            assert_eq!(place.extract(host, tx, &resource, 1), 1);
+                            let inner = host.transaction(|host, tx| {
+                                assert_eq!(place.extract(host, tx, &resource, 1), 1);
+                                Err::<(), ()>(())
+                            });
+                            assert_eq!(inner, Err(()));
+                            inner_restored = place.stack(host);
+                            assert_eq!(place.extract(host, tx, &resource, 1), 1);
+                            Err::<(), ()>(())
+                        });
+                        assert_eq!(aborted, Err(()));
+                        restored.push((inner_restored, place.stack(host)));
+                        // Player and menu writes share the ender snapshot, not competing copies.
+                        let aborted = host.transaction(|host, tx| {
+                            assert_eq!(place.extract(host, tx, &resource, 1), 1);
+                            assert_eq!(menu.cursor().insert(host, tx, &resource, 1), 1);
+                            Err::<(), ()>(())
+                        });
+                        assert_eq!(aborted, Err(()));
+                        assert_eq!(
+                            place.stack(host),
+                            Some(stack.clone().try_into_api().unwrap())
+                        );
+                        assert_eq!(menu.carried(host), Some(None));
+                        // A committed child lends its first snapshot to the parent.
+                        let aborted = host.transaction(|host, _| {
+                            host.transaction(|host, tx| {
+                                assert_eq!(place.extract(host, tx, &resource, 1), 1);
+                                Ok::<_, ()>(())
+                            })
+                            .unwrap();
+                            Err::<(), ()>(())
+                        });
+                        assert_eq!(aborted, Err(()));
+                        assert_eq!(
+                            place.stack(host),
+                            Some(stack.clone().try_into_api().unwrap())
+                        );
+                    });
+                    game.guest_close_all(1);
+                }
+                let expected = |n| {
+                    Some(
+                        ItemStack::new("minecraft:diamond", n)
+                            .try_into_api()
+                            .unwrap(),
+                    )
+                };
+                assert_eq!(
+                    restored,
+                    vec![(expected(4), expected(5)), (expected(4), expected(5))]
+                );
+            })
+        });
+    }
+
+    #[test]
+    #[ignore = "daily"]
     fn container_open_handles_follow_supported_menus() {
         use mod_api::{Hooks, ModEntry, Mods, PlayerContainerCloseEvent, PlayerContainerOpenEvent};
         use std::sync::Mutex;

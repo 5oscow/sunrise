@@ -152,7 +152,7 @@ impl Game<'_> {
     /// Resolve the menu's owner through the shared player boundary. The menu metadata,
     /// crafting grid and native slots stay on the guest during a turn; inventory,
     /// equipment, cursor and ender contents are swapped into Game.
-    fn native_menu_player(&self, player: PlayerRef) -> Option<&Guest> {
+    pub(super) fn native_menu_player(&self, player: PlayerRef) -> Option<&Guest> {
         match self.player_handle_read(player)? {
             super::native_server::PlayerRead::Guest(guest) => Some(guest),
             super::native_server::PlayerRead::Acting { .. } => {
