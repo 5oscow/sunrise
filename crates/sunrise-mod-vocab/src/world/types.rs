@@ -1504,8 +1504,9 @@ pub trait LevelHost {
 pub trait LevelRandomHost: LevelHost {
     /// Vanilla comparator container signal, 0 to 15, through the engine comparator path.
     /// Generates unopened container loot once before reading, as vanilla getItem does;
-    /// stack maxima are honoured. None on clients, for unloaded or out-of-height positions,
-    /// or without a container view. Never loads chunks. Owning game thread only, never
+    /// stack maxima are honoured. `Some(0)` at a loaded position without a container.
+    /// None on clients, for unloaded or out-of-height positions, or without a container view.
+    /// Never loads chunks. Owning game thread only, never
     /// reachable from a worker-thread hook body.
     fn container_signal(&mut self, _pos: [i32; 3]) -> Option<i32> {
         None
