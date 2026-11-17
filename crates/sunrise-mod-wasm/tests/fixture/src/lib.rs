@@ -327,6 +327,7 @@ impl Hooks for Mod {
 
     fn register(&self, registrar: &mut dyn mod_api::Registrar, cx: &mod_api::RegistrationContext) {
         block_state_notice::register(registrar, cx);
+        collision_shape::register(registrar, cx);
         runtime_environment::register(cx);
         capability_registration::register(registrar, cx);
         game_payload::register(registrar);
