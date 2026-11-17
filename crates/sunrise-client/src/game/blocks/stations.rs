@@ -1622,11 +1622,23 @@ impl Game<'_> {
                 lines.push((random.with_color(sunrise_client::text::GRAY), u32::MAX));
             }
         }
+        let context = mod_api::TooltipAppendContext {
+            player: self.own_uuid(),
+            player_entity_id: self.own_entity_id(),
+            tick_rate: if self.native_client_level().is_some() {
+                self.clock.rate()
+            } else {
+                20.0
+            },
+            advanced,
+            creative,
+            nested,
+        };
         // A mod item's own `Item.appendHoverText`, its parts' lines, before the components; a
         // tooltip the stack hides, and a crossbow's projectile, stay without them.
         if mod_callbacks && !nested && !lines.is_empty() {
             let mut own = Vec::new();
-            self.native_tooltip(stack, &mut own);
+            self.native_tooltip(stack, &context, &mut own);
             lines.extend(own);
         }
         // The component details, marked for the placements of the registered appenders.
@@ -2017,13 +2029,6 @@ impl Game<'_> {
         }
         // RegisterTooltipAppendersEvent: each registered appender's lines, where its placement puts them.
         if !appenders.is_empty() {
-            let context = mod_api::TooltipAppendContext {
-                player: self.own_uuid(),
-                player_entity_id: self.own_entity_id(),
-                advanced,
-                creative,
-                nested,
-            };
             sunrise_client::item_tooltip::add_appender_lines(
                 &mut lines,
                 &details,
@@ -2581,6 +2586,74 @@ mod tests {
                     advanced
                 );
             }
+        });
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn tooltip_part_context_tracks_flags_and_client_tick_rate() {
+        use mod_api::{
+            ClientHost, Hooks, ItemPart, ModEntry, Registrar, TooltipAppendContext, TooltipEvent,
+        };
+        use std::sync::{Arc, Mutex};
+
+        #[derive(Clone)]
+        struct Part(Arc<Mutex<Vec<TooltipAppendContext>>>);
+        #[mod_api::sunrise_part]
+        impl ItemPart for Part {
+            fn tooltip(&self, _: &dyn ClientHost, event: &mut TooltipEvent<'_>) {
+                self.0.lock().unwrap().push(*event.context);
+                event
+                    .lines
+                    .push((mod_api::Text::literal("context"), u32::MAX));
+            }
+        }
+        struct Mod(Part);
+        #[mod_api::__subscriptions]
+        impl Hooks for Mod {
+            fn register(&self, registrar: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
+                let item = registrar.item_key("minecraft:stick");
+                registrar.item_part(item, self.0.clone());
+            }
+        }
+        let heard = Arc::new(Mutex::new(Vec::new()));
+        let mods: mod_api::Mods = vec![ModEntry::new(
+            "tooltip_context",
+            Box::new(Mod(Part(heard.clone()))),
+        )]
+        .into();
+        crate::game::api_values::install_parts(&mods).unwrap();
+        mod_platform::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_client_game(|game| {
+                let stack = super::ItemStack::new("minecraft:stick", 1);
+                game.clock.set_rate(40.0);
+                assert!(game.native_client_level().is_none());
+                game.build_stack_tooltip_lines(&stack, false, false, false, true);
+                assert_eq!(heard.lock().unwrap().last().unwrap().tick_rate, 20.0);
+                let (client, _server) = sunrise_protocol::connection::Pipe::pair();
+                game.connect_local(client, "TooltipContextTest").unwrap();
+                game.remote.as_mut().unwrap().logged_in = true;
+                assert!(game.native_client_level().is_some());
+                for (advanced, rate) in [(true, 20.0), (false, 37.5)] {
+                    game.handle_packet(sunrise_protocol::packets::play::Clientbound::TickingState(
+                        sunrise_protocol::packets::play::TickingState {
+                            rate,
+                            frozen: false,
+                        },
+                    ))
+                    .unwrap();
+                    let lines =
+                        game.build_stack_tooltip_lines(&stack, false, false, advanced, true);
+                    assert!(lines.iter().any(|(text, _)| text.plain() == "context"));
+                    let heard = heard.lock().unwrap();
+                    let context = heard.last().unwrap();
+                    assert_eq!(context.advanced, advanced);
+                    assert_eq!(context.tick_rate, rate);
+                    assert_eq!(context.tick_rate, game.clock.rate());
+                    assert!(!context.creative && !context.nested);
+                }
+                assert_eq!(heard.lock().unwrap().len(), 3);
+            });
         });
     }
 
