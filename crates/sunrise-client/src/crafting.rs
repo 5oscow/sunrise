@@ -1489,6 +1489,13 @@ impl ResolvedSources {
     ) -> Result<Self> {
         // Every consumer keeps vanilla's resource-file registration order.
         sources.sort_by_cached_key(|(name, _)| registration_key(name));
+        // A `type` without a namespace is `minecraft:`'s (`Identifier.parse`);
+        // everything after this reads the qualified id.
+        for (_, file) in &mut sources {
+            if let Some(kind) = file["type"].as_str().filter(|kind| !kind.contains(':')) {
+                file["type"] = format!("minecraft:{kind}").into();
+            }
+        }
         for (name, file) in &sources {
             if let Some(serializer) = file["type"].as_str() {
                 mod_kinds::recipe_type(name, serializer)?;

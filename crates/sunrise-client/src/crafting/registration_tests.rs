@@ -155,3 +155,38 @@ fn unknown_serializer_refuses_before_unclaimed_ingredient_is_dropped() {
         );
     });
 }
+
+#[test]
+fn a_type_without_a_namespace_is_minecrafts() {
+    mod_platform::testing::with_mods(Vec::new().into(), || {
+        let sources = vec![
+            (
+                "bare".into(),
+                serde_json::json!({"type":"crafting_shapeless","ingredients":["minecraft:stone"],"result":{"id":"minecraft:stick","count":3}}),
+            ),
+            (
+                "upper".into(),
+                serde_json::json!({"type":"Crafting_shapeless"}),
+            ),
+        ];
+        let context = crate::test_resources::server_load();
+        let error = ResolvedSources::resolve(sources.clone(), &context)
+            .err()
+            .unwrap()
+            .to_string();
+        assert_eq!(
+            error,
+            "recipe data/minecraft/recipe/upper.json, unregistered recipe serializer minecraft:Crafting_shapeless"
+        );
+        let root = tempfile::tempdir().unwrap();
+        let recipes = Recipes::from_sources(
+            root.path(),
+            &Items::for_tests(Default::default()),
+            &PackOverlay::NONE,
+            sources[..1].to_vec(),
+            &context,
+        )
+        .unwrap();
+        assert_eq!(recipes.crafting.len(), 1);
+    });
+}
