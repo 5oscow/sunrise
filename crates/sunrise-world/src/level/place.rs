@@ -330,7 +330,16 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             Some(None) => return None,
             _ => {}
         }
-        self.placement_at(block, 0, ctx)
+        let placed = self.placement_at(block, 0, ctx)?;
+        if self.b.block_data(block).declared_waterlogged {
+            Some(
+                self.b
+                    .table
+                    .set_bool(placed, self.b.props.waterlogged, self.is_water_at(ctx.pos)),
+            )
+        } else {
+            Some(placed)
+        }
     }
 
     fn placement_at(

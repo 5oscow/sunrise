@@ -1919,6 +1919,14 @@ impl<'a> Plan<'a> {
                         if let Some(item) = b.item_row() {
                             v.set("item", J::Str(item.into()));
                         }
+                        if b.decl.state_properties.contains_key("waterlogged") {
+                            if let Some(J::Arr(interfaces)) = v.at("interfaces") {
+                                interfaces.push(J::Str("SimpleWaterloggedBlock".into()));
+                            }
+                            if let Some(fields) = v.at("fields") {
+                                fields.set("declaredWaterlogged", J::Bool(true));
+                            }
+                        }
                         // `SignBlock.getWoodType`: the wood's name is what
                         // the editor reads of it.
                         if let Some(wood) = &b.decl.wood_type

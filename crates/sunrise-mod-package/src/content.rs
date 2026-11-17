@@ -1632,6 +1632,24 @@ fn check_block(file: &Block) -> Result<(), String> {
         light.check()?;
     }
     for (name, property) in &file.state_properties {
+        if name == "waterlogged" {
+            if !matches!(property, StateProperty::Boolean) {
+                return Err("state_properties.waterlogged must have type boolean".into());
+            }
+            if matches!(
+                file.template.as_str(),
+                "minecraft:seagrass"
+                    | "minecraft:tall_seagrass"
+                    | "minecraft:kelp"
+                    | "minecraft:kelp_plant"
+                    | "minecraft:bubble_column"
+            ) {
+                return Err(format!(
+                    "state_properties.waterlogged cannot be added to always-water template {}",
+                    file.template
+                ));
+            }
+        }
         if !state_name(name) {
             return Err(format!(
                 "state property {name:?} is lower case letters, digits and underscores"
@@ -2991,6 +3009,42 @@ capabilities = ["registries"]
                 format!(r#"{{"template": "minecraft:chorus_plant", "connects_to": "{tag}"}}"#);
             let e = block(&json).unwrap_err();
             assert!(e.contains("block tag"), "{tag}: {e}");
+        }
+    }
+
+    #[test]
+    fn declared_waterlogged_requires_a_boolean_and_a_non_intrinsic_water_template() {
+        let parse = |template: &str, property: &str| {
+            let json = format!(
+                r#"{{"template":"minecraft:{template}","state_properties":{{"waterlogged":{property}}}}}"#
+            );
+            smod(
+                "waterlogged",
+                MANIFEST_TEXT,
+                &[("data/ruby/sunrise/block/plant.json", json.as_bytes())],
+            )
+        };
+        assert!(parse("tall_grass", r#"{"type":"boolean"}"#).is_ok());
+        assert!(parse("stone", r#"{"type":"boolean"}"#).is_ok());
+        let error = parse("stone", r#"{"type":"enum","values":["false","true"]}"#).unwrap_err();
+        assert!(
+            error.contains("state_properties.waterlogged") && error.contains("plant.json"),
+            "{error}"
+        );
+        for template in [
+            "seagrass",
+            "tall_seagrass",
+            "kelp",
+            "kelp_plant",
+            "bubble_column",
+        ] {
+            let error = parse(template, r#"{"type":"boolean"}"#).unwrap_err();
+            assert!(
+                error.contains("state_properties.waterlogged")
+                    && error.contains("plant.json")
+                    && error.contains(template),
+                "{error}"
+            );
         }
     }
 

@@ -288,6 +288,22 @@ takes one value per declared property too, so a block's default is exactly one
 state of its own. Every combination has to fit in the states a world holds
 (2^20), so a declaration that would not is refused when the mods load.
 
+A declared **boolean** `waterlogged` also makes the block a `SimpleWaterloggedBlock`: buckets fill and drain it,
+water can flow into it, and draining breaks it if it cannot survive dry. This applies even to a stone template.
+The default placement takes `waterlogged` from the water at the target cell; a shape update schedules the contained
+water's tick. A block's `state_for_placement` or `update_shape` Part answer replaces the corresponding default.
+A double plant keeps its template's class and companion-half behaviour, so this declares a two-high water plant:
+
+```json
+{ "template": "minecraft:tall_grass",
+  "state_properties": { "waterlogged": { "type": "boolean" } },
+  "default_state": { "waterlogged": "true" } }
+```
+
+Each half takes the water at its own cell; an upper half above the water line is dry. An enum named `waterlogged`,
+a template that already has that property, or an always-water template (`seagrass`, `tall_seagrass`, `kelp`,
+`kelp_plant`, `bubble_column`) is refused. Native and wasm `Block` declarations use the same rule.
+
 A block with template `minecraft:farmland` may set `"base_block": "namespace:block"` to choose the block it becomes when it dries out, is trampled, or has a solid block placed above it. The ID must name a registered block; without the key, the template's dirt base is used.
 
 A block whose template is one of vanilla's signs is a sign, whatever its name: it has vanilla's sign block
