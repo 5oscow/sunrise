@@ -436,9 +436,7 @@ fn jumping_onto_a_deck_at_two_blocks_a_tick_attaches_on_landing() {
         (4.0, 0.2, 0.8),
         (4.0, 0.0, 0.5),
     ];
-    let mut t = 30;
-    for (i, (age, y, x)) in steps.into_iter().enumerate() {
-        t += 1;
+    for (t, (i, (age, y, x))) in (31..).zip(steps.into_iter().enumerate()) {
         rig.tick(|_| along(ORIGIN[2] + 2.0 * f64::from(t)));
         let to = honest(&rig, age, Vec3::new(x, y, 0.0));
         if i == 0 {
@@ -446,9 +444,6 @@ fn jumping_onto_a_deck_at_two_blocks_a_tick_attaches_on_landing() {
         }
         let (_, refused, _) = side.report(&rig, to, None);
         assert!(!refused, "step {i} at {to:?}");
-        // A second report in the same tick, a little further on.
-        let again = honest(&rig, age, Vec3::new(x - 0.02, y, 0.0));
-        assert!(!side.report(&rig, again, None).1, "step {i}, again");
         assert_eq!(
             side.guest().on_collider.is_some(),
             y.abs() < 0.05,
@@ -1022,8 +1017,7 @@ fn past_a_second_of_round_trip_the_rider_is_no_longer_carried() {
 /// What the costly paths take, on a collider at the box cap (a 32 x 32 x 32 lump of 32768
 /// boxes, its top at its origin), the lump moving 2.0 blocks a tick, so every report meets a new
 /// tick's frames: a report that fits no age (the whole search), one that is refused and
-/// corrected, a guest walking beside the lump without touching it, and a second report of the
-/// same tick (the aged placement shared). The numbers go to stderr (`--nocapture`).
+/// corrected, and a guest walking beside the lump (near it, on nothing). The numbers go to stderr (`--nocapture`).
 #[test]
 #[ignore = "daily"]
 fn the_costly_paths_are_timed_on_a_collider_at_the_box_cap() {
@@ -1054,28 +1048,21 @@ fn the_costly_paths_are_timed_on_a_collider_at_the_box_cap() {
         reported: local,
         committed: local,
     };
-    let mut time = |name: &str, again: bool, report: &mut dyn FnMut(&mut Guestside<'_>, &Rig)| {
+    let mut time = |name: &str, report: &mut dyn FnMut(&mut Guestside<'_>, &Rig)| {
         let mut spent = std::time::Duration::ZERO;
         let mut reports = 0u32;
         for t in 41..241u32 {
             rig.tick(|_| along(ORIGIN[2] + 2.0 * f64::from(t)));
-            for second in [false, true] {
-                if second && !again {
-                    continue;
-                }
-                // Hovering beside the lump for 200 ticks is not what is timed: nobody is kicked for it.
-                side.hub.pending_kicks.clear();
-                side.hub.guests.update(0, |g| {
-                    g.client_is_floating = false;
-                    g.above_ground_ticks = 0;
-                });
-                let began = std::time::Instant::now();
-                report(&mut side, &rig);
-                if second == again {
-                    spent += began.elapsed();
-                    reports += 1;
-                }
-            }
+            // Hovering beside the lump for 200 ticks is not what is timed: nobody is kicked for it.
+            side.hub.pending_kicks.clear();
+            side.hub.guests.update(0, |g| {
+                g.client_is_floating = false;
+                g.above_ground_ticks = 0;
+            });
+            let began = std::time::Instant::now();
+            report(&mut side, &rig);
+            spent += began.elapsed();
+            reports += 1;
         }
         eprintln!(
             "carried check, collider at the box cap, {name}: {:.1} us per report over {reports}",
@@ -1084,7 +1071,7 @@ fn the_costly_paths_are_timed_on_a_collider_at_the_box_cap() {
     };
     let on = Vec3::new(0.0, 0.0, 0.0);
     // Attached, and the report is 25 blocks along the lump's length: over nothing at any age.
-    time("fits no age", false, &mut |side, rig| {
+    time("fits no age", &mut |side, rig| {
         let to = honest(rig, 4.0, Vec3::new(0.0, 0.0, 25.0));
         side.hub.guests.update(0, |g| {
             g.position = honest(rig, 4.0, on);
@@ -1093,7 +1080,7 @@ fn the_costly_paths_are_timed_on_a_collider_at_the_box_cap() {
         side.report(rig, to, None);
     });
     // Attached, and the report is inside the lump: refused and corrected.
-    time("refused and corrected", false, &mut |side, rig| {
+    time("refused and corrected", &mut |side, rig| {
         let to = honest(rig, 4.0, Vec3::new(0.0, -3.0, 0.0));
         side.hub.guests.update(0, |g| {
             g.position = honest(rig, 4.0, on);
@@ -1102,7 +1089,7 @@ fn the_costly_paths_are_timed_on_a_collider_at_the_box_cap() {
         side.report(rig, to, None);
     });
     // Not attached, beside the lump, on nothing.
-    time("walking beside it", false, &mut |side, rig| {
+    time("walking beside it", &mut |side, rig| {
         let to = honest(rig, 4.0, Vec3::new(16.8, 0.0, 0.0));
         side.hub.guests.update(0, |g| {
             g.position = honest(rig, 4.0, Vec3::new(16.7, 0.0, 0.0));
@@ -1110,16 +1097,155 @@ fn the_costly_paths_are_timed_on_a_collider_at_the_box_cap() {
         });
         side.report(rig, to, None);
     });
-    time(
-        "walking beside it, second report of a tick",
-        true,
-        &mut |side, rig| {
-            let to = honest(rig, 4.0, Vec3::new(16.8, 0.0, 0.0));
-            side.hub.guests.update(0, |g| {
-                g.position = honest(rig, 4.0, Vec3::new(16.7, 0.0, 0.0));
-                g.on_collider = None;
-            });
-            side.report(rig, to, None);
-        },
+}
+
+/// A rider that is attached is moved through the level's current placement: an aged report that is
+/// clear, while the deck now carries the player across a wall, is stopped at the wall, the server
+/// saves the place on the deck that was reached, and a refused report's correction does not pass
+/// the wall.
+#[test]
+#[ignore = "daily"]
+fn a_commit_stopped_by_a_wall_in_the_current_frame_is_what_a_correction_returns_to() {
+    let Some(fixture) = crate::test_fixtures::vanilla() else {
+        return;
+    };
+    // A wall across the track at z 71 (the deck is at z 70 at tick 29 and 72 at tick 30, and
+    // passes through it as a collider).
+    let walls: Vec<(i32, i32)> = (19..=22).map(|x| (x, 71)).collect();
+    let mut rig = Rig::new(vec![(DECK, deck(20.0), along(ORIGIN[2]))]);
+    let mut side = Guestside::new(fixture, &walls, 100);
+    for t in 1..=29 {
+        rig.tick(|_| along(ORIGIN[2] + 2.0 * f64::from(t)));
+    }
+    let on = Vec3::new(0.0, 0.0, 0.0);
+    let to = honest(&rig, 4.0, on);
+    side.hub.guests.update(0, |g| g.position = to);
+    assert!(!side.report(&rig, to, None).1);
+    assert!(side.guest().on_collider.is_some(), "attached");
+    // The deck moves on to z 72; the report in the age the client saw is clear of the wall.
+    rig.tick(|_| along(ORIGIN[2] + 2.0 * 30.0));
+    let to = honest(&rig, 4.0, on);
+    assert!(to[2] < 70.0, "{to:?} is before the wall in the aged frame");
+    assert!(!side.report(&rig, to, None).1);
+    let kept = side.guest().position;
+    assert!(
+        kept[2] < 71.0,
+        "stopped at the wall, not through it: {kept:?}"
+    );
+    let held = side.guest().on_collider.expect("still attached");
+    let now = rig.frame(DECK, 0.0).to_world(held.local);
+    assert!(
+        (now.z - kept[2]).abs() < 1e-9,
+        "the saved place on the deck is the one reached: {now:?} vs {kept:?}"
+    );
+    // The deck stands still; the next report is inside it and refused: the correction is the
+    // place reached, on this side of the wall.
+    rig.tick(|_| along(ORIGIN[2] + 2.0 * 30.0));
+    let inside = honest(&rig, 4.0, Vec3::new(0.0, -0.6, 0.0));
+    let (_, refused, _) = side.report(&rig, inside, None);
+    assert!(refused);
+    let corrected = side.corrected.expect("a correction");
+    assert!(
+        corrected[2] < 71.0,
+        "the correction stops at the wall: {corrected:?}"
+    );
+}
+
+/// Two position reports in one tick: the first is judged as any other, the second is the
+/// repeated packet the hub refuses by kicking the player, with the age payload in front of each
+/// not changing that.
+#[test]
+#[ignore = "daily"]
+fn a_second_position_report_in_a_tick_is_refused_by_the_real_guard() {
+    let Some(fixture) = crate::test_fixtures::vanilla() else {
+        return;
+    };
+    let mut rig = Rig::new(vec![(DECK, deck(20.0), along(ORIGIN[2]))]);
+    let mut side = Guestside::new(fixture, &[], 100);
+    for t in 1..=30 {
+        rig.tick(|_| along(ORIGIN[2] + 2.0 * f64::from(t)));
+    }
+    let to = honest(&rig, 4.0, Vec3::new(0.0, 0.0, 0.0));
+    side.hub.guests.update(0, |g| g.position = to);
+    assert!(!side.report(&rig, to, None).1);
+    rig.tick(|_| along(ORIGIN[2] + 2.0 * 31.0));
+    let hint = |ticks| {
+        S::CustomPayload(sunrise_protocol::packets::configuration::CustomPayload {
+            channel: sunrise_protocol::carry_age::CHANNEL.into(),
+            data: sunrise_protocol::carry_age::encode(sunrise_protocol::carry_age::Hint {
+                collider: DECK,
+                ticks,
+            }),
+        })
+    };
+    let movement = |p: [f64; 3]| {
+        S::MovePlayerPos(play::MovePlayerPos {
+            x: p[0],
+            y: p[1],
+            z: p[2],
+            flags: 1,
+        })
+    };
+    let first = honest(&rig, 4.0, Vec3::new(0.0, 0.0, 0.2));
+    let second = honest(&rig, 4.0, Vec3::new(0.0, 0.0, 0.3));
+    let before = side.guest().received_moves;
+    side.hub.guests.update(0, |g| g.position_this_tick = false);
+    // One inbox, the guard intact between the reports.
+    side.tick(
+        &rig,
+        vec![hint(4), movement(first), hint(4), movement(second)],
+    );
+    let g = side.guest();
+    assert_eq!(
+        g.received_moves,
+        before + 1,
+        "only the first report is judged"
+    );
+    assert!(g.disconnect_pending, "the repeated report kicks the player");
+    assert_eq!(g.carry_rejects, 0);
+}
+
+/// A player attaching to a deck is stopped by another collider across its path, as by a block:
+/// only the deck it attaches to is no obstacle.
+#[test]
+#[ignore = "daily"]
+fn an_attaching_player_is_stopped_by_another_collider_across_its_path() {
+    let Some(fixture) = crate::test_fixtures::vanilla() else {
+        return;
+    };
+    // A wall of a collider across the track at z 71 to 72, standing still. The deck is at z 74 now
+    // and was at z 66 where the client saw it: attaching with a report that puts the player
+    // across the wall in the current frame holds it at the wall.
+    let (mut rig, mut side) = (
+        Rig::new(vec![
+            (DECK, deck(20.0), along(ORIGIN[2])),
+            (
+                OTHER,
+                Arc::new(ColliderBoxes::new(vec![Aabb::new(
+                    Vec3::new(-3.0, -4.0, -0.5),
+                    Vec3::new(3.0, 4.0, 0.5),
+                )])),
+                Frame::translation(Vec3::new(ORIGIN[0], ORIGIN[1], 71.5)),
+            ),
+        ]),
+        Guestside::new(fixture, &[], 100),
+    );
+    for t in 1..=31 {
+        rig.tick(|id| {
+            if id == DECK {
+                along(ORIGIN[2] + 2.0 * f64::from(t))
+            } else {
+                Frame::translation(Vec3::new(ORIGIN[0], ORIGIN[1], 71.5))
+            }
+        });
+    }
+    let to = honest(&rig, 4.0, Vec3::new(0.0, 0.0, 0.0));
+    side.hub.guests.update(0, |g| g.position = to);
+    assert!(!side.report(&rig, to, None).1);
+    assert!(side.guest().on_collider.is_some(), "attached");
+    let kept = side.guest().position;
+    assert!(
+        kept[2] < 71.0,
+        "stopped by the other collider, not through it: {kept:?}"
     );
 }

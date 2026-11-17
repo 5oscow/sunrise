@@ -172,11 +172,9 @@ impl Game<'_> {
                         ),
                     )
                 };
-                // The collider as the player's client sees it.
-                match g.on_collider {
-                    Some(held) => sunrise_client_render::moving_colliders::at_age(held.age, eyes),
-                    None => eyes(),
-                }
+                // The crush is in the level as it stands now, where the guest's committed
+                // position is.
+                eyes()
             })
     }
 }

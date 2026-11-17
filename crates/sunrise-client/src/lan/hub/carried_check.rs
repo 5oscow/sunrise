@@ -13,7 +13,7 @@
 //! now. A correction is counted, and never counts toward the floating kick.
 use super::{Hub, TickCtx};
 use std::sync::atomic::Ordering;
-use sunrise_client_render::moving_colliders::{at_age, with_history};
+use sunrise_client_render::moving_colliders::{as_mover, at_age, with_history};
 use sunrise_core::geometry::{
     Aabb, Vec3,
     carried::{Ages, Body, Carried, Fit, Footing, judge},
@@ -209,6 +209,11 @@ impl Hub {
                 .flatten();
                 let target = now.map_or(fit.local, |frame| frame.to_world(fit.local));
                 let target = [target.x, target.y, target.z];
+                // An attached player is moved from where the server last committed it. One that
+                // attaches now is moved from where its report put it, as the client saw the
+                // collider, to the same place under the collider now. The collider that carries
+                // it is no obstacle to that, as its own stack is none; every other collider and
+                // the blocks are.
                 let committed = match held {
                     Some(held) => self.settle(
                         i,
@@ -216,14 +221,22 @@ impl Hub {
                         target,
                         ctx,
                     ),
-                    None => target,
+                    None => as_mover(collider, || self.settle(i, to, target, ctx)),
+                };
+                // What is saved is the place on the collider that was actually reached, so a
+                // later correction never goes past a wall the commit stopped at.
+                let local = match now {
+                    Some(frame) if committed != target => {
+                        frame.to_local(Vec3::new(committed[0], committed[1], committed[2]))
+                    }
+                    _ => fit.local,
                 };
                 let standing = fit.footing == Footing::Standing;
                 self.guests.update(i, |g| {
                     g.on_collider = Some(Carried {
                         collider,
                         age: fit.age,
-                        local: fit.local,
+                        local,
                         reported: Vec3::new(to[0], to[1], to[2]),
                         committed: Vec3::new(committed[0], committed[1], committed[2]),
                     });
