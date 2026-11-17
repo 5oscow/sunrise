@@ -3,11 +3,12 @@
 
 ### Moving a player
 
-`player.entity().move_by(host, delta)` (`EntityRef`, `&mut dyn ServerHost`; the host method is `entity_move_by`, which
-the generator turns into the handle method, as it does for `entity_set_collision_exclusions` and `entity_push`) moves a
-player by `delta` through the level as `Entity.move` would: blocks, other entities' colliders and the player's
-collision exclusions stop it, and a step up is taken. It returns the displacement made. There is no limit on the length
-of `delta`.
+`player.entity().move_by(host, delta, cause)` (`EntityRef::move_by`, the call that moves any other entity, on a
+`&mut dyn ServerHost`) moves a player by `delta` through the level as `Entity.move` would: blocks, other entities' colliders and the player's
+collision exclusions stop it, and a step up is taken. It returns the displacement made. As for every entity, a
+`delta` beyond 64 blocks on an axis is refused. The `entity_move` hook hears it once, for
+the player and with `cause`, and a listener may replace or cancel it as for any other entity (a cancelled move is
+`Some([0.0; 3])` and the client is told nothing); `cause` changes only what the hook hears, not the physics.
 
 The server's copy moves at once, and the player's client is sent a relative teleport: it adds the displacement to where
 it is when the packet arrives and keeps its motion and look, so what it walked in the meantime is kept. Until it

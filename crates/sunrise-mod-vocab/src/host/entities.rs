@@ -685,11 +685,23 @@ pub trait EntitiesBackendMut {
     /// piston's per-tick limit, 0.51 blocks per axis, on the first non-zero axis only; a
     /// mob's budget carries across calls in a tick, any other kind's lasts the call. Returns how far
     /// the entity moved, `delta` less what the collisions took. None for a stale handle, on a
-    /// client, for a player (its client owns its position; teleport it instead), for an entity
-    /// outside the game's entity walk (a display, a painting, an item frame, an End crystal, a
-    /// dragon part) and for a delta that is not finite or has a component beyond 64 blocks. The
-    /// entity's own tick still does what follows a move: fall damage, block effects and
-    /// triggers.
+    /// client, for an entity outside the game's entity walk (a display, a painting, an item
+    /// frame, an End crystal, a dragon part) and for a delta that is not finite or has a
+    /// component beyond 64 blocks. The entity's own tick still does what follows a move: fall
+    /// damage, block effects and triggers.
+    ///
+    /// A player moves as `Entity.move` with `MoverType.SELF` would, whatever `cause` the hook
+    /// hears: blocks, entity and moving colliders and the player's collision exclusions stop
+    /// it and a step up is taken (a spectator goes through everything, and `MoveCause::Piston`'s
+    /// per-tick limit does not apply). The server's copy moves at once and the player's client
+    /// is told with a relative teleport, so it adds the displacement to where it is when the
+    /// packet arrives and keeps its motion and look. Until the client confirms, the server drops
+    /// the player's own movement reports: a mod that moves a player on many ticks in a row holds
+    /// it still (a development build warns after 20), so use `entity_push` or a client-side
+    /// write for motion every tick. A player a moving collider carries stays carried while the
+    /// target is still over the collider. `None` for a player who is a rider (its vehicle moves
+    /// it), a sleeper, one without a connection, a target outside the world's bounds or a move
+    /// the collision query cannot answer; nothing moves then.
     #[access(WorldOnly)]
     fn entity_move_by(
         &mut self,
@@ -791,21 +803,6 @@ pub trait EntitiesBackendMut {
     /// Sunrise doesn't simulate, or a value that isn't finite.
     #[access(WorldOnly)]
     fn entity_push(&mut self, entity: EntityRef, delta: [f64; 3]) -> bool;
-    /// Side: server.
-    /// Moves a player by `delta` through the level as it stands (`Entity.move`, `MoverType.SELF`:
-    /// blocks, entity and moving colliders and the player's collision exclusions stop it, a step
-    /// up is taken) and returns the displacement made. The server's copy moves at once and the
-    /// player's client is told with a relative teleport, so it adds the displacement to where it
-    /// is when the packet arrives and keeps its motion and look. Until the client confirms,
-    /// the server drops the player's own movement reports: a mod that moves a player on many
-    /// ticks in a row holds it still (a development build warns after 20), so use `entity_push`
-    /// or a client-side write for motion every tick. A player a moving collider carries stays
-    /// carried while the target is still over the collider. There is no limit on the length of
-    /// `delta`. `None` for a stale handle, a value that isn't finite, an entity that isn't a
-    /// player with a connection, a rider (its vehicle moves it), a sleeper, a target outside the
-    /// world's bounds or a move the collision query cannot answer; nothing moves then.
-    #[access(WorldOnly)]
-    fn entity_move_by(&mut self, entity: EntityRef, delta: [f64; 3]) -> Option<[f64; 3]>;
     /// Side: server.
     /// Sets the player's collision exclusions, boxes of its own level
     /// (`[min_x, min_y, min_z, max_x, max_y, max_z]`) in which that level's blocks don't stop it:

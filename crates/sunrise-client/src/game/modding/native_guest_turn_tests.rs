@@ -1,9 +1,9 @@
 //! Real-game regressions for native handles used during a guest's turn.
 
 use super::lan::LanSettings;
-use mod_api::prelude::*;
+use mod_api::{EntityMoveEvent, Flow, Hooks, LoopContext, MoveCause, prelude::*};
 use std::sync::{
-    Arc,
+    Arc, Mutex,
     atomic::{AtomicI32, AtomicUsize},
 };
 use sunrise_client::{
@@ -333,7 +333,9 @@ fn move_by_moves_a_player_and_refuses_what_it_cannot() {
         let a = game.player(12).unwrap();
         let b = game.player(13).unwrap();
         let before = b.entity().position(game).unwrap();
-        let by = game.entity_move_by(b.entity(), [0.5, 0.0, 0.25]).unwrap();
+        let by = game
+            .entity_move_by(b.entity(), [0.5, 0.0, 0.25], MoveCause::SelfMovement)
+            .unwrap();
         assert_eq!(by, [0.5, 0.0, 0.25]);
         let now = [before[0] + 0.5, before[1], before[2] + 0.25];
         assert_eq!(b.entity().position(game), Some(now));
@@ -345,14 +347,17 @@ fn move_by_moves_a_player_and_refuses_what_it_cannot() {
         game.as_guest(12, |game| {
             let own = a.entity().position(game).unwrap();
             assert_eq!(
-                game.entity_move_by(a.entity(), [0.0, 0.0, -2.0]),
+                game.entity_move_by(a.entity(), [0.0, 0.0, -2.0], MoveCause::SelfMovement),
                 Some([0.0, 0.0, -2.0])
             );
             assert_eq!(
                 a.entity().position(game),
                 Some([own[0], own[1], own[2] - 2.0])
             );
-            assert!(game.entity_move_by(b.entity(), [1.0, 0.0, 0.0]).is_some());
+            assert!(
+                game.entity_move_by(b.entity(), [1.0, 0.0, 0.0], MoveCause::SelfMovement)
+                    .is_some()
+            );
         })
         .unwrap();
         // Nothing moves for a value that is not finite or a target outside the world.
@@ -362,9 +367,61 @@ fn move_by_moves_a_player_and_refuses_what_it_cannot() {
             [0.0, f64::INFINITY, 0.0],
             [4.0e7, 0.0, 0.0],
         ] {
-            assert_eq!(game.entity_move_by(b.entity(), delta), None, "{delta:?}");
+            assert_eq!(
+                game.entity_move_by(b.entity(), delta, MoveCause::SelfMovement),
+                None,
+                "{delta:?}"
+            );
         }
         assert_eq!(b.entity().position(game), held);
+    });
+}
+
+/// A player's `entity_move_by` fires `entity_move` once, for the player and with the caller's
+/// cause; a listener that cancels it leaves the player where it was and the client untold.
+#[test]
+#[ignore = "daily"]
+fn a_players_move_by_is_heard_once_and_a_cancel_moves_nothing() {
+    struct Cancel(Arc<Mutex<Vec<(u32, MoveCause)>>>);
+    #[mod_api::__subscriptions]
+    impl Hooks for Cancel {
+        fn entity_move(&self, _: &dyn LoopContext, event: &mut EntityMoveEvent<'_>) -> Flow {
+            self.0
+                .lock()
+                .unwrap()
+                .push((event.entity, event.cause));
+            Flow::Cancel
+        }
+    }
+    let heard = Arc::new(Mutex::new(Vec::new()));
+    let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+        "refuser",
+        Box::new(Cancel(heard.clone())),
+    )]
+    .into();
+    mod_platform::testing::with_mods(mods, || {
+        with_guests(|game| {
+            game.as_guest(13, |_| {}).unwrap();
+            let b = game.player(13).unwrap();
+            let before = b.entity().position(game);
+            let moved = game.entity_move_by(b.entity(), [1.0, 0.0, 0.0], MoveCause::Piston);
+            assert_eq!(moved, Some([0.0; 3]));
+            assert_eq!(b.entity().position(game), before);
+            assert!(
+                game.lan
+                    .as_ref()
+                    .unwrap()
+                    .hub
+                    .guest(13)
+                    .unwrap()
+                    .awaiting_teleport
+                    .is_none()
+            );
+            assert_eq!(
+                *heard.lock().unwrap(),
+                [(b.entity().id(), MoveCause::Piston)]
+            );
+        });
     });
 }
 

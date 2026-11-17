@@ -9,8 +9,10 @@ use super::{
     commands::{Target, entity_pitch},
     vehicle_teleport::TeleportMotion,
 };
+use crate::game::move_gate::MoveWho;
 use mod_api::{EntityRef, MoveCause};
 use sunrise_core::geometry::Vec3;
+use sunrise_world::entity_move::MoverType;
 
 /// `Level.isInSpawnableBounds` and `/tp`'s limits: 30,000,000 blocks out,
 /// 20,000,000 up or down.
@@ -119,8 +121,8 @@ impl Game<'_> {
     }
     /// Moves the entity by `delta` as `Entity.move(cause, delta)` does: collided, stepping,
     /// through the `entity_move` hook. How far it moved; None for a stale handle, on a client,
-    /// for a player, for an entity outside the entity walk, and for an unknown cause and for a delta
-    /// that is not finite or beyond 64 blocks on an axis.
+    /// for an entity outside the entity walk, and for an unknown cause and for a delta that is
+    /// not finite or beyond 64 blocks on an axis. A player is moved by `move_player_by`.
     pub(super) fn entity_move_by(
         &mut self,
         entity: EntityRef,
@@ -134,6 +136,16 @@ impl Game<'_> {
             return None;
         }
         let mover = sunrise_client::move_gate::mover_of(cause)?;
+        let t = self.native_entity_target(entity)?;
+        if matches!(t, Target::Player | Target::Guest(_)) {
+            let conn = match t {
+                Target::Player => self.lan_acting?,
+                Target::Guest(conn) => conn,
+                _ => return None,
+            };
+            // The level the player is in, as a teleport is made in it.
+            return self.in_target_level(t, |game| game.move_player_by(t, conn, mover, delta))?;
+        }
         let handle = self.native_walk_entity(entity.id())?;
         let [x, y, z] = delta;
         let moved = self.move_listed_entity(handle, mover, Vec3::new(x, y, z));
@@ -302,33 +314,36 @@ impl Game<'_> {
         }
         true
     }
-    /// Moves a player by `delta` through the level (`Entity.move`, `MoverType.SELF`) and tells
-    /// its client with a relative teleport (`Hub::displace`). The displacement made, or `None`
-    /// (see the host trait for what is refused).
-    pub(super) fn entity_move_by(
+    /// Moves a player by `delta` through the level (`Entity.move`) after the `entity_move` hook
+    /// has heard it, and tells its client with a relative teleport (`Hub::displace`). The
+    /// displacement made, or `None` (see the host trait for what is refused).
+    fn move_player_by(
         &mut self,
-        entity: EntityRef,
+        t: Target,
+        conn: u32,
+        mover: MoverType,
         delta: [f64; 3],
     ) -> Option<[f64; 3]> {
-        if !delta.iter().all(|v| v.is_finite()) {
-            return None;
-        }
-        let t = self.native_entity_target(entity)?;
-        let conn = match t {
-            Target::Player => self.lan_acting?,
-            Target::Guest(conn) => conn,
-            _ => return None,
-        };
-        // The level the player is in, as a teleport is made in it.
-        self.in_target_level(t, |game| game.move_player_by(t, conn, delta))?
-    }
-    fn move_player_by(&mut self, t: Target, conn: u32, delta: [f64; 3]) -> Option<[f64; 3]> {
         let acting = t == Target::Player;
+        {
+            let guest = self.lan.as_ref()?.hub.guest(conn)?;
+            if guest.vehicle.is_some() || guest.sleeping {
+                return None;
+            }
+        }
+        // The hook hears the move once, as `Entity.move` begins; a cancel is a move of nothing.
+        let who = if acting {
+            MoveWho::Player
+        } else {
+            MoveWho::Guest(conn)
+        };
+        let gate = self.entity_move(who, mover, Vec3::new(delta[0], delta[1], delta[2]));
+        if gate.skipped() {
+            return Some([0.0; 3]);
+        }
+        let delta = gate.delta().components();
         let host = self.lan.as_ref()?;
         let guest = host.hub.guest(conn)?;
-        if guest.vehicle.is_some() || guest.sleeping {
-            return None;
-        }
         let body = if acting {
             self.player.as_ref()
         } else {

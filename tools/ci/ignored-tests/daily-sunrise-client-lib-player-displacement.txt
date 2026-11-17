@@ -7,3 +7,4 @@ sunrise-client-lib lan::hub::tests::displace_tests::a_second_displacement_while_
 sunrise-client-lib lan::hub::tests::displace_tests::an_unconfirmed_displacement_is_resent_absolute_with_no_velocity lib daily resources
 sunrise-client-lib lan::hub::tests::displace_tests::the_move_stops_at_a_wall lib daily resources
 sunrise-client-lib lan::hub::tests::displace_tests::the_streak_of_displaced_ticks_counts_in_a_row_and_a_gap_starts_it_again lib daily resources
+sunrise-client game::native_guest_turn_tests::a_players_move_by_is_heard_once_and_a_cancel_moves_nothing lib daily resources
