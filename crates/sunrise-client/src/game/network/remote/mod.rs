@@ -15504,15 +15504,20 @@ pub(crate) mod tests {
             game.offhand = Some(ItemStack::new("minecraft:shield", 1));
             game.selected = 0;
             while peer.recv().is_ok() {}
-            let mut click = |game: &mut super::super::Game<'_>, z: i32| {
+            let aim = |game: &mut super::super::Game<'_>, z: i32| {
                 game.forced_hit = Some(Hit {
                     pos: [0, 63, z],
                     face: [0, 1, 0],
                     point: [0.5, 64.0, f64::from(z) + 0.5],
                     inside: false,
                 });
+            };
+            // The whole click (Minecraft.startUseItem): it ends at the block, so neither the main
+            // hand's air use nor the offhand's shield is tried, and nothing is held in use.
+            let mut click = |game: &mut super::super::Game<'_>, z: i32| {
+                aim(game, z);
                 let swings = game.swings_started;
-                let done = game.remote_use_block(Hand::Main);
+                game.remote_use(mod_api::InteractionAttempt::Press);
                 let mut sent = Vec::new();
                 while let Ok((id, bytes)) = peer.recv() {
                     match play::Serverbound::decode(id, &bytes) {
@@ -15521,14 +15526,17 @@ pub(crate) mod tests {
                         _ => {}
                     }
                 }
-                (done, game.swings_started != swings, sent)
+                assert!(game.using.is_none(), "z={z}");
+                (game.swings_started != swings, sent)
             };
-            assert_eq!(click(game, 2), (true, true, vec!["use_item_on"]));
-            assert_eq!(click(game, 4), (true, false, vec!["use_item_on"]));
-            assert_eq!(click(game, 0), (true, false, vec!["use_item_on"]));
+            assert_eq!(click(game, 2), (true, vec!["use_item_on"]));
+            assert_eq!(click(game, 4), (false, vec!["use_item_on"]));
+            assert_eq!(click(game, 0), (false, vec!["use_item_on"]));
+            // On cooldown the block use itself passes.
             game.cooldowns
                 .add(sunrise_client::cooldowns::group(&crystal, None), 20);
-            assert!(!click(game, 2).0);
+            aim(game, 2);
+            assert!(!game.remote_use_block(Hand::Main));
         });
     }
 }
