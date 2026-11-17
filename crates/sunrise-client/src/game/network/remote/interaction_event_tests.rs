@@ -293,6 +293,7 @@ fn with_interaction_game_at(
             game.options.execution_role = ExecutionRole::Client;
             let (client, server) = Pipe::pair();
             game.connect_local(client, "InteractionTest").unwrap();
+            game.remote.as_mut().unwrap().logged_in = true;
             Some(server)
         } else {
             game.options.dedicated = Some(Vec::new());
@@ -1035,12 +1036,19 @@ fn air_event_skips_the_item_and_consuming_results_end_the_click() {
                     .get("minecraft:zombie")
                     .unwrap()
                     .clone();
-                game.mobs.push(sunrise_client::mobs::Mob::new(
-                    42,
-                    kind,
-                    Vec3::new(0.5, 64.0, 5.5),
-                    0.0,
-                ));
+                if client {
+                    game.spawn_entity(42, &kind.id, [0.5, 64.0, 5.5], [0.0; 3]);
+                } else {
+                    game.mobs.push(sunrise_client::mobs::Mob::new(
+                        42,
+                        kind,
+                        Vec3::new(0.5, 64.0, 5.5),
+                        0.0,
+                    ));
+                }
+                if client {
+                    game.refresh_client_pick(1.0);
+                }
                 assert!(game.entity_targeted());
                 assert!(
                     game.right_click_item(Hand::Main, &ItemStack::new("minecraft:stick", 1))
