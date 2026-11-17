@@ -1880,4 +1880,75 @@ mod tests {
         assert_eq!(game.tridents[1].pickup, super::Pickup::CreativeOnly);
         assert!(game.held().is_some());
     }
+
+    /// `TridentItem.releaseUsing` launches a Riptide III player along the float look vector
+    /// scaled to 3.0 by its float length, added to the velocity it had. The expected components
+    /// are computed apart from the code, with every step rounded to f32 as the look is.
+    #[test]
+    #[ignore = "daily"]
+    fn riptide_launch_preserves_float_push() {
+        use crate::game::{Audio, Options, PlayerMotion, Progress, Settings, load_resources};
+        let root = std::path::PathBuf::from(std::env::var_os("SUNRISE_TEST_RESOURCES").unwrap());
+        let settings = Settings::default();
+        let loaded = load_resources(
+            sunrise_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
+            None,
+            &root,
+            &settings,
+            std::time::Instant::now(),
+            false,
+            crate::game::execution_role::ExecutionRole::IntegratedServer,
+            &Progress::new(),
+            &mut |_, _| unreachable!(),
+        )
+        .unwrap();
+        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
+        options.resources = root.clone();
+        options.game_dir = Some(
+            std::path::PathBuf::from(std::env::var_os("SUNRISE_HOME").unwrap())
+                .join("trident-riptide"),
+        );
+        options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
+        let mut game = super::Game::new(
+            &loaded.resources,
+            loaded.pack,
+            loaded.gui.unwrap(),
+            options,
+            settings,
+            Audio::silent(&sunrise_assets::resource_source::ResourceSource::directory(
+                root.to_path_buf(),
+            )),
+            None,
+        )
+        .unwrap();
+        game.world.chunks.insert(
+            (0, 0),
+            std::sync::Arc::new(sunrise_client::chunk::Chunk::empty(0, 0)),
+        );
+        let water = game
+            .pack
+            .assets
+            .registry
+            .default_state("minecraft:water")
+            .unwrap();
+        game.world.set(4, 200, 4, water).unwrap();
+        let mut player = PlayerMotion::new(game.motion, super::Vec3::new(4.5, 200.0, 4.5)).unwrap();
+        player.velocity = super::Vec3::new(0.1, 0.2, 0.3);
+        game.player = Some(player);
+        game.yaw = 30.0;
+        game.pitch = 20.0;
+        let mut stack = super::ItemStack::new("minecraft:trident", 1);
+        stack
+            .data_mut()
+            .enchantments
+            .push(("minecraft:riptide".into(), 3));
+        *game.held_mut() = Some(stack.clone());
+        assert!(game.use_trident(&stack));
+        game.release_trident(10);
+        let velocity = game.player.as_ref().unwrap().velocity;
+        assert_eq!(velocity.x, f64::from_bits(0xbff4_f3bb_2666_6666));
+        assert_eq!(velocity.y, f64::from_bits(0xbfea_6d1e_9999_999a));
+        assert_eq!(velocity.z, f64::from_bits(0x4005_ee9e_c666_6666));
+    }
 }
