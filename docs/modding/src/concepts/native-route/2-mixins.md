@@ -67,10 +67,10 @@ The helper file holds exactly one function: private, safe, with no attributes an
 | `MODIFY_CONSTANT` | on one literal in the body | the new value |
 | `MODIFY_VARIABLE` | on one read or write of a local or parameter | the new value |
 | `MODIFY_EXPRESSION_VALUE` | on the value of one call in the body (`$value`) | the new value |
-| `WRAP_OPERATION` | around one call, which you get as `$operation` and may run or not | the call's type |
+| `WRAP_OPERATION` | around one call, which you get as `$operation` and may run or not. The receiver and arguments run at the call site, in order, before the wrapper: a `?` in them returns from the function, with its error conversion, and the wrapper does not run. A receiver that is a call result (`EventLoop::new()?.run_app`) takes the mode its binding type declares: `&T` or `&mut T` borrows the temporary in place, so it lives as long as in the original, and the method autorefs as usual; `T` moves it in, for a method that takes `self` | the call's type |
 
 The other kinds act on one place in the body, which a `selector` names as source text. For a call, write the
-callee without arguments: `autosave_interval` or `self.next_autosave_interval`. For
+callee without arguments: `autosave_interval` or `self.next_autosave_interval`. A bare method name finds no method call: a method's selector writes its receiver as source text, `make()?.method`, and a count of 0 for a bare name called as a method here names that selector when it can be written. For
 `MODIFY_EXPRESSION_VALUE`, write the whole expression: `autosave_interval(rate)`. `MODIFY_VARIABLE` uses
 `variable` instead. `require` is how many matches the body has (inside `slice`, if set), and `ordinal` picks one, from 0.
 
