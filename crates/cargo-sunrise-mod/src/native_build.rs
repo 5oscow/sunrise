@@ -31,7 +31,7 @@ pub fn run(args: &[String]) -> ExitCode {
         tr: |en| en,
         root: || WORK.get().cloned().unwrap_or_default(),
         get,
-        mark_used: |_| Ok(()),
+        mark_used: contract::note_used,
     });
     match contract::run(&plan, &mut input, &mut std::io::stdout().lock()) {
         Ok(()) => ExitCode::SUCCESS,
