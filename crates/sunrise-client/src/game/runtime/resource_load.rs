@@ -527,9 +527,7 @@ pub(super) fn take_modified_attribute_rows(
     }
 }
 
-/// The synchronous launch loads both phases; an ordinary launch returns the
-/// core bundle while the rest worker keeps loading. `launch_world`: the world
-/// the launch opens, whose data is preloaded meanwhile.
+/// Fixture helper for tests without a launch mod state.
 #[allow(clippy::too_many_arguments)]
 #[cfg(test)]
 pub(super) fn load_resources(
@@ -559,9 +557,12 @@ pub(super) fn load_resources(
     )
 }
 
+/// A synchronous launch loads both phases; an ordinary launch returns the
+/// core bundle while the rest worker keeps loading. If `launch_world` is set,
+/// its data is preloaded during that second phase.
+///
 /// The owning mod state supplies the same cached condition table used to build
-/// content roots and reload data. Test-only callers without sources use the
-/// wrapper above; production always supplies the generation's mod state.
+/// content roots and reload data.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn load_resources_for_mods(
     mut resolved: sunrise_assets::resource_source::ResourceRoot,
