@@ -364,8 +364,9 @@ impl GameLevel<'_> {
         ground: BlockStateId,
         ground_pos: BlockPos,
         may: &mut Option<bool>,
+        inert: &mut bool,
     ) {
-        self.fire_may_place_on(dimension, state, ground, ground_pos, may);
+        self.fire_may_place_on(dimension, state, ground, ground_pos, may, inert);
     }
 
     /// An authoritative server's `ServerLevel.tickBlock` is about to run a

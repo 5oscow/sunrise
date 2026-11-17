@@ -4321,12 +4321,13 @@ fn survive_hooks_answer_for_the_block() {
             ground: BlockStateId,
             _ground_pos: BlockPos,
             may: &mut Option<bool>,
-        ) {
+        ) -> bool {
             if let Some((plant, on)) = self.ground
                 && self.b.block(state) == plant
             {
                 *may = Some(self.b.block(ground) == on);
             }
+            false
         }
     }
     let Some(f) = fixture() else { return };

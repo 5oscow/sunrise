@@ -810,14 +810,16 @@ pub trait LevelAccess: BlockEntityNeighbors {
     }
     /// `IBlockExtension.canSustainPlant` for the soil `ground` at `ground_pos`
     /// and the plant `state` above it, before the plant answers `mayPlaceOn`.
-    /// An answer put in `sustains` is the result. The default does nothing.
+    /// An answer put in `sustains` is the result. Returns the same inert signal as
+    /// `before_can_survive` (false by default).
     fn before_can_sustain_plant(
         &self,
         _state: BlockStateId,
         _ground: BlockStateId,
         _ground_pos: BlockPos,
         _sustains: &mut Option<bool>,
-    ) {
+    ) -> bool {
+        false
     }
     /// Whether a part may answer `IBlockExtension.isFertile`: asked once per
     /// `CropBlock.getGrowthSpeed`, so with none the speed is vanilla's loop.
@@ -849,15 +851,16 @@ pub trait LevelAccess: BlockEntityNeighbors {
     }
     /// `VegetationBlock.mayPlaceOn(ground, level, groundPos)` for the plant
     /// `state`, before the plant answers it: the blocks a plant can stand on,
-    /// which its `canSurvive` asks. An answer put in `may` is the result. The
-    /// default does nothing.
+    /// which its `canSurvive` asks. An answer put in `may` is the result. Returns the
+    /// same inert signal as `before_can_survive` (false by default).
     fn before_may_place_on(
         &self,
         _state: BlockStateId,
         _ground: BlockStateId,
         _ground_pos: BlockPos,
         _may: &mut Option<bool>,
-    ) {
+    ) -> bool {
+        false
     }
     /// `Level.isClientSide`: this level is a client's copy (false on a
     /// server, a host or the test harness).

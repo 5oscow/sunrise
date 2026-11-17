@@ -39,7 +39,7 @@ fn restitution_parts_read_the_level_of_either_side_and_answer_in_turn() {
             7,
             "fixture:pig",
             BlockState::new(BlockKey::Test, 0),
-            BlockPos::default(),
+            BlockPos,
             &mut factor,
         );
         // The second part is given the first part's answer, and its own is the last word.

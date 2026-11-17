@@ -656,10 +656,19 @@ impl LevelAccess for GameLevel<'_> {
         ground: BlockStateId,
         ground_pos: BlockPos,
         sustains: &mut Option<bool>,
-    ) {
+    ) -> bool {
+        let mut inert = false;
         if self.native_authoritative {
-            self.native_can_sustain_plant(self.dimension, state, ground, ground_pos, sustains);
+            self.native_can_sustain_plant(
+                self.dimension,
+                state,
+                ground,
+                ground_pos,
+                sustains,
+                &mut inert,
+            );
         }
+        inert
     }
     fn asks_is_fertile(&self) -> bool {
         self.native_authoritative && mod_api::__private::has_scoped_hook(mod_api::HookId::IsFertile)
@@ -692,10 +701,12 @@ impl LevelAccess for GameLevel<'_> {
         ground: BlockStateId,
         ground_pos: BlockPos,
         may: &mut Option<bool>,
-    ) {
+    ) -> bool {
+        let mut inert = false;
         if self.native_authoritative {
-            self.native_may_place_on(self.dimension, state, ground, ground_pos, may);
+            self.native_may_place_on(self.dimension, state, ground, ground_pos, may, &mut inert);
         }
+        inert
     }
     fn is_client_side(&self) -> bool {
         self.client_side

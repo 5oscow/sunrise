@@ -9,13 +9,13 @@ pub trait Hooks {
     /// the plant is refused there and pops off when its ground changes to
     /// one it can't stand on. Answer only for your own blocks. The level is
     /// read-only. A disabled owner's subscribed rule preserves a plant of this
-    /// type already at the position, but does not authorize a new planting.
+    /// type already at the position or settling there, but does not authorize a new planting.
     #[hook(
         side = "server",
         contract = "replace",
         out = "may",
         scope = "block",
-        inert = "*may = Some(level.block_state([ground_pos.x, ground_pos.y.wrapping_add(1), ground_pos.z]).map(BlockState::block) == Some(state.block()));",
+        inert = "signal",
         key = "state",
         target = "sunrise_client::game::native_hooks::base::GameLevel<'_>::native_may_place_on",
         neoforge = "IBlockExtension.canSustainPlant"

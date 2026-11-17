@@ -97,6 +97,30 @@ mod tests {
         }
     }
 
+    struct Plant;
+    #[mod_api::sunrise_part]
+    impl BlockPart for Plant {
+        fn may_place_on(
+            &self,
+            _: &dyn mod_api::LevelHost,
+            _: &mut mod_api::MayPlaceOnEvent,
+        ) -> Option<bool> {
+            Some(true)
+        }
+    }
+
+    struct Soil;
+    #[mod_api::sunrise_part]
+    impl BlockPart for Soil {
+        fn can_sustain_plant(
+            &self,
+            _: &dyn mod_api::LevelHost,
+            _: &mut mod_api::CanSustainPlantEvent,
+        ) -> Option<bool> {
+            Some(true)
+        }
+    }
+
     struct Owner(Arc<Probe>);
     #[mod_api::__subscriptions]
     impl Hooks for Owner {
@@ -107,6 +131,10 @@ mod tests {
             r.block_part(carpet, Survival);
             let sand = r.block_key("inert_test:sand");
             r.block_part(sand, Survival);
+            let plant = r.block_key("inert_test:plant");
+            r.block_part(plant, Plant);
+            let soil = r.block_key("inert_test:soil");
+            r.block_part(soil, Soil);
         }
         fn blocks(&self, _: &RegistrationContext, e: &mut mod_api::BlocksEvent<'_>) {
             e.blocks.push(
@@ -117,6 +145,11 @@ mod tests {
             e.blocks.push(carpet);
             e.blocks
                 .push(mod_api::Block::new("inert_test:sand", "minecraft:sand"));
+            let mut plant = mod_api::Block::new("inert_test:plant", "minecraft:dandelion");
+            plant.properties.push_reaction = Some(mod_api::PushReaction::PushPull);
+            e.blocks.push(plant);
+            e.blocks
+                .push(mod_api::Block::new("inert_test:soil", "minecraft:stone"));
         }
     }
     struct Observer(Arc<Probe>);
@@ -249,13 +282,11 @@ mod tests {
 
     #[test]
     #[ignore = "daily"]
-    fn disabled_carpet_survives_a_piston_push_without_authorizing_placement() {
+    fn disabled_blocks_survive_piston_pushes_without_authorizing_placement() {
         with_inert_block(
-            "disabled_carpet_survives_a_piston_push_without_authorizing_placement",
+            "disabled_blocks_survive_piston_pushes_without_authorizing_placement",
             |game, _, _| {
-                let piston_pos = BlockPos::new(3, 70, 5);
-                let start = piston_pos.offset(1, 0, 0);
-                let end = piston_pos.offset(2, 0, 0);
+                let base = BlockPos::new(3, 70, 5);
                 let registry = &game.pack.assets.registry;
                 let piston = registry
                     .resolve(&sunrise_world::chunk::BlockState {
@@ -267,36 +298,55 @@ mod tests {
                         .into(),
                     })
                     .unwrap();
-                let carpet = registry.default_state("inert_test:carpet").unwrap();
-                let stone = registry.default_state("minecraft:stone").unwrap();
-                let moving = registry.default_state("minecraft:moving_piston").unwrap();
-                let redstone = registry.default_state("minecraft:redstone_block").unwrap();
+                let state = |name| registry.default_state(name).unwrap();
+                let moving = state("minecraft:moving_piston");
+                let redstone = state("minecraft:redstone_block");
+                let cases = [
+                    ("inert_test:carpet", "minecraft:stone", "minecraft:air"),
+                    ("inert_test:plant", "minecraft:dirt", "minecraft:stone"),
+                    ("inert_test:plant", "minecraft:dirt", "inert_test:soil"),
+                ]
+                .map(|(block, source, target)| {
+                    (target, state(block), state(source), state(target))
+                });
                 game.tickets
                     .update(Some(sunrise_client::ticket_levels::Sources {
                         forced: vec![(0, 0)],
                         ..Default::default()
                     }));
                 game.with_level(|b, level, ticks| {
-                    ticks.add_empty_chunk(start.chunk()).unwrap();
-                    level.set_raw(piston_pos, piston).unwrap();
-                    level.set_raw(start.offset(0, -1, 0), stone).unwrap();
-                    level.set_raw(start, carpet).unwrap();
+                    ticks.add_empty_chunk(base.chunk()).unwrap();
                     assert!(mod_api::__private::set_mod_enabled("inert_test", false));
-                    assert!(b.can_survive(level, ticks, start, carpet));
-                    assert!(!b.can_survive(level, ticks, end, carpet));
-                    b.set_block(level, ticks, piston_pos.offset(-1, 0, 0), redstone, 3);
-                    b.run_block_events(level, ticks);
-                    assert_eq!(b.block(level.block_state(end)), b.block(moving));
-                    assert!(b.is_air(level.block_state(end.offset(0, -1, 0))));
-                    for _ in 0..4 {
-                        b.tick_block_entities(level, ticks);
+                    for (i, (ground, carried, source_floor, dest_floor)) in
+                        cases.into_iter().enumerate()
+                    {
+                        let piston_pos = base.offset(0, 0, (i as i32) * 3);
+                        let start = piston_pos.offset(1, 0, 0);
+                        let end = piston_pos.offset(2, 0, 0);
+                        level.set_raw(piston_pos, piston).unwrap();
+                        level.set_raw(start.offset(0, -1, 0), source_floor).unwrap();
+                        if !b.is_air(dest_floor) {
+                            level.set_raw(end.offset(0, -1, 0), dest_floor).unwrap();
+                        }
+                        level.set_raw(start, carried).unwrap();
+                        assert!(b.can_survive(level, ticks, start, carried));
+                        assert!(
+                            !b.can_survive(level, ticks, end, carried),
+                            "new placement over {ground}"
+                        );
+                        b.set_block(level, ticks, piston_pos.offset(-1, 0, 0), redstone, 3);
+                        b.run_block_events(level, ticks);
+                        assert_eq!(b.block(level.block_state(end)), b.block(moving));
+                        for _ in 0..4 {
+                            b.tick_block_entities(level, ticks);
+                        }
+                        assert_eq!(
+                            level.block_state(end),
+                            carried,
+                            "the moved block must survive over {ground}"
+                        );
+                        assert!(!b.can_survive(level, ticks, start, carried));
                     }
-                    assert_eq!(
-                        level.block_state(end),
-                        carpet,
-                        "the moved carpet must not pop off"
-                    );
-                    assert!(!b.can_survive(level, ticks, start, carpet));
                 });
             },
         );
