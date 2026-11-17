@@ -10,11 +10,19 @@ from pathlib import Path, PurePosixPath
 ROOT = Path(__file__).resolve().parents[2]
 HOME = "launcher"
 
-INCLUDE = re.compile(r'\b(include_str|include_bytes|include)!\s*\(\s*"([^"]+)"')
-PATH_ATTR = re.compile(r'#\[\s*path\s*=\s*"([^"]+)"\s*\]')
-MANIFEST_JOIN = re.compile(r'env!\(\s*"CARGO_MANIFEST_DIR"\s*\)\s*\)?((?:\s*\.join\(\s*"[^"]*"\s*\))+)')
-MANIFEST_CONCAT = re.compile(r'concat!\(\s*env!\(\s*"CARGO_MANIFEST_DIR"\s*\)\s*,\s*"([^"]*)"')
-JOINED = re.compile(r'\.join\(\s*"([^"]*)"\s*\)')
+STRING = r'"((?:[^"\\]|\\.)*)"'
+RAW = re.compile(r'(?<![A-Za-z0-9_])b?r(#*)"(.*?)"\1', re.S)
+INCLUDE = re.compile(r'\b(include_str|include_bytes|include)!\s*\(\s*' + STRING)
+PATH_ATTR = re.compile(r'#\[\s*path\s*=\s*' + STRING + r'\s*\]')
+MANIFEST_JOIN = re.compile(r'env!\(\s*"CARGO_MANIFEST_DIR"\s*\)\s*\)?((?:\s*\.join\(\s*' + STRING + r'\s*\))+)')
+MANIFEST_CONCAT = re.compile(r'concat!\(\s*env!\(\s*"CARGO_MANIFEST_DIR"\s*\)\s*,\s*' + STRING)
+JOINED = re.compile(r'\.join\(\s*' + STRING + r'\s*\)')
+# A build script runs in its crate's folder: a literal it reads, opens, joins or reruns on is a path from there.
+BUILD_READ = re.compile(
+    r'(?:\b(?:read_to_string|read|read_dir|copy|open|new|from)|\.join)\(\s*' + STRING
+    + r'|cargo:rerun-if-changed=([^"\\]+)'
+)
+ABSOLUTE = re.compile(r'^(?:/|[A-Za-z]:/|//)')
 
 
 def tracked(root: Path) -> list[str]:
@@ -23,9 +31,29 @@ def tracked(root: Path) -> list[str]:
     return [p for p in listed.stdout.decode().split("\0") if p]
 
 
+def plain(text: str) -> str:
+    """`text` with its raw string literals written as plain ones, on the same lines."""
+    return RAW.sub(lambda m: '"' + m.group(2).replace("\\", "\\\\").replace('"', '\\"') + '"', text)
+
+
+def unescaped(literal: str) -> str:
+    """A plain string literal's text."""
+    return re.sub(r"\\(.)", r"\1", literal)
+
+
+def joined(parts: list[str]) -> str:
+    """`Path::join` of `parts` in turn: an absolute part replaces what came before, as in Rust."""
+    path = ""
+    for part in parts:
+        part = unescaped(part).replace("\\", "/")
+        path = part if ABSOLUTE.match(part) or not path else f"{path}/{part}"
+    return path or "."
+
+
 def inside(base: PurePosixPath, relative: str) -> bool:
-    """Whether `relative`, read from the folder `base`, stays in `launcher/`."""
-    if relative.startswith("/"):
+    """Whether `relative` (`/` or `\\` separated), read from the folder `base`, stays in `launcher/`."""
+    relative = relative.replace("\\", "/")
+    if ABSOLUTE.match(relative):
         return False
     parts: list[str] = []
     for part in (base / relative).parts:
@@ -79,14 +107,14 @@ def problems(root: Path, files: list[str]) -> list[str]:
                 if not inside(path.parent, value):
                     found.append(f"{name}: path {value!r} leaves {HOME}/")
         elif path.suffix == ".rs":
-            text = (root / name).read_text(encoding="utf-8", errors="replace")
+            text = plain((root / name).read_text(encoding="utf-8", errors="replace"))
             here = crate_dir(path, manifests)
-            checks = [(m, path.parent, m.group(2)) for m in INCLUDE.finditer(text)]
-            checks += [(m, path.parent, m.group(1)) for m in PATH_ATTR.finditer(text)]
-            checks += [(m, here, m.group(1).lstrip("/")) for m in MANIFEST_CONCAT.finditer(text)]
-            for m in MANIFEST_JOIN.finditer(text):
-                joined = "/".join(JOINED.findall(m.group(1))) or "."
-                checks.append((m, here, joined))
+            checks = [(m, path.parent, unescaped(m.group(2))) for m in INCLUDE.finditer(text)]
+            checks += [(m, path.parent, unescaped(m.group(1))) for m in PATH_ATTR.finditer(text)]
+            checks += [(m, here, unescaped(m.group(1)).lstrip("/")) for m in MANIFEST_CONCAT.finditer(text)]
+            checks += [(m, here, joined(JOINED.findall(m.group(1)))) for m in MANIFEST_JOIN.finditer(text)]
+            if path.name == "build.rs":
+                checks += [(m, here, unescaped(m.group(1) or m.group(2))) for m in BUILD_READ.finditer(text)]
             for match, base, value in checks:
                 if not inside(base, value):
                     line = text.count("\n", 0, match.start()) + 1
