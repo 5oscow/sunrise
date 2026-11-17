@@ -172,6 +172,8 @@ fn authoritative_custom_book_rebuilds_cached_geometry_without_observe_screen() {
                     })],
                     inventory_y: 84.0,
                     inventory_x: 8.0,
+                    title_label: None,
+                    inventory_label: None,
                     own_labels: false,
                     own_background: false,
                     recipe_book: Some(key.clone()),
