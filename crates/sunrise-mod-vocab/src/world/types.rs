@@ -1327,6 +1327,12 @@ impl TriState {
 /// }
 /// ```
 pub trait LevelHost {
+    /// `BlockGetter.getBlockEntity` in this level: the handle of the block entity at `pos`, or
+    /// None when no block entity is there, its chunk is unloaded, `pos` is outside the build
+    /// height, or it is out of the world for its own tick. Never loads a chunk or generates loot.
+    fn block_entity(&self, _pos: [i32; 3]) -> Option<crate::BlockEntityRef> {
+        None
+    }
     /// Read a block entity's saved data without identity metadata from this level.
     /// Stale generations and handles from another level or world return None.
     fn block_entity_data(&self, _entity: crate::BlockEntityRef) -> Option<crate::Compound> {

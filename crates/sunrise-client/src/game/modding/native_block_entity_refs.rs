@@ -38,11 +38,7 @@ impl Game<'_> {
     /// the level it shows. An entity taken out for its tick cannot be read in that tick.
     pub(super) fn block_entity(&self, level: LevelRef, pos: [i32; 3]) -> Option<BlockEntityRef> {
         let world = self.native_level_read_world(level)?;
-        loaded_block_entity(world, pos)?;
-        let generation = world.block_entities.generation(&(pos[0], pos[1], pos[2]))?;
-        Some(mod_api::__private::game::block_entity_ref(
-            level, pos, generation,
-        ))
+        world_block_entity(world, level, pos)
     }
 
     /// `block_entity`, also for a block entity taken out for its own tick: its generation
@@ -805,8 +801,22 @@ fn mod_item_slots(
     Ok(slots)
 }
 
+/// The handle of the loaded block entity at `pos`, without loading a chunk or taking one
+/// that is out of the world for its own tick.
+pub(super) fn world_block_entity(
+    world: &World,
+    level: LevelRef,
+    pos: [i32; 3],
+) -> Option<BlockEntityRef> {
+    loaded_block_entity(world, pos)?;
+    let generation = world.block_entities.generation(&(pos[0], pos[1], pos[2]))?;
+    Some(mod_api::__private::game::block_entity_ref(
+        level, pos, generation,
+    ))
+}
+
 fn loaded_block_entity(world: &World, [x, y, z]: [i32; 3]) -> Option<&BlockEntity> {
-    if !world.loaded(x, z) {
+    if !world.loaded(x, z) || !world.shape.contains_y(y) {
         return None;
     }
     world
@@ -872,6 +882,21 @@ mod tests {
             };
             game.world.block_entities.insert(pos, holder());
             let original = game.block_entity(level, [1, 64, 1]).unwrap();
+            game.with_level(|_, host, ticks| {
+                let wrapped = super::super::mod_api_host::LevelTicks::new(&*host, ticks);
+                assert_eq!(
+                    mod_api::LevelHost::block_entity(&wrapped, [1, 64, 1]),
+                    mod_api::LevelHost::block_entity(&*host, [1, 64, 1]),
+                );
+                assert_eq!(
+                    mod_api::LevelHost::block_entity(&wrapped, [1, 64, 1]),
+                    Some(original),
+                );
+                assert_eq!(
+                    mod_api::LevelHost::block_entity(&wrapped, [1, 400, 1]),
+                    None,
+                );
+            });
             assert_eq!(original.set_data_slots(game, vec![7]), Ok(true));
             let mut tentative = None;
             let _: Result<(), ()> = game.transaction(|game, _| {
@@ -943,6 +968,16 @@ mod tests {
             .block_entities
             .insert(key, BlockEntity::Mod(Box::default()));
         assert!(loaded_block_entity(&world, pos).is_none());
+        let outside_pos = [-1, world.shape.max_y(), 0];
+        world
+            .block_entities
+            .insert((-1, outside_pos[1], 0), BlockEntity::DaylightDetector);
+        assert!(loaded_block_entity(&world, outside_pos).is_none());
+        let below_pos = [-1, world.shape.min_y - 1, 0];
+        world
+            .block_entities
+            .insert((-1, below_pos[1], 0), BlockEntity::DaylightDetector);
+        assert!(loaded_block_entity(&world, below_pos).is_none());
     }
 
     fn compound(snbt: &str) -> Compound {
