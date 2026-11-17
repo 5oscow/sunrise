@@ -7,6 +7,8 @@ mod below_world;
 mod friction_tests;
 #[cfg(test)]
 mod lifetime_tests;
+#[cfg(test)]
+mod paddle_tests;
 mod placement;
 
 use super::{Game, InteractTarget, entity::Entity, entity_culling::at, view_vector};
