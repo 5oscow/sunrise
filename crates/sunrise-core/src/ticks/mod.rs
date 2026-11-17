@@ -330,6 +330,22 @@ mod tests {
         assert_eq!(ran, [tick(0, 0, 0, 0, 0)]);
     }
     #[test]
+    fn held_ticks_do_not_starve_runnable_ticks_and_resume_in_order() {
+        let mut level = level();
+        let held = tick(0, 0, 0, -1, 0);
+        let runnable = tick(1, 1, 0, 0, 1);
+        level.schedule(held);
+        level.schedule(runnable);
+        level
+            .begin_tick_where(0, 1, |_| true, |tick| tick.kind != TickTypeId(0))
+            .unwrap();
+        assert_eq!(level.next_tick().unwrap(), Some(runnable));
+        level.finish_tick().unwrap();
+        level.begin_tick(0, 1, |_| true).unwrap();
+        assert_eq!(level.next_tick().unwrap(), Some(held));
+        level.finish_tick().unwrap();
+    }
+    #[test]
     fn collection_guards_and_membership_survive_area_mutation() {
         let mut level = level();
         level.schedule(tick(0, 0, 0, 0, 0));
@@ -485,7 +501,18 @@ impl LevelTicks {
         &mut self,
         game_time: i64,
         maximum: i32,
+        can_tick: impl FnMut(ChunkPos) -> bool,
+    ) -> Result<(), TickError> {
+        self.begin_tick_where(game_time, maximum, can_tick, |_| true)
+    }
+    /// Collect runnable ticks without charging held work against the pass's budget.
+    /// Rejected ticks keep their exact deadline, priority and relative order.
+    pub fn begin_tick_where(
+        &mut self,
+        game_time: i64,
+        maximum: i32,
         mut can_tick: impl FnMut(ChunkPos) -> bool,
+        mut can_run: impl FnMut(ScheduledTick) -> bool,
     ) -> Result<(), TickError> {
         if self.collecting {
             return Err(TickError::AlreadyCollecting);
@@ -517,6 +544,7 @@ impl LevelTicks {
             true
         });
         let maximum = maximum.max(0) as usize;
+        let mut held = Vec::new();
         while self.to_run.len() < maximum {
             let Some(key) = containers.pop(|a, b| {
                 self.chunks[&a]
@@ -527,7 +555,12 @@ impl LevelTicks {
                 break;
             };
             let chunk = self.chunks.get_mut(&key).unwrap();
-            self.to_run.push_back(chunk.poll().unwrap());
+            let tick = chunk.poll().unwrap();
+            if can_run(tick) {
+                self.to_run.push_back(tick);
+            } else {
+                held.push(tick);
+            }
             let competing = containers.peek().and_then(|key| self.chunks[&key].peek());
             let chunk = self.chunks.get_mut(&key).unwrap();
             while self.to_run.len() < maximum {
@@ -539,7 +572,12 @@ impl LevelTicks {
                 {
                     break;
                 }
-                self.to_run.push_back(chunk.poll().unwrap());
+                let tick = chunk.poll().unwrap();
+                if can_run(tick) {
+                    self.to_run.push_back(tick);
+                } else {
+                    held.push(tick);
+                }
             }
             if let Some(head) = chunk.peek() {
                 if head.trigger_tick <= game_time && self.to_run.len() < maximum {
@@ -560,6 +598,9 @@ impl LevelTicks {
         }
         containers.values.clear();
         self.containers_to_tick = containers;
+        for tick in held {
+            self.schedule(tick);
+        }
         Ok(())
     }
     /// Pop immediately before invoking block/fluid behavior. The current tick is

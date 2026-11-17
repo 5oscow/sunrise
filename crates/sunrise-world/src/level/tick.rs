@@ -1854,9 +1854,16 @@ impl Behaviours {
             let level_ref: &L = level;
             if ticks
                 .blocks
-                .begin_tick(time, 65536, |chunk: ChunkPos| {
-                    level_ref.is_ticking_chunk(chunk)
-                })
+                .begin_tick_where(
+                    time,
+                    65536,
+                    |chunk: ChunkPos| level_ref.is_ticking_chunk(chunk),
+                    |tick| {
+                        let state = level_ref.block_state(tick.pos);
+                        u32::from(self.block(state).0) != tick.kind.0
+                            || !level_ref.hold_block_tick(state)
+                    },
+                )
                 .is_err()
             {
                 ticks.handling_tick = false;
@@ -1924,9 +1931,18 @@ impl Behaviours {
             &mut ticks.blocks
         };
         let ok = queue
-            .begin_tick(time, 65536, |chunk: ChunkPos| {
-                level_ref.is_ticking_chunk(chunk)
-            })
+            .begin_tick_where(
+                time,
+                65536,
+                |chunk: ChunkPos| level_ref.is_ticking_chunk(chunk),
+                |tick| {
+                    fluids || {
+                        let state = level_ref.block_state(tick.pos);
+                        u32::from(self.block(state).0) != tick.kind.0
+                            || !level_ref.hold_block_tick(state)
+                    }
+                },
+            )
             .is_ok();
         if !ok {
             ticks.handling_tick = false;
