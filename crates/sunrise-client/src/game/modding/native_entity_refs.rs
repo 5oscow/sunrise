@@ -1287,8 +1287,25 @@ pub(super) mod tests {
     }
 
     pub(in crate::game) fn with_game(test: impl FnOnce(&mut super::Game<'_>)) {
-        let root = std::path::PathBuf::from(std::env::var_os("SUNRISE_TEST_RESOURCES").unwrap());
-        with_game_at(root, test);
+        with_game_at(fixture_root(), test);
+    }
+
+    /// The root a plain fixture game is built over: the prepared resources, or, when the compiled wasm
+    /// fixture is installed, the content root its mods make. The fixture declares blocks, block entity
+    /// types and Parts of its own (its `part_state` counter), which a loaded game has registered and the
+    /// bare prepared resources lack.
+    pub(in crate::game) fn fixture_root() -> std::path::PathBuf {
+        use mod_api::__private::game::Fields;
+        let base = std::path::PathBuf::from(std::env::var_os("SUNRISE_TEST_RESOURCES").unwrap());
+        let mods = mod_api::__private::mods();
+        if !mods.iter().any(|entry| entry.fields().id == "wasm_fixture") {
+            return base;
+        }
+        crate::game::api_values::install_parts(mods).unwrap();
+        crate::game::mods::content_root(&base, &Default::default())
+            .unwrap()
+            .prepared()
+            .to_owned()
     }
 
     pub(in crate::game) fn with_game_at(
@@ -1317,9 +1334,8 @@ pub(super) mod tests {
     }
 
     pub(in crate::game) fn with_client_game(test: impl FnOnce(&mut super::Game<'_>)) {
-        let root = std::path::PathBuf::from(std::env::var_os("SUNRISE_TEST_RESOURCES").unwrap());
         with_game_role(
-            root,
+            fixture_root(),
             super::super::execution_role::ExecutionRole::Client,
             test,
         );
