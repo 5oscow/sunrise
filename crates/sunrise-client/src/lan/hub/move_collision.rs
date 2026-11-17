@@ -2,7 +2,10 @@
 //! guest's collision exclusions (#3717): a mod's boxes in which the level's blocks don't stop the
 //! player are the same boxes its client moves it through.
 use super::{Guest, Hub, TickCtx};
-use crate::{collisions::SceneCollisions, world::World};
+use crate::{
+    collisions::{EntityCollisions, SceneCollisions},
+    world::World,
+};
 use std::io;
 use sunrise_core::geometry::{Aabb, ShapeOp, Vec3, VoxelShape};
 use sunrise_world::{
@@ -24,11 +27,12 @@ impl Hub {
         let Some(binding) = ctx.collision else {
             return to;
         };
-        self.settle_in(i, from, to, ctx.world, binding)
+        self.settle_in(i, from, to, ctx.world, binding, &[])
             .unwrap_or(to)
     }
 
     /// [`Self::settle_in`] for the guest of connection `conn`; `None` for one the hub has no more.
+    /// `entities` are the boxes of the solid entities it may meet.
     pub fn settle_conn(
         &self,
         conn: u32,
@@ -36,6 +40,7 @@ impl Hub {
         to: [f64; 3],
         world: &World,
         binding: &BlockCollisionRegistry<'_>,
+        entities: &[Aabb],
     ) -> Option<[f64; 3]> {
         self.settle_in(
             self.guests.connection_index(conn)?,
@@ -43,6 +48,7 @@ impl Hub {
             to,
             world,
             binding,
+            entities,
         )
     }
 
@@ -56,6 +62,7 @@ impl Hub {
         to: [f64; 3],
         world: &World,
         binding: &BlockCollisionRegistry<'_>,
+        entities: &[Aabb],
     ) -> Option<[f64; 3]> {
         let g = &self.guests[i];
         let movement = Vec3::new(to[0] - from[0], to[1] - from[1], to[2] - from[2]);
@@ -70,10 +77,14 @@ impl Hub {
             ),
         );
         let context = CollisionContext::position(from[1]).with_descending(g.sneaking);
-        let mut scene = SceneCollisions {
-            world,
-            binding,
-            subject: None,
+        let mut scene = EntityCollisions {
+            blocks: SceneCollisions {
+                world,
+                binding,
+                subject: None,
+            },
+            entities,
+            border: None,
         };
         let done = if g.collision_exclusions.is_empty() {
             settled(g, bounds, movement, context, &mut scene)

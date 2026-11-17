@@ -422,6 +422,40 @@ fn a_players_move_by_is_heard_once_and_a_cancel_moves_nothing() {
     });
 }
 
+/// A boat in the way stops a player's `entity_move_by`, as it stops a player walking: the move
+/// ends against the boat's side, not at the target.
+#[test]
+#[ignore = "daily"]
+fn a_players_move_by_stops_at_a_boat() {
+    with_guests(|game| {
+        game.as_guest(13, |_| {}).unwrap();
+        let b = game.player(13).unwrap();
+        let [x, y, z] = b.entity().position(game).unwrap();
+        let free = game
+            .entity_move_by(b.entity(), [4.0, 0.0, 0.0], MoveCause::SelfMovement)
+            .unwrap();
+        assert_eq!(free, [4.0, 0.0, 0.0], "nothing in the way");
+        // Back to where it was, then a boat 2 blocks along, its box across the line of travel.
+        game.entity_move_by(b.entity(), [-4.0, 0.0, 0.0], MoveCause::SelfMovement)
+            .unwrap();
+        game.next_entity += 1;
+        let id = game.next_entity;
+        game.boats.push(crate::game::boats::Boat::new(
+            id,
+            "oak".into(),
+            Vec3::new(x + 2.0, y, z),
+            0.0,
+        ));
+        let by = game
+            .entity_move_by(b.entity(), [4.0, 0.0, 0.0], MoveCause::SelfMovement)
+            .unwrap();
+        assert!(
+            by[0] > 0.5 && by[0] < 1.6,
+            "stopped against the boat's side, moved {by:?}"
+        );
+    });
+}
+
 /// B's live menu and motion stay available while A acts, but displaced
 /// menus and an outer turn's motion must not use the swapped-out records.
 #[test]

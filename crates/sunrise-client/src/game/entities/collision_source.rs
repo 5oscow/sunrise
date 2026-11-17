@@ -10,6 +10,8 @@ use sunrise_core::geometry::{Aabb, Vec3};
 pub(in crate::game) enum Mover<'a> {
     /// The window's player.
     Player,
+    /// Any player that is not riding, by the height of its feet: a guest the server holds.
+    PlayerAt { feet_y: f64 },
     /// A mover that is neither a player nor a vehicle: an item, a stand, an orb, TNT, a
     /// falling block, a body a piston pushes.
     Passive,
@@ -76,13 +78,20 @@ impl Game<'_> {
                     None,
                 )
             }
+            Mover::PlayerAt { feet_y } => (
+                Rule::Player {
+                    feet_y,
+                    riding: None,
+                },
+                None,
+            ),
             Mover::Passive => (Rule::Passive, None),
             Mover::Cart(c) => (Rule::Cart { id: c.id }, Some(cart_reach(c))),
             Mover::Boat { id, area } => (Rule::Boat { id }, Some(area)),
         };
         let solids = Solids::new(rule, area);
         match mover {
-            Mover::Player | Mover::Passive => {
+            Mover::Player | Mover::PlayerAt { .. } | Mover::Passive => {
                 for (j, m) in self.mobs.iter().enumerate() {
                     if solids.takes(m.solid_kind()) {
                         let c = m.solid_candidate();

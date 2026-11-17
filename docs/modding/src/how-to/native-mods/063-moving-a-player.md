@@ -21,4 +21,4 @@ server half of the mod, or move the player from the client half of the mod.
 
 A player on a moving collider stays on it when the target is still over it, and lets go otherwise. The call is refused
 (`None`, nothing moves) for a value that is not finite, a target outside the world, a player that is riding something,
-a sleeper and an entity that is not a player.
+a sleeper, a player without a connection, or a move the collision query cannot answer.

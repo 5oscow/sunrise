@@ -249,7 +249,7 @@ fn the_move_stops_at_a_wall() {
     let to = plus(START, [10.0, 0.0, 0.0]);
     let reached = side
         .hub
-        .settle_conn(conn, START, to, &side.world, &fixture.collision)
+        .settle_conn(conn, START, to, &side.world, &fixture.collision, &[])
         .expect("the level answers");
     // The block at x 23 is the wall: the player's box ends against it.
     assert!((reached[0] - 22.7).abs() < 1e-6, "{reached:?}");
@@ -258,7 +258,7 @@ fn the_move_stops_at_a_wall() {
     let free = plus(START, [-5.0, 0.0, 0.0]);
     assert_eq!(
         side.hub
-            .settle_conn(conn, START, free, &side.world, &fixture.collision),
+            .settle_conn(conn, START, free, &side.world, &fixture.collision, &[]),
         Some(free)
     );
 }

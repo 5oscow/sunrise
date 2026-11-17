@@ -9,7 +9,7 @@ use super::{
     commands::{Target, entity_pitch},
     vehicle_teleport::TeleportMotion,
 };
-use crate::game::move_gate::MoveWho;
+use crate::game::{collision_source::Mover, move_gate::MoveWho};
 use mod_api::{EntityRef, MoveCause};
 use sunrise_core::geometry::Vec3;
 use sunrise_world::entity_move::MoverType;
@@ -129,10 +129,7 @@ impl Game<'_> {
         delta: [f64; 3],
         cause: MoveCause,
     ) -> Option<[f64; 3]> {
-        if self.remote.is_some()
-            || !delta.iter().all(|v| v.is_finite() && v.abs() <= 64.0)
-            || self.native_entity_target(entity).is_none()
-        {
+        if self.remote.is_some() || !delta.iter().all(|v| v.is_finite() && v.abs() <= 64.0) {
             return None;
         }
         let mover = sunrise_client::move_gate::mover_of(cause)?;
@@ -143,8 +140,16 @@ impl Game<'_> {
                 Target::Guest(conn) => conn,
                 _ => return None,
             };
-            // The level the player is in, as a teleport is made in it.
-            return self.in_target_level(t, |game| game.move_player_by(t, conn, mover, delta))?;
+            // The level the player is in, as a teleport is made in it, with that level's moving
+            // colliders when it is not the one ticking.
+            let elsewhere = self.resident_target_dimension(t)? != self.dim;
+            return self.in_target_level(t, |game| {
+                if elsewhere {
+                    game.in_this_levels_colliders(|game| game.move_player_by(t, conn, mover, delta))
+                } else {
+                    game.move_player_by(t, conn, mover, delta)
+                }
+            })?;
         }
         let handle = self.native_walk_entity(entity.id())?;
         let [x, y, z] = delta;
@@ -358,8 +363,16 @@ impl Game<'_> {
         let reached = if guest.spectator() {
             to
         } else {
-            host.hub
-                .settle_conn(conn, from, to, &self.world, self.collision)?
+            // The solid entities (boats, shulkers, a still happy ghast) the player may meet.
+            let entities = self.entity_collisions(Mover::PlayerAt { feet_y: from[1] });
+            self.lan.as_ref()?.hub.settle_conn(
+                conn,
+                from,
+                to,
+                &self.world,
+                self.collision,
+                &entities,
+            )?
         };
         let target = Vec3::new(reached[0], reached[1], reached[2]);
         if acting {
