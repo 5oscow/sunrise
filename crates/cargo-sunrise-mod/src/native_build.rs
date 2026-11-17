@@ -1,5 +1,5 @@
 //! `native-build`: native mods compiled against an unpacked SDK (docs/modding/src/reference/sdk/08-native-build.md).
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::OnceLock;
 use sunrise_native_build::{check as checks, contract, host};
@@ -26,13 +26,7 @@ pub fn run(args: &[String]) -> ExitCode {
             });
         }
     };
-    let _ = WORK.set(plan.work.clone());
-    host::install(host::Host {
-        tr: |en| en,
-        root: || WORK.get().cloned().unwrap_or_default(),
-        get,
-        mark_used: contract::note_used,
-    });
+    install_host(&plan.work);
     match contract::run(&plan, &mut input, &mut std::io::stdout().lock()) {
         Ok(()) => ExitCode::SUCCESS,
         Err(_) => ExitCode::FAILURE,
@@ -40,6 +34,17 @@ pub fn run(args: &[String]) -> ExitCode {
 }
 
 /// Fetches through the proxy its environment names (`HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`, `NO_PROXY`), as the launcher passes its own.
+/// The tool as the native build's host: `work` its folder, English, its own network, used files noted for the reply.
+fn install_host(work: &Path) {
+    let _ = WORK.set(work.to_owned());
+    host::install(host::Host {
+        tr: |en| en,
+        root: || WORK.get().cloned().unwrap_or_default(),
+        get,
+        mark_used: contract::note_used,
+    });
+}
+
 fn get(url: &str) -> Result<host::Body, String> {
     match sunrise_port_pack::net::agent(url).get(url).call() {
         Ok(response) => Ok(Some(Box::new(response.into_reader()))),
@@ -50,21 +55,9 @@ fn get(url: &str) -> Result<host::Body, String> {
 
 /// Reads a check plan from standard input and prints one reply line: 0 checked, 1 an error reply (a file it names didn't read), 2 no plan, 3 another contract.
 pub fn check(args: &[String]) -> ExitCode {
-    if !args.is_empty() {
-        eprintln!(
-            "usage: cargo sunrise-mod native-check < plan.json (docs/modding/src/reference/sdk/08-native-build.md)"
-        );
-        return ExitCode::from(2);
-    }
-    let plan: checks::Plan = match contract::read_line(&mut std::io::stdin().lock()) {
+    let plan: checks::Plan = match plan(args, "native-check") {
         Ok(plan) => plan,
-        Err(error) => {
-            eprintln!("error: {error}");
-            return ExitCode::from(match error {
-                contract::PlanError::Contract(_) => 3,
-                contract::PlanError::Invalid(_) => 2,
-            });
-        }
+        Err(code) => return code,
     };
     let (code, line) = checked(&plan);
     println!("{line}");
@@ -85,6 +78,95 @@ fn checked(plan: &checks::Plan) -> (u8, serde_json::Value) {
             }),
         ),
     }
+}
+
+/// Reads one plan line of `T` from standard input, or the exit code that says why it isn't one: 2 no plan, 3 another contract.
+fn plan<T: serde::de::DeserializeOwned>(args: &[String], command: &str) -> Result<T, ExitCode> {
+    if !args.is_empty() {
+        eprintln!(
+            "usage: cargo sunrise-mod {command} < plan.json (docs/modding/src/reference/sdk/08-native-build.md)"
+        );
+        return Err(ExitCode::from(2));
+    }
+    contract::read_line(&mut std::io::stdin().lock()).map_err(|error| {
+        eprintln!("error: {error}");
+        ExitCode::from(match error {
+            contract::PlanError::Contract(_) => 3,
+            contract::PlanError::Invalid(_) => 2,
+        })
+    })
+}
+
+/// Prints `reply`, or the error reply of `kind`, as one line: 0 or 1.
+fn answer(reply: Result<serde_json::Value, (&'static str, String)>) -> ExitCode {
+    let (code, line) = match reply {
+        Ok(mut reply) => {
+            reply["contract"] = contract::CONTRACT.into();
+            (0, reply)
+        }
+        Err((kind, message)) => (
+            1,
+            serde_json::json!({"contract": contract::CONTRACT, "error": {"kind": kind, "message": message}}),
+        ),
+    };
+    println!("{line}");
+    ExitCode::from(code)
+}
+
+/// `native-discover`: the mod's internals (`{"internals": [...]}`), or its pinned game's build data copied to `catalog` (`{"catalog": path}`).
+pub fn discover(args: &[String]) -> ExitCode {
+    let plan: contract::DiscoverPlan = match plan(args, "native-discover") {
+        Ok(plan) => plan,
+        Err(code) => return code,
+    };
+    install_host(&plan.work);
+    answer(discovered(&plan))
+}
+
+fn discovered(plan: &contract::DiscoverPlan) -> Result<serde_json::Value, (&'static str, String)> {
+    let kind = |error: sunrise_native_build::discover::Error| match error {
+        sunrise_native_build::discover::Error::SourceUnavailable { .. } => {
+            ("source", error.to_string())
+        }
+        sunrise_native_build::discover::Error::Check(_) => ("discover", error.to_string()),
+    };
+    match &plan.catalog {
+        Some(output) => {
+            sunrise_native_build::discover::catalog(&plan.toolchain, &plan.mods, output)
+                .map(|path| serde_json::json!({"catalog": path}))
+                .map_err(kind)
+        }
+        None => sunrise_native_build::discover::internals(&plan.toolchain, &plan.mods)
+            .map(|internals| serde_json::json!({"internals": internals}))
+            .map_err(kind),
+    }
+}
+
+/// `native-lock`: the mod's registry dependencies pinned in its `Cargo.lock` (`{"lock": path}`).
+pub fn lock(args: &[String]) -> ExitCode {
+    let plan: contract::LockPlan = match plan(args, "native-lock") {
+        Ok(plan) => plan,
+        Err(code) => return code,
+    };
+    install_host(&plan.work);
+    answer(locked(&plan))
+}
+
+fn locked(plan: &contract::LockPlan) -> Result<serde_json::Value, (&'static str, String)> {
+    sunrise_native_build::bundle_in(&plan.mods)
+        .and_then(|found| {
+            found.ok_or_else(|| format!("{} is not a native mod.", plan.mods.display()))
+        })
+        .and_then(|bundle| {
+            sunrise_native_build::registry_generate::generate(
+                || Ok(plan.toolchain.clone()),
+                &bundle,
+                plan.update,
+            )
+            .map(|()| bundle.dir.join("Cargo.lock"))
+        })
+        .map(|path| serde_json::json!({"lock": path}))
+        .map_err(|message| ("lock", message))
 }
 
 #[cfg(test)]
@@ -112,5 +194,36 @@ mod tests {
                 .is_some_and(|m| !m.is_empty())
         );
         std::fs::remove_file(file).unwrap();
+    }
+
+    #[test]
+    fn discover_and_lock_name_their_step_when_the_folder_is_no_native_mod() {
+        let empty = std::env::temp_dir().join(format!("native-tools-empty-{}", std::process::id()));
+        std::fs::create_dir_all(&empty).unwrap();
+        let toolchain: sunrise_native_build::rust::Unpacked =
+            serde_json::from_value(serde_json::json!({
+                "dir": empty, "target": "x86_64-unknown-linux-gnu", "cargo_home": empty
+            }))
+            .unwrap();
+        let (kind, _) = discovered(&contract::DiscoverPlan {
+            contract: contract::CONTRACT,
+            work: empty.join("work"),
+            toolchain: toolchain.clone(),
+            mods: empty.clone(),
+            catalog: None,
+        })
+        .unwrap_err();
+        assert_eq!(kind, "discover");
+        let (kind, message) = locked(&contract::LockPlan {
+            contract: contract::CONTRACT,
+            work: empty.join("work"),
+            toolchain,
+            mods: empty.clone(),
+            update: false,
+        })
+        .unwrap_err();
+        assert_eq!(kind, "lock");
+        assert!(message.contains("is not a native mod"), "{message}");
+        std::fs::remove_dir_all(empty).unwrap();
     }
 }

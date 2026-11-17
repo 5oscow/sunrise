@@ -92,7 +92,22 @@ mods, `null` when none is. Each of `mods` has:
 A `change` is `"removed"`, `"changed"`, `{"lost-impl": trait}`, `{"fields": {gained, at}}`, `{"version": {named, now}}`,
 `{"not-buildable": {at}}`, `{"path": path}` or `{"route": {from, owner}}`.
 
+## `native-discover` and `native-lock`
+
+Two more tools a caller with the SDK's Rust runs on one native mod. Each reads one plan line and writes one reply
+line, with the exit codes of `native-check`: 0 a reply, 1 an error reply `{"contract": 2, "error": {"kind", "message"}}`,
+2 no plan, 3 another contract. Both plans have `contract` (`2`), `work` (the tool's own folder: the pinned game's
+source and caches), `toolchain` (as for `native-build`) and `mods` (the mod's folder).
+
+| Command | Its own plan field | Reply | Error `kind` |
+|---|---|---|---|
+| `native-discover` | `catalog`, optional: a folder that doesn't exist yet | without `catalog`, `{"internals": […]}`: the game internals the mod names, each as the pinned game's catalog lists it (`cargo sunrise-mod internals sync` writes them into `sunrise-mod.toml`). With it, `{"catalog": folder}`: the pinned game's `internals.json` and `points.json` with only this mod's `[[native.module]]` rows applied, copied there | `source` (the pinned game's source isn't cached and couldn't be downloaded), `discover` |
+| `native-lock` | `update`, optional: resolve again when the mod has a lock | `{"lock": path}`: the mod's registry dependencies pinned in its `Cargo.lock` | `lock` |
+
+`native-discover` checks the mod against the pinned game's source with the deprecation lint forced on the mod alone;
+it runs the tool itself as Cargo's rustc wrapper for that.
+
 ## Changelog
 
-- contract 2: `native-check`; `failed` names the blamed mod (`blame`) instead of a caller matching its text; `built` adds `internals` and `mixins` for the build record; both list the kept files they `used`.
+- contract 2: `native-check`, `native-discover`, `native-lock`; `failed` names the blamed mod (`blame`) instead of a caller matching its text; `built` adds `internals` and `mixins` for the build record; both list the kept files they `used`.
 - contract 1: the plan, `mod`, `consent`, `built` and `failed`.

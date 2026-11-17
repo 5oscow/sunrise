@@ -1,5 +1,5 @@
 use super::*;
-use crate::native_mods::{tests::dir, tests::write_bundle};
+use crate::tests::{dir, write_bundle};
 use std::cell::Cell;
 
 const STRUCT: &str = "sunrise_client::game::ported_level::PortedGame";
@@ -72,7 +72,7 @@ impl Fixture {
                 );
                 let payload = fs::read_to_string(input.join("example/src/ported.rs")).unwrap();
                 assert!(input.join("example/horizon-mixin.toml").is_file());
-                super::super::sync(prepared, output)?;
+                crate::sync(prepared, output)?;
                 fs::write(
                     output.join("crates/sunrise-client/src/game.rs"),
                     format!("pub mod ported_level {{ {payload} }}"),
@@ -165,7 +165,14 @@ fn module_edit_regenerates_hash_and_apply_failure_names_the_mod() {
 
 #[test]
 fn discovery_error_text_is_unchanged() {
-    assert_eq!(Error::SourceUnavailable { revision: "pinned".into(), reason: "offline".into() }.to_string(), "E_INTERNAL_SOURCE_UNAVAILABLE: internals sync needs the source for pinned. It is not cached and could not be downloaded: offline");
+    assert_eq!(
+        Error::SourceUnavailable {
+            revision: "pinned".into(),
+            reason: "offline".into()
+        }
+        .to_string(),
+        "E_INTERNAL_SOURCE_UNAVAILABLE: internals sync needs the source for pinned. It is not cached and could not be downloaded: offline"
+    );
     assert_eq!(
         Error::Check("compiler failure".into()).to_string(),
         "compiler failure"
