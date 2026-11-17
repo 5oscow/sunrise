@@ -2,7 +2,7 @@
 """The daily parity leg's verdict file (daily.yml `parity`, .github/workflows/parity.yml with `report`).
 
 parity_verdict.py LOG REPORT reads tools/parity.py's log on the runner for harness names and PASS/FAIL only and
-writes REPORT in tools/ci/ignored_tests.py's form, which daily_summary.py --parity reads: a problem (package
+writes REPORT in tools/ci/ignored_tests.py's form, which daily_summary.py reads: a problem (package
 `parity`, kind `parity`) for each failing harness, every passing one, and the run as incomplete when the log has no
 final count (the job ended before tools/parity.py did). A harness's shards (`name#2`) are one harness, failing if
 any of its shards' last record failed. No other text of the log is copied: it holds vanilla's values.
