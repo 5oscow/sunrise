@@ -483,6 +483,18 @@ impl Game<'_> {
         this: Option<&EntityView>,
         origin: [f64; 3],
     ) -> bool {
+        self.conditions_hold_among(v, this, None, None, origin)
+    }
+    /// [`Self::conditions_hold`] with the `target_entity` and
+    /// `interacting_entity` a loot context may also carry.
+    pub(in crate::game) fn conditions_hold_among(
+        &self,
+        v: &Value,
+        this: Option<&EntityView>,
+        target: Option<&EntityView>,
+        interacting: Option<&EntityView>,
+        origin: [f64; 3],
+    ) -> bool {
         adv::conditions(
             v,
             &adv::Entities {
@@ -490,6 +502,8 @@ impl Game<'_> {
                 origin,
                 tool: None,
                 block_pos: None,
+                target,
+                interacting,
             },
             &View(self),
         )
@@ -507,6 +521,8 @@ impl Game<'_> {
             origin,
             tool: None,
             block_pos: None,
+            target: None,
+            interacting: None,
         };
         // An invalid reference anywhere fails the whole tree, even under an inversion.
         if !adv::references_valid(v, &View(self)) {
@@ -1334,6 +1350,8 @@ impl Game<'_> {
                         origin: me.position,
                         tool: None,
                         block_pos: None,
+                        target: None,
+                        interacting: None,
                     },
                     w,
                 )
@@ -1353,6 +1371,8 @@ impl Game<'_> {
                 origin: me.position,
                 tool: None,
                 block_pos: None,
+                target: None,
+                interacting: None,
             };
             adv::conditions(&c["player"], &ctx, w)
         });
@@ -1387,6 +1407,8 @@ impl Game<'_> {
                     origin: me.position,
                     tool: None,
                     block_pos: None,
+                    target: None,
+                    interacting: None,
                 };
                 adv::conditions(&c["player"], &ctx, w)
             });
@@ -1403,12 +1425,16 @@ impl Game<'_> {
                 origin: me.position,
                 tool: None,
                 block_pos: None,
+                target: None,
+                interacting: None,
             };
             let ectx = adv::Entities {
                 this: Some(&target),
                 origin: me.position,
                 tool: None,
                 block_pos: None,
+                target: None,
+                interacting: None,
             };
             adv::conditions(&c["player"], &pctx, w) && adv::conditions(&c[&key], &ectx, w)
         });
@@ -1457,6 +1483,8 @@ impl Game<'_> {
                 origin: me.position,
                 tool: None,
                 block_pos: None,
+                target: None,
+                interacting: None,
             };
             adv::conditions(&c["player"], &pctx, w)
                 && (c["distance"].is_null() || adv::distance(&c["distance"], start, me.position))
@@ -1548,6 +1576,8 @@ impl Game<'_> {
                 origin: me.position,
                 tool: None,
                 block_pos: None,
+                target: None,
+                interacting: None,
             };
             adv::conditions(&c["player"], &pctx, w)
                 && adv::location(&c["start_position"], start, w)
@@ -1566,6 +1596,8 @@ impl Game<'_> {
                 origin: me.position,
                 tool: None,
                 block_pos: None,
+                target: None,
+                interacting: None,
             };
             adv::conditions(&c["player"], &pctx, w)
                 && adv::location(&c["start_position"], impact, w)
@@ -1577,6 +1609,8 @@ impl Game<'_> {
                             origin: me.position,
                             tool: None,
                             block_pos: None,
+                            target: None,
+                            interacting: None,
                         };
                         adv::conditions(&c["cause"], &cctx, w)
                     }))
@@ -1592,6 +1626,8 @@ impl Game<'_> {
                 origin: me.position,
                 tool: None,
                 block_pos: None,
+                target: None,
+                interacting: None,
             };
             let effects = c["effects"].is_null()
                 || adv::entity(
@@ -1607,6 +1643,8 @@ impl Game<'_> {
                         origin: me.position,
                         tool: None,
                         block_pos: None,
+                        target: None,
+                        interacting: None,
                     };
                     adv::conditions(&c["source"], &sctx, w)
                 });
@@ -1645,6 +1683,8 @@ impl Game<'_> {
                 origin: me.position,
                 tool: None,
                 block_pos: None,
+                target: None,
+                interacting: None,
             };
             adv::conditions(&c["player"], &pctx, w)
                 && (c["item"].is_null() || adv::item(&c["item"], &item, w))
@@ -1665,6 +1705,8 @@ impl Game<'_> {
                 origin: me.position,
                 tool: None,
                 block_pos: None,
+                target: None,
+                interacting: None,
             };
             adv::conditions(&c["player"], &pctx, w) && adv::item(&c["item"], &it, w)
         });
@@ -1682,6 +1724,8 @@ impl Game<'_> {
                 origin: me.position,
                 tool: None,
                 block_pos: None,
+                target: None,
+                interacting: None,
             };
             adv::conditions(&c["player"], &pctx, w) && matches_sqr(&c["distance"], sqr_distance)
         });
@@ -1755,6 +1799,8 @@ impl Game<'_> {
                 origin: me.position,
                 tool: None,
                 block_pos: None,
+                target: None,
+                interacting: None,
             };
             let vctx = adv::Entities {
                 this: Some(&victim),
@@ -1799,6 +1845,8 @@ impl Game<'_> {
                 origin: me.position,
                 tool: None,
                 block_pos: None,
+                target: None,
+                interacting: None,
             };
             adv::conditions(&c["player"], &pctx, w)
                 && adv::damage(&c["damage"], &damage, w, me.position)
@@ -1814,6 +1862,8 @@ impl Game<'_> {
                 origin: me.position,
                 tool: None,
                 block_pos: None,
+                target: None,
+                interacting: None,
             };
             adv::conditions(&c["player"], &pctx, w) && adv::item(&c["item"], &it, w)
         });
@@ -1866,6 +1916,8 @@ impl Game<'_> {
                 origin: me.position,
                 tool: None,
                 block_pos: None,
+                target: None,
+                interacting: None,
             };
             adv::conditions(&c["player"], &pctx, w) && adv::range_i(&c["level"], i64::from(levels))
         });
@@ -1880,6 +1932,8 @@ impl Game<'_> {
                 origin: me.position,
                 tool: None,
                 block_pos: None,
+                target: None,
+                interacting: None,
             };
             adv::conditions(&c["player"], &pctx, w)
                 && adv::item(&c["item"], &it, w)
@@ -1897,6 +1951,8 @@ impl Game<'_> {
                 origin: me.position,
                 tool: None,
                 block_pos: None,
+                target: None,
+                interacting: None,
             };
             adv::conditions(&c["player"], &pctx, w)
                 && adv::potions(&c["potion"], potion.as_deref(), w)
@@ -1913,6 +1969,8 @@ impl Game<'_> {
                 origin: me.position,
                 tool: None,
                 block_pos: None,
+                target: None,
+                interacting: None,
             };
             let vctx = adv::Entities {
                 this: Some(&villager),
@@ -1941,6 +1999,8 @@ impl Game<'_> {
                 origin: me.position,
                 tool: None,
                 block_pos: None,
+                target: None,
+                interacting: None,
             };
             let ectx = adv::Entities {
                 this: Some(&hooked),
@@ -1970,6 +2030,8 @@ impl Game<'_> {
                 origin: me.position,
                 tool: None,
                 block_pos: None,
+                target: None,
+                interacting: None,
             };
             block_ok && state_ok && adv::conditions(&c["player"], &pctx, w)
         });
@@ -1983,6 +2045,8 @@ impl Game<'_> {
                 origin: me.position,
                 tool: None,
                 block_pos: None,
+                target: None,
+                interacting: None,
             };
             adv::conditions(&c["player"], &ctx, w) && adv::block(c, pos, w)
         });
@@ -1998,6 +2062,8 @@ impl Game<'_> {
                 origin: me.position,
                 tool: None,
                 block_pos: None,
+                target: None,
+                interacting: None,
             };
             let target = adv::Entities {
                 this: Some(&projectile),
@@ -2020,6 +2086,8 @@ impl Game<'_> {
                 origin: me.position,
                 tool: Some(&it),
                 block_pos: Some(pos),
+                target: None,
+                interacting: None,
             };
             adv::conditions(&c["location"], &ctx, w)
         });
@@ -2047,6 +2115,8 @@ impl Game<'_> {
                 origin: me.position,
                 tool: None,
                 block_pos: None,
+                target: None,
+                interacting: None,
             };
             let location = adv::Entities {
                 origin: centre,
@@ -2069,6 +2139,8 @@ impl Game<'_> {
                 origin: me.position,
                 tool: None,
                 block_pos: None,
+                target: None,
+                interacting: None,
             };
             let bctx = adv::Entities {
                 this: Some(&bolt),
@@ -2100,6 +2172,8 @@ impl Game<'_> {
                 origin: me.position,
                 tool: None,
                 block_pos: None,
+                target: None,
+                interacting: None,
             };
             adv::conditions(&c["player"], &pctx, w)
                 && c["victims"].as_array().into_iter().flatten().all(|want| {
@@ -2125,6 +2199,8 @@ impl Game<'_> {
                 origin: me.position,
                 tool: None,
                 block_pos: None,
+                target: None,
+                interacting: None,
             };
             adv::conditions(&c["player"], &pctx, w)
                 && c["count"].as_u64().is_none_or(|n| stabbed as u64 >= n)
@@ -2149,6 +2225,8 @@ impl Game<'_> {
                 origin: me.position,
                 tool: None,
                 block_pos: None,
+                target: None,
+                interacting: None,
             };
             let state_ok = c["state"]
                 .as_object()
@@ -2183,6 +2261,8 @@ impl Game<'_> {
                 origin: me.position,
                 tool: None,
                 block_pos: None,
+                target: None,
+                interacting: None,
             };
             adv::conditions(&c["player"], &pctx, w)
         });
@@ -2214,6 +2294,8 @@ impl Game<'_> {
                 origin: me.position,
                 tool: None,
                 block_pos: None,
+                target: None,
+                interacting: None,
             };
             adv::conditions(&c["player"], &pctx, w)
                 && adv::id_matches(&c["recipes"], "recipe", &recipe, w)
@@ -2231,6 +2313,8 @@ impl Game<'_> {
                 origin: me.position,
                 tool: None,
                 block_pos: None,
+                target: None,
+                interacting: None,
             };
             adv::conditions(&c["player"], &pctx, w)
                 && adv::id_matches(&c["loot_tables"], "loot_table", &table, w)
@@ -2252,6 +2336,8 @@ impl Game<'_> {
                     origin: me.position,
                     tool: None,
                     block_pos: None,
+                    target: None,
+                    interacting: None,
                 }
                 .this
                 .map(|_| ())
@@ -2267,6 +2353,8 @@ impl Game<'_> {
                                 origin: me.position,
                                 tool: None,
                                 block_pos: None,
+                                target: None,
+                                interacting: None,
                             },
                             w,
                         )
