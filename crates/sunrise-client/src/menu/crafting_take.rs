@@ -219,7 +219,7 @@ impl Menu {
                     Some(_) => {
                         let mut left = replacement;
                         if !self.inventory_add(env, &mut left) {
-                            self.drop_stack(&left);
+                            self.drop_stack(&left, env.items);
                         }
                     }
                 }

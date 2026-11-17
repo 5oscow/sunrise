@@ -638,7 +638,14 @@ mod anchor_save_tests {
         // What the phantom circles now is what its chunk save keeps.
         m.extra.home = Some([9, 70, -3]);
         let source = saved_phantom(Some([100, 64, -40]));
-        let saved = mob_to_nbt(&m, [0; 4], Some(&source), None, |_| None);
+        let saved = mob_to_nbt(
+            &m,
+            [0; 4],
+            Some(&source),
+            None,
+            |_| None,
+            &Default::default(),
+        );
         assert_eq!(
             saved.get("anchor_pos"),
             Some(&Tag::IntArray(vec![9, 70, -3]))
@@ -649,7 +656,14 @@ mod anchor_save_tests {
         assert_eq!(loose.extra.home, None, "a save without anchor_pos");
         loose.extra.home = None;
         let stale = saved_phantom(Some([100, 64, -40]));
-        let saved = mob_to_nbt(&loose, [0; 4], Some(&stale), None, |_| None);
+        let saved = mob_to_nbt(
+            &loose,
+            [0; 4],
+            Some(&stale),
+            None,
+            |_| None,
+            &Default::default(),
+        );
         assert_eq!(saved.get("anchor_pos"), None, "no anchor, no key");
     }
 

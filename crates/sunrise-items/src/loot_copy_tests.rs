@@ -220,7 +220,7 @@ fn copy_components_uses_available_sources_and_table_filters_in_both_evaluators()
                             )
                             .unwrap();
                         assert_eq!(output.len(), 1);
-                        crate::item_data::encode_components(&output.remove(0)).unwrap()
+                        crate::item_data::component_snapshot(&output.remove(0)).unwrap()
                     } else {
                         let mut output = if has_entity {
                             data.roll_entity(

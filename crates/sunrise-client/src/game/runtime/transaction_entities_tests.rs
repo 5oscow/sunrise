@@ -64,6 +64,9 @@ static NEST: AtomicU8 = AtomicU8::new(0);
 struct Observer;
 #[mod_api::__subscriptions]
 impl Hooks for Observer {
+    fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
+        r.register_attachment_type("journal:mark", false).unwrap();
+    }
     fn entity_constructing(&self, host: HostSide<'_>, event: &mut EntityConstructingEvent) {
         if let (HostSide::Server(host), Holder::Entity(id)) = (host, event.holder) {
             HEARD.lock().unwrap().constructed.push(id);

@@ -118,6 +118,13 @@ jobs:
             HEAD_SHA=$SOURCE_SHA
           fi
           python3 tools/release_train.py decide --kind launcher ${HEAD_SHA:+--head "$HEAD_SHA"} ${FORCE:+--force} | tee decision.json
+          # A real hand dispatch without base releases main's head or nothing: while main's newest gate is still running
+          # (or failed), the newest gate-green commit is an older one, which would otherwise ship without a word.
+          picked=$(jq -r '.head // empty' decision.json)
+          if [[ "$EVENT" == workflow_dispatch && -z "$BASE" && "$DRY_RUN" != true && -n "$picked" && "$picked" != "$SOURCE_SHA" ]]; then
+            echo "::error::the newest commit with a green gate is ${picked:0:9}, not main's head ${SOURCE_SHA:0:9}: main's gate on ${SOURCE_SHA:0:9} is still running or failed. Dispatch again once it passes, or with -f base=${picked:0:9} to release that commit on purpose."
+            exit 1
+          fi
           echo "### $(jq -r '.reason' decision.json)" >> "$GITHUB_STEP_SUMMARY"
           tag=$(jq -r '.tag' decision.json)
           version=${tag#launcher-v}
@@ -171,11 +178,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+      # Saved by main's runs only, which every branch restores from: a branch's copy (about 800 MB a platform) serves
+      # no other ref and pushed main's SDK caches out of the repository's 10 GB.
       - uses: Swatinem/rust-cache@v2
         if: runner.environment == 'github-hosted'
         with:
           workspaces: launcher
           shared-key: launcher-${{ matrix.name }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Linux libraries GPUI links to
         if: runner.os == 'Linux'
         run: |
@@ -214,7 +224,10 @@ jobs:
           fi
       - name: Name the fork executable
         if: github.repository == 'sunrise-org/sunrise'
-        run: mv "$BIN/sunrise-launcher${{ runner.os == 'Windows' && '.exe' || '' }}" "$BIN/${{ matrix.binary }}"
+        # GNU mv refuses to move a file onto itself: Sunrise's matrix names the binary as Cargo does.
+        run: |
+          built="$BIN/sunrise-launcher${{ runner.os == 'Windows' && '.exe' || '' }}"
+          [[ "$built" == "$BIN/${{ matrix.binary }}" ]] || mv "$built" "$BIN/${{ matrix.binary }}"
       - name: Release binary retains the game-holder capability marker
         run: |
           python=python3; [[ "$RUNNER_OS" != Windows ]] || python=python
