@@ -2916,6 +2916,7 @@ impl Game<'_> {
                     for list in c.faces.iter_mut().chain([&mut c.inputs, &mut c.outputs]) {
                         list.retain(|&s| s < n);
                     }
+                    c.insert_rules.truncate(n);
                     c.menu = c
                         .menu
                         .filter(|m| mod_menu(m).is_some_and(|(_, size)| size == n));

@@ -2866,7 +2866,10 @@ registration path.
   payload contains `nbt`, `items` and `data`. A mod cannot replace the view or access its private entity handle.
 
 - Item slots for those block entities (`r.block_container(&block, container)`): hoppers, comparators and breaking the
-  block use them as they use vanilla's containers, and `block_entity_tick` also gets the slots.
+  block use them as they use vanilla's containers, and `block_entity_tick` also gets the slots. Set
+  `container.insert_rules` with `ModContainerInsertRule::OnlyWhenEmpty` or
+  `ModContainerInsertRule::SameKind` to apply one admission rule to hoppers, droppers, funnels,
+  menu shift-clicks and `ResourceHandler::insert` alike.
 
 - Menus for mod containers: the container names one of vanilla's slot-grid or furnace menus, which opens when the block is used,
   and `block_entity_tick` takes the whole block entity, with the data slots the menu shows.
