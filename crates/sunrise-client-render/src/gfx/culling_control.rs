@@ -217,8 +217,8 @@ impl Renderer {
         let Some((_, Some(post))) = &self.pack_post else {
             return (false, false);
         };
-        let c = post.shadow_casters();
-        ((c.entities && !c.only_player) || c.blocks, c.entities)
+        let c = external::ExternalPipeline::shadow_casters(post);
+        (c.others, c.player)
     }
 
     /// A standard pack replaces mobs' vanilla blob shadows only when its compiled
@@ -227,10 +227,7 @@ impl Renderer {
         self.pack_post
             .as_ref()
             .and_then(|(_, post)| post.as_ref())
-            .is_some_and(|post| {
-                let casters = post.shadow_casters();
-                casters.entities && !casters.only_player
-            })
+            .is_some_and(|post| external::ExternalPipeline::shadow_casters(post).mobs)
     }
 
     pub fn has_section(&self, key: SectionKey) -> bool {

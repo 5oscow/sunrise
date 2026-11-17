@@ -404,7 +404,7 @@ impl Renderer {
             .as_ref()
             .and_then(|p| p.1.as_ref())
             .filter(|_| !frame.title)
-            .and_then(|p| p.shadow_view(frame))
+            .and_then(|p| p.shadow_request(&state))
             .or_else(|| {
                 // One of Sunrise's own packs with `[shadow]` uses the same lists.
                 let native = self.native.as_ref().filter(|_| !frame.title)?;

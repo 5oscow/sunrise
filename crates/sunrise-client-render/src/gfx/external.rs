@@ -57,6 +57,18 @@ pub struct Draws {
     pub skins_entities: bool,
 }
 
+/// Which entities a pipeline's shadow pass draws (none without a shadow pass): what the renderer
+/// must keep in the frame's lists though the camera culls them.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ShadowCasters {
+    /// Entities or block entities other than the player.
+    pub others: bool,
+    /// The local player's model, built in first person too.
+    pub player: bool,
+    /// Mobs other than the player: vanilla's blob shadows give way to it.
+    pub mobs: bool,
+}
+
 /// An external shader pipeline, called by the renderer at fixed points of a world frame (not
 /// title frames). Every method has a default that leaves vanilla's way in place.
 pub trait ExternalPipeline: Send {
@@ -69,6 +81,10 @@ pub trait ExternalPipeline: Send {
     /// The shadow pass this frame wants; `None` draws none.
     fn shadow_request(&self, _state: &FrameState<'_>) -> Option<ShadowView> {
         None
+    }
+    /// The entities its shadow pass draws this frame.
+    fn shadow_casters(&self) -> ShadowCasters {
+        ShadowCasters::default()
     }
     /// The window's drawable size changed.
     fn resize(&mut self, _size: [u32; 2]) {}
