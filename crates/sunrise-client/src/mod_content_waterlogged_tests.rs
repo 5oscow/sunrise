@@ -83,15 +83,16 @@ fn declared_waterlogged_blocks_keep_their_class_and_gain_liquid_defaults() {
         "sunrise-declared-waterlogged-{}",
         std::process::id()
     ));
-    for template in [
-        "seagrass",
-        "tall_seagrass",
-        "kelp",
-        "kelp_plant",
-        "bubble_column",
+    for (template, reason) in [
+        ("seagrass", "already holds water"),
+        ("tall_seagrass", "already holds water"),
+        ("kelp", "already holds water"),
+        ("kelp_plant", "already holds water"),
+        ("bubble_column", "already holds water"),
+        ("lava", "standalone liquid block"),
     ] {
         let json = format!(
-            r#"{{"template":"minecraft:{template}","state_properties":{{"waterlogged":{{"type":"boolean"}}}}}}"#
+            r#"{{"template":"minecraft:{template}","item":false,"state_properties":{{"waterlogged":{{"type":"boolean"}}}},"default_state":{{"waterlogged":"true"}}}}"#
         );
         let rejected = folder_mod(
             &scratch.join(format!("refused-{template}")),
@@ -111,7 +112,8 @@ fn declared_waterlogged_blocks_keep_their_class_and_gain_liquid_defaults() {
         assert!(
             error.contains("wet:plant")
                 && error.contains("state_properties.waterlogged")
-                && error.contains(template),
+                && error.contains(&format!("minecraft:{template}"))
+                && error.contains(reason),
             "{error}"
         );
     }

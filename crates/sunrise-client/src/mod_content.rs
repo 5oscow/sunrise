@@ -1093,6 +1093,7 @@ impl<'a> Plan<'a> {
                 .any(|b| b.state_properties.contains_key("waterlogged"))
         });
         let mut water_states = Vec::new();
+        let mut liquid_templates = BTreeSet::new();
         if base.join("block-behaviours.json").exists() {
             let behaviors = read_json(&base.join("block-behaviours.json"))?;
             if needs_waterlogging {
@@ -1146,6 +1147,9 @@ impl<'a> Plan<'a> {
                     .any(|class| matches!(*class, "LeavesBlock" | "TintedGlassBlock"))
                 {
                     custom_dampening.insert(name.clone());
+                }
+                if needs_waterlogging && classes.contains(&"LiquidBlock") {
+                    liquid_templates.insert(name.clone());
                 }
             }
         }
@@ -1338,6 +1342,12 @@ impl<'a> Plan<'a> {
                     }
                 }
                 if decl.state_properties.contains_key("waterlogged") {
+                    if liquid_templates.contains(&decl.template) {
+                        return Err(format!(
+                            "{}: state_properties.waterlogged cannot be added: template {} is a standalone liquid block",
+                            decl.id, decl.template
+                        ).into());
+                    }
                     let template_water = water_states
                         .get(states.start as usize..states.end as usize)
                         .ok_or("block-behaviours.json is missing template state fluids")?;

@@ -301,8 +301,9 @@ A double plant keeps its template's class and companion-half behaviour, so this 
 ```
 
 The placed half takes source water at its cell; the companion half uses the water tag at its own cell, so an upper half above the water line is dry. An enum named `waterlogged`,
-a template that already has that property, or an always-water template (`seagrass`, `tall_seagrass`, `kelp`,
-`kelp_plant`, `bubble_column`) is refused. Native and wasm `Block` declarations use the same rule.
+a template that already has that property, a standalone liquid block such as `minecraft:lava`, or an
+always-water template (`seagrass`, `tall_seagrass`, `kelp`, `kelp_plant`, `bubble_column`) is refused.
+Native and wasm `Block` declarations use the same rule.
 
 A block with template `minecraft:farmland` may set `"base_block": "namespace:block"` to choose the block it becomes when it dries out, is trampled, or has a solid block placed above it. The ID must name a registered block; without the key, the template's dirt base is used.
 

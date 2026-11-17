@@ -235,9 +235,9 @@ pub struct Block {
     /// A boolean `waterlogged` adds SimpleWaterloggedBlock behaviour: buckets fill
     /// and drain it, placement copies source water at the cell, and shape updates schedule
     /// a water tick. The placement and shape Part answers override those defaults.
-    /// Refused if `waterlogged` is an enum, the template already has it, or the
-    /// template's every state already holds water. A double plant keeps its
-    /// class and companion-half behaviour.
+    /// Refused if `waterlogged` is an enum or the template already has it, is a
+    /// standalone liquid such as lava, or already holds water in every state.
+    /// A double plant keeps its class and companion-half behaviour.
     pub state_properties: BTreeMap<String, BlockStateProperty>,
     /// State properties overlaid on the template default.
     pub default_state: BTreeMap<String, String>,
