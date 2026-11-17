@@ -1092,6 +1092,8 @@ impl<'a> Plan<'a> {
                     return Err("block-behaviours.json has no state fluids".into());
                 };
                 for state in states {
+                    // Compact state row column 2 is the exported fluid registry ordinal,
+                    // also decoded by sunrise_world::level::data::build_with_gameplay.
                     let kind = match state {
                         J::Arr(row) => row.get(2).and_then(J::as_u32),
                         _ => None,
