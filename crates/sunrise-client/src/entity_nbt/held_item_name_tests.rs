@@ -69,6 +69,7 @@ fn horse_head_and_body_survive_save_load_and_drop_independently() {
     let loot = LootData::load(&root, &PackOverlay::new(&[]), &defaults).unwrap();
     let death = Death {
         loot: &loot,
+        this_nbt: None,
         damage: None,
         player: None,
         player_killed: false,

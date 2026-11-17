@@ -128,6 +128,10 @@ fn real_member() {
         loaded
             .initialize(&[info])
             .expect("guest initialization and point registration");
+        // The fixture guest declares a general entity type in `register`, which only the registration
+        // phase accepts. The scope follows `initialize`: the phase lives in the backend it installs.
+        let _registration =
+            mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::Registration);
         mod_api::testing::with_mods(loaded.mods.into(), || {
             mod_api::__private::install_parts(
                 mod_api::__private::mods(),
@@ -224,7 +228,12 @@ fn real_member() {
                 &mut entity,
             );
             assert_eq!(entity.data, [23]);
-            mod_api::__private::resolve_items(["minecraft:snowball", "minecraft:bow"]).unwrap();
+            mod_api::__private::resolve_items([
+                "minecraft:snowball",
+                "minecraft:bow",
+                "minecraft:paper",
+            ])
+            .unwrap();
             let item = mod_api::__private::item_key_by_identifier(
                 &mod_api::Identifier::parse("minecraft:snowball").unwrap(),
             )

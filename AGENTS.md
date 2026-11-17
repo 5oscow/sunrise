@@ -166,7 +166,7 @@ Game workspace (root `Cargo.toml`); `launcher/` and `crates/sunrise-telemetry-se
 
 Other top-level folders: `tools/` (harnesses and dev scripts), `tests/` (Python unit tests: `python3 -m
 unittest discover -s tests`), `mods/sunrise/src/test/java/dev/sunriselab/parity/` (Java oracles),
-`docs/`, `.github/workflows/`. The website (playsunrise.net) is the private horizon-rust/horizon-site: its build
+`docs/`, `.github/workflows/`. The website (playsunrise.net) is `frontend/site` in the private sunrise-org/sunny: its build
 reads `README.md`, `launcher/links.json`, `docs/api/`, `roadmap/roadmap.json` and `crates/sunrise-theme/tokens.css` from main.
 
 ## Write tests with signal

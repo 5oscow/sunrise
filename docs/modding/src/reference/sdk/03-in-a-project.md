@@ -7,7 +7,7 @@ A code mod's project names the mod API by the path where `cargo sunrise-mod` kee
 sunrise-mod-api = { path = ".sunrise/sdk/api/crates/sunrise-mod-api" }
 ```
 
-`sunrise-mod-points` and `sunrise-internals` are named the same way, by `.sunrise/sdk/api/crates/<package>`. The
+`sunrise-mod-points`, `sunrise-internals` and `sunrise-wasmtime` (native mods only; [the game's wasmtime](../../concepts/native-route/8-wasmtime.md)) are named the same way, by `.sunrise/sdk/api/crates/<package>`. The
 SDK carries no `sunrise-internals` crate yet: a mod that names game internals builds through the launcher, which
 puts the mod's own generated facade in its place, and not with a plain `cargo check`. Features
 (`features = ["testing"]` on a dev-dependency) are kept.

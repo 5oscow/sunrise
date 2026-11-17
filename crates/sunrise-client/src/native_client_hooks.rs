@@ -18,7 +18,7 @@ pub struct NativeClientHooks {
     pub player_tab_list_name_format: fn(&LoopContext, u128, &str, &mut Option<crate::text::Text>),
     pub living_drown: fn(&LoopContext, u32, &str, &mut bool, &mut f32, &mut i32, &mut bool),
     pub living_fall: fn(&LoopContext, u32, &str, &mut f64, &mut f32, &mut bool),
-    pub living_jump: fn(&LoopContext, u32, &str),
+    pub living_jump: fn(&LoopContext, u32, &str, [f64; 3]),
     pub living_jump_power: fn(&LoopContext, u32, &str, &mut f32),
     pub living_speed: fn(&LoopContext, u32, &str, &mut f32),
     pub living_flying_speed: fn(&LoopContext, u32, &str, &mut f32),
@@ -186,9 +186,9 @@ pub(crate) fn living_fall(
     }
 }
 
-pub(crate) fn living_jump(context: &LoopContext, entity: u32, kind: &str) {
+pub(crate) fn living_jump(context: &LoopContext, entity: u32, kind: &str, velocity: [f64; 3]) {
     if let Some(hooks) = HOOKS.get() {
-        (hooks.living_jump)(context, entity, kind);
+        (hooks.living_jump)(context, entity, kind, velocity);
     }
 }
 
