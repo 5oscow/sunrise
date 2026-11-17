@@ -1683,12 +1683,12 @@ capabilities = ["registries"]
 
     #[test]
     fn layout_metadata_round_trips_and_malformed_archives_are_refused() {
-        let layouts = br#"{"ruby":{"ruby::T":"0123456789abcdef"}}"#;
+        let layouts = br#"{"ruby":{"ruby::T":"0123456789abcdef0123456789abcdef"}}"#;
         let bytes = Package::write_files(EXAMPLE, &[("layouts.json", layouts)]).unwrap();
         let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
         let package = Package::read_zip(&mut zip).unwrap();
         let changed =
-            crate::layouts::Layouts::read(br#"{"ruby":{"ruby::T":"1123456789abcdef"}}"#.as_slice())
+            crate::layouts::Layouts::read(br#"{"ruby":{"ruby::T":"1123456789abcdef1123456789abcdef"}}"#.as_slice())
                 .unwrap();
         assert_eq!(
             package.layouts.first_difference("ruby", &changed),

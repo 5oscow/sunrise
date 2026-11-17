@@ -51,13 +51,13 @@ impl Layouts {
         let maps: BTreeMap<_, _> = parsed.0.into_iter().map(|(k, v)| (k, v.0)).collect();
         for (owner, types) in &maps {
             for (name, hash) in types {
-                if hash.len() != 16
+                if hash.len() != 32
                     || !hash
                         .bytes()
                         .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
                 {
                     return Err(format!(
-                        "{FILE}: {owner} type {name}: expected 16 lowercase hex digits"
+                        "{FILE}: {owner} type {name}: expected 32 lowercase hex digits"
                     ));
                 }
             }
@@ -82,7 +82,7 @@ mod tests {
         for bytes in [
             b"{".as_slice(),
             br#"{"lib":{},"lib":{}}"#,
-            br#"{"lib":{"T":"0123456789abcdef","T":"0123456789abcdef"}}"#,
+            br#"{"lib":{"T":"0123456789abcdef0123456789abcdef","T":"0123456789abcdef0123456789abcdef"}}"#,
             br#"{"lib":{"T":"ABCDEF0123456789"}}"#,
             br#"{"lib":{"T":12}}"#,
             br#"{"lib":{"T":"0123"}}"#,
@@ -159,15 +159,15 @@ mod edge_tests {
         }
     }
     fn check(native: bool, mismatch: bool) {
-        let dependent = package("addon", native, true, "0123456789abcdef");
+        let dependent = package("addon", native, true, "0123456789abcdef0123456789abcdef");
         let library = package(
             "lib",
             !native,
             false,
             if mismatch {
-                "1123456789abcdef"
+                "1123456789abcdef1123456789abcdef"
             } else {
-                "0123456789abcdef"
+                "0123456789abcdef0123456789abcdef"
             },
         );
         let reason = mixed_refusal(&dependent, &library).unwrap();
@@ -189,17 +189,17 @@ mod edge_tests {
     }
     #[test]
     fn same_target_and_undeclared_edges_are_not_mixed() {
-        let mut dependent = package("addon", true, true, "0123456789abcdef");
-        let library = package("lib", true, false, "1123456789abcdef");
+        let mut dependent = package("addon", true, true, "0123456789abcdef0123456789abcdef");
+        let library = package("lib", true, false, "1123456789abcdef1123456789abcdef");
         assert!(mixed_refusal(&dependent, &library).is_none());
         dependent.manifest.dependencies.clear();
-        let library = package("lib", false, false, "1123456789abcdef");
+        let library = package("lib", false, false, "1123456789abcdef1123456789abcdef");
         assert!(mixed_refusal(&dependent, &library).is_none());
     }
     #[test]
     fn absent_recordings_need_no_layout_check_but_missing_library_type_does() {
-        let mut dependent = package("addon", true, true, "0123456789abcdef");
-        let mut library = package("lib", false, false, "0123456789abcdef");
+        let mut dependent = package("addon", true, true, "0123456789abcdef0123456789abcdef");
+        let mut library = package("lib", false, false, "0123456789abcdef0123456789abcdef");
         library.layouts = Layouts::default();
         assert!(
             mixed_refusal(&dependent, &library)

@@ -247,7 +247,7 @@ mod mixed_tests {
         .unwrap();
         fs::write(
             addon.join("layouts.json"),
-            br#"{"lib":{"T":"0123456789abcdef"}}"#,
+            br#"{"lib":{"T":"0123456789abcdef0123456789abcdef"}}"#,
         )
         .unwrap();
         fs::write(
@@ -265,7 +265,7 @@ mod mixed_tests {
     #[test]
     fn native_to_wasm_layout_mismatch_names_the_type() {
         assert_eq!(
-            refusal("1123456789abcdef"),
+            refusal("1123456789abcdef1123456789abcdef"),
             "addon: layout mismatch in library lib for type T"
         );
     }
@@ -273,7 +273,7 @@ mod mixed_tests {
     #[test]
     fn native_to_wasm_matching_layout_is_still_unsupported() {
         assert_eq!(
-            refusal("0123456789abcdef"),
+            refusal("0123456789abcdef0123456789abcdef"),
             "lib is a wasm mod; native mod addon depends on it: mixed native and wasm dependencies aren't supported yet"
         );
     }
