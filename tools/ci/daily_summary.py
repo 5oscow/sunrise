@@ -33,7 +33,7 @@ Only a run on refs/heads/main with DRY_RUN=false writes; otherwise it prints wha
 Lookups come first and fail the job on any API error (a rate limit included), so a failed lookup never files
 duplicates.
 
-Environment: GITHUB_REPOSITORY, GITHUB_RUN_ID, GITHUB_REF, GITHUB_SERVER_URL, GH_TOKEN, COMMIT, DRY_RUN,
+Environment: GITHUB_REPOSITORY, GITHUB_RUN_ID, GITHUB_RUN_ATTEMPT, GITHUB_REF, GITHUB_SERVER_URL, GH_TOKEN, COMMIT, DRY_RUN,
 RESULTS (toJSON(needs)), REPORTS (the downloaded daily-report-* artifacts), GITHUB_STEP_SUMMARY, GITHUB_OUTPUT.
 """
 
@@ -265,7 +265,7 @@ def named(problem):
     return not problem["test"].startswith("identity withheld")
 
 
-def verdicts(jobs, reports, results, legs):
+def verdicts(jobs, reports, results, legs, parity_report):
     """(failing tests, unfinished legs, passing tests, green legs) of this run.
 
     A failing test is a dict of package, test, kind, panic, policy and leg; an unfinished leg is (leg, conclusion,
@@ -325,23 +325,22 @@ def verdicts(jobs, reports, results, legs):
         if leg in unstarted:
             continue
         if leg == PARITY:
-            report = next((report for report in reports if PARITY in report.get("shards", ())), None)
-            parity_tests = [dict(item, leg=PARITY) for item in (report or {}).get("problems", ())
-                            if TEST_NAME.fullmatch(item["test"])]
-            tests += parity_tests
+            parity_jobs = [job for job in jobs if job["name"].startswith(f"{PARITY} / ")]
+            failures = parity_report["failed"] if parity_report else []
+            tests.extend({"package": PARITY, "test": name, "leg": PARITY, "kind": PARITY,
+                          "panic": None, "policy": None} for name in failures)
             # A completed harness failure is not an infrastructure failure. The two can also coexist.
-            if result != "success" and not (result == "failure" and parity_tests):
-                reason = "did not complete outside its harnesses"
-            elif leg not in seen or not report:
-                reason = "no verdict file: the job ended before it wrote one"
-            elif report["incomplete"]:
+            if not parity_jobs or not parity_report:
+                reason = "no verdict from this run attempt"
+            elif not parity_report["complete"]:
                 reason = "the harness run did not finish"
+            elif result != ("failure" if failures else "success") or any(j["conclusion"] != result for j in parity_jobs):
+                reason = "the parity call did not finish with the reported harness result"
             else:
-                passed |= {(item["package"], item["test"]) for item in report["passed"]}
+                passed |= {(PARITY, name) for name in parity_report["passed"]}
                 green_legs.add(leg)  # the harness run completed; close any infrastructure issue
                 continue
-            steps = [f"{job['name']}: {step}" for job in jobs if job["name"].startswith(f"{PARITY} / ")
-                     for step in failed_steps(job)]
+            steps = [f"{job['name']}: {step}" for job in parity_jobs for step in failed_steps(job)]
             unfinished.append((leg, result, steps, reason))
         elif leg in helpers:
             unfinished.append((leg, result, [], "did not complete: " + ", ".join(f"`{name}`" for name in helpers[leg])
@@ -480,8 +479,7 @@ def detail(item):
         "gpu": f"fails with a Vulkan driver present. Panic location: {where}.",
         "passes-now": f"passes now but is listed as a known failure in `{item['policy']}`: take it off that list.",
         "no-longer-runs": f"is listed in `{item['policy']}` but no longer runs: remove the row or restore the test.",
-        "parity": "differs from vanilla 26.3 in the daily run. Its logs hold vanilla data, so they stay on the runner, "
-                  "in the folder the job log names.",
+        "parity": "failed in the daily run. Its logs hold vanilla data, so they stay on the runner.",
     }
     return f"`{item['test']}` ({item['package']}, leg `{item['leg']}`) {kinds[item['kind']]}"
 
@@ -606,14 +604,20 @@ def main(call=api, run_git=git, query=graphql):
     # Only main writes, whatever the input says: a branch's run is always a dry run.
     writes = env.get("GITHUB_REF") == "refs/heads/main" and env.get("DRY_RUN") == "false"
     run_url = f"{env.get('GITHUB_SERVER_URL', 'https://github.com')}/{env['GITHUB_REPOSITORY']}/actions/runs/{env['GITHUB_RUN_ID']}"
-    reports = [json.loads(path.read_text()) for path in sorted(Path(env["REPORTS"]).glob("*/*.json"))] \
-        if Path(env.get("REPORTS", "")).is_dir() else []
+    reports_dir = Path(env["REPORTS"])
+    reports = [json.loads(path.read_text()) for path in sorted(reports_dir.glob("*/*.json")) if path.name != "parity.json"]
+    attempt = env["GITHUB_RUN_ATTEMPT"]
+    path = reports_dir / f"daily-report-parity-{attempt}" / "parity.json"
+    parity_report = json.loads(path.read_text()) if path.is_file() else None
+    if parity_report and parity_report.get("scope") != {
+            "run_id": env["GITHUB_RUN_ID"], "run_attempt": attempt, "commit": commit}:
+        parity_report = None
     jobs = pages(call, f"actions/runs/{env['GITHUB_RUN_ID']}/jobs?filter=latest", "jobs")
     results = leg_results(json.loads(env["RESULTS"]))
     parity_not_applicable = (results.get("resolve", {}).get("outputs", {}).get("parity_required") == "false"
                              and results.get(PARITY, {}).get("result") == "skipped")
     legs = tuple(leg for leg in LEGS if leg != PARITY or not parity_not_applicable)
-    tests, unfinished, passed, green_legs, green = verdicts(jobs, reports, results, legs)
+    tests, unfinished, passed, green_legs, green = verdicts(jobs, reports, results, legs, parity_report)
     open_issues = {issue["title"]: issue["number"]
                    for issue in pages(call, f"issues?state=open&labels={LABEL}")
                    if "pull_request" not in issue and issue["title"].startswith(PREFIX)}

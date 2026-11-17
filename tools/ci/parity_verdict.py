@@ -1,53 +1,56 @@
 #!/usr/bin/env python3
-"""The daily parity leg's verdict file (daily.yml `parity`, .github/workflows/parity.yml with `report`).
-
-parity_verdict.py LOG REPORT reads tools/parity.py's log on the runner for harness names and PASS/FAIL only and
-writes REPORT in tools/ci/ignored_tests.py's form, which daily_summary.py reads: a problem (package
-`parity`, kind `parity`) for each failing harness, every passing one, and the run as incomplete when the log has no
-final count (the job ended before tools/parity.py did). A harness's shards (`name#2`) are one harness, failing if
-any of its shards' last record failed. No other text of the log is copied: it holds vanilla's values.
-"""
+"""Reduce this attempt's private parity log to harness names and outcomes for the daily summary."""
 import json
 import re
+import shutil
 import sys
 from pathlib import Path
 
-PARITY = "parity"
-RECORD = re.compile(r"^(PASS|FAIL|FLAKY) ([a-z0-9_]+(?:#\d+)?)(?=[ :]|$)")
-FINISHED = re.compile(r"^\d+ passed, \d+ failed in [\d.]+ min\.$")
+RECORD = re.compile(r"^(PASS|FAIL) ([a-z0-9_]+(?:#\d+)?) \d+s(?: |$)")
+FINISHED = re.compile(r"^(\d+) passed, (\d+) failed in [\d.]+ min\.$")
 
 
-def verdict(log):
-    """The report for tools/parity.py's output `log` (None: no log at all)."""
-    if log is None:
-        return {"shards": [PARITY], "problems": [], "passed": [],
-                "incomplete": [{"shard": PARITY, "reason": "no parity log: the harness run did not start"}]}
-    labels, finished = {}, False
+def verdict(log, expected, status):
+    """Latest outcome per selected shard. A footer alone does not prove the selected set ran."""
+    labels, counts = {}, None
     for line in log.splitlines():
-        finished |= bool(FINISHED.match(line))
-        if found := RECORD.match(line):
+        if (found := RECORD.match(line)) and found[2] in expected:
             labels[found[2]] = found[1] == "PASS"
+        if finished := FINISHED.fullmatch(line):
+            counts = (int(finished[1]), int(finished[2]))
+    passes = sum(labels.values())
+    failures = len(labels) - passes
+    complete = (bool(expected) and labels.keys() == expected and counts == (passes, failures)
+                and status == str(int(failures != 0)))
     harnesses = {}
     for label, passed in labels.items():
         name = label.split("#", 1)[0]
         harnesses[name] = harnesses.get(name, True) and passed
-    return {
-        "shards": [PARITY],
-        "problems": [{"package": PARITY, "test": name, "kind": PARITY, "panic": None, "policy": None}
-                     for name, passed in sorted(harnesses.items()) if not passed],
-        "passed": [{"package": PARITY, "test": name} for name, passed in sorted(harnesses.items()) if passed],
-        "incomplete": [] if finished else [{"shard": PARITY, "reason": "the harness run did not finish"}],
-    }
+    return ({"passed": sorted(name for name, passed in harnesses.items() if passed),
+             "failed": sorted(name for name, passed in harnesses.items() if not passed),
+             "complete": complete}, labels)
 
 
-def main(log, report):
-    path = Path(log)
-    result = verdict(path.read_text(errors="replace") if path.is_file() else None)
+def main(folder, report):
+    folder = Path(folder)
+    run_id, run_attempt, commit = (folder / "scope").read_text().splitlines()
+    log, selection, exit_status = (folder / name for name in ("parity.log", "selection.json", "exit"))
+    result, labels = verdict(log.read_text(errors="replace") if log.is_file() else "",
+                             set(json.loads(selection.read_text())) if selection.is_file() else set(),
+                             exit_status.read_text().strip() if exit_status.is_file() else "")
+    result["scope"] = {"run_id": run_id, "run_attempt": run_attempt, "commit": commit}
     Path(report).write_text(json.dumps(result, indent=2) + "\n")
-    print(f"parity verdict: {len(result['passed'])} harnesses passed, {len(result['problems'])} failed"
-          + ("; the run did not finish" if result["incomplete"] else ""))
-    return 0
+    for name in result["passed"] if result["complete"] else []:
+        print(f"PASS {name}")
+    for name in result["failed"]:
+        print(f"FAIL {name}")
+
+    # Preserve failed-shard and first-retry logs across reuse of the slot's scratch directory.
+    logs = Path(".local/parity-runner/logs")
+    for path in [*logs.glob("*.first-run.log"), *(logs / f"{label}.log" for label, passed in labels.items() if not passed)]:
+        if path.is_file():
+            shutil.copyfile(path, folder / path.name)
 
 
 if __name__ == "__main__":
-    sys.exit(main(*sys.argv[1:3]))
+    main(*sys.argv[1:])

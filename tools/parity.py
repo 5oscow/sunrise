@@ -1631,6 +1631,7 @@ def main():
     parser.add_argument("--failed", action="store_true", help="rerun the harnesses that failed last time")
     parser.add_argument("--list", action="store_true", help="print what would run, then stop")
     parser.add_argument("--status", action="store_true", help="print each harness's last result")
+    parser.add_argument("--selection-file", type=Path, help="write selected harness and shard names as JSON before running")
     parser.add_argument("-j", "--jobs", type=int,
                         help="harnesses at once on this machine (default: PARITY_LOCAL_JOBS, else 3 with other hosts or a "
                              "third of its threads, within $FLEET_LOAD_JOBS); runners here share PARITY_MACHINE_JOBS slots")
@@ -1722,6 +1723,8 @@ def main():
         if rounds:
             print(f"Flake check: {', '.join(sorted(rounds))} must pass {args.flake_rounds} times.", flush=True)
     selected = {name: found[name] for name in chosen}
+    if args.selection_file:
+        args.selection_file.write_text(json.dumps(list(selected)) + "\n", encoding="utf-8")
     if args.list or not selected:
         for name in selected:
             print(name)

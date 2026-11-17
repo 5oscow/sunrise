@@ -1,5 +1,6 @@
 """Dyna's switch routes only supported, same-repository events to its pool."""
 import hashlib
+import json
 import os
 from pathlib import Path
 import shutil
@@ -544,36 +545,84 @@ class DynaRoutingTests(unittest.TestCase):
             (tree / "tools" / "test_fast_parity.py").write_text(
                 'run(["cargo", "test", "--profile", "fast", "-p", "sunrise-client", "--lib", "z"])\n')
             env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
-                   "DYNA_CI_BUILD": temporary}
-            Path(temporary, "parity-logs").mkdir()
+                   "PARITY_LOG_DIR": temporary}
             subprocess.run(["bash", "-e", "-c", script], cwd=tree, env=env, check=True)
             self.assertEqual(calls.read_text().splitlines(), ["test --locked --no-run -p sunrise-client-lib --lib",
                                                              "test --locked --no-run -p sunrise-client --lib"])
 
+class ParityWorkflowTests(unittest.TestCase):
+    def setUp(self):
+        from test_ci_concurrency import yaml
+        self.steps = {step.get("name"): step for step in
+                      yaml.load(PARITY.read_text(), Loader=yaml.BaseLoader)["jobs"]["vanilla-parity"]["steps"]}
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.env = {**os.environ, "DYNA_CI_BUILD": str(self.root), "RUNNER_TEMP": str(self.root),
+                    "GITHUB_ENV": str(self.root / "env"), "GITHUB_STEP_SUMMARY": str(self.root / "public-summary"),
+                    "GITHUB_RUN_ID": "77", "GITHUB_RUN_ATTEMPT": "2", "COMMIT": "current"}
+        ci = self.root / "tools/ci"
+        ci.mkdir(parents=True)
+        shutil.copy(ROOT / "tools/ci/parity_verdict.py", ci)
+        self.slot = self.root / "parity-keep/77-2"
+
+    def step(self, name):
+        return subprocess.run(["bash", "-e", "-c", self.steps[name]["run"]], cwd=self.root, env=self.env,
+                              capture_output=True, text=True)
+
+    def initialise(self):
+        result = self.step("Start a fresh private log directory for this attempt")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.env.update([line.split("=", 1) for line in (self.root / "env").read_text().splitlines()])
+        self.assertEqual(Path(self.env["PARITY_LOG_DIR"]), self.slot)
+
+    def test_an_early_failure_cannot_report_a_previous_slots_result(self):
+        # Both an older attempt and stale state in the current directory survive until the first workflow step.
+        for path in (self.slot.with_name("77-1"), self.slot):
+            path.mkdir(parents=True)
+            (path / "parity.log").write_text("FAIL loot_old 3s\n0 passed, 1 failed in 1.0 min.\n")
+            (path / "selection.json").write_text('["loot_old"]')
+            (path / "exit").write_text("1\n")
+        self.initialise()
+        self.assertFalse((self.slot / "parity.log").exists())
+        self.assertTrue((self.slot.with_name("77-1") / "parity.log").exists())
+        # A setup step failed before any harness could run. The always() reporter still runs.
+        self.assertEqual(self.steps["Write the harnesses' verdict"]["if"], "always()")
+        result = self.step("Write the harnesses' verdict")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "")
+        report = json.loads((self.root / "parity.json").read_text())
+        self.assertEqual(report, {"passed": [], "failed": [], "complete": False,
+                                  "scope": {"run_id": "77", "run_attempt": "2", "commit": "current"}})
+        self.assertEqual(self.steps["Upload the harnesses' verdict"]["with"]["name"],
+                         "daily-report-parity-${{ github.run_attempt }}")
+
     def test_parity_public_output_is_names_and_results_only(self):
-        from test_ci_runners import jobs
-        parity = dict(jobs(PARITY.read_text()))["vanilla-parity"]
-        step = parity.split("- name: Run every automatic harness\n", 1)[1]
-        script = textwrap.dedent(step.split("        run: |\n", 1)[1].split("\n      - ", 1)[0])
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            (root / "tools").mkdir()
-            (root / "parity-logs").mkdir()
-            (root / "tools/parity.py").write_text(
-                "import os, sys\nfrom pathlib import Path\n"
-                "Path(os.environ['GITHUB_STEP_SUMMARY']).write_text('private retry reason')\n"
-                "print('PASS loot_a 3s')\nprint('FAIL loot_b 2s  (log)')\n"
-                "print('RETRIED loot_b: private retry reason')\nprint('private mismatch', file=sys.stderr)\nsys.exit(1)\n")
-            summary = root / "public-summary"
-            env = {**os.environ, "DYNA_CI_BUILD": temporary, "RUNNER_TEMP": temporary,
-                   "GITHUB_STEP_SUMMARY": str(summary)}
-            result = subprocess.run(["bash", "-e", "-c", script], cwd=root, env=env, capture_output=True, text=True)
-            self.assertEqual(result.returncode, 1)
-            self.assertEqual(result.stdout.splitlines(), ["PASS loot_a", "FAIL loot_b", "Parity exited 1"])
-            self.assertEqual(result.stderr, "")
-            self.assertFalse(summary.exists())
-            self.assertIn("private mismatch", (root / "parity-logs/parity.log").read_text())
-            self.assertEqual((root / "parity-private-summary").read_text(), "private retry reason")
+        self.initialise()
+        (self.root / "tools/parity.py").write_text(
+            "import os, sys\nfrom pathlib import Path\n"
+            "Path(sys.argv[-1]).write_text('[\"loot_a\", \"loot_b\"]')\n"
+            "Path(os.environ['GITHUB_STEP_SUMMARY']).write_text('private retry reason')\n"
+            "print('PASS loot_a 3s')\nprint('FAIL loot_b 2s  (private path)')\n"
+            "print('PASS private_value 2s')\nprint('RETRIED loot_b: private retry reason')\n"
+            "print('1 passed, 1 failed in 1.0 min.')\nprint('private mismatch', file=sys.stderr)\nsys.exit(1)\n")
+        logs = self.root / ".local/parity-runner/logs"
+        logs.mkdir(parents=True)
+        (logs / "loot_b.log").write_text("private mismatch")
+        (logs / "loot_a.first-run.log").write_text("private retry reason")
+        result = self.step("Run every automatic harness")
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stdout.splitlines(), ["Parity exited 1"])
+        self.assertEqual(result.stderr, "")
+        result = self.step("Write the harnesses' verdict")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines(), ["PASS loot_a", "FAIL loot_b"])
+        self.assertEqual(result.stderr, "")
+        self.assertFalse((self.root / "public-summary").exists())
+        self.assertIn("private mismatch", (self.slot / "parity.log").read_text())
+        self.assertEqual((self.slot / "loot_b.log").read_text(), "private mismatch")
+        self.assertEqual((self.slot / "loot_a.first-run.log").read_text(), "private retry reason")
+        self.assertEqual((self.root / "parity-private-summary").read_text(), "private retry reason")
 
 
 if __name__ == "__main__":

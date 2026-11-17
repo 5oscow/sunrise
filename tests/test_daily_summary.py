@@ -16,7 +16,7 @@ from tools.ci import daily_summary as summary, parity_verdict
 COMMIT = "c" * 40
 LEGS = {leg: {"result": "success"} for leg in summary.LEGS}
 PARITY_JOB = "parity / vanilla-parity"
-PARITY_PASS = "PASS loot_a 3s\n1 passed, 0 failed in 280.0 min.\n"
+PARITY_PASS = {"passed": ["loot_a"], "failed": [], "complete": True}
 
 
 def job(name, conclusion="success", failed=()):
@@ -110,15 +110,18 @@ def git(merged=(), tag=True, ancestors=()):
 
 class DailySummaryTests(unittest.TestCase):
     def run_summary(self, api, reports=(), results=LEGS, ref="refs/heads/main", dry_run="false", merged=(), tag=True,
-                    fixes=None, ancestors=(), parity=PARITY_PASS, run="77"):
-        if parity is not None:
-            reports = [*reports, parity_verdict.verdict(parity)]
+                    fixes=None, ancestors=(), parity=PARITY_PASS, run="77", parity_scope=None):
         with tempfile.TemporaryDirectory() as folder:
             for index, report in enumerate(reports):
                 path = Path(folder, "reports", f"daily-report-{index}")
                 path.mkdir(parents=True)
                 (path / "daily-report.json").write_text(json.dumps(report))
-            env = {"GITHUB_REPOSITORY": "arismoko/horizon", "GITHUB_RUN_ID": run, "GITHUB_REF": ref,
+            if parity is not None:
+                path = Path(folder, "reports", "daily-report-parity-1")
+                path.mkdir(parents=True, exist_ok=True)
+                scope = {"run_id": run, "run_attempt": "1", "commit": COMMIT} | (parity_scope or {})
+                (path / "parity.json").write_text(json.dumps(dict(parity, scope=scope)))
+            env = {"GITHUB_REPOSITORY": "arismoko/horizon", "GITHUB_RUN_ID": run, "GITHUB_RUN_ATTEMPT": "1", "GITHUB_REF": ref,
                    "GITHUB_SERVER_URL": "https://github.com", "COMMIT": COMMIT, "DRY_RUN": dry_run,
                    "RESULTS": json.dumps(results), "REPORTS": str(Path(folder, "reports")),
                    "GITHUB_STEP_SUMMARY": str(Path(folder, "summary")), "GITHUB_OUTPUT": str(Path(folder, "out"))}
@@ -159,17 +162,18 @@ class DailySummaryTests(unittest.TestCase):
         self.run_after(quiet, "failure", ref="refs/heads/topic")
         self.assertEqual(quiet.writes, [])
 
-    def run_parity(self, api, result, log, run="77", merged=(2101, 2102)):
+    def run_parity(self, api, result, log, expected=(), run="77", merged=(2101, 2102)):
         api.jobs = [j for j in GREEN_JOBS if j["name"] != PARITY_JOB] + api.jobs
         if run != "77":
             api.runs = {int(run): {"jobs": api.jobs}}
-        return self.run_summary(api, results=dict(LEGS, parity={"result": result}), parity=log, run=run, merged=merged)
+        verdict = None if log is None else parity_verdict.verdict(log, set(expected), "1" if "FAIL " in log else "0")[0]
+        return self.run_summary(api, results=dict(LEGS, parity={"result": result}), parity=verdict, run=run, merged=merged)
 
     def test_a_failing_harness_files_one_issue_with_the_suspects_and_its_pass_closes_it(self):
         api = Api([job(PARITY_JOB, "failure", ["Every harness"])])
         log = ("PASS loot_a 3s\nFAIL boat_rider 884s  (log)\nPASS sculk#1 2s\nFAIL sculk#2 4s\n"
                "RETRIED sculk#2: failed, then failed again on its one retry\n2 passed, 2 failed in 300.2 min.\n")
-        _, out = self.run_parity(api, "failure", log)
+        _, out = self.run_parity(api, "failure", log, ["loot_a", "boat_rider", "sculk#1", "sculk#2"])
         self.assertEqual(out.splitlines(), ["green=false", "sdk_green=true"])
         self.assertFalse(any(path.startswith("git/") for _, path, _ in api.writes))
         created = [body for method, path, body in api.writes if method == "POST" and path == "issues"]
@@ -180,7 +184,7 @@ class DailySummaryTests(unittest.TestCase):
         # The next run: boat_rider still fails, but sculk passes in every shard and closes.
         next_run = Api([job(PARITY_JOB, "failure")], issues=api.issues)
         self.run_parity(next_run, "failure", "FAIL boat_rider 9s\nPASS sculk#1 1s\nPASS sculk#2 1s\n"
-                        "2 passed, 1 failed in 290.0 min.\n", run="78")
+                        "2 passed, 1 failed in 290.0 min.\n", ["boat_rider", "sculk#1", "sculk#2"], run="78")
         self.assertEqual([(method, path) for method, path, _ in next_run.writes],
                          [("POST", "issues/1000/comments"), ("POST", "issues/1001/comments"), ("PATCH", "issues/1001")])
 
@@ -218,7 +222,8 @@ class DailySummaryTests(unittest.TestCase):
     def test_an_incomplete_parity_run_files_failures_but_closes_nothing(self):
         api = Api([job(PARITY_JOB, "failure")],
                   issues=[{"number": 7, "title": "Daily: parity sculk"}])
-        _, out = self.run_parity(api, "failure", "PASS sculk#1 3s\nFAIL loot_c 2s\n")
+        _, out = self.run_parity(api, "failure", "PASS sculk#1 3s\nFAIL loot_c 2s\n1 passed, 1 failed in 1.0 min.\n",
+                                 ["sculk#1", "sculk#2", "loot_c"])
         self.assertIn("green=false", out)
         self.assertEqual([body["title"] for method, path, body in api.writes if path == "issues"],
                          ["Daily: parity loot_c", "Daily: parity did not complete"])
@@ -226,10 +231,20 @@ class DailySummaryTests(unittest.TestCase):
 
     def test_a_cancelled_parity_call_with_a_finished_red_verdict_still_did_not_complete(self):
         api = Api([job(PARITY_JOB, "cancelled")], issues=[{"number": 7, "title": "Daily: parity did not complete"}])
-        _, out = self.run_parity(api, "cancelled", "FAIL loot_a 3s\n0 passed, 1 failed in 1.0 min.\n")
+        _, out = self.run_parity(api, "cancelled", "FAIL loot_a 3s\n0 passed, 1 failed in 1.0 min.\n", ["loot_a"])
         self.assertIn("green=false", out)
         self.assertEqual([(method, path) for method, path, _ in api.writes],
                          [("POST", "issues"), ("POST", "issues/7/comments")])
+
+    def test_parity_verdict_must_match_run_attempt_and_commit(self):
+        for mismatched in ({"run_id": "76"}, {"run_attempt": "0"}, {"commit": "old"}):
+            with self.subTest(scope=mismatched):
+                api = Api(GREEN_JOBS, issues=[{"number": 7, "title": "Daily: parity loot_a"}])
+                _, out = self.run_summary(api, parity_scope=mismatched)
+                self.assertEqual(out.splitlines(), ["green=false", "sdk_green=true"])
+                self.assertEqual([body["title"] for _, path, body in api.writes if path == "issues"],
+                                 ["Daily: parity did not complete"])
+                self.assertFalse(any(method == "PATCH" for method, _, _ in api.writes))
 
     def test_all_green_moves_the_tag_and_closes_issues_that_went_green(self):
         api = Api(GREEN_JOBS, issues=[{"number": 5, "title": "Daily: sunrise-world a::b"},
@@ -482,7 +497,7 @@ class DailySummaryTests(unittest.TestCase):
 
         def run(runs):
             api = Api(jobs, runs=runs)
-            env = {"GITHUB_REPOSITORY": "arismoko/horizon", "GITHUB_RUN_ID": "77", "GITHUB_REF": "refs/heads/main",
+            env = {"GITHUB_REPOSITORY": "arismoko/horizon", "GITHUB_RUN_ID": "77", "GITHUB_RUN_ATTEMPT": "1", "GITHUB_REF": "refs/heads/main",
                    "GITHUB_SERVER_URL": "https://github.com", "COMMIT": COMMIT, "DRY_RUN": "false",
                    "RESULTS": json.dumps(dict(LEGS, shards={"result": "failure"})), "REPORTS": "/nonexistent"}
             with tempfile.TemporaryDirectory() as folder, \

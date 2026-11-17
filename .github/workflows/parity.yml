@@ -12,6 +12,8 @@ defaults:
     shell: bash
 permissions:
   contents: read
+env:
+  SUNRISE_TELEMETRY_URL: "off"
 jobs:
   vanilla-parity:
     runs-on: dyna-large
@@ -20,6 +22,18 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Start a fresh private log directory for this attempt
+        env:
+          COMMIT: ${{ inputs.commit }}
+        run: |
+          root="${DYNA_CI_BUILD:?}/parity-keep"
+          mkdir -p "$root"
+          dir="$root/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          rm -rf -- "$dir"
+          mkdir "$dir"
+          printf '%s\n' "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$COMMIT" > "$dir/scope"
+          echo "PARITY_LOG_DIR=$dir" >> "$GITHUB_ENV"
+          find "$root" -mindepth 1 -maxdepth 1 -type d -mmin +4320 -exec rm -rf {} +
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.commit }}
@@ -46,8 +60,8 @@ jobs:
         run: python3 tools/ci/cargo_jobs.py --job-mib 3072 --cap
       - name: Set up disk-backed parity scratch and prepared vanilla data
         run: |
-          rm -rf "$DYNA_CI_BUILD/parity-out" "$DYNA_CI_BUILD/parity-tmp" "$DYNA_CI_BUILD/parity-logs"
-          mkdir -p "$DYNA_CI_BUILD/parity-out" "$DYNA_CI_BUILD/parity-tmp" "$DYNA_CI_BUILD/parity-logs"
+          rm -rf "$DYNA_CI_BUILD/parity-out" "$DYNA_CI_BUILD/parity-tmp"
+          mkdir -p "$DYNA_CI_BUILD/parity-out" "$DYNA_CI_BUILD/parity-tmp"
           ln -s "$DYNA_CI_BUILD/parity-out" .local
           # The probes' build folder (tools/parity.py's .local/parity-target) lives under the slot's persistent target,
           # so a run rebuilds only what changed instead of the whole game from cold (a harness's own 900 s build limit
@@ -59,7 +73,7 @@ jobs:
           # other trees' passes: this run's records start empty, on the slot.
           echo "PARITY_SHARED=$DYNA_CI_BUILD/parity-out/shared" >> "$GITHUB_ENV"
           SUNRISE_DYNA_CACHE=true SUNRISE_PREPARED_CACHE="$DYNA_CI_BUILD/vanilla" SUNRISE_SHARED_SOURCE=/cache/sunrise-local \
-            bash tools/ci/vanilla-data.sh > "$DYNA_CI_BUILD/parity-logs/setup.log" 2>&1
+            bash tools/ci/vanilla-data.sh > "$PARITY_LOG_DIR/setup.log" 2>&1
       # The game opens a window even with --offscreen, and the runner has no display: a virtual X display for every
       # harness, started from this workflow and left running for the job.
       - name: Virtual display
@@ -78,7 +92,7 @@ jobs:
           CARGO_PROFILE_DEV_OPT_LEVEL: '3'
         run: |
           export CARGO_TARGET_DIR="$PWD/.local/parity-target"
-          exec > "$DYNA_CI_BUILD/parity-logs/game-probes.log" 2>&1
+          exec > "$PARITY_LOG_DIR/game-probes.log" 2>&1
           scripts=(tools/test_*_parity.py)
           if grep -q "'--example', 'client_probe'" "${scripts[@]}"; then
             cargo build --profile fast -p sunrise-client-lib --example client_probe
@@ -99,7 +113,7 @@ jobs:
           done
       - name: Build parity probes
         run: |
-          exec > "$DYNA_CI_BUILD/parity-logs/probes.log" 2>&1
+          exec > "$PARITY_LOG_DIR/probes.log" 2>&1
           cargo build --release --bin sunrise-parity
           cargo build --release --bin sunrise-tick-parity
           cargo build --release --bin sunrise-geometry-parity
@@ -117,38 +131,24 @@ jobs:
         run: |
           # The runner writes retry reasons to the step summary as well as stdout; keep both private.
           export GITHUB_STEP_SUMMARY="$RUNNER_TEMP/parity-private-summary"
-          log="$DYNA_CI_BUILD/parity-logs/parity.log"
+          log="$PARITY_LOG_DIR/parity.log"
           status=0
-          python3 tools/parity.py --all -j 4 --timeout 2400 > "$log" 2>&1 || status=$?
-          grep -aEo '^(PASS|FAIL) [a-z0-9_]+(#[0-9]+)? ' "$log" | sed 's/ $//' || true
+          python3 tools/parity.py --all -j 4 --timeout 2400 --selection-file "$PARITY_LOG_DIR/selection.json" \
+            > "$log" 2>&1 || status=$?
+          printf '%s\n' "$status" > "$PARITY_LOG_DIR/exit"
           echo "Parity exited $status"
           exit "$status"
       # Only names and outcomes go to the daily summary. Keep setup and harness logs on the runner slot.
       - name: Write the harnesses' verdict
         if: always()
-        run: python3 tools/ci/parity_verdict.py "$DYNA_CI_BUILD/parity-logs/parity.log" "$RUNNER_TEMP/daily-report.json"
+        run: |
+          [ -n "${PARITY_LOG_DIR:-}" ] || exit 0  # setup did not initialise this attempt
+          python3 tools/ci/parity_verdict.py "$PARITY_LOG_DIR" "$RUNNER_TEMP/parity.json"
       - name: Upload the harnesses' verdict
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: daily-report-parity
-          path: ${{ runner.temp }}/daily-report.json
+          name: daily-report-parity-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/parity.json
           if-no-files-found: ignore
           retention-days: 7
-      - name: Keep private failure logs on the runner
-        if: failure()
-        run: |
-          keep="$DYNA_CI_BUILD/parity-keep/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-          mkdir -p "$keep"
-          cp -a "$DYNA_CI_BUILD/parity-logs/." "$keep/"
-          logs="$GITHUB_WORKSPACE/.local/parity-runner/logs"
-          if [ -d "$logs" ]; then
-            cp -a "$logs" "$keep/"
-          fi
-          echo "Failure logs are kept on runner $RUNNER_NAME in $keep" >> "$GITHUB_STEP_SUMMARY"
-      - name: Prune kept failure logs
-        if: always()
-        run: |
-          keep="$DYNA_CI_BUILD/parity-keep"
-          [ -d "$keep" ] || exit 0
-          find "$keep" -mindepth 1 -maxdepth 1 -type d -mmin +4320 -exec rm -rf {} +
