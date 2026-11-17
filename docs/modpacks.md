@@ -312,7 +312,8 @@ inspected:
 │   ├── port/                 the agent's Rust crate (tiers logic and up)
 │   ├── harness/              per-mod harness results and logs
 │   └── <id>.smod
-└── coverage.json, coverage.md
+├── coverage.json, coverage.md
+└── launcher-status.json      the launcher's copy of the porter's last status reply (docs/api/port-pack.md)
 ```
 
 **Status.** `import`, `inventory`, `fetch`, `carry` and `report` run today, and `port` runs
