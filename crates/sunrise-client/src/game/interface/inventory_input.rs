@@ -263,7 +263,9 @@ impl Game<'_> {
     }
     /// Mouse movement while a quick craft drag is running.
     pub(super) fn inventory_drag_move(&mut self) {
-        if self.container_drag() || (self.tweaks_on() && self.tweak_drag_move(self.inventory_target().0)) {
+        if self.container_drag()
+            || (self.tweaks_on() && self.tweak_drag_move(self.inventory_target().0))
+        {
             return;
         }
         let Some((ty, slots)) = self.inv_drag.clone() else {
