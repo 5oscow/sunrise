@@ -2,6 +2,7 @@
 //! guest's collision exclusions (#3717): a mod's boxes in which the level's blocks don't stop the
 //! player are the same boxes its client moves it through.
 use super::{Guest, Hub, TickCtx};
+use crate::entity_solids::{Mover as Rule, Solids};
 use crate::{
     collisions::{EntityCollisions, SceneCollisions},
     world::World,
@@ -103,6 +104,38 @@ impl Hub {
         done.map(|done| [from[0] + done.x, from[1] + done.y, from[2] + done.z])
     }
 
+    /// The boxes of the solid entities the guest, moving from `from` to `to`, may meet: those
+    /// the player rule takes that meet the swept box widened by the step height.
+    fn solid_boxes(&self, g: &Guest, from: [f64; 3], to: [f64; 3]) -> Vec<Aabb> {
+        if self.move_solids.is_empty() {
+            return Vec::new();
+        }
+        let d = g.dimensions();
+        let half = f64::from(d.width) / 2.0;
+        let at = |p: [f64; 3]| {
+            Aabb::new(
+                Vec3::new(p[0] - half, p[1], p[2] - half),
+                Vec3::new(p[0] + half, p[1] + f64::from(d.height), p[2] + half),
+            )
+        };
+        // The step's reach above, and `EntityGetter`'s 1e-7 on every side.
+        let swept = at(from)
+            .union_bounds(at(to))
+            .inflate(Vec3::new(1.0e-7, 0.6 + 1.0e-7, 1.0e-7));
+        let solids = Solids::new(
+            Rule::Player {
+                feet_y: from[1],
+                riding: None,
+            },
+            Some(swept),
+        );
+        self.move_solids
+            .iter()
+            .filter(|c| solids.accepts(c, || None))
+            .map(|c| c.bounds)
+            .collect()
+    }
+
     /// The collision part of handlePlayerPositionChange: whether the move
     /// counts as moved wrongly (logged), and whether it is refused (the
     /// player is sent back where they were).
@@ -127,10 +160,17 @@ impl Hub {
         if g.spectator() || g.sleeping {
             return (false, false, false);
         }
-        let mut scene = SceneCollisions {
-            world: ctx.world,
-            binding,
-            subject: None,
+        // The solid entities (`Entity.collide`'s `getEntityCollisions`) meeting the move's swept
+        // box: a few tests of the level's few boats and shulkers, no level-wide query.
+        let entities = self.solid_boxes(g, from, to);
+        let mut scene = EntityCollisions {
+            blocks: SceneCollisions {
+                world: ctx.world,
+                binding,
+                subject: None,
+            },
+            entities: &entities,
+            border: None,
         };
         // A Player-cause move through the move gate (#2414); the gate records the movement
         // unchanged and its delta is what the collision resolves.

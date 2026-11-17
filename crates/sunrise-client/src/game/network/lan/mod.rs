@@ -2440,6 +2440,9 @@ impl Game<'_> {
         // before this tick moves anyone.
         let entities = std::mem::take(&mut host.states);
         let spawn = self.world_spawn_position();
+        let mut solids = std::mem::take(&mut host.hub.move_solids);
+        self.fill_move_solids(&mut solids, !host.hub.guests.is_empty());
+        host.hub.move_solids = solids;
         let events = {
             let clock_rate = self.network_clock_rate();
             let mut ctx = TickCtx {
@@ -2775,11 +2778,22 @@ impl Game<'_> {
             }
             host.hub.far_level(&self.save);
             let spawn = self.world_spawn_position();
+            let mut solids = self
+                .lan
+                .as_mut()
+                .map(|host| std::mem::take(&mut host.hub.move_solids))
+                .unwrap_or_default();
+            let guests = self
+                .lan
+                .as_ref()
+                .is_some_and(|host| !host.hub.guests.is_empty());
+            self.fill_move_solids(&mut solids, guests);
             let (events, last) = {
                 let clock_rate = self.network_clock_rate();
                 let Some(host) = self.lan.as_mut() else {
                     return;
                 };
+                host.hub.move_solids = solids;
                 let mut ctx = TickCtx {
                     sea_level: self.end.locator().map_or(63, |terrain| terrain.sea_level()),
                     world: &mut self.world,

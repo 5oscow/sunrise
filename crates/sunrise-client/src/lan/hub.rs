@@ -406,6 +406,10 @@ pub struct Hub {
     /// The `player_movement_check` and `elytra_movement_check` game rules,
     /// set by the game before each tick.
     pub movement_checks: (bool, bool),
+    /// The level's entities that can be solid to a player (boats, shulkers, happy ghasts), set by
+    /// the game once before each tick's packets: the moved-wrongly check resolves a report
+    /// against those meeting the move's swept box (`Entity.collide`'s entity collisions).
+    pub move_solids: Vec<crate::entity_solids::Candidate>,
     /// The anticheat, when `server.toml` turns it on (dedicated servers).
     pub anticheat: Option<Box<super::anticheat::Anticheat>>,
     /// The chat filter, when `server.toml` turns it on (dedicated servers).
@@ -825,6 +829,7 @@ impl Hub {
             reduced_debug_info: false,
             limited_crafting: false,
             movement_checks: (true, true),
+            move_solids: Vec::new(),
             anticheat: None,
             chat_filter: None,
             far: None,
@@ -5360,6 +5365,7 @@ mod tests {
     mod collision_exclusion_tests;
     mod displace_tests;
     mod effect_meta_tests;
+    mod entity_move_check_tests;
     #[path = "../far_tests.rs"]
     mod far_tests;
     mod live_player_limit_tests;

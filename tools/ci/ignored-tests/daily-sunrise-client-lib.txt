@@ -59,6 +59,7 @@ sunrise-client-lib join_seq::visibility::tests::unbound_passes_block_until_resto
 sunrise-client-lib lan::conn::tests::profession_mod_missing_refused_before_pairing lib daily child-process
 sunrise-client-lib lan::entity::tests::send_on_threads_matches_send_in_order lib daily slow
 sunrise-client-lib lan::hub::tests::collision_exclusion_tests::the_server_checks_a_guests_moves_through_the_same_exclusions_as_its_client lib daily resources
+sunrise-client-lib lan::hub::tests::entity_move_check_tests::a_reported_move_through_a_shulker_is_moved_wrongly_and_one_that_stops_at_its_side_is_not lib daily resources
 sunrise-client-lib lan::hub::tests::requeue_matches_the_scan lib daily slow
 sunrise-client-lib lan::io_pool::memory_progress_tests::tcp_server_resumes_only_from_writable_readiness lib daily network
 sunrise-client-lib lan::io_pool::tests::a_close_ends_a_disconnect_the_client_does_not_take lib daily network
