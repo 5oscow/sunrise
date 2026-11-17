@@ -9,6 +9,8 @@ pub use native_libraries::{GAME_BUILD_ID, RUSTC_VERSION, main};
 mod loading;
 pub use loading::main_with;
 
+mod mods_button;
+
 /// Establish main-thread stack capacity before compiler-child handling.
 pub use sunrise_guest_stack::prepare_main as prepare_main_stack;
 pub use sunrise_mod_wasm::compile_child;
