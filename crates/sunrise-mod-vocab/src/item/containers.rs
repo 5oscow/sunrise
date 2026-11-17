@@ -197,13 +197,10 @@ impl std::ops::DerefMut for ModBlockEntity {
         &mut self.fields
     }
 }
-/// The container of a mod block's block entity, as a `WorldlyContainer`
-/// says it: its slot count, the slots each face reaches
-/// (`getSlotsForFace`, by `Direction`: down, up, north, south, west, east),
-/// and the slots hoppers may put into (`canPlaceItemThroughFace`) and take
-/// from (`canTakeItemThroughFace`); and the vanilla menu that shows its
-/// slots when the block is used, if any (`MOD_MENUS`).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, sunrise_mod_api_macros::Wire)]
+/// What a slot of a mod container admits, besides what its face rules and the item allow.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+// exhaustive: the three admission rules are the whole set a declaration can name
+#[derive(sunrise_mod_api_macros::Wire)]
 pub enum ModContainerInsertRule {
     /// Accept any item that the slot's other container rules allow.
     #[default]
@@ -227,6 +224,12 @@ impl ModContainerInsertRule {
     }
 }
 
+/// The container of a mod block's block entity, as a `WorldlyContainer`
+/// says it: its slot count, the slots each face reaches
+/// (`getSlotsForFace`, by `Direction`: down, up, north, south, west, east),
+/// and the slots hoppers may put into (`canPlaceItemThroughFace`) and take
+/// from (`canTakeItemThroughFace`); and the vanilla menu that shows its
+/// slots when the block is used, if any (`MOD_MENUS`).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 // exhaustive: the game builds it with a literal; mods only read it
 #[derive(sunrise_mod_api_macros::Wire)]

@@ -411,7 +411,7 @@ fn hopper_respects_a_mod_container_only_when_empty_rule() {
             hopper(
                 game,
                 vec![
-                    Some(ItemStack::new("minecraft:dirt", 1)),
+                    Some(ItemStack::new("minecraft:stone", 1)),
                     None,
                     None,
                     None,
@@ -456,7 +456,7 @@ fn hopper_respects_a_mod_container_only_when_empty_rule() {
                     .unwrap()
                     .item
                     .as_ref(),
-                "minecraft:dirt"
+                "minecraft:stone"
             );
 
             hopper(
