@@ -14,6 +14,7 @@ impl Renderer {
         &mut self,
         frame: &Frame<'_>,
         landed: Duration,
+        laps: &mut crate::spans::Laps,
     ) -> Result<Option<AcquiredFrame>> {
         if self.first_frame == FirstFrame::Acquire {
             // Once: a minimized window acquires nothing for a while.
@@ -42,6 +43,7 @@ impl Renderer {
             }
             self.surface_unconfigured = false;
         }
+        laps.lap("r_prepare");
         // Frame generation: its present thread acquires and presents, this frame draws
         // into frames of its own. Not over menus that blur the frame, a shader pack's own post
         // passes, HDR output without the HUD's layer (or the 16-bit frame HDR was started

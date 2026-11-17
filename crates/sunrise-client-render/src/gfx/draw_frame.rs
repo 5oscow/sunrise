@@ -66,13 +66,12 @@ impl Renderer {
             surface_frame,
             reconfigure,
             target_texture,
-        }) = self.acquire_frame_surface(frame, landed)?
+        }) = self.acquire_frame_surface(frame, landed, &mut laps)?
         else {
             return Ok(false);
         };
 
         let size = [self.config.width, self.config.height];
-        laps.lap("r_prepare");
         // One command buffer for the frame, after the section copies staged
         // since the last one: Metal commits every command buffer wgpu-core
         // makes (one per run of copies and two per pass) on its own.
