@@ -1,6 +1,5 @@
 //! Unit and integration test suites for gfx rendering, culling, and pipelines.
 
-
 #[test]
 fn taa_culling_covers_jittered_view_edges_but_still_rejects_behind_the_camera() {
     use super::*;
@@ -13,9 +12,7 @@ fn taa_culling_covers_jittered_view_edges_but_still_rejects_behind_the_camera() 
                 * crate::camera::view_matrix(yaw, pitch);
             let matrix = world_projection(70.0, 16.0 / 9.0, 512.0) * pose;
             let guarded = taa_frustum(matrix, size);
-            let ordinary = Frustum {
-                planes: frustum(matrix),
-            };
+            let ordinary = Frustum::from_planes(frustum(matrix));
             for x in [-1.0, 1.0] {
                 for y in [-1.0, 1.0] {
                     let jitter = Mat4::from_translation(Vec3::new(
@@ -59,9 +56,7 @@ fn depth_culling_keeps_jittered_edges_and_depth_crossing_models() {
         let pose = Mat4::from_translation(Vec3::new(0.03, -0.02, 0.01))
             * crate::camera::view_matrix(yaw, pitch);
         let matrix = world_projection(70.0, 16.0 / 9.0, 512.0) * pose;
-        let view = Frustum {
-            planes: frustum(matrix),
-        };
+        let view = Frustum::from_planes(frustum(matrix));
         for size in [[1, 1], [320, 180], [1280, 720], [3840, 2160]] {
             for (x, y) in [(-1.0, 1.0), (1.0, -1.0)] {
                 let jitter =
