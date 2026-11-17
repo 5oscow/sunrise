@@ -107,7 +107,16 @@ source and caches), `toolchain` (as for `native-build`) and `mods` (the mod's fo
 `native-discover` checks the mod against the pinned game's source with the deprecation lint forced on the mod alone;
 it runs the tool itself as Cargo's rustc wrapper for that.
 
+## `native-layout`
+
+`cargo sunrise-mod native-layout` lays out a local prebuilt game, the folder `tools/prebuilt_game.py build` makes from a
+checkout, as an SDK release's slices, for a build no SDK is published for. The plan is `{"contract": 2, "prebuilt",
+"build", "host", "target", "out"}`. It checks that `prebuilt` is that build id's game for that host triple and side
+(`client` or `server`), built with this SDK's Rust. Then it lays its files out by links under `out`, which it replaces;
+`prebuilt` itself is never changed. The reply is `{"package": {"runtime", "api", "engine"}}`, the three folders a
+`native-build` plan names. A folder that is something else gives exit 1 with an error reply of kind `layout`.
+
 ## Changelog
 
-- contract 2: `native-check`, `native-discover`, `native-lock`; `failed` names the blamed mod (`blame`) instead of a caller matching its text; `built` adds `internals` and `mixins` for the build record; both list the kept files they `used`.
+- contract 2: `native-check`, `native-discover`, `native-lock`, `native-layout`; `failed` names the blamed mod (`blame`) instead of a caller matching its text; `built` adds `internals` and `mixins` for the build record; both list the kept files they `used`.
 - contract 1: the plan, `mod`, `consent`, `built` and `failed`.

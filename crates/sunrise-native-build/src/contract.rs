@@ -69,6 +69,24 @@ pub struct LockPlan {
     pub update: bool,
 }
 
+/// What `native-layout` reads: a local prebuilt game (`tools/prebuilt_game.py build`) to check and lay out as an SDK's slices.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct LayoutPlan {
+    /// Must be [`CONTRACT`].
+    pub contract: u32,
+    /// The local prebuilt game's folder; it is never changed.
+    pub prebuilt: PathBuf,
+    /// The build id (the game's full commit) it must be.
+    pub build: String,
+    /// The host triple it must be built for.
+    pub host: String,
+    /// `client` or `server`: the side it must be.
+    pub target: TargetName,
+    /// Where to lay out its slices, by links: replaced when it exists.
+    pub out: PathBuf,
+}
+
 /// [`Target`] as a plan names it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
