@@ -4015,6 +4015,8 @@ pub(crate) mod tests {
     fn installed_slot_rules_change_mod_menu_placement() {
         use crate::native_client_hooks::test_hooks::{JUMPS, STILL_VALID_ASKED};
         crate::native_client_hooks::test_hooks::install();
+        JUMPS.set(0);
+        STILL_VALID_ASKED.set(0);
         let kind = Kind::Mod(Box::leak(Box::new(crate::containers::ModMenuType {
             id: "test:rules",
             slots: 1,
@@ -4238,7 +4240,7 @@ pub(crate) mod tests {
             landing(&after),
             (4.0, 2.0, false, true, [1.0, 3.0, 3.0], true)
         );
-        assert_eq!(JUMPS.load(std::sync::atomic::Ordering::Relaxed), 2);
+        assert_eq!(JUMPS.get(), 2);
         // Heal, breathe and drown read it as well.
         let health = |context: &LoopContext| {
             let (mut amount, mut cancel) = (2.0, false);
@@ -4349,7 +4351,7 @@ pub(crate) mod tests {
             };
             menu.still_valid(context, &world, &guest)
         };
-        let asked = || STILL_VALID_ASKED.load(std::sync::atomic::Ordering::Relaxed);
+        let asked = || STILL_VALID_ASKED.get();
         // The guest's eyes are at (0, 65.62, 0), its reach 4.5 plus 4: a chest 3
         // blocks away stays open, one 20 blocks away closes, and a vanilla menu
         // type asks no part either way, though one answers for it.
