@@ -4,7 +4,7 @@ Attach server-side behaviour to a content-declared effect with a `MobEffectPart`
 
 ```rust,ignore
 let effect = r.effect_key("meals:comfort");
-r.mob_effect_part(&effect, Comfort)?;
+r.mob_effect_part(&effect, Comfort).expect("attach Comfort to its effect");
 ```
 
 Implement the Part with `#[mod_api::sunrise_part]`. Its two methods are:

@@ -645,23 +645,6 @@ fn dispatch_contracts() {
     let mut lines = Vec::new();
     dispatch_tooltip(&host, &ItemStack::default(), &mut lines);
     assert_eq!(lines.iter().map(|line| line.1).collect::<Vec<_>>(), [1, 2]);
-    let mut apply = false;
-    calls.lock().unwrap().clear();
-    install_parts(Parts {
-        effects: vec![part(1, &calls)],
-        ..Parts::default()
-    });
-    dispatch_should_apply_effect_tick_this_tick(
-        &host,
-        calls::ShouldApplyEffectTickThisTickCall {
-            effect: EffectKey(7),
-            tick_count: 19,
-            amplifier: 2,
-            apply: &mut apply,
-        },
-    );
-    assert!(apply);
-    assert_eq!(*calls.lock().unwrap(), [1]);
     let source = HurtSource {
         damage_type: "damage",
         position: None,

@@ -1565,24 +1565,33 @@ impl Game<'_> {
         };
         let mut keep = true;
         let mut changes = Vec::new();
-        let mut keys = self.potions.tick_keys.borrow_mut();
-        keys.clear();
-        keys.extend(active_effects.filter_map(mod_api::__private::effect_key_by_index));
+        let keys = std::cell::OnceCell::new();
+        let (keep_out, changes_out) = (&mut keep, &mut changes);
         mod_api::__private::dispatch_mob_effect_tick(
             self,
             tick_count,
-            mod_api::__private::ApplyEffectTickCall {
-                effect,
-                dimension: self.dim.id(),
-                entity,
-                amplifier,
-                holder,
-                health,
-                max_health,
-                food,
-                active_effects: &keys,
-                changes: &mut changes,
-                keep: &mut keep,
+            effect,
+            amplifier,
+            |effect, amplifier| {
+                let keys = keys.get_or_init(|| {
+                    let mut keys = self.potions.tick_keys.borrow_mut();
+                    keys.clear();
+                    keys.extend(active_effects.filter_map(mod_api::__private::effect_key_by_index));
+                    keys
+                });
+                mod_api::__private::ApplyEffectTickCall {
+                    effect,
+                    dimension: self.dim.id(),
+                    entity,
+                    amplifier,
+                    holder,
+                    health,
+                    max_health,
+                    food,
+                    active_effects: keys,
+                    changes: changes_out,
+                    keep: keep_out,
+                }
             },
         );
         (keep, changes)
@@ -3008,7 +3017,12 @@ mod tests {
     }
     struct OtherEffectMod;
     #[mod_api::__subscriptions]
-    impl mod_api::Hooks for OtherEffectMod {}
+    impl mod_api::Hooks for OtherEffectMod {
+        fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
+            let effect = r.effect_key("other-mod:foreign");
+            r.mob_effect_part(&effect, OtherEffectMod).unwrap();
+        }
+    }
     #[mod_api::sunrise_part]
     impl mod_api::MobEffectPart for OtherEffectMod {
         fn should_apply_effect_tick_this_tick(
@@ -3048,12 +3062,17 @@ mod tests {
             ]),
             || {
                 assert!(brewing::register_mod_effects(
-                    ["test:comfort", "test:nourishment"].map(|id| (
+                    [
+                        ("test:comfort", "effect-owner"),
+                        ("test:nourishment", "effect-owner"),
+                        ("other-mod:foreign", "other-mod"),
+                    ]
+                    .map(|(id, owner)| (
                         id.into(),
                         0,
                         brewing::Category::Beneficial,
                         None,
-                        "effect-owner".into(),
+                        owner.into(),
                     ))
                 ));
                 super::super::native_entity_refs::tests::with_game(|game| {

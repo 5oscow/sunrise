@@ -10,6 +10,7 @@ pub trait Hooks {
         side = "server",
         scope = "effect",
         key = "effect",
+        target = "mod_api::parts::effects::dispatch_mob_effect_tick",
         version = 3,
         contract = "listen",
         host = "read",

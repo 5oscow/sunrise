@@ -80,11 +80,13 @@ pub(super) fn emit<'a>(
         let is_render = is_render(hook);
         let external = free_function_source(target);
         let in_game = external.is_none();
-        // An explicit catalog signature can stand on its own. Existing engine
-        // wrappers remain optional conversion boundaries, not signature owners.
-        let declaration_only = !hook.call.is_empty()
-            && external.is_none()
-            && !methods.iter().any(|method| method.sig.ident == native);
+        // Effect cadence and action have one paired dispatcher. Generate the events and
+        // Part methods for both, but neither a `fire` wrapper nor a standalone dispatch.
+        let declaration_only = target == crate::hook_targets::EFFECT_TICK_TARGET
+            && hook
+                .scope
+                .as_ref()
+                .is_some_and(|scope| scope.kind == PartKind::Effect);
         let (method, call) = if declaration_only {
             let carrier = format!("{}Call", hook_id(name));
             let receiver = if hook.host == Some(crate::catalog::HostAccess::Read) {
@@ -568,7 +570,7 @@ pub(super) fn emit<'a>(
         if let Some((name, ty)) = output.as_ref().filter(|_| contract != Contract::Collect) {
             dispatch_params.push(format!("{name}: {}", ty.to_token_stream()));
         }
-        if !declared.is_empty() {
+        if !declared.is_empty() && (!declaration_only || name == "apply_effect_tick") {
             dispatch_params.truncate(usize::from(host.is_some()));
             let (fields, generics) = carrier_fields(&carried);
             dispatch_params.push(format!(
@@ -576,7 +578,7 @@ pub(super) fn emit<'a>(
                 if generics.is_empty() { "" } else { "<'_>" }
             ));
             calls.push_str(&format!(
-                "/// What the game passes `dispatch_{name}`: the hook's declared parameters.\n#[doc(hidden)]\n#[allow(missing_docs)]\n// no wire: internal call carrier, not an owned boundary value.\npub struct {carrier}{generics} {{\n{fields}}}\n"
+                "/// The hook's declared parameters at the engine boundary.\n#[doc(hidden)]\n#[allow(missing_docs)]\n// no wire: internal call carrier, not an owned boundary value.\npub struct {carrier}{generics} {{\n{fields}}}\n"
             ));
         }
         for (name, ty) in &stack_outputs {
@@ -867,6 +869,9 @@ pub(super) fn emit<'a>(
         dispatch.push_str(&format!(
             "/// What [`{trait_name}::{name}`] is told. Each field is that hook's argument of the same name, described in the hook's doc.\n#[allow(missing_docs)]\n{wire_form}\npub struct {event_type}{generics} {{\n{fields}}}\n"
         ));
+        if declaration_only {
+            continue;
+        }
         let build = format!(
             "{stack_snapshots}{}let {}{event} = {event_type} {{ {} }};",
             if answered && contract == Contract::Collect {

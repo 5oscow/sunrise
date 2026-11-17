@@ -21,6 +21,7 @@ pub trait Hooks {
         side = "server",
         scope = "effect",
         key = "effect",
+        target = "mod_api::parts::effects::dispatch_mob_effect_tick",
         version = 3,
         contract = "listen",
         host = "read",
@@ -40,8 +41,7 @@ pub trait Hooks {
         keep: &mut bool,
     );
     /// `MobEffect.onEffectAdded`: `LivingEntity.addEffect` gave `entity`
-    /// (as in `native_apply_effect_tick`) the content mod's effect `effect`,
-    /// which it didn't have. Server-side.
+    /// the content mod's effect `effect`, which it didn't have. Server-side.
     #[hook(
         side = "server",
         contract = "listen",

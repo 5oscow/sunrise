@@ -752,28 +752,36 @@ fn wire_loopback_checked_append_is_atomic_and_bit_exact() {
     mod_api::__private::resolve_effects(["wire_test:tick"], |_| Some(0)).unwrap();
     let holder = mod_api::LivingRef::new(mod_api::EntityRef::new(mod_api::WorldEpoch::new(1), 7));
     mod_api::testing::with_mods(Arc::from(mods), || {
-        for attack in [0, 1, 2, 3] {
+        let effect = REGISTERED_EFFECT.get().unwrap();
+        let active_effects = [effect];
+        for (ticks, attack) in [(1, 0), (2, 0), (2, 1), (2, 2), (2, 3)] {
             APPEND_ATTACK.set(attack);
             let mut changes = vec![EffectTickChange::Heal(f32::from_bits(0x7fc01234))];
             let mut keep = true;
-            mod_api::dispatch_apply_effect_tick(
+            mod_api::__private::dispatch_mob_effect_tick(
                 &World,
-                mod_api::__private::ApplyEffectTickCall {
-                    effect: REGISTERED_EFFECT.get().unwrap(),
+                ticks,
+                effect,
+                0,
+                |effect, amplifier| mod_api::__private::ApplyEffectTickCall {
+                    effect,
                     dimension: "test:world",
                     entity: Some(7),
-                    amplifier: 0,
+                    amplifier,
                     holder,
                     health: 10.,
                     max_health: 20.,
                     food: None,
-                    active_effects: &[REGISTERED_EFFECT.get().unwrap()],
+                    active_effects: &active_effects,
                     changes: &mut changes,
                     keep: &mut keep,
                 },
             );
             assert!(matches!(changes[0], EffectTickChange::Heal(v) if v.to_bits() == 0x7fc01234));
-            if attack == 0 {
+            if ticks == 1 {
+                assert!(keep, "a false guest cadence must not run the action");
+                assert_eq!(changes.len(), 1);
+            } else if attack == 0 {
                 assert!(!keep);
                 assert_eq!(
                     &changes[1..],

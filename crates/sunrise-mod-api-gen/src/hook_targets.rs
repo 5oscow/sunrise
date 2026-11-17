@@ -1,5 +1,5 @@
 //! Native hook targets come from definitions, not declaration file names.
-use crate::catalog::Catalog;
+use crate::catalog::{Catalog, PartKind};
 use quote::ToTokens;
 use std::{collections::BTreeMap, fs, path::Path};
 
@@ -39,9 +39,40 @@ fn definitions(root: &Path) -> Result<BTreeMap<String, (String, syn::Signature)>
     Ok(targets)
 }
 
+pub(crate) const EFFECT_TICK_TARGET: &str = "mod_api::parts::effects::dispatch_mob_effect_tick";
+
 pub(crate) fn resolve(root: &Path, catalog: &mut Catalog) -> Result<(), String> {
     let targets = definitions(root)?;
+    let mut checked_effect_tick_target = false;
     for hook in &mut catalog.hooks {
+        if hook
+            .scope
+            .as_ref()
+            .is_some_and(|scope| scope.kind == PartKind::Effect)
+        {
+            if !matches!(
+                hook.name.as_str(),
+                "should_apply_effect_tick_this_tick" | "apply_effect_tick"
+            ) || hook.target != EFFECT_TICK_TARGET
+                || hook.call.is_empty()
+            {
+                return Err(format!(
+                    "{}: an effect tick hook must declare its call to {EFFECT_TICK_TARGET}",
+                    hook.name
+                ));
+            }
+            if !checked_effect_tick_target {
+                let path = root.join("crates/sunrise-mod-vocab/src/parts/effects.rs");
+                let source =
+                    fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+                let parsed = syn::parse_file(&source).map_err(|e| e.to_string())?;
+                if !parsed.items.iter().any(|item| matches!(item, syn::Item::Fn(f) if f.sig.ident == "dispatch_mob_effect_tick")) {
+                    return Err(format!("{}: no definition for {EFFECT_TICK_TARGET}", hook.name));
+                }
+                checked_effect_tick_target = true;
+            }
+            continue;
+        }
         if hook
             .target
             .starts_with("sunrise_client::game::native_hooks::")
@@ -52,10 +83,6 @@ pub(crate) fn resolve(root: &Path, catalog: &mut Catalog) -> Result<(), String> 
                 .unwrap();
             let name = tail.split("::").skip(1).collect::<Vec<_>>().join("::");
             let Some((target, signature)) = targets.get(&name) else {
-                if !hook.call.is_empty() {
-                    // The catalog owns this signature; no engine wrapper is required.
-                    continue;
-                }
                 return Err(format!("{}: no native definition", hook.name));
             };
             if hook.stack_count.is_some() && hook.call.is_empty() {
@@ -83,7 +110,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn explicit_signatures_need_no_wrapper_regardless_of_scope() {
+    fn explicit_signature_still_requires_its_native_definition() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let declared = Catalog::load_declarations(&root).unwrap();
         let mut hook = declared
@@ -99,8 +126,7 @@ mod tests {
             draw_contexts: Vec::new(),
             general_notes: None,
         };
-        resolve(&root, &mut catalog).unwrap();
-        catalog.hooks[0].call.clear();
+        assert!(!catalog.hooks[0].call.is_empty());
         assert!(
             resolve(&root, &mut catalog)
                 .unwrap_err()

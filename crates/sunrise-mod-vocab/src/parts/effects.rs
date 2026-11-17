@@ -96,43 +96,41 @@ pub fn validate_effect_part_owners<'a>(
     }
 }
 
-impl HookParts {
-    pub(crate) fn effect<'k>(
-        &self,
-        id: impl FnOnce() -> Option<&'k str>,
-    ) -> &[Attached<dyn MobEffectPart>] {
-        attached(&self.effects, id)
-    }
-}
-
 /// Run each effect Part's cadence and action as one pair, sharing the holder snapshots.
 /// Queued writes remain deferred until this entire dispatch returns.
-pub fn dispatch_mob_effect_tick(
+pub fn dispatch_mob_effect_tick<'a>(
     host: &dyn Host,
     tick_count: i32,
-    call: crate::__private::ApplyEffectTickCall<'_>,
+    effect: crate::EffectKey,
+    amplifier: i32,
+    make_call: impl FnOnce(crate::EffectKey, i32) -> crate::__private::ApplyEffectTickCall<'a>,
 ) {
     if !has_part_hook(HookId::ShouldApplyEffectTickThisTick) {
         return;
     }
-    let Some(id) = crate::content::registry_keys::effect_id(call.effect) else {
+    let Some(id) = crate::content::registry_keys::effect_id(effect) else {
         return;
     };
-    let table = parts(HookId::ShouldApplyEffectTickThisTick, "effect tick routing");
-    let Some(attached) = table.effects.get(id) else {
+    let hook = HookId::ShouldApplyEffectTickThisTick;
+    let table = parts(hook, "effect tick routing");
+    let Some(attached) = table.for_hook(hook).and_then(|table| table.effects.get(id)) else {
         return;
     };
-    for part in crate::entered_parts(attached, "mob_effect_tick") {
+    let mut due = crate::entered_parts(attached, "mob_effect_tick").filter(|part| {
         let mut should = crate::ShouldApplyEffectTickThisTickEvent {
-            effect: call.effect,
+            effect,
             tick_count,
-            amplifier: call.amplifier,
+            amplifier,
             apply: false,
         };
         part.should_apply_effect_tick_this_tick(host, &mut should);
-        if !should.apply {
-            continue;
-        }
+        should.apply
+    });
+    let Some(first) = due.next() else {
+        return;
+    };
+    let call = make_call(effect, amplifier);
+    for part in std::iter::once(first).chain(due) {
         let mut event = crate::ApplyEffectTickEvent {
             effect: call.effect,
             dimension: call.dimension,

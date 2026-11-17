@@ -196,8 +196,10 @@ fn two_packages_keep_independent_cadences_and_share_snapshots() {
         || {
             crate::testing::with_mods(mods.clone(), || {
                 let effect = install(&mods);
+                let active_effects = [effect];
                 mod_vocab::__private::validate_effect_part_owners(|_| Some("owner")).unwrap();
                 for (ticks, amplifier, expected, expected_trace, expected_keep) in [
+                    (1, 0, vec![], vec![], true),
                     (
                         2,
                         0,
@@ -230,23 +232,30 @@ fn two_packages_keep_independent_cadences_and_share_snapshots() {
                     trace.lock().unwrap().clear();
                     let mut changes = Vec::new();
                     let mut keep = true;
+                    let prepared = std::cell::Cell::new(false);
                     mod_vocab::__private::dispatch_mob_effect_tick(
                         &World,
                         ticks,
-                        mod_vocab::__private::ApplyEffectTickCall {
-                            effect,
-                            dimension: "minecraft:overworld",
-                            entity: Some(7),
-                            amplifier,
-                            holder: LivingRef::new(EntityRef::new(WorldEpoch::new(1), 7)),
-                            health: 10.0,
-                            max_health: 20.0,
-                            food: None,
-                            active_effects: &[effect],
-                            changes: &mut changes,
-                            keep: &mut keep,
+                        effect,
+                        amplifier,
+                        |effect, amplifier| {
+                            prepared.set(true);
+                            mod_vocab::__private::ApplyEffectTickCall {
+                                effect,
+                                dimension: "minecraft:overworld",
+                                entity: Some(7),
+                                amplifier,
+                                holder: LivingRef::new(EntityRef::new(WorldEpoch::new(1), 7)),
+                                health: 10.0,
+                                max_health: 20.0,
+                                food: None,
+                                active_effects: &active_effects,
+                                changes: &mut changes,
+                                keep: &mut keep,
+                            }
                         },
                     );
+                    assert_eq!(prepared.get(), !expected_trace.is_empty());
                     assert_eq!(changes, expected);
                     assert_eq!(*trace.lock().unwrap(), expected_trace);
                     assert_eq!(keep, expected_keep);
