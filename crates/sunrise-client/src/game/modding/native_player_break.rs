@@ -195,14 +195,11 @@ mod tests {
         });
     }
 
-    /// A door's break asks the same harvest answer as every other block: the selected hotbar
-    /// slot, never the offhand. Breaking an iron door's upper half with the pickaxe in the main
-    /// hand takes both halves (the lower by the neighbour update); with the pickaxe only in the
-    /// offhand (and acting) the tool is not the correct one, so the lower half goes at once and
-    /// nothing drops.
+    /// Only the selected slot harvests a block that requires a tool. Iron doors do not
+    /// require one in 26.3, so both hand arrangements harvest their lower-half drop.
     #[test]
     #[ignore = "daily"]
-    fn a_door_breaks_by_the_selected_slot_not_the_offhand() {
+    fn harvesting_uses_the_selected_slot_and_iron_doors_need_no_tool() {
         with_game(|game| {
             game.world.chunks.insert(
                 (0, 0),
@@ -210,6 +207,26 @@ mod tests {
             );
             let pickaxe = ItemStack::new("minecraft:iron_pickaxe", 1);
             let player = with_player(game, pickaxe.clone());
+            let iron = [8, 64, 4];
+            place(game, iron, "minecraft:iron_block");
+            assert!(game.player_destroy_block(player, iron, false));
+            assert!(
+                popped(game, "minecraft:iron_block"),
+                "selected pickaxe harvests"
+            );
+            game.dropped.clear();
+            game.inventory[game.selected] = None;
+            game.offhand = Some(pickaxe.clone());
+            game.hand = sunrise_client::first_person::Hand::Off;
+            place(game, iron, "minecraft:iron_block");
+            assert!(game.player_destroy_block(player, iron, false));
+            assert!(
+                !popped(game, "minecraft:iron_block"),
+                "offhand cannot harvest"
+            );
+            game.inventory[game.selected] = Some(pickaxe.clone());
+            game.offhand = None;
+            game.hand = sunrise_client::first_person::Hand::Main;
             let (lower, upper) = ([6, 64, 4], [6, 65, 4]);
             let door = |game: &mut Game<'_>, half: &str, pos: [i32; 3]| {
                 let state = game
@@ -243,6 +260,7 @@ mod tests {
                 "minecraft:air",
                 "main hand: correct tool"
             );
+            assert!(popped(game, "minecraft:iron_door"));
 
             game.dropped.clear();
             game.inventory[game.selected] = None;
@@ -256,9 +274,9 @@ mod tests {
             assert_eq!(
                 block(game, lower),
                 "minecraft:air",
-                "offhand: not the correct tool"
+                "empty main hand: door needs no tool"
             );
-            assert!(!popped(game, "minecraft:iron_door"));
+            assert!(popped(game, "minecraft:iron_door"));
         });
     }
 
