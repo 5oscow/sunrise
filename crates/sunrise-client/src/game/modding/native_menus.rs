@@ -316,6 +316,9 @@ impl Game<'_> {
         };
         let dimension = self.dim.id();
         self.player_hook(conn, move |g| {
+            if let Some([x, y, z]) = menu.pos {
+                g.mod_container_player_opener((x, y, z), true);
+            }
             g.native_player_container_open(uuid, &name, dimension, &menu.menu, menu.pos);
         });
     }
@@ -331,6 +334,9 @@ impl Game<'_> {
         };
         let dimension = self.dim.id();
         self.player_hook(conn, move |g| {
+            if let Some([x, y, z]) = menu.pos {
+                g.mod_container_player_opener((x, y, z), false);
+            }
             g.native_player_container_close(uuid, &name, dimension, &menu.menu, menu.pos);
         });
     }
