@@ -900,7 +900,7 @@ mod connected_spawnpoint_rotation_tests {
 }
 
 #[cfg(test)]
-mod pitch_preservation_controls {
+mod forced_respawn_space_tests {
     use super::*;
 
     #[test]
@@ -962,6 +962,11 @@ mod pitch_preservation_controls {
             });
         });
     }
+}
+
+#[cfg(test)]
+mod pitch_preservation_controls {
+    use super::*;
 
     #[test]
     fn wrapped_existing_callers_default_to_positive_zero_pitch() {
