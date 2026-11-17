@@ -35,6 +35,13 @@ impl Game<'_> {
     /// first and LeashFenceKnotEntity.interact takes the click. The fence block behind only ties
     /// the player's own mobs (LeadItem.useOn), it never takes one back.
     fn remote_knot_hit(&self) -> Option<(i32, f64, [f64; 3])> {
+        let mut pick = crate::game::pick_accumulator::PickAccumulator::new(self.entity_reach);
+        self.remote_knot_hit_with_pick(&mut pick)
+    }
+    fn remote_knot_hit_with_pick(
+        &self,
+        pick: &mut crate::game::pick_accumulator::PickAccumulator,
+    ) -> Option<(i32, f64, [f64; 3])> {
         if let Some(hit) = self.cached_entity_pick() {
             let (entity, distance, _) = hit?;
             let block = *self.remote_knots.get(&entity.id())?;
@@ -53,9 +60,10 @@ impl Game<'_> {
                     Vec3::new(p.x + half, p.y + knot.height, p.z + half),
                 );
                 ray_box(eye, dir, self.entity_reach, bounds)
+                    .filter(|&d| pick.consider(self, id, d))
                     .map(|d| (id as i32, d, [p.x, p.y, p.z]))
             })
-            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .last()
     }
 
     /// Whether a use starts on an entity: the crosshair's `EntityHitResult`, or a fence knot.
@@ -73,6 +81,14 @@ impl Game<'_> {
     /// The nearest boat, minecart, item frame, armor stand or painting the
     /// view hits within reach; also End crystals when attacking, and fence knots when using.
     pub(super) fn remote_object_hit(&self, attacking: bool) -> Option<ObjectHit> {
+        let mut pick = crate::game::pick_accumulator::PickAccumulator::new(self.entity_reach);
+        self.remote_object_hit_with_pick(attacking, &mut pick)
+    }
+    pub(super) fn remote_object_hit_with_pick(
+        &self,
+        attacking: bool,
+        pick: &mut crate::game::pick_accumulator::PickAccumulator,
+    ) -> Option<ObjectHit> {
         if let Some(hit) = self.cached_entity_pick() {
             let (entity, distance, point) = hit?;
             if (!attacking
@@ -110,29 +126,29 @@ impl Game<'_> {
             ]
         };
         let mut hits: Vec<(i32, f64, [f64; 3])> = Vec::new();
-        if let Some((i, d)) = self.painting_hit() {
+        if let Some((i, d)) = self.painting_hit_with_pick(pick) {
             let p = &self.paintings[i];
             hits.push((p.id as i32, d, block_centre(p.pos)));
         }
-        if let Some((i, d)) = self.frame_hit() {
+        if let Some((i, d)) = self.frame_hit_with_pick(pick) {
             let f = &self.item_frames[i];
             hits.push((f.id as i32, d, block_centre(f.pos)));
         }
-        if let Some((i, d, _)) = self.armor_stand_hit() {
+        if let Some((i, d, _)) = self.armor_stand_hit_with_pick(pick) {
             let a = &self.armor_stands[i];
             let p = a.position;
             hits.push((a.id as i32, d, [p.x, p.y, p.z]));
         }
-        if let Some((i, d, _)) = self.cushion_hit() {
+        if let Some((i, d, _)) = self.cushion_hit_with_pick(pick) {
             let c = &self.cushions[i];
             let p = c.position;
             hits.push((c.id as i32, d, [p.x, p.y, p.z]));
         }
-        if let Some((i, d)) = self.boat_hit() {
+        if let Some((i, d)) = self.boat_hit_with_pick(pick) {
             let p = self.boats[i].position;
             hits.push((self.boats[i].id as i32, d, [p.x, p.y, p.z]));
         }
-        if let Some((i, d)) = self.cart_hit() {
+        if let Some((i, d)) = self.cart_hit_with_pick(pick) {
             let p = self.carts[i].position;
             hits.push((self.carts[i].id as i32, d, [p.x, p.y, p.z]));
         }
@@ -140,13 +156,15 @@ impl Game<'_> {
         // to its scripts, for both uses and attacks.
         let reach = self.entity_reach;
         for (&id, i) in &self.interactions {
-            if let Some(d) = ray_box(eye, dir, reach, i.bounds()) {
+            if let Some(d) =
+                ray_box(eye, dir, reach, i.bounds()).filter(|&d| pick.consider(self, id as u32, d))
+            {
                 let p = i.position;
                 hits.push((id, d, [p.x, p.y, p.z]));
             }
         }
         if (!attacking || self.client_pick.ray.is_some())
-            && let Some((id, d, p)) = self.remote_knot_hit()
+            && let Some((id, d, p)) = self.remote_knot_hit_with_pick(pick)
         {
             hits.push((id, d, p));
         }
@@ -161,14 +179,19 @@ impl Game<'_> {
                     Vec3::new(p.x - 1.0, p.y, p.z - 1.0),
                     Vec3::new(p.x + 1.0, p.y + 2.0, p.z + 1.0),
                 );
-                if let Some(d) = ray_box(eye, dir, reach, bounds) {
+                if let Some(d) =
+                    ray_box(eye, dir, reach, bounds).filter(|&d| pick.consider(self, c.id, d))
+                {
                     hits.push((c.id as i32, d, [p.x, p.y, p.z]));
                 }
             }
             // EnderDragonPart.isPickable: the server's dragon hurts by part.
-            hits.extend(self.remote_dragon_part_hit(eye, dir, reach));
+            hits.extend(self.remote_dragon_part_hit_with_pick(eye, dir, reach, pick));
         }
-        let (id, distance, origin) = hits.into_iter().min_by(|a, b| a.1.total_cmp(&b.1))?;
+        let (id, distance, origin) = hits.into_iter().find(|hit| {
+            pick.hovered
+                .is_some_and(|hovered| hovered.id == hit.0 as u32)
+        })?;
         let point = at(distance);
         Some(ObjectHit {
             id,

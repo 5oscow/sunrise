@@ -6314,19 +6314,25 @@ impl Game<'_> {
     /// [`Game::mob_hit`] out to `reach` instead of the entity interaction range
     /// (`ProjectileUtil.getHitResultOnViewVector` with another range).
     pub(super) fn mob_hit_within(&self, reach: f64) -> Option<(usize, f64, [f64; 3])> {
+        let mut pick = crate::game::pick_accumulator::PickAccumulator::new(reach);
+        self.mob_hit_within_with_pick(reach, &mut pick)
+    }
+    pub(super) fn mob_hit_within_with_pick(
+        &self,
+        reach: f64,
+        pick: &mut crate::game::pick_accumulator::PickAccumulator,
+    ) -> Option<(usize, f64, [f64; 3])> {
         let (eye, dir) = self.aim()?;
         let mut best: Option<(usize, f64, [f64; 3])> = None;
         for (i, m) in self.mobs.iter().enumerate() {
-            // ProjectileUtil.getEntityHitResult: the mob the player rides
-            // shares its root vehicle and is never the hit, nor is the
-            // camera entity the pick starts from. EntitySelector.CAN_BE_PICKED
-            // is isPickable — `!isRemoved`, not alive: a health-0 fake player
-            // still answers a click.
-            if m.removed || Some(m.id) == self.riding || Some(m.id) == self.remote_camera_id() {
+            // EntitySelector.CAN_BE_PICKED is isPickable — `!isRemoved`,
+            // not alive: a health-0 fake player still answers a click.
+            // The shared accumulator owns camera and root-vehicle filtering.
+            if m.removed {
                 continue;
             }
             if let Some(t) = ray_box(eye, dir, reach, m.bounds())
-                && best.is_none_or(|b| t < b.1)
+                && pick.consider(self, m.id, t)
             {
                 let point = Vec3::new(
                     eye[0] + dir[0] * t,

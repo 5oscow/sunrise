@@ -110,12 +110,24 @@ impl Game<'_> {
     }
 
     pub(super) fn pick_entity_candidate(&self) -> Option<CrosshairTarget> {
-        let hit = self.crosshair_entity_hit()?;
+        let mut pick = super::pick_accumulator::PickAccumulator::new(self.entity_reach);
+        self.collect_pick_candidates(&mut pick);
+        let hit = pick.hovered?;
         let (eye, direction) = self.aim()?;
         Some(CrosshairTarget::Entity {
-            entity: EntityRef::new(self.native_lifecycle.epoch()?, hit.id as u32),
+            entity: EntityRef::new(self.native_lifecycle.epoch()?, hit.id),
             point: std::array::from_fn(|i| eye[i] + direction[i] * hit.distance),
         })
+    }
+
+    pub(super) fn collect_pick_candidates(
+        &self,
+        pick: &mut super::pick_accumulator::PickAccumulator,
+    ) {
+        self.remote_object_hit_with_pick(true, pick);
+        self.mob_hit_within_with_pick(self.entity_reach, pick);
+        self.redirectable_hit_with_pick(pick);
+        self.dragon_hit_with_pick(pick);
     }
 
     /// The entity the crosshair hits before any block, as `Entity.getId`; an
