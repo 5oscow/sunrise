@@ -327,13 +327,13 @@ pub(crate) fn install_client_hooks() {
             let context = reader.context();
             mod_api::dispatch_living_fall(&context, entity, kind, distance, multiplier, cancel);
         },
-        living_jump: |context, entity, kind| {
+        living_jump: |context, entity, kind, velocity| {
             if !mod_api::__private::listened(mod_api::HookId::LivingJump) {
                 return;
             }
             let reader = sunrise_client_render::api_context::LoopReader(context);
             let context = reader.context();
-            mod_api::dispatch_living_jump(&context, entity, kind);
+            mod_api::dispatch_living_jump(&context, entity, kind, velocity);
         },
         living_jump_power: |context, entity, kind, power| {
             if !mod_api::__private::listened(mod_api::HookId::LivingJumpPower) {

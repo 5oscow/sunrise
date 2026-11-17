@@ -19,6 +19,30 @@ thread_local! {
     /// with.
     static ITEM_ASKS: std::cell::RefCell<Vec<(&'static str, String, bool)>> =
         const { std::cell::RefCell::new(Vec::new()) };
+    /// The jumps the installed `living_jump` heard on this thread while a [`record_jumps`]
+    /// guard lives: the entity and its velocity. `None` when no test records.
+    static JUMPED: std::cell::RefCell<Option<Vec<(u32, [f64; 3])>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Records this thread's jumps until it is dropped; recorded jumps leave [`JUMPS`] alone.
+pub(crate) struct JumpRecording;
+
+impl Drop for JumpRecording {
+    fn drop(&mut self) {
+        JUMPED.set(None);
+    }
+}
+
+/// Starts recording the jumps the installed `living_jump` hears on this thread.
+pub(crate) fn record_jumps() -> JumpRecording {
+    JUMPED.set(Some(Vec::new()));
+    JumpRecording
+}
+
+/// The jumps recorded on this thread since the last call, oldest first.
+pub(crate) fn jumps() -> Vec<(u32, [f64; 3])> {
+    JUMPED.with_borrow_mut(|jumps| jumps.as_mut().map(std::mem::take).unwrap_or_default())
 }
 
 /// The item hooks this thread asked since the last call, oldest first: the hook, the stack's
@@ -117,11 +141,19 @@ pub(crate) fn install() {
                     *multiplier *= 2.0;
                 }
             },
-            living_jump: |context, _, _| {
-                JUMPS.fetch_add(
-                    usize::from(context.side() == LoopSide::Server),
-                    std::sync::atomic::Ordering::Relaxed,
-                );
+            living_jump: |context, entity, _, velocity| {
+                let recorded = JUMPED.with_borrow_mut(|jumps| {
+                    jumps
+                        .as_mut()
+                        .map(|jumps| jumps.push((entity, velocity)))
+                        .is_some()
+                });
+                if !recorded {
+                    JUMPS.fetch_add(
+                        usize::from(context.side() == LoopSide::Server),
+                        std::sync::atomic::Ordering::Relaxed,
+                    );
+                }
             },
             living_jump_power: |context, _, _, power| {
                 *power += context.setting("rules_mod", "stack").map_or(0.0, |_| 1.0);

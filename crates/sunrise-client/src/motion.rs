@@ -52,10 +52,11 @@ use sunrise_world::{
 mod exclusions;
 mod restitution;
 
-/// A living entity jumped (`LivingEvent.LivingJumpEvent`).
+/// A living entity jumped (`LivingEvent.LivingJumpEvent`); `velocity` is its motion right after
+/// the jump.
 #[inline(never)]
-pub fn native_living_jump(context: &LoopContext, entity: u32, kind: &str) {
-    crate::native_client_hooks::living_jump(context, entity, kind);
+pub fn native_living_jump(context: &LoopContext, entity: u32, kind: &str, velocity: [f64; 3]) {
+    crate::native_client_hooks::living_jump(context, entity, kind, velocity);
 }
 
 /// A living entity's jump power is about to be used (beyond NeoForge: there is no counterpart).
@@ -1935,12 +1936,14 @@ impl MotionWorld<'_, '_, '_> {
         }
     }
     pub fn jump_from_ground(&mut self) -> Result<()> {
-        living_motion::jump_from_ground(self)?;
-        if !self.player.replaying {
+        let jumped = living_motion::jump_from_ground(self)?;
+        if jumped && !self.player.replaying {
+            let v = self.player.velocity;
             native_living_jump(
                 self.loop_context,
                 self.player.entity_id as u32,
                 "minecraft:player",
+                [v.x, v.y, v.z],
             );
         }
         self.player
@@ -3318,6 +3321,41 @@ mod tests {
         assert_eq!(base(&mut back, "minecraft:max_health"), 30.0);
         assert_eq!(back.attribute("minecraft:max_health").unwrap(), 45.0);
         assert_eq!(back.health.health(), 40.0);
+    }
+
+    /// `Player.jumpFromGround` calls `LivingEntity.jumpFromGround`, which ends with NeoForge's
+    /// `LivingJumpEvent`: `living_jump` hears the player's jump once, with the motion it left.
+    #[test]
+    #[ignore = "daily"]
+    fn a_player_jump_fires_living_jump_once_with_its_velocity() {
+        use crate::native_client_hooks::test_hooks::{install, jumps, record_jumps};
+        let v = crate::test_fixtures::vanilla().expect("prepared resources");
+        let (assets, render, binding, resources) = (&v.assets, &v.render, &v.collision, &v.motion);
+        let mut scene = World::test_scene(assets, render, 1).unwrap();
+        let mut player = PlayerMotion::new(resources, Vec3::new(10.0, 100.0, 10.0)).unwrap();
+        player.entity_id = 5;
+        player.ground.on_ground = true;
+        install();
+        let _recording = record_jumps();
+        MotionWorld {
+            tag_items: None,
+            block_registries: None,
+            // The player fires on either side; a client one stays off the menu test's server count.
+            loop_context: &crate::test_resources::loop_context(
+                sunrise_world::native_load_context::LoopSide::Client,
+            ),
+            damage_hooks: &crate::health::DamageHooks::NONE,
+            entities: &[],
+            player: &mut player,
+            scene: &mut scene,
+            assets,
+            collision_binding: binding,
+            resources,
+            health: &resources.health,
+        }
+        .jump_from_ground()
+        .unwrap();
+        assert_eq!(jumps(), [(5, [0.0, f64::from(0.42_f32), 0.0])]);
     }
 
     #[test]
