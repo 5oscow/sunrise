@@ -1328,7 +1328,8 @@ impl TriState {
 /// ```
 pub trait LevelHost {
     /// `BlockState.isFaceSturdy`, through the same engine read as `LevelRef::block_face_sturdy`.
-    /// `canSupportRigidBlock` is `(pos, Up, Rigid)`; `canSupportCenter` is `(pos, face, Center)`.
+    /// `canSupportRigidBlock` is `(pos, Up, Rigid)`. `canSupportCenter` is `(pos, face, Center)`
+    /// except that vanilla also refuses `Down` on blocks tagged `minecraft:unstable_bottom_center`.
     /// Returns None for unloaded or out-of-height positions, on clients, or without a support
     /// view. Never loads chunks or opens loot containers. Available only on the owning game
     /// thread, never in worker-thread hook bodies.
