@@ -26,6 +26,7 @@ programs end in `.exe`:
 | File | Where | Needed by | How to make it |
 |---|---|---|---|
 | `sunrise-ctl` | beside the game program | `package` | cargo build PROFILE -p sunrise-client-lib --bin sunrise-ctl |
+| `sunrise-perf` | beside the game program | `package` | cargo build PROFILE -p sunrise-perf --bin sunrise-perf |
 | `sunrise-prepare` | beside the game program | `package`, `package-server` | cargo build PROFILE -p sunrise-prepare |
 | `sunrise-server` | beside the game program | `package`, `package-server` | cargo build PROFILE -p sunrise-server |
 | `sunrise-wasm-std.wasm` | beside the game program | `package`, `package-server` | cargo run --locked -p cargo-sunrise-mod -- wasm-std PROGRAM_FOLDER/sunrise-wasm-std.wasm |

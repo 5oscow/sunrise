@@ -68,6 +68,7 @@ fn client_and_server_layouts_require_and_ship_std() {
         for name in [
             "sunrise-client",
             "sunrise-ctl",
+            "sunrise-perf",
             "sunrise-prepare",
             "sunrise-server",
         ] {
