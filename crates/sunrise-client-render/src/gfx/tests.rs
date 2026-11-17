@@ -1,6 +1,6 @@
 //! Unit and integration test suites for gfx rendering, culling, and pipelines.
 
-pub use super::*;
+use super::*;
 
 #[test]
 fn taa_culling_covers_jittered_view_edges_but_still_rejects_behind_the_camera() {
