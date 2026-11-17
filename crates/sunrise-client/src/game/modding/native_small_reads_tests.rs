@@ -96,6 +96,47 @@ fn the_tick_rate_is_frozen_on_a_server_only() {
     });
 }
 
+/// Menu reads follow the local client's prediction and reject every other player.
+#[test]
+#[ignore = "daily"]
+fn a_client_reads_only_its_own_menu() {
+    mod_platform::testing::with_mods(Vec::<mod_api::ModEntry>::new().into(), || {
+        super::native_entity_refs::tests::with_client_game(|game| {
+            let (client, _server) = sunrise_protocol::connection::Pipe::pair();
+            game.connect_local(client, "MenuReadTest").unwrap();
+            game.remote.as_mut().unwrap().logged_in = true;
+            let player = game.local_player().unwrap();
+            let other = mod_api::__private::game::player_ref(
+                mod_api::EntityRef::new(player.entity().epoch(), player.entity().id() + 1),
+                42,
+            );
+            assert_eq!(game.player_container_menu(other), None);
+            let stack = sunrise_client::items::ItemStack::new("minecraft:stone", 7);
+            game.inventory[0] = Some(stack.clone());
+            game.carried = Some(stack.clone());
+            let inventory = game.player_container_menu(player).unwrap();
+            assert_eq!(game.menu_slot_count(inventory), Some(46));
+            assert_eq!(game.menu_slot(inventory, 36), Some(Some(stack.clone())));
+            assert_eq!(game.menu_carried(inventory), Some(Some(stack.clone())));
+            game.remote
+                .as_mut()
+                .unwrap()
+                .menu
+                .set(Some((1, "minecraft:generic_9x3".into())));
+            let open = game.player_container_menu(player).unwrap();
+            assert_eq!(game.menu_slot_count(open), Some(63));
+            assert_eq!(game.menu_slot(open, 54), Some(Some(stack)));
+            assert_eq!(game.menu_slot_count(inventory), None);
+            game.remote.as_mut().unwrap().menu.set(None);
+            assert_eq!(game.menu_slot_count(open), None);
+            assert_eq!(
+                game.menu_slot_count(game.player_container_menu(player).unwrap()),
+                Some(46)
+            );
+        });
+    });
+}
+
 #[test]
 #[ignore = "daily"]
 fn client_player_state_reads_its_own_copy_only() {
@@ -139,6 +180,31 @@ fn client_player_state_reads_its_own_copy_only() {
     });
 }
 
+/// The HUD clock is a client clock: pause stops it, server freeze does not.
+#[test]
+#[ignore = "daily"]
+fn gui_ticks_follow_unpaused_client_ticks() {
+    mod_platform::testing::with_mods(Vec::<mod_api::ModEntry>::new().into(), || {
+        super::native_entity_refs::tests::with_client_game(|game| {
+            // Isolate the client's own per-tick work from simulation and network setup.
+            game.agent.hold_server = true;
+            assert_eq!(game.gui_ticks(), 0);
+            game.client_tick_steps(2, None).unwrap();
+            assert_eq!(game.gui_ticks(), 2);
+            game.pause = true;
+            game.client_tick_steps(3, None).unwrap();
+            assert_eq!(game.gui_ticks(), 2);
+            game.pause = false;
+            game.clock.set_frozen(true);
+            game.client_tick_steps(1, None).unwrap();
+            assert_eq!(game.gui_ticks(), 3);
+            game.gui_ticks = i32::MAX;
+            game.client_tick_steps(1, None).unwrap();
+            assert_eq!(game.gui_ticks(), i32::MIN);
+        });
+    });
+}
+
 #[test]
 #[ignore = "daily"]
 fn client_abilities_follow_predicted_flying_between_packets() {
@@ -171,68 +237,4 @@ fn client_abilities_follow_predicted_flying_between_packets() {
     });
 }
 
-/// Menu reads follow the local client's prediction and reject every other player.
-#[test]
-#[ignore = "daily"]
-fn a_client_reads_only_its_own_menu() {
-    mod_platform::testing::with_mods(Vec::<mod_api::ModEntry>::new().into(), || {
-        super::native_entity_refs::tests::with_client_game(|game| {
-            let (client, _server) = sunrise_protocol::connection::Pipe::pair();
-            game.connect_local(client, "MenuReadTest").unwrap();
-            game.remote.as_mut().unwrap().logged_in = true;
-            let player = game.local_player().unwrap();
-            let other = mod_api::__private::game::player_ref(
-                mod_api::EntityRef::new(player.entity().epoch(), player.entity().id() + 1),
-                42,
-            );
-            assert_eq!(game.player_container_menu(other), None);
-            let stack = sunrise_client::items::ItemStack::new("minecraft:stone", 7);
-            game.inventory[0] = Some(stack.clone());
-            game.carried = Some(stack.clone());
-            let inventory = game.player_container_menu(player).unwrap();
-            assert_eq!(game.menu_slot_count(inventory), Some(46));
-            assert_eq!(game.menu_slot(inventory, 36), Some(Some(stack.clone())));
-            assert_eq!(game.menu_carried(inventory), Some(Some(stack.clone())));
-            game.remote
-                .as_mut()
-                .unwrap()
-                .menu
-                .set(Some((1, "minecraft:generic_9x3".into())));
-            let open = game.player_container_menu(player).unwrap();
-            assert_eq!(game.menu_slot_count(open), Some(63));
-            assert_eq!(game.menu_slot(open, 54), Some(Some(stack)));
-            assert_eq!(game.menu_slot_count(inventory), None);
-            game.remote.as_mut().unwrap().menu.set(None);
-            assert_eq!(game.menu_slot_count(open), None);
-            assert_eq!(
-                game.menu_slot_count(game.player_container_menu(player).unwrap()),
-                Some(46)
-            );
-        });
-    });
-}
 
-/// The HUD clock is a client clock: pause stops it, server freeze does not.
-#[test]
-#[ignore = "daily"]
-fn gui_ticks_follow_unpaused_client_ticks() {
-    mod_platform::testing::with_mods(Vec::<mod_api::ModEntry>::new().into(), || {
-        super::native_entity_refs::tests::with_client_game(|game| {
-            // Isolate the client's own per-tick work from simulation and network setup.
-            game.agent.hold_server = true;
-            assert_eq!(game.gui_ticks(), 0);
-            game.client_tick_steps(2, None).unwrap();
-            assert_eq!(game.gui_ticks(), 2);
-            game.pause = true;
-            game.client_tick_steps(3, None).unwrap();
-            assert_eq!(game.gui_ticks(), 2);
-            game.pause = false;
-            game.clock.set_frozen(true);
-            game.client_tick_steps(1, None).unwrap();
-            assert_eq!(game.gui_ticks(), 3);
-            game.gui_ticks = i32::MAX;
-            game.client_tick_steps(1, None).unwrap();
-            assert_eq!(game.gui_ticks(), i32::MIN);
-        });
-    });
-}
