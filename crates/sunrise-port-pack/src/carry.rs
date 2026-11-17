@@ -104,8 +104,12 @@ pub struct Report {
     pub loot_tables_added: usize,
     /// Worldgen and structure files (`data/<id>/worldgen/`, `structure/`).
     pub worldgen: usize,
-    /// Recipes left as they were: custom types, NeoForge conditions, results before 1.20.5.
+    /// Recipes left as they were: vanilla types whose result is written before 1.20.5.
     pub recipes_kept: Vec<String>,
+    /// Recipes of a type that isn't a `minecraft:` serializer, moved to `outside/`: one
+    /// unregistered type fails 26.3's whole data load, so a code mod that registers the type
+    /// carries them back.
+    pub recipes_custom: Vec<String>,
     /// Of those, the recipes whose result names its item as `item` ([`result_before_1_20_5`]).
     #[serde(skip_serializing_if = "is_zero")]
     pub recipes_old_result: usize,
@@ -1064,7 +1068,11 @@ pub fn carry(
         if off {
             report.recipes_off.push(name.clone());
         }
-        let keep = keep && unreadable.is_none() && !off;
+        let custom = keep && !off && recipe_custom_type(&name, &bytes);
+        if custom {
+            report.recipes_custom.push(name.clone());
+        }
+        let keep = keep && unreadable.is_none() && !off && !custom;
         if let Some(why) = unreadable {
             report.unreadable.insert(name.clone(), why);
         }
@@ -1564,6 +1572,19 @@ fn recipe_off(
         Some(f) => !f.recipes.contains_key(&format!("{prefix}{path}")),
         None => !crate::lithostitched::conditions_pass(&recipe, loaded),
     }
+}
+
+/// Whether `name` is a recipe file whose `type` isn't a `minecraft:` serializer (or has none).
+/// Run after [`recipe_off`], so a recipe whose own conditions fail is already out; one whose
+/// conditions pass still has a type the game can't decode. A recipe that doesn't parse isn't
+/// this: it is [`Report::unreadable`].
+fn recipe_custom_type(name: &str, bytes: &[u8]) -> bool {
+    matches!(split(name), Some(("data", _, rest)) if rest.starts_with("recipe/") && rest.ends_with(".json"))
+        && serde_json::from_slice::<Value>(bytes).is_ok_and(|r| {
+            !r["type"]
+                .as_str()
+                .is_some_and(|t| t.starts_with("minecraft:"))
+        })
 }
 
 /// The item a recipe makes: `result.id` (1.21 and later), `result.item` or a bare id.
@@ -2528,7 +2549,7 @@ mod tests {
             &BTreeMap::new(),
         )
         .unwrap();
-        assert_eq!(report.copied, 16);
+        assert_eq!(report.copied, 15);
         let unreadable: Vec<&str> = report.unreadable.keys().map(String::as_str).collect();
         assert_eq!(
             unreadable,
@@ -2537,7 +2558,7 @@ mod tests {
                 "data/gem/tags/item/empty.json"
             ]
         );
-        assert_eq!(report.outside.len(), 2);
+        assert_eq!(report.outside.len(), 3);
         // A vanilla tag that replaces is kept as it is: the game honours it.
         let replacing: Value = serde_json::from_slice(
             &fs::read(out.join(
@@ -2553,7 +2574,10 @@ mod tests {
             fs::read(out.join("carry/assets/gem/lang/de_de.json")).unwrap()[0],
             b'{'
         );
-        assert_eq!((report.recipes_upgraded, report.recipes_kept.len()), (1, 1));
+        assert_eq!((report.recipes_upgraded, report.recipes_kept.len()), (1, 0));
+        assert_eq!(report.recipes_custom, ["data/gem/recipe/infuse.json"]);
+        assert!(out.join("outside/data/gem/recipe/infuse.json").exists());
+        assert!(!out.join("carry/data/gem/recipe/infuse.json").exists());
         assert_eq!(report.item_definitions_added, 2);
         assert_eq!(report.blocks["gem_door"], "minecraft:oak_door");
         assert_eq!(report.blocks["gem_block"], "minecraft:stone");

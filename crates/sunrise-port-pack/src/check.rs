@@ -194,11 +194,11 @@ pub fn check(jar_path: &Path, out: &Path) -> Result<Check, String> {
             "recipes for left-out blocks",
         ));
     }
-    if !report.recipes_kept.is_empty() {
+    if !report.recipes_custom.is_empty() {
         skipped.push(plural(
-            report.recipes_kept.len(),
-            "recipe of a type Sunrise doesn't have",
-            "recipes of types Sunrise doesn't have",
+            report.recipes_custom.len(),
+            "recipe of a type Sunrise doesn't have (moved to outside/)",
+            "recipes of types Sunrise doesn't have (moved to outside/)",
         ));
     }
     if !report.unreadable.is_empty() {
@@ -387,6 +387,31 @@ displayName = "Ruby"
         assert!(dir.join("out/outside/data/ruby/recipe/odd.json").exists());
         assert!(
             dir.join("out/carry/data/ruby/recipe/ruby_block.json")
+                .exists()
+        );
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn recipes_of_unknown_types_are_moved_out_and_reported() {
+        let dir = temp("custom");
+        let custom = br#"{"type": "ruby:cutting", "ingredient": {"item": "ruby:ruby"}, "neoforge:conditions": [{"type": "neoforge:true"}]}"#;
+        let files = [
+            ("META-INF/neoforge.mods.toml", TOML),
+            ("assets/ruby/models/item/ruby.json", b"{}"),
+            ("data/ruby/recipe/cutting.json", custom.as_slice()),
+        ];
+        let c = check(&jar(&dir, &files), &dir.join("out")).unwrap();
+        assert!(
+            c.skipped.contains(
+                &"1 recipe of a type Sunrise doesn't have (moved to outside/)".to_string()
+            ),
+            "{:?}",
+            c.skipped
+        );
+        assert!(!dir.join("out/carry/data/ruby/recipe/cutting.json").exists());
+        assert!(
+            dir.join("out/outside/data/ruby/recipe/cutting.json")
                 .exists()
         );
         fs::remove_dir_all(&dir).unwrap();
