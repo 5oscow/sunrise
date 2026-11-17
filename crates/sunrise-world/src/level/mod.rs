@@ -835,6 +835,11 @@ pub trait LevelAccess: BlockEntityNeighbors {
         _hydrates: &mut Option<bool>,
     ) {
     }
+    /// Whether a part declares vegetation behaviour for `state` by implementing
+    /// `may_place_on`. The default is false; appearance templates do not declare it.
+    fn declares_vegetation(&self, _state: BlockStateId) -> bool {
+        false
+    }
     /// `VegetationBlock.mayPlaceOn(ground, level, groundPos)` for the plant
     /// `state`, before the plant answers it: the blocks a plant can stand on,
     /// which its `canSurvive` asks. An answer put in `may` is the result. The

@@ -48,6 +48,19 @@ cargo sunrise-mod check target/sunrise-mod/my_mod.smod   # the registry's checks
 - `use-jar <path>` records an original Java jar as an external asset/data source, without copying it into the mod
   ([Java jars as external assets](#java-jars-as-external-assets)).
 
+## Vegetation behaviour is independent of the template
+
+Attach a `BlockPart` implementing `may_place_on` to declare a block as vegetation,
+including a block whose appearance template is glass or stairs. Placement and
+neighbour updates ask the soil's `can_sustain_plant` first: `Some(true)` or
+`Some(false)` decides immediately. Otherwise the plant's `may_place_on` answers.
+Returning `None` keeps an inherited `VegetationBlock` ground rule, or checks
+`minecraft:supports_vegetation` for other templates. A plant is refused on
+unsupported ground and pops off when its ground changes. A template inheriting
+`VegetationBlock` keeps its existing class-specific checks, such as crop
+light requirements; declaring the Part does not replace those checks. Without
+this Part, a glass or stairs template remains an ordinary block.
+
 ## Declare content in code
 
 Code mods declare content through `BlocksEvent` and `ItemsEvent`, using API-owned

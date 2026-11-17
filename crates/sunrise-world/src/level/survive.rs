@@ -16,7 +16,20 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         let mut survives = None;
         self.level
             .before_can_survive(&*self.ticks, pos, state, &mut survives);
-        survives.unwrap_or_else(|| self.can_survive_at(0, state, pos))
+        survives.unwrap_or_else(|| {
+            if self.uses_declared_vegetation(state) {
+                let ground = below(pos);
+                self.may_place_on(state, self.state(ground), ground)
+            } else {
+                self.can_survive_at(0, state, pos)
+            }
+        })
+    }
+    /// Plant templates keep their class-specific survival and shape updates. A part
+    /// on any other template declares the base VegetationBlock behaviour instead.
+    pub(super) fn uses_declared_vegetation(&self, state: BlockStateId) -> bool {
+        self.level.declares_vegetation(state)
+            && !self.b.data(state).chain.contains(&Class::Vegetation)
     }
     fn can_survive_at(&self, depth: usize, state: BlockStateId, pos: BlockPos) -> bool {
         let chain = &self.b.data(state).chain;
@@ -429,7 +442,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             };
             return result;
         }
-        false
+        self.uses_declared_vegetation(state) && b.in_set(ground, &t.supports_vegetation)
     }
 
     fn frogspawn_may_place_on(&self, pos: BlockPos) -> bool {

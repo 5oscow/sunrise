@@ -349,13 +349,13 @@ impl GameLevel<'_> {
         self.fire_update_shape(ticks, call);
     }
 
-    /// On an authoritative server, `VegetationBlock.mayPlaceOn` for the
-    /// plant `state` on `ground` at `ground_pos`, before the plant answers
-    /// it: the blocks a mod plant (one whose template is a vanilla plant,
-    /// such as a crop) can stand on. Its template's `canSurvive` asks it, so
-    /// the plant is refused there and pops off when its ground changes to
-    /// one it can't stand on. Answer only for your own blocks. The level is
-    /// read-only.
+    /// On an authoritative server, `VegetationBlock.mayPlaceOn` for plant
+    /// `state` on `ground` at `ground_pos`. Implementing this Part method
+    /// declares vegetation behaviour independently of the block's template:
+    /// placement and neighbour updates check the soil's `can_sustain_plant`
+    /// first, then this method. `None` uses an inherited vegetation rule, or
+    /// `minecraft:supports_vegetation` for other templates. Unsupported plants
+    /// are refused and pop off. The level is read-only.
     #[inline(always)]
     pub(in crate::game) fn native_may_place_on(
         &self,
