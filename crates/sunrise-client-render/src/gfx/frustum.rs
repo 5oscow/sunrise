@@ -247,9 +247,8 @@ pub(super) fn shadow_casters(view_proj: Mat4, light: Vec3) -> [Frustum; 2] {
             }
         }
     }
-    let [a, b] = [0, 6].map(|i| Frustum {
-        planes: planes[i..i + 6].try_into().expect("six planes"),
-    });
+    let [a, b] =
+        [0, 6].map(|i| Frustum::from_planes(planes[i..i + 6].try_into().expect("six planes")));
     [a, b]
 }
 pub(super) fn taa_frustum(view_proj: Mat4, rendered_size: [u32; 2]) -> Frustum {
@@ -257,9 +256,7 @@ pub(super) fn taa_frustum(view_proj: Mat4, rendered_size: [u32; 2]) -> Frustum {
     // Widen x/y before extracting the planes: this includes every such shifted
     // view, including a posed camera, without changing the near/far planes.
     let [x, y] = rendered_size.map(|size| 1.0 / (1.0 + 2.0 / size.max(1) as f32));
-    Frustum {
-        planes: frustum(Mat4::from_scale(Vec3::new(x, y, 1.0)) * view_proj),
-    }
+    Frustum::from_planes(frustum(Mat4::from_scale(Vec3::new(x, y, 1.0)) * view_proj))
 }
 
 pub(super) fn frustum(m: Mat4) -> [Vec4; 6] {
