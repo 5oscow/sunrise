@@ -641,13 +641,13 @@ impl Renderer {
     /// them (large pages beside the translucent arena, else pages flat draws bind):
     /// the game meshes them again (`take_dropped_sections`).
     pub(super) fn follow_translucent_layout(&mut self) {
-        let pack = self.pack_post.as_ref().and_then(|p| p.1.as_ref());
+        let pack = self.external.as_ref().map(|p| p.frame_request());
         let split = translucent_split(
             self.translucent_batching,
             self.flat.is_some() && self.flat_on,
-            pack.is_some_and(|p| p.has_terrain()),
+            pack.is_some_and(|p| p.terrain),
             // One of Sunrise's own packs with `[shadow]` draws from the same lists (`shadow_view`).
-            pack.is_some_and(|p| p.has_shadow()) || self.native_shadow(),
+            pack.is_some_and(|p| p.shadow) || self.native_shadow(),
         );
         if split == self.translucent_arena.is_some() {
             return;
@@ -670,7 +670,7 @@ impl Renderer {
     /// programs outside flat draws (flat ones unpack the records, `pack_atlas::PULL_FLAT`).
     /// Leaving it drops every section and far tile for the game to mesh again.
     pub(super) fn follow_packed_layout(&mut self) {
-        let pack = self.pack_post.as_ref().and_then(|p| p.1.as_ref()).is_some();
+        let pack = self.external.is_some();
         let want = self.flat.is_some() && (!pack || self.pack_terrain_flat) && self.packed_on;
         if want == self.packed_quads {
             return;

@@ -153,9 +153,25 @@ pub struct PostContext<'a, 'd> {
     pub terrain: &'a mut TerrainDraw<'d>,
 }
 
+/// What a pipeline draws whenever it runs, known once it is loaded and asked outside a frame
+/// (`ExternalPipeline::frame_request`): how the sections and entities are laid out for it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PipelineFrame {
+    /// It draws the terrain itself, so the sections keep the vertices it reads.
+    pub terrain: bool,
+    /// It draws a shadow pass from the terrain's lists.
+    pub shadow: bool,
+    /// Its entity programs read GPU-posed vertices (`Draws::skins_entities`).
+    pub skins_entities: bool,
+}
+
 /// An external shader pipeline, called by the renderer at fixed points of a world frame (not
 /// title frames). Every method has a default that leaves vanilla's way in place.
 pub trait ExternalPipeline: Send {
+    /// What it draws whenever it runs, for layouts decided outside a frame.
+    fn frame_request(&self) -> PipelineFrame {
+        PipelineFrame::default()
+    }
     /// A world frame starts, before culling.
     fn begin_frame(&mut self, _state: &FrameState<'_>) {}
     /// What it draws itself this frame; vanilla draws the rest.
@@ -205,7 +221,11 @@ pub trait ExternalPipeline: Send {
         Err("the shader pack copied no centre depth".into())
     }
     /// The pipeline's pass timer, while it has one slot to time into (`Renderer::set_pass_timing`).
-    fn timing(&mut self) -> Option<&mut Option<super::pack_timing::PassTiming>> {
+    fn timing_slot(&mut self) -> Option<&mut Option<super::pack_timing::PassTiming>> {
+        None
+    }
+    /// Its pass timer, while it times.
+    fn timing(&self) -> Option<&super::pack_timing::PassTiming> {
         None
     }
 }

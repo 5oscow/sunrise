@@ -104,7 +104,7 @@ impl Renderer {
 
         if let Some((color, depth)) = &scaled
             && pack_post
-            && let Some((dimension, Some(mut post))) = self.pack_post.take()
+            && let Some(mut post) = self.external.take()
         {
             let size = self.world_post.size().unwrap_or([1, 1]);
             let flat = self.flat.as_ref().filter(|_| flat_frame);
@@ -208,7 +208,7 @@ impl Renderer {
                 window: [self.config.width, self.config.height],
                 terrain: &mut terrain,
             });
-            self.pack_post = Some((dimension, Some(post)));
+            self.external = Some(post);
         } else if let Some((color, depth)) = &scaled
             && native_post
             && let Some(native) = &mut self.native

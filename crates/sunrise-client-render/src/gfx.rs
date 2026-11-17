@@ -101,7 +101,7 @@ pub use entity_batch::{
     WATER_MASK_OVERLAY, WORLD_TEXT_OVERLAY, WORLD_TEXT_POLYGON_OFFSET_OVERLAY, is_native_terrain,
     mark_oit,
 };
-use external::{ExternalPipeline, shadow_box, shadow_runs};
+use external::{shadow_box, shadow_runs};
 pub use frustum::{Cull, Frusta, JoinedFrusta, ShadowCull};
 use frustum::{block_entities_within_reach, frustum, shadow_casters, taa_frustum};
 use section_fade::{
@@ -1015,7 +1015,8 @@ pub struct Renderer {
     /// The HDR Lighting setting, kept for the HDR output made when HDR turns on.
     hdr_lighting_setting: bool,
     /// The shader pack's post-processing, and the dimension (legacy id) it was loaded for.
-    pack_post: Option<(i32, Option<pack_external::PackPipeline>)>,
+    /// The dimension a `shaders/` pack was last set for, whether or not it runs.
+    pack_dimension: Option<i32>,
     /// A `shaders/` pack whose pipelines build on a thread of their own (`load_shader_pack`).
     pack_loading: Option<PackLoading>,
     /// The post passes of one of Sunrise's own shader packs; never beside `pack_post`'s.
@@ -3728,7 +3729,7 @@ impl Renderer {
             frame_kept_logged: false,
             hdr_marker: None,
             hdr_driver,
-            pack_post: None,
+            pack_dimension: None,
             pack_loading: None,
             native: None,
             pass_timing: false,
@@ -3943,8 +3944,11 @@ impl Renderer {
         self.entity_skin.is_some()
             && entity_skin::poses(
                 self.frame_gen.on,
-                (self.pack_post.as_ref())
-                    .map(|(_, p)| p.as_ref().is_some_and(|p| p.skins_entities())),
+                self.pack_dimension.map(|_| {
+                    self.external
+                        .as_ref()
+                        .is_some_and(|p| p.frame_request().skins_entities)
+                }),
                 self.native.is_some(),
                 || native_render::needs().entity_spans,
             )
@@ -3956,7 +3960,7 @@ impl Renderer {
     /// where they are ordinary entity quads. On, `EntityBatch` sorts them into
     /// its stages by the CPU vertices' `OIT_ENTITY` tag.
     pub fn skins_tagged(&self) -> bool {
-        self.skins_entities() && !self.improved_transparency && self.pack_post.is_none()
+        self.skins_entities() && !self.improved_transparency && self.pack_dimension.is_none()
     }
 
     pub fn frame_generation_share(&self) -> Option<f32> {
@@ -4075,7 +4079,8 @@ impl Renderer {
         let mut post = match post {
             Ok(post) => post,
             Err(e) => {
-                self.pack_post = Some((dimension, None));
+                self.pack_dimension = Some(dimension);
+                self.external = None;
                 self.pack_atlas = None;
                 self.pack_material_atlases = None;
                 return Err(e);
@@ -4091,8 +4096,9 @@ impl Renderer {
             let programs = p.programs().into_iter().map(str::to_owned).collect();
             (programs, p.notes.clone())
         });
-        self.pack_post = Some((dimension, post.map(pack_external::PackPipeline::new)));
-        if self.pack_post.as_ref().is_some_and(|p| p.1.is_some()) {
+        self.pack_dimension = Some(dimension);
+        self.external = post.map(|p| Box::new(pack_external::PackPipeline::new(p)) as _);
+        if self.external.is_some() {
             self.native = None;
         }
         Ok(report)
@@ -4110,9 +4116,6 @@ impl Renderer {
         if let Some(pipeline) = &mut self.external {
             pipeline.reset_history(&self.device);
         }
-        if let Some((_, Some(post))) = &mut self.pack_post {
-            ExternalPipeline::reset_history(post, &self.device);
-        }
         if let Some(native) = &mut self.native {
             native.frame.reset_history();
             if let Some(post) = &mut native.post {
@@ -4123,8 +4126,8 @@ impl Renderer {
     /// The running shader pack's kind: `iris` (a `shaders/` pack) or `native` (one of
     /// Sunrise's own).
     pub fn shader_pack_kind(&self) -> Option<&'static str> {
-        match (&self.pack_post, &self.native) {
-            (Some((_, Some(_))), _) => Some("iris"),
+        match (&self.external, &self.native) {
+            (Some(_), _) => Some("iris"),
             (_, Some(_)) => Some("native"),
             _ => None,
         }
@@ -4143,8 +4146,8 @@ impl Renderer {
         if self.device_lost() {
             return Err("the graphics device was lost".into());
         }
-        if let Some((_, Some(post))) = &mut self.pack_post {
-            ExternalPipeline::take_center_depth(post, &self.device)?;
+        if let Some(post) = &mut self.external {
+            post.take_center_depth(&self.device)?;
         }
         Ok(())
     }
@@ -4235,7 +4238,8 @@ impl Renderer {
         match thread {
             Ok(thread) => {
                 // The last pack doesn't draw this dimension meanwhile.
-                self.pack_post = None;
+                self.pack_dimension = None;
+                self.external = None;
                 self.pack_loading = Some(PackLoading {
                     dimension,
                     thread,
@@ -4248,7 +4252,8 @@ impl Renderer {
                 log::error!("shader pack {label}: no thread to build it on: {e}");
                 // Off for this dimension, as a pack that fails, not tried again every frame.
                 self.pack_loading = None;
-                self.pack_post = Some((dimension, None));
+                self.pack_dimension = Some(dimension);
+                self.external = None;
             }
         }
     }
@@ -4289,7 +4294,8 @@ impl Renderer {
     /// Drops the running shader pack, of either kind.
     pub fn drop_shader_packs(&mut self) {
         self.pack_loading = None;
-        self.pack_post = None;
+        self.pack_dimension = None;
+        self.external = None;
         self.native = None;
         self.pack_atlas = None;
         self.separate_ao = false;
@@ -4358,7 +4364,8 @@ impl Renderer {
         )?;
         self.native = pack.draws().then_some(pack);
         if self.native.is_some() {
-            self.pack_post = None;
+            self.pack_dimension = None;
+            self.external = None;
             self.pack_atlas = None;
             self.pack_material_atlases = None;
         }
@@ -4491,7 +4498,7 @@ impl Renderer {
     /// The dimension the shader pack was last set for.
     pub fn shader_pack_dimension(&self) -> Option<i32> {
         let loading = self.pack_loading.as_ref().map(|l| l.dimension);
-        loading.or_else(|| self.pack_post.as_ref().map(|p| p.0))
+        loading.or(self.pack_dimension)
     }
     /// The Texture Filtering and Max Anisotropy options (`filtering`: 0 none, 1 RGSS, 2
     /// anisotropic; `bit`: `maxAnisotropyBit`). All take LevelRenderer's chunk layer sampler

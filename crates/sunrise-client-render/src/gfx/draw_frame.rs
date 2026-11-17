@@ -12,7 +12,6 @@ use acquire_frame::AcquiredFrame;
 mod post;
 #[path = "frame/water_mirror.rs"]
 mod water_mirror;
-use super::external::ExternalPipeline;
 use super::*;
 use post::{PostPassArgs, PostPassResult};
 
@@ -121,7 +120,7 @@ impl Renderer {
         laps.lap("r_acquire");
         // TAA runs where the world post pass does, not under a shader pack's own.
         let taa = !frame.title
-            && self.pack_post.as_ref().is_none_or(|p| p.1.is_none())
+            && self.external.is_none()
             && self.native.as_ref().is_none_or(|n| n.post.is_none());
         let hdr_lighting = self.shader_pack_kind().is_none();
         if let Some(hdr) = &mut self.hdr {
@@ -395,14 +394,13 @@ impl Renderer {
             pipeline.begin_frame(&state);
         }
         // What a `shaders/` pack draws itself this frame.
-        let pk = match &self.pack_post {
-            Some((_, Some(pack))) if !frame.title => pack.draws(&state),
+        let pk = match &self.external {
+            Some(pack) if !frame.title => pack.draws(&state),
             _ => external::Draws::default(),
         };
         let shadow_view = self
-            .pack_post
+            .external
             .as_ref()
-            .and_then(|p| p.1.as_ref())
             .filter(|_| !frame.title)
             .and_then(|p| p.shadow_request(&state))
             .or_else(|| {
@@ -410,12 +408,6 @@ impl Renderer {
                 let native = self.native.as_ref().filter(|_| !frame.title)?;
                 native.shadow.as_ref()?;
                 native.frame.shadow_view(frame)
-            })
-            .or_else(|| {
-                self.external
-                    .as_ref()
-                    .filter(|_| !frame.title)?
-                    .shadow_request(&state)
             });
         let pack_terrain = pk.terrain;
         // `LevelRenderer.extractSectionDrawGroups`' fade-in time, for the instances.
@@ -1308,11 +1300,10 @@ impl Renderer {
         let mut pack_entities = false;
         if !frame.title
             && pk.entities
-            && let Some((_, Some(post))) = &mut self.pack_post
+            && let Some(post) = &mut self.external
         {
             pack_entities = true;
-            ExternalPipeline::prepare_entities(
-                post,
+            post.prepare_entities(
                 &self.device,
                 &self.queue,
                 &external::EntityInput {
@@ -1331,7 +1322,7 @@ impl Renderer {
         // path.
         let oit_on = self.improved_transparency
             && !frame.title
-            && self.pack_post.as_ref().is_none_or(|p| p.1.is_none())
+            && self.external.is_none()
             && self.native.is_none()
             && oit::supported(&self.device);
         let [
@@ -1529,10 +1520,9 @@ impl Renderer {
         if let (Some(skinner), Some(skin)) = (&mut self.entity_skin, skin) {
             if pack_skin {
                 let target = self
-                    .pack_post
+                    .external
                     .as_ref()
-                    .and_then(|(_, post)| post.as_ref())
-                    .and_then(|post| ExternalPipeline::skin_target(post))
+                    .and_then(|post| post.skin_target())
                     .expect("GPU pack entity target");
                 skinner.dispatch_pack(
                     &self.device,
@@ -1928,7 +1918,7 @@ impl Renderer {
         let pack_post = pk.reads_world;
         // One of Sunrise's own packs reads the same world target.
         let native_post = !frame.title && self.native.as_ref().is_some_and(|n| n.post.is_some());
-        if let Some(timer) = Self::pass_timer(&mut self.pack_post, &mut self.native)
+        if let Some(timer) = Self::pass_timer(&mut self.external, &mut self.native)
             && timer.is_some() != self.pass_timing
         {
             *timer = self
@@ -1936,7 +1926,7 @@ impl Renderer {
                 .then(|| pack_timing::PassTiming::new(&self.device, &self.queue))
                 .flatten();
         }
-        if let Some(Some(t)) = Self::pass_timer(&mut self.pack_post, &mut self.native) {
+        if let Some(Some(t)) = Self::pass_timer(&mut self.external, &mut self.native) {
             t.gap = self.pass_timing_gap;
             t.keep_frames(self.keep_timed_frames);
         }

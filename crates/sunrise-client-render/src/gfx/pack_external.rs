@@ -1,11 +1,9 @@
 //! A `shaders/` pack as an external pipeline (`external::ExternalPipeline`): what the renderer
 //! asks of it at the frame's points, answered from the pack's programs.
 
-use std::ops::{Deref, DerefMut};
-
 use super::external::{
-    Draws, EntityInput, ExternalPipeline, FrameState, PostContext, PostFeed, ShadowCasters,
-    ShadowView,
+    Draws, EntityInput, ExternalPipeline, FrameState, PipelineFrame, PostContext, PostFeed,
+    ShadowCasters, ShadowView,
 };
 use super::pack_post::{PackPost, TerrainPage};
 use super::pack_timing::PassTiming as PackTiming;
@@ -29,40 +27,36 @@ impl PackPipeline {
     }
 }
 
-impl Deref for PackPipeline {
-    type Target = PackPost;
-    fn deref(&self) -> &PackPost {
-        &self.post
-    }
-}
-
-impl DerefMut for PackPipeline {
-    fn deref_mut(&mut self) -> &mut PackPost {
-        &mut self.post
-    }
-}
-
 impl ExternalPipeline for PackPipeline {
+    fn frame_request(&self) -> PipelineFrame {
+        PipelineFrame {
+            terrain: PackPost::has_terrain(&self.post),
+            shadow: PackPost::has_shadow(&self.post),
+            skins_entities: PackPost::skins_entities(&self.post),
+        }
+    }
+
     fn draws(&self, _state: &FrameState<'_>) -> Draws {
+        let p = &self.post;
         Draws {
             reads_world: true,
-            sky: self.has_sky(),
-            sky_clear: self.sky_clear(),
-            celestial: self.has_celestial(),
-            terrain: self.has_terrain(),
-            water: self.has_water(),
-            shadow: self.has_shadow(),
-            clouds: self.has_clouds(),
-            outline: self.has_lines(),
-            hand: self.has_hand(),
-            weather: self.has_weather(),
-            entities: self.has_entities(),
-            skins_entities: self.skins_entities(),
+            sky: p.has_sky(),
+            sky_clear: p.sky_clear(),
+            celestial: p.has_celestial(),
+            terrain: p.has_terrain(),
+            water: p.has_water(),
+            shadow: p.has_shadow(),
+            clouds: p.has_clouds(),
+            outline: p.has_lines(),
+            hand: p.has_hand(),
+            weather: p.has_weather(),
+            entities: p.has_entities(),
+            skins_entities: p.skins_entities(),
         }
     }
 
     fn shadow_request(&self, state: &FrameState<'_>) -> Option<ShadowView> {
-        self.shadow_view(state.frame)
+        self.post.shadow_view(state.frame)
     }
 
     fn shadow_casters(&self) -> ShadowCasters {
@@ -172,7 +166,11 @@ impl ExternalPipeline for PackPipeline {
         PackPost::take_center_depth(&mut self.post, device)
     }
 
-    fn timing(&mut self) -> Option<&mut Option<PackTiming>> {
+    fn timing_slot(&mut self) -> Option<&mut Option<PackTiming>> {
         Some(&mut self.post.timing)
+    }
+
+    fn timing(&self) -> Option<&PackTiming> {
+        self.post.timing.as_ref()
     }
 }

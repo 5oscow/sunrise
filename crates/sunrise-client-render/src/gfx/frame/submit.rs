@@ -1,4 +1,3 @@
-use super::super::external::ExternalPipeline;
 use super::super::*;
 
 pub(in super::super) struct SubmitFrameArgs<'a, 'b> {
@@ -126,10 +125,7 @@ impl Renderer {
             // Occlusion culling's results, GPU culling's statistics and a shader pack's centre
             // depth are read back as soon as the frame is submitted, as here.
             let culling = self.after_submit();
-            let center = match &mut self.pack_post {
-                Some((_, Some(post))) => ExternalPipeline::submitted(post),
-                _ => None,
-            };
+            let center = self.external.as_mut().and_then(|post| post.submitted());
             let after = (culling.is_some() || center.is_some()).then(|| {
                 Box::new(move || {
                     if let Some(read) = culling {
@@ -174,14 +170,14 @@ impl Renderer {
             timer.submitted(&self.queue);
             timer.collect(&self.device, &mut self.gpu_times);
         }
-        if let Some(Some(timer)) = Self::pass_timer(&mut self.pack_post, &mut self.native) {
+        if let Some(Some(timer)) = Self::pass_timer(&mut self.external, &mut self.native) {
             timer.submitted(&self.queue);
         }
         if let Some(timer) = &mut self.own_timing {
             timer.submitted(&self.queue);
         }
-        if let Some((_, Some(post))) = &mut self.pack_post
-            && let Some(read) = ExternalPipeline::submitted(post)
+        if let Some(post) = &mut self.external
+            && let Some(read) = post.submitted()
         {
             read();
         }

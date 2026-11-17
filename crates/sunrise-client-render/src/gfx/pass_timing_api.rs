@@ -86,7 +86,7 @@ impl Renderer {
             .as_mut()
             .map(pack_timing::PassTiming::take_frames)
             .unwrap_or_default();
-        let pack = match Self::pass_timer(&mut self.pack_post, &mut self.native) {
+        let pack = match Self::pass_timer(&mut self.external, &mut self.native) {
             Some(Some(t)) => t.take_frames(),
             _ => Vec::new(),
         };
@@ -94,11 +94,11 @@ impl Renderer {
     }
     /// The running shader pack's timer, of either kind.
     pub(super) fn pass_timer<'a>(
-        pack: &'a mut Option<(i32, Option<super::pack_external::PackPipeline>)>,
+        pack: &'a mut Option<Box<dyn ExternalPipeline>>,
         native: &'a mut Option<native_pack::NativePack>,
     ) -> Option<&'a mut Option<pack_timing::PassTiming>> {
         match (pack, native) {
-            (Some((_, Some(post))), _) => ExternalPipeline::timing(post),
+            (Some(post), _) => post.timing_slot(),
             (_, Some(native)) => Some(&mut native.timing),
             _ => None,
         }
@@ -106,8 +106,8 @@ impl Renderer {
     /// Each pass of the running shader pack with its median GPU time in milliseconds, while
     /// they are timed (`set_pass_timing`).
     pub fn shader_pass_times(&self) -> Vec<(String, f32)> {
-        let timer = match (&self.pack_post, &self.native) {
-            (Some((_, Some(post))), _) => post.timing.as_ref(),
+        let timer = match (&self.external, &self.native) {
+            (Some(post), _) => post.timing(),
             (_, Some(native)) => native.timing.as_ref(),
             _ => None,
         };
@@ -144,8 +144,8 @@ impl Renderer {
             .as_ref()
             .map(pack_timing::PassTiming::readings)
             .filter(|r| !r.is_empty());
-        let pack = match (&self.pack_post, &self.native) {
-            (Some((_, Some(post))), _) => post.timing.as_ref(),
+        let pack = match (&self.external, &self.native) {
+            (Some(post), _) => post.timing(),
             (_, Some(native)) => native.timing.as_ref(),
             _ => None,
         }

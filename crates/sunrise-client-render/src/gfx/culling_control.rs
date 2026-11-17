@@ -214,20 +214,19 @@ impl Renderer {
     /// kept for it; the local player, so its model is built in first person too). (false,
     /// false) without a pack or its shadow pass.
     pub fn pack_shadow_casters(&self) -> (bool, bool) {
-        let Some((_, Some(post))) = &self.pack_post else {
+        let Some(post) = &self.external else {
             return (false, false);
         };
-        let c = external::ExternalPipeline::shadow_casters(post);
+        let c = post.shadow_casters();
         (c.others, c.player)
     }
 
     /// A standard pack replaces mobs' vanilla blob shadows only when its compiled
     /// shadow path actually draws entities other than the player.
     pub fn pack_entity_shadows(&self) -> bool {
-        self.pack_post
+        self.external
             .as_ref()
-            .and_then(|(_, post)| post.as_ref())
-            .is_some_and(|post| external::ExternalPipeline::shadow_casters(post).mobs)
+            .is_some_and(|post| post.shadow_casters().mobs)
     }
 
     pub fn has_section(&self, key: SectionKey) -> bool {
