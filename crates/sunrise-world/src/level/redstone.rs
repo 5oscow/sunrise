@@ -18,6 +18,9 @@ use sunrise_core::{
 };
 
 mod experimental;
+mod wire_cache;
+
+pub(crate) use wire_cache::WireConnections;
 
 const SIGNAL_ORDER: [Direction; 6] = [
     Direction::Down,
@@ -1539,12 +1542,21 @@ impl<L: super::signal_access::SignalAccess + ?Sized> Signals<'_, L> {
     ) -> BlockStateId {
         let b = self.b;
         let table = &b.table;
+        let power = table.int(state, b.props.power);
         let was_dot = self.wire_is_dot(state);
-        let mut result = table.set_int(
-            b.default_of(b.named.redstone_wire),
-            b.props.power,
-            table.int(state, b.props.power),
-        );
+        // The shape is a pure function of the neighbours and `was_dot`, and a
+        // `Signals` view holds the level and ticks shared, so no block state can
+        // change while this view lives: the answer stays true for the view.
+        // `getBestNeighborSignal` and `getDirectSignalTo` ask for it from every
+        // direction they probe. View 0 caches nothing.
+        if let Some(cached) = self
+            .ticks
+            .wire_connections
+            .get(self.view, pos, power, was_dot)
+        {
+            return cached;
+        }
+        let mut result = table.set_int(b.default_of(b.named.redstone_wire), b.props.power, power);
         let can_up = self.wire_can_connect_up(pos);
         for direction in HORIZONTAL {
             if !self.wire_connected(result, direction) {
@@ -1553,6 +1565,7 @@ impl<L: super::signal_access::SignalAccess + ?Sized> Signals<'_, L> {
             }
         }
         if was_dot && self.wire_is_dot(result) {
+            self.cache_wire_connection(pos, power, was_dot, result);
             return result;
         }
         let north = self.wire_connected(result, Direction::North);
@@ -1573,7 +1586,13 @@ impl<L: super::signal_access::SignalAccess + ?Sized> Signals<'_, L> {
         if !south && ew_empty {
             result = table.set_text(result, b.props.south, "side");
         }
+        self.cache_wire_connection(pos, power, was_dot, result);
         result
+    }
+    fn cache_wire_connection(&self, pos: BlockPos, power: i32, was_dot: bool, state: BlockStateId) {
+        self.ticks
+            .wire_connections
+            .put(self.view, pos, power, was_dot, state);
     }
 }
 
@@ -1586,19 +1605,19 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         self.signals().comparator_output(pos)
     }
     pub fn direct_signal(&self, pos: BlockPos, direction: Direction) -> i32 {
-        self.signals().direct_signal(pos, direction)
+        self.query_signals().direct_signal(pos, direction)
     }
     pub fn signal(&self, pos: BlockPos, direction: Direction) -> i32 {
-        self.signals().signal(pos, direction)
+        self.query_signals().signal(pos, direction)
     }
     pub fn has_signal(&self, pos: BlockPos, direction: Direction) -> bool {
-        self.signals().has_signal(pos, direction)
+        self.query_signals().has_signal(pos, direction)
     }
     pub fn has_neighbor_signal(&self, pos: BlockPos) -> bool {
-        self.signals().has_neighbor_signal(pos)
+        self.query_signals().has_neighbor_signal(pos)
     }
     pub fn best_neighbor_signal(&self, pos: BlockPos) -> i32 {
-        self.signals().best_neighbor_signal(pos)
+        self.query_signals().best_neighbor_signal(pos)
     }
     fn wire_can_survive_on(&self, pos: BlockPos) -> bool {
         self.signals().wire_can_survive_on(pos)

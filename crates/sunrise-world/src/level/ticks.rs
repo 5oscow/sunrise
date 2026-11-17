@@ -27,6 +27,9 @@ pub struct Ticks {
     pub comparator_outputs: std::collections::HashMap<BlockPos, i32>,
     /// `RedstoneTorchBlock.RECENT_TOGGLES` (position, game time).
     pub torch_toggles: Vec<(BlockPos, i64)>,
+    /// Memoized wire connection states for one `Signals` view; see
+    /// [`super::redstone::WireConnections`].
+    pub(crate) wire_connections: super::redstone::WireConnections,
     /// Moving-piston block entities in ticker order (render and collide
     /// moving blocks from these; see `piston_shape`).
     pub moving_pistons: Vec<(BlockPos, super::pistons::MovingPiston)>,
@@ -76,6 +79,7 @@ impl Ticks {
             updater: NeighborUpdater::default(),
             comparator_outputs: Default::default(),
             torch_toggles: Vec::new(),
+            wire_connections: Default::default(),
             moving_pistons: Vec::new(),
             moving_piston_ids: FxHashMap::default(),
             piston_pushes: Vec::new(),

@@ -1974,15 +1974,30 @@ pub struct Signals<'a, L: signal_access::SignalAccess + ?Sized> {
     /// `RedstoneWireBlock.shouldSignal` is false while a wire samples its
     /// neighbours (`getBlockSignal`).
     pub(crate) wire_signal_off: bool,
+    /// This view's wire-shape cache id; see [`redstone::WireConnections`].
+    pub(crate) view: u64,
 }
 impl<'a, L: LevelAccess + ?Sized> Sim<'a, L> {
-    /// This simulation's level, read-only.
+    /// This simulation's level, read-only. The view caches nothing: single
+    /// reads do not repeat, and the shape paths pass states that are not the
+    /// one at `pos` (a cross for a wire, a default state for a placement).
+    /// Signal trees, which ask a wire's shape from every direction they probe,
+    /// start at [`Self::query_signals`].
     pub(crate) fn signals(&self) -> Signals<'_, L> {
         Signals {
             b: self.b,
             level: &*self.level,
             ticks: &*self.ticks,
             wire_signal_off: self.wire_signal_off.get(),
+            view: 0,
+        }
+    }
+    /// A view for one signal tree: the wire shapes it computes are memoized for
+    /// as long as it lives. See [`redstone::WireConnections`].
+    pub(crate) fn query_signals(&self) -> Signals<'_, L> {
+        Signals {
+            view: self.ticks.wire_connections.next_view(),
+            ..self.signals()
         }
     }
 }
@@ -1998,6 +2013,7 @@ impl Behaviours {
             level,
             ticks,
             wire_signal_off: false,
+            view: ticks.wire_connections.next_view(),
         }
     }
     pub(crate) fn sim<'a, L: LevelAccess + ?Sized>(
