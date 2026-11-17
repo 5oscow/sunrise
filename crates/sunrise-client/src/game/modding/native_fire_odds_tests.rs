@@ -2,7 +2,7 @@
 //! Part's answer for one face makes the fire beside that face valid, and the other faces keep
 //! vanilla's table.
 use super::native_entity_refs::tests::with_game;
-use mod_api::{self, BlockPart, FireOddsEvent, Hooks, LevelHost, Registrar};
+use mod_api::{self, BlockPart, FireOddsEvent, Hooks, Registrar};
 use sunrise_core::{geometry::Direction, position::BlockPos};
 
 /// Glass that ignites from its west face only.
@@ -10,7 +10,11 @@ struct WestFace;
 
 #[mod_api::sunrise_part]
 impl BlockPart for WestFace {
-    fn fire_odds(&self, _: &dyn LevelHost, event: &mut FireOddsEvent) -> Option<(i32, i32)> {
+    fn fire_odds(
+        &self,
+        _: mod_api::LevelSide<'_>,
+        event: &mut FireOddsEvent,
+    ) -> Option<(i32, i32)> {
         (event.face == Direction::West).then_some((5, 0))
     }
 }
@@ -53,9 +57,10 @@ fn a_block_part_answers_fire_odds_for_one_face() {
             };
             assert!(stands(game, 0), "the Part makes the west face flammable");
             assert!(!stands(game, 2), "the east face keeps vanilla's never");
-            // A client's copy of the level asks no Part.
+            // A client's placement/shape reads ask the same Part.
             game.options.dedicated = None;
-            assert!(!stands(game, 0));
+            assert!(stands(game, 0));
+            assert!(!stands(game, 2));
         })
     });
 }

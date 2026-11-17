@@ -1,7 +1,8 @@
 use super::*;
 
 impl GameLevel<'_> {
-    /// On an authoritative server, how fire treats the block `state` at `pos`
+    /// How fire treats the block `state` at `pos` on either side. The client
+    /// reads ignite odds for placement and shape prediction; only the server burns blocks.
     /// (`FireBlock.setFlammable(block, igniteOdds, burnOdds)`), asked from its
     /// side `face`, the one that faces the fire or the air fire may take: put
     /// `(ignite, burn)` in `odds` for your own blocks, and vanilla's table

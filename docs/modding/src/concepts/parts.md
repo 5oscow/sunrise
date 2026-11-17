@@ -52,6 +52,13 @@ impl Hooks for MyMod {
 - In `has_analog_output`, answer from the block state alone. In `analog_output`, do not change the
   world. The game clamps the comparator signal to the range 0 to 15.
 
+## Fire eligibility
+
+`BlockPart::fire_odds` receives a read-only `LevelSide` on both sides. Its ignite odds
+control fire placement and shape prediction on the client, including flint-and-steel
+prediction; burn odds are used only by the server. The face points toward the fire.
+Return `None` to keep the table. Client fire animation still uses vanilla's built-in table.
+
 ## Campfire smoke sources
 
 `BlockPart::smoke_source` answers whether its block makes a campfire above it a signal fire.
