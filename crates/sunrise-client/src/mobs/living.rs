@@ -1299,9 +1299,9 @@ impl Mob {
         level: &mut DamageLevel<'_>,
         contact: Option<(&MobWorld, [i32; 3])>,
         distance: f64,
-        damage: f32,
-    ) -> f32 {
-        contact.map_or(damage, |(w, p)| {
+        multiplier: f32,
+    ) -> (f64, f32) {
+        contact.map_or((distance, multiplier), |(w, p)| {
             crate::block_contact::fall(
                 level,
                 crate::block_contact::Contact {
@@ -1311,7 +1311,7 @@ impl Mob {
                     position: sunrise_core::position::BlockPos::new(p[0], p[1], p[2]),
                 },
                 distance,
-                damage,
+                multiplier,
             )
         })
     }
@@ -1400,6 +1400,7 @@ impl Mob {
             self.mod_block_fall(level, contact, landed, 0.0);
             return false;
         }
+        let (distance, modifier) = self.mod_block_fall(level, contact, distance, modifier);
         let power = distance + 1.0e-6 - self.kind.safe_fall_distance;
         let mut damage = (power * f64::from(modifier) * self.kind.fall_damage_multiplier).floor();
         // Frog.calculateFallDamage: five points less than the base damage;
@@ -1409,7 +1410,7 @@ impl Mob {
             super::Species::Goat => damage -= 10.0,
             _ => {}
         }
-        let damage = f64::from(self.mod_block_fall(level, contact, landed, damage as f32));
+
         // LivingEntity.causeFallDamage lets the riders fall first.
         if !horse {
             self.fall_to_passengers(distance, modifier, events);

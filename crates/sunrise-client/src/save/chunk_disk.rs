@@ -240,6 +240,7 @@ impl SaveDir {
         chunks: &[Arc<Chunk>],
         registry: &BlockRegistry,
         biomes: &Biomes,
+        items: &crate::items::Items,
     ) -> Option<Result<usize>> {
         if !mod_api::__private::listened(mod_api::HookId::ChunkDataSave) {
             return None;
@@ -274,6 +275,7 @@ impl SaveDir {
                             self.tables.get().map(|t| &**t),
                             self.shape,
                             blending.as_deref(),
+                            items,
                         );
                         if let Some(entries) = entries {
                             replace_entries(&mut tag, entries)?;

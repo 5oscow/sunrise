@@ -1595,7 +1595,7 @@ impl Game<'_> {
         let destroying: Vec<_> = self
             .destroying
             .iter()
-            .map(|(id, (pos, stage, _))| json!({ "id": id, "pos": pos, "stage": stage }))
+            .map(|(id, crack)| json!({ "id": id, "pos": crack.pos, "stage": crack.stage }))
             .collect();
         let mut status = json!({
             "screen": self.screen_name(),

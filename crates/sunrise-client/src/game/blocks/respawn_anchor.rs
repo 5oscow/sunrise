@@ -797,7 +797,7 @@ mod connected_spawnpoint_rotation_tests {
             (guest.uuid, guest.health, guest.game_mode, guest.position),
             (77, 20.0, 0, [4.5, 100.0, 4.5])
         );
-        let tag = playerdata::player_tag(guest);
+        let tag = playerdata::player_tag(guest, &Default::default());
         let respawn = tag
             .get("respawn")
             .expect("actual serialized personal configuration")

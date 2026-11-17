@@ -76,6 +76,15 @@ impl Game<'_> {
     /// The redirectable projectile under the crosshair within the attack
     /// reach, and how far along the view it is.
     pub(super) fn redirectable_hit(&self) -> Option<(usize, f64)> {
+        if let Some(hit) = self.cached_entity_pick() {
+            let (entity, distance, _) = hit?;
+            let index = self
+                .creatures
+                .projectiles
+                .iter()
+                .position(|f| f.id == entity.id())?;
+            return Some((index, distance));
+        }
         let (eye, dir) = self.aim()?;
         let reach: f64 = self.entity_reach;
         self.creatures
@@ -99,7 +108,9 @@ impl Game<'_> {
         if self.mob_hit().is_some_and(|(_, d, _)| d < t) {
             return false;
         }
-        if let (Some(hit), Some(eye)) = (self.pick_unfiltered(), self.eye_position()) {
+        if !self.uses_stored_pick()
+            && let (Some(hit), Some(eye)) = (self.pick_unfiltered(), self.eye_position())
+        {
             let d = (0..3)
                 .map(|a| (hit.point[a] - eye[a]).powi(2))
                 .sum::<f64>()

@@ -6416,6 +6416,7 @@ impl Game<'_> {
         })?;
         // Only a client's own pick is stopped by a block: the range check passed.
         if target.is_none()
+            && !self.uses_stored_pick()
             && let Some(hit) = self.pick_unfiltered()
             && let Some(eye) = self.eye_position()
         {
