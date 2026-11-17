@@ -445,6 +445,7 @@ struct GameLevel<'w> {
     recipes: &'w sunrise_client::crafting::Recipes,
     /// Container loot tables (`unpackLootTable`).
     loot: Option<std::sync::Arc<sunrise_world::loot::LootData>>,
+    loot_storage: std::sync::Arc<sunrise_world::loot::copy::StorageData>,
     registry: &'static sunrise_world::registry::BlockRegistry,
     block_registries: &'w sunrise_client::command::args::Registries,
     rules: sunrise_world::level::GameRules,
@@ -2664,6 +2665,13 @@ impl Game<'_> {
         origin: [f64; 3],
         block_entity: Option<sunrise_core::nbt::Tag>,
     ) -> sunrise_world::loot::LootPlace {
+        let (block_entity, block_components) = match block_entity {
+            Some(saved) => {
+                let source = spill::source_snapshot(saved, None, None);
+                (Some(source.nbt), Some(source.components))
+            }
+            None => (None, None),
+        };
         let (rain, thunder) = self.world.weather.levels(1.0);
         // Level.canHaveWeather: sky light, no ceiling and not the End.
         let weather =
@@ -2671,6 +2679,8 @@ impl Game<'_> {
         sunrise_world::loot::LootPlace {
             origin: Some(origin),
             block_entity,
+            block_components,
+            storage: Some(self.score.storage.snapshot()),
             level: Some(sunrise_world::loot::LootLevel {
                 dimension: self.dim.id().to_owned(),
                 game_time: self.world.game_time,
@@ -2995,6 +3005,7 @@ impl Game<'_> {
             } else {
                 self.server_loot.get()
             },
+            loot_storage: self.score.storage.snapshot(),
             registry: self.pack.assets.registry,
             block_registries: &self.pack.block_registries,
             rules,

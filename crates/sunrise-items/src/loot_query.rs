@@ -1,30 +1,6 @@
 use super::*;
 
 impl<R: RandomSource> LootContext<'_, R> {
-    /// Extend sequence evaluation only for a subtree containing a registered type.
-    pub(super) fn has_registered_function(&self, value: &Value) -> bool {
-        match value {
-            Value::String(id) => self
-                .items
-                .loot_modifiers
-                .get(id)
-                .is_some_and(|value| self.has_registered_function(value)),
-            Value::Array(values) => values
-                .iter()
-                .any(|value| self.has_registered_function(value)),
-            Value::Object(_) => {
-                self.items
-                    .loot_types
-                    .contains(value["type"].as_str().unwrap_or(""), true)
-                    || ["functions", "on_pass", "on_fail"].iter().any(|field| {
-                        value
-                            .get(field)
-                            .is_some_and(|value| self.has_registered_function(value))
-                    })
-            }
-            _ => false,
-        }
-    }
     pub(super) fn stock_condition(&self, c: &Value) -> Option<bool> {
         if !matches!(
             c["type"].as_str(),

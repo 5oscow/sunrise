@@ -21,6 +21,9 @@ use sunrise_world::{
     tag_layers::TagLayers,
 };
 
+#[cfg(test)]
+#[path = "loot_copy_tests.rs"]
+mod copy_tests;
 mod loot_conditions;
 
 fn tool_number(value: &sunrise_core::nbt::Tag) -> Option<f32> {
@@ -1152,7 +1155,7 @@ impl Items {
                 &enchantments,
                 &entity_tags,
             )?,
-            component_defaults: ingredient_defaults::component_defaults(defaults)?,
+            component_defaults: loot_data.component_defaults().clone(),
             mob_visibility,
             order,
             registry_order,
@@ -2379,9 +2382,82 @@ impl<R: RandomSource> LootContext<'_, R> {
                 continue;
             }
             match f["type"].as_str().or(f["function"].as_str()).unwrap_or("") {
-                "minecraft:sequence" if self.has_registered_function(f) => {
+                "minecraft:sequence" => {
                     for function in f["functions"].as_array().into_iter().flatten() {
                         self.modifiers(function, stack, random);
+                    }
+                }
+                "minecraft:copy_custom_data" => {
+                    let prototype = self.items.component_defaults.get(stack.item.as_ref());
+                    let original = if stack
+                        .data()
+                        .is_some_and(|data| data.other("!minecraft:custom_data").is_some())
+                    {
+                        None
+                    } else if let Some(data) = stack.custom_data() {
+                        Some(std::borrow::Cow::Borrowed(data))
+                    } else {
+                        prototype
+                            .and_then(|values| values.get(&"minecraft:custom_data".into()))
+                            .and_then(|value| sunrise_world::custom_data::borrow(value).ok())
+                    };
+                    let place = sunrise_world::loot::current_native_loot_place();
+                    if let Some(data) = sunrise_world::loot::copy::copy_custom_data(
+                        f,
+                        original.as_deref(),
+                        |source| {
+                            sunrise_world::loot::copy::nbt_source(
+                                source,
+                                place.as_deref(),
+                                |target| {
+                                    (target == "this")
+                                        .then(|| self.target.map(|(entity, _)| entity))
+                                        .flatten()
+                                },
+                            )
+                        },
+                    ) {
+                        apply_component_patch(
+                            stack,
+                            [(
+                                "minecraft:custom_data".into(),
+                                sunrise_core::nbt::Tag::Compound(data),
+                            )]
+                            .into_iter()
+                            .collect(),
+                        );
+                    }
+                }
+                "minecraft:copy_components" => {
+                    let place = sunrise_world::loot::current_native_loot_place();
+                    let mut patch = sunrise_core::nbt::Compound::new();
+                    sunrise_world::loot::copy::copy_components(
+                        f,
+                        |source| match source {
+                            "block_entity" => place
+                                .as_ref()?
+                                .block_components
+                                .as_ref()
+                                .map(std::borrow::Cow::Borrowed),
+                            "tool" => self.held.map(|tool| {
+                                std::borrow::Cow::Owned(
+                                    sunrise_world::loot::copy::components_with_patch(
+                                        self.items.component_defaults.get(tool.item.as_ref()),
+                                        crate::item_data::component_snapshot(tool).as_ref(),
+                                    ),
+                                )
+                            }),
+                            "this" => self.target.map(|(entity, _)| {
+                                sunrise_world::loot::copy::entity_components(entity)
+                            }),
+                            _ => None,
+                        },
+                        |id, value| {
+                            patch.insert(id.as_str().into(), value.clone());
+                        },
+                    );
+                    if !patch.is_empty() {
+                        apply_component_patch(stack, patch);
                     }
                 }
                 "minecraft:filtered" => {
@@ -2628,15 +2704,42 @@ impl<R: RandomSource> LootContext<'_, R> {
 /// (`!id` removes a component), read back as a saved stack's components are,
 /// so a modelled one (a potion's contents, a book's pages) lands in its field.
 fn apply_components(stack: &mut ItemStack, patch: &Value) {
+    let patch = patch
+        .as_object()
+        .into_iter()
+        .flatten()
+        .map(|(id, value)| {
+            if value.is_null() {
+                (
+                    format!("!{}", id.strip_prefix('!').unwrap_or(id))
+                        .as_str()
+                        .into(),
+                    sunrise_core::nbt::Tag::Compound(Default::default()),
+                )
+            } else {
+                (
+                    id.as_str().into(),
+                    sunrise_client_core::scoreboard::json_to_tag(value),
+                )
+            }
+        })
+        .collect();
+    apply_component_patch(stack, patch);
+}
+
+/// One complete patch enters the component codec together, preserving component
+/// interactions (including the ominous banner) and the source's NBT types.
+fn apply_component_patch(stack: &mut ItemStack, patch: sunrise_core::nbt::Compound) {
     use sunrise_core::nbt::Tag;
     let mut saved = match crate::item_data::component_snapshot(stack) {
         Some(Tag::Compound(c)) => c,
         _ => Default::default(),
     };
-    for (key, value) in patch.as_object().into_iter().flatten() {
+    for (key, value) in patch {
+        let key = key.to_string_lossy();
         let (removed, id) = key
             .strip_prefix('!')
-            .map_or((false, &**key), |id| (true, id));
+            .map_or((false, key.as_str()), |id| (true, id));
         let id = if id.contains(':') {
             id.to_owned()
         } else {
@@ -2650,10 +2753,7 @@ fn apply_components(stack: &mut ItemStack, patch: &Value) {
                 Tag::compound(Vec::<(&str, Tag)>::new()),
             );
         } else {
-            saved.insert(
-                id.as_str().into(),
-                sunrise_client_core::scoreboard::json_to_tag(value),
-            );
+            saved.insert(id.as_str().into(), value);
         }
     }
     (stack.damage, stack.extra) = crate::item_data::decode_components(Some(&Tag::Compound(saved)));
