@@ -247,11 +247,11 @@ pub mod tests {
             let BlockPos { x, y, z } = event.pos;
             if let Ok(Some(count @ 1..)) = HOARD.get_existing(level, Holder::BlockEntity([x, y, z]))
             {
-                event.drops.push(crate::parts::items::tests::stack(
+                event.drops.push(Some(crate::parts::items::tests::stack(
                     "minecraft:gold_ingot",
                     count,
                     0,
-                ));
+                )));
             }
         }
     }
