@@ -979,3 +979,23 @@ fn a_hidden_type_named_only_by_an_impl_gets_its_record() {
         Some("type:internal::Secret")
     );
 }
+
+/// `surface.json` lists, for each hook and trait method that crosses, the name a built wasm mod
+/// uses for it, and no two records share one.
+#[test]
+#[ignore = "daily"]
+fn every_crossing_method_lists_one_distinct_call_name() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let export = export(&root).unwrap();
+    let mut owners: std::collections::BTreeMap<&String, Vec<&str>> = Default::default();
+    for item in &export.surface.traits {
+        for method in &item.methods {
+            if let Some(call) = &method.call {
+                owners.entry(call).or_default().push(&method.id);
+            }
+        }
+    }
+    assert!(owners.len() > 1000, "{} calls", owners.len());
+    owners.retain(|_, ids| ids.len() > 1);
+    assert!(owners.is_empty(), "records sharing a call name: {owners:?}");
+}

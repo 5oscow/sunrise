@@ -8,8 +8,6 @@ mod host;
 mod prepared;
 #[cfg(test)]
 mod prepared_tests;
-#[cfg(test)]
-mod protocol_pin;
 pub use host::{generate_coverage, generate_host};
 mod trait_roles;
 mod ty;
@@ -388,13 +386,17 @@ pub(super) fn surface_reading<'a>(
                             .inputs
                             .iter()
                             .filter_map(|input| match input {
-                                FnArg::Typed(arg) => Some(quote::ToTokens::to_token_stream(&arg.ty).to_string()),
+                                FnArg::Typed(arg) => {
+                                    Some(quote::ToTokens::to_token_stream(&arg.ty).to_string())
+                                }
                                 FnArg::Receiver(_) => None,
                             })
                             .collect(),
                         ret: match &function.sig.output {
                             ReturnType::Default => None,
-                            ReturnType::Type(_, ty) => Some(quote::ToTokens::to_token_stream(ty).to_string()),
+                            ReturnType::Type(_, ty) => {
+                                Some(quote::ToTokens::to_token_stream(ty).to_string())
+                            }
                         },
                         trait_params: item
                             .generics
@@ -488,14 +490,6 @@ pub(super) struct Names {
     by_method: std::collections::HashMap<(String, String), mod_surface::call::Name>,
 }
 
-impl Names {
-    pub(super) fn get(&self, owner: &str, method: &str) -> &mod_surface::call::Name {
-        self.by_method
-            .get(&(owner.to_owned(), method.to_owned()))
-            .unwrap_or_else(|| panic!("no name for {owner}::{method}"))
-    }
-}
-
 /// The hook's side as its name, for the hash.
 fn side_word(side: &crate::catalog::Side) -> &'static str {
     match side {
@@ -511,15 +505,7 @@ pub(crate) fn exported_calls(
     surface: &mut Surface<'_>,
     hooks: &[crate::catalog::Hook],
 ) -> Result<std::collections::BTreeMap<(String, String), String>, String> {
-    let prepared: Vec<(String, String)> = hooks
-        .iter()
-        .filter_map(|hook| {
-            hook.prepared
-                .clone()
-                .map(|field| (hook.name.clone(), field))
-        })
-        .collect();
-    let names = call_names(surface, hooks, &prepared)?;
+    let names = call_names(surface, hooks)?;
     Ok(names
         .by_method
         .iter()
@@ -527,8 +513,7 @@ pub(crate) fn exported_calls(
         .collect())
 }
 
-/// Names every method of the surface that crosses (see `surface::calls`), the calls a mod makes
-/// on objects it holds, and the entries of the prepared hooks.
+/// Names every method of the surface that crosses (see `surface::calls`).
 pub(super) fn call_names(
     surface: &mut Surface<'_>,
     hooks: &[crate::catalog::Hook],
@@ -993,7 +978,11 @@ mod tests {
                 for text in &texts {
                     assert!(mod_surface::call::Name::parse(text).is_ok(), "{text}");
                 }
-                eprintln!("{} names, longest {}", texts.len(), texts.iter().map(String::len).max().unwrap());
+                eprintln!(
+                    "{} names, longest {}",
+                    texts.len(),
+                    texts.iter().map(String::len).max().unwrap()
+                );
             })
             .unwrap()
             .join()
