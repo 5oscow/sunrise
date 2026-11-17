@@ -869,12 +869,16 @@ fn loaded_block_entity(world: &World, [x, y, z]: [i32; 3]) -> Option<&BlockEntit
 
 /// Whether an open menu holds the container at `key` (`isOwnContainer`): a double
 /// chest's holds both halves, an ender chest's the block it was opened from.
-fn menu_holds(menu: &Menu, key: (i32, i32, i32)) -> bool {
+pub(super) fn menu_holds(menu: &Menu, key: (i32, i32, i32)) -> bool {
+    menu_container_positions(menu).contains(&Some(key))
+}
+
+pub(super) fn menu_container_positions(menu: &Menu) -> [Option<(i32, i32, i32)>; 2] {
     match menu.slots {
-        Slots::Block(at) => at == key,
-        Slots::Double(first, second) => first == key || second == key,
-        Slots::Ender => menu.pos == Some(key),
-        Slots::Native => false,
+        Slots::Block(at) => [Some(at), None],
+        Slots::Double(first, second) => [Some(first), Some(second)],
+        Slots::Ender => [menu.pos, None],
+        Slots::Native => [None; 2],
     }
 }
 
