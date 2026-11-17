@@ -575,6 +575,21 @@ impl ItemStack {
         }
         info.is_some_and(|info| info.components.iter().any(|c| c == id))
     }
+    /// Effective villager food nutrition, including a stack's override or removal.
+    pub fn villager_food(&self, info: Option<&ItemInfo>) -> Option<i32> {
+        if let Some(data) = self.data() {
+            if let Some(value) = data.other("minecraft:villager_food") {
+                return value.get("nutrition").and_then(|n| match n {
+                    Tag::Int(n) => Some(*n),
+                    _ => None,
+                });
+            }
+            if data.other("!minecraft:villager_food").is_some() {
+                return None;
+            }
+        }
+        info.and_then(|i| i.villager_food)
+    }
     /// Death protection effects retained at patch or prototype load.
     pub fn death_protection<'a>(
         &'a self,
@@ -1862,6 +1877,22 @@ pub fn command_components(text: &str) -> Result<Tag, String> {
     }
     Ok(Tag::Compound(entries))
 }
+#[cfg(test)]
+#[test]
+fn villager_food_stack_override_and_removal() {
+    let mut stack = ItemStack::new("test:meal", 3);
+    assert_eq!(stack.villager_food(None), None);
+    stack.data_mut().set_loot_component(
+        "minecraft:villager_food",
+        &Some(Tag::compound([("nutrition", Tag::Int(7))])),
+    );
+    assert_eq!(stack.villager_food(None), Some(7));
+    stack
+        .data_mut()
+        .set_loot_component("minecraft:villager_food", &None);
+    assert_eq!(stack.villager_food(None), None);
+}
+
 #[cfg(test)]
 fn prototype_items() -> &'static crate::items::Items {
     static ITEMS: std::sync::OnceLock<crate::items::Items> = std::sync::OnceLock::new();

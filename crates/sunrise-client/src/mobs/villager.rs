@@ -496,11 +496,9 @@ pub fn gift_table(m: &Mob, maps: &crate::neoforge_mob_maps::NeoForgeMobMaps) -> 
 
 /// `VillagerFood` nutrition (`DataComponents.VILLAGER_FOOD`).
 ///
-/// The value in `items`, the registry the villager lives with: a data pack's
-/// or a mod's item with the component counts, as one with vanilla's four does;
-/// an item the registry lacks feeds nothing.
-pub fn food_points(items: &Items, item: &str) -> i32 {
-    items.villager_food(item).unwrap_or(0)
+/// Reads the stack's effective component, including overrides and removals.
+pub fn food_points(items: &Items, stack: &ItemStack) -> i32 {
+    stack.villager_food(items.get(&stack.item)).unwrap_or(0)
 }
 /// The farmer's `requestedItems` (`VillagerProfession.FARMER`). Food is picked
 /// up and traded separately, through its villager food value.
@@ -576,7 +574,7 @@ impl Ext {
     pub fn food_in_inventory(&self, items: &Items) -> i32 {
         self.inventory
             .iter()
-            .map(|s| food_points(items, &s.item) * s.count as i32)
+            .map(|s| food_points(items, s) * s.count as i32)
             .sum()
     }
     /// `hasExcessFood` and `wantsMoreFood`.
@@ -594,8 +592,9 @@ impl Ext {
         if self.hungry() {
             let mut slot = 0;
             while slot < self.inventory.len() && self.hungry() {
-                let points = food_points(items, &self.inventory[slot].item);
-                if points > 0 {
+                if let Some(points) =
+                    self.inventory[slot].villager_food(items.get(&self.inventory[slot].item))
+                {
                     while self.inventory[slot].count > 0 && self.hungry() {
                         self.food_level += points;
                         self.inventory[slot].count -= 1;
@@ -813,8 +812,8 @@ pub fn meet(
     let mut thrown = Vec::new();
     if excess
         && (farmer || wants_more)
-        && let Some(s) =
-            ext_mut(&mut mobs[a]).take_half_stack(|s| food_points(items, &s.item) > 0, max_stack)
+        && let Some(s) = ext_mut(&mut mobs[a])
+            .take_half_stack(|s| s.villager_food(items.get(&s.item)).is_some(), max_stack)
     {
         thrown.push(s);
     }
@@ -1841,9 +1840,12 @@ mod tests {
     #[test]
     fn villager_food_values() {
         let items = &vanilla_food();
-        assert_eq!(food_points(items, "minecraft:bread"), 4);
-        assert_eq!(food_points(items, "minecraft:beetroot"), 1);
-        assert_eq!(food_points(items, "minecraft:apple"), 0);
+        assert_eq!(food_points(items, &ItemStack::new("minecraft:bread", 1)), 4);
+        assert_eq!(
+            food_points(items, &ItemStack::new("minecraft:beetroot", 1)),
+            1
+        );
+        assert_eq!(food_points(items, &ItemStack::new("minecraft:apple", 1)), 0);
     }
     /// A villager's snapshot counts its food by the registry it is taken with:
     /// another registry built since, or alongside, never answers for it.
