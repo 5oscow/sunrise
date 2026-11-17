@@ -166,7 +166,7 @@ pub enum PartStateRefusal {
     /// `Arc<dyn BlockPart>`), which crosses only into one link group's resource scope:
     /// not as data both targets read, nor into a save.
     ResourceHandle,
-    /// The same key is already declared with a type of another Wire layout, named here.
+    /// The same key is already declared with a type of another Rust type name, named here.
     Incompatible {
         /// The type the key was first declared with.
         declared: &'static str,
@@ -196,7 +196,7 @@ impl PartStateRefusal {
             ),
             Self::Incompatible { declared } => write!(
                 f,
-                "the key is already declared with type {declared}, whose Wire layout differs"
+                "the key is already declared with type {declared}, a different Rust type"
             ),
             Self::EntityKind { kind, reason } => write!(f, "entity type {kind}: {reason}"),
         }
@@ -268,6 +268,8 @@ pub struct PartStateDeclaration {
     sync: bool,
     copy_on_death: bool,
     codec: bool,
+    /// Whether the type's Wire form holds a resource handle anywhere in it.
+    resource: bool,
 }
 
 impl PartStateDeclaration {
@@ -281,6 +283,7 @@ impl PartStateDeclaration {
             sync: key.sync,
             copy_on_death: key.copy_on_death,
             codec: key.codec.is_some(),
+            resource: T::holds_resource(&mut Vec::new()),
         }
     }
 
@@ -293,6 +296,9 @@ impl PartStateDeclaration {
         }
         if self.copy_on_death {
             return Err(PartStateRefusal::CopyOnDeath);
+        }
+        if self.resource {
+            return Err(PartStateRefusal::ResourceHandle);
         }
         if wasm && !self.codec {
             return Err(PartStateRefusal::NoCodecOnWasm);
@@ -514,6 +520,44 @@ mod tests {
             check(&key(false, true, true), false),
             Err(PartStateRefusal::CopyOnDeath)
         );
+    }
+
+    #[test]
+    fn a_resource_handle_anywhere_in_the_type_refuses_the_declaration_on_both_targets() {
+        #[derive(sunrise_mod_api_macros::Wire)]
+        struct Holds {
+            _part: Vec<(u8, Option<Arc<dyn BlockPart>>)>,
+        }
+        #[derive(sunrise_mod_api_macros::Wire)]
+        enum Plain {
+            _A(u8, String),
+            _B { _x: Vec<Option<i64>> },
+        }
+        fn declared<T: crate::wire::Wire + 'static>(wasm: bool) -> Result<(), PartStateRefusal> {
+            let key = AttachmentType::<T> {
+                namespace: "test",
+                name: "state",
+                default: || unreachable!(),
+                codec: Some(AttachmentCodec {
+                    encode: |_| Ok(Compound::new()),
+                    decode: |_| unreachable!(),
+                }),
+                copy_on_death: false,
+                sync: false,
+            };
+            PartStateDeclaration::of(&key).check(wasm)
+        }
+        for wasm in [false, true] {
+            assert_eq!(
+                declared::<Option<Arc<dyn BlockPart>>>(wasm),
+                Err(PartStateRefusal::ResourceHandle)
+            );
+            assert_eq!(
+                declared::<Holds>(wasm),
+                Err(PartStateRefusal::ResourceHandle)
+            );
+            assert_eq!(declared::<Plain>(wasm), Ok(()));
+        }
     }
 
     #[test]

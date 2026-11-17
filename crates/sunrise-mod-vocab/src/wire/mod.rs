@@ -552,6 +552,13 @@ impl<'a> Reader<'a> {
 pub trait Wire: Sized {
     /// Minimum encoded size, used to reject impossible collection lengths.
     const MIN: usize;
+    /// Whether the type's encoding holds a resource handle anywhere in it (an erased handler
+    /// such as `Arc<dyn BlockPart>`): such a value crosses only as a handle into one link
+    /// group's resource scope, so Part state refuses it.
+    // hidden: derived and forwarded by the codecs, read by the part-state declaration.
+    fn holds_resource(_: &mut Vec<&'static str>) -> bool {
+        false
+    }
     /// Encodes this value, recording failures on the writer.
     fn put(&self, out: &mut Writer);
     /// Consumes owned data when a resource's ownership must cross the boundary.
@@ -713,6 +720,9 @@ impl Wire for Arc<str> {
 
 impl<T: Wire> Wire for Option<T> {
     const MIN: usize = 1;
+    fn holds_resource(visiting: &mut Vec<&'static str>) -> bool {
+        T::holds_resource(visiting)
+    }
     fn put(&self, out: &mut Writer) {
         match self {
             None => out.put(&0u8),
@@ -742,6 +752,9 @@ impl<T: Wire> Wire for Option<T> {
 
 impl<T: Wire, E: Wire> Wire for Result<T, E> {
     const MIN: usize = 1;
+    fn holds_resource(visiting: &mut Vec<&'static str>) -> bool {
+        T::holds_resource(visiting) || E::holds_resource(visiting)
+    }
     fn put(&self, out: &mut Writer) {
         match self {
             Ok(value) => {
@@ -777,6 +790,9 @@ impl<T: Wire, E: Wire> Wire for Result<T, E> {
 
 impl<T: Wire> Wire for Arc<[T]> {
     const MIN: usize = 4;
+    fn holds_resource(visiting: &mut Vec<&'static str>) -> bool {
+        T::holds_resource(visiting)
+    }
     fn put(&self, out: &mut Writer) {
         out.put_len(self.len());
         for item in self.iter() {
@@ -790,6 +806,9 @@ impl<T: Wire> Wire for Arc<[T]> {
 
 impl<T: Wire> Wire for Box<[T]> {
     const MIN: usize = 4;
+    fn holds_resource(visiting: &mut Vec<&'static str>) -> bool {
+        T::holds_resource(visiting)
+    }
     fn put(&self, out: &mut Writer) {
         out.put_len(self.len());
         for item in self.iter() {
@@ -803,6 +822,9 @@ impl<T: Wire> Wire for Box<[T]> {
 
 impl<T: Wire> Wire for Box<T> {
     const MIN: usize = T::MIN;
+    fn holds_resource(visiting: &mut Vec<&'static str>) -> bool {
+        T::holds_resource(visiting)
+    }
     fn put(&self, out: &mut Writer) {
         out.nested(|out| (**self).put(out));
     }
@@ -816,6 +838,9 @@ impl<T: Wire> Wire for Box<T> {
 
 impl<T: Wire> Wire for Arc<T> {
     const MIN: usize = T::MIN;
+    fn holds_resource(visiting: &mut Vec<&'static str>) -> bool {
+        T::holds_resource(visiting)
+    }
     fn put(&self, out: &mut Writer) {
         out.nested(|out| (**self).put(out));
     }
@@ -826,6 +851,9 @@ impl<T: Wire> Wire for Arc<T> {
 
 impl<T: Wire> Wire for Vec<T> {
     const MIN: usize = 4;
+    fn holds_resource(visiting: &mut Vec<&'static str>) -> bool {
+        T::holds_resource(visiting)
+    }
     fn put(&self, out: &mut Writer) {
         T::put_list(self, out);
     }
@@ -839,6 +867,9 @@ impl<T: Wire> Wire for Vec<T> {
 
 impl<T: Wire> Wire for VecDeque<T> {
     const MIN: usize = 4;
+    fn holds_resource(visiting: &mut Vec<&'static str>) -> bool {
+        T::holds_resource(visiting)
+    }
     fn put(&self, out: &mut Writer) {
         out.put_len(self.len());
         for item in self {
@@ -858,6 +889,9 @@ impl<T: Wire> Wire for VecDeque<T> {
 
 impl<T: Wire, const N: usize> Wire for [T; N] {
     const MIN: usize = T::MIN * N;
+    fn holds_resource(visiting: &mut Vec<&'static str>) -> bool {
+        T::holds_resource(visiting)
+    }
     fn put(&self, out: &mut Writer) {
         for item in self {
             item.put(out);
@@ -884,6 +918,9 @@ macro_rules! sets {
     ($($ty:ident [$($bound:tt)+]),*) => {$(
         impl<T: Wire + $($bound)+> Wire for $ty<T> {
     const MIN: usize = 4;
+    fn holds_resource(visiting: &mut Vec<&'static str>) -> bool {
+        T::holds_resource(visiting)
+    }
             fn put(&self, out: &mut Writer) {
                 out.put_len(self.len());
                 for item in self {
@@ -908,6 +945,9 @@ macro_rules! maps {
     ($($ty:ident [$($bound:tt)+]),*) => {$(
         impl<K: Wire + $($bound)+, V: Wire> Wire for $ty<K, V> {
     const MIN: usize = 4;
+    fn holds_resource(visiting: &mut Vec<&'static str>) -> bool {
+        K::holds_resource(visiting) || V::holds_resource(visiting)
+    }
             fn put(&self, out: &mut Writer) {
                 out.put_len(self.len());
                 for (key, value) in self {
@@ -936,6 +976,9 @@ macro_rules! tuples {
         impl<$($name: Wire),+> Wire for ($($name,)+) {
 
     const MIN: usize = 0 $(+ $name::MIN)+;
+    fn holds_resource(visiting: &mut Vec<&'static str>) -> bool {
+        false $(|| <$name as Wire>::holds_resource(visiting))+
+    }
             fn put(&self, out: &mut Writer) {
                 let ($($name,)+) = self;
                 $($name.put(out);)+
@@ -976,15 +1019,31 @@ impl Wire for std::time::Duration {
 
 // Checked encodings declare their written fields here rather than relying on the
 // Rust representation (which may contain caches or validated constructor state).
-// The list is read by the surface export (`surface/wire_forms.rs`) and expands to nothing.
+// The list is read by the surface export (`surface/wire_forms.rs`) and expands to the
+// resource walk over the written fields.
 macro_rules! layout_fields {
-    ($($field:literal => $ty:ty),* $(,)?) => {};
+    ($($field:literal => $ty:ty),* $(,)?) => {
+        fn holds_resource(visiting: &mut Vec<&'static str>) -> bool {
+            let this = ::core::any::type_name::<Self>();
+            if visiting.contains(&this) {
+                return false;
+            }
+            visiting.push(this);
+            let found = false $(|| <$ty as $crate::wire::Wire>::holds_resource(visiting))*;
+            visiting.pop();
+            found
+        }
+    };
 }
 
 // Declares that a hand-written impl crosses as another type: read by the surface export,
-// like `layout_fields!`, and expands to nothing.
+// like `layout_fields!`, and expands to that type's resource walk.
 macro_rules! layout_via {
-    ($ty:ty) => {};
+    ($ty:ty) => {
+        fn holds_resource(visiting: &mut Vec<&'static str>) -> bool {
+            <$ty as $crate::wire::Wire>::holds_resource(visiting)
+        }
+    };
 }
 
 pub(crate) use layout_fields;

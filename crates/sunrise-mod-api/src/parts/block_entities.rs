@@ -447,7 +447,7 @@ impl BlockEntitiesRegistrar for PartRegistrar {
 
 impl PartRegistrar {
     /// Checks a Part state declaration of either holder and records its key: see
-    /// `PartStateDeclaration::check` or a key used with another Wire layout.
+    /// `PartStateDeclaration::check` or a key used with another Rust type name.
     /// Owner declarations are checked after all packages have registered.
     pub(crate) fn check_part_state(
         &mut self,

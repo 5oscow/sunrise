@@ -10,6 +10,9 @@ macro_rules! arc_handler {
     ($handler:ty, $name:literal) => {
         impl Wire for Arc<$handler> {
             const MIN: usize = 8;
+            fn holds_resource(_: &mut Vec<&'static str>) -> bool {
+                true
+            }
             fn put(&self, out: &mut Writer) {
                 out.put_resource(Box::new(self.clone()));
             }
@@ -24,6 +27,9 @@ macro_rules! handler {
         $crate::wire::wire_handlers::arc_handler!($handler, $name);
         impl Wire for Box<$handler> {
             const MIN: usize = 8;
+            fn holds_resource(_: &mut Vec<&'static str>) -> bool {
+                true
+            }
             fn put(&self, out: &mut Writer) {
                 out.fail(WireError::Invalid("boxed handler needs owned encoding"));
             }
