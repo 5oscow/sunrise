@@ -2,14 +2,12 @@ import contextlib
 import io
 import json
 import subprocess
-import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
-import oracle_harness  # noqa: E402
+from tools import oracle_harness
 
 
 def message(level, rendered):
