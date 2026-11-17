@@ -912,6 +912,9 @@ impl<
 impl<'a: 'b, 'b, T: std::ops::Deref<Target = Ticks>> mod_api::LevelRandomHost
     for LevelTicks<'b, &mut super::GameLevel<'a>, T>
 {
+    fn container_signal(&mut self, pos: [i32; 3]) -> Option<i32> {
+        mod_api::LevelRandomHost::container_signal(&mut *self.level, pos)
+    }
     fn attachments(&mut self) -> &mut dyn mod_api::AttachmentStore {
         mod_api::LevelRandomHost::attachments(&mut *self.level)
     }

@@ -42,7 +42,11 @@ fn level_container_reads_preserve_snapshot_and_unpack_comparator_once() {
                 assert_eq!(level.container_signal(unloaded.pos), None);
             });
             pending_seed(game, POS, &[37]);
-            game.with_level(|_, level, _| assert_eq!(level.container_signal(at.pos), Some(1)));
+            game.with_level(|_, level, ticks| {
+                let mut host = crate::game::mod_api_host::LevelTicks::new(level, ticks);
+                assert_eq!(host.container_signal(at.pos), Some(1));
+                assert_eq!(host.container_signal([32, 64, 8]), None);
+            });
             consumed(game, POS);
             assert_eq!(count(game, POS, "minecraft:diamond"), 1);
             game.world
