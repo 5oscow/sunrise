@@ -1197,6 +1197,8 @@ struct Game<'a> {
     kept_block_entities: std::cell::RefCell<native_block_entity_draw::KeptGeometry>,
     /// Mod screens' living scenes, per mod and clock id (game/modding/native_scene_live.rs).
     live_scenes: std::cell::RefCell<native_scene_live::LiveScenes>,
+    /// Client mods' dynamic textures in the GUI atlas's pool (game/modding/native_dynamic_textures.rs).
+    dynamic_textures: sunrise_client::hud::dynamic_textures::DynamicTextures,
     /// Glyphs from `native_draw_text` (`&self`): uploaded to the font atlas with the frame.
     text_patches: std::cell::RefCell<Vec<sunrise_client::font::Patch>>,
     /// Prepared block-entity copies for this frame, in entity-stream order.
@@ -8815,6 +8817,7 @@ impl Game<'_> {
         // map_patches any earlier leaves them a frame behind.
         hud.patches.append(&mut self.map_patches);
         hud.patches.append(self.text_patches.get_mut());
+        self.dynamic_texture_patches(&mut hud.image_patches);
         let entity_spans = std::mem::take(self.entity_spans.get_mut());
         let entity_motion = std::mem::take(self.entity_motion.get_mut());
         let entity_motion_posed = std::mem::take(self.entity_motion_posed.get_mut());
@@ -10802,6 +10805,7 @@ impl<'a> Game<'a> {
             glint_frame: Default::default(),
             kept_block_entities: Default::default(),
             live_scenes: Default::default(),
+            dynamic_textures: Default::default(),
             text_patches: Default::default(),
             prepared_model_draws: Default::default(),
             world_geometry: Some(Default::default()),

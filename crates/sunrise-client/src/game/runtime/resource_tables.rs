@@ -147,11 +147,11 @@ impl Game<'_> {
     }
 }
 
-/// Whether the HUD atlas packs the mod image slot (`sunrise/modimage`): whenever a client mod is
-/// loaded, native or wasm, since any of them can call `ClientHost::mod_image`, with no mixin and
-/// no opt-in (#4437). A game with no mod pays none of its 4 MiB. Read where the atlas is built:
-/// at the first load and on a resource reload.
-pub(in crate::game) fn mod_image_slot() -> bool {
+/// Whether the HUD atlas packs the pool of dynamic texture slots: whenever a client mod is
+/// loaded, native or wasm, since any of them can call `ClientHost::create_dynamic_texture`, with
+/// no mixin and no opt-in (#4437). A game with no mod packs no slot and its atlas does not grow.
+/// Read where the atlas is built: at the first load and on a resource reload.
+pub(in crate::game) fn dynamic_texture_pool() -> bool {
     !mod_api::__private::mods().is_empty()
 }
 
@@ -167,9 +167,9 @@ impl UiResources {
                     sunrise_client::gfx::panorama::Faces::load(root, root)
                 })
             });
-            let mod_image = mod_image_slot();
+            let pool = dynamic_texture_pool();
             let atlas = startup::time("ui.atlas", || {
-                HudAtlas::build_over_with_image(root, root, mod_image)
+                HudAtlas::build_over_with_dynamic_textures(root, root, pool)
             });
             let panorama = panorama
                 .join()
