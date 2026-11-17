@@ -225,3 +225,11 @@ inventory and movement writes still require a server host.
 
 The local player's `abilities` read takes `flying` from current client prediction;
 the other flags and speeds stay as supplied by the last abilities packet.
+
+## The client's open menu
+
+`Host::player_container_menu(player)` reads on both sides. On a client it returns only the
+local player's supported open menu, or the inventory menu when none is open; every other
+player returns `None`. `MenuRef::slot_count`, `slot` and `carried` read the client's view:
+server slot updates plus local prediction, not server authority. A menu ref becomes stale
+when that menu closes or another opens. The server retains its supported-menu restrictions.
