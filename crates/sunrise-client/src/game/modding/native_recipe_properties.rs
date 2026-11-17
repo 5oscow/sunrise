@@ -44,7 +44,12 @@ impl Game<'_> {
                 sets.insert(key.to_owned(), items);
             }
         }
-        Arc::make_mut(&mut self.loop_context).set_recipe_properties(Arc::new(sets));
+        let tags = self
+            .native_tag_items()
+            .map(|items| items.item_tag_order.clone());
+        let context = Arc::make_mut(&mut self.loop_context);
+        context.set_recipe_properties(Arc::new(sets));
+        context.set_item_tags(tags);
         if let Some(host) = self.lan.as_mut() {
             host.hub.loop_context = self.loop_context.clone();
         }

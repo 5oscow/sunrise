@@ -38,6 +38,7 @@ impl Game<'_> {
         };
         if r.registries.tags.is_empty() {
             r.tags = None;
+            self.refresh_recipe_property_context();
             return;
         }
         let names = SyncedNames {
@@ -69,6 +70,7 @@ impl Game<'_> {
         if let Some(r) = self.remote.as_mut() {
             r.tags = Some(items);
         }
+        self.refresh_recipe_property_context();
         self.announce_data_bound(mod_api::TagsUpdateCause::ClientPacketReceived {
             integrated_server: self.integrated.is_some(),
         });
