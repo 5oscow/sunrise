@@ -283,10 +283,11 @@ impl Walker<'_> {
         Ok(())
     }
     fn fields(&mut self, data: &Value, path: &str) -> io::Result<()> {
-        if let Some(value) = data.get("condition") {
+        // JsonOps map lookup treats JSON null as absent for optionalFieldOf.
+        if let Some(value) = data.get("condition").filter(|value| !value.is_null()) {
             self.entry(value, false, &format!("{path}.condition"))?;
         }
-        if let Some(value) = data.get("modifier") {
+        if let Some(value) = data.get("modifier").filter(|value| !value.is_null()) {
             self.entry(value, true, &format!("{path}.modifier"))?;
         }
         Ok(())
