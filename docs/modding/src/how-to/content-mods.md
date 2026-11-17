@@ -920,6 +920,11 @@ The fence: files go in the mod's own namespaces (`assets/<id>/`,
 (`data/minecraft/tags/`), to the convention tags NeoForge and Fabric mods
 share (`data/c/tags/`), and sources added to vanilla's atlases
 (`assets/minecraft/atlases/`), which follow vanilla's own as a reload appends them.
+Packages of every kind may also add to the declared [`sunrise:` extension tags](extension-tags.md),
+by writing exactly the listed registry and tag path under `data/sunrise/tags/`.
+Other `data/sunrise/` and all `assets/sunrise/` files remain refused; the namespace cannot be claimed.
+Generated `sunrise:class/*` tags are refused by name: attach a part with `block_part_tag` instead.
+The SDK surface's `extension_tags` lists these same declarations, and `sdk diff` treats a removed tag as breaking.
 Templates and `sounds` name vanilla blocks; unknown keys are refused.
 
 Some Java mods ship their files under other names than their mod id (Towns and Towers, mod id `t_and_t`, under

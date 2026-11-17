@@ -64,7 +64,34 @@ pub(crate) fn check_namespace(name: &str, manifest: &Manifest) -> Result<(), Str
     // tags and atlases, and to the convention tags mods share.
     let shared = matches!(namespace, "minecraft" | "c");
     let atlas = top == "assets" && namespace == "minecraft" && rest.starts_with("atlases/");
-    let allowed = owned || (top == "data" && shared && rest.starts_with("tags/")) || atlas;
+    let mut extension = false;
+    if top == "data" && namespace == "sunrise" && rest.starts_with("tags/") {
+        let tag = rest
+            .strip_prefix("tags/")
+            .and_then(|s| s.strip_suffix(".json"));
+        if tag.is_some_and(|t| {
+            t.split_once('/')
+                .is_some_and(|(_, path)| path.starts_with("class/"))
+        }) {
+            return Err(format!(
+                "{name}: sunrise:class/* tags are generated; attach a part through block_part_tag instead"
+            ));
+        }
+        extension = tag
+            .and_then(|t| t.split_once('/'))
+            .is_some_and(|(registry, path)| {
+                crate::extension_tags::ALL.iter().any(|tag| {
+                    tag.registry == registry && tag.id.strip_prefix("sunrise:") == Some(path)
+                })
+            });
+        if !extension {
+            return Err(format!(
+                "{name}: not a declared Sunrise extension tag; see the SDK extension_tags list and the book's extension tags reference (mod professions use secondary_blocks)"
+            ));
+        }
+    }
+    let allowed =
+        owned || (top == "data" && shared && rest.starts_with("tags/")) || atlas || extension;
     if !allowed {
         return Err(format!(
             "{name}: a mod adds files in its own namespaces ({top}/{id}/ and those listed in namespaces), to vanilla and convention (c) tags, or to vanilla's atlases"
@@ -3699,6 +3726,40 @@ capabilities = ["registries"]
                 &[("data/ruby/sunrise/block/a.json", block.as_bytes())],
             );
             assert!(e.contains(why), "{case}: {e}");
+        }
+    }
+
+    #[test]
+    fn reserved_namespace_accepts_only_declared_extension_tags() {
+        for tag in crate::extension_tags::ALL {
+            let path = format!(
+                "data/sunrise/tags/{}/{}.json",
+                tag.registry,
+                tag.id.strip_prefix("sunrise:").unwrap()
+            );
+            let content = smod(
+                "extension",
+                MANIFEST_TEXT,
+                &[(path.as_str(), br#"{"values":[]}"#)],
+            )
+            .unwrap();
+            assert_eq!(content.files.len(), 1);
+        }
+        for (path, hint) in [
+            (
+                "data/sunrise/tags/block/villager_secondary_poi/custom.json",
+                "secondary_blocks",
+            ),
+            (
+                "data/sunrise/tags/item/villager_secondary_poi/farmer.json",
+                "extension_tags",
+            ),
+            ("data/sunrise/tags/block/class/crop.json", "block_part_tag"),
+            ("data/sunrise/loot_table/a.json", "own namespaces"),
+            ("assets/sunrise/lang/en_us.json", "own namespaces"),
+        ] {
+            let error = smod("extension-refused", MANIFEST_TEXT, &[(path, b"{}")]).unwrap_err();
+            assert!(error.contains(path) && error.contains(hint), "{error}");
         }
     }
 

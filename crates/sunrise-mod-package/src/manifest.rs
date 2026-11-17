@@ -429,6 +429,12 @@ impl Manifest {
                 "{MANIFEST}: internals need a [native] or [wasm] mod"
             ));
         }
+        if RESERVED_NAMESPACES.contains(&m.id.as_str()) {
+            return Err(format!(
+                "{MANIFEST}: id {:?} is a reserved namespace, not a mod's to claim",
+                m.id
+            ));
+        }
         if reserved_mod_id(&m.id) {
             return Err(format!(
                 "{MANIFEST}: id {:?} is a reserved Windows device name",
@@ -1837,6 +1843,20 @@ capabilities = ["registries"]
         assert!(with("\"a\", \"a\"").unwrap_err().contains("twice"));
         assert!(with("\"Kaisyn\"").unwrap_err().contains("is not"));
         assert!(with("\"\"").unwrap_err().contains("is not"));
+    }
+
+    #[test]
+    fn reserved_namespaces_cannot_be_the_mod_id() {
+        for id in RESERVED_NAMESPACES {
+            let manifest = EXAMPLE.replace("id = \"ruby\"", &format!("id = {id:?}"));
+            let error = Manifest::parse(&manifest).unwrap_err();
+            assert!(
+                error.contains(MANIFEST)
+                    && error.contains(id)
+                    && error.contains("reserved namespace"),
+                "{error}"
+            );
+        }
     }
 
     #[test]
