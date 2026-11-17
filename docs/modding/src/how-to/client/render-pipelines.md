@@ -74,6 +74,15 @@ event.pipelines.push(
 A load cannot build a pipeline when its shader file is missing, the file is refused, or the GPU
 rejects the shader. The game never panics over a pipeline's shader.
 
+### Checking a shader before you run the game
+
+`cargo sunrise-mod check`, run in the mod's folder, composes and validates every
+`assets/<namespace>/shaders/pipeline/**/*.wgsl` file with the code the game uses, and fails with
+`<file>: <reason>` for each one the game would refuse (the same text the game logs after the
+pipeline's id). The tool cannot see your `RenderPipeline` registration, so it takes a file that
+calls `pipeline_texture` as textured and any other file as untextured. A file the check accepts
+can still be refused at load when the GPU rejects it.
+
 ## 3. Resolve and draw
 
 ```rust,ignore
