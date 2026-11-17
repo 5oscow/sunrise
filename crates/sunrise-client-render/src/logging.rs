@@ -459,9 +459,25 @@ fn ours(target: &str) -> bool {
     target.starts_with("sunrise")
 }
 
+/// Crates logged from ERROR only, their warnings being known noise. `calloop` 0.13, winit 0.30's
+/// Wayland event loop, warns once per key press: smithay-client-toolkit re-registers the key
+/// repeat timer on each press and the removed timer's last event still arrives ("Received an
+/// event for non-existence source"). Neither crate has a release without it.
+const ERRORS_ONLY: &[&str] = &["calloop"];
+
 impl log::Log for Logger {
     fn enabled(&self, meta: &log::Metadata) -> bool {
-        meta.level() <= log::Level::Info
+        let target = meta.target();
+        let floor = if ERRORS_ONLY.iter().any(|name| {
+            target
+                .strip_prefix(name)
+                .is_some_and(|rest| rest.is_empty() || rest.starts_with("::"))
+        }) {
+            log::Level::Error
+        } else {
+            log::Level::Info
+        };
+        meta.level() <= floor
     }
 
     fn log(&self, record: &log::Record) {
@@ -760,6 +776,9 @@ mod tests {
             ("wgpu_core::device", log::Level::Error, "device lost"),
             ("meridian_core::map", log::Level::Debug, "debug detail"),
             ("meridian_core::map", log::Level::Trace, "trace detail"),
+            ("calloop::loop_logic", log::Level::Warn, "calloop noise"),
+            ("calloop::loop_logic", log::Level::Error, "calloop failed"),
+            ("calloopish", log::Level::Warn, "another crate"),
         ] {
             logger.log(
                 &log::Record::builder()
@@ -782,6 +801,12 @@ mod tests {
         assert!(text.contains("[wgpu_core::device] device lost"), "{text}");
         assert!(!text.contains("debug detail"));
         assert!(!text.contains("trace detail"));
+        assert!(!text.contains("calloop noise"), "{text}");
+        assert!(
+            text.contains("[calloop::loop_logic] calloop failed"),
+            "{text}"
+        );
+        assert!(text.contains("[calloopish] another crate"), "{text}");
     }
 
     #[test]

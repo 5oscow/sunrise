@@ -387,6 +387,13 @@ struct GameLevel<'w> {
     cake_requested: std::cell::Cell<bool>,
     cake_answer: Option<bool>,
     api_level: Option<mod_api::LevelRef>,
+    part_state_index: Option<
+        &'w std::sync::Arc<
+            std::sync::Mutex<
+                sunrise_mod_runtime::attachments::index::AttachmentIndex<mod_api::AttachmentHolder>,
+            >,
+        >,
+    >,
     positions: piston_carry_state::PositionState<'w>,
     border: &'w sunrise_core::geometry::border::BorderGeometry,
     world: &'w mut World,
@@ -1875,9 +1882,9 @@ struct Game<'a> {
     tick_hit: std::cell::Cell<Option<Option<Hit>>>,
     /// Non-window simulation's tick-local mob ray, including the held attack range.
     tick_mob: Option<Option<(usize, f64, [f64; 3])>>,
-    /// Number keys since the last tick (`keyHotbarSlots[i].consumeClick`):
+    /// Each number key's clicks since it was last consumed (`keyHotbarSlots[i].clickCount`):
     /// `Minecraft.handleKeybinds` selects them before the tick's inputs.
-    hotbar_presses: sunrise_client::input_queue::InputQueue<usize>,
+    hotbar_presses: [sunrise_client::input_queue::ClickQueue; 9],
     /// `Player.entityInteractionRange` and `blockInteractionRange`, refreshed
     /// each tick from the attribute (a server's reach modifier, creative's
     /// +2): the pick helpers' `&self` reach.
@@ -2939,6 +2946,7 @@ impl Game<'_> {
             cake_requested: std::cell::Cell::new(false),
             cake_answer: None,
             api_level: self.level(self.dim.id()),
+            part_state_index: self.attachment_indexes.get(&self.dim),
             command_block_transition: None,
             positions: piston_carry_state::PositionState {
                 gateways: &mut self.be_anims.gateway_servers,
@@ -11197,7 +11205,7 @@ impl<'a> Game<'a> {
             forced_hit: None,
             tick_hit: Default::default(),
             tick_mob: None,
-            hotbar_presses: sunrise_client::input_queue::InputQueue::new(hand::HOTBAR_PRESSES),
+            hotbar_presses: [hand::HOTBAR_CLICKS; 9],
             entity_reach: 3.0,
             block_reach: 4.5,
             client_pick: Default::default(),

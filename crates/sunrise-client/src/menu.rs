@@ -4209,7 +4209,7 @@ pub(crate) mod tests {
                 &mut target,
                 &mut teleport,
             );
-            crate::motion::native_living_jump(context, 1, "minecraft:cow");
+            crate::motion::native_living_jump(context, 1, "minecraft:cow", [0.0, 0.42, 0.0]);
             (distance, multiplier, cancel, trample, target, teleport)
         };
         assert_eq!(
