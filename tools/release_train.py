@@ -629,9 +629,11 @@ GATE = {"lint", "verify", "verify-static", "launcher"}
 
 
 def daily_green_commit():
-    """The commit the tag `daily-green` points to (the newest fully green daily run), freshly fetched, or ""."""
-    run("git", "fetch", "--quiet", "--force", "origin", f"+refs/tags/{DAILY_GREEN}:refs/tags/{DAILY_GREEN}", check=False)
-    return run("git", "rev-parse", "--verify", "--quiet", f"refs/tags/{DAILY_GREEN}^{{commit}}", check=False).strip()
+    """The commit origin's tag `daily-green` points to (the newest fully green daily run), or "" when origin has none.
+    Read from origin every time, never from a local tag a checkout may hold; a failed lookup stops."""
+    tag = f"refs/tags/{DAILY_GREEN}"
+    refs = {ref: sha for sha, ref in (line.split("\t") for line in run("git", "ls-remote", "origin", tag, tag + "^{}").splitlines())}
+    return refs.get(tag + "^{}", refs.get(tag, ""))
 
 
 GATE_WAIT = 150 * 60  # seconds: a gate run's queue wait and its longest job, lint (about 25 min), with room
@@ -681,7 +683,11 @@ def gate_again(sha):
 def channel_head(channel, head, exception=""):
     """The commit a fork channel builds, or exits naming the check it failed. A nightly builds only the commit
     `daily-green` points to (its default), unless `exception` names the owner's one-time grant for another commit
-    (docs/release-flow.md "Nightly channel"); that commit still needs the gate."""
+    (docs/release-flow.md "Nightly channel"), which names that commit in full; it still needs the gate. A snapshot
+    takes no exception."""
+    if channel == "nightly" and exception and not re.fullmatch(r"[0-9a-f]{40}", head or ""):
+        raise SystemExit("::error::refused: an exception names the full 40-character commit it grants, not "
+                         + (head or "main's head"))
     green = daily_green_commit() if channel == "nightly" and not exception else ""
     head = head or green
     sha = run("git", "rev-parse", "--verify", "--quiet", f"{head or 'refs/remotes/origin/main'}^{{commit}}",
@@ -695,8 +701,8 @@ def channel_head(channel, head, exception=""):
                          "a Nightly ships only the commit of a fully green daily run, or one the owner granted a "
                          "one-time exception (the `exception` input)")
     if exception and channel == "nightly":
-        print(f"::warning::{sha[:9]} is published by a one-time exception, not from a green daily: {exception}",
-              file=sys.stderr)
+        grant = f"{sha[:9]} is allowed by a one-time exception instead of a green daily run: {exception}"
+        print("::warning::" + grant.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A"), file=sys.stderr)
     if not fork_gate_passed(sha) and not (os.environ.get("GATE_RERUN") == "1" and gate_again(sha)):
         raise SystemExit(f"::error::refused: dyna-checks' gate jobs ({', '.join(sorted(GATE))}) "
                          f"did not all pass on a main push of {sha}; a {channel} needs the gate green on its commit")
@@ -791,7 +797,7 @@ def main():
 
     # Game releases ship only a commit the vanilla harnesses passed on (parity-main, docs/release-flow.md).
     parity = args.kind == "game" and args.command == "decide" and not args.force
-    head = channel_head(args.channel, args.head, args.exception) if args.channel else args.head or green_main_head(parity)
+    head = channel_head(args.channel, args.head, args.exception.strip()) if args.channel else args.head or green_main_head(parity)
     if not head:
         result = {"release": False, "reason": "main's latest checks did not pass" + (
             " or parity-main did not pass on them" if parity else "")}

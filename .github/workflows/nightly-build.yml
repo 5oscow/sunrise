@@ -74,7 +74,7 @@ on:
         type: string
         default: ''
       exception:
-        description: The owner's one-time grant to publish a `base` that is not daily-green (who, when, why); empty otherwise
+        description: The owner's one-time grant to publish a `base` (its full SHA) that is not daily-green (who, when, why); empty otherwise
         type: string
         default: ''
       urgent:

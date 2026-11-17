@@ -58,8 +58,8 @@ on:
         default: true
       exception:
         description: >-
-          A nightly of a commit that is not daily-green: the owner's one-time grant (who, when, why). Never set
-          otherwise; the rule stays
+          A nightly of a commit that is not daily-green: the owner's one-time grant (who, when, why), with that
+          commit's full SHA in `commit`. Never set otherwise; the rule stays. A snapshot ignores it
         type: string
         default: ''
       force:
