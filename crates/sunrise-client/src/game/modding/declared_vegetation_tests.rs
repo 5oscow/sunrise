@@ -30,10 +30,12 @@ impl BlockPart for Soil {
     }
 }
 struct Garden(Arc<AtomicUsize>);
-const PLANTS: [(&str, &str); 3] = [
+const PLANTS: [(&str, &str); 5] = [
     ("garden:glass", "minecraft:glass"),
     ("garden:stairs", "minecraft:oak_stairs"),
     ("garden:poppy", "minecraft:poppy"),
+    ("garden:farmland", "minecraft:farmland"),
+    ("garden:path", "minecraft:dirt_path"),
 ];
 #[mod_api::__subscriptions]
 impl Hooks for Garden {
@@ -138,8 +140,9 @@ fn declared_vegetation_places_and_breaks_independently_of_its_template() {
                         asks_plant,
                         "soil decides before the plant"
                     );
-                    assert_eq!(game.world.block(5, 65, 5) != air, allowed);
+                    let placed = game.world.block(pos.x, pos.y, pos.z);
                     if allowed {
+                        assert_eq!(registry.state(placed).unwrap().name, plant);
                         game.with_level(|b, level, ticks| {
                             b.set_block(level, ticks, BlockPos::new(5, 64, 5), stone, 3);
                         });
@@ -148,6 +151,8 @@ fn declared_vegetation_places_and_breaks_independently_of_its_template() {
                             air,
                             "{plant} pops off after its soil changes"
                         );
+                    } else {
+                        assert_eq!(placed, air, "{plant} on {soil} must not write a fallback");
                     }
                 }
             }
@@ -188,7 +193,12 @@ fn declared_vegetation_places_and_breaks_independently_of_its_template() {
                 for (soil, allowed) in [("minecraft:stone", false), ("minecraft:dirt", true)] {
                     let ground = game.pack.assets.registry.default_state(soil).unwrap();
                     game.world.set(5, 64, 5, ground).unwrap();
-                    for id in ["garden:glass", "garden:bare"] {
+                    for id in [
+                        "garden:glass",
+                        "garden:bare",
+                        "garden:farmland",
+                        "garden:path",
+                    ] {
                         let before = heard.load(Ordering::Relaxed);
                         let placement = game.remote_can_place(&hit, &ItemStack::new(id, 1));
                         assert_eq!(

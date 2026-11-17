@@ -939,18 +939,19 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 }
                 None
             }
-            Class::Farmland => {
-                if !self.can_survive(default, pos) {
-                    Some(b.default_of(b.data(default).link.unwrap_or(n.dirt)))
-                } else {
+            Class::Farmland | Class::Path => {
+                let data = b.data(default);
+                // Declared plants keep their candidate so the final survival check can
+                // reject unsupported placement instead of placing another block.
+                if data.declared_vegetation || self.can_survive(default, pos) {
                     sup!()
-                }
-            }
-            Class::Path => {
-                if !self.can_survive(default, pos) {
-                    Some(b.default_of(n.dirt))
                 } else {
-                    sup!()
+                    let fallback = if class == Class::Farmland {
+                        data.link.unwrap_or(n.dirt)
+                    } else {
+                        n.dirt
+                    };
+                    Some(b.default_of(fallback))
                 }
             }
             Class::Fence => {
