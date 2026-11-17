@@ -57,7 +57,42 @@ them. A caller with a proxy setting of its own passes it in those variables.
 
 The tool never edits an instance, never selects a version and never installs anything outside `work`.
 
+## `native-check`
+
+`cargo sunrise-mod native-check` says how a set of native mods stands against one build before anything compiles:
+each mod's refusal, or its fit (SDK design §10), and the route a build of the usable ones takes. It reads one plan
+line on standard input and writes one reply line on standard output. Exit codes are those of `native-build`, except
+that 1 comes with an error reply, `{"contract": 2, "error": {"kind": "unread", "message": …}}`: a file the plan names
+(the mods, the surface, the build data) didn't read. A tool from before `native-check` (contract 1) knows no such
+command: it prints its usage on standard error and nothing on standard output, so a caller that finds no reply line
+knows the tool is too old.
+
+```sh
+cargo sunrise-mod native-check < plan.json
+```
+
+| Plan field | What it is |
+|---|---|
+| `contract` | `2`, checked first as for `native-build`. |
+| `mods` | A mod's folder, or a folder of mod folders. |
+| `build` | The build id (the game's full commit) the mods are checked against. |
+| `surface` | Optional. The build's `surface.json`, read only for a mod made for another build. |
+| `build_data` | Optional. The build's unpacked build data (`points.json`, `internals.json`), read only for a mod with `[[inject]]` rows made for another build. |
+
+The reply is `{"contract": 2, "route": …, "mods": […]}`. `route` is `prebuilt-api` or `prebuilt` for the usable
+mods, `null` when none is. Each of `mods` has:
+
+| Field | What it is |
+|---|---|
+| `id` | The mod's id. |
+| `refusal` | Why no build takes it, as the build log says it; then `verdict` is `null`. |
+| `verdict` | `{"kind": …, "made_for": build}`: `made-for` (no `made_for`), `fits`, `exact` (`why`: the table that changes game code, or `internals`), `no-list` (its package doesn't say what it uses), `does-not-fit` (`misfits`: each `{id, change}`, the surface id and how it changed), `points` (`why`: an `[[inject]]` point that isn't the same). `made-for` and `fits` are usable. |
+| `needs` | `surface` or `build-data` when the plan didn't give the file its verdict needs; then `verdict` is `null`. The caller fetches it and asks again. |
+
+A `change` is `"removed"`, `"changed"`, `{"lost-impl": trait}`, `{"fields": {gained, at}}`, `{"version": {named, now}}`,
+`{"not-buildable": {at}}`, `{"path": path}` or `{"route": {from, owner}}`.
+
 ## Changelog
 
-- contract 2: `failed` names the blamed mod (`blame`) instead of a caller matching its text; `built` adds `internals` and `mixins` for the build record; both list the kept files they `used`.
+- contract 2: `native-check`; `failed` names the blamed mod (`blame`) instead of a caller matching its text; `built` adds `internals` and `mixins` for the build record; both list the kept files they `used`.
 - contract 1: the plan, `mod`, `consent`, `built` and `failed`.
