@@ -92,8 +92,6 @@ pub mod flatgen;
 pub mod fluid_tooltip;
 pub mod furnace;
 pub mod game_mode_switcher;
-#[cfg(test)]
-mod test_game_dir;
 pub mod game_rules_screen;
 pub mod gizmos;
 pub mod gossip;
@@ -109,6 +107,8 @@ pub mod item_sync;
 pub mod item_tooltip;
 pub mod join_seq;
 pub mod move_gate;
+#[cfg(test)]
+mod test_game_dir;
 /// Game-owned JSON metadata conversion, shared by recipe and API adapters.
 pub use sunrise_core::json_nbt;
 pub mod lan;
