@@ -7628,7 +7628,7 @@ fn plain_block_properties_replace_template_facts_and_face_rule() {
             ))
         );
         let mut behaviour: J = serde_json::from_str(
-            r#"{"states":[[0,0,0,0,0,0,0,0,"HARP"],[0,0,0,0,0,0,0,0,"HARP"]],"blocks":[]}"#,
+            r#"{"states":[[0,0,0,0,0,0,0,0,"HARP"],[0,0,0,0,0,0,0,0,"HARP"]],"blocks":[],"items":{}}"#,
         )
         .unwrap();
         plan.json("block-behaviours.json", &mut behaviour).unwrap();
