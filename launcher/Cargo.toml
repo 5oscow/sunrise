@@ -65,7 +65,7 @@ sunrise-launcher-theme = { path = "crates/theme" }
 sunrise-launcher-scenery = { path = "scenery" }
 # The engine, through the platform's public API (docs/layers.md): the pinned version and the native build.
 sunrise-platform = { path = "../crates/sunrise-platform", features = ["mod-build"] }
-# The native build's SDK, mixins and fit test, and the content fence a mod's files pass before install.
+# The native build's SDK, mixins and fit test. The game runs the content fence when it loads a mod.
 sunrise-mod-package = { path = "../crates/sunrise-mod-package", features = ["index", "prebuilt", "runtime-process"] }
 # Parses proxy and download addresses (`net.rs`); already in the lockfile through ureq.
 url = "2"
