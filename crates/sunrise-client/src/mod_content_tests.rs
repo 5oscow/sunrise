@@ -7594,3 +7594,51 @@ fn a_declared_shape_decides_the_legacy_solid_bit() {
     assert_eq!(with_solid_bit(flags, Some(true), &boxed(0.1)), 0b11);
     assert_eq!(with_solid_bit(flags | 1, Some(false), &boxed(1.0)), 0b10);
 }
+
+#[test]
+fn plain_block_properties_replace_template_facts_and_face_rule() {
+    for value in [true, false] {
+        let declaration = format!(
+            r#"{{"template":"minecraft:test","item":false,"properties":{{"instrument":"CUSTOM_HEAD","ignited_by_lava":{value},"replaceable":{value},"skip_same_block_faces":{value}}}}}"#
+        );
+        let (base, mods) = block_base(&format!("plain-properties-{value}"), &[&declaration]);
+        let plan = Plan::new(&base, &mods).unwrap();
+        let row = format!(
+            r#"{{"ignited_by_lava":{},"replaceable":{}}}"#,
+            !value, !value
+        );
+        let mut gameplay: J =
+            serde_json::from_str(&format!(r#"{{"states":[{row},{row}]}}"#)).unwrap();
+        plan.json("gameplay-facts.json", &mut gameplay).unwrap();
+        let Some(J::Arr(rows)) = gameplay.get("states") else {
+            panic!("states")
+        };
+        for row in &rows[2..] {
+            assert_eq!(row.get("ignited_by_lava"), Some(&J::Bool(value)));
+            assert_eq!(row.get("replaceable"), Some(&J::Bool(value)));
+        }
+        let mut definitions: J =
+            serde_json::from_str(r#"{"minecraft:test":{"rule":"bars"}}"#).unwrap();
+        plan.json("render-definitions.json", &mut definitions)
+            .unwrap();
+        assert_eq!(
+            definitions.at("testmod:test/rule"),
+            Some(&mut J::Str(
+                if value { "same_block" } else { "never" }.into()
+            ))
+        );
+        let mut behaviour: J = serde_json::from_str(
+            r#"{"states":[[0,0,0,0,0,0,0,0,"HARP"],[0,0,0,0,0,0,0,0,"HARP"]],"blocks":[]}"#,
+        )
+        .unwrap();
+        plan.json("block-behaviours.json", &mut behaviour).unwrap();
+        let Some(J::Arr(rows)) = behaviour.get("states") else {
+            panic!("states")
+        };
+        for row in &rows[2..] {
+            let J::Arr(row) = row else { panic!("row") };
+            assert_eq!(row[8], J::Str("CUSTOM_HEAD".into()));
+        }
+        fs::remove_dir_all(base.parent().unwrap()).unwrap();
+    }
+}

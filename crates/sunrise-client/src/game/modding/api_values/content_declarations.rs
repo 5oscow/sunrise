@@ -52,6 +52,10 @@ impl TryIntoEngine<()> for mod_api::BlockProperties {
                 .map(|value| push_reaction(value).0),
             occludes: self.occludes,
             destroy_overlay: self.destroy_overlay,
+            instrument: self.instrument,
+            ignited_by_lava: self.ignited_by_lava,
+            replaceable: self.replaceable,
+            skip_same_block_faces: self.skip_same_block_faces,
         })
     }
 }

@@ -129,6 +129,59 @@ pub struct BlockProperties {
     /// block broken by use; unset or `true`, it is drawn. Only the overlay: the break and the
     /// destroy-progress packets are vanilla's.
     pub destroy_overlay: Option<bool>,
+    /// Vanilla's note-block instrument constant; unset inherits the template.
+    #[serde(default, deserialize_with = "deserialize_instrument")]
+    pub instrument: Option<mod_vocab::NoteInstrument>,
+    /// Lava ignition flag. The per-position `ignited_by_lava` hook still answers first.
+    #[serde(default, deserialize_with = "deserialize_ignited_by_lava")]
+    pub ignited_by_lava: Option<bool>,
+    /// Whether placement may replace this block; the held-own-item rule remains unchanged.
+    #[serde(default, deserialize_with = "deserialize_replaceable")]
+    pub replaceable: Option<bool>,
+    /// Skip faces against any state of this same block; false disables the template's skip rule.
+    #[serde(default, deserialize_with = "deserialize_skip_same_block_faces")]
+    pub skip_same_block_faces: Option<bool>,
+}
+
+fn deserialize_instrument<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<mod_vocab::NoteInstrument>, D::Error> {
+    Option::<String>::deserialize(deserializer)
+        .map_err(|e| serde::de::Error::custom(format!("instrument: {e}")))?
+        .map(|name| {
+            mod_vocab::NoteInstrument::ALL
+                .into_iter()
+                .find(|instrument| instrument.name().to_ascii_uppercase() == name)
+                .ok_or_else(|| {
+                    serde::de::Error::custom(format!(
+                        "instrument: unknown NoteBlockInstrument constant {name}"
+                    ))
+                })
+        })
+        .transpose()
+}
+
+fn property_bool<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+    key: &str,
+) -> Result<Option<bool>, D::Error> {
+    Option::<bool>::deserialize(deserializer)
+        .map_err(|e| serde::de::Error::custom(format!("{key}: {e}")))
+}
+fn deserialize_ignited_by_lava<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<bool>, D::Error> {
+    property_bool(d, "ignited_by_lava")
+}
+fn deserialize_replaceable<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<bool>, D::Error> {
+    property_bool(d, "replaceable")
+}
+fn deserialize_skip_same_block_faces<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<bool>, D::Error> {
+    property_bool(d, "skip_same_block_faces")
 }
 
 /// Vanilla's `PushReaction`, by its constant's name.
@@ -2783,6 +2836,23 @@ capabilities = ["registries"]
         for bad in [r#""animated""#, r#""model""#, "1"] {
             assert!(block(bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn block_instruments_accept_every_vanilla_constant_and_name_unknown_values() {
+        for instrument in mod_vocab::NoteInstrument::ALL {
+            let name = instrument.name().to_ascii_uppercase();
+            let properties: BlockProperties =
+                serde_json::from_str(&format!(r#"{{"instrument":"{name}"}}"#)).unwrap();
+            assert_eq!(properties.instrument, Some(instrument));
+        }
+        let error = serde_json::from_str::<BlockProperties>(r#"{"instrument":"FLUTEISH"}"#)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("instrument") && error.contains("FLUTEISH"),
+            "{error}"
+        );
     }
 
     #[test]

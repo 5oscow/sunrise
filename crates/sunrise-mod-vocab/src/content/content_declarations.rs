@@ -39,6 +39,14 @@ pub struct BlockProperties {
     /// block broken by use; unset or `true`, it is drawn. Only the overlay: the break and the
     /// destroy-progress packets are vanilla's.
     pub destroy_overlay: Option<bool>,
+    /// Vanilla's note-block instrument; unset inherits the template.
+    pub instrument: Option<crate::NoteInstrument>,
+    /// Lava ignition flag. The per-position `ignited_by_lava` hook still answers first.
+    pub ignited_by_lava: Option<bool>,
+    /// Whether placement may replace this block; the held-own-item rule remains unchanged.
+    pub replaceable: Option<bool>,
+    /// Skip faces against any state of this same block; false disables the template's skip rule.
+    pub skip_same_block_faces: Option<bool>,
 }
 
 /// PushReaction in a load-time content declaration.

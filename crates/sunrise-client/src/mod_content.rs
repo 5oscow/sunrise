@@ -1691,6 +1691,12 @@ impl<'a> Plan<'a> {
         row: &mut J,
     ) {
         let p = &b.decl.properties;
+        if let Some(value) = p.ignited_by_lava {
+            row.set("ignited_by_lava", J::Bool(value));
+        }
+        if let Some(value) = p.replaceable {
+            row.set("replaceable", J::Bool(value));
+        }
         if let Some(ticks) = &p.random_ticks {
             row.set("random_ticks", J::Bool(ticks.applies(combo)));
         }
@@ -1876,6 +1882,22 @@ impl<'a> Plan<'a> {
             "creative-inventory.json" => self.creative_tabs(doc)?,
             "block-behaviours.json" => {
                 states(doc, "states", false, false)?;
+                if let Some(J::Arr(rows)) = doc.at("states") {
+                    for b in &self.blocks {
+                        if let Some(instrument) = b.decl.properties.instrument {
+                            for (id, _) in (b.rename.first..).zip(b.state_combinations()) {
+                                let J::Arr(row) = &mut rows[id as usize] else {
+                                    return Err(
+                                        "block-behaviours.json: expected a compact state row"
+                                            .into(),
+                                    );
+                                };
+                                row.resize(row.len().max(9), J::Null);
+                                row[8] = J::Str(instrument.name().to_ascii_uppercase());
+                            }
+                        }
+                    }
+                }
                 self.declared_solid(doc);
                 let Some(J::Arr(blocks)) = doc.at("blocks") else {
                     return Err("no blocks".into());
@@ -1957,6 +1979,12 @@ impl<'a> Plan<'a> {
                     let Some(entry) = doc.get_mut(&b.decl.id) else {
                         continue;
                     };
+                    if !model && let Some(skip) = b.decl.properties.skip_same_block_faces {
+                        entry.set(
+                            "rule",
+                            J::Str(if skip { "same_block" } else { "never" }.into()),
+                        );
+                    }
                     // Faces beside a block that occludes nothing are drawn (`Block.shouldRenderFace`).
                     if !model && b.decl.properties.occludes == Some(false) {
                         entry.set("can_occlude", J::Bool(false));
