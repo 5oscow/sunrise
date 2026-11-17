@@ -283,6 +283,7 @@ fn end_fog_sky(frame: &Frame) -> bool {
     !frame.title && frame.end_sky && frame.boss_world_fog
 }
 
+/// The point a `shaders/` pack's terrain is drawn relative to: the camera with the fraction of
 /// each coordinate rounded to the nearest 1/65536 block. Read back with a probe pack of ours,
 /// Iris 1.11.7's terrain `gl_Vertex` is the block's position minus this, for cameras from 13
 /// to 40000 blocks out (#8464); `cameraPosition` and the matrices keep the exact camera. Off by
