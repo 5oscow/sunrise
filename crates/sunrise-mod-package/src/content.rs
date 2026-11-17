@@ -349,6 +349,17 @@ impl ShapeEntityKind {
     }
 }
 
+/// A vanilla block's context-dependent collision a block takes (`context_collision`), whatever
+/// its template.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ContextCollision {
+    /// Scaffolding's (`ScaffoldingBlock.getCollisionShape`): solid on top unless the entity is
+    /// descending, open below, and the bottom row's floor. Its states need scaffolding's
+    /// `distance` (0 to 7) and `bottom` properties, from the template or declared.
+    Scaffolding,
+}
+
 /// A state property a block declares on its own, beside its template's.
 /// A block's states become the template's states times these values, so a
 /// pipe can have a connection per side without a template that has one.
@@ -395,6 +406,7 @@ struct BlockFile {
     interaction_shapes: Option<BlockShapes>,
     #[serde(default)]
     shapes_from_block_entity: bool,
+    context_collision: Option<ContextCollision>,
     state_light: Option<StateLight>,
     #[serde(default)]
     state_properties: BTreeMap<String, StateProperty>,
@@ -452,6 +464,9 @@ pub struct Block {
     /// The block's block entity publishes its outline and collision shapes, which replace the
     /// declared ones until cleared. Needs a block entity type that owns the block.
     pub shapes_from_block_entity: bool,
+    /// A vanilla block's context collision it takes, over its shapes for entities that have
+    /// no `collision_context_shapes` of their own.
+    pub context_collision: Option<ContextCollision>,
     /// Per-state emission; takes precedence over `properties.light`.
     pub state_light: Option<StateLight>,
     /// State properties of its own, which its template does not have.
@@ -1235,6 +1250,7 @@ impl Content {
                 collision_context_shapes: file.collision_context_shapes,
                 interaction_shapes: file.interaction_shapes,
                 shapes_from_block_entity: file.shapes_from_block_entity,
+                context_collision: file.context_collision,
                 state_light: file.state_light,
                 state_properties: file.state_properties,
                 default_state: file.default_state,
@@ -2200,6 +2216,7 @@ capabilities = ["registries"]
                 collision_context_shapes: BTreeMap::new(),
                 interaction_shapes: None,
                 shapes_from_block_entity: false,
+                context_collision: None,
                 state_light: None,
                 state_properties: BTreeMap::new(),
                 default_state: BTreeMap::new(),

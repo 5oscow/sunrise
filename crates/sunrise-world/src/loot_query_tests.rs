@@ -4,6 +4,9 @@ use std::rc::Rc;
 fn data(tables: Vec<(&str, Value)>) -> LootData {
     LootData {
         holder_sets: Default::default(),
+        component_defaults: Arc::default(),
+        copies_entity_nbt: false,
+        types: types::Types::capture(),
         tables: Arc::new(tables.into_iter().map(|(k, v)| (k.into(), v)).collect()),
         global_modifiers: Arc::default(),
         modifiers: HashMap::new(),

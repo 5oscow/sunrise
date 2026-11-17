@@ -250,6 +250,7 @@ pub(super) struct Tracked {
     /// packet's delta counts from. A TeleportEntity moves the entity but not
     /// this base, so the server's next delta still lands where it means.
     codec_base: [f64; 3],
+    on_fire: bool,
     silent: bool,
     /// `Entity.vehicle`: the entity it rides (`SetPassengers`), whatever either one's type.
     pub(in crate::game) vehicle: Option<u32>,
@@ -2815,6 +2816,7 @@ impl Game<'_> {
                     kind: kind.to_owned(),
                     position,
                     codec_base: position,
+                    on_fire: false,
                     silent: false,
                     vehicle: None,
                 },
@@ -3770,6 +3772,11 @@ impl Game<'_> {
             C::SetEntityData(p) => {
                 if let Some(r) = self.remote.as_mut() {
                     for (index, _, value) in &p.values {
+                        if let (0, Value::Byte(flags)) = (index, value)
+                            && let Some(t) = r.entities.get_mut(&p.id)
+                        {
+                            t.on_fire = flags & 1 != 0;
+                        }
                         if let (4, Value::Bool(silent)) = (index, value) {
                             if p.id == r.entity_id {
                                 r.local_entity_silent = *silent;
@@ -6185,10 +6192,6 @@ impl Game<'_> {
         // ClientLevel.tick: the End's sky flash, frozen or not.
         self.tick_end_flash();
         self.player_border();
-        // The entities added after the player tick after it: their pushes
-        // (from where they ended last tick, onto where the player ended)
-        // reach its next move, this one.
-        let pushed_after = self.remote_pushes(false);
         self.tick_remote_entities(running);
         self.tick_remote_arm_poses();
         self.tick_random_textures();
@@ -6237,7 +6240,7 @@ impl Game<'_> {
         self.tick_client_load();
         let entity_collisions = self.entity_collisions(Mover::Player);
         // Those added before it tick before it: their pushes reach this move.
-        let pushed = pushed_after.add_vector(self.remote_pushes(true));
+        let pushed = self.remote_pushes(true);
         let sprint_window = self.settings.sprint_window;
         let Some(player) = self.player.as_mut() else {
             return Ok(());
@@ -6278,6 +6281,7 @@ impl Game<'_> {
         }
         self.native_local_player_fit_sizes();
         let result = self.tick_local_player(entity_collisions, pushed, sprint_window);
+        self.push_after_player();
         entity_section_steps::player_after(self, player_from);
         // `EntityEvent.Size` for the pose the tick set.
         self.native_local_player_size();
@@ -6285,6 +6289,23 @@ impl Game<'_> {
             self.native_player_tick_post(mod_api::__private::PlayerTickPostCall { player });
         }
         result
+    }
+
+    /// The pushes of the entities added after the player, which tick after
+    /// it: `Entity.push` adds each to the player's deltaMovement during their
+    /// tick, from where they and the player ended it. A velocity or teleport
+    /// the server sends before the next tick replaces that deltaMovement, push
+    /// included (`ClientPacketListener.handleSetEntityMotion`,
+    /// `handleMovePlayer`), so the push lands on the velocity now, not on the
+    /// next move.
+    fn push_after_player(&mut self) {
+        let pushed = self.remote_pushes(false);
+        let still = self.screen == Screen::Dead || self.sleeping.is_some() || self.riding.is_some();
+        if let Some(player) = self.player.as_mut()
+            && !still
+        {
+            player.velocity = player.velocity.add_vector(pushed);
+        }
     }
 
     /// `LocalPlayer.tick`'s `Player.tick` work: input, riding, motion, sleep
@@ -6848,6 +6869,8 @@ impl Game<'_> {
             if let Some(fluids) = fluids {
                 let was = m.fluids.in_water;
                 let first = m.first_tick;
+                // Entity.baseTick saves the preceding eye sample before the new fluid update.
+                m.was_eye_in_water = m.fluids.eye_in_water;
                 m.fluids = fluids;
                 // Entity.doWaterSplashEffect on the client copy. Particles
                 // only: ClientLevel draws addParticle, and playSeededSound
@@ -8742,7 +8765,9 @@ impl Game<'_> {
         }
         if !ready {
             // A screen's opening released the keys (`KeyMapping.releaseAll`).
-            self.hotbar_presses.clear();
+            self.hotbar_presses
+                .iter_mut()
+                .for_each(sunrise_client::input_queue::ClickQueue::clear);
             return;
         }
         let (attack, use_item) = (self.left, self.right);
@@ -10105,6 +10130,14 @@ impl Remote {
             .find(|(_, u)| **u == uuid)
             .map(|(id, _)| *id as u32)
     }
+    /// The client's synced Entity shared flag 0, including the local player.
+    pub(in crate::game) fn entity_on_fire(&self, id: i32) -> Option<bool> {
+        if id == self.entity_id {
+            Some(self.own_on_fire)
+        } else {
+            self.entities.get(&id).map(|t| t.on_fire)
+        }
+    }
     /// The kind and last sent position of a tracked server entity.
     pub(super) fn tracked(&self, id: i32) -> Option<(&str, [f64; 3])> {
         self.entities.get(&id).map(|t| (&*t.kind, t.position))
@@ -10474,12 +10507,14 @@ pub(crate) mod tests {
                     .default_state("minecraft:stone")
                     .unwrap();
                 game.world.set(0, 64, 0, stone).unwrap();
-                game.tick_hit.set(Some(Some(Hit {
+                game.forced_hit = Some(Hit {
                     pos,
                     face: [0, 1, 0],
                     point: [0.5, 65.0, 0.5],
                     inside: false,
-                })));
+                });
+                game.refresh_client_pick(1.0);
+                game.forced_hit = None;
                 let held = game.main_hand_key();
                 let remote = game.remote.as_mut().unwrap();
                 remote.destroying = Some((pos, 1, 0.5));
@@ -10650,6 +10685,7 @@ pub(crate) mod tests {
                     kind: "minecraft:zombie".into(),
                     position: [0.0; 3],
                     codec_base: [0.0; 3],
+                    on_fire: false,
                     silent: false,
                     vehicle: None,
                 },
@@ -14385,6 +14421,7 @@ pub(crate) mod tests {
             kind: kind.to_owned(),
             position: [0.0, 64.0, 0.0],
             codec_base: [0.0, 64.0, 0.0],
+            on_fire: false,
             silent: false,
             vehicle: None,
         };
@@ -14423,6 +14460,7 @@ pub(crate) mod tests {
                 kind: "minecraft:cow".to_owned(),
                 position: [8.5, 64.0, -3.5],
                 codec_base: [8.5, 64.0, -3.5],
+                on_fire: false,
                 silent: false,
                 vehicle: None,
             },
@@ -14467,6 +14505,7 @@ pub(crate) mod tests {
                 kind: "minecraft:arrow".to_owned(),
                 position: [8.5, 64.0, -3.5],
                 codec_base: [8.5, 64.0, -3.5],
+                on_fire: false,
                 silent: true,
                 vehicle: None,
             },

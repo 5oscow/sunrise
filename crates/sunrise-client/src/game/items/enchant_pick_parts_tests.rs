@@ -134,7 +134,7 @@ fn with_parts(test: impl FnOnce(&mut Game<'_>, &Answers)) {
         crate::game::api_values::install_parts(&mods).unwrap();
         crate::game::native_entity_refs::tests::with_game(|game| {
             game.options.dedicated = Some(Vec::new());
-            game.resolve_parts().unwrap();
+            // with_game already resolves the installed parts when opening its fixture.
             test(game, &answers);
             // The resources may be shared with the next test's game: retire the answers.
             game.clear_world_parts();

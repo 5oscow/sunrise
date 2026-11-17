@@ -379,9 +379,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                         {
                             let next = self.growing_plant_grow_into_state(state);
                             self.set_block_and_update(growth, next);
-                            // The hook gets the new head as the original state.
-                            let grown = self.state(growth);
-                            self.level.crop_grow_post(growth, grown);
+                            self.level.crop_grow_post(growth, state);
                         }
                     }
                 }
@@ -471,7 +469,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                             let age = b.table.int(state, p.age);
                             if age == 15 {
                                 self.set_block_and_update(above(pos), b.default_of(block));
-                                self.level.crop_grow_post(above(pos), b.default_of(block));
+                                self.level.crop_grow_post(above(pos), state);
                                 self.set_block(pos, b.table.set_int(state, p.age, 0), 260);
                             } else {
                                 self.set_block(pos, b.table.set_int(state, p.age, age + 1), 260);

@@ -334,7 +334,7 @@ impl Game<'_> {
         game_master: bool,
     ) {
         let key = (pos[0], pos[1], pos[2]);
-        self.pending.banner.remove(&pos);
+        self.pending.clear(pos);
         let state = self.world.block(pos[0], pos[1], pos[2]);
         self.sculk_place_entity(state);
         let Some(saved) = self.saved_block_entity(key) else {
