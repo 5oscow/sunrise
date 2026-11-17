@@ -8447,21 +8447,17 @@ mod mob_griefing_tests;
 #[cfg(test)]
 mod living_visibility_tests;
 
-
 #[cfg(test)]
 mod enchanted_entity_loot_tests;
 
 #[cfg(test)]
 mod enderman_anger_tests;
 
-
 #[cfg(test)]
 mod local_sound_event_tests;
 
-
 #[cfg(test)]
 mod general_creature_tests;
-
 
 /// Whether the killing blow's causing entity (`DamageSource.getEntity`) was a
 /// mob, such as a tame wolf whose owner gets the kill credit.
@@ -8527,10 +8523,8 @@ fn breeding_credit(
 #[cfg(test)]
 mod mob_subscription_tests;
 
-
 #[cfg(test)]
 mod shulker_arrow_tests;
-
 
 #[cfg(test)]
 mod breeding_tests;
@@ -8541,10 +8535,8 @@ mod projectile_batch_tests;
 #[cfg(test)]
 mod breeze_random_tests;
 
-
 #[cfg(test)]
 mod damage_type_tests;
-
 
 #[cfg(test)]
 mod pearl_tests;
@@ -8552,10 +8544,8 @@ mod pearl_tests;
 #[cfg(test)]
 mod knockback_tests;
 
-
 #[cfg(test)]
 mod dye_mix_tests;
-
 
 impl sunrise_client::arrows::OwnerLookup for Game<'_> {
     fn non_player_entity(&self, uuid: [i32; 4]) -> bool {
@@ -8570,10 +8560,8 @@ impl sunrise_client::arrows::OwnerLookup for Game<'_> {
 #[cfg(test)]
 mod conversion_subscriber_tests;
 
-
 #[cfg(test)]
 mod living_drops_tests;
-
 
 #[cfg(test)]
 mod armor_destroy_tests;
@@ -8581,10 +8569,8 @@ mod armor_destroy_tests;
 #[cfg(test)]
 mod conversion_tag_tests;
 
-
 #[cfg(test)]
 mod pickable_projectile_tests;
-
 
 #[cfg(test)]
 mod mob_pearl_hook_tests;
@@ -8594,7 +8580,6 @@ mod breeding_orb_tests;
 
 #[cfg(test)]
 mod enchanted_block_loot_breaker_tests;
-
 
 #[cfg(test)]
 #[path = "rabbit_colour_tests.rs"]
@@ -8608,7 +8593,6 @@ mod loaded_arrow_shot_tests;
 
 #[cfg(test)]
 mod loaded_mob_arrow_permission_tests;
-
 
 #[cfg(test)]
 mod h169_glide_travel_tests;
