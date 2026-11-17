@@ -155,6 +155,33 @@ class ReleaseTrainTests(unittest.TestCase):
                     self.assertEqual(output.read_text(),
                                      "tag=launcher@0.2.0\nversion=0.2.0\nrelease=true\nhead=head\n")
 
+    def test_launcher_real_dispatch_refuses_a_commit_behind_main_unless_base_names_it(self):
+        workflow = (train.ROOT / ".github/workflows/launcher.yml").read_text()
+        step = workflow.split("      - id: decide\n", 1)[1].split("\n  build:", 1)[0]
+        script = textwrap.dedent(step.split("        run: |\n", 1)[1]).replace("${{ steps.mode.outputs.dry_run }}", "false")
+        # The release base check (the `if [[ -n "$BASE" ]]` block) needs a repository; this exercises what follows.
+        script = script.replace('if [[ -n "$BASE" ]]; then', 'if false; then', 1)
+        cases = [
+            (dict(BASE="", EVENT="workflow_dispatch", DRY_RUN="false"), "older", False),
+            (dict(BASE="", EVENT="workflow_dispatch", DRY_RUN="false"), "head", True),
+            (dict(BASE="", EVENT="workflow_dispatch", DRY_RUN="true"), "older", True),
+            (dict(BASE="", EVENT="schedule", DRY_RUN="false"), "older", True),
+        ]
+        for env, picked, passes in cases:
+            with self.subTest(env=env, picked=picked), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                (root / "tools").mkdir()
+                (root / "tools/release_train.py").write_text(
+                    "import json\n"
+                    f"print(json.dumps({{'reason': 'ready', 'tag': 'launcher@0.2.0', 'head': '{picked}'}}))\n")
+                result = subprocess.run(["bash", "-e", "-c", script], cwd=root, capture_output=True, text=True,
+                                        env={**os.environ, **env, "GITHUB_OUTPUT": str(root / "output"),
+                                             "GITHUB_STEP_SUMMARY": str(root / "summary"), "GITHUB_SHA": "head",
+                                             "SOURCE_SHA": "head", "FORCE": ""})
+                self.assertEqual(result.returncode == 0, passes, result.stdout + result.stderr)
+                if not passes:
+                    self.assertIn("not main's head", result.stdout)
+
     def test_player_facing_paths(self):
         exporters = {"mods/sunrise/src/test/java/dev/sunriselab/parity/VanillaMobDataExporter.java"}
         self.assertTrue(train.player_facing("crates/sunrise-client/src/game.rs", "game"))

@@ -793,6 +793,7 @@ impl Game<'_> {
             let save = SaveDir::new(
                 sunrise_client::save::dimension_dir(&self.world_root, dim.id()),
                 self.level_shapes.get(dim.id()),
+                None,
             );
             if !save.load_portal_tickets().is_empty() {
                 self.enter_level(dim)?;
@@ -2125,6 +2126,7 @@ mod tests {
         let save = sunrise_client::save::SaveDir::new(
             sunrise_client::save::dimension_dir(&world, "minecraft:overworld"),
             sunrise_client::chunk::LevelShape::OVERWORLD,
+            Some(Default::default()),
         );
         let blending = |x, z| {
             save.raw_chunk(x, z)

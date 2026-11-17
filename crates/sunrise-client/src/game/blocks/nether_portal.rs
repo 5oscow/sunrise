@@ -1346,7 +1346,7 @@ impl Game<'_> {
         }
         let (mut tag, list, i) = if let Some(i) = self.dropped.iter().position(|e| e.id == id) {
             let uuid = self.uuid_for(id);
-            let tag = sunrise_client::entity_nbt::item_entity_to_nbt_with_items(
+            let tag = sunrise_client::entity_nbt::item_entity_to_nbt(
                 &self.dropped[i],
                 uuid,
                 self.persist_raw(id),
@@ -1357,12 +1357,21 @@ impl Game<'_> {
             (self.tnt_nbt(i), List::Tnt, i)
         } else if let Some(i) = self.tridents.iter().position(|t| t.id == id) {
             let uuid = self.uuid_for(id);
-            let tag =
-                self.tridents[i].to_nbt(uuid, self.pack.assets.registry, self.persist_raw(id));
+            let tag = self.tridents[i].to_nbt(
+                uuid,
+                self.pack.assets.registry,
+                self.persist_raw(id),
+                self.res.items(),
+            );
             (tag, List::Trident, i)
         } else if let Some(i) = self.rockets.iter().position(|r| r.id == id) {
             let uuid = self.uuid_for(id);
-            let tag = self.rockets[i].to_nbt(uuid, self.level.player_uuid, self.persist_raw(id));
+            let tag = self.rockets[i].to_nbt(
+                uuid,
+                self.level.player_uuid,
+                self.persist_raw(id),
+                self.res.items(),
+            );
             (tag, List::Rocket, i)
         } else if let Some(i) = self.orbs.iter().position(|o| o.id == id) {
             let uuid = self.uuid_for(id);
@@ -1382,14 +1391,32 @@ impl Game<'_> {
                 .and_then(|a| a.last_state)
                 .map(|s| self.state_to_nbt(s));
             let raw = self.persist_raw(id);
-            let tag =
-                sunrise_client::entity_nbt::arrow_to_nbt(p, uuid, p.owner_uuid, in_block, raw)
-                    .or_else(|| {
-                        sunrise_client::entity_nbt::fireball_to_nbt(p, uuid, p.owner_uuid, raw)
-                    })
-                    .or_else(|| {
-                        sunrise_client::entity_nbt::throwable_to_nbt(p, uuid, p.owner_uuid, raw)
-                    })?;
+            let tag = sunrise_client::entity_nbt::arrow_to_nbt(
+                p,
+                uuid,
+                p.owner_uuid,
+                in_block,
+                raw,
+                self.res.items(),
+            )
+            .or_else(|| {
+                sunrise_client::entity_nbt::fireball_to_nbt(
+                    p,
+                    uuid,
+                    p.owner_uuid,
+                    raw,
+                    self.res.items(),
+                )
+            })
+            .or_else(|| {
+                sunrise_client::entity_nbt::throwable_to_nbt(
+                    p,
+                    uuid,
+                    p.owner_uuid,
+                    raw,
+                    self.res.items(),
+                )
+            })?;
             (tag, List::Projectile, i)
         };
         super::persist::write_attachments(&mut tag, id, &self.entity_attachments);

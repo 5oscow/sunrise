@@ -410,7 +410,7 @@ impl Game<'_> {
             v["max_damage"] = json!(max);
             v["durability_left"] = json!((i64::from(max) - i64::from(s.damage)).max(0));
         }
-        if let Some(c) = sunrise_client::item_data::encode_components(s) {
+        if let Some(c) = sunrise_client::item_data::component_snapshot(s) {
             v["components"] = json!(sunrise_client::snbt::to_snbt(&c));
         }
         v
@@ -2417,7 +2417,7 @@ mod tests {
                 name: "Moor".into(),
                 ..Default::default()
             }
-            .write(&saves.join("Moor"))
+            .write(&saves.join("Moor"), &Default::default())
             .unwrap();
             let world = list_worlds(&saves).remove(0);
             let mut title = Title::new(saves, scratch.path(), "");

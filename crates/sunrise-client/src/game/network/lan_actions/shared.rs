@@ -1762,7 +1762,7 @@ mod tests {
                 let picked = guest.inventory[guest.selected].as_ref().unwrap();
                 assert_eq!(&*picked.item, "minecraft:diamond");
                 let Some(sunrise_core::nbt::Tag::Compound(components)) =
-                    sunrise_client::item_data::encode_components(picked)
+                    sunrise_client::item_data::component_snapshot(picked)
                 else {
                     panic!("the chest's data is on the diamond");
                 };
@@ -1980,6 +1980,7 @@ mod tests {
                 progress: 0.5,
                 per_tick: 0.0,
                 ticks: 8,
+                crack: None,
             }),
             destroy_pos: Some(pos),
             dig_start: 1000,

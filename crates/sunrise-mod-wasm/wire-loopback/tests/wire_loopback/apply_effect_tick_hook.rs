@@ -5,6 +5,8 @@ impl ApplyEffectTickHooks {
         _: &dyn mod_api::Host,
         event: &mut mod_api::ApplyEffectTickEvent<'_>,
     ) {
+        assert_eq!(event.mod_id, "wire_test");
+        assert!(event.has_effect(event.effect));
         event.heal(2.5);
         event.hurt("minecraft:wither", 3.);
         event.eat(2, 0.25);

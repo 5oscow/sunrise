@@ -912,7 +912,7 @@ impl Menu {
                 if let Some(mut book) = book
                     && !self.inventory_add(env, &mut book)
                 {
-                    self.drop_stack(&book);
+                    self.drop_stack(&book, env.items);
                 }
             }
             _ => return false,
@@ -2016,12 +2016,12 @@ impl Menu {
         }
     }
 
-    fn drop_stack(&mut self, stack: &ItemStack) {
+    fn drop_stack(&mut self, stack: &ItemStack, items: &Items) {
         self.touch();
         if stack.count > 0 {
             self.state
                 .drops
-                .push(crate::item_data::canon_stack(Some(stack)));
+                .push(crate::item_data::canon_stack(Some(stack), items));
             self.state.dropped.push(stack.clone());
         }
     }
@@ -2761,14 +2761,14 @@ impl Menu {
         } else {
             MenuStep::Done((clicked, stack))
         };
-        take.then(self, env, move |menu, _, (clicked, stack)| {
+        take.then(self, env, move |menu, env, (clicked, stack)| {
             // What the result slot's move left over is dropped.
             if (index == 0 && matches!(menu.state.kind, Kind::Inventory | Kind::Crafting))
                 || (index == 1 && menu.state.kind == Kind::Stonecutter)
                 || (matches!(menu.state.kind, Kind::Mod(_))
                     && menu.state.slots[index].role == Role::CraftResult)
             {
-                menu.drop_stack(&stack);
+                menu.drop_stack(&stack, env.items);
             }
             MenuStep::Done(Some(clicked))
         })

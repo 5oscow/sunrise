@@ -212,10 +212,10 @@ impl Menu {
                 if let Some(carried) = self.state.carried.as_mut() {
                     if primary {
                         let dropped = self.state.carried.take().expect("some");
-                        self.drop_stack(&dropped);
+                        self.drop_stack(&dropped, env.items);
                     } else {
                         let one = split(carried, 1);
-                        self.drop_stack(&one);
+                        self.drop_stack(&one, env.items);
                         tidy(&mut self.state.carried);
                     }
                 }
@@ -295,9 +295,9 @@ impl Menu {
                 menu.safe_take_step(env, s, amount, u32::MAX).then(
                     menu,
                     env,
-                    move |menu, _, taken| {
+                    move |menu, env, taken| {
                         if let Some(taken) = &taken {
-                            menu.drop_stack(taken);
+                            menu.drop_stack(taken, env.items);
                         }
                         MenuStep::Done(
                             if button == 1
@@ -542,7 +542,7 @@ impl Menu {
                             env,
                             |menu, env, mut taken| {
                                 if !menu.inventory_add(env, &mut taken) {
-                                    menu.drop_stack(&taken);
+                                    menu.drop_stack(&taken, env.items);
                                 }
                                 MenuStep::Done(())
                             },

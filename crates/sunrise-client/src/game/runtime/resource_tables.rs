@@ -36,6 +36,9 @@ impl Resources {
     pub(super) fn items(&self) -> &Items {
         &self.rest().items
     }
+    pub(super) fn shared_items(&self) -> Arc<Items> {
+        self.rest().items.clone()
+    }
     pub(super) fn recipes(&self) -> &Recipes {
         &self.rest().recipes
     }

@@ -742,6 +742,7 @@ fn wire_loopback_checked_append_is_atomic_and_bit_exact() {
             mod_api::dispatch_apply_effect_tick(
                 &World,
                 mod_api::__private::ApplyEffectTickCall {
+                    mod_id: "wire_test",
                     effect: REGISTERED_EFFECT.get().unwrap(),
                     dimension: "test:world",
                     entity: Some(7),
@@ -750,6 +751,7 @@ fn wire_loopback_checked_append_is_atomic_and_bit_exact() {
                     health: 10.,
                     max_health: 20.,
                     food: None,
+                    active_effects: &[REGISTERED_EFFECT.get().unwrap()],
                     changes: &mut changes,
                     keep: &mut keep,
                 },
