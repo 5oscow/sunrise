@@ -1648,6 +1648,11 @@ mod enchantment_boundary_tests {
 fn prepare_stack_boundary_tests() {
     install_stack_hooks();
     install_parts(&[]).unwrap();
+    resolve_stack_boundary_test_items();
+}
+
+#[cfg(test)]
+fn resolve_stack_boundary_test_items() {
     mod_api::__private::resolve_items([
         "minecraft:iron_sword",
         "minecraft:stick",
@@ -2938,11 +2943,10 @@ mod game_rule_values;
 mod item_properties;
 #[path = "api_values/loot_values.rs"]
 pub(crate) mod loot_values;
-#[path = "api_values/particle_values.rs"]
-mod particle_values;
-pub(crate) use loot_values::{dispatch_loot_condition, dispatch_loot_function};
 #[path = "api_values/package_snapshot.rs"]
 mod package_snapshot;
+#[path = "api_values/particle_values.rs"]
+mod particle_values;
 pub(in crate::game) use package_snapshot::install_packages;
 #[path = "api_values/phase_values.rs"]
 mod phase_values;
