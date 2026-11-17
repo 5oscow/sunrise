@@ -133,14 +133,22 @@ change it for particular items, vanilla's or another mod's included, attach a pa
 
 Three server-side methods, each with a read-only `Host`, whose `event` field arrives holding vanilla's answer:
 
-- `ItemPart::is_primary_item_for` is `IItemExtension.isPrimaryItemFor`: whether enchantment selection may offer
-  `event.enchantment` to the part's item. `event.primary` arrives as `Enchantment.isPrimaryItem` (in the
-  enchantment's `supported_items`, and in its `primary_items` when that is set). Selection chooses the enchanting
-  table's offers and clues, loot `enchant_with_levels`, trades and spawn gear, all inside a roll. So the part is
-  asked once per registered enchantment when parts install (world open and `/reload`), with the item's default
-  stack, and selection reads the answers stored on that server's enchantment registry until the next install
-  or the world closing: answer from the item and the enchantment alone. A book is
-  offered every enchantment and never asks.
+- `ItemPart::supports_enchantment` is `IItemExtension.supportsEnchantment`: whether the item may receive
+  `event.enchantment`. The first `Some(bool)` replaces support; `None` tries the next part and then defaults
+  to true for an enchanted book or membership in `supported_items`.
+  Both anvil calculations, `/enchant`, and compatibility-filtered `enchant_randomly` in both loot engines read
+  this answer. Creative anvil use still bypasses support; enchantment conflicts remain separate.
+- `ItemPart::is_primary_item_for` is `IItemExtension.isPrimaryItemFor`: whether selection may offer the pair
+  in table offers/clues, loot `enchant_with_levels`, trades and spawn gear. Its default is true for a plain
+  book; otherwise it reads support before checking `primary_items` when that set exists. A primary listener
+  may change that answer, including withholding an enchantment from a plain book. This is version 2.
+
+Both hooks are **install-time snapshots**, not component-dependent held-stack queries. Each item's parts are
+asked once per registered enchantment when parts install (world open and `/reload`), with the item's default
+stack. The engines read the stored answers until the next install or the world closes: answer from the item
+and enchantment alone. Support resolves on both sides with a read-only `Host`, before the server resolves
+primary answers. Every snapshot owns its answers; publishing a fresh world-loot snapshot copies the current
+answers without asking listeners again.
 - `ItemPart::apply_enchantments` is `IItemExtension.applyEnchantments`: the enchanting table's result for the
   input stack and the list it chose (`event.enchantments`). `event.result` arrives as vanilla's (a book becomes
   an enchanted book, then each level is added). The input slot holds what the part leaves, and

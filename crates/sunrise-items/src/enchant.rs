@@ -199,6 +199,8 @@ pub struct Enchantments {
     /// The mods' `isPrimaryItemFor` answers resolved for this snapshot
     /// (`ItemPart::is_primary_item_for`).
     primary_answers: sunrise_world::enchantment_answers::AnswerTable,
+    /// The item's support answer, resolved at install for this registry snapshot.
+    support_answers: sunrise_world::enchantment_answers::AnswerTable,
 }
 
 fn string_list(v: &Value) -> Vec<String> {
@@ -530,12 +532,17 @@ impl Enchantments {
             props,
             lang,
             primary_answers: Default::default(),
+            support_answers: Default::default(),
         })
     }
     /// The `isPrimaryItemFor` answers the server resolved for this snapshot when its parts
-    /// installed ([`crate::primary_items`]); selection reads them.
+    /// installed; selection reads them.
     pub fn primary_answers(&self) -> &sunrise_world::enchantment_answers::AnswerTable {
         &self.primary_answers
+    }
+    /// The support answers resolved for this snapshot when its parts installed.
+    pub fn support_answers(&self) -> &sunrise_world::enchantment_answers::AnswerTable {
+        &self.support_answers
     }
     pub fn get(&self, id: &str) -> Option<&Enchantment> {
         self.index.get(id).map(|&i| &self.list[i])
@@ -650,17 +657,26 @@ impl Enchantments {
             crate::properties::item_matches(spec, item, |tag| items.item_in_tag(tag, item))
         })
     }
-    /// `Enchantment.canEnchant` / `isSupportedItem`.
-    pub fn can_enchant(&self, items: &Items, id: &str, item: &str) -> bool {
-        self.get(id)
-            .is_some_and(|e| Self::item_in(items, &e.supported, item))
+    /// The unmodified `supportsEnchantment` default, used when resolving the snapshot.
+    pub fn default_supports(&self, items: &Items, e: &Enchantment, item: &str) -> bool {
+        item == "minecraft:enchanted_book" || Self::item_in(items, &e.supported, item)
     }
-    /// `Enchantment.isPrimaryItem`.
+    fn supports(&self, items: &Items, e: &Enchantment, item: &str) -> bool {
+        self.support_answers
+            .answer(item, &e.id)
+            .unwrap_or_else(|| self.default_supports(items, e, item))
+    }
+    /// `ItemStack.supportsEnchantment`, from this snapshot's install-time answers.
+    pub fn can_enchant(&self, items: &Items, id: &str, item: &str) -> bool {
+        self.get(id).is_some_and(|e| self.supports(items, e, item))
+    }
+    /// The `isPrimaryItemFor` default: a plain book, or support before the primary tag.
     pub fn is_primary(&self, items: &Items, e: &Enchantment, item: &str) -> bool {
-        Self::item_in(items, &e.supported, item)
-            && e.primary
-                .as_ref()
-                .is_none_or(|p| Self::item_in(items, p, item))
+        item == "minecraft:book"
+            || (self.supports(items, e, item)
+                && e.primary
+                    .as_ref()
+                    .is_none_or(|p| Self::item_in(items, p, item)))
     }
     /// `Enchantment.areCompatible`.
     pub fn compatible(&self, a: &str, b: &str) -> bool {
@@ -786,15 +802,13 @@ impl Enchantments {
         item: &str,
         pool: &[Arc<str>],
     ) -> Vec<(Arc<str>, u32)> {
-        let book = item == "minecraft:book";
         let mut out = Vec::new();
         for id in pool {
             let Some(e) = self.get(id) else { continue };
-            if !(book
-                || self
-                    .primary_answers
-                    .answer(item, &e.id)
-                    .unwrap_or_else(|| self.is_primary(items, e, item)))
+            if !self
+                .primary_answers
+                .answer(item, &e.id)
+                .unwrap_or_else(|| self.is_primary(items, e, item))
             {
                 continue;
             }
@@ -1860,6 +1874,7 @@ pub mod tests {
             props,
             lang: HashMap::new(),
             primary_answers: Default::default(),
+            support_answers: Default::default(),
         }
     }
     pub fn sample_items() -> Items {
@@ -1885,6 +1900,92 @@ pub mod tests {
             ["minecraft:iron_boots".to_owned()].into_iter().collect(),
         );
         Items::for_tests(item_tags)
+    }
+
+    #[test]
+    fn support_precedes_primary_tags_and_primary_answers_can_withhold_books() {
+        let (mut e, items) = (sample(), sample_items());
+        let sharp: Arc<str> = "minecraft:sharpness".into();
+        let index = e.index[&sharp];
+        e.list[index].primary = Some(vec![
+            "minecraft:stick".into(),
+            "minecraft:iron_sword".into(),
+        ]);
+        let at_30 =
+            |item: &str| e.available_results(&items, 30, item, std::slice::from_ref(&sharp));
+        assert!(at_30("minecraft:stick").is_empty());
+        assert_eq!(at_30("minecraft:iron_sword"), [(sharp.clone(), 3)]);
+        e.support_answers().install(HashMap::from([
+            (
+                "minecraft:stick".into(),
+                HashMap::from([(sharp.clone(), true)]),
+            ),
+            (
+                "minecraft:glass".into(),
+                HashMap::from([(sharp.clone(), true)]),
+            ),
+            (
+                "minecraft:iron_sword".into(),
+                HashMap::from([(sharp.clone(), false)]),
+            ),
+        ]));
+        assert_eq!(
+            at_30("minecraft:stick"),
+            [(sharp.clone(), 3)],
+            "support can admit an item in primary_items but outside supported_items"
+        );
+        assert!(
+            at_30("minecraft:glass").is_empty(),
+            "support does not bypass primary_items"
+        );
+        assert!(
+            at_30("minecraft:iron_sword").is_empty(),
+            "primary_items does not bypass support"
+        );
+        assert_eq!(at_30("minecraft:book"), [(sharp.clone(), 3)]);
+        e.primary_answers().install(HashMap::from([(
+            "minecraft:book".into(),
+            HashMap::from([(sharp.clone(), false)]),
+        )]));
+        assert!(
+            at_30("minecraft:book").is_empty(),
+            "a primary answer can withhold the plain book's default eligibility"
+        );
+    }
+
+    #[test]
+    fn items_random_enchantment_reads_support_without_filtering_unrestricted_rolls() {
+        let mut items = sample_items();
+        items.enchantments = sample().into();
+        for item in ["minecraft:diamond_sword", "minecraft:enchanted_book"] {
+            for compatible in [true, false] {
+                let table = json!({"pools":[{"rolls":1,"entries":[{
+                    "type":"minecraft:item", "name":item, "modifier":[{
+                        "type":"minecraft:enchant_randomly", "options":"minecraft:mending", "only_compatible":compatible
+                    }]
+                }]}]});
+                let roll = || {
+                    items.inline_loot_table(&table, &mut sunrise_core::random::LegacyRandom::new(1))
+                        [0]
+                    .crafting_enchantments()
+                    .to_vec()
+                };
+                assert_eq!(roll(), [(Arc::from("minecraft:mending"), 1)]);
+                items
+                    .enchantments
+                    .support_answers()
+                    .install(HashMap::from([(
+                        item.into(),
+                        HashMap::from([("minecraft:mending".into(), false)]),
+                    )]));
+                if compatible {
+                    assert!(roll().is_empty());
+                } else {
+                    assert_eq!(roll(), [(Arc::from("minecraft:mending"), 1)]);
+                }
+                items.enchantments.support_answers().clear();
+            }
+        }
     }
 
     #[test]

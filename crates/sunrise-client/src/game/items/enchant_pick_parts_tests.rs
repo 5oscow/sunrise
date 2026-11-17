@@ -6,7 +6,7 @@
 use super::*;
 use mod_api::{
     ApplyEnchantmentsEvent, Hooks, IsNotReplaceableByPickActionEvent, IsPrimaryItemForEvent,
-    ItemPart, ModEntry, Registrar, RegistrationContext,
+    ItemPart, ModEntry, Registrar, RegistrationContext, SupportsEnchantmentEvent,
 };
 use std::sync::{Arc, Mutex};
 
@@ -15,6 +15,9 @@ const SHARPNESS: &str = "minecraft:sharpness";
 /// What the parts answer, and what they were asked.
 #[derive(Clone, Default)]
 struct Answers {
+    support: Arc<Mutex<Vec<(String, bool)>>>,
+    support_asked: Arc<Mutex<usize>>,
+    primary_incoming: Arc<Mutex<Vec<(String, bool)>>>,
     /// `is_primary_item_for`: the item and the answer for sharpness.
     primary: Arc<Mutex<Vec<(String, bool)>>>,
     /// `is_primary_item_for`: how many times a part was asked.
@@ -37,11 +40,31 @@ struct Part {
 
 #[mod_api::sunrise_part]
 impl ItemPart for Part {
+    fn supports_enchantment(
+        &self,
+        _: &dyn mod_api::Host,
+        event: &mut SupportsEnchantmentEvent<'_>,
+    ) -> Option<bool> {
+        *self.answers.support_asked.lock().unwrap() += 1;
+        if event.enchantment != SHARPNESS {
+            return None;
+        }
+        let answers = self.answers.support.lock().unwrap();
+        answers
+            .iter()
+            .find(|(item, _)| item == self.item)
+            .map(|(_, answer)| *answer)
+    }
     fn is_primary_item_for(&self, _: &dyn mod_api::Host, event: &mut IsPrimaryItemForEvent<'_>) {
         *self.answers.primary_asked.lock().unwrap() += 1;
         if event.enchantment != SHARPNESS {
             return;
         }
+        self.answers
+            .primary_incoming
+            .lock()
+            .unwrap()
+            .push((self.item.into(), event.primary));
         let answers = self.answers.primary.lock().unwrap();
         if let Some((_, answer)) = answers.iter().find(|(item, _)| item == self.item) {
             event.primary = *answer;
@@ -157,7 +180,7 @@ fn primary_answers_are_asked_at_install_and_read_by_selection() {
             sharpness_at_30(game, "minecraft:stick");
         }
         assert_eq!(*answers.primary_asked.lock().unwrap(), 6 * registered);
-        // A book is offered every enchantment whatever the parts say.
+        // An unsubscribed plain book keeps its default eligibility.
         assert_eq!(sharpness_at_30(game, "minecraft:book"), level_3);
         // The answers are this server's snapshot's: its stations and its loot items read them.
         let items = &game.items().enchantments;
@@ -284,5 +307,121 @@ fn pick_asks_each_hotbar_stack_until_one_may_be_replaced() {
         assert!(game.pick_into_inventory(&ItemStack::new("minecraft:oak_planks", 1), false));
         assert_eq!(game.selected, 1);
         assert!(answers.keeps_asked.lock().unwrap().is_empty());
+    });
+}
+
+#[test]
+#[ignore = "daily"]
+fn support_snapshot_reaches_both_anvils_and_enchant_without_dispatching_inside_them() {
+    use crate::game::execution_role::ExecutionRole;
+    use crate::game::stations::{Kind as StationKind, Station};
+    use sunrise_client::menu::{Kind as MenuKind, Menu};
+    with_parts(|game, answers| {
+        let registered = game.stations().enchantments.list.len();
+        assert_eq!(*answers.support_asked.lock().unwrap(), 3 * registered);
+        *answers.support.lock().unwrap() = vec![
+            ("minecraft:stick".into(), true),
+            ("minecraft:diamond_sword".into(), false),
+        ];
+        answers.primary_incoming.lock().unwrap().clear();
+        game.resolve_parts().unwrap();
+        assert!(
+            answers
+                .primary_incoming
+                .lock()
+                .unwrap()
+                .contains(&("minecraft:diamond_sword".into(), false)),
+            "primary listeners start from the support-layered default"
+        );
+        assert!(sharpness_at_30(game, "minecraft:diamond_sword").is_empty());
+        game.creative = false;
+        game.player = Some(
+            sunrise_client::motion::PlayerMotion::new(
+                game.motion,
+                sunrise_core::geometry::Vec3::ZERO,
+            )
+            .unwrap(),
+        );
+        game.build_registries();
+        for role in [ExecutionRole::IntegratedServer, ExecutionRole::Client] {
+            game.options.execution_role = role;
+            if role == ExecutionRole::Client {
+                let asked = *answers.support_asked.lock().unwrap();
+                game.resolve_primary_items();
+                assert_eq!(
+                    *answers.support_asked.lock().unwrap(),
+                    asked + 3 * registered,
+                    "the client installs its support snapshot too"
+                );
+            }
+            let asked = *answers.support_asked.lock().unwrap();
+            let mut book = ItemStack::new("minecraft:enchanted_book", 1);
+            book.set_crafting_enchantments(vec![(SHARPNESS.into(), 1)]);
+            for (item, allowed) in [
+                ("minecraft:stick", true),
+                ("minecraft:diamond_sword", false),
+            ] {
+                let input = ItemStack::new(item, 1);
+                let mut menu = Menu::new(MenuKind::Anvil);
+                let env = game.menu_env();
+                menu.set_slot(&env, 0, Some(input.clone()));
+                menu.set_slot(&env, 1, Some(book.clone()));
+                menu.settle(&env);
+                assert_eq!(menu.slot(2).is_some(), allowed, "client-lib anvil: {item}");
+                if allowed {
+                    assert_eq!(menu.slot(2).unwrap().enchantment_level(SHARPNESS), 1);
+                }
+                let mut station = Station::new(StationKind::Anvil, [0, 64, 0]);
+                station.inputs[0] = Some(input);
+                station.inputs[1] = Some(book.clone());
+                game.station = Some(station);
+                game.station_changed();
+                let result = &game.station.as_ref().unwrap().result;
+                assert_eq!(result.is_some(), allowed, "game anvil: {item}");
+                if allowed {
+                    assert_eq!(result.as_ref().unwrap().enchantment_level(SHARPNESS), 1);
+                }
+            }
+            if role == ExecutionRole::IntegratedServer {
+                game.selected = 0;
+                game.inventory[0] = Some(ItemStack::new("minecraft:stick", 1));
+                assert!(game.as_console(|g| g.run_command("enchant @s minecraft:sharpness 1")));
+                assert_eq!(
+                    game.inventory[0]
+                        .as_ref()
+                        .unwrap()
+                        .enchantment_level(SHARPNESS),
+                    1
+                );
+                game.inventory[0] = Some(ItemStack::new("minecraft:diamond_sword", 1));
+                assert!(!game.as_console(|g| g.run_command("enchant @s minecraft:sharpness 1")));
+                assert_eq!(
+                    game.inventory[0]
+                        .as_ref()
+                        .unwrap()
+                        .enchantment_level(SHARPNESS),
+                    0
+                );
+            }
+            assert_eq!(
+                *answers.support_asked.lock().unwrap(),
+                asked,
+                "anvil and /enchant read the snapshot, not listeners"
+            );
+        }
+        game.options.execution_role = ExecutionRole::IntegratedServer;
+        answers.support.lock().unwrap().clear();
+        assert!(
+            game.stations()
+                .enchantments
+                .can_enchant(game.items(), SHARPNESS, "minecraft:stick"),
+            "changing a listener does not change an installed answer"
+        );
+        game.resolve_primary_items();
+        assert!(!game.stations().enchantments.can_enchant(
+            game.items(),
+            SHARPNESS,
+            "minecraft:stick"
+        ));
     });
 }

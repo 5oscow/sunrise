@@ -349,6 +349,7 @@ pub struct LootData {
     /// Part answers resolved for this world registry snapshot, shared in meaning with
     /// the items engine's selection table, never with another world's answers.
     primary_answers: crate::enchantment_answers::AnswerTable,
+    support_answers: crate::enchantment_answers::AnswerTable,
     /// Tag files' layers by (registry, tag id).
     tags: HashMap<(String, String), crate::tag_layers::TagLayers>,
     /// Smelting recipes in recipe id order: (ingredient, result, result count).
@@ -899,6 +900,7 @@ impl LootData {
             items,
             enchantments,
             primary_answers: Default::default(),
+            support_answers: Default::default(),
             tags,
             smelting,
         };
@@ -909,6 +911,10 @@ impl LootData {
     /// The primary-item answers resolved for this enchantment registry snapshot.
     pub fn primary_answers(&self) -> &crate::enchantment_answers::AnswerTable {
         &self.primary_answers
+    }
+    /// The support answers resolved for this enchantment registry snapshot.
+    pub fn support_answers(&self) -> &crate::enchantment_answers::AnswerTable {
+        &self.support_answers
     }
 
     /// Attach prepared instances to this private, not-yet-published snapshot.
@@ -1049,6 +1055,13 @@ impl LootData {
     }
     fn item_in(&self, item: &str, set: &Value) -> bool {
         self.holder_set("item", set).iter().any(|i| i == item)
+    }
+    fn supports(&self, item: &str, enchantment: &Enchantment) -> bool {
+        self.support_answers
+            .answer(item, &enchantment.name)
+            .unwrap_or_else(|| {
+                item == "minecraft:enchanted_book" || self.item_in(item, &enchantment.supported)
+            })
     }
     fn facts(&self, item: &str) -> ItemFacts {
         self.items.get(item).copied().unwrap_or(ItemFacts {
@@ -1557,9 +1570,7 @@ impl<R: RandomSource> Context<'_, R> {
                 };
                 let options: Vec<usize> = options
                     .into_iter()
-                    .filter(|&i| {
-                        !check || data.item_in(&stack.item, &data.enchantments[i].supported)
-                    })
+                    .filter(|&i| !check || data.supports(&stack.item, &data.enchantments[i]))
                     .collect();
                 if !options.is_empty() {
                     let pick = self
@@ -2016,10 +2027,10 @@ impl<R: RandomSource> Context<'_, R> {
                 .primary_answers
                 .answer(item, &e.name)
                 .unwrap_or_else(|| {
-                    data.item_in(item, &e.supported)
-                        && e.primary.as_ref().is_none_or(|p| data.item_in(item, p))
+                    book || (data.supports(item, e)
+                        && e.primary.as_ref().is_none_or(|p| data.item_in(item, p)))
                 });
-            if !primary && !book {
+            if !primary {
                 continue;
             }
             for level in (1..=e.max_level).rev() {
@@ -3036,14 +3047,16 @@ mod namespace_tests {
 mod native_kinds_tests {
     use super::*;
 
-    #[test]
-    fn world_loot_selection_reads_and_retires_its_primary_snapshot() {
+    fn enchantable_probe(name: &str, item: &str, modifier: Value) -> LootData {
         let mut data = table(
-            "primary_snapshot",
-            r#"{"pools":[{"rolls":1,"entries":[{"type":"minecraft:item","name":"test:probe","modifier":[{"type":"minecraft:enchant_with_levels","levels":30}]}]}]}"#,
+            name,
+            &serde_json::json!({"pools":[{"rolls":1,"entries":[{
+                "type":"minecraft:item", "name":item, "modifier":[modifier]
+            }]}]})
+            .to_string(),
         );
         data.items.insert(
-            "test:probe".into(),
+            item.into(),
             ItemFacts {
                 max_stack: 64,
                 enchantable: Some(1),
@@ -3052,7 +3065,7 @@ mod native_kinds_tests {
         );
         data.enchantments.push(Enchantment {
             name: "test:sharp".into(),
-            supported: Value::Null,
+            supported: serde_json::json!(["test:probe"]),
             primary: None,
             exclusive: Value::Null,
             max_level: 1,
@@ -3062,6 +3075,17 @@ mod native_kinds_tests {
             slots: vec![],
             effects: Value::Null,
         });
+        data
+    }
+
+    #[test]
+    fn world_loot_selection_reads_and_retires_its_primary_snapshot() {
+        let mut data = enchantable_probe(
+            "primary_snapshot",
+            "test:probe",
+            serde_json::json!({"type":"minecraft:enchant_with_levels","levels":30}),
+        );
+        data.enchantments[0].supported = Value::Null;
         let roll = |data: &LootData| {
             data.roll("minecraft:test", &mut LegacyRandom::new(1), 0.0, None, None)[0]
                 .enchantments
@@ -3076,6 +3100,42 @@ mod native_kinds_tests {
         // Retiring the world's answer restores the vanilla outcome.
         data.primary_answers().clear();
         assert!(roll(&data).is_empty());
+    }
+
+    #[test]
+    fn world_random_enchantment_respects_support_only_when_compatibility_is_requested() {
+        for item in ["test:probe", "minecraft:enchanted_book"] {
+            for compatible in [true, false] {
+                let data = enchantable_probe(
+                    "support_snapshot",
+                    item,
+                    serde_json::json!({
+                        "type":"minecraft:enchant_randomly", "only_compatible":compatible
+                    }),
+                );
+                let roll = || {
+                    data.roll("minecraft:test", &mut LegacyRandom::new(1), 0.0, None, None)[0]
+                        .enchantments
+                        .clone()
+                };
+                assert_eq!(roll(), [("test:sharp".into(), 1)]);
+                data.support_answers().install(HashMap::from([(
+                    item.into(),
+                    HashMap::from([("test:sharp".into(), false)]),
+                )]));
+                if compatible {
+                    assert!(roll().is_empty(), "a refusal filters {item}");
+                } else {
+                    assert_eq!(
+                        roll(),
+                        [("test:sharp".into(), 1)],
+                        "unfiltered random enchantment skips support"
+                    );
+                }
+                data.support_answers().clear();
+                assert_eq!(roll(), [("test:sharp".into(), 1)]);
+            }
+        }
     }
 
     #[test]
