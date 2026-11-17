@@ -13,7 +13,8 @@ pub trait Hooks {
     /// level event played with the smoke: 1000 the click, 1001 the fail sound,
     /// or 0 for nothing at all. Leave answer None and `dispense_item` decides,
     /// as it did before.
-    /// A disabled owner's subscribed method retains the stack and emits no dispense event.
+    /// A disabled owner's subscribed method retains the stack and emits no dispense event unless
+    /// an earlier enabled Part supplies a reply the engine accepts.
     #[hook(
         side = "server",
         contract = "replace",

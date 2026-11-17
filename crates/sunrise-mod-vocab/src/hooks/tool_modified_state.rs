@@ -11,8 +11,9 @@ pub trait Hooks {
     /// the world. A part answers before the global `block_tool_modification`, which still hears the
     /// result and may change or cancel it; a cancelled part skips it. Asked for the block's own parts only, so
     /// a block with none costs nothing.
-    /// A disabled owner's subscribed transform leaves the block unchanged without cancelling
-    /// the global notification; its listeners still see the candidate state.
+    /// A disabled owner's subscribed transform suppresses the unchanged template result,
+    /// not the ability's notification or a listener's replacement. The global hook still
+    /// sees the candidate, and later abilities can be tried if this one has no result.
     #[hook(
         side = "both",
         contract = "cancel",

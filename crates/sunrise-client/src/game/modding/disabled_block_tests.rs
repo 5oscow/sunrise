@@ -2,11 +2,13 @@
 #[cfg(test)]
 mod tests {
     use super::super::{
-        Dim, Game, api_values::TryIntoEngine, native_entity_refs::tests as fixture,
+        Dim, Game, Hit,
+        api_values::{TryIntoApi, TryIntoEngine},
+        native_entity_refs::tests as fixture,
     };
     use mod_api::{
         BlockPart, BlockToolModificationEvent, DispenseMethodEvent, Dispensed, Flow, Hooks, Host,
-        LevelWriteHost, Registrar, RegistrationContext, ServerHost, TickBlockEvent,
+        LevelWriteHost, Registrar, RegistrationContext, ServerHost, TickBlockEvent, ToolAbility,
         ToolModifiedStateEvent,
     };
     use std::sync::{
@@ -15,15 +17,61 @@ mod tests {
     };
     use sunrise_client::{chunk::Chunk, items::ItemStack};
     use sunrise_core::{geometry::Direction, position::BlockPos, ticks::TickPriority};
-    use sunrise_world::{level::LevelAccess, registry::BlockStateId};
+    use sunrise_world::{
+        level::{BlockMaps, LevelAccess},
+        registry::BlockStateId,
+    };
 
     const POS: BlockPos = BlockPos::new(3, 64, 5);
 
-    struct Machine(Arc<AtomicUsize>);
+    #[derive(Default)]
+    struct ToolProbe {
+        candidates: Vec<(ToolAbility, Option<BlockStateId>)>,
+        replacement: Option<mod_api::BlockState>,
+    }
+
+    #[derive(Default)]
+    struct Probe {
+        owner_ticks: AtomicUsize,
+        earlier_ticks: AtomicUsize,
+        earlier_dispenses: AtomicUsize,
+        tool: Mutex<ToolProbe>,
+    }
+
+    struct Earlier(Arc<Probe>);
+    #[mod_api::sunrise_part]
+    impl BlockPart for Earlier {
+        fn tick_block(&self, _: &mut dyn LevelWriteHost, _: &mut TickBlockEvent) -> Flow {
+            self.0.earlier_ticks.fetch_add(1, Ordering::Relaxed);
+            Flow::Cancel
+        }
+        fn dispense_method(
+            &self,
+            _: &mut dyn ServerHost,
+            event: &mut DispenseMethodEvent<'_>,
+        ) -> Option<Dispensed> {
+            self.0.earlier_dispenses.fetch_add(1, Ordering::Relaxed);
+            let mut remainder = event.stack.clone();
+            remainder
+                .set_count(if remainder.count() == 3 { 65 } else { 2 })
+                .unwrap();
+            Some((Some(remainder), 0))
+        }
+    }
+    struct EnabledPrefix(Arc<Probe>);
+    #[mod_api::__subscriptions]
+    impl Hooks for EnabledPrefix {
+        fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
+            let block = r.block_key("inert_test:machine");
+            r.block_part(block, Earlier(self.0.clone()));
+        }
+    }
+
+    struct Machine(Arc<Probe>);
     #[mod_api::sunrise_part]
     impl BlockPart for Machine {
         fn tick_block(&self, _: &mut dyn LevelWriteHost, _: &mut TickBlockEvent) -> Flow {
-            self.0.fetch_add(1, Ordering::Relaxed);
+            self.0.owner_ticks.fetch_add(1, Ordering::Relaxed);
             Flow::Cancel
         }
         fn dispense_method(
@@ -37,7 +85,7 @@ mod tests {
             Flow::Continue
         }
     }
-    struct Owner(Arc<AtomicUsize>);
+    struct Owner(Arc<Probe>);
     #[mod_api::__subscriptions]
     impl Hooks for Owner {
         fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
@@ -50,7 +98,7 @@ mod tests {
             );
         }
     }
-    struct Observer(Arc<Mutex<Vec<Option<BlockStateId>>>>);
+    struct Observer(Arc<Probe>);
     #[mod_api::__subscriptions]
     impl Hooks for Observer {
         fn block_tool_modification(
@@ -58,28 +106,32 @@ mod tests {
             _: &dyn Host,
             event: &mut BlockToolModificationEvent<'_>,
         ) -> Flow {
-            self.0.lock().unwrap().push(
+            let mut tool = self.0.tool.lock().unwrap();
+            tool.candidates.push((
+                event.tool.ability,
                 event
                     .final_state
                     .map(|state| state.try_into_engine(&()).unwrap()),
-            );
+            ));
+            if event.tool.ability == ToolAbility::AxeWaxOff
+                && let Some(replacement) = tool.replacement
+            {
+                *event.final_state = Some(replacement);
+            }
             Flow::Continue
         }
     }
 
-    fn with_inert_block(
-        name: &str,
-        test: impl FnOnce(&mut Game<'_>, BlockStateId, &AtomicUsize, &Mutex<Vec<Option<BlockStateId>>>),
-    ) {
+    fn with_inert_block(name: &str, test: impl FnOnce(&mut Game<'_>, BlockStateId, &Probe)) {
         let name = format!("game::disabled_block_tests::tests::{name}");
         if fixture::run_fresh_cases(&name, "SUNRISE_INERT_BLOCK_CHILD", &["valid"]) {
             return;
         }
-        let calls = Arc::new(AtomicUsize::new(0));
-        let candidates = Arc::new(Mutex::new(Vec::new()));
+        let probe = Arc::new(Probe::default());
         let mods: mod_api::Mods = vec![
-            mod_api::ModEntry::new("inert_test", Box::new(Owner(calls.clone()))),
-            mod_api::ModEntry::new("enabled_observer", Box::new(Observer(candidates.clone()))),
+            mod_api::ModEntry::new("enabled_prefix", Box::new(EnabledPrefix(probe.clone()))),
+            mod_api::ModEntry::new("inert_test", Box::new(Owner(probe.clone()))),
+            mod_api::ModEntry::new("enabled_observer", Box::new(Observer(probe.clone()))),
         ]
         .into();
         mod_platform::testing::with_mods(mods.clone(), || {
@@ -105,7 +157,7 @@ mod tests {
                     .default_state("inert_test:machine")
                     .unwrap();
                 game.world.set(POS.x, POS.y, POS.z, state).unwrap();
-                test(game, state, &calls, &candidates);
+                test(game, state, &probe);
             });
         });
     }
@@ -115,7 +167,7 @@ mod tests {
     fn reenabled_owner_resumes_held_scheduled_tick() {
         with_inert_block(
             "reenabled_owner_resumes_held_scheduled_tick",
-            |game, state, calls, _| {
+            |game, state, probe| {
                 game.tickets
                     .update(Some(sunrise_client::ticket_levels::Sources {
                         forced: vec![(0, 0)],
@@ -126,40 +178,49 @@ mod tests {
                         .add_chunk(POS.chunk(), Default::default(), Default::default())
                         .unwrap();
                 });
-                for (before, stepped) in [false, true].into_iter().enumerate() {
+                let calls = || {
+                    [
+                        probe.earlier_ticks.load(Ordering::Relaxed),
+                        probe.owner_ticks.load(Ordering::Relaxed),
+                    ]
+                };
+                for stepped in [false, true] {
                     let tick = |game: &mut Game<'_>| {
                         if stepped {
                             game.tick_scheduled().unwrap();
                         } else {
                             game.with_level(|b, level, ticks| b.tick_scheduled(level, ticks));
                         }
-                    };
-                    game.with_level(|b, level, ticks| {
-                        ticks.schedule_block(
-                            level.game_time(),
-                            POS,
-                            b.block(state),
-                            0,
-                            TickPriority::High,
-                        );
-                    });
-                    assert!(mod_api::__private::set_mod_enabled("inert_test", false));
-                    for _ in 0..3 {
-                        tick(game);
-                        assert_eq!(calls.load(Ordering::Relaxed), before);
                         assert_eq!(game.world.block(POS.x, POS.y, POS.z), state);
+                    };
+                    for (part, prefix_enabled) in [true, false].into_iter().enumerate() {
+                        assert!(mod_api::__private::set_mod_enabled(
+                            "enabled_prefix",
+                            prefix_enabled
+                        ));
+                        let before = calls();
+                        game.with_level(|b, level, ticks| {
+                            ticks.schedule_block(
+                                level.game_time(),
+                                POS,
+                                b.block(state),
+                                0,
+                                TickPriority::High,
+                            );
+                        });
+                        assert!(mod_api::__private::set_mod_enabled("inert_test", false));
+                        for _ in 0..3 {
+                            tick(game);
+                            assert_eq!(calls(), before, "no Part runs while the owner is off");
+                        }
+                        assert!(mod_api::__private::set_mod_enabled("inert_test", true));
+                        let mut expected = before;
+                        expected[part] += 1;
+                        tick(game);
+                        assert_eq!(calls(), expected);
+                        tick(game);
+                        assert_eq!(calls(), expected, "the held tick runs exactly once");
                     }
-                    assert!(mod_api::__private::set_mod_enabled("inert_test", true));
-                    tick(game);
-                    assert_eq!(calls.load(Ordering::Relaxed), before + 1);
-                    assert_eq!(game.world.block(POS.x, POS.y, POS.z), state);
-                    tick(game);
-                    assert_eq!(
-                        calls.load(Ordering::Relaxed),
-                        before + 1,
-                        "the held tick runs exactly once"
-                    );
-                    assert_eq!(game.world.block(POS.x, POS.y, POS.z), state);
                 }
             },
         );
@@ -170,7 +231,8 @@ mod tests {
     fn inert_dispense_keeps_a_legacy_over_max_stack_without_events() {
         with_inert_block(
             "inert_dispense_keeps_a_legacy_over_max_stack_without_events",
-            |game, _, _, _| {
+            |game, _, _| {
+                assert!(mod_api::__private::set_mod_enabled("enabled_prefix", false));
                 let dispenser = (POS.x - 1, POS.y, POS.z);
                 let stack = ItemStack::new("minecraft:stick", 65); // legal persisted count, above 64
                 game.audio.capture = Some(Vec::new());
@@ -202,41 +264,76 @@ mod tests {
 
     #[test]
     #[ignore = "daily"]
+    fn rejected_dispense_reply_preserves_the_disabled_owners_fallback() {
+        with_inert_block(
+            "rejected_dispense_reply_preserves_the_disabled_owners_fallback",
+            |game, _, probe| {
+                assert!(mod_api::__private::set_mod_enabled("inert_test", false));
+                let dispenser = (POS.x - 1, POS.y, POS.z);
+                game.audio.capture = Some(Vec::new());
+                let particles = game.particles.len();
+                for (input, remaining) in [(3, 3), (4, 2)] {
+                    assert_eq!(
+                        game.dispense_item(
+                            dispenser,
+                            Direction::East,
+                            ItemStack::new("minecraft:stick", input)
+                        )
+                        .unwrap(),
+                        Some(ItemStack::new("minecraft:stick", remaining))
+                    );
+                    assert!(game.dropped.is_empty());
+                    assert!(game.audio.capture.as_ref().unwrap().is_empty());
+                    assert_eq!(game.particles.len(), particles);
+                }
+                assert_eq!(probe.earlier_dispenses.load(Ordering::Relaxed), 2);
+            },
+        );
+    }
+
+    #[test]
+    #[ignore = "daily"]
     fn inert_tool_keeps_block_but_global_listener_sees_vanilla_candidate() {
         with_inert_block(
             "inert_tool_keeps_block_but_global_listener_sees_vanilla_candidate",
-            |game, state, _, candidates| {
-                let expected = game
-                    .pack
-                    .assets
-                    .registry
+            |game, state, probe| {
+                let registry = game.pack.assets.registry;
+                let candidate = registry.default_state("minecraft:observer").unwrap();
+                let replacement = registry
                     .default_state("minecraft:stripped_oak_log")
                     .unwrap();
-                let tool = mod_api::ToolUse::from(mod_api::__private::built::ToolUse {
-                    player: None,
-                    hand: mod_api::Hand::Main,
+                let waxed = serde_json::json!({"waxed": "inert_test:machine"});
+                game.res
+                    .behaviours()
+                    .set_block_maps(Some(Arc::new(BlockMaps::from_values(
+                        [],
+                        [],
+                        [("minecraft:observer", &waxed)],
+                        |_| 0,
+                    ))));
+                let hit = Hit {
                     pos: [POS.x, POS.y, POS.z],
                     face: [0, 1, 0],
-                    click: [3.5, 65.0, 5.5],
-                    ability: mod_api::ToolAbility::AxeStrip,
-                    simulated: false,
-                });
+                    point: [3.5, 65.0, 5.5],
+                    inside: false,
+                };
+                let axe = ItemStack::new("minecraft:iron_axe", 1);
+                let candidates = [
+                    (ToolAbility::AxeStrip, None),
+                    (ToolAbility::AxeScrape, None),
+                    (ToolAbility::AxeWaxOff, Some(candidate)),
+                ];
                 assert!(mod_api::__private::set_mod_enabled("inert_test", false));
-                let mut candidate = Some(expected);
-                let mut cancel = false;
-                game.mod_tool_modification(
-                    &ItemStack::new("minecraft:iron_axe", 1),
-                    state,
-                    &tool,
-                    &mut candidate,
-                    &mut cancel,
-                );
-                assert_eq!(*candidates.lock().unwrap(), [Some(expected)]);
-                assert!(
-                    cancel,
-                    "the caller must not apply the candidate to the disabled block"
-                );
+                assert!(!game.use_block_transformer(&axe, &hit).unwrap());
                 assert_eq!(game.world.block(POS.x, POS.y, POS.z), state);
+                {
+                    let mut tool = probe.tool.lock().unwrap();
+                    assert_eq!(std::mem::take(&mut tool.candidates), candidates);
+                    tool.replacement = Some(replacement.try_into_api().unwrap());
+                }
+                assert!(game.use_block_transformer(&axe, &hit).unwrap());
+                assert_eq!(game.world.block(POS.x, POS.y, POS.z), replacement);
+                assert_eq!(probe.tool.lock().unwrap().candidates, candidates);
             },
         );
     }
