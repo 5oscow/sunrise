@@ -266,7 +266,7 @@ pub mod tests {
     pub(crate) struct Press;
     #[mod_api::sunrise_part]
     impl BlockPart for Press {
-        fn analog_output(&self, _: &dyn LevelHost, event: &mut AnalogOutputEvent) {
+        fn analog_output(&self, _: &mut dyn LevelRandomHost, event: &mut AnalogOutputEvent) {
             event.output += 40;
         }
     }
@@ -328,11 +328,11 @@ pub mod tests {
             let BlockPos { x, y, z } = event.pos;
             if let Ok(Some(count @ 1..)) = HOARD.get_existing(level, Holder::BlockEntity([x, y, z]))
             {
-                event.drops.push(crate::parts::items::tests::stack(
+                event.drops.push(Some(crate::parts::items::tests::stack(
                     "minecraft:gold_ingot",
                     count,
                     0,
-                ));
+                )));
             }
         }
     }

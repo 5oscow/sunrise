@@ -242,14 +242,12 @@ fn witch_attack(m: &mut Mob, who: Who, _power: f32, cx: &mut Cx) {
     // when the witch is not silent.
     witch_sound(m, cx.events, "entity.witch.throw");
 }
-/// The movement speed of a witch with `SPEED_MODIFIER_DRINKING` (-0.25,
-/// `ADD_VALUE`) while it drinks: it stands still for the 32 ticks.
-pub fn speed(m: &Mob, base: f64) -> f64 {
-    if m.species() == Species::Witch && m.extra.flag {
-        (base - 0.25).max(0.0)
-    } else {
-        base
-    }
+/// A drinking witch's `SPEED_MODIFIER_DRINKING` (-0.25, `ADD_VALUE`): it
+/// stands still for the 32 ticks. It adds before an effect's
+/// `ADD_MULTIPLIED_TOTAL` multiplies (`Mob::movement_speed`).
+pub fn drinking_modifier(m: &Mob) -> Option<(f64, super::finalize::Op)> {
+    (m.species() == Species::Witch && m.extra.flag)
+        .then_some((-0.25, super::finalize::Op::AddValue))
 }
 /// Witch.aiStep before `super.aiStep()`: the healing cooldown, then drink
 /// water breathing, fire resistance, healing or swiftness.

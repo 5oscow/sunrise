@@ -502,6 +502,9 @@ fn arguments(
             .ok_or_else(|| meta.error("expected a key"))?
             .to_string();
         let value = argument(&meta.value()?.parse()?).map_err(|e| meta.error(e))?;
+        if map.contains_key(&key) {
+            return Err(meta.error(format!("duplicate key {key}")));
+        }
         map.insert(key, value);
         Ok(())
     })
@@ -983,6 +986,23 @@ mod tests {
 
     fn file(name: &str, source: &str) -> (String, String) {
         (name.to_owned(), source.to_owned())
+    }
+
+    #[test]
+    fn a_key_given_twice_in_one_attribute_is_refused() {
+        let error = Catalog::parse(&[file(
+            "a.rs",
+            r#"
+            pub trait Hooks {
+                /// Twice.
+                #[hook(side = "server", version = 2, contract = "listen", version = 3)]
+                fn twice();
+            }
+            "#,
+        )])
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("duplicate key version"), "{error}");
     }
 
     #[test]

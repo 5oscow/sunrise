@@ -961,39 +961,6 @@ fn wire_loopback_item_toss_carries_the_item_entity_and_its_cancel() {
     );
 }
 #[test]
-fn wire_loopback_item_picked_up_partial_carries_the_original_and_writes_back_the_remainder() {
-    mod_api::__private::initialize().unwrap();
-    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
-    struct World;
-    impl mod_api::Host for World {}
-    mod_api::impl_host_areas!(World);
-    impl mod_api::ServerHost for World {}
-    mod_api::impl_server_host_areas!(World);
-    install_counter();
-    let module = WasmMod {
-        group: 0,
-        subscribed: &[],
-        listeners: &[],
-        corrupt: false,
-    };
-    let original = mod_api::ItemStack::new(REGISTERED_ITEM.get().unwrap(), 8).unwrap();
-    let mut remaining = Some(mod_api::ItemStack::new(REGISTERED_ITEM.get().unwrap(), 3).unwrap());
-    let mut event = mod_api::ItemPickedUpPartialEvent {
-        player: 0x1234_5678_9abc_def0_1234_5678_9abc_def0,
-        original: &original,
-        remaining: &mut remaining,
-    };
-    module.item_picked_up_partial(&mut World, &mut event);
-    assert_eq!(
-        PICKED_UP_PARTIAL.get(),
-        Some((0x1234_5678_9abc_def0_1234_5678_9abc_def0, 8, Some(3)))
-    );
-    assert!(
-        remaining.is_none(),
-        "the remainder a guest empties comes back"
-    );
-}
-#[test]
 fn wire_loopback_array_of_optional_borrowed_records() {
     mod_api::__private::initialize().unwrap();
     let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
@@ -1170,7 +1137,6 @@ thread_local! {
     static REGISTERED_KIND:std::cell::Cell<Option<mod_api::BlockEntityTypeKey>> = const {std::cell::Cell::new(None)};
     static PICKED_UP_POST: std::cell::Cell<Option<(u128, u32, u32, Option<u32>)>> = const { std::cell::Cell::new(None) };
     static TOSSED: std::cell::Cell<Option<(u128, u32)>> = const { std::cell::Cell::new(None) };
-    static PICKED_UP_PARTIAL: std::cell::Cell<Option<(u128, u32, Option<u32>)>> = const { std::cell::Cell::new(None) };
 }
 fn install_counter() {
     let mods = [mod_api::ModEntry::new(

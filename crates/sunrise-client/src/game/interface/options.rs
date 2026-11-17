@@ -118,6 +118,32 @@ impl Game<'_> {
         let b = HudBatch::new(size, self.settings.gui_scale_inputs());
         (b.width, b.height)
     }
+    /// Close the options screens (`OptionsScreen.onClose`) back to where they
+    /// were opened: the recipe book's settings, World Options, the title or
+    /// the pause menu.
+    pub(super) fn leave_options(&mut self) {
+        let to_game = self.options_from_title;
+        let back = if let Some(screen) = self.panel.recipes_settings_return.take() {
+            screen
+        } else if std::mem::take(&mut self.options_to_world_options) {
+            Screen::WorldOptions
+        } else if self.options_from_title {
+            Screen::Playing
+        } else {
+            Screen::Paused
+        };
+        self.set_screen(back);
+        // Vanilla grabs only on `setScreen(null)`: back on the title, which
+        // is still shown, the pointer stays free (#1999). The startup handoff
+        // can enter a world while its options are open, and closing them then
+        // returns to that world, as `capture_loaded_world` grabs.
+        if to_game && self.title.is_none() {
+            self.capture(true);
+        }
+        self.dragging = false;
+        // Closed from calibration (sunrise-ctl, a lost window): out of it.
+        self.show_calibration((0.0, 0.0));
+    }
     /// Open the options screens (OptionsScreen) from the title or pause menu.
     pub(super) fn open_options(&mut self, from_title: bool) {
         self.open_options_at(from_title, Page::Main);
@@ -402,23 +428,7 @@ impl Game<'_> {
                 Event::Close if self.ui.options.resource_error.is_some() => {}
                 Event::Close => {
                     self.settings.save(&Self::options_path());
-                    let to_game = self.options_from_title;
-                    let back = if let Some(screen) = self.panel.recipes_settings_return.take() {
-                        screen
-                    } else if std::mem::take(&mut self.options_to_world_options) {
-                        Screen::WorldOptions
-                    } else if self.options_from_title {
-                        Screen::Playing
-                    } else {
-                        Screen::Paused
-                    };
-                    self.set_screen(back);
-                    if to_game {
-                        self.capture(true);
-                    }
-                    self.dragging = false;
-                    // Closed from calibration (sunrise-ctl, a lost window): out of it.
-                    self.show_calibration((0.0, 0.0));
+                    self.leave_options();
                 }
                 Event::Language(code) => {
                     self.load_language(&code);

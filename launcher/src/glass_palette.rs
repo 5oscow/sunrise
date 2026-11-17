@@ -12,7 +12,7 @@ use crate::glass_ui::{self as ui, white};
 use std::path::PathBuf;
 use sunrise_launcher::browser::Project;
 use sunrise_launcher::instances::Kind as InstanceKind;
-use sunrise_theme::glass::ink;
+use sunrise_launcher_theme::glass::ink;
 
 /// Commands listed at most (`slice(0, 8)`).
 const SHOWN: usize = 8;
@@ -52,6 +52,8 @@ impl Launcher {
             window.focus(&self.root_focus, cx);
             return;
         }
+        // A menu left open would draw over the palette.
+        self.close_menus();
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
         self.palette = Some(Palette {
@@ -217,7 +219,7 @@ impl Launcher {
             .h(px(48.))
             .px(px(12.))
             .cursor_text()
-            .font_family(sunrise_theme::glass::FONT)
+            .font_family(sunrise_launcher_theme::glass::FONT)
             .text_size(px(15.))
             .text_color(white(ink::FULL))
             .child(ui::icon("search-01", 20., white(0.55)))
@@ -280,7 +282,7 @@ impl Launcher {
                     .gap(px(16.))
                     .h(px(44.))
                     .px(px(12.))
-                    .rounded(px(12.))
+                    .rounded(px(crate::glass_ui::rad(12.)))
                     .when(i == index, |d| d.bg(white(0.1)))
                     .cursor_pointer()
                     .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {

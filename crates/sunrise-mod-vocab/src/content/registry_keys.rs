@@ -3,6 +3,7 @@ use crate::{
     BlockEntityTypeKey, BlockKey, DimensionKey, EffectKey, EnchantmentKey, EntityTypeKey, FluidKey,
     ItemKey, MenuKey,
 };
+use std::sync::Arc;
 
 impl BlockKey {
     #[cfg(any(not(target_arch = "wasm32"), test))]
@@ -69,8 +70,8 @@ pub fn resolve_items<'a>(
 }
 
 fn resolved_block_keys()
--> &'static std::sync::OnceLock<sunrise_mod_runtime::block_definitions::Blocks> {
-    static EMPTY: std::sync::OnceLock<sunrise_mod_runtime::block_definitions::Blocks> =
+-> &'static std::sync::OnceLock<Arc<sunrise_mod_runtime::block_definitions::Blocks>> {
+    static EMPTY: std::sync::OnceLock<Arc<sunrise_mod_runtime::block_definitions::Blocks>> =
         std::sync::OnceLock::new();
     crate::parts::installed().map_or(&EMPTY, |installed| &installed.resolved_blocks)
 }
@@ -80,6 +81,33 @@ fn block_names() -> &'static sunrise_mod_runtime::registry_keys::Names {
         .get()
         .map(|blocks| &blocks.names)
         .unwrap_or(&crate::parts::requested_keys().blocks)
+}
+
+/// Retain one copy of equal definitions across test installations.
+///
+/// A test installs the same declarations for every game it builds, and each install keeps its
+/// own resolved table for the life of the process. Sharing is by full equality of the resolved
+/// payload, never by hash alone. A production process installs once, so it keeps its own.
+#[cfg(any(test, feature = "testing"))]
+fn share_blocks(
+    blocks: sunrise_mod_runtime::block_definitions::Blocks,
+) -> Arc<sunrise_mod_runtime::block_definitions::Blocks> {
+    #[cfg(any(test, feature = "testing"))]
+    static SHARED: std::sync::Mutex<Vec<Arc<sunrise_mod_runtime::block_definitions::Blocks>>> =
+        std::sync::Mutex::new(Vec::new());
+    let mut shared = SHARED.lock().unwrap_or_else(|error| error.into_inner());
+    if let Some(equal) = shared.iter().find(|shared| ***shared == blocks) {
+        return equal.clone();
+    }
+    let blocks = Arc::new(blocks);
+    shared.push(blocks.clone());
+    blocks
+}
+#[cfg(not(any(test, feature = "testing")))]
+fn share_blocks(
+    blocks: sunrise_mod_runtime::block_definitions::Blocks,
+) -> Arc<sunrise_mod_runtime::block_definitions::Blocks> {
+    Arc::new(blocks)
 }
 
 /// Publish completed identities and immutable definitions together before constructing mesh tables.
@@ -97,7 +125,7 @@ pub fn resolve_block_keys<'a>(
             format!("mod {mod_id} requested unknown block {id}")
         })?;
     let blocks = sunrise_mod_runtime::block_definitions::Blocks::prepare(names, definition)?;
-    let _ = resolved_block_keys().set(blocks);
+    let _ = resolved_block_keys().set(share_blocks(blocks));
     Ok(())
 }
 
@@ -108,7 +136,7 @@ pub fn block_key(id: &str) -> Option<BlockKey> {
 
 /// Borrow the immutable definitions published with completed block identities.
 pub fn block_definitions() -> Option<&'static sunrise_mod_runtime::block_definitions::Blocks> {
-    resolved_block_keys().get()
+    resolved_block_keys().get().map(|blocks| &**blocks)
 }
 
 /// Find an item in the completed registry without allocating at a hook boundary.

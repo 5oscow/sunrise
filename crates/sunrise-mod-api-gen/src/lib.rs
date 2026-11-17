@@ -725,7 +725,7 @@ mod tests {
             .find(|p| p.name == "pre_remove_side_effects")
             .unwrap();
         assert!(scoped.scoped);
-        assert_eq!(scoped.version, 1);
+        assert_eq!(scoped.version, 2);
     }
 
     #[test]

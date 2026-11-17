@@ -14,10 +14,7 @@ use sunrise_mod_package::dependencies;
 use sunrise_mod_package::mod_surface;
 pub use sunrise_native_build::Refusal;
 use sunrise_native_build::{api, internals, package, prebuilt, registry_generate};
-use sunrise_native_build::{
-    apply, bundle_files, cargo, is_revision, prepare_mixins_source, registry_rustc, run, source,
-    stage_mixins, sync, tool,
-};
+use sunrise_native_build::{bundle_files, is_revision, registry_rustc};
 pub use sunrise_native_build::{
     bundle_in, bundles, cancel, check_cancelled, copy_bundle, digest, failure, mixins_from_source,
     scan_bundles, source_digest, unpack_archive, Bundle, RegistryInventory, Target, CANCELLED,
@@ -27,7 +24,7 @@ pub use sunrise_native_build::{
 mod planning;
 pub use planning::{routes, update_check, UpdateCheck};
 mod internals_sync;
-pub use internals_sync::{pinned_catalog_with_modules, DiscoveryCatalog};
+pub use internals_sync::catalog;
 pub mod fit;
 mod isolate;
 mod picker;
@@ -298,7 +295,7 @@ fn logged<T, E: std::fmt::Display + From<String>>(
 
 /// Dispatch Cargo's discovery-only rustc wrapper before normal launcher startup.
 pub fn internals_rustc_wrapper() -> Option<i32> {
-    registry_rustc::wrapper().or_else(internals_sync::rustc_wrapper)
+    registry_rustc::wrapper().or_else(sunrise_native_build::discover::rustc_wrapper)
 }
 
 pub fn sync_internals(
@@ -306,7 +303,7 @@ pub fn sync_internals(
 ) -> Result<Vec<sunrise_mod_package::internals::ListedInternal>, Failed> {
     install_host();
     require_consent()?;
-    internals_sync::check(folder).map_err(|error| Failed::Other(error.to_string()))
+    internals_sync::check(folder).map_err(Failed::Other)
 }
 
 pub fn cache_error(error: crate::storage::Error) -> String {
@@ -555,7 +552,7 @@ pub fn revision_of(version: &str) -> Result<String, String> {
     sdk_cache::build_of(
         version,
         &sdk_cache::Base::from_env(),
-        &sunrise_release_sign::sdk_keys_for(backend::REPO),
+        &sunrise_launcher_release_verify::sdk_keys_for(backend::REPO),
     )
     .map_err(|refusal| refusal.to_string())
 }
@@ -967,7 +964,8 @@ pub enum Failed {
         error: String,
         compiling: bool,
     },
-    /// Every mod was left out.
+    /// The folder holds no mod to build: none has a `[native]` table (content and wasm mods
+    /// need no native build).
     Nothing,
     /// Mods this build can't use were saved into worlds: the player chooses (stay, or back the
     /// worlds up and build without them).
@@ -986,7 +984,7 @@ impl std::fmt::Display for Failed {
         match self {
             Self::Mods { error, .. } | Self::Other(error) => f.write_str(error),
             Self::Worlds(stake) => f.write_str(&stake.text),
-            Self::Nothing => Ok(()),
+            Self::Nothing => f.write_str(tr("Nothing to build: none of these mods has native code (a [native] table in sunrise-mod.toml). Content and wasm mods need no native build.")),
             Self::NoConsent => f.write_str(tr("Native mods run inside your game with your rights; mixins compile code into the game. Allow native mods in Settings, Storage, or pass --trust-native-code.")),
         }
     }
@@ -1325,7 +1323,7 @@ fn pipeline(
     let revision = build_revision(base, built_on.as_ref())?;
     let developer = crate::developer_install::is_developer(origin);
     let sdk_base = sdk_cache::Base::from_env();
-    let keys = sunrise_release_sign::sdk_keys_for(backend::REPO);
+    let keys = sunrise_launcher_release_verify::sdk_keys_for(backend::REPO);
     // A developer install's checkout has no published surface to test against: its mods are
     // made for it exactly. Any other build tests each mod made for another build (SDK design §10).
     let sdk = if developer {
@@ -1395,9 +1393,15 @@ fn pipeline(
         }
     }
     if target == Target::Server {
-        let jars = sunrise_mod_package::manifest::collect_jar_requirements(
-            mods.iter()
-                .map(|bundle| (bundle.manifest.id.as_str(), bundle.manifest.jar.as_slice())),
+        let jars: Vec<(&str, Vec<_>)> = mods
+            .iter()
+            .map(|bundle| {
+                let jars = bundle.manifest.jar.iter().map(crate::jars::from_game);
+                Ok((bundle.manifest.id.as_str(), jars.collect::<Result<_, _>>()?))
+            })
+            .collect::<Result<_, String>>()?;
+        let jars = sunrise_launcher_smod::manifest::collect_jar_requirements(
+            jars.iter().map(|(id, jars)| (*id, jars.as_slice())),
         )
         .map_err(|error| crate::jars::LaunchError::Conflict(error).to_string())?;
         crate::jars::prepare(
@@ -1697,6 +1701,8 @@ fn isolated(
                 }
                 last = error;
             }
+            // Nothing was there to build: said as such, not as an empty failure.
+            Err(Failed::Nothing) if skip.is_empty() => return Err(Failed::Nothing),
             Err(Failed::Nothing) => return Err(said(&skip, last)),
             Err(Failed::NoConsent) => return Err(Failed::NoConsent),
             Err(Failed::Worlds(stake)) => return Err(Failed::Worlds(stake)),
@@ -1941,7 +1947,7 @@ fn copy_runtime(from: &Path, to: &Path) -> std::io::Result<()> {
         if entry.file_type()?.is_dir() {
             copy_runtime(&entry.path(), &destination)?;
         } else {
-            sunrise_prepare::clone_or_copy(&entry.path(), &destination)?;
+            crate::preparer::clone_or_copy(&entry.path(), &destination)?;
             fs::set_permissions(&destination, entry.metadata()?.permissions())?;
         }
     }
@@ -1970,7 +1976,7 @@ pub(crate) fn copy_base(
             backend::copy_dir(&entry.path(), &to)
         } else {
             // A clone is a new file: sunrise-ctl and sunrise-server keep their permissions.
-            sunrise_prepare::clone_or_copy(&entry.path(), &to)
+            crate::preparer::clone_or_copy(&entry.path(), &to)
                 .and_then(|()| fs::set_permissions(&to, entry.metadata()?.permissions()))
         };
         copied.map_err(|e| format!("Could not copy {}: {e}", entry.path().display()))?;
@@ -2004,6 +2010,7 @@ fn carried_over(name: &std::ffi::OsStr, target: Target) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use sunrise_native_build::{apply, stage_mixins, sync};
 
     use super::*;
     use crate::rust_toolchain::Toolchain;
@@ -2181,7 +2188,7 @@ mod tests {
 
     #[test]
     fn a_mod_saved_into_a_world_is_never_switched_off_without_the_players_choice() {
-        use sunrise_platform::world::nbt::{self, Limits, Tag};
+        use sunrise_launcher_nbt::{self as nbt, Limits, Tag};
         let _guard = scratch_state();
         let home = dir("guard-worlds");
         let world = home.join("saves").join("Home");
@@ -2278,6 +2285,13 @@ mod tests {
         };
         assert!(guard_worlds(&home, &[other], build, false, &|_| {}).is_ok());
         fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn a_folder_with_nothing_native_says_so() {
+        let _guard = scratch_state();
+        let result = isolated(|_| Err(Failed::Nothing), &|_| {});
+        assert!(matches!(result, Err(Failed::Nothing)));
     }
 
     #[test]
@@ -3322,7 +3336,7 @@ mod tests {
         denied(sync_internals(&folder));
         let expected = require_consent().unwrap_err().to_string();
         assert_eq!(
-            pinned_catalog_with_modules(&folder).err().unwrap(),
+            catalog(&folder, &folder.join("catalog")).unwrap_err(),
             expected
         );
         let preview = root().join("installed.routes");
@@ -3461,7 +3475,7 @@ mod registry_binary_tests {
     #[test]
     fn source_preparation_lookup_requires_exact_build_and_target() {
         let index = sunrise_mod_package::index::Index::parse(include_str!(
-            "../../crates/sunrise-mod-package/tests/index/index-v1.json"
+            "../crates/smod/tests/index/index-v1.json"
         ))
         .unwrap();
         let mut version = index.project("coords_hud").unwrap().versions[0].clone();

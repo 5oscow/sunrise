@@ -22,16 +22,16 @@ cargo sunrise-mod native-build < plan.json
 | 0 | It built: the last line is a `built` event. |
 | 1 | It did not: the last line is a `failed` event. |
 | 2 | No plan: the first line is not a plan of this contract (not one JSON object, a field missing, wrong or unknown). Standard error says why. |
-| 3 | Another contract: the plan's `contract` isn't `1`. It is read before any other field, so a newer plan is refused for its number, never for a field this tool doesn't know. Standard error names both contracts. |
+| 3 | Another contract: the plan's `contract` isn't `2`. It is read before any other field, so a newer plan is refused for its number, never for a field this tool doesn't know. Standard error names both contracts. |
 
 ## The plan
 
-One JSON object on one line. Its `contract` is checked first: anything but `1` exits 3. Then a field the tool
+One JSON object on one line. Its `contract` is checked first: anything but `2` exits 3. Then a field the tool
 doesn't know is refused (exit 2).
 
 | Field | What it is |
 |---|---|
-| `contract` | `1`. A change to any field or event below takes a new number. |
+| `contract` | `2`. A change to any field or event below takes a new number. |
 | `work` | The build's own folder: `build.log`, the horizon-mixins tool, the game source a mixin patch copies from, and kept compiles under `prebuilt-build/`. The launcher passes its `native/` folder, so the kept compiles are the ones its in-process build made. |
 | `toolchain` | `dir` (holding `bin/cargo` and `bin/rustc`), `target` (its host triple), `cargo_home`, `cargo_config` (`--config` values every cargo command gets; the launcher's Windows ARM64 flags) and `c_bin` (the folder of its C and link programs, when it brings them). The Rust release must be the SDK's (`sdk.json`'s `toolchain.rust`). |
 | `package` | `runtime`, `api` and `engine`: the folders the SDK's three slices for this host and side are unpacked into. The API route reads only `runtime` and `api`. |
@@ -48,7 +48,75 @@ Each line is an object whose `event` names it.
 |---|---|---|
 | `mod` | `id`, `done`, `total` | A mod's own library starts compiling, `done` of `total`. |
 | `consent` | `added_crates`, `build_scripts`, `proc_macros` | Registry crates need a yes and the plan gave no `registry`. The caller answers with one line on standard input: `true` agrees, anything else refuses. |
-| `built` | `route`, `binary`, `libraries`, `records`, `mods` | The executable and the libraries to install beside it, in load order; `records` is each library's identity, the build record's `libraries`; `route` is `prebuilt-api` or `prebuilt`, as the record names it; `mods` is the compiled mods in dependency order. |
-| `failed` | `error` | Why it did not build, as the build log ends with it. A mod blamed by name in it (`Compiling <mod> failed`, `E_NATIVE_BUILD_SCRIPT: <mod>`) is how a caller learns which mod to leave out next time. |
+| `built` | `route`, `binary`, `libraries`, `records`, `mods`, `internals`, `mixins`, `used` | The executable and the libraries to install beside it, in load order; `records` is each library's identity, the build record's `libraries`; `route` is `prebuilt-api` or `prebuilt`, as the record names it; `mods` is the compiled mods in dependency order. `internals` has each compiled mod's `[[internals]]` by mod id, every absent `hash` taken from the SDK's catalog, as the build record keeps them; `mixins` is the horizon-mixins revision the build ran; `used` lists the kept folders and files under `work` it used, for a caller's cache to count as used. |
+| `failed` | `error`, `blame`, `used` | Why it did not build, as the build log ends with it. `blame` is `null`, or the mod the error is that mod's own and how: `{"mod": id, "kind": "compile" \| "build-script" \| "features"}`, the one a caller leaves out next time. `used` as for `built`. |
+
+What it downloads (the horizon-mixins tool, a mod's GitHub source) goes through the proxy its environment names:
+`HTTPS_PROXY`, `HTTP_PROXY` or `ALL_PROXY`, with the hosts `NO_PROXY` lists reached directly, as the launcher reads
+them. A caller with a proxy setting of its own passes it in those variables.
 
 The tool never edits an instance, never selects a version and never installs anything outside `work`.
+
+## `native-check`
+
+`cargo sunrise-mod native-check` says how a set of native mods stands against one build before anything compiles:
+each mod's refusal, or its fit (SDK design §10), and the route a build of the usable ones takes. It reads one plan
+line on standard input and writes one reply line on standard output. Exit codes are those of `native-build`, except
+that 1 comes with an error reply, `{"contract": 2, "error": {"kind": "unread", "message": …}}`: a file the plan names
+(the mods, the surface, the build data) didn't read. A tool from before `native-check` (contract 1) knows no such
+command: it prints its usage on standard error and nothing on standard output, so a caller that finds no reply line
+knows the tool is too old.
+
+```sh
+cargo sunrise-mod native-check < plan.json
+```
+
+| Plan field | What it is |
+|---|---|
+| `contract` | `2`, checked first as for `native-build`. |
+| `mods` | A mod's folder, or a folder of mod folders. |
+| `build` | The build id (the game's full commit) the mods are checked against. |
+| `surface` | Optional. The build's `surface.json`, read only for a mod made for another build. |
+| `build_data` | Optional. The build's unpacked build data (`points.json`, `internals.json`), read only for a mod with `[[inject]]` rows made for another build. |
+
+The reply is `{"contract": 2, "route": …, "mods": […]}`. `route` is `prebuilt-api` or `prebuilt` for the usable
+mods, `null` when none is. Each of `mods` has:
+
+| Field | What it is |
+|---|---|
+| `id` | The mod's id. |
+| `refusal` | Why no build takes it, as the build log says it; then `verdict` is `null`. |
+| `verdict` | `{"kind": …, "made_for": build}`: `made-for` (no `made_for`), `fits`, `exact` (`why`: the table that changes game code, or `internals`), `no-list` (its package doesn't say what it uses), `does-not-fit` (`misfits`: each `{id, change}`, the surface id and how it changed), `points` (`why`: an `[[inject]]` point that isn't the same). `made-for` and `fits` are usable. |
+| `needs` | `surface` or `build-data` when the plan didn't give the file its verdict needs; then `verdict` is `null`. The caller fetches it and asks again. |
+
+A `change` is `"removed"`, `"changed"`, `{"lost-impl": trait}`, `{"fields": {gained, at}}`, `{"version": {named, now}}`,
+`{"not-buildable": {at}}`, `{"path": path}` or `{"route": {from, owner}}`.
+
+## `native-discover` and `native-lock`
+
+Two more tools a caller with the SDK's Rust runs on one native mod. Each reads one plan line and writes one reply
+line, with the exit codes of `native-check`: 0 a reply, 1 an error reply `{"contract": 2, "error": {"kind", "message"}}`,
+2 no plan, 3 another contract. Both plans have `contract` (`2`), `work` (the tool's own folder: the pinned game's
+source and caches), `toolchain` (as for `native-build`) and `mods` (the mod's folder).
+
+| Command | Its own plan field | Reply | Error `kind` |
+|---|---|---|---|
+| `native-discover` | `catalog`, optional: a folder that doesn't exist yet | without `catalog`, `{"internals": […]}`: the game internals the mod names, each as the pinned game's catalog lists it (`cargo sunrise-mod internals sync` writes them into `sunrise-mod.toml`). With it, `{"catalog": folder}`: the pinned game's `internals.json` and `points.json` with only this mod's `[[native.module]]` rows applied, copied there | `source` (the pinned game's source isn't cached and couldn't be downloaded), `discover` |
+| `native-lock` | `update`, optional: resolve again when the mod has a lock | `{"lock": path}`: the mod's registry dependencies pinned in its `Cargo.lock` | `lock` |
+
+`native-discover` checks the mod against the pinned game's source with the deprecation lint forced on the mod alone;
+it runs the tool itself as Cargo's rustc wrapper for that.
+
+## `native-layout`
+
+`cargo sunrise-mod native-layout` lays out a local prebuilt game, the folder `tools/prebuilt_game.py build` makes from a
+checkout, as an SDK release's slices, for a build no SDK is published for. The plan is `{"contract": 2, "prebuilt",
+"build", "host", "target", "out"}`. It checks that `prebuilt` is that build id's game for that host triple and side
+(`client` or `server`), built with this SDK's Rust. Then it lays its files out by links under `out`, which it replaces;
+`prebuilt` itself is never changed. The reply is `{"package": {"runtime", "api", "engine"}}`, the three folders a
+`native-build` plan names. A folder that is something else gives exit 1 with an error reply of kind `layout`.
+
+## Changelog
+
+- contract 2: `native-check`, `native-discover`, `native-lock`, `native-layout`; `failed` names the blamed mod (`blame`) instead of a caller matching its text; `built` adds `internals` and `mixins` for the build record; both list the kept files they `used`.
+- contract 1: the plan, `mod`, `consent`, `built` and `failed`.

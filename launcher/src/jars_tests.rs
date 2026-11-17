@@ -1,7 +1,7 @@
 use super::*;
 use sha2::Digest;
 use std::{cell::Cell, io::Write, path::PathBuf};
-use sunrise_mod_package::manifest::collect_jar_requirements;
+use sunrise_launcher_smod::manifest::collect_jar_requirements;
 
 struct Scratch(PathBuf);
 impl Scratch {
@@ -360,7 +360,7 @@ fn failed_metadata_lookup_names_every_missing_jar_but_not_cache_hits() {
 #[test]
 fn final_launch_combines_only_enabled_content_dev_and_adjacent_native_candidates() {
     use std::process::Command;
-    use sunrise_mod_package::mod_list::{DIR, FILE, NATIVE_DIR};
+    use sunrise_launcher_smod::mod_list::{DIR, FILE, NATIVE_DIR};
     let root = Scratch::new();
     let game = root.0.join("game");
     let bin = root.0.join("bin");
@@ -464,4 +464,15 @@ fn information_requests_do_not_read_packages_or_create_a_cache() {
         .unwrap();
         assert!(!root.0.join("cache").exists());
     }
+}
+
+#[test]
+fn a_game_crate_jar_becomes_the_launchers_unchanged() {
+    let game =
+        sunrise_mod_package::manifest::JarRef::new("first".into(), "2".into(), "a".repeat(128))
+            .unwrap();
+    assert_eq!(
+        from_game(&game).unwrap(),
+        JarRef::new("first".into(), "2".into(), "a".repeat(128)).unwrap()
+    );
 }

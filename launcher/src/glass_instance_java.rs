@@ -11,7 +11,7 @@ use servers_page::Field;
 use sunrise_launcher::instances::{self, Instance, Plays, Unkept};
 use sunrise_launcher::loaders::Loader;
 use sunrise_launcher::minecraft_versions::Kind as VersionKind;
-use sunrise_theme::glass::{fill, ink, radius};
+use sunrise_launcher_theme::glass::{fill, ink, radius};
 
 /// Mojang versions listed at most: the search finds the others.
 const ROWS: usize = 60;
@@ -39,9 +39,9 @@ impl Launcher {
                     .items_center()
                     .h(px(32.))
                     .px(px(12.))
-                    .rounded(px(radius::CONTROL))
+                    .rounded(px(crate::glass_ui::rad(radius::CONTROL)))
                     .cursor_pointer()
-                    .font_family(sunrise_theme::glass::FONT)
+                    .font_family(sunrise_launcher_theme::glass::FONT)
                     .text_size(px(13.))
                     .when(on, |d| {
                         d.bg(white(fill::BUTTON_HOVER))
@@ -261,14 +261,14 @@ impl Launcher {
         if lines.is_empty() {
             return None;
         }
-        let warn = ui::color(sunrise_theme::glass::WARN);
+        let warn = ui::color(sunrise_launcher_theme::glass::WARN);
         Some(
             div()
                 .flex()
                 .flex_none()
                 .gap(px(12.))
                 .p(px(16.))
-                .rounded(px(radius::POPOVER))
+                .rounded(px(crate::glass_ui::rad(radius::POPOVER)))
                 .bg(warn.opacity(0.1))
                 .child(ui::icon("information-circle", 20., warn))
                 .child(

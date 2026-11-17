@@ -2382,7 +2382,14 @@ impl Game<'_> {
             return;
         }
         if let Some(stack) = stack {
-            self.draw_stack_tooltip(batch, &stack, self.cursor.0, self.cursor.1);
+            let mut lines = self.stack_tooltip_lines(&stack, false, false);
+            self.native_screen_tooltip_lines(batch, Some(slot), &mut lines);
+            if lines.is_empty()
+                && !sunrise_client::item_tooltip::tooltip_display(&stack).name_visible(false)
+            {
+                return;
+            }
+            self.draw_stack_tooltip_lines(batch, &stack, lines, self.cursor.0, self.cursor.1);
         } else if let Some(text) = self.crafter_tooltip(slot) {
             self.draw_tooltip_lines(
                 batch,

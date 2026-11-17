@@ -4,6 +4,7 @@
 //! own, as for every other player draw.
 use super::{Dim, Game};
 use crate::game::api_values::TryIntoApi;
+use crate::game::collision_source::Mover;
 use std::convert::Infallible;
 use sunrise_client::{
     items::{ConsumeEffect, ItemInfo, ItemStack},
@@ -301,7 +302,7 @@ impl Game<'_> {
         if avoid.is_some_and(|tag| self.state_in_tag(tag, ground)) {
             return false;
         }
-        let entities = self.player_entity_collisions();
+        let entities = self.entity_collisions(Mover::Player);
         let Some(player) = self.player.as_mut() else {
             return false;
         };

@@ -8,7 +8,7 @@ use crate::glass_ui::{self as ui, white};
 use gpui::{deferred, ExternalPaths};
 use std::path::Path;
 use sunrise_launcher::worlds::World;
-use sunrise_theme::glass::{fill, ink, radius};
+use sunrise_launcher_theme::glass::{fill, ink, radius};
 use worlds_page::Action;
 
 /// A listener of the launcher's, boxed so a helper can return it.
@@ -487,7 +487,7 @@ pub(super) fn picture(image: Option<gpui::ImageSource>, fallback: &'static str) 
             .relative()
             .flex_none()
             .size(px(PICTURE))
-            .rounded(px(PICTURE_RADIUS))
+            .rounded(px(crate::glass_ui::rad(PICTURE_RADIUS)))
             .into_any_element(),
         None => div()
             .relative()
@@ -496,7 +496,7 @@ pub(super) fn picture(image: Option<gpui::ImageSource>, fallback: &'static str) 
             .items_center()
             .justify_center()
             .size(px(PICTURE))
-            .rounded(px(PICTURE_RADIUS))
+            .rounded(px(crate::glass_ui::rad(PICTURE_RADIUS)))
             .bg(white(fill::BUTTON))
             .child(ui::icon(fallback, 17., white(ink::QUIET)))
             .into_any_element(),
@@ -523,11 +523,11 @@ pub(super) fn danger_button(id: SharedString, label: SharedString) -> Stateful<D
         .items_center()
         .h(px(36.))
         .px(px(12.))
-        .rounded(px(radius::CONTROL))
+        .rounded(px(crate::glass_ui::rad(radius::CONTROL)))
         .cursor_pointer()
         .child(ui::back_tint(
             radius::CONTROL,
-            gpui::rgba(sunrise_theme::glass::DANGER_HOVER << 8 | 0x1f).into(),
+            gpui::rgba(sunrise_launcher_theme::glass::DANGER_HOVER << 8 | 0x1f).into(),
         ))
         .child(
             ui::text(13., FontWeight::MEDIUM, ink::FULL)

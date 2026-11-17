@@ -55,6 +55,7 @@ TARGETS = {
 ROUTES = {
     "api": "Every enabled mod uses the mod API alone.",
     "engine": "A mod has a `[native.*]` table, names game internals, or depends on a registry (crates.io) crate.",
+    "tool": "Before either: the native build tool, which tells the caller the route and then compiles.",
 }
 
 # `surface.json`'s record kinds by id prefix (`sunrise_mod_surface`, "Ids"); a member's id has a `.` after its owner.
