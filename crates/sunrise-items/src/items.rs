@@ -2709,10 +2709,19 @@ fn apply_components(stack: &mut ItemStack, patch: &Value) {
         .into_iter()
         .flatten()
         .map(|(id, value)| {
-            (
-                id.as_str().into(),
-                sunrise_client_core::scoreboard::json_to_tag(value),
-            )
+            if value.is_null() {
+                (
+                    format!("!{}", id.strip_prefix('!').unwrap_or(id))
+                        .as_str()
+                        .into(),
+                    sunrise_core::nbt::Tag::Compound(Default::default()),
+                )
+            } else {
+                (
+                    id.as_str().into(),
+                    sunrise_client_core::scoreboard::json_to_tag(value),
+                )
+            }
         })
         .collect();
     apply_component_patch(stack, patch);

@@ -269,7 +269,7 @@ impl<R: sunrise_core::random::RandomSource> super::Context<'_, R> {
             .find(|(key, _)| key == id || key == "!minecraft:custom_data")
         {
             Some((key, value)) if key == id => value.as_ref(),
-            Some((_, None)) | None => default,
+            None => default,
             _ => None,
         };
         let original = match raw.map(crate::custom_data::borrow) {

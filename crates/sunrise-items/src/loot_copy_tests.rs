@@ -608,3 +608,80 @@ fn copy_custom_data_runs_the_same_ordered_nbt_operations_in_both_evaluators() {
     }
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn copy_custom_data_respects_removed_prototype_data_in_both_evaluators() {
+    let root = std::env::temp_dir().join(format!(
+        "sunrise-copy-removed-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let folder = root.join("data/test/loot_table");
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(
+        root.join("items.json"),
+        r#"{"minecraft:stick":{"minecraft:max_stack_size":64,"minecraft:custom_data":{"old":1}}}"#,
+    )
+    .unwrap();
+    for (name, removal) in [
+        ("null", json!({"minecraft:custom_data":null})),
+        ("bang", json!({"!minecraft:custom_data":{}})),
+        ("bang_null", json!({"!minecraft:custom_data":null})),
+    ] {
+        let table = json!({"type":"minecraft:empty","pools":[{"rolls":1,"entries":[{
+            "type":"minecraft:item","name":"minecraft:stick",
+            "modifier":{"type":"minecraft:sequence","functions":[
+                {"type":"minecraft:set_components","components":removal},
+                {"type":"minecraft:copy_custom_data","source":"block_entity","ops":[
+                    {"source":"fresh","target":"new","op":"replace"}
+                ]}
+            ]}
+        }]}]});
+        std::fs::write(folder.join(format!("{name}.json")), table.to_string()).unwrap();
+    }
+    let defaults = sunrise_world::item_defaults::read(&root).unwrap();
+    let data = loot::LootData::load_with_types(
+        &root,
+        &loot::PackOverlay::NONE,
+        &defaults,
+        loot::types::Types::default(),
+    )
+    .unwrap();
+    let mut items = Items::for_tests(HashMap::new());
+    items.set_loot_data(&data);
+    items.component_defaults = data.component_defaults().clone();
+    let source = BlockSource {
+        nbt: Tag::compound([("fresh", Tag::Long(7))]),
+        components: Default::default(),
+    };
+    let expected = Tag::compound([("new", Tag::Long(7))]);
+    for name in ["null", "bang", "bang_null"] {
+        for item_engine in [false, true] {
+            let actual = loot::copy::with_block_source(Some(&source), || {
+                let mut random = LegacyRandom::new(45);
+                let id = format!("test:{name}");
+                if item_engine {
+                    let mut output = items.roll_loot_table(&id, None, None, &mut random).unwrap();
+                    assert_eq!(output.len(), 1);
+                    Tag::Compound(output.remove(0).custom_data().unwrap().clone())
+                } else {
+                    let mut output = data.roll(&id, &mut random, 0.0, None, None);
+                    assert_eq!(output.len(), 1);
+                    output
+                        .remove(0)
+                        .components
+                        .into_iter()
+                        .find(|(id, _)| id == "minecraft:custom_data")
+                        .unwrap()
+                        .1
+                        .unwrap()
+                }
+            });
+            assert_eq!(actual, expected, "{name}, items = {item_engine}");
+        }
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}
