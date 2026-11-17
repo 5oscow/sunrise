@@ -762,6 +762,10 @@ fn upgrade_regions_with_threads(
     }
     let staging = folder.join(".datafix");
     fs::create_dir_all(&staging)?;
+    // A try that stopped before moving them out leaves staged `.mcc` files.
+    for stale in files_with_suffix(&staging, ".mcc") {
+        fs::remove_file(stale)?;
+    }
     let next = AtomicUsize::new(0);
     let stop = AtomicBool::new(false);
     let failed: Mutex<Option<(usize, io::Error)>> = Mutex::new(None);
@@ -832,8 +836,15 @@ fn upgrade_region_file(path: &Path, staging: &Path, fix: &impl Fn(&mut Tag)) -> 
     for (pos, record) in &records {
         writer.write(*pos, record)?;
     }
+    // An oversized chunk's `c.X.Z.mcc` is written next to the staged region.
+    let externals = writer.externals().to_vec();
     writer.finish()?;
-    fs::rename(&temporary, path)
+    fs::rename(&temporary, path)?;
+    let folder = path.parent().unwrap_or(Path::new("."));
+    for staged in externals {
+        fs::rename(&staged, folder.join(staged.file_name().unwrap_or_default()))?;
+    }
+    Ok(())
 }
 
 /// The progress a data upgrade reports to and whether it may stop early: a
@@ -1331,6 +1342,42 @@ mod upgrade_tests {
             converted
         );
         assert!(!dir.join(".datafix").exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A chunk of 256 sectors or more lives in its own `c.X.Z.mcc`: the
+    /// upgraded one replaces the old one next to the region, and the staging
+    /// folder is left empty and removed, even after a try that stopped midway.
+    #[test]
+    fn region_upgrade_moves_an_external_chunk_out_of_staging() {
+        let dir = std::env::temp_dir().join(format!("sunrise-mcc-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let mut tag = old_chunk(0, 0);
+        // Stored uncompressed, so the record is over 256 sectors.
+        set(&mut tag, "Big", Tag::ByteArray(vec![0; 1_100_000]));
+        let root = NamedTag {
+            name: "".into(),
+            tag,
+        };
+        let pos = sunrise_core::position::ChunkPos::new(0, 0);
+        let record = ChunkRecord::from_nbt(&root, Compression::None, 7, Limits::default()).unwrap();
+        let mut region = RegionFile::open_writable(dir.join("r.0.0.mca"), true).unwrap();
+        region.write(pos, &record).unwrap();
+        drop(region);
+        assert!(dir.join("c.0.0.mcc").exists());
+        // What an earlier try that stopped before moving it leaves behind.
+        fs::create_dir_all(dir.join(".datafix")).unwrap();
+        fs::write(dir.join(".datafix/c.0.0.mcc"), b"stale").unwrap();
+
+        let progress = UpgradeProgress::new();
+        let run = Progress {
+            progress: &progress,
+            cancelable: true,
+        };
+        upgrade_regions_with_threads(&dir, &run, fix_overworld_chunk, 1).unwrap();
+        assert!(!dir.join(".datafix").exists());
+        assert_eq!(chunk_versions(&dir), vec![vec![CURRENT]]);
         let _ = fs::remove_dir_all(&dir);
     }
 }
