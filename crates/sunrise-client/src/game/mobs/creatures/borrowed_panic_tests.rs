@@ -165,6 +165,8 @@ impl mod_api::Hooks for Hooks {
         self.0.posts.fetch_add(1, Ordering::SeqCst);
     }
     fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
+        r.register_attachment_type("borrowed-panic:retained", false)
+            .unwrap();
         if matches!(self.0.family, Family::Goal | Family::MountedGoal) {
             r.entity_part("minecraft:zombie", GoalPart(self.0.clone()));
         }
@@ -242,7 +244,7 @@ impl mod_api::Hooks for Hooks {
     }
 }
 const VALUE: AttachmentType<i32> = AttachmentType {
-    namespace: "borrowed-mob-test",
+    namespace: "borrowed-panic",
     name: "retained",
     default: || 0,
     codec: None,
@@ -292,6 +294,7 @@ fn run_output(family: Family, output: Output) {
             0,
             sunrise_client::brewing::Category::Neutral,
             None,
+            "borrowed-panic".into(),
         )]);
     });
     eprintln!("BORROWED_ASSERTIONS_DISABLED:{}", !cfg!(debug_assertions));

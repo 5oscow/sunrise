@@ -1139,6 +1139,7 @@ impl Game<'_> {
                 width: v.width,
                 height: v.height,
                 check_interval: 0,
+                ticks: 0,
             };
             self.bind_saved_entity_attachments(id, &mut painting.attachment_lifetime);
             self.paintings.push(painting);
@@ -1374,7 +1375,7 @@ impl Game<'_> {
         {
             let uuid = self.uuid_for(root);
             let b = self.boat_object(root)?;
-            let mut tag = b.to_nbt(uuid, self.persist.raw.get(&root));
+            let mut tag = b.to_nbt(uuid, self.persist.raw.get(&root), self.res.items());
             self.put_mob_passengers(&mut tag, root);
             write_attachments(&mut tag, root, &self.entity_attachments);
             return Some(tag);
@@ -1387,7 +1388,7 @@ impl Game<'_> {
         }
         let uuid = self.uuid_for(root);
         let c = self.cart_object(root)?;
-        let mut tag = c.to_nbt(uuid, self.persist.raw.get(&root));
+        let mut tag = c.to_nbt(uuid, self.persist.raw.get(&root), self.res.items());
         self.put_mob_passengers(&mut tag, root);
         write_attachments(&mut tag, root, &self.entity_attachments);
         Some(tag)
@@ -1694,7 +1695,10 @@ impl Game<'_> {
             let uuid = saved_uuid(&self.persist, d.id);
             // The fields kept with it (`remember_tags`: Silent, Tags, a
             // name...) once it has flown from where it was loaded.
-            let mut tag = with_raw(d.to_nbt(uuid, raw.as_ref()), self.persist.raw.get(&d.id));
+            let mut tag = with_raw(
+                d.to_nbt(uuid, raw.as_ref(), self.res.items()),
+                self.persist.raw.get(&d.id),
+            );
             write_attachments(&mut tag, d.id, &self.entity_attachments);
             roots
                 .entry(chunk_of(d.position))
@@ -1722,6 +1726,7 @@ impl Game<'_> {
                     s.spawn_item_after,
                     self.persist.uuids.get(&s.id).copied().unwrap_or(s.uuid),
                     s.raw.as_deref(),
+                    self.res.items(),
                 );
                 write_attachments(&mut tag, s.id, &self.entity_attachments);
                 roots
@@ -1744,7 +1749,12 @@ impl Game<'_> {
                     .get(&f.id)
                     .copied()
                     .unwrap_or_else(random_uuid);
-                let mut tag = entity_nbt::item_frame_to_nbt(f, uuid, self.persist.raw.get(&f.id));
+                let mut tag = entity_nbt::item_frame_to_nbt(
+                    f,
+                    uuid,
+                    self.persist.raw.get(&f.id),
+                    self.res.items(),
+                );
                 write_attachments(&mut tag, f.id, &self.entity_attachments);
                 roots
                     .entry(chunk_of(at))
@@ -2067,7 +2077,7 @@ impl Game<'_> {
         keys.contains(&chunk_of(at)).then(|| {
             let id = self.dropped[i].id;
             let uuid = self.uuid_for(id);
-            let mut tag = entity_nbt::item_entity_to_nbt_with_items(
+            let mut tag = entity_nbt::item_entity_to_nbt(
                 &self.dropped[i],
                 uuid,
                 self.persist.raw.get(&id),
@@ -2119,10 +2129,17 @@ impl Game<'_> {
             .as_ref()
             .and_then(|a| a.last_state)
             .map(|s| self.state_to_nbt(s));
-        let tag = entity_nbt::arrow_to_nbt(p, uuid, owner, in_block, raw.as_ref())
-            .or_else(|| entity_nbt::fireball_to_nbt(p, uuid, owner, raw.as_ref()))
-            .or_else(|| entity_nbt::throwable_to_nbt(p, uuid, owner, raw.as_ref()))
-            .or_else(|| entity_nbt::spit_or_bullet_to_nbt(p, uuid, owner, target, raw.as_ref()))?;
+        let tag =
+            entity_nbt::arrow_to_nbt(p, uuid, owner, in_block, raw.as_ref(), self.res.items())
+                .or_else(|| {
+                    entity_nbt::fireball_to_nbt(p, uuid, owner, raw.as_ref(), self.res.items())
+                })
+                .or_else(|| {
+                    entity_nbt::throwable_to_nbt(p, uuid, owner, raw.as_ref(), self.res.items())
+                })
+                .or_else(|| {
+                    entity_nbt::spit_or_bullet_to_nbt(p, uuid, owner, target, raw.as_ref())
+                })?;
         // HasBeenShot is modeled for these projectiles. The generic raw
         // overlay also serves entity types whose shot flag is still opaque.
         let shot = tag.get("HasBeenShot").cloned();
@@ -2180,8 +2197,12 @@ impl Game<'_> {
         let (id, at) = (self.rockets[i].id, self.rockets[i].position);
         keys.contains(&chunk_of(at)).then(|| {
             let uuid = self.uuid_for(id);
-            let tag =
-                self.rockets[i].to_nbt(uuid, self.level.player_uuid, self.persist.raw.get(&id));
+            let tag = self.rockets[i].to_nbt(
+                uuid,
+                self.level.player_uuid,
+                self.persist.raw.get(&id),
+                self.res.items(),
+            );
             (chunk_of(at), tag)
         })
     }
@@ -2193,7 +2214,8 @@ impl Game<'_> {
         let (id, at) = (self.tridents[i].id, self.tridents[i].position);
         keys.contains(&chunk_of(at)).then(|| {
             let (uuid, reg) = (self.uuid_for(id), self.pack.assets.registry);
-            let tag = self.tridents[i].to_nbt(uuid, reg, self.persist.raw.get(&id));
+            let tag =
+                self.tridents[i].to_nbt(uuid, reg, self.persist.raw.get(&id), self.res.items());
             (chunk_of(at), tag)
         })
     }
@@ -2217,7 +2239,7 @@ impl Game<'_> {
             return None;
         }
         let uuid = self.saved_uuid_or_random(id);
-        let mut tag = b.to_nbt(uuid, self.persist.raw.get(&id));
+        let mut tag = b.to_nbt(uuid, self.persist.raw.get(&id), self.res.items());
         self.put_mob_passengers(&mut tag, id);
         // AbstractBoat.addAdditionalSaveData: the lead's holder.
         self.write_boat_leash(&mut tag, i);
@@ -2234,7 +2256,7 @@ impl Game<'_> {
             return None;
         }
         let uuid = self.saved_uuid_or_random(id);
-        let mut tag = self.carts[i].to_nbt(uuid, self.persist.raw.get(&id));
+        let mut tag = self.carts[i].to_nbt(uuid, self.persist.raw.get(&id), self.res.items());
         self.put_mob_passengers(&mut tag, id);
         self.save_portal_cooldown(id, &mut tag);
         Some((chunk_of(at), tag))
@@ -2247,7 +2269,12 @@ impl Game<'_> {
         let a = &self.armor_stands[i];
         keys.contains(&chunk_of(a.position)).then(|| {
             let uuid = self.saved_uuid_or_random(a.id);
-            let tag = entity_nbt::armor_stand_to_nbt(a, uuid, self.persist.raw.get(&a.id));
+            let tag = entity_nbt::armor_stand_to_nbt(
+                a,
+                uuid,
+                self.persist.raw.get(&a.id),
+                self.res.items(),
+            );
             (chunk_of(a.position), tag)
         })
     }
@@ -3598,7 +3625,7 @@ mod mob_inventory_merge_tests {
         stacks
             .iter()
             .map(|s| {
-                let saved = sunrise_client::save::item_to_nbt(s);
+                let saved = sunrise_client::save::item_to_nbt(s, &Default::default());
                 let data = match saved
                     .get("components")
                     .and_then(|c| c.get("minecraft:custom_data"))
@@ -3622,7 +3649,7 @@ mod mob_inventory_merge_tests {
         list.iter()
             .filter_map(sunrise_client::save::item_from_nbt)
             .map(|s| {
-                let saved = sunrise_client::save::item_to_nbt(&s);
+                let saved = sunrise_client::save::item_to_nbt(&s, &Default::default());
                 let data = match saved
                     .get("components")
                     .and_then(|c| c.get("minecraft:custom_data"))

@@ -27,7 +27,7 @@ fn horse_head_and_body_survive_save_load_and_drop_independently() {
         crate::mobs::finalize::OFFHAND,
         offhand.clone(),
     );
-    let saved = mob_to_nbt(&zombie, [0; 4], None, None, |_| None);
+    let saved = mob_to_nbt(&zombie, [0; 4], None, None, |_| None, &Default::default());
     let zombie = mob_from_nbt(&saved, &types, 4, None).unwrap();
     assert_eq!(zombie.saddle_item(), Some(saddle));
     assert_eq!(zombie.equipment_stacks()[1], Some(offhand));
@@ -49,7 +49,14 @@ fn horse_head_and_body_survive_save_load_and_drop_independently() {
         stacks[6].as_ref().unwrap().item.as_ref(),
         "minecraft:diamond_horse_armor"
     );
-    let raw = mob_to_nbt(&horse, [1, 2, 3, 4], None, None, |_| None);
+    let raw = mob_to_nbt(
+        &horse,
+        [1, 2, 3, 4],
+        None,
+        None,
+        |_| None,
+        &Default::default(),
+    );
     let mut horse = mob_from_nbt(&raw, &types, 2, None).unwrap();
     assert_eq!(horse.extra.head_id(), Some("minecraft:iron_helmet"));
     assert_eq!(horse.extra.body_id(), Some("minecraft:diamond_horse_armor"));
@@ -114,7 +121,14 @@ fn a_worn_piece_keeps_its_damage_and_name_through_the_save() {
     helmet.data_mut().trim = Some(("minecraft:gold".into(), "minecraft:coast".into()));
     assert!(mob.set_equipment_stack(5, Some(helmet.clone())));
     assert!(mob.set_equipment_stack(0, Some(helmet)));
-    let raw = mob_to_nbt(&mob, [1, 2, 3, 4], None, None, |_| None);
+    let raw = mob_to_nbt(
+        &mob,
+        [1, 2, 3, 4],
+        None,
+        None,
+        |_| None,
+        &Default::default(),
+    );
     let loaded = mob_from_nbt(&raw, &types, 2, None).unwrap();
     let worn = crate::mobs::finalize::item_stack(&loaded, crate::mobs::finalize::HEAD).unwrap();
     assert_eq!(worn.damage, 40);
@@ -158,7 +172,14 @@ fn replacing_a_named_item_does_not_restore_its_old_name_on_save() {
     let mut sword = crate::items::ItemStack::new("minecraft:diamond_sword", 1);
     sword.data_mut().custom_name = Some(sunrise_core::nbt::Tag::String("Old Sword".into()));
     mob.extra.set_main_hand_stack(Some(sword));
-    let raw = mob_to_nbt(&mob, [1, 2, 3, 4], None, None, |_| None);
+    let raw = mob_to_nbt(
+        &mob,
+        [1, 2, 3, 4],
+        None,
+        None,
+        |_| None,
+        &Default::default(),
+    );
     let mut loaded = mob_from_nbt(&raw, &types, 2, None).unwrap();
     assert_eq!(
         loaded
@@ -172,7 +193,14 @@ fn replacing_a_named_item_does_not_restore_its_old_name_on_save() {
     loaded
         .extra
         .set_main_hand(Some("minecraft:diamond_sword".into()));
-    let saved = mob_to_nbt(&loaded, [1, 2, 3, 4], Some(&raw), None, |_| None);
+    let saved = mob_to_nbt(
+        &loaded,
+        [1, 2, 3, 4],
+        Some(&raw),
+        None,
+        |_| None,
+        &Default::default(),
+    );
     let restored = mob_from_nbt(&saved, &types, 3, None).unwrap();
     assert_eq!(
         restored.extra.main_hand_id(),

@@ -7,7 +7,7 @@ fn types() -> HashMap<String, Arc<MobType>> {
     HashMap::from([("minecraft:pig".to_owned(), Arc::new(pig))])
 }
 fn saved(m: &Mob) -> Tag {
-    mob_to_nbt(m, [202, 0, 0, 1], None, None, |_| None)
+    mob_to_nbt(m, [202, 0, 0, 1], None, None, |_| None, &Default::default())
 }
 #[test]
 fn loaded_speed_fallback_survives_a_no_raw_save() {
@@ -58,7 +58,14 @@ fn fallback_model_wins_over_stale_raw_and_clears_without_resurrection() {
     );
     m.extra.effect_chains[0].duration = 123;
     m.extra.effects[0].duration = 30;
-    let actual = mob_to_nbt(&m, [202, 0, 0, 1], Some(&input), None, |_| None);
+    let actual = mob_to_nbt(
+        &m,
+        [202, 0, 0, 1],
+        Some(&input),
+        None,
+        |_| None,
+        &Default::default(),
+    );
     let first = |t: &Tag| match t.get("active_effects").unwrap() {
         Tag::List(v) => v[0].clone(),
         _ => panic!(),
@@ -71,7 +78,7 @@ fn fallback_model_wins_over_stale_raw_and_clears_without_resurrection() {
     assert_eq!(actual.get("Tags"), input.get("Tags"));
     m.extra.effect_chains.clear();
     for raw in [None, Some(&input)] {
-        let actual = mob_to_nbt(&m, [202, 0, 0, 1], raw, None, |_| None);
+        let actual = mob_to_nbt(&m, [202, 0, 0, 1], raw, None, |_| None, &Default::default());
         assert!(first(&actual).get("hidden_effect").is_none());
     }
 }

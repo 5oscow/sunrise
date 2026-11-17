@@ -63,7 +63,14 @@ fn decoded_numeric_amplifiers_roundtrip_without_raw_input() {
         loaded.show_icon = false;
         assert_eq!(mob.extra.effects, [loaded], "{value:?}");
         for source in [None, Some(&raw)] {
-            let saved = mob_to_nbt(&mob, [158, 0, 0, 1], source, None, |_| None);
+            let saved = mob_to_nbt(
+                &mob,
+                [158, 0, 0, 1],
+                source,
+                None,
+                |_| None,
+                &Default::default(),
+            );
             let effect = saved_effect(&saved);
             let expected_tag = (expected != 0).then_some(Tag::Byte(expected as u8 as i8));
             assert_eq!(effect.get("amplifier"), expected_tag.as_ref(), "{value:?}");
@@ -107,7 +114,14 @@ fn a_mobs_show_icon_roundtrips_apart_from_show_particles() {
     for (fields, icon, particles) in cases {
         let mob = mob_from_nbt(&with(fields), &types, 7, None).unwrap();
         assert_eq!(mob.extra.effects[0].show_icon, icon, "{fields:?}");
-        let saved = mob_to_nbt(&mob, [158, 0, 0, 1], None, None, |_| None);
+        let saved = mob_to_nbt(
+            &mob,
+            [158, 0, 0, 1],
+            None,
+            None,
+            |_| None,
+            &Default::default(),
+        );
         let effect = saved_effect(&saved);
         assert_eq!(effect.get("show_icon"), Some(&Tag::Byte(i8::from(icon))));
         assert_eq!(effect.get("show_particles"), particles.as_ref());
@@ -121,7 +135,14 @@ fn modeled_amplifier_mutation_overrides_stale_raw_and_omits_zero() {
     for amplifier in [0, 128, 255, 1] {
         mob.extra.effects[0].amplifier = amplifier;
         for source in [None, Some(&raw)] {
-            let saved = mob_to_nbt(&mob, [158, 0, 0, 2], source, None, |_| None);
+            let saved = mob_to_nbt(
+                &mob,
+                [158, 0, 0, 2],
+                source,
+                None,
+                |_| None,
+                &Default::default(),
+            );
             let expected = (amplifier != 0).then_some(Tag::Byte(amplifier as u8 as i8));
             assert_eq!(saved_effect(&saved).get("amplifier"), expected.as_ref());
             assert_eq!(saved.get("Health"), Some(&Tag::Float(10.0f32.to_bits())));

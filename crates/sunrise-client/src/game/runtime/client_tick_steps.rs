@@ -35,6 +35,9 @@ impl Game<'_> {
                     self.tick_ambience();
                 }
                 self.tick_fov();
+            } else if self.pause {
+                // Minecraft.tick still picks while the game mode and level are paused.
+                self.refresh_client_pick(1.0);
             }
             self.tick_win_screen()?;
             self.native_configs_tick_client();

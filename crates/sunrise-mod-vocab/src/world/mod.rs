@@ -21,6 +21,7 @@ pub(crate) mod datapack_snapshot;
 pub(crate) mod dimension;
 pub(crate) mod dimension_transition;
 pub(crate) mod explosion_settings;
+pub(crate) mod feature_type;
 pub(crate) mod fluid_interaction;
 pub(crate) mod game_rule_value;
 pub(crate) mod place_feature_refusal;

@@ -59,7 +59,7 @@ fn decoded_stand_fall_distance_survives_save_without_raw_or_with_stale_raw() {
             ]);
             let stand = armor_stand_from_nbt(&input, 1).unwrap();
             for raw in [None, Some(&stale)] {
-                let saved = armor_stand_to_nbt(&stand, [28, 0, 0, 1], raw);
+                let saved = armor_stand_to_nbt(&stand, [28, 0, 0, 1], raw, &Default::default());
                 assert_eq!(
                     saved.get("fall_distance"),
                     Some(&Tag::Double(distance.to_bits())),

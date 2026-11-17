@@ -20,9 +20,14 @@ fn a_mob_anger_target_is_saved_as_its_uuid() {
     let mut m = wolf(1);
     m.extra.angry_at = Some(Who::Mob(7));
     let target = [7, 0, 0, 3];
-    let tag = mob_to_nbt(&m, [1, 2, 3, 4], None, None, |id| {
-        (id == 7).then_some(target)
-    });
+    let tag = mob_to_nbt(
+        &m,
+        [1, 2, 3, 4],
+        None,
+        None,
+        |id| (id == 7).then_some(target),
+        &Default::default(),
+    );
     assert_eq!(tag.get("angry_at"), Some(&Tag::IntArray(target.to_vec())));
     assert_eq!(number(tag.get("anger_end_time")), Some(3000));
 }
@@ -33,7 +38,7 @@ fn a_mob_anger_target_is_saved_as_its_uuid() {
 fn an_unknown_anger_target_writes_no_angry_at() {
     let mut m = wolf(1);
     m.extra.angry_at = Some(Who::Mob(7));
-    let tag = mob_to_nbt(&m, [1, 2, 3, 4], None, None, |_| None);
+    let tag = mob_to_nbt(&m, [1, 2, 3, 4], None, None, |_| None, &Default::default());
     assert_eq!(tag.get("angry_at"), None);
     assert_eq!(number(tag.get("anger_end_time")), Some(3000));
 }
@@ -43,7 +48,7 @@ fn an_unknown_anger_target_writes_no_angry_at() {
 fn a_player_anger_target_needs_no_map() {
     let mut m = wolf(1);
     m.extra.angry_at = Some(Who::Player);
-    let tag = mob_to_nbt(&m, [1, 2, 3, 4], None, None, |_| None);
+    let tag = mob_to_nbt(&m, [1, 2, 3, 4], None, None, |_| None, &Default::default());
     assert_eq!(
         tag.get("angry_at"),
         Some(&Tag::IntArray(player_uuid().to_vec()))
@@ -64,7 +69,14 @@ fn a_saved_mob_uuid_resolves_back_to_it() {
     let (wolf_uuid, pig_uuid) = ([1, 2, 3, 4], [9, 0, 0, 1]);
     let uuids: HashMap<u32, [i32; 4]> = HashMap::from([(1, wolf_uuid), (9, pig_uuid)]);
     wolf.extra.angry_at = Some(Who::Mob(pig.id));
-    let tag = mob_to_nbt(&wolf, wolf_uuid, None, None, |id| uuids.get(&id).copied());
+    let tag = mob_to_nbt(
+        &wolf,
+        wolf_uuid,
+        None,
+        None,
+        |id| uuids.get(&id).copied(),
+        &Default::default(),
+    );
     let Some(Tag::IntArray(stored)) = tag.get("angry_at") else {
         panic!("anger at a mob is saved as that mob's UUID");
     };

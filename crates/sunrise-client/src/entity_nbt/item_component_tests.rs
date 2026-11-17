@@ -145,7 +145,14 @@ fn a_horse_or_llama_spawn_egg_picks_its_variant_component() {
     );
     // The save keeps the packed `Variant` int and gains no `variant` name,
     // which only `VariantUtils.writeVariant` species store.
-    let tag = mob_to_nbt(&horse, [1, 2, 3, 4], None, None, |_| None);
+    let tag = mob_to_nbt(
+        &horse,
+        [1, 2, 3, 4],
+        None,
+        None,
+        |_| None,
+        &Default::default(),
+    );
     assert_eq!(tag.get("variant"), None);
     assert!(
         matches!(tag.get("Variant"), Some(Tag::Int(v)) if *v == 6 | 2 << 8),
@@ -202,8 +209,10 @@ fn a_spawn_eggs_entity_data_reaches_the_mob_it_spawned() {
         else {
             return m;
         };
-        let tag =
-            crate::data_cmd::merged(&mob_to_nbt(&m, [1, 2, 3, 4], None, None, |_| None), data);
+        let tag = crate::data_cmd::merged(
+            &mob_to_nbt(&m, [1, 2, 3, 4], None, None, |_| None, &Default::default()),
+            data,
+        );
         mob_from_nbt(&tag, &types, 2, None).unwrap()
     };
     // `entity_data={NoAI:1b}`: no id, so the egg's own type holds the data.

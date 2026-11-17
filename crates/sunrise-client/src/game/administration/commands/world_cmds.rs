@@ -1820,8 +1820,7 @@ impl Game<'_> {
         let at = at.unwrap_or(m.position);
         m.extra.passenger = false;
         m.extra.boarding_cooldown = super::super::boat_passengers::BOARDING_COOLDOWN;
-        m.position = at;
-        m.previous = at;
+        sunrise_client::mobs::living::teleports::snap_to(m, at);
         self.snap_mob_passengers(rider);
         self.release_removed_vehicle(v);
     }

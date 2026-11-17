@@ -26,6 +26,18 @@ pub enum LayerBlock {
     Ground,
 }
 pub trait PlacementContext {
+    /// The numeric block registry this world's states are of (the game's are loaded once and
+    /// kept), for a mod feature's state index (`worldgen::mod_features`). Worlds without one
+    /// answer `None`, and a mod feature placed there fails, saying so.
+    fn block_registry(&self) -> Option<&'static crate::registry::BlockRegistry> {
+        None
+    }
+    /// Whether `position` is in a full chunk the world only reads (a decoration region's
+    /// `ImposterProtoChunk`): its block writes answer true and change nothing, so no data for
+    /// a block there is taken.
+    fn full_chunk_at(&mut self, _position: [i32; 3]) -> Result<bool, PlacementQueryError> {
+        Ok(false)
+    }
     /// StructureTemplate.updateShapeAtEdge for one outer face of a placed
     /// voxel shape: update the state at `position` against its neighbor in
     /// `direction`, then the neighbor against the (possibly new) state, writing
@@ -306,6 +318,14 @@ pub trait PlacementContext {
         &mut self,
         _position: [i32; 3],
     ) -> Result<crate::registry::BlockStateId, PlacementQueryError> {
+        Err(PlacementQueryError::Unavailable)
+    }
+    /// Whether `state` is in block tag `tag` (a mod feature's own staged block).
+    fn state_matches_tag(
+        &mut self,
+        _state: crate::registry::BlockStateId,
+        _tag: &str,
+    ) -> Result<bool, PlacementQueryError> {
         Err(PlacementQueryError::Unavailable)
     }
     /// Read the state at the requested position and test its block-tag identity.
