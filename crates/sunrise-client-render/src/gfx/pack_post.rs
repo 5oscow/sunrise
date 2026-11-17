@@ -561,21 +561,7 @@ pub(super) struct World<'a> {
     pub hand: bool,
 }
 
-/// This frame's block outline, when the pack draws it: the outline buffer (one instance per
-/// edge, pack_lines.rs) and the edges in it.
-pub(super) struct Lines {
-    pub edges: wgpu::Buffer,
-    pub count: u32,
-}
-
-/// This frame's clouds, when the pack draws them: their vertices, uniform, quad indices and
-/// quad count.
-pub(super) struct Clouds {
-    pub vertices: wgpu::Buffer,
-    pub group: wgpu::BindGroup,
-    pub indices: wgpu::Buffer,
-    pub quads: u32,
-}
+pub(super) use super::external::{Clouds, Lines};
 
 /// This frame's rain and snow, when the pack draws them: their vertices, the quad indices, the
 /// quads of each kind (rain, snow), each kind's sprite, and a number that changes with them.
@@ -1177,15 +1163,7 @@ fn attach(
     })
 }
 
-/// Which of the frame's terrain draws: the camera's solid or translucent ones, or the shadow
-/// camera's.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum TerrainList {
-    Solid,
-    Translucent,
-    ShadowSolid,
-    ShadowTranslucent,
-}
+pub(super) use super::external::TerrainList;
 
 impl TerrainList {
     fn translucent(self) -> bool {
@@ -1193,16 +1171,7 @@ impl TerrainList {
     }
 }
 
-/// Draws the game's terrain of one list into a pass; calls its third argument with each arena
-/// page before drawing from it.
-/// Draws a list's terrain: indexed, or for a program with a geometry stage, without indices and
-/// with that many instances (and its index buffer bound in set 5 by this layout).
-pub(super) type TerrainDraw<'a> = dyn FnMut(
-        &mut wgpu::RenderPass<'_>,
-        TerrainList,
-        &dyn Fn(&mut wgpu::RenderPass<'_>, u32),
-        Option<(u32, &wgpu::BindGroupLayout)>,
-    ) + 'a;
+pub(super) use super::external::TerrainDraw;
 
 pub(super) use super::external::ShadowView;
 

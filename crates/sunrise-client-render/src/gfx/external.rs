@@ -82,6 +82,76 @@ pub struct EntityInput<'a> {
     pub motion: (&'a [(u32, u64)], &'a [u32]),
 }
 
+/// Which of the frame's terrain draws: the camera's solid or translucent ones, or the shadow
+/// camera's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TerrainList {
+    Solid,
+    Translucent,
+    ShadowSolid,
+    ShadowTranslucent,
+}
+
+/// Draws the game's terrain of one list into a pass; calls its third argument with each arena
+/// page before drawing from it. Indexed, or for a program with a geometry stage, without
+/// indices and with that many instances (and its index buffer bound in set 5 by this layout).
+pub type TerrainDraw<'a> = dyn FnMut(
+        &mut wgpu::RenderPass<'_>,
+        TerrainList,
+        &dyn Fn(&mut wgpu::RenderPass<'_>, u32),
+        Option<(u32, &wgpu::BindGroupLayout)>,
+    ) + 'a;
+
+/// This frame's block outline, when the pipeline draws it: the outline buffer (one instance
+/// per edge) and the edges in it.
+pub struct Lines {
+    pub edges: wgpu::Buffer,
+    pub count: u32,
+}
+
+/// This frame's clouds, when the pipeline draws them: their vertices, uniform, quad indices and
+/// quad count.
+pub struct Clouds {
+    pub vertices: wgpu::Buffer,
+    pub group: wgpu::BindGroup,
+    pub indices: wgpu::Buffer,
+    pub quads: u32,
+}
+
+/// What the renderer hands a pipeline before its post passes (`ExternalPipeline::feed_post`):
+/// the frame's layers it draws itself, as the engine keeps them.
+pub struct PostFeed<'a> {
+    pub device: &'a wgpu::Device,
+    pub encoder: &'a mut wgpu::CommandEncoder,
+    pub uploads: &'a mut super::upload::Uploads,
+    pub frame: &'a Frame<'a>,
+    pub draws: Draws,
+    /// The GUI atlas, which rain and snow take their sprites from.
+    pub atlas: Option<&'a wgpu::Texture>,
+    /// The terrain arena's pages, when terrain is drawn flat (`None` otherwise).
+    pub flat_pages: Option<&'a super::arena::Arena>,
+    pub quad_indices: &'a wgpu::Buffer,
+    pub lines: Option<Lines>,
+    pub clouds: Option<Clouds>,
+}
+
+/// What the renderer hands a pipeline to run the world's post passes (`ExternalPipeline::post`):
+/// the world drawn into `color` and `depth`, the screen to draw the result onto, and the
+/// terrain's draw lists.
+pub struct PostContext<'a, 'd> {
+    pub device: &'a wgpu::Device,
+    pub queue: &'a wgpu::Queue,
+    pub encoder: &'a mut wgpu::CommandEncoder,
+    pub frame: &'a Frame<'a>,
+    pub color: &'a wgpu::TextureView,
+    pub depth: &'a wgpu::TextureView,
+    pub target: &'a wgpu::TextureView,
+    /// The world's size in pixels, and the window's.
+    pub size: [u32; 2],
+    pub window: [u32; 2],
+    pub terrain: &'a mut TerrainDraw<'d>,
+}
+
 /// An external shader pipeline, called by the renderer at fixed points of a world frame (not
 /// title frames). Every method has a default that leaves vanilla's way in place.
 pub trait ExternalPipeline: Send {
@@ -113,6 +183,12 @@ pub trait ExternalPipeline: Send {
     fn shadow_casters(&self) -> ShadowCasters {
         ShadowCasters::default()
     }
+    /// Before the world's post passes: takes the layers it draws itself (`Draws`) from `feed`.
+    fn feed_post(&mut self, _feed: PostFeed<'_>) {}
+    /// Runs the world's post passes in place of `world_post` (TAA, upscaling, sharpening) over
+    /// the world drawn into `ctx.color`, and draws the result onto `ctx.target`. Called only
+    /// with `Draws::reads_world`.
+    fn post(&mut self, _ctx: PostContext<'_, '_>) {}
     /// The window's drawable size changed.
     fn resize(&mut self, _size: [u32; 2]) {}
     /// Forget what was kept from earlier frames: the next is drawn as a fresh pipeline's first.
