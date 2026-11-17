@@ -48,7 +48,7 @@ fn get(url: &str) -> Result<host::Body, String> {
     }
 }
 
-/// Reads a check plan from standard input and prints the reply: 0 checked, 1 a file it names didn't read, 2 no plan, 3 another contract.
+/// Reads a check plan from standard input and prints one reply line: 0 checked, 1 an error reply (a file it names didn't read), 2 no plan, 3 another contract.
 pub fn check(args: &[String]) -> ExitCode {
     if !args.is_empty() {
         eprintln!(
@@ -66,16 +66,51 @@ pub fn check(args: &[String]) -> ExitCode {
             });
         }
     };
-    match checks::check(&plan)
-        .and_then(|reply| serde_json::to_string(&reply).map_err(|e| e.to_string()))
+    let (code, line) = checked(&plan);
+    println!("{line}");
+    ExitCode::from(code)
+}
+
+/// The exit code and the reply line for `plan`: a tool from before `native-check` prints no such line, which is how a caller tells.
+fn checked(plan: &checks::Plan) -> (u8, serde_json::Value) {
+    match checks::check(plan)
+        .and_then(|reply| serde_json::to_value(reply).map_err(|e| e.to_string()))
     {
-        Ok(line) => {
-            println!("{line}");
-            ExitCode::SUCCESS
-        }
-        Err(error) => {
-            eprintln!("error: {error}");
-            ExitCode::FAILURE
-        }
+        Ok(reply) => (0, reply),
+        Err(message) => (
+            1,
+            serde_json::json!({
+                "contract": contract::CONTRACT,
+                "error": {"kind": "unread", "message": message},
+            }),
+        ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_check_that_cant_read_its_mods_replies_with_an_error_line() {
+        // A file where the plan names a folder of mods: it doesn't read as one.
+        let file = std::env::temp_dir().join(format!("native-check-file-{}", std::process::id()));
+        std::fs::write(&file, "not a folder").unwrap();
+        let (code, reply) = checked(&checks::Plan {
+            contract: contract::CONTRACT,
+            mods: file.clone(),
+            build: "b".repeat(40),
+            surface: None,
+            build_data: None,
+        });
+        assert_eq!(code, 1);
+        assert_eq!(reply["contract"], contract::CONTRACT);
+        assert_eq!(reply["error"]["kind"], "unread");
+        assert!(
+            reply["error"]["message"]
+                .as_str()
+                .is_some_and(|m| !m.is_empty())
+        );
+        std::fs::remove_file(file).unwrap();
     }
 }

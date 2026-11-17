@@ -61,8 +61,11 @@ The tool never edits an instance, never selects a version and never installs any
 
 `cargo sunrise-mod native-check` says how a set of native mods stands against one build before anything compiles:
 each mod's refusal, or its fit (SDK design §10), and the route a build of the usable ones takes. It reads one plan
-line on standard input and writes one reply line. Exit codes are those of `native-build`, except that 1 means a file
-the plan names didn't read (standard error says which).
+line on standard input and writes one reply line on standard output. Exit codes are those of `native-build`, except
+that 1 comes with an error reply, `{"contract": 2, "error": {"kind": "unread", "message": …}}`: a file the plan names
+(the mods, the surface, the build data) didn't read. A tool from before `native-check` (contract 1) knows no such
+command: it prints its usage on standard error and nothing on standard output, so a caller that finds no reply line
+knows the tool is too old.
 
 ```sh
 cargo sunrise-mod native-check < plan.json
