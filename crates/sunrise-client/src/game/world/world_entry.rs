@@ -845,6 +845,7 @@ impl Game<'_> {
         api_values::install_block_states(&self.tick, prepared.block_states);
         native_world_read::install_block_tags(prepared.tags);
         api_values::install_resolved_parts(&self.tick, prepared.parts);
+        self.mark_collision_shape_states();
         self.resolve_block_paths();
         self.resolve_piston_reactions();
         self.resolve_primary_items();

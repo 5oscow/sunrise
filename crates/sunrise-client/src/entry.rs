@@ -373,6 +373,9 @@ pub(crate) fn install_client_hooks() {
         friction: |context, entity, kind, pos, state, friction| {
             crate::game::native_surface::friction(context, entity, kind, pos, state, friction);
         },
+        collision_shape: |context, pos, state, query, shape| {
+            crate::game::native_collision_shape::collision_shape(context, pos, state, query, shape);
+        },
         player_stays_on_ground_surface: |context, entity, staying| {
             if !mod_api::__private::listened(mod_api::HookId::PlayerStaysOnGroundSurface) {
                 return;

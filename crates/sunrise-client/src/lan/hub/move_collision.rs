@@ -55,21 +55,25 @@ impl Hub {
         // correct the guest all the same.
         let overridden = gate.overridden();
         // A move with no exclusions pays this one check.
-        if g.collision_exclusions.is_empty() {
-            return check_move(g, to, requested, movement, overridden, &mut scene);
-        }
-        let boxes = g.collision_exclusions.boxes();
-        check_move(
-            g,
-            to,
-            requested,
-            movement,
-            overridden,
-            &mut Excluding {
-                world: &mut scene,
-                boxes,
-            },
-        )
+        // The guest's move, as the entity a block's parts are asked about (the gate names it
+        // for its own moves): the server asks the same question the guest's client did.
+        sunrise_client_render::moving_colliders::as_mover(g.entity_id as u32, || {
+            if g.collision_exclusions.is_empty() {
+                return check_move(g, to, requested, movement, overridden, &mut scene);
+            }
+            let boxes = g.collision_exclusions.boxes();
+            check_move(
+                g,
+                to,
+                requested,
+                movement,
+                overridden,
+                &mut Excluding {
+                    world: &mut scene,
+                    boxes,
+                },
+            )
+        })
     }
 }
 

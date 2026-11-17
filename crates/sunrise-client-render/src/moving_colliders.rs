@@ -158,6 +158,11 @@ pub fn as_mover<R>(id: u32, f: impl FnOnce() -> R) -> R {
     result
 }
 
+/// The entity whose move [`as_mover`] names, or 0 outside one.
+pub fn mover() -> u64 {
+    MOVER.with(Cell::get)
+}
+
 /// Appends to `out` the colliders meeting `bounds` that `entity` collides with. An identity of
 /// 0 is the move [`as_mover`] names; with none named (a ray, a projectile's path) it is exempt
 /// from nothing and meets every collider.

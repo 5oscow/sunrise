@@ -28,6 +28,15 @@ pub struct NativeClientHooks {
     pub makes_open_trapdoor_above_climbable:
         fn(&LoopContext, BlockStateId, BlockPos, BlockStateId, &mut bool),
     pub friction: fn(&LoopContext, u32, &str, BlockPos, BlockStateId, &mut f32),
+    /// `BlockPart::collision_shape` of the state's block, for one collision query; `shape`
+    /// arrives `None` and leaves checked.
+    pub collision_shape: fn(
+        &LoopContext,
+        BlockPos,
+        BlockStateId,
+        &mod_api::CollisionQuery,
+        &mut Option<Vec<[f64; 6]>>,
+    ),
     pub player_stays_on_ground_surface: fn(&LoopContext, u32, &mut bool),
     pub ender_entity_teleport: fn(&LoopContext, u32, &str, [f64; 3], &mut [f64; 3], &mut bool),
     pub fluid_flow: fn(&LoopContext, &str, BlockPos, &mut [f64; 3]),
@@ -244,6 +253,18 @@ pub(crate) fn friction(
 ) {
     if let Some(hooks) = HOOKS.get() {
         (hooks.friction)(context, entity, kind, pos, state, friction);
+    }
+}
+
+pub(crate) fn collision_shape(
+    context: &LoopContext,
+    pos: BlockPos,
+    state: BlockStateId,
+    query: &mod_api::CollisionQuery,
+    shape: &mut Option<Vec<[f64; 6]>>,
+) {
+    if let Some(hooks) = HOOKS.get() {
+        (hooks.collision_shape)(context, pos, state, query, shape);
     }
 }
 

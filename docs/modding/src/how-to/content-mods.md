@@ -428,8 +428,9 @@ shape updates, as for lichen and sculk veins) read the published collision shape
 Fluid passage reads it as well: water and lava pass between two cells by their collision shapes at
 their positions. A publish, a clear and an aborted publish (the old shapes put back) each notify the
 block's neighbours, so a fluid beside it reads the new shape; publishing an unchanged value notifies nothing.
-Shapes that depend on the querying entity are not covered; `outline_context_shapes` and
-`collision_context_shapes` stay declared, and a published shape stands over them.
+Shapes that depend on the querying entity are not published: a part answers them per query
+(next section), and a published shape stands over the declared `outline_context_shapes` and
+`collision_context_shapes`.
 
 - **Checks**, refused by name with a `BlockEntityShapesError` and never clamped: every
   coordinate finite and each minimum at most its maximum; at most 64 boxes in each list.
@@ -451,6 +452,48 @@ Shapes that depend on the querying entity are not covered; `outline_context_shap
   repair. They are dropped when the block entity is removed or its block changes. The key they
   are kept under is the engine's: `replace_data` and `merge_data` leave them alone, and a
   payload that carries it has it ignored.
+
+### Shapes that depend on the querying entity
+
+A block part can give a block another collision shape for the entity that asks, as vanilla's
+`getCollisionShape(state, level, pos, context)` does: `BlockPart::collision_shape(context, event)`
+sets `event.shape = Some(boxes)` (block-local `[min_x, min_y, min_z, max_x, max_y, max_z]`, as in
+`shapes`) for the state `event.state` at `event.pos`. This is the one place the engine calls a
+mod in the middle of physics, for the blocks whose parts opt in; everything else, and every
+published shape, is read without a call. It reverses the rule above for those blocks only.
+
+`event.query` is a `CollisionQuery`, vanilla's `EntityCollisionContext` as it was when the query
+was made: `entity()` (the entity's id, `None` for the empty, position and cache contexts),
+`kind()`, `is_descending()`, `is_placement()`, `always_collide_with_fluid()`,
+`is_above(shape, pos, default)`, `is_holding_item(item)` and `can_stand_on_fluid(above, fluid)`.
+
+- **Ordering.** `None`, the starting value, keeps whatever the block would otherwise have: its
+  declared shape, a context-keyed one, or the one its block entity published. `Some` replaces
+  that for this query only. The per-state shape cache stays the empty-context answer, so a block
+  that is large there is still scanned in the cells around its own.
+- **Who asks.** Entity movement (step-up retries included), placement checks and projectile
+  paths, on the thread that owns the level: the server tick, and the client's own prediction. A
+  guest's move is checked by the server with the same entity id. Fluid passage and face-support
+  checks never ask. Another thread (the mesher, world generation) reads the normal shape.
+- **Once a tick.** A part is asked once for each entity, position and tick (a placement query
+  separately); a step-up retry or a second sweep reads the first answer, so the shape cannot change
+  in the middle of a move.
+- **No re-entry.** The query holds the entity's state from before the move, and a collision query
+  made inside the callback gets the empty-context answer, never a nested call.
+- **No `Host`.** A move holds the level's collision data and cannot lend a `Host`, as for
+  `entity_move` and `friction`. The part answers from the query and from state it keeps itself. A
+  rule that needs more (a belt's set of carried entities; powder snow's fall distance) tracks that
+  state in the mod, keyed by `query.entity()`. If a mod needs an entity read it cannot track, one
+  captured field is added to `CollisionQuery`; the `Host` is not reopened.
+- **The client must sync that state.** The client asks the same question for its own prediction,
+  so a mod whose rule reads its own state must send it to the client. If the two disagree the
+  server corrects the player's position (the usual "moved wrongly" correction), never a kick.
+- **Bounds**, as for a published shape: at most 64 boxes, every coordinate finite and each minimum
+  at most its maximum. These bound what crosses the Wire from a wasm part too.
+- **Faults.** A panic, a trap or a refused shape keeps the normal shape, switches that block's
+  `collision_shape` off for the session, and logs once, naming the mods and the block.
+- **Cost.** Nothing for a block without such a part. An opted-in block costs one call per
+  entity, position and tick, and a wasm part adds a Wire crossing to each.
 
 An item copies its template's data components, with `max_stack_size` and
 `rarity` changed, and any other 26.3 component set or removed in

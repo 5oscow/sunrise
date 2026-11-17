@@ -108,6 +108,7 @@ pub mod native_load_hooks;
 pub mod native_worldgen_hooks;
 pub mod object_open_map;
 pub mod object_open_set;
+pub mod part_collision;
 pub mod piston_movement;
 pub mod piston_push;
 pub mod piston_shape;

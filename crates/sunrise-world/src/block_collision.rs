@@ -5,12 +5,21 @@ use crate::{
     collision::CachedCollisionRegistry,
     collision_context::CollisionContext,
     dynamic_support::{DynamicSupport, DynamicSupportError, DynamicSupportWorld},
+    fluid::{FluidKind, FluidState},
     liquid_collision::{LiquidCollision, LiquidCollisionWorld},
+    part_collision,
     piston_shape::PistonBlockBindings,
     powder_snow_collision::{PowderSnowWorld, powder_snow_collision_shape},
     registry::{BlockRegistry, BlockStateId},
 };
-use std::{collections::HashMap, io, sync::Arc};
+use std::{
+    collections::HashMap,
+    io,
+    sync::{
+        Arc,
+        atomic::{AtomicU8, Ordering},
+    },
+};
 use sunrise_core::geometry::{Aabb, Axis, Direction, Vec3, VoxelShape};
 
 #[derive(Clone, Copy, Debug)]
@@ -79,7 +88,11 @@ pub struct BlockCollisionRegistry<'r> {
     cached: Arc<CachedCollisionRegistry<'r>>,
     dynamic: HashMap<BlockStateId, DynamicSupport>,
     contextual: HashMap<BlockStateId, ContextualRule>,
-    scan_flags: Vec<u8>,
+    /// The scan metadata the registry was built with.
+    base_flags: Vec<u8>,
+    /// What a scan reads: `base_flags` with the states whose parts answer collision queries
+    /// marked (bit 5), large and never empty. Relaxed: set between ticks.
+    scan_flags: Vec<AtomicU8>,
     /// Piston and piston-head states for moving-piston collision; None in
     /// registries without pistons.
     pistons: Option<PistonBlockBindings<'r>>,
@@ -146,12 +159,35 @@ impl<'r> BlockCollisionRegistry<'r> {
             cached,
             dynamic,
             contextual,
-            scan_flags,
+            scan_flags: scan_flags.iter().copied().map(AtomicU8::new).collect(),
+            base_flags: scan_flags,
             pistons,
         })
     }
     pub fn registry(&self) -> &'r BlockRegistry {
         self.cached.registry()
+    }
+    fn flags(&self, state: BlockStateId) -> Option<u8> {
+        self.scan_flags
+            .get(state.0 as usize)
+            .map(|flags| flags.load(Ordering::Relaxed))
+    }
+    /// Marks the states whose parts answer collision queries (`BlockPart::collision_shape`), and
+    /// only them: such a state is scanned for in the cells around its own, as a published one
+    /// is, and never counts as empty, since its shape depends on who asks. Called between
+    /// ticks, once the game's parts are resolved; an earlier marking is replaced.
+    pub fn set_part_states(&self, states: impl IntoIterator<Item = BlockStateId>) {
+        for (flags, base) in self.scan_flags.iter().zip(&self.base_flags) {
+            flags.store(*base, Ordering::Relaxed);
+        }
+        for state in states {
+            if let (Some(flags), Some(base)) = (
+                self.scan_flags.get(state.0 as usize),
+                self.base_flags.get(state.0 as usize),
+            ) {
+                flags.store((base | 1 | 32) & !4, Ordering::Relaxed);
+            }
+        }
     }
     /// The piston states behind `PistonMovingBlockEntity.getCollisionShape`.
     pub fn pistons(&self) -> Option<&PistonBlockBindings<'r>> {
@@ -162,9 +198,8 @@ impl<'r> BlockCollisionRegistry<'r> {
     }
     /// Immutable cursor-filter metadata, prepared once for this registry.
     pub fn collision_block(&self, state: BlockStateId) -> io::Result<CollisionBlock> {
-        let flags = *self
-            .scan_flags
-            .get(state.0 as usize)
+        let flags = self
+            .flags(state)
             .ok_or_else(|| crate::compression::invalid("collision scan state outside registry"))?;
         Ok(CollisionBlock {
             state,
@@ -176,9 +211,7 @@ impl<'r> BlockCollisionRegistry<'r> {
     /// Whether the block entity of `state`'s block publishes the block's shapes
     /// (`shapes_from_block_entity`). States outside the registry do not.
     pub fn publishes_shapes(&self, state: BlockStateId) -> bool {
-        self.scan_flags
-            .get(state.0 as usize)
-            .is_some_and(|flags| flags & 16 != 0)
+        self.flags(state).is_some_and(|flags| flags & 16 != 0)
     }
     /// The state's cached shape, unless it may publish its own: a cached shape of such a state
     /// stands only when its block entity holds none, so callers that read the cache go through
@@ -192,24 +225,18 @@ impl<'r> BlockCollisionRegistry<'r> {
     /// Whether `state` can have a collision shape: false for states whose shape is always
     /// empty, whatever the context. States outside the registry count.
     pub fn may_collide(&self, state: BlockStateId) -> bool {
-        self.scan_flags
-            .get(state.0 as usize)
-            .is_none_or(|flags| flags & 4 == 0)
+        self.flags(state).is_none_or(|flags| flags & 4 == 0)
     }
     /// Whether `state` has a contextual collision rule (scaffolding, a liquid, powder snow):
     /// its shape with an entity's context may differ from the cached one. States outside the
     /// registry count.
     pub fn has_context_rule(&self, state: BlockStateId) -> bool {
-        self.scan_flags
-            .get(state.0 as usize)
-            .is_none_or(|flags| flags & 8 != 0)
+        self.flags(state).is_none_or(|flags| flags & 8 != 0)
     }
     /// Whether a scan keeps `state` in the cells around its box: a large
     /// collision shape or a moving piston. States outside the registry count.
     pub fn reaches_out(&self, state: BlockStateId) -> bool {
-        self.scan_flags
-            .get(state.0 as usize)
-            .is_none_or(|flags| flags & 3 != 0)
+        self.flags(state).is_none_or(|flags| flags & 3 != 0)
     }
     pub fn collision_shape<W: DynamicCollisionWorld>(
         &self,
@@ -254,6 +281,27 @@ impl<'r> BlockCollisionRegistry<'r> {
             + LiquidCollisionWorld<Error = E>
             + PowderSnowWorld<Error = E>,
     {
+        let flags = self.flags(state);
+        // A part that answers for the entity replaces whatever the block would otherwise have,
+        // a published shape included; `None` keeps it.
+        if flags.is_some_and(|flags| flags & 32 != 0)
+            && let Some(shape) = part_collision::ask(state, position, context, &mut || {
+                let Some(entity) = context.living_entity() else {
+                    return Vec::new();
+                };
+                [FluidKind::Water, FluidKind::Lava]
+                    .into_iter()
+                    .filter(|kind| {
+                        world
+                            .entity_can_stand(entity, FluidState::new(*kind, 8, false))
+                            .unwrap_or(false)
+                    })
+                    .map(FluidKind::name)
+                    .collect()
+            })
+        {
+            return Ok(shape);
+        }
         // A published shape stands over every declared one, whatever the entity.
         if self.publishes_shapes(state)
             && let Some(shape) = world
@@ -263,10 +311,7 @@ impl<'r> BlockCollisionRegistry<'r> {
             return Ok(shape);
         }
         // Most states have no contextual rule: their flag spares the lookup.
-        let contextual = self
-            .scan_flags
-            .get(state.0 as usize)
-            .is_none_or(|flags| flags & 8 != 0);
+        let contextual = flags.is_none_or(|flags| flags & 8 != 0);
         if contextual
             && let Some(shape) = self
                 .cached

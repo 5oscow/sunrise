@@ -14,7 +14,15 @@ pub(crate) static JUMPS: AtomicUsize = AtomicUsize::new(0);
 /// The asks the installed `menu_still_valid` heard.
 pub(crate) static STILL_VALID_ASKED: AtomicUsize = AtomicUsize::new(0);
 
+/// What the installed `collision_shape` answers a query on this thread.
+pub(crate) type CollisionAnswer = Box<dyn Fn(&mod_api::CollisionQuery) -> Option<Vec<[f64; 6]>>>;
+
 thread_local! {
+    /// How many times this thread asked the installed `collision_shape`.
+    pub(crate) static COLLISION_ASKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// The answer the installed `collision_shape` gives this thread; none leaves the shape be.
+    pub(crate) static COLLISION_ANSWER: std::cell::RefCell<Option<CollisionAnswer>> =
+        const { std::cell::RefCell::new(None) };
     /// The item hooks this thread asked: the hook, the stack's item, and the answer it arrived
     /// with.
     static ITEM_ASKS: std::cell::RefCell<Vec<(&'static str, String, bool)>> =
@@ -58,6 +66,13 @@ fn item_part(context: &LoopContext, hook: &'static str, stack: &ItemStack, answe
     if let Some(given) = given {
         *answer = given;
     }
+}
+
+/// A server loop context with no settings.
+pub(crate) fn loop_context() -> LoopContext {
+    let inputs = std::sync::Arc::new(LoadInputs::new(Default::default(), std::env::temp_dir()));
+    LoadContext::new(DataLoadOrigin::ServerDataLoad, inputs, [])
+        .loop_context(LoopSide::Server, [] as [&str; 0])
 }
 
 /// Install the test callbacks, once for the process.
@@ -152,6 +167,14 @@ pub(crate) fn install() {
                         _ => 3.0,
                     };
                 }
+            },
+            collision_shape: |_, _, _, query, shape| {
+                COLLISION_ASKS.with(|asks| asks.set(asks.get() + 1));
+                COLLISION_ANSWER.with_borrow(|answer| {
+                    if let Some(answer) = answer {
+                        *shape = answer(query);
+                    }
+                });
             },
             player_stays_on_ground_surface: |context, _, staying| {
                 *staying |= context.setting("rules_mod", "stack").is_some();

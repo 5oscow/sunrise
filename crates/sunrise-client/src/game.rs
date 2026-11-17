@@ -4540,6 +4540,9 @@ impl Game<'_> {
         let _colliders = (!self.is_logical_server()).then(|| {
             sunrise_client_render::moving_colliders::Scope::enter(self.placed_moving_colliders())
         });
+        let _parts = (!self.is_logical_server())
+            .then(|| self.collision_parts())
+            .flatten();
         // `Player.entityInteractionRange`/`blockInteractionRange` for the tick's
         // picks: the attribute carries creative's and a server's modifiers.
         self.entity_reach = self.interaction_range("minecraft:entity_interaction_range", 3.0, 5.0);
