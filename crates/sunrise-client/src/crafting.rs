@@ -1492,9 +1492,11 @@ impl ResolvedSources {
     ) -> Result<Self> {
         Self::load_collecting(root, overlay, context)?.checked()
     }
-    /// `load` that keeps the refused recipes for the table build to report
-    /// with its own.
-    fn load_collecting(
+    /// `load` that keeps the refused recipes instead of failing: the caller
+    /// must build the tables with `Recipes::from_resolved`, which reports them
+    /// together with the validation failures and refuses the whole generation.
+    /// A caller that publishes or reads the sources otherwise uses `load`.
+    pub fn load_collecting(
         root: &Path,
         overlay: &PackOverlay,
         context: &sunrise_world::native_load_context::LoadContext,
@@ -1505,12 +1507,21 @@ impl ResolvedSources {
             &context,
         )
     }
-    fn checked(self) -> Result<Self> {
+    /// Whether every recipe resolved; sources with failures are never shared.
+    pub fn is_complete(&self) -> bool {
+        self.failures.is_empty()
+    }
+    /// The error naming every recipe that failed to resolve, if any did.
+    pub fn check(&self) -> Result<()> {
         if self.failures.is_empty() {
-            Ok(self)
+            Ok(())
         } else {
-            Err(load_failed(self.failures))
+            Err(load_failed(self.failures.clone()))
         }
+    }
+    fn checked(self) -> Result<Self> {
+        self.check()?;
+        Ok(self)
     }
     /// `sources` (`recipe_sources::sources`' shape), the hook asked once for
     /// each mod ingredient in the recipes the loader parses (minecraft's own

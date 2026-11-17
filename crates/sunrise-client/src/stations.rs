@@ -39,7 +39,7 @@ impl StationData {
         defaults: &sunrise_world::item_defaults::ItemDefaults,
         context: &sunrise_world::native_load_context::LoadContext,
     ) -> crate::Result<Self> {
-        let sources = crate::crafting::ResolvedSources::load(root, overlay, context)?;
+        let sources = crate::crafting::ResolvedSources::load_collecting(root, overlay, context)?;
         let recipes = crate::crafting::Recipes::from_resolved(root, items, overlay, &sources)?;
         Ok(Self::from_sources(
             root,

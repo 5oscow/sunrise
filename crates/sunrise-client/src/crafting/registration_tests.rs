@@ -227,3 +227,37 @@ fn a_failed_load_reports_resolution_and_validation_failures_together() {
         assert!(!error.contains("d.json"), "{error}");
     });
 }
+
+#[test]
+fn collected_sources_and_table_build_report_every_stage_together() {
+    mod_platform::testing::with_mods(Vec::new().into(), || {
+        let root = tempfile::tempdir().unwrap();
+        let folder = root.path().join("data/minecraft/recipe");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("a.json"), r#"{"type":"absent:serializer"}"#).unwrap();
+        std::fs::write(
+            folder.join("b.json"),
+            r#"{"type":"minecraft:crafting_shapeless","ingredients":[],"result":{"id":"minecraft:stick"}}"#,
+        )
+        .unwrap();
+        let context = crate::test_resources::server_load();
+        let sources =
+            ResolvedSources::load_collecting(root.path(), &PackOverlay::NONE, &context).unwrap();
+        assert!(!sources.is_complete());
+        let error = Recipes::from_resolved(
+            root.path(),
+            &Items::for_tests(Default::default()),
+            &PackOverlay::NONE,
+            &sources,
+        )
+        .err()
+        .unwrap()
+        .to_string();
+        assert!(error.starts_with("2 recipes failed to load:"), "{error}");
+        assert!(
+            error.find("a.json").unwrap() < error.find("b.json").unwrap(),
+            "{error}"
+        );
+        assert!(ResolvedSources::load(root.path(), &PackOverlay::NONE, &context).is_err());
+    });
+}
