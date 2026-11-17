@@ -760,7 +760,7 @@ mod tests {
             assert_eq!(rocket.owner(game), Some(boat));
             assert_eq!(game.rockets[0].owner, None);
             let saved = game.uuid_for(boat_id);
-            let tag = game.rockets[0].to_nbt([9; 4], None, None);
+            let tag = game.rockets[0].to_nbt([9; 4], None, None, game.res.items());
             let back = Rocket::from_nbt(
                 sunrise_client::entity_nbt::firework_rocket_from_nbt(&tag, None).unwrap(),
             );

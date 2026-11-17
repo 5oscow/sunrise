@@ -49,10 +49,11 @@ impl Pending {
         pos: [i32; 3],
         entity: &BlockEntity,
         block: &str,
+        items: &crate::items::Items,
     ) {
         let key = (pos[0], pos[1], pos[2]);
         let name = world.block_names.get(&key).cloned();
-        self.record(pos, entity, block, name, world.block_lock(key));
+        self.record(pos, entity, block, name, world.block_lock(key), items);
     }
     /// Remember what the block entity at `pos` copies into its own drop.
     /// Name and lock live outside the model: snapshot the actual lock before
@@ -64,6 +65,7 @@ impl Pending {
         block: &str,
         name: Option<Tag>,
         lock: Option<&Tag>,
+        items: &crate::items::Items,
     ) {
         if let BlockEntity::Banner(banner) = entity {
             self.banner.insert(pos, banner.clone());
@@ -94,7 +96,7 @@ impl Pending {
         };
         if !include.is_empty() {
             let mut saved =
-                save::block_entity_encode::encode((pos[0], pos[1], pos[2]), entity, block);
+                save::block_entity_encode::encode((pos[0], pos[1], pos[2]), entity, block, items);
             if is_shulker_box(block)
                 && let (Some(lock), Tag::Compound(tag)) = (lock, &mut saved)
             {
@@ -143,7 +145,7 @@ impl Pending {
             .is_some_and(|(item, _)| **item == *stack.item)
             && let Some((_, copied)) = self.copied.remove(&pos)
         {
-            let mut patch = match item_data::encode_components(stack) {
+            let mut patch = match item_data::component_snapshot(stack) {
                 Some(Tag::Compound(c)) => c,
                 _ => Default::default(),
             };
@@ -162,7 +164,7 @@ impl Pending {
                 components,
             }) = self.banner.remove(&pos)
         {
-            let mut patch = match item_data::encode_components(stack) {
+            let mut patch = match item_data::component_snapshot(stack) {
                 Some(Tag::Compound(c)) => c,
                 _ => Default::default(),
             };
@@ -626,7 +628,8 @@ impl GameLevel<'_> {
         if let Some(entity) = self.world.block_entities.get(&key) {
             let entity = entity.clone();
             let block = self.facts.get(state).name.clone();
-            self.pending.record_from(self.world, at, &entity, &block);
+            self.pending
+                .record_from(self.world, at, &entity, &block, self.items);
         } else if let Some(tag) = saved_entity(self.world, [pos.x, pos.y, pos.z]) {
             self.pending.record_saved(at, &tag);
         }
@@ -696,6 +699,7 @@ impl GameLevel<'_> {
                 &self.facts.get(state).name,
                 name,
                 self.world.block_lock(key),
+                self.items,
             );
         } else if let Some(tag) = saved_entity(self.world, at) {
             copied.record_saved(at, &tag);
@@ -1073,6 +1077,7 @@ impl GameLevel<'_> {
                     &mut self.world.random,
                     self.rand_sequences,
                     self.seed,
+                    self.items,
                     sunrise_world::loot::ContainerLootContext::default(),
                 );
                 let mut items = vec![None; slots];
@@ -1484,23 +1489,30 @@ mod tests {
     #[test]
     fn ominous_banner_survives_placement_save_and_drop() {
         let original = raider::ominous_banner();
-        let Tag::Compound(components) = item_data::encode_components(&original).unwrap() else {
+        let Tag::Compound(components) = item_data::component_snapshot(&original).unwrap() else {
             panic!("banner components");
         };
         for block in ["minecraft:white_banner", "minecraft:white_wall_banner"] {
             let pos = (1, 64, 2);
             let fresh = BlockEntity::for_block(block).unwrap();
-            let fresh = save::block_entity_encode::encode(pos, &fresh, block);
+            let fresh = save::block_entity_encode::encode(pos, &fresh, block, &Default::default());
             let placed = block_entity_item::place(&fresh, &components, false);
             let (_, placed) = save::decode_block_entity(&placed).unwrap();
-            let saved = save::block_entity_encode::encode(pos, &placed, block);
+            let saved = save::block_entity_encode::encode(pos, &placed, block, &Default::default());
             let (_, loaded) = save::decode_block_entity(&saved).unwrap();
             let BlockEntity::Banner(banner) = &loaded else {
                 panic!("placed banner");
             };
             assert_eq!(banner.layers.len(), item_data::OMINOUS_LAYERS.len());
             let mut pending = Pending::default();
-            pending.record([pos.0, pos.1, pos.2], &loaded, block, None, None);
+            pending.record(
+                [pos.0, pos.1, pos.2],
+                &loaded,
+                block,
+                None,
+                None,
+                &Default::default(),
+            );
             let mut dropped = ItemStack::new("minecraft:white_banner", 1);
             pending.attach([pos.0, pos.1, pos.2], &mut dropped);
             assert!(dropped.data().unwrap().ominous_banner);
@@ -1514,7 +1526,7 @@ mod tests {
                 "uncommon"
             );
             assert_eq!(
-                item_data::encode_components(&dropped),
+                item_data::component_snapshot(&dropped),
                 Some(Tag::Compound(components.clone()))
             );
         }

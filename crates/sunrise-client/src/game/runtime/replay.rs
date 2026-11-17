@@ -839,6 +839,7 @@ impl Game<'_> {
             &r.builtin,
             &biome_names,
             &registry,
+            self.res.shared_items(),
         );
 
         let mut count = 0;

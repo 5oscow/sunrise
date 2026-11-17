@@ -430,6 +430,7 @@ impl Game<'_> {
                 "vx": hook.velocity.x.to_bits() as i64, "vy": hook.velocity.y.to_bits() as i64,
                 "vz": hook.velocity.z.to_bits() as i64, "nibble": hook.nibble, "next": hook.random.next_long(),
             }));
+            self.hook.retire_extracted(hook.id, hook.join);
         }
         // The client must take the same block hit before moving as the server;
         // otherwise it lands farther away and slides back on the next update.

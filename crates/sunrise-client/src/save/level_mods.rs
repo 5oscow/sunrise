@@ -620,7 +620,7 @@ mod tests {
         .unwrap();
         let mut level = Level::read(&dir).unwrap();
         assert_eq!(level.saved_mods, Some(vec![record("old", "0.1.0")]));
-        level.write(&dir).unwrap();
+        level.write(&dir, &Default::default()).unwrap();
         assert_eq!(
             Level::read(&dir).unwrap().saved_mods,
             Some(vec![record("old", "0.1.0")])

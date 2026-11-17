@@ -326,7 +326,12 @@ fn refresh_ms(ep: &Endpoints, client_id: &str, refresh: &str) -> Result<MsTokens
         ])),
         "Microsoft",
     )?;
-    ms_tokens(status, &v)
+    // A refresh token issued to another app registration (the launcher's client ID changed
+    // since the player signed in) is refused as the client's; only a new sign-in mends it.
+    match v.get("error").and_then(Value::as_str) {
+        Some("invalid_client" | "unauthorized_client") => Err(SIGN_IN_AGAIN.into()),
+        _ => ms_tokens(status, &v),
+    }
 }
 
 // ----- Xbox Live, XSTS, Minecraft ----------------------------------------------------------------
@@ -2351,6 +2356,23 @@ pub struct GameSession {
     pub offline: Option<String>,
     /// The other accounts' sessions, for splitscreen players (`account_sessions`).
     pub env: Vec<(&'static str, String)>,
+}
+
+impl GameSession {
+    /// Gives the game about to start this session: the playing account's file, the other
+    /// accounts' for splitscreen players, and, when it plays offline, why
+    /// (`SUNRISE_OFFLINE_REASON`), which the game shows the player. The reason, for the
+    /// launcher to show as well.
+    pub fn apply(self, cmd: &mut std::process::Command) -> Option<String> {
+        if let Some(file) = self.file {
+            cmd.arg("--session-file").arg(file);
+        }
+        cmd.envs(self.env);
+        if let Some(reason) = &self.offline {
+            cmd.env("SUNRISE_OFFLINE_REASON", reason);
+        }
+        self.offline
+    }
 }
 
 /// The owner gate for the game about to start, then the selected account's session in a file

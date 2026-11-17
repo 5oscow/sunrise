@@ -830,10 +830,28 @@ impl Game<'_> {
     }
 
     pub(super) fn settle_title_toasts(&mut self) {
-        let pending = self.title.as_mut().and_then(|title| {
-            title.poll_backup();
-            title.take_pending_toast()
-        });
+        let pending = self
+            .title
+            .as_mut()
+            .and_then(|title| {
+                title.poll_backup();
+                title.take_pending_toast()
+            })
+            .or_else(|| {
+                // The launcher's "Playing offline" can sit behind this window: say it here too, once
+                // the toast slot is free.
+                let reason = self
+                    .options
+                    .offline_reason
+                    .take_if(|_| self.title.as_ref().is_some_and(|title| !title.has_toast()))?;
+                Some(
+                    sunrise_client::toasts::SystemToast::new(
+                        sunrise_client::text::Text::tr("sunrise.title.playing_offline", &[]),
+                        Some(sunrise_client::text::Text::literal(reason)),
+                    )
+                    .with_display_time(sunrise_client::toasts::SystemToast::LONG_DISPLAY_TIME),
+                )
+            });
         if let Some(toast) = pending.and_then(|toast| self.add_system_toast(toast))
             && let Some(title) = self.title.as_mut()
         {
@@ -1653,7 +1671,7 @@ pub(super) const BLOCK_CONTACT_HOOKS: sunrise_client::block_contact::Hooks =
                 }
             }
         },
-        fall_on: |dimension, level, c, distance, damage, writes| {
+        fall_on: |dimension, level, c, distance, damage_multiplier, writes| {
             HitLevel(level.reborrow()).native_fall_on(
                 crate::game::native_hooks::fire::FallOnCall {
                     dimension,
@@ -1662,7 +1680,7 @@ pub(super) const BLOCK_CONTACT_HOOKS: sunrise_client::block_contact::Hooks =
                     state: c.state,
                     pos: c.position,
                     distance,
-                    damage,
+                    damage_multiplier,
                     writes,
                 },
             );
@@ -4000,6 +4018,7 @@ mod tests {
                     pos,
                     game.world.block_entities.get(&pos).unwrap(),
                     block,
+                    &Default::default(),
                 );
                 assert_eq!(saved.get("energy"), Some(&Tag::Long(6301)));
                 let (saved_pos, restored) =
@@ -4013,6 +4032,7 @@ mod tests {
                     pos,
                     game.world.block_entities.get(&pos).unwrap(),
                     block,
+                    &Default::default(),
                 );
                 assert_eq!(saved.get("energy"), Some(&Tag::Long(6302)));
             }
@@ -4135,7 +4155,8 @@ mod tests {
             assert_eq!(machine.data, [7]);
             assert_ne!(machine.revision(), made);
             assert!(game.world.modified.contains(&(0, 0)));
-            let saved = block_entity_encode::encode(pos, entity, "minecraft:stone");
+            let saved =
+                block_entity_encode::encode(pos, entity, "minecraft:stone", &Default::default());
             let (saved_pos, loaded) = decode_block_entity(&saved).unwrap();
             assert_eq!(saved_pos, pos);
             assert_eq!(loaded.id(), "test:machine");
@@ -5040,7 +5061,7 @@ mod item_fall_on_tests {
                 event.kind.to_owned(),
                 event.pos,
                 event.distance,
-                event.damage,
+                event.damage_multiplier,
             ));
             event.request(mod_api::LandingWrite::DestroyBlock { drop: false });
         }

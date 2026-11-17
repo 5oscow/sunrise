@@ -58,10 +58,14 @@ pub fn main() -> sunrise_client::Result<()> {
                             .iter()
                             .enumerate()
                             .filter_map(|(i, s)| {
-                                Some(format!("{i}={}", canon_stack(Some(s.as_ref()?))))
+                                Some(format!("{i}={}", canon_stack(Some(s.as_ref()?), &items)))
                             })
                             .collect();
-                        format!("{id}\t{}\t{}", canon_stack(Some(&result)), rest.join(";"))
+                        format!(
+                            "{id}\t{}\t{}",
+                            canon_stack(Some(&result), &items),
+                            rest.join(";")
+                        )
                     }
                 }
             }
@@ -76,7 +80,10 @@ pub fn main() -> sunrise_client::Result<()> {
             }) {
                 None => "none".to_owned(),
                 Some((id, result, xp, time)) => {
-                    format!("{id}\t{}\t{xp:?}\t{time}", canon_stack(Some(&result)))
+                    format!(
+                        "{id}\t{}\t{xp:?}\t{time}",
+                        canon_stack(Some(&result), &items)
+                    )
                 }
             },
             "stonecut" => match stack(1)? {
@@ -88,7 +95,7 @@ pub fn main() -> sunrise_client::Result<()> {
                         format!(
                             "{}={}",
                             r.id.trim_start_matches("minecraft:"),
-                            canon_stack(Some(&r.result))
+                            canon_stack(Some(&r.result), &items)
                         )
                     })
                     .collect::<Vec<_>>()
@@ -114,7 +121,7 @@ pub fn main() -> sunrise_client::Result<()> {
                     a.as_ref(),
                 ) {
                     None => "none".to_owned(),
-                    Some(r) => canon_stack(Some(&r)),
+                    Some(r) => canon_stack(Some(&r), &items),
                 }
             }
             "smith" => {
@@ -127,7 +134,7 @@ pub fn main() -> sunrise_client::Result<()> {
                     a.as_ref(),
                 ) {
                     None => "none".to_owned(),
-                    Some(r) => canon_stack(Some(&r)),
+                    Some(r) => canon_stack(Some(&r), &items),
                 }
             }
             other => return Err(format!("unknown command {other}").into()),

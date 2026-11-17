@@ -9,6 +9,26 @@ impl Game<'_> {
         if let Some(r) = self.remote.as_mut() {
             r.use_target = None;
         }
+        if self.uses_stored_pick() {
+            let Some(mod_api::CrosshairTarget::Entity { entity, .. }) = self.crosshair_target()
+            else {
+                return false;
+            };
+            let Some([lo, hi]) = self.entity_bounding_box(entity) else {
+                return false;
+            };
+            let Some(eye) = self.eye_position() else {
+                return false;
+            };
+            // Client interact range: closest box point, strict bound and no server buffer.
+            // Refuse this use without choosing another target or the block behind it.
+            let distance_squared = (0..3)
+                .map(|i| (eye[i] - eye[i].clamp(lo[i], hi[i])).powi(2))
+                .sum::<f64>();
+            if distance_squared >= self.entity_reach.powi(2) {
+                return false;
+            }
+        }
         let sneaking = self.remote_shift_down();
         // A boat, minecart, item frame, armor stand or painting nearer than
         // any mob: the server uses it (AbstractBoat.interact boards it).
