@@ -25,7 +25,7 @@ impl mod_api::CraftingRecipeKind for Kind {
     fn write(&self, value: &u32) -> Result<String, String> {
         Ok(format!("{{\"rest\":{value}}}"))
     }
-    fn matches(&self, _: &u32, grid: CraftingGrid) -> bool {
+    fn matches(&self, _context: &dyn mod_api::LoopContext, _: &u32, grid: CraftingGrid) -> bool {
         if self
             .shape
             .is_some_and(|shape| shape != (grid.width, grid.height))
@@ -40,11 +40,17 @@ impl mod_api::CraftingRecipeKind for Kind {
             }
         })
     }
-    fn assemble(&self, _: &u32, _: CraftingGrid) -> Option<mod_api::ItemStack> {
+    fn assemble(
+        &self,
+        _context: &dyn mod_api::LoopContext,
+        _: &u32,
+        _: CraftingGrid,
+    ) -> Option<mod_api::ItemStack> {
         mod_api::ItemStack::new(self.output, 3)
     }
     fn remaining_items(
         &self,
+        _context: &dyn mod_api::CraftingRemainders,
         value: &u32,
         grid: CraftingGrid,
     ) -> Option<Vec<Option<mod_api::ItemStack>>> {
@@ -184,10 +190,15 @@ impl mod_api::CraftingRecipeKind for EmptyKind {
     fn write(&self, _: &()) -> Result<String, String> {
         Ok("{}".into())
     }
-    fn matches(&self, _: &(), grid: CraftingGrid) -> bool {
+    fn matches(&self, _context: &dyn mod_api::LoopContext, _: &(), grid: CraftingGrid) -> bool {
         grid.width == 2 && grid.height == 2 && grid.cells.iter().all(Option::is_none)
     }
-    fn assemble(&self, _: &(), _: CraftingGrid) -> Option<mod_api::ItemStack> {
+    fn assemble(
+        &self,
+        _context: &dyn mod_api::LoopContext,
+        _: &(),
+        _: CraftingGrid,
+    ) -> Option<mod_api::ItemStack> {
         mod_api::ItemStack::new(self.0, 3)
     }
 }

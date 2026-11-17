@@ -14,7 +14,12 @@ impl CraftingRecipeHandler for Diagonal {
         assert_eq!(value.bytes, [3, 0, 0, 0]);
         Ok(r#"{"count":3}"#.into())
     }
-    fn matches(&self, value: &CraftingRecipeValue, grid: CraftingGrid) -> bool {
+    fn matches(
+        &self,
+        _context: &dyn mod_api::LoopContext,
+        value: &CraftingRecipeValue,
+        grid: CraftingGrid,
+    ) -> bool {
         value.bytes == [3, 0, 0, 0]
             && grid.width == 3
             && grid.height == 3
@@ -24,11 +29,17 @@ impl CraftingRecipeHandler for Diagonal {
                 .enumerate()
                 .all(|(i, c)| c.is_some() == [0, 4, 8].contains(&i))
     }
-    fn assemble(&self, _: &CraftingRecipeValue, _: CraftingGrid) -> Option<mod_api::ItemStack> {
+    fn assemble(
+        &self,
+        _context: &dyn mod_api::LoopContext,
+        _: &CraftingRecipeValue,
+        _: CraftingGrid,
+    ) -> Option<mod_api::ItemStack> {
         mod_api::ItemStack::new(REGISTERED_ITEM.get().unwrap(), 3)
     }
     fn remaining_items(
         &self,
+        _context: &dyn mod_api::CraftingRemainders,
         _: &CraftingRecipeValue,
         _: CraftingGrid,
     ) -> Option<Vec<Option<mod_api::ItemStack>>> {
