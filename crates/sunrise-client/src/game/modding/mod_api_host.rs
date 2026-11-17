@@ -385,6 +385,30 @@ pub(super) fn level_side(level: &impl SidedLevel) -> mod_api::LevelSide<'_> {
 }
 
 impl mod_api::LevelHost for super::GameLevel<'_> {
+    fn block_face_sturdy(
+        &self,
+        pos: [i32; 3],
+        face: mod_api::BlockFace,
+        support: mod_api::SupportType,
+    ) -> Option<bool> {
+        if !self.native_authoritative {
+            return None;
+        }
+        super::native_world_read::block_face_sturdy(
+            self.world,
+            self.behaviours,
+            self.collision,
+            pos,
+            face,
+            support,
+        )
+    }
+    fn can_see_sky(&self, pos: [i32; 3]) -> Option<bool> {
+        if !self.native_authoritative {
+            return None;
+        }
+        super::native_world_read::can_see_sky(self.world, pos)
+    }
     fn block_entity_data(&self, entity: mod_api::BlockEntityRef) -> Option<mod_api::Compound> {
         use mod_api::__private::game::Fields;
         let fields = entity.fields();
@@ -746,6 +770,17 @@ impl<
     T: std::ops::Deref<Target = Ticks>,
 > mod_api::LevelHost for LevelTicks<'b, L, T>
 {
+    fn block_face_sturdy(
+        &self,
+        pos: [i32; 3],
+        face: mod_api::BlockFace,
+        support: mod_api::SupportType,
+    ) -> Option<bool> {
+        mod_api::LevelHost::block_face_sturdy(&*self.level, pos, face, support)
+    }
+    fn can_see_sky(&self, pos: [i32; 3]) -> Option<bool> {
+        mod_api::LevelHost::can_see_sky(&*self.level, pos)
+    }
     fn block_entity_data(&self, entity: mod_api::BlockEntityRef) -> Option<mod_api::Compound> {
         mod_api::LevelHost::block_entity_data(&*self.level, entity)
     }

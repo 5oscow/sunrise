@@ -1327,6 +1327,26 @@ impl TriState {
 /// }
 /// ```
 pub trait LevelHost {
+    /// `BlockState.isFaceSturdy`, through the same engine read as `LevelRef::block_face_sturdy`.
+    /// `canSupportRigidBlock` is `(pos, Up, Rigid)`; `canSupportCenter` is `(pos, face, Center)`.
+    /// Returns None for unloaded or out-of-height positions, on clients, or without a support
+    /// view. Never loads chunks or opens loot containers. Available only on the owning game
+    /// thread, never in worker-thread hook bodies.
+    fn block_face_sturdy(
+        &self,
+        _pos: [i32; 3],
+        _face: crate::BlockFace,
+        _support: crate::SupportType,
+    ) -> Option<bool> {
+        None
+    }
+    /// `LevelReader.canSeeSky`: full stored sky light, as `LevelRef::can_see_sky` reads it.
+    /// Returns None for unloaded or out-of-height positions, on clients, or without a light
+    /// view. Never loads chunks or opens loot containers. Available only on the owning game
+    /// thread, never in worker-thread hook bodies.
+    fn can_see_sky(&self, _pos: [i32; 3]) -> Option<bool> {
+        None
+    }
     /// Read a block entity's saved data without identity metadata from this level.
     /// Stale generations and handles from another level or world return None.
     fn block_entity_data(&self, _entity: crate::BlockEntityRef) -> Option<crate::Compound> {

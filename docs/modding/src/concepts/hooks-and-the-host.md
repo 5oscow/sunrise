@@ -168,6 +168,8 @@ load or reload, and `ClientPacketReceived { integrated_server }` for a client's 
 integrated client, whose server already updated the shared static data. Installing client tags
 announces the bound defaults; it does not rebind those defaults.
 
+`block_face_sturdy(pos, face, support)` reads `BlockState.isFaceSturdy` through the same engine query as the level handle, including dynamic and published shapes. `canSupportRigidBlock` is `(pos, Up, Rigid)` and `canSupportCenter` is `(pos, face, Center)`. `can_see_sky(pos)` tests full stored sky light through the level handle's query. Both return `None` on clients, for unloaded or out-of-height positions, or in a callback without the corresponding view. Neither loads chunks or opens loot containers. They are owning-game-thread reads, not available in worker-thread hook bodies.
+
 Redstone and shape reads on `LevelHost`, for placement and survival: `signal(pos, direction)`
 (`SignalGetter.getSignal`), `direct_signal`, `direct_signal_to`, `best_neighbor_signal(pos)`,
 `has_neighbor_signal(pos)` (what a lamp's or a door's placement reads) and `collision_shape(pos)` (the block's
