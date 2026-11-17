@@ -1,6 +1,7 @@
 //! ContainerOpenersCounter timing, including lost openers.
 #[cfg(test)]
 mod tests {
+    use super::super::Game;
     use mod_api::{Hooks, ModContainerViewersEvent, ModEntry, ServerHost, VanillaGameEventEvent};
     use std::sync::{Arc, Mutex};
     use sunrise_client::containers::{
@@ -146,6 +147,56 @@ mod tests {
                 assert_eq!(notices.lock().unwrap().len(), before_notices);
                 assert_eq!(events.lock().unwrap().len(), before_events);
                 assert!(game.mod_container_viewers.is_empty());
+
+                // If a second player opens the replacement, the first player's stale menu
+                // cannot close it, count on a recheck, or appear in its viewer list.
+                let open = |game: &mut Game<'_>, conn| {
+                    game.lan.as_mut().unwrap().hub.open_container(
+                        conn,
+                        "minecraft:generic_3x3",
+                        Tag::String("box".into()),
+                        pos,
+                        Slots::Block(pos),
+                        vec![None; 9],
+                        None,
+                    );
+                    game.player_menu_opening(conn);
+                };
+                let level = game.level("minecraft:overworld").unwrap();
+                let replacement_viewer = game.player(12).unwrap();
+                for recheck_first in [false, true] {
+                    open(game, 13);
+                    let entity = game.world.block_entities.get(&pos).unwrap().clone();
+                    game.world.block_entities.replace(pos, entity).unwrap();
+                    open(game, 12);
+                    let replacement = game.block_entity(level, [pos.0, pos.1, pos.2]).unwrap();
+                    if recheck_first {
+                        game.world.game_time += 5;
+                        game.tick_mod_container_viewers();
+                        assert_eq!(notices.lock().unwrap().last(), Some(&(1, 1)));
+                        assert_eq!(replacement.viewers(game), Some(vec![replacement_viewer]));
+                    }
+                    let before_notices = notices.lock().unwrap().len();
+                    let before_events = events.lock().unwrap().len();
+                    game.guest_close_all(13);
+                    assert_eq!(
+                        notices.lock().unwrap().len(),
+                        before_notices,
+                        "stale close notified"
+                    );
+                    assert_eq!(
+                        events.lock().unwrap().len(),
+                        before_events,
+                        "stale close emitted an event"
+                    );
+                    assert_eq!(replacement.viewers(game), Some(vec![replacement_viewer]));
+                    game.guest_close_all(12);
+                    assert_eq!(notices.lock().unwrap().last(), Some(&(1, 0)));
+                    assert_eq!(
+                        events.lock().unwrap().last(),
+                        Some(&("minecraft:container_close".into(), Some(12)))
+                    );
+                }
 
                 // Combined menus count each block entity; an ordinary close retains its source.
                 let other = (4, 64, 5);

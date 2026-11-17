@@ -5,12 +5,15 @@
 //! it again. A stock client shows it; nothing on the player's side. A trade
 //! built on these menus moves the items between the players' `ENTITY_ITEMS`
 //! handlers in one transaction, so nothing moves before both sides are settled.
-use super::{Game, lan::LanHost};
+use super::{Game, lan::LanHost, lan_menus::GuestMenus};
 use mod_api::__private::game::*;
 use mod_api::{MenuRef, MenuReplace};
 use sunrise_client::{
     items::ItemStack,
-    lan::{data::component_nbt, menu::NativeMenuEvent},
+    lan::{
+        data::component_nbt,
+        menu::{Menu, NativeMenuEvent, Slots},
+    },
     text::Text,
 };
 
@@ -216,16 +219,34 @@ impl Game<'_> {
     }
 }
 
-/// A menu a player has open, as the mods last heard it
-/// (`native_player_container_open`).
+type ContainerPos = (i32, i32, i32);
+
+/// A menu the player opened, including the block entity instances it opened.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct HeardMenu {
+    window: i32,
     /// The menu type's name; a mount's inventory has none in vanilla.
     menu: String,
     /// The block the menu is of.
     pos: Option<[i32; 3]>,
-    /// Both block entities of a combined container, retained until removed.
-    openers: [Option<(i32, i32, i32)>; 2],
+    /// Each position and its generation when the menu opened; combined menus hold both halves.
+    openers: [Option<(ContainerPos, u64)>; 2],
+}
+
+impl GuestMenus {
+    pub(super) fn menu_holds(
+        &self,
+        menu: Option<&Menu>,
+        pos: ContainerPos,
+        generation: u64,
+    ) -> bool {
+        self.menu_heard
+            .as_ref()
+            .zip(menu)
+            .is_some_and(|(opened, live)| {
+                opened.window == live.window && opened.openers.contains(&Some((pos, generation)))
+            })
+    }
 }
 
 /// What a mount's inventory is called, as vanilla's `HorseInventoryMenu` has
@@ -282,14 +303,31 @@ impl Game<'_> {
         let Some(host) = self.lan.as_mut() else {
             return;
         };
-        let Some((_, menu, pos)) = open_menu_of(host, conn) else {
+        let Some((window, menu, pos)) = open_menu_of(host, conn) else {
             return;
         };
-        let openers = host.hub.guest(conn).and_then(|g| g.menu.as_ref()).map_or(
-            [None; 2],
-            super::native_block_entity_refs::menu_container_positions,
-        );
+        let openers = host
+            .hub
+            .guest(conn)
+            .and_then(|g| g.menu.as_ref())
+            .map_or([None; 2], |m| {
+                let positions = match m.slots {
+                    Slots::Block(at) => [Some(at), None],
+                    Slots::Double(first, second) => [Some(first), Some(second)],
+                    Slots::Ender => [m.pos, None],
+                    Slots::Native => [None; 2],
+                };
+                positions.map(|pos| {
+                    pos.and_then(|pos| {
+                        self.world
+                            .block_entities
+                            .generation(&pos)
+                            .map(|generation| (pos, generation))
+                    })
+                })
+            });
         let menu = HeardMenu {
+            window,
             menu: menu.to_owned(),
             pos,
             openers,
@@ -321,7 +359,7 @@ impl Game<'_> {
         let heard = mod_api::__private::listened(hook);
         let openers = menu
             .openers
-            .map(|pos| pos.filter(|&pos| self.mod_menu_at(pos).is_some()));
+            .map(|opener| opener.filter(|&(pos, _)| self.mod_menu_at(pos).is_some()));
         if !heard && openers == [None; 2] {
             return;
         }
@@ -332,8 +370,8 @@ impl Game<'_> {
         let name = heard.then(|| guest.name.clone());
         let dimension = self.dim.id();
         self.player_hook(conn, move |g| {
-            for pos in openers.into_iter().flatten() {
-                g.mod_container_player_opener(pos, open);
+            for (pos, generation) in openers.into_iter().flatten() {
+                g.mod_container_player_opener_for(pos, open, Some(generation));
             }
             if let Some(name) = name {
                 if open {

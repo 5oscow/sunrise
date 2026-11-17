@@ -13,7 +13,9 @@ after the first open, then every five ticks while open; these rechecks report
 counts even when unchanged. Open and close callbacks can therefore occur in the
 same tick. The player is in place during their open or close callback; a recheck
 has no acting player. Removing or replacing the block entity drops its pending
-recheck without a viewer notice or a game event.
+recheck without a viewer notice or a game event. A guest's open menu belongs to
+that block entity instance, not its position: closing or rechecking the old menu
+does not affect a replacement's count or viewer list.
 
 A zero-to-positive transition posts `minecraft:container_open`; a
 positive-to-zero transition posts `minecraft:container_close`. The opening or

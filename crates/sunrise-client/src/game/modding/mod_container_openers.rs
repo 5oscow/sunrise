@@ -1,5 +1,5 @@
 //! The server's ContainerOpenersCounter for declared mod containers.
-use super::{Game, native_block_entity_refs::menu_holds};
+use super::Game;
 use sunrise_client::mobs::{Species, Who};
 use sunrise_core::geometry::{Aabb, Vec3};
 
@@ -15,11 +15,20 @@ pub(super) struct ModContainerOpeners {
 impl Game<'_> {
     /// startOpen/stopOpen, with the opening player's body in place.
     pub(super) fn mod_container_player_opener(&mut self, pos: Pos, open: bool) {
+        self.mod_container_player_opener_for(pos, open, None);
+    }
+
+    pub(super) fn mod_container_player_opener_for(
+        &mut self,
+        pos: Pos,
+        open: bool,
+        bound: Option<u64>,
+    ) {
         if self.spectator() {
             return;
         }
         let range = self.interaction_range("minecraft:block_interaction_range", 4.5, 5.0);
-        self.mod_container_opener(pos, open, Some(Who::Player), range);
+        self.change_mod_container_openers(pos, open, Some(Who::Player), range, bound);
     }
 
     pub(super) fn mod_container_opener(
@@ -29,9 +38,23 @@ impl Game<'_> {
         source: Option<Who>,
         range: f64,
     ) {
+        self.change_mod_container_openers(pos, open, source, range, None);
+    }
+
+    fn change_mod_container_openers(
+        &mut self,
+        pos: Pos,
+        open: bool,
+        source: Option<Who>,
+        range: f64,
+        bound: Option<u64>,
+    ) {
         let Some(generation) = self.mod_container_generation(pos) else {
             return;
         };
+        if bound.is_some_and(|opened| opened != generation) {
+            return;
+        }
         let key = (self.dim.id(), pos);
         if self
             .mod_container_viewers
@@ -130,11 +153,14 @@ impl Game<'_> {
             let mut count = 0;
             let mut next_range: f64 = 0.0;
             if let Some(host) = &mut self.lan {
+                let menus = &host.menus;
                 host.hub.guests.update_all(|g| {
                     if g.placed_in(dim)
                         && !g.spectator()
                         && g.bounds().intersects(area)
-                        && g.menu.as_ref().is_some_and(|menu| menu_holds(menu, pos))
+                        && menus
+                            .get(&g.conn)
+                            .is_some_and(|m| m.menu_holds(g.menu.as_ref(), pos, generation))
                     {
                         count += 1;
                         let fallback = if g.creative() { 5.0 } else { 4.5 };
