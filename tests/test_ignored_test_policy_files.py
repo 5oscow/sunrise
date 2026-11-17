@@ -202,6 +202,16 @@ class PolicyFiles(unittest.TestCase):
             self.assertEqual(ignored_tests.run_prebuilt(str(built) + ".missing", ["-p", "pkg", "--lib"]), 101)
         self.assertEqual(ran, [("pkg", {"test:it": "/t/it-2"}, ["x"])])
         self.assertIn("no test executable for pkg test:gone", log.getvalue())
+        # A filter that matched no test (renamed, or behind a feature the build left off) fails, naming it.
+        with patch.object(ignored_tests, "run_binaries", lambda *args: subprocess.CompletedProcess(
+                [], 0, "running 0 tests\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out\n")), \
+                contextlib.redirect_stdout(io.StringIO()) as log:
+            self.assertEqual(ignored_tests.run_prebuilt(str(built), ["-p", "pkg", "--lib", "--", "guest_pool_"]), 101)
+        self.assertIn("no test of pkg lib ran with guest_pool_", log.getvalue())
+        with patch.object(ignored_tests, "run_binaries", lambda *args: subprocess.CompletedProcess(
+                [], 0, "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out\n")), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(ignored_tests.run_prebuilt(str(built), ["-p", "pkg", "--lib", "--", "guest_pool_"]), 0)
 
 
 if __name__ == "__main__":

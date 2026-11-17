@@ -386,6 +386,14 @@ def run_prebuilt(path, arguments):
         return 101
     done = run_binaries(package, {target: built[package, target] for target in targets}, rest, dict(os.environ))
     print(done.stdout, end="", flush=True)
+    # A filter that matches nothing passes in libtest: a test renamed, or behind a feature the workspace build left
+    # off, would vanish and leave the step green.
+    ran = sum(int(found[1]) + int(found[2]) for found in re.finditer(r"^test result: \w+\. (\d+) passed; (\d+) failed;",
+                                                                       done.stdout, re.M))
+    if not ran:
+        print(f"error: no test of {package} {' '.join(targets)} ran with {shlex.join(rest) or '(no arguments)'}",
+              flush=True)
+        return 101
     return done.returncode
 
 
