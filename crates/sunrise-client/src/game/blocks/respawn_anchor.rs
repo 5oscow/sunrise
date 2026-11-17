@@ -468,6 +468,11 @@ impl Game<'_> {
     /// `Block.isPossibleToRespawnInThis`: neither solid nor liquid; banners,
     /// signs and pressure plates override it to always.
     fn possible_to_respawn_in(&self, state: BlockStateId) -> bool {
+        let mut answer = None;
+        self.native_is_possible_to_respawn_in(state, &mut answer);
+        if let Some(answer) = answer {
+            return answer;
+        }
         let f = self.res.facts().get(state);
         let name = &*f.name;
         let liquid = self.res.behaviours().facts(state).flags & state_flags::LIQUID != 0;
@@ -897,6 +902,66 @@ mod connected_spawnpoint_rotation_tests {
 #[cfg(test)]
 mod pitch_preservation_controls {
     use super::*;
+
+    #[test]
+    #[ignore = "daily"]
+    fn forced_respawn_checks_parts_for_both_cells() {
+        use mod_api::{BlockPart, Hooks, Host, IsPossibleToRespawnInEvent, Registrar};
+        struct Space(bool);
+        #[mod_api::sunrise_part]
+        impl BlockPart for Space {
+            fn is_possible_to_respawn_in(
+                &self,
+                _: &dyn Host,
+                _: &mut IsPossibleToRespawnInEvent,
+            ) -> Option<bool> {
+                Some(self.0)
+            }
+        }
+        struct Parts;
+        #[mod_api::__subscriptions]
+        impl Hooks for Parts {
+            fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
+                let stone = r.block_key("minecraft:stone");
+                r.block_part(stone, Space(true));
+                let air = r.block_key("minecraft:air");
+                r.block_part(air, Space(false));
+            }
+        }
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new("space", Box::new(Parts))].into();
+        crate::game::api_values::install_parts(&mods).unwrap();
+        mod_platform::testing::with_mods(mods, || {
+            crate::game::native_entity_refs::tests::with_game(|game| {
+                let registry = game.pack.assets.registry;
+                let stone = registry.default_state("minecraft:stone").unwrap();
+                let air = registry.default_state("minecraft:air").unwrap();
+                let glass = registry.default_state("minecraft:glass").unwrap();
+                // Parts can accept solid space and reject normally empty space.
+                assert!(game.possible_to_respawn_in(stone));
+                assert!(!game.possible_to_respawn_in(air));
+                assert!(!game.possible_to_respawn_in(glass));
+                game.world.chunks.insert(
+                    (0, 0),
+                    std::sync::Arc::new(sunrise_client::chunk::Chunk::empty(0, 0)),
+                );
+                game.world.set(5, 64, 5, stone).unwrap();
+                game.world.set(5, 65, 5, stone).unwrap();
+                let config = RespawnConfig {
+                    dim: Dim::Overworld,
+                    pos: [5, 64, 5],
+                    yaw: 45.0,
+                    pitch: 10.0,
+                    forced: true,
+                };
+                assert!(game.find_respawn_and_use(config, false).unwrap().is_some());
+                game.world.set(5, 65, 5, air).unwrap();
+                assert!(game.find_respawn_and_use(config, false).unwrap().is_none());
+                game.world.set(5, 65, 5, stone).unwrap();
+                game.world.set(5, 64, 5, air).unwrap();
+                assert!(game.find_respawn_and_use(config, false).unwrap().is_none());
+            });
+        });
+    }
 
     #[test]
     fn wrapped_existing_callers_default_to_positive_zero_pitch() {
