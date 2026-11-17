@@ -95,6 +95,9 @@ pub struct ChunkTicks {
     queue: Heap<ScheduledTick>,
     pending: Option<Vec<SavedTick>>,
     positions: FxHashSet<(TickTypeId, BlockPos)>,
+    // Held occurrences are still scheduled, but don't occupy the runnable heap.
+    // Several occurrences at one key may have come from a saved list.
+    held: FxHashMap<(TickTypeId, BlockPos), Vec<ScheduledTick>>,
 }
 impl ChunkTicks {
     pub fn from_saved(ticks: Vec<SavedTick>) -> Self {
@@ -134,21 +137,47 @@ impl ChunkTicks {
     }
     /// First schedule wins for a type/position, irrespective of timing/priority.
     pub fn schedule(&mut self, tick: ScheduledTick) -> bool {
-        if !self.positions.insert(tick.key()) {
+        if self.held.contains_key(&tick.key()) || !self.positions.insert(tick.key()) {
             return false;
         }
         self.queue.push(tick, ScheduledTick::drain_cmp);
         true
     }
+    fn hold(&mut self, tick: ScheduledTick) {
+        self.held.entry(tick.key()).or_default().push(tick);
+    }
+    fn release_where(&mut self, can_run: &mut impl FnMut(ScheduledTick) -> bool) {
+        self.held.retain(|&key, occurrences| {
+            occurrences.retain(|&tick| {
+                if !can_run(tick) {
+                    return true;
+                }
+                // Restore this occurrence, never apply new-schedule deduplication.
+                self.positions.insert(key);
+                self.queue.push(tick, ScheduledTick::drain_cmp);
+                false
+            });
+            !occurrences.is_empty()
+        });
+        if self.held.is_empty() {
+            self.held = FxHashMap::default();
+        }
+    }
     pub fn has_scheduled(&self, pos: BlockPos, kind: TickTypeId) -> bool {
-        self.positions.contains(&(kind, pos))
+        let key = (kind, pos);
+        self.positions.contains(&key) || self.held.contains_key(&key)
     }
     pub fn count(&self) -> usize {
-        self.queue.values.len() + self.pending.as_ref().map_or(0, Vec::len)
+        self.queue.values.len()
+            + self.pending.as_ref().map_or(0, Vec::len)
+            + self.held.values().map(Vec::len).sum::<usize>()
     }
     /// Heap traversal order, as exposed by vanilla getAll, rather than sorted order.
     pub fn queued(&self) -> &[ScheduledTick] {
         &self.queue.values
+    }
+    fn held(&self) -> impl Iterator<Item = &ScheduledTick> {
+        self.held.values().flatten()
     }
     pub fn remove_if(&mut self, mut predicate: impl FnMut(ScheduledTick) -> bool) {
         self.queue.remove_if(
@@ -161,11 +190,19 @@ impl ChunkTicks {
             },
             ScheduledTick::drain_cmp,
         );
+        self.held.retain(|_, occurrences| {
+            occurrences.retain(|&tick| !predicate(tick));
+            !occurrences.is_empty()
+        });
+        if self.held.is_empty() {
+            self.held = FxHashMap::default();
+        }
         self.trim();
     }
     pub fn pack(&self, game_time: i64) -> Vec<SavedTick> {
         let mut saved = self.pending.clone().unwrap_or_default();
         let mut queued = self.queue.values.clone();
+        queued.extend(self.held().copied());
         queued.sort_by_key(|t| t.sub_tick_order);
         saved.extend(queued.into_iter().map(|t| t.saved(game_time)));
         saved
@@ -346,6 +383,46 @@ mod tests {
         level.finish_tick().unwrap();
     }
     #[test]
+    fn holding_loaded_duplicates_keeps_both_occurrences_and_their_order() {
+        let pos = ChunkPos::new(0, 0);
+        let first = tick(0, 0, 10, -2, -2);
+        let second = tick(0, 0, 10, -1, -1);
+        let saved = vec![first.saved(10), second.saved(10)];
+        let mut level = LevelTicks::default();
+        level
+            .add_chunk(pos, ChunkTicks::from_saved(saved.clone()))
+            .unwrap();
+        level.unpack_chunk(pos, 10);
+
+        for _ in 0..3 {
+            level.begin_tick_where(10, 1, |_| true, |_| false).unwrap();
+            assert_eq!(level.next_tick().unwrap(), None);
+            level.finish_tick().unwrap();
+            assert_eq!(level.count(), 2);
+            assert_eq!(level.chunk(pos).unwrap().pack(10), saved);
+            assert_eq!(level.schedule(first), ScheduleResult::Duplicate);
+        }
+
+        // A switch during the phase must park the next occurrence without recording a run.
+        level.begin_tick(10, 2, |_| true).unwrap();
+        assert_eq!(level.peek_next_tick(), Some(first));
+        assert!(level.hold_next_tick());
+        assert_eq!(level.peek_next_tick(), Some(second));
+        assert!(level.hold_next_tick());
+        assert_eq!(
+            level.area_ticks(TickArea::new(first.pos, first.pos)).len(),
+            2
+        );
+        level.finish_tick().unwrap();
+
+        let mut ran = Vec::new();
+        level
+            .tick(10, 2, |_| true, |_, occurrence| ran.push(occurrence))
+            .unwrap();
+        assert_eq!(ran, [first, second]);
+        assert_eq!(level.count(), 0);
+    }
+    #[test]
     fn collection_guards_and_membership_survive_area_mutation() {
         let mut level = level();
         level.schedule(tick(0, 0, 0, 0, 0));
@@ -430,6 +507,7 @@ impl std::error::Error for TickError {}
 pub struct LevelTicks {
     chunks: FxHashMap<i64, ChunkTicks>,
     deadlines: DeadlineIndex,
+    held_chunks: FxHashSet<i64>,
     containers_to_tick: Heap<i64>,
     to_run: VecDeque<ScheduledTick>,
     already_run: Vec<ScheduledTick>,
@@ -442,7 +520,11 @@ impl LevelTicks {
         if self.chunks.contains_key(&key) {
             return Err(TickError::ChunkAlreadyAdded);
         }
-        if ticks.queue.values.iter().any(|t| t.pos.chunk() != pos)
+        if ticks
+            .queued()
+            .iter()
+            .chain(ticks.held())
+            .any(|t| t.pos.chunk() != pos)
             || ticks
                 .pending
                 .as_ref()
@@ -453,12 +535,17 @@ impl LevelTicks {
         if let Some(tick) = ticks.peek() {
             self.deadlines.put(key, tick.trigger_tick);
         }
+        if !ticks.held.is_empty() {
+            self.held_chunks.insert(key);
+        }
         self.chunks.insert(key, ticks);
         Ok(())
     }
     pub fn remove_chunk(&mut self, pos: ChunkPos) -> Option<ChunkTicks> {
-        self.deadlines.remove(pos.pack());
-        self.chunks.remove(&pos.pack())
+        let key = pos.pack();
+        self.deadlines.remove(key);
+        self.held_chunks.remove(&key);
+        self.chunks.remove(&key)
     }
     pub fn chunk(&self, pos: ChunkPos) -> Option<&ChunkTicks> {
         self.chunks.get(&pos.pack())
@@ -520,6 +607,20 @@ impl LevelTicks {
         self.collecting = true;
         let mut containers = std::mem::take(&mut self.containers_to_tick);
         let chunks = &mut self.chunks;
+        // Only chunks with parked ticks need rechecking. A still-held occurrence stays
+        // where it is rather than cycling through the heap and deadline index each phase.
+        self.held_chunks.retain(|key| {
+            if !can_tick(ChunkPos::unpack(*key)) {
+                return true;
+            }
+            let chunk = chunks.get_mut(key).unwrap();
+            let old = chunk.peek();
+            chunk.release_where(&mut can_run);
+            if let Some(head) = chunk.peek().filter(|head| Some(*head) != old) {
+                self.deadlines.put(*key, head.trigger_tick);
+            }
+            !chunk.held.is_empty()
+        });
         let compare = |a: i64, b: i64| {
             chunks[&a]
                 .peek()
@@ -544,7 +645,6 @@ impl LevelTicks {
             true
         });
         let maximum = maximum.max(0) as usize;
-        let mut held = Vec::new();
         while self.to_run.len() < maximum {
             let Some(key) = containers.pop(|a, b| {
                 self.chunks[&a]
@@ -554,29 +654,24 @@ impl LevelTicks {
             }) else {
                 break;
             };
-            let chunk = self.chunks.get_mut(&key).unwrap();
-            let tick = chunk.poll().unwrap();
-            if can_run(tick) {
-                self.to_run.push_back(tick);
-            } else {
-                held.push(tick);
-            }
             let competing = containers.peek().and_then(|key| self.chunks[&key].peek());
             let chunk = self.chunks.get_mut(&key).unwrap();
-            while self.to_run.len() < maximum {
-                let Some(head) = chunk.peek() else {
-                    break;
-                };
-                if head.trigger_tick > game_time
-                    || competing.is_some_and(|other| head.intra_cmp(other) == Ordering::Greater)
-                {
-                    break;
-                }
+            loop {
                 let tick = chunk.poll().unwrap();
                 if can_run(tick) {
                     self.to_run.push_back(tick);
                 } else {
-                    held.push(tick);
+                    chunk.hold(tick);
+                    self.held_chunks.insert(key);
+                }
+                if self.to_run.len() == maximum
+                    || chunk.peek().is_none_or(|head| {
+                        head.trigger_tick > game_time
+                            || competing
+                                .is_some_and(|other| head.intra_cmp(other) == Ordering::Greater)
+                    })
+                {
+                    break;
                 }
             }
             if let Some(head) = chunk.peek() {
@@ -598,10 +693,27 @@ impl LevelTicks {
         }
         containers.values.clear();
         self.containers_to_tick = containers;
-        for tick in held {
-            self.schedule(tick);
-        }
         Ok(())
+    }
+    /// Inspect the next collected tick without counting it as run.
+    pub fn peek_next_tick(&self) -> Option<ScheduledTick> {
+        self.to_run.front().copied()
+    }
+    /// Park a collected tick that became held after collection. If its chunk was
+    /// removed, leave it in the usual collected queue for the caller to handle.
+    pub fn hold_next_tick(&mut self) -> bool {
+        let Some(tick) = self.peek_next_tick() else {
+            return false;
+        };
+        let key = tick.pos.chunk().pack();
+        let Some(chunk) = self.chunks.get_mut(&key) else {
+            return false;
+        };
+        chunk.hold(tick);
+        self.held_chunks.insert(key);
+        self.to_run.pop_front();
+        self.to_run_set.remove(&tick.key());
+        true
     }
     /// Pop immediately before invoking block/fluid behavior. The current tick is
     /// already-run, absent from will_tick, and available to area copying.
@@ -685,6 +797,9 @@ impl LevelTicks {
             let chunk = self.chunks.get_mut(&key).unwrap();
             let old = chunk.peek();
             chunk.remove_if(|tick| area.contains(tick.pos));
+            if chunk.held.is_empty() {
+                self.held_chunks.remove(&key);
+            }
             if chunk.peek() != old {
                 if let Some(tick) = chunk.peek() {
                     self.deadlines.put(key, tick.trigger_tick);
@@ -710,6 +825,7 @@ impl LevelTicks {
                 self.chunks[&key]
                     .queued()
                     .iter()
+                    .chain(self.chunks[&key].held())
                     .copied()
                     .filter(|t| area.contains(t.pos)),
             );
