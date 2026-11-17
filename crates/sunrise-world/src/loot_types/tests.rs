@@ -128,6 +128,41 @@ fn pack_predicates_bind_for_validation_and_world_evaluation() {
 }
 
 #[test]
+fn conditional_function_with_null_condition_loads_and_applies() {
+    let root = std::env::temp_dir().join(format!("sunrise-null-function-{}", std::process::id()));
+    let dir = root.join("data/test/loot_table");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(root.join("items.json"), "{}").unwrap();
+    std::fs::write(
+        dir.join("root.json"),
+        json!({"pools":[{
+            "rolls":1,"entries":[{"type":"minecraft:item","name":"minecraft:stick",
+                "modifier":{"type":"minecraft:set_count","count":7,"condition":null}}]
+        }]})
+        .to_string(),
+    )
+    .unwrap();
+    let data = crate::loot::LootData::load_with_types(
+        &root,
+        &crate::loot::PackOverlay::NONE,
+        &crate::item_defaults::read(&root).unwrap(),
+        Types::default(),
+    )
+    .unwrap();
+    let output = data.roll(
+        "test:root",
+        &mut sunrise_core::random::LegacyRandom::new(1),
+        0.0,
+        None,
+        None,
+    );
+    assert_eq!(output.len(), 1);
+    assert_eq!(output[0].item, "minecraft:stick");
+    assert_eq!(output[0].count, 7);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn selecting_a_pack_never_falls_back_from_malformed_winning_loot_data() {
     let root = std::env::temp_dir().join(format!("sunrise-codec-selection-{}", std::process::id()));
     std::fs::create_dir_all(root.join("data/test/predicate")).unwrap();
