@@ -167,7 +167,8 @@ fn may_read_entity_nbt(value: &Value) -> bool {
         }
 }
 
-/// Entity getters include intrinsic empty custom data even when it was not saved.
+/// `Entity.get`: the base entity's `custom_data` (intrinsic and empty when not saved) and
+/// `custom_name`, then the entity type's own components, read from its saved NBT.
 pub fn entity_components(entity: &super::LootEntity) -> Cow<'_, Compound> {
     let mut components = entity.components.clone();
     components
@@ -185,6 +186,11 @@ pub fn entity_components(entity: &super::LootEntity) -> Cow<'_, Compound> {
         components
             .entry("minecraft:custom_name".into())
             .or_insert_with(|| name.clone());
+    }
+    if let Some(nbt) = entity.nbt.as_deref() {
+        for (id, value) in crate::entity_components::type_components(&entity.kind, nbt) {
+            components.entry(id).or_insert(value);
+        }
     }
     Cow::Owned(components)
 }

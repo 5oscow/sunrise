@@ -6758,26 +6758,7 @@ fn restore_axolotl_memories(m: &mut Mob, tag: &Tag) {
         }
     }
 }
-/// `Axolotl.Variant` names, by id.
-pub const AXOLOTL_VARIANTS: [&str; 5] = ["lucy", "wild", "gold", "cyan", "blue"];
-/// `Salmon.Variant` names, by id.
-const SALMON_SIZES: [&str; 3] = ["small", "medium", "large"];
-/// `TropicalFish.Pattern` names in enum order: the six small patterns, then
-/// the six large ones (the order of `extra.variant`).
-pub const TROPICAL_PATTERNS: [&str; 12] = [
-    "kob",
-    "sunstreak",
-    "snooper",
-    "dasher",
-    "brinely",
-    "spotty",
-    "flopper",
-    "stripey",
-    "glitter",
-    "blockfish",
-    "betty",
-    "clayfish",
-];
+pub use sunrise_world::entity_components::{AXOLOTL_VARIANTS, SALMON_SIZES, TROPICAL_PATTERNS};
 /// `Bucketable.saveDefaultDataToBucketTag`, with the age an axolotl and a
 /// tadpole add (`saveToBucketTag`).
 pub fn bucket_data(m: &Mob) -> Tag {

@@ -1,0 +1,1 @@
+sunrise-client-lib mobs::drops::death_loot_table_tests::copy_components_from_this_copies_a_cats_variant_and_a_sheeps_colour lib daily resources

@@ -912,6 +912,80 @@ mod death_loot_table_tests {
         assert!(items(0, false).iter().all(|i| i != "minecraft:diamond"));
     }
 
+    /// `Entity.get`: a killed cat's and sheep's own components (variant, colour)
+    /// reach a `copy_components` from `this`, read from the saved entity.
+    #[test]
+    #[ignore = "daily"]
+    fn copy_components_from_this_copies_a_cats_variant_and_a_sheeps_colour() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/sunrise-client")
+            .join(sunrise_core::VANILLA_VERSION);
+        let table = br#"{"type":"minecraft:entity","pools":[{"rolls":1,"entries":[
+            {"type":"minecraft:item","name":"minecraft:stone","functions":[
+            {"function":"minecraft:copy_components","source":"this",
+             "include":["minecraft:cat/variant","minecraft:sheep/color"]}]}]}]}"#;
+        let packs = [("loot_table/pack:copy".to_owned(), vec![table.to_vec()])];
+        let defaults = sunrise_world::item_defaults::read(&root).unwrap();
+        let loot = LootData::load(&root, &PackOverlay::new(&packs), &defaults).unwrap();
+        assert!(loot.copies_entity_nbt());
+        let types = crate::mobs::MobTypes::load(&root).unwrap().types;
+        let drop_of = |id: &str, setup: &dyn Fn(&mut Mob)| {
+            let mut m = Mob::new(
+                1,
+                std::sync::Arc::new(types[id].clone()),
+                sunrise_core::geometry::Vec3::ZERO,
+                0.0,
+            );
+            setup(&mut m);
+            m.extra.death_loot_table = Some("pack:copy".into());
+            let nbt = crate::entity_nbt::mob_to_nbt(
+                &m,
+                [0; 4],
+                None,
+                None,
+                |_| None,
+                &Default::default(),
+            );
+            let death = Death {
+                loot: &loot,
+                this_nbt: Some(std::sync::Arc::new(nbt)),
+                damage: None,
+                player: None,
+                player_killed: false,
+                luck: 0.0,
+                vehicle: None,
+                mob_drops: true,
+                world_seed: 0,
+            };
+            let (out, _) = die(
+                &mut m,
+                &death,
+                &mut RandomSequences::default(),
+                &mut LegacyRandom::new(7),
+            );
+            out.into_iter()
+                .find_map(|d| match d {
+                    Drop::Stack(s) => Some(s),
+                    _ => None,
+                })
+                .expect("the table's stone")
+        };
+        let cat = drop_of("minecraft:cat", &|m| {
+            m.extra.variant = crate::mobs::finalize::variant_index(Species::Cat, "calico");
+        });
+        let data = cat.data().unwrap();
+        assert_eq!(
+            data.other("minecraft:cat/variant"),
+            Some(&sunrise_core::nbt::Tag::String("minecraft:calico".into()))
+        );
+        assert!(data.other("minecraft:sheep/color").is_none());
+        let sheep = drop_of("minecraft:sheep", &|m| m.extra.color = 11);
+        assert_eq!(
+            sheep.data().unwrap().other("minecraft:sheep/color"),
+            Some(&sunrise_core::nbt::Tag::String("blue".into()))
+        );
+    }
+
     /// A listener of `enchanted_entity_loot` draws from the level's random in
     /// the middle of a roll on that random: the roll carries on after its
     /// draw, as vanilla's one shared random does.
