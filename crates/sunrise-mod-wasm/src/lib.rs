@@ -533,11 +533,9 @@ pub fn load_installed(
                 refused.push((selected.package.manifest.id, Refusal::Package(reason)));
                 return None;
             }
-            // The package opens once, here: its runtime files are checked with its module.
-            match selected.package.wasm(&selected.path).and_then(|module| {
-                selected.package.read_runtime(&selected.path)?;
-                Ok(module)
-            }) {
+            // The runtime files are checked once, by the game's `runtime_files::sources`, which
+            // keeps the bytes it serves.
+            match selected.package.wasm(&selected.path) {
                 Ok(module) => Some(WasmPackage {
                     manifest: selected.package.manifest,
                     module,

@@ -577,6 +577,7 @@
   "sunrise.mods.missing": "Install these mods to join:\n%s",
   "sunrise.mods.not_built": " (Not built)",
   "sunrise.mods.open_folder": "Open Mods Folder",
+  "sunrise.mods.runtime": "%s (its runtime files differ from this server's)",
   "sunrise.mods.screen.authors": "Authors: %s",
   "sunrise.mods.screen.config": "Config",
   "sunrise.mods.screen.copy_id": "Click to copy mod ID",

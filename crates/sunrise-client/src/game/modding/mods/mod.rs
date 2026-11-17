@@ -4,6 +4,7 @@
 //! or wasm (`sunrise-mod-wasm`, loaded at startup); any other executable file is refused.
 use super::{Game, execution_role::ExecutionRole, registration_capability_coverage as coverage};
 mod menu_books;
+pub(in crate::game) mod runtime_files;
 mod standalone;
 use mod_api::__private::game::*;
 use mod_api::RegistrationContext;
@@ -224,7 +225,10 @@ fn builtin_registry_names(root: &Path) -> sunrise_client::Result<BTreeMap<String
 }
 
 /// Capture registration's stable registries, settings and stock capability type owners.
-pub(super) fn install_registration_data(root: &Path) -> sunrise_client::Result<()> {
+pub(super) fn install_registration_data(
+    root: &Path,
+    runtime_files: BTreeMap<String, Arc<dyn mod_api::RuntimeFileSource>>,
+) -> sunrise_client::Result<()> {
     let packages = mod_api::__private::loaded_mods();
     let directory = Game::game_dir();
     #[cfg(unix)]
@@ -247,7 +251,8 @@ pub(super) fn install_registration_data(root: &Path) -> sunrise_client::Result<(
             directory,
             crate::entry::runtime_environment::get().clone(),
         )
-        .with_capability_coverage(coverage::builtin, coverage::block_entity),
+        .with_capability_coverage(coverage::builtin, coverage::block_entity)
+        .with_runtime_files(runtime_files),
     );
     Ok(())
 }
@@ -731,7 +736,15 @@ pub(super) fn content_overlay(
             .native
             .built()
             .iter()
-            .map(|m| announced_entry(m.id, m.version, m.side))
+            .map(|m| {
+                let runtime = sources
+                    .native
+                    .packages()
+                    .iter()
+                    .find(|p| p.manifest.id == m.id)
+                    .and_then(|p| p.manifest.runtime.as_ref());
+                announced_entry(m.id, m.version, m.side, runtime)
+            })
             .collect()
     } else {
         Vec::new()
@@ -821,7 +834,12 @@ pub(super) fn content_overlay(
                     version: m.version.clone(),
                 });
                 if announce {
-                    announced.push(announced_entry(&m.id, &m.version, m.side));
+                    announced.push(announced_entry(
+                        &m.id,
+                        &m.version,
+                        m.side,
+                        m.runtime.as_ref(),
+                    ));
                 }
             }
             Ok(_) => {}
@@ -1215,6 +1233,7 @@ fn announced_entry(
     id: &str,
     version: &str,
     side: mod_api::Side,
+    runtime: Option<&sunrise_mod_package::manifest::RuntimeTable>,
 ) -> sunrise_protocol::mod_list::Entry {
     use mod_api::Side;
     use sunrise_protocol::mod_list;
@@ -1227,6 +1246,7 @@ fn announced_entry(
             // `Side` is open to new kinds; until the list carries one, such a mod stays local.
             _ => mod_list::Side::Client,
         },
+        runtime: runtime.map(sunrise_mod_package::manifest::RuntimeTable::digest),
     }
 }
 

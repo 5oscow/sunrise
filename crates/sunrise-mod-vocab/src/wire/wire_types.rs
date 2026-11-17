@@ -264,20 +264,25 @@ impl Wire for crate::LoadedMods {
     }
 }
 impl Wire for crate::RegistrationContext {
-    const LAYOUT_SEED: u64 = crate::wire::layout_seed("RegistrationContext.runtime.startup.v3");
+    const LAYOUT_SEED: u64 =
+        crate::wire::layout_seed("RegistrationContext.runtime.startup.runtime_files.v4");
     const MIN: usize = <Option<crate::InstanceDirectory> as Wire>::MIN
         + <Option<crate::RuntimeEnvironment> as Wire>::MIN
-        + <Option<std::sync::Arc<dyn crate::StartupScreen>> as Wire>::MIN;
+        + <Option<std::sync::Arc<dyn crate::StartupScreen>> as Wire>::MIN
+        + <Option<std::sync::Arc<dyn crate::RuntimeFileSource>> as Wire>::MIN;
     fn put(&self, out: &mut Writer) {
         out.put(&self.instance_dir);
         out.put(&self.runtime);
         out.put(&self.startup);
+        // The wasm mod being called gets its own package's files, never another's.
+        out.put(&self.bound_runtime_files());
     }
     fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
         let mut context = Self::new();
         context.instance_dir = input.take()?;
         context.runtime = input.take()?;
         context.startup = input.take()?;
+        context.runtime_files = input.take()?;
         Ok(context)
     }
 }
