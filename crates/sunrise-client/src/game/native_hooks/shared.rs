@@ -3170,18 +3170,19 @@ impl Game<'_> {
                 );
             }
         }
-        let gui_size = [batch.width as i32, batch.height as i32];
-        let mut draw = crate::game::host::draw::GameDrawContext::new(self, batch);
-        self.native_screen_draw(mod_api::__private::ScreenDrawCall {
-            block: &s.block,
-            pos: s.pos(),
-            data: &s.data,
-            origin: [ox, oy],
-            pointer: [self.cursor.0 as i32, self.cursor.1 as i32],
-            gui_size,
-            draw: &mut draw,
-        });
-        drop(draw);
+        if mod_api::__private::has_scoped_hook(mod_api::HookId::ScreenDraw) {
+            let gui_size = [batch.width as i32, batch.height as i32];
+            let mut draw = crate::game::host::draw::GameDrawContext::new(self, batch);
+            self.native_screen_draw(mod_api::__private::ScreenDrawCall {
+                block: &s.block,
+                pos: s.pos(),
+                data: &s.data,
+                origin: [ox, oy],
+                pointer: [self.cursor.0 as i32, self.cursor.1 as i32],
+                gui_size,
+                draw: &mut draw,
+            });
+        }
         self.draw_screen_phase(batch, sunrise_client::screen_draw::RenderPhase::Background);
         if s.screen.own_labels {
             return true;
@@ -3293,6 +3294,7 @@ impl Game<'_> {
         slot: Option<usize>,
         lines: &mut Vec<(sunrise_client::text::Text, u32)>,
     ) {
+        // Scoped hooks subscribe through Parts, not the global Hooks subscriber table.
         if !mod_api::__private::has_scoped_hook(mod_api::HookId::ScreenTooltip) {
             return;
         }
@@ -3305,8 +3307,12 @@ impl Game<'_> {
         let (ox, oy) = self.inventory_origin(batch);
         let at = [self.cursor.0 - ox, self.cursor.1 - oy];
         use crate::game::api_values::{TryIntoApi, TryIntoEngine};
-        let Ok(mut snapshot) = lines.try_into_api() else {
-            return;
+        let mut snapshot = match lines.try_into_api() {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                log::warn!("screen_tooltip refused input text: {error:?}");
+                return;
+            }
         };
         self.native_screen_tooltip(mod_api::__private::ScreenTooltipCall {
             block: &screen.block,
@@ -3318,8 +3324,9 @@ impl Game<'_> {
             gui_size: [batch.width as i32, batch.height as i32],
             lines: &mut snapshot,
         });
-        if let Ok(replacement) = snapshot.try_into_engine(&()) {
-            *lines = replacement;
+        match snapshot.try_into_engine(&()) {
+            Ok(replacement) => *lines = replacement,
+            Err(error) => log::warn!("screen_tooltip refused output text: {error:?}"),
         }
     }
     /// Options > Mods' rows for loaded code mods, after the content-only rows.
