@@ -966,6 +966,65 @@ mod tests {
         }));
     }
 
+    /// A wasm package whose runtime file does not match its manifest hash is refused by name at
+    /// load, naming the file; the other package is not refused for it.
+    #[test]
+    fn a_wasm_package_with_an_edited_runtime_file_is_refused_alone() {
+        crate::test_stack::on_guest_stack(|| {
+            let root = std::env::temp_dir().join(format!("wasm-runtime-{}", std::process::id()));
+            let module = wat::parse_str(
+                r#"(module (@custom "dylink.0" "\01\04\00\00\00\00")
+                    (func (export "sunrise_layout"))
+                    (func (export "sunrise_in"))
+                    (func (export "sunrise_hook")))"#,
+            )
+            .unwrap();
+            let make = |id: &str, on_disk: &[u8]| {
+                let path = root.join(id);
+                std::fs::create_dir_all(path.join("runtime")).unwrap();
+                std::fs::write(path.join("mod.wasm"), &module).unwrap();
+                std::fs::write(path.join("runtime/nav.bin"), on_disk).unwrap();
+                std::fs::write(
+                    path.join("sunrise-mod.toml"),
+                    format!(
+                        "id='{id}'\nname='{id}'\nversion='1.0.0'\napi='0.2'\ncapabilities=['registries']\n[wasm]\nsha512='{}'\ntoolchain='test'\nbuilt_with='test'\n[runtime]\n\"nav.bin\"='{}'\n",
+                        sunrise_mod_package::manifest::sha512_of(&module),
+                        sunrise_mod_package::manifest::sha512_of(b"tables"),
+                    ),
+                )
+                .unwrap();
+                path.to_str().unwrap().to_owned()
+            };
+            let good = make("good_runtime", b"tables");
+            let bad = make("bad_runtime", b"tablez");
+            let launch = sunrise_mod_package::selection::LaunchArguments::parse(
+                ["--dev-mod".to_owned(), good, "--dev-mod".to_owned(), bad].into_iter(),
+                &root,
+                &root,
+                None,
+            )
+            .unwrap();
+            let loaded = load_installed(&launch, &root);
+            let refused: Vec<_> = loaded
+                .refused
+                .iter()
+                .map(|(id, why)| (id.as_str(), why.to_string()))
+                .collect();
+            std::fs::remove_dir_all(&root).unwrap();
+            let reason = |id: &str| refused.iter().find(|(r, _)| *r == id).map(|(_, why)| why);
+            assert!(
+                reason("bad_runtime").is_some_and(|why| why.contains("runtime/nav.bin")),
+                "{refused:?}"
+            );
+            // The other package passed the package checks; this test has no wasm standard
+            // library to link it against, which is the only thing that stops it.
+            assert!(
+                reason("good_runtime").is_none_or(|why| !why.contains("nav.bin")),
+                "{refused:?}"
+            );
+        });
+    }
+
     #[test]
     fn installed_wasm_mixin_refuses_by_name() {
         let root = std::env::temp_dir().join(format!("wasm-mixin-{}", std::process::id()));

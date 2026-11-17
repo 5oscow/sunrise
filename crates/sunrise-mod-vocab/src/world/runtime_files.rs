@@ -146,10 +146,38 @@ mod tests {
             (name == "nav.bin").then(|| b"tables".to_vec())
         }
         fn path(&self, name: &str) -> Option<crate::InstanceDirectory> {
-            (self.folder && name == "nav.bin").then(|| {
-                crate::InstanceDirectory::Unix(b"/mods/\xff ruby/runtime/nav.bin".to_vec())
-            })
+            (self.folder && name == "nav.bin").then(|| host_path().0)
         }
+    }
+
+    /// A host path with a byte (or code unit) no UTF-8 text holds, as the value the game hands
+    /// over and as the path it must give back.
+    #[cfg(unix)]
+    fn host_path() -> (crate::InstanceDirectory, std::path::PathBuf) {
+        use std::os::unix::ffi::OsStrExt;
+        let bytes = b"/mods/\xff ruby/runtime/nav.bin";
+        (
+            crate::InstanceDirectory::Unix(bytes.to_vec()),
+            std::path::PathBuf::from(std::ffi::OsStr::from_bytes(bytes)),
+        )
+    }
+    #[cfg(windows)]
+    fn host_path() -> (crate::InstanceDirectory, std::path::PathBuf) {
+        use std::os::windows::ffi::OsStringExt;
+        let mut units: Vec<u16> = "C:\\mods\\".encode_utf16().collect();
+        units.push(0xd800);
+        units.extend("ruby\\runtime\\nav.bin".encode_utf16());
+        (
+            crate::InstanceDirectory::Windows(units.clone()),
+            std::path::PathBuf::from(std::ffi::OsString::from_wide(&units)),
+        )
+    }
+    #[cfg(not(any(unix, windows)))]
+    fn host_path() -> (crate::InstanceDirectory, std::path::PathBuf) {
+        (
+            crate::InstanceDirectory::Unix(b"/mods/ruby/runtime/nav.bin".to_vec()),
+            std::path::PathBuf::new(),
+        )
     }
 
     fn context(source: Option<Fake>) -> crate::RegistrationContext {
@@ -177,31 +205,32 @@ mod tests {
         );
     }
 
+    #[cfg(any(unix, windows))]
     #[test]
-    fn a_path_is_native_only_listed_only_and_a_folder_only() {
+    fn a_path_is_listed_only_and_a_folder_only_and_comes_back_exactly() {
         let folder = context(Some(Fake { folder: true }))
             .runtime_files()
             .unwrap();
         let archive = context(Some(Fake { folder: false }))
             .runtime_files()
             .unwrap();
-        if cfg!(target_arch = "wasm32") {
-            assert_eq!(folder.file_path("nav.bin"), Err(RuntimePathError::WasmMod));
-        } else {
-            assert_eq!(folder.file_path("nav.bin"), {
-                use std::os::unix::ffi::OsStrExt;
-                Ok(std::path::PathBuf::from(std::ffi::OsStr::from_bytes(
-                    b"/mods/\xff ruby/runtime/nav.bin",
-                )))
-            });
-            assert_eq!(
-                folder.file_path("other.bin"),
-                Err(RuntimePathError::NotListed)
-            );
-            assert_eq!(
-                archive.file_path("nav.bin"),
-                Err(RuntimePathError::NotAFolder)
-            );
-        }
+        assert_eq!(folder.file_path("nav.bin"), Ok(host_path().1));
+        assert_eq!(
+            folder.file_path("other.bin"),
+            Err(RuntimePathError::NotListed)
+        );
+        assert_eq!(
+            archive.file_path("nav.bin"),
+            Err(RuntimePathError::NotAFolder)
+        );
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    #[test]
+    fn a_wasm_mod_is_refused_a_path_by_name() {
+        let folder = context(Some(Fake { folder: true }))
+            .runtime_files()
+            .unwrap();
+        assert_eq!(folder.file_path("nav.bin"), Err(RuntimePathError::WasmMod));
     }
 }

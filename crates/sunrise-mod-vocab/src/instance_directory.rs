@@ -43,13 +43,15 @@ impl InstanceDirectory {
                 use std::os::unix::ffi::OsStrExt;
                 Some(std::ffi::OsStr::from_bytes(bytes).into())
             }
+            #[cfg(not(unix))]
+            Self::Unix(_) => None,
             #[cfg(windows)]
             Self::Windows(units) => {
                 use std::os::windows::ffi::OsStringExt;
                 Some(std::ffi::OsString::from_wide(units).into())
             }
-            #[allow(unreachable_patterns)]
-            _ => None,
+            #[cfg(not(windows))]
+            Self::Windows(_) => None,
         }
     }
 }
