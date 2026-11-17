@@ -20,7 +20,7 @@ fn unregistered_serializer_refuses_whole_load_after_false_conditions() {
         .to_string();
     assert_eq!(
         error,
-        "recipe data/minecraft/recipe/unknown.json, unregistered recipe serializer absent:serializer"
+        "1 recipe failed to load:\n  recipe data/minecraft/recipe/unknown.json, unregistered recipe serializer absent:serializer"
     );
     std::fs::write(
         folder.join("unknown.json"),
@@ -136,7 +136,7 @@ fn unknown_serializer_refuses_before_unclaimed_ingredient_is_dropped() {
             .to_string();
         assert_eq!(
             error,
-            "recipe data/minecraft/recipe/future.json, unregistered recipe serializer minecraft:future_serializer"
+            "1 recipe failed to load:\n  recipe data/minecraft/recipe/future.json, unregistered recipe serializer minecraft:future_serializer"
         );
         let root = tempfile::tempdir().unwrap();
         let error = Recipes::from_sources(
@@ -151,7 +151,35 @@ fn unknown_serializer_refuses_before_unclaimed_ingredient_is_dropped() {
         .to_string();
         assert_eq!(
             error,
-            "recipe data/minecraft/recipe/future.json, unregistered recipe serializer minecraft:future_serializer"
+            "1 recipe failed to load:\n  recipe data/minecraft/recipe/future.json, unregistered recipe serializer minecraft:future_serializer"
+        );
+    });
+}
+
+#[test]
+fn a_failed_load_names_every_bad_recipe() {
+    mod_platform::testing::with_mods(Vec::new().into(), || {
+        let sources = vec![
+            (
+                "minecraft:b".into(),
+                serde_json::json!({"type":"absent:two"}),
+            ),
+            (
+                "minecraft:a".into(),
+                serde_json::json!({"type":"absent:one"}),
+            ),
+            (
+                "ns:c".into(),
+                serde_json::json!({"type":"minecraft:crafting_special_repairitem"}),
+            ),
+        ];
+        let error = ResolvedSources::resolve(sources, &crate::test_resources::server_load())
+            .err()
+            .unwrap()
+            .to_string();
+        assert_eq!(
+            error,
+            "2 recipes failed to load:\n  recipe data/minecraft/recipe/a.json, unregistered recipe serializer absent:one\n  recipe data/minecraft/recipe/b.json, unregistered recipe serializer absent:two"
         );
     });
 }

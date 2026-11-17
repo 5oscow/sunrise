@@ -1324,12 +1324,25 @@ fn shrink(pattern: &[Vec<char>]) -> Vec<Vec<char>> {
 }
 pub use sunrise_items::recipe_sources::qualified;
 
-fn recipe_refused(name: &str, reason: &str) -> Box<dyn std::error::Error> {
+fn recipe_refused(name: &str, reason: &str) -> String {
     let id = qualified(name);
     let (namespace, path) = id.split_once(':').unwrap();
-    let message = format!("recipes: data/{namespace}/recipe/{path}.json refused: {reason}");
-    // The error-level diagnostic naming the file (#1273); the load returns the
-    // same message, which its caller may log again at its own level.
+    format!("recipes: data/{namespace}/recipe/{path}.json refused: {reason}")
+}
+/// One message for every recipe that failed the load, in registration order
+/// (vanilla collects every element's error, then fails). The error-level
+/// diagnostic naming the files (#1273); the load returns the same message,
+/// which its caller may log again at its own level.
+fn load_failed(failures: Vec<String>) -> Box<dyn std::error::Error> {
+    let count = failures.len();
+    let mut message = format!(
+        "{count} {} failed to load:",
+        if count == 1 { "recipe" } else { "recipes" }
+    );
+    for failure in failures {
+        message.push_str("\n  ");
+        message.push_str(&failure);
+    }
     log::error!("{message}");
     message.into()
 }
@@ -1489,15 +1502,13 @@ impl ResolvedSources {
     ) -> Result<Self> {
         // Every consumer keeps vanilla's resource-file registration order.
         sources.sort_by_cached_key(|(name, _)| registration_key(name));
-        for (name, file) in &sources {
-            if let Some(serializer) = file["type"].as_str() {
-                mod_kinds::recipe_type(name, serializer)?;
-            }
-        }
         let listened = mod_api::__private::listened(mod_api::HookId::Ingredient);
         let recipes = sources
             .into_iter()
-            .map(|(name, file)| {
+            .map(|(name, file)| -> std::result::Result<ResolvedRecipe, String> {
+                if let Some(serializer) = file["type"].as_str() {
+                    mod_kinds::recipe_type(&name, serializer)?;
+                }
                 let mut resolved = file.clone();
                 let parsed_here = resolved["type"]
                     .as_str()
@@ -1558,7 +1569,15 @@ impl ResolvedSources {
                     resolved,
                 })
             })
-            .collect::<Result<Vec<_>>>()?;
+            .collect::<Vec<std::result::Result<_, String>>>();
+        let mut failures = Vec::new();
+        let recipes = recipes
+            .into_iter()
+            .filter_map(|recipe| recipe.map_err(|failure| failures.push(failure)).ok())
+            .collect();
+        if !failures.is_empty() {
+            return Err(load_failed(failures));
+        }
         Ok(Self {
             recipes,
             property_additions: PropertyAdditions::ask(context),
@@ -1630,11 +1649,7 @@ impl Recipes {
         overlay: &PackOverlay,
         sources: &ResolvedSources,
     ) -> Result<Self> {
-        for recipe in &sources.recipes {
-            if let Some(serializer) = recipe.file["type"].as_str() {
-                mod_kinds::recipe_type(&recipe.name, serializer)?;
-            }
-        }
+        let mut failures = Vec::new();
         let mut mod_read_only = Vec::new();
         let mut crafting = Vec::new();
         let mut cooking = Vec::new();
@@ -1656,11 +1671,19 @@ impl Recipes {
                 } else {
                     format!("minecraft:{name}")
                 };
-                entry = Some(crate::crafting::RecipeSnapshot::new(
-                    id,
-                    mod_kinds::recipe_type(name, kind)?,
-                    json.clone(),
-                ));
+                match mod_kinds::recipe_type(name, kind) {
+                    Ok(recipe_type) => {
+                        entry = Some(crate::crafting::RecipeSnapshot::new(
+                            id,
+                            recipe_type,
+                            json.clone(),
+                        ));
+                    }
+                    Err(failure) => {
+                        failures.push(failure);
+                        continue;
+                    }
+                }
             }
             if custom_type(json).is_some() {
                 if let Some(recipe) = mod_kinds::decode(name, json)
@@ -1679,8 +1702,10 @@ impl Recipes {
             if !VANILLA_RECIPE_SERIALIZERS.contains(&kind) {
                 continue;
             }
-            Ingredient::validate_recipe(resolved, items)
-                .map_err(|error| recipe_refused(name, &error))?;
+            if let Err(error) = Ingredient::validate_recipe(resolved, items) {
+                failures.push(recipe_refused(name, &error));
+                continue;
+            }
             let v = &**resolved;
             let text = |k: &str| v[k].as_str().unwrap_or("").to_owned();
             meta.insert(name.clone(), (text("category"), text("group")));
@@ -1879,25 +1904,29 @@ impl Recipes {
                     None
                 }
                 "minecraft:brewing" => {
-                    crate::brewing::BrewingRecipe::validate(v)
-                        .map_err(|error| recipe_refused(name, error))?;
+                    if let Err(error) = crate::brewing::BrewingRecipe::validate(v) {
+                        failures.push(recipe_refused(name, error));
+                        continue;
+                    }
                     None
                 }
                 "minecraft:stonecutting"
                 | "minecraft:smithing_transform"
                 | "minecraft:smithing_trim" => None,
                 _ => {
-                    return Err(recipe_refused(
+                    failures.push(recipe_refused(
                         name,
                         &format!("recipe type {kind} has no parser"),
                     ));
+                    continue;
                 }
             };
             if parsed_by_game && parsed.is_none() && cooking.len() == cooked && station.is_none() {
                 let reason = failure.into_inner().unwrap_or_else(|| {
                     format!("invalid ingredients or required fields for {kind}")
                 });
-                return Err(recipe_refused(name, &reason));
+                failures.push(recipe_refused(name, &reason));
+                continue;
             }
             // Every known recipe was parsed successfully before any table
             // can be published; every view reads that same parse.
@@ -1944,6 +1973,9 @@ impl Recipes {
             if let Some(recipe) = parsed {
                 crafting.push((name.clone(), recipe));
             }
+        }
+        if !failures.is_empty() {
+            return Err(load_failed(failures));
         }
         let facts = items
             .items
