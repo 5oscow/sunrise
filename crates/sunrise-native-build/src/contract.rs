@@ -3,11 +3,13 @@ use crate::prebuilt::{self, Package, Route};
 use crate::rust::Unpacked;
 use crate::{Target, api, dependencies, library_record, scan_bundles};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::io::{BufRead, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 /// The contract this tool speaks: a plan naming another is refused, so a caller never misreads a reply.
-pub const CONTRACT: u32 = 1;
+pub const CONTRACT: u32 = 2;
 
 /// What to build, the first line of standard input.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -76,9 +78,83 @@ pub enum Event {
         records: Vec<library_record::Library>,
         /// The mods compiled, in dependency order.
         mods: Vec<String>,
+        /// Each compiled mod's `[[internals]]`, every absent hash taken from the SDK's catalog: the build record's form.
+        internals: BTreeMap<String, serde_json::Value>,
+        /// The horizon-mixins revision the build ran.
+        mixins: String,
+        /// The kept folders and files the build used, for the caller's cache to count as used.
+        used: Vec<PathBuf>,
     },
     /// It didn't: the error as the build log ends with it.
-    Failed { error: String },
+    Failed {
+        error: String,
+        /// The mod the error is that mod's own, and how: the one a caller leaves out next time.
+        blame: Option<Blame>,
+        /// The kept folders and files the build used before it stopped.
+        used: Vec<PathBuf>,
+    },
+}
+
+/// The mod a failed build stops at.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct Blame {
+    #[serde(rename = "mod")]
+    pub mod_id: String,
+    pub kind: BlameKind,
+}
+
+/// How a mod stopped a build.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum BlameKind {
+    /// Its own library didn't compile.
+    Compile,
+    /// It has a build script, which a prebuilt build refuses.
+    BuildScript,
+    /// It asks for Cargo features, which a prebuilt build refuses.
+    Features,
+}
+
+/// What the build used of its kept folders, for the events.
+static USED: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+
+/// Notes that the build used `path`: the tool's [`crate::host::Host::mark_used`].
+pub fn note_used(path: &Path) -> Result<(), String> {
+    USED.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .push(path.to_owned());
+    Ok(())
+}
+
+fn take_used() -> Vec<PathBuf> {
+    let mut used = std::mem::take(
+        &mut *USED
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+    );
+    used.sort();
+    used.dedup();
+    used
+}
+
+/// The mod among `ids` that `error` blames by name, as the build log says it.
+fn blame(error: &str, ids: &[String]) -> Option<Blame> {
+    ids.iter().find_map(|id| {
+        let kind = if error.contains(&format!("{} failed (", prebuilt::compiling(id))) {
+            BlameKind::Compile
+        } else if error.contains(&prebuilt::Refusal::BuildScript { mod_id: id.clone() }.to_string())
+        {
+            BlameKind::BuildScript
+        } else if error.contains(&prebuilt::Refusal::Features { mod_id: id.clone() }.to_string()) {
+            BlameKind::Features
+        } else {
+            return None;
+        };
+        Some(Blame {
+            mod_id: id.clone(),
+            kind,
+        })
+    })
 }
 
 /// Why the first line of standard input isn't a plan this tool builds.
@@ -134,10 +210,12 @@ pub fn emit(out: &mut dyn Write, event: &Event) -> Result<(), String> {
 pub fn run(plan: &Plan, input: &mut dyn BufRead, out: &mut dyn Write) -> Result<(), String> {
     crate::mixins_from_source(plan.mixins_from_source);
     let events = std::cell::RefCell::new(out);
+    let ids = std::cell::RefCell::new(Vec::new());
     let built = compile(
         plan,
         &|event| emit(&mut **events.borrow_mut(), &event),
         input,
+        &ids,
     );
     let out = events.into_inner();
     match built {
@@ -146,7 +224,9 @@ pub fn run(plan: &Plan, input: &mut dyn BufRead, out: &mut dyn Write) -> Result<
             emit(
                 out,
                 &Event::Failed {
+                    blame: blame(&error, &ids.borrow()),
                     error: error.clone(),
+                    used: take_used(),
                 },
             )?;
             Err(error)
@@ -158,6 +238,7 @@ fn compile(
     plan: &Plan,
     say: &dyn Fn(Event) -> Result<(), String>,
     input: &mut dyn BufRead,
+    ids: &std::cell::RefCell<Vec<String>>,
 ) -> Result<Event, String> {
     let work = crate::root();
     std::fs::create_dir_all(&work).map_err(|e| format!("{}: {e}", work.display()))?;
@@ -172,6 +253,10 @@ fn compile(
     if mods.is_empty() {
         return Err(format!("{} holds no native mod.", plan.mods.display()));
     }
+    *ids.borrow_mut() = mods
+        .iter()
+        .map(|bundle| bundle.manifest.id.clone())
+        .collect();
     let declared: Vec<Vec<dependencies::Dependency>> = mods
         .iter()
         .map(|bundle| dependencies::from_manifest(&bundle.manifest.dependencies, side))
@@ -227,6 +312,14 @@ fn compile(
             });
         },
     )?;
+    let catalog = crate::internals::Catalog::read(&plan.package.api)?;
+    let mut internals = BTreeMap::new();
+    for &index in &resolution.order {
+        let manifest = &mods[index].manifest;
+        let pinned =
+            serde_json::to_value(catalog.pinned(manifest).internals).map_err(|e| e.to_string())?;
+        internals.insert(manifest.id.clone(), pinned);
+    }
     Ok(Event::Built {
         route: route.name().into(),
         records: library_record::collect(&libraries)?,
@@ -237,6 +330,9 @@ fn compile(
             .iter()
             .map(|&index| mods[index].manifest.id.clone())
             .collect(),
+        internals,
+        mixins: crate::MIXINS_REV.into(),
+        used: take_used(),
     })
 }
 
@@ -289,12 +385,12 @@ mod tests {
 
     #[test]
     fn another_contract_is_refused_for_its_number_before_any_other_field() {
-        let error = read_plan(&mut "{\"contract\":2}\n".as_bytes()).unwrap_err();
-        assert_eq!(error, PlanError::Contract(2.into()));
+        let error = read_plan(&mut "{\"contract\":1}\n".as_bytes()).unwrap_err();
+        assert_eq!(error, PlanError::Contract(1.into()));
         assert!(
             error
                 .to_string()
-                .starts_with("the plan speaks contract 2; this tool speaks contract 1"),
+                .starts_with("the plan speaks contract 1; this tool speaks contract 2"),
             "{error}"
         );
         let error = read_plan(&mut "{\"contract\":\"1\",\"later\":true}\n".as_bytes()).unwrap_err();
@@ -313,10 +409,21 @@ mod tests {
             },
         )
         .unwrap();
-        emit(&mut out, &Event::Failed { error: "no".into() }).unwrap();
+        emit(
+            &mut out,
+            &Event::Failed {
+                error: "no".into(),
+                blame: Some(Blame {
+                    mod_id: "greeter".into(),
+                    kind: BlameKind::Compile,
+                }),
+                used: vec!["kept".into()],
+            },
+        )
+        .unwrap();
         assert_eq!(
             String::from_utf8(out).unwrap(),
-            "{\"event\":\"mod\",\"id\":\"greeter\",\"done\":1,\"total\":2}\n{\"event\":\"failed\",\"error\":\"no\"}\n"
+            "{\"event\":\"mod\",\"id\":\"greeter\",\"done\":1,\"total\":2}\n{\"event\":\"failed\",\"error\":\"no\",\"blame\":{\"mod\":\"greeter\",\"kind\":\"compile\"},\"used\":[\"kept\"]}\n"
         );
     }
 
@@ -342,7 +449,39 @@ mod tests {
             .lines()
             .map(|line| serde_json::from_str(line).unwrap())
             .collect();
-        assert_eq!(lines, [Event::Failed { error }]);
+        assert_eq!(
+            lines,
+            [Event::Failed {
+                error,
+                blame: Some(Blame {
+                    mod_id: "scripted".into(),
+                    kind: BlameKind::BuildScript,
+                }),
+                used: Vec::new(),
+            }]
+        );
+    }
+
+    #[test]
+    fn a_failure_blames_the_mod_its_error_names() {
+        let ids = ["alpha".to_owned(), "beta".to_owned()];
+        let compile = format!("{} failed (exit status: 101)", prebuilt::compiling("beta"));
+        assert_eq!(
+            blame(&compile, &ids),
+            Some(Blame {
+                mod_id: "beta".into(),
+                kind: BlameKind::Compile
+            })
+        );
+        let features = prebuilt::Refusal::Features {
+            mod_id: "alpha".into(),
+        }
+        .to_string();
+        assert_eq!(
+            blame(&features, &ids).map(|b| b.kind),
+            Some(BlameKind::Features)
+        );
+        assert_eq!(blame("the linker ran out of memory", &ids), None);
     }
 
     #[test]

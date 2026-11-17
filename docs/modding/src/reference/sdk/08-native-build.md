@@ -22,16 +22,16 @@ cargo sunrise-mod native-build < plan.json
 | 0 | It built: the last line is a `built` event. |
 | 1 | It did not: the last line is a `failed` event. |
 | 2 | No plan: the first line is not a plan of this contract (not one JSON object, a field missing, wrong or unknown). Standard error says why. |
-| 3 | Another contract: the plan's `contract` isn't `1`. It is read before any other field, so a newer plan is refused for its number, never for a field this tool doesn't know. Standard error names both contracts. |
+| 3 | Another contract: the plan's `contract` isn't `2`. It is read before any other field, so a newer plan is refused for its number, never for a field this tool doesn't know. Standard error names both contracts. |
 
 ## The plan
 
-One JSON object on one line. Its `contract` is checked first: anything but `1` exits 3. Then a field the tool
+One JSON object on one line. Its `contract` is checked first: anything but `2` exits 3. Then a field the tool
 doesn't know is refused (exit 2).
 
 | Field | What it is |
 |---|---|
-| `contract` | `1`. A change to any field or event below takes a new number. |
+| `contract` | `2`. A change to any field or event below takes a new number. |
 | `work` | The build's own folder: `build.log`, the horizon-mixins tool, the game source a mixin patch copies from, and kept compiles under `prebuilt-build/`. The launcher passes its `native/` folder, so the kept compiles are the ones its in-process build made. |
 | `toolchain` | `dir` (holding `bin/cargo` and `bin/rustc`), `target` (its host triple), `cargo_home`, `cargo_config` (`--config` values every cargo command gets; the launcher's Windows ARM64 flags) and `c_bin` (the folder of its C and link programs, when it brings them). The Rust release must be the SDK's (`sdk.json`'s `toolchain.rust`). |
 | `package` | `runtime`, `api` and `engine`: the folders the SDK's three slices for this host and side are unpacked into. The API route reads only `runtime` and `api`. |
@@ -48,7 +48,12 @@ Each line is an object whose `event` names it.
 |---|---|---|
 | `mod` | `id`, `done`, `total` | A mod's own library starts compiling, `done` of `total`. |
 | `consent` | `added_crates`, `build_scripts`, `proc_macros` | Registry crates need a yes and the plan gave no `registry`. The caller answers with one line on standard input: `true` agrees, anything else refuses. |
-| `built` | `route`, `binary`, `libraries`, `records`, `mods` | The executable and the libraries to install beside it, in load order; `records` is each library's identity, the build record's `libraries`; `route` is `prebuilt-api` or `prebuilt`, as the record names it; `mods` is the compiled mods in dependency order. |
-| `failed` | `error` | Why it did not build, as the build log ends with it. A mod blamed by name in it (`Compiling <mod> failed`, `E_NATIVE_BUILD_SCRIPT: <mod>`) is how a caller learns which mod to leave out next time. |
+| `built` | `route`, `binary`, `libraries`, `records`, `mods`, `internals`, `mixins`, `used` | The executable and the libraries to install beside it, in load order; `records` is each library's identity, the build record's `libraries`; `route` is `prebuilt-api` or `prebuilt`, as the record names it; `mods` is the compiled mods in dependency order. `internals` has each compiled mod's `[[internals]]` by mod id, every absent `hash` taken from the SDK's catalog, as the build record keeps them; `mixins` is the horizon-mixins revision the build ran; `used` lists the kept folders and files under `work` it used, for a caller's cache to count as used. |
+| `failed` | `error`, `blame`, `used` | Why it did not build, as the build log ends with it. `blame` is `null`, or the mod the error is that mod's own and how: `{"mod": id, "kind": "compile" \| "build-script" \| "features"}`, the one a caller leaves out next time. `used` as for `built`. |
 
 The tool never edits an instance, never selects a version and never installs anything outside `work`.
+
+## Changelog
+
+- contract 2: `failed` names the blamed mod (`blame`) instead of a caller matching its text; `built` adds `internals` and `mixins` for the build record; both list the kept files they `used`.
+- contract 1: the plan, `mod`, `consent`, `built` and `failed`.
