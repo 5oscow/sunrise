@@ -37,7 +37,9 @@ mod tests {
     #[test]
     fn json_int_conversion_pins_controls_and_issue_2105_precision_gaps() {
         // Independent values from the #2105 probe table. The known-gap rows
-        // deliberately pin today's representation, not an unimplemented fix.
+        // deliberately pin today's representation, not an unimplemented fix. A row whose float
+        // parse rounds differently with serde_json's `float_roundtrip` (on in the workspace build,
+        // off in this crate's own) is left out: "9007199254740993.0" reads 2 or 0 by build.
         for (token, expected) in [
             ("2.0", 2),
             ("1e1", 10),
@@ -45,7 +47,6 @@ mod tests {
             ("-1.9", -1),
             ("4294967297", 1),
             ("9007199254740993", 1),
-            ("9007199254740993.0", 2), // #2105: Java gives 1.
             ("9007199254740995.0", 4), // #2105: Java gives 3.
             ("1e20", 1661992960),
             ("-1e20", -1661992960),
