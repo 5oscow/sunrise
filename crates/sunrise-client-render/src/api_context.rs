@@ -50,6 +50,8 @@ impl LoopReader<'_> {
 }
 impl mod_api::LoopReader for LoopReader<'_> {
     fn item_is_in_tag(&self, item: mod_api::ItemKey, tag: mod_api::TagKey) -> Option<bool> {
+        // A requested token has a name even before its completed item table is published.
+        mod_api::__private::item_key("minecraft:air")?;
         let item = mod_api::__private::item_key_id(item)?;
         mod_api::__private::with_tag_name(tag, |name| self.0.item_is_in_tag(item, name?))
     }
@@ -84,7 +86,19 @@ mod tests {
 
     #[test]
     fn item_tags_distinguish_unavailable_empty_ordered_and_replaced_generations() {
-        mod_platform::__private::part_tests::install_parts_fixture(&[]).unwrap();
+        struct RequestsItem(Arc<std::sync::OnceLock<mod_api::ItemKey>>);
+        #[mod_api::__subscriptions]
+        impl mod_api::Hooks for RequestsItem {
+            fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
+                self.0.set(r.item_key("minecraft:emerald")).unwrap();
+            }
+        }
+        let requested = Arc::new(std::sync::OnceLock::new());
+        mod_platform::__private::part_tests::install_parts_fixture(&[mod_api::ModEntry::new(
+            "test",
+            Box::new(RequestsItem(requested.clone())),
+        )])
+        .unwrap();
         let tag = mod_api::__private::tag_key(&mod_api::Identifier::parse("test:grain").unwrap())
             .unwrap();
         let missing =
@@ -109,6 +123,11 @@ mod tests {
         let reader = LoopReader(&generation);
         let view = reader.context();
         assert!(view.item_count(tag).is_none(), "keys are not bound yet");
+        assert_eq!(
+            view.is_in_tag(*requested.get().unwrap(), tag),
+            None,
+            "a registration-time token is not a completed item table"
+        );
         mod_api::__private::resolve_items([
             "minecraft:air",
             "minecraft:emerald",
