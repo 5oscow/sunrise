@@ -236,5 +236,3 @@ fn client_abilities_follow_predicted_flying_between_packets() {
         });
     });
 }
-
-
