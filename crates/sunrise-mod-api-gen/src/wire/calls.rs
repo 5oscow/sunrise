@@ -1039,7 +1039,9 @@ pub(super) fn dispatchable(types: &Types<'_>, m: &Method) -> bool {
 /// A statement marking one export as used: a call of a no-op import named like it, on wasm
 /// (`__sunrise_import!`, in `mod_api`, which holds the guest's unsafe code).
 fn mark_block(root: &str, name: &str) -> String {
-    format!("{root}::__sunrise_import!(\"{name}\");")
+    // The call sits where only a wasm build names the macro: a crate that holds the vocabulary
+    // without `mod_api`'s guest transport never resolves it.
+    format!("#[cfg(target_arch = \"wasm32\")] {{ {root}::__sunrise_import!(\"{name}\"); }}")
 }
 
 /// The `__sunrise_mark!` macro: one arm per export a mod can implement, each a no-op import

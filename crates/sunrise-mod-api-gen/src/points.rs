@@ -914,7 +914,7 @@ fn place_items(places: &[(String, String, mod_surface::call::Name)]) -> proc_mac
     });
     let marks = places.iter().map(|(_, name, call)| {
         let call = call.text();
-        quote!((#name) => { ::mod_api::__sunrise_import!(#call) };)
+        quote!((#name) => { #[cfg(target_arch = "wasm32")] { ::mod_api::__sunrise_import!(#call); } };)
     });
     let subscriptions = SUBSCRIPTIONS;
     quote! {
