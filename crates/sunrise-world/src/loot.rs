@@ -188,7 +188,7 @@ impl ExplorationMap {
                 .unwrap_or("minecraft:mansion")
                 .to_owned(),
             zoom: f["zoom"].as_u64().unwrap_or(2) as u8,
-            search_radius: f["search_radius"].as_i64().unwrap_or(50) as i32,
+            search_radius: int_value(&f["search_radius"]).unwrap_or(50) as i32,
             skip_existing_chunks: f["skip_existing_chunks"].as_bool().unwrap_or(true),
         }
     }
@@ -478,13 +478,13 @@ fn json_tag(value: &Value) -> Option<Tag> {
 fn int_bounds(v: &Value, value: i32) -> bool {
     match v {
         Value::Null => true,
-        Value::Number(n) => n.as_i64() == Some(i64::from(value)),
+        Value::Number(n) => number::int_value(n) == i64::from(value),
         Value::Object(o) => {
             o.get("min")
-                .and_then(Value::as_i64)
+                .and_then(int_value)
                 .is_none_or(|m| i64::from(value) >= m)
                 && o.get("max")
-                    .and_then(Value::as_i64)
+                    .and_then(int_value)
                     .is_none_or(|m| i64::from(value) <= m)
         }
         _ => false,
@@ -504,7 +504,7 @@ fn list_operation<T: Clone>(
     let values: Vec<T> = (spec["values"].as_array().into_iter().flatten())
         .map(&mut draw)
         .collect();
-    let offset = spec["offset"].as_i64().unwrap_or(0).max(0) as usize;
+    let offset = int_value(&spec["offset"]).unwrap_or(0).max(0) as usize;
     // A section replacement or an insertion past the end is logged and ignored.
     let fits = offset <= existing.len();
     match spec["mode"].as_str().unwrap_or("replace_all") {
@@ -518,7 +518,7 @@ fn list_operation<T: Clone>(
         }
         "replace_section" if fits => {
             let mut out = existing;
-            let size = (spec["size"].as_i64()).map_or(values.len(), |s| s.max(0) as usize);
+            let size = int_value(&spec["size"]).map_or(values.len(), |s| s.max(0) as usize);
             let tail = out.split_off((offset + size).min(out.len()));
             out.truncate(offset);
             out.extend(values);
@@ -531,10 +531,9 @@ fn list_operation<T: Clone>(
     }
 }
 
-/// A JSON number read by an int codec (`Number.intValue`): `3.0`, which
-/// 1.21.1 mods write for rolls and counts, is 3.
+/// A JSON scalar at an INT position, using the same narrowing as load validation.
 fn int_value(v: &Value) -> Option<i64> {
-    v.as_i64().or_else(|| v.as_f64().map(|f| f as i64))
+    v.as_number().map(number::int_value)
 }
 
 /// `data/<ns>/<kind>/` of every namespace, as `ns:path`: vanilla's, and in
@@ -1837,7 +1836,7 @@ impl<R: RandomSource> Context<'_, R> {
                     // `WrittenBookContent`'s generation is 0 to 3; the codec
                     // refuses the rest, so a table that asks for more is clamped
                     // as the item's own parse does.
-                    if let Some(generation) = f["generation"].as_i64() {
+                    if let Some(generation) = int_value(&f["generation"]) {
                         map.insert("generation".into(), Tag::Int(generation.clamp(0, 3) as i32));
                     }
                 }
