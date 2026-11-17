@@ -969,9 +969,36 @@ mod tests {
     /// A wasm package whose runtime file does not match its manifest hash is refused by name at
     /// load, naming the file; the other package is not refused for it.
     #[test]
+    #[ignore = "daily"]
     fn a_wasm_package_with_an_edited_runtime_file_is_refused_alone() {
+        const CHILD_ROOT: &str = "SUNRISE_RUNTIME_FILE_TEST_ROOT";
+        let Some(root) = std::env::var_os(CHILD_ROOT) else {
+            // The loader installs process-wide state and finds the standard library and
+            // packages beside the executable, so this runs in a relocated copy, alone.
+            let executable = std::env::current_exe().unwrap();
+            let root = tempfile::tempdir_in(executable.parent().unwrap()).unwrap();
+            let harness = root.path().join("runtime-file-test");
+            std::fs::hard_link(executable, &harness).unwrap();
+            std::fs::write(
+                root.path().join("sunrise-wasm-std.wasm"),
+                b"\0asm\x01\0\0\0",
+            )
+            .unwrap();
+            let status = std::process::Command::new(harness)
+                .args([
+                    "--exact",
+                    "tests::a_wasm_package_with_an_edited_runtime_file_is_refused_alone",
+                    "--ignored",
+                    "--nocapture",
+                ])
+                .env(CHILD_ROOT, root.path())
+                .status()
+                .unwrap();
+            assert!(status.success());
+            return;
+        };
+        let root = std::path::PathBuf::from(root).join("packages");
         crate::test_stack::on_guest_stack(|| {
-            let root = std::env::temp_dir().join(format!("wasm-runtime-{}", std::process::id()));
             let module = wat::parse_str(
                 r#"(module (@custom "dylink.0" "\01\04\00\00\00\00")
                     (func (export "sunrise_layout"))
@@ -1010,7 +1037,6 @@ mod tests {
                 .iter()
                 .map(|(id, why)| (id.as_str(), why.to_string()))
                 .collect();
-            std::fs::remove_dir_all(&root).unwrap();
             let reason = |id: &str| refused.iter().find(|(r, _)| *r == id).map(|(_, why)| why);
             assert!(
                 reason("bad_runtime").is_some_and(|why| why.contains("runtime/nav.bin")),
