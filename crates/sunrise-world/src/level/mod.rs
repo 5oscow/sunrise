@@ -796,6 +796,11 @@ pub trait LevelAccess: BlockEntityNeighbors {
         _survives: &mut Option<bool>,
     ) {
     }
+    /// A neighbour's `FenceGateBlock.isWall` answer. `None` keeps the walls tag.
+    /// Asked on both logical sides; only the neighbour's state determines it.
+    fn fence_gate_in_wall(&self, _state: BlockStateId) -> Option<bool> {
+        None
+    }
     /// `IBlockExtension.canSustainPlant` for the soil `ground` at `ground_pos`
     /// and the plant `state` above it, before the plant answers `mayPlaceOn`.
     /// An answer put in `sustains` is the result. The default does nothing.

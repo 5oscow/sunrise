@@ -181,6 +181,11 @@ and `collision_shape` alike.
 A signal read never asks `state_for_placement` or `can_survive`, so it cannot re-enter the hook it was read in.
 `LevelTicksHost`'s signal reads moved here and now return `Option`.
 
+A neighbour's `BlockPart::fence_gate_in_wall` answers whether a fence gate sits at wall height
+beside that state. It runs on both sides at placement and shape updates, with a read-only `LevelSide`:
+`Some(true)` counts as a wall, `Some(false)` does not, and `None` keeps the `minecraft:walls` tag
+check. It changes only the gate's `in_wall`, not wall connections or pathfinding.
+
 `LevelHost` has no random access: a draw from a read-only hook inside a level write would shift the level's random sequence away from vanilla's order. A hook that may draw is given a `LevelRandomHost`.
 `LevelRandomHost` provides vanilla's `Level.random` so
 mod draws come in vanilla's order. `LevelTicksHost` adds scheduling through
