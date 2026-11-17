@@ -169,6 +169,28 @@ fn locked(plan: &contract::LockPlan) -> Result<serde_json::Value, (&'static str,
         .map_err(|message| ("lock", message))
 }
 
+/// `native-layout`: a local prebuilt game checked to be the plan's build, host and side, then laid out as slices (`{"package": {runtime, api, engine}}`).
+pub fn layout(args: &[String]) -> ExitCode {
+    let plan: contract::LayoutPlan = match plan(args, "native-layout") {
+        Ok(plan) => plan,
+        Err(code) => return code,
+    };
+    answer(laid_out(&plan))
+}
+
+fn laid_out(plan: &contract::LayoutPlan) -> Result<serde_json::Value, (&'static str, String)> {
+    use sunrise_native_build::prebuilt;
+    let layout = || -> Result<prebuilt::Package, String> {
+        prebuilt::check_identity(&plan.prebuilt, &plan.build, &plan.host, plan.target.into())?;
+        let _ = std::fs::remove_dir_all(&plan.out);
+        prebuilt::lay_out(&plan.prebuilt, &plan.out, true)
+    };
+    layout()
+        .and_then(|package| serde_json::to_value(package).map_err(|e| e.to_string()))
+        .map(|package| serde_json::json!({ "package": package }))
+        .map_err(|message| ("layout", message))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -224,6 +246,25 @@ mod tests {
         .unwrap_err();
         assert_eq!(kind, "lock");
         assert!(message.contains("is not a native mod"), "{message}");
+        std::fs::remove_dir_all(empty).unwrap();
+    }
+
+    #[test]
+    fn a_folder_that_is_no_prebuilt_game_is_refused_by_layout() {
+        let empty =
+            std::env::temp_dir().join(format!("native-layout-empty-{}", std::process::id()));
+        std::fs::create_dir_all(&empty).unwrap();
+        let (kind, _) = laid_out(&contract::LayoutPlan {
+            contract: contract::CONTRACT,
+            prebuilt: empty.clone(),
+            build: "b".repeat(40),
+            host: "x86_64-unknown-linux-gnu".into(),
+            target: contract::TargetName::Client,
+            out: empty.join("out"),
+        })
+        .unwrap_err();
+        assert_eq!(kind, "layout");
+        assert!(!empty.join("out").exists(), "nothing is laid out");
         std::fs::remove_dir_all(empty).unwrap();
     }
 }
