@@ -3105,26 +3105,27 @@ mod native_kinds_tests {
         assert_eq!(counts, [64, 64, 2]);
     }
 
-    /// An unclaimed condition fails (the pool drops nothing) and an
-    /// unclaimed function leaves the stack's count as it was.
+    /// Programmatic inline tables bypass data-file validation: an unclaimed
+    /// condition fails and an unclaimed function leaves the stack unchanged.
     #[test]
     fn unclaimed_kinds_fail_the_condition_and_leave_the_stack() {
-        let data = table(
-            "cond",
+        let data = table("unclaimed_inline", r#"{"pools":[]}"#);
+        let condition: Value = serde_json::from_str(
             r#"{"pools":[{"rolls":1,"condition":{"type":"mymod:always_true"},
                 "entries":[{"type":"minecraft:item","name":"minecraft:stone"}]}]}"#,
-        );
+        )
+        .unwrap();
         let mut random = sunrise_core::random::LegacyRandom::new(42);
-        let items = data.roll("minecraft:test", &mut random, 0.0, None, None);
+        let items = data.roll_inline(&condition, &mut random);
         assert!(items.is_empty());
 
-        let data = table(
-            "func",
+        let function: Value = serde_json::from_str(
             r#"{"pools":[{"rolls":1,"entries":[{"type":"minecraft:item","name":"minecraft:stone"}],
                 "modifier":[{"type":"mymod:duplicate","factor":2}]}]}"#,
-        );
+        )
+        .unwrap();
         let mut random = sunrise_core::random::LegacyRandom::new(42);
-        let items = data.roll("minecraft:test", &mut random, 0.0, None, None);
+        let items = data.roll_inline(&function, &mut random);
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].count, 1);
     }
@@ -3219,27 +3220,27 @@ mod native_kinds_tests {
                     "modifier":[{"type":"lootmod:x"}]}]}"#,
             ),
         ] {
-            let data = table(name, json);
+            let data = table(name, r#"{"pools":[]}"#);
+            let inline: Value = serde_json::from_str(json).unwrap();
             let mut plain = sunrise_core::random::LegacyRandom::new(7);
             let mut placed = sunrise_core::random::LegacyRandom::new(7);
-            let without = data.roll("minecraft:test", &mut plain, 0.0, None, None);
-            let with = with_native_loot_place(place(0.5), || {
-                data.roll("minecraft:test", &mut placed, 0.0, None, None)
-            });
+            let without = data.roll_inline(&inline, &mut plain);
+            let with =
+                with_native_loot_place(place(0.5), || data.roll_inline(&inline, &mut placed));
             assert_eq!(with, without, "{name}");
             assert_eq!(placed.next_long(), plain.next_long(), "{name}");
         }
     }
 
     #[test]
-    fn an_unknown_minecraft_function_is_skipped() {
-        let data = table(
-            "vanilla",
+    fn an_unknown_minecraft_function_is_skipped_in_programmatic_inline_tables() {
+        let data = table("vanilla_inline", r#"{"pools":[]}"#);
+        let inline: Value = serde_json::from_str(
             r#"{"pools":[{"rolls":1,"entries":[{"type":"minecraft:item","name":"minecraft:stone"}],
                 "modifier":[{"type":"minecraft:future_function"},{"type":"minecraft:set_count","count":5}]}]}"#,
-        );
+        ).unwrap();
         let mut random = sunrise_core::random::LegacyRandom::new(42);
-        let items = data.roll("minecraft:test", &mut random, 0.0, None, None);
+        let items = data.roll_inline(&inline, &mut random);
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].count, 5);
     }
