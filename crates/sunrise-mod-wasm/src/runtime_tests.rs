@@ -398,7 +398,7 @@ fn guest_input_pool_stays_flat_for_100k_no_import_calls() {
             DEFAULT_GROUP_MEMORY_MIB,
             &[
                 Member {
-                    name: "std",
+                    name: "libstd.so",
                     module: &std,
                 },
                 Member {
@@ -476,7 +476,7 @@ fn real_members_link_when_built() {
             DEFAULT_GROUP_MEMORY_MIB,
             &[
                 Member {
-                    name: "std",
+                    name: "libstd.so",
                     module: &std,
                 },
                 Member {
