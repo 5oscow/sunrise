@@ -670,6 +670,8 @@ CRASH_NAMES = 20
 CGROUP = Path("/sys/fs/cgroup")
 # Why the last run() returned None, for --report: names and numbers only (stopped()).
 _stopped = {}
+# The results a run that did not complete reported before it stopped (stopped()): each still counts.
+_reported = {}
 
 
 def cgroup_memory():
@@ -699,6 +701,8 @@ def stopped(reason, started, kills_before, process=None, results=(), expected=()
     long = dict.fromkeys(found[1] for line in output.splitlines() if (found := RUNNING_LONG.match(line.strip())))
     still = [name for name in long if name not in results]
     kills = memory.pop("oom_kills")
+    _reported.clear()
+    _reported.update(results)
     _stopped.clear()
     _stopped.update({
         "reason": reason, "ended_by": ended_by, "cargo_exit": process.returncode if process is not None else None,
@@ -1033,6 +1037,7 @@ def main(shards, report=None):
         write_report(report, dict(verdict, incomplete=[*verdict["incomplete"], {
             "shard": shard, "in_progress": True, "started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}]))
         _stopped.clear()
+        _reported.clear()
         daily_group = shard.split(":", 1)[0] in ignored_shards.DAILY_ROWS_LEGS.values()
         if daily_group:
             _, package, target = shard.split(":", 2)
@@ -1052,11 +1057,14 @@ def main(shards, report=None):
             skip += [row.test for row in listed_entries() if row.mark == "daily" and row.reason in DAILY_INPUTS
                      and row.package == package and in_leg(row.test, number, count)]
             results = run(package, skip, number, count) if number is not None else run(package, skip)
-        if results is None:
+        complete = results is not None
+        if not complete:
             print(f"{shard}: did not complete: " + json.dumps(_stopped, sort_keys=True), flush=True)
             problems.append(f"{shard}: the test run did not complete")
             verdict["incomplete"].append({"shard": shard, **_stopped})
-            continue
+            # The tests that reported before the run stopped keep their verdicts (an out-of-memory kill of the
+            # test process loses only the rest); what never reported is judged by the next complete run.
+            results = dict(_reported)
         for test, passed in sorted(results.items()):
             listed = (package, test) in known
             policy_test = test
@@ -1078,6 +1086,8 @@ def main(shards, report=None):
                 problem(package, policy_test, "passes-now", policy)
             elif passed:
                 verdict["passed"].append({"package": package, "test": test})
+        if not complete:
+            continue
         for test in expected_daily:
             if test not in results:
                 problems.append(f"{package} {safe_identity(test)}: listed in {files[package, test]} but no longer runs")

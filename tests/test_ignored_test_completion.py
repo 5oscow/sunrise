@@ -82,6 +82,22 @@ class IgnoredTests(unittest.TestCase):
             self.assertEqual(ignored_tests.main(["example"], str(path)), 1)
             self.assertEqual(json.loads(path.read_text())["incomplete"], [{"shard": "example"}])
 
+    def test_the_tests_a_stopped_run_reported_keep_their_verdicts(self):
+        def run(package, skip, number=None, count=None):
+            return ignored_tests.stopped("a test process crashed", 0.0, None, results={"fine": True, "broken": False})
+
+        known = {("example", "gone"): None}
+        with tempfile.TemporaryDirectory() as folder, \
+                patch.object(ignored_tests, "CGROUP", Path(folder)), \
+                patch.object(ignored_tests, "known_failures", return_value=known), \
+                patch.object(ignored_tests, "run", side_effect=run), contextlib.redirect_stdout(io.StringIO()):
+            path = Path(folder) / "report.json"
+            self.assertEqual(ignored_tests.main(["example"], str(path)), 1)
+            report = json.loads(path.read_text())
+        self.assertEqual(report["passed"], [{"package": "example", "test": "fine"}])
+        self.assertEqual({(item["test"], item["kind"]) for item in report["problems"]}, {("broken", "failed")})
+        self.assertEqual([item["shard"] for item in report["incomplete"]], ["example"])
+
     def test_a_test_process_killed_for_memory_reports_signal_memory_time_and_what_still_ran(self):
         # The shape of the first daily's sunrise-client#1of2 (run 43499359519): the library's test process killed by
         # the out-of-memory killer with one test past 60 s; the later targets finished; cargo exits 101.
