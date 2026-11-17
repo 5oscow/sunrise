@@ -148,13 +148,12 @@ Geist (400, 500, 600) and Geist Mono (400), bundled under the SIL Open Font Lice
   pixels sits in the footer.
 - **Game**: vanilla's screens. The on-screen keyboard is a rounded plate of keys in the page
   colour, the focused key in the accent. Sunrise's graphics, controller, Extras and Shaders
-  settings screens take the Blocks palette below in a lighter form (`graphics_style.rs`, through
-  the shared `settings_shell.rs`).
+  settings screens draw with vanilla's widgets and list background (`graphics_style.rs`, through
+  the shared `settings_shell.rs`; #452, Q2).
 
 ## Blocks
 
-A blocky, Minecraft-like look in Sunrise's purple, for the website, the redesigned launcher and
-the game's graphics, controller, Extras and Shaders settings screens:
+A blocky, Minecraft-like look in Sunrise's purple, for the website and the redesigned launcher:
 Minecraft's inventory rather than a document. Its colours are `sunrise_theme::Blocks`
 (`BLOCKS_LIGHT`, `BLOCKS_DARK`), which `tokens.css` carries under the same names as before plus
 `--panel`, `--raised`, `--button`, `--well`, `--bevel`, `--lip`, `--outline` and the `--face`
