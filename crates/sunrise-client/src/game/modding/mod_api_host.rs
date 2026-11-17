@@ -419,7 +419,7 @@ impl mod_api::LevelHost for super::GameLevel<'_> {
             self.world,
             self.api_level,
             self.native_authoritative,
-            self.part_state_index.as_ref(),
+            self.part_state_index,
             entity,
             namespace,
             name,
@@ -596,7 +596,15 @@ impl mod_api::AttachmentHost for super::GameLevel<'_> {
 }
 
 impl mod_api::LevelRandomHost for super::GameLevel<'_> {
-
+    fn container_signal(&mut self, pos: [i32; 3]) -> Option<i32> {
+        if !self.native_authoritative || !self.world.is_loaded_at(pos[0], pos[1], pos[2]) {
+            return None;
+        }
+        Some(super::machines::container_signal(
+            self,
+            BlockPos::new(pos[0], pos[1], pos[2]),
+        ))
+    }
     fn attachments(&mut self) -> &mut dyn mod_api::AttachmentStore {
         self
     }

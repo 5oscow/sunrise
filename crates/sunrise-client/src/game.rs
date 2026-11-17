@@ -388,7 +388,7 @@ struct GameLevel<'w> {
     cake_answer: Option<bool>,
     api_level: Option<mod_api::LevelRef>,
     part_state_index: Option<
-        std::sync::Arc<
+        &'w std::sync::Arc<
             std::sync::Mutex<
                 sunrise_mod_runtime::attachments::index::AttachmentIndex<mod_api::AttachmentHolder>,
             >,
@@ -2934,7 +2934,7 @@ impl Game<'_> {
             cake_requested: std::cell::Cell::new(false),
             cake_answer: None,
             api_level: self.level(self.dim.id()),
-            part_state_index: self.attachment_indexes.get(&self.dim).cloned(),
+            part_state_index: self.attachment_indexes.get(&self.dim),
             command_block_transition: None,
             positions: piston_carry_state::PositionState {
                 gateways: &mut self.be_anims.gateway_servers,

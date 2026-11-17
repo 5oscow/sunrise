@@ -296,7 +296,7 @@ impl GameLevel<'_> {
     /// Authoritative servers only.
     #[inline(always)]
     pub(in crate::game) fn native_analog_output(
-        &self,
+        &mut self,
         dimension: LevelDimension,
         pos: BlockPos,
         state: BlockStateId,
