@@ -10,6 +10,7 @@
 //! they do for containers.
 mod fill;
 pub mod global_modifiers;
+pub mod number;
 pub mod query;
 #[path = "loot_query.rs"]
 mod query_context;

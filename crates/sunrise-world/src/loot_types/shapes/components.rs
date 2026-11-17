@@ -1,5 +1,5 @@
 //! Persistent data-component value codecs (122 registered names, 3 transient) and their nested records.
-//! `VALUES` is the component registry table consumed by `value()`; `ROWS` holds the `component_*` helper
+//! `VALUES` is the component registry table consumed by the kernel; `ROWS` holds the `component_*` helper
 //! records reached through `Named`. Item templates, patches, item/block predicates and text recurse through
 //! the same kernel table. Registry membership (is this ID a real mob effect, block, ...) is NOT checked here:
 //! shape validation only validates identifier syntax. Unknown object fields are ignored, as in map codecs.
@@ -672,10 +672,3 @@ pub(super) const VALUES: &[Row] = &[
     v("waxed", UNIT),
     v("cushion/color", DYE),
 ];
-
-/// Component registry lookup. Core Identifier parsing supplies the default minecraft namespace; only minecraft
-/// names exist. Transient names return `Kind::Transient` so presence predicates can recognize them while exact
-/// values and patches (including `!` removals) refuse them.
-pub(super) fn value(id: &str) -> Option<Kind> {
-    matching_row(VALUES, id, true).map(|row| row.kind)
-}

@@ -5,6 +5,8 @@ use serde_json::Value;
 mod normalize;
 #[path = "loot_types/parameters.rs"]
 mod parameters;
+#[path = "loot_types/shapes/mod.rs"]
+mod shapes;
 #[cfg(test)]
 #[path = "loot_types/tests.rs"]
 mod tests;
