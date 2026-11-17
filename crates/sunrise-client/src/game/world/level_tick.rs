@@ -171,21 +171,19 @@ impl Game<'_> {
             sunrise_client::spans::time("tick_sculk_blocks", || self.tick_sculk_blocks())?;
         }
         if running {
-            // ClientLevel.tickBlockEntities (not while paused or frozen):
-            // chest lids, books, shulker boxes, bells, conduits, heads.
-            sunrise_client::spans::time("tick_block_entity_anims", || {
-                self.tick_block_entity_anims()
+            // The bells' and conduits' server tickers, after the other block entities.
+            sunrise_client::spans::time("tick_block_entity_servers", || {
+                self.tick_block_entity_servers()
             });
             // A conduit's hurt teleports an enderman now (`Enderman.hurtServer`).
             span("settle_hurt_teleports", || self.settle_hurt_teleports())?;
+            // A server's particles are not only drawn: a firework's blast sound and mob pickups ride on them.
             sunrise_client::spans::time("tick_particles", || self.tick_particles());
-            span("tick_client_ambient", || self.tick_client_ambient());
         }
         // ServerLevel.tick's `entityManager.tick()`, frozen or not, after every
         // block entity ticker (the bells, conduits and gateways above too): the
         // chunks loaded before this pass have their entities loaded from the next.
         self.world.entities_pending.clear();
-        span("tick_frame_visuals", || self.tick_frame_visuals(running));
         if running {
             // MinecraftServer.tickServer: GameTestTicker.SINGLETON.tick().
             span("tick_game_tests", || self.tick_game_tests());
