@@ -331,7 +331,8 @@ jobs:
           SOURCE_TAG: ${{ needs.pick.outputs.source_tag }}
         run: |
           set -euo pipefail
-          if [[ -f dist/sdk.json ]]; then python3 tools/ci/nightly.py require-sdk "$SHA"; fi
+          # Never a Nightly without its SDK (sdk-<sha>, published first): refused here before anything rotates.
+          python3 tools/ci/nightly.py require-sdk "$SHA"
           python3 tools/ci/nightly.py rotate
           signature=(); [[ -f dist/SHA256SUMS.sig ]] && signature=(dist/SHA256SUMS.sig)
           [[ -f dist/SHA256SUMS.v2.sig ]] && signature+=(dist/SHA256SUMS.v2.sig)
@@ -353,7 +354,7 @@ jobs:
           fi
           # A pre-release, never GitHub's latest: the latest stays the last vX.Y.Z, which launchers and servers from
           # before the Nightly-only switch keep (they don't read Nightlies).
-          if [[ -f dist/sdk.json ]]; then python3 tools/ci/nightly.py require-sdk "$SHA"; fi
+          python3 tools/ci/nightly.py require-sdk "$SHA"
           macos=()
           for archive in dist/sunrise-macos-arm64.zip dist/sunrise-macos-x64.zip; do
             if [[ -f "$archive" ]]; then macos+=("$archive"); fi

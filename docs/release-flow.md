@@ -210,7 +210,7 @@ Three kinds of game build (CI tiers, owner 2026-11-13):
 | Build | Who starts it | What it needs | Published as |
 |---|---|---|---|
 | [Snapshot](#snapshot) | root, by dispatching `release.yml -f kind=snapshot -f dry_run=false` on main | the gate (`lint`, `verify`, `verify-static`, `launcher`) green on that commit | pre-release `snapshot-<date>-<short>`; no launcher offers it |
-| Nightly | dispatch, or the [daily run](#daily-run) | main’s head or an explicit commit of main, with its dyna-checks gate green; SDK when published | pre-release `nightly`, every launcher's update |
+| Nightly | dispatch, or the [daily run](#daily-run) | main’s head or an explicit commit of main, with its dyna-checks gate green and its SDK published first | pre-release `nightly`, every launcher's update |
 | Release (`v*`) | by hand, from a Nightly | | the release |
 
 ### Snapshot
@@ -269,7 +269,8 @@ summary (`tools/ci/daily_summary.py`) reads each leg's result and its sanitised 
 The SDK publishes on its own legs (`sdk`, `linkage`, `machine-sample`, `fn-replace-check`: the summary's `sdk_green`) until a runner with prepared data exists (umceko, 2026-11-16).
 
 Only a run on `main` with `dry_run` false moves the tag, files issues or publishes; any other run prints what it
-would do. On Sunrise a Nightly ships a commit of main with its dyna-checks gate green; a published SDK is optional.
+would do. On Sunrise a Nightly ships a commit of main with its dyna-checks gate green and its SDK, `sdk-<sha>`, published
+first on the same commit: a game build without its SDK is never published (owner, 2026-11-17).
 A [snapshot](#snapshot) (`release.yml -f kind=snapshot`) needs only dyna-checks' gate on its commit of main.
 
 ```mermaid
@@ -477,9 +478,9 @@ of downloads or caches belong to #3009; retaining a release does not authenticat
 ### Current publication contract
 
 The fork's [Nightly workflow](../.github/workflows/nightly-build.yml) selects a gate-checked commit of main through
-[`tools/ci/nightly.py`](../tools/ci/nightly.py). When its complete SDK is published, it carries `sdk.json` and
-checks `require-sdk` before rotation and again before publication. Otherwise it omits `sdk.json` and adds a
-known issue: native mods cannot be built for this build. A complete SDK means a published, non-draft `sdk-<40 lowercase hex SHA>` release holding every asset
+[`tools/ci/nightly.py`](../tools/ci/nightly.py). It carries its complete SDK's `sdk.json` and
+checks `require-sdk` before rotation and again before publication. Without a complete SDK, a real Nightly stops at
+the pick, before it pushes a build branch; a dry run goes on without `sdk.json`. A complete SDK means a published, non-draft `sdk-<40 lowercase hex SHA>` release holding every asset
 `nightly.py sdk-assets` names: `sdk.json`, `SHA256SUMS` signed for `sdk-<sha>` (`SHA256SUMS.sig`), `surface.json`,
 `build-data.tar.xz` and the `runtime`, `api` and `engine` slices of the four packages (Linux client, Linux server,
 Windows GNU and macOS ARM64); its `sdk.json` must match those sums and name that build and this package format. The
