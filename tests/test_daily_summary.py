@@ -653,7 +653,9 @@ class DailyWorkflowTests(unittest.TestCase):
         self.assertEqual(names | {"api-source.tar.xz", "build-data.tar.xz", "surface.json"}, set(nightly.SDK_ARCHIVES))
         self.assertEqual(len(nightly.SDK_ARCHIVES), len(set(nightly.SDK_ARCHIVES)))
         steps = {step.get("name") or step.get("uses"): step for step in build["steps"]}
-        self.assertEqual(steps["Pack the SDK's assets"]["run"], "python tools/prebuilt_game.py pack prebuilt dist")
+        self.assertEqual(steps["Pack the SDK's assets"]["run"],
+                         "python tools/prebuilt_game.py pack prebuilt dist --stage-tool "
+                         "target/prebuilt/tools/release/sunrise-stage${{ runner.os == 'Windows' && '.exe' || '' }}")
         self.assertEqual(steps["actions/upload-artifact@v4"]["with"]["name"], "sdk-leg-${{ matrix.name }}")
         self.assertNotIn("env", build, "no hand-set archive name")
 
