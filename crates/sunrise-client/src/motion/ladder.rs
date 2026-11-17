@@ -139,12 +139,8 @@ impl LivingAirWorld for MotionWorld<'_, '_, '_> {
     }
     fn in_scaffolding(&mut self) -> Result<bool> {
         Ok(self
-            .assets
-            .registry
-            .state(self.block(BlockPos::containing(self.player.position)))
-            .unwrap()
-            .name
-            == "minecraft:scaffolding")
+            .collision_binding
+            .is_scaffolding(self.block(BlockPos::containing(self.player.position))))
     }
     fn suppressing_ladder_slide(&mut self) -> Result<bool> {
         Ok(self.player.shift_key_down && !(self.player.client_side && self.player.flying))
