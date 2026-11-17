@@ -39,11 +39,19 @@ impl PartRegistrar {
                                 part.type_name
                             );
                             // Its type key asked for a type that, with the dependency absent,
-                            // nobody declares: that request is not a load error.
-                            self.registry_keys
-                                .borrow_mut()
-                                .block_entity_types
-                                .withdraw(part.mod_id, id);
+                            // nobody declares: the request is not a load error, unless this mod
+                            // also keyed a capability provider on the type, which still needs it.
+                            let answers_capability = self.parts.capabilities.values().any(|by_type| {
+                                by_type.get(&**id).is_some_and(|providers| {
+                                    providers.iter().any(|provider| provider.mod_id == part.mod_id)
+                                })
+                            });
+                            if !answers_capability {
+                                self.registry_keys
+                                    .borrow_mut()
+                                    .block_entity_types
+                                    .withdraw(part.mod_id, id);
+                            }
                         }
                         Some(crate::DependencyKind::Required) => self.refused.push(format!(
                             "mod {} attached {} to block entity type {id}, which its required dependency {dependency_id} does not declare",
@@ -552,6 +560,31 @@ pub mod tests {
             crate::__private::install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false)
                 .unwrap();
             assert_eq!(resolve(), Ok(()));
+        });
+        // A capability provider keyed on the same absent type still needs it.
+        struct AnswersToo;
+        #[mod_api::__subscriptions]
+        impl Hooks for AnswersToo {
+            fn register(&self, r: &mut dyn Registrar, cx: &RegistrationContext) {
+                Attaches(FromB).register(r, cx);
+                let press = r.block_entity_type_key("owner:press");
+                r.block_entity_capability(
+                    &crate::parts::capabilities::tests::CHEMICALS,
+                    &press,
+                    |_, at| Some(Box::new(crate::parts::capabilities::tests::ChemTank(at))),
+                );
+            }
+        }
+        crate::load_state::with_test_package_inventory(optional(), || {
+            let mods = [ModEntry::new("b", Box::new(AnswersToo))];
+            crate::__private::install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false)
+                .unwrap();
+            assert_eq!(
+                resolve(),
+                Err(vec![
+                    "mod b requested unknown block entity type owner:press".to_owned()
+                ])
+            );
         });
         let mut packages = optional();
         packages.push(package("c", Side::Both, &[]));
