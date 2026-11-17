@@ -65,9 +65,8 @@ RUNTIME = "bin"
 INPUTS = ROOT / "crates/sunrise-mod-package/src/sdk/inputs.json"
 # The crates an API-only mod may name; their closure is the `api` archive.
 API_ROOTS = ("sunrise-mod-api", "sunrise-mod-points")
-# The game libraries outside the API closure, in the runtime archive. `sunrise_wasmtime` is the game's one wasmtime,
-# which native mods with a `[[native.*]]` row link (its metadata is in the engine archive's `deps/`).
-GAME_LIBRARIES = ("sunrise_mod_host", "sunrise_mod_wasm", "sunrise_wasmtime")
+# The game libraries outside the API closure, in the runtime archive.
+GAME_LIBRARIES = ("sunrise_mod_host", "sunrise_mod_wasm")
 # A crate the wasm runtime depends on normally links into its dylib alone, and a C library inside a Rust dylib is
 # hidden from the other: #1596 put mimalloc there and the game's library, which calls it, no longer linked. These
 # `links` keys carry no library: rayon-core and wasm-bindgen-shared keep one copy, sunrise-mod-vocab hands on a folder.
@@ -387,7 +386,7 @@ def build(out: Path, server: bool) -> None:
     metadata = json.loads(run(["cargo", "metadata", "--format-version", "1"], cwd=staged))
     closure = api_closure(metadata)
     for package in metadata["packages"]:
-        if package["id"] not in closure and package["name"] not in ("sunrise-mod-wasm", "sunrise-wasmtime"):
+        if package["id"] not in closure and package["name"] != "sunrise-mod-wasm":
             continue
         if not any(target["kind"] == ["lib"] for target in package["targets"]):
             continue
@@ -566,7 +565,7 @@ def check(out: Path) -> None:
     ]
     if stray:
         sys.exit(f"prebuilt folder holds files that aren't compiler outputs: {stray}")
-    for crate in ("sunrise_mod_wasm", "sunrise_mod_host", "sunrise_wasmtime"):
+    for crate in ("sunrise_mod_wasm", "sunrise_mod_host"):
         if dylib(out / "deps", crate) is None:
             sys.exit(f"prebuilt folder has no {crate.replace('_', '-')} dylib")
 
