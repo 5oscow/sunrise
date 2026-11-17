@@ -35,6 +35,7 @@ pub mod compression;
 pub mod conditions;
 pub mod consumable;
 pub mod consume_effect;
+pub mod custom_data;
 pub mod damage_immunity;
 pub mod damage_reduction;
 pub mod damage_source;

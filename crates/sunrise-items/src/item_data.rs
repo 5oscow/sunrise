@@ -7,8 +7,7 @@ pub mod brewing_fuel;
 pub mod component_values;
 #[path = "item_data/cooking_fuel.rs"]
 pub mod cooking_fuel;
-#[path = "item_data/custom_data.rs"]
-pub mod custom_data;
+pub use sunrise_world::custom_data;
 #[path = "item_data/custom_model_data.rs"]
 pub mod custom_model_data;
 #[path = "item_data/ingredient_components.rs"]
