@@ -1,3 +1,0 @@
-ids = ["hook:register_render_pipelines"]
-why = "A pipeline's shader is now also refused when its composed module holds more than 20,000 expressions or 64 texture reads, or when SPIR-V, MSL or HLSL translation refuses it (the refusal names the backend). Refusals with a place in the file now give line and column: <file>:<line>:<column>: <reason>. The hook's contract is unchanged, so its hook_version stays."
-migrate = "Run cargo sunrise-mod check: it refuses the same shaders with the same text the game logs. A shader that passed before and is refused now needs fewer expressions or texture reads, or a rewrite of what the named backend refuses (for example a pointer to a matrix column passed to a function)."
