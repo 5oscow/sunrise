@@ -1204,6 +1204,10 @@ jobs:
           echo "WAYLAND_DISPLAY=" >> "$GITHUB_ENV"
       # The game-probe builds the named harnesses run, built here first, as tools/parity.py runs them (its target and
       # profile), so a cold build never counts against a harness's own build limit.
+      # The runner's own CPU use through the probe build and the harnesses (tools/ci/cpu_use.py), to size -j from.
+      - name: Note the runner's CPU counters
+        if: inputs.harnesses != ''
+        run: python3 tools/ci/cpu_use.py mark parity
       - name: Build the named harnesses' game probes
         if: inputs.harnesses != ''
         env:
@@ -1241,6 +1245,11 @@ jobs:
             fi
           done
           echo "Game probe builds: $((SECONDS - started)) s" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Note the runner's CPU counters before the harnesses
+        if: inputs.harnesses != ''
+        run: |
+          python3 tools/ci/cpu_use.py report parity "Probe build CPU"
+          python3 tools/ci/cpu_use.py mark harnesses
       - name: Named harnesses
         if: inputs.harnesses != ''
         env:
@@ -1255,6 +1264,9 @@ jobs:
           # tools/parity.py's probe build runs at the runner's size (cargo_jobs.py), not the host's CPU count.
           PARITY_BUILD_JOBS="${CI_JOBS:?}" python tools/parity.py -j 4 --timeout 2400 --fails-on-main "$FAILS_ON_MAIN" "${names[@]}"
       # The dependency lists this run wrote, for the slot's next run (see the scratch step).
+      - name: The runner's CPU use through the harnesses
+        if: always() && inputs.harnesses != ''
+        run: python3 tools/ci/cpu_use.py report harnesses "Harness CPU"
       - name: Keep the harnesses' dependency lists on the slot
         if: always() && inputs.harnesses != ''
         run: |
