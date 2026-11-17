@@ -106,8 +106,9 @@ standard operation; `copy_components`, `copy_custom_data`, `copy_state` and
 ## Copying components
 
 `minecraft:copy_components` reads `source` as `block_entity`, `tool`, or an
-available entity target (`this`, `attacker`, `direct_attacker`,
-`attacking_player`, `target_entity`, or `interacting_entity`).
+available entity target. The world evaluator accepts `this`, `attacker`,
+`direct_attacker`, and `attacking_player`; the item evaluator currently accepts
+only `this`. Each entity source is available only when the caller supplied it.
 The block source is its collected component map, including a mod block entity's
 stored components, retained before removal; it is not restricted to particular
 vanilla block classes. A tool includes its loaded prototype and live component
@@ -131,7 +132,8 @@ component-getter follow-up; the copy function does not manufacture those values.
 the equivalent `{"type":"minecraft:context","target":"this"}` object, or
 `{"type":"minecraft:storage","source":"example:cache"}`. Context sources are
 available only when the caller supplied that entity or block entity. An unset
-storage entry is an empty compound, not an absent context source.
+storage entry is an empty compound, not an absent context source. Entity target
+names have the same evaluator-specific availability as `copy_components` above.
 
 Each entry in `ops` has a `source` NBT path, a `target` NBT path into the item's
 custom-data compound, and an `op`:
