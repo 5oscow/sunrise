@@ -28,8 +28,8 @@ A row marked `daily` (`PACKAGE TEST TARGET daily REASON`, in `daily-<package>.tx
 `verify` into the daily run with `#[ignore = "daily"]` (tools/ci/move_to_daily.py): not a known failure, it must
 pass, and its row must name a test that still runs. A package's shard runs the daily rows of the targets it
 already runs (its library; every target for the packages in INTEGRATION_TESTS); the shard `daily-rows`
-(tools/ci/ignored_shards.py; `daily-rows-launcher` for the launcher's) runs every other daily row, one `cargo test -p PACKAGE TARGET -- --ignored --exact
-TEST...` per package and target, from the package's own workspace: a launcher row runs from launcher/ against its
+(tools/ci/ignored_shards.py; `daily-rows-launcher` for the launcher's) runs every other daily row, one `cargo test -p PACKAGE TARGET... -- --ignored --exact
+TEST...` per package (all its targets in one build), from the package's own workspace: a launcher row runs from launcher/ against its
 own lockfile (`--locked`). A daily row whose reason names an input only one job builds (DAILY_INPUTS: `wasm-fixture`)
 runs in that job with the `needs` rows of that variable (`--needs SUNRISE_WASM_FIXTURE --one-process-each`), never in a
 shard.
@@ -796,7 +796,7 @@ def listed_result_records(line, expected, max_name_length):
 def run(package, skip, number=None, count=None, only=None):
     """Each test's result in `package`'s ignored library tests but `skip` (and, with a leg, the other legs'), or None if they didn't build.
 
-    `only=(target, tests)` runs just those ignored tests of one target (`lib`, `bin:NAME`, `test:NAME`) instead.
+    `only=(targets, tests)` runs just those ignored tests of those targets (`lib`, `bin:NAME`, `test:NAME`) instead.
     When it returns None, `_stopped` says why (stopped())."""
     started = time.monotonic()
     kills_before = cgroup_memory()["oom_kills"]
@@ -819,13 +819,14 @@ def run(package, skip, number=None, count=None, only=None):
         command = ["cargo", "test", "-p", package, "--lib", *(["--bins", "--tests"] if package in INTEGRATION_TESTS else []), "--no-fail-fast"]
         workspace = "."
         if only:
-            target = only[0]
+            targets = only[0]
             # A package of another workspace (the launcher's) runs from that workspace, against its own lockfile.
             workspace = ignored_shards.workspace_members()[package][1]
             features = workspace_features(workspace).get(package, [])
             command = ["cargo", "test", *(["--locked"] if workspace != "." else []), "-p", package,
                        *(["--features", ",".join(features)] if features else []),
-                       *(["--lib"] if target == "lib" else [f"--{target.split(':')[0]}", target.split(":", 1)[1]])]
+                       *(flag for target in targets for flag in
+                         (["--lib"] if target == "lib" else [f"--{target.split(':')[0]}", target.split(":", 1)[1]]))]
         if client_half:
             # The runner's own cap (tools/ci/cargo_jobs.py --cap) when set, else the old fixed one.
             command.append(f"--jobs={os.environ.get('CI_JOBS', '8')}")
@@ -1032,7 +1033,7 @@ def main(shards, report=None):
         for selection in (
             ("sunrise-client-lib#1of2", "sunrise-client-lib#2of2")
             if shard == "sunrise-client-lib" else
-            [f"{shard}:{package}:{target}" for package, target in groups
+            [f"{shard}:{package}" for package in sorted({package for package, _ in groups})
              if ignored_shards.daily_rows_leg(package) == shard]
             if shard in ignored_shards.DAILY_ROWS_LEGS.values() else (shard,)
         )
@@ -1044,10 +1045,13 @@ def main(shards, report=None):
             "shard": shard, "in_progress": True, "started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}]))
         daily_group = shard.split(":", 1)[0] in ignored_shards.DAILY_ROWS_LEGS.values()
         if daily_group:
-            _, package, target = shard.split(":", 2)
-            print(f"{package} {target}: {len(groups[package, target])} daily tests", flush=True)
-            runs = [lambda: run(package, [], only=(target, groups[package, target]))]
-            expected_daily = groups[package, target]
+            _, package = shard.split(":", 1)
+            # Every target of the package in one cargo run: one build that links its test binaries in parallel,
+            # not one cargo run per target (51 of them made the leg outlast its 60 minutes, #1619).
+            targets = sorted(target for listed, target in groups if listed == package)
+            expected_daily = [test for target in targets for test in groups[package, target]]
+            print(f"{package} {', '.join(targets)}: {len(expected_daily)} daily tests", flush=True)
+            runs = [lambda: run(package, [], only=(targets, expected_daily))]
         else:
             package, number, count = parse_shard(shard)
             expected_daily = [row.test for row in daily if row.package == package
