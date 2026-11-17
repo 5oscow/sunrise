@@ -20,7 +20,7 @@ fn unregistered_serializer_refuses_whole_load_after_false_conditions() {
         .to_string();
     assert_eq!(
         error,
-        "1 recipe failed to load:\n  recipe data/minecraft/recipe/unknown.json, unregistered recipe serializer absent:serializer"
+        "2 recipes failed to load:\n  recipes: data/minecraft/recipe/known_bad.json refused: invalid result: {\"count\":100,\"id\":\"minecraft:stick\"}\n  recipe data/minecraft/recipe/unknown.json, unregistered recipe serializer absent:serializer"
     );
     std::fs::write(
         folder.join("unknown.json"),
@@ -181,5 +181,49 @@ fn a_failed_load_names_every_bad_recipe() {
             error,
             "2 recipes failed to load:\n  recipe data/minecraft/recipe/a.json, unregistered recipe serializer absent:one\n  recipe data/minecraft/recipe/b.json, unregistered recipe serializer absent:two"
         );
+    });
+}
+
+#[test]
+fn a_failed_load_reports_resolution_and_validation_failures_together() {
+    mod_platform::testing::with_mods(Vec::new().into(), || {
+        let sources = vec![
+            (
+                "minecraft:a".into(),
+                serde_json::json!({"type":"absent:serializer"}),
+            ),
+            (
+                "minecraft:b".into(),
+                serde_json::json!({"type":"minecraft:crafting_shapeless","ingredients":[{"type":"absent:kind"}],"result":{"id":"minecraft:stick"}}),
+            ),
+            (
+                "minecraft:c".into(),
+                serde_json::json!({"type":"minecraft:crafting_shapeless","ingredients":[],"result":{"id":"minecraft:stick"}}),
+            ),
+            (
+                "minecraft:d".into(),
+                serde_json::json!({"type":"minecraft:crafting_shapeless","ingredients":["minecraft:stone"],"result":{"id":"minecraft:stick"}}),
+            ),
+        ];
+        let root = tempfile::tempdir().unwrap();
+        let error = Recipes::from_sources(
+            root.path(),
+            &Items::for_tests(Default::default()),
+            &PackOverlay::NONE,
+            sources,
+            &crate::test_resources::server_load(),
+        )
+        .err()
+        .unwrap()
+        .to_string();
+        let lines: Vec<_> = error.lines().collect();
+        assert_eq!(lines[0], "3 recipes failed to load:", "{error}");
+        for (line, file) in lines[1..].iter().zip(["a", "b", "c"]) {
+            assert!(
+                line.contains(&format!("data/minecraft/recipe/{file}.json")),
+                "{error}"
+            );
+        }
+        assert!(!error.contains("d.json"), "{error}");
     });
 }
