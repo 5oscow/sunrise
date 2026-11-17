@@ -296,8 +296,13 @@ fn registrations(
     Ok((registrations, point_names))
 }
 
-pub fn build(root: &Path, catalog: Option<&Path>, additional: &[PathBuf]) -> Result<(), String> {
-    group::build(root, catalog, additional)
+pub fn build(
+    root: &Path,
+    catalog: Option<&Path>,
+    additional: &[PathBuf],
+    api: Option<&mod_surface::Surface>,
+) -> Result<(), String> {
+    group::build(root, catalog, additional, api)
 }
 
 fn member_export(name: &str) -> bool {

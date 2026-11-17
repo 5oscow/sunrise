@@ -73,19 +73,6 @@ fn checkout_surface(root: &Path) -> Result<Option<Surface>, String> {
     sunrise_mod_api_gen::surface::export(&tree).map(|export| Some(export.surface))
 }
 
-/// Removes a `layouts.json` the reader no longer accepts (a build before the current identity
-/// width wrote one): it is derived output, and the build writes it again.
-pub fn discard_stale(root: &Path) -> Result<(), String> {
-    let path = root.join(sunrise_mod_package::layouts::FILE);
-    let Ok(file) = fs::File::open(&path) else {
-        return Ok(());
-    };
-    if sunrise_mod_package::layouts::Layouts::read(file).is_err() {
-        fs::remove_file(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-    }
-    Ok(())
-}
-
 fn build_with(tool: Tool, root: &Path, api: Option<&Surface>) -> Result<(), String> {
     if !root.join("Cargo.toml").is_file() {
         return Ok(());
@@ -214,10 +201,17 @@ mod tests {
 
     /// A mod `addon` that depends on a mod library `library` whose source is `library_source`.
     fn project(name: &str, library_source: &str, addon_source: &str) -> PathBuf {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
-            "../../target/layouts-{name}-{}",
-            std::process::id()
-        ));
+        project_in(
+            &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target"),
+            name,
+            library_source,
+            addon_source,
+        )
+    }
+
+    /// The same project below `base`.
+    fn project_in(base: &Path, name: &str, library_source: &str, addon_source: &str) -> PathBuf {
+        let root = base.join(format!("layouts-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         let library = root.join("library");
         fs::create_dir_all(library.join("src")).unwrap();
@@ -355,6 +349,35 @@ mod tests {
 
     #[test]
     #[ignore = "daily"]
+    fn a_library_type_naming_a_mod_api_type_builds_with_the_sdk_surface_outside_any_checkout() {
+        // The surface an SDK ships is the export of the tree it was built from.
+        let tree = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let surface = sunrise_mod_api_gen::surface::export(&tree).unwrap().surface;
+        let root = project_in(
+            &std::env::temp_dir(),
+            "sdk",
+            "#[derive(mod_api::Wire)] pub struct Held { pub stack: mod_api::ItemStack }\n",
+            "pub fn run() {}\n",
+        );
+        // Outside the checkout there is none to export from: the pinned surface is the only source.
+        assert!(build(&root).unwrap_err().contains("no pinned SDK"));
+        let tool = |name: &str| match name {
+            "cargo" => Command::new(env!("CARGO")),
+            other => Command::new(other),
+        };
+        build_with(&tool, &root, Some(&surface)).unwrap();
+        assert_eq!(
+            recorded(&root)["library"]["library::Held"]
+                .as_str()
+                .unwrap()
+                .len(),
+            32
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    #[ignore = "daily"]
     fn a_library_whose_root_is_not_lib_rs_is_read() {
         let root = project("root", "", "pub fn run() {}\n");
         fs::rename(
@@ -379,18 +402,32 @@ mod tests {
     }
 
     #[test]
-    fn a_layouts_file_of_the_old_width_is_discarded_for_the_build_to_write_again() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join(format!("../../target/layouts-stale-{}", std::process::id()));
-        fs::create_dir_all(&root).unwrap();
-        let file = root.join("layouts.json");
-        fs::write(&file, r#"{"library":{"library::T":"0123456789abcdef"}}"#).unwrap();
-        discard_stale(&root).unwrap();
-        assert!(!file.exists());
-        let current = br#"{"library":{"library::T":"0123456789abcdef0123456789abcdef"}}"#;
-        fs::write(&file, current).unwrap();
-        discard_stale(&root).unwrap();
-        assert_eq!(fs::read(&file).unwrap(), current);
+    #[ignore = "daily"]
+    fn a_legacy_layouts_file_is_replaced_by_the_build_and_kept_when_it_refuses() {
+        let root = project(
+            "legacy",
+            "#[derive(mod_api::Wire)] pub struct Record { pub field: u32 }\n",
+            "pub fn run() {}\n",
+        );
+        let legacy = br#"{"library":{"library::Record":"0123456789abcdef"}}"#;
+        fs::write(root.join("layouts.json"), legacy).unwrap();
+        build(&root).unwrap();
+        assert_eq!(
+            recorded(&root)["library"]["library::Record"]
+                .as_str()
+                .unwrap()
+                .len(),
+            32
+        );
+        // A refused build leaves an old file as it was: the last-type review still guards it.
+        fs::write(root.join("layouts.json"), legacy).unwrap();
+        fs::write(root.join("library/src/lib.rs"), "pub struct Local;\n").unwrap();
+        assert!(
+            build(&root)
+                .unwrap_err()
+                .contains("lose all recorded types")
+        );
+        assert_eq!(fs::read(root.join("layouts.json")).unwrap(), legacy);
         fs::remove_dir_all(root).unwrap();
     }
 }

@@ -16,6 +16,8 @@ cargo-sunrise-mod internals_commands_refuse_wasm_mods_without_edits test:interna
 cargo-sunrise-mod internals_sync_invokes_the_launcher_and_never_edits_on_failure test:internals daily child-process
 cargo-sunrise-mod layouts::tests::a_library_type_naming_a_mod_api_type_builds_without_an_sdk_inside_the_checkout bin:cargo-sunrise-mod daily child-process
 cargo-sunrise-mod layouts::tests::a_library_whose_root_is_not_lib_rs_is_read bin:cargo-sunrise-mod daily child-process
+cargo-sunrise-mod layouts::tests::a_legacy_layouts_file_is_replaced_by_the_build_and_kept_when_it_refuses bin:cargo-sunrise-mod daily child-process
+cargo-sunrise-mod layouts::tests::a_library_type_naming_a_mod_api_type_builds_with_the_sdk_surface_outside_any_checkout bin:cargo-sunrise-mod daily child-process
 cargo-sunrise-mod layouts::tests::a_library_types_identity_follows_its_fields_and_the_types_they_nest bin:cargo-sunrise-mod daily child-process
 cargo-sunrise-mod layouts::tests::removing_the_last_public_type_must_be_reviewed bin:cargo-sunrise-mod daily child-process
 cargo-sunrise-mod module_free_add_commands_keep_prebuilt_output_and_never_run_launcher test:module_discovery daily child-process

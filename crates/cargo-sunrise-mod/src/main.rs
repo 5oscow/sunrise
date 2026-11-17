@@ -101,7 +101,8 @@ fn main() -> ExitCode {
             None => Ok(()),
         }),
         Some("build") if args.get(1).is_some_and(|a| a == "--wasm") => fetched(Path::new("."))
-            .and_then(|()| wasm::build(Path::new("."), flag(&args[2..], "--catalog").map(Path::new), &args[2..].windows(2).filter(|a| a[0] == "--with").map(|a| PathBuf::from(&a[1])).collect::<Vec<_>>()))
+            .and_then(|()| pinned_surface(Path::new(".")))
+            .and_then(|api| wasm::build(Path::new("."), flag(&args[2..], "--catalog").map(Path::new), &args[2..].windows(2).filter(|a| a[0] == "--with").map(|a| PathBuf::from(&a[1])).collect::<Vec<_>>(), api.as_ref()))
             .and_then(|()| build(entry))
             .map(|p| println!("Built {}", p.display())),
         Some("wasm-std") => wasm::wasm_std(&args[1..]),
@@ -177,6 +178,15 @@ fn fetched(dir: &Path) -> Result<(), String> {
         sdk.dir.display()
     );
     Ok(())
+}
+
+/// The surface of the SDK the project pins, read once for everything that packs a library's
+/// wire identities; none for a project built against the game checkout, which exports its own.
+fn pinned_surface(dir: &Path) -> Result<Option<mod_surface::Surface>, String> {
+    if sdk_fetch::game_tree(dir)?.is_some() {
+        return Ok(None);
+    }
+    uses_table::surface_of(&sdk_fetch::ensure_sdk(dir)?).map(Some)
 }
 
 /// The value after `flag` in `args`.
@@ -408,7 +418,6 @@ fn new_code(
 /// checkout it lies in, which has no published surface to scan against).
 fn build(entry: mod_surface::child::ChildEntry) -> Result<PathBuf, String> {
     let root = Path::new(".");
-    layouts::discard_stale(root)?;
     let package = Package::read(root)?;
     let code = package.manifest.native.is_some() || package.manifest.wasm.is_some();
     let mut api = None;
@@ -449,7 +458,6 @@ fn pack_into(
     uses: Option<&[u8]>,
     api: Option<&mod_surface::Surface>,
 ) -> Result<PathBuf, String> {
-    layouts::discard_stale(root)?;
     let package = Package::read(root)?;
     if package.manifest.native.is_some() || package.manifest.wasm.is_some() {
         layouts::build(root, api)?;
