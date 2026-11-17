@@ -548,6 +548,44 @@ pub fn conditions_hold_with_lookup(
     evaluate(v, loaded, lookup, owned, &Context::default(), &mut |_| {})
 }
 
+/// Does the built-in evaluator already implement this condition ID?
+pub fn is_builtin_condition(id: &sunrise_core::identifier::Identifier) -> bool {
+    BuiltinCondition::from_parts(id.namespace(), id.path()).is_some()
+}
+
+#[derive(Clone, Copy)]
+enum BuiltinCondition {
+    ModLoaded,
+    True,
+    False,
+    FeatureFlags,
+    Registered,
+    TagEmpty,
+    Not,
+    And,
+    Or,
+}
+
+impl BuiltinCondition {
+    fn from_parts(namespace: &str, path: &str) -> Option<Self> {
+        if namespace != "neoforge" {
+            return None;
+        }
+        Some(match path {
+            "mod_loaded" => Self::ModLoaded,
+            "true" => Self::True,
+            "false" => Self::False,
+            "feature_flags_enabled" => Self::FeatureFlags,
+            "registered" => Self::Registered,
+            "tag_empty" => Self::TagEmpty,
+            "not" => Self::Not,
+            "and" => Self::And,
+            "or" => Self::Or,
+            _ => return None,
+        })
+    }
+}
+
 fn evaluate(
     v: &Value,
     loaded: &ModLoaded,
@@ -566,11 +604,18 @@ fn evaluate(
     ) -> Result<Option<bool>, String> {
         // Both NeoForge codecs default `registry` to `minecraft:item`.
         let registry = || qualified(c["registry"].as_str().unwrap_or("minecraft:item"));
-        Ok(match c["type"].as_str() {
-            Some("neoforge:mod_loaded") => Some(c["modid"].as_str().is_some_and(loaded)),
-            Some("neoforge:true") => Some(true),
-            Some("neoforge:false") => Some(false),
-            Some("neoforge:feature_flags_enabled") => match &context.features {
+        let Some(name) = c["type"].as_str() else {
+            return Ok(None);
+        };
+        let builtin = name
+            .split_once(':')
+            .and_then(|(namespace, path)| BuiltinCondition::from_parts(namespace, path));
+        use BuiltinCondition::*;
+        Ok(match builtin {
+            Some(ModLoaded) => Some(c["modid"].as_str().is_some_and(loaded)),
+            Some(True) => Some(true),
+            Some(False) => Some(false),
+            Some(FeatureFlags) => match &context.features {
                 Some(enabled) => {
                     let Some(flags) = c["flags"].as_array() else {
                         unknown("neoforge:feature_flags_enabled (invalid flags)");
@@ -591,7 +636,7 @@ fn evaluate(
                     None
                 }
             },
-            Some("neoforge:registered") => match &context.registries {
+            Some(Registered) => match &context.registries {
                 Some(registries) => Some(
                     c["value"]
                         .as_str()
@@ -602,7 +647,7 @@ fn evaluate(
                     None
                 }
             },
-            Some("neoforge:tag_empty") => match &context.tags {
+            Some(TagEmpty) => match &context.tags {
                 Some(tags) => match c["tag"].as_str() {
                     Some(tag) => Some(!tags.contains(&registry(), &qualified(tag))),
                     None => {
@@ -615,18 +660,16 @@ fn evaluate(
                     None
                 }
             },
-            Some("neoforge:not") => {
-                hold(&c["value"], loaded, lookup, owned, context, unknown)?.map(|v| !v)
-            }
-            Some(kind @ ("neoforge:and" | "neoforge:or")) => {
+            Some(Not) => hold(&c["value"], loaded, lookup, owned, context, unknown)?.map(|v| !v),
+            Some(kind @ (And | Or)) => {
                 // Visit every child: an unknown node invalidates the whole file,
                 // including after a sibling already determines its boolean result.
-                let mut answer = kind == "neoforge:and";
+                let mut answer = matches!(kind, And);
                 let mut known = true;
                 for child in c["values"].as_array().into_iter().flatten() {
                     match hold(child, loaded, lookup, owned, context, unknown)? {
                         Some(value) => {
-                            if kind == "neoforge:and" {
+                            if matches!(kind, And) {
                                 answer &= value;
                             } else {
                                 answer |= value;
@@ -637,7 +680,7 @@ fn evaluate(
                 }
                 known.then_some(answer)
             }
-            Some(name) => match lookup(name, c) {
+            None => match lookup(name, c) {
                 Some(answer) => Some(answer?),
                 None => {
                     if let Some(owner) = name
@@ -652,7 +695,6 @@ fn evaluate(
                     None
                 }
             },
-            None => None,
         })
     }
     let mut allowed = true;

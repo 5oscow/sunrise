@@ -2,12 +2,9 @@
 pub trait Hooks {
     /// Register named conditions once at mod load, before server data admission.
     /// Each handler is a raw-JSON handler: it reads the condition's JSON value.
-    /// Names may use any namespace; duplicate ids refuse mod load and name both
-    /// registering mods. Native and wasm handlers share the same route. Any
-    /// namespace with a registered handler is owned for unknown-id handling,
-    /// whoever registered it; an unknown condition there refuses data reload.
-    /// Foreign unknown ids omit their file with one ERROR-level log entry,
-    /// even inside `or(true, unknown)`; every combinator branch is visited.
+    /// IDs may use any namespace, but built-in and duplicate IDs refuse mod load.
+    /// Native and wasm handlers share the same route. Foreign registrations
+    /// do not grant namespace ownership for unknown-ID handling.
     #[hook(
         side = "server",
         version = 2,

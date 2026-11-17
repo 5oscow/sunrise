@@ -356,7 +356,9 @@ fn load_conditions_registration_allows_shared_namespaces() {
         ]
         .into(),
         || {
-            let mut registrar = mod_api::LoadConditionDeclarations::default();
+            let mut registrar = mod_api::LoadConditionDeclarations::new(
+                sunrise_world::conditions::is_builtin_condition,
+            );
             mod_api::dispatch_register_load_conditions(&RegistrationContext::new(), &mut registrar);
             let entries = registrar.finish().unwrap();
             assert_eq!(entries.len(), 2);
@@ -379,11 +381,70 @@ fn load_conditions_registration_refuses_duplicate_ids_even_if_ignored() {
         ]
         .into(),
         || {
-            let mut registrar = mod_api::LoadConditionDeclarations::default();
+            let mut registrar = mod_api::LoadConditionDeclarations::new(
+                sunrise_world::conditions::is_builtin_condition,
+            );
             mod_api::dispatch_register_load_conditions(&RegistrationContext::new(), &mut registrar);
             let error = registrar.finish().err().unwrap().message;
             assert!(error.contains("condition a:x"), "{error}");
             assert!(error.contains("both a and b"), "{error}");
+        },
+    );
+}
+
+#[test]
+fn load_conditions_refuse_a_builtin_id_at_startup_even_if_ignored() {
+    mod_platform::testing::with_mods(
+        vec![ModEntry::new(
+            "compat",
+            Box::new(NamedCondition("neoforge:mod_loaded")),
+        )]
+        .into(),
+        || {
+            let sources = crate::game::mods::ModsState::default();
+            let inventory = sunrise_mod_package::enabled::EnabledMods::default();
+            let error = super::conditions_for_mods(&sources, &inventory).unwrap_err();
+            assert!(error.contains("mod compat"), "{error}");
+            assert!(error.contains("neoforge:mod_loaded"), "{error}");
+            assert!(error.contains("built in"), "{error}");
+        },
+    );
+}
+
+#[test]
+fn load_conditions_foreign_registrations_do_not_grant_namespace_ownership() {
+    mod_platform::testing::with_mods(
+        vec![
+            ModEntry::new("a", Box::new(NamedCondition("a:x"))),
+            ModEntry::new("b", Box::new(NamedCondition("a:z"))),
+            ModEntry::new("compat", Box::new(NamedCondition("c:config"))),
+            ModEntry::new("other", Box::new(NamedCondition("neoforge:custom"))),
+        ]
+        .into(),
+        || {
+            let sources = crate::game::mods::ModsState::default();
+            let inventory = sunrise_mod_package::enabled::EnabledMods::default();
+            let conditions = super::conditions_for_mods(&sources, &inventory).unwrap();
+            let file = |id: &str| json!({"neoforge:conditions":[{"type":id, "value":true}]});
+            assert!(conditions.allows_file(&file("c:config"), "data/demo/advancement/known.json"));
+            assert!(conditions.allows_file(
+                &file("neoforge:custom"),
+                "data/demo/advancement/custom.json"
+            ));
+            for (id, path) in [
+                ("c:missing", "data/demo/advancement/c.json"),
+                ("neoforge:missing", "data/demo/advancement/neoforge.json"),
+            ] {
+                assert!(!conditions.allows_file(&file(id), path));
+            }
+            assert_eq!(conditions.check_errors(), Ok(()));
+            assert!(!conditions.allows_file(&file("a:missing"), "data/demo/advancement/a.json"));
+            let error = conditions.check_errors().unwrap_err();
+            assert!(
+                error.contains("condition a:missing in namespace registered by mod a"),
+                "{error}"
+            );
+            assert!(!error.contains("mod b"), "{error}");
         },
     );
 }
