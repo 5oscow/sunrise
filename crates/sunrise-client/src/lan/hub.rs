@@ -2138,8 +2138,8 @@ impl Hub {
     }
 
     /// A displacement of the player by `by` to `target`, made on its server copy by the caller
-    /// (its body is at `target`; `Guest::position` is set here), told to its client as a relative teleport: the
-    /// client adds `by` to where it is now (`Relative.X/Y/Z`), keeps its motion and look
+    /// (its body is at `target`; `Guest::position` is set here), told to its client as a
+    /// relative teleport: the client adds `by` to where it is now (`Relative.X/Y/Z`), keeps its motion and look
     /// (`DELTA_*`, `ROTATE_DELTA`, `Y_ROT`, `X_ROT`), and nothing snaps back by what it
     /// walked while the packet was on its way. Its confirmation puts the server copy where it
     /// has been since, the awaited target, and its reports until then are dropped as for any
@@ -2148,23 +2148,18 @@ impl Hub {
     /// A player a moving collider carries stays carried when the target is still on the
     /// collider as the server places it now, with the place on the collider re-derived from the
     /// target; otherwise it lets go, and its next report that fits attaches it again. Either
-    /// way no report is counted against it. `false` for a player the hub has no more.
-    pub fn displace(&mut self, conn: u32, target: [f64; 3], by: [f64; 3]) -> bool {
+    /// way no report is counted against it. Nothing happens for a player the hub has no more.
+    pub fn displace(&mut self, conn: u32, target: [f64; 3], by: [f64; 3]) {
         let Some(i) = self.guests.connection_index(conn) else {
-            return false;
+            return;
         };
         let carried = self.guests[i].on_collider;
-        {
-            let value = 0;
-            self.guests
-                .update(i, |guest| guest.above_ground_ticks = value);
-        }
+        self.guests.update(i, |g| g.above_ground_ticks = 0);
         use play::relative::{DELTA_X, DELTA_Y, DELTA_Z, ROTATE_DELTA, X, X_ROT, Y, Y_ROT, Z};
         let relatives = X | Y | Z | Y_ROT | X_ROT | DELTA_X | DELTA_Y | DELTA_Z | ROTATE_DELTA;
         self.teleport_relative(i, Some(target), relatives, by);
         self.keep_carried_at(i, carried, target);
         self.note_displaced(i);
-        true
     }
 
     /// A development build's warning for a player displaced on 20 ticks in a row: each

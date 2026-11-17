@@ -49,7 +49,7 @@ impl Hub {
     /// [`Self::settle`] through `world` and its collision data, `None` when the level cannot
     /// answer (a move too long for the collision query's budget): a caller that must not pass
     /// a wall on failure moves nothing.
-    pub fn settle_in(
+    fn settle_in(
         &self,
         i: usize,
         from: [f64; 3],

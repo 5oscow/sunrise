@@ -66,12 +66,16 @@ fn warned(events: &[HostEvent]) -> bool {
     events.iter().any(|e| matches!(e, HostEvent::Warn(_)))
 }
 
-/// The client keeps walking while the teleport is on its way: its relative landing is its own
-/// position plus the displacement, and the server snaps to its own target at the
-/// confirmation, then accepts the client's walk from there as an ordinary move.
+/// A displacement goes out as one relative teleport (position, motion and look), the player's
+/// own reports while it is awaited lose their position and keep their rotation with nothing
+/// held against it, and the confirmation leaves the server at its own target, from where the
+/// client's walk is accepted as an ordinary move. What this does not assert: that the end
+/// position is the client's walk plus the displacement. The hub commits the teleport's target
+/// on a confirmation, not the position the packet reports (sunrise#2055).
 #[test]
 #[ignore = "daily"]
-fn a_client_that_keeps_walking_ends_at_its_walk_plus_the_displacement() {
+fn a_displacement_is_a_relative_teleport_that_drops_position_keeps_rotation_and_lands_on_the_target()
+ {
     use play::relative::{DELTA_X, DELTA_Y, DELTA_Z, ROTATE_DELTA, X, X_ROT, Y, Y_ROT, Z};
     let Some(fixture) = crate::test_fixtures::vanilla() else {
         return;
@@ -80,7 +84,7 @@ fn a_client_that_keeps_walking_ends_at_its_walk_plus_the_displacement() {
     let conn = side.guest().conn;
     let by = [2.0, 0.0, 0.0];
     let target = plus(START, by);
-    assert!(side.hub.displace(conn, target, by));
+    side.hub.displace(conn, target, by);
     let packet = position_sent(&side);
     let all = X | Y | Z | DELTA_X | DELTA_Y | DELTA_Z | Y_ROT | X_ROT | ROTATE_DELTA;
     assert_eq!(
@@ -144,7 +148,7 @@ fn a_confirmation_and_the_next_report_in_one_tick_are_not_a_duplicate() {
     let conn = side.guest().conn;
     let by = [0.0, 0.0, 1.5];
     let target = plus(START, by);
-    assert!(side.hub.displace(conn, target, by));
+    side.hub.displace(conn, target, by);
     let id = position_sent(&side).teleport;
     let tick_end = || S::ClientTickEnd(Default::default());
     let report = |to: [f64; 3]| {
@@ -187,10 +191,10 @@ fn a_second_displacement_while_one_is_awaited_composes_and_the_old_id_is_ignored
     let conn = side.guest().conn;
     let (first_by, second_by) = ([1.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
     let one = plus(START, first_by);
-    assert!(side.hub.displace(conn, one, first_by));
+    side.hub.displace(conn, one, first_by);
     let old = position_sent(&side).teleport;
     let two = plus(one, second_by);
-    assert!(side.hub.displace(conn, two, second_by));
+    side.hub.displace(conn, two, second_by);
     let new = position_sent(&side).teleport;
     assert_ne!(old, new);
     assert_eq!(side.guest().awaiting_teleport, Some((new, two)));
@@ -214,7 +218,7 @@ fn an_unconfirmed_displacement_is_resent_absolute_with_no_velocity() {
     let conn = side.guest().conn;
     let by = [3.0, 0.0, 0.0];
     let target = plus(START, by);
-    assert!(side.hub.displace(conn, target, by));
+    side.hub.displace(conn, target, by);
     let old = position_sent(&side).teleport;
     side.hub.ticks += 21;
     walk(&mut side, &rig, START, 0.0);
@@ -275,7 +279,7 @@ fn a_carried_player_stays_on_its_deck_or_lets_go_and_nothing_is_counted() {
         let conn = side.guest().conn;
         let at = side.guest().position;
         let target = plus(at, by);
-        assert!(rig.within(|| side.hub.displace(conn, target, by)));
+        rig.within(|| side.hub.displace(conn, target, by));
         match (stays, side.guest().on_collider) {
             (true, Some(now)) => {
                 assert_eq!(now.collider, DECK);
@@ -309,10 +313,10 @@ fn the_streak_of_displaced_ticks_counts_in_a_row_and_a_gap_starts_it_again() {
     let (_, mut side) = standing(fixture, &[]);
     let conn = side.guest().conn;
     let mut at = START;
-    let mut step = |side: &mut Guestside<'_>, at: &mut [f64; 3]| {
+    let step = |side: &mut Guestside<'_>, at: &mut [f64; 3]| {
         let by = [0.01, 0.0, 0.0];
         *at = plus(*at, by);
-        assert!(side.hub.displace(conn, *at, by));
+        side.hub.displace(conn, *at, by);
     };
     for _ in 0..25 {
         side.hub.ticks += 1;
