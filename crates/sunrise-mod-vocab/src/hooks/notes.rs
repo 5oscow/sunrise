@@ -1746,12 +1746,7 @@ still go on each event or registrar.
   mod plant (a block whose template is a vanilla plant, such as a crop): the blocks it can stand on, which its
   template's `canSurvive` asks, so it is refused elsewhere and pops off when its ground changes. Answer only for your
   own blocks and leave the answer empty otherwise; the level is read-only. Both run on every shape update of such a
-  block: keep them short. These two, `can_sustain_plant` and `state_for_placement` are asked on both sides, as vanilla asks
-  them: a client asks them from its placement prediction and its own shape updates, with its loaded copy of the level,
-  and tells its side by `LevelSide`. Reads a client can't answer, tag tests among them, are `None` there, and
-  `BlockEntityPartState::state_in` gives its default: never answer from those as if they were the server's. A mod
-  that can decide only on a server answers `None` on a client, and the template's rule predicts. Named injections
-  request `hook_version = 2`.
+  block: keep them short. With `can_sustain_plant` and `state_for_placement` they are asked on both sides (their docs).
 
 - Drawing mod block entities on the client. `block_entity_submit(pos, block, state, entity, draw)` runs once a frame
   for each mod block entity in view, as vanilla's `BlockEntityRenderer.submit` does (within its view distance, 64 blocks
