@@ -793,10 +793,10 @@ impl DataLoadContext for OwningLoad<'_> {
     }
 }
 
-/// The view of a hook fired inside a menu, recipe or player-list loop, where no
-/// game is at hand: the side, the registries, the settings and the mod list.
-/// The side that owns the loop builds it once per resource generation; a hook
-/// never builds one, and its answers never change while it is held.
+/// The frozen resource-generation view of a hook fired inside a menu, recipe or
+/// player-list loop: the side, registries, settings, mod list and authoritative item
+/// tags. Unloaded or unsynced tags are unavailable (`None`), not false membership.
+/// The side that owns the loop builds this view; its answers never change while held.
 ///
 /// ```compile_fail
 /// use mod_api::{Host, LoopContext};

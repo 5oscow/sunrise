@@ -265,6 +265,42 @@ fn request(root: &Path) -> WorldRequest {
 
 #[test]
 #[ignore = "daily"]
+fn dedicated_world_open_publishes_crafting_item_tags() {
+    let scratch = tempfile::tempdir().unwrap();
+    let root = scratch.path();
+    write(
+        &root.join("datapacks/crafting_tags/pack.mcmeta"),
+        r#"{"pack":{"description":"crafting tags"}}"#,
+    );
+    write(
+        &root.join("datapacks/crafting_tags/data/test/tags/item/crafting_inputs.json"),
+        r#"{"values":["minecraft:stick"]}"#,
+    );
+    write(
+        &root.join("datapacks.json"),
+        r#"{"enabled":["file/crafting_tags"],"disabled":[]}"#,
+    );
+    mod_platform::testing::with_mods(Vec::<ModEntry>::new().into(), || {
+        with_game(|game| {
+            game.options.execution_role =
+                crate::game::execution_role::ExecutionRole::DedicatedServer;
+            game.load_world(request(root)).unwrap();
+            assert_eq!(
+                game.loop_context
+                    .item_is_in_tag("minecraft:stick", "test:crafting_inputs"),
+                Some(true)
+            );
+            assert_eq!(
+                game.loop_context
+                    .item_is_in_tag("minecraft:dirt", "test:crafting_inputs"),
+                Some(false)
+            );
+        });
+    });
+}
+
+#[test]
+#[ignore = "daily"]
 fn missing_original_at_reload_preserves_the_published_data_and_reports_its_owners() {
     const MODE: &str = "SUNRISE_JAR_RELOAD_CHILD";
     let root = if let Some(root) = std::env::var_os(MODE) {
