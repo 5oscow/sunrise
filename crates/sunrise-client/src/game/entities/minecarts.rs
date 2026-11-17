@@ -1415,14 +1415,19 @@ impl Game<'_> {
         let pos = self.rail_block(c.position);
         if self.minecart_improvements() {
             self.move_along_track_new(c, intent);
-        } else if let Some(rail) = self.rail(Some(c.id), pos[0], pos[1], pos[2]) {
-            self.move_along_track(c, pos, &rail, intent, slot);
-            self.note_cart_pass(c, pos);
-            if &*rail.name == "minecraft:activator_rail" {
-                self.activate_cart(c, rail.powered);
-            }
         } else {
-            self.come_off_track(c);
+            // OldMinecartBehavior.tick writes `onRails` every tick, before the move.
+            let rail = self.rail(Some(c.id), pos[0], pos[1], pos[2]);
+            c.on_rails = rail.is_some();
+            if let Some(rail) = rail {
+                self.move_along_track(c, pos, &rail, intent, slot);
+                self.note_cart_pass(c, pos);
+                if &*rail.name == "minecraft:activator_rail" {
+                    self.activate_cart(c, rail.powered);
+                }
+            } else {
+                self.come_off_track(c);
+            }
         }
         c.first_tick = false;
         // The old behavior derives yaw once per tick; the experiment has

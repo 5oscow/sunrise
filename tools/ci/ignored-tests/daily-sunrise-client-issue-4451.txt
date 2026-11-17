@@ -1012,6 +1012,7 @@ sunrise-client game::minecarts::lifetime_tests::terminal_vehicle_damage_and_nati
 sunrise-client game::minecarts::rejected_passenger_tests::cart_destruction_ejects_rejected_rider_and_snaps_frozen_descendant lib daily resources
 sunrise-client game::minecarts::rejected_passenger_tests::rejected_cart_passenger_occupies_capacity_physics_pickup_and_interaction lib daily resources
 sunrise-client game::minecarts::tests::a_furnace_cart_is_capped_at_half_the_rule_speed_under_the_new_physics lib daily resources
+sunrise-client game::minecarts::tests::an_old_behaviour_cart_writes_is_on_rails_each_tick lib daily resources
 sunrise-client game::minecarts::tests::cart_index_finds_the_mobs_a_scan_finds lib daily resources
 sunrise-client game::minecarts::tnt_impact_tests::a_cart_on_a_slope_presses_a_plate_at_its_temporary_position lib daily resources
 sunrise-client game::minecarts::tnt_impact_tests::a_cart_resting_against_a_fence_keeps_toggling_the_plate_above_it lib daily resources
