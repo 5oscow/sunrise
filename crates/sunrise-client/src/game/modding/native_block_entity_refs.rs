@@ -1623,6 +1623,7 @@ mod tests {
             ));
 
             // A client's copy of the level is not the server's.
+            game.options.execution_role = crate::game::execution_role::ExecutionRole::Client;
             game.options.dedicated = None;
             assert!(!write(game, [0, 64, 0], api_stone, flags));
             assert_eq!(game.world.block(0, 64, 0), grown);
