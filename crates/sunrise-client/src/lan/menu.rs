@@ -3338,13 +3338,15 @@ pub(crate) mod tests {
         click(&mut view, &mut drag, 1, 0, input::QUICK_MOVE, &rules);
         assert_eq!(view.get(0), Some(ItemStack::new("minecraft:stone", 1)));
         assert_eq!(view.get(1), Some(ItemStack::new("minecraft:stone", 1)));
-        // So does a pickup click with the same item on the cursor.
+        // A pickup click with the same item on the cursor can't merge into the slot either: as
+        // `AbstractContainerMenu.doClick` does when `mayPlace` refuses a same-item stack, it
+        // takes the slot's stack onto the cursor instead.
         view.guest.carried = Some(ItemStack::new("minecraft:stone", 1));
         click(&mut view, &mut drag, 0, 0, input::PICKUP, &rules);
-        assert_eq!(view.get(0), Some(ItemStack::new("minecraft:stone", 1)));
+        assert_eq!(view.get(0), None);
         assert_eq!(
             view.guest.carried,
-            Some(ItemStack::new("minecraft:stone", 1))
+            Some(ItemStack::new("minecraft:stone", 2))
         );
     }
 }
