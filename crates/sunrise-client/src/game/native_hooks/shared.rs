@@ -3307,12 +3307,10 @@ impl Game<'_> {
         let (ox, oy) = self.inventory_origin(batch);
         let at = [self.cursor.0 - ox, self.cursor.1 - oy];
         use crate::game::api_values::{TryIntoApi, TryIntoEngine};
-        let mut snapshot = match lines.try_into_api() {
-            Ok(snapshot) => snapshot,
-            Err(error) => {
-                log::warn!("screen_tooltip refused input text: {error:?}");
-                return;
-            }
+        // Keep the original tooltip if either conversion fails. A hovered
+        // item's text can fail on every frame, so do not log the refusal here.
+        let Ok(mut snapshot) = lines.try_into_api() else {
+            return;
         };
         self.native_screen_tooltip(mod_api::__private::ScreenTooltipCall {
             block: &screen.block,
@@ -3324,9 +3322,8 @@ impl Game<'_> {
             gui_size: [batch.width as i32, batch.height as i32],
             lines: &mut snapshot,
         });
-        match snapshot.try_into_engine(&()) {
-            Ok(replacement) => *lines = replacement,
-            Err(error) => log::warn!("screen_tooltip refused output text: {error:?}"),
+        if let Ok(replacement) = snapshot.try_into_engine(&()) {
+            *lines = replacement;
         }
     }
     /// Options > Mods' rows for loaded code mods, after the content-only rows.

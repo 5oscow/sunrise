@@ -2,10 +2,6 @@
 // catalog-order: 0028
 
 pub trait Hooks {
-    /// `pointer` is the frame's absolute integer pointer in scaled GUI pixels
-    /// (truncated toward zero); `gui_size` is that frame's scaled width and height.
-    /// `origin` is the panel's top-left in the same coordinates. The pointer may
-    /// be outside the panel; use these frame values rather than caching a size.
     /// Draw block `block`'s screen at `origin` (its top left, GUI pixels),
     /// over a plain panel with its slots' frames and under the items and
     /// labels, from the menu's data slots `data` (the block entity's `data`
@@ -18,6 +14,11 @@ pub trait Hooks {
     /// It is `None` for a menu opened without a block position. Read the
     /// client level's current view at this position through the existing
     /// both-sided level reads; it is not an authoritative server snapshot.
+    ///
+    /// `pointer` is the frame's absolute integer pointer in scaled GUI pixels
+    /// (truncated toward zero); `gui_size` is that frame's scaled width and height.
+    /// `origin` is the panel's top-left in the same coordinates. The pointer may
+    /// be outside the panel; use these frame values rather than caching a size.
     #[hook(
         version = 3,
         side = "client",

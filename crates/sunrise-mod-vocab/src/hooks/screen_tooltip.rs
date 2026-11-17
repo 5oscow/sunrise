@@ -2,10 +2,6 @@
 // catalog-order: 0030
 
 pub trait Hooks {
-    /// `pointer` is the frame's absolute integer pointer in scaled GUI pixels
-    /// (truncated toward zero); `gui_size` is that frame's scaled width and height.
-    /// `origin` is the panel's top-left in the same coordinates. The pointer may
-    /// be outside the panel; use these frame values rather than caching a size.
     /// The tooltip at `at` (GUI pixels from the mod screen's top-left).
     /// `slot` is the hovered menu index, including player inventory slots,
     /// or `None` outside a mapped slot. On a filled slot, `lines` starts as
@@ -14,6 +10,11 @@ pub trait Hooks {
     /// Empty slots and screen space start empty. Images, style and the carried
     /// stack visibility rule are unchanged. Lines are rich Text/color pairs,
     /// so editing one line does not flatten the styling of the others.
+    ///
+    /// `pointer` is the frame's absolute integer pointer in scaled GUI pixels
+    /// (truncated toward zero); `gui_size` is that frame's scaled width and height.
+    /// `origin` is the panel's top-left in the same coordinates. The pointer may
+    /// be outside the panel; use these frame values rather than caching a size.
     #[hook(
         side = "client",
         version = 2,
