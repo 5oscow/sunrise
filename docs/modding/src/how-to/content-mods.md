@@ -290,7 +290,7 @@ state of its own. Every combination has to fit in the states a world holds
 
 A declared **boolean** `waterlogged` also makes the block a `SimpleWaterloggedBlock`: buckets fill and drain it,
 water can flow into it, and draining breaks it if it cannot survive dry. This applies even to a stone template.
-The default placement takes `waterlogged` from the water at the target cell; a shape update schedules the contained
+The default placement takes `waterlogged` from source water at the target cell (flowing water leaves it dry); a shape update schedules the contained
 water's tick. A block's `state_for_placement` or `update_shape` Part answer replaces the corresponding default.
 A double plant keeps its template's class and companion-half behaviour, so this declares a two-high water plant:
 
@@ -300,7 +300,7 @@ A double plant keeps its template's class and companion-half behaviour, so this 
   "default_state": { "waterlogged": "true" } }
 ```
 
-Each half takes the water at its own cell; an upper half above the water line is dry. An enum named `waterlogged`,
+The placed half takes source water at its cell; the companion half uses the water tag at its own cell, so an upper half above the water line is dry. An enum named `waterlogged`,
 a template that already has that property, or an always-water template (`seagrass`, `tall_seagrass`, `kelp`,
 `kelp_plant`, `bubble_column`) is refused. Native and wasm `Block` declarations use the same rule.
 

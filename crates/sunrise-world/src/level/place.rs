@@ -332,11 +332,11 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         }
         let placed = self.placement_at(block, 0, ctx)?;
         if self.b.block_data(block).declared_waterlogged {
-            Some(
-                self.b
-                    .table
-                    .set_bool(placed, self.b.props.waterlogged, self.is_water_at(ctx.pos)),
-            )
+            Some(self.b.table.set_bool(
+                placed,
+                self.b.props.waterlogged,
+                self.b.fluid(self.state(ctx.pos)).kind() == crate::fluid::FluidKind::Water,
+            ))
         } else {
             Some(placed)
         }

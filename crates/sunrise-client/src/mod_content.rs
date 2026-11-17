@@ -1078,8 +1078,33 @@ impl<'a> Plan<'a> {
         // use the resolved state's fluid, not the template's cached dry answer.
         let mut skylight_rules = BTreeMap::new();
         let mut custom_dampening = BTreeSet::new();
+        let needs_waterlogging = mods.iter().any(|m| {
+            m.content
+                .blocks
+                .iter()
+                .any(|b| b.state_properties.contains_key("waterlogged"))
+        });
+        let mut water_states = Vec::new();
         if base.join("block-behaviours.json").exists() {
             let behaviors = read_json(&base.join("block-behaviours.json"))?;
+            if needs_waterlogging {
+                let Some(J::Arr(states)) = behaviors.get("states") else {
+                    return Err("block-behaviours.json has no state fluids".into());
+                };
+                for state in states {
+                    let kind = match state {
+                        J::Arr(row) => row.get(2).and_then(J::as_u32),
+                        _ => None,
+                    }
+                    .and_then(|index| sunrise_world::fluid::FluidKind::ALL.get(index as usize))
+                    .ok_or("block-behaviours.json has an invalid state fluid")?;
+                    water_states.push(matches!(
+                        kind,
+                        sunrise_world::fluid::FluidKind::Water
+                            | sunrise_world::fluid::FluidKind::FlowingWater
+                    ));
+                }
+            }
             let Some(J::Arr(blocks)) = behaviors.get("blocks") else {
                 return Err("block-behaviours.json has no blocks".into());
             };
@@ -1300,6 +1325,17 @@ impl<'a> Plan<'a> {
                             decl.id, decl.template
                         )
                         .into());
+                    }
+                }
+                if decl.state_properties.contains_key("waterlogged") {
+                    let template_water = water_states
+                        .get(states.start as usize..states.end as usize)
+                        .ok_or("block-behaviours.json is missing template state fluids")?;
+                    if template_water.iter().all(|water| *water) {
+                        return Err(format!(
+                            "data/{}.json: state_properties.waterlogged cannot be added: every state of template {} already holds water",
+                            decl.id.replacen(':', "/sunrise/block/", 1), decl.template
+                        ).into());
                     }
                 }
                 let combos = combinations(&decl.state_properties, &decl.default_state)

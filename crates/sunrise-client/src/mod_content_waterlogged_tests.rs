@@ -77,6 +77,38 @@ fn declared_waterlogged_blocks_keep_their_class_and_gain_liquid_defaults() {
         "sunrise-declared-waterlogged-{}",
         std::process::id()
     ));
+    for template in [
+        "seagrass",
+        "tall_seagrass",
+        "kelp",
+        "kelp_plant",
+        "bubble_column",
+    ] {
+        let json = format!(
+            r#"{{"template":"minecraft:{template}","state_properties":{{"waterlogged":{{"type":"boolean"}}}}}}"#
+        );
+        let rejected = folder_mod(
+            &scratch.join(format!("refused-{template}")),
+            &[
+                ("sunrise-mod.toml", &manifest("wet", "")),
+                ("data/wet/sunrise/block/plant.json", &json),
+            ],
+        );
+        let error = resource_root_fixture(
+            &base,
+            Path::new(""),
+            &[rejected],
+            &scratch.join("cache-refused"),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            error.contains("plant.json")
+                && error.contains("state_properties.waterlogged")
+                && error.contains(template),
+            "{error}"
+        );
+    }
     let m = folder_mod(
         &scratch.join("mod"),
         &[
@@ -134,6 +166,21 @@ fn declared_waterlogged_blocks_keep_their_class_and_gain_liquid_defaults() {
             )
             .unwrap();
         assert!(is_waterlogged(wet));
+        level
+            .blocks
+            .insert(pos, b.table.set_int(water, b.props.level, 1));
+        let flowing = b
+            .state_for_placement(
+                &mut level,
+                &mut ticks,
+                b.block(stone),
+                &context("wet:stone"),
+            )
+            .unwrap();
+        assert!(
+            !is_waterlogged(flowing),
+            "only source water waterlogs the placed half"
+        );
         level.blocks.insert(pos, air);
         let dry = b
             .state_for_placement(
