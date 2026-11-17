@@ -9,7 +9,7 @@ sunrise_client_render::chunk::Section::unpack
 sunrise_client_render::fog::fog_type
 sunrise_client_render::font::Font::load
 sunrise_client_render::font::Font::take_patches
-sunrise_client_render::gfx::Renderer::draw_outline
+sunrise_client_render::gfx::entity_draw::Renderer::draw_outline
 sunrise_client_render::gfx::Renderer::release_surface
 sunrise_client_render::gfx::Renderer::render
 sunrise_client_render::gfx::stars::Stars::draw
