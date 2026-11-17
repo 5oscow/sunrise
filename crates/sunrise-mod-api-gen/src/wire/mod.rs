@@ -1084,6 +1084,32 @@ mod tests {
                     texts.len(),
                     texts.iter().map(String::len).max().unwrap()
                 );
+                // A method added to (here: removed from) an owner moves no other call's name,
+                // not even its neighbours in the same trait.
+                let mut count: std::collections::HashMap<&str, usize> = Default::default();
+                for method in &surface.methods {
+                    *count.entry(method.owner).or_default() += 1;
+                }
+                let owner = count.iter().max_by_key(|(_, n)| **n).unwrap().0.to_owned();
+                let at = surface
+                    .methods
+                    .iter()
+                    .position(|m| m.owner == owner)
+                    .unwrap();
+                let gone = surface.methods.remove(at);
+                let fewer = super::call_names(&mut surface, &hooks, &[]).unwrap();
+                assert_eq!(fewer.by_method.len() + 1, names.by_method.len());
+                for (key, name) in &fewer.by_method {
+                    assert_eq!(
+                        name.text(),
+                        names.by_method[key].text(),
+                        "removing {}::{} moved {}::{}",
+                        gone.owner,
+                        gone.name,
+                        key.0,
+                        key.1
+                    );
+                }
             })
             .unwrap()
             .join()
