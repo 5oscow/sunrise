@@ -769,6 +769,55 @@ impl LootData {
         defaults: &crate::item_defaults::ItemDefaults,
         types: types::Types,
     ) -> io::Result<Self> {
+        let mut loaded = Self::load_table_candidate(root, overlay, defaults, types)?;
+        let mut recipes = HashMap::new();
+        load_kind(&root.join("data"), "recipe", &mut recipes)?;
+        overlay_map(overlay, "recipe", &mut recipes);
+        let mut ids: Vec<&String> = recipes.keys().collect();
+        ids.sort();
+        loaded.smelting = ids
+            .into_iter()
+            .map(|id| &recipes[id])
+            .filter(|r| r["type"] == "minecraft:smelting")
+            .filter_map(|r| {
+                let result = recipe_result_id(&r["result"])?.to_owned();
+                let count = r["result"]["count"].as_i64().unwrap_or(1) as i32;
+                Some((r["ingredient"].clone(), result, count))
+            })
+            .collect();
+        for (i, (ingredient, _, _)) in loaded.smelting.iter_mut().enumerate() {
+            loaded.holder_sets.field(
+                &format!("smelting[{i}].ingredient"),
+                "item",
+                ingredient,
+                &loaded.tags,
+            )?;
+        }
+        loaded.prepare_types()?;
+        Ok(loaded)
+    }
+
+    /// Prepare shared loot tables, predicates and modifiers for an item catalog.
+    /// Recipe decoding belongs to that catalog's crafting consumer, not the
+    /// world's independent smelting holder-set reader. The returned snapshot
+    /// has no smelting recipes; world evaluation uses `load` / `load_with_types`.
+    pub fn load_table_data(
+        root: &Path,
+        overlay: &PackOverlay,
+        defaults: &crate::item_defaults::ItemDefaults,
+    ) -> io::Result<Self> {
+        let mut loaded =
+            Self::load_table_candidate(root, overlay, defaults, types::Types::capture())?;
+        loaded.prepare_types()?;
+        Ok(loaded)
+    }
+
+    fn load_table_candidate(
+        root: &Path,
+        overlay: &PackOverlay,
+        defaults: &crate::item_defaults::ItemDefaults,
+        types: types::Types,
+    ) -> io::Result<Self> {
         let all = root.join("data");
         let tables = shared_tables(root, overlay)?;
         let modifiers = types::load_files(root, overlay, "item_modifier")?;
@@ -853,21 +902,6 @@ impl LootData {
                 }
             }
         }
-        let mut recipes = HashMap::new();
-        load_kind(&all, "recipe", &mut recipes)?;
-        overlay_map(overlay, "recipe", &mut recipes);
-        let mut ids: Vec<&String> = recipes.keys().collect();
-        ids.sort();
-        let smelting = ids
-            .into_iter()
-            .map(|id| &recipes[id])
-            .filter(|r| r["type"] == "minecraft:smelting")
-            .filter_map(|r| {
-                let result = recipe_result_id(&r["result"])?.to_owned();
-                let count = r["result"]["count"].as_i64().unwrap_or(1) as i32;
-                Some((r["ingredient"].clone(), result, count))
-            })
-            .collect();
         let binding = holder_sets::Binding::load(root, overlay, &items, &enchantments)?;
         let mut loaded = Self {
             holder_sets: Default::default(),
@@ -879,11 +913,10 @@ impl LootData {
             items,
             enchantments,
             tags,
-            smelting,
+            smelting: Vec::new(),
         };
         binding.snapshot(&mut loaded)?;
         loaded.holder_sets = binding;
-        loaded.prepare_types()?;
         Ok(loaded)
     }
     /// Attach prepared instances to this private, not-yet-published snapshot.
