@@ -1648,7 +1648,8 @@ struct Game<'a> {
     /// The screen of a mod block's menu open on this client (`native_screen`).
     mod_screen: Option<native_hooks::OpenNativeScreen>,
     /// The players with each mod container open, by level (`tick_mod_container_viewers`).
-    mod_container_viewers: HashMap<(&'static str, (i32, i32, i32)), u32>,
+    mod_container_viewers:
+        HashMap<(&'static str, (i32, i32, i32)), mod_container_openers::ModContainerOpeners>,
     /// Where item entities are, while the block entities tick (hoppers).
     item_columns: Option<machines::ItemColumns>,
     /// The item columns for one pass of the players' pickups
@@ -2559,12 +2560,11 @@ impl Game<'_> {
     /// (aiStep, unless a spectator or a passenger): a corner inside a
     /// suffocating block sets a 0.1 speed towards the nearest side that is
     /// free, on that side's axis; a later corner overwrites an earlier one.
-    /// Suffocating is a full collision cube that is also a full render cube,
-    /// as `in_wall` has it.
+    /// Suffocating is `LocalPlayer.suffocatesAt` (`closest_space_nudge`).
     fn closest_space_nudge(&self) -> [Option<f64>; 2] {
         match self.player.as_ref() {
             Some(p) if !p.spectator && self.riding.is_none() => {
-                closest_space_nudge(p, &self.world, self.res.facts())
+                closest_space_nudge(p, &self.world, self.collision, self.level_suffocation())
             }
             _ => [None; 2],
         }
@@ -4019,6 +4019,9 @@ impl Game<'_> {
         } else if self.open_mod_menu(key) {
             // A mod block's container (`native_block_entity_container`).
             self.container = Some(key);
+            if self.lan_acting.is_none() {
+                self.mod_container_player_opener(key, true);
+            }
         } else if self.open_station(pos, &name) {
             // Workstation menus: game/blocks/stations.rs.
         } else {
@@ -5400,6 +5403,9 @@ impl Game<'_> {
         self.craft_table = None;
         self.open_container_slots = None;
         if let Some(key) = self.container.take() {
+            if self.lan_acting.is_none() {
+                self.mod_container_player_opener(key, false);
+            }
             // A cart's or chest boat's items go back to it.
             self.close_cart_container(key);
             let last = self.container_opener_event(key, false);

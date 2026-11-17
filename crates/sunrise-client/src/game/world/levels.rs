@@ -481,6 +481,12 @@ impl Levels {
         self.runtime.clear();
     }
 
+    pub(super) fn abort_parked_generation(&mut self) {
+        for level in self.parked.values_mut() {
+            level.streaming.abort_generation();
+        }
+    }
+
     /// A parked level, without opening or loading it.
     pub(super) fn parked_world(&self, dim: Dim) -> Option<&World> {
         self.parked.get(&dim).map(|level| &level.world)

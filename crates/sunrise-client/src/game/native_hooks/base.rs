@@ -3633,11 +3633,10 @@ impl Game<'_> {
     /// open went from `previous` to `viewers` (vanilla's
     /// `ContainerOpenersCounter`, as a barrel keeps it): 0 to more than 0 is
     /// `onOpen`, back to 0 is `onClose`, any change `openerCountChanged`, so a
-    /// block can show itself open while `viewers` is not 0. Counted every
-    /// tick from the players' open menus, so a player who leaves without
-    /// closing (a lost connection, death, another dimension, out of reach, the
-    /// block gone) is heard too (`recheckOpeners`). Once for each change, with
-    /// no player's state swapped in. Server-side.
+    /// block can show itself open while `viewers` is not 0. Synchronous with
+    /// non-spectator menu opens and closes, with that player's state in place;
+    /// scheduled rechecks run every five ticks while open and repair lost
+    /// openers. Also called by a recheck when the count is unchanged. Server-side.
     pub(in crate::game) fn native_mod_container_viewers(
         &mut self,
         dimension: &str,

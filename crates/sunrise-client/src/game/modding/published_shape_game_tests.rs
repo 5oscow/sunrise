@@ -6,7 +6,7 @@ use mod_api::*;
 use std::sync::Arc;
 use sunrise_core::geometry::Vec3;
 
-const BUS: &str = "shapes:bus";
+pub(super) const BUS: &str = "shapes:bus";
 /// A flagged block on a template with a dynamic shape and a random outline offset
 /// (`minecraft:bamboo`).
 const TUFT: &str = "shapes:tuft";
@@ -29,7 +29,7 @@ impl Hooks for Bus {
 }
 
 /// The mod installed, a game on its content root with a player over chunk (0, 0).
-fn with_bus(test: impl FnOnce(&mut Game<'_>)) {
+pub(super) fn with_bus(test: impl FnOnce(&mut Game<'_>)) {
     let mods: Mods = vec![ModEntry::new("shapes", Box::new(Bus))].into();
     mod_platform::testing::with_mods(mods.clone(), || {
         crate::game::api_values::install_parts(&mods).unwrap();
@@ -53,7 +53,7 @@ fn with_bus(test: impl FnOnce(&mut Game<'_>)) {
 
 /// Places `block` at `pos` in the level in place, with its block entity and no shapes
 /// published yet.
-fn place(game: &mut Game<'_>, block: &str, pos: [i32; 3]) -> BlockEntityRef {
+pub(super) fn place(game: &mut Game<'_>, block: &str, pos: [i32; 3]) -> BlockEntityRef {
     let level = game.level(game.dim.id()).unwrap();
     let state = game.pack.assets.registry.default_state(block).unwrap();
     assert!(
@@ -70,17 +70,17 @@ fn publish(game: &mut Game<'_>, pos: [i32; 3], shapes: BlockEntityShapes) {
     assert_eq!(game.block_entity_set_shapes(entity, Some(shapes)), Ok(true));
 }
 
-fn shapes(collision: &[[f64; 6]], outline: &[[f64; 6]]) -> BlockEntityShapes {
+pub(super) fn shapes(collision: &[[f64; 6]], outline: &[[f64; 6]]) -> BlockEntityShapes {
     BlockEntityShapes {
         collision: collision.to_vec(),
         outline: outline.to_vec(),
     }
 }
 
-const HALF: [f64; 6] = [0.0, 0.0, 0.0, 1.0, 0.5, 1.0];
+pub(super) const HALF: [f64; 6] = [0.0, 0.0, 0.0, 1.0, 0.5, 1.0];
 const LOW: [f64; 6] = [0.0, 0.0, 0.0, 1.0, 0.25, 1.0];
-const SMALL: [f64; 6] = [0.25, 0.0, 0.25, 0.75, 0.25, 0.75];
-const FULL: [f64; 6] = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+pub(super) const SMALL: [f64; 6] = [0.25, 0.0, 0.25, 0.75, 0.25, 0.75];
+pub(super) const FULL: [f64; 6] = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
 const TALL: [f64; 6] = [0.0, 0.0, 0.0, 1.0, 0.75, 1.0];
 const THIN: [f64; 6] = [0.45, 0.0, 0.45, 0.55, 0.25, 0.55];
 

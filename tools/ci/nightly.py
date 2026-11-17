@@ -59,7 +59,7 @@ DATED = re.compile(r"^nightly-(\d{4}-\d{2}-\d{2})$")
 TITLE_DATE = re.compile(r"Nightly (\d{4}-\d{2}-\d{2})")
 SOURCE_TAG = "nightly-source/"
 # Load from the trusted workflow checkout before pick() switches to a possibly older green tree.
-FORK_PLAYERS = Path(__file__).with_name("nightly-arismoko.md").read_text().strip()
+SUNRISE_PLAYERS = Path(__file__).with_name("nightly-players.md").read_text().strip()
 
 
 @dataclass
@@ -115,7 +115,7 @@ def notes(today: str, chosen: Ref, main: Ref, picked: list[dict], left_out: list
     built = f"main ({main.sha[:7]})" + (f" with {len(picked)} pull requests merged in" if picked else "")
     # The banner first: people who land on the Nightly ran its game zip for the launcher (a player, 2026-10-30).
     fork = train.REPO == "sunrise-org/sunrise"
-    parts = [FORK_PLAYERS if fork else train.PLAYERS,
+    parts = [SUNRISE_PLAYERS if fork else train.PLAYERS,
              f"Nightly {today} · {chosen.sha[:7]}: {built}, built from `{chosen.name}` ({chosen.sha}).",
              source_line(today, chosen.sha)]
     if not fork:
@@ -206,6 +206,14 @@ def build_set(main: Ref, prs: list[dict], left_out: list[str], today: str, force
         stop(repo, issue, f"the build stopped: final source {sha} is not the gate-checked main commit.")
     previous = git("ls-remote", "--tags", "origin", "refs/tags/nightly").split("\t")[0] or None
     build = force or previous != sha
+    # A game build is never published without its SDK, published first on the same commit (owner, 2026-11-17).
+    sdk = repo != "sunrise-org/sunrise" or sdk_ready(sha)
+    if build and not sdk:
+        if not dry_run:
+            stop(repo, issue, f"the build stopped: {sha} has no complete published sdk-{sha}; a Nightly is published "
+                              "only after its SDK, on the same commit.")
+        print(f"::warning::{sha} has no published SDK: a real Nightly of it would stop here; this dry run carries no "
+              "sdk.json")
     name = "(unchanged)"
     if build:
         if dry_run:
@@ -230,12 +238,13 @@ def build_set(main: Ref, prs: list[dict], left_out: list[str], today: str, force
         if not dry_run:
             ns.update_state(lambda st, builds: (st, builds + json.dumps(record) + "\n", f"build {name}"), token)
     chosen = Ref(name, sha, dt.datetime.now(dt.timezone.utc))
-    sdk = repo != "sunrise-org/sunrise" or sdk_ready(sha)
-    issues = train.known_issues()
-    if not sdk:
-        issues.append("- Native mods cannot be built for this build: its SDK is not published.")
+    if force and previous == sha:
+        # A forced rebuild of the published Nightly's commit (the macOS legs it lacked, 2026-11-17) replaces that
+        # Nightly, so its notes list what the replaced one did: since the newest Nightly kept on an older commit.
+        older = [c for c in remote_refs(f"refs/tags/{SOURCE_TAG}*").values() if c != sha and is_ancestor(c, sha)]
+        previous = max(older, key=lambda c: int(git("rev-list", "--count", c)), default=None)
     with open("nightly-notes.md", "w") as f:
-        f.write(notes(today, chosen, main, kept, left_out, merged_since(previous, main.sha), issues))
+        f.write(notes(today, chosen, main, kept, left_out, merged_since(previous, main.sha), train.known_issues()))
     output(build=str(build).lower(), sha=sha, short=sha[:7], source=name, date=today, version=f"nightly-{today}",
            nightly=f"{today} {sha[:7]}", source_tag=source_tag(today, sha), sdk=str(sdk).lower())
     print(f"{'build' if build else 'skip (unchanged since the last nightly)'}: {name} {sha}, main {main.sha[:7]}"

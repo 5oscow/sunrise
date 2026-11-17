@@ -209,6 +209,7 @@ sunrise-client game::clone_block_ticks_tests::a_strict_clone_copies_the_pending_
 sunrise-client game::clone_block_ticks_tests::copied_block_ticks_keep_order_priority_and_dedup lib daily resources
 sunrise-client game::clone_dimensions_tests::a_clone_to_another_dimension_lands_in_that_world_and_comes_back lib daily resources
 sunrise-client game::clone_dimensions_tests::an_unknown_clone_dimension_fails_and_clones_nothing lib daily resources
+sunrise-client game::closest_space::tests::a_player_is_pushed_out_of_ice_and_a_closed_shulker_box_but_not_glass lib daily resources
 sunrise-client game::combat::guest_hit_tests::an_effect_hit_on_a_guest_credits_the_mob_that_swung lib daily resources
 sunrise-client game::combat::infested_roll_tests::a_starving_infested_player_rolls_the_infested_effect lib daily resources
 sunrise-client game::combat::infested_roll_tests::an_absorbed_hit_still_rolls_the_infested_effect lib daily resources
@@ -2220,6 +2221,7 @@ sunrise-client game::remote::effect_blend_tests::ordinary_effect_blends_follow_t
 sunrise-client game::remote::effect_blend_tests::ordinary_effect_first_read_does_not_restart_the_blend lib daily resources
 sunrise-client game::remote::effect_blend_tests::ordinary_effect_infinite_partial_ticks_follow_the_blend_direction lib daily resources
 sunrise-client game::remote::effect_blend_tests::ordinary_effect_packets_preserve_or_skip_the_blend lib daily resources
+sunrise-client game::remote::fall_sound::tests::a_loaded_client_falls_where_no_chunk_has_come lib daily resources
 sunrise-client game::remote::fall_sound::tests::a_silent_local_player_hears_no_block_fall_sound lib daily resources
 sunrise-client game::remote::fall_sound::tests::remote_five_block_fall_plays_stone_locally_once lib daily resources
 sunrise-client game::remote::interaction_event_tests::a_creative_hand_replaced_by_a_finish_listener_is_not_sent_as_a_creative_slot lib daily resources
@@ -2283,6 +2285,7 @@ sunrise-client game::remote::tests::a_mod_chat_line_shows_locally_and_sends_noth
 sunrise-client game::remote::tests::a_reconfiguring_client_plays_menu_music_and_never_indexes_past_the_biomes lib daily resources
 sunrise-client game::remote::tests::a_servers_client_takes_its_speed_from_the_attributes_not_the_effect lib daily resources
 sunrise-client game::remote::tests::an_end_crystal_click_on_a_block_ends_there lib daily resources
+sunrise-client game::remote::tests::a_spear_jab_sends_only_its_stab lib daily resources
 sunrise-client game::remote::tests::block_alias_survival_consumption_and_client_prediction lib daily resources
 sunrise-client game::remote::tests::client_camera_entity_returns_to_player_after_removal lib daily resources
 sunrise-client game::remote::tests::client_day_time_reads_overworld_clock_across_packets_and_levels lib daily resources

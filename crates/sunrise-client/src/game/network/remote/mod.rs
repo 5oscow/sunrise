@@ -6259,39 +6259,22 @@ impl Game<'_> {
         // Those added before it tick before it: their pushes reach this move.
         let pushed = self.remote_pushes(true);
         let sprint_window = self.settings.sprint_window;
-        let Some(player) = self.player.as_mut() else {
-            return Ok(());
-        };
-        let (cx, cz) = (
-            (player.position.x.floor() as i32) >> 4,
-            (player.position.z.floor() as i32) >> 4,
-        );
-        if !self.streaming.is_lit(cx, cz) {
-            // LocalPlayer.tick can wait for chunks, but Minecraft.tick still
-            // calls sendChanges: rotations and the 20-tick position reminder
-            // must continue, as well as moves into the unloaded area.
-            if let Some(r) = self.remote.as_ref()
-                && r.loaded_sent
-            {
-                let input = r.last_input;
-                self.remote_send_state(input);
-            }
+        if self.player.is_none() {
             return Ok(());
         }
-        // LocalPlayer.tick reaches Player.tick only once the client has loaded
-        // and the player's chunk is there; its endpoints bracket that work
-        // alone, also on the death screen, not the level pass before it.
-        let player = self
-            .remote
-            .as_ref()
-            .is_some_and(|r| r.loaded_sent)
-            .then(|| {
-                (mod_api::__private::listened(mod_api::HookId::PlayerTickPre)
-                    || mod_api::__private::listened(mod_api::HookId::PlayerTickPost))
-                .then(|| self.local_player())
-                .flatten()
-            })
-            .flatten();
+        // LocalPlayer.tick and sendChanges run once the client has loaded (hasClientLoaded),
+        // wherever the player is: a chunk that hasn't come yet has no blocks here, as vanilla's
+        // empty chunk has none, so the player falls through it until the chunk comes.
+        if !self.remote.as_ref().is_some_and(|r| r.loaded_sent) {
+            return Ok(());
+        }
+        // LocalPlayer.tick reaches Player.tick only once the client has loaded; its
+        // endpoints bracket that work alone, also on the death screen, not the level
+        // pass before it.
+        let player = (mod_api::__private::listened(mod_api::HookId::PlayerTickPre)
+            || mod_api::__private::listened(mod_api::HookId::PlayerTickPost))
+        .then(|| self.local_player())
+        .flatten();
         let player_from = entity_section_steps::player_before(self);
         if let Some(player) = player {
             self.native_player_tick_pre(mod_api::__private::PlayerTickPreCall { player });
@@ -11359,6 +11342,49 @@ pub(crate) mod tests {
                     "settled slots are not sent twice"
                 );
             });
+        });
+    }
+
+    /// `MultiPlayerGameMode.piercingAttack`: a spear's jab sends its STAB action and nothing else,
+    /// even with the look changed since the last move packet, so the 20-tick position reminder
+    /// keeps its count.
+    #[test]
+    #[ignore = "daily"]
+    fn a_spear_jab_sends_only_its_stab() {
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            use std::sync::Arc;
+            use sunrise_client::{chunk::Chunk, items::ItemStack, motion::PlayerMotion};
+            use sunrise_core::geometry::Vec3;
+            use sunrise_protocol::packets::play;
+            let (mut peer, _writer) = connect_menu_test(game);
+            peer.set_read_timeout(Some(std::time::Duration::from_millis(50)))
+                .unwrap();
+            game.set_mode_id(0);
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::new(0.5, 64.0, 0.5)).unwrap());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            game.inventory[0] = Some(ItemStack::new("minecraft:iron_spear", 1));
+            game.selected = 0;
+            game.hand_strength.ticker = 100;
+            while peer.recv().is_ok() {}
+            game.yaw = 37.0;
+            assert!(game.remote_start_attack());
+            let mut sent = Vec::new();
+            while let Ok((id, bytes)) = peer.recv() {
+                match play::Serverbound::decode(id, &bytes) {
+                    Ok(play::Serverbound::PlayerAction(a)) => {
+                        sent.push(format!("action {}", a.action))
+                    }
+                    Ok(
+                        play::Serverbound::MovePlayerPos(_)
+                        | play::Serverbound::MovePlayerPosRot(_)
+                        | play::Serverbound::MovePlayerRot(_),
+                    ) => sent.push("move".into()),
+                    _ => {}
+                }
+            }
+            assert_eq!(sent, ["action 8"]);
         });
     }
 
