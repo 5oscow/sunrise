@@ -84,7 +84,7 @@ Get **the Sunrise launcher** from [playsunrise.net/download](https://playsunrise
 ## Mods and shader packs
 
 - **Content mods** (`.smod`): blocks, items, recipes, loot, models and textures, with no code.
-- **Native mods** (also `.smod`, with a `[native]` manifest): Rust that the launcher compiles into the game for you, with nothing to install.
+- **Native mods** (also `.smod`, whose manifest has a `[native]` table): Rust that the launcher compiles into the game for you, with nothing to install.
 - **Java mods** (Fabric, NeoForge, Forge) don't run: Sunrise has no Java. The launcher carries over the data and assets inside their jars, and imports modpacks (`.mrpack`, CurseForge zips, Prism instances) the same way ([modpacks](https://playsunrise.net/docs/modpacks)).
 - **Shader packs**: Iris/OptiFine-format packs (`shaders/` folders) and Sunrise's own WGSL packs, under Video Settings → Shader Packs ([pack format](docs/shaders.md)).
 
