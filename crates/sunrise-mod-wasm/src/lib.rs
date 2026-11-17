@@ -743,11 +743,31 @@ fn load_with_cache(
     memory_cap_mib: u32,
     side: sunrise_mod_package::manifest::Side,
 ) -> Loaded {
+    // Each mod's imports are checked on their own, before any group forms: a mod whose items
+    // are gone is refused by name, and no mod that merely shares a library with it is.
+    let mut import_refused = Vec::new();
+    let packages: Vec<WasmPackage> = packages
+        .into_iter()
+        .filter(|package| {
+            let member = link::Member {
+                name: &package.manifest.id,
+                module: &package.module,
+            };
+            match imports::check(&[member]) {
+                Ok(()) => true,
+                Err(why) => {
+                    import_refused.push((package.manifest.id.clone(), why));
+                    false
+                }
+            }
+        })
+        .collect();
     let (groups, refused) = groups(&packages, side);
     let mut loaded = Loaded {
         refused,
         ..Loaded::default()
     };
+    loaded.refused.extend(import_refused);
     let engine = match runtime::engine() {
         Ok(engine) => engine,
         Err(error) => {
@@ -1086,6 +1106,42 @@ mod tests {
         let mut package = package(id, "1.0.0", "", sha, "t", "");
         package.manifest.wasm_memory_mib = memory_mib;
         package
+    }
+
+    #[test]
+    fn a_mod_whose_imports_are_gone_is_refused_alone_by_name() {
+        let module = |import: &str| {
+            wat::parse_str(format!(
+                r#"(module (@custom "dylink.0" "\01\04\00\00\00\00")
+                (import "env" "memory" (memory 1))
+                (import "sunrise" "{}" (func (param i32 i32 i32 i32) (result i32)))
+                {import}
+                (func (export "sunrise_in") (param i32) (result i32) i32.const 0)
+                (func (export "sunrise_hook") (param i64) (result i64) i64.const 0))"#,
+                mod_surface::call::protocol_name("log", mod_surface::call::SHARED_PROTOCOL).text()
+            ))
+            .unwrap()
+        };
+        let mut good = package("good", "1.0.0", "", 'a', "t", "");
+        good.module = module("");
+        let mut bad = package("bad", "1.0.0", "", 'b', "t", "");
+        bad.module = module(
+            r#"(import "sunrise" "hook:Hooks::removed_long_ago@1#00112233445566778899aabbccddeeff" (func))"#,
+        );
+        let loaded = load_available_std(
+            Some(&[]),
+            vec![good, bad],
+            None,
+            sunrise_mod_package::manifest::MAX_WASM_MEMORY_MIB,
+            sunrise_mod_package::manifest::Side::Both,
+        );
+        let boundary: Vec<_> = loaded
+            .refused
+            .iter()
+            .filter(|(_, why)| matches!(why, Refusal::Boundary { .. }))
+            .map(|(id, _)| id.as_str())
+            .collect();
+        assert_eq!(boundary, ["bad"], "{:?}", loaded.refused);
     }
 
     #[test]
