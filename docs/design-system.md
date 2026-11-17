@@ -241,11 +241,14 @@ Light); `tokens.css` carries them as `--night-*`. The game's menus don't use it.
 | `accent-hi` | `#a08cff` | `#5333c9` | accent text, focus ring |
 | `success`, `warn`, `danger` | `#5fd39a` `#f5b45a` `#ff8a78` | `#136336` `#7a4f00` `#a3301d` | Ready, updates, errors |
 
-- **Motion that means something**: the sky drifts slowly and stops when the window is hidden or
-  unfocused; the interface moves only to show cause and effect (a row arrives where it was added,
-  progress fills). Reduced motion: nothing moves. The launcher's sky (`launcher/scenery/src/sky.rs`) moves
-  in whole texels on a half-second beat, so it asks for two frames a second at most;
-  `SUNRISE_LAUNCHER_MOTION=off` stills it, `always` keeps it moving unfocused (for recordings).
+- **Motion that means something**: the interface moves only to show cause and effect (a row
+  arrives where it was added, progress fills). Every theme draws the same flat pages; Home's page
+  between the sidebars holds the theme's animated pixel scene (Sunrise's coast at first light,
+  `launcher/scenery/src/coast.rs`, or the theme's painted sky from `launcher/scenery/src/sky.rs`), which Settings › Appearance › Home background
+  turns plain. The sky moves in whole texels on a half-second beat, keeps its drift off the hero,
+  and stops when the window is hidden. Reduced motion: nothing moves
+  (`launcher/scenery/src/clock.rs`); `SUNRISE_LAUNCHER_MOTION=off` stills everything, `always`
+  keeps it moving unfocused (for recordings).
 - **Copy says what happens** ("Downloads 26.3 and Java 21, about 600 MB"), never praises.
 - The specimen (`SUNRISE_LAUNCHER_PAGE=specimen sunrise-launcher`) draws the type and colours in the
   launcher itself.
@@ -307,22 +310,20 @@ screen by screen, replacing Night where they differ; the mockup is the reference
 colour, state and motion. Its tokens are `sunrise_theme::glass`; `tokens.css` carries the colours
 as `--glass-*`.
 
-- **The scene is the background**: a pixel sunset over three ridges with trees, clouds, stars, a
-  meteor now and then and fireflies (`launcher/scenery/src/scene.rs`), a port of the website's
-  `SunriseScene` with its seeds and sums, so a window shows the picture the mockup shows at the
-  same size. It eases with the pointer and stops 10 s after the window loses focus;
-  `SUNRISE_LAUNCHER_MOTION` works as for Night. Dark appearance only so far; Light keeps the dawn.
-- **Frosted plates, round corners, no borders.** A plate is the scene behind it blurred 24 px and
-  saturated 140 %, under white at 6 % and the accent's dark violet (`base`) at 22 %. Menus and
-  popovers take the same glass with a shadow (the mockup's darker `hzl-float` read as another
-  material beside the cards); toasts keep it. Corners (`glass::radius`): dialogs 28, panels 20,
-  menus 16, the Play group 14, rows and chips 12, buttons and tabs 10. No pixel steps, no strokes.
+- **The scene is the background**, on Home only, between the sidebars: Sunrise's own coast at
+  first light (`launcher/scenery/src/coast.rs`: dithered bands from night to amber, the sun half
+  out of a still sea, a block island with a tree, glints, ripples, clouds, birds and stars) or a
+  theme's painted sky (`sky.rs`). It moves a texel at a time on a slow beat and stops 10 s after
+  the window loses focus; `SUNRISE_LAUNCHER_MOTION` works as for Night. The setup window draws
+  the coast too.
+- **Solid plates, the player's corners.** A plate is the theme's card colour under a faint 1 px
+  line (`launcher/scenery/src/glass.rs`), so nothing under a dialog reads through it; menus and
+  popovers take the same fill with a shadow. Corners are the player's (Settings › Appearance ›
+  Corners, 4 px unless changed), the same on every element.
 - **Motion as the website plays it** (`launcher/src/motion.rs`): hovers ease over `quick`'s
   150 ms curve, toasts and a new page arrive as `hzl-pop` (a fade and a 6 px rise over 200 ms,
   `cubic-bezier(0.2, 0.7, 0.2, 1)`), a switch's knob slides for 200 ms. Menus open at once. Under
   reduced motion each is drawn where it ends.
-- **Light**: plates are white at 84 % over the dawn sky washed with white (55 %), so the page
-  reads white; icons and text on the accent keep `on-accent`.
 - **One accent, mixed like the mockup.** `accent` (`#6b4bff`) fills the main action;
   `accent-soft` (half accent, half white in OKLab) draws progress, ticks, links and the focus ring;
   text on the accent turns dark when a player's accent is light. `Glass::new` does the mockup's

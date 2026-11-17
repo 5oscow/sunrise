@@ -86,6 +86,7 @@ fn uses_registered_payload_codec(channel: &str, play: bool, clientbound: bool) -
         crate::menu_extra::CHANNEL => !play || clientbound,
         "sunrise:recipe_transfer" => play,
         crate::passage_sync::CROSS_CHANNEL => play && !clientbound,
+        crate::carry_age::CHANNEL => play && !clientbound,
         crate::custom_book::CHANNEL => play || clientbound,
         // Configuration both ways (the capability), play clientbound only.
         crate::viewed_levels::CHANNEL => !play || clientbound,
@@ -235,6 +236,7 @@ mod tests {
             ("sunrise:anvil_cost", [false, false, false, true]),
             ("sunrise:passage_sync", [false, false, false, true]),
             ("sunrise:passage_cross", [false, false, true, false]),
+            ("sunrise:carry_age", [false, false, true, false]),
             ("sunrise:lod", [false, true, true, true]),
             ("sunrise:block_registry", [true, true, false, false]),
             ("sunrise:recipe_content", [false, false, false, true]),

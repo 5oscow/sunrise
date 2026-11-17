@@ -121,9 +121,8 @@ fn read(home: &Path, java_instance: bool) -> Vec<ModRow> {
                     let entry = entries.iter().find(|e| e.file == file).cloned();
                     let (name, version) = match &entry {
                         Some(e) => (e.title.clone(), e.number.clone()),
-                        None => sunrise_port_pack::jar::read(&f.path())
-                            .map(|j| (j.name, j.version))
-                            .unwrap_or_else(|_| {
+                        None => sunrise_launcher::browser::java::jar_title(&f.path())
+                            .unwrap_or_else(|| {
                                 (jar.trim_end_matches(".jar").into(), String::new())
                             }),
                     };
@@ -537,7 +536,7 @@ impl Launcher {
                 .items_center()
                 .h(px(24.))
                 .px(px(10.))
-                .rounded(px(night::RADIUS_CONTROL))
+                .rounded(px(crate::glass_ui::rad(night::RADIUS_CONTROL)))
                 .bg(alpha(n.warn, 0.16))
                 .cursor_pointer()
                 .hover(move |s| s.bg(alpha(n.warn, 0.26)))

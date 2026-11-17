@@ -189,9 +189,12 @@ pub trait PlayersBackend {
     #[access(WorldOnly)]
     fn player_selected_slot(&self, player: PlayerRef) -> Option<usize>;
     /// Side: both.
-    /// A player's current supported menu. Refuses crafting tables, merchants,
-    /// workstations, lecterns, mounts and menus with hidden slots; also refuses
-    /// clients, stale players and players whose state is swapped out.
+    /// A player's current supported menu, or the inventory menu when none is open.
+    /// On a client, only the local player's menu is available: its slots and carried stack
+    /// are the client's view (server updates plus local prediction), not server authority.
+    /// On a server, refuses crafting tables, merchants, workstations, lecterns, mounts,
+    /// menus with hidden slots, stale players and players whose state is swapped out.
+    /// On a client, refuses stale players and unsupported menu layouts.
     #[access(WorldOnly)]
     fn player_container_menu(&self, player: PlayerRef) -> Option<MenuRef>;
     /// Side: server.

@@ -28,6 +28,7 @@ fn capped(at: Vec3) -> Placed {
         })
         .collect();
     Placed {
+        id: 1,
         collider: OrientedCollider::new(
             Frame::from_quaternion(at, [0.0, 0.1, 0.0, 0.995]),
             Arc::new(ColliderBoxes::new(boxes)),
@@ -38,6 +39,7 @@ fn capped(at: Vec3) -> Placed {
 
 fn small(at: Vec3) -> Placed {
     Placed {
+        id: 1,
         collider: OrientedCollider::new(
             Frame::translation(at),
             Arc::new(ColliderBoxes::new(vec![Aabb::new(

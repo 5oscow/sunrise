@@ -116,6 +116,10 @@ NOT_READS = {
         "crates/sunrise-client/src/native_main.rs.template", "crates/sunrise-core/src", "crates/sunrise-core/src/storage.rs",
         "crates/sunrise-mod-api", "crates/sunrise-mod-host", "crates/sunrise-mod-host/Cargo.toml", "crates/sunrise-official",
         "crates/sunrise-official/Cargo.toml",
+        # The discovery tests' scratch game source (`discover_tests.rs`).
+        "crates/sunrise-client/src/entry.rs", "crates/sunrise-client/src/game.rs", "crates/sunrise-client/src/lib.rs",
+        "crates/sunrise-engine-slots/Cargo.toml", "crates/sunrise-engine-slots/src/lib.rs",
+        "crates/sunrise-mod-api-gen/internals.txt", "crates/sunrise-mod-points/Cargo.toml",
     },
 }
 
