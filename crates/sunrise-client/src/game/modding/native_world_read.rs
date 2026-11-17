@@ -16,7 +16,7 @@ use sunrise_world::{
 pub(super) fn block_face_sturdy(
     world: &World,
     b: &Behaviours,
-    binding: &sunrise_client::block_collision::BlockCollisionRegistry<'_>,
+    binding: &sunrise_world::block_collision::BlockCollisionRegistry<'_>,
     pos: [i32; 3],
     face: mod_api::BlockFace,
     support: mod_api::SupportType,
