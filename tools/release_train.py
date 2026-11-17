@@ -509,6 +509,19 @@ def published_nightly():
 # published Nightly and its sdk-<commit> carry both, such a launcher refuses every Nightly players can install, so
 # no launcher is released from main (umceko, 2026-11-17).
 PREPARE_NEEDS = "9649943c68d48a32fe247f1bac750fe4249b93fa"
+# The launcher-split pull requests whose launcher needs both. Rollups merge a member's head unchanged, so a head that
+# contains one's head commit carries it; a launcher without them (a hotfix of launcher@1.0.1) isn't held.
+SPLIT_PULL_REQUESTS = (2080, 2163)
+
+
+def launcher_has_split(head):
+    """Whether `head` contains a launcher-split pull request's head commit."""
+    for number in SPLIT_PULL_REQUESTS:
+        sha = run("gh", "api", f"repos/{REPO}/pulls/{number}", "--jq", ".head.sha", check=False).strip()
+        if sha and not subprocess.run(["git", "merge-base", "--is-ancestor", sha, head], cwd=ROOT,
+                                      capture_output=True).returncode:
+            return True
+    return False
 
 
 def launcher_waits_for_nightly():
@@ -768,7 +781,7 @@ def main():
                                blockers, daily=args.daily)
     if release and args.head and parity and not args.channel and not (passed_on("parity-main", head) and passed_on("checks", head)):
         release, reason = False, f"waiting for checks and parity-main to pass on {head[:9]}"
-    if release and args.kind == "launcher":
+    if release and args.kind == "launcher" and launcher_has_split(head):
         waiting = launcher_waits_for_nightly()
         if waiting:
             release, reason = False, waiting

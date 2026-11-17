@@ -412,6 +412,26 @@ class ReleaseTrainTests(unittest.TestCase):
                 sdk_assets.append("tool-x86_64-unknown-linux-gnu.tar.xz")
                 self.assertIsNone(train.launcher_waits_for_nightly())
 
+    def test_only_a_launcher_with_the_split_is_held(self):
+        with tempfile.TemporaryDirectory() as folder:
+            def git(*args):
+                return subprocess.check_output(["git", *args], cwd=folder, text=True,
+                                               stderr=subprocess.DEVNULL).strip()
+            git("init", "-b", "main")
+            git("config", "user.name", "Test")
+            git("config", "user.email", "test@example.invalid")
+            git("commit", "--allow-empty", "-m", "launcher@1.0.1")
+            hotfix = git("rev-parse", "HEAD")
+            git("commit", "--allow-empty", "-m", "launcher split")
+            split = git("rev-parse", "HEAD")
+            heads = {2080: split, 2163: "f" * 40}
+            def run(*command, check=True):
+                self.assertEqual(command[0], "gh")
+                return heads[int(command[2].rsplit("/", 1)[1])] + "\n"
+            with mock.patch.object(train, "ROOT", Path(folder)), mock.patch.object(train, "run", side_effect=run):
+                self.assertTrue(train.launcher_has_split(split))
+                self.assertFalse(train.launcher_has_split(hotfix))
+
     @mock.patch.object(train, "REPO", "sunrise-org/sunrise")
     def test_fork_base_requires_same_sha_main_push_gate_jobs(self):
         def record(sha, ident, event="push", branch="main"):
