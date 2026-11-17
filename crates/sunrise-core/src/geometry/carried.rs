@@ -443,6 +443,7 @@ mod tests {
     /// Arbitrary reports never fit unless they are on the deck at some age in the window: the
     /// accepted position, in the frame it fitted, is always over the deck and never inside it.
     #[test]
+    #[ignore = "daily"]
     fn no_report_fits_off_the_deck_or_through_it() {
         let log = train(60, 2.0);
         let deck = deck();
