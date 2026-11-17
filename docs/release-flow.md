@@ -319,6 +319,11 @@ the last one stays GitHub's *latest*, so launchers and servers from before the s
 keep a working build until they update themselves. `.github/release-line.txt` still numbers the launcher's releases
 (`launcher@X.Y.Z`).
 
+A launcher release from main waits for the game it installs: `release_train.py decide --kind launcher` holds it
+until the published `nightly`'s commit has `sunrise-prepare needs` and its `sdk-<commit>` carries the SDK's `tool`
+slices, both of which a launcher built after the launcher split asks for (umceko, 2026-11-17). Its summary names
+which one is missing.
+
 - **Launchers** (#3342) install the current `nightly` pre-release as their update, as the version
   `nightly-<date>-<commit>`, after checking its checksums signed for the Nightly channel. A player on the newest
   release, on a Nightly or on nothing moves to it at the next check; a version picked by hand or pinned by an

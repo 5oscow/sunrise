@@ -381,6 +381,37 @@ class ReleaseTrainTests(unittest.TestCase):
             self.assertEqual(select(event="push").stdout, topic)
             self.assertEqual(select(dry_run="true").stdout, topic)
 
+    def test_a_launcher_from_main_waits_for_a_nightly_with_prepare_needs_and_an_sdk_tool(self):
+        real_run = train.run
+        with tempfile.TemporaryDirectory() as folder:
+            def git(*args):
+                return subprocess.check_output(["git", *args], cwd=folder, text=True,
+                                               stderr=subprocess.DEVNULL).strip()
+            git("init", "-b", "main")
+            git("config", "user.name", "Test")
+            git("config", "user.email", "test@example.invalid")
+            git("commit", "--allow-empty", "-m", "before")
+            before = git("rev-parse", "HEAD")
+            git("commit", "--allow-empty", "-m", "sunrise-prepare needs")
+            needs = git("rev-parse", "HEAD")
+            git("remote", "add", "origin", folder)
+            sdk_assets = []
+            def run(*command, check=True):
+                if command[0] == "gh":
+                    self.assertEqual(command[2], f"repos/{train.REPO}/releases/tags/sdk-{needs}")
+                    return "\n".join(sdk_assets)
+                return real_run(*command, check=check)
+            with mock.patch.object(train, "ROOT", Path(folder)), mock.patch.object(train, "PREPARE_NEEDS", needs), \
+                    mock.patch.object(train, "run", side_effect=run):
+                self.assertIn("no Nightly is published", train.launcher_waits_for_nightly())
+                git("tag", "nightly", before)
+                self.assertIn("no `sunrise-prepare needs`", train.launcher_waits_for_nightly())
+                git("tag", "-f", "nightly", needs)
+                sdk_assets[:] = ["sdk.json", "runtime-x86_64-unknown-linux-gnu.tar.xz"]
+                self.assertIn("no `tool` slice", train.launcher_waits_for_nightly())
+                sdk_assets.append("tool-x86_64-unknown-linux-gnu.tar.xz")
+                self.assertIsNone(train.launcher_waits_for_nightly())
+
     @mock.patch.object(train, "REPO", "sunrise-org/sunrise")
     def test_fork_base_requires_same_sha_main_push_gate_jobs(self):
         def record(sha, ident, event="push", branch="main"):

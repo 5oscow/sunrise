@@ -504,6 +504,30 @@ def published_nightly():
     return json.loads(out) if out.strip() else None
 
 
+# A launcher built from main after the launcher split (#2080, #2163 and on) asks the installed game's preparer
+# `sunrise-prepare needs` (it came with 9649943c68d) and builds native mods with the SDK's `tool` slices: until a
+# published Nightly and its sdk-<commit> carry both, such a launcher refuses every Nightly players can install, so
+# no launcher is released from main (umceko, 2026-11-17).
+PREPARE_NEEDS = "9649943c68d48a32fe247f1bac750fe4249b93fa"
+
+
+def launcher_waits_for_nightly():
+    """Why a launcher from main can't be released yet, or None once the published Nightly's commit has
+    `sunrise-prepare needs` and its SDK release carries a `tool` slice."""
+    if not run("git", "ls-remote", "--tags", "origin", "refs/tags/nightly").strip():
+        return "no Nightly is published: a launcher from main waits for one with `sunrise-prepare needs` and its SDK's tool"
+    run("git", "fetch", "--quiet", "--force", "origin", "refs/tags/nightly:refs/tags/nightly")
+    sha = run("git", "rev-parse", "refs/tags/nightly^{commit}").strip()
+    if subprocess.run(["git", "merge-base", "--is-ancestor", PREPARE_NEEDS, sha], cwd=ROOT).returncode:
+        return (f"the published Nightly ({sha[:9]}) has no `sunrise-prepare needs`, which a launcher from main asks "
+                "the game: it waits for a newer Nightly")
+    assets = run("gh", "api", f"repos/{REPO}/releases/tags/sdk-{sha}", "--jq", ".assets[].name", check=False).split()
+    if not any(name.startswith("tool-") for name in assets):
+        return (f"sdk-{sha[:9]}, the published Nightly's SDK, has no `tool` slice, which a launcher from main builds "
+                "native mods with: it waits for a newer Nightly")
+    return None
+
+
 SNAPSHOT_RUN = "snapshot build"
 
 
@@ -744,6 +768,10 @@ def main():
                                blockers, daily=args.daily)
     if release and args.head and parity and not args.channel and not (passed_on("parity-main", head) and passed_on("checks", head)):
         release, reason = False, f"waiting for checks and parity-main to pass on {head[:9]}"
+    if release and args.kind == "launcher":
+        waiting = launcher_waits_for_nightly()
+        if waiting:
+            release, reason = False, waiting
     urgent = False
     if args.kind == "game":
         release, reason, urgent = nightly_decision(release, reason, prs, nightly_building(),
