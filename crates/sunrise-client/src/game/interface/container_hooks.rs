@@ -114,7 +114,10 @@ impl<'g> Open<'_, 'g> {
     }
     fn stack_of(&self, stack: &ItemStack) -> Stack {
         let kind = kind_of(stack);
-        self.seen.borrow_mut().entry(kind).or_insert_with(|| stack.clone());
+        self.seen
+            .borrow_mut()
+            .entry(kind)
+            .or_insert_with(|| stack.clone());
         Stack::new(
             stack.item.to_string(),
             stack.count,
@@ -191,7 +194,9 @@ impl Container for Open<'_, '_> {
         };
         let order = game.creative_screen.order_of(&stack);
         (
-            order.and_then(|o| u32::try_from(o).ok()).unwrap_or(u32::MAX),
+            order
+                .and_then(|o| u32::try_from(o).ok())
+                .unwrap_or(u32::MAX),
             hover_name(&game.pack.names, &stack),
         )
     }
@@ -359,8 +364,7 @@ impl<'g> Game<'g> {
     }
     /// A mouse button down on the screen, by the name the key mappings use.
     pub(in crate::game) fn container_mouse(&mut self, button: winit::event::MouseButton) -> bool {
-        api::engine::any()
-            && self.container_key(&sunrise_client::keybinds::mouse_name(button))
+        api::engine::any() && self.container_key(&sunrise_client::keybinds::mouse_name(button))
     }
     /// A key press, by the name the key mappings use.
     pub(in crate::game) fn container_key_code(&mut self, code: KeyCode) -> bool {
@@ -504,14 +508,23 @@ mod tests {
             shulker: false,
             size: rows * 9,
         };
-        assert_eq!(local_menu_id(chest(3)).as_deref(), Some("minecraft:generic_9x3"));
-        assert_eq!(local_menu_id(chest(6)).as_deref(), Some("minecraft:generic_9x6"));
+        assert_eq!(
+            local_menu_id(chest(3)).as_deref(),
+            Some("minecraft:generic_9x3")
+        );
+        assert_eq!(
+            local_menu_id(chest(6)).as_deref(),
+            Some("minecraft:generic_9x6")
+        );
         let shulker = Local::Chest {
             rows: None,
             shulker: true,
             size: 27,
         };
-        assert_eq!(local_menu_id(shulker).as_deref(), Some("minecraft:shulker_box"));
+        assert_eq!(
+            local_menu_id(shulker).as_deref(),
+            Some("minecraft:shulker_box")
+        );
         assert_eq!(
             local_menu_id(Local::Furnace(FurnaceKind::Smoker)).as_deref(),
             Some("minecraft:smoker")
@@ -532,7 +545,10 @@ mod tests {
         );
         assert_eq!(a, b);
         assert_eq!(kind_of(&a), kind_of(&b));
-        assert_ne!(kind_of(&a), kind_of(&ItemStack::new("minecraft:enchanted_book", 1)));
+        assert_ne!(
+            kind_of(&a),
+            kind_of(&ItemStack::new("minecraft:enchanted_book", 1))
+        );
     }
 
     /// Picks up slot 9 on every press.
