@@ -9,6 +9,7 @@ pub trait Hooks {
         contract = "replace",
         out = "answer",
         scope = "block",
+        inert = "*answer = Some(InteractionResult::Pass);",
         key = "state",
         neoforge = "none (vanilla BlockBehaviour.useWithoutItem; PlayerInteractEvent.RightClickBlock cancels or answers before it)"
     )]

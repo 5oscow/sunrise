@@ -19,6 +19,7 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "replace",
+        inert = "*new = Some(state);",
         out = "new",
         scope = "block",
         key = "state",

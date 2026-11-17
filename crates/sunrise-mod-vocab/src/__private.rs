@@ -58,6 +58,11 @@ pub fn content_owner_disabled(id: &str) -> bool {
     crate::runtime::content_owner_disabled(id)
 }
 
+/// Whether any installed mod is off; computed only at load/toggle time.
+pub fn any_mod_disabled() -> bool {
+    crate::runtime::any_mod_disabled()
+}
+
 /// Whether a block's owner has a disabled Part subscribed to this hook.
 /// The scheduler uses the same pre-indexed table as dispatch, before consuming a tick.
 pub fn block_hook_inert(hook: HookId, state: BlockState) -> bool {

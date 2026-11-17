@@ -1848,27 +1848,8 @@ impl Behaviours {
     /// Run due scheduled ticks for the level's current game time, in vanilla
     /// order: block ticks then fluid ticks (65536 each at most).
     pub fn tick_scheduled<L: LevelAccess + ?Sized>(&self, level: &mut L, ticks: &mut Ticks) {
-        let time = level.game_time();
-        ticks.handling_tick = true;
-        {
-            let level_ref: &L = level;
-            if ticks
-                .blocks
-                .begin_tick_where(
-                    time,
-                    65536,
-                    |chunk: ChunkPos| level_ref.is_ticking_chunk(chunk),
-                    |tick| {
-                        let state = level_ref.block_state(tick.pos);
-                        u32::from(self.block(state).0) != tick.kind.0
-                            || !level_ref.hold_block_tick(state)
-                    },
-                )
-                .is_err()
-            {
-                ticks.handling_tick = false;
-                return;
-            }
+        if !self.scheduled_begin(level, ticks, false) {
+            return;
         }
         while let Ok(Some(tick)) = ticks.blocks.next_tick() {
             let mut sim = self.sim(level, ticks);
@@ -1876,7 +1857,7 @@ impl Behaviours {
             sunrise_threads::work::set_chunk(tick.pos.x >> 4, tick.pos.z >> 4);
             sunrise_threads::work::set_block(self.block(state).0);
             if u32::from(self.block(state).0) == tick.kind.0 {
-                if sim.level.hold_block_tick(state) {
+                if sim.level.has_held_block_ticks() && sim.level.hold_block_tick(state) {
                     // Collection is finished: this exact tick stays queued for the next pass.
                     sim.ticks.blocks.schedule(tick);
                 } else {
@@ -1885,18 +1866,8 @@ impl Behaviours {
             }
         }
         let _ = ticks.blocks.finish_tick();
-        {
-            let level_ref: &L = level;
-            if ticks
-                .fluids
-                .begin_tick(time, 65536, |chunk: ChunkPos| {
-                    level_ref.is_ticking_chunk(chunk)
-                })
-                .is_err()
-            {
-                ticks.handling_tick = false;
-                return;
-            }
+        if !self.scheduled_begin(level, ticks, true) {
+            return;
         }
         while let Ok(Some(tick)) = ticks.fluids.next_tick() {
             let mut sim = self.sim(level, ticks);
@@ -1925,25 +1896,29 @@ impl Behaviours {
         let time = level.game_time();
         ticks.handling_tick = true;
         let level_ref: &L = level;
+        let hold_blocks = !fluids && level_ref.has_held_block_ticks();
         let queue = if fluids {
             &mut ticks.fluids
         } else {
             &mut ticks.blocks
         };
-        let ok = queue
-            .begin_tick_where(
+        let ok = if hold_blocks {
+            queue.begin_tick_where(
                 time,
                 65536,
                 |chunk: ChunkPos| level_ref.is_ticking_chunk(chunk),
                 |tick| {
-                    fluids || {
-                        let state = level_ref.block_state(tick.pos);
-                        u32::from(self.block(state).0) != tick.kind.0
-                            || !level_ref.hold_block_tick(state)
-                    }
+                    let state = level_ref.block_state(tick.pos);
+                    u32::from(self.block(state).0) != tick.kind.0
+                        || !level_ref.hold_block_tick(state)
                 },
             )
-            .is_ok();
+        } else {
+            queue.begin_tick(time, 65536, |chunk: ChunkPos| {
+                level_ref.is_ticking_chunk(chunk)
+            })
+        }
+        .is_ok();
         if !ok {
             ticks.handling_tick = false;
         }
@@ -1977,7 +1952,7 @@ impl Behaviours {
             sunrise_threads::work::set_chunk(tick.pos.x >> 4, tick.pos.z >> 4);
             sunrise_threads::work::set_block(self.block(state).0);
             if u32::from(self.block(state).0) == tick.kind.0 {
-                if sim.level.hold_block_tick(state) {
+                if sim.level.has_held_block_ticks() && sim.level.hold_block_tick(state) {
                     sim.ticks.blocks.schedule(tick);
                 } else {
                     sim.tick_due_block(state, tick.pos);

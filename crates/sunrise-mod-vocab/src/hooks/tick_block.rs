@@ -14,6 +14,7 @@ pub trait Hooks {
         contract = "cancel",
         out = "handled",
         scope = "block",
+        inert = "*handled = true;",
         key = "state",
         target = "sunrise_client::game::native_hooks::base::GameLevel<'_>::native_tick_block",
         neoforge = "none (vanilla BlockBehaviour.tick; NeoForge adds no event or extension for it)"

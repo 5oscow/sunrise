@@ -692,6 +692,10 @@ pub trait LevelAccess: BlockEntityNeighbors {
         _handled: &mut bool,
     ) {
     }
+    /// Whether this phase can contain held mod ticks. False keeps the ordinary scheduler path.
+    fn has_held_block_ticks(&self) -> bool {
+        false
+    }
     /// Hold a due block tick without running its body or changing its deadline/order.
     /// Used while the owner of a subscribed block behaviour is switched off.
     fn hold_block_tick(&self, _state: BlockStateId) -> bool {

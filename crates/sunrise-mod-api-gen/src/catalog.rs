@@ -119,6 +119,8 @@ pub struct Hook {
     pub owner: Option<String>,
     /// Validate a collector's edits at the per-listener ownership boundary.
     pub collect_validator: Option<String>,
+    /// The inert answer for a disabled content owner's subscribed block Part.
+    pub inert: Option<String>,
     /// A global cancel hook whose dispatch runs every listener inside `catch_unwind`: one that
     /// unwinds is switched off for this hook for the session, and the outputs it had written roll
     /// back to what the game requested (#2414 ruling).
@@ -265,6 +267,7 @@ struct HookEntry {
     /// Only `prepared = "stack"` on `can_equip` is supported; reject at parse time.
     prepared: Option<String>,
     stack_count: Option<StackCount>,
+    inert: Option<String>,
     neoforge: Option<serde_json::Value>,
     fabric: Option<serde_json::Value>,
     paper: Option<serde_json::Value>,
@@ -331,6 +334,20 @@ impl Hook {
         ) {
             return Err(CatalogError::InvalidContract(name));
         }
+        if let Some(inert) = &entry.inert
+            && (!scope
+                .as_ref()
+                .is_some_and(|scope| scope.kind == PartKind::Block)
+                || !matches!(api.contract, Contract::Cancel | Contract::Replace)
+                || syn::parse_str::<syn::Block>(&format!("{{ {inert} }}")).is_err())
+        {
+            return Err(CatalogError::InvalidHook {
+                hook: name,
+                error:
+                    "inert requires a block-scoped cancel/replace hook and valid Rust statements"
+                        .into(),
+            });
+        }
         if entry.stack_count.is_some() {
             if api.contract != Contract::Collect || api.out.is_none() || api.answered_by.is_some() {
                 return Err(CatalogError::InvalidHook {
@@ -391,6 +408,7 @@ impl Hook {
             answered_by_mod,
             owner: api.owner,
             collect_validator: api.collect_validator,
+            inert: entry.inert,
             isolate,
             scope,
             host: entry.host,
@@ -833,6 +851,7 @@ impl Hook {
             answered_by_mod: false,
             owner: None,
             collect_validator: None,
+            inert: None,
             isolate: false,
             scope: None,
             host: None,

@@ -70,6 +70,7 @@ pub(crate) struct Installed {
     pub(crate) subscribers: sunrise_mod_runtime::subscribers::Subscribers,
     pub(crate) disabled: Box<[std::sync::atomic::AtomicBool]>,
     namespace_owners: std::collections::HashMap<Box<str>, usize>,
+    disabled_count: std::sync::atomic::AtomicUsize,
     /// The poison sets of the hooks whose dispatch isolates every listener
     /// (#2414 ruling): a listener that unwound is skipped by that one hook
     /// for the rest of the session. One set per hook, filled only on a panic;
@@ -122,6 +123,7 @@ impl Installed {
             subscribers,
             disabled,
             namespace_owners,
+            disabled_count: std::sync::atomic::AtomicUsize::new(0),
             poisons: std::sync::Mutex::new(None),
             poison_free: std::sync::atomic::AtomicBool::new(true),
         }
@@ -220,7 +222,21 @@ pub(crate) fn set_mod_enabled(id: &str, on: bool) -> bool {
     let mut found = false;
     for (entry, disabled) in installed.mods.iter().zip(&*installed.disabled) {
         if entry.id == id {
-            if disabled.swap(!on, std::sync::atomic::Ordering::Relaxed) == on {
+            // Publish the slow path before disabling. A repeated disable reserves and releases
+            // its own count; enabling releases the count of the previously disabled entry.
+            // This keeps concurrent toggles from publishing a stale false flag.
+            if !on {
+                installed
+                    .disabled_count
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+            let was_disabled = disabled.swap(!on, std::sync::atomic::Ordering::SeqCst);
+            if was_disabled {
+                installed
+                    .disabled_count
+                    .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+            }
+            if was_disabled == on {
                 MODS_SWITCHED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 if !on {
                     sunrise_mod_runtime::water_tickets::remove_owner(id);
@@ -230,6 +246,16 @@ pub(crate) fn set_mod_enabled(id: &str, on: bool) -> bool {
         }
     }
     found
+}
+
+/// Cached at load/toggle time, so the scheduler need not inspect content on its normal path.
+pub(crate) fn any_mod_disabled() -> bool {
+    installed().is_some_and(|installed| {
+        installed
+            .disabled_count
+            .load(std::sync::atomic::Ordering::SeqCst)
+            != 0
+    })
 }
 
 /// How many times a mod was switched on or off: what a kept capability compares to tell that a
@@ -265,6 +291,9 @@ pub(crate) fn mod_index_on(index: usize) -> bool {
 
 /// Content ownership is resolved at installation, not by scanning mods on a tick.
 pub(crate) fn content_owner_disabled(id: &str) -> bool {
+    if !any_mod_disabled() {
+        return false;
+    }
     let Some((namespace, _)) = id.split_once(':') else {
         return false;
     };
@@ -278,7 +307,8 @@ pub(crate) fn disabled_owner_part<P: ?Sized>(parts: &[Attached<P>], id: Option<&
     let Some((namespace, _)) = id.and_then(|id| id.split_once(':')) else {
         return false;
     };
-    let Some(owner) = installed().and_then(|installed| installed.namespace_owners.get(namespace)) else {
+    let Some(owner) = installed().and_then(|installed| installed.namespace_owners.get(namespace))
+    else {
         return false;
     };
     !mod_index_on(*owner) && parts.iter().any(|part| part.mod_index == *owner)
@@ -561,5 +591,38 @@ mod listener_lease_tests {
                 |_| true,
             )
             .unwrap();
+    }
+}
+
+#[cfg(test)]
+mod toggle_tests {
+    use super::*;
+
+    #[test]
+    fn cached_disabled_flag_tracks_repeated_and_independent_toggles() {
+        struct Quiet;
+        #[mod_api::__subscriptions]
+        impl crate::Hooks for Quiet {}
+        crate::testing::with_dispatch(
+            vec![
+                ModEntry::new("a", Box::new(Quiet)),
+                ModEntry::new("b", Box::new(Quiet)),
+            ]
+            .into(),
+            || {
+                assert!(!any_mod_disabled());
+                assert!(set_mod_enabled("a", false));
+                assert!(set_mod_enabled("a", false));
+                assert!(any_mod_disabled());
+                assert!(set_mod_enabled("b", false));
+                assert!(set_mod_enabled("a", true));
+                assert!(set_mod_enabled("a", true));
+                assert!(any_mod_disabled());
+                assert!(!set_mod_enabled("missing", true));
+                assert!(any_mod_disabled());
+                assert!(set_mod_enabled("b", true));
+                assert!(!any_mod_disabled());
+            },
+        );
     }
 }

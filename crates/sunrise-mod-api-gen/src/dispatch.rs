@@ -336,6 +336,9 @@ pub(super) fn emit<'a>(
                     .find(|(arg, _)| arg == key)
                     .ok_or_else(|| format!("key {key} is not an argument of {name}"))?;
                 let key_type = ty.to_token_stream().to_string().replace("mod_api :: ", "");
+                if hook.inert.is_some() && key_type != "BlockState" {
+                    return Err(format!("inert hook {name} requires a BlockState key"));
+                }
                 let lookup = match key_type.as_str() {
                     "BlockState" if table == "block" && observer_routed => {
                         let host = &host
@@ -1016,18 +1019,10 @@ pub(super) fn emit<'a>(
         };
         // A disabled content owner's subscribed world-writing behaviour is inert, not
         // the vanilla template's. Keep reads (shapes, loot, etc.) on their normal fallback.
-        let inert = match name {
-            "random_tick" | "tick_block" => Some("*handled = true;"),
-            "update_shape" => Some("*new = Some(state);"),
-            "can_survive" => Some("*survives = Some(true);"),
-            "use_item_on" | "use_without_item" => Some("*answer = Some(InteractionResult::Pass);"),
-            "dispense_method" => Some("*answer = Some((Some(stack.clone()), 0));"),
-            "tool_modified_state" => Some("*cancel = true;"),
-            _ => None,
-        };
-        let lookup = if let Some(inert) = inert {
+        let lookup = if let Some(inert) = &hook.inert {
+            let key = &hook.scope.as_ref().expect("inert has a block scope").key;
             format!(
-                "{lookup}\nif super::disabled_owner_part({part_list}, super::content::registry_keys::block_id(state.block())) {{ {inert} return; }}\n"
+                "{lookup}\nif super::any_mod_disabled() && super::disabled_owner_part({part_list}, super::content::registry_keys::block_id({key}.block())) {{ {inert} return; }}\n"
             )
         } else {
             lookup
@@ -2300,6 +2295,40 @@ fn main() {{ game::run(std::env::args_os().nth(1).unwrap().into()); }}
                 .unwrap()
                 .success()
         );
+    }
+
+    #[test]
+    fn inert_guard_is_owned_by_the_hook_declaration() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let mut hook = Hook {
+            name: "probe".into(),
+            contract: Contract::Cancel,
+            out: Some("handled".into()),
+            scope: Some(crate::catalog::PartScope {
+                kind: crate::catalog::PartKind::Block,
+                key: "state".into(),
+            }),
+            inert: Some("*handled = true;".into()),
+            ..Hook::sample(
+                "sunrise_client::game::native_hooks::probe::Game<'_>::native_probe",
+                Side::Server,
+            )
+        };
+        let method: syn::ItemFn = syn::parse_quote! {
+            fn native_probe(&mut self, state: BlockStateId, handled: &mut bool) { let _ = (state, handled); }
+        };
+        let declared = emit(
+            &root,
+            std::iter::once(&hook),
+            std::slice::from_ref(&method),
+            &[],
+        )
+        .unwrap();
+        assert!(declared.dispatch.contains("disabled_owner_part"));
+        assert!(declared.dispatch.contains("*handled = true; return;"));
+        hook.inert = None;
+        let undeclared = emit(&root, std::iter::once(&hook), &[method], &[]).unwrap();
+        assert!(!undeclared.dispatch.contains("disabled_owner_part"));
     }
 
     #[test]

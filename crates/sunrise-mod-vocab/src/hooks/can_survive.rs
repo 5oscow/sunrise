@@ -17,6 +17,7 @@ pub trait Hooks {
         contract = "replace",
         out = "survives",
         scope = "block",
+        inert = "*survives = Some(true);",
         key = "state",
         target = "sunrise_client::game::native_hooks::base::LevelView<'_>::native_can_survive",
         neoforge = "none (vanilla BlockBehaviour.canSurvive; NeoForge adds no event or extension for it)"

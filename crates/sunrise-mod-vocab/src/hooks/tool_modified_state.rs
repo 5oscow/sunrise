@@ -17,6 +17,7 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         scope = "block",
+        inert = "*cancel = true;",
         key = "state",
         host = "read",
         neoforge = "IBlockExtension.getToolModifiedState"
