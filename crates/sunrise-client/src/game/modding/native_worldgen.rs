@@ -76,12 +76,18 @@ fn retain_or_prepare(
                     .and_then(|state| index.to_api(state).ok())
                     .map(BlockState::block)
             });
-        let _ = registry.mod_worker_resource.set(Arc::new(WorkerResources {
-            index,
-            metadata,
-            air,
-            air_blocks,
-        }));
+        // Registries interned from one payload and one metadata snapshot derive equal
+        // resources, so the first installation's is shared rather than kept once per install.
+        let resource = registry.share_worker_resource(
+            metadata as *const Blocks as usize,
+            Arc::new(WorkerResources {
+                index,
+                metadata,
+                air,
+                air_blocks,
+            }),
+        );
+        let _ = registry.mod_worker_resource.set(resource);
     }
     let resource = WorkerResources::get(registry)
         .map_err(|_| "worker registry contains an incompatible resource".to_owned())?;
