@@ -34,6 +34,7 @@ pub(super) fn show(looked_in: &std::path::Path, settings: &Settings) -> Result<(
             ))?,
             panorama: Arc::new(sunrise_client::gfx::panorama::Faces::colour([0; 4])),
             splashes: Arc::from(""),
+            plain_texts: Default::default(),
         },
         screen: NoResources::new(looked_in, sunrise_hooks::engine::get_the_game()),
         pointer: (0.0, 0.0),

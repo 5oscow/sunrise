@@ -1508,6 +1508,7 @@ mod tests {
                 96, 110, 111, 255,
             ])),
             splashes: Arc::from(""),
+            plain_texts: Default::default(),
         }
     }
 
