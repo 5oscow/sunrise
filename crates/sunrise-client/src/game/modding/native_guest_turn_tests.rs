@@ -386,10 +386,7 @@ fn a_players_move_by_is_heard_once_and_a_cancel_moves_nothing() {
     #[mod_api::__subscriptions]
     impl Hooks for Cancel {
         fn entity_move(&self, _: &dyn LoopContext, event: &mut EntityMoveEvent<'_>) -> Flow {
-            self.0
-                .lock()
-                .unwrap()
-                .push((event.entity, event.cause));
+            self.0.lock().unwrap().push((event.entity, event.cause));
             Flow::Cancel
         }
     }
