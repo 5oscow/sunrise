@@ -2387,6 +2387,47 @@ impl<R: RandomSource> LootContext<'_, R> {
                         self.modifiers(function, stack, random);
                     }
                 }
+                "minecraft:copy_custom_data" => {
+                    let prototype = self.items.component_defaults.get(stack.item.as_ref());
+                    let original = if stack
+                        .data()
+                        .is_some_and(|data| data.other("!minecraft:custom_data").is_some())
+                    {
+                        None
+                    } else if let Some(data) = stack.custom_data() {
+                        Some(std::borrow::Cow::Borrowed(data))
+                    } else {
+                        prototype
+                            .and_then(|values| values.get(&"minecraft:custom_data".into()))
+                            .and_then(|value| sunrise_world::custom_data::borrow(value).ok())
+                    };
+                    let place = sunrise_world::loot::current_native_loot_place();
+                    if let Some(data) = sunrise_world::loot::copy::copy_custom_data(
+                        f,
+                        original.as_deref(),
+                        |source| {
+                            sunrise_world::loot::copy::nbt_source(
+                                source,
+                                place.as_deref(),
+                                |target| {
+                                    (target == "this")
+                                        .then(|| self.target.map(|(entity, _)| entity))
+                                        .flatten()
+                                },
+                            )
+                        },
+                    ) {
+                        apply_component_patch(
+                            stack,
+                            [(
+                                "minecraft:custom_data".into(),
+                                sunrise_core::nbt::Tag::Compound(data),
+                            )]
+                            .into_iter()
+                            .collect(),
+                        );
+                    }
+                }
                 "minecraft:copy_components" => {
                     let place = sunrise_world::loot::current_native_loot_place();
                     let mut patch = sunrise_core::nbt::Compound::new();
@@ -2406,9 +2447,9 @@ impl<R: RandomSource> LootContext<'_, R> {
                                     ),
                                 )
                             }),
-                            "this" => self
-                                .target
-                                .map(|(entity, _)| std::borrow::Cow::Borrowed(&entity.components)),
+                            "this" => self.target.map(|(entity, _)| {
+                                sunrise_world::loot::copy::entity_components(entity)
+                            }),
                             _ => None,
                         },
                         |id, value| {

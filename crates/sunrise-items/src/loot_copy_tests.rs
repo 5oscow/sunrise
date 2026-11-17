@@ -98,6 +98,14 @@ fn copy_components_uses_available_sources_and_table_filters_in_both_evaluators()
             vec![("test:keep", Tag::ByteArray(vec![7, 252]))],
         ),
         (
+            "invalid_include_is_atomic",
+            json!({"source":"block_entity","include":[7]}),
+            true,
+            false,
+            false,
+            vec![],
+        ),
+        (
             "empty_include",
             json!({"source":"block_entity","include":[]}),
             true,
@@ -148,6 +156,14 @@ fn copy_components_uses_available_sources_and_table_filters_in_both_evaluators()
             false,
             true,
             vec![("test:entity", Tag::LongArray(vec![3, 4]))],
+        ),
+        (
+            "entity_empty_custom_data",
+            json!({"source":"this","include":["minecraft:custom_data"]}),
+            false,
+            false,
+            true,
+            vec![("minecraft:custom_data", Tag::Compound(Compound::new()))],
         ),
         (
             "missing_entity",
@@ -252,6 +268,342 @@ fn copy_components_uses_available_sources_and_table_filters_in_both_evaluators()
                 Tag::Compound(expected.clone()),
                 "{name}, items = {item_engine}"
             );
+        }
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn copy_custom_data_runs_the_same_ordered_nbt_operations_in_both_evaluators() {
+    let root = std::env::temp_dir().join(format!(
+        "sunrise-copy-custom-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let folder = root.join("data/test/loot_table");
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(
+        root.join("items.json"),
+        r#"{"minecraft:stick":{"minecraft:max_stack_size":64}}"#,
+    )
+    .unwrap();
+    let base_text = "{keep:13L,list:[\"old\"],array:[I;5,6],dst:{nested:{old:1b}},same:3b,rows:[{id:\"a\"},{id:\"b\"}]}";
+    let base = sunrise_core::nbt::parse_snbt(base_text).unwrap().0;
+    let opaque = Tag::Compound(
+        [
+            (
+                sunrise_core::nbt::JavaString(vec![0xd800]),
+                Tag::LongArray(vec![i64::MIN, i64::MAX]),
+            ),
+            ("bytes".into(), Tag::ByteArray(vec![0, 255])),
+        ]
+        .into_iter()
+        .collect(),
+    );
+    let source_tag = Tag::compound([
+        (
+            "picks",
+            Tag::List(vec![
+                Tag::compound([("id", Tag::String("a".into())), ("n", Tag::Byte(3))]),
+                Tag::compound([("id", Tag::String("b".into())), ("n", Tag::Long(9))]),
+            ]),
+        ),
+        ("values", Tag::List(vec![Tag::Int(3), Tag::Long(4)])),
+        (
+            "merge",
+            Tag::List(vec![
+                Tag::compound([("nested", Tag::compound([("new", Tag::Long(2))]))]),
+                Tag::Int(7),
+                Tag::compound([("last", Tag::ByteArray(vec![1, 255]))]),
+            ]),
+        ),
+        ("ints", Tag::IntArray(vec![6, 7])),
+        ("opaque", opaque.clone()),
+        ("data", Tag::compound([("entity_flag", Tag::Long(7))])),
+    ]);
+    let source = BlockSource {
+        nbt: source_tag.clone(),
+        components: Default::default(),
+    };
+    let entity = loot::LootEntity {
+        nbt: Some(Arc::new(source_tag.clone())),
+        ..loot::LootEntity::new("test:entity")
+    };
+    let storage: Arc<loot::copy::StorageData> = Arc::new(
+        [
+            (
+                "test".to_owned(),
+                [("cache".to_owned(), source_tag)].into_iter().collect(),
+            ),
+            (
+                "minecraft".to_owned(),
+                [("cache".to_owned(), source.nbt.clone())]
+                    .into_iter()
+                    .collect(),
+            ),
+        ]
+        .into_iter()
+        .collect(),
+    );
+    let op = |source: &str, target: &str, strategy: &str| json!({"source":source,"target":target,"op":strategy});
+    // Expected SNBT is independent of the path writer and merge implementation.
+    let deep_target = vec!["new"; 512].join(".");
+    let cases = [
+        (
+            "depth_refusal_is_atomic",
+            json!("block_entity"),
+            vec![
+                op("values[]", &deep_target, "append"),
+                op("merge[]", &deep_target, "merge"),
+            ],
+            None,
+        ),
+        (
+            "replace_last",
+            json!("block_entity"),
+            vec![op("picks[].n", "result", "replace")],
+            Some("{result:9L}"),
+        ),
+        (
+            "append_all",
+            json!("block_entity"),
+            vec![op("values[]", "list", "append")],
+            Some("{list:[\"old\",3,4L]}"),
+        ),
+        (
+            "append_array_refused",
+            json!("block_entity"),
+            vec![op("values[]", "array", "append")],
+            None,
+        ),
+        (
+            "append_created",
+            json!("block_entity"),
+            vec![op("values[]", "new.child", "append")],
+            Some("{new:{child:[3,4L]}}"),
+        ),
+        (
+            "merge_compounds",
+            json!("block_entity"),
+            vec![op("merge[]", "dst", "merge")],
+            Some("{dst:{nested:{old:1b,new:2L},last:[B;1b,-1b]}}"),
+        ),
+        (
+            "merge_created_without_compound",
+            json!("block_entity"),
+            vec![op("picks[].n", "made", "merge")],
+            Some("{made:{}}"),
+        ),
+        (
+            "merge_array_refused",
+            json!("block_entity"),
+            vec![op("merge[]", "array", "merge")],
+            None,
+        ),
+        (
+            "ordered",
+            json!("block_entity"),
+            vec![
+                op("picks[].n", "dst", "replace"),
+                op("merge[]", "dst", "merge"),
+                op("picks[0].n", "list", "append"),
+            ],
+            Some("{dst:9L,list:[\"old\",3b]}"),
+        ),
+        (
+            "selectors",
+            json!("block_entity"),
+            vec![
+                op("picks[{id:b}].n", "rows[{id:b}].added", "replace"),
+                op("ints[-1]", "tail", "replace"),
+            ],
+            Some("{rows:[{id:a},{id:b,added:9L}],tail:7}"),
+        ),
+        (
+            "opaque",
+            json!("block_entity"),
+            vec![op("opaque", "opaque", "replace")],
+            None,
+        ),
+        (
+            "no_match",
+            json!("block_entity"),
+            vec![op("absent.field", "never.created", "replace")],
+            None,
+        ),
+        (
+            "same_value",
+            json!("block_entity"),
+            vec![op("picks[0].n", "same", "replace")],
+            None,
+        ),
+        (
+            "missing_block",
+            json!("block_entity"),
+            vec![op("picks[].n", "result", "replace")],
+            None,
+        ),
+        (
+            "entity",
+            json!("this"),
+            vec![op("picks[].n", "result", "replace")],
+            Some("{result:9L}"),
+        ),
+        (
+            "entity_object",
+            json!({"type":"context","target":"this"}),
+            vec![op("picks[].n", "result", "replace")],
+            Some("{result:9L}"),
+        ),
+        (
+            "missing_entity",
+            json!("this"),
+            vec![op("picks[].n", "result", "replace")],
+            None,
+        ),
+        (
+            "missing_attacker",
+            json!("attacker"),
+            vec![op("picks[].n", "result", "replace")],
+            None,
+        ),
+        (
+            "storage",
+            json!({"type":"minecraft:storage","source":"test:cache"}),
+            vec![op("picks[].n", "result", "replace")],
+            Some("{result:9L}"),
+        ),
+        (
+            "storage_default_namespace",
+            json!({"type":"storage","source":":cache"}),
+            vec![op("picks[].n", "result", "replace")],
+            Some("{result:9L}"),
+        ),
+        (
+            "unset_storage_is_empty",
+            json!({"type":"storage","source":"test:unset"}),
+            vec![op("{}", "empty", "replace")],
+            Some("{empty:{}}"),
+        ),
+        (
+            "component_then_custom",
+            json!("this"),
+            vec![op("picks[].n", "added", "replace")],
+            Some("{entity_flag:7L,added:9L}"),
+        ),
+    ];
+    for (name, provider, operations, _) in &cases {
+        let mut functions = vec![
+            json!({"type":"minecraft:set_components","components":{"test:untouched":{"value":"before"}}}),
+            json!({"type":"minecraft:set_components","components":{"minecraft:custom_data":base_text}}),
+        ];
+        if *name == "component_then_custom" {
+            functions.push(json!({"type":"minecraft:copy_components","source":"this","include":["minecraft:custom_data"]}));
+        }
+        functions
+            .push(json!({"type":"minecraft:copy_custom_data","source":provider,"ops":operations}));
+        let table = json!({"type":"minecraft:empty","pools":[{"rolls":1,"entries":[{
+            "type":"minecraft:item","name":"minecraft:stick","modifier":{"type":"minecraft:sequence","functions":functions}
+        }]}]});
+        std::fs::write(folder.join(format!("{name}.json")), table.to_string()).unwrap();
+    }
+    let defaults = sunrise_world::item_defaults::read(&root).unwrap();
+    let data = loot::LootData::load_with_types(
+        &root,
+        &loot::PackOverlay::NONE,
+        &defaults,
+        loot::types::Types::default(),
+    )
+    .unwrap();
+    let mut items = Items::for_tests(HashMap::new());
+    items.set_loot_data(&data);
+    for (name, _, _, patch) in cases {
+        let mut expected = if name == "component_then_custom" {
+            Compound::new()
+        } else {
+            let Tag::Compound(base) = &base else {
+                unreachable!()
+            };
+            base.clone()
+        };
+        if let Some(patch) = patch {
+            let Tag::Compound(patch) = sunrise_core::nbt::parse_snbt(patch).unwrap().0 else {
+                unreachable!()
+            };
+            expected.extend(patch);
+        }
+        if name == "opaque" {
+            expected.insert("opaque".into(), opaque.clone());
+        }
+        let expected = Tag::compound([
+            (
+                "test:untouched",
+                Tag::compound([("value", Tag::String("before".into()))]),
+            ),
+            ("minecraft:custom_data", Tag::Compound(expected)),
+        ]);
+        for item_engine in [false, true] {
+            let output = loot::copy::with_storage(storage.clone(), || {
+                loot::copy::with_block_source((name != "missing_block").then_some(&source), || {
+                    let target = (name != "missing_entity").then_some(&entity);
+                    let mut random = LegacyRandom::new(45);
+                    if item_engine {
+                        let predicate = |_: &Value, _: &loot::LootEntity| true;
+                        let mut stacks = items
+                            .roll_loot_table(
+                                &format!("test:{name}"),
+                                None,
+                                target.map(|entity| {
+                                    (
+                                        entity,
+                                        &predicate as &dyn Fn(&Value, &loot::LootEntity) -> bool,
+                                    )
+                                }),
+                                &mut random,
+                            )
+                            .unwrap();
+                        assert_eq!(stacks.len(), 1);
+                        crate::item_data::component_snapshot(&stacks.remove(0)).unwrap()
+                    } else {
+                        let mut stacks = match target {
+                            Some(entity) => data.roll_entity(
+                                &format!("test:{name}"),
+                                &mut random,
+                                &loot::EntityLootParams {
+                                    this: entity.clone(),
+                                    ..Default::default()
+                                },
+                            ),
+                            None => {
+                                data.roll(&format!("test:{name}"), &mut random, 0.0, None, None)
+                            }
+                        };
+                        assert_eq!(stacks.len(), 1);
+                        let stack = stacks.remove(0);
+                        assert_eq!(
+                            stack
+                                .components
+                                .iter()
+                                .filter(|(id, _)| id == "minecraft:custom_data")
+                                .count(),
+                            1
+                        );
+                        Tag::Compound(
+                            stack
+                                .components
+                                .into_iter()
+                                .filter_map(|(id, value)| {
+                                    value.map(|value| (id.as_str().into(), value))
+                                })
+                                .collect(),
+                        )
+                    }
+                })
+            });
+            assert_eq!(output, expected, "{name}, items = {item_engine}");
         }
     }
     std::fs::remove_dir_all(root).unwrap();

@@ -118,3 +118,32 @@ source component, while an empty list selects none. `exclude` is applied after
 `include`, so exclusion always wins. Selected values replace their destination
 components without removing unselected values. An absent source makes no edit.
 This is the same operation in both loot evaluators.
+
+Entity sources currently supply custom name when present and custom data
+(including an empty compound when unset). Subtype components such as variants
+and entity-type default components will arrive with the separate general entity
+component-getter follow-up; the copy function does not manufacture those values.
+
+## Copying custom data
+
+`minecraft:copy_custom_data` reads saved NBT rather than a component map. Its
+`source` may be an inline context target such as `"this"` or `"block_entity"`,
+the equivalent `{"type":"minecraft:context","target":"this"}` object, or
+`{"type":"minecraft:storage","source":"example:cache"}`. Context sources are
+available only when the caller supplied that entity or block entity. An unset
+storage entry is an empty compound, not an absent context source.
+
+Each entry in `ops` has a `source` NBT path, a `target` NBT path into the item's
+custom-data compound, and an `op`:
+- `replace` writes the last matching source value to the target path.
+- `append` appends every source match to each matching list, creating missing
+  lists. It does not append to byte, int or long arrays.
+- `merge` recursively merges compound matches into each target compound,
+  creating missing compounds and ignoring non-compound matches.
+
+Operations run in order. Missing sources and unmatched source paths leave the
+stack unchanged, and the custom-data component is written only if the result
+changed. Other components are untouched. Literal NBT types, arrays and Java
+UTF-16 payloads are retained. Both evaluators use the same path parser and merge
+implementation. Like `set` and `insert`, append and merge refuse writes beyond
+the existing 512-level NBT budget before creating any target parents.

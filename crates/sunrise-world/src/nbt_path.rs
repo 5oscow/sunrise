@@ -368,11 +368,22 @@ impl NbtPath {
     ) -> Result<(), PathError> {
         self.descend(0, self.nodes.len(), root, true, Some(new_value), f)
     }
-    /// `set`: returns how many tags changed.
-    pub fn set(&self, root: &mut Tag, value: &Tag) -> Result<usize, PathError> {
-        if too_deep(value, self.nodes.len()) {
+    /// Refuse writes outside the existing 512-level NBT budget before creating parents.
+    pub fn check_depth<'a>(
+        &self,
+        values: impl IntoIterator<Item = &'a Tag>,
+    ) -> Result<(), PathError> {
+        if values
+            .into_iter()
+            .any(|value| too_deep(value, self.nodes.len()))
+        {
             return Err(PathError::new("arguments.nbtpath.too_deep", vec![], 0));
         }
+        Ok(())
+    }
+    /// `set`: returns how many tags changed.
+    pub fn set(&self, root: &mut Tag, value: &Tag) -> Result<usize, PathError> {
+        self.check_depth(std::iter::once(value))?;
         let Some(last) = self.nodes.last() else {
             return Ok(0);
         };
@@ -400,15 +411,7 @@ impl NbtPath {
         root: &mut Tag,
         values: &[Tag],
     ) -> Result<usize, CollectionError> {
-        for v in values {
-            if too_deep(v, self.nodes.len()) {
-                return Err(CollectionError::Path(PathError::new(
-                    "arguments.nbtpath.too_deep",
-                    vec![],
-                    0,
-                )));
-            }
-        }
+        self.check_depth(values).map_err(CollectionError::Path)?;
         let mut modified = 0;
         let mut error: Option<CollectionError> = None;
         self.get_or_create(root, &|| Tag::List(Vec::new()), &mut |target| {

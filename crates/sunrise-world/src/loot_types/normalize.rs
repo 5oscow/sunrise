@@ -24,6 +24,7 @@ impl super::super::LootData {
             &self.modifiers,
         )?;
         self.tables = Arc::new(tables.into_iter().collect());
+        self.refresh_copy_requirements();
         Ok(())
     }
     pub(in crate::loot) fn prepare_types(&mut self) -> io::Result<()> {
@@ -51,7 +52,9 @@ impl super::super::LootData {
         for value in self.modifiers.values_mut() {
             typed(value, true, tags, types);
         }
-        self.validate_types()
+        self.validate_types()?;
+        self.refresh_copy_requirements();
+        Ok(())
     }
 }
 type Tags = HashMap<(String, String), crate::tag_layers::TagLayers>;

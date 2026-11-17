@@ -54,10 +54,11 @@ pub(super) fn world_source(
     world: &sunrise_client::world::World,
     pos: [i32; 3],
     block: &str,
+    items: &crate::items::Items,
 ) -> Option<std::sync::Arc<sunrise_world::loot::copy::BlockSource>> {
     let key = (pos[0], pos[1], pos[2]);
     let saved = match world.block_entities.get(&key) {
-        Some(entity) => save::block_entity_encode::encode(key, entity, block),
+        Some(entity) => save::block_entity_encode::encode(key, entity, block, items),
         None => saved_entity(world, pos)?,
     };
     Some(std::sync::Arc::new(source_snapshot(
@@ -1041,27 +1042,29 @@ impl Game<'_> {
         entity: Option<u32>,
         roll: BlockLootRoll<'_>,
     ) -> Vec<ItemStack> {
-        let source = self.pending.source(pos).or_else(|| {
-            self.pack
-                .assets
-                .registry
-                .state(state)
-                .and_then(|block| world_source(&self.world, pos, &block.name))
-        });
-        sunrise_world::loot::copy::with_block_source(source.as_deref(), || {
-            if mod_api::__private::listened(mod_api::HookId::EnchantedBlockLoot) {
-                let at = BlockPos::new(pos[0], pos[1], pos[2]);
-                let entity = self.loot_entity_ref(entity);
-                return self
-                    .with_level(|_, level, _| level.roll_block_loot(at, state, entity, roll));
-            }
-            world_items!(self).block_drops(
-                self.pack.assets.registry,
-                state,
-                roll,
-                &mut self.world.random,
-                Some((&mut self.rand_sequences, self.level.seed)),
-            )
+        let source =
+            self.pending.source(pos).or_else(|| {
+                self.pack.assets.registry.state(state).and_then(|block| {
+                    world_source(&self.world, pos, &block.name, world_items!(self))
+                })
+            });
+        let storage = self.score.storage.snapshot();
+        sunrise_world::loot::copy::with_storage(storage, || {
+            sunrise_world::loot::copy::with_block_source(source.as_deref(), || {
+                if mod_api::__private::listened(mod_api::HookId::EnchantedBlockLoot) {
+                    let at = BlockPos::new(pos[0], pos[1], pos[2]);
+                    let entity = self.loot_entity_ref(entity);
+                    return self
+                        .with_level(|_, level, _| level.roll_block_loot(at, state, entity, roll));
+                }
+                world_items!(self).block_drops(
+                    self.pack.assets.registry,
+                    state,
+                    roll,
+                    &mut self.world.random,
+                    Some((&mut self.rand_sequences, self.level.seed)),
+                )
+            })
         })
     }
     /// The handle of `LootContextParams.THIS_ENTITY`, by its id.

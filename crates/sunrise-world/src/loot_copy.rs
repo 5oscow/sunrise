@@ -1,4 +1,10 @@
-//! Shared loot source snapshots and component-copy evaluation.
+//! Shared loot source snapshots and copy-function evaluation.
+#[path = "loot_copy/custom_data.rs"]
+mod custom_data;
+pub use custom_data::{NbtSource, copy_custom_data};
+
+/// Command-storage namespaces and their named compounds, retained by copy-on-write snapshots.
+pub type StorageData = std::collections::BTreeMap<String, std::collections::BTreeMap<String, Tag>>;
 use super::LootStack;
 use serde_json::Value;
 use std::borrow::Cow;
@@ -20,6 +26,8 @@ pub struct LootPlace {
     pub block_entity: Option<Tag>,
     /// The block entity's collected components, separate from its saved NBT.
     pub block_components: Option<Compound>,
+    /// Server command storage, shared without cloning its compounds on a roll.
+    pub storage: Option<Arc<StorageData>>,
     /// The level the roll is in.
     pub level: Option<LootLevel>,
 }
@@ -83,6 +91,104 @@ pub fn with_block_source<T>(source: Option<&BlockSource>, roll: impl FnOnce() ->
     with_native_loot_place(place, roll)
 }
 
+/// Lend a stable view of server command storage to this roll.
+pub fn with_storage<T>(storage: Arc<StorageData>, roll: impl FnOnce() -> T) -> T {
+    let mut place = current_native_loot_place()
+        .as_deref()
+        .cloned()
+        .unwrap_or_default();
+    place.storage = Some(storage);
+    with_native_loot_place(place, roll)
+}
+
+/// Resolve providers identically for both evaluators; entity selection is adapter-owned.
+pub fn nbt_source<'a>(
+    source: NbtSource<'_>,
+    place: Option<&'a LootPlace>,
+    entity: impl FnOnce(&str) -> Option<&'a super::LootEntity>,
+) -> Option<Cow<'a, Tag>> {
+    match source {
+        NbtSource::Context("block_entity") => place?.block_entity.as_ref().map(Cow::Borrowed),
+        NbtSource::Context(target) => entity(target)?.nbt.as_deref().map(Cow::Borrowed),
+        NbtSource::Storage(id) => {
+            let storage = place?.storage.as_ref()?;
+            Some(
+                match storage
+                    .get(id.namespace())
+                    .and_then(|entries| entries.get(id.path()))
+                {
+                    Some(tag) => Cow::Borrowed(tag),
+                    None => Cow::Owned(Tag::Compound(Compound::new())),
+                },
+            )
+        }
+    }
+}
+
+impl super::LootData {
+    pub(in crate::loot) fn refresh_copy_requirements(&mut self) {
+        self.copies_entity_nbt = self
+            .tables
+            .ids()
+            .map(|id| &self.tables[id])
+            .chain(self.modifiers.values())
+            .any(may_read_entity_nbt);
+    }
+}
+
+/// Cold, conservative metadata: ordinary tables need no entity serialization.
+fn may_read_entity_nbt(value: &Value) -> bool {
+    let kind = value["type"]
+        .as_str()
+        .map(|kind| kind.strip_prefix("minecraft:").unwrap_or(kind));
+    let reads_entity = match kind {
+        Some("copy_components") => {
+            !matches!(value["source"].as_str(), Some("block_entity" | "tool"))
+        }
+        Some("copy_custom_data") => {
+            let source = &value["source"];
+            source.as_str() != Some("block_entity")
+                && !matches!(
+                    source["type"].as_str(),
+                    Some("storage" | "minecraft:storage")
+                )
+                && !(matches!(
+                    source["type"].as_str(),
+                    Some("context" | "minecraft:context")
+                ) && source["target"].as_str() == Some("block_entity"))
+        }
+        _ => false,
+    };
+    reads_entity
+        || match value {
+            Value::Object(object) => object.values().any(may_read_entity_nbt),
+            Value::Array(array) => array.iter().any(may_read_entity_nbt),
+            _ => false,
+        }
+}
+
+/// Entity getters include intrinsic empty custom data even when it was not saved.
+pub fn entity_components(entity: &super::LootEntity) -> Cow<'_, Compound> {
+    let mut components = entity.components.clone();
+    components
+        .entry("minecraft:custom_data".into())
+        .or_insert_with(|| {
+            entity
+                .nbt
+                .as_deref()
+                .and_then(|nbt| nbt.get("data"))
+                .and_then(|value| crate::custom_data::borrow(value).ok())
+                .map(|data| Tag::Compound(data.into_owned()))
+                .unwrap_or_else(|| Tag::Compound(Compound::new()))
+        });
+    if let Some(name) = entity.nbt.as_deref().and_then(|nbt| nbt.get("CustomName")) {
+        components
+            .entry("minecraft:custom_name".into())
+            .or_insert_with(|| name.clone());
+    }
+    Cow::Owned(components)
+}
+
 /// Copy only values the selected source actually has. Include and exclude intersect;
 /// exclusion wins, and an absent source leaves the candidate untouched.
 pub fn copy_components<'a>(
@@ -90,28 +196,34 @@ pub fn copy_components<'a>(
     source: impl FnOnce(&str) -> Option<Cow<'a, Compound>>,
     mut apply: impl FnMut(String, &Tag),
 ) {
+    let filter =
+        |field| -> Option<Option<std::collections::HashSet<sunrise_core::nbt::JavaString>>> {
+            let Some(value) = function.get(field) else {
+                return Some(None);
+            };
+            value
+                .as_array()?
+                .iter()
+                .map(|value| {
+                    let id = sunrise_core::identifier::Identifier::parse(value.as_str()?).ok()?;
+                    Some(id.to_string().as_str().into())
+                })
+                .collect::<Option<_>>()
+                .map(Some)
+        };
+    let (Some(includes), Some(excludes)) = (filter("include"), filter("exclude")) else {
+        return;
+    };
     let Some(source) = function["source"].as_str().and_then(source) else {
         return;
     };
-    let includes = function.get("include").and_then(Value::as_array);
-    let excludes = function.get("exclude").and_then(Value::as_array);
     for (id, value) in source.iter() {
-        let id = id.to_string_lossy();
-        let contains = |list: &[Value]| {
-            list.iter().filter_map(Value::as_str).any(|entry| {
-                if entry.contains(':') {
-                    entry == id
-                } else {
-                    id.strip_prefix("minecraft:") == Some(entry)
-                }
-            })
-        };
-        if includes.is_some_and(|list| !contains(list))
-            || excludes.is_some_and(|list| contains(list))
+        if includes.as_ref().is_some_and(|list| !list.contains(id))
+            || excludes.as_ref().is_some_and(|list| list.contains(id))
         {
             continue;
         }
-        apply(id, value);
+        apply(id.to_string_lossy(), value);
     }
 }
 
@@ -143,6 +255,41 @@ impl super::LootData {
 }
 
 impl<R: sunrise_core::random::RandomSource> super::Context<'_, R> {
+    pub(super) fn copy_source_custom_data(&self, function: &Value, stack: &mut LootStack) {
+        let id = "minecraft:custom_data";
+        let default = self
+            .data
+            .component_defaults
+            .get(&stack.item)
+            .and_then(|prototype| prototype.get(&id.into()));
+        let raw = match stack
+            .components
+            .iter()
+            .rev()
+            .find(|(key, _)| key == id || key == "!minecraft:custom_data")
+        {
+            Some((key, value)) if key == id => value.as_ref(),
+            Some((_, None)) | None => default,
+            _ => None,
+        };
+        let original = match raw.map(crate::custom_data::borrow) {
+            Some(Ok(value)) => Some(value),
+            Some(Err(_)) => return,
+            None => None,
+        };
+        let place = current_native_loot_place();
+        if let Some(data) = copy_custom_data(function, original.as_deref(), |source| {
+            nbt_source(source, place.as_deref(), |target| self.target(target))
+        }) {
+            stack
+                .components
+                .retain(|(key, _)| key != id && key != "!minecraft:custom_data");
+            stack
+                .components
+                .push((id.to_owned(), Some(Tag::Compound(data))));
+        }
+    }
+
     pub(super) fn copy_source_components(&self, function: &Value, stack: &mut LootStack) {
         let place = current_native_loot_place();
         copy_components(
@@ -155,9 +302,7 @@ impl<R: sunrise_core::random::RandomSource> super::Context<'_, R> {
                         self.data.component_defaults.get(&tool.item),
                     ))
                 }),
-                target => self
-                    .target(target)
-                    .map(|entity| Cow::Borrowed(&entity.components)),
+                target => self.target(target).map(entity_components),
             },
             |id, value| {
                 match (id.as_str(), value) {

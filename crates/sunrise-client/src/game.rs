@@ -438,6 +438,7 @@ struct GameLevel<'w> {
     recipes: &'w sunrise_client::crafting::Recipes,
     /// Container loot tables (`unpackLootTable`).
     loot: Option<std::sync::Arc<sunrise_world::loot::LootData>>,
+    loot_storage: std::sync::Arc<sunrise_world::loot::copy::StorageData>,
     registry: &'static sunrise_world::registry::BlockRegistry,
     block_registries: &'w sunrise_client::command::args::Registries,
     rules: sunrise_world::level::GameRules,
@@ -2660,6 +2661,7 @@ impl Game<'_> {
             origin: Some(origin),
             block_entity,
             block_components,
+            storage: Some(self.score.storage.snapshot()),
             level: Some(sunrise_world::loot::LootLevel {
                 dimension: self.dim.id().to_owned(),
                 game_time: self.world.game_time,
@@ -2983,6 +2985,7 @@ impl Game<'_> {
             } else {
                 self.server_loot.get()
             },
+            loot_storage: self.score.storage.snapshot(),
             registry: self.pack.assets.registry,
             block_registries: &self.pack.block_registries,
             rules,

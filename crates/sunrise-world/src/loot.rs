@@ -255,6 +255,7 @@ pub struct LootData {
     holder_sets: holder_sets::Binding,
     types: types::Types,
     component_defaults: Arc<HashMap<String, Compound>>,
+    copies_entity_nbt: bool,
     tables: Arc<LootTables>,
     global_modifiers: Arc<global_modifiers::GlobalLootModifiers>,
     modifiers: HashMap<String, Value>,
@@ -298,6 +299,8 @@ pub struct LootEntity {
     pub equipment: Vec<(String, LootStack)>,
     /// Components exposed by this entity as a loot source.
     pub components: Compound,
+    /// The canonical entity tag used by NBT predicates, when the caller has its live state.
+    pub nbt: Option<Arc<Tag>>,
 }
 impl LootEntity {
     pub fn new(kind: &str) -> Self {
@@ -819,6 +822,7 @@ impl LootData {
         let binding = holder_sets::Binding::load(root, overlay, &items, &enchantments)?;
         let mut loaded = Self {
             holder_sets: Default::default(),
+            copies_entity_nbt: false,
             component_defaults: copy::component_defaults(defaults)
                 .map_err(|reason| io::Error::new(io::ErrorKind::InvalidData, reason))?,
             types,
@@ -835,6 +839,10 @@ impl LootData {
         loaded.holder_sets = binding;
         loaded.prepare_types()?;
         Ok(loaded)
+    }
+    /// Whether any loaded function may request an entity's full saved NBT.
+    pub fn copies_entity_nbt(&self) -> bool {
+        self.copies_entity_nbt
     }
     /// Attach prepared instances to this private, not-yet-published snapshot.
     pub fn set_global_modifiers(&mut self, modifiers: Arc<global_modifiers::GlobalLootModifiers>) {
@@ -1592,6 +1600,7 @@ impl<R: RandomSource> Context<'_, R> {
                 }
             }
             "minecraft:copy_components" => self.copy_source_components(f, &mut stack),
+            "minecraft:copy_custom_data" => self.copy_source_custom_data(f, &mut stack),
             "minecraft:filtered" => {
                 let pass = self.item_matches(&f["item_filter"], &stack);
                 let branch = if pass { &f["on_pass"] } else { &f["on_fail"] };
