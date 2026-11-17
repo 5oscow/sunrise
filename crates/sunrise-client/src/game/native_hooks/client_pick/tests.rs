@@ -784,7 +784,12 @@ fn rider_pick_refuses_a_camera_changed_by_its_listener() {
             .unwrap();
             game.remote_set_passengers(32, &[7, 31]);
             assert_eq!(game.pick_camera_id(), Some(7));
-            let stone = game.res.blocks().default_state("minecraft:stone").unwrap();
+            let stone = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:stone")
+                .unwrap();
             game.world.set(3, 2, 0, stone).unwrap();
             game.refresh_client_pick(1.0);
             assert_eq!(*calls.lock().unwrap(), 1);
