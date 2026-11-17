@@ -85,8 +85,10 @@ impl Sorter {
 }
 
 impl Sorter {
-    /// `sort`, then the quads some camera in `reach` draws, as it left them, before the ones
-    /// none does (`Facing::hidden_from`), in their order: the quads' count first.
+    /// `sort`'s whole order, then, when some quads face away from every camera in `reach`
+    /// (`Facing::hidden_from`), the other quads again in that same order: the quads' count
+    /// first. The whole order is what the section draws for any other camera, so it stays in
+    /// full and exactly as `sort` left it.
     fn sort_facing(
         &mut self,
         centers: &[[f32; 3]],
@@ -96,16 +98,27 @@ impl Sorter {
     ) -> (&[u32], usize) {
         self.sort(centers, camera);
         let hidden = |quad: u32| facings[quad as usize].is_some_and(|f| f.hidden_from(reach));
-        // `sort_by` is stable: both runs keep the back to front order.
-        self.order.sort_by_key(|&(quad, _)| hidden(quad));
-        let kept = self.order.partition_point(|&(quad, _)| !hidden(quad));
-        self.indices.clear();
-        for &(quad, _) in &self.order {
-            let v = quad * 4;
-            self.indices.extend([v, v + 1, v + 2, v + 2, v + 3, v]);
+        let kept = self
+            .order
+            .iter()
+            .filter(|&&(quad, _)| !hidden(quad))
+            .count();
+        if kept < self.order.len() {
+            for &(quad, _) in &self.order {
+                if !hidden(quad) {
+                    let v = quad * 4;
+                    self.indices.extend([v, v + 1, v + 2, v + 2, v + 3, v]);
+                }
+            }
         }
         (&self.indices, kept)
     }
+}
+
+/// The index words a section of `quads` translucent quads holds in the sorted index buffer: its
+/// whole back to front order, then the part of it that faces the camera (`SortState::drawn`).
+pub fn index_words(quads: u32) -> u64 {
+    u64::from(quads) * 12
 }
 
 /// Which side of a section's 16 block cube the camera is on, in each axis: -1 below or before
@@ -120,8 +133,8 @@ pub fn viewpoint(camera: [f64; 3], origin: [i32; 3]) -> [i32; 3] {
 pub struct SortState {
     centers: Vec<[f32; 3]>,
     facings: Vec<Option<Facing>>,
-    /// When the last order left quads out (`update`'s `cull_back`): the viewpoint it was made for
-    /// (`viewpoint`) and how many quads at its front a camera there draws.
+    /// When the last order has the facing quads after it (`update`'s `cull_back`): the viewpoint
+    /// of the eye it was made for (`viewpoint`) and how many quads a camera there draws.
     kept: Option<([i32; 3], usize)>,
     last: Option<([i32; 3], [i32; 3])>,
 }
@@ -149,14 +162,18 @@ impl SortState {
         }
     }
 
-    /// How many of the section's `total` quads the camera's draw takes, which are the first
-    /// quads of its indices: all unless the last order left some out for the camera's own
-    /// viewpoint `pov` (`viewpoint`). A section is re-sorted only now and then, so a camera that
-    /// has moved to another viewpoint since draws the whole order until it is.
-    pub fn drawn(&self, total: u32, cull_back: bool, pov: [i32; 3]) -> u32 {
+    /// Which quads of the section's `total` the camera's draw takes: the first quad of its
+    /// index range and the count. The quads that face the eye (in `pov`, its `viewpoint`) come
+    /// after the whole order when the last order was made for that viewpoint; otherwise, and
+    /// whenever nothing faces away, the whole order draws. A section is re-sorted only now and
+    /// then, so an eye that has moved to another viewpoint draws the whole order, which is the
+    /// order it was sorted in, until the section is sorted again.
+    pub fn drawn(&self, total: u32, cull_back: bool, pov: [i32; 3]) -> (u32, u32) {
         match self.kept {
-            Some((made_for, kept)) if cull_back && made_for == pov => kept as u32,
-            _ => total,
+            Some((made_for, kept)) if cull_back && made_for == pov && (kept as u32) < total => {
+                (total, kept as u32)
+            }
+            _ => (0, total),
         }
     }
 
@@ -188,23 +205,26 @@ impl SortState {
     /// their ordering until the point of view changes; aligned views also
     /// resort on crossing a block boundary. Sub-block movement needs no upload.
     ///
-    /// With `cull_back` the order has the quads that face the camera first (`drawn`), and a quad
-    /// is left out only when no camera of this viewpoint could see its front: a quad's plane is
-    /// on one axis, and the camera must be off the section on that axis, on the quad's back
-    /// side.
+    /// The order is by distance from `camera`, as vanilla's. With `cull_back` the indices carry,
+    /// after the whole order, the quads of it that face the eye (`drawn`): `eye` is where the
+    /// projection looks from, which the view bob moves off `camera`. A quad is left out only when
+    /// no eye of this viewpoint could see its front: a quad's plane is on one axis, and the eye
+    /// must be off the section on that axis, on the quad's back side.
     pub fn update<'a>(
         &mut self,
         camera: [f64; 3],
+        eye: [f64; 3],
         origin: [i32; 3],
         cull_back: bool,
         sorter: &'a mut Sorter,
     ) -> Option<&'a [u32]> {
         let block = camera.map(|v| v.floor() as i32);
         let pov = viewpoint(camera, origin);
+        let eye_pov = viewpoint(eye, origin);
         if let Some((last_block, last_pov)) = self.last
             && last_pov == pov
             && (last_block == block || !pov.contains(&0))
-            && self.kept.is_some() == cull_back
+            && self.kept.map(|(made_for, _)| made_for) == cull_back.then_some(eye_pov)
         {
             return None;
         }
@@ -214,15 +234,15 @@ impl SortState {
             self.kept = None;
             return Some(sorter.sort(&self.centers, relative));
         }
-        // Every camera of the viewpoint, section-relative: beyond the section's edge on an axis
+        // Every eye of the viewpoint, section-relative: beyond the section's edge on an axis
         // it is off, and on an axis it shares with the section, anywhere in it.
-        let reach = pov.map(|side| match side {
+        let reach = eye_pov.map(|side| match side {
             1.. => [16.0, f32::INFINITY],
             0 => [0.0, 16.0],
             _ => [f32::NEG_INFINITY, 0.0],
         });
         let (indices, kept) = sorter.sort_facing(&self.centers, &self.facings, relative, &reach);
-        self.kept = Some((pov, kept));
+        self.kept = Some((eye_pov, kept));
         Some(indices)
     }
 }
@@ -258,27 +278,27 @@ mod tests {
         let mut state = SortState::new(vec![[0.5; 3]]);
         let mut sorter = Sorter::default();
         let camera = [-29_999_999.5, -63.5, 30_000_000.5];
-        assert!(state.update(camera, origin, false, &mut sorter).is_some());
-        assert!(state.update(camera, origin, false, &mut sorter).is_none());
+        assert!(update_at(&mut state, camera, origin, false, &mut sorter).is_some());
+        assert!(update_at(&mut state, camera, origin, false, &mut sorter).is_none());
         assert!(
-            state
-                .update(
-                    [-29_999_999.1, -63.1, 30_000_000.9],
-                    origin,
-                    false,
-                    &mut sorter
-                )
-                .is_none()
+            update_at(
+                &mut state,
+                [-29_999_999.1, -63.1, 30_000_000.9],
+                origin,
+                false,
+                &mut sorter
+            )
+            .is_none()
         );
         assert!(
-            state
-                .update(
-                    [-29_999_998.9, -63.1, 30_000_000.9],
-                    origin,
-                    false,
-                    &mut sorter
-                )
-                .is_some()
+            update_at(
+                &mut state,
+                [-29_999_998.9, -63.1, 30_000_000.9],
+                origin,
+                false,
+                &mut sorter
+            )
+            .is_some()
         );
     }
     #[test]
@@ -320,25 +340,51 @@ mod tests {
         viewpoint(camera, origin)
     }
 
+    /// `update` for a camera whose eye is where it is (no view bob).
+    fn update_at<'a>(
+        state: &mut SortState,
+        camera: [f64; 3],
+        origin: [i32; 3],
+        cull_back: bool,
+        sorter: &'a mut Sorter,
+    ) -> Option<&'a [u32]> {
+        state.update(camera, camera, origin, cull_back, sorter)
+    }
+
+    /// How many quads the draw for an eye in `pov` takes.
+    fn count(state: &SortState, total: u32, cull_back: bool, pov: [i32; 3]) -> u32 {
+        state.drawn(total, cull_back, pov).1
+    }
+
+    /// The indices the draw for an eye in `pov` submits out of the section's `indices`, as the
+    /// renderer takes them: `quads * 6` from its first quad's.
+    fn submitted(state: &SortState, indices: &[u32], total: u32, pov: [i32; 3]) -> Vec<u32> {
+        let (skip, quads) = state.drawn(total, true, pov);
+        indices[skip as usize * 6..][..quads as usize * 6].to_vec()
+    }
+
     #[test]
     fn a_surface_draws_its_front_to_a_camera_above_and_its_back_to_one_below() {
         let quads = [surface(8.0, true), surface(8.0, false)];
         let mut sorter = Sorter::default();
         let mut state = SortState::of_quads(quads.into_iter());
-        // In another section, above: only quad 0 (indices 0..4) is drawn.
+        // In another section, above: only quad 0 is drawn.
         let above = [8.5, 40.5, 8.5];
-        let indices = state.update(above, [0, 0, 0], true, &mut sorter).unwrap();
-        assert_eq!(indices[0], 0);
+        let indices = update_at(&mut state, above, [0, 0, 0], true, &mut sorter)
+            .unwrap()
+            .to_vec();
         let up = pov(above, [0; 3]);
-        assert_eq!(
-            (state.drawn(2, true, up), state.drawn(2, false, up)),
-            (1, 2)
-        );
-        // Below it: only quad 1 (indices 4..8).
+        assert_eq!(submitted(&state, &indices, 2, up), [0, 1, 2, 2, 3, 0]);
+        assert_eq!(count(&state, 2, false, up), 2);
+        // Below it: only quad 1.
         let below = [8.5, -20.5, 8.5];
-        let indices = state.update(below, [0, 0, 0], true, &mut sorter).unwrap();
-        assert_eq!(indices[0], 4);
-        assert_eq!(state.drawn(2, true, pov(below, [0; 3])), 1);
+        let indices = update_at(&mut state, below, [0, 0, 0], true, &mut sorter)
+            .unwrap()
+            .to_vec();
+        assert_eq!(
+            submitted(&state, &indices, 2, pov(below, [0; 3])),
+            [4, 5, 6, 6, 7, 4]
+        );
     }
 
     #[test]
@@ -348,25 +394,110 @@ mod tests {
         // At any height within the section's 16 blocks, above the plane or below.
         for y in [0.2, 8.4, 8.6, 15.9] {
             let camera = [8.5, y, 8.5];
-            state.update(camera, [0; 3], true, &mut sorter);
-            assert_eq!(state.drawn(2, true, pov(camera, [0; 3])), 2, "at y {y}");
+            update_at(&mut state, camera, [0; 3], true, &mut sorter);
+            assert_eq!(count(&state, 2, true, pov(camera, [0; 3])), 2, "at y {y}");
         }
     }
 
+    /// A quad facing down at y 8 (A) and one facing -x at x 0, y 30 (B): from the first camera
+    /// B is nearer, from the second A is.
+    fn overlapping() -> [[[f32; 3]; 4]; 2] {
+        let down = surface(8.0, false);
+        let west = [
+            [0.0, 30.0, 0.0],
+            [0.0, 31.0, 0.0],
+            [0.0, 31.0, 1.0],
+            [0.0, 30.0, 1.0],
+        ];
+        [down, west]
+    }
+
     #[test]
-    fn a_camera_that_moved_to_another_viewpoint_draws_the_whole_order_until_it_is_sorted() {
+    fn an_eye_that_moved_to_another_viewpoint_draws_the_order_it_was_sorted_in() {
+        let quads = overlapping();
+        assert!(quads.iter().all(|q| Facing::of(q).is_some()));
         let mut sorter = Sorter::default();
-        let mut state = SortState::of_quads([surface(8.0, true), surface(8.0, false)].into_iter());
-        // Sorted from above: the back quad is out.
-        let above = [8.5, 40.5, 8.5];
-        state.update(above, [0; 3], true, &mut sorter);
-        assert_eq!(state.drawn(2, true, pov(above, [0; 3])), 1);
-        // The camera dived below the section before the section was sorted again: the quad the
-        // sort left out now faces it, and it draws.
-        let below = [8.5, -20.5, 8.5];
-        assert_eq!(state.drawn(2, true, pov(below, [0; 3])), 2);
-        // Back above, nothing was re-sorted: the prefix is good again.
-        assert_eq!(state.drawn(2, true, pov(above, [0; 3])), 1);
+        let mut state = SortState::of_quads(quads.into_iter());
+        // Sorted from above and west of the section: A faces away, B faces it; B is nearer, so
+        // the whole order is A then B.
+        let first = [-48.0, 40.0, 8.0];
+        let indices = update_at(&mut state, first, [0; 3], true, &mut sorter)
+            .unwrap()
+            .to_vec();
+        let (a, b) = ([0, 1, 2, 2, 3, 0], [4, 5, 6, 6, 7, 4]);
+        assert_eq!(submitted(&state, &indices, 2, pov(first, [0; 3])), b);
+        // The eye went below before the section was sorted again: A faces it now, and what is
+        // drawn is the order the sort made (A, B), not the facing quad first and the rest after.
+        let second = [-48.0, -1.0, 8.0];
+        assert_ne!(pov(first, [0; 3]), pov(second, [0; 3]));
+        let whole = submitted(&state, &indices, 2, pov(second, [0; 3]));
+        assert_eq!(whole, [a, b].concat());
+        assert_eq!(
+            whole,
+            Sorter::default().sort(&[[0.5, 8.0, 0.5], [0.0, 30.5, 0.5]], [-48.0, 40.0, 8.0])
+        );
+        // Back at the first viewpoint, nothing was re-sorted: the facing quads draw again.
+        assert_eq!(submitted(&state, &indices, 2, pov(first, [0; 3])), b);
+    }
+
+    #[test]
+    fn the_facing_follows_the_rendered_eye_not_the_nominal_camera() {
+        // Two quads at y 0.2, just inside the section's bottom: one facing up, one down.
+        let quads = [surface(0.2, true), surface(0.2, false)];
+        let mut sorter = Sorter::default();
+        let mut state = SortState::of_quads(quads.iter().copied());
+        // The camera is a hair below the section, so it sees only the back quad; the bob lifts the
+        // eye into the section, above the plane, and the front quad faces it too.
+        let camera = [8.5, -0.1, 8.5];
+        let eye = [8.5, 0.4, 8.5];
+        assert_ne!(pov(camera, [0; 3]), pov(eye, [0; 3]));
+        let indices = state
+            .update(camera, eye, [0; 3], true, &mut sorter)
+            .unwrap()
+            .to_vec();
+        assert_eq!(count(&state, 2, true, pov(eye, [0; 3])), 2);
+        assert_eq!(indices.len(), 12);
+        // The same section drawn for an eye that stays with the camera takes the one quad.
+        let mut state = SortState::of_quads(quads.iter().copied());
+        let indices = update_at(&mut state, camera, [0; 3], true, &mut sorter)
+            .unwrap()
+            .to_vec();
+        assert_eq!(
+            submitted(&state, &indices, 2, pov(camera, [0; 3])),
+            [4, 5, 6, 6, 7, 4]
+        );
+    }
+
+    #[test]
+    fn an_eye_crossing_a_section_plane_while_the_camera_does_not_is_sorted_for() {
+        let quads = [surface(0.2, true), surface(0.2, false)];
+        let mut sorter = Sorter::default();
+        let mut state = SortState::of_quads(quads.into_iter());
+        let camera = [8.5, -0.1, 8.5];
+        let (below, inside) = ([8.5, -0.05, 8.5], [8.5, 0.4, 8.5]);
+        assert!(
+            state
+                .update(camera, below, [0; 3], true, &mut sorter)
+                .is_some()
+        );
+        // Same camera, same block: nothing to sort while the eye stays in its viewpoint.
+        assert!(
+            state
+                .update(camera, below, [0; 3], true, &mut sorter)
+                .is_none()
+        );
+        // The eye crossed: the order is made again for it, though the camera did not move.
+        let indices = state
+            .update(camera, inside, [0; 3], true, &mut sorter)
+            .unwrap()
+            .to_vec();
+        assert_eq!(count(&state, 2, true, pov(inside, [0; 3])), 2);
+        assert_eq!(indices.len(), 12);
+        assert!(
+            state
+                .update(camera, inside, [0; 3], true, &mut sorter)
+                .is_none()
+        );
     }
 
     fn sub(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
@@ -415,13 +546,13 @@ mod tests {
         let full = Sorter::default().sort(&centers, [-3.5, 40.5, 2.5]).to_vec();
         let mut sorter = Sorter::default();
         let mut state = SortState::of_quads(quads.iter().copied());
-        let order = state
-            .update(camera, [0; 3], true, &mut sorter)
+        let order = update_at(&mut state, camera, [0; 3], true, &mut sorter)
             .unwrap()
             .to_vec();
-        let kept = state.drawn(quads.len() as u32, true, pov(camera, [0; 3])) as usize;
-        assert!(kept > 0 && kept < quads.len());
-        let in_prefix: Vec<u32> = order[..kept * 6].to_vec();
+        let total = quads.len() as u32;
+        assert_eq!(order[..full.len()], full);
+        let in_prefix = submitted(&state, &order, total, pov(camera, [0; 3]));
+        assert!(!in_prefix.is_empty() && in_prefix.len() < full.len());
         let expected: Vec<u32> = full
             .chunks(6)
             .filter(|quad| in_prefix.chunks(6).any(|kept| kept == *quad))
@@ -474,8 +605,8 @@ mod tests {
         let mut sorter = Sorter::default();
         let mut state = SortState::of_quads([top].into_iter());
         let camera = [-4.5, 0.49, 0.5];
-        state.update(camera, [0; 3], true, &mut sorter);
-        assert_eq!(state.drawn(1, true, pov(camera, [0; 3])), 1);
+        update_at(&mut state, camera, [0; 3], true, &mut sorter);
+        assert_eq!(count(&state, 1, true, pov(camera, [0; 3])), 1);
     }
 
     /// Quads on planes at both sides of the section and at the block edges, both windings, from
@@ -525,12 +656,12 @@ mod tests {
                         f64::from(origin[2]) + z,
                     ];
                     let mut state = SortState::of_quads(quads.iter().copied());
-                    let indices = state
-                        .update(camera, origin, true, &mut sorter)
+                    let indices = update_at(&mut state, camera, origin, true, &mut sorter)
                         .unwrap()
                         .to_vec();
                     let side = pov(camera, origin);
-                    let kept = state.drawn(quads.len() as u32, true, side) as usize;
+                    let total = quads.len() as u32;
+                    let kept = submitted(&state, &indices, total, side);
                     // Cameras of the viewpoint, section-relative: three samples an axis.
                     let eyes: Vec<[f32; 3]> = (0..27)
                         .map(|n| {
@@ -544,7 +675,10 @@ mod tests {
                             })
                         })
                         .collect();
-                    for quad in indices.chunks(6).skip(kept) {
+                    for quad in indices[..total as usize * 6]
+                        .chunks(6)
+                        .filter(|quad| !kept.chunks(6).any(|k| k == *quad))
+                    {
                         left_out += 1;
                         let q = &quads[(quad[0] / 4) as usize];
                         assert!(

@@ -796,7 +796,7 @@ impl Part {
             Self::Translucent => s.vertex_ranges(true).1,
             Self::Indices => s
                 .sorted_indices
-                .map(|(page, at)| (page, at, u64::from(s.translucent) * 6)),
+                .map(|(page, at)| (page, at, translucency::index_words(s.translucent))),
         }
     }
     /// Points the mesh where its range moved.
@@ -5281,9 +5281,11 @@ impl Renderer {
             _ => (page, start + solid_slots),
         };
         let sorted_indices = if translucent > 0 {
-            let indices =
-                self.sorted_indices
-                    .alloc(&self.device, encoder, u64::from(translucent) * 6);
+            let indices = self.sorted_indices.alloc(
+                &self.device,
+                encoder,
+                translucency::index_words(translucent),
+            );
             if indices.is_none() {
                 release_main(&mut self.arena);
                 if let Some(arena) = &mut self.translucent_arena {
@@ -5502,7 +5504,7 @@ impl Renderer {
         }
         if let Some((page, start)) = s.sorted_indices {
             self.sorted_indices
-                .release(page, start, u64::from(s.translucent) * 6);
+                .release(page, start, translucency::index_words(s.translucent));
         }
         let (main, translucent) = s.vertex_ranges(self.translucent_arena.is_some());
         if let Some((page, start, vertices)) = main {
@@ -6062,7 +6064,7 @@ impl Renderer {
         self.sorted_indices
             .release_all(released.iter().filter_map(|s| {
                 let (page, start) = s.sorted_indices?;
-                Some((page, start, u64::from(s.translucent) * 6))
+                Some((page, start, translucency::index_words(s.translucent)))
             }));
         let split = self.translucent_arena.is_some();
         self.arena
@@ -7619,7 +7621,8 @@ impl Renderer {
         // Solid quads facing away from the eye are left out: the bob moves
         // the eye off `camera`, so it is found from the projection. With the mirror, those
         // facing its eye are kept too: it sits straight below, at this camera-relative y.
-        let eye = view::projection_center(cull_proj).filter(|_| self.sides_on);
+        let rendered_eye = view::projection_center(cull_proj);
+        let eye = rendered_eye.filter(|_| self.sides_on);
         let mirror_low = mirror_plane
             .zip(eye)
             .map(|(plane, eye)| 2.0 * (plane - frame.camera.y as f32) - eye.y);
@@ -8215,13 +8218,17 @@ impl Renderer {
         self.translucent_draws.clear();
         // Only the camera's own pass takes a section's translucent order with the quads that face
         // away left out: a shadow, a mirrored view or a pack's own pipelines draw them all.
+        // The eye it keeps them for is the projection's (`rendered_eye`), not the camera: the bob
+        // moves it, and the water mirror draws no translucent terrain.
         let cull_back = shadow_view.is_none()
+            && rendered_eye.is_some()
             && !pack_terrain
             && self.native.is_none()
             && self.world_views.sections.sections().next().is_none();
         let count = visible.len() + visible_lods.len();
         let budget = (count / 8).max(15).min(count);
         self.translucency_cursor %= count.max(1);
+        let eye = camera + rendered_eye.map_or(DVec3::ZERO, |e| e.as_dvec3());
         for (i, v) in visible.iter().enumerate().rev() {
             let s = self.sections.get_mut(v.slot);
             if let Some((index_page, index_start)) = s.sorted_indices {
@@ -8237,6 +8244,7 @@ impl Renderer {
                 if (!s.sort.is_sorted() || nearby || scheduled)
                     && let Some(indices) = s.sort.update(
                         camera.to_array(),
+                        eye.to_array(),
                         origin,
                         cull_back,
                         &mut self.translucent_sorter,
@@ -8250,13 +8258,19 @@ impl Renderer {
                     );
                 }
                 let (page, first) = s.translucent_at;
-                let pov = translucency::viewpoint(camera.to_array(), origin);
-                let quads = s.sort.drawn(s.translucent, cull_back, pov);
+                let pov = translucency::viewpoint(eye.to_array(), origin);
+                let (skip, quads) = s.sort.drawn(s.translucent, cull_back, pov);
                 if quads > 0 {
                     self.translucent_draws.push((
                         v.distance,
                         i,
-                        [quads * 6, 1, index_start as u32, first as u32, i as u32],
+                        [
+                            quads * 6,
+                            1,
+                            (index_start + u64::from(skip) * 6) as u32,
+                            first as u32,
+                            i as u32,
+                        ],
                         (page, Some(index_page)),
                     ));
                 }
