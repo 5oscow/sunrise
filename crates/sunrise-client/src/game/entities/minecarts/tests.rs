@@ -644,6 +644,8 @@ fn an_old_behaviour_cart_writes_is_on_rails_each_tick() {
         }
         let mut on = Minecart::new(1, CartKind::Rideable, Vec3::new(0.5, 64.0625, 2.5));
         let mut off = Minecart::new(2, CartKind::Rideable, Vec3::new(8.5, 80.0, 8.5));
+        on.first_tick = false;
+        off.on_rails = true;
         game.tick_cart(&mut on, [0.0; 2], 0, &mut CartIndex::default());
         game.tick_cart(&mut off, [0.0; 2], 0, &mut CartIndex::default());
         assert!(on.on_rails);
