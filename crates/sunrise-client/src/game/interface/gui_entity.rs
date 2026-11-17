@@ -4,7 +4,7 @@
 //! draws it with (a mod's renderer for its type, else its model, then the
 //! mods' layers), then seen as the inventory's player is (`draw_player_preview`):
 //! the box's centre, `size` pixels a block, turned, depth-sorted, back faces
-//! culled and lit by `Lighting.ENTITY_IN_UI`.
+//! culled only for render types that cull them, and lit by `Lighting.ENTITY_IN_UI`.
 //!
 //! Nothing here runs unless a mod calls `DrawContext::entity`. The buffers and
 //! the entities made for `GuiEntity::Kind` are kept per thread and reused, so a
@@ -31,8 +31,8 @@ struct Made {
     mob: Mob,
 }
 
-/// A face of the entity as seen: its depth, corners, UVs and ABGR colour.
-type SeenQuad = (f32, [[f32; 3]; 4], [[f32; 2]; 4], u32);
+/// A face of the entity as seen: its depth, corners, UVs, ABGR colour and emission ordinal.
+type SeenQuad = (f32, [[f32; 3]; 4], [[f32; 2]; 4], u32, usize);
 
 #[derive(Default)]
 struct Scratch {
@@ -146,7 +146,7 @@ impl Game<'_> {
             return Err(GuiEntityError::BadView);
         }
         let start = batch.vertices.len();
-        for &(_, p, uv, color) in &scratch.quads {
+        for &(_, p, uv, color, _) in &scratch.quads {
             batch.quad_3d(p, uv, color);
         }
         let end = batch.vertices.len();
@@ -311,12 +311,13 @@ fn seen_quads(verts: &[Vertex], gui: Mat4, quads: &mut Vec<SeenQuad>) {
             corners.reverse();
             uv.reverse();
         }
-        quads.push((depth, corners, uv, color));
+        quads.push((depth, corners, uv, color, quads.len()));
     }
-    // Far to near for translucent faces. Stable: a layer the model draws again over the same
-    // faces (a villager's type and profession clothes over its body) stays after them, so the
-    // depth test (LessEqual) shows the layer, as the world's draw order does.
-    quads.sort_by(|a, b| a.0.total_cmp(&b.0));
+    // Far to near for translucent faces. Equal depths keep their emission order (the ordinal),
+    // so a layer the model draws again over the same faces (a villager's type and profession
+    // clothes over its body) stays after them and the depth test (LessEqual) shows the layer,
+    // as the world's draw order does. In place, so the sort allocates nothing each frame.
+    quads.sort_unstable_by(|a, b| a.0.total_cmp(&b.0).then(a.4.cmp(&b.4)));
 }
 
 #[cfg(test)]
