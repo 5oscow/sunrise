@@ -201,7 +201,7 @@ impl LevelAccess for GameLevel<'_> {
             return vanilla;
         }
         let mut result = mod_api::TriState::Default;
-        self.native_crop_grow_pre(self.dimension, pos, state, &mut result);
+        self.native_crop_grow_pre(self.dimension, pos, state, vanilla, &mut result);
         result.or(vanilla)
     }
     fn crop_grow_post(&mut self, pos: BlockPos, original: BlockStateId) {
