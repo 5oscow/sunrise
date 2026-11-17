@@ -39,8 +39,9 @@ pub fn run(args: &[String]) -> ExitCode {
     }
 }
 
+/// Fetches through the proxy its environment names (`HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`, `NO_PROXY`), as the launcher passes its own.
 fn get(url: &str) -> Result<host::Body, String> {
-    match ureq::get(url).call() {
+    match sunrise_port_pack::net::agent(url).get(url).call() {
         Ok(response) => Ok(Some(Box::new(response.into_reader()))),
         Err(ureq::Error::Status(404, _)) => Ok(None),
         Err(error) => Err(format!("{url}: {error}")),

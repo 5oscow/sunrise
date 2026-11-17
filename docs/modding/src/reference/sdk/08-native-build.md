@@ -51,4 +51,8 @@ Each line is an object whose `event` names it.
 | `built` | `route`, `binary`, `libraries`, `records`, `mods` | The executable and the libraries to install beside it, in load order; `records` is each library's identity, the build record's `libraries`; `route` is `prebuilt-api` or `prebuilt`, as the record names it; `mods` is the compiled mods in dependency order. |
 | `failed` | `error` | Why it did not build, as the build log ends with it. A mod blamed by name in it (`Compiling <mod> failed`, `E_NATIVE_BUILD_SCRIPT: <mod>`) is how a caller learns which mod to leave out next time. |
 
+What it downloads (the horizon-mixins tool, a mod's GitHub source) goes through the proxy its environment names:
+`HTTPS_PROXY`, `HTTP_PROXY` or `ALL_PROXY`, with the hosts `NO_PROXY` lists reached directly, as the launcher reads
+them. A caller with a proxy setting of its own passes it in those variables.
+
 The tool never edits an instance, never selects a version and never installs anything outside `work`.
