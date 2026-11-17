@@ -2303,7 +2303,9 @@ impl Renderer {
             );
             pass.set_bind_group(0, &self.group, &[]);
             pack_frame(&mut pass);
-            pass.stage(self.own_timing.as_mut(), "sky");
+            if frame.title || (sky_visible && (frame.skybox || frame.end_sky)) {
+                pass.stage(self.own_timing.as_mut(), "sky");
+            }
             self.draw_sky_pass_content(
                 &mut pass,
                 frame,
