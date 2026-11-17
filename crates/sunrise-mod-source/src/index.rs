@@ -129,7 +129,7 @@ impl<'a> Index<'a> {
         let items = match path.split_last() {
             None => {
                 let file = self.root_files.get(krate).map_or("lib.rs", String::as_str);
-                self.parse(krate, &file.to_owned())?
+                self.parse(krate, file)?
             }
             Some((last, parent)) => {
                 let parent = self.module(krate, parent)?;
