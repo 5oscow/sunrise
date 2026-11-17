@@ -978,6 +978,7 @@ impl Game<'_> {
     pub(super) fn journal_set_block(&mut self, pos: [i32; 3], state: BlockStateId) -> bool {
         self.journal_set_block_flags(pos, state, sunrise_world::level::flags::UPDATE_ALL, false)
     }
+    /// The root commit replays one write per position with its last write's flags, not earlier updates.
     pub(super) fn journal_set_block_flags(
         &mut self,
         pos: [i32; 3],

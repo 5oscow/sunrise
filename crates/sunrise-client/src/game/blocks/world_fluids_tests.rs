@@ -436,10 +436,7 @@ fn with_liquid_part(test: impl FnOnce(&mut Game<'_>, LevelRef, &LiquidCalls)) {
 #[ignore = "daily"]
 fn liquid_part_accepts_nonwater_from_bucket_and_predicts_the_same_target() {
     use crate::game::Hit;
-    use sunrise_core::{
-        geometry::{Direction, Vec3},
-        position::BlockPos,
-    };
+    use sunrise_core::{geometry::Vec3, position::BlockPos};
     use sunrise_world::{fluid::FluidKind, level::BucketContent};
     with_liquid_part(|game, _, calls| {
         let mut player =
@@ -471,19 +468,8 @@ fn liquid_part_accepts_nonwater_from_bucket_and_predicts_the_same_target() {
         );
         calls.queried.lock().unwrap().clear();
 
-        // A dispenser lends no user and uses the same decision for lava.
-        let dandelion = state(game, "minecraft:dandelion");
-        game.world.set(AT[0], AT[1], AT[2], dandelion).unwrap();
-        let stack = sunrise_client::items::ItemStack::new("minecraft:lava_bucket", 1);
-        game.dispense_filled_bucket((2, 65, 1), Direction::South, stack)
-            .unwrap();
-        assert_eq!(block(game), state(game, "minecraft:emerald_block"));
-        assert_eq!(
-            *calls.queried.lock().unwrap(),
-            [(false, None, key("minecraft:lava"))]
-        );
-
         // The same target check on a connected client retains the real prediction actor.
+        let dandelion = state(game, "minecraft:dandelion");
         game.options.execution_role = crate::game::execution_role::ExecutionRole::Client;
         game.options.dedicated = None;
         let (client, _server) = sunrise_protocol::connection::Pipe::pair();
@@ -498,10 +484,32 @@ fn liquid_part_accepts_nonwater_from_bucket_and_predicts_the_same_target() {
         game.world.set(AT[0], AT[1], AT[2], dandelion).unwrap();
         assert_eq!(game.bucket_target(lava, &hit), AT);
         assert_eq!(
-            calls.queried.lock().unwrap().last(),
-            Some(&(true, Some(91), key("minecraft:lava")))
+            *calls.queried.lock().unwrap(),
+            [(true, Some(91), key("minecraft:lava"))]
         );
-        assert_eq!(calls.placed.lock().unwrap().len(), 2);
+        assert_eq!(calls.placed.lock().unwrap().len(), 1);
+    });
+}
+
+#[test]
+#[ignore = "daily"]
+fn dispenser_uses_the_liquid_part_with_no_user() {
+    use sunrise_core::geometry::Direction;
+    with_liquid_part(|game, _, calls| {
+        let stack = sunrise_client::items::ItemStack::new("minecraft:lava_bucket", 1);
+        let (remainder, _) = game
+            .dispense_filled_bucket((2, 65, 1), Direction::South, stack)
+            .unwrap();
+        assert_eq!(&*remainder.unwrap().item, "minecraft:bucket");
+        assert_eq!(block(game), state(game, "minecraft:emerald_block"));
+        assert_eq!(
+            *calls.queried.lock().unwrap(),
+            [(false, None, key("minecraft:lava"))]
+        );
+        let placed = calls.placed.lock().unwrap();
+        assert_eq!(placed.len(), 1);
+        assert_eq!(placed[0].fluid, key("minecraft:lava"));
+        assert!(placed[0].is_source());
     });
 }
 
