@@ -131,7 +131,8 @@ change it for particular items, vanilla's or another mod's included, attach a pa
 
 ## Enchanting and pick block
 
-Three server-side methods, each with a read-only `Host`, whose `event` field arrives holding vanilla's answer:
+Four methods use a read-only `Host`. `supports_enchantment` runs on both sides and returns an
+`Option<bool>`; the other three run on the server and edit an answer in their event.
 
 - `ItemPart::supports_enchantment` is `IItemExtension.supportsEnchantment`: whether the item may receive
   `event.enchantment`. The first `Some(bool)` replaces support; `None` tries the next part and then defaults
@@ -143,12 +144,6 @@ Three server-side methods, each with a read-only `Host`, whose `event` field arr
   book; otherwise it reads support before checking `primary_items` when that set exists. A primary listener
   may change that answer, including withholding an enchantment from a plain book. This is version 2.
 
-Both hooks are **install-time snapshots**, not component-dependent held-stack queries. Each item's parts are
-asked once per registered enchantment when parts install (world open and `/reload`), with the item's default
-stack. The engines read the stored answers until the next install or the world closes: answer from the item
-and enchantment alone. Support resolves on both sides with a read-only `Host`, before the server resolves
-primary answers. Every snapshot owns its answers; publishing a fresh world-loot snapshot copies the current
-answers without asking listeners again.
 - `ItemPart::apply_enchantments` is `IItemExtension.applyEnchantments`: the enchanting table's result for the
   input stack and the list it chose (`event.enchantments`). `event.result` arrives as vanilla's (a book becomes
   an enchanted book, then each level is added). The input slot holds what the part leaves, and
@@ -158,6 +153,14 @@ answers without asking listeners again.
   moves an item into a full hotbar, whether the stack in `event.slot` must stay. `event.not_replaceable` arrives
   as vanilla's (the stack is enchanted). The hotbar is asked from the selected slot on until a stack answers
   `false`, and the pick uses that slot; with every stack kept, it uses the selected one.
+
+`supports_enchantment` and `is_primary_item_for` are **install-time snapshots**, not component-dependent
+held-stack queries. Each item's parts are asked once per registered enchantment when parts install (world
+open and `/reload`), with the item's default stack. The engines read the stored answers until the next
+install or the world closes: answer from the item and enchantment alone. Support resolves before the server
+resolves primary answers. Each snapshot owns its answers; publishing a fresh world-loot snapshot copies
+the current answers without asking listeners again. The client `Host::enchantment_supports` read is separate:
+it checks `supported_items` membership only.
 
 ## Hand, break and name on the client
 

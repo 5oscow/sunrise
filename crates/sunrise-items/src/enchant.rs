@@ -791,10 +791,10 @@ impl Enchantments {
             _ => selected.max(bookcases * 2),
         }
     }
-    /// `EnchantmentHelper.getAvailableEnchantmentResults`. A non-book is offered an
-    /// enchantment that is primary for it: vanilla's `isPrimaryItem`, or the answer a part
-    /// gave when this snapshot's parts installed (`ItemPart::is_primary_item_for`,
-    /// [`Self::primary_answers`]).
+    /// `EnchantmentHelper.getAvailableEnchantmentResults` offers only enchantments for which
+    /// the item is primary. A plain book qualifies by default; other items need support and
+    /// membership in `primary_items` if present. This snapshot's `ItemPart::is_primary_item_for`
+    /// answers can override that default for any item, including books ([`Self::primary_answers`]).
     pub fn available_results(
         &self,
         items: &Items,

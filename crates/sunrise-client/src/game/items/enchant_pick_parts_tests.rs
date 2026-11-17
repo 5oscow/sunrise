@@ -355,6 +355,18 @@ fn support_snapshot_reaches_both_anvils_and_enchant_without_dispatching_inside_t
                 );
             }
             let asked = *answers.support_asked.lock().unwrap();
+            if role == ExecutionRole::Client {
+                // The client Host reads the supported_items set, not the answers
+                // installed for the anvil below or the enchanted-book default.
+                for (id, supported) in [
+                    ("minecraft:stick", false),
+                    ("minecraft:diamond_sword", true),
+                    ("minecraft:enchanted_book", false),
+                ] {
+                    let key = mod_api::__private::item_key(id).unwrap();
+                    assert_eq!(game.enchantment_supports(SHARPNESS, key), supported, "{id}");
+                }
+            }
             let mut book = ItemStack::new("minecraft:enchanted_book", 1);
             book.set_crafting_enchantments(vec![(SHARPNESS.into(), 1)]);
             for (item, allowed) in [
