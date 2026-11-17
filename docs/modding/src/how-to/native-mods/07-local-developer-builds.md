@@ -7,9 +7,12 @@ code with your rights and requires `--trust-unsigned`.
 Commit tracked changes, build the game and companion programs, generate the wasm standard library
 beside the game, and prepare compatible exporters from your own Minecraft installation before
 installing. The packager copies `sunrise-wasm-std.wasm` from the game's folder for every developer
-base, whether the mods you build are native or wasm; the command names it if it is missing:
+base, whether the mods you build are native or wasm; the command names it if it is missing. The
+game program, the `--program` file, is the `sunrise-client` binary of the `sunrise-game` package
+(`cargo build -p sunrise-client` builds only the library):
 
 ```sh
+cargo build -p sunrise-game -p sunrise-client-lib --bins -p sunrise-prepare -p sunrise-server
 cargo run --locked -p cargo-sunrise-mod -- wasm-std CHECKOUT/target/debug/sunrise-wasm-std.wasm
 sunrise-launcher developer-install CHECKOUT --program CHECKOUT/target/debug/sunrise-client --trust-unsigned
 ```
