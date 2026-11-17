@@ -111,6 +111,9 @@ impl Game<'_> {
             let Some(gi) = host.hub.guests.connection_index(conn) else {
                 continue;
             };
+            if !host.hub.here(&host.hub.guests[gi]) {
+                continue;
+            }
             // ServerGamePacketListenerImpl.tick: the chat and command throttlers
             // decay one a tick, dead or alive.
             let play = host.play.entry(conn).or_default();
