@@ -582,13 +582,13 @@ class FakeExecutor:
 
 
 class KnownFlakyTests(unittest.TestCase):
-    def run_harnesses(self, scripts, flaky, rounds=None):
+    def run_harnesses(self, scripts, flaky, rounds=None, fails_on_main=frozenset()):
         executor = FakeExecutor()
         state = {"harnesses": {name: {"status": "pass", "oracle_reuse": True} for name in scripts}}
         with tempfile.TemporaryDirectory() as tmp, mock.patch.multiple(parity, STATE_DIR=Path(tmp), SHARED=Path(tmp)), \
                 mock.patch.object(parity, "save_state"), mock.patch.object(parity, "time") as clock:
             clock.monotonic.return_value = 0.0
-            results, _ = parity.run(scripts, state, None, "env", [executor], True, rounds, flaky)
+            results, _ = parity.run(scripts, state, None, "env", [executor], True, rounds, flaky, fails_on_main)
         return results, executor.started
 
     def test_a_known_flaky_failure_runs_once_more_from_scratch_and_says_so(self):
@@ -609,6 +609,14 @@ class KnownFlakyTests(unittest.TestCase):
         self.assertEqual((results["food"]["status"], results["food"]["retried"]), ("pass", "reused oracle results"))
         self.assertEqual(started, [("food", True), ("food", False)])
         self.assertFalse(results["food"]["oracle_reuse"])
+
+    def test_a_harness_that_fails_on_main_gets_no_retry(self):
+        results, started = self.run_harnesses({"food": ["fail", "pass"], "dedicated_server": ["fail", "pass"]},
+                                              {"dedicated_server": "timer"},
+                                              fails_on_main=frozenset({"food", "dedicated_server"}))
+        self.assertEqual({name: record["status"] for name, record in results.items()},
+                         {"food": "fail", "dedicated_server": "fail"})
+        self.assertEqual(len(started), 2)
 
     def test_repeated_runs_get_no_retry(self):
         results, started = self.run_harnesses({"dedicated_server": ["pass", "fail"]}, {"dedicated_server": "timer"},

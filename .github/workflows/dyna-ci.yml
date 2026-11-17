@@ -37,6 +37,10 @@ on:
         description: With parity, these harnesses (names as tools/parity.py takes them, space-separated) instead of the fixed set
         type: string
         default: ''
+      fails_on_main:
+        description: With harnesses, those of them (space-separated) that failed on the main run this one is judged against; a failure of theirs is not retried
+        type: string
+        default: ''
 defaults:
   run:
     shell: bash
@@ -1241,6 +1245,7 @@ jobs:
         if: inputs.harnesses != ''
         env:
           HARNESSES: ${{ inputs.harnesses }}
+          FAILS_ON_MAIN: ${{ inputs.fails_on_main }}
           PARITY_HOSTS: ''
         run: |
           read -ra names <<< "$HARNESSES"
@@ -1248,7 +1253,7 @@ jobs:
             [[ "$name" =~ ^[a-z0-9_]+(#[0-9]+)?$ ]] || { echo "::error::not a harness name: $name"; exit 1; }
           done
           # tools/parity.py's probe build runs at the runner's size (cargo_jobs.py), not the host's CPU count.
-          PARITY_BUILD_JOBS="${CI_JOBS:?}" python tools/parity.py -j 4 --timeout 2400 "${names[@]}"
+          PARITY_BUILD_JOBS="${CI_JOBS:?}" python tools/parity.py -j 4 --timeout 2400 --fails-on-main "$FAILS_ON_MAIN" "${names[@]}"
       # The dependency lists this run wrote, for the slot's next run (see the scratch step).
       - name: Keep the harnesses' dependency lists on the slot
         if: always() && inputs.harnesses != ''
