@@ -6393,7 +6393,14 @@ impl Game<'_> {
         // (`yRotO`/`xRotO`), as the local tick does; `tick` returns before it
         // reaches its own write when this window is a server client.
         self.rope_rot_old = (self.yaw, self.pitch);
-        // A passenger moves with its vehicle (Entity.rideTick), not by itself.
+        // Entity.rideTick: the vehicle ticks first, then its rider, which moves itself
+        // from where it sat before (`rider_tick`, in the riding branch below, once its
+        // look and the vehicle's fluid shelter are this tick's); positionRider then puts
+        // it on the new seat and changes nothing else.
+        let old_seat = self
+            .riding
+            .filter(|_| self.screen != Screen::Dead)
+            .and_then(|_| self.player.as_ref().map(|p| p.position));
         let riding = self.screen != Screen::Dead && self.remote_ride(keys, sprint_window)?;
         // The server sends no passenger's position: they sit where their
         // vehicles are now.
@@ -6489,7 +6496,13 @@ impl Game<'_> {
                     tag_items: None,
                     block_registries: None,
                 };
-                passenger.passenger_pose_tick()?;
+                // The rider moves from its old seat; the new one is its place after.
+                let seat = passenger.player.position;
+                if let Some(from) = old_seat {
+                    passenger.player.position = from;
+                }
+                passenger.rider_tick(keys.direction())?;
+                passenger.player.position = seat;
                 // LivingEntity.aiStep: a passenger freezes in powder snow too, and the
                 // frostbite overlay shows it (#8156).
                 passenger.passenger_block_effects_tick()?;
@@ -7521,6 +7534,12 @@ impl Game<'_> {
     /// vehicle and sprint, or `sendPosition`'s sprint and move. The held slot is not sent here:
     /// `MultiPlayerGameMode.tick` sends it at the start of the next tick (`remote_handle_input`).
     fn remote_send_state(&mut self, input: u8) {
+        // LocalPlayer.tickDeath removes the player once its deathTime reaches 20, and
+        // Minecraft.tick's sendChanges skips a removed player: nothing goes out until the
+        // respawn's new player, not even the position reminder.
+        if self.screen == Screen::Dead && self.ui.death_time >= 20 {
+            return;
+        }
         let Some(p) = self.player.as_ref() else {
             return;
         };
@@ -7831,13 +7850,14 @@ impl Game<'_> {
                 return false;
             }
             // startDestroyBlock aborts only a break that is running; a target left by a stop that
-            // ended one is just replaced by the START below.
-            let aborted = self.remote.as_mut().and_then(|r| {
-                if !std::mem::take(&mut r.is_destroying) {
-                    return None;
-                }
-                r.destroying.take()
-            });
+            // ended one is just replaced by the START below. The abort leaves the running break's
+            // state as it was: a break that isn't instant replaces it below, and after an instant
+            // one the old target is still running, so the next start aborts it again.
+            let aborted = self
+                .remote
+                .as_ref()
+                .filter(|r| r.is_destroying)
+                .and_then(|r| r.destroying);
             if let Some((old, _, _)) = aborted {
                 let old_state = self.world.block(old[0], old[1], old[2]);
                 self.tutorial_destroy(old_state, -1.0);
@@ -15093,6 +15113,8 @@ mod movement_input_tests;
 #[cfg(test)]
 #[path = "player_tick_tests.rs"]
 mod player_tick_tests;
+#[cfg(test)]
+mod rider_tick_tests;
 #[cfg(test)]
 mod item_use_tick_tests {
     use mod_api::{Flow, Hooks, HostSide, LivingEntityUseItemTickEvent, ModEntry, Mods};
