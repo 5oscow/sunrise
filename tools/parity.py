@@ -759,7 +759,8 @@ def publish(name, record):
     if record["status"] != "pass" or "key" not in record:
         return
     for path, data in ((SHARED / "passes" / name / f"{record['key']}.json", record),
-                       (SHARED / "dependencies" / f"{name}.json", {k: record[k] for k in ("dependencies", "artifacts")})):
+                       (SHARED / "dependencies" / f"{name}.json",
+                        {k: record[k] for k in ("dependencies", "artifacts", "seconds") if k in record})):
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_name(f"{path.name}.{os.getpid()}.tmp")
         temporary.write_text(json.dumps(data))
@@ -1108,9 +1109,16 @@ def run(selected, state, hasher, environment_digest, executors, reuse_oracles, r
     rounds = rounds or {}
     known_flaky = known_flaky or {}
     second_chance = set()  # known flaky harnesses that already failed once in this run
-    # Longest first, so the slow harnesses don't start last; a harness's later rounds after its first.
+    # Longest first, so the slow harnesses don't start last; a harness's later rounds after its first. Its last
+    # time here, else its shared dependency list's (a fresh worktree or CI slot has no records of its own); a
+    # harness with neither goes first.
+    expected = {}
+    for name in selected:
+        template = SHARED / "dependencies" / f"{name}.json"
+        shared = json.loads(template.read_text(encoding="utf-8")) if template.exists() else {}
+        expected[name] = records.get(name, {}).get("seconds", shared.get("seconds", 1e9))
     queue = sorted((name if index == 1 else f"{name}~{index}" for name in selected for index in range(1, rounds.get(name, 1) + 1)),
-                   key=lambda label: (-records.get(harness_of(label), {}).get("seconds", 1e9), label))
+                   key=lambda label: (-expected[harness_of(label)], label))
     results, retried, busy, done = {}, set(), {}, {}
     home = {}  # where a harness's first round ran: its later rounds run there too, reusing its oracle results
     started_all = time.monotonic()

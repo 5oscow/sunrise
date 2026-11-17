@@ -626,6 +626,19 @@ class KnownFlakyTests(unittest.TestCase):
         self.assertIn("RETRIED dedicated_server: failed, then passed on its one retry (known flaky: timer", text)
         self.assertNotIn("food", text)
 
+    def test_a_runner_without_records_starts_the_longest_harnesses_first_from_the_shared_lists(self):
+        executor = FakeExecutor()
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.multiple(parity, STATE_DIR=Path(tmp), SHARED=Path(tmp)), \
+                mock.patch.object(parity, "save_state"), mock.patch.object(parity, "time") as clock:
+            clock.monotonic.return_value = 0.0
+            (Path(tmp) / "dependencies").mkdir()
+            for name, seconds in (("short", 5.0), ("long", 500.0)):
+                (Path(tmp) / "dependencies" / f"{name}.json").write_text(json.dumps({"seconds": seconds}))
+            parity.run({"short": ["pass"], "long": ["pass"], "unknown": ["pass"]}, {"harnesses": {}}, None, "env",
+                       [executor], True)
+        # One with no time anywhere goes first, as it may be the longest of all.
+        self.assertEqual([label for label, _ in executor.started], ["unknown", "long", "short"])
+
     def test_the_known_flaky_list_has_a_reason_per_harness(self):
         flaky = parity.known_flaky(parity.host_config())
         self.assertTrue(all(isinstance(reason, str) and len(reason) > 20 for reason in flaky.values()))
