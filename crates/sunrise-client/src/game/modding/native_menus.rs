@@ -224,6 +224,8 @@ pub(super) struct HeardMenu {
     menu: String,
     /// The block the menu is of.
     pos: Option<[i32; 3]>,
+    /// Both block entities of a combined container, retained until removed.
+    openers: [Option<(i32, i32, i32)>; 2],
 }
 
 /// What a mount's inventory is called, as vanilla's `HorseInventoryMenu` has
@@ -283,9 +285,19 @@ impl Game<'_> {
         let Some((_, menu, pos)) = open_menu_of(host, conn) else {
             return;
         };
+        let openers = match host
+            .hub
+            .guest(conn)
+            .and_then(|g| g.menu.as_ref())
+            .map(|m| &m.slots)
+        {
+            Some(sunrise_client::lan::menu::Slots::Double(a, b)) => [Some(*a), Some(*b)],
+            _ => [pos.map(|[x, y, z]| (x, y, z)), None],
+        };
         let menu = HeardMenu {
             menu: menu.to_owned(),
             pos,
+            openers,
         };
         host.menus.entry(conn).or_default().menu_heard = Some(menu.clone());
         self.player_menu_opened(conn, menu);
@@ -319,6 +331,9 @@ impl Game<'_> {
         };
         let dimension = self.dim.id();
         self.player_hook(conn, move |g| {
+            for pos in menu.openers.into_iter().flatten() {
+                g.mod_container_player_opener(pos, true);
+            }
             let handle = g
                 .player(uuid)
                 .and_then(|player| g.player_container_menu(player));
@@ -337,6 +352,9 @@ impl Game<'_> {
         };
         let dimension = self.dim.id();
         self.player_hook(conn, move |g| {
+            for pos in menu.openers.into_iter().flatten() {
+                g.mod_container_player_opener(pos, false);
+            }
             g.native_player_container_close(uuid, &name, dimension, &menu.menu, menu.pos);
         });
     }

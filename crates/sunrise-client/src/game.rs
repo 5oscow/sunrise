@@ -1652,7 +1652,8 @@ struct Game<'a> {
     /// The screen of a mod block's menu open on this client (`native_screen`).
     mod_screen: Option<native_hooks::OpenNativeScreen>,
     /// The players with each mod container open, by level (`tick_mod_container_viewers`).
-    mod_container_viewers: HashMap<(&'static str, (i32, i32, i32)), u32>,
+    mod_container_viewers:
+        HashMap<(&'static str, (i32, i32, i32)), mod_container_openers::ModContainerOpeners>,
     /// Where item entities are, while the block entities tick (hoppers).
     item_columns: Option<machines::ItemColumns>,
     /// The item columns for one pass of the players' pickups
@@ -4022,6 +4023,9 @@ impl Game<'_> {
         } else if self.open_mod_menu(key) {
             // A mod block's container (`native_block_entity_container`).
             self.container = Some(key);
+            if self.lan_acting.is_none() {
+                self.mod_container_player_opener(key, true);
+            }
         } else if self.open_station(pos, &name) {
             // Workstation menus: game/blocks/stations.rs.
         } else {
@@ -5413,6 +5417,9 @@ impl Game<'_> {
         self.craft_table = None;
         self.open_container_slots = None;
         if let Some(key) = self.container.take() {
+            if self.lan_acting.is_none() {
+                self.mod_container_player_opener(key, false);
+            }
             // A cart's or chest boat's items go back to it.
             self.close_cart_container(key);
             let last = self.container_opener_event(key, false);
