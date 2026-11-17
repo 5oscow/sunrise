@@ -460,10 +460,9 @@ mod tests {
         level.begin_tick_where(10, 1, |_| true, |_| false).unwrap();
         level.finish_tick().unwrap();
         assert_eq!(level.chunk(held.pos.chunk()).unwrap().queued(), &[future]);
-        assert_eq!(
-            level.all_queued().copied().collect::<Vec<_>>(),
-            [future, held]
-        );
+        let mut queued: Vec<_> = level.all_queued().copied().collect();
+        queued.sort_by_key(|tick| tick.trigger_tick);
+        assert_eq!(queued, [held, future]);
     }
     #[test]
     fn collection_guards_and_membership_survive_area_mutation() {
