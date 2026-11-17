@@ -410,6 +410,9 @@ pub struct Hub {
     /// the game once before each tick's packets: the moved-wrongly check resolves a report
     /// against those meeting the move's swept box (`Entity.collide`'s entity collisions).
     pub move_solids: Vec<crate::entity_solids::Candidate>,
+    /// The boxes of those meeting the move being checked: kept so a reported move allocates
+    /// nothing once it has grown.
+    pub(super) move_boxes: Mutex<Vec<sunrise_core::geometry::Aabb>>,
     /// The anticheat, when `server.toml` turns it on (dedicated servers).
     pub anticheat: Option<Box<super::anticheat::Anticheat>>,
     /// The chat filter, when `server.toml` turns it on (dedicated servers).
@@ -830,6 +833,7 @@ impl Hub {
             limited_crafting: false,
             movement_checks: (true, true),
             move_solids: Vec::new(),
+            move_boxes: Mutex::default(),
             anticheat: None,
             chat_filter: None,
             far: None,
