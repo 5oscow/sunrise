@@ -346,6 +346,9 @@ pub struct LootData {
     items: HashMap<String, ItemFacts>,
     /// Enchantments in registry (identifier) order.
     enchantments: Vec<Enchantment>,
+    /// Part answers resolved for this world registry snapshot, shared in meaning with
+    /// the items engine's selection table, never with another world's answers.
+    primary_answers: crate::enchantment_answers::AnswerTable,
     /// Tag files' layers by (registry, tag id).
     tags: HashMap<(String, String), crate::tag_layers::TagLayers>,
     /// Smelting recipes in recipe id order: (ingredient, result, result count).
@@ -895,6 +898,7 @@ impl LootData {
             predicates: Arc::new(predicates),
             items,
             enchantments,
+            primary_answers: Default::default(),
             tags,
             smelting,
         };
@@ -902,6 +906,11 @@ impl LootData {
         loaded.holder_sets = binding;
         Ok(loaded)
     }
+    /// The primary-item answers resolved for this enchantment registry snapshot.
+    pub fn primary_answers(&self) -> &crate::enchantment_answers::AnswerTable {
+        &self.primary_answers
+    }
+
     /// Attach prepared instances to this private, not-yet-published snapshot.
     pub fn set_global_modifiers(&mut self, modifiers: Arc<global_modifiers::GlobalLootModifiers>) {
         self.global_modifiers = modifiers;
@@ -2003,8 +2012,13 @@ impl<R: RandomSource> Context<'_, R> {
         let mut available: Vec<(usize, i32)> = Vec::new();
         for &i in source {
             let e = &data.enchantments[i];
-            let primary = data.item_in(item, &e.supported)
-                && e.primary.as_ref().is_none_or(|p| data.item_in(item, p));
+            let primary = data
+                .primary_answers
+                .answer(item, &e.name)
+                .unwrap_or_else(|| {
+                    data.item_in(item, &e.supported)
+                        && e.primary.as_ref().is_none_or(|p| data.item_in(item, p))
+                });
             if !primary && !book {
                 continue;
             }
@@ -3021,6 +3035,48 @@ mod namespace_tests {
 #[cfg(test)]
 mod native_kinds_tests {
     use super::*;
+
+    #[test]
+    fn world_loot_selection_reads_and_retires_its_primary_snapshot() {
+        let mut data = table(
+            "primary_snapshot",
+            r#"{"pools":[{"rolls":1,"entries":[{"type":"minecraft:item","name":"test:probe","modifier":[{"type":"minecraft:enchant_with_levels","levels":30}]}]}]}"#,
+        );
+        data.items.insert(
+            "test:probe".into(),
+            ItemFacts {
+                max_stack: 64,
+                enchantable: Some(1),
+                ..Default::default()
+            },
+        );
+        data.enchantments.push(Enchantment {
+            name: "test:sharp".into(),
+            supported: Value::Null,
+            primary: None,
+            exclusive: Value::Null,
+            max_level: 1,
+            weight: 1,
+            min_cost: (0, 0),
+            max_cost: (100, 0),
+            slots: vec![],
+            effects: Value::Null,
+        });
+        let roll = |data: &LootData| {
+            data.roll("minecraft:test", &mut LegacyRandom::new(1), 0.0, None, None)[0]
+                .enchantments
+                .clone()
+        };
+        assert!(roll(&data).is_empty());
+        data.primary_answers().install(HashMap::from([(
+            "test:probe".into(),
+            HashMap::from([("test:sharp".into(), true)]),
+        )]));
+        assert_eq!(roll(&data), [("test:sharp".into(), 1)]);
+        // Retiring the world's answer restores the vanilla outcome.
+        data.primary_answers().clear();
+        assert!(roll(&data).is_empty());
+    }
 
     #[test]
     fn weight_totals_pool_and_enchantments() {

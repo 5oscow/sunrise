@@ -41,6 +41,10 @@ impl AnswerTable {
         *stored = answers;
         self.any.store(any, Ordering::Release);
     }
+    /// Copy the resolved answers when another engine publishes the same registry snapshot.
+    pub fn snapshot(&self) -> Answers {
+        self.read().clone()
+    }
     /// Retire every stored answer: selection is vanilla's again.
     pub fn clear(&self) {
         self.install(Answers::new());

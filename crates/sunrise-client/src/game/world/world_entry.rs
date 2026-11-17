@@ -679,6 +679,7 @@ impl Game<'_> {
     pub(super) fn load_server_loot(&mut self) {
         if let Some(tables) = &self.world_tables {
             self.server_items = Some(tables.items.clone());
+            self.copy_loot_enchantment_answers(&tables.loot);
             self.server_loot.set(Some(tables.loot.clone()));
             global_loot_modifiers::bind_retained(
                 &self.reload_resources,
@@ -725,6 +726,9 @@ impl Game<'_> {
             let mut items = self.items().clone();
             items.set_loot_tables(loot.tables().clone());
             self.server_items = Some(Arc::new(items));
+        }
+        if let Some(loot) = &loot {
+            self.copy_loot_enchantment_answers(loot);
         }
         self.server_loot.set(loot);
     }
