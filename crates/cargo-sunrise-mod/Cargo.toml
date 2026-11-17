@@ -25,6 +25,7 @@ sunrise-mod-point-emit = { path = "../sunrise-mod-point-emit" }
 sunrise-native-build = { path = "../sunrise-native-build" }
 # The uses scan, the fit test, the surface search and its diff, over the fetched SDK's `surface.json`.
 sunrise-mod-surface = { path = "../sunrise-mod-surface" }
+sunrise-shader-api = { path = "../sunrise-shader-api" }
 sunrise-release-sign = { path = "../sunrise-release-sign" }
 sunrise-port-pack = { path = "../sunrise-port-pack" }
 rustc-demangle = "0.1"
