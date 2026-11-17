@@ -371,6 +371,7 @@ pub mod tests {
     }
 
     /// A part with no hooks: it only shows who attached it, and in what order.
+    #[cfg(test)]
     macro_rules! quiet_part {
         ($name:ident) => {
             struct $name;
@@ -380,10 +381,14 @@ pub mod tests {
             impl BlockEntityPart for $name {}
         };
     }
+    #[cfg(test)]
     quiet_part!(FromB);
+    #[cfg(test)]
     quiet_part!(FromC);
 
+    #[cfg(test)]
     struct Owner;
+    #[cfg(test)]
     #[mod_api::__subscriptions]
     impl Hooks for Owner {
         fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
@@ -392,7 +397,9 @@ pub mod tests {
                 .build();
         }
     }
+    #[cfg(test)]
     struct Attaches<P: BlockEntityPart + Clone>(P);
+    #[cfg(test)]
     impl<P: BlockEntityPart + Clone> Hooks for Attaches<P> {
         fn subscribed(&self) -> &'static [Option<HookId>] {
             &[]
@@ -402,6 +409,7 @@ pub mod tests {
             r.block_entity_part(&press, self.0.clone()).unwrap();
         }
     }
+    #[cfg(test)]
     macro_rules! attach_part {
         ($name:ident) => {
             impl Clone for $name {
@@ -411,13 +419,17 @@ pub mod tests {
             }
         };
     }
+    #[cfg(test)]
     attach_part!(FromB);
+    #[cfg(test)]
     attach_part!(FromC);
 
+    #[cfg(test)]
     fn package(id: &str, side: Side, depends_on: &[&str]) -> PackageInfo {
         package_of(id, side, depends_on, DependencyKind::Required)
     }
 
+    #[cfg(test)]
     fn package_of(id: &str, side: Side, depends_on: &[&str], kind: DependencyKind) -> PackageInfo {
         PackageInfo::new(
             id.into(),
@@ -442,6 +454,7 @@ pub mod tests {
         )
     }
 
+    #[cfg(test)]
     fn attached_to_owner_block(mods: &[ModEntry]) -> (Vec<&'static str>, Vec<String>) {
         let registrar = crate::parts::shared::register_all(mods, |_| false);
         let attached = registrar
@@ -683,6 +696,7 @@ pub mod tests {
         });
     }
 
+    #[cfg(test)]
     static OWNERS_PROGRESS: AttachmentType<u32> = AttachmentType {
         namespace: "owner",
         name: "progress",
@@ -691,6 +705,7 @@ pub mod tests {
         copy_on_death: false,
         sync: false,
     };
+    #[cfg(test)]
     static B_PROGRESS: AttachmentType<u32> = AttachmentType {
         namespace: "b",
         name: "progress",
@@ -699,24 +714,33 @@ pub mod tests {
         copy_on_death: false,
         sync: false,
     };
+    #[cfg(test)]
     struct Keeps<const OWNERS: bool>;
+    #[cfg(test)]
     #[mod_api::sunrise_part]
     impl BlockPart for Keeps<true> {}
+    #[cfg(test)]
     #[mod_api::sunrise_part]
     impl BlockEntityPart for Keeps<true> {}
+    #[cfg(test)]
     impl BlockEntityPartState for Keeps<true> {
         type Data = u32;
         const DATA: &'static AttachmentType<u32> = &OWNERS_PROGRESS;
     }
+    #[cfg(test)]
     #[mod_api::sunrise_part]
     impl BlockPart for Keeps<false> {}
+    #[cfg(test)]
     #[mod_api::sunrise_part]
     impl BlockEntityPart for Keeps<false> {}
+    #[cfg(test)]
     impl BlockEntityPartState for Keeps<false> {
         type Data = u32;
         const DATA: &'static AttachmentType<u32> = &B_PROGRESS;
     }
+    #[cfg(test)]
     struct KeepsState<const OWNERS: bool>;
+    #[cfg(test)]
     #[mod_api::__subscriptions]
     impl<const OWNERS: bool> Hooks for KeepsState<OWNERS>
     where
