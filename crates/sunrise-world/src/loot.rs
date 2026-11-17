@@ -2403,16 +2403,19 @@ mod namespace_tests {
             {"type":"minecraft:set_components","components":{"test:value":null}},
             {"type":"minecraft:set_components","components":{"test:value":[7]}}
         ]}]}]}"#;
-        for (name, text) in [
-            ("items.json", r#"{"minecraft:stone":{}}"#),
-            ("data/minecraft/loot_table/patches.json", table),
-        ] {
-            let path = root.join(name);
-            fs::create_dir_all(path.parent().unwrap()).unwrap();
-            fs::write(path, text).unwrap();
-        }
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("items.json"), r#"{"minecraft:stone":{}}"#).unwrap();
         let defaults = crate::item_defaults::read(&root).unwrap();
-        let data = LootData::load(&root, &PackOverlay::NONE, &defaults).unwrap();
+        let mut data = LootData::load(&root, &PackOverlay::NONE, &defaults).unwrap();
+        // This pins permissive evaluator patch ordering, not pack codec acceptance.
+        data.tables = Arc::new(
+            [(
+                "minecraft:patches".into(),
+                serde_json::from_str(table).unwrap(),
+            )]
+            .into_iter()
+            .collect(),
+        );
         let filled = data.fill("minecraft:patches", 7, 27, None);
         let stack = filled.iter().flatten().next().unwrap();
         assert_eq!(

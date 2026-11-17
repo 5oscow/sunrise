@@ -2,7 +2,7 @@
 use super::{Kind::*, Row, opt, req, row};
 pub(super) const ROWS: &[Row] = &[
     row("set_count", &[req("count", Named("int")), opt("add", Bool)]),
-    row("set_item", &[req("item", Id)]),
+    row("set_item", &[req("item", NonAirItemId)]),
     row(
         "enchant_with_levels",
         &[
@@ -21,7 +21,7 @@ pub(super) const ROWS: &[Row] = &[
     ),
     row(
         "set_enchantments",
-        &[opt("enchantments", Map(&Named("int"))), opt("add", Bool)],
+        &[opt("enchantments", IdMap(&Named("int"))), opt("add", Bool)],
     ),
     row("set_custom_data", &[req("tag", Snbt)]),
     row(

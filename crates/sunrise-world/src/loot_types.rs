@@ -1,6 +1,9 @@
 //! Load validation and direct type dispatch, shared by both loot evaluators.
 use crate::loot::{LootContext, LootStack, LootTags};
 use serde_json::Value;
+#[cfg(test)]
+#[path = "loot_types/argument_tests.rs"]
+mod argument_tests;
 #[path = "loot_types/normalize.rs"]
 mod normalize;
 #[path = "loot_types/parameters.rs"]
@@ -190,18 +193,22 @@ impl Types {
         };
         for (id, data) in tables {
             walker.visiting_tables.insert(id.to_owned());
-            walker.table(data, &format!("loot_table {id} $"))?;
+            walker.table(data, &resource("loot_table", id))?;
             walker.visiting_tables.remove(id);
         }
         walker.allowed = None;
         for (id, data) in predicates {
-            walker.entry(data, false, &format!("predicate {id} $"))?;
+            walker.entry(data, false, &resource("predicate", id))?;
         }
         for (id, data) in modifiers {
-            walker.entry(data, true, &format!("item_modifier {id} $"))?;
+            walker.entry(data, true, &resource("item_modifier", id))?;
         }
         Ok(())
     }
+}
+fn resource(kind: &str, id: &str) -> String {
+    let (namespace, path) = id.split_once(':').unwrap_or(("minecraft", id));
+    format!("{kind} {id} [data/{namespace}/{kind}/{path}.json] $")
 }
 fn invalid(path: &str, kind: &str, reason: impl std::fmt::Display) -> io::Error {
     io::Error::new(
@@ -232,7 +239,7 @@ impl Walker<'_> {
             return Err(invalid(path, "loot_table", "expected object"));
         }
         self.fields(table, path)?;
-        if let Some(pools) = table.get("pools") {
+        if let Some(pools) = table.get("pools").filter(|value| !value.is_null()) {
             let pools = pools
                 .as_array()
                 .ok_or_else(|| invalid(path, "loot_table", "pools: expected list"))?;
@@ -255,7 +262,7 @@ impl Walker<'_> {
     }
     fn container(&mut self, entry: &Value, path: &str) -> io::Result<()> {
         self.fields(entry, path)?;
-        if let Some(children) = entry.get("children") {
+        if let Some(children) = entry.get("children").filter(|value| !value.is_null()) {
             for (i, child) in children
                 .as_array()
                 .ok_or_else(|| invalid(path, "entry", "children: expected list"))?
@@ -269,18 +276,23 @@ impl Walker<'_> {
             if entry["value"].is_object() {
                 self.contents(&entry["value"], &format!("{path}.value"))?;
             } else if let Some(id) = entry["value"].as_str() {
-                let id = if id.contains(':') {
-                    id.to_owned()
-                } else {
-                    format!("minecraft:{id}")
-                };
-                if self.visiting_tables.insert(id.clone()) {
-                    if let Some(table) = self.tables.get(id.as_str()).copied() {
-                        self.contents(table, &format!("{path}.value -> loot_table {id}"))?;
-                    }
-                    self.visiting_tables.remove(&id);
-                }
+                self.reference_table(id, &format!("{path}.value"))?;
             }
+        }
+        Ok(())
+    }
+    fn reference_table(&mut self, id: &str, path: &str) -> io::Result<()> {
+        let id = sunrise_core::identifier::Identifier::parse(id)
+            .map_err(|reason| invalid(path, "loot_table", reason))?
+            .to_string();
+        if self.visiting_tables.insert(id.clone()) {
+            let result = if let Some(table) = self.tables.get(id.as_str()).copied() {
+                self.contents(table, &format!("{path} -> loot_table {id}"))
+            } else {
+                Ok(())
+            };
+            self.visiting_tables.remove(&id);
+            result?;
         }
         Ok(())
     }
@@ -296,40 +308,36 @@ impl Walker<'_> {
     }
     fn entry(&mut self, data: &Value, function: bool, path: &str) -> io::Result<()> {
         if let Some(id) = data.as_str() {
-            let key = (function, id.to_owned());
+            let id = sunrise_core::identifier::Identifier::parse(id)
+                .map_err(|reason| invalid(path, id, reason))?
+                .to_string();
+            let key = (function, id.clone());
             if !self.visiting.insert(key.clone()) {
-                return Err(invalid(path, id, "reference cycle"));
+                return Err(invalid(path, &id, "reference cycle"));
             }
             let value = if function {
-                self.modifiers.get(id)
+                self.modifiers.get(&id)
             } else {
-                self.predicates.get(id)
+                self.predicates.get(&id)
             }
-            .ok_or_else(|| invalid(path, id, "unknown reference"))?;
+            .ok_or_else(|| invalid(path, &id, "unknown reference"))?;
             self.entry(value, function, &format!("{path} -> {id}"))?;
             self.visiting.remove(&key);
             return Ok(());
         }
-        if function && let Some(list) = data.as_array() {
-            for (i, entry) in list.iter().enumerate() {
-                if entry.is_array() {
-                    return Err(invalid(path, "sequence", "nested bare function list"));
-                }
-                self.entry(entry, true, &format!("{path}[{i}]"))?;
-            }
-            return Ok(());
+        if function && data.is_array() {
+            return self.set(data, true, path);
         }
         let kind = data
             .get("type")
             .and_then(Value::as_str)
             .ok_or_else(|| invalid(path, "<missing>", "expected typed loot object"))?;
-        let qualified = if kind.contains(':') {
-            kind.to_owned()
-        } else {
-            format!("minecraft:{kind}")
-        };
+        let qualified = sunrise_core::identifier::Identifier::parse(kind)
+            .map_err(|reason| invalid(path, kind, reason))?
+            .to_string();
         let kind = qualified.as_str();
-        if !builtin(kind, function) {
+        let builtin = builtin(kind, function);
+        if !builtin {
             let registry = self
                 .types
                 .registry
@@ -356,131 +364,55 @@ impl Walker<'_> {
                 }
             }
         }
-        if function {
-            if (builtin(kind, true) || self.types.conditional(kind))
-                && let Some(condition) = data.get("condition").filter(|value| !value.is_null())
-            {
-                self.entry(condition, false, &format!("{path}.condition"))?;
-            }
-            match kind {
-                "minecraft:sequence" => self.list(data, "functions", true, path)?,
-                "minecraft:filtered" => {
-                    for field in ["on_pass", "on_fail"] {
-                        if let Some(value) = data.get(field) {
-                            self.entry(value, true, &format!("{path}.{field}"))?;
+        if function
+            && (builtin || self.types.conditional(kind))
+            && let Some(condition) = data.get("condition").filter(|value| !value.is_null())
+        {
+            self.entry(condition, false, &format!("{path}.condition"))?;
+        }
+        if builtin {
+            for child in shapes::validate(data, function, kind, path)? {
+                match child.kind {
+                    shapes::ChildKind::Function => self.entry(child.value, true, &child.path)?,
+                    shapes::ChildKind::Condition => self.entry(child.value, false, &child.path)?,
+                    shapes::ChildKind::Set(function) => {
+                        self.set(child.value, function, &child.path)?
+                    }
+                    shapes::ChildKind::Table => {
+                        if let Some(id) = child.value.as_str() {
+                            self.reference_table(id, &child.path)?;
                         }
                     }
                 }
-                _ => {}
-            }
-        } else {
-            match kind {
-                "minecraft:all_of" | "minecraft:any_of" => self.list(data, "terms", false, path)?,
-                "minecraft:inverted" => {
-                    self.entry(&data["term"], false, &format!("{path}.term"))?
-                }
-                _ => {}
             }
         }
         Ok(())
     }
-    fn list(&mut self, data: &Value, field: &str, function: bool, path: &str) -> io::Result<()> {
-        let list = data[field].as_array().ok_or_else(|| {
-            invalid(
-                path,
-                data["type"].as_str().unwrap_or("<missing>"),
-                format!("{field}: expected list"),
-            )
-        })?;
-        for (i, value) in list.iter().enumerate() {
-            self.entry(value, function, &format!("{path}.{field}[{i}]"))?;
+    fn set(&mut self, data: &Value, function: bool, path: &str) -> io::Result<()> {
+        if let Some(list) = data.as_array() {
+            for (i, value) in list.iter().enumerate() {
+                if value.is_array() {
+                    return Err(invalid(
+                        &format!("{path}[{i}]"),
+                        "holder_set",
+                        "nested bare list",
+                    ));
+                }
+                self.entry(value, function, &format!("{path}[{i}]"))?;
+            }
+            Ok(())
+        } else {
+            self.entry(data, function, path)
         }
-        Ok(())
     }
 }
 fn builtin(kind: &str, function: bool) -> bool {
-    if !function
-        && matches!(
-            kind,
-            "neoforge:loot_table_id" | "neoforge:can_item_perform_ability"
-        )
-    {
-        return true;
-    }
-    let Some(kind) = kind.strip_prefix("minecraft:") else {
-        return false;
-    };
-    if function {
-        matches!(
-            kind,
-            "set_count"
-                | "set_item"
-                | "enchant_with_levels"
-                | "enchant_randomly"
-                | "set_enchantments"
-                | "set_custom_data"
-                | "set_components"
-                | "furnace_smelt"
-                | "enchanted_count_increase"
-                | "set_damage"
-                | "set_attributes"
-                | "set_name"
-                | "exploration_map"
-                | "set_stew_effect"
-                | "copy_name"
-                | "set_contents"
-                | "modify_contents"
-                | "filtered"
-                | "limit_count"
-                | "apply_bonus"
-                | "set_loot_table"
-                | "explosion_decay"
-                | "set_lore"
-                | "fill_player_head"
-                | "copy_custom_data"
-                | "copy_state"
-                | "set_banner_pattern"
-                | "set_potion"
-                | "set_random_dyes"
-                | "set_random_potion"
-                | "set_instrument"
-                | "sequence"
-                | "copy_components"
-                | "set_fireworks"
-                | "set_firework_explosion"
-                | "set_book_cover"
-                | "set_written_book_pages"
-                | "set_writable_book_pages"
-                | "toggle_tooltips"
-                | "set_ominous_bottle_amplifier"
-                | "set_custom_model_data"
-                | "discard"
-        )
-    } else {
-        matches!(
-            kind,
-            "inverted"
-                | "any_of"
-                | "all_of"
-                | "random_chance"
-                | "random_chance_with_enchanted_bonus"
-                | "entity_properties"
-                | "killed_by_player"
-                | "entity_scores"
-                | "match_block"
-                | "match_tool"
-                | "table_bonus"
-                | "survives_explosion"
-                | "damage_source_properties"
-                | "location_check"
-                | "weather_check"
-                | "time_check"
-                | "int_value_check"
-                | "float_value_check"
-                | "enchantment_active_check"
-                | "environment_attribute_check"
-        )
-    }
+    shapes::contains(kind, function)
+        || (!function
+            && matches!(
+                kind,
+                "neoforge:loot_table_id" | "neoforge:can_item_perform_ability"
+            ))
 }
 
 impl<R: sunrise_core::random::RandomSource> super::Context<'_, R> {

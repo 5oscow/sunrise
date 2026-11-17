@@ -40,8 +40,22 @@ winning pack JSON never falls back to a lower-priority file. Predicate and item
 modifier references, including references selected by tags, validate at load.
 Referenced tables retain the caller's context set during parameter validation;
 recursive table references stop traversal rather than recursing indefinitely.
-Built-in function argument schemas are not fully validated by this registration
-boundary; that pre-existing decoder limitation is separate from registered codecs.
+Built-in functions and conditions use the same preparation boundary. Declarative
+codec shapes check their required fields, optional values, enums, numeric
+providers, component payloads and nested entries. The same shapes identify the
+owned child functions and conditions for reference validation and tag expansion;
+the engine never searches through a registered codec's opaque payload.
+
+Optional `null` fields behave like omitted fields, unknown fields remain ignored,
+and supported compact forms (including singleton holder sets, references and
+compound SNBT strings) stay accepted. Generic registry IDs are checked for syntax,
+not arbitrary registry membership; codecs with a closed registry still enforce it.
+Primitive integer fields accept numeric JSON tokens such as `2.0` and `1e1` and
+use signed Java-style narrowing rather than defaulting those tokens to zero.
+Extreme numeric literals can still lose precision in the JSON representation
+([#2105](https://github.com/sunrise-org/sunrise/issues/2105)). Text shape checks do
+not yet replace complete selector, coordinate and canonical text-size validation
+([#2112](https://github.com/sunrise-org/sunrise/issues/2112)).
 
 `LootEntryData` is API-owned and derives `Wire`. Its one private JSON-value field
 uses the shared JSON tree encoding: length-prefixed UTF-8 JSON, with the shared

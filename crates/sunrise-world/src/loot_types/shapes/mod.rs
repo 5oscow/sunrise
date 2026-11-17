@@ -72,7 +72,7 @@ enum Kind {
     TextColor,
     Snbt,
     Function,
-    FunctionElement,
+    HolderSet(bool),
     Condition,
     Entry,
 }
@@ -137,30 +137,84 @@ pub(super) fn contains(kind: &str, function: bool) -> bool {
 pub(super) enum ChildKind {
     Function,
     Condition,
+    Set(bool),
     Table,
 }
 pub(super) struct Child<'v> {
     pub value: &'v Value,
     pub kind: ChildKind,
     pub path: String,
+    pub pointer: String,
+}
+#[derive(Clone)]
+struct Location {
+    diagnostic: String,
+    pointer: String,
+}
+impl Location {
+    fn field(&self, key: &str) -> Self {
+        Self {
+            diagnostic: format!("{}.{key}", self.diagnostic),
+            pointer: format!(
+                "{}/{}",
+                self.pointer,
+                key.replace('~', "~0").replace('/', "~1")
+            ),
+        }
+    }
+    fn index(&self, index: usize) -> Self {
+        Self {
+            diagnostic: format!("{}[{index}]", self.diagnostic),
+            pointer: format!("{}/{index}", self.pointer),
+        }
+    }
+}
+impl std::ops::Deref for Location {
+    type Target = str;
+    fn deref(&self) -> &str {
+        &self.diagnostic
+    }
+}
+impl std::fmt::Display for Location {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.diagnostic.fmt(formatter)
+    }
 }
 struct Task<'v> {
     value: &'v Value,
     kind: Kind,
-    path: String,
+    path: Location,
     owner: String,
 }
 enum Work<'v> {
     Check(Task<'v>),
     EndAlternative,
 }
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Purpose {
+    Validate,
+    Locate,
+}
+enum Variants {
+    Kinds(std::slice::Iter<'static, Kind>),
+    Rows(std::slice::Iter<'static, Row>),
+}
+impl Variants {
+    fn next(&mut self) -> Option<Kind> {
+        match self {
+            Self::Kinds(kinds) => kinds.next().copied(),
+            Self::Rows(rows) => rows.next().map(|row| row.kind),
+        }
+    }
+}
 struct Alternative<'v> {
     value: &'v Value,
-    remaining: std::vec::IntoIter<Kind>,
-    path: String,
+    remaining: Variants,
+    path: Location,
     pending: usize,
     children: usize,
     owner: String,
+    failure: Option<(Location, String, String)>,
 }
 
 fn slot_range(value: &str) -> bool {
@@ -264,7 +318,14 @@ pub(super) fn validate<'v>(
     let Some(shape) = builtin(kind, function) else {
         return Ok(Vec::new());
     };
-    validate_shape(value, shape, kind, path)
+    validate_shape(value, shape, kind, path, Purpose::Validate)
+}
+
+pub(super) fn children<'v>(value: &'v Value, function: bool, kind: &str) -> Vec<Child<'v>> {
+    let Some(shape) = builtin(kind, function) else {
+        return Vec::new();
+    };
+    validate_shape(value, shape, kind, "", Purpose::Locate).unwrap_or_default()
 }
 
 fn validate_shape<'v>(
@@ -272,11 +333,15 @@ fn validate_shape<'v>(
     shape: Kind,
     kind: &str,
     path: &str,
+    purpose: Purpose,
 ) -> io::Result<Vec<Child<'v>>> {
     let mut pending = vec![Work::Check(Task {
         value,
         kind: shape,
-        path: path.to_owned(),
+        path: Location {
+            diagnostic: path.to_owned(),
+            pointer: String::new(),
+        },
         owner: kind.to_owned(),
     })];
     let mut alternatives: Vec<Alternative<'v>> = Vec::new();
@@ -285,13 +350,60 @@ fn validate_shape<'v>(
         let Work::Check(Task {
             value,
             kind: rule,
-            path,
+            mut path,
             owner,
         }) = work
         else {
             alternatives.pop();
             continue;
         };
+        // Normalization locates typed child edges; it does not decode scalar
+        // codecs or text twice. Alternative containers may all be inspected:
+        // only their matching object/list shapes can expose child locations.
+        if purpose == Purpose::Locate
+            && matches!(
+                rule,
+                Kind::Bool
+                    | Kind::Number
+                    | Kind::Any
+                    | Kind::Transient
+                    | Kind::NbtPath
+                    | Kind::NonAirItemId
+                    | Kind::PlayerName
+                    | Kind::TypedEntityData
+                    | Kind::AttributeNumber(_)
+                    | Kind::DifferenceLimit(..)
+                    | Kind::WithinEndpoints(..)
+                    | Kind::StringLimit(..)
+                    | Kind::AtMostOne(..)
+                    | Kind::NotBoolEnum(..)
+                    | Kind::ChatString
+                    | Kind::VariableName
+                    | Kind::MacroTemplate
+                    | Kind::HttpScheme
+                    | Kind::Uuid
+                    | Kind::Text
+                    | Kind::SlotRange
+                    | Kind::IntRange(..)
+                    | Kind::String(_)
+                    | Kind::Id
+                    | Kind::Enum(_)
+                    | Kind::FloatRange(..)
+                    | Kind::Ordered(..)
+                    | Kind::OrderedFloat(..)
+                    | Kind::OrderedInt(..)
+                    | Kind::PositiveWeights
+                    | Kind::Tag
+                    | Kind::RegistryEnum(_)
+                    | Kind::HexColor(_)
+                    | Kind::NotBoth(..)
+                    | Kind::TextColor
+                    | Kind::Snbt
+                    | Kind::PartialWeightedList(_)
+            )
+        {
+            continue;
+        }
         let mut reason = None;
         let mut push = |kind, value, path| {
             pending.push(Work::Check(Task {
@@ -320,7 +432,8 @@ fn validate_shape<'v>(
                         children.push(Child {
                             value,
                             kind: ChildKind::Table,
-                            path: path.clone(),
+                            path: path.diagnostic.clone(),
+                            pointer: path.pointer.clone(),
                         });
                     } else {
                         reason = Some("expected loot table reference".into());
@@ -428,8 +541,14 @@ fn validate_shape<'v>(
                     for (index, entry) in values.iter().enumerate() {
                         // MobSpawnSettings promotes list partials. Its element grammar
                         // contains only legacy count providers, not this list rule.
-                        if validate_shape(entry, *element, &owner, &format!("{path}[{index}]"))
-                            .is_ok()
+                        if validate_shape(
+                            entry,
+                            *element,
+                            &owner,
+                            &format!("{path}[{index}]"),
+                            Purpose::Validate,
+                        )
+                        .is_ok()
                         {
                             let weight = entry["weight"].as_number().map_or(0, int_value) as i32;
                             if let Some(total) = sum.checked_add(weight) {
@@ -527,7 +646,7 @@ fn validate_shape<'v>(
                     .and_then(Value::as_str)
                     .and_then(environment::value);
                 match (shape, value.get("value").filter(|value| !value.is_null())) {
-                    (Some(shape), Some(value)) => push(shape, value, format!("{path}.value")),
+                    (Some(shape), Some(value)) => push(shape, value, path.field("value")),
                     (None, _) => reason = Some("unknown or missing environment attribute".into()),
                     (_, None) => reason = Some("missing required field value".into()),
                 }
@@ -558,7 +677,7 @@ fn validate_shape<'v>(
                 if let Some(object) = value.as_object() {
                     for (id, value) in object {
                         if let Some(row) = matching_row(rows, id, true) {
-                            push(row.kind, value, format!("{path}.{id}"));
+                            push(row.kind, value, path.field(id));
                         } else {
                             reason = Some(format!("unknown predicate type {id}"));
                             break;
@@ -593,10 +712,10 @@ fn validate_shape<'v>(
                 }
             }
             Kind::OrderedInt(min, max) => {
-                if let (Some(min), Some(max)) = (value[min].as_number(), value[max].as_number()) {
-                    if int_value(min) > int_value(max) {
-                        reason = Some("bounds are out of order".into());
-                    }
+                if let (Some(min), Some(max)) = (value[min].as_number(), value[max].as_number())
+                    && int_value(min) > int_value(max)
+                {
+                    reason = Some("bounds are out of order".into());
                 }
             }
             Kind::HexColor(size) => {
@@ -647,10 +766,11 @@ fn validate_shape<'v>(
             Kind::Object(fields) => {
                 if let Some(object) = value.as_object() {
                     for field in fields {
-                        let path = format!("{path}.{}", field.name);
+                        let child_path = path.field(field.name);
                         match object.get(field.name).filter(|v| !v.is_null()) {
-                            Some(value) => push(field.kind, value, path),
+                            Some(value) => push(field.kind, value, child_path),
                             None if field.required => {
+                                path = child_path;
                                 reason = Some(format!("missing required field {}", field.name));
                                 break;
                             }
@@ -667,7 +787,7 @@ fn validate_shape<'v>(
                     .filter(|list| list.len() >= min && list.len() <= max)
                 {
                     for (index, value) in list.iter().enumerate() {
-                        push(*element, value, format!("{path}[{index}]"));
+                        push(*element, value, path.index(index));
                     }
                 } else {
                     reason = Some(format!("expected list with {min}..={max} elements"));
@@ -699,7 +819,7 @@ fn validate_shape<'v>(
                             reason = Some(format!("unknown map key {key}"));
                             break;
                         }
-                        push(*element, value, format!("{path}.{key}"));
+                        push(*element, value, path.field(key));
                     }
                 } else {
                     reason = Some("expected map".into());
@@ -746,7 +866,7 @@ fn validate_shape<'v>(
                             known
                         };
                         if let Some(shape) = shape {
-                            push(shape, value, format!("{path}.{key}"));
+                            push(shape, value, path.field(key));
                         } else {
                             reason = Some(format!("unknown or nonpersistent component {id}"));
                             break;
@@ -785,7 +905,13 @@ fn validate_shape<'v>(
                 }
             }
             Kind::Either(variants) => {
-                let mut remaining = variants.to_vec().into_iter();
+                if purpose == Purpose::Locate {
+                    for kind in variants {
+                        push(*kind, value, path.clone());
+                    }
+                    continue;
+                }
+                let mut remaining = Variants::Kinds(variants.iter());
                 if let Some(first) = remaining.next() {
                     alternatives.push(Alternative {
                         value,
@@ -794,6 +920,7 @@ fn validate_shape<'v>(
                         pending: pending.len(),
                         children: children.len(),
                         owner: owner.clone(),
+                        failure: None,
                     });
                     pending.push(Work::EndAlternative);
                     pending.push(Work::Check(Task {
@@ -807,14 +934,16 @@ fn validate_shape<'v>(
                 }
             }
             Kind::FuzzySwitch(field, rows) => {
+                if purpose == Purpose::Locate && value.get(field).is_none_or(Value::is_null) {
+                    for row in rows {
+                        push(row.kind, value, path.clone());
+                    }
+                    continue;
+                }
                 if value.get(field).is_some_and(|v| !v.is_null()) {
                     push(Kind::Switch(field, false, rows), value, path.clone());
                 } else {
-                    let mut remaining = rows
-                        .iter()
-                        .map(|row| row.kind)
-                        .collect::<Vec<_>>()
-                        .into_iter();
+                    let mut remaining = Variants::Rows(rows.iter());
                     if let Some(first) = remaining.next() {
                         alternatives.push(Alternative {
                             value,
@@ -823,6 +952,7 @@ fn validate_shape<'v>(
                             pending: pending.len(),
                             children: children.len(),
                             owner: owner.clone(),
+                            failure: None,
                         });
                         pending.push(Work::EndAlternative);
                         pending.push(Work::Check(Task {
@@ -893,27 +1023,49 @@ fn validate_shape<'v>(
                     reason = Some("expected compound or compound SNBT string".into());
                 }
             }
-            Kind::Function | Kind::FunctionElement | Kind::Condition => {
-                if matches!(rule, Kind::FunctionElement)
-                    && !(value.is_string() || value.is_object())
+            Kind::Function | Kind::Condition | Kind::HolderSet(_) => {
+                let valid = value.is_object()
+                    || value.is_string()
+                    || (!matches!(rule, Kind::Condition) && value.is_array());
+                if !valid {
+                    reason =
+                        Some("expected typed object, reference or permitted holder list".into());
+                } else if purpose == Purpose::Validate
+                    && matches!(rule, Kind::HolderSet(_))
+                    && value
+                        .as_str()
+                        .and_then(|id| id.strip_prefix('#'))
+                        .is_some_and(|id| !identifier(id))
                 {
-                    reason = Some("expected function object or reference".into());
+                    reason = Some("invalid holder-set tag identifier".into());
                 } else {
                     children.push(Child {
                         value,
-                        path: path.clone(),
-                        kind: if matches!(rule, Kind::Condition) {
-                            ChildKind::Condition
-                        } else {
-                            ChildKind::Function
+                        path: path.diagnostic.clone(),
+                        pointer: path.pointer.clone(),
+                        kind: match rule {
+                            Kind::Condition => ChildKind::Condition,
+                            Kind::HolderSet(function) => ChildKind::Set(function),
+                            _ => ChildKind::Function,
                         },
                     });
                 }
             }
         }
         if let Some(reason) = reason {
+            if purpose == Purpose::Locate {
+                continue;
+            }
+            let mut failure = (path, owner, reason);
             let mut retry = false;
             while let Some(alternative) = alternatives.last_mut() {
+                // Preserve a nested field refusal over a later, generic mismatch
+                // from another branch (for example an inline table versus a tag).
+                if alternative.failure.as_ref().is_none_or(|previous| {
+                    failure.0.pointer.matches('/').count() > previous.0.pointer.matches('/').count()
+                }) {
+                    alternative.failure = Some(failure.clone());
+                }
                 pending.truncate(alternative.pending);
                 children.truncate(alternative.children);
                 if let Some(first) = alternative.remaining.next() {
@@ -927,10 +1079,11 @@ fn validate_shape<'v>(
                     retry = true;
                     break;
                 }
+                failure = alternative.failure.take().unwrap_or(failure);
                 alternatives.pop();
             }
             if !retry {
-                return Err(invalid(&path, &owner, reason));
+                return Err(invalid(&failure.0, &failure.1, failure.2));
             }
         }
     }

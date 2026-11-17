@@ -99,6 +99,8 @@ pub(super) const ROWS: &[Row] = &[
     row(
         "loot_table_direct",
         &[
+            // LootTable uses lenientOptionalFieldOf: even a malformed context
+            // set falls back to its default rather than refusing the table.
             opt("type", Any),
             opt("random_sequence", Id),
             opt("pools", List(&Named("loot_pool"), 0, usize::MAX)),

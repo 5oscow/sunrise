@@ -77,11 +77,11 @@ pub(super) const ROWS: &[Row] = &[
     },
     Row {
         name: "functions",
-        kind: Either(&[List(&FunctionElement, 0, usize::MAX), FunctionElement, Tag]),
+        kind: HolderSet(true),
     },
     Row {
         name: "conditions",
-        kind: Either(&[List(&Condition, 0, usize::MAX), Condition, Tag]),
+        kind: HolderSet(false),
     },
     Row {
         name: "slot_group",

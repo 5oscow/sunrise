@@ -6,6 +6,19 @@ use sunrise_core::{
 };
 use sunrise_world::loot::{self, copy::BlockSource};
 
+fn programmatic_tables(
+    data: &loot::LootData,
+    extra: &HashMap<String, Value>,
+) -> Arc<loot::LootTables> {
+    Arc::new(
+        data.tables()
+            .ids()
+            .map(|id| (id.to_owned(), data.tables()[id].clone()))
+            .chain(extra.iter().map(|(id, table)| (id.clone(), table.clone())))
+            .collect(),
+    )
+}
+
 #[test]
 fn copy_components_uses_available_sources_and_table_filters_in_both_evaluators() {
     let root = std::env::temp_dir().join(format!(
@@ -28,7 +41,7 @@ fn copy_components_uses_available_sources_and_table_filters_in_both_evaluators()
         .to_string(),
     )
     .unwrap();
-    let base = Tag::compound([("value", Tag::String("before".into()))]);
+    let base = Tag::compound([("minecraft:oak_log", Tag::String("axis".into()))]);
     let block = BlockSource {
         nbt: Tag::compound([("id", Tag::String("test:source".into()))]),
         components: [
@@ -182,16 +195,22 @@ fn copy_components_uses_available_sources_and_table_filters_in_both_evaluators()
             vec![],
         ),
     ];
+    let mut programmatic = HashMap::new();
     for (name, function, _, _, _, _) in &cases {
         let mut function = function.clone();
         function["type"] = json!("minecraft:copy_components");
         let table = json!({"type":"minecraft:empty","pools":[{"rolls":1,"entries":[{
             "type":"minecraft:item","name":"minecraft:stick",
             "modifier":{"type":"minecraft:sequence","functions":[
-                {"type":"minecraft:set_components","components":{"test:untouched":{"value":"before"}}}, function
+                {"type":"minecraft:set_components","components":{"minecraft:debug_stick_state":{"minecraft:oak_log":"axis"}}}, function
             ]}
         }]}]});
-        std::fs::write(folder.join(format!("{name}.json")), table.to_string()).unwrap();
+        if *name == "invalid_include_is_atomic" {
+            // Malformed arguments are an evaluator fallback case, not pack data.
+            programmatic.insert(format!("test:{name}"), table);
+        } else {
+            std::fs::write(folder.join(format!("{name}.json")), table.to_string()).unwrap();
+        }
     }
     let defaults = sunrise_world::item_defaults::read(&root).unwrap();
     let data = loot::LootData::load_with_types(
@@ -204,8 +223,9 @@ fn copy_components_uses_available_sources_and_table_filters_in_both_evaluators()
     let mut items = Items::for_tests(HashMap::new());
     items.set_loot_data(&data);
     items.component_defaults = data.component_defaults().clone();
+    items.loot = programmatic_tables(&data, &programmatic);
     for (name, _, has_block, has_tool, has_entity, copied) in cases {
-        let mut expected: Compound = [("test:untouched".into(), base.clone())]
+        let mut expected: Compound = [("minecraft:debug_stick_state".into(), base.clone())]
             .into_iter()
             .collect();
         expected.extend(copied.into_iter().map(|(id, tag)| (id.into(), tag)));
@@ -247,6 +267,8 @@ fn copy_components_uses_available_sources_and_table_filters_in_both_evaluators()
                                     ..Default::default()
                                 },
                             )
+                        } else if let Some(table) = programmatic.get(&id) {
+                            data.roll_inline(table, &mut random)
                         } else {
                             data.roll(&id, &mut random, 0.0, None, None)
                         };
@@ -497,7 +519,7 @@ fn copy_custom_data_runs_the_same_ordered_nbt_operations_in_both_evaluators() {
     ];
     for (name, provider, operations, _) in &cases {
         let mut functions = vec![
-            json!({"type":"minecraft:set_components","components":{"test:untouched":{"value":"before"}}}),
+            json!({"type":"minecraft:set_components","components":{"minecraft:debug_stick_state":{"minecraft:oak_log":"axis"}}}),
             json!({"type":"minecraft:set_components","components":{"minecraft:custom_data":base_text}}),
         ];
         if *name == "component_then_custom" {
@@ -540,8 +562,8 @@ fn copy_custom_data_runs_the_same_ordered_nbt_operations_in_both_evaluators() {
         }
         let expected = Tag::compound([
             (
-                "test:untouched",
-                Tag::compound([("value", Tag::String("before".into()))]),
+                "minecraft:debug_stick_state",
+                Tag::compound([("minecraft:oak_log", Tag::String("axis".into()))]),
             ),
             ("minecraft:custom_data", Tag::Compound(expected)),
         ]);
@@ -626,6 +648,7 @@ fn copy_custom_data_respects_removed_prototype_data_in_both_evaluators() {
         r#"{"minecraft:stick":{"minecraft:max_stack_size":64,"minecraft:custom_data":{"old":1}}}"#,
     )
     .unwrap();
+    let mut programmatic = HashMap::new();
     for (name, removal) in [
         ("null", json!({"minecraft:custom_data":null})),
         ("bang", json!({"!minecraft:custom_data":{}})),
@@ -640,7 +663,11 @@ fn copy_custom_data_respects_removed_prototype_data_in_both_evaluators() {
                 ]}
             ]}
         }]}]});
-        std::fs::write(folder.join(format!("{name}.json")), table.to_string()).unwrap();
+        if name == "bang" {
+            std::fs::write(folder.join(format!("{name}.json")), table.to_string()).unwrap();
+        }
+        // Null forms exercise the permissive evaluator, never the pack codec.
+        programmatic.insert(format!("test:{name}"), table);
     }
     let defaults = sunrise_world::item_defaults::read(&root).unwrap();
     let data = loot::LootData::load_with_types(
@@ -653,6 +680,7 @@ fn copy_custom_data_respects_removed_prototype_data_in_both_evaluators() {
     let mut items = Items::for_tests(HashMap::new());
     items.set_loot_data(&data);
     items.component_defaults = data.component_defaults().clone();
+    items.loot = programmatic_tables(&data, &programmatic);
     let source = BlockSource {
         nbt: Tag::compound([("fresh", Tag::Long(7))]),
         components: Default::default(),
@@ -668,7 +696,7 @@ fn copy_custom_data_respects_removed_prototype_data_in_both_evaluators() {
                     assert_eq!(output.len(), 1);
                     Tag::Compound(output.remove(0).custom_data().unwrap().clone())
                 } else {
-                    let mut output = data.roll(&id, &mut random, 0.0, None, None);
+                    let mut output = data.roll_inline(&programmatic[&id], &mut random);
                     assert_eq!(output.len(), 1);
                     output
                         .remove(0)
@@ -832,6 +860,7 @@ fn set_custom_data_merges_effective_prototypes_and_respects_removal_in_both_eval
         r#"{"minecraft:stick":{"minecraft:custom_data":{"old":1}}}"#,
     )
     .unwrap();
+    let mut programmatic = HashMap::new();
     for (name, removal) in [
         ("prototype", None),
         ("removed", Some(json!({"!minecraft:custom_data":{}}))),
@@ -848,7 +877,11 @@ fn set_custom_data_merges_effective_prototypes_and_respects_removal_in_both_eval
             "type":"minecraft:item","name":"minecraft:stick",
             "modifier":{"type":"minecraft:sequence","functions":functions}
         }]}]});
-        std::fs::write(folder.join(format!("{name}.json")), table.to_string()).unwrap();
+        if name != "null" {
+            std::fs::write(folder.join(format!("{name}.json")), table.to_string()).unwrap();
+        }
+        // Null forms exercise the permissive evaluator, never the pack codec.
+        programmatic.insert(format!("test:{name}"), table);
     }
     let data = loot::LootData::load(
         &root,
@@ -859,6 +892,7 @@ fn set_custom_data_merges_effective_prototypes_and_respects_removal_in_both_eval
     let mut items = Items::for_tests(HashMap::new());
     items.set_loot_data(&data);
     items.component_defaults = data.component_defaults().clone();
+    items.loot = programmatic_tables(&data, &programmatic);
     for name in ["prototype", "removed", "null"] {
         let expected = if name == "prototype" {
             Tag::compound([
@@ -877,7 +911,7 @@ fn set_custom_data_merges_effective_prototypes_and_respects_removal_in_both_eval
                 assert_eq!(output.len(), 1);
                 Tag::Compound(output.remove(0).custom_data().unwrap().clone())
             } else {
-                let mut output = data.roll(&id, &mut random, 0.0, None, None);
+                let mut output = data.roll_inline(&programmatic[&id], &mut random);
                 assert_eq!(output.len(), 1);
                 output
                     .remove(0)
