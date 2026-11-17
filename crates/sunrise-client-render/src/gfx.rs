@@ -261,6 +261,7 @@ mod pack_atlas;
 mod pack_center_depth;
 pub mod pack_draw;
 mod pack_entities;
+mod pack_external;
 mod pack_hand;
 mod pack_images;
 mod pack_lines;

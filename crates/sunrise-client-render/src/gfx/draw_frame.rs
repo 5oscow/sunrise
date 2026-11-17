@@ -12,6 +12,7 @@ use acquire_frame::AcquiredFrame;
 mod post;
 #[path = "frame/water_mirror.rs"]
 mod water_mirror;
+use super::external::ExternalPipeline as _;
 use super::*;
 use post::{PostPassArgs, PostPassResult};
 
@@ -393,6 +394,11 @@ impl Renderer {
         if let Some(pipeline) = self.external.as_mut().filter(|_| !frame.title) {
             pipeline.begin_frame(&state);
         }
+        // What a `shaders/` pack draws itself this frame.
+        let pk = match &self.pack_post {
+            Some((_, Some(pack))) if !frame.title => pack.draws(&state),
+            _ => external::Draws::default(),
+        };
         let shadow_view = self
             .pack_post
             .as_ref()
@@ -411,12 +417,7 @@ impl Renderer {
                     .filter(|_| !frame.title)?
                     .shadow_request(&state)
             });
-        let pack_terrain = !frame.title
-            && self
-                .pack_post
-                .as_ref()
-                .and_then(|p| p.1.as_ref())
-                .is_some_and(|p| p.has_terrain());
+        let pack_terrain = pk.terrain;
         // `LevelRenderer.extractSectionDrawGroups`' fade-in time, for the instances.
         let fade_ms = fade_millis(frame.chunk_fade);
         // GPU culling's fading sections, decided at `fades.now`: before the gate, the record
@@ -595,12 +596,7 @@ impl Renderer {
             self.walk_world_views(&mut encoder, frame, radius)
         });
         // A `shaders/` pack that draws the terrain, or its shadow, sees it as Iris does.
-        let shaders_pack = !frame.title
-            && self
-                .pack_post
-                .as_ref()
-                .and_then(|p| p.1.as_ref())
-                .is_some_and(|p| p.has_terrain() || p.has_shadow());
+        let shaders_pack = pk.terrain || pk.shadow;
         if shaders_pack {
             let from = pack_terrain_camera(camera);
             let lists = self.world_views.sections.sections_mut();
@@ -1305,20 +1301,14 @@ impl Renderer {
             Some(skinner) => skinner.register(&self.device, &mut self.uploads, &mut encoder, skin),
             None => false,
         });
-        let pack_skin = !frame.title
-            && skin.is_some()
-            && self
-                .pack_post
-                .as_ref()
-                .and_then(|(_, post)| post.as_ref())
-                .is_some_and(|post| post.skins_entities());
+        let pack_skin = skin.is_some() && pk.skins_entities;
         // While a shader pack draws entities, the runs of `entity_spans` its programs draw are
         // left out of Sunrise's own entity draw.
         let mut entities = frame.entities;
         let mut pack_entities = false;
         if !frame.title
+            && pk.entities
             && let Some((_, Some(post))) = &mut self.pack_post
-            && post.has_entities()
         {
             pack_entities = true;
             post.prepare_entities(
@@ -1932,7 +1922,7 @@ impl Renderer {
             self.show_stats(serial, cpu);
         }
         // The world's targets: the screen, or the scaled target of `post`.
-        let pack_post = !frame.title && self.pack_post.as_ref().is_some_and(|p| p.1.is_some());
+        let pack_post = pk.reads_world;
         // One of Sunrise's own packs reads the same world target.
         let native_post = !frame.title && self.native.as_ref().is_some_and(|n| n.post.is_some());
         if let Some(timer) = Self::pass_timer(&mut self.pack_post, &mut self.native)
@@ -1963,48 +1953,13 @@ impl Renderer {
         let pack_draws_terrain = pack_terrain && flat_frame == self.pack_terrain_flat;
         // The shadow camera's lists, drawn by the pack's shadow programs.
         let pack_draws_shadow = shadow_view.is_some() && flat_frame == self.pack_terrain_flat;
-        let pack_draws_sky = pack_post
-            && self
-                .pack_post
-                .as_ref()
-                .and_then(|p| p.1.as_ref())
-                .is_some_and(|p| p.has_sky());
-        let pack_draws_celestial = pack_post
-            && self
-                .pack_post
-                .as_ref()
-                .and_then(|p| p.1.as_ref())
-                .is_some_and(|p| p.has_celestial());
-        let pack_draws_water = pack_draws_terrain
-            && self
-                .pack_post
-                .as_ref()
-                .and_then(|p| p.1.as_ref())
-                .is_some_and(|p| p.has_water());
-        let pack_draws_clouds = pack_post
-            && self
-                .pack_post
-                .as_ref()
-                .and_then(|p| p.1.as_ref())
-                .is_some_and(|p| p.has_clouds());
-        let pack_draws_outline = pack_post
-            && self
-                .pack_post
-                .as_ref()
-                .and_then(|p| p.1.as_ref())
-                .is_some_and(|p| p.has_lines());
-        let pack_draws_hand = pack_post
-            && self
-                .pack_post
-                .as_ref()
-                .and_then(|p| p.1.as_ref())
-                .is_some_and(|p| p.has_hand());
-        let pack_draws_weather = pack_post
-            && self
-                .pack_post
-                .as_ref()
-                .and_then(|p| p.1.as_ref())
-                .is_some_and(|p| p.has_weather());
+        let pack_draws_sky = pk.sky;
+        let pack_draws_celestial = pk.celestial;
+        let pack_draws_water = pack_draws_terrain && pk.water;
+        let pack_draws_clouds = pk.clouds;
+        let pack_draws_outline = pk.outline;
+        let pack_draws_hand = pk.hand;
+        let pack_draws_weather = pk.weather;
         let scaled = self.world_post.prepare(
             &self.device,
             [self.config.width, self.config.height],
@@ -2049,10 +2004,7 @@ impl Renderer {
                     [water_mask_quads > 0, cloud_quads > 0],
                 );
         }
-        let pack_sky_clear = pack_draws_sky
-            .then(|| self.pack_post.as_ref().and_then(|p| p.1.as_ref()))
-            .flatten()
-            .and_then(|p| p.sky_clear());
+        let pack_sky_clear = pk.sky_clear;
         let clear = if let Some([r, g, b, a]) = pack_sky_clear {
             wgpu::Color {
                 r: f64::from(r),

@@ -26,11 +26,46 @@ pub struct FrameState<'a> {
     pub output: &'a EffectiveOutput,
 }
 
+/// What an external pipeline draws itself this frame: vanilla's own draw of each is skipped. All
+/// `false` is vanilla's frame. Asked once a world frame (`ExternalPipeline::draws`), so the
+/// engine tests plain values at each point, not the pipeline.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Draws {
+    /// It runs the world's post passes in place of `world_post`, so the world is drawn into
+    /// targets of its own and kept with its depth.
+    pub reads_world: bool,
+    /// The sky disc, sunset, stars and void; with the colour the world clears to (`None`: fog).
+    pub sky: bool,
+    pub sky_clear: Option<[f32; 4]>,
+    /// The sun and moon.
+    pub celestial: bool,
+    /// Terrain (solid and cutout), or nothing draws it.
+    pub terrain: bool,
+    /// Translucent terrain.
+    pub water: bool,
+    /// Terrain from the light: it has a shadow pass (`shadow_request`).
+    pub shadow: bool,
+    pub clouds: bool,
+    /// The block outline.
+    pub outline: bool,
+    pub hand: bool,
+    /// Rain and snow.
+    pub weather: bool,
+    /// Entities, from the vertices the renderer lists for them.
+    pub entities: bool,
+    /// Entity models posed on the GPU land in its buffer (`Frame::skin`).
+    pub skins_entities: bool,
+}
+
 /// An external shader pipeline, called by the renderer at fixed points of a world frame (not
 /// title frames). Every method has a default that leaves vanilla's way in place.
 pub trait ExternalPipeline: Send {
     /// A world frame starts, before culling.
     fn begin_frame(&mut self, _state: &FrameState<'_>) {}
+    /// What it draws itself this frame; vanilla draws the rest.
+    fn draws(&self, _state: &FrameState<'_>) -> Draws {
+        Draws::default()
+    }
     /// The shadow pass this frame wants; `None` draws none.
     fn shadow_request(&self, _state: &FrameState<'_>) -> Option<ShadowView> {
         None
