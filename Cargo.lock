@@ -525,6 +525,7 @@ dependencies = [
  "sunrise-native-build",
  "sunrise-port-pack",
  "sunrise-release-sign",
+ "sunrise-shader-api",
  "tempfile",
  "toml",
  "toml_edit",
