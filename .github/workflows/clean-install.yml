@@ -49,7 +49,7 @@ jobs:
             "$RUNNER_TEMP/dl/sunrise-launcher-setup.exe" setup --quiet --dir "$home/programs"
             launcher=$(find "$home/programs" -name 'sunrise-launcher.exe' | head -1)
           else
-            sudo apt-get update -qq && sudo apt-get install -y -qq xvfb libvulkan1 mesa-vulkan-drivers libasound2t64 >/dev/null
+            sudo apt-get update -qq && sudo apt-get install -y -qq xvfb libvulkan1 mesa-vulkan-drivers libasound2t64 libxkbcommon-x11-0 libxcb-xkb1 >/dev/null
             mkdir -p "$home/programs" && tar xzf "$RUNNER_TEMP/dl/${{ matrix.asset }}" -C "$home/programs"
             launcher="$home/programs/sunrise-launcher"
           fi
@@ -81,8 +81,8 @@ jobs:
           "$LAUNCHER" versions --installed
       - name: Play asks for a Microsoft account
         run: |
-          set -uo pipefail
-          out=$("$LAUNCHER" play --world smoke 2>&1); status=$?
+          status=0
+          out=$("$LAUNCHER" play --world smoke 2>&1) || status=$?
           echo "$out" | tail -2
           [[ $status != 0 ]] && grep -q "Sign in with a Microsoft account" <<<"$out"
       - name: The installed game enters a new world
