@@ -507,7 +507,8 @@ class ReleaseTrainTests(unittest.TestCase):
             for n in range(3):
                 git("commit", "-q", "--allow-empty", "-m", str(n))
                 commits.append(git("rev-parse", "HEAD"))
-            with mock.patch.object(train, "ROOT", Path(folder)):
+            with mock.patch.object(train, "ROOT", Path(folder)), \
+                    mock.patch.object(train, "daily_green_commit", return_value=commits[1]):
                 for channel in ("snapshot", "nightly"):
                     git("update-ref", "refs/remotes/origin/main", commits[1])
                     head = commits[1]
@@ -532,6 +533,37 @@ class ReleaseTrainTests(unittest.TestCase):
                             train.channel_head(channel, commits[2])
                         with self.assertRaisesRegex(SystemExit, "not a commit of this repository"):
                             train.channel_head(channel, "f" * 40)
+
+    def test_a_nightly_ships_only_daily_green_unless_the_owner_granted_an_exception(self):
+        with tempfile.TemporaryDirectory() as folder:
+            def git(*args):
+                return subprocess.check_output(["git", *args], cwd=folder, text=True, stderr=subprocess.DEVNULL).strip()
+            git("init", "-q", "-b", "main")
+            git("config", "user.name", "Test")
+            git("config", "user.email", "test@example.invalid")
+            commits = []
+            for n in range(2):
+                git("commit", "-q", "--allow-empty", "-m", str(n))
+                commits.append(git("rev-parse", "HEAD"))
+            git("update-ref", "refs/remotes/origin/main", commits[1])
+            with mock.patch.object(train, "ROOT", Path(folder)), \
+                    mock.patch.object(train, "fork_gate_passed", return_value=True):
+                # A gate-green commit of main that is not daily-green: refused, by default and by name.
+                with mock.patch.object(train, "daily_green_commit", return_value=commits[0]):
+                    self.assertEqual(train.channel_head("nightly", ""), commits[0], "the default is daily-green")
+                    with self.assertRaisesRegex(SystemExit, "not the commit `daily-green` points to"):
+                        train.channel_head("nightly", commits[1])
+                    self.assertEqual(train.channel_head("snapshot", commits[1]), commits[1], "a snapshot needs no daily")
+                with mock.patch.object(train, "daily_green_commit", return_value=""):
+                    with self.assertRaisesRegex(SystemExit, "none yet"):
+                        train.channel_head("nightly", "")
+                    # The owner's one-time grant names its commit, which still needs the gate.
+                    self.assertEqual(train.channel_head("nightly", commits[1], "owner 2026-11-17: the cursor fix"),
+                                     commits[1])
+                with mock.patch.object(train, "fork_gate_passed", return_value=False), \
+                        mock.patch.object(train, "daily_green_commit", side_effect=AssertionError("not consulted")):
+                    with self.assertRaisesRegex(SystemExit, "needs the gate green"):
+                        train.channel_head("nightly", commits[1], "owner 2026-11-17: the cursor fix")
 
     def test_a_publishing_run_runs_a_cancelled_gate_again_and_waits_for_it(self):
         sha = "a" * 40

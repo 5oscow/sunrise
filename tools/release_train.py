@@ -2,7 +2,7 @@
 """Decides when Sunrise releases, names the release and writes its notes (.github/workflows/release.yml).
 
     python3 tools/release_train.py decide --kind game [--head SHA] [--force]
-    python3 tools/release_train.py decide --kind game --channel nightly|snapshot [--head SHA] [--force] [--daily]
+    python3 tools/release_train.py decide --kind game --channel nightly|snapshot [--head SHA] [--force] [--daily] [--exception TEXT]
     python3 tools/release_train.py decide --kind launcher
     python3 tools/release_train.py notes --kind game --tag v2026.10.15 --out dist/notes
     python3 tools/release_train.py gate --kind game --smoke dist/smoke-test.json [--blockers]   # before publishing
@@ -10,7 +10,8 @@
 The game ships only the Nightly since 2026-10-28 (Ludovic): when `decide --kind game` says so, release.yml starts
 `nightly build` on the commit it decided (tools/ci/nightly.py), and "the last release" is the published Nightly.
 On the fork (CI tiers, owner 2026-11-13) `--channel` names the kind of build: `nightly` takes `daily-green` and
-refuses any other --head (an older commit had no daily run of its own, and no SDK); `snapshot` takes main's head (or
+refuses any other --head (an older commit had no daily run of its own, and no SDK) unless --exception names the
+owner's one-time grant for it (owner, 2026-11-17: an exception never changes the rule); `snapshot` takes main's head (or
 a --head on main) and refuses a commit whose gate jobs (dyna-checks' main-push lint, verify, verify-static, launcher)
 did not all pass (pending is not passed). The next push cancels a main push run (dyna-ci.yml), so a publishing run
 (GATE_RERUN=1: release.yml's decide and nightly-build.yml's pick, real runs) waits for the commit's run and starts it again once when it was cancelled, in a
@@ -677,14 +678,25 @@ def gate_again(sha):
         time.sleep(GATE_POLL)
 
 
-def channel_head(channel, head):
-    """The commit a fork channel builds, or exits naming the check it failed."""
+def channel_head(channel, head, exception=""):
+    """The commit a fork channel builds, or exits naming the check it failed. A nightly builds only the commit
+    `daily-green` points to (its default), unless `exception` names the owner's one-time grant for another commit
+    (docs/release-flow.md "Nightly channel"); that commit still needs the gate."""
+    green = daily_green_commit() if channel == "nightly" and not exception else ""
+    head = head or green
     sha = run("git", "rev-parse", "--verify", "--quiet", f"{head or 'refs/remotes/origin/main'}^{{commit}}",
               check=False).strip()
     if not sha:
         raise SystemExit(f"::error::refused: {head} is not a commit of this repository")
     if subprocess.run(["git", "merge-base", "--is-ancestor", sha, "refs/remotes/origin/main"], cwd=ROOT).returncode:
         raise SystemExit(f"::error::refused: {sha} is not on main; a {channel} builds only a commit of main")
+    if channel == "nightly" and not exception and sha != green:
+        raise SystemExit(f"::error::refused: {sha} is not the commit `{DAILY_GREEN}` points to ({green or 'none yet'}); "
+                         "a Nightly ships only the commit of a fully green daily run, or one the owner granted a "
+                         "one-time exception (the `exception` input)")
+    if exception and channel == "nightly":
+        print(f"::warning::{sha[:9]} is published by a one-time exception, not from a green daily: {exception}",
+              file=sys.stderr)
     if not fork_gate_passed(sha) and not (os.environ.get("GATE_RERUN") == "1" and gate_again(sha)):
         raise SystemExit(f"::error::refused: dyna-checks' gate jobs ({', '.join(sorted(GATE))}) "
                          f"did not all pass on a main push of {sha}; a {channel} needs the gate green on its commit")
@@ -755,6 +767,8 @@ def main():
                         help="decide: the daily run's nightly, without the batch-size and age rules")
     parser.add_argument("--channel", choices=["nightly", "snapshot"],
                         help="decide: the fork's kind of build, which picks and checks the commit (see above)")
+    parser.add_argument("--exception", default="",
+                        help="decide --channel nightly: the owner's one-time grant for a commit that is not daily-green")
     parser.add_argument("--tag", help="notes: the release's tag")
     parser.add_argument("--force", action="store_true", help="release even without player-facing changes, before merges settle, while paused or before parity-main passed")
     parser.add_argument("--out", type=Path, help="notes: write title.txt and body.md here")
@@ -777,7 +791,7 @@ def main():
 
     # Game releases ship only a commit the vanilla harnesses passed on (parity-main, docs/release-flow.md).
     parity = args.kind == "game" and args.command == "decide" and not args.force
-    head = channel_head(args.channel, args.head) if args.channel else args.head or green_main_head(parity)
+    head = channel_head(args.channel, args.head, args.exception) if args.channel else args.head or green_main_head(parity)
     if not head:
         result = {"release": False, "reason": "main's latest checks did not pass" + (
             " or parity-main did not pass on them" if parity else "")}

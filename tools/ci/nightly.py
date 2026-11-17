@@ -24,7 +24,7 @@ this repository's checks passed (`dyna-checks` on the fork, `checks` and `parity
 `nightly` pre-release; the previous one stays a week as nightly-<date>.
 On sunrise-org/sunrise only, the base is the commit `daily-green` points to (the newest daily run that passed every
 leg, which also published its SDK: release_train.daily_green_commit), with a complete published `sdk-<sha>` release
-of the current package format for that exact SHA, whose sdk.json the Nightly carries in its signed sums. An explicit base that is any other commit, or has no SDK, fails; PR picks are
+of the current package format for that exact SHA, whose sdk.json the Nightly carries in its signed sums. An explicit base that is any other commit (unless NIGHTLY_EXCEPTION names the owner's one-time grant for it), or has no SDK, fails; PR picks are
 disabled, and the final SHA is rechecked before pushing.
 Its notes list what reached main since the previous nightly, then the picked pull requests. Runs from main's
 checkout with `gh`; it reads and merges the branches with git and never runs anything from them.
@@ -356,7 +356,7 @@ def green_base(repo: str, issue: str) -> Ref:
     (dyna-checks on the fork, checks plus parity-main upstream), never an untested fallback."""
     explicit = os.environ.get("NIGHTLY_BASE", "").strip()
     if repo == "sunrise-org/sunrise":
-        sha = train.channel_head("nightly", explicit)
+        sha = train.channel_head("nightly", explicit, os.environ.get("NIGHTLY_EXCEPTION", "").strip())
     else:
         sha = explicit or train.green_main_head(parity=True)
         if not sha:

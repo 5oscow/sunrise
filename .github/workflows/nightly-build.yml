@@ -70,7 +70,11 @@ on:
         type: string
         default: ''
       base:
-        description: The commit of main to build on (default main's newest with green checks; on Sunrise main's head with its dyna-checks gate green)
+        description: The commit of main to build on (default main's newest with green checks; on Sunrise the `daily-green` commit with its dyna-checks gate green)
+        type: string
+        default: ''
+      exception:
+        description: The owner's one-time grant to publish a `base` that is not daily-green (who, when, why); empty otherwise
         type: string
         default: ''
       urgent:
@@ -130,6 +134,7 @@ jobs:
           NIGHTLY_ISSUE: ${{ inputs.issue }}
           NIGHTLY_PRS: ${{ inputs.prs }}
           NIGHTLY_BASE: ${{ inputs.base }}
+          NIGHTLY_EXCEPTION: ${{ inputs.exception }}
           NIGHTLY_URGENT: ${{ inputs.urgent }}
           KIND: ${{ inputs.kind }}
         run: |
