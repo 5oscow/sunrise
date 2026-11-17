@@ -3,7 +3,7 @@ use super::super::*;
 impl Renderer {
     pub(in super::super) fn draw_shadow_passes(
         &mut self,
-        mut encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut wgpu::CommandEncoder,
         frame: &Frame,
         shadow_view: Option<&external::ShadowView>,
         flat_frame: bool,
@@ -20,7 +20,7 @@ impl Renderer {
         if !frame.title
             && let Some(native) = &mut self.native
         {
-            native.frame.shadow_map.clear_blank(&mut encoder);
+            native.frame.shadow_map.clear_blank(encoder);
         }
         if !frame.title
             && shadow_view.is_some()
@@ -28,7 +28,7 @@ impl Renderer {
             && let Some(shadow) = &native.shadow
         {
             let mut pass = native.frame.shadow_map.begin(
-                &mut encoder,
+                encoder,
                 "Native shader pack shadow",
                 self.own_timing.as_mut(),
             );
@@ -61,7 +61,7 @@ impl Renderer {
             }
             drop(pass);
             let mut pass = native.frame.shadow_map.begin_translucent(
-                &mut encoder,
+                encoder,
                 "Native shader pack translucent shadow",
                 self.own_timing.as_mut(),
             );
@@ -94,7 +94,7 @@ impl Renderer {
                 let mut pass = native
                     .frame
                     .shadow_map
-                    .begin_entities(&mut encoder, "Native shader pack entity shadow");
+                    .begin_entities(encoder, "Native shader pack entity shadow");
                 pass.set_pipeline(&shadow.entity);
                 pass.set_bind_group(0, &self.entity_group, &[]);
                 pass.set_bind_group(sunrise_shader_api::stages::GROUP, &shadow.group, &[]);
