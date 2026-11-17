@@ -20,6 +20,10 @@ pub(crate) type CollisionAnswer = Box<dyn Fn(&mod_api::CollisionQuery) -> Option
 thread_local! {
     /// How many times this thread asked the installed `collision_shape`.
     pub(crate) static COLLISION_ASKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// The states whose answers the installed `collision_shape_refused` heard on this thread, in
+    /// order. A state in it is not asked again, as the game's adapter switches its block off.
+    pub(crate) static COLLISION_REFUSED: std::cell::RefCell<Vec<u32>> =
+        const { std::cell::RefCell::new(Vec::new()) };
     /// The answer the installed `collision_shape` gives this thread; none leaves the shape be.
     pub(crate) static COLLISION_ANSWER: std::cell::RefCell<Option<CollisionAnswer>> =
         const { std::cell::RefCell::new(None) };
@@ -168,7 +172,10 @@ pub(crate) fn install() {
                     };
                 }
             },
-            collision_shape: |_, _, _, query, shape| {
+            collision_shape: |_, _, state, query, shape| {
+                if COLLISION_REFUSED.with_borrow(|refused| refused.contains(&state.0)) {
+                    return;
+                }
                 COLLISION_ASKS.with(|asks| asks.set(asks.get() + 1));
                 COLLISION_ANSWER.with_borrow(|answer| {
                     if let Some(answer) = answer {
@@ -176,7 +183,9 @@ pub(crate) fn install() {
                     }
                 });
             },
-            collision_shape_refused: |_, _| {},
+            collision_shape_refused: |state, _| {
+                COLLISION_REFUSED.with_borrow_mut(|refused| refused.push(state.0));
+            },
             player_stays_on_ground_surface: |context, _, staying| {
                 *staying |= context.setting("rules_mod", "stack").is_some();
             },

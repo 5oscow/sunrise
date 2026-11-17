@@ -175,7 +175,7 @@ impl PartShapes for ModParts {
 mod tests {
     use super::*;
     use crate::native_client_hooks::test_hooks::{
-        COLLISION_ANSWER, COLLISION_ASKS, install, loop_context,
+        COLLISION_ANSWER, COLLISION_ASKS, COLLISION_REFUSED, install, loop_context,
     };
     use std::rc::Rc;
     use sunrise_world::collision_context::CollisionEntity;
@@ -206,6 +206,24 @@ mod tests {
             &entity(id),
             &mut || &[],
         )
+    }
+
+    #[test]
+    fn a_refused_answer_keeps_the_normal_shape_and_the_block_is_not_asked_again() {
+        let parts = parts();
+        COLLISION_REFUSED.with_borrow_mut(Vec::clear);
+        COLLISION_ANSWER.with_borrow_mut(|answer| {
+            *answer = Some(Box::new(|_| Some(vec![[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]; 65])));
+        });
+        assert!(
+            ask(&parts, 7, [1, 64, 1]).is_none(),
+            "the normal shape stays"
+        );
+        assert_eq!(COLLISION_REFUSED.with_borrow(Clone::clone), [1]);
+        // Another position and another entity: the refused block is not asked.
+        assert!(ask(&parts, 8, [2, 64, 1]).is_none());
+        assert_eq!(COLLISION_ASKS.get(), 1);
+        assert_eq!(COLLISION_REFUSED.with_borrow(Clone::clone), [1]);
     }
 
     #[test]
