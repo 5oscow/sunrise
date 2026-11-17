@@ -219,14 +219,14 @@ fn a_biome_filter_refuses_only_when_reached() {
     }
 }
 
-/// A configured feature's id is not a placed feature's, and the other way round.
+/// Registry-exclusive feature ids must not resolve through the other registry.
 #[test]
 #[ignore = "daily"]
 fn a_placed_feature_id_is_checked_in_its_own_registry() {
     with_game(|game| {
         ground(game, false);
         let level = game.level(game.dim.id()).unwrap();
-        for id in ["mymod:no_such_tree", "oak_checked", "minecraft:oak"] {
+        for id in ["mymod:no_such_tree", "oak_checked", "minecraft:azalea_tree"] {
             assert_eq!(
                 level.place_placed_feature(game, id, AT),
                 Err(PlaceFeatureRefusal::UnknownFeature),
