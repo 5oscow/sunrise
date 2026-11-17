@@ -7617,6 +7617,19 @@ fn plain_block_properties_replace_template_facts_and_face_rule() {
             assert_eq!(row.get("ignited_by_lava"), Some(&J::Bool(value)));
             assert_eq!(row.get("replaceable"), Some(&J::Bool(value)));
         }
+        let template_flags = if value { 16 } else { 16 | 4 };
+        let mut properties = Tag::Compound(Compound::from([(
+            "blocks".into(),
+            Tag::Compound(Compound::from([(
+                "minecraft:test".into(),
+                Tag::Byte(template_flags),
+            )])),
+        )]));
+        plan.nbt(&mut properties);
+        assert_eq!(
+            properties.get("blocks").unwrap().get("testmod:test"),
+            Some(&Tag::Byte(if value { 16 | 4 } else { 16 }))
+        );
         let mut definitions: J =
             serde_json::from_str(r#"{"minecraft:test":{"rule":"bars"}}"#).unwrap();
         plan.json("render-definitions.json", &mut definitions)

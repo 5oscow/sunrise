@@ -2389,10 +2389,14 @@ impl<'a> Plan<'a> {
                         else {
                             continue;
                         };
-                        if b.decl.properties.occludes == Some(false)
-                            && let Tag::Byte(flags) = &mut v
-                        {
-                            *flags &= !16;
+                        if let Tag::Byte(flags) = &mut v {
+                            if b.decl.properties.occludes == Some(false) {
+                                *flags &= !16;
+                            }
+                            if let Some(replaceable) = b.decl.properties.replaceable {
+                                // `BlockPropertiesRegistry` reads replaceable from bit 2.
+                                *flags = (*flags & !4) | (i8::from(replaceable) << 2);
+                            }
                         }
                         if let (Some(f), Some(slot)) =
                             (b.decl.properties.friction, v.get_mut("friction"))

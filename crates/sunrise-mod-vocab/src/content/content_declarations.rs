@@ -43,9 +43,10 @@ pub struct BlockProperties {
     pub instrument: Option<crate::NoteInstrument>,
     /// Lava ignition flag. The per-position `ignited_by_lava` hook still answers first.
     pub ignited_by_lava: Option<bool>,
-    /// Whether placement may replace this block; the held-own-item rule remains unchanged.
+    /// Whether placement and features may replace this block; the held-own-item rule still applies.
     pub replaceable: Option<bool>,
-    /// Skip faces against any state of this same block; false disables the template's skip rule.
+    /// Skip faces against any state of this same block; false disables the template's render rule.
+    /// Leaf and ice graphics culling still follows the template class.
     pub skip_same_block_faces: Option<bool>,
 }
 

@@ -243,13 +243,16 @@ doesn't leave a hole in the floor under it. It is not a solid render either, so 
 leaves: dampened by 1, or not at all if skylight passes down; special template light rules remain inherited.
 Unset or `true` preserves the template's ability to occlude, using the declared outline when one is supplied.
 
-`instrument` takes any vanilla `NoteBlockInstrument` constant name (for example `HARP`, `FLUTE`, or
-`CUSTOM_HEAD`); native and wasm declarations use `NoteInstrument`. It controls the instrument of a note block
-placed above this block. `ignited_by_lava` sets lava's ignition flag; a subscribed per-position
-`ignited_by_lava` hook still answers first. `replaceable` controls whether placement can replace this block;
+`instrument` takes any vanilla `NoteBlockInstrument` constant name (for example `HARP` or `FLUTE`);
+native and wasm declarations use `NoteInstrument`. A note block reads ordinary instruments from the block
+below it and head instruments (`ZOMBIE` through `CUSTOM_HEAD`) from the block above it. `CUSTOM_HEAD`
+is silent without a skull block entity above the note block with a `note_block_sound`.
+`ignited_by_lava` sets lava's ignition flag; a subscribed per-position `ignited_by_lava` hook still answers
+first. `replaceable` controls replacement by block placement and by features that check replaceability;
 the usual refusal when the hand holds the block's own item still applies. `skip_same_block_faces: true`
-hides model faces against any state of this same block, as glass does; `false` disables the template's
-skip rule. Unset values inherit the template. These are load-time properties on both sides, with no new hook.
+hides model faces against any state of this same block, as glass does; `false` disables the template's render
+definition skip rule. Leaf and ice graphics options can still hide faces based on the template class.
+Unset values inherit the template. These are load-time properties on both sides, with no new hook.
 
 `destroy_overlay: false` hides the breaking crack (`destroy_stage_0` to `9`) on the block, for one broken by use
 (a feast or a cake taken apart bite by bite). It is read once at load into the block's facts, and only the overlay

@@ -135,10 +135,11 @@ pub struct BlockProperties {
     /// Lava ignition flag. The per-position `ignited_by_lava` hook still answers first.
     #[serde(default, deserialize_with = "deserialize_ignited_by_lava")]
     pub ignited_by_lava: Option<bool>,
-    /// Whether placement may replace this block; the held-own-item rule remains unchanged.
+    /// Whether placement and features may replace this block; the held-own-item rule still applies.
     #[serde(default, deserialize_with = "deserialize_replaceable")]
     pub replaceable: Option<bool>,
-    /// Skip faces against any state of this same block; false disables the template's skip rule.
+    /// Skip faces against any state of this same block; false disables the template's render rule.
+    /// Leaf and ice graphics culling still follows the template class.
     #[serde(default, deserialize_with = "deserialize_skip_same_block_faces")]
     pub skip_same_block_faces: Option<bool>,
 }
