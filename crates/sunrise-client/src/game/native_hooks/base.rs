@@ -3256,11 +3256,12 @@ impl Game<'_> {
     /// server does), so answer from the stack and the player alone.
     pub(in crate::game) fn native_can_eat(
         &self,
+        player: mod_api::PlayerRef,
         stack: Option<&ItemStack>,
         vanilla_can_eat: bool,
         can_eat: &mut Option<bool>,
     ) {
-        self.fire_can_eat(stack, vanilla_can_eat, can_eat);
+        self.fire_can_eat(player, stack, vanilla_can_eat, can_eat);
     }
     /// NeoForge's `LivingEntityUseItemEvent.Start`: `entity` starts using
     /// `stack` in `hand` (`LivingEntity.startUsingItem`), for `duration`
