@@ -134,6 +134,7 @@ fn main() -> ExitCode {
                     | "needs"
                     | "missing-extras"
                     | "extras"
+                    | "data-file"
             )
         )
     });
@@ -332,9 +333,9 @@ fn main() -> ExitCode {
 }
 
 /// The commands a launcher asks instead of linking the preparer (docs/api/prepare-extras.md).
-const QUERIES: [&str; 3] = ["needs", "missing-extras", "extras"];
+const QUERIES: [&str; 4] = ["needs", "missing-extras", "extras", "data-file"];
 
-/// `needs`, `missing-extras` and `extras`: the answer on stdout, JSON with `--json`.
+/// `needs`, `missing-extras`, `extras` and `data-file`: the answer on stdout, JSON with `--json`.
 fn run_query(
     name: &str,
     options: &sunrise_prepare::Options,
@@ -366,6 +367,14 @@ fn run_query(
                     "server jar needed: {}\nJDK needed: {}",
                     needs.server_jar, needs.jdk
                 ),
+            };
+            (text, true)
+        }),
+        "data-file" => extras::data_file(&options.root, options.output.as_deref()).map(|written| {
+            let text = match (json, written) {
+                (true, _) => extras::data_file_json(written),
+                (false, true) => "sunrise-data.bin written".into(),
+                (false, false) => "sunrise-data.bin was already there".into(),
             };
             (text, true)
         }),
