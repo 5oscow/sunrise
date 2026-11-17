@@ -146,6 +146,7 @@ use std::{
     time::{Duration, Instant},
 };
 use sunrise_client::actions::Action as Mapping;
+use sunrise_client::held::Source;
 use sunrise_client::spans::{startup, time as span};
 use sunrise_client::{
     Result,
@@ -189,7 +190,6 @@ use sunrise_client::{
     vanillagen::VanillaTerrain,
     world::World,
 };
-use sunrise_client::{fast_hash::FxHashMap, held::Source};
 use sunrise_core::{
     biome::{BiomeZoom, obfuscate_seed},
     geometry::{Aabb, Direction},
@@ -387,6 +387,13 @@ struct GameLevel<'w> {
     cake_requested: std::cell::Cell<bool>,
     cake_answer: Option<bool>,
     api_level: Option<mod_api::LevelRef>,
+    part_state_index: Option<
+        &'w std::sync::Arc<
+            std::sync::Mutex<
+                sunrise_mod_runtime::attachments::index::AttachmentIndex<mod_api::AttachmentHolder>,
+            >,
+        >,
+    >,
     positions: piston_carry_state::PositionState<'w>,
     border: &'w sunrise_core::geometry::border::BorderGeometry,
     world: &'w mut World,
@@ -438,6 +445,7 @@ struct GameLevel<'w> {
     recipes: &'w sunrise_client::crafting::Recipes,
     /// Container loot tables (`unpackLootTable`).
     loot: Option<std::sync::Arc<sunrise_world::loot::LootData>>,
+    loot_storage: std::sync::Arc<sunrise_world::loot::copy::StorageData>,
     registry: &'static sunrise_world::registry::BlockRegistry,
     block_registries: &'w sunrise_client::command::args::Registries,
     rules: sunrise_world::level::GameRules,
@@ -1197,6 +1205,8 @@ struct Game<'a> {
     kept_block_entities: std::cell::RefCell<native_block_entity_draw::KeptGeometry>,
     /// Mod screens' living scenes, per mod and clock id (game/modding/native_scene_live.rs).
     live_scenes: std::cell::RefCell<native_scene_live::LiveScenes>,
+    /// Client mods' dynamic textures in the GUI atlas's pool (game/modding/native_dynamic_textures.rs).
+    dynamic_textures: sunrise_client::hud::dynamic_textures::DynamicTextures,
     /// Glyphs from `native_draw_text` (`&self`): uploaded to the font atlas with the frame.
     text_patches: std::cell::RefCell<Vec<sunrise_client::font::Patch>>,
     /// Prepared block-entity copies for this frame, in entity-stream order.
@@ -1223,6 +1233,8 @@ struct Game<'a> {
     fps_frames: u64,
     fps_at: Instant,
     ticks: u64,
+    /// `Hud.tickCount`, advanced on each unpaused client tick, including in menus.
+    gui_ticks: i32,
     /// The sprite animation clock (`TextureManager.tick`): counts only the ticks the level
     /// runs normally, so `/tick freeze` holds it and `/tick step` moves it on.
     texture_ticks: u64,
@@ -1755,7 +1767,11 @@ struct Game<'a> {
     persist: persist::EntityMemory,
     /// Missing profession IDs already reported for this world session.
     missing_professions: HashSet<String>,
-    entity_attachments: FxHashMap<u32, sunrise_mod_runtime::attachments::Attachments>,
+    entity_attachments: native_colliders::EntityMaps,
+    /// What changed in entities' colliders this tick, for the players who track them.
+    collider_changes: Vec<native_colliders::ColliderChange>,
+    collider_placements: native_colliders::Placements,
+    collider_histories: native_colliders::Histories,
     entity_initialization: entity_initialization::EntityInitialization,
     /// Typed per-level membership follows dimensions, not the temporary world swap.
     attachment_indexes: attachment_index::Indexes,
@@ -1867,9 +1883,9 @@ struct Game<'a> {
     tick_hit: std::cell::Cell<Option<Option<Hit>>>,
     /// Non-window simulation's tick-local mob ray, including the held attack range.
     tick_mob: Option<Option<(usize, f64, [f64; 3])>>,
-    /// Number keys since the last tick (`keyHotbarSlots[i].consumeClick`):
+    /// Each number key's clicks since it was last consumed (`keyHotbarSlots[i].clickCount`):
     /// `Minecraft.handleKeybinds` selects them before the tick's inputs.
-    hotbar_presses: sunrise_client::input_queue::InputQueue<usize>,
+    hotbar_presses: [sunrise_client::input_queue::ClickQueue; 9],
     /// `Player.entityInteractionRange` and `blockInteractionRange`, refreshed
     /// each tick from the attribute (a server's reach modifier, creative's
     /// +2): the pick helpers' `&self` reach.
@@ -1930,6 +1946,10 @@ struct Game<'a> {
     save_after_guest_turn: bool,
     /// Guests whose records are displaced by nested player swaps, outer first.
     lan_guest_swaps: Vec<u32>,
+    /// Ender chests a mod opened for a guest inside that guest's turn
+    /// (`player_open_ender_chest`), by connection, with their titles: opened as the turn
+    /// ends, once the guest's own ender chest is back in their record.
+    lan_ender_menus: Vec<(u32, sunrise_core::nbt::Tag)>,
     /// Live attachments and original snapshots retained during player replacement.
     player_state: original_player::PlayerState,
     /// The block the acting player is breaking (`break_block`): its destroy
@@ -2645,6 +2665,13 @@ impl Game<'_> {
         origin: [f64; 3],
         block_entity: Option<sunrise_core::nbt::Tag>,
     ) -> sunrise_world::loot::LootPlace {
+        let (block_entity, block_components) = match block_entity {
+            Some(saved) => {
+                let source = spill::source_snapshot(saved, None, None);
+                (Some(source.nbt), Some(source.components))
+            }
+            None => (None, None),
+        };
         let (rain, thunder) = self.world.weather.levels(1.0);
         // Level.canHaveWeather: sky light, no ceiling and not the End.
         let weather =
@@ -2652,6 +2679,8 @@ impl Game<'_> {
         sunrise_world::loot::LootPlace {
             origin: Some(origin),
             block_entity,
+            block_components,
+            storage: Some(self.score.storage.snapshot()),
             level: Some(sunrise_world::loot::LootLevel {
                 dimension: self.dim.id().to_owned(),
                 game_time: self.world.game_time,
@@ -2927,6 +2956,7 @@ impl Game<'_> {
             cake_requested: std::cell::Cell::new(false),
             cake_answer: None,
             api_level: self.level(self.dim.id()),
+            part_state_index: self.attachment_indexes.get(&self.dim),
             command_block_transition: None,
             positions: piston_carry_state::PositionState {
                 gateways: &mut self.be_anims.gateway_servers,
@@ -2975,6 +3005,7 @@ impl Game<'_> {
             } else {
                 self.server_loot.get()
             },
+            loot_storage: self.score.storage.snapshot(),
             registry: self.pack.assets.registry,
             block_registries: &self.pack.block_registries,
             rules,
@@ -4524,6 +4555,21 @@ impl Game<'_> {
         cancel
     }
     fn tick(&mut self) -> Result<()> {
+        // A client's tick of the level it shows holds the colliders as it began, then carries
+        // its own player with the one it stands on; a server's level tick holds its own scope.
+        let start = (!self.is_logical_server()).then(|| self.placed_moving_colliders());
+        let scope = start
+            .clone()
+            .map(sunrise_client_render::moving_colliders::Scope::enter);
+        let result = self.tick_body();
+        drop(scope);
+        if let (Some(start), Ok(())) = (&start, &result) {
+            self.carry_pass(start);
+            self.observe_carry_age(start);
+        }
+        result
+    }
+    fn tick_body(&mut self) -> Result<()> {
         self.expire_client_cracks();
         if self.agent.hold_server {
             return Ok(());
@@ -8810,6 +8856,7 @@ impl Game<'_> {
         // map_patches any earlier leaves them a frame behind.
         hud.patches.append(&mut self.map_patches);
         hud.patches.append(self.text_patches.get_mut());
+        self.dynamic_texture_patches(&mut hud.image_patches);
         let entity_spans = std::mem::take(self.entity_spans.get_mut());
         let entity_motion = std::mem::take(self.entity_motion.get_mut());
         let entity_motion_posed = std::mem::take(self.entity_motion_posed.get_mut());
@@ -10351,6 +10398,12 @@ impl Game<'_> {
                     self.report_activity();
                     let target = self.tick_target_millis();
                     let steps = self.clock.advance(elapsed, target);
+                    if steps > 0
+                        && self.title.is_none()
+                        && let Err(e) = self.poll_remote_before_tick()
+                    {
+                        log::warn!("Sunrise: {e}");
+                    }
                     self.client_tick_steps(steps, Some(event_loop))?;
                     self.extras_frame(elapsed);
                     self.extras_retry()?;
@@ -10797,6 +10850,7 @@ impl<'a> Game<'a> {
             glint_frame: Default::default(),
             kept_block_entities: Default::default(),
             live_scenes: Default::default(),
+            dynamic_textures: Default::default(),
             text_patches: Default::default(),
             prepared_model_draws: Default::default(),
             world_geometry: Some(Default::default()),
@@ -10810,6 +10864,7 @@ impl<'a> Game<'a> {
             fps_frames: 0,
             fps_at: now,
             ticks: 0,
+            gui_ticks: 0,
             texture_ticks: 0,
             error: None,
             message: None,
@@ -11114,6 +11169,9 @@ impl<'a> Game<'a> {
             persist: Default::default(),
             missing_professions: Default::default(),
             entity_attachments: Default::default(),
+            collider_changes: Vec::new(),
+            collider_placements: Default::default(),
+            collider_histories: Default::default(),
             entity_initialization: Default::default(),
             attachment_indexes: Default::default(),
             remote: None,
@@ -11170,7 +11228,7 @@ impl<'a> Game<'a> {
             forced_hit: None,
             tick_hit: Default::default(),
             tick_mob: None,
-            hotbar_presses: sunrise_client::input_queue::InputQueue::new(hand::HOTBAR_PRESSES),
+            hotbar_presses: [hand::HOTBAR_CLICKS; 9],
             entity_reach: 3.0,
             block_reach: 4.5,
             client_pick: Default::default(),
@@ -11197,6 +11255,7 @@ impl<'a> Game<'a> {
             lan_building_boxes: Default::default(),
             save_after_guest_turn: false,
             lan_guest_swaps: Vec::new(),
+            lan_ender_menus: Vec::new(),
             player_state: Default::default(),
             lan_break_pos: None,
             break_collect: None,

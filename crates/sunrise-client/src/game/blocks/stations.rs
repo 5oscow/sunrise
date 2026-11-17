@@ -695,9 +695,14 @@ impl Game<'_> {
             }
             Kind::Anvil => {
                 let name = self.anvil_item_name(&s);
+                // createResult's getHoverName().getString(), as vanilla resolves it.
                 let hover = s.inputs[0]
                     .as_ref()
-                    .map(|i| stations::hover_name(&self.pack.names, i))
+                    .map(|i| {
+                        sunrise_client::lang::returned_to_server(|| {
+                            stations::hover_name(&self.pack.names, i)
+                        })
+                    })
                     .unwrap_or_default();
                 s.anvil = stations::anvil_result(
                     &enchantments,
@@ -1178,11 +1183,16 @@ impl Game<'_> {
             return;
         };
         if s.kind == Kind::Anvil && s.inputs[0] != s.anvil_last {
-            // AnvilScreen.slotChanged: the box follows its input item.
+            // AnvilScreen.slotChanged: the box follows its input item, named as vanilla's
+            // client names it (the box's text goes back to a server).
             s.anvil_last = s.inputs[0].clone();
             let name = s.inputs[0]
                 .as_ref()
-                .map(|i| stations::hover_name(&self.pack.names, i))
+                .map(|i| {
+                    sunrise_client::lang::returned_to_server(|| {
+                        stations::hover_name(&self.pack.names, i)
+                    })
+                })
                 .unwrap_or_default();
             anvil::input_changed(s, name);
         }
@@ -2382,7 +2392,14 @@ impl Game<'_> {
             return;
         }
         if let Some(stack) = stack {
-            self.draw_stack_tooltip(batch, &stack, self.cursor.0, self.cursor.1);
+            let mut lines = self.stack_tooltip_lines(&stack, false, false);
+            self.native_screen_tooltip_lines(batch, Some(slot), &mut lines);
+            if lines.is_empty()
+                && !sunrise_client::item_tooltip::tooltip_display(&stack).name_visible(false)
+            {
+                return;
+            }
+            self.draw_stack_tooltip_lines(batch, &stack, lines, self.cursor.0, self.cursor.1);
         } else if let Some(text) = self.crafter_tooltip(slot) {
             self.draw_tooltip_lines(
                 batch,

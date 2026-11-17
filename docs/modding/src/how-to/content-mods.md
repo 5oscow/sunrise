@@ -74,8 +74,11 @@ No declaration conversion runs per tick.
 
 Implement `BlockPart::remove_block` for a block that leaves a support or another
 state behind when removed. This server-only replacement receives the dimension,
-position, removed state and `moved_by_piston`. Answer `Some(state)` to choose the
-replacement, or `None` to keep vanilla's fluid block (air when dry). Only the
+position, removed state, `moved_by_piston` and `replacement`: the exact state
+written if the listener leaves `answer` unanswered, the fluid's legacy block
+(air when dry, water for a waterlogged block). Answer `Some(state)` to choose a
+different state, or `None` to keep `replacement`. Named injections request
+`hook_version = 2`; native and wasm mods rebuild against this signature. Only the
 removed block's own Part is called, not the replacement block's Part.
 
 The chosen state goes through the normal `setBlock` effects with flags 3, plus
@@ -404,6 +407,28 @@ and player selection uses its own outline channel. Callers without a captured
 entity class retain ordinary shapes. These declarations select state/class-only
 geometry, not arbitrary world-dependent block behavior or native callbacks.
 
+### Scaffolding's context collision
+
+A block that is stood on like scaffolding and dropped through while sneaking (a metal
+scaffolding) sets `"context_collision": "scaffolding"` (`Block::context_collision =
+Some(ContextCollision::Scaffolding)`), whatever its template. Entities then collide with it as
+with `minecraft:scaffolding` (`ScaffoldingBlock.getCollisionShape`), which takes the same rule:
+solid on top unless the entity is descending, nothing below the top, and in a `bottom` state
+that is not supported (`distance` above 0) a floor 2 pixels high under an entity above the block
+below. Placement checks see no collision. Its states need scaffolding's `distance` (0 to 7) and
+`bottom` (`false`, `true`) properties, from a `minecraft:scaffolding` template or declared in
+`state_properties`; loading refuses the block, by name, otherwise. Climbing is the
+`minecraft:climbable` block tag, and what keeps `distance` and `bottom` up to date is the
+template's behaviour: neither comes from this field. A `collision_context_shapes` entry for an
+entity class stands over the rule for that class, as it does over the block's other shapes.
+
+```json
+{
+  "template": "minecraft:scaffolding",
+  "context_collision": "scaffolding"
+}
+```
+
 ### Shapes a block entity publishes
 
 A block whose geometry depends on what is inside it (a cable bus with attached parts, a table
@@ -422,6 +447,9 @@ mob's path stands on and its move control's jump read the published value at the
 nothing calls into the mod.
 Face sturdiness and multiface attachment between neighbouring blocks (placement, survival,
 shape updates, as for lichen and sculk veins) read the published collision shape at the position too.
+Fluid passage reads it as well: water and lava pass between two cells by their collision shapes at
+their positions. A publish, a clear and an aborted publish (the old shapes put back) each notify the
+block's neighbours, so a fluid beside it reads the new shape; publishing an unchanged value notifies nothing.
 Shapes that depend on the querying entity are not covered; `outline_context_shapes` and
 `collision_context_shapes` stay declared, and a published shape stands over them.
 

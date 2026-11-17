@@ -78,8 +78,8 @@ impl Game<'_> {
                 .is_some_and(|(_, d, _)| self.before_block(d))
     }
 
-    /// The nearest boat, minecart, item frame, armor stand or painting the
-    /// view hits within reach; also End crystals when attacking, and fence knots when using.
+    /// The nearest boat, minecart, item frame, armor stand, painting, End crystal or dragon part
+    /// the view hits within reach; also fence knots when using.
     pub(super) fn remote_object_hit(&self, attacking: bool) -> Option<ObjectHit> {
         let mut pick = crate::game::pick_accumulator::PickAccumulator::new(self.entity_reach);
         self.remote_object_hit_with_pick(attacking, &mut pick)
@@ -91,10 +91,7 @@ impl Game<'_> {
     ) -> Option<ObjectHit> {
         if let Some(hit) = self.cached_entity_pick() {
             let (entity, distance, point) = hit?;
-            if (!attacking
-                && (self.crystals.iter().any(|c| c.id == entity.id())
-                    || self.level_dragon_part(entity.id()).is_some()))
-                || self.mobs.iter().any(|m| m.id == entity.id())
+            if self.mobs.iter().any(|m| m.id == entity.id())
                 || self
                     .creatures
                     .projectiles
@@ -168,27 +165,16 @@ impl Game<'_> {
         {
             hit = Some((id, d, p));
         }
-        if attacking {
-            // EndCrystal.isPickable: its 2 x 2 box, with the server's entity
-            // id, not special_targets' local projectile target id.
-            // Entity.interact passes on a crystal, so right clicks use the item.
-            let reach = self.entity_reach;
-            for c in self.crystals.iter().filter(|c| c.id != 0) {
-                let p = c.position;
-                let bounds = Aabb::new(
-                    Vec3::new(p.x - 1.0, p.y, p.z - 1.0),
-                    Vec3::new(p.x + 1.0, p.y + 2.0, p.z + 1.0),
-                );
-                if let Some(d) =
-                    ray_box(eye, dir, reach, bounds).filter(|&d| pick.consider(self, c.id, d))
-                {
-                    hit = Some((c.id as i32, d, [p.x, p.y, p.z]));
-                }
-            }
-            // EnderDragonPart.isPickable: the server's dragon hurts by part.
-            if let Some(part) = self.remote_dragon_part_hit_with_pick(eye, dir, reach, pick) {
-                hit = Some(part);
-            }
+        // A right click on a crystal interacts with it too (MultiPlayerGameMode.interact
+        // sends the packet), then passes on to the item (Entity.interact).
+        if let Some((i, d)) = self.crystal_hit_with_pick(eye, dir, pick) {
+            let p = self.crystals[i].position;
+            hit = Some((self.crystals[i].id as i32, d, [p.x, p.y, p.z]));
+        }
+        // EnderDragonPart.isPickable: the server's dragon hurts by part, and
+        // a right click on one passes as a crystal's does.
+        if let Some(part) = self.remote_dragon_part_hit_with_pick(eye, dir, reach, pick) {
+            hit = Some(part);
         }
         let (id, distance, origin) = hit?;
         let point = at(distance);
@@ -201,6 +187,32 @@ impl Game<'_> {
                 point[2] - origin[2],
             ],
         })
+    }
+
+    /// `EndCrystal.isPickable`: the nearest crystal the view hits within reach, by its
+    /// 2 x 2 box, with the server's entity id (not special_targets' local projectile
+    /// target id).
+    pub(super) fn crystal_hit(&self) -> Option<(usize, f64)> {
+        let (eye, dir) = self.aim()?;
+        let mut pick = super::pick_accumulator::PickAccumulator::new(self.entity_reach);
+        self.crystal_hit_with_pick(eye, dir, &mut pick)
+    }
+
+    fn crystal_hit_with_pick(
+        &self,
+        eye: [f64; 3],
+        dir: [f64; 3],
+        pick: &mut super::pick_accumulator::PickAccumulator,
+    ) -> Option<(usize, f64)> {
+        let mut hit = None;
+        for (i, crystal) in self.crystals.iter().enumerate().filter(|(_, c)| c.id != 0) {
+            if let Some(d) = ray_box(eye, dir, self.entity_reach, crystal.bounds())
+                .filter(|&d| pick.consider(self, crystal.id, d))
+            {
+                hit = Some((i, d));
+            }
+        }
+        hit
     }
 
     /// `ClientPacketListener.handleSetEntityPassengersPacket`: who rides

@@ -2,7 +2,7 @@
 //! changes), and its section in Settings. Everything goes through `sunrise_launcher::telemetry`.
 use super::*;
 use sunrise_launcher::telemetry;
-use sunrise_telemetry::{Choices, Consent, Kind as DataKind};
+use sunrise_launcher_telemetry::{Choices, Consent, Kind as DataKind};
 
 /// What the window keeps about data collection.
 pub(crate) struct Collection {
@@ -71,7 +71,7 @@ fn json_view(view: &(String, String), t: &Theme, scroll: &Scrollbar) -> Div {
                     .max_h(px(260.))
                     .overflow_y_scroll()
                     .p(px(16.))
-                    .rounded(px(theme::RADIUS_PLATE))
+                    .rounded(px(crate::glass_ui::rad(theme::RADIUS_PLATE)))
                     .bg(t.plate)
                     .font_family(theme::MONO)
                     .text_size(px(theme::CAPTION.px))
@@ -364,7 +364,7 @@ impl Launcher {
             Some(self.ping_switch("data-ping", cx).into_any_element()),
             &t,
         ));
-        let waiting = sunrise_telemetry::outbox::pending(&telemetry::home()).len();
+        let waiting = sunrise_launcher_telemetry::outbox::pending(&telemetry::home()).len();
         let id = match consent.install_id.as_str() {
             "" => tr("No install ID: nothing has been collected").to_string(),
             id => trf(
@@ -372,7 +372,7 @@ impl Launcher {
                 &[("prefix", &id[..4]), ("suffix", &id[id.len() - 4..])],
             ),
         };
-        let server = if sunrise_telemetry::endpoint().is_some() {
+        let server = if sunrise_launcher_telemetry::endpoint().is_some() {
             trf(
                 "{count} waiting to be sent",
                 &[("count", &waiting.to_string())],
@@ -436,23 +436,21 @@ impl Launcher {
             Some(actions.into_any_element()),
             &t,
         ));
-        // In the glass look the section is already titled Data & privacy, and its text lines up
-        // with the rows' (14 px inside a 1 px edge).
-        let inset = if t.glass { 15. } else { 0. };
+        let inset = glass_ui::flat();
         div()
             .flex()
             .flex_col()
             .gap(px(16.))
-            .when(!t.glass, |d| {
-                d.child(
-                    text(theme::HEADING)
-                        .text_color(t.ink)
-                        .child(tr("Data collection")),
-                )
-            })
+            // The glass card's rows sit 16 px in: its words line up with them.
+            .child(
+                text(theme::HEADING)
+                    .when(inset, |d| d.px(px(16.)).pt(px(16.)))
+                    .text_color(t.ink)
+                    .child(tr("Data collection")),
+            )
             .child(
                 text(theme::UI)
-                    .px(px(inset))
+                    .when(inset, |d| d.px(px(16.)))
                     .max_w(px(600.))
                     .text_color(t.muted)
                     .child(trf(
@@ -463,7 +461,7 @@ impl Launcher {
             .child(list)
             .child(
                 text(theme::CAPTION)
-                    .px(px(inset))
+                    .when(inset, |d| d.px(px(16.)))
                     .max_w(px(600.))
                     .text_color(t.muted)
                     .child(tr(telemetry::NEVER)),
@@ -472,7 +470,12 @@ impl Launcher {
                 self.collection
                     .note
                     .clone()
-                    .map(|n| text(theme::UI).text_color(t.ink).child(n)),
+                    .map(|n| {
+                        text(theme::UI)
+                            .when(inset, |d| d.px(px(16.)))
+                            .text_color(t.ink)
+                            .child(n)
+                    }),
             )
             .children(
                 self.collection

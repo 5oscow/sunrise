@@ -282,6 +282,10 @@ fill 0 100 0 9 100 9 minecraft:hopper[facing=east]{Items:[{Slot:0b,id:"minecraft
     grep -F 'fnr: api_only server_started, sin 0.479' "$scratch/server.log"
     grep -F 'fnr: api_only listener at tick_block_entities' "$scratch/server.log"
   fi
+  if [[ " ${FNR_MODS:-alpha beta} " == *" wasmtime "* ]]; then
+    # The mod's own engine ran a module in the game's one wasmtime.
+    grep -F 'fnr: wasmtime add 2+3=5' "$scratch/server.log"
+  fi
   if [[ " ${FNR_MODS:-alpha beta} " == *" fdshape "* ]]; then
     grep -F 'fnr: native_server_started dedicated=true' "$scratch/server.log"
   fi

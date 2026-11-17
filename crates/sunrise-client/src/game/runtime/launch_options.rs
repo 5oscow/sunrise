@@ -82,6 +82,9 @@ pub(crate) struct Options {
     pub(super) session_file: Option<String>,
     /// `--session-stdin`: the session file's JSON comes on standard input instead.
     pub(super) session_stdin: bool,
+    /// Why this game plays without an account: the launcher's `SUNRISE_OFFLINE_REASON`, or a
+    /// session it could not read. The title screen shows it once.
+    pub(super) offline_reason: Option<String>,
 }
 
 impl Options {
@@ -134,8 +137,15 @@ impl Options {
                 // The chat key pair, ready before the first join.
                 sunrise_client::auth::prepare_chat_keys(true);
             }
-            Ok(None) => {}
-            Err(e) => eprintln!("Sunrise: not signed in: {e}"),
+            Ok(None) => {
+                o.offline_reason = std::env::var("SUNRISE_OFFLINE_REASON")
+                    .ok()
+                    .filter(|reason| !reason.is_empty());
+            }
+            Err(e) => {
+                eprintln!("Sunrise: not signed in: {e}");
+                o.offline_reason = Some(e);
+            }
         }
         if !o.developer_single_player {
             split::launcher::read_now();
@@ -239,6 +249,7 @@ impl Options {
             quick_play: None,
             session_file: std::env::var("SUNRISE_SESSION_FILE").ok(),
             session_stdin: false,
+            offline_reason: None,
         };
         for argument in rest {
             match argument {

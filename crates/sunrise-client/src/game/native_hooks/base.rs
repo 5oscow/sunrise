@@ -296,7 +296,7 @@ impl GameLevel<'_> {
     /// Authoritative servers only.
     #[inline(always)]
     pub(in crate::game) fn native_analog_output(
-        &self,
+        &mut self,
         dimension: LevelDimension,
         pos: BlockPos,
         state: BlockStateId,
@@ -1128,11 +1128,12 @@ impl Game<'_> {
     pub(in crate::game) fn native_screen_draw(
         &self,
         block: &str,
+        pos: Option<[i32; 3]>,
         data: &[i32],
         draw: &mut HudBatch,
         origin: [f32; 2],
     ) {
-        self.fire_screen_draw(block, data, draw, origin);
+        self.fire_screen_draw(block, pos, data, draw, origin);
     }
     /// The open screen has drawn itself and its tooltips (`Screen.render`,
     /// the point of `ScreenEvent.Render.Post`): draw over it with
@@ -1356,17 +1357,18 @@ impl Game<'_> {
     ) {
         self.fire_screen_click(block, data, at, right, button);
     }
-    /// The tooltip at `at` (as in `native_screen_click`) on block `block`'s
-    /// screen, a mod's, over no item: push its lines when it is over
-    /// something of yours. Legacy colour codes (§) work.
+    /// A mod screen's tooltip after item tooltip hooks, before its image and
+    /// component gathering. `slot` is the hovered menu index, or None outside
+    /// a mapped slot. The listener's final lines replace the item's lines.
     pub(in crate::game) fn native_screen_tooltip(
         &self,
         block: &str,
         data: &[i32],
         at: [f32; 2],
-        lines: &mut Vec<String>,
+        slot: Option<u32>,
+        lines: &mut Vec<(Text, u32)>,
     ) {
-        self.fire_screen_tooltip(block, data, at, lines);
+        self.fire_screen_tooltip(block, data, at, slot, lines);
     }
     /// A player pressed a mod container's button (`clickMenuButton`), on
     /// the server. The block entity is out of the world during the call;
@@ -3647,7 +3649,7 @@ impl Game<'_> {
     }
     /// `player` (`name`) opened a menu (NeoForge's `PlayerContainerEvent.Open`,
     /// posted when `ServerPlayer.openMenu` sets the new `containerMenu`): any
-    /// menu, vanilla or a mod's. `menu` is the menu type's name
+    /// menu, vanilla or a mod's. `menu_type` is the menu type's name
     /// (`minecraft:generic_9x3`, `minecraft:furnace`, `minecraft:merchant`,
     /// `minecraft:crafting`, `minecraft:lectern`, a mod's own), `pos` the
     /// block it is of in `dimension` (none for a trade, a vehicle's, a mod's
@@ -3662,10 +3664,11 @@ impl Game<'_> {
         player: u128,
         name: &str,
         dimension: &str,
-        menu: &str,
+        menu_type: &str,
         pos: Option<[i32; 3]>,
+        menu: Option<mod_api::MenuRef>,
     ) {
-        self.fire_player_container_open(player, name, dimension, menu, pos);
+        self.fire_player_container_open(player, name, dimension, menu_type, pos, menu);
     }
     /// `player` (`name`) closed the menu `native_player_container_open` told
     /// of (NeoForge's `PlayerContainerEvent.Close`, posted in
@@ -3682,10 +3685,10 @@ impl Game<'_> {
         player: u128,
         name: &str,
         dimension: &str,
-        menu: &str,
+        menu_type: &str,
         pos: Option<[i32; 3]>,
     ) {
-        self.fire_player_container_close(player, name, dimension, menu, pos);
+        self.fire_player_container_close(player, name, dimension, menu_type, pos);
     }
     /// A client started tracking an entity (NeoForge's
     /// `PlayerEvent.StartTracking`, posted at the end of
@@ -4439,39 +4442,10 @@ impl Game<'_> {
         let [a, r, g, b] = argb.to_be_bytes();
         batch.fill(&self.gui.atlas, x, y, w, h, rgba(r, g, b, a));
     }
-    /// A mod's own RGBA image, uploaded into the HUD atlas slot
-    /// `MOD_IMAGE_SPRITE` and drawn with
-    /// `native_sprite`: its own source rectangle crops and stretches it. `rgba`
-    /// is `width * height` pixels of four bytes, each side at most
-    /// `MOD_IMAGE_SIZE`; false when it is not that
-    /// size. The upload costs a texture patch of the image, so send one when the
-    /// image changed, not every frame.
-    pub(in crate::game) fn mod_image(&mut self, width: u32, height: u32, rgba: &[u8]) -> bool {
-        let Some(rect) = self
-            .gui
-            .atlas
-            .sprites
-            .get(crate::hud::MOD_IMAGE_SPRITE)
-            .copied()
-        else {
-            return false;
-        };
-        if !mod_image_fits(width, height, rgba.len(), rect.w, rect.h) {
-            return false;
-        }
-        let (w, h) = (self.gui.atlas.width as f32, self.gui.atlas.height as f32);
-        self.map_patches.push(sunrise_client::font::Patch {
-            x: (rect.u0 * w).round() as u32,
-            y: (rect.v0 * h).round() as u32,
-            width,
-            height,
-            rgba: rgba.to_vec(),
-        });
-        true
-    }
     /// Part `src` (`[x, y, w, h]` in the sprite's own pixels) of sprite
-    /// `name` (vanilla's `gui/...`, or a content mod's GUI texture
-    /// `mymod:gui/...`), drawn stretched into `dst` (`[x, y, w, h]` in GUI
+    /// `name` (vanilla's `gui/...`, a content mod's GUI texture `mymod:gui/...`,
+    /// or a client mod's dynamic texture bound to an atlas slot,
+    /// `create_dynamic_texture`), drawn stretched into `dst` (`[x, y, w, h]` in GUI
     /// pixels), every texel multiplied by `tint` (`0xAARRGGBB`, a fluid's colour)
     /// when there is one. False when there is no such sprite.
     pub(in crate::game) fn native_sprite(

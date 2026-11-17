@@ -743,6 +743,7 @@ mod tests {
             );
             assert_eq!(game.level_fluid_state(level, [16, 64, 1]), None);
             assert_eq!(game.level_fluid_state(level, [1, 4000, 1]), None);
+            game.options.execution_role = super::super::execution_role::ExecutionRole::Client;
             game.with_level(|_, host, _| {
                 // Not an authoritative level: tags are not the server's, so they read None.
                 assert_eq!(
@@ -761,6 +762,8 @@ mod tests {
                     api_fluid_state(EngineFluidState::WATER)
                 );
             });
+            game.options.execution_role =
+                super::super::execution_role::ExecutionRole::IntegratedServer;
             game.options.dedicated = Some(Vec::new());
             let bounds = game.level_height(level).unwrap();
             use super::super::api_values::TryIntoApi;

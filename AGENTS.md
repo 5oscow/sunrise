@@ -131,6 +131,8 @@ Game workspace (root `Cargo.toml`); `launcher/` and `crates/sunrise-telemetry-se
 |---|---|
 | `sunrise-client` | Gameplay library (`src/lib.rs`: `game.rs` + `game/`, `entry.rs`) and thin executable (`src/main.rs`). Also the dedicated server (`--dedicated`). Re-exports `sunrise-client-lib` for existing mod paths. |
 | `sunrise-client-lib` | Reusable client systems, `sunrise-ctl`, probes and their tests. Its manifest points to the existing sources under `crates/sunrise-client/`; the library root is `src/client_lib.rs`. It never depends on gameplay. |
+| `sunrise-gameplay` | Vanilla's logical side, what the server jar holds (common code included), moved out of `sunrise-client` module by module ([#2210](https://github.com/sunrise-org/sunrise/issues/2210)). Engine layer, not yet portable: `portable.pending` lets it take `sunrise-client-lib` until the types it needs move down. Never depends on `sunrise-client-gameplay` |
+| `sunrise-client-gameplay` | Client-only gameplay moved out of `sunrise-client`: depends on `sunrise-client-lib` and portable crates, never on `sunrise-gameplay`. Engine layer, desktop |
 | `sunrise-items` | Blocks and items below gameplay: `blocks.rs` (block facts), `items.rs`, `item_data.rs` (components), `enchant.rs`, `cooldowns.rs`, `bundle.rs`, `item_nbt.rs`. Re-exported as `sunrise_client::items`... |
 | `sunrise-command` | Command parsing (Brigadier): the vanilla tree, argument types, selectors, suggestions, the tree's network form. Re-exported as `sunrise_client::command` |
 | `sunrise-client-core` | The client lib's bottom layer: `text.rs`, `lang.rs`, `snbt.rs`, `nbt_path.rs`, `component.rs`, `scoreboard.rs`, `bossbar.rs`, `gamerules.rs`, `block_entity_nbt.rs`, registry/particle/sound tables. Re-exported under the old paths (`sunrise_client::text`...) |
@@ -147,7 +149,8 @@ Game workspace (root `Cargo.toml`); `launcher/` and `crates/sunrise-telemetry-se
 | `sunrise-java-properties` | `java.util.Properties` load/store and the JDK date text, standard library only: shared by `sunrise-server-files` and the wasm runtime |
 | `sunrise-anticheat` | The dedicated server's anticheat, off by default: `[anticheat]` settings, violation levels, the checks' rules; the hub runs them (`lan/anticheat.rs`) ([docs/anticheat.md](docs/anticheat.md)) |
 | `sunrise-friends`, `sunrise-relay` | Play with Friends: invite codes, encrypted tunnel, the relay ([docs/play-with-friends.md](docs/play-with-friends.md)) |
-| `sunrise-mod-package`, `cargo-sunrise-mod` | Content mods (`.smod`: manifest, content fence, no code), the registry index and `.spack`, and `cargo sunrise-mod` (`new`, `build`, `run`, `check`, `registry`) ([docs/modding/](docs/modding/src/introduction.md)). Code mods are native, built by the launcher ([docs/modding/src/how-to/native-mods.md](docs/modding/src/how-to/native-mods.md)) |
+| `sunrise-mod-package`, `cargo-sunrise-mod` | Content mods (`.smod`: manifest, content fence, no code), the registry index and `.spack`, and `cargo sunrise-mod` (`new`, `build`, `run`, `check`, `registry`, `native-build`) ([docs/modding/](docs/modding/src/introduction.md)). Code mods are native, built by the launcher ([docs/modding/src/how-to/native-mods.md](docs/modding/src/how-to/native-mods.md)) |
+| `sunrise-native-build` | Native mods compiled against a signed prebuilt SDK: the launcher's build, and `cargo sunrise-mod native-build`'s JSON contract that every `sdk-<build id>` ships ([docs/modding/src/reference/sdk/08-native-build.md](docs/modding/src/reference/sdk/08-native-build.md)) |
 | `sunrise-port-pack` | Porting Java modpacks ([docs/modpacks.md](docs/modpacks.md)) |
 | `sunrise-optifine` | OptiFine-format pack files below every feature that reads them: `.properties`, the name/range/block matchers, paths and `optifine/` folders, and custom entity models (`cem/`: `.jem`/`.jpm` parsing and baking) |
 | `sunrise-polytone` | Polytone-format pack files (`assets/*/polytone/`), read clean-room from the public wiki: targets, biome and dimension modifiers and their environment attribute layers (#11486) |
@@ -165,7 +168,7 @@ Game workspace (root `Cargo.toml`); `launcher/` and `crates/sunrise-telemetry-se
 
 Other top-level folders: `tools/` (harnesses and dev scripts), `tests/` (Python unit tests: `python3 -m
 unittest discover -s tests`), `mods/sunrise/src/test/java/dev/sunriselab/parity/` (Java oracles),
-`docs/`, `.github/workflows/`. The website (playsunrise.net) is the private horizon-rust/horizon-site: its build
+`docs/`, `.github/workflows/`. The website (playsunrise.net) is `frontend/site` in the private sunrise-org/sunny: its build
 reads `README.md`, `launcher/links.json`, `docs/api/`, `roadmap/roadmap.json` and `crates/sunrise-theme/tokens.css` from main.
 
 ## Write tests with signal

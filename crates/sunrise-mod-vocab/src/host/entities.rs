@@ -249,7 +249,7 @@ pub trait EntitiesBackend {
     /// Side: both.
     /// The entity's box (`Entity.getBoundingBox`): its lowest and highest
     /// corner. Displays and markers have zero-sized physical boxes; interactions use
-    /// their saved dimensions. None for End crystals and the dragon; a dragon part's is its own. On a client, reads
+    /// their saved dimensions. End crystals have their 2 x 2 box. None for the dragon; a dragon part's is its own. On a client, reads
     /// its own copy of a tracked entity, or the local player's predicted box.
     #[access(WorldOnly)]
     fn entity_bounding_box(&self, entity: EntityRef) -> Option<[[f64; 3]; 2]>;
@@ -431,6 +431,11 @@ pub trait EntitiesBackend {
     /// every other entity.
     #[access(WorldOnly)]
     fn entity_spectator(&self, entity: EntityRef) -> Option<bool>;
+    /// Side: server.
+    /// The collider the entity carries (`set_collider`), or None for none, a stale handle, or a
+    /// client.
+    #[access(WorldOnly)]
+    fn entity_collider(&self, entity: EntityRef) -> Option<Collider>;
     /// Side: both.
     /// `isSecondaryUseActive`: the local client's live semantic sneak state (not the
     /// physical key binding or last tick's crouching pose); the server's shift-key flag.
@@ -484,6 +489,21 @@ pub trait EntitiesBackend {
     /// Whether the entity is in lava (`Entity.isInLava`): players and mobs.
     #[access(WorldOnly)]
     fn entity_is_in_lava(&self, entity: EntityRef) -> Option<bool>;
+    /// Side: both.
+    /// `Entity.isUnderWater`: the previous eye-in-water sample AND current water contact,
+    /// not just the current eye fluid. The local client player instead follows
+    /// `LocalPlayer.isUnderWater`: the saved eye sample alone, even without current water contact.
+    /// Players and mobs, using the client's own cached state on a client.
+    /// None for other kinds or stale handles.
+    #[access(WorldOnly)]
+    fn entity_is_under_water(&self, entity: EntityRef) -> Option<bool>;
+    /// Side: both.
+    /// `Entity.isOnFire`: not fire immune, and positive remaining fire ticks OR the
+    /// client's synced shared flag 0. Players, mobs, armor stands and items, as
+    /// `entity_fire_ticks` covers. Reads the client's own copy on a client;
+    /// None for other kinds or stale handles.
+    #[access(WorldOnly)]
+    fn entity_is_on_fire(&self, entity: EntityRef) -> Option<bool>;
     /// Side: server.
     /// Whether the entity's type never burns (`EntityType.fireImmune`):
     /// players and mobs.
@@ -1011,6 +1031,37 @@ pub trait EntitiesBackendMut {
     /// Sets the mob's no-gravity flag (`Entity.setNoGravity`). Returns false for players and guests.
     #[access(WorldOnly)]
     fn entity_set_no_gravity(&mut self, entity: EntityRef, no_gravity: bool) -> bool;
+    /// Side: server.
+    /// Gives the entity boxes that every other entity collides with, or removes them with None.
+    /// The boxes are in the entity's frame (its position is the origin), turned by the
+    /// collider's rotation; see [`Collider`] for what collides, who is exempt, the limits and
+    /// that a vanilla client does not see them. Contact effects (step sounds, sprint particles,
+    /// friction, bounce) are not applied yet: a box is solid ground and walls only
+    /// (sunrise-org/sunrise#1909). The collider is saved with the entity, sent to
+    /// the Sunrise clients that track it when they start to (and then only what changed), and
+    /// dropped with the entity. Replacing a collider sends the boxes that were added or removed
+    /// by index. An entity the new boxes overlap is treated as vanilla treats a block that
+    /// appears inside it, with no push-out. Refused by name, with the old collider kept, when
+    /// the handle is stale, a value is not finite, the rotation is not a unit quaternion,
+    /// there are too many boxes, or a box lies too far from the entity (see
+    /// [`ColliderError`]).
+    #[access(WorldOnly)]
+    fn entity_set_collider(
+        &mut self,
+        entity: EntityRef,
+        collider: Option<Collider>,
+    ) -> Result<(), ColliderError>;
+    /// Side: server.
+    /// Turns the entity's collider (a unit quaternion `[x, y, z, w]`) without sending its boxes
+    /// again: only the rotation reaches the clients that track it. Refused by name for a stale
+    /// handle, a rotation that is not finite or not a unit quaternion, or an entity with no
+    /// collider.
+    #[access(WorldOnly)]
+    fn entity_set_collider_transform(
+        &mut self,
+        entity: EntityRef,
+        rotation: [f32; 4],
+    ) -> Result<(), ColliderError>;
     /// Side: server.
     /// Sets the entity's no-physics flag (`Entity.noPhysics`), the value
     /// `entity_no_physics` reads: its moves pass through blocks. Refused, and

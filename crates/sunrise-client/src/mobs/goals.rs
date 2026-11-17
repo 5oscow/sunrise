@@ -2482,7 +2482,7 @@ impl Goal for Breed {
                     // Wolf.canMate: a sitting wolf is no partner.
                     && !(species == Species::Wolf && s.sitting)
                     // AbstractHorse.canParent of the partner.
-                    && (!(equine || camel) || s.tame && !s.ridden && s.health >= s.stats[0] as f32)
+                    && (!(equine || camel) || s.tame && !s.ridden && s.health >= s.max_health)
                     && (!sniffer || super::sniffer::can_mate_state(s.variant))
                     // BreedGoal.getFreePartner: `!potentialPartner.isPanicking()`.
                     && !s.panicking

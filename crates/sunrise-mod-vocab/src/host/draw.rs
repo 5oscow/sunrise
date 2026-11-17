@@ -53,10 +53,11 @@ pub trait DrawContext {
         unimplemented!("DrawContext::fill_gradient")
     }
     /// Part `src` (`[x, y, w, h]` in the sprite's own pixels) of sprite
-    /// `name` (vanilla's `gui/...`, or a content mod's GUI texture
-    /// `mymod:gui/...`), drawn stretched into `dst` (`[x, y, w, h]` in GUI
-    /// pixels), every texel multiplied by `tint` (`0xAARRGGBB`, a fluid's colour)
-    /// when there is one. False when there is no such sprite.
+    /// `name` (vanilla's `gui/...`, a content mod's GUI texture `mymod:gui/...`, or
+    /// a client mod's dynamic texture, `ClientRenderClientHost::create_dynamic_texture`),
+    /// drawn stretched into `dst` (`[x, y, w, h]` in GUI pixels), every texel multiplied by
+    /// `tint` (`0xAARRGGBB`, a fluid's colour) when there is one. False when there is
+    /// no such sprite.
     fn sprite(&mut self, name: &str, src: [f32; 4], dst: [f32; 4], tint: Option<u32>) -> bool {
         unimplemented!("DrawContext::sprite")
     }

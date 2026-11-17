@@ -189,9 +189,13 @@ pub trait PlayersBackend {
     #[access(WorldOnly)]
     fn player_selected_slot(&self, player: PlayerRef) -> Option<usize>;
     /// Side: both.
-    /// A player's current supported menu. Refuses crafting tables, merchants,
-    /// workstations, lecterns, mounts and menus with hidden slots; also refuses
-    /// clients, stale players and players whose state is swapped out.
+    /// A player's current supported menu, or the inventory menu when none is open.
+    /// On a client, only the local player's menu is available: its slots and carried stack
+    /// are the client's view (server updates plus local prediction), not server authority.
+    /// On a server, refuses crafting tables, merchants, workstations, lecterns, mounts,
+    /// menus with hidden slots, stale players and players held out by another active turn;
+    /// reads for the acting player use their current inventory, equipment, cursor and ender
+    /// contents. On a client, refuses stale players and unsupported menu layouts.
     #[access(WorldOnly)]
     fn player_container_menu(&self, player: PlayerRef) -> Option<MenuRef>;
     /// Side: server.
@@ -698,6 +702,28 @@ pub trait PlayersBackendMut {
         places: Vec<MenuSlotPlace>,
     ) -> Result<(), MenuSlotBackRefusal>;
     /// Side: server.
+    /// Opens the player's own ender chest for them with no block, titled `title`: a three-row
+    /// `ChestMenu` over their `PlayerEnderChestContainer`, as `EnderChestBlock.useWithoutItem`
+    /// opens it (`ChestMenu.threeRows`) but with no active chest, so it stays valid wherever
+    /// they go. An item's use, a command or a tick can open it. Its slots are the player's
+    /// ender chest itself: clicks, shift-clicks, drags and the close move stacks as an ender
+    /// chest block's menu does, and the game writes and saves them. The menu replaces the one
+    /// they had open, as `ServerPlayer.openMenu` does, and the mods may cancel it with
+    /// `container_opened` (`player_container_open` is the notice after it opened, and cannot
+    /// cancel). Inside a hook of the player's own action (`use_item`, `right_click_item`,
+    /// `right_click_block`, their command), the menu opens when that action ends, as a block's
+    /// menu the same action opens does. Ok(true) inside an action means queued: the menu is
+    /// still subject to cancellation when the queue runs; outside one it opened. Ok(false) is an
+    /// immediate cancellation by a mod. Errors:
+    /// `PlayerUnavailable` (stale, dead, fake, or on a client), or `Title` for a title that
+    /// could not cross; nothing opens then.
+    #[access(WorldOnly)]
+    fn player_open_ender_chest(
+        &mut self,
+        player: PlayerRef,
+        title: Text,
+    ) -> Result<bool, OpenMenuError>;
+    /// Side: server.
     /// Sends the player `uuid` the whole picture of map `map_id`: 128 x 128
     /// colours (`MapColor` ids times 4 plus the shade, row by row), scale 0,
     /// locked, no decorations, as `ClientboundMapItemDataPacket`. A filled
@@ -823,6 +849,20 @@ pub trait PlayersBackendMut {
         player: PlayerRef,
         pos: [i32; 3],
         original: &ItemStack,
+    ) -> Result<(), TriggerCriterionError>;
+    /// Side: server.
+    /// Vanilla `CriteriaTriggers.CONSUME_ITEM.trigger(serverPlayer, stack)`, also public
+    /// to NeoForge mods. Fires only `minecraft:consume_item` through the food-eating
+    /// criterion path, without consuming a stack, awarding a used statistic or reading inventory.
+    /// Predicates and rewards run in the player's own level. `Ok(())` means reached,
+    /// even if nothing matched. Refuses clients (`NotServer`), stale/offline/displaced
+    /// players (`PlayerUnavailable`) and invalid stacks (`Stack(StackWriteError)`)
+    /// before firing.
+    #[access(WorldOnly)]
+    fn player_trigger_consume_item(
+        &mut self,
+        player: PlayerRef,
+        stack: &ItemStack,
     ) -> Result<(), TriggerCriterionError>;
     /// Side: server.
     /// `Player.setLastDeathLocation`: stores where the player died, or

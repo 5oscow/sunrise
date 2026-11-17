@@ -58,6 +58,7 @@ pub mod cauldron;
 pub mod chunk_io;
 pub mod client_perf;
 pub mod clock;
+pub mod colliders;
 pub mod command_storage;
 pub mod confirm_screen;
 pub mod container_screen;
@@ -82,6 +83,7 @@ pub mod end_gateway;
 pub mod entities;
 pub mod entity_nbt;
 pub mod entity_rules;
+pub mod entity_solids;
 pub mod extras_hud;
 pub mod falling_block;
 pub mod fire_render;
@@ -105,6 +107,8 @@ pub mod item_sync;
 pub mod item_tooltip;
 pub mod join_seq;
 pub mod move_gate;
+#[cfg(test)]
+mod test_game_dir;
 /// Game-owned JSON metadata conversion, shared by recipe and API adapters.
 pub use sunrise_core::json_nbt;
 pub mod lan;

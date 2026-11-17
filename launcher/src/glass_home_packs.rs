@@ -7,7 +7,7 @@ use crate::glass_ui::{self as ui, white};
 use glass_home_lists::{danger_button, danger_line, picture};
 use gpui::ExternalPaths;
 use sunrise_launcher::packs::{self, Kind as PackKind, Pack};
-use sunrise_theme::glass::{fill, ink, radius};
+use sunrise_launcher_theme::glass::{fill, ink, radius};
 
 impl Launcher {
     /// Home's Resource packs or Shaders tab: the selected instance's packs of that `kind`.
@@ -30,7 +30,7 @@ impl Launcher {
             .id("packs")
             .flex()
             .flex_col()
-            .rounded(px(radius::ROW))
+            .rounded(px(crate::glass_ui::rad(radius::ROW)))
             .drag_over::<ExternalPaths>(|s, _, _, _| s.bg(white(fill::ROW_HOVER)))
             .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| {
                 this.add_packs(paths.paths().to_vec());
@@ -280,7 +280,7 @@ impl Launcher {
                         div()
                             .w_full()
                             .aspect_ratio(16. / 9.)
-                            .rounded(px(radius::ROW))
+                            .rounded(px(crate::glass_ui::rad(radius::ROW)))
                             .overflow_hidden()
                             .bg(white(fill::HOVER))
                             .children(picture),

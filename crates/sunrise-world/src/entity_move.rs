@@ -10,6 +10,8 @@ pub enum MoverType {
     Piston,
     ShulkerBox,
     Shulker,
+    /// A moving collider carrying the body that stands on it (Sunrise's own).
+    Carried,
 }
 #[derive(Clone, Copy, Debug, Default)]
 pub struct CollisionFlags {

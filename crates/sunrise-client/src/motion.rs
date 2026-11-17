@@ -52,10 +52,11 @@ use sunrise_world::{
 mod exclusions;
 mod restitution;
 
-/// A living entity jumped (`LivingEvent.LivingJumpEvent`).
+/// A living entity jumped (`LivingEvent.LivingJumpEvent`); `velocity` is its motion right after
+/// the jump.
 #[inline(never)]
-pub fn native_living_jump(context: &LoopContext, entity: u32, kind: &str) {
-    crate::native_client_hooks::living_jump(context, entity, kind);
+pub fn native_living_jump(context: &LoopContext, entity: u32, kind: &str, velocity: [f64; 3]) {
+    crate::native_client_hooks::living_jump(context, entity, kind, velocity);
 }
 
 /// A living entity's jump power is about to be used (beyond NeoForge: there is no counterpart).
@@ -1331,21 +1332,26 @@ impl MotionWorld<'_, '_, '_> {
         if self.player.block_effects {
             self.apply_effects_from_blocks()?;
         }
-        // LivingEntity.aiStep "freezing" (server).
-        if !self.player.in_powder_snow || !self.player.can_freeze() {
-            self.player.ticks_frozen = (self.player.ticks_frozen - 2).max(0);
+        // LivingEntity.aiStep "freezing", the server's alone (`level instanceof
+        // ServerLevel`): a client's player gets its frost slowdown from the
+        // server's attributes and its frozen ticks from the server's entity data.
+        if !self.player.client_side {
+            if !self.player.in_powder_snow || !self.player.can_freeze() {
+                self.player.ticks_frozen = (self.player.ticks_frozen - 2).max(0);
+            }
+            self.player.remove_frost()?;
+            let on = self.support(movement_support::LEGACY_SUPPORT_OFFSET)?;
+            let on_air = self.assets.registry.state(self.block(on)).is_none_or(|s| {
+                matches!(
+                    s.name.as_str(),
+                    "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air"
+                )
+            });
+            self.player.try_add_frost(on_air)?;
         }
-        self.player.remove_frost()?;
-        let on = self.support(movement_support::LEGACY_SUPPORT_OFFSET)?;
-        let on_air = self.assets.registry.state(self.block(on)).is_none_or(|s| {
-            matches!(
-                s.name.as_str(),
-                "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air"
-            )
-        });
-        self.player.try_add_frost(on_air)?;
         self.update_soul_speed_block()?;
-        if self.player.health.tick_count % 40 == 0
+        if !self.player.client_side
+            && self.player.health.tick_count % 40 == 0
             && self.player.is_fully_frozen()
             && self.player.can_freeze()
         {
@@ -1397,25 +1403,52 @@ impl MotionWorld<'_, '_, '_> {
             }
         }
         let flying_y = self.player.flying.then_some(self.player.velocity.y);
+        self.living_travel(&mut gate, input)?;
+        if let Some(y) = flying_y {
+            self.player.velocity.y = y * 0.6;
+        }
+        Ok(())
+    }
+    /// `LivingEntity.travel`: in a fluid (`isAffectedByFluids`: not while
+    /// flying), gliding, or in the air.
+    fn living_travel(&mut self, gate: &mut MoveGate, input: Vec3) -> Result<()> {
         if !self.player.flying
             && (self.player.fluids.was_touching_water || self.player.is_in_lava())
         {
-            sunrise_world::living_fluid::travel_in_fluid(self, &mut gate, input)?;
+            sunrise_world::living_fluid::travel_in_fluid(self, gate, input)?;
+            Ok(())
         } else if self.player.fall_flying {
             // LivingEntity.travelFallFlying: on a climbable the glide ends and
             // the player moves like in the air.
             if self.climbable()? {
-                self.travel_in_air(&mut gate, input)?;
+                self.travel_in_air(gate, input)?;
                 self.player.fall_flying = false;
+                Ok(())
             } else {
-                self.travel_fall_flying(&mut gate)?;
+                self.travel_fall_flying(gate)
             }
         } else {
-            self.travel_in_air(&mut gate, input)?;
+            self.travel_in_air(gate, input)
         }
-        if let Some(y) = flying_y {
-            self.player.velocity.y = y * 0.6;
-        }
+    }
+    /// `Entity.rideTick` for a rider this client moves (`LocalPlayer`): its
+    /// deltaMovement starts at zero, then `LivingEntity.aiStep` travels it as
+    /// it does any entity it simulates (`Player.travel` for a passenger is
+    /// `LivingEntity.travel`, with no swimming or flight change), from where
+    /// it sat, with its own input (`LocalPlayer.applyInput`: a passenger slows
+    /// for neither an item nor sneaking); `LivingEntity.rideTick` then forgets
+    /// the fall. The caller seats it after (`positionRider`). The move leaves
+    /// the onGround and horizontalCollision its Rot packet carries, and the
+    /// deltaMovement a dismount teleport keeps (its DELTA_* are relative).
+    pub(crate) fn rider_travel_tick(&mut self, direction: [f32; 2]) -> Result<()> {
+        self.player.velocity = Vec3::ZERO;
+        let input = crate::input::modify_input(direction, None, None);
+        let mut gate = MoveGate::new();
+        self.living_travel(
+            &mut gate,
+            Vec3::new(f64::from(input[0]), 0.0, f64::from(input[1])),
+        )?;
+        self.player.fall_distance = 0.0;
         Ok(())
     }
     /// ServerPlayer's own travel: the server simulates a player too
@@ -1640,10 +1673,10 @@ impl MotionWorld<'_, '_, '_> {
         Ok(())
     }
     /// The block effects and the frost of a window's own player while a vehicle carries it. Its
-    /// client does not travel (`passenger_pose_tick` is all it runs), but `LivingEntity.aiStep`
-    /// still applies the effects of the blocks a passenger is in (`applyEffectsFromBlocks`: powder
-    /// snow's FREEZE adds a tick of frost) and thaws it when it is out of powder snow. The
-    /// frostbite overlay reads these ticks. The server's copy does this in `server_block_damage`.
+    /// own move is `rider_tick`'s; after it, `LivingEntity.aiStep` still applies the effects of
+    /// the blocks a passenger is in (`applyEffectsFromBlocks`: powder snow's FREEZE adds a tick of
+    /// frost) and thaws it when it is out of powder snow. The frostbite overlay reads these ticks.
+    /// The server's copy does this in `server_block_damage`.
     pub fn passenger_block_effects_tick(&mut self) -> Result<()> {
         // Entity.baseTick
         self.player.was_in_powder_snow = self.player.in_powder_snow;
@@ -1935,12 +1968,14 @@ impl MotionWorld<'_, '_, '_> {
         }
     }
     pub fn jump_from_ground(&mut self) -> Result<()> {
-        living_motion::jump_from_ground(self)?;
-        if !self.player.replaying {
+        let jumped = living_motion::jump_from_ground(self)?;
+        if jumped && !self.player.replaying {
+            let v = self.player.velocity;
             native_living_jump(
                 self.loop_context,
                 self.player.entity_id as u32,
                 "minecraft:player",
+                [v.x, v.y, v.z],
             );
         }
         self.player
@@ -3318,6 +3353,41 @@ mod tests {
         assert_eq!(base(&mut back, "minecraft:max_health"), 30.0);
         assert_eq!(back.attribute("minecraft:max_health").unwrap(), 45.0);
         assert_eq!(back.health.health(), 40.0);
+    }
+
+    /// `Player.jumpFromGround` calls `LivingEntity.jumpFromGround`, which ends with NeoForge's
+    /// `LivingJumpEvent`: `living_jump` hears the player's jump once, with the motion it left.
+    #[test]
+    #[ignore = "daily"]
+    fn a_player_jump_fires_living_jump_once_with_its_velocity() {
+        use crate::native_client_hooks::test_hooks::{install, jumps, record_jumps};
+        let v = crate::test_fixtures::vanilla().expect("prepared resources");
+        let (assets, render, binding, resources) = (&v.assets, &v.render, &v.collision, &v.motion);
+        let mut scene = World::test_scene(assets, render, 1).unwrap();
+        let mut player = PlayerMotion::new(resources, Vec3::new(10.0, 100.0, 10.0)).unwrap();
+        player.entity_id = 5;
+        player.ground.on_ground = true;
+        install();
+        let _recording = record_jumps();
+        MotionWorld {
+            tag_items: None,
+            block_registries: None,
+            // The player fires on either side; a client one stays off the menu test's server count.
+            loop_context: &crate::test_resources::loop_context(
+                sunrise_world::native_load_context::LoopSide::Client,
+            ),
+            damage_hooks: &crate::health::DamageHooks::NONE,
+            entities: &[],
+            player: &mut player,
+            scene: &mut scene,
+            assets,
+            collision_binding: binding,
+            resources,
+            health: &resources.health,
+        }
+        .jump_from_ground()
+        .unwrap();
+        assert_eq!(jumps(), [(5, [0.0, f64::from(0.42_f32), 0.0])]);
     }
 
     #[test]
@@ -4999,6 +5069,83 @@ mod tests {
         assert_eq!(w.player.pose, crate::pose::Pose::Standing);
         assert_eq!(w.player.dimensions.eye_height, 1.62);
     }
+    /// A rider's own move (`rider_tick`): one beside a wall, holding forward, collides with it only
+    /// when its look is turned to it, so its look packet's flag follows this tick's look.
+    #[test]
+    #[ignore = "daily"]
+    fn a_riders_own_move_takes_this_ticks_look() {
+        let Some(v) = crate::test_fixtures::vanilla() else {
+            return;
+        };
+        let (assets, render, binding, resources) = (&v.assets, &v.render, &v.collision, &v.motion);
+        let mut scene = World::test_scene(assets, render, 2).unwrap();
+        let stone = assets.registry.default_state("minecraft:stone").unwrap();
+        for y in 4..=6 {
+            scene.set(20, y, 21, stone).unwrap();
+        }
+        let mut collided = Vec::new();
+        for yaw in [0.0, 180.0] {
+            // A hair from the wall at +z: forward at yaw 0 runs into it.
+            let mut player = PlayerMotion::new(resources, Vec3::new(20.5, 4.0, 20.69)).unwrap();
+            player.yaw = yaw;
+            let mut w = MotionWorld {
+                tag_items: None,
+                block_registries: None,
+                loop_context: crate::test_resources::server_loop_context(),
+                damage_hooks: &crate::health::DamageHooks::NONE,
+                entities: &[],
+                player: &mut player,
+                scene: &mut scene,
+                assets,
+                collision_binding: binding,
+                resources,
+                health: &resources.health,
+            };
+            w.rider_tick([0.0, 1.0]).unwrap();
+            collided.push(w.player.collision.horizontal);
+        }
+        assert_eq!(collided, [true, false]);
+    }
+    /// A rider's fluids are this tick's before it moves: in water its own move is a fluid
+    /// one (`travelInFluid`: 0.8 of the motion, minus gravity / 16, so y is -0.005), out of
+    /// it an air one (gravity then 0.98: -0.0784), and the fall is forgotten either way.
+    #[test]
+    #[ignore = "daily"]
+    fn a_riders_own_move_follows_the_fluid_it_is_in_now() {
+        let Some(v) = crate::test_fixtures::vanilla() else {
+            return;
+        };
+        let (assets, render, binding, resources) = (&v.assets, &v.render, &v.collision, &v.motion);
+        let mut scene = World::test_scene(assets, render, 2).unwrap();
+        let water = assets.registry.default_state("minecraft:water").unwrap();
+        for y in 6..=7 {
+            scene.set(20, y, 20, water).unwrap();
+        }
+        let mut fell = Vec::new();
+        for y in [6.2, 10.2] {
+            let mut player = PlayerMotion::new(resources, Vec3::new(20.5, y, 20.5)).unwrap();
+            player.fall_distance = 3.0;
+            let mut w = MotionWorld {
+                tag_items: None,
+                block_registries: None,
+                loop_context: crate::test_resources::server_loop_context(),
+                damage_hooks: &crate::health::DamageHooks::NONE,
+                entities: &[],
+                player: &mut player,
+                scene: &mut scene,
+                assets,
+                collision_binding: binding,
+                resources,
+                health: &resources.health,
+            };
+            w.rider_tick([0.0, 0.0]).unwrap();
+            assert_eq!(w.player.fall_distance, 0.0);
+            assert!(!w.player.ground.on_ground);
+            fell.push(w.player.velocity.y);
+        }
+        assert!((fell[0] - -0.005).abs() < 1e-6, "{fell:?}");
+        assert!((fell[1] - -0.0784).abs() < 1e-6, "{fell:?}");
+    }
     /// #4509: a cushion seat clips the feet into the floor, so `can_fit_pose`
     /// rejects standing and would leave a swim pose; sit up anyway.
     #[test]
@@ -6344,6 +6491,82 @@ mod tests {
             .unwrap();
             assert_eq!(player.velocity.y, want, "client_side={client_side}");
         }
+    }
+    /// `LivingEntity.aiStep`'s "freezing" part runs on a `ServerLevel` only: a client's player
+    /// keeps the frost modifier and the frozen ticks the server sent, takes no freeze damage, and
+    /// does not make the modifier again once the server's attributes remove it.
+    #[test]
+    #[ignore = "daily"]
+    fn a_clients_player_takes_its_frost_from_the_server() {
+        use sunrise_protocol::packets::play::{AttributeModifier, AttributeSnapshot};
+        let Some(v) = crate::test_fixtures::vanilla() else {
+            return;
+        };
+        let (assets, render, binding, resources) = (&v.assets, &v.render, &v.collision, &v.motion);
+        let mut scene = World::test_scene(assets, render, 1).unwrap();
+        let mut player = PlayerMotion::new(resources, Vec3::new(20.5, 4.0, 20.5)).unwrap();
+        player.client_side = true;
+        let speed = player
+            .attributes
+            .key("minecraft:movement_speed")
+            .unwrap()
+            .attribute()
+            .registry_id();
+        // The server's frost at 100% frozen: movement_speed takes -0.05 (a float) from 0.1 (a float).
+        let from_server = |modifiers: Vec<AttributeModifier>| AttributeSnapshot {
+            attribute: speed,
+            base: f64::from(0.1f32),
+            modifiers,
+        };
+        crate::lan::attributes::apply(
+            &mut player.attributes,
+            &[from_server(vec![AttributeModifier {
+                id: "minecraft:powder_snow".into(),
+                amount: f64::from(-0.05f32),
+                operation: 0,
+            }])],
+        );
+        player.ticks_frozen = 140;
+        let frozen_speed = f64::from(0.1f32) + f64::from(-0.05f32);
+        let mut run = |player: &mut PlayerMotion, ticks: usize| {
+            for _ in 0..ticks {
+                MotionWorld {
+                    tag_items: None,
+                    block_registries: None,
+                    loop_context: crate::test_resources::server_loop_context(),
+                    damage_hooks: &crate::health::DamageHooks::NONE,
+                    entities: &[],
+                    player,
+                    scene: &mut scene,
+                    assets,
+                    collision_binding: binding,
+                    resources,
+                    health: &resources.health,
+                }
+                .controlled_simulation_tick(Default::default())
+                .unwrap();
+            }
+        };
+        // Forty ticks reach a multiple of the freeze damage's forty.
+        run(&mut player, 40);
+        assert_eq!(
+            player.attribute("minecraft:movement_speed").unwrap(),
+            frozen_speed
+        );
+        assert_eq!(player.ticks_frozen, 140);
+        assert_eq!(player.health.health(), 20.0);
+        assert!(!player.events.iter().any(|e| matches!(
+            e,
+            MotionEvent::Health(crate::health::HealthEvent::FreezeDamage(_))
+        )));
+        // The server's next attributes carry no frost: the client's ticks do not bring it back.
+        crate::lan::attributes::apply(&mut player.attributes, &[from_server(Vec::new())]);
+        run(&mut player, 40);
+        assert_eq!(
+            player.attribute("minecraft:movement_speed").unwrap(),
+            f64::from(0.1f32)
+        );
+        assert_eq!(player.ticks_frozen, 140);
     }
     /// `LocalPlayer.isSuppressingSlidingDownLadder` is `!abilities.flying && super...()`, where
     /// `LivingEntity`'s is `isShiftKeyDown()`: a flying player on the client keeps sliding down a

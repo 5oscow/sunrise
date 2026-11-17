@@ -194,6 +194,7 @@ fn handle_records_have_declared_field_bytes() {
         (epoch, 0x5678u128),
     );
     fields(ObjectiveRef { epoch, id: 0x77 }, (epoch, 0x77u64));
+    fields(TeamRef { epoch, id: 0x78 }, (epoch, 0x78u64));
     fields(
         MenuRef {
             player,

@@ -9,7 +9,7 @@ use crate::glass_ui::{self as ui, white};
 use new_instance::NewKind;
 use servers_page::Field;
 use sunrise_launcher::instances::{Channel, Icon, Instance, Kind as InstanceKind, Plays};
-use sunrise_theme::glass::{ink, radius};
+use sunrise_launcher_theme::glass::{ink, radius};
 
 /// The sheet's sections.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -100,7 +100,7 @@ fn group(title: Option<SharedString>, rows: Div) -> Div {
             rows.flex()
                 .flex_col()
                 .p(px(2.))
-                .rounded(px(14.))
+                .rounded(px(crate::glass_ui::rad(14.)))
                 .bg(white(0.03))
                 .border_1()
                 .border_color(white(0.1)),
@@ -295,7 +295,7 @@ impl Launcher {
                     .min_w_0()
                     .child(
                         div()
-                            .font_family(sunrise_theme::glass::DISPLAY_FONT)
+                            .font_family(sunrise_launcher_theme::glass::DISPLAY_FONT)
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_size(px(20.))
                             .line_height(px(26.))
@@ -318,7 +318,7 @@ impl Launcher {
                                     .flex_none()
                                     .px(px(8.))
                                     .py(px(1.))
-                                    .rounded_full()
+                                    .rounded(px(crate::glass_ui::rad(10.)))
                                     .bg(white(0.07))
                                     .border_1()
                                     .border_color(white(0.12))
@@ -403,7 +403,7 @@ impl Launcher {
                     .gap(px(3.))
                     .child(
                         div()
-                            .font_family(sunrise_theme::glass::DISPLAY_FONT)
+                            .font_family(sunrise_launcher_theme::glass::DISPLAY_FONT)
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_size(px(19.))
                             .line_height(px(23.))
@@ -658,7 +658,7 @@ impl Launcher {
                             .gap(px(6.))
                             .child(
                                 div()
-                                    .font_family(sunrise_theme::glass::DISPLAY_FONT)
+                                    .font_family(sunrise_launcher_theme::glass::DISPLAY_FONT)
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .text_size(px(18.))
                                     .text_color(white(ink::FULL))
@@ -879,14 +879,14 @@ impl Launcher {
     /// instance, the game's home, has none.
     fn sheet_danger(&mut self, editing: &Instance, cx: &mut Context<Self>) -> Option<Div> {
         let delete = self.delete_button(editing, cx)?;
-        let danger = ui::color(sunrise_theme::glass::DANGER_HOVER);
+        let danger = ui::color(sunrise_launcher_theme::glass::DANGER_HOVER);
         Some(
             div()
                 .flex()
                 .flex_col()
                 .mt(px(4.))
                 .p(px(14.))
-                .rounded(px(12.))
+                .rounded(px(crate::glass_ui::rad(12.)))
                 .border_1()
                 .border_color(danger.opacity(0.3))
                 .bg(danger.opacity(0.05))

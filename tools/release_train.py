@@ -12,7 +12,9 @@ The game ships only the Nightly since 2026-10-28 (Ludovic): when `decide --kind 
 On the fork (CI tiers, owner 2026-11-13) `--channel` names the kind of build: `nightly` takes `daily-green` and
 refuses any other --head (an older commit had no daily run of its own, and no SDK); `snapshot` takes main's head (or
 a --head on main) and refuses a commit whose gate jobs (dyna-checks' main-push lint, verify, verify-static, launcher)
-did not all pass (pending is not passed); otherwise it always builds, as snapshot-<date>-<short> (no batch rules,
+did not all pass (pending is not passed). The next push cancels a main push run (dyna-ci.yml), so a publishing run
+(GATE_RERUN=1: release.yml's decide and nightly-build.yml's pick, real runs) waits for the commit's run and starts it again once when it was cancelled, in a
+group no push cancels (gate_again); otherwise it always builds, as snapshot-<date>-<short> (no batch rules,
 cap, pause or release-blocker: a snapshot is for testing main, never for players).
 
 A kind releases when a pull request merged into main since its last published release changed one of its
@@ -46,6 +48,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import time
 
 ROOT = Path(__file__).resolve().parents[1]
 REPO = os.environ.get("GITHUB_REPOSITORY", "sunrise-org/sunrise")
@@ -79,6 +82,7 @@ LAUNCHER_PATHS = [
     "crates/sunrise-mcp/",
     "crates/sunrise-mod-api-gen/",
     "crates/sunrise-mod-package/",
+    "crates/sunrise-native-build/",
     "crates/sunrise-port-pack/",
     "crates/sunrise-prepare/",
     "crates/sunrise-release-sign/",
@@ -503,6 +507,44 @@ def published_nightly():
     return json.loads(out) if out.strip() else None
 
 
+# A launcher built from main after the launcher split (#2080, #2163 and on) asks the installed game's preparer
+# `sunrise-prepare needs` (it came with 9649943c68d) and builds native mods with the SDK's `tool` slices: until a
+# published Nightly and its sdk-<commit> carry both, such a launcher refuses every Nightly players can install, so
+# no launcher is released from main (umceko, 2026-11-17).
+PREPARE_NEEDS = "9649943c68d48a32fe247f1bac750fe4249b93fa"
+# The launcher-split pull requests whose launcher needs both. Rollups merge a member's head unchanged, so a head that
+# contains one's head commit carries it; a launcher without them (a hotfix of launcher@1.0.1) isn't held.
+SPLIT_PULL_REQUESTS = (2080, 2163)
+
+
+def launcher_has_split(head):
+    """Whether `head` contains a launcher-split pull request's head commit."""
+    for number in SPLIT_PULL_REQUESTS:
+        # A failed lookup exits: the hold fails closed.
+        sha = run("gh", "api", f"repos/{REPO}/pulls/{number}", "--jq", ".head.sha").strip()
+        if not subprocess.run(["git", "merge-base", "--is-ancestor", sha, head], cwd=ROOT,
+                              capture_output=True).returncode:
+            return True
+    return False
+
+
+def launcher_waits_for_nightly():
+    """Why a launcher from main can't be released yet, or None once the published Nightly's commit has
+    `sunrise-prepare needs` and its SDK release carries a `tool` slice."""
+    if not run("git", "ls-remote", "--tags", "origin", "refs/tags/nightly").strip():
+        return "no Nightly is published: a launcher from main waits for one with `sunrise-prepare needs` and its SDK's tool"
+    run("git", "fetch", "--quiet", "--force", "origin", "refs/tags/nightly:refs/tags/nightly")
+    sha = run("git", "rev-parse", "refs/tags/nightly^{commit}").strip()
+    if subprocess.run(["git", "merge-base", "--is-ancestor", PREPARE_NEEDS, sha], cwd=ROOT).returncode:
+        return (f"the published Nightly ({sha[:9]}) has no `sunrise-prepare needs`, which a launcher from main asks "
+                "the game: it waits for a newer Nightly")
+    assets = run("gh", "api", f"repos/{REPO}/releases/tags/sdk-{sha}", "--jq", ".assets[].name", check=False).split()
+    if not any(name.startswith("tool-") for name in assets):
+        return (f"sdk-{sha[:9]}, the published Nightly's SDK, has no `tool` slice, which a launcher from main builds "
+                "native mods with: it waits for a newer Nightly")
+    return None
+
+
 SNAPSHOT_RUN = "snapshot build"
 
 
@@ -591,13 +633,48 @@ def daily_green_commit():
     return run("git", "rev-parse", "--verify", "--quiet", f"refs/tags/{DAILY_GREEN}^{{commit}}", check=False).strip()
 
 
-def fork_gate_passed(sha):
-    """Whether the newest dyna-checks main-push run on sha passed every gate job (the snapshot's check)."""
+GATE_WAIT = 150 * 60  # seconds: a gate run's queue wait and its longest job, lint (about 25 min), with room
+GATE_POLL = 60
+
+
+def push_gate_run(sha):
+    """The newest dyna-checks main-push run on sha (its API record), or None."""
     pages = gh_json("api", "--paginate",
                     f"repos/{REPO}/actions/workflows/dyna-ci.yml/runs?branch=main&event=push&head_sha={sha}&per_page=100")
     runs = [entry for page in pages for entry in page["workflow_runs"]
             if entry["head_sha"] == sha and entry["head_branch"] == "main" and entry["event"] == "push"]
-    return bool(runs) and gate_jobs_passed(runs[0]["id"], GATE)
+    return runs[0] if runs else None
+
+
+def fork_gate_passed(sha):
+    """Whether the newest dyna-checks main-push run on sha passed every gate job (the snapshot's check)."""
+    found = push_gate_run(sha)
+    return found is not None and gate_jobs_passed(found["id"], GATE)
+
+
+def gate_again(sha):
+    """Whether sha's gate passes once its main push run ends, the run started again (its cancelled and failed jobs,
+    `gh run rerun --failed`) when the next push cancelled it: that run's later attempt has a concurrency group of its
+    own (dyna-ci.yml), so it finishes. A gate job that failed is a red gate, never run again. Waits GATE_WAIT at most."""
+    deadline, again = time.monotonic() + GATE_WAIT, False
+    while True:
+        found = push_gate_run(sha)
+        if found is None:
+            return False
+        if found["status"] != "completed":
+            if time.monotonic() > deadline:
+                return False
+            time.sleep(GATE_POLL)
+            continue
+        if gate_jobs_passed(found["id"], GATE):
+            return True
+        if again or found["conclusion"] != "cancelled":
+            return False
+        print(f"dyna-checks' main push run {found['id']} on {sha[:9]} was cancelled by a later push: running its gate "
+              "again", file=sys.stderr)
+        run("gh", "run", "rerun", str(found["id"]), "--failed", "--repo", REPO)
+        again = True
+        time.sleep(GATE_POLL)
 
 
 def channel_head(channel, head):
@@ -608,7 +685,7 @@ def channel_head(channel, head):
         raise SystemExit(f"::error::refused: {head} is not a commit of this repository")
     if subprocess.run(["git", "merge-base", "--is-ancestor", sha, "refs/remotes/origin/main"], cwd=ROOT).returncode:
         raise SystemExit(f"::error::refused: {sha} is not on main; a {channel} builds only a commit of main")
-    if not fork_gate_passed(sha):
+    if not fork_gate_passed(sha) and not (os.environ.get("GATE_RERUN") == "1" and gate_again(sha)):
         raise SystemExit(f"::error::refused: dyna-checks' gate jobs ({', '.join(sorted(GATE))}) "
                          f"did not all pass on a main push of {sha}; a {channel} needs the gate green on its commit")
     return sha
@@ -743,6 +820,10 @@ def main():
                                blockers, daily=args.daily)
     if release and args.head and parity and not args.channel and not (passed_on("parity-main", head) and passed_on("checks", head)):
         release, reason = False, f"waiting for checks and parity-main to pass on {head[:9]}"
+    if release and args.kind == "launcher" and launcher_has_split(head):
+        waiting = launcher_waits_for_nightly()
+        if waiting:
+            release, reason = False, waiting
     urgent = False
     if args.kind == "game":
         release, reason, urgent = nightly_decision(release, reason, prs, nightly_building(),

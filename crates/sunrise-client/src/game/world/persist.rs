@@ -419,17 +419,19 @@ fn read_attachments(
 pub(super) fn write_attachments(
     tag: &mut Tag,
     id: u32,
-    maps: &HashMap<u32, sunrise_mod_runtime::attachments::Attachments, impl std::hash::BuildHasher>,
+    maps: &super::native_colliders::EntityMaps,
 ) {
-    if let Tag::Compound(root) = tag
-        && let Some(map) = maps.get(&id)
-        && attachment_compound(root.get(&ATTACHMENTS_KEY.into())).is_ok()
-    {
-        let data = map.to_nbt();
-        if data.is_empty() {
-            root.remove(&ATTACHMENTS_KEY.into());
-        } else {
-            root.insert(ATTACHMENTS_KEY.into(), Tag::Compound(data));
+    if let Tag::Compound(root) = tag {
+        maps.write_collider(root, id);
+        if let Some(map) = maps.get(&id)
+            && attachment_compound(root.get(&ATTACHMENTS_KEY.into())).is_ok()
+        {
+            let data = map.to_nbt();
+            if data.is_empty() {
+                root.remove(&ATTACHMENTS_KEY.into());
+            } else {
+                root.insert(ATTACHMENTS_KEY.into(), Tag::Compound(data));
+            }
         }
     }
 }
@@ -1521,6 +1523,7 @@ impl Game<'_> {
         self.persist.score_destroyed.remove(&id);
         self.forget_entity_initialization(mod_api::Holder::Entity(id));
         self.entity_attachments.remove(&id);
+        self.entity_attachments.remove_collider(id);
         self.persist.raw.remove(&id);
         self.persist.no_physics.remove(&id);
     }
@@ -1626,6 +1629,7 @@ impl Game<'_> {
             self.initialize_entity(mod_api::Holder::Entity(id), &kind);
         }
         read_attachments(tag, id, &mut self.entity_attachments, live);
+        self.load_saved_collider(id, tag);
         self.join_saved_team(id, tag);
     }
     fn join_saved_team(&mut self, id: u32, tag: &Tag) {

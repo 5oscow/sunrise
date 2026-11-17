@@ -1,6 +1,7 @@
 import datetime as dt
 import os
 import subprocess
+import sys
 import textwrap
 from pathlib import Path
 import tempfile
@@ -381,6 +382,61 @@ class ReleaseTrainTests(unittest.TestCase):
             self.assertEqual(select(event="push").stdout, topic)
             self.assertEqual(select(dry_run="true").stdout, topic)
 
+    def test_a_launcher_from_main_waits_for_a_nightly_with_prepare_needs_and_an_sdk_tool(self):
+        real_run = train.run
+        with tempfile.TemporaryDirectory() as folder:
+            def git(*args):
+                return subprocess.check_output(["git", *args], cwd=folder, text=True,
+                                               stderr=subprocess.DEVNULL).strip()
+            git("init", "-b", "main")
+            git("config", "user.name", "Test")
+            git("config", "user.email", "test@example.invalid")
+            git("commit", "--allow-empty", "-m", "before")
+            before = git("rev-parse", "HEAD")
+            git("commit", "--allow-empty", "-m", "sunrise-prepare needs")
+            needs = git("rev-parse", "HEAD")
+            git("remote", "add", "origin", folder)
+            sdk_assets = []
+            def run(*command, check=True):
+                if command[0] == "gh":
+                    self.assertEqual(command[2], f"repos/{train.REPO}/releases/tags/sdk-{needs}")
+                    return "\n".join(sdk_assets)
+                return real_run(*command, check=check)
+            with mock.patch.object(train, "ROOT", Path(folder)), mock.patch.object(train, "PREPARE_NEEDS", needs), \
+                    mock.patch.object(train, "run", side_effect=run):
+                self.assertIn("no Nightly is published", train.launcher_waits_for_nightly())
+                git("tag", "nightly", before)
+                self.assertIn("no `sunrise-prepare needs`", train.launcher_waits_for_nightly())
+                git("tag", "-f", "nightly", needs)
+                sdk_assets[:] = ["sdk.json", "runtime-x86_64-unknown-linux-gnu.tar.xz"]
+                self.assertIn("no `tool` slice", train.launcher_waits_for_nightly())
+                sdk_assets.append("tool-x86_64-unknown-linux-gnu.tar.xz")
+                self.assertIsNone(train.launcher_waits_for_nightly())
+
+    def test_only_a_launcher_with_the_split_is_held(self):
+        with tempfile.TemporaryDirectory() as folder:
+            def git(*args):
+                return subprocess.check_output(["git", *args], cwd=folder, text=True,
+                                               stderr=subprocess.DEVNULL).strip()
+            git("init", "-b", "main")
+            git("config", "user.name", "Test")
+            git("config", "user.email", "test@example.invalid")
+            git("commit", "--allow-empty", "-m", "launcher@1.0.1")
+            hotfix = git("rev-parse", "HEAD")
+            git("commit", "--allow-empty", "-m", "launcher split")
+            split = git("rev-parse", "HEAD")
+            heads = {2080: split, 2163: "f" * 40}
+            def run(*command, check=True):
+                self.assertEqual(command[0], "gh")
+                return heads[int(command[2].rsplit("/", 1)[1])] + "\n"
+            with mock.patch.object(train, "ROOT", Path(folder)), mock.patch.object(train, "run", side_effect=run):
+                self.assertTrue(train.launcher_has_split(split))
+                self.assertFalse(train.launcher_has_split(hotfix))
+            with mock.patch.object(train, "subprocess", wraps=train.subprocess) as sub:
+                sub.run.return_value = subprocess.CompletedProcess([], 1, "", "API rate limit exceeded")
+                with self.assertRaises(SystemExit):
+                    train.launcher_has_split(hotfix)
+
     @mock.patch.object(train, "REPO", "sunrise-org/sunrise")
     def test_fork_base_requires_same_sha_main_push_gate_jobs(self):
         def record(sha, ident, event="push", branch="main"):
@@ -476,6 +532,50 @@ class ReleaseTrainTests(unittest.TestCase):
                             train.channel_head(channel, commits[2])
                         with self.assertRaisesRegex(SystemExit, "not a commit of this repository"):
                             train.channel_head(channel, "f" * 40)
+
+    def test_a_publishing_run_runs_a_cancelled_gate_again_and_waits_for_it(self):
+        sha = "a" * 40
+        def gate(runs, passed, publishing=True):
+            """channel_head's gate check on `runs` (push_gate_run's answers in turn) and `passed` (gate_jobs_passed's),
+            returning the rerun commands it ran."""
+            reruns = []
+            def run(*command, check=True):
+                if command[:3] == ("gh", "run", "rerun"):
+                    reruns.append(command)
+                    return ""
+                return subprocess.run(command, cwd=train.ROOT, capture_output=True, text=True).stdout
+            with mock.patch.object(train, "push_gate_run", side_effect=runs), \
+                    mock.patch.object(train, "gate_jobs_passed", side_effect=passed), \
+                    mock.patch.object(train, "run", side_effect=run), \
+                    mock.patch.object(train.time, "sleep"), \
+                    mock.patch.dict(os.environ, {"GATE_RERUN": "1" if publishing else ""}):
+                return train.fork_gate_passed(sha) or (publishing and train.gate_again(sha)), reruns
+        cancelled = dict(id=7, status="completed", conclusion="cancelled")
+        running = dict(id=7, status="in_progress", conclusion=None)
+        passed = dict(id=7, status="completed", conclusion="success")
+        # The next push cancelled the commit's gate: it runs again, once, and the release waits for it.
+        self.assertEqual(gate([cancelled, cancelled, running, passed], [False, False, True]),
+                         (True, [("gh", "run", "rerun", "7", "--failed", "--repo", train.REPO)]))
+        # Still running when asked: waited for, nothing started again.
+        self.assertEqual(gate([running, running, passed], [False, True]), (True, []))
+        # A gate job that failed is red: never run again.
+        failed = dict(id=7, status="completed", conclusion="failure")
+        self.assertEqual(gate([failed, failed], [False, False]), (False, []))
+        # Cancelled again after its second run: refused, not a third.
+        self.assertEqual(gate([cancelled, cancelled, cancelled], [False, False, False]),
+                         (False, [("gh", "run", "rerun", "7", "--failed", "--repo", train.REPO)]))
+        # A dry run or a by-hand check only reads.
+        self.assertEqual(gate([cancelled], [False], publishing=False), (False, []))
+        # Only publishing runs (release.yml's decide, nightly-build.yml's pick) set GATE_RERUN, with the right to start the run again.
+        sys.path.insert(0, str(train.ROOT / "tools/ci/vendor/pyyaml-6.0.3.zip"))
+        import yaml
+        decide = yaml.safe_load((train.ROOT / ".github/workflows/release.yml").read_text())["jobs"]["decide"]
+        self.assertEqual(decide["permissions"]["actions"], "write")
+        self.assertEqual(decide["steps"][-1]["env"]["GATE_RERUN"], "${{ steps.mode.outputs.dry_run == 'false' && '1' || '' }}")
+        pick = yaml.safe_load((train.ROOT / ".github/workflows/nightly-build.yml").read_text())["jobs"]["pick"]
+        self.assertEqual(pick["permissions"]["actions"], "write")
+        step = next(step for step in pick["steps"] if step.get("id") == "pick")
+        self.assertEqual(step["env"]["GATE_RERUN"], "${{ steps.mode.outputs.dry_run != 'true' && '1' || '' }}")
 
     def test_a_snapshot_is_tagged_by_kind_date_and_commit(self):
         sha = "0c02067" + "a" * 33
