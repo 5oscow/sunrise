@@ -29,8 +29,8 @@ SAME_BYTES = (
     ("docs/media/village.webp", "../assets/media/village.webp"),
     ("docs/media/underwater.webp", "../assets/media/underwater.webp"),
     ("docs/media/nether.webp", "../assets/media/nether.webp"),
-    ("LICENSE", "../assets/licenses/LICENSE"),
-    ("LICENSES/MIT-Horizon.txt", "../assets/licenses/MIT-Horizon.txt"),
+    ("LICENSE", "../assets/LICENSE"),
+    ("LICENSES/MIT-Horizon.txt", "../assets/LICENSES/MIT-Horizon.txt"),
     ("crates/sunrise-prepare/tests/support/java_probe.rs", "../tests/support/java_probe.rs"),
 )
 
