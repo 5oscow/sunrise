@@ -60,9 +60,12 @@ spreading and dispensers. Only a player's bucket supplies a `user`.
 needed tick, `Some(false)` if it was not placed, or `None` to run the template. Buckets supply a
 source state; spreading supplies the arriving state. A normal bucket still empties if the container
 returns false; a validated fluid-container operation fails instead. Player buckets and the fluid
-utility journal the part's writes; a false answer or fallthrough discards tentative writes. The
-direct dispenser and spreading paths skip the listener and log the refusal if a mod transaction is
-open, leaving the template's answer.
+utility journal the part's writes; a false answer or fallthrough discards tentative writes. Root
+commit applies only the final state at each changed position, not the intermediate states. If any
+committed write there requested a neighbour, client or immediate update, that request survives;
+shape updates, drops and other effects are suppressed only if all writes there suppressed them.
+Aborted writes do not contribute. The direct dispenser and spreading paths skip the listener and
+log the refusal if a mod transaction is open, leaving the template's answer.
 
 ## Saving and game events
 

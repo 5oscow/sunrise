@@ -365,6 +365,61 @@ fn journal_level_host_stages_block_entity_random_and_effect_changes() {
     });
 }
 
+#[test]
+#[ignore = "daily"]
+fn journal_level_host_retains_neighbour_updates_from_earlier_writes() {
+    use crate::game::journal_level_write::JournalLevelWrite;
+    use mod_api::{BlockUpdateFlags, LevelHost, LevelWriteHost};
+
+    with_level(|game, level| {
+        let lamp_pos = [AT[0] + 1, AT[1], AT[2]];
+        let [x, y, z] = lamp_pos;
+        let lamp = state(game, "minecraft:redstone_lamp");
+        let air = state(game, "minecraft:air");
+        let lit_lamp = game
+            .pack
+            .assets
+            .registry
+            .resolve(&sunrise_world::chunk::BlockState {
+                name: "minecraft:redstone_lamp".into(),
+                properties: [("lit".into(), "true".into())].into(),
+            })
+            .unwrap();
+        for nested in [false, true] {
+            game.world.set(AT[0], AT[1], AT[2], air).unwrap();
+            game.world.set(x, y, z, lamp).unwrap();
+            let root = game.transaction_open();
+            {
+                let mut host = JournalLevelWrite::new(game, level).unwrap();
+                let lever = host
+                    .block_state_id("minecraft:lever[face=floor,facing=east,powered=true]")
+                    .unwrap();
+                assert!(host.set_block(
+                    AT,
+                    lever,
+                    BlockUpdateFlags::NEIGHBORS | BlockUpdateFlags::CLIENTS
+                ));
+            }
+            let inner = nested.then(|| game.transaction_open());
+            {
+                let mut host = JournalLevelWrite::new(game, level).unwrap();
+                assert!(host.set_block_property(
+                    AT,
+                    "facing",
+                    "west",
+                    BlockUpdateFlags::CLIENTS | BlockUpdateFlags::KNOWN_SHAPE
+                ));
+            }
+            if let Some(inner) = inner {
+                game.transaction_close(&inner, true);
+            }
+            assert_eq!(game.world.block(x, y, z), lamp);
+            game.transaction_close(&root, true);
+            assert_eq!(game.world.block(x, y, z), lit_lamp, "nested: {nested}");
+        }
+    });
+}
+
 #[derive(Default)]
 struct LiquidCalls {
     queried: std::sync::Mutex<Vec<(bool, Option<u32>, mod_api::FluidKey)>>,

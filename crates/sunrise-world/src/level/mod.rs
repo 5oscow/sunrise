@@ -2143,6 +2143,132 @@ mod dimension_key_tests {
 }
 
 #[cfg(test)]
+mod liquid_container_tests {
+    use super::{tests::TestLevel, *};
+
+    struct ContainerLevel {
+        base: TestLevel,
+        container: BlockStateId,
+        accepts: Option<FluidKind>,
+        filled: BlockStateId,
+    }
+
+    impl BlockEntityNeighbors for ContainerLevel {}
+
+    impl LevelAccess for ContainerLevel {
+        fn block_state(&self, pos: BlockPos) -> BlockStateId {
+            self.base.block_state(pos)
+        }
+        fn set_raw(&mut self, pos: BlockPos, state: BlockStateId) -> Option<BlockStateId> {
+            self.base.set_raw(pos, state)
+        }
+        fn is_loaded(&self, pos: BlockPos) -> bool {
+            self.base.is_loaded(pos)
+        }
+        fn random(&mut self) -> &mut LegacyRandom {
+            self.base.random()
+        }
+        fn game_time(&self) -> i64 {
+            self.base.game_time()
+        }
+        fn has_liquid_container_part(&self, state: BlockStateId) -> bool {
+            state == self.container && self.accepts.is_some()
+        }
+        fn can_place_liquid(
+            &self,
+            _: BlockPos,
+            state: BlockStateId,
+            fluid: FluidKind,
+            _: LiquidUser,
+        ) -> Option<bool> {
+            if state != self.container {
+                return None;
+            }
+            self.accepts.map(|kind| kind == fluid)
+        }
+        fn place_liquid(
+            &mut self,
+            _: &mut Ticks,
+            pos: BlockPos,
+            state: BlockStateId,
+            fluid: FluidState,
+        ) -> Option<bool> {
+            (state == self.container && self.accepts == Some(fluid.kind()) && fluid.is_source())
+                .then(|| self.set_raw(pos, self.filled).is_some())
+        }
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn lava_bucket_fills_a_solid_non_template_container() {
+        let fixture = tests::fixture().expect("prepared block facts for daily fixture");
+        let b = &fixture.behaviours;
+        let stone = fixture.registry.default_state("minecraft:stone").unwrap();
+        let emerald = fixture
+            .registry
+            .default_state("minecraft:emerald_block")
+            .unwrap();
+        let at = BlockPos::new(0, 64, 0);
+        let mut level = ContainerLevel {
+            base: TestLevel::new(b),
+            container: stone,
+            accepts: Some(FluidKind::Lava),
+            filled: emerald,
+        };
+        level.set_raw(at, stone);
+        assert!(b.bucket_can_fill(&level, at, stone, FluidKind::Lava, LiquidUser::default()));
+        assert_eq!(
+            b.bucket_empty_as(
+                &mut level,
+                &mut Ticks::default(),
+                at,
+                None,
+                BucketContent::Fluid(FluidKind::Lava),
+                "minecraft:item.bucket.empty_lava",
+                false,
+                LiquidUser::default(),
+            ),
+            Some(at),
+        );
+        assert_eq!(level.block_state(at), emerald);
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn refusing_container_stays_where_water_would_wash_it_away() {
+        let fixture = tests::fixture().expect("prepared block facts for daily fixture");
+        let b = &fixture.behaviours;
+        let plant = fixture
+            .registry
+            .default_state("minecraft:dandelion")
+            .unwrap();
+        let water = fixture.registry.default_state("minecraft:water").unwrap();
+        let source = BlockPos::new(0, 65, 0);
+        let at = BlockPos::new(0, 64, 0);
+        for accepts in [Some(FluidKind::Lava), None] {
+            let mut level = ContainerLevel {
+                base: TestLevel::new(b),
+                container: plant,
+                accepts,
+                filled: plant,
+            };
+            level.set_raw(source, water);
+            level.set_raw(at, plant);
+            b.scheduled_fluid_tick(&mut level, &mut Ticks::default(), source);
+            if accepts.is_some() {
+                assert_eq!(level.block_state(at), plant);
+            } else {
+                assert!(
+                    b.fluid(level.block_state(at))
+                        .kind()
+                        .same_family(FluidKind::Water)
+                );
+            }
+        }
+    }
+}
+
+#[cfg(test)]
 mod block_entity_neighbor_tests;
 
 mod piston_reactions;

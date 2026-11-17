@@ -32,6 +32,7 @@ use std::collections::HashMap;
 use sunrise_client::{items::ItemStack, world::BlockEntityExtras};
 use sunrise_core::position::BlockPos;
 use sunrise_mod_runtime::attachments::{Attachments, Holder};
+use sunrise_world::level::flags;
 
 #[path = "transactions/decision.rs"]
 pub(in crate::game) mod decision;
@@ -114,6 +115,22 @@ struct KeptBlock {
     replay_removal: bool,
 }
 
+/// Preserve requested updates, and suppress an effect only if every write
+/// suppressed it. Other bits describe the final write (e.g. moved by piston).
+fn merge_block_update_flags(earlier: i32, later: i32) -> i32 {
+    const REQUESTED: i32 =
+        flags::UPDATE_NEIGHBORS | flags::UPDATE_CLIENTS | flags::UPDATE_IMMEDIATE;
+    const SUPPRESSED: i32 = flags::UPDATE_INVISIBLE
+        | flags::UPDATE_KNOWN_SHAPE
+        | flags::UPDATE_SUPPRESS_DROPS
+        | flags::UPDATE_SKIP_SHAPE_UPDATE_ON_WIRE
+        | flags::UPDATE_SKIP_BLOCK_ENTITY_SIDEEFFECTS
+        | flags::UPDATE_SKIP_ON_PLACE;
+    ((earlier | later) & REQUESTED)
+        | ((earlier & later) & SUPPRESSED)
+        | (later & !(REQUESTED | SUPPRESSED))
+}
+
 /// One open transaction.
 #[derive(Default)]
 pub(super) struct Level {
@@ -133,7 +150,7 @@ pub(super) struct Level {
     /// transaction first wrote it, for a block entity not kept whole in `block_entities`: a
     /// move through a container keeps the slot it touches, not the entity's whole saved data.
     slots: HashMap<(Pos, usize), KeptSlot>,
-    /// Each block's original state and its most recent write's update flags.
+    /// Each block's original state and the combined update flags of its writes.
     blocks: HashMap<Pos, KeptBlock>,
     /// Level.random before the first transactional level write drew from it.
     level_random: Option<sunrise_core::random::LegacyRandom>,
@@ -308,7 +325,7 @@ pub(super) enum After {
 
     /// `ServerLevel.destroyBlockProgress`: breaker id, position, stage. Sent once, at the root commit.
     BreakProgress(i32, [i32; 3], i32),
-    /// The block's new state, set with the update flags of its last write.
+    /// The block's final state, set with the combined update flags.
     Block(Pos),
     /// A validated level write host effect; never published on abort.
     LevelWrite(Box<super::journal_level_write::PendingWrite>),
@@ -534,7 +551,7 @@ impl Game<'_> {
                         .blocks
                         .entry(pos)
                         .and_modify(|kept| {
-                            kept.flags = block.flags;
+                            kept.flags = merge_block_update_flags(kept.flags, block.flags);
                             kept.level_host = block.level_host;
                             kept.replay_removal |= block.replay_removal;
                         })
@@ -978,7 +995,7 @@ impl Game<'_> {
     pub(super) fn journal_set_block(&mut self, pos: [i32; 3], state: BlockStateId) -> bool {
         self.journal_set_block_flags(pos, state, sunrise_world::level::flags::UPDATE_ALL, false)
     }
-    /// The root commit replays one write per position with its last write's flags, not earlier updates.
+    /// The root commit replays one write per position with the combined update flags.
     pub(super) fn journal_set_block_flags(
         &mut self,
         pos: [i32; 3],
@@ -995,7 +1012,7 @@ impl Game<'_> {
             .blocks
             .entry(key)
             .and_modify(|kept| {
-                kept.flags = flags;
+                kept.flags = merge_block_update_flags(kept.flags, flags);
                 kept.level_host = level_host;
             })
             .or_insert(KeptBlock {
