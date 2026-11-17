@@ -200,6 +200,14 @@ impl Menu {
         mut clicked: ItemStack,
         stack: ItemStack,
     ) -> MenuStep<(ItemStack, ItemStack)> {
+        if self.menu_slot_take_hook && self.mod_take_slot(index) {
+            let amount = clicked.count - stack.count;
+            let mut moved = clicked.clone();
+            moved.count = amount;
+            return self
+                .take_step(env, index, moved, amount)
+                .then(self, env, move |_, _, _| MenuStep::Done((clicked, stack)));
+        }
         let role = self.slots[index].role;
         let rest = matches!(
             role,

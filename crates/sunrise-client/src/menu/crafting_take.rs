@@ -10,9 +10,33 @@ impl Menu {
         &mut self,
         env: &Env,
         s: usize,
+        taken: ItemStack,
+    ) -> MenuStep<ItemStack> {
+        self.take_step(env, s, taken, 0)
+    }
+
+    pub(super) fn take_step(
+        &mut self,
+        env: &Env,
+        s: usize,
         mut taken: ItemStack,
+        quick_craft_amount: u32,
     ) -> MenuStep<ItemStack> {
         self.on_take(env, s, &mut taken);
+        if self.menu_slot_take_hook
+            && self.mod_take_slot(s)
+            && taken.count > 0
+            && env.loop_context.side() == LoopSide::Server
+        {
+            return MenuStep::Take {
+                event: TakeEvent {
+                    slot: s,
+                    taken: taken.clone(),
+                    quick_craft_amount,
+                },
+                resume: Box::new(move |_, _| MenuStep::Done(taken)),
+            };
+        }
         MenuStep::Done(taken)
     }
 

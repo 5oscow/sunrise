@@ -803,6 +803,7 @@ impl Menu {
                 merchant_remove_count: 0,
                 brewed: Vec::new(),
                 brewed_potion_hook: false,
+                menu_slot_take_hook: false,
                 brewed_potion_takes: Vec::new(),
                 item_smelted_hook: false,
                 item_smelted: Vec::new(),
@@ -2280,6 +2281,7 @@ impl Menu {
             }
             // ChestMenu.quickMoveStack over the mod's slots.
             Kind::Mod(t) => {
+                after_take = self.menu_slot_take_hook && self.mod_take_slot(index);
                 check_count = false;
                 let n = t.slots;
                 if index < n {

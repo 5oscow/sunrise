@@ -143,6 +143,9 @@ pub struct State {
     /// Set by a server caller when a mod listens: every stack taken from a
     /// brewing stand's bottle slots then goes to `brewed_potion_takes`.
     pub brewed_potion_hook: bool,
+    /// Suspend positive takes from mod-owned slots for an authoritative coordinator.
+    /// The synchronous data-only API does not execute external effects.
+    pub menu_slot_take_hook: bool,
     /// Stacks taken from brewing stand bottle slots, for
     /// `PlayerBrewedPotionEvent`.
     pub brewed_potion_takes: Vec<ItemStack>,

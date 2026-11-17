@@ -150,6 +150,11 @@ impl Game<'_> {
             return false;
         }
         let slot = p.slot as usize;
+        let take = self.menu_quick_take_before(menu_type, slot, pos);
+        let take_seal = take.as_ref().map(|_| self.transaction_open());
+        if take_seal.is_some() {
+            self.journal_guest_click(conn);
+        }
         // The game's own routing reuses the pickup rule's answer asked before the hook, so the
         // click asks it once, as the client's prediction does.
         let (handled, asked) = if mod_api::__private::has_part_hook(mod_api::HookId::MenuQuickMove)
@@ -159,6 +164,9 @@ impl Game<'_> {
             match self.decided_mod_quick_move(conn, pos, size, menu_type, slot, at, window) {
                 Some(decided) => decided,
                 None => {
+                    if let Some(seal) = &take_seal {
+                        self.transaction_close(seal, false);
+                    }
                     // The client predicted the game's routing: it gets the menu as it is.
                     if let Some(host) = self.lan.as_mut() {
                         host.hub.resend_menu(conn, window, &self.world);
@@ -173,7 +181,22 @@ impl Game<'_> {
             (handled, Asked::default())
         };
         if !handled {
+            if let Some(seal) = &take_seal {
+                self.transaction_close(seal, false);
+            }
             return !asked.is_empty() && self.lan_machine_click_asked(conn, p, asked);
+        }
+        if let Some((menu, event)) = take {
+            let kept = self.menu_quick_take_after(conn, pos, menu, event);
+            if let Some(seal) = &take_seal {
+                self.transaction_close(seal, kept);
+            }
+            if !kept {
+                if let Some(host) = self.lan.as_mut() {
+                    host.hub.resend_menu(conn, window, &self.world);
+                }
+                return true;
+            }
         }
         // The mod menu type's engine starts over from the block entity next click.
         let Some(host) = self.lan.as_mut() else {
