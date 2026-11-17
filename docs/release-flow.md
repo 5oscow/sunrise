@@ -358,7 +358,7 @@ the notes.
 | `sunrise-macos-arm64.zip` | The Mac mini's runner (`vars.MAC_RUNNER=macos-latest` sends it to GitHub) | system libraries only (`otool -L`); a 1500-frame offscreen run of a new world (about 12 s; 300 frames end before the world has loaded) with resources prepared from the runner's own Minecraft (`--offscreen --world smoke --frames 1500 --smoke-report`: frames drawn, chunks generated and meshed, a player, no error) |
 | `sunrise-macos-x64.zip` | The same runner, cross-built for `x86_64-apple-darwin` and signed there (#1161) | system libraries only (`otool -L`); startup checks of every program from the packaged archive on native Intel (`macos-15-intel`, #1602), which the archive must pass to ship; no Intel world smoke, so only the arm64 build's `smoke-test.json` is published |
 
-Each builds `sunrise-client`, `sunrise-ctl`, `sunrise-prepare` and `sunrise-server` in release mode, checks they
+Each builds `sunrise-client`, `sunrise-ctl`, `sunrise-prepare`, `sunrise-server` and `sunrise-port-pack` in release mode, checks they
 exist, verifies Windows PE architectures, checks the `--help` and `--version` entry points, packages the folder with
 `cargo run -p xtask -- package` and archives it. The
 GitHub jobs keep their Cargo caches (`Swatinem/rust-cache`); the Mac mini keeps its `target/`. Only the Mac
