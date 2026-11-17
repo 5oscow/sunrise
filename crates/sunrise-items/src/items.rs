@@ -2360,6 +2360,25 @@ impl<R: RandomSource> LootContext<'_, R> {
             _ => e.list.iter().map(|x| Arc::clone(&x.id)).collect(),
         }
     }
+    fn effective_custom_data<'s>(
+        &'s self,
+        stack: &'s ItemStack,
+    ) -> Option<std::borrow::Cow<'s, sunrise_core::nbt::Compound>> {
+        let prototype = self.items.component_defaults.get(stack.item.as_ref());
+        if stack
+            .data()
+            .is_some_and(|data| data.other("!minecraft:custom_data").is_some())
+        {
+            None
+        } else if let Some(data) = stack.custom_data() {
+            Some(std::borrow::Cow::Borrowed(data))
+        } else {
+            prototype
+                .and_then(|values| values.get(&"minecraft:custom_data".into()))
+                .and_then(|value| sunrise_world::custom_data::borrow(value).ok())
+        }
+    }
+
     fn modifiers(&self, m: &Value, stack: &mut ItemStack, random: &mut R) {
         let list: Vec<&Value> = match m {
             Value::Array(a) => a.iter().collect(),
@@ -2388,19 +2407,7 @@ impl<R: RandomSource> LootContext<'_, R> {
                     }
                 }
                 "minecraft:copy_custom_data" => {
-                    let prototype = self.items.component_defaults.get(stack.item.as_ref());
-                    let original = if stack
-                        .data()
-                        .is_some_and(|data| data.other("!minecraft:custom_data").is_some())
-                    {
-                        None
-                    } else if let Some(data) = stack.custom_data() {
-                        Some(std::borrow::Cow::Borrowed(data))
-                    } else {
-                        prototype
-                            .and_then(|values| values.get(&"minecraft:custom_data".into()))
-                            .and_then(|value| sunrise_world::custom_data::borrow(value).ok())
-                    };
+                    let original = self.effective_custom_data(stack);
                     let place = sunrise_world::loot::current_native_loot_place();
                     if let Some(data) = sunrise_world::loot::copy::copy_custom_data(
                         f,
@@ -2427,6 +2434,38 @@ impl<R: RandomSource> LootContext<'_, R> {
                             .collect(),
                         );
                     }
+                }
+                "minecraft:set_custom_data" => {
+                    // Keep flattened SNBT for the shared custom-data codec;
+                    // JSON compounds use the same JsonOps conversion as world loot.
+                    let encoded = match &f["tag"] {
+                        Value::String(text) => {
+                            Some(sunrise_core::nbt::Tag::String(text.as_str().into()))
+                        }
+                        value => sunrise_world::loot::nbt_predicate_tag(value),
+                    };
+                    let Some(encoded) = encoded else {
+                        continue;
+                    };
+                    let Ok(tag) = sunrise_world::custom_data::borrow(&encoded) else {
+                        continue;
+                    };
+                    let mut data = self
+                        .effective_custom_data(stack)
+                        .map(std::borrow::Cow::into_owned)
+                        .unwrap_or_default();
+                    sunrise_world::nbt_path::merge_compound(&mut data, &tag);
+                    let id = if data.is_empty() {
+                        "!minecraft:custom_data"
+                    } else {
+                        "minecraft:custom_data"
+                    };
+                    apply_component_patch(
+                        stack,
+                        [(id.into(), sunrise_core::nbt::Tag::Compound(data))]
+                            .into_iter()
+                            .collect(),
+                    );
                 }
                 "minecraft:copy_components" => {
                     let place = sunrise_world::loot::current_native_loot_place();
