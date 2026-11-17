@@ -6,13 +6,13 @@
 //!   `[timestamp_ms: u32 big-endian][packet_length: u32 big-endian][packet_data: VarInt(packet_id) + payload]`
 //! - Optional `recording.tmcpr.crc32`: CRC32 of the packet stream.
 
-use super::spline::CameraTrack;
 use serde::{Deserialize, Serialize};
 use std::{
     fs::{self, File, OpenOptions},
     io::{self, BufReader, BufWriter, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
 };
+use sunrise_hooks::replay::{Marker, TimestampedPacket};
 use sunrise_protocol::buf::{Reader, write_varint};
 
 /// The most `metaData.json` may inflate to: real files are a few hundred bytes.
@@ -71,7 +71,7 @@ impl Default for Metadata {
             file_format: "MCPR".to_owned(),
             file_format_version: 14,
             protocol: Some(sunrise_protocol::PROTOCOL_VERSION),
-            generator: "Sunrise Studio".to_owned(),
+            generator: "Sunrise Replay".to_owned(),
             self_id: 1,
             players: Vec::new(),
         }
@@ -88,26 +88,6 @@ impl Metadata {
             ..Default::default()
         }
     }
-}
-
-pub use crate::packet_source::TimestampedPacket;
-
-impl TimestampedPacket {
-    pub fn new(timestamp_ms: u32, id: i32, payload: Vec<u8>) -> Self {
-        Self {
-            timestamp_ms,
-            id,
-            payload,
-        }
-    }
-}
-
-/// An editor bookmark stored with a replay, without player identity data.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Marker {
-    pub time_ms: u32,
-    pub label: String,
 }
 
 /// A file name beside `dest` that no other writer in this or another process
@@ -201,11 +181,11 @@ impl McprWriter {
             if !parent.as_os_str().is_empty() {
                 match recover_crashed_recordings(parent) {
                     Ok(report) if !report.recovered.is_empty() => log::info!(
-                        "Studio: recovered {} recording(s) a crash left behind",
+                        "Replay: recovered {} recording(s) a crash left behind",
                         report.recovered.len()
                     ),
                     Ok(_) => {}
-                    Err(e) => log::warn!("Studio: could not look for crashed recordings: {e}"),
+                    Err(e) => log::warn!("Replay: could not look for crashed recordings: {e}"),
                 }
             }
         }
@@ -218,7 +198,7 @@ impl McprWriter {
         if let Err(e) = file.try_lock() {
             // Filesystems without locks still record; recovery falls back to the
             // pid in the stream's name there.
-            log::warn!("Studio: recording stream cannot be locked: {e}");
+            log::warn!("Replay: recording stream cannot be locked: {e}");
         }
         let writer = Some(BufWriter::with_capacity(64 * 1024, file));
         let mut this = Self {
@@ -320,7 +300,7 @@ impl McprWriter {
         }
         if let Err(e) = self.write_sidecar() {
             log::warn!(
-                "Studio: could not update {}: {e}",
+                "Replay: could not update {}: {e}",
                 self.temp_meta_path.display()
             );
         }
@@ -345,7 +325,7 @@ impl McprWriter {
         if let Err(e) = self.flush() {
             // A failed flush leaves a partial frame at the end at worst: only
             // `bytes_written` are packaged below.
-            log::warn!("Studio: recording flush failed: {e}");
+            log::warn!("Replay: recording flush failed: {e}");
             self.failed = true;
         }
         // Close the stream before packaging reads it again: on Windows the
@@ -373,72 +353,42 @@ impl McprWriter {
         }
     }
 
-    /// Atomically replace the optional camera path without touching the packet
-    /// stream, metadata, or other archive entries.
-    pub fn replace_camera_track(path: &Path, track: &CameraTrack) -> io::Result<()> {
-        let part = sibling(path, "camera.part");
-        let result = (|| {
-            let file = File::open(path)?;
-            let mut archive = zip::ZipArchive::new(file)
-                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-            let mut output = zip::ZipWriter::new(create_private_file(&part)?);
-            for index in 0..archive.len() {
-                let mut entry = archive.by_index(index).map_err(io::Error::other)?;
-                let name = entry
-                    .name()
-                    .map(|name| name.into_owned())
-                    .map_err(io::Error::other)?;
-                if name == "camera.json" {
-                    continue;
-                }
-                let options = zip::write::SimpleFileOptions::default()
-                    .compression_method(zip::CompressionMethod::Deflated)
-                    .large_file(entry.size() >= u32::MAX as u64);
-                if entry.is_dir() {
-                    output
-                        .add_directory(name, options)
-                        .map_err(io::Error::other)?;
-                } else {
-                    output.start_file(name, options).map_err(io::Error::other)?;
-                    io::copy(&mut entry, &mut output)?;
-                }
-            }
-            if !track.is_empty() {
-                output
-                    .start_file(
-                        "camera.json",
-                        zip::write::SimpleFileOptions::default()
-                            .compression_method(zip::CompressionMethod::Deflated),
-                    )
-                    .map_err(io::Error::other)?;
-                serde_json::to_writer_pretty(&mut output, track).map_err(io::Error::other)?;
-            }
-            let file = output.finish().map_err(io::Error::other)?;
-            file.sync_all()?;
-            drop(file);
-            fs::rename(&part, path)
-        })();
-        if result.is_err() {
-            let _ = fs::remove_file(&part);
-        }
-        result
+    /// Atomically replace the bookmarks without touching packet data.
+    pub fn replace_markers(path: &Path, markers: &[Marker]) -> io::Result<()> {
+        let bytes = (!markers.is_empty())
+            .then(|| serde_json::to_vec_pretty(markers))
+            .transpose()
+            .map_err(io::Error::other)?;
+        Self::replace_entry(path, "markers.json", bytes.as_deref())
     }
 
-    /// Atomically replace the optional editor markers without touching packet data.
-    pub fn replace_markers(path: &Path, markers: &[Marker]) -> io::Result<()> {
-        let part = sibling(path, "markers.part");
+    pub(super) fn replace_extension(
+        path: &Path,
+        name: &str,
+        bytes: Option<&[u8]>,
+    ) -> io::Result<()> {
+        validate_extension_name(name)?;
+        if bytes.is_some_and(|bytes| bytes.len() as u64 > MAX_METADATA_BYTES) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("{name} is larger than {MAX_METADATA_BYTES} bytes"),
+            ));
+        }
+        Self::replace_entry(path, name, bytes)
+    }
+
+    fn replace_entry(path: &Path, name: &str, bytes: Option<&[u8]>) -> io::Result<()> {
+        let part = sibling(path, "edit.part");
         let result = (|| {
-            let file = File::open(path)?;
-            let mut archive = zip::ZipArchive::new(file)
-                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+            let mut archive = open_archive(path)?;
             let mut output = zip::ZipWriter::new(create_private_file(&part)?);
             for index in 0..archive.len() {
                 let mut entry = archive.by_index(index).map_err(io::Error::other)?;
-                let name = entry
+                let entry_name = entry
                     .name()
                     .map(|name| name.into_owned())
                     .map_err(io::Error::other)?;
-                if name == "markers.json" {
+                if entry_name == name {
                     continue;
                 }
                 let options = zip::write::SimpleFileOptions::default()
@@ -446,22 +396,24 @@ impl McprWriter {
                     .large_file(entry.size() >= u32::MAX as u64);
                 if entry.is_dir() {
                     output
-                        .add_directory(name, options)
+                        .add_directory(entry_name, options)
                         .map_err(io::Error::other)?;
                 } else {
-                    output.start_file(name, options).map_err(io::Error::other)?;
+                    output
+                        .start_file(entry_name, options)
+                        .map_err(io::Error::other)?;
                     io::copy(&mut entry, &mut output)?;
                 }
             }
-            if !markers.is_empty() {
+            if let Some(bytes) = bytes {
                 output
                     .start_file(
-                        "markers.json",
+                        name,
                         zip::write::SimpleFileOptions::default()
                             .compression_method(zip::CompressionMethod::Deflated),
                     )
                     .map_err(io::Error::other)?;
-                serde_json::to_writer_pretty(&mut output, markers).map_err(io::Error::other)?;
+                output.write_all(bytes)?;
             }
             let file = output.finish().map_err(io::Error::other)?;
             file.sync_all()?;
@@ -673,9 +625,7 @@ pub struct McprReader {
     /// Sparse frame index; timestamps are normalized to never go backwards.
     packet_index: Vec<SparseIndexEntry>,
     total_packets: usize,
-    /// Optional camera keyframes stored by the Studio editor.
-    pub camera_track: Option<CameraTrack>,
-    /// User-created editor bookmarks stored in the replay archive.
+    /// Bookmarks stored in the replay archive.
     pub markers: Vec<Marker>,
 }
 
@@ -694,36 +644,63 @@ fn read_entry(archive: &mut zip::ZipArchive<File>, name: &str, max: u64) -> io::
     Ok(bytes)
 }
 
-fn read_optional_json<T: for<'de> Deserialize<'de>>(
+fn open_archive(path: &Path) -> io::Result<zip::ZipArchive<File>> {
+    zip::ZipArchive::new(File::open(path)?)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+}
+
+fn read_optional_entry(
     archive: &mut zip::ZipArchive<File>,
     name: &str,
-    max: u64,
-) -> io::Result<Option<T>> {
+) -> io::Result<Option<Vec<u8>>> {
     match archive.by_name(name) {
         Ok(entry) => {
             let mut bytes = Vec::new();
-            entry.take(max + 1).read_to_end(&mut bytes)?;
-            if bytes.len() as u64 > max {
+            entry.take(MAX_METADATA_BYTES + 1).read_to_end(&mut bytes)?;
+            if bytes.len() as u64 > MAX_METADATA_BYTES {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
-                    format!("{name} is larger than {max} bytes"),
+                    format!("{name} is larger than {MAX_METADATA_BYTES} bytes"),
                 ));
             }
-            serde_json::from_slice(&bytes)
-                .map(Some)
-                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+            Ok(Some(bytes))
         }
         Err(zip::result::ZipError::FileNotFound) => Ok(None),
         Err(error) => Err(io::Error::new(io::ErrorKind::InvalidData, error)),
     }
 }
 
+fn validate_extension_name(name: &str) -> io::Result<()> {
+    if name.is_empty()
+        || !name
+            .bytes()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, b'.' | b'_' | b'-'))
+        || matches!(
+            name,
+            "." | ".."
+                | "metaData.json"
+                | "markers.json"
+                | "recording.tmcpr"
+                | "recording.tmcpr.crc32"
+        )
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid replay extension name",
+        ));
+    }
+    Ok(())
+}
+
 impl McprReader {
+    pub(super) fn read_extension(path: &Path, name: &str) -> io::Result<Option<Vec<u8>>> {
+        validate_extension_name(name)?;
+        read_optional_entry(&mut open_archive(path)?, name)
+    }
+
     /// Open an `.mcpr` replay archive from disk.
     pub fn open(path: &Path) -> io::Result<Self> {
-        let file = File::open(path)?;
-        let mut archive = zip::ZipArchive::new(file)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        let mut archive = open_archive(path)?;
 
         let meta_bytes = read_entry(&mut archive, "metaData.json", MAX_METADATA_BYTES)?;
         let metadata: Metadata = serde_json::from_slice(&meta_bytes)
@@ -782,11 +759,11 @@ impl McprReader {
                 ));
             }
         }
-        let camera_track =
-            read_optional_json::<CameraTrack>(&mut archive, "camera.json", MAX_METADATA_BYTES)?;
-        let markers =
-            read_optional_json::<Vec<Marker>>(&mut archive, "markers.json", MAX_METADATA_BYTES)?
-                .unwrap_or_default();
+        let markers = read_optional_entry(&mut archive, "markers.json")?
+            .map(|bytes| serde_json::from_slice(&bytes))
+            .transpose()
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?
+            .unwrap_or_default();
         // A recording that stopped mid-write ends in a frame that isn't whole:
         // indexing and playback both stop before it.
         let mut packet_index = Vec::new();
@@ -818,7 +795,6 @@ impl McprReader {
             end: offset,
             packet_index,
             total_packets,
-            camera_track,
             markers,
         })
     }
@@ -950,7 +926,7 @@ pub fn recover_crashed_recordings(dir: &Path) -> io::Result<RecoveryReport> {
 
         if writer_may_be_alive(&path, pid) {
             log::info!(
-                "Studio: keeping {}: its writer is still running",
+                "Replay: keeping {}: its writer is still running",
                 path.display()
             );
             report.skipped.push(path);
@@ -964,7 +940,7 @@ pub fn recover_crashed_recordings(dir: &Path) -> io::Result<RecoveryReport> {
             Some(metadata) => metadata,
             None => {
                 log::warn!(
-                    "Studio: {} has no metadata; recovering it with defaults",
+                    "Replay: {} has no metadata; recovering it with defaults",
                     path.display()
                 );
                 Metadata {
@@ -977,7 +953,7 @@ pub fn recover_crashed_recordings(dir: &Path) -> io::Result<RecoveryReport> {
         match recover_stream(&path, &dest, metadata) {
             Ok((archive, packets)) => {
                 log::info!(
-                    "Studio: recovered {} packet(s) from {} into {}",
+                    "Replay: recovered {} packet(s) from {} into {}",
                     packets,
                     path.display(),
                     archive.display()
@@ -986,7 +962,7 @@ pub fn recover_crashed_recordings(dir: &Path) -> io::Result<RecoveryReport> {
             }
             Err(e) => {
                 log::warn!(
-                    "Studio: could not recover {} ({e}); keeping it",
+                    "Replay: could not recover {} ({e}); keeping it",
                     path.display()
                 );
                 report.kept.push(path);
@@ -1134,7 +1110,7 @@ mod tests {
         let mcpr_path = temp_dir.join("test_recording.mcpr");
 
         let meta = Metadata {
-            server_name: "Studio Test Server".to_owned(),
+            server_name: "Test Server".to_owned(),
             players: vec!["Player1".to_owned(), "Player2".to_owned()],
             ..Default::default()
         };
@@ -1152,7 +1128,7 @@ mod tests {
         assert_eq!(finished_path, mcpr_path);
 
         let mut reader = McprReader::open(&mcpr_path).unwrap();
-        assert_eq!(reader.metadata.server_name, "Studio Test Server");
+        assert_eq!(reader.metadata.server_name, "Test Server");
         assert_eq!(reader.metadata.duration, 550);
         assert_eq!(reader.metadata.players, vec!["Player1", "Player2"]);
         assert_eq!(reader.total_packets(), 4);
@@ -1271,34 +1247,31 @@ mod tests {
     }
 
     #[test]
-    fn camera_track_is_saved_without_changing_recorded_packets() {
-        let scratch = Scratch::new("camera_track");
-        let path = scratch.0.join("camera.mcpr");
+    fn archive_extension_round_trips_without_changing_recorded_packets() {
+        let scratch = Scratch::new("extension");
+        let path = scratch.0.join("extension.mcpr");
         let mut writer = McprWriter::new(path.clone(), Metadata::default()).unwrap();
         writer.write_packet(0, 1, &[10, 20, 30]).unwrap();
         writer.finish(0).unwrap();
 
-        let track = CameraTrack {
-            keyframes: vec![super::super::spline::CameraKeyframe::new(
-                125,
-                [1.0, 64.0, -2.0],
-                45.0,
-                -10.0,
-                70.0,
-            )],
-        };
-        McprWriter::replace_camera_track(&path, &track).unwrap();
-        let mut reader = McprReader::open(&path).unwrap();
-        assert_eq!(reader.camera_track, Some(track));
+        let name = "custom.dat";
+        let bytes = [0, 255, 1];
+        McprWriter::replace_extension(&path, name, Some(&bytes)).unwrap();
+        assert_eq!(
+            McprReader::read_extension(&path, name).unwrap(),
+            Some(bytes.to_vec())
+        );
+        assert!(McprWriter::replace_extension(&path, "metaData.json", Some(&bytes)).is_err());
 
+        let mut reader = McprReader::open(&path).unwrap();
         let packet = reader.next_packet().unwrap().unwrap();
         assert_eq!(
             (packet.timestamp_ms, packet.id, packet.payload),
             (0, 1, vec![10, 20, 30])
         );
 
-        McprWriter::replace_camera_track(&path, &CameraTrack::default()).unwrap();
-        assert!(McprReader::open(&path).unwrap().camera_track.is_none());
+        McprWriter::replace_extension(&path, name, None).unwrap();
+        assert_eq!(McprReader::read_extension(&path, name).unwrap(), None);
     }
 
     #[test]
@@ -1653,6 +1626,6 @@ mod tests {
         let sidecar: Metadata =
             serde_json::from_slice(&fs::read(writer.metadata_path()).unwrap()).unwrap();
         assert_eq!(sidecar.duration, 2 * FLUSH_INTERVAL_MS);
-        assert_eq!(sidecar.generator, "Sunrise Studio");
+        assert_eq!(sidecar.generator, "Sunrise Replay");
     }
 }

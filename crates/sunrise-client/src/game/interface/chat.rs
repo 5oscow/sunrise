@@ -193,7 +193,11 @@ impl Game<'_> {
             sunrise_client::command::MOD_COMMAND,
             &arguments,
         );
-        with_studio_commands(&with_native_commands(&tree_with_mods, &["studio"])).with_profiler()
+        if sunrise_hooks::replay::engine::factory().is_some() {
+            tree_with_mods =
+                with_studio_commands(&with_native_commands(&tree_with_mods, &["studio"]));
+        }
+        tree_with_mods.with_profiler()
     }
 }
 
@@ -2678,18 +2682,15 @@ mod tests {
 
     #[test]
     #[ignore = "daily"]
-    fn studio_is_in_the_client_chat_tree_without_a_mod_registering_it() {
+    fn studio_is_absent_without_a_replay_provider() {
         super::super::native_entity_refs::tests::with_game(|game| {
             let tree = game.chat_tree_for(None);
             let reg = Registries::default();
-            assert!(tree.find("studio").is_some());
-            assert_eq!(
-                tree.parse("studio start", &reg).executable().unwrap().1,
-                sunrise_client::command::MOD_COMMAND
-            );
+            assert!(tree.find("studio").is_none());
             let parse = tree.parse("stu", &reg);
             let offered = tree.client_suggestions(&parse, 3, &reg).1;
-            assert!(offered.iter().any(|s| s.text == "studio"));
+            assert!(!offered.iter().any(|s| s.text == "studio"));
+            assert!(!game.studio_command("studio record start"));
         });
     }
 

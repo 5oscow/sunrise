@@ -4827,6 +4827,10 @@ dependencies = [
 [[package]]
 name = "sunrise-hooks"
 version = "0.1.0"
+dependencies = [
+ "serde",
+ "sunrise-protocol",
+]
 
 [[package]]
 name = "sunrise-hot-paths-game"
@@ -5211,6 +5215,7 @@ dependencies = [
  "sunrise-heartbeat",
  "sunrise-perf-share",
  "sunrise-platform",
+ "sunrise-replay",
  "winresource",
 ]
 
@@ -5358,6 +5363,21 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "ring",
+]
+
+[[package]]
+name = "sunrise-replay"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "crc32fast",
+ "log",
+ "serde",
+ "serde_json",
+ "sunrise-core",
+ "sunrise-hooks",
+ "sunrise-protocol",
+ "zip",
 ]
 
 [[package]]

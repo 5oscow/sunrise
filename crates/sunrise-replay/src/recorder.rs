@@ -1,11 +1,9 @@
-//! Studio Live Session Packet Recorder
+//! Live Session Packet Recorder
 //!
 //! Captures clientbound network packets in real-time onto a background writer
 //! thread so gameplay frame rates and latency are unaffected.
 
-use super::mcpr::{McprWriter, Metadata, TimestampedPacket};
-use crate::net::PacketRecorder;
-pub use crate::net::RecorderStatus;
+use super::mcpr::{McprWriter, Metadata};
 use std::{
     io,
     path::{Path, PathBuf},
@@ -17,6 +15,7 @@ use std::{
     thread::{self, JoinHandle},
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
+use sunrise_hooks::replay::{PacketRecorder, RecorderStatus, TimestampedPacket};
 use sunrise_protocol::{buf::Reader, crypto::generate_secret, packets::play};
 
 static RECORDING_NAME_SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -30,7 +29,7 @@ enum RecordCommand {
 const RECORD_QUEUE_PACKETS: usize = 2048;
 
 /// Asynchronous packet recorder that writes `.mcpr` sessions on a worker thread.
-pub struct StudioRecorder {
+pub struct LiveRecorder {
     active: Arc<AtomicBool>,
     packet_count: Arc<AtomicU64>,
     bytes_written: Arc<AtomicU64>,
@@ -41,7 +40,7 @@ pub struct StudioRecorder {
     dest_path: PathBuf,
 }
 
-impl StudioRecorder {
+impl LiveRecorder {
     /// Start a new recording session saving to `dest_path`.
     pub fn start(dest_path: PathBuf, mut metadata: Metadata) -> io::Result<Self> {
         let active = Arc::new(AtomicBool::new(true));
@@ -67,7 +66,7 @@ impl StudioRecorder {
         let thread_dest = dest_path.clone();
 
         let worker = thread::Builder::new()
-            .name("Studio Recorder".into())
+            .name("Replay Recorder".into())
             .spawn(move || -> io::Result<PathBuf> {
                 let mut duration_ms = 0;
                 while let Ok(cmd) = receiver.recv() {
@@ -180,7 +179,7 @@ impl StudioRecorder {
         if let Some(worker) = self.worker.take() {
             match worker.join() {
                 Ok(res) => res,
-                Err(_) => Err(io::Error::other("studio recorder worker thread panicked")),
+                Err(_) => Err(io::Error::other("replay recorder worker thread panicked")),
             }
         } else {
             Ok(self.dest_path.clone())
@@ -188,29 +187,32 @@ impl StudioRecorder {
     }
 }
 
-impl PacketRecorder for StudioRecorder {
+impl PacketRecorder for LiveRecorder {
     fn is_active(&self) -> bool {
-        StudioRecorder::is_active(self)
+        LiveRecorder::is_active(self)
     }
     /// Keeps what [`recordable`] lets through: the filter copies what it keeps, and re-encodes
     /// AddEntity with a fresh UUID.
     fn received(&self, packet: &play::Clientbound, id: i32, payload: &[u8]) {
         if let Some((id, payload)) = recordable(packet, id, payload) {
-            StudioRecorder::record_packet(self, id, &payload);
+            LiveRecorder::record_packet(self, id, &payload);
         }
     }
     fn record_packet(&self, id: i32, payload: &[u8]) {
-        StudioRecorder::record_packet(self, id, payload);
+        LiveRecorder::record_packet(self, id, payload);
+    }
+    fn record_initial_packet(&self, id: i32, payload: &[u8]) {
+        self.record_packet_at(0, id, payload);
     }
     fn status(&self) -> RecorderStatus {
-        StudioRecorder::status(self)
+        LiveRecorder::status(self)
     }
     fn stop(self: Box<Self>) -> io::Result<PathBuf> {
-        StudioRecorder::stop(*self)
+        LiveRecorder::stop(*self)
     }
 }
 
-/// Return the packet bytes safe to persist in a Studio recording.
+/// Return the packet bytes safe to persist in a recording.
 ///
 /// Unknown packets fail closed so a newly added protocol packet cannot bypass
 /// the privacy policy. `AddEntity` retains its entity id and state, but gets a
@@ -256,7 +258,7 @@ fn recordable<'a>(
     }
 }
 
-impl Drop for StudioRecorder {
+impl Drop for LiveRecorder {
     fn drop(&mut self) {
         self.active.store(false, Ordering::SeqCst);
         let _ = self.sender.send(RecordCommand::Stop);
@@ -266,7 +268,7 @@ impl Drop for StudioRecorder {
     }
 }
 
-/// Default storage directory for video studio recordings (`recordings/`).
+/// Default storage directory for replay recordings (`recordings/`).
 pub fn default_recordings_dir() -> PathBuf {
     Path::new("recordings").to_path_buf()
 }
@@ -307,7 +309,7 @@ mod tests {
     use sunrise_protocol::packets::configuration as cfg;
 
     #[test]
-    fn studio_recording_drops_packets_with_direct_player_identity_or_private_text() {
+    fn recording_drops_packets_with_direct_player_identity_or_private_text() {
         use play::{
             ChatTypeBound, Clientbound as P, CustomChatCompletions, PlayerInfo, PlayerInfoRemove,
             PlayerInfoUpdate, ResetScore, SetPlayerTeam, SetScore, TrackedWaypoint, WaypointId,
@@ -439,7 +441,7 @@ mod tests {
     }
 
     #[test]
-    fn studio_recording_replaces_entity_uuids_but_keeps_entity_state() {
+    fn recording_replaces_entity_uuids_but_keeps_entity_state() {
         let original = play::AddEntity {
             id: 18,
             uuid: 0x0102_0304_0506_0708_090a_0b0c_0d0e_0f10,
@@ -471,9 +473,9 @@ mod tests {
     }
 
     #[test]
-    fn test_studio_recorder_lifecycle() {
+    fn test_live_recorder_lifecycle() {
         let temp_dir = std::env::temp_dir().join(format!(
-            "studio_rec_{}_{}",
+            "replay_rec_{}_{}",
             std::process::id(),
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -484,7 +486,7 @@ mod tests {
         let mcpr_path = temp_dir.join("live_test.mcpr");
 
         let meta = Metadata::default();
-        let recorder = StudioRecorder::start(mcpr_path.clone(), meta).unwrap();
+        let recorder = LiveRecorder::start(mcpr_path.clone(), meta).unwrap();
         assert!(recorder.is_active());
 
         // Send a few packets

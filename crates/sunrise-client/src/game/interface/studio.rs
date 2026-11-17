@@ -7,10 +7,12 @@ use serde_json::{Value, json};
 use std::{path::PathBuf, time::Duration};
 use sunrise_client::{
     Result,
-    packet_source::PacketSource,
-    studio::{ReplayDriver, TimelineAction},
+    studio::{CameraTrack, TimelineAction},
     text::Text,
 };
+use sunrise_hooks::replay::PacketSource;
+
+const CAMERA_TRACK_ENTRY: &str = "camera.json";
 
 /// Studio's state in a `Game`: the replay editor's free camera, timeline and top bar. Studio is a
 /// Sunrise extra (docs/layers.md: the replay editor) on top of the platform's replay
@@ -25,11 +27,21 @@ pub(super) struct Studio {
 }
 
 /// Studio's editor runs. It is a Sunrise extra (docs/layers.md: the replay editor), so a build
-/// without `sunrise-extras` (sunrise-plain) plays replays without it: no free camera, path,
-/// timeline or top bar, and no editor commands or keys.
+/// without `sunrise-extras` has no free camera, path, timeline, top bar, editor commands or keys.
 pub(super) const EDITOR: bool = cfg!(feature = "sunrise-extras");
 
 impl Studio {
+    /// Load the editor's path before the replay replaces the current world.
+    pub(super) fn load_camera_track(driver: &dyn PacketSource) -> std::io::Result<CameraTrack> {
+        if let Some(annotations) = driver.annotations()
+            && let Some(bytes) = annotations.read_extension(CAMERA_TRACK_ENTRY)?
+        {
+            return serde_json::from_slice(&bytes)
+                .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error));
+        }
+        Ok(CameraTrack::default())
+    }
+
     /// The free camera flies, apart from the player.
     pub(super) fn flying(&self) -> bool {
         self.freecam.active
@@ -420,7 +432,7 @@ impl Game<'_> {
             .replay
             .driver
             .as_mut()
-            .and_then(|driver| driver.as_any_mut().downcast_mut::<ReplayDriver>())
+            .and_then(|driver| driver.annotations_mut())
         else {
             return;
         };
@@ -465,21 +477,27 @@ impl Game<'_> {
                 .replay
                 .driver
                 .as_mut()
-                .and_then(|driver| driver.as_any_mut().downcast_mut::<ReplayDriver>())
+                .and_then(|driver| driver.annotations_mut())
         {
-            driver.save_camera_track(&self.studio.freecam.track)?;
+            let track = &self.studio.freecam.track;
+            let bytes = (!track.keyframes.is_empty())
+                .then(|| serde_json::to_vec_pretty(track))
+                .transpose()?;
+            driver.replace_extension(CAMERA_TRACK_ENTRY, bytes.as_deref())?;
             self.studio.camera_track_dirty = false;
         }
         Ok(())
     }
 
     /// A replay opened: the timeline shows it and the free camera takes its saved path.
-    pub(super) fn studio_replay_opened(&mut self, driver: &ReplayDriver) {
+    pub(super) fn studio_replay_opened(&mut self, driver: &dyn PacketSource, track: CameraTrack) {
         self.studio.timeline.duration_ms = u64::from(driver.duration_ms());
         self.studio.timeline.current_time_ms = 0;
         self.studio.timeline.playing = !driver.is_paused();
-        self.studio.timeline.markers = driver.markers().to_vec();
-        self.studio.freecam.track = driver.camera_track().cloned().unwrap_or_default();
+        let annotations = driver.annotations();
+        self.studio.timeline.markers =
+            annotations.map_or_else(Vec::new, |data| data.markers().to_vec());
+        self.studio.freecam.track = track;
         self.studio.camera_track_dirty = false;
     }
 
@@ -498,9 +516,8 @@ impl Game<'_> {
         if let Some((position, duration, paused, markers)) =
             self.replay.driver.as_ref().map(|replay| {
                 let markers = replay
-                    .as_any()
-                    .downcast_ref::<ReplayDriver>()
-                    .map_or_else(Vec::new, |driver| driver.markers().to_vec());
+                    .annotations()
+                    .map_or_else(Vec::new, |data| data.markers().to_vec());
                 (
                     replay.position_ms(),
                     replay.duration_ms(),

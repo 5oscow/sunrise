@@ -53,7 +53,8 @@ const PAGES: [&dyn pages::Page; 1] = [&sunrise_discord::SECTION];
 /// Registers Sunrise's in-game parts with the game. The executable calls it before it runs the
 /// game, and so does the launcher's generated executable for native mods.
 pub fn register() {
-    let late = PARTS.into_iter().map(hooks::register);
+    let late =
+        std::iter::once(sunrise_replay::register()).chain(PARTS.into_iter().map(hooks::register));
     let late = late.chain(STORES.into_iter().map(settings::register));
     for result in late.chain(PAGES.into_iter().map(pages::register)) {
         if let Err(e) = result {

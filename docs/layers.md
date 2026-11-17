@@ -97,9 +97,10 @@ What makes vanilla nicer to change, port and run, with no Sunrise branding and n
 public API that mods, desktop-class ports and the Sunrise layer build on.
 
 - **Belongs:** the mod API and mod formats, the native mod host, the shader API and pack formats beyond vanilla
-  (OptiFine, Polytone, `shaders/`), HDR, controllers, splitscreen, replay recording and playback, the HUD widget
-  framework, UI pages and the settings system, agent control (`sunrise-ctl`, MCP), the dedicated server's anticheat and chat
-  filter, modpack porting, the design tokens of non-vanilla screens.
+  (OptiFine, Polytone, `shaders/`), HDR, controllers, splitscreen, replay recording and playback (installed only
+  by the official Extras executable), the HUD widget framework, UI pages and the settings system, agent control
+  (`sunrise-ctl`, MCP), the dedicated server's anticheat and chat filter, modpack porting, the design tokens of
+  non-vanilla screens.
 - **Exposes what vanilla already uses.** FOV changes, potion effects, the player's state, screens, rendering
   hooks and so on become public API with stable types (arismoko/horizon#1608's patterns). Then a mod, a port or a
   Sunrise feature builds on them instead of editing or copying engine code.
@@ -141,10 +142,11 @@ exposes. Ports to consoles and handhelds need them, and other projects can build
   mean exposing the whole frame pipeline as API or rebuilding it up there, for a feature that on vanilla's path
   costs nothing. What the engine must not hold is the feature: the router, the screens, the layouts.
 - **Replays:** recording the session's packets as `.mcpr` (the format other replay tools read) and playing them
-  back through the client (`studio/recorder.rs`, `mcpr.rs`, `replay.rs`) is platform: mods, tools and bug reports
-  build on it. The Studio on top of it (camera paths, splines, the timeline and its bar: `studio/camera.rs`,
-  `spline.rs`, `path_render.rs`, `timeline_ui.rs`, `topbar.rs`, `studio_ui.rs`) is a finished feature, so it
-  goes to the Sunrise layer or a native mod (rule 4), built on the platform's replay API.
+  back through the client (`sunrise-replay`) is platform: mods, tools and bug reports build on it. The official
+  Extras executable installs the provider; the plain executable does not link or install it. The platform
+  stores extensions as named entries of opaque bytes. The Studio on top of it (camera paths, splines, the
+  timeline and its bar) is a finished feature, so it goes to the Sunrise layer or a native mod (rule 4),
+  built on the platform's replay API.
 - **UI pages:** a general API for pages a mod, a port or the Sunrise layer adds (the settings shell, its rows,
   search and undo, today `settings_shell.rs` and `extras_ui.rs`'s pages). The engine exposes screens: open one, draw on
   the GUI layer, take input and focus. The platform gives the page API stable types (as #1608 does for the mod
@@ -188,7 +190,7 @@ The rule, in order (duckybertduck's):
 4. Everything else: **Sunrise**, or a native mod that players add themselves, since it can be built on what's below.
 
 A feature often splits along this rule: the part others build on is platform, and the finished feature on top of it
-is Sunrise (PvP & HUD and replays, [above](#controllers-splitscreen-replays-and-ui-pages)).
+is Sunrise (PvP & HUD and the replay editor, [above](#controllers-splitscreen-replays-and-ui-pages)).
 
 The mod interface follows that split too: `sunrise-mod-vocab` is an engine crate, while
 `sunrise-mod-api` preserves the mod-facing paths through re-exports. The build-time generator,
@@ -210,7 +212,7 @@ and Parts registration state; it is not yet a stateless or unsafe-free interface
 | Controller support: a device, bindings, glyphs, pad menus | platform | the pad modules, on the engine's input hooks ([Controllers](#controllers-splitscreen-replays-and-ui-pages)) |
 | Splitscreen or more players on one machine | platform | the `split` modules, on the engine's compositor |
 | A render pipeline capability vanilla's path doesn't use but a higher layer can't add without rebuilding the pipeline (the compositor) | engine | `gfx.rs` and `gfx/`, doing nothing on vanilla's path |
-| A UI page others can add to, a HUD widget framework, replay recording and playback | platform | the page API, `hud_kit.rs` and `hud_kit/`, `studio/recorder.rs`, `mcpr.rs`, `replay.rs` |
+| A UI page others can add to, a HUD widget framework, replay recording and playback | platform | the page API, `hud_kit.rs` and `hud_kit/`; `sunrise-replay` installed only by the official Extras executable |
 | A finished feature built on those (PvP presets, the replay editor) | Sunrise, or a native mod | behind `sunrise-extras` |
 | A Sunrise extra (a setting, screen or HUD element vanilla doesn't have) | Sunrise | its own module behind `sunrise-extras`, built on platform API; or an optional native mod that players add themselves |
 | Anything that talks to playsunrise.net or a third-party service by itself | Sunrise | a Sunrise crate, its address in `sunrise-addresses` |
@@ -228,8 +230,8 @@ also goes behind `sunrise-extras`. That keeps each later move a pure file move.
 The target, after the split. It is not built yet: nothing moves before the split below is done.
 
 **What a build of this repository gives.** A complete game: vanilla play, the platform (mods, shader packs,
-controllers, splitscreen, replays, HDR, the dedicated server) and no Sunrise layer. That means no extras, telemetry or Discord,
-no built-in outside address, and no launcher. Forks and builds from source get exactly
+controllers, splitscreen, HDR, the dedicated server) and no Sunrise layer. That means no extras, replay provider,
+telemetry or Discord, no built-in outside address, and no launcher. Forks and builds from source get exactly
 that. sunrise-plain becomes a plain build of this repository.
 
 **The seam.** The Sunrise repository has to plug into the game without changing it:
@@ -568,8 +570,9 @@ themselves, or stays a cfg-gated module linked into the official build. None mov
 - the renderer's extras: fullbright, dynamic lights, hidden block-break particles;
 - chunk pregeneration.
 
-The minimap already moved to a native mod ([extras.md](extras.md#moved-to-native-mods)). Splitscreen,
-controllers and replay recording are not extras: they are platform ([above](#controllers-splitscreen-replays-and-ui-pages)).
+The minimap already moved to a native mod ([extras.md](extras.md#moved-to-native-mods)). Splitscreen and
+controllers are platform. Replay recording and playback are also platform code, linked only into the official
+Extras executable ([above](#controllers-splitscreen-replays-and-ui-pages)).
 
 ## The checks
 
@@ -685,7 +688,7 @@ mechanical steps (checks, M1–M4) continue meanwhile. M5 and M6 started on 2026
 | M3 | The renderer's telemetry module leaves `sunrise-client-render` for `sunrise-client-lib`, with Sunrise's other in-game parts; the renderer offers the adapter (`gfx::adapter`) and a crash-report hook (`crash::on_report`) | render → telemetry, bench | #13060, merged |
 | M4 | Cosmetics leave `sunrise-client-render`: the tab list's mark through a name-decoration callback (#13094); the settings lines leave with `extras.rs` and `extras_ui.rs` in M5, as clients of the UI page API | render → cosmetics | #13094, merged; the rest in M5 |
 | M5 | Sunrise's in-game parts (extras, Discord, Friends, ping, benchmark upload) leave `sunrise-client` for Sunrise crates linked into the official build through platform hooks | client, client-lib → friends, telemetry, bench | started 2026-11-09 |
-| M6 | The engine crates stop depending on platform crates: the renderer's shader-pack, pack-format, HDR and theme code moves behind engine extension points; the mod host and agent control move to platform crates; controllers, splitscreen, replay recording and the UI page API move to platform crates on the engine's input-source, compositor and screen hooks; the launcher and `sunrise-server` reach the engine through platform API (done, #13905) | the engine → platform and Sunrise → engine exceptions | started 2026-11-09; HDR's part with NikitaMGrimm, below |
+| M6 | The engine crates stop depending on platform crates: the renderer's shader-pack, pack-format, HDR and theme code moves behind engine extension points; the mod host and agent control move to platform crates; controllers, splitscreen and the UI page API move to platform crates on the engine's input-source, compositor and screen hooks, and replay recording and playback move into `sunrise-replay`, installed only by the official Extras executable; the launcher and `sunrise-server` reach the engine through platform API (done, #13905) | the engine → platform and Sunrise → engine exceptions | started 2026-11-09; HDR's part with NikitaMGrimm, below |
 | P | Optional, longer: gameplay into the portable crates. `Game` holds the world and its presentation (renderer, screens, particles, sound): split its state module by module, turn gameplay's direct particle and sound calls into level events as vanilla's server sends them, then move each clean module into `sunrise-gameplay` (server side) or `sunrise-client-gameplay` (client only) | | any time, small PRs |
 | R | The Sunrise layer moves to its own repository and ships in every official download (the table above) | | after the split, Ludovic's call |
 

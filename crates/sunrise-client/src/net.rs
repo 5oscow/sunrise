@@ -51,33 +51,7 @@ use sunrise_hooks::tunnel;
 /// connection (`TransferState`), so a proxy's backend switch keeps them.
 pub type Cookies = Arc<Mutex<HashMap<String, Vec<u8>>>>;
 
-/// A recording of the session's packets: the tap a replay recorder plugs into. Replay recording is a
-/// platform feature (docs/layers.md, "Controllers, splitscreen, replays and UI pages"); the engine only
-/// hands it the packets: the network thread what it receives, the game thread what the client makes for
-/// the recording itself (its own movement, pose and swings).
-pub trait PacketRecorder: Send {
-    /// Whether it still takes packets (false once stopped or failed).
-    fn is_active(&self) -> bool;
-    /// A play packet the network thread received, decoded, with its id and payload as they came.
-    /// The recorder decides what it keeps.
-    fn received(&self, packet: &play::Clientbound, id: i32, payload: &[u8]);
-    /// A packet the client made for the recording, encoded, stamped now.
-    fn record_packet(&self, id: i32, payload: &[u8]);
-    fn status(&self) -> RecorderStatus;
-    /// Finishes the recording; the file it wrote.
-    fn stop(self: Box<Self>) -> std::io::Result<PathBuf>;
-}
-
-/// Where a recording stands.
-#[derive(Clone, Debug, PartialEq)]
-pub struct RecorderStatus {
-    pub active: bool,
-    pub path: PathBuf,
-    pub elapsed: Duration,
-    pub packet_count: u64,
-    pub bytes_written: u64,
-    pub error: Option<String>,
-}
+pub use sunrise_hooks::replay::{PacketRecorder, RecorderStatus};
 
 /// The session's recorder, shared with its network thread.
 type RecorderSlot = Arc<Mutex<Option<Box<dyn PacketRecorder>>>>;
@@ -504,16 +478,17 @@ impl Session {
     }
     /// Starts recording into `recorder`. `initialize` runs first, while the network thread
     /// can't record, so what it writes (a snapshot of the world) comes before any live packet.
-    pub fn start_recording<R: PacketRecorder + 'static>(
+    pub fn start_recording(
         &self,
-        recorder: R,
-        initialize: impl FnOnce(&R),
+        recorder: impl Into<Box<dyn PacketRecorder>>,
+        initialize: impl FnOnce(&dyn PacketRecorder),
     ) {
+        let recorder = recorder.into();
         let mut slot = self.recorder.lock().unwrap();
-        initialize(&recorder);
-        *slot = Some(Box::new(recorder));
+        initialize(recorder.as_ref());
+        *slot = Some(recorder);
     }
-    /// Stop recording and finalize the `.mcpr` archive.
+    /// Stop recording and finalize the archive.
     pub fn stop_recording(&self) -> Option<std::io::Result<PathBuf>> {
         let rec = self.recorder.lock().unwrap().take()?;
         Some(rec.stop())
@@ -3057,7 +3032,7 @@ mod tests {
             let encoded = snapshot.encode();
             let mut reader = sunrise_protocol::buf::Reader::new(&encoded);
             let id = reader.varint().unwrap();
-            rec.record_packet(id, reader.rest());
+            rec.record_initial_packet(id, reader.rest());
         });
         let swing_pkt = play::Clientbound::SwingAnimation(play::SwingAnimation {
             id: 42,

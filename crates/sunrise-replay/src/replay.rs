@@ -1,18 +1,15 @@
-//! Studio Replay Playback Driver
+//! Replay Playback Driver
 //!
 //! Feeds recorded `.mcpr` packet streams into the client's packet processing
 //! loop at user-controlled playback speeds (slow-motion, 1x, fast-forward, pause).
 
-use super::{
-    mcpr::{Marker, McprReader, McprWriter, Metadata, TimestampedPacket},
-    spline::CameraTrack,
-};
-use crate::packet_source::PacketSource;
+use super::mcpr::{McprReader, McprWriter, Metadata};
 use std::{
     io,
     path::{Path, PathBuf},
     time::Duration,
 };
+use sunrise_hooks::replay::{Annotations, Marker, PacketSource, TimestampedPacket};
 
 /// Playback controller driving recorded packets according to a virtual timeline.
 pub struct ReplayDriver {
@@ -51,19 +48,16 @@ impl ReplayDriver {
             next_packet_cache,
         })
     }
+}
 
-    /// Camera keyframes saved alongside the packet stream, if present.
-    pub fn camera_track(&self) -> Option<&CameraTrack> {
-        self.reader.camera_track.as_ref()
-    }
-
+impl Annotations for ReplayDriver {
     /// Markers saved alongside the packet stream, in timeline order.
-    pub fn markers(&self) -> &[Marker] {
+    fn markers(&self) -> &[Marker] {
         &self.reader.markers
     }
 
     /// Add a bookmark at the current playhead and persist it in `markers.json`.
-    pub fn add_marker(&mut self, label: String) -> io::Result<Marker> {
+    fn add_marker(&mut self, label: String) -> io::Result<Marker> {
         let marker = Marker {
             time_ms: self.position_ms(),
             label,
@@ -76,11 +70,12 @@ impl ReplayDriver {
         Ok(marker)
     }
 
-    /// Save the edited camera path in the recording archive.
-    pub fn save_camera_track(&mut self, track: &CameraTrack) -> io::Result<()> {
-        McprWriter::replace_camera_track(&self.path, track)?;
-        self.reader.camera_track = (!track.is_empty()).then(|| track.clone());
-        Ok(())
+    fn read_extension(&self, name: &str) -> io::Result<Option<Vec<u8>>> {
+        McprReader::read_extension(&self.path, name)
+    }
+
+    fn replace_extension(&mut self, name: &str, bytes: Option<&[u8]>) -> io::Result<()> {
+        McprWriter::replace_extension(&self.path, name, bytes)
     }
 }
 
@@ -225,12 +220,12 @@ impl PacketSource for ReplayDriver {
         self.seek(0)
     }
 
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
+    fn annotations(&self) -> Option<&dyn Annotations> {
+        Some(self)
     }
 
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
-        self
+    fn annotations_mut(&mut self) -> Option<&mut dyn Annotations> {
+        Some(self)
     }
 }
 
@@ -287,7 +282,7 @@ fn validate_play_stream_start(first: &TimestampedPacket) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::studio::mcpr::McprWriter;
+    use crate::mcpr::McprWriter;
     use std::fs;
 
     fn play_login_packet() -> (i32, Vec<u8>) {

@@ -122,7 +122,8 @@ impl OptionsUi {
                         Page::SplitSetup
                     },
                 ),
-                Some(open("sunrise.pages.open.studio", Page::Studio)),
+                sunrise_hooks::replay::engine::factory()
+                    .map(|_| open("sunrise.pages.open.studio", Page::Studio)),
             ),
             // No AI hides the AI Agent page and everything AI.
             if s.extras.no_ai {

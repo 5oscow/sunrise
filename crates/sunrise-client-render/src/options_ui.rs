@@ -7666,7 +7666,6 @@ mod tests {
                 Page::Extras,
                 Page::Pvp,
                 Page::SplitSetup,
-                Page::Studio,
                 Page::Agent,
                 Page::ModBrowser,
             ]

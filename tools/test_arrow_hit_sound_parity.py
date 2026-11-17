@@ -100,9 +100,10 @@ def run_side(label, command, client, folder, decoder):
         reply('fill 0 200 0 15 205 15 minecraft:air')
         passed('execute if block 4 199 4 minecraft:stone')
         passed('execute if block 4 201 4 minecraft:air')
-        # The final silent command keeps the existing net harness connected
-        # while the console runs this bounded scene. It then stops Studio.
-        env = lab.game_env(SUNRISE_NET_REPORT=folder / 'client-report.json',
+        # The capture client records both servers' incoming packets before client
+        # sound handling. Disable the official executable's unrelated presence hook.
+        # The final silent command keeps it connected until the scene is done.
+        env = lab.game_env(SUNRISE_NET_REPORT=folder / 'client-report.json', SUNRISE_NO_DISCORD='1',
             SUNRISE_NET_CHAT='/studio record start h331;h331_capture_ready;'
             '/scoreboard players set #hold h331 0;/studio record stop')
         with (folder / 'client.log').open('w') as log:
@@ -162,7 +163,7 @@ def run_side(label, command, client, folder, decoder):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary', type=Path, help='prebuilt server; otherwise build fast')
-    parser.add_argument('--client-binary', type=Path, help='unchanged Studio client; defaults to server binary')
+    parser.add_argument('--client-binary', type=Path, help='prebuilt Studio client; otherwise build the Extras executable')
     parser.add_argument('--out', type=Path, help='fresh capture directory; default retains a new run')
     parser.add_argument('--reference-dir', type=Path, help='retained fresh Java capture; never rewritten')
     parser.add_argument('--reference-only', action='store_true')
@@ -175,7 +176,13 @@ def main():
         subprocess.run(['cargo', 'build', '--locked', '--profile', 'fast', '-p', 'sunrise-game',
                         '--bin', 'sunrise-client'], cwd=lab.ROOT, check=True)
         binary = lab.cargo_target() / 'fast' / ('sunrise-client.exe' if os.name == 'nt' else 'sunrise-client')
-    client_binary = args.client_binary.resolve(strict=True) if args.client_binary else binary
+    if args.client_binary:
+        client_binary = args.client_binary.resolve(strict=True)
+    else:
+        subprocess.run(['cargo', 'build', '--locked', '--profile', 'fast', '-p', 'sunrise-official',
+                        '--bin', 'sunrise-official'], cwd=lab.ROOT, check=True)
+        exe = 'sunrise-official.exe' if os.name == 'nt' else 'sunrise-official'
+        client_binary = lab.cargo_target() / 'fast' / exe
     lock, jars, libraries = base.verify_artifacts()
     classes, dependencies, _ = oracle_harness.compile_oracle(out, 'VanillaEntitySoundPacketOracle',
         jars, libraries, lock['minecraft']['java_major'])

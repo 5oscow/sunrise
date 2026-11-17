@@ -20,15 +20,19 @@ const PROTOCOL: &str = "0.1.0";
 /// The command groups the game serves, as `help` chains them: what `hello` reports as its features.
 const FEATURES: &[&str] = &[
     "game", "station", "blocks", "lan", "friends", "render", "sculk", "agent", "ui", "options",
-    "events", "saves", "pad", "studio",
+    "events", "saves", "pad",
 ];
 
 /// `hello`: the protocol the socket speaks, the game's release and the command groups it serves.
 fn hello() -> Value {
+    let mut features = FEATURES.to_vec();
+    if sunrise_hooks::replay::engine::factory().is_some() {
+        features.push("studio");
+    }
     json!({
         "protocol": PROTOCOL,
         "release": sunrise_core::release::VERSION,
-        "features": FEATURES,
+        "features": features,
     })
 }
 
@@ -466,7 +470,7 @@ impl Game<'_> {
                 .chain(super::pad::HELP)
                 .chain(super::input_trace::HELP)
                 .chain(super::repro::HELP)
-                .chain(super::studio::HELP)
+                .chain(sunrise_hooks::replay::engine::factory().map_or(&[][..], |_| super::studio::HELP))
                 .collect::<Vec<_>>() }))),
             "setblock" | "fill" | "particle" | "signedit" => self.render_command(&words),
             "section-draws" => {

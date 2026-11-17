@@ -23,6 +23,7 @@ pub mod pages;
 pub mod perf;
 pub mod players;
 mod registry;
+pub mod replay;
 pub mod settings;
 pub mod tunnel;
 

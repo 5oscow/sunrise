@@ -4,13 +4,13 @@
 //! Supports scrubbing, keyframe insertion, selection, deletion, and scene markers.
 
 use super::camera::StudioFreecam;
-use super::mcpr::Marker;
 use sunrise_client_render::{
     graphics_style as style,
     hud::{HudAtlas, HudBatch},
     text::Text,
     ui,
 };
+use sunrise_hooks::replay::Marker;
 
 /// Action emitted when a user interacts with the timeline UI.
 #[derive(Clone, Debug, PartialEq)]

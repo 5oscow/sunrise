@@ -8,12 +8,8 @@ use std::{
     path::{Path, PathBuf},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use sunrise_client::{
-    Result,
-    packet_source::PacketSource,
-    studio::{Metadata, ReplayDriver},
-    text::Text,
-};
+use sunrise_client::{Result, text::Text};
+use sunrise_hooks::replay::{PacketRecorder, PacketSource, TimestampedPacket, engine::factory};
 
 /// The packet replay a `Game` plays, if any, and its playback clock.
 #[derive(Default)]
@@ -56,7 +52,7 @@ impl Game<'_> {
         let Some(rest) = command.strip_prefix("studio") else {
             return false;
         };
-        if !rest.is_empty() && !rest.starts_with(char::is_whitespace) {
+        if (!rest.is_empty() && !rest.starts_with(char::is_whitespace)) || factory().is_none() {
             return false;
         }
         let words: Vec<&str> = rest.split_whitespace().collect();
@@ -345,10 +341,7 @@ impl Game<'_> {
         Ok(())
     }
 
-    fn dispatch_studio_replay_packets(
-        &mut self,
-        packets: Vec<sunrise_client::studio::mcpr::TimestampedPacket>,
-    ) {
+    fn dispatch_studio_replay_packets(&mut self, packets: Vec<TimestampedPacket>) {
         for pkt in packets {
             match sunrise_protocol::packets::play::Clientbound::decode(pkt.id, &pkt.payload) {
                 Ok(packet) => {
@@ -468,7 +461,7 @@ impl Game<'_> {
 
     /// Control socket command handler for `studio`.
     pub(super) fn studio_control(&mut self, words: &[&str]) -> Result<Option<Value>> {
-        if words.first().copied() != Some("studio") {
+        if words.first().copied() != Some("studio") || factory().is_none() {
             return Ok(None);
         }
         match words.get(1).copied() {
@@ -564,6 +557,9 @@ impl Game<'_> {
     }
 
     pub(super) fn start_studio_recording(&mut self, name: Option<&str>) -> Result<Value> {
+        let Some(factory) = factory() else {
+            return Ok(json!({ "ok": false, "error": "no replay provider registered" }));
+        };
         let Some(r) = self.remote.as_ref() else {
             return Ok(json!({ "ok": false, "error": "no active world session" }));
         };
@@ -586,12 +582,7 @@ impl Game<'_> {
             r.session.address.clone()
         };
         let is_singleplayer = server_address == "local";
-        let meta = Metadata::new(
-            server_address,
-            is_singleplayer,
-            sunrise_core::release::VERSION.into(),
-        );
-        match sunrise_client::studio::StudioRecorder::start(path.clone(), meta) {
+        match factory.start_recording(path.clone(), server_address, is_singleplayer) {
             Ok(recorder) => {
                 r.session.start_recording(recorder, |recorder| {
                     self.dump_world_snapshot_to_recorder(recorder);
@@ -631,6 +622,9 @@ impl Game<'_> {
     }
 
     pub(super) fn open_studio_replay(&mut self, path: &str) -> Result<Value> {
+        let Some(factory) = factory() else {
+            return Ok(json!({ "ok": false, "error": "no replay provider registered" }));
+        };
         if let Err(error) = self.save_studio_camera_track() {
             return Ok(json!({ "ok": false, "error": error.to_string() }));
         }
@@ -647,7 +641,7 @@ impl Game<'_> {
 
         // Validate and index the archive before replacing the title menu or active world. A
         // temp-file, metadata, or protocol error must leave the current screen usable.
-        let driver = match ReplayDriver::open(Path::new(path)) {
+        let driver = match factory.open_replay(Path::new(path)) {
             Ok(driver) => driver,
             Err(error) => {
                 log::error!("Failed to open studio replay '{path}': {error}");
@@ -655,6 +649,13 @@ impl Game<'_> {
             }
         };
 
+        let track = match super::studio::Studio::load_camera_track(driver.as_ref()) {
+            Ok(track) => track,
+            Err(error) => {
+                log::error!("Failed to load camera path from '{path}': {error}");
+                return Ok(json!({ "ok": false, "error": error.to_string() }));
+            }
+        };
         let standalone = self.replay.driver.is_none() && self.remote.is_none();
         if self.remote.is_none()
             && let Err(error) = self.init_remote_for_replay()
@@ -665,12 +666,12 @@ impl Game<'_> {
 
         let duration_ms = driver.duration_ms();
         let packets = driver.packet_count();
-        self.studio_replay_opened(&driver);
+        self.studio_replay_opened(driver.as_ref(), track);
         if self.replay.driver.is_none() {
             self.replay.previous_camera_type = Some(self.camera_type);
             self.replay.standalone = standalone;
         }
-        self.replay.driver = Some(Box::new(driver));
+        self.replay.driver = Some(driver);
         self.camera_type = sunrise_client::camera::CameraType::FirstPerson;
         self.title = None;
         self.screen = Screen::Playing;
@@ -736,10 +737,7 @@ impl Game<'_> {
     }
     /// Dump current player pose, dimension login, center chunk, and resident loaded chunks
     /// into the recording stream at timestamp 0ms so replays accurately reconstruct the world.
-    pub(super) fn dump_world_snapshot_to_recorder(
-        &self,
-        recorder: &sunrise_client::studio::StudioRecorder,
-    ) {
+    fn dump_world_snapshot_to_recorder(&self, recorder: &dyn PacketRecorder) {
         let Some(r) = self.remote.as_ref() else {
             return;
         };
@@ -748,7 +746,7 @@ impl Game<'_> {
             let mut reader = sunrise_protocol::buf::Reader::new(&encoded);
             if let Ok(id) = reader.varint() {
                 let payload = reader.rest();
-                recorder.record_packet_at(0, id, payload);
+                recorder.record_initial_packet(id, payload);
             }
         };
 

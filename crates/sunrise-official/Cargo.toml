@@ -16,6 +16,7 @@ test = false
 [dependencies]
 sunrise-game = { path = "../sunrise-game" }
 sunrise-platform = { path = "../sunrise-platform" }
+sunrise-replay = { path = "../sunrise-replay" }
 sunrise-heartbeat = { path = "../sunrise-heartbeat" }
 sunrise-friends = { path = "../sunrise-friends", features = ["game"] }
 sunrise-addresses = { path = "../sunrise-addresses" }
