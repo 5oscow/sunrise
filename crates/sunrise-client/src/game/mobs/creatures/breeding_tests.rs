@@ -391,9 +391,8 @@ fn breeding_announces_the_orb_before_the_lower_id_child() {
             game.mobs
                 .push(Mob::new(fox_base + 2, fox, Vec3::new(1.0, 64.0, 0.0), 0.0));
             game.native_joins_skip();
-            game.player = Some(
-                sunrise_client::motion::PlayerMotion::new(game.motion, Vec3::ZERO).unwrap(),
-            );
+            game.player =
+                Some(sunrise_client::motion::PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
             let feeder = sunrise_client::lan::playerdata::uuid_ints(game.native_acting_id());
             game.love_cause.insert(fox_base + 1, None);
             let fox_child = game.breed(
