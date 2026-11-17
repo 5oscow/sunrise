@@ -1524,13 +1524,17 @@ fn shader_globals_match_the_rust_layout() {
         let body = source.split("struct Globals {").nth(1).unwrap();
         body[..body.find('}').unwrap()]
             .lines()
-            .filter_map(|l| l.trim().split_once(':').map(|(name, _)| name.to_string()))
+            .filter_map(|l| {
+                l.trim()
+                    .split_once(':')
+                    .map(|(name, _)| name.trim_start_matches("pub(super) ").to_string())
+            })
             .filter(|name| !name.starts_with("//"))
             .collect()
     };
     let terrain = fields(include_str!("../terrain.wgsl"));
     assert_eq!(terrain, fields(include_str!("../entity.wgsl")));
-    let rust = fields(include_str!("../gfx.rs"));
+    let rust = fields(include_str!("frame.rs"));
     assert_eq!(terrain, rust);
 }
 #[test]
