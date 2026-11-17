@@ -3,6 +3,9 @@
 //! like a player (walk, look, break, place, use, click buttons). Actions that
 //! take time run as a task advanced every frame and reply when they finish or
 //! time out, so `sunrise-ctl break 10 64 3` returns what the block dropped.
+#[cfg(test)]
+#[path = "face_pick_tests.rs"]
+mod face_pick_tests;
 #[path = "agent_navigation.rs"]
 mod navigation;
 
@@ -918,6 +921,11 @@ impl Game<'_> {
         let (yaw, pitch) = yaw_pitch(eye, at);
         self.yaw = yaw;
         self.pitch = pitch.clamp(-90.0, 90.0);
+        // The crosshair target is stored, picked once per frame and per tick
+        // (client_pick.rs). Pick again along the new view, as the frame drawn after a
+        // mouse turn would, so this command's own reads see where it now looks:
+        // `attack ID`'s reach check and the target in `look-at`'s reply.
+        self.refresh_client_pick(1.0);
         Ok(())
     }
     /// Aim at a face of `pos` the crosshair can reach; the face hit.
