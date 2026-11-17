@@ -152,7 +152,8 @@ impl sunrise_world::level::LevelAccess for DryLevel<'_> {
         ground_pos: sunrise_core::position::BlockPos,
         may: &mut Option<bool>,
     ) {
-        self.base.before_may_place_on(state, ground, ground_pos, may);
+        self.base
+            .before_may_place_on(state, ground, ground_pos, may);
     }
     fn game_time(&self) -> i64 {
         self.base.game_time()
