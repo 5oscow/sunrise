@@ -65,7 +65,14 @@ fn camel_inherited_fields_decode_and_save_without_raw_or_with_stale_raw() {
                 put(&mut stale, field, value);
             }
             for source in [None, Some(&raw), Some(&stale)] {
-                let saved = mob_to_nbt(&mob, [92, 0, 0, 1], source, None, |_| None);
+                let saved = mob_to_nbt(
+                    &mob,
+                    [92, 0, 0, 1],
+                    source,
+                    None,
+                    |_| None,
+                    &Default::default(),
+                );
                 assert_eq!(saved.get("Tame"), Some(&Tag::Byte(1)), "{id}, {temper:?}");
                 assert_eq!(saved.get("Temper"), Some(&Tag::Int(temper.unwrap_or(0))));
                 for field in ["Bred", "EatingHaystack"] {
@@ -108,7 +115,15 @@ fn camel_signed_state_and_mutations_override_contradictory_raw() {
             assert_eq!(mob.extra.equine_temper, value, "actual signed model state");
             assert!(mob.extra.tame && mob.extra.bred && mob.extra.flag);
             assert_eq!(
-                mob_to_nbt(&mob, [92, 0, 0, 1], None, None, |_| None).get("Temper"),
+                mob_to_nbt(
+                    &mob,
+                    [92, 0, 0, 1],
+                    None,
+                    None,
+                    |_| None,
+                    &Default::default()
+                )
+                .get("Temper"),
                 Some(&Tag::Int(value))
             );
         }
@@ -130,7 +145,14 @@ fn camel_signed_state_and_mutations_override_contradictory_raw() {
         mob.extra.bred = false;
         mob.extra.flag = false;
         for source in [None, Some(&raw)] {
-            let saved = mob_to_nbt(&mob, [92, 0, 0, 1], source, None, |_| None);
+            let saved = mob_to_nbt(
+                &mob,
+                [92, 0, 0, 1],
+                source,
+                None,
+                |_| None,
+                &Default::default(),
+            );
             assert_eq!(saved.get("Temper"), Some(&Tag::Int(-77)));
             assert_eq!(saved.get("Tame"), Some(&Tag::Byte(1)));
             assert_eq!(saved.get("Bred"), Some(&Tag::Byte(0)));
@@ -170,7 +192,14 @@ fn camel_saved_carry_leaves_the_seven_equine_paths_unchanged() {
         assert_eq!(mob.extra.equine_temper, 12);
         assert!(!mob.extra.flag, "the other species' load path is unchanged");
         for source in [None, Some(&raw)] {
-            let saved = mob_to_nbt(&mob, [92, 0, 0, 1], source, None, |_| None);
+            let saved = mob_to_nbt(
+                &mob,
+                [92, 0, 0, 1],
+                source,
+                None,
+                |_| None,
+                &Default::default(),
+            );
             assert_eq!(saved.get("Temper"), Some(&Tag::Int(12)));
             assert_eq!(saved.get("Tame"), Some(&Tag::Byte(1)));
             assert_eq!(saved.get("Bred"), Some(&Tag::Byte(1)));

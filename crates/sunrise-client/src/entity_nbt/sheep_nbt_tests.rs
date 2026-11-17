@@ -17,7 +17,14 @@ fn a_sheep_keeps_its_dyed_and_sheared_wool() {
     // Summoned white, then dyed red and sheared: the save has it now.
     let raw = Tag::compound([("Color", Tag::Byte(0)), ("Sheared", Tag::Byte(0))]);
     (m.extra.color, m.extra.sheared) = (14, true);
-    let tag = mob_to_nbt(&m, [1, 2, 3, 4], Some(&raw), None, |_| None);
+    let tag = mob_to_nbt(
+        &m,
+        [1, 2, 3, 4],
+        Some(&raw),
+        None,
+        |_| None,
+        &Default::default(),
+    );
     assert_eq!(
         (number(tag.get("Color")), number(tag.get("Sheared"))),
         (Some(14), Some(1))
@@ -60,13 +67,20 @@ fn a_snow_golem_keeps_its_pumpkin_state() {
         let m = mob_from_nbt(&saved(pumpkin), &types, 2, None).unwrap();
         assert_eq!(m.extra.sheared, sheared, "{pumpkin:?}");
         // addAdditionalSaveData always writes it, over the loaded value.
-        let tag = mob_to_nbt(&m, [1, 2, 3, 4], Some(&saved(pumpkin)), None, |_| None);
+        let tag = mob_to_nbt(
+            &m,
+            [1, 2, 3, 4],
+            Some(&saved(pumpkin)),
+            None,
+            |_| None,
+            &Default::default(),
+        );
         assert_eq!(number(tag.get("Pumpkin")), Some(i64::from(!sheared)));
     }
     // Sheared in game: the save and the next load keep it off.
     let mut m = mob_from_nbt(&saved(None), &types, 3, None).unwrap();
     m.extra.sheared = true;
-    let tag = mob_to_nbt(&m, [1, 2, 3, 4], None, None, |_| None);
+    let tag = mob_to_nbt(&m, [1, 2, 3, 4], None, None, |_| None, &Default::default());
     assert!(mob_from_nbt(&tag, &types, 4, None).unwrap().extra.sheared);
 }
 
@@ -95,13 +109,27 @@ fn a_hoglin_keeps_cannot_be_hunted_and_is_no_prey() {
     let protected = mob_from_nbt(&raw, &types, 1, None).unwrap();
     assert!(protected.extra.cannot_be_hunted);
     assert!(!protected.seen(None, &crate::items::Items::empty()).huntable);
-    let saved = mob_to_nbt(&protected, [0; 4], Some(&raw), None, |_| None);
+    let saved = mob_to_nbt(
+        &protected,
+        [0; 4],
+        Some(&raw),
+        None,
+        |_| None,
+        &Default::default(),
+    );
     assert_eq!(saved.get("CannotBeHunted"), Some(&Tag::Byte(1)));
     for raw in [hoglin(None), hoglin(Some(0))] {
         let prey = mob_from_nbt(&raw, &types, 2, None).unwrap();
         assert!(!prey.extra.cannot_be_hunted);
         assert!(prey.seen(None, &crate::items::Items::empty()).huntable);
-        let saved = mob_to_nbt(&prey, [0; 4], Some(&raw), None, |_| None);
+        let saved = mob_to_nbt(
+            &prey,
+            [0; 4],
+            Some(&raw),
+            None,
+            |_| None,
+            &Default::default(),
+        );
         assert_eq!(saved.get("CannotBeHunted"), Some(&Tag::Byte(0)));
     }
 }
@@ -134,7 +162,7 @@ fn a_death_loot_table_round_trips() {
         Some("mymod:entities/boss")
     );
     assert_eq!(m.extra.death_table_seed, 42);
-    let tag = mob_to_nbt(&m, [1, 2, 3, 4], None, None, |_| None);
+    let tag = mob_to_nbt(&m, [1, 2, 3, 4], None, None, |_| None, &Default::default());
     assert_eq!(
         text(tag.get("DeathLootTable")).as_deref(),
         Some("mymod:entities/boss")
@@ -146,7 +174,14 @@ fn a_death_loot_table_round_trips() {
         ("Pos", doubles(&[0.0, 64.0, 0.0])),
     ]);
     let plain = mob_from_nbt(&plain, &types, 3, None).unwrap();
-    let tag = mob_to_nbt(&plain, [1, 2, 3, 4], None, None, |_| None);
+    let tag = mob_to_nbt(
+        &plain,
+        [1, 2, 3, 4],
+        None,
+        None,
+        |_| None,
+        &Default::default(),
+    );
     assert!(tag.get("DeathLootTable").is_none() && tag.get("DeathLootTableSeed").is_none());
 }
 
@@ -172,7 +207,7 @@ fn a_rabbit_keeps_how_full_of_carrots_it_is() {
         0.0,
     );
     m.extra.more_carrot_ticks = 33;
-    let tag = mob_to_nbt(&m, [1, 2, 3, 4], None, None, |_| None);
+    let tag = mob_to_nbt(&m, [1, 2, 3, 4], None, None, |_| None, &Default::default());
     assert_eq!(number(tag.get("MoreCarrotTicks")), Some(33));
     let back = mob_from_nbt(&tag, &types, 2, None).unwrap();
     assert_eq!(back.extra.more_carrot_ticks, 33);
@@ -199,10 +234,10 @@ fn an_ocelot_keeps_its_trust() {
         Vec3::new(0.0, 4.0, 0.0),
         0.0,
     );
-    let tag = mob_to_nbt(&m, [1, 2, 3, 4], None, None, |_| None);
+    let tag = mob_to_nbt(&m, [1, 2, 3, 4], None, None, |_| None, &Default::default());
     assert_eq!(number(tag.get("Trusting")), Some(0));
     m.extra.trusting = true;
-    let tag = mob_to_nbt(&m, [1, 2, 3, 4], None, None, |_| None);
+    let tag = mob_to_nbt(&m, [1, 2, 3, 4], None, None, |_| None, &Default::default());
     assert_eq!(number(tag.get("Trusting")), Some(1));
     let back = mob_from_nbt(&tag, &types, 2, None).unwrap();
     assert!(back.extra.trusting);
@@ -231,7 +266,7 @@ fn a_mannequin_keeps_its_immovable_flag_and_description() {
         Vec3::new(0.0, 4.0, 0.0),
         0.0,
     );
-    let save = |m: &Mob| mob_to_nbt(m, [1, 2, 3, 4], None, None, |_| None);
+    let save = |m: &Mob| mob_to_nbt(m, [1, 2, 3, 4], None, None, |_| None, &Default::default());
     // The default description is not written; it comes back.
     let tag = save(&m);
     assert!(tag.get("description").is_none() && tag.get("hide_description").is_none());
@@ -280,10 +315,11 @@ fn a_mob_keeps_a_mod_effect() {
         1,
         crate::brewing::Category::Harmful,
         None,
+        "testfx".into(),
     )]);
     let mut m = Mob::new(1, types["minecraft:pig"].clone(), Vec3::ZERO, 0.0);
     m.add_effect(crate::brewing::effect("testfx:glow").unwrap().id, 200, 2);
-    let tag = mob_to_nbt(&m, [1, 2, 3, 4], None, None, |_| None);
+    let tag = mob_to_nbt(&m, [1, 2, 3, 4], None, None, |_| None, &Default::default());
     let Some(Tag::List(saved)) = tag.get("active_effects") else {
         panic!("no active_effects");
     };
@@ -318,7 +354,7 @@ fn an_amplifier_of_zero_is_left_out_of_active_effects() {
         2,
     );
     m.add_effect("minecraft:slowness", 90, 3);
-    let tag = mob_to_nbt(&m, [1, 2, 3, 4], None, None, |_| None);
+    let tag = mob_to_nbt(&m, [1, 2, 3, 4], None, None, |_| None, &Default::default());
     let Some(Tag::List(saved)) = tag.get("active_effects") else {
         panic!("no active_effects");
     };
@@ -355,7 +391,7 @@ fn farm_animals_keep_their_variant_and_sound_variant() {
         Vec3::new(0.0, 4.0, 0.0),
         0.0,
     );
-    let tag = mob_to_nbt(&m, [1, 2, 3, 4], None, None, |_| None);
+    let tag = mob_to_nbt(&m, [1, 2, 3, 4], None, None, |_| None, &Default::default());
     assert_eq!(
         text(tag.get("variant")).as_deref(),
         Some("minecraft:temperate")
@@ -366,7 +402,7 @@ fn farm_animals_keep_their_variant_and_sound_variant() {
     );
     // Spawned in a warm biome with the mini sounds.
     (m.extra.variant, m.extra.sound_variant) = (1, Some(2));
-    let tag = mob_to_nbt(&m, [1, 2, 3, 4], None, None, |_| None);
+    let tag = mob_to_nbt(&m, [1, 2, 3, 4], None, None, |_| None, &Default::default());
     assert_eq!(text(tag.get("variant")).as_deref(), Some("minecraft:warm"));
     assert_eq!(
         text(tag.get("sound_variant")).as_deref(),
@@ -381,7 +417,14 @@ fn farm_animals_keep_their_variant_and_sound_variant() {
         0.0,
     );
     (hen.extra.variant, hen.extra.egg_time) = (2, 7795);
-    let tag = mob_to_nbt(&hen, [1, 2, 3, 4], None, None, |_| None);
+    let tag = mob_to_nbt(
+        &hen,
+        [1, 2, 3, 4],
+        None,
+        None,
+        |_| None,
+        &Default::default(),
+    );
     assert_eq!(text(tag.get("variant")).as_deref(), Some("minecraft:cold"));
     let back = mob_from_nbt(&tag, &types, 4, None).unwrap();
     assert_eq!((back.extra.variant, back.extra.egg_time), (2, 7795));
@@ -430,7 +473,14 @@ fn parrots_omit_raw_age_and_pigs_keep_modeled_age() {
             Some(Tag::compound([("Age", Tag::Int(-100))])),
             Some(Tag::compound([("Age", Tag::Int(100))])),
         ] {
-            let saved = mob_to_nbt(&mob, [0; 4], raw.as_ref(), None, |_| None);
+            let saved = mob_to_nbt(
+                &mob,
+                [0; 4],
+                raw.as_ref(),
+                None,
+                |_| None,
+                &Default::default(),
+            );
             assert_eq!(
                 saved.get("Age"),
                 expected.as_ref(),
@@ -461,7 +511,7 @@ fn a_baby_villager_keeps_its_age() {
     ]);
     let m = mob_from_nbt(&saved, &types, 1, None).unwrap();
     assert_eq!(m.extra.age, -21359);
-    let tag = mob_to_nbt(&m, [1, 2, 3, 4], None, None, |_| None);
+    let tag = mob_to_nbt(&m, [1, 2, 3, 4], None, None, |_| None, &Default::default());
     assert_eq!(number(tag.get("Age")), Some(-21359));
     assert_eq!(number(tag.get("AgeLocked")), Some(0));
     assert_eq!(number(tag.get("VillagerDataFinalized")), Some(1));
@@ -494,7 +544,7 @@ fn a_dolphins_moistness_and_fish_survive_a_save() {
     assert_eq!(m.extra.counter, 2400);
     m.extra.flag = true;
     m.extra.counter = 123;
-    let tag = mob_to_nbt(&m, [1, 2, 3, 4], None, None, |_| None);
+    let tag = mob_to_nbt(&m, [1, 2, 3, 4], None, None, |_| None, &Default::default());
     assert_eq!(number(tag.get("Moistness")), Some(123));
     assert_eq!(number(tag.get("GotFish")), Some(1));
     let back = mob_from_nbt(&tag, &types, 2, None).unwrap();
@@ -535,7 +585,7 @@ fn a_wandering_traders_countdown_and_target_survive_a_save() {
     );
     m.extra.ints[5] = 48000;
     m.extra.point = Some([12.0, 65.0, -30.0]);
-    let tag = mob_to_nbt(&m, [1, 2, 3, 4], None, None, |_| None);
+    let tag = mob_to_nbt(&m, [1, 2, 3, 4], None, None, |_| None, &Default::default());
     assert_eq!(number(tag.get("DespawnDelay")), Some(48000));
     let Some(Tag::IntArray(target)) = tag.get("wander_target") else {
         panic!("wander_target missing");
@@ -573,7 +623,14 @@ fn mobs_keep_their_variant_puff_state_carried_block_and_conversion_times() {
     .unwrap();
     let new = |kind: &str| Mob::new(1, types[kind].clone(), Vec3::new(0.0, 4.0, 0.0), 0.0);
     let round_trip = |m: &Mob| {
-        let tag = mob_to_nbt(m, [1, 2, 3, 4], None, Some(&registry), |_| None);
+        let tag = mob_to_nbt(
+            m,
+            [1, 2, 3, 4],
+            None,
+            Some(&registry),
+            |_| None,
+            &Default::default(),
+        );
         (mob_from_nbt(&tag, &types, 2, Some(&registry)).unwrap(), tag)
     };
     // A save with nothing but where the mob stands.
@@ -768,7 +825,14 @@ fn mobs_keep_their_variant_puff_state_carried_block_and_conversion_times() {
         ]);
         let mut m = new(kind);
         (m.extra.counter, m.extra.counter2) = (-1, 0);
-        let tag = mob_to_nbt(&m, [1, 2, 3, 4], Some(&loaded), Some(&registry), |_| None);
+        let tag = mob_to_nbt(
+            &m,
+            [1, 2, 3, 4],
+            Some(&loaded),
+            Some(&registry),
+            |_| None,
+            &Default::default(),
+        );
         assert_eq!(number(tag.get(conversion)), Some(-1), "{kind}");
         assert_eq!(number(tag.get(affliction)), Some(-1), "{kind}");
     }
@@ -780,7 +844,14 @@ fn mobs_keep_their_variant_puff_state_carried_block_and_conversion_times() {
     ] {
         let back = mob_from_nbt(&empty(kind), &types, 5, None).unwrap();
         assert!(back.can_pick_up_loot(), "{kind}");
-        let tag = mob_to_nbt(&back, [1, 2, 3, 4], None, Some(&registry), |_| None);
+        let tag = mob_to_nbt(
+            &back,
+            [1, 2, 3, 4],
+            None,
+            Some(&registry),
+            |_| None,
+            &Default::default(),
+        );
         assert_eq!(number(tag.get("CannotHunt")), hunt, "{kind}");
     }
     let mut saved = empty("minecraft:piglin");

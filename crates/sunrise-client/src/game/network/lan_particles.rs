@@ -1017,6 +1017,7 @@ pub(in crate::game) mod tests {
             &sunrise_protocol::registry::Builtin::default(),
             &[],
             &[],
+            Default::default(),
         );
         let hub_config = HubConfig {
             default_game_mode: 0,

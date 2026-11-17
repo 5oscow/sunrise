@@ -34,7 +34,14 @@ fn animal_save_uses_the_parsed_love_cause_instead_of_stale_raw() {
         let mut mob = mob_from_nbt(&raw, &types, 1, None).unwrap();
         assert_eq!(mob.extra.love_cause, None);
         for input in [None, Some(&raw)] {
-            let saved = mob_to_nbt(&mob, [57, 0, 0, 1], input, None, |_| None);
+            let saved = mob_to_nbt(
+                &mob,
+                [57, 0, 0, 1],
+                input,
+                None,
+                |_| None,
+                &Default::default(),
+            );
             assert!(saved.get("LoveCause").is_none(), "invalid raw {raw:?}");
             assert_eq!(saved.get("InLove"), Some(&Tag::Int(123)));
             if input.is_some() {
@@ -42,7 +49,14 @@ fn animal_save_uses_the_parsed_love_cause_instead_of_stale_raw() {
                 assert_eq!(saved.get("Tags"), raw.get("Tags"));
             }
             mob.extra.love_cause = Some(valid);
-            let saved = mob_to_nbt(&mob, [57, 0, 0, 1], input, None, |_| None);
+            let saved = mob_to_nbt(
+                &mob,
+                [57, 0, 0, 1],
+                input,
+                None,
+                |_| None,
+                &Default::default(),
+            );
             assert_eq!(saved.get("LoveCause"), Some(&Tag::IntArray(valid.to_vec())));
             mob.extra.love_cause = None;
         }
@@ -51,20 +65,43 @@ fn animal_save_uses_the_parsed_love_cause_instead_of_stale_raw() {
     let mut mob = mob_from_nbt(&loaded_raw, &types, 2, None).unwrap();
     assert_eq!(mob.extra.love_cause, Some(valid));
     assert_eq!(
-        mob_to_nbt(&mob, [57, 0, 0, 2], None, None, |_| None).get("LoveCause"),
+        mob_to_nbt(
+            &mob,
+            [57, 0, 0, 2],
+            None,
+            None,
+            |_| None,
+            &Default::default()
+        )
+        .get("LoveCause"),
         Some(&Tag::IntArray(valid.to_vec()))
     );
     mob.extra.love_cause = None;
     assert!(
-        mob_to_nbt(&mob, [57, 0, 0, 2], Some(&loaded_raw), None, |_| None)
-            .get("LoveCause")
-            .is_none()
+        mob_to_nbt(
+            &mob,
+            [57, 0, 0, 2],
+            Some(&loaded_raw),
+            None,
+            |_| None,
+            &Default::default()
+        )
+        .get("LoveCause")
+        .is_none()
     );
     // This cleanup belongs only to Animal's writer, not generic raw data.
     Arc::make_mut(&mut mob.kind).id = "minecraft:zombie".into();
     Arc::make_mut(&mut mob.kind).species = Species::Zombie;
     assert_eq!(
-        mob_to_nbt(&mob, [57, 0, 0, 2], Some(&loaded_raw), None, |_| None).get("LoveCause"),
+        mob_to_nbt(
+            &mob,
+            [57, 0, 0, 2],
+            Some(&loaded_raw),
+            None,
+            |_| None,
+            &Default::default()
+        )
+        .get("LoveCause"),
         loaded_raw.get("LoveCause")
     );
 }

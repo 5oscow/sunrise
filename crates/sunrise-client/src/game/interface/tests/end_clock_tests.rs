@@ -104,7 +104,7 @@ fn time_moves_the_clock_the_end_runs_on() {
     );
     assert_eq!(run(&mut game, "pause"), "Paused clock minecraft:the_end");
     game.sync_level();
-    game.level.write(&world).unwrap();
+    game.level.write(&world, &Default::default()).unwrap();
     game.save_world_state();
     let level = Level::read(&world).unwrap();
     assert_eq!(level.end_clock, Some(400));

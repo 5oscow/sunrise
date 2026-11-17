@@ -434,6 +434,7 @@ pub(super) mod tests {
                     progress,
                     per_tick: 0.0,
                     ticks: 3,
+                    crack: None,
                 });
                 assert_eq!(
                     player.block_breaking(game),

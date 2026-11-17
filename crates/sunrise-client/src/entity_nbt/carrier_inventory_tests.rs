@@ -80,7 +80,14 @@ fn carrier_inventory_is_adopted_and_saved_from_the_model() {
                 ])]),
             );
             for base in [None, Some(&raw), Some(&stale)] {
-                let saved = mob_to_nbt(&mob, [137, 0, 0, 1], base, None, |_| None);
+                let saved = mob_to_nbt(
+                    &mob,
+                    [137, 0, 0, 1],
+                    base,
+                    None,
+                    |_| None,
+                    &Default::default(),
+                );
                 assert_eq!(saved.get("Inventory"), Some(&expected), "{id} save");
                 if base.is_some() {
                     assert_eq!(saved.get("CustomName"), raw.get("CustomName"));
@@ -100,13 +107,29 @@ fn carrier_inventory_is_adopted_and_saved_from_the_model() {
                 let mut changed = stack.clone();
                 put(&mut changed, "count", Tag::Int(4));
                 assert_eq!(
-                    mob_to_nbt(&mob, [137, 0, 0, 1], Some(&raw), None, |_| None).get("Inventory"),
+                    mob_to_nbt(
+                        &mob,
+                        [137, 0, 0, 1],
+                        Some(&raw),
+                        None,
+                        |_| None,
+                        &Default::default()
+                    )
+                    .get("Inventory"),
                     Some(&Tag::List(vec![changed]))
                 );
             }
             mob.extra.inventory.clear();
             assert_eq!(
-                mob_to_nbt(&mob, [137, 0, 0, 1], Some(&stale), None, |_| None).get("Inventory"),
+                mob_to_nbt(
+                    &mob,
+                    [137, 0, 0, 1],
+                    Some(&stale),
+                    None,
+                    |_| None,
+                    &Default::default()
+                )
+                .get("Inventory"),
                 Some(&Tag::List(vec![]))
             );
         }
@@ -120,8 +143,15 @@ fn carrier_inventory_is_adopted_and_saved_from_the_model() {
         .inventory
         .push(crate::save::item_from_nbt(&stack).unwrap());
     assert!(
-        mob_to_nbt(&pig, [137, 0, 0, 2], None, None, |_| None)
-            .get("Inventory")
-            .is_none()
+        mob_to_nbt(
+            &pig,
+            [137, 0, 0, 2],
+            None,
+            None,
+            |_| None,
+            &Default::default()
+        )
+        .get("Inventory")
+        .is_none()
     );
 }

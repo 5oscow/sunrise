@@ -28,7 +28,8 @@ fn temper_preservation_decodes_and_saves_without_raw_input() {
             assert!(m.extra.tame && m.no_ai);
             let stale = Tag::compound([("Temper", Tag::Int(17)), ("audit:unrelated", Tag::Int(9))]);
             for base in [None, Some(&raw), Some(&stale)] {
-                let saved = mob_to_nbt(&m, [93, 0, 0, 1], base, None, |_| None);
+                let saved =
+                    mob_to_nbt(&m, [93, 0, 0, 1], base, None, |_| None, &Default::default());
                 assert_eq!(
                     saved.get("Temper"),
                     Some(&Tag::Int(value)),
@@ -45,7 +46,14 @@ fn temper_preservation_decodes_and_saves_without_raw_input() {
             }
         }
         let fresh = Mob::new(7, kind, Vec3::ZERO, 0.0);
-        let saved = mob_to_nbt(&fresh, [93, 0, 0, 1], None, None, |_| None);
+        let saved = mob_to_nbt(
+            &fresh,
+            [93, 0, 0, 1],
+            None,
+            None,
+            |_| None,
+            &Default::default(),
+        );
         assert_eq!(saved.get("Temper"), Some(&Tag::Int(0)));
         let absent = Tag::compound([
             ("id", string(&format!("minecraft:{name}"))),
@@ -53,7 +61,7 @@ fn temper_preservation_decodes_and_saves_without_raw_input() {
         ]);
         let decoded = mob_from_nbt(&absent, &types, 7, None).unwrap();
         assert_eq!(
-            mob_to_nbt(&decoded, [0; 4], None, None, |_| None).get("Temper"),
+            mob_to_nbt(&decoded, [0; 4], None, None, |_| None, &Default::default()).get("Temper"),
             Some(&Tag::Int(0))
         );
     }
@@ -76,7 +84,7 @@ fn equine_and_ravager_attributes_parity() {
     .unwrap();
     assert_eq!(donkey.extra.vector[0], 0.5);
     assert_eq!(
-        mob_to_nbt(&donkey, [0; 4], None, None, |_| None).get("attributes"),
+        mob_to_nbt(&donkey, [0; 4], None, None, |_| None, &Default::default()).get("attributes"),
         Some(&Tag::List(vec![]))
     );
     Arc::make_mut(&mut kind).species = Species::Ravager;
@@ -94,7 +102,7 @@ fn equine_and_ravager_attributes_parity() {
         let pos = ("Pos", doubles(&[0.0, 0.0, 0.0]));
         let tag = Tag::compound([("id", string("minecraft:ravager")), pos, (key, value)]);
         let ravager = mob_from_nbt(&tag, &types, 2, None).unwrap();
-        let nbt = mob_to_nbt(&ravager, [0; 4], None, None, |_| None);
+        let nbt = mob_to_nbt(&ravager, [0; 4], None, None, |_| None, &Default::default());
         assert_eq!(nbt.get("attributes"), Some(&saved));
     }
 }

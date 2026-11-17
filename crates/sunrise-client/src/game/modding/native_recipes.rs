@@ -87,7 +87,7 @@ impl Index {
 /// them (`[minecraft:potion_contents={potion:"minecraft:swiftness"}]`), or "".
 pub(super) fn components(s: &ItemStack) -> String {
     use sunrise_core::nbt::Tag;
-    let Some(Tag::Compound(entries)) = sunrise_client::item_data::encode_components(s) else {
+    let Some(Tag::Compound(entries)) = sunrise_client::item_data::component_snapshot(s) else {
         return String::new();
     };
     let parts: Vec<String> = entries
