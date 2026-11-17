@@ -16,6 +16,7 @@ pub(in crate::game) struct ClientPick {
     entity_reach: f64,
     result: Option<CrosshairTarget>,
     pub entity_metadata: (bool, bool),
+    pub rider_candidates: Vec<crate::game::pick_accumulator::PickCandidate>,
     dispatching: bool,
 }
 
@@ -142,6 +143,13 @@ impl Game<'_> {
             });
         let attack_candidate = self.attack_range_pick_entity();
         let entity_candidate = attack_candidate.or_else(|| self.pick_entity_candidate());
+        if self.client_pick.epoch != self.native_lifecycle.epoch()
+            || self.client_pick.dimension != Some(self.dim)
+        {
+            self.client_pick.ray = None;
+            self.publish_client_pick(None);
+            return;
+        }
         let original = attack_candidate.or_else(|| match entity_candidate {
             Some(CrosshairTarget::Entity { point, .. })
                 if occluder.is_none_or(|distance| self.pick_distance(point) < distance) =>
@@ -194,6 +202,13 @@ impl Game<'_> {
             ),
             _ => (false, false),
         };
+    }
+
+    pub(in crate::game) fn native_can_rider_interact(
+        &mut self,
+        call: mod_api::__private::CanRiderInteractCall<'_>,
+    ) {
+        self.fire_can_rider_interact(call);
     }
 
     pub(in crate::game) fn native_client_pick(

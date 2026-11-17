@@ -71,8 +71,8 @@ impl HookParts {
 }
 
 /// The refusal a wasm mod's entity part earns by overriding a native-only
-/// method: the part crosses with its [`general_entity_tick`] alone (#792 stage
-/// 4b), so the override would be silently never called. The subscription macro
+/// method: hooks such as [`general_entity_tick`] and [`can_rider_interact`] cross,
+/// but native-only overrides would be silently never called. The subscription macro
 /// records the overrides as [`EntityPart::entity_native_only`] capability
 /// metadata; the generated wasm attach wrapper consults it where the real part
 /// lives, and delivers this refusal through the registration refusal channel.
@@ -82,8 +82,7 @@ pub fn entity_part_native_only_refusal(part: &dyn EntityPart) -> Option<String> 
     let native_only = part.entity_native_only();
     let first = *native_only.first()?;
     Some(format!(
-        "EntityPart::{first}: a wasm entity part crosses with its general_entity_tick alone \
-         (#792 stage 4b), so its native-only methods may not be overridden on wasm"
+        "EntityPart::{first}: a wasm entity part cannot override native-only methods"
     ))
 }
 

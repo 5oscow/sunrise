@@ -109,9 +109,23 @@ impl Game<'_> {
         })
     }
 
-    pub(super) fn pick_entity_candidate(&self) -> Option<CrosshairTarget> {
-        let mut pick = super::pick_accumulator::PickAccumulator::new(self.entity_reach);
+    pub(super) fn pick_entity_candidate(&mut self) -> Option<CrosshairTarget> {
+        use super::pick_accumulator::PickAccumulator;
+        let subscribed = mod_api::__private::has_scoped_hook(mod_api::HookId::CanRiderInteract);
+        let mut pick = if subscribed {
+            PickAccumulator::recording(
+                self.entity_reach,
+                std::mem::take(&mut self.client_pick.rider_candidates),
+            )
+        } else {
+            PickAccumulator::new(self.entity_reach)
+        };
         self.collect_pick_candidates(&mut pick);
+        if subscribed {
+            let seal = self.transaction_open();
+            self.client_pick.rider_candidates = pick.dispatch(self);
+            self.transaction_close(&seal, true);
+        }
         let hit = pick.hovered?;
         let (eye, direction) = self.aim()?;
         Some(CrosshairTarget::Entity {

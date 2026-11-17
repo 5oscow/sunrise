@@ -125,32 +125,32 @@ impl Game<'_> {
                 f64::from(p[2]) + 0.5,
             ]
         };
-        let mut hits: Vec<(i32, f64, [f64; 3])> = Vec::new();
+        let mut hit: Option<(i32, f64, [f64; 3])> = None;
         if let Some((i, d)) = self.painting_hit_with_pick(pick) {
             let p = &self.paintings[i];
-            hits.push((p.id as i32, d, block_centre(p.pos)));
+            hit = Some((p.id as i32, d, block_centre(p.pos)));
         }
         if let Some((i, d)) = self.frame_hit_with_pick(pick) {
             let f = &self.item_frames[i];
-            hits.push((f.id as i32, d, block_centre(f.pos)));
+            hit = Some((f.id as i32, d, block_centre(f.pos)));
         }
         if let Some((i, d, _)) = self.armor_stand_hit_with_pick(pick) {
             let a = &self.armor_stands[i];
             let p = a.position;
-            hits.push((a.id as i32, d, [p.x, p.y, p.z]));
+            hit = Some((a.id as i32, d, [p.x, p.y, p.z]));
         }
         if let Some((i, d, _)) = self.cushion_hit_with_pick(pick) {
             let c = &self.cushions[i];
             let p = c.position;
-            hits.push((c.id as i32, d, [p.x, p.y, p.z]));
+            hit = Some((c.id as i32, d, [p.x, p.y, p.z]));
         }
         if let Some((i, d)) = self.boat_hit_with_pick(pick) {
             let p = self.boats[i].position;
-            hits.push((self.boats[i].id as i32, d, [p.x, p.y, p.z]));
+            hit = Some((self.boats[i].id as i32, d, [p.x, p.y, p.z]));
         }
         if let Some((i, d)) = self.cart_hit_with_pick(pick) {
             let p = self.carts[i].position;
-            hits.push((self.carts[i].id as i32, d, [p.x, p.y, p.z]));
+            hit = Some((self.carts[i].id as i32, d, [p.x, p.y, p.z]));
         }
         // Interaction.isPickable: an invisible box the server clicks through
         // to its scripts, for both uses and attacks.
@@ -160,13 +160,13 @@ impl Game<'_> {
                 ray_box(eye, dir, reach, i.bounds()).filter(|&d| pick.consider(self, id as u32, d))
             {
                 let p = i.position;
-                hits.push((id, d, [p.x, p.y, p.z]));
+                hit = Some((id, d, [p.x, p.y, p.z]));
             }
         }
         if (!attacking || self.client_pick.ray.is_some())
             && let Some((id, d, p)) = self.remote_knot_hit_with_pick(pick)
         {
-            hits.push((id, d, p));
+            hit = Some((id, d, p));
         }
         if attacking {
             // EndCrystal.isPickable: its 2 x 2 box, with the server's entity
@@ -182,16 +182,15 @@ impl Game<'_> {
                 if let Some(d) =
                     ray_box(eye, dir, reach, bounds).filter(|&d| pick.consider(self, c.id, d))
                 {
-                    hits.push((c.id as i32, d, [p.x, p.y, p.z]));
+                    hit = Some((c.id as i32, d, [p.x, p.y, p.z]));
                 }
             }
             // EnderDragonPart.isPickable: the server's dragon hurts by part.
-            hits.extend(self.remote_dragon_part_hit_with_pick(eye, dir, reach, pick));
+            if let Some(part) = self.remote_dragon_part_hit_with_pick(eye, dir, reach, pick) {
+                hit = Some(part);
+            }
         }
-        let (id, distance, origin) = hits.into_iter().find(|hit| {
-            pick.hovered
-                .is_some_and(|hovered| hovered.id == hit.0 as u32)
-        })?;
+        let (id, distance, origin) = hit?;
         let point = at(distance);
         Some(ObjectHit {
             id,

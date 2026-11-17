@@ -5079,15 +5079,6 @@ impl Game<'_> {
     }
     /// The dragon's parts as a server's client attacks them: the server's
     /// ids for `EnderDragonPart`s follow the dragon's.
-    pub(super) fn remote_dragon_part_hit(
-        &self,
-        eye: [f64; 3],
-        dir: [f64; 3],
-        reach: f64,
-    ) -> Option<(i32, f64, [f64; 3])> {
-        let mut pick = crate::game::pick_accumulator::PickAccumulator::new(self.entity_reach);
-        self.remote_dragon_part_hit_with_pick(eye, dir, reach, &mut pick)
-    }
     pub(super) fn remote_dragon_part_hit_with_pick(
         &self,
         eye: [f64; 3],

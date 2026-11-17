@@ -10,6 +10,7 @@ pub(super) struct PickCandidate {
 pub(super) struct PickAccumulator {
     pub hovered: Option<PickCandidate>,
     nearest: f64,
+    candidates: Option<Vec<PickCandidate>>,
 }
 
 impl PickAccumulator {
@@ -17,6 +18,7 @@ impl PickAccumulator {
         Self {
             hovered: None,
             nearest: reach,
+            candidates: None,
         }
     }
 
@@ -24,11 +26,49 @@ impl PickAccumulator {
         if game.pick_camera_id() == Some(id) {
             return false;
         }
+        if let Some(candidates) = &mut self.candidates {
+            candidates.push(PickCandidate { id, distance });
+            return false;
+        }
         self.accept(
             PickCandidate { id, distance },
             game.pick_shares_vehicle(id),
             false,
         )
+    }
+
+    /// Candidate geometry is copied while the family lists are borrowed; only a
+    /// subscribed hook needs this reusable buffer so its Host can borrow Game.
+    pub(super) fn recording(reach: f64, mut candidates: Vec<PickCandidate>) -> Self {
+        candidates.clear();
+        Self {
+            candidates: Some(candidates),
+            ..Self::new(reach)
+        }
+    }
+
+    pub(super) fn dispatch(&mut self, game: &mut Game<'_>) -> Vec<PickCandidate> {
+        let candidates = self.candidates.take().unwrap_or_default();
+        for &candidate in &candidates {
+            if game.pick_camera_id() == Some(candidate.id) {
+                continue;
+            }
+            let same_vehicle = game.pick_shares_vehicle(candidate.id);
+            let mut allowed = false;
+            if candidate.distance != 0.0
+                && (candidate.distance < self.nearest || self.nearest == 0.0)
+                && same_vehicle
+                && let Some(epoch) = game.native_lifecycle.epoch()
+            {
+                let entity = mod_api::EntityRef::new(epoch, candidate.id);
+                game.native_can_rider_interact(mod_api::__private::CanRiderInteractCall {
+                    entity,
+                    allowed: &mut allowed,
+                });
+            }
+            self.accept(candidate, same_vehicle, allowed);
+        }
+        candidates
     }
 
     fn accept(&mut self, candidate: PickCandidate, same_vehicle: bool, allowed: bool) -> bool {
