@@ -25,7 +25,14 @@ fn integer_memory_saves_keep_finite_ttl_and_drop_it_after_a_permanent_write() {
             ty.species = crate::mobs::Species::Axolotl;
             let mut mob = Mob::new(1, kind, Vec3::ZERO, 0.0);
             restore_axolotl_memories(&mut mob, &raw);
-            let saved = mob_to_nbt(&mob, [0; 4], Some(&raw), None, |_| None);
+            let saved = mob_to_nbt(
+                &mob,
+                [0; 4],
+                Some(&raw),
+                None,
+                |_| None,
+                &Default::default(),
+            );
             let entry = memory(&saved, key).expect("loaded value must be present");
             assert_eq!(entry.get("value"), Some(&Tag::Int(100)));
             let expected = ttl.filter(|v| *v != i64::MAX).map(Tag::Long);
@@ -38,7 +45,14 @@ fn integer_memory_saves_keep_finite_ttl_and_drop_it_after_a_permanent_write() {
             } else {
                 brain.mem.temptation_cooldown_ticks.set(99);
             }
-            let saved = mob_to_nbt(&mob, [0; 4], Some(&raw), None, |_| None);
+            let saved = mob_to_nbt(
+                &mob,
+                [0; 4],
+                Some(&raw),
+                None,
+                |_| None,
+                &Default::default(),
+            );
             let entry = memory(&saved, key).unwrap();
             assert_eq!(entry.get("value"), Some(&Tag::Int(99)));
             assert!(entry.get("ttl").is_none(), "stale raw TTL must not return");

@@ -15,6 +15,7 @@ impl SaveDir {
             self.flush()?;
         }
         Ok(Arc::new(Encoding {
+            items: self.items_for_save()?.clone(),
             registry,
             biomes: biomes.clone(),
             tables: self.tables.get().cloned(),

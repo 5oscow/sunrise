@@ -30,7 +30,14 @@ fn axolotl_boolean_memory_preserves_values_and_saved_lifetimes() {
             ty.species = crate::mobs::Species::Axolotl;
             let mut mob = Mob::new(1, kind, Vec3::ZERO, 0.0);
             restore_axolotl_memories(&mut mob, &raw);
-            let saved = mob_to_nbt(&mob, [0; 4], Some(&raw), None, |_| None);
+            let saved = mob_to_nbt(
+                &mob,
+                [0; 4],
+                Some(&raw),
+                None,
+                |_| None,
+                &Default::default(),
+            );
             let entry = saved
                 .get("Brain")
                 .and_then(|b| b.get("memories"))
@@ -80,7 +87,7 @@ fn aquatic_from_bucket_saves_defaults_and_tadpole_constant() {
             let m = mob_from_nbt(&input, &types, 1, None).unwrap();
             let expected = kind == "tadpole" || value.unwrap_or(false);
             for raw in [None, Some(&input)] {
-                let saved = mob_to_nbt(&m, [1; 4], raw, None, |_| None);
+                let saved = mob_to_nbt(&m, [1; 4], raw, None, |_| None, &Default::default());
                 assert_eq!(
                     saved.get("FromBucket"),
                     Some(&Tag::Byte(i8::from(expected))),
@@ -92,7 +99,7 @@ fn aquatic_from_bucket_saves_defaults_and_tadpole_constant() {
     }
     let pig = Mob::new(1, types["minecraft:pig"].clone(), Vec3::ZERO, 0.0);
     assert!(
-        mob_to_nbt(&pig, [1; 4], None, None, |_| None)
+        mob_to_nbt(&pig, [1; 4], None, None, |_| None, &Default::default())
             .get("FromBucket")
             .is_none()
     );
@@ -123,7 +130,7 @@ fn a_happy_ghast_keeps_its_still_timeout() {
     m.extra.age = 100;
     for timeout in [0, 7, 10] {
         m.extra.counter = timeout;
-        let saved = mob_to_nbt(&m, [1; 4], None, None, |_| None);
+        let saved = mob_to_nbt(&m, [1; 4], None, None, |_| None, &Default::default());
         assert_eq!(
             number(saved.get("still_timeout")),
             Some(i64::from(timeout)),
@@ -175,7 +182,14 @@ fn bucket_cooldown_and_brain_memories_survive_and_expired_cooldown_is_removed() 
             Tag::compound([("test:unrelated", Tag::compound([("value", Tag::Int(9))]))]),
         )]),
     )]);
-    let tag = mob_to_nbt(&m, [1, 2, 3, 4], Some(&raw), None, |_| None);
+    let tag = mob_to_nbt(
+        &m,
+        [1, 2, 3, 4],
+        Some(&raw),
+        None,
+        |_| None,
+        &Default::default(),
+    );
     let memories = tag.get("Brain").unwrap().get("memories").unwrap();
     assert!(memories.get("test:unrelated").is_some());
     assert_eq!(
@@ -203,7 +217,7 @@ fn bucket_cooldown_and_brain_memories_survive_and_expired_cooldown_is_removed() 
         Some("blue".into())
     );
     assert!(bucket_data(&m).get("Variant").is_none());
-    let stack = item_from_nbt(&item_to_nbt(&stack)).unwrap();
+    let stack = item_from_nbt(&item_to_nbt(&stack, &Default::default())).unwrap();
     let mut restored = Mob::new(2, kind, Vec3::new(0.0, 4.0, 0.0), 0.0);
     apply_item_components(&mut restored, &stack);
     assert_eq!(
@@ -289,7 +303,14 @@ fn bucket_cooldown_and_brain_memories_survive_and_expired_cooldown_is_removed() 
 
     crate::mobs::animal_brain::set_hunting_cooldown(&mut m, 0);
     assert!(bucket_data(&m).get("HuntingCooldown").is_none());
-    let saved = mob_to_nbt(&m, [1, 2, 3, 4], Some(&tag), None, |_| None);
+    let saved = mob_to_nbt(
+        &m,
+        [1, 2, 3, 4],
+        Some(&tag),
+        None,
+        |_| None,
+        &Default::default(),
+    );
     assert!(
         saved
             .get("Brain")

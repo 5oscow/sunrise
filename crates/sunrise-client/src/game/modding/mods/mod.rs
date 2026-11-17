@@ -1238,24 +1238,33 @@ fn announced_entry(
 fn register_mob_effects(mods: &[sunrise_client::mod_content::ContentMod]) {
     use sunrise_client::brewing::{self, Category};
     use sunrise_mod_package::content::EffectCategory;
-    let effects = sunrise_client::mod_content::mob_effects(mods);
+    let mut effects: Vec<_> = mods
+        .iter()
+        .flat_map(|m| m.content.effects.iter().map(move |effect| (&m.id, effect)))
+        .collect();
+    effects.sort_by(|(_, a), (_, b)| a.id.cmp(&b.id));
     if effects.is_empty() {
         return;
     }
-    let ids: Vec<String> = effects.iter().map(|e| e.id.clone()).collect();
-    let set = brewing::register_mod_effects(effects.into_iter().map(|e| {
+    let ids: Vec<_> = effects
+        .iter()
+        .map(|(owner, e)| (e.id.clone(), owner.to_string()))
+        .collect();
+    let set = brewing::register_mod_effects(effects.into_iter().map(|(owner, e)| {
         let category = match e.category {
             EffectCategory::Beneficial => Category::Beneficial,
             EffectCategory::Harmful => Category::Harmful,
             EffectCategory::Neutral => Category::Neutral,
         };
-        (e.id.clone(), e.color, category, e.sort_order)
+        (e.id.clone(), e.color, category, e.sort_order, owner.clone())
     }));
     if !set
         && brewing::mod_effects()
             .iter()
-            .map(|e| e.id)
-            .ne(ids.iter().map(String::as_str))
+            .map(|e| (e.id, e.owner))
+            .ne(ids
+                .iter()
+                .map(|(id, owner)| (id.as_str(), Some(owner.as_str()))))
     {
         log::warn!("Sunrise: the mods' mob effects changed; restart the game to use them");
     }
@@ -2111,8 +2120,16 @@ mod tests {
             Mob::new(2, ghoul.clone(), at, 0.0),
         );
         assert_eq!(ghoul.health, 40.0);
-        let saved =
-            |m: &Mob| sunrise_client::entity_nbt::mob_to_nbt(m, [0, 0, 0, 2], None, None, |_| None);
+        let saved = |m: &Mob| {
+            sunrise_client::entity_nbt::mob_to_nbt(
+                m,
+                [0, 0, 0, 2],
+                None,
+                None,
+                |_| None,
+                &Default::default(),
+            )
+        };
         let keys = |tag: &sunrise_core::nbt::Tag| -> Vec<String> {
             let sunrise_core::nbt::Tag::Compound(map) = tag else {
                 panic!("a mob saves a compound");
@@ -2174,8 +2191,14 @@ mod tests {
                 Species::Parrot => pet.extra.variant = 2,
                 _ => pet.extra.color = if species == Species::Wolf { 14 } else { 3 },
             }
-            let tag =
-                sunrise_client::entity_nbt::mob_to_nbt(&pet, [0, 0, 0, 1], None, None, |_| None);
+            let tag = sunrise_client::entity_nbt::mob_to_nbt(
+                &pet,
+                [0, 0, 0, 1],
+                None,
+                None,
+                |_| None,
+                &Default::default(),
+            );
             let get = |key: &str| tag.get(key).cloned();
             assert_eq!(
                 get("id"),
@@ -2632,8 +2655,16 @@ mod tests {
         let trader = Mob::new(1, types["minecraft:wandering_trader"].clone(), at, 0.0);
         let merchant = Mob::new(2, merchant.clone(), at, 0.0);
         assert!(merchant.ai.goals.has("Float") && trader.ai.goals.has("Float"));
-        let saved =
-            |m: &Mob| sunrise_client::entity_nbt::mob_to_nbt(m, [0, 0, 0, 2], None, None, |_| None);
+        let saved = |m: &Mob| {
+            sunrise_client::entity_nbt::mob_to_nbt(
+                m,
+                [0, 0, 0, 2],
+                None,
+                None,
+                |_| None,
+                &Default::default(),
+            )
+        };
         let keys = |tag: &Tag| -> Vec<String> {
             let Tag::Compound(map) = tag else {
                 panic!("a mob saves a compound");
@@ -3165,7 +3196,8 @@ mod tests {
             "test:effect".to_owned(),
             0,
             brewing::Category::Neutral,
-            None
+            None,
+            "test-potions".into()
         )]));
     }
 }

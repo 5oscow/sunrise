@@ -51,7 +51,14 @@ fn guarded_event_saves_actual_uuid_and_remaining_long_ttl() {
         for remaining in [600, 520] {
             m.extra.anger = remaining;
             for base in [None, Some(&raw)] {
-                let saved = mob_to_nbt(&m, [42, 43, 44, 45], base, None, |_| None);
+                let saved = mob_to_nbt(
+                    &m,
+                    [42, 43, 44, 45],
+                    base,
+                    None,
+                    |_| None,
+                    &Default::default(),
+                );
                 assert_eq!(
                     memory(&saved),
                     Some(&Tag::compound([
@@ -126,7 +133,14 @@ fn expired_owned_memory_cannot_resurrect_stale_raw_anger() {
     crate::mobs::piglin::set_guarded_anger_target(&mut m, Some([1, 2, 3, 4]));
     m.extra.anger = 0;
     m.ai.target = None;
-    let saved = mob_to_nbt(&m, [42, 43, 44, 45], Some(&raw()), None, |_| None);
+    let saved = mob_to_nbt(
+        &m,
+        [42, 43, 44, 45],
+        Some(&raw()),
+        None,
+        |_| None,
+        &Default::default(),
+    );
     assert!(memory(&saved).is_none());
     assert_unrelated(&saved);
 }
@@ -134,15 +148,39 @@ fn expired_owned_memory_cannot_resurrect_stale_raw_anger() {
 #[test]
 fn calm_loaded_and_missing_identity_states_are_distinct() {
     let mut m = mob();
-    assert!(memory(&mob_to_nbt(&m, [42, 43, 44, 45], None, None, |_| None)).is_none());
+    assert!(
+        memory(&mob_to_nbt(
+            &m,
+            [42, 43, 44, 45],
+            None,
+            None,
+            |_| None,
+            &Default::default()
+        ))
+        .is_none()
+    );
     let raw = raw();
     // Loaded Brain semantics stay outside this live event projection.
-    let untouched = mob_to_nbt(&m, [42, 43, 44, 45], Some(&raw), None, |_| None);
+    let untouched = mob_to_nbt(
+        &m,
+        [42, 43, 44, 45],
+        Some(&raw),
+        None,
+        |_| None,
+        &Default::default(),
+    );
     assert_eq!(memory(&untouched), memory(&raw));
     crate::mobs::piglin::set_guarded_anger_target(&mut m, None);
     assert_eq!(m.extra.anger, 600);
     assert_eq!(m.ai.target, Some(Who::Player));
-    let saved = mob_to_nbt(&m, [42, 43, 44, 45], Some(&raw), None, |_| None);
+    let saved = mob_to_nbt(
+        &m,
+        [42, 43, 44, 45],
+        Some(&raw),
+        None,
+        |_| None,
+        &Default::default(),
+    );
     assert!(memory(&saved).is_none());
     assert_unrelated(&saved);
 }

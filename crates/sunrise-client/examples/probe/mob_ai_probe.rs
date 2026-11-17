@@ -1558,6 +1558,7 @@ pub fn main() -> sunrise_client::Result<()> {
                         None,
                         None,
                         |_| None,
+                        &Default::default(),
                     );
                     let flower = sunrise_client::mobs::bee::get(&mobs[i]).and_then(|b| b.flower);
                     let mut honey = Vec::new();

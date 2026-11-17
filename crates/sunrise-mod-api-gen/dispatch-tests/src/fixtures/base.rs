@@ -611,7 +611,7 @@ fn dispatch_contracts() {
     let mods: Vec<ModEntry> = (1..=2)
         .map(|id| {
             ModEntry::new(
-                "mod-11",
+                if id == 1 { "effect-owner" } else { "other-mod" },
                 Box::new(Mod {
                     id,
                     calls: calls.clone(),
@@ -647,9 +647,16 @@ fn dispatch_contracts() {
     assert_eq!(lines.iter().map(|line| line.1).collect::<Vec<_>>(), [1, 2]);
     let mut apply = false;
     calls.lock().unwrap().clear();
-    dispatch_should_apply_effect_tick_this_tick(&host, EffectKey(7), 19, 2, &mut apply);
-    assert!(!apply);
-    assert_eq!(*calls.lock().unwrap(), [1, 2]);
+    dispatch_should_apply_effect_tick_this_tick(
+        &host,
+        "effect-owner",
+        EffectKey(7),
+        19,
+        2,
+        &mut apply,
+    );
+    assert!(apply);
+    assert_eq!(*calls.lock().unwrap(), [1]);
     let source = HurtSource {
         damage_type: "damage",
         position: None,

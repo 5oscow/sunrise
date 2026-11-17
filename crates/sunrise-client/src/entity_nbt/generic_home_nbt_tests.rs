@@ -24,7 +24,7 @@ fn spawned_trader_home_restricts_and_survives_save() {
     assert!(crate::mobs::trader::within_home(&m));
     m.position = Vec3::new(20.5, 201.0, 0.5);
     assert!(!crate::mobs::trader::within_home(&m));
-    let saved = mob_to_nbt(&m, [0; 4], None, None, |_| None);
+    let saved = mob_to_nbt(&m, [0; 4], None, None, |_| None, &Default::default());
     assert_eq!(saved.get("home_radius"), Some(&Tag::Int(16)));
     assert_eq!(saved.get("home_pos"), Some(&Tag::IntArray(vec![4, 201, 0])));
     let mut loaded = mob(Species::WanderingTrader, "minecraft:wandering_trader");
@@ -40,7 +40,7 @@ fn generic_home_output_uses_model_and_removes_stale_raw_fields() {
     for raw in [None, Some(&raw)] {
         for radius in [0, 5, -2, -1] {
             m.ai.home = Some(([4, 5, 6], radius));
-            let saved = mob_to_nbt(&m, [0; 4], raw, None, |_| None);
+            let saved = mob_to_nbt(&m, [0; 4], raw, None, |_| None, &Default::default());
             if radius == -1 {
                 assert!(saved.get("home_radius").is_none());
                 assert!(saved.get("home_pos").is_none());
@@ -50,7 +50,7 @@ fn generic_home_output_uses_model_and_removes_stale_raw_fields() {
             }
         }
         m.ai.home = None;
-        let saved = mob_to_nbt(&m, [0; 4], raw, None, |_| None);
+        let saved = mob_to_nbt(&m, [0; 4], raw, None, |_| None, &Default::default());
         assert!(saved.get("home_radius").is_none());
         assert!(saved.get("home_pos").is_none());
         if raw.is_some() {
@@ -143,7 +143,7 @@ fn turtle_and_creaking_keep_their_own_home_position_writer() {
         for raw in [None, Some(&raw)] {
             for home in [None, Some(([7, 8, 9], 5))] {
                 m.ai.home = home;
-                let saved = mob_to_nbt(&m, [0; 4], raw, None, |_| None);
+                let saved = mob_to_nbt(&m, [0; 4], raw, None, |_| None, &Default::default());
                 assert_eq!(saved.get("home_pos"), Some(&Tag::IntArray(vec![4, 5, 6])));
                 assert_eq!(
                     saved.get("home_radius"),

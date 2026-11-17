@@ -34,9 +34,14 @@ fn a_wardens_anger_round_trips_as_suspect_uuid_pairs() {
     anger.increase(Who::Mob(7), 41);
     m.extra.warden.as_mut().unwrap().anger = anger;
     let pig_uuid = [0, 0, 0, 7];
-    let tag = mob_to_nbt(&m, [9, 9, 9, 9], None, None, |id| {
-        (id == 7).then_some(pig_uuid)
-    });
+    let tag = mob_to_nbt(
+        &m,
+        [9, 9, 9, 9],
+        None,
+        None,
+        |id| (id == 7).then_some(pig_uuid),
+        &Default::default(),
+    );
     // A warden is no `NeutralMob`: neither of its keys is written.
     assert!(tag.get("angry_at").is_none());
     assert!(tag.get("anger_end_time").is_none());
@@ -78,7 +83,7 @@ fn a_named_then_unnamed_player_saves_only_the_named_one() {
     anger.increase_player(Some(alice), 50);
     anger.increase_player(None, 20);
     m.extra.warden.as_mut().unwrap().anger = anger;
-    let tag = mob_to_nbt(&m, [9, 9, 9, 9], None, None, |_| None);
+    let tag = mob_to_nbt(&m, [9, 9, 9, 9], None, None, |_| None, &Default::default());
     let Some(Tag::List(pairs)) = tag.get("anger").and_then(|t| t.get("suspects")) else {
         panic!("the named player's anger is saved");
     };
@@ -102,7 +107,7 @@ fn an_unknown_player_suspect_writes_no_pair() {
     let mut anger = AngerManagement::default();
     anger.increase_player(None, 35);
     m.extra.warden.as_mut().unwrap().anger = anger;
-    let tag = mob_to_nbt(&m, [9, 9, 9, 9], None, None, |_| None);
+    let tag = mob_to_nbt(&m, [9, 9, 9, 9], None, None, |_| None, &Default::default());
     assert!(tag.get("anger").and_then(|t| t.get("suspects")).is_none());
 }
 
@@ -115,13 +120,20 @@ fn an_away_suspect_survives_another_save() {
     let away = [4, 0, 0, 42];
     let mut m = warden(1);
     m.extra.warden.as_mut().unwrap().anger = AngerManagement::from_saved([(away, 12)]);
-    let tag = mob_to_nbt(&m, [9, 9, 9, 9], None, None, |_| None);
+    let tag = mob_to_nbt(&m, [9, 9, 9, 9], None, None, |_| None, &Default::default());
     let mut back = mob_from_nbt(&tag, &types(), 2, None).unwrap();
     let st = back.extra.warden.as_mut().unwrap();
     for _ in 0..4 {
         st.anger.tick(|_| true, |_| None);
     }
-    let saved = mob_to_nbt(&back, [9, 9, 9, 9], None, None, |_| None);
+    let saved = mob_to_nbt(
+        &back,
+        [9, 9, 9, 9],
+        None,
+        None,
+        |_| None,
+        &Default::default(),
+    );
     let Some(Tag::List(pairs)) = saved.get("anger").and_then(|t| t.get("suspects")) else {
         panic!("the away suspect is still saved");
     };
@@ -136,7 +148,7 @@ fn an_away_suspect_survives_another_save() {
 #[test]
 fn a_warden_with_no_anger_writes_no_suspects() {
     let m = warden(1);
-    let tag = mob_to_nbt(&m, [9, 9, 9, 9], None, None, |_| None);
+    let tag = mob_to_nbt(&m, [9, 9, 9, 9], None, None, |_| None, &Default::default());
     assert_eq!(
         tag.get("anger"),
         Some(&Tag::compound(Vec::<(&str, Tag)>::new()))

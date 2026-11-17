@@ -22,6 +22,7 @@ pub(super) enum Record {
 }
 /// What encoding a chunk needs, captured when it is queued.
 pub(super) struct Encoding {
+    pub(super) items: Arc<crate::items::Items>,
     pub(super) registry: &'static BlockRegistry,
     pub(super) biomes: Arc<Biomes>,
     pub(super) tables: Option<Arc<SaveTables>>,
@@ -39,6 +40,7 @@ impl Record {
                 e.tables.as_deref(),
                 e.shape,
                 blending.as_deref(),
+                &e.items,
             ))),
             Record::Proto(p, e) => Some(Arc::new(encode_proto(
                 p,
@@ -46,6 +48,7 @@ impl Record {
                 &e.biomes,
                 e.tables.as_deref(),
                 e.shape,
+                &e.items,
             ))),
             Record::Poi(c, t, professions) => {
                 encode_poi(c, t, professions.as_deref()).map(Arc::new)

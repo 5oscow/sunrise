@@ -1037,10 +1037,11 @@ impl Game<'_> {
         streaming.remote = true;
         streaming.radius = self.settings.render_distance;
         self.streaming = streaming;
-        self.world = Game::world_for_mods(self.res.facts().air, 0);
+        self.reset_client_world(0);
         self.save = Arc::new(SaveDir::new(
             std::env::temp_dir().join("sunrise-remote-unused"),
             sunrise_client::save::LevelShape::OVERWORLD,
+            None,
         ));
         self.inventory = vec![None; 36];
         self.offhand = None;
@@ -1304,10 +1305,11 @@ impl Game<'_> {
         streaming.remote = true;
         streaming.radius = self.settings.render_distance;
         self.streaming = streaming;
-        self.world = Game::world_for_mods(self.res.facts().air, 0);
+        self.reset_client_world(0);
         self.save = Arc::new(SaveDir::new(
             std::env::temp_dir().join("sunrise-replay-unused"),
             sunrise_client::save::LevelShape::OVERWORLD,
+            None,
         ));
         self.inventory = vec![None; 36];
         self.offhand = None;
@@ -6259,6 +6261,7 @@ impl Game<'_> {
         if let Some(player) = player {
             self.native_player_tick_pre(mod_api::__private::PlayerTickPreCall { player });
         }
+        self.native_local_player_fit_sizes();
         let result = self.tick_local_player(entity_collisions, pushed, sprint_window);
         entity_section_steps::player_after(self, player_from);
         // `EntityEvent.Size` for the pose the tick set.
@@ -7805,12 +7808,13 @@ impl Game<'_> {
             // startDestroyBlock plays the first hit and crack itself; the
             // server's level events 2019 and 2020 do the rest.
             self.breaking_block_effects(hit.pos, hit.face, true);
-            self.mining = Some(Mining {
+            self.set_client_mining(Some(Mining {
                 pos: hit.pos,
                 progress: 0.0,
                 per_tick: 0.0,
                 ticks: 0,
-            });
+                crack: None,
+            }));
             return true;
         }
         let Some((pos, last_face, done)) = self.remote.as_ref().and_then(|r| r.destroying) else {
@@ -7856,12 +7860,13 @@ impl Game<'_> {
             if let Some(r) = self.remote.as_mut() {
                 r.destroying = Some((pos, face, done));
             }
-            self.mining = Some(Mining {
+            self.set_client_mining(Some(Mining {
                 pos,
                 progress: done,
                 per_tick: 0.0,
                 ticks,
-            });
+                crack: None,
+            }));
         }
         true
     }
@@ -8705,6 +8710,7 @@ impl Game<'_> {
         // chosen since the last tick (the wheel, the last tick's number keys, the
         // server's SetHeldSlot) goes out before anything else of this tick.
         self.remote_send_carried();
+        self.refresh_client_pick(1.0);
         if stop || !ready {
             self.stop_remote_mining();
         }
@@ -11004,6 +11010,54 @@ pub(crate) mod tests {
         });
         assert_eq!(count.load(Ordering::Relaxed), 1);
     }
+    /// A client's painting lives on `Entity.tickCount`, which its renderer reads as the age: it
+    /// advances with each running level tick and holds while the level is frozen.
+    #[test]
+    #[ignore = "daily"]
+    fn a_client_painting_ages_with_running_ticks() {
+        super::super::native_entity_refs::tests::with_client_game(|game| {
+            let (client, _server) = sunrise_protocol::connection::Pipe::pair();
+            game.connect_local(client, "painting-age-client").unwrap();
+            assert!(game.spawn_remote_object(
+                5,
+                "minecraft:painting",
+                [0.5, 64.5, 0.5],
+                (0.0, 0.0),
+                2
+            ));
+            assert_eq!(game.paintings[0].ticks, 0);
+            game.tick_remote_entities(true);
+            game.tick_remote_entities(true);
+            assert_eq!(game.paintings[0].ticks, 2);
+            game.tick_remote_entities(false);
+            assert_eq!(game.paintings[0].ticks, 2);
+        });
+    }
+
+    /// A client's item frame lives on `Entity.tickCount`, which its renderer reads as the age: it
+    /// advances with each running level tick and holds while the level is frozen.
+    #[test]
+    #[ignore = "daily"]
+    fn a_client_item_frame_ages_with_running_ticks() {
+        super::super::native_entity_refs::tests::with_client_game(|game| {
+            let (client, _server) = sunrise_protocol::connection::Pipe::pair();
+            game.connect_local(client, "item-frame-age-client").unwrap();
+            assert!(game.spawn_remote_object(
+                6,
+                "minecraft:item_frame",
+                [0.5, 64.5, 0.5],
+                (0.0, 0.0),
+                2
+            ));
+            assert_eq!(game.item_frames[0].ticks, 0);
+            game.tick_remote_entities(true);
+            game.tick_remote_entities(true);
+            assert_eq!(game.item_frames[0].ticks, 2);
+            game.tick_remote_entities(false);
+            assert_eq!(game.item_frames[0].ticks, 2);
+        });
+    }
+
     /// The remote player animation uses the scoped item answer once per tick.
     #[test]
     #[ignore = "daily"]
@@ -13274,6 +13328,7 @@ pub(crate) mod tests {
             game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
             game.yaw = 0.0;
             game.pitch = 0.0;
+            game.refresh_client_pick(1.0);
             let Some(CrosshairTarget::Entity { entity, .. }) = game.crosshair_target() else {
                 panic!("the crosshair hits the pig in front of the player");
             };

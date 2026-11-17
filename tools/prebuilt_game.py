@@ -8,7 +8,8 @@ native trait mods against it with rustc alone, in seconds, without the game's so
     python3 tools/prebuilt_game.py exports OUT            # each DLL's exported names, toward Windows' limit
     python3 tools/prebuilt_game.py pack OUT DIST          # the SDK's assets from OUT: runtime-, api- and
                                                           # engine-<target>[-server].tar.xz, build-data.tar.xz
-                                                          # and surface.json, in DIST
+                                                          # and surface.json, in DIST; --stage-tool the
+                                                          # sunrise-stage `build` compiled, instead of compiling it
     python3 tools/prebuilt_game.py gather LEGS DIST       # the release folder from every packing leg's DIST, once
                                                           # their build data and surface are checked equal
     python3 tools/prebuilt_game.py index DIST [--nightly NAME] [--previous BUILD DIFF]  # DIST/sdk.json
@@ -955,6 +956,9 @@ def main() -> None:
     pack_parser = commands.add_parser("pack")
     pack_parser.add_argument("out", type=Path)
     pack_parser.add_argument("dist", type=Path)
+    # `build` compiles sunrise-stage from the commit's own source before staging it (target/prebuilt/tools); the
+    # surface export reuses that binary instead of compiling it again in another target folder.
+    pack_parser.add_argument("--stage-tool", type=Path, help="the sunrise-stage binary to export the surface with")
     gather_parser = commands.add_parser("gather")
     gather_parser.add_argument("legs", type=Path)
     gather_parser.add_argument("dist", type=Path)
@@ -979,7 +983,7 @@ def main() -> None:
     elif args.command == "start":
         start(args.out.resolve())
     elif args.command == "pack":
-        pack(args.out.resolve(), args.dist.resolve())
+        pack(args.out.resolve(), args.dist.resolve(), args.stage_tool)
     elif args.command == "gather":
         gather(args.legs.resolve(), args.dist.resolve())
     elif args.command == "index":
