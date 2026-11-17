@@ -141,10 +141,11 @@ console.log(JSON.stringify(Boolean(eval(s.expression))));
         text = GAME.read_text()
         commands = re.findall(r"check_glibc.py ([^\n]+)", text.replace("\\\n", " "))
         checked = [{Path(argument).name for argument in shlex.split(command)} for command in commands]
-        self.assertEqual(checked, [
-            {"sunrise-client", "sunrise-ctl", "sunrise-prepare", "sunrise-server"},
-            {"sunrise-engine", "sunrise-server", "sunrise-prepare"},
-        ])
+        # Every program each release folder takes (the SDK's input list), and the game program itself.
+        routes = json.loads((ROOT / "crates/sunrise-mod-package/src/sdk/inputs.json").read_text())["routes"]
+        programs = {route: {name for name in routes[route]["program"] if "." not in name} for route in ["package", "package-server"]}
+        self.assertEqual(checked, [programs["package"] | {"sunrise-client"},
+                                   programs["package-server"] | {"sunrise-engine"}])
         tools = [step for step in text.split("\n      - ") if "path: .workflow-tools" in step]
         self.assertTrue(tools)
         for checkout in tools:

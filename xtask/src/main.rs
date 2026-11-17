@@ -1,8 +1,8 @@
 //! Repository tasks, run with `cargo run -p xtask -- TASK`.
 //!
-//! `package BINARY OUTDIR`: a playable Sunrise folder with the game binary, sunrise-ctl,
+//! `package BINARY OUTDIR`: a playable Sunrise folder with the game binary, sunrise-ctl, sunrise-perf,
 //! sunrise-prepare and sunrise-server (built beside it: cargo build --release -p sunrise-game -p sunrise-client-lib
-//! --bins -p sunrise-prepare -p sunrise-server), the exporters sunrise-prepare compiles, its sources (the launcher compares
+//! --bins -p sunrise-perf --bin sunrise-perf -p sunrise-prepare -p sunrise-server), the exporters sunrise-prepare compiles, its sources (the launcher compares
 //! them to its own), and PLAY.txt. It holds none of Minecraft's files: players prepare those
 //! from their own copy. .github/workflows/release.yml makes the release folders with it.
 //!
@@ -51,7 +51,7 @@ const ARCHIVED: [&str; 6] = [
 ];
 
 // The programs that sit beside the client (sunrise-ctl, the command line and MCP server that play
-// the game; sunrise-prepare, which prepares the resources from the player's own Minecraft;
+// the game; sunrise-perf, which reads the game's .hzperf performance captures; sunrise-prepare, which prepares the resources from the player's own Minecraft;
 // sunrise-server, which hosts a server with the client as its engine, docs/server.md) and the
 // wasm runtime are listed, with the checkout's exporters, in the SDK's required inputs
 // (`sunrise_mod_package::sdk::inputs`): routes `package` and `package-server`.
@@ -682,6 +682,7 @@ mod tests {
         for name in [
             "sunrise-client",
             "sunrise-ctl",
+            "sunrise-perf",
             "sunrise-prepare",
             "sunrise-server",
         ] {
