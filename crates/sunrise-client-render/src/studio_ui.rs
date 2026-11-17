@@ -243,7 +243,7 @@ impl StudioUi {
         let panel_h = (h - 76.0).max(100.0);
 
         // Glass panel backdrop for recordings list
-        style::panel(batch, atlas, [panel_x, panel_y, panel_w, panel_h]);
+        style::panel(batch, atlas, [panel_x, panel_y, panel_w, panel_h], true);
         [panel_x, panel_y, panel_w, panel_h]
     }
     pub(crate) fn draw_contents(
