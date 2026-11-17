@@ -66,3 +66,36 @@ identifier alone does not register a statistic.
 
 `/scoreboard objectives add steps minecraft.custom:rewrite.steps` creates an
 objective for this registered counter.
+
+## Moving colliders
+
+A native mod gives an entity boxes that every other entity collides with:
+
+```rust
+entity.set_collider(host, Some(Collider {
+    boxes: vec![ColliderBox { min: [-1.5, -1.0, -10.0], max: [1.5, 0.0, 10.0] }],
+    rotation: [0.0, 0.0, 0.0, 1.0],
+}))?;
+entity.set_collider_transform(host, turned)?; // the rotation alone, as the entity turns
+```
+
+The boxes are in the entity's own frame (its position is the origin), turned by `rotation`, a unit
+quaternion with any yaw, pitch and roll. Other entities collide with them as solid ground and walls:
+the entity's box is swept against each turned box (a separating-axis test with the time of impact), it
+steps up onto a top within its step height, and standing on a tilted top follows the surface. The
+collider is solid to every mover except spectators, entities with no physics and the entities in its
+own vehicle stack (the root vehicle and every passenger, at any depth, the collider's entity among them).
+**Contact effects are not applied yet:** a box is solid ground and walls and nothing more, so standing or walking on one has no block's step sound, sprint particles, friction or bounce ([#1909](https://github.com/sunrise-org/sunrise/issues/1909)).
+
+The game checks a collider when it is set and refuses by name (`ColliderError`), keeping the old one:
+every value finite, the rotation a unit quaternion within 1e-3, at most `Collider::MAX_BOXES` (32,768)
+boxes, and every box within `Collider::MAX_REACH` (512) blocks of the entity on each axis. Boxes are kept
+as `f32`; read back, they are the rounded values both sides collide with. A box whose minimum is above
+its maximum is read with the corners swapped, and a box with no volume (zero thickness on an axis)
+collides with nothing.
+
+A collider is saved with the entity. The server sends it only to Sunrise clients that track the entity:
+the whole collider when they start to (in messages of at most 64 KiB), then only what changed, by box
+index, and the rotation alone for `set_collider_transform`. **A vanilla client does not see a collider**:
+it sees the entity and walks through it. A mod that needs players to stand on one requires the Sunrise
+client at join. Carrying whoever stands on a moving collider is a later step; this one only makes it solid.

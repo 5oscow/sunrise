@@ -797,6 +797,28 @@ impl FishingHookRef {
     }
 }
 
+/// Where a fishing bobber outside water floats and fishes, as a mod answers
+/// `fishing_medium`: lava, the void under an island, a cloud. In the block of
+/// `surface` or below (its y under `floor(surface) + 1`) the bobber floats and
+/// fishes as in still water; above it, it falls as anywhere else.
+#[derive(Clone, Debug, Default, PartialEq)]
+// exhaustive: a mod builds the answer; write it with `..FishingMedium::default()`
+#[derive(sunrise_mod_api_macros::Wire)]
+pub struct FishingMedium {
+    /// The height the bobber floats at (world Y), as water's surface is. A value that is
+    /// not finite is no medium.
+    pub surface: f64,
+    /// The loot table a catch from here rolls (`mymod:gameplay/void_fishing`); None rolls
+    /// vanilla's `minecraft:gameplay/fishing`, and so does an id that is malformed or names
+    /// no table the server has (with one warning naming the mod and the id). Read on the
+    /// server; a client ignores it.
+    pub loot_table: Option<String>,
+    /// The ticks a fish takes to come, `[min, max]`: the wait is `min + nextInt(max - min +
+    /// 1)` less the rod's Lure, with `min` raised to at least 1 and `max` to at least `min`.
+    /// None keeps vanilla's 100 to 600. Read on the server; a client ignores it.
+    pub lure_ticks: Option<[i32; 2]>,
+}
+
 /// A villager or wandering trader (vanilla's `AbstractVillager`, a `Merchant`),
 /// narrowed from an entity with `host.merchant(entity)`. If a villager's saved
 /// profession is unresolved, offers read empty and merchant mutations are
@@ -1465,6 +1487,12 @@ pub struct PlayerActionSetup {
     pub pitch: f32,
     /// Secondary use, as when holding sneak; this does not change the standing eye height.
     pub secondary_use: bool,
+    /// Start with a full attack charge: with the stack in hand, the attack-strength ticker is
+    /// set so that `getAttackStrengthScale(0.5)` is 1.0, and the fake's own ticker comes back
+    /// afterwards with its other action timers. Only [`PlayerAction::Attack`] reads it. A stack
+    /// that leaves no attack speed never charges, as in vanilla.
+    /// `false` by default; set it by assignment: `setup.full_attack_charge = true;`.
+    pub full_attack_charge: bool,
 }
 
 impl PlayerActionSetup {
@@ -1482,6 +1510,7 @@ impl PlayerActionSetup {
             yaw,
             pitch,
             secondary_use,
+            full_attack_charge: false,
         }
     }
 }

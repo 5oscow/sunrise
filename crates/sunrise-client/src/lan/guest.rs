@@ -880,6 +880,13 @@ impl Guest {
             Err(error) => eprintln!("[lan] send refused: {error}"),
         }
     }
+    /// Whether this connection reads collider sync (`sunrise:collider_sync`).
+    pub fn negotiated_collider_sync(&self) -> bool {
+        crate::raw_payloads::negotiated(
+            self.sender.payload_transport(),
+            sunrise_protocol::collider_sync::CHANNEL,
+        )
+    }
     /// Whether the guest's play epoch has attachment sync negotiated (a vanilla client never
     /// offers it).
     pub fn negotiated_attachment_sync(&self) -> bool {

@@ -30,6 +30,7 @@ use super::{BlockEntity, BlockStateId, Game, machines::HopperState};
 use mod_api::{Transaction, TransactionLifecycle, TransactionSeal};
 use std::collections::HashMap;
 use sunrise_client::{items::ItemStack, world::BlockEntityExtras};
+use sunrise_core::position::BlockPos;
 use sunrise_mod_runtime::attachments::{Attachments, Holder};
 
 #[path = "transactions/decision.rs"]
@@ -1164,9 +1165,22 @@ impl Game<'_> {
             }
         }
 
+        // Block entities whose published shapes the abort changed back.
+        let mut reshaped = Vec::new();
         for (pos, kept) in level.block_entities {
             match (&kept.entity, self.world.block_entities.get_mut(&pos)) {
                 (Some(entity), Some(now)) => {
+                    fn shapes(
+                        entity: &BlockEntity,
+                    ) -> Option<&sunrise_client::containers::PublishedShapes> {
+                        match entity {
+                            BlockEntity::Mod(entity) => entity.shapes(),
+                            _ => None,
+                        }
+                    }
+                    if shapes(now) != shapes(entity) {
+                        reshaped.push(pos);
+                    }
                     *now = entity.clone();
                     self.world
                         .block_entities
@@ -1235,6 +1249,16 @@ impl Game<'_> {
         }
         for (pos, state) in level.blocks {
             self.world.set_stored(pos.0, pos.1, pos.2, state);
+        }
+        // The shapes are back: the neighbours that read them (a fluid beside it) are told, as
+        // the publish told them.
+        for pos in reshaped {
+            let at = BlockPos::new(pos.0, pos.1, pos.2);
+            let state = self.world.block(pos.0, pos.1, pos.2);
+            self.with_level(|b, level, ticks| {
+                let block = b.block(state);
+                b.update_neighbors_at(level, ticks, at, block);
+            });
         }
         for (chunk, randoms) in level.composter_randoms {
             self.transactions

@@ -178,8 +178,11 @@ pub trait BlockEntitiesBackendMut {
     /// loads and sends it with the block entity to clients; it is dropped when the block
     /// entity is removed or its block changes. An entity the new shape now overlaps is
     /// treated as vanilla treats a block that appears inside it, with no push-out. Ok(false)
-    /// when nothing changed. Inside a transaction an abort puts the old shapes back. The
-    /// checks are those of `BlockEntityShapes`; a shape that fails one is refused by name.
+    /// when nothing changed. Fluids read the collision shape too: water and lava pass between
+    /// two cells by their collision shapes at their positions. A publish, a clear and an abort
+    /// that puts the old shapes back each notify the block's neighbours, so a fluid beside it
+    /// reads the new shape; an unchanged value notifies nothing. The checks are those of
+    /// `BlockEntityShapes`; a shape that fails one is refused by name.
     #[access(WorldOnly)]
     fn block_entity_set_shapes(
         &mut self,

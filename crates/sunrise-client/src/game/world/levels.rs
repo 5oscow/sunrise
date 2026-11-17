@@ -1111,6 +1111,8 @@ impl Game<'_> {
             }
         };
         self.journal_arrival(id);
+        let level = self.dim;
+        self.entity_attachments.move_collider(id, level);
         if self.uuid_admission_refused(self.persist.uuids.get(&id).copied()) {
             self.persist.off_level.insert(id, object);
             return;
@@ -1241,23 +1243,28 @@ impl Game<'_> {
             });
             sunrise_client::spans::time("update_world", || self.update_world());
             let tick_span = sunrise_client::spans::guard("level_tick");
-            result = sunrise_client::block_contact::in_level(
-                self.tick,
-                (self.serving.is_some() || self.options.dedicated.is_some()).then_some(dim.id()),
-                || {
-                    if paused {
-                        self.tick_lan(true);
-                        Ok(())
-                    } else if k == 0 {
-                        self.tick()
-                    } else {
-                        let running = running.unwrap_or_else(|| self.clock.world_runs());
-                        // ClientLevel.tick: the sky flash fades in a frozen level too.
-                        self.tick_weather_effects();
-                        self.tick_world(running)
-                    }
-                },
-            );
+            // This level's moving colliders, solid to its movers for this tick only.
+            let colliders = self.placed_moving_colliders();
+            result = sunrise_client_render::moving_colliders::in_level(colliders, || {
+                sunrise_client::block_contact::in_level(
+                    self.tick,
+                    (self.serving.is_some() || self.options.dedicated.is_some())
+                        .then_some(dim.id()),
+                    || {
+                        if paused {
+                            self.tick_lan(true);
+                            Ok(())
+                        } else if k == 0 {
+                            self.tick()
+                        } else {
+                            let running = running.unwrap_or_else(|| self.clock.world_runs());
+                            // ClientLevel.tick: the sky flash fades in a frozen level too.
+                            self.tick_weather_effects();
+                            self.tick_world(running)
+                        }
+                    },
+                )
+            });
             drop(tick_span);
             self.drain_entity_inside();
             if result.is_err() {
@@ -1526,6 +1533,7 @@ impl Game<'_> {
         // Its entities' attachments are saved with them; they leave memory too.
         for id in self.persist.uuids.keys() {
             self.entity_attachments.remove(id);
+            self.entity_attachments.remove_collider(*id);
         }
         self.enter_level(back)?;
         self.levels.parked.remove(&dim);
