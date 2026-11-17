@@ -170,7 +170,7 @@ fn a_clients_smithing_table_works_out_no_result() {
         ] {
             menu.carried = stack(item, 1);
             menu.click(env, slot, 0, Input::Pickup).unwrap();
-            assert_eq!(menu.slot(slot), stack(item, 1).as_ref());
+            assert_eq!(menu.slot(slot as usize), stack(item, 1).as_ref());
         }
         assert_eq!(menu.slot(3), None);
         assert_eq!(menu.data[0], 0);
