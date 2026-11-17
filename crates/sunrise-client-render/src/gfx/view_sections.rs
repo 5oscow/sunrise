@@ -230,10 +230,12 @@ impl Renderer {
             return;
         };
         let origin = [key.0 * 16, self.layout.min_y() + key.1 * 16, key.2 * 16];
-        if let Some(indices) =
-            s.sort
-                .update(camera.to_array(), origin, &mut self.translucent_sorter)
-        {
+        if let Some(indices) = s.sort.update(
+            camera.to_array(),
+            origin,
+            false,
+            &mut self.translucent_sorter,
+        ) {
             self.uploads.buffer(
                 encoder,
                 self.sorted_indices.buffer(index_page),

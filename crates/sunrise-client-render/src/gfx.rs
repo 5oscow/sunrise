@@ -5373,13 +5373,12 @@ impl Renderer {
                 Sides::unsorted(solid)
             },
             translucent,
-            sort: translucency::SortState::new(
+            sort: translucency::SortState::of_quads(
                 mesh.translucent
                     .as_chunks::<4>()
                     .0
                     .iter()
-                    .map(|q| translucency::quad_center(q[0].pos, q[2].pos))
-                    .collect(),
+                    .map(|q| q.map(|v| v.pos)),
             ),
             sorted_indices,
             flat_id,
@@ -8189,6 +8188,12 @@ impl Renderer {
         // LevelRenderer: nearby sections each frame, plus a rotating eighth
         // (at least 15) of the visible list. Cached views avoid needless sorts.
         self.translucent_draws.clear();
+        // Only the camera's own pass takes a section's translucent order with the quads that face
+        // away left out: a shadow, a mirrored view or a pack's own pipelines draw them all.
+        let cull_back = shadow_view.is_none()
+            && !pack_terrain
+            && self.native.is_none()
+            && self.world_views.sections.sections().next().is_none();
         let count = visible.len() + visible_lods.len();
         let budget = (count / 8).max(15).min(count);
         self.translucency_cursor %= count.max(1);
@@ -8205,9 +8210,12 @@ impl Renderer {
                     v.key.2 * 16,
                 ];
                 if (!s.sort.is_sorted() || nearby || scheduled)
-                    && let Some(indices) =
-                        s.sort
-                            .update(camera.to_array(), origin, &mut self.translucent_sorter)
+                    && let Some(indices) = s.sort.update(
+                        camera.to_array(),
+                        origin,
+                        cull_back,
+                        &mut self.translucent_sorter,
+                    )
                 {
                     self.uploads.buffer(
                         &mut encoder,
@@ -8217,18 +8225,16 @@ impl Renderer {
                     );
                 }
                 let (page, first) = s.translucent_at;
-                self.translucent_draws.push((
-                    v.distance,
-                    i,
-                    [
-                        s.translucent * 6,
-                        1,
-                        index_start as u32,
-                        first as u32,
-                        i as u32,
-                    ],
-                    (page, Some(index_page)),
-                ));
+                let pov = translucency::viewpoint(camera.to_array(), origin);
+                let quads = s.sort.drawn(s.translucent, cull_back, pov);
+                if quads > 0 {
+                    self.translucent_draws.push((
+                        v.distance,
+                        i,
+                        [quads * 6, 1, index_start as u32, first as u32, i as u32],
+                        (page, Some(index_page)),
+                    ));
+                }
             }
         }
         // Sections went back to front (`visible` is sorted by distance, then
