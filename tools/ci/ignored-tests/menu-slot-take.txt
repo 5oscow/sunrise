@@ -1,1 +1,0 @@
-sunrise-client game::menu_slot_take_tests::mod_slot_takes_resume_before_repetition_and_refuse_failed_or_stale_rewards lib daily resources
