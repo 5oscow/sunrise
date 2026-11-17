@@ -22,11 +22,15 @@ pub trait Hooks {
     /// `Some(Some(state))` to choose a state, `Some(None)` to refuse, or
     /// `None` to leave the answer to the next mod or vanilla. Changes to the event's fluid
     /// copy are mod-provided data forwarded to later Parts, never consumed by the engine.
-    /// Asked on both sides, as vanilla asks it on both: a client asks it from its placement
-    /// prediction, of its loaded copy of the level (match `LevelSide`; a read the client can't
-    /// answer is `None`), and a client refusal keeps its stack unspent until the server answers.
-    /// Answer `None` on a client where only a server can decide: the template's rule then
-    /// predicts, and the server still decides. Named injections request `hook_version = 2`.
+    /// Asked on both sides, as vanilla asks it: a client asks it from its
+    /// placement prediction, with its loaded copy of the level (match
+    /// `LevelSide`). Reads a client can't answer, tag tests among them, are
+    /// `None` there, and `BlockEntityPartState::state_in` gives its default:
+    /// never answer from those as if they were the server's. A client refusal
+    /// keeps its stack unspent until the server answers. Answer `None` on a
+    /// client where only a server can decide: the template's rule then
+    /// predicts, and the server still decides. Named injections request
+    /// `hook_version = 2`.
     #[hook(
         side = "both",
         version = 2,

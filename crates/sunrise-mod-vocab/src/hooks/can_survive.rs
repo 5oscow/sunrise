@@ -11,10 +11,13 @@ pub trait Hooks {
     /// blocks: `Some(false)` refuses the spot, `Some(true)` allows it, and
     /// the block's own rule doesn't run. The level is read-only. Asked on
     /// every shape update of such a block: keep it short.
-    /// Asked on both sides, as vanilla asks it on both: a client asks it from its placement
-    /// prediction and its own shape updates, of its loaded copy of the level (match `LevelSide`; a
-    /// read the client can't answer is `None`). Answer `None` on a client where only a server can
-    /// decide: the template's rule then predicts, and the server still decides. Named injections
+    /// Asked on both sides, as vanilla asks it: a client asks it from its
+    /// placement prediction and its own shape updates, with its loaded copy of
+    /// the level (match `LevelSide`). Reads a client can't answer, tag tests
+    /// among them, are `None` there, and `BlockEntityPartState::state_in` gives
+    /// its default: never answer from those as if they were the server's.
+    /// Answer `None` on a client where only a server can decide: the template's
+    /// rule then predicts, and the server still decides. Named injections
     /// request `hook_version = 2`.
     #[hook(
         side = "both",

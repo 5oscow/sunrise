@@ -1746,10 +1746,12 @@ still go on each event or registrar.
   mod plant (a block whose template is a vanilla plant, such as a crop): the blocks it can stand on, which its
   template's `canSurvive` asks, so it is refused elsewhere and pops off when its ground changes. Answer only for your
   own blocks and leave the answer empty otherwise; the level is read-only. Both run on every shape update of such a
-  block: keep them short. Both, `can_sustain_plant` and `state_for_placement` are asked on both sides, as vanilla asks
+  block: keep them short. These two, `can_sustain_plant` and `state_for_placement` are asked on both sides, as vanilla asks
   them: a client asks them from its placement prediction and its own shape updates, of its loaded copy of the level,
-  and tells its side by `LevelSide`. A mod that can decide only on a server answers `None` on a client, and the
-  template's rule predicts. Named injections request `hook_version = 2`.
+  and tells its side by `LevelSide`. Reads a client can't answer, tag tests among them, are `None` there, and
+  `BlockEntityPartState::state_in` gives its default: never answer from those as if they were the server's. A mod
+  that can decide only on a server answers `None` on a client, and the template's rule predicts. Named injections
+  request `hook_version = 2`.
 
 - Drawing mod block entities on the client. `block_entity_submit(pos, block, state, entity, draw)` runs once a frame
   for each mod block entity in view, as vanilla's `BlockEntityRenderer.submit` does (within its view distance, 64 blocks
@@ -2348,7 +2350,7 @@ registration path.
 
 - `native_server_event(name, uuid, message)` posts an `announce` event to a dedicated server's event stream (`GET /api/v1/events`); sunrise-server's Discord bridge relays it, in gold, when `[discord] events` lists `announce` (off by default). False elsewhere and for an empty message.
 
-- `native_state_block(state)` names the block a state belongs to (`BlockState.getBlock()`), on a server hook's level and on the game: `state_for_placement` is asked for every block placed, so a mod compares it with its own block to answer only for it.
+- `native_state_block(state)` names the block a state belongs to (`BlockState.getBlock()`), on a hook's level and on the game: `state_for_placement` is asked for every block placed, so a mod compares it with its own block to answer only for it.
 
 - The helper `native_physical_window_size()`, which returns the window's width and height in physical pixels, independent of GUI scale. It returns no size on a server or when no window exists.
 
