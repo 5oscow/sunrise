@@ -265,7 +265,7 @@ def named(problem):
     return not problem["test"].startswith("identity withheld")
 
 
-def verdicts(jobs, reports, results):
+def verdicts(jobs, reports, results, legs):
     """(failing tests, unfinished legs, passing tests, green legs) of this run.
 
     A failing test is a dict of package, test, kind, panic, policy and leg; an unfinished leg is (leg, conclusion,
@@ -318,7 +318,7 @@ def verdicts(jobs, reports, results):
                 unfinished.append((expected, "missing", [], "did not report: the daily matrix has this shard, but "
                                    "no job of that name ran"))
     seen = {job["name"].split(" / ", 1)[0] for job in leg_jobs(jobs)}
-    for leg in LEGS:
+    for leg in legs:
         result = results.get(leg, {}).get("result", "missing")
         accounted = any(item["leg"].split(" / ", 1)[0] == leg for item in tests) or any(
             entry[0].split(" / ", 1)[0] == leg for entry in unfinished)
@@ -352,7 +352,7 @@ def verdicts(jobs, reports, results):
             unfinished.append((leg, result, [], "did not complete, and no job or test of it says why"))
         elif result == "success" and not accounted:
             green_legs.add(leg)  # a whole leg that reported and passed closes its leg-level issue
-    green = legs_green(LEGS, jobs, results, tests, unfinished) and not tests and not unfinished
+    green = legs_green(legs, jobs, results, tests, unfinished) and not tests and not unfinished
     failing = {(item["package"], item["test"]) for item in tests}
     return tests, unfinished, passed - failing, green_legs, green
 
@@ -545,7 +545,7 @@ def render(actions, writes):
     lead = "## Daily summary" + ("" if writes else " (dry run: nothing written)")
     lines = [lead, ""]
     if any(action[0] == "tag" for action in actions):
-        lines.append("Every leg is green: then publish the nightly of this commit (release.yml, kind nightly).")
+        lines.append("Every applicable leg is green: then publish the nightly of this commit (release.yml, kind nightly).")
     if not actions:
         lines.append("Nothing to do: no leg is red and no open daily issue went green.")
     for action in actions:
@@ -610,7 +610,10 @@ def main(call=api, run_git=git, query=graphql):
         if Path(env.get("REPORTS", "")).is_dir() else []
     jobs = pages(call, f"actions/runs/{env['GITHUB_RUN_ID']}/jobs?filter=latest", "jobs")
     results = leg_results(json.loads(env["RESULTS"]))
-    tests, unfinished, passed, green_legs, green = verdicts(jobs, reports, results)
+    parity_not_applicable = (results.get("resolve", {}).get("outputs", {}).get("parity_required") == "false"
+                             and results.get(PARITY, {}).get("result") == "skipped")
+    legs = tuple(leg for leg in LEGS if leg != PARITY or not parity_not_applicable)
+    tests, unfinished, passed, green_legs, green = verdicts(jobs, reports, results, legs)
     open_issues = {issue["title"]: issue["number"]
                    for issue in pages(call, f"issues?state=open&labels={LABEL}")
                    if "pull_request" not in issue and issue["title"].startswith(PREFIX)}

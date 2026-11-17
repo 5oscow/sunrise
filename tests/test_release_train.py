@@ -315,39 +315,6 @@ class ReleaseTrainTests(unittest.TestCase):
         self.assertFalse(train.decision("game", [], NOW, new_line="0.3", blockers=[7])[0])
         self.assertTrue(train.decision("game", [pr(1)], NOW, blockers=[])[0])
 
-    @mock.patch.object(train, "REPO", "horizon-rust/horizon")
-    def test_game_releases_ship_only_what_parity_main_passed(self):
-        def runs(parity, checks):
-            def gh_json(*arguments):
-                table = parity if "parity-main" in arguments else checks
-                if "--commit" in arguments:
-                    sha = arguments[arguments.index("--commit") + 1]
-                    return [{"status": s, "conclusion": c} for h, s, c in table if h == sha]
-                if "--status" in arguments:
-                    wanted = arguments[arguments.index("--status") + 1]
-                    table = [(h, s, c) for h, s, c in table if c == wanted]
-                return [{"headSha": h, "status": s, "conclusion": c} for h, s, c in table]
-            return mock.patch.object(train, "gh_json", gh_json)
-        checks = [("c", "in_progress", ""), ("b", "completed", "success"), ("a", "completed", "success")]
-        with runs([("c", "queued", ""), ("b", "completed", "cancelled"), ("a", "completed", "success")], checks):
-            self.assertEqual(train.green_main_head(), "b", "checks alone: the newest green checks")
-            self.assertEqual(train.green_main_head(parity=True), "a", "a superseded parity-main run counts for nothing")
-            self.assertTrue(train.passed_on("parity-main", "a"))
-            self.assertFalse(train.passed_on("parity-main", "b"))
-        with runs([("b", "completed", "failure"), ("a", "completed", "success")], checks):
-            self.assertEqual(train.green_main_head(parity=True), "a",
-                             "a later failed batch holds only its own merges, not the commit before it")
-        with runs([("c", "completed", "success")], checks):
-            self.assertIsNone(train.green_main_head(parity=True), "its checks must pass too")
-        with runs([("c", "completed", "success"), ("a", "completed", "success")], checks):
-            self.assertEqual(train.green_main_head(parity=True), "a", "the newest green commit whose checks passed")
-        with runs([("c", "completed", "failure"), ("b", "completed", "cancelled")], checks):
-            self.assertIsNone(train.green_main_head(parity=True), "nothing parity-main passed")
-        with runs([("c", "completed", "success")], [("c", "completed", "success")]):
-            self.assertEqual(train.green_main_head(), "c")
-        with runs([], [("c", "completed", "failure"), ("b", "completed", "success")]):
-            self.assertIsNone(train.green_main_head(), "checks alone: main's newest finished checks must pass")
-
     def test_launcher_manual_base_is_pinned_and_must_belong_to_main(self):
         workflow = (train.ROOT / ".github/workflows/launcher.yml").read_text()
         selection = workflow.split("          set -euo pipefail\n", 1)[1].split(
@@ -460,7 +427,6 @@ class ReleaseTrainTests(unittest.TestCase):
             return [{"jobs": jobs[ident][:2]}, {"jobs": jobs[ident][2:]}]
         with mock.patch.object(train, "REPO", "sunrise-org/sunrise"), \
                 mock.patch.object(train, "gh_json", side_effect=api) as requests:
-            self.assertEqual(train.green_main_head(parity=True), "good", "missing gate is not success")
             self.assertEqual(train.green_main_head(), "good", "non-gate failure must not reject a build")
             jobs[3] = gates
             self.assertEqual(train.green_main_head(), "new")

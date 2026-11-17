@@ -1,7 +1,7 @@
 name: dyna-checks
 # What the run tests, readable in the run list: a dispatch with `pr` runs on ref main but tests that pull request's head,
 # so it is named for it and never read as main's CI; the prepared-output dispatch likewise.
-run-name: "${{ inputs.pr && inputs.parity && format('PR #{0} vanilla parity', inputs.pr) || inputs.pr && format('PR #{0} gate', inputs.pr) || inputs.parity && 'vanilla parity' || inputs.prepare-output-check && 'prepared output check' || github.event.pull_request.title || github.event.head_commit.message || github.workflow }}"
+run-name: "${{ inputs.pr && format('PR #{0} gate', inputs.pr) || inputs.prepare-output-check && 'prepared output check' || github.event.pull_request.title || github.event.head_commit.message || github.workflow }}"
 # A contributor's pull request (its head in a fork) gets the cheap checks (verify-static, format); the heavy ones
 # (everything that compiles) run on main's pushes, dispatches, and same-repository rollup or sync pull requests
 # (tools/ci/pr_gate.py, docs/ci-runners.md).
@@ -29,14 +29,6 @@ on:
         description: Run the heavy checks on this pull request's head (a fork's too) and post them on it
         type: string
         default: ''
-      parity:
-        description: Run only the vanilla parity harnesses on main's head, not the gate (never with pr; the daily runs every harness)
-        type: boolean
-        default: false
-      harnesses:
-        description: With parity, these harnesses (names as tools/parity.py takes them, space-separated) instead of the fixed set
-        type: string
-        default: ''
 defaults:
   run:
     shell: bash
@@ -49,11 +41,10 @@ concurrency:
   # of the rollup gates queued behind them. None of its jobs publishes or writes shared state.
   # A dispatch for a pull request (`pr`) is grouped by that pull request, never by main's head; any other dispatch
   # (a snapshot's gate) by its commit, and it always finishes.
-  # A parity dispatch has a group of its own, so it never replaces a waiting gate dispatch for the same head.
   # A main push run started again (a later attempt) is a release's gate: release.yml re-runs a commit's gate that the
   # next push cancelled before it publishes that commit (tools/release_train.py gate_again). It is grouped by its
   # commit and always finishes.
-  group: dyna-checks-${{ github.event.pull_request.number || inputs.pr && format('pr-{0}', inputs.pr) || github.event_name == 'push' && github.run_attempt == '1' && github.ref || github.sha }}${{ inputs.parity && '-parity' || '' }}
+  group: dyna-checks-${{ github.event.pull_request.number || inputs.pr && format('pr-{0}', inputs.pr) || github.event_name == 'push' && github.run_attempt == '1' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' && github.run_attempt == '1' }}
 env:
   # Test runs never reach the telemetry server: no live-count ping, no uploads (docs/telemetry.md).
@@ -259,7 +250,7 @@ jobs:
     # build folder persists, so clippy re-checks only what changed. A fork's pull request, or a run while the
     # pool is down, stays on GitHub's runners with the snapshot cache below.
     needs: changes
-    if: ${{ always() && !cancelled() && needs.changes.result != 'skipped' && (needs.changes.result != 'success' || needs.changes.outputs.heavy == 'true') && !inputs.parity }}
+    if: ${{ always() && !cancelled() && needs.changes.result != 'skipped' && (needs.changes.result != 'success' || needs.changes.outputs.heavy == 'true') }}
     runs-on: ${{ needs.changes.outputs.rust_required == 'false' && (needs.changes.outputs.self_hosted == 'true' && needs.changes.outputs.trusted == 'true' && 'dyna-small' || 'ubuntu-latest') || needs.changes.outputs.self_hosted == 'true' && needs.changes.outputs.trusted == 'true' && 'dyna-large' || needs.changes.outputs.hosted_label || 'ubuntu-latest' }}
     # Recent green lint peaked at 53.5 minutes on a cold runner (including the wasm check).
     # Cold GitHub/boat lint was not represented in that sample; retain its previous allowance.
@@ -430,7 +421,7 @@ jobs:
 
   verify:
     needs: changes
-    if: ${{ always() && !cancelled() && needs.changes.result != 'skipped' && (needs.changes.result != 'success' || needs.changes.outputs.heavy == 'true') && !inputs.parity }}
+    if: ${{ always() && !cancelled() && needs.changes.result != 'skipped' && (needs.changes.result != 'success' || needs.changes.outputs.heavy == 'true') }}
     runs-on: ${{ needs.changes.outputs.rust_required == 'false' && (needs.changes.outputs.self_hosted == 'true' && needs.changes.outputs.trusted == 'true' && 'dyna-small' || 'ubuntu-latest') || needs.changes.outputs.self_hosted == 'true' && 'dyna-large' || !inputs.github-fallback && needs.changes.outputs.forced_github != 'true' && vars.SELF_HOSTED_CI == 'all' && needs.changes.outputs.trusted == 'true' && fromJSON('["self-hosted", "linux", "playsunrise-ci"]') || needs.changes.outputs.hosted_label || 'ubuntu-latest' }}
     timeout-minutes: ${{ needs.changes.outputs.self_hosted == 'true' && 50 || 45 }}
     # Dyna's runner image now carries lavapipe, Mesa's software Vulkan driver, for ignored-tests' `gpu` tests.
@@ -543,7 +534,7 @@ jobs:
       # sunrise-client rustc processes take several GB each; $JOBS (chosen above) fits them in the runner's
       # memory. Formatting and lint run in parallel (the lint job), so this job only tests.
       # Libraries, binaries and integration tests, then doc tests: not the ~275 examples, which the lint job already
-      # type-checks and the parity job builds and runs (they were most of this step's build and link time).
+      # type-checks.
       # cargo test, not nextest: nextest's process per test reloads each binary's shared tables for every test, and on
       # these 4-core runners it was no faster (#4978).
       - name: Setup done
@@ -680,7 +671,7 @@ jobs:
   # compiles. Formatting alone never blocks a merge (room rule); lint repeats it on the heavy runs.
   format:
     needs: changes
-    if: needs.changes.result == 'success' && needs.changes.outputs.heavy != 'true' && !inputs.parity
+    if: needs.changes.result == 'success' && needs.changes.outputs.heavy != 'true'
     # Only pull requests outside the gate run it, so it is never a gate job: GitHub's runner, leaving Dyna's to gates.
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -710,7 +701,7 @@ jobs:
 
   verify-static:
     needs: changes
-    if: ${{ always() && !cancelled() && needs.changes.result != 'skipped' && !inputs.parity }}
+    if: ${{ always() && !cancelled() && needs.changes.result != 'skipped' }}
     # A contributor's pull request gets GitHub's runners: these checks compile nothing heavy, and
     # its only two checks must not depend on a paid pool's balance.
     # A pull request outside the gate: GitHub's runner, never a paid pool or our own (it gates nothing).
@@ -905,7 +896,7 @@ jobs:
   # alone and break it together (#2059 and the registry ratings did, 2026-10-26).
   launcher:
     needs: changes
-    if: needs.changes.outputs.launcher_required != 'false' && needs.changes.outputs.heavy == 'true' && !inputs.parity
+    if: needs.changes.outputs.launcher_required != 'false' && needs.changes.outputs.heavy == 'true'
     runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna-medium' || !inputs.github-fallback && needs.changes.outputs.forced_github != 'true' && vars.SELF_HOSTED_CI == 'all' && needs.changes.outputs.trusted == 'true' && fromJSON('["self-hosted", "linux", "playsunrise-ci"]') || 'ubuntu-latest' }}
     timeout-minutes: 45
     steps:
@@ -1001,7 +992,7 @@ jobs:
   # alone holds the write permission, and only for commit statuses.
   pr-status:
     needs: [changes, lint, verify, verify-static, launcher]
-    if: always() && github.event_name == 'workflow_dispatch' && inputs.pr != '' && !inputs.parity && needs.changes.outputs.pr_sha != ''
+    if: always() && github.event_name == 'workflow_dispatch' && inputs.pr != '' && needs.changes.outputs.pr_sha != ''
     # Five seconds of status posts after the gate: nothing waits on it, so it takes none of Dyna's counted runners.
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -1079,16 +1070,3 @@ jobs:
           expected=$(awk '!/^#/ && NF == 2 { value=$2 } END { print value }' crates/sunrise-prepare/output-versions.txt)
           { echo "prepared output check: $([ "$result" -eq 0 ] && echo pass || echo fail)"; echo "actual: $actual"; echo "expected: $expected"; } | tee -a "$GITHUB_STEP_SUMMARY"
           exit "$result"
-
-  # Parity runs in the daily run on main's head (daily.yml `parity`, every harness), never on a rollup or a pull request
-  # (owner, 2026-11-17). A dispatch with `parity` runs the fixed set (or `harnesses`) on main's head by hand, to read a
-  # daily red again; with `pr` it runs nothing.
-  vanilla-parity:
-    needs: changes
-    if: github.repository == 'sunrise-org/sunrise' && github.event_name == 'workflow_dispatch' && inputs.parity && !inputs.pr && !inputs.prepare-output-check && !inputs.github-fallback && needs.changes.outputs.trusted == 'true'
-    permissions:
-      contents: read
-    uses: ./.github/workflows/parity.yml
-    with:
-      commit: ${{ github.sha }}
-      harnesses: ${{ inputs.harnesses }}

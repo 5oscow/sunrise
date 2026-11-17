@@ -109,9 +109,9 @@ python3 tools/pr_ready.py --base upstream/main   # or origin/main if you work on
 ```
 
 It looks at what your branch changes and runs what matters: rustfmt, clippy with warnings denied, the tests of the
-crates you touched (and the launcher's), generated files, `Cargo.lock` and the Python tests. Like CI, it runs the
-vanilla harnesses only when your branch changes a harness, an oracle, a probe or the runner; otherwise it lists the
-ones your change can affect, and main's parity run checks them after the merge. `--harnesses` runs them on your
+crates you touched (and the launcher's), generated files, `Cargo.lock` and the Python tests. It runs the
+vanilla harnesses locally only when your branch changes a harness, an oracle, a probe or the runner; otherwise it
+lists the ones your change can affect. The daily checks the automatic harnesses after the merge. `--harnesses` runs them on your
 machine anyway, and a change to mod content, assets, blocks or items also runs the `#[ignore]`d content-root tests;
 both need the prepared vanilla data and are reported as not run without it. `--quick` never runs the harnesses.
 It exits non-zero when something fails.
@@ -126,7 +126,7 @@ network and are still in `verify` are being moved by the next change of #4022.
 | --- | --- | --- |
 | Push | every pull request push | `format`, `verify-static` |
 | Gate | rollup and sync pull requests, pushes to main | `lint`, `verify` (unit tests only), `verify-static`, `launcher` |
-| Daily | once a day on main's head | every test that boots the game or needs prepared resources, the wasm fixture, `fn-replace-check`, the SDK build and its linkage probe, the machine sample built against the mod API |
+| Daily | once a day on main's head | every test that boots the game or needs prepared resources, the wasm fixture, `fn-replace-check`, the SDK build and its linkage probe, the machine sample built against the mod API, and vanilla parity on the main head captured at dispatch |
 
 **A unit test** uses no prepared resources, boots no game, starts no child process, uses no network and no compiled
 wasm fixture, and finishes in under 2 seconds. Any other test is a daily test: it carries `#[ignore]` and a row in
@@ -233,10 +233,9 @@ A change too big to review as one concern starts from a spec:
 
 ## Parity checks
 
-A pull request from a fork gets the push tier ([CI tiers](#ci-tiers)); the gate runs when a rollup carries it.
-Parity harnesses never run on a pull request, a fork's or ours: the daily run runs every harness on main's head
-([docs/release-flow.md](docs/release-flow.md#daily-run)), and a harness that fails there becomes a `bug` issue
-listing the pull requests merged since the last green run.
+A pull request from a fork gets the push tier ([CI tiers](#ci-tiers)); the gate runs when a rollup carries it. Vanilla
+parity never runs on a pull request or rollup. Run a relevant harness locally if you have prepared vanilla data;
+the [daily](docs/release-flow.md#parity-on-main) checks the automatic harnesses after merge.
 
 ## Talk to us
 

@@ -66,6 +66,7 @@ jobs:
       commit: ${{ steps.commit.outputs.commit }}
       skip: ${{ steps.commit.outputs.skip }}
       dry_run: ${{ steps.commit.outputs.dry_run }}
+      parity_required: ${{ steps.commit.outputs.parity_required }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -96,7 +97,14 @@ jobs:
               echo "### $sha already has a completed daily run: $done" >> "$GITHUB_STEP_SUMMARY"
             fi
           fi
-          { echo "commit=$sha"; echo "skip=$skip"; echo "dry_run=$DRY_RUN"; } >> "$GITHUB_OUTPUT"
+          # A dry run or an explicitly older commit has no parity leg. Compare with the main head at dispatch,
+          # not the branch tip by the time a queued job gets a runner.
+          parity_required=false
+          if [ "$GITHUB_REF" = refs/heads/main ] && [ "$DRY_RUN" = false ] && [ "$sha" = "$GITHUB_SHA" ]; then
+            parity_required=true
+          fi
+          printf 'commit=%s\nskip=%s\ndry_run=%s\nparity_required=%s\n' \
+            "$sha" "$skip" "$DRY_RUN" "$parity_required" >> "$GITHUB_OUTPUT"
 
   shards:
     needs: resolve
@@ -179,14 +187,14 @@ jobs:
   # beside them while gates wait. The summary requires this leg for the nightly and files its failures.
   parity:
     needs: [resolve, shards]
-    if: ${{ !cancelled() && needs.resolve.result == 'success' && needs.resolve.outputs.skip == 'false' }}
+    if: >-
+      !cancelled() && needs.resolve.result == 'success' && needs.resolve.outputs.skip == 'false' &&
+      needs.resolve.outputs.parity_required == 'true'
     permissions:
       contents: read
     uses: ./.github/workflows/parity.yml
     with:
       commit: ${{ needs.resolve.outputs.commit }}
-      harnesses: all
-      report: true
   # Reads every leg's result and verdict file (never a log) and moves `daily-green` or files the issues.
   summary:
     # The resolved commit names the job: what a scheduled run's lookup (daily_summary.py --seen) matches.

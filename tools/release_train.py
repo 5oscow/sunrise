@@ -606,14 +606,6 @@ def merged_between(kind, base, head):
     return prs
 
 
-def passed_on(workflow, sha):
-    """Whether the newest finished push run of workflow on main for commit sha passed."""
-    runs = gh_json("run", "list", "--repo", REPO, "--workflow", workflow, "--branch", "main", "--event", "push",
-                   "--commit", sha, "--limit", "5", "--json", "status,conclusion")
-    done = [entry for entry in runs if entry["status"] == "completed" and entry["conclusion"] != "cancelled"]
-    return bool(done) and done[0]["conclusion"] == "success"
-
-
 def gate_jobs_passed(run_id, required):
     """Require every named gate on the latest attempt, regardless of non-gate failures."""
     pages = gh_json("api", "--paginate",
@@ -697,11 +689,8 @@ def build_tag(channel, date, sha):
     return f"{channel}-{date}-{sha[:7]}"
 
 
-def green_main_head(parity=False, eligible=None):
-    """The newest commit on main whose checks passed: what an automatic release builds. With parity (game
-    releases), the newest commit parity-main passed on whose checks passed too: parity-main runs on batches of
-    merges, so the commits a run skipped are covered by the next one, and a superseded run counts for nothing. A
-    later batch that failed holds only the merges after that commit, which the green one doesn't contain."""
+def green_main_head(eligible=None):
+    """The newest commit on main whose gate passed: what an automatic launcher release builds."""
     if REPO == "sunrise-org/sunrise":
         # Runs are ordered by creation, not completion: a late old run must not
         # displace a newer push. Paginate beyond bursts of cancelled main runs.
@@ -719,16 +708,6 @@ def green_main_head(parity=False, eligible=None):
                 # The wasm fixture left main pushes for the daily run (daily-green), so the gate alone counts here.
                 if gate_jobs_passed(entry["id"], GATE):
                     return sha
-        return None
-    if parity:
-        # Only the successful runs: while merges land, one run at a time finishes (the pending one is replaced at
-        # every push), and a later failed or timed-out batch must not starve the Nightly of the commit an earlier
-        # run passed (2026-11-02: no Nightly for 30 h while main had a green commit parity-main had passed).
-        runs = gh_json("run", "list", "--repo", REPO, "--workflow", "parity-main", "--branch", "main", "--event",
-                       "push", "--status", "success", "--limit", "20", "--json", "headSha,status,conclusion")
-        for entry in runs:
-            if entry["status"] == "completed" and entry["conclusion"] == "success" and passed_on("checks", entry["headSha"]):
-                return entry["headSha"]
         return None
     # 50, not 10: a busy hour of merges cancels many runs, which pushes the last finished one out of a short window.
     runs = gh_json("run", "list", "--repo", REPO, "--workflow", "checks", "--branch", "main", "--event", "push",
@@ -756,7 +735,7 @@ def main():
     parser.add_argument("--channel", choices=["nightly", "snapshot"],
                         help="decide: the fork's kind of build, which picks and checks the commit (see above)")
     parser.add_argument("--tag", help="notes: the release's tag")
-    parser.add_argument("--force", action="store_true", help="release even without player-facing changes, before merges settle, while paused or before parity-main passed")
+    parser.add_argument("--force", action="store_true", help="release even without player-facing changes, before merges settle or while paused")
     parser.add_argument("--out", type=Path, help="notes: write title.txt and body.md here")
     parser.add_argument("--now", help="the time to decide at (ISO 8601; default now)")
     parser.add_argument("--smoke", type=Path, help="gate: the release smoke test's report (smoke-test.json)")
@@ -775,12 +754,13 @@ def main():
                 summary.write(f"### {line}\n")
         return 1 if problem else 0
 
-    # Game releases ship only a commit the vanilla harnesses passed on (parity-main, docs/release-flow.md).
-    parity = args.kind == "game" and args.command == "decide" and not args.force
-    head = channel_head(args.channel, args.head) if args.channel else args.head or green_main_head(parity)
+    # The legacy, unchannelled game decision now uses the daily tag instead of a retired push workflow.
+    needs_daily = args.kind == "game" and args.command == "decide" and not args.channel and not args.force
+    daily_head = daily_green_commit() if needs_daily else ""
+    head = channel_head(args.channel, args.head) if args.channel else args.head or (
+        daily_head if needs_daily else green_main_head())
     if not head:
-        result = {"release": False, "reason": "main's latest checks did not pass" + (
-            " or parity-main did not pass on them" if parity else "")}
+        result = {"release": False, "reason": "no fully green daily run yet" if needs_daily else "main's latest checks did not pass"}
         print(json.dumps(result, indent=1))
         write_outputs({"release": "false", "reason": result["reason"]})
         return 0
@@ -818,8 +798,8 @@ def main():
     blockers = open_blockers() if args.kind == "game" else []
     release, reason = decision(args.kind, prs, now, os.environ.get("RELEASES_PAUSED") == "1", args.force, new_line,
                                blockers, daily=args.daily)
-    if release and args.head and parity and not args.channel and not (passed_on("parity-main", head) and passed_on("checks", head)):
-        release, reason = False, f"waiting for checks and parity-main to pass on {head[:9]}"
+    if release and needs_daily and head != daily_head:
+        release, reason = False, f"waiting for a fully green daily on {head[:9]}"
     if release and args.kind == "launcher" and launcher_has_split(head):
         waiting = launcher_waits_for_nightly()
         if waiting:

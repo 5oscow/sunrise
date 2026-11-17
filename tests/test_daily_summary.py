@@ -201,6 +201,20 @@ class DailySummaryTests(unittest.TestCase):
         self.assertEqual(out.splitlines(), ["green=false", "sdk_green=true"])
         self.assertEqual(api.writes, [])
 
+    def test_an_inapplicable_parity_skip_leaves_its_issues_alone_and_other_legs_decide_green(self):
+        issues = [{"number": 7, "title": "Daily: parity did not complete"},
+                  {"number": 8, "title": "Daily: parity loot_a"}]
+        jobs = [j for j in GREEN_JOBS if j["name"] != PARITY_JOB]
+        # The resolve job supplies one explicit distinction: a skipped required call is still a failure.
+        results = dict(LEGS, parity={"result": "skipped"}, resolve={"outputs": {"parity_required": "false"}})
+        for dry_run, ref, writes in (("false", "refs/heads/main", True), ("true", "refs/heads/main", False),
+                                     ("true", "refs/heads/topic", False)):
+            with self.subTest(dry_run=dry_run, ref=ref):
+                api = Api(jobs, issues=issues)
+                _, out = self.run_summary(api, results=results, parity=None, ref=ref, dry_run=dry_run)
+                self.assertEqual(out.splitlines(), ["green=true", "sdk_green=true"])
+                self.assertEqual([path for _, path, _ in api.writes], ["git/refs"] if writes else [])
+
     def test_an_incomplete_parity_run_files_failures_but_closes_nothing(self):
         api = Api([job(PARITY_JOB, "failure")],
                   issues=[{"number": 7, "title": "Daily: parity sculk"}])
@@ -803,8 +817,7 @@ class DailyWorkflowTests(unittest.TestCase):
         jobs = self.workflow["jobs"]
         parity = jobs["parity"]
         self.assertEqual(parity["uses"], "./.github/workflows/parity.yml")
-        self.assertEqual(parity["with"], {"commit": "${{ needs.resolve.outputs.commit }}", "harnesses": "all",
-                                          "report": "true"})
+        self.assertEqual(parity["with"], {"commit": "${{ needs.resolve.outputs.commit }}"})
         self.assertIn("shards", parity["needs"])
         self.assertIn("parity", jobs["summary"]["needs"])
         self.assertIn("sdk-windows-macos", jobs["summary"]["needs"])
@@ -812,6 +825,31 @@ class DailyWorkflowTests(unittest.TestCase):
         self.assertIn("needs.summary.outputs.green == 'true'", jobs["nightly"]["if"])
         self.assertIn("needs.summary.outputs.sdk_green == 'true'", jobs["sdk-publish"]["if"])
         self.assertNotIn("parity-report", jobs)
+
+    def test_parity_applicability_uses_the_captured_head_not_the_current_tip(self):
+        jobs = self.workflow["jobs"]
+        resolve = jobs["resolve"]
+        self.assertEqual(resolve["outputs"]["parity_required"], "${{ steps.commit.outputs.parity_required }}")
+        self.assertIn("needs.resolve.outputs.parity_required == 'true'", jobs["parity"]["if"])
+        with tempfile.TemporaryDirectory() as folder:
+            folder = Path(folder)
+            # A checked-in resolve job body exercised with a substitute git: both candidates are ancestors of
+            # current main, but only one matches the SHA captured at dispatch.
+            stub = folder / "git"
+            stub.write_text('#!/bin/sh\n[ "$1" != rev-parse ] || printf "%s\\n" "${4%%^*}"\n')
+            stub.chmod(0o755)
+            out = folder / "out"
+            for ref, dry, commit, required in (("main", "false", "head", "true"),
+                                               ("main", "false", "older", "false"),
+                                               ("main", "true", "head", "false"),
+                                               ("topic", "false", "head", "false")):
+                with self.subTest(ref=ref, dry=dry, commit=commit):
+                    out.unlink(missing_ok=True)
+                    env = {**os.environ, "PATH": f"{folder}{os.pathsep}{os.environ['PATH']}", "COMMIT": commit,
+                           "DRY_RUN": dry, "SCHEDULED": "false", "GITHUB_SHA": "head", "GITHUB_REF": f"refs/heads/{ref}",
+                           "GITHUB_OUTPUT": str(out)}
+                    subprocess.run(["bash", "-e", "-c", resolve["steps"][-1]["run"]], env=env, check=True)
+                    self.assertIn(f"parity_required={required}", out.read_text().splitlines())
 
     def test_every_leg_is_a_called_workflow_with_the_commit(self):
         jobs = self.workflow["jobs"]
