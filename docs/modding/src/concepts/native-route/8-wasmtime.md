@@ -58,3 +58,15 @@ unchanged, and a dependency on the game's wasmtime would break that, so the laun
 
 A wasm mod runs inside this wasmtime and cannot link it. `cargo sunrise-mod build` refuses a wasm mod that depends
 on `sunrise-wasmtime`, under `E_WASM_NATIVE_PACKAGE`.
+
+## Helpers and support modules
+
+The dependency above is for your mod crate's own code. A `[[native.mixin]]` helper or a `[[native.module]]` is
+compiled into the game's patch library, which already links every crate the game exposes, so it can name
+`wasmtime` directly with no dependency line. Code that several helpers share belongs in your mod crate, where
+`sunrise-wasmtime` is declared.
+
+## Checking locally
+
+`cargo check` in your project resolves `.sunrise/sdk/api/crates/sunrise-wasmtime` from the SDK's API source, which
+compiles wasmtime from crates.io for the check only. The launcher's build binds the game's own copy.
