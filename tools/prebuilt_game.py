@@ -416,6 +416,10 @@ def build(out: Path, server: bool) -> None:
     link = ["--", "-C", "link-arg=-Wl,-rpath,$ORIGIN"] if sys.platform == "linux" else []
     # Encoded flags take precedence over RUSTFLAGS in Cargo.
     environment = {key: value for key, value in os.environ.items() if key != "CARGO_ENCODED_RUSTFLAGS"}
+    # The SDK game builds with 16 codegen units, not the release profile's 1: on Linux its final step took 270 s
+    # instead of 422 s with no measurable change in the dedicated server's tick (1.670 against 1.677 ms). The
+    # player release keeps the profile's single unit and ThinLTO.
+    environment["CARGO_PROFILE_RELEASE_CODEGEN_UNITS"] = "16"
     messages = run(
         ["cargo", "rustc", "--locked", "-p", GAME, "--lib", "--crate-type", "dylib",
          "--target", host, "--profile", PROFILE, "--message-format", "json-render-diagnostics", *features, *link],
