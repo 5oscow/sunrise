@@ -196,7 +196,7 @@ impl Part {
             Self::Translucent => s.vertex_ranges(true).1,
             Self::Indices => s
                 .sorted_indices
-                .map(|(page, at)| (page, at, u64::from(s.translucent) * 6)),
+                .map(|(page, at)| (page, at, translucency::index_words(s.translucent))),
         }
     }
 
