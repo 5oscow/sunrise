@@ -431,6 +431,10 @@ class ReleaseTrainTests(unittest.TestCase):
             with mock.patch.object(train, "ROOT", Path(folder)), mock.patch.object(train, "run", side_effect=run):
                 self.assertTrue(train.launcher_has_split(split))
                 self.assertFalse(train.launcher_has_split(hotfix))
+            with mock.patch.object(train, "subprocess", wraps=train.subprocess) as sub:
+                sub.run.return_value = subprocess.CompletedProcess([], 1, "", "API rate limit exceeded")
+                with self.assertRaises(SystemExit):
+                    train.launcher_has_split(hotfix)
 
     @mock.patch.object(train, "REPO", "sunrise-org/sunrise")
     def test_fork_base_requires_same_sha_main_push_gate_jobs(self):

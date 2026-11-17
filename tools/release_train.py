@@ -517,9 +517,10 @@ SPLIT_PULL_REQUESTS = (2080, 2163)
 def launcher_has_split(head):
     """Whether `head` contains a launcher-split pull request's head commit."""
     for number in SPLIT_PULL_REQUESTS:
-        sha = run("gh", "api", f"repos/{REPO}/pulls/{number}", "--jq", ".head.sha", check=False).strip()
-        if sha and not subprocess.run(["git", "merge-base", "--is-ancestor", sha, head], cwd=ROOT,
-                                      capture_output=True).returncode:
+        # A failed lookup exits: the hold fails closed.
+        sha = run("gh", "api", f"repos/{REPO}/pulls/{number}", "--jq", ".head.sha").strip()
+        if not subprocess.run(["git", "merge-base", "--is-ancestor", sha, head], cwd=ROOT,
+                              capture_output=True).returncode:
             return True
     return False
 
