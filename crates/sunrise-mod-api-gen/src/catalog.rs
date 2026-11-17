@@ -119,7 +119,8 @@ pub struct Hook {
     pub owner: Option<String>,
     /// Validate a collector's edits at the per-listener ownership boundary.
     pub collect_validator: Option<String>,
-    /// The inert answer for a disabled content owner's subscribed block Part.
+    /// The inert answer for a disabled content owner's subscribed block Part: Rust statements
+    /// setting the answer, or `signal` to report engine inactivity separately from listener output.
     pub inert: Option<String>,
     /// A global cancel hook whose dispatch runs every listener inside `catch_unwind`: one that
     /// unwinds is switched off for this hook for the session, and the outputs it had written roll
@@ -339,12 +340,13 @@ impl Hook {
                 .as_ref()
                 .is_some_and(|scope| scope.kind == PartKind::Block)
                 || !matches!(api.contract, Contract::Cancel | Contract::Replace)
-                || syn::parse_str::<syn::Block>(&format!("{{ {inert} }}")).is_err())
+                || (inert != "signal"
+                    && syn::parse_str::<syn::Block>(&format!("{{ {inert} }}")).is_err()))
         {
             return Err(CatalogError::InvalidHook {
                 hook: name,
                 error:
-                    "inert requires a block-scoped cancel/replace hook and valid Rust statements"
+                    "inert requires a block-scoped cancel/replace hook and Rust statements or `signal`"
                         .into(),
             });
         }

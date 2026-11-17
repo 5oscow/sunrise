@@ -17,9 +17,14 @@ impl Game<'_> {
         state: &mut Option<BlockStateId>,
         cancel: &mut bool,
     ) {
-        self.native_tool_modified_state(block, stack, tool, state, cancel);
+        let mut inert = false;
+        self.native_tool_modified_state(block, stack, tool, state, cancel, &mut inert);
         if !*cancel {
             self.native_block_tool_modification(stack, tool, state, cancel);
+        }
+        // Inactivity suppresses the write, not the global hook's notification.
+        if inert {
+            *cancel = true;
         }
     }
 }

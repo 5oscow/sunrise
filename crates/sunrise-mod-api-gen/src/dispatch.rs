@@ -150,6 +150,20 @@ pub(super) fn emit<'a>(
                 }
             }
         }
+        // Some callers must distinguish engine-selected inactivity from a listener reply.
+        // Keep that signal in the engine call, not in the event or its Wire layout.
+        let inert_signal = hook.inert.as_deref() == Some("signal");
+        if inert_signal
+            && (!in_game
+                || !hook.call.is_empty()
+                || !native_args.pop().is_some_and(|(arg, ty)| {
+                    arg == "inert" && ty.to_token_stream().to_string() == "& mut bool"
+                }))
+        {
+            return Err(format!(
+                "{name}: an inert signal needs a final engine-only inert: &mut bool"
+            ));
+        }
         // A hook that declares its parameters is called with them as one `<Name>Call`.
         let carrier = format!("{}Call", hook_id(name));
         let declared = hook
@@ -159,7 +173,12 @@ pub(super) fn emit<'a>(
             .collect::<Result<Vec<_>, syn::Error>>()
             .map_err(|e| format!("{name}: {e}"))?;
         let mut args: Vec<(String, &Type)> = if declared.is_empty() {
-            target_parameters(name, &native, sig.inputs.len(), &carrier)?;
+            target_parameters(
+                name,
+                &native,
+                sig.inputs.len() - usize::from(inert_signal),
+                &carrier,
+            )?;
             native_args
         } else {
             let taken_ticks = native_args.iter().position(|(arg, _)| arg == "ticks");
@@ -567,6 +586,9 @@ pub(super) fn emit<'a>(
                 ty = ty.to_token_stream()
             ));
         }
+        if inert_signal {
+            dispatch_params.push("inert: &mut bool".into());
+        }
         let (generics, elided) = match (lifetimes.a, lifetimes.b) {
             (_, true) => ("<'a, 'b>", "<'_, '_>"),
             (true, false) => ("<'a>", "<'_>"),
@@ -632,6 +654,7 @@ pub(super) fn emit<'a>(
                 } else {
                     vec!["call".to_owned()]
                 })
+                .chain(inert_signal.then(|| "inert".to_owned()))
                 .collect::<Vec<_>>()
                 .join(", ");
             let mut signature = sig.clone();
@@ -735,6 +758,7 @@ pub(super) fn emit<'a>(
                             .unwrap_or(argument)
                     }))
                     .chain(crossing.validators.iter().cloned())
+                    .chain(inert_signal.then(|| "inert".to_owned()))
                     .collect::<Vec<_>>()
                     .join(", ");
                 if guarded_carrier {
@@ -960,6 +984,7 @@ pub(super) fn emit<'a>(
                 format!("{cancel}; {stack_after}")
             }
         };
+        let inert_owner = fresh_name("disabled_owner", &mut used);
         let (lookup, calls) = match &scoped {
             None if matches!(name, "blocks" | "items") => (
                 String::new(),
@@ -1011,18 +1036,30 @@ pub(super) fn emit<'a>(
                         format!("super::parts(HookId::{hook_id}, \"{name}\")")
                     }
                 ),
-                format!(
-                    "for {part_item} in super::entered_parts({part_list}, \"{name}\") {{ {} }}",
-                    call(&part_item, "break"),
-                ),
+                if let Some(inert) = &hook.inert {
+                    let inert = if inert_signal {
+                        "*inert = true;"
+                    } else {
+                        inert
+                    };
+                    // The synthetic answer occupies the owner's original place in the chain.
+                    // Earlier enabled Parts still get their regular call and can answer first.
+                    format!(
+                        "'dispatch_parts: {{ for {part_item} in super::entered_parts(&{part_list}[..{inert_owner}.unwrap_or({part_list}.len())], \"{name}\") {{ {} }} if {inert_owner}.is_some() {{ {inert} }} }}",
+                        call(&part_item, "break 'dispatch_parts"),
+                    )
+                } else {
+                    format!(
+                        "for {part_item} in super::entered_parts({part_list}, \"{name}\") {{ {} }}",
+                        call(&part_item, "break"),
+                    )
+                },
             ),
         };
-        // A disabled content owner's subscribed world-writing behaviour is inert, not
-        // the vanilla template's. Keep reads (shapes, loot, etc.) on their normal fallback.
-        let lookup = if let Some(inert) = &hook.inert {
+        let lookup = if hook.inert.is_some() {
             let key = &hook.scope.as_ref().expect("inert has a block scope").key;
             format!(
-                "{lookup}\nif super::any_mod_disabled() && super::disabled_owner_part({part_list}, super::content::registry_keys::block_id({key}.block())) {{ {inert} return; }}\n"
+                "{lookup}\nlet {inert_owner} = if super::any_mod_disabled() {{ super::disabled_owner_part({part_list}, super::content::registry_keys::block_id({key}.block())) }} else {{ None }};"
             )
         } else {
             lookup
@@ -2325,7 +2362,7 @@ fn main() {{ game::run(std::env::args_os().nth(1).unwrap().into()); }}
         )
         .unwrap();
         assert!(declared.dispatch.contains("disabled_owner_part"));
-        assert!(declared.dispatch.contains("*handled = true; return;"));
+        assert!(declared.dispatch.contains("*handled = true;"));
         hook.inert = None;
         let undeclared = emit(&root, std::iter::once(&hook), &[method], &[]).unwrap();
         assert!(!undeclared.dispatch.contains("disabled_owner_part"));

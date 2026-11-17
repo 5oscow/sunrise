@@ -19,7 +19,7 @@ pub trait Hooks {
         contract = "replace",
         out = "answer",
         scope = "block",
-        inert = "*answer = Some((Some(stack.clone()), 0));",
+        inert = "signal",
         key = "state",
         neoforge = "none (vanilla DispenserBlock.getDispenseMethod; NeoForge adds no event or extension for it)"
     )]

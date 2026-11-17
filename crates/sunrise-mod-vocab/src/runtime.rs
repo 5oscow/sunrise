@@ -302,16 +302,17 @@ pub(crate) fn content_owner_disabled(id: &str) -> bool {
         .is_some_and(|index| !mod_index_on(*index))
 }
 
-/// Only a subscribed Part belonging to the disabled content owner makes a block inert.
-pub(crate) fn disabled_owner_part<P: ?Sized>(parts: &[Attached<P>], id: Option<&str>) -> bool {
-    let Some((namespace, _)) = id.and_then(|id| id.split_once(':')) else {
-        return false;
-    };
-    let Some(owner) = installed().and_then(|installed| installed.namespace_owners.get(namespace))
-    else {
-        return false;
-    };
-    !mod_index_on(*owner) && parts.iter().any(|part| part.mod_index == *owner)
+/// Find the disabled content owner's first subscribed Part, in dispatch order.
+pub(crate) fn disabled_owner_part<P: ?Sized>(
+    parts: &[Attached<P>],
+    id: Option<&str>,
+) -> Option<usize> {
+    let (namespace, _) = id?.split_once(':')?;
+    let owner = *installed()?.namespace_owners.get(namespace)?;
+    if mod_index_on(owner) {
+        return None;
+    }
+    parts.iter().position(|part| part.mod_index == owner)
 }
 
 /// `mods` in order, each marked as running `hook` until the next one is (or the loop ends), so a

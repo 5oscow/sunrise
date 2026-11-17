@@ -72,6 +72,7 @@ pub fn block_hook_inert(hook: HookId, state: BlockState) -> bool {
             table.block_value(state),
             crate::content::registry_keys::block_id(state.block()),
         )
+        .is_some()
     })
 }
 

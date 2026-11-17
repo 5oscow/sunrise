@@ -9,13 +9,17 @@ behaviour, the disabled block is inert rather than inheriting its vanilla templa
 - `update_shape` keeps the input state and `can_survive` answers true, so the template cannot
   replace the block or make it pop off.
 - `use_item_on` and `use_without_item` pass without invoking the block template's interaction.
-- `dispense_method` retains the input stack and emits no dispense event.
-- `tool_modified_state` cancels the transform, leaving the input block unchanged.
+- `is_valid_bonemeal_target` refuses bone meal. For `on_tree_grow`, the soil under the trunk stays
+  unchanged and the rest of the tree grows normally.
+- `dispense_method` retains the original input stack and emits no dispense event.
+- `tool_modified_state` leaves the block unchanged. The global `block_tool_modification` hook still
+  hears the tool's candidate state.
 - Block entities belonging to the disabled mod do not tick, including through native tick loops.
   Their persistent state stays in the world and resumes when enabled.
 
-These inert defaults apply only when that owner subscribed a Part to that behaviour. A disabled
-mod's Part attached to another owner's block does not make that block inert. Read-only queries
+These defaults occupy the disabled owner's usual place in Part dispatch: earlier enabled Parts
+can answer first. Scheduled block ticks are held before dispatch where the disabled owner subscribed.
+A disabled mod's Part attached to another owner's block does not make that block inert. Read-only queries
 (such as shapes, fluid state and loot) retain their ordinary data/template fallback. This is the
 same on native and wasm; enabled listeners and hook versions do not change.
 

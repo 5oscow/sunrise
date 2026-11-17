@@ -605,6 +605,7 @@ impl Game<'_> {
             // The block the dispenser faces has the first say (`dispense_method`), then the
             // item's own part (`dispense_item`); the first answer wins.
             let front = self.block_at(offset(pos, facing));
+            let mut inert = false;
             self.native_dispense_method(
                 self.dim.id(),
                 [pos.0, pos.1, pos.2],
@@ -612,7 +613,11 @@ impl Game<'_> {
                 front,
                 &stack,
                 &mut answer,
+                &mut inert,
             );
+            if inert {
+                return Ok(Some(stack));
+            }
             if answer.is_none() {
                 self.native_dispense_item(
                     self.dim.id(),

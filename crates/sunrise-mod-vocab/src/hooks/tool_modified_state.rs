@@ -11,13 +11,14 @@ pub trait Hooks {
     /// the world. A part answers before the global `block_tool_modification`, which still hears the
     /// result and may change or cancel it; a cancelled part skips it. Asked for the block's own parts only, so
     /// a block with none costs nothing.
-    /// A disabled owner's subscribed transform is cancelled, leaving the block unchanged.
+    /// A disabled owner's subscribed transform leaves the block unchanged without cancelling
+    /// the global notification; its listeners still see the candidate state.
     #[hook(
         side = "both",
         contract = "cancel",
         out = "cancel",
         scope = "block",
-        inert = "*cancel = true;",
+        inert = "signal",
         key = "state",
         host = "read",
         neoforge = "IBlockExtension.getToolModifiedState"
