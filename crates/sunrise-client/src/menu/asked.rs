@@ -60,6 +60,30 @@ impl Menu {
         .0
     }
 
+    /// Begin a resumable authoritative click. Slot answers remain attached to the detached
+    /// menu across take boundaries and are cleared when the continuation completes.
+    /// A coordinator that refuses a step must restore its pre-click menu snapshot.
+    pub fn click_steps_asked(
+        &mut self,
+        env: &Env,
+        slot_index: i32,
+        button: i32,
+        input: Input,
+        asked: Asked,
+    ) -> MenuStep<Result<(), &'static str>> {
+        let owns_answers = self.planning.0.borrow().is_none();
+        if owns_answers {
+            *self.planning.0.borrow_mut() = Some(asked);
+        }
+        self.click_step(env, slot_index, button, input)
+            .then(self, env, move |menu, _, result| {
+                if owns_answers {
+                    menu.planning.0.take();
+                }
+                MenuStep::Done(result)
+            })
+    }
+
     /// `Slot.mayPickup` of slot `s` asked before a click reaches the menu, and the answers to
     /// hand that click (`click_asked`).
     pub fn ask_pickup(&mut self, env: &Env, s: usize) -> (bool, Asked) {

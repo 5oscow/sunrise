@@ -74,6 +74,18 @@ impl SlotContext<'_> {
 }
 
 impl Menu {
+    /// The backing index and context at a suspended take. Unlike a planned rule's cached
+    /// snapshot, the caller copies these live container views at the take boundary.
+    pub fn take_slot_context<'s>(
+        &'s self,
+        env: &Env,
+        event: &super::TakeEvent,
+    ) -> (usize, SlotContext<'s>) {
+        let mut context = self.slot_context(env, event.slot);
+        context.snapshot = None;
+        (self.state.slots[event.slot].index, context)
+    }
+
     /// Who and where this menu's `menu_slot_rules` ask about menu slot `s` is: the env's
     /// player, the menu's block (`set_block_pos`), `s`'s container and the menu's own
     /// containers, with the menu's snapshot cell.

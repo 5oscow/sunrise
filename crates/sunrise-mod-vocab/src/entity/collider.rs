@@ -23,6 +23,12 @@ pub struct ColliderBox {
 /// movement check sees the same boxes. A collider is solid to every mover except spectators,
 /// entities with no physics and the entities in its own vehicle stack.
 ///
+/// A collider that moves or turns carries the bodies standing on it: once a tick, after the
+/// level's entities ticked, each moves by the displacement of its contact point as a collided
+/// move with `MoveCause::Carried`, never through a wall; a body caught between the collider and a
+/// wall stays where the collision leaves it and a living one takes `in_wall` damage while a box
+/// covers its eyes. Passengers follow their vehicle instead of being carried.
+///
 /// A vanilla client has none of this: the server sends a collider only to a Sunrise client that
 /// tracks the entity, and a vanilla client sees the entity and walks through it.
 ///
