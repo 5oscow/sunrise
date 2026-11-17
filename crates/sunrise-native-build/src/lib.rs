@@ -13,9 +13,11 @@ use sunrise_mod_package::dependencies;
 
 pub mod api;
 mod api_route;
+pub mod check;
 pub mod contract;
 mod crates;
 mod diagnostics;
+pub mod discover;
 pub mod host;
 mod inject;
 pub mod internals;

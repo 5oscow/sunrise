@@ -28,8 +28,8 @@ A row marked `daily` (`PACKAGE TEST TARGET daily REASON`, in `daily-<package>.tx
 `verify` into the daily run with `#[ignore = "daily"]` (tools/ci/move_to_daily.py): not a known failure, it must
 pass, and its row must name a test that still runs. A package's shard runs the daily rows of the targets it
 already runs (its library; every target for the packages in INTEGRATION_TESTS); the shard `daily-rows`
-(tools/ci/ignored_shards.py; `daily-rows-launcher` for the launcher's) runs every other daily row, one `cargo test -p PACKAGE TARGET -- --ignored --exact
-TEST...` per package and target, from the package's own workspace: a launcher row runs from launcher/ against its
+(tools/ci/ignored_shards.py; `daily-rows-launcher` for the launcher's) runs every other daily row, one `cargo test -p PACKAGE TARGET... -- --ignored --exact
+TEST...` per package (all its targets in one build), from the package's own workspace: a launcher row runs from launcher/ against its
 own lockfile (`--locked`). A daily row whose reason names an input only one job builds (DAILY_INPUTS: `wasm-fixture`)
 runs in that job with the `needs` rows of that variable (`--needs SUNRISE_WASM_FIXTURE --one-process-each`), never in a
 shard.
@@ -198,6 +198,12 @@ def parse_shard(shard):
     if not 1 <= number <= count:
         sys.exit(f"{shard}: leg {number} of {count} doesn't exist")
     return found["package"], number, count
+
+
+# Each sunrise-client half runs its tests as this many test processes, one after another: one process for all of a
+# half's ~2,700 tests grew past the runner's 32 GiB (the dry-run daily 44022251929 killed both halves; on ovh-rise5
+# the test process alone went from 1.6 to 6.3 GiB over its first 465 tests). A fresh process per batch starts empty.
+CLIENT_BATCHES = 4
 
 
 def in_leg(test, number, count):
@@ -670,6 +676,8 @@ CRASH_NAMES = 20
 CGROUP = Path("/sys/fs/cgroup")
 # Why the last run() returned None, for --report: names and numbers only (stopped()).
 _stopped = {}
+# The results a run that did not complete reported before it stopped (stopped()): each still counts.
+_reported = {}
 
 
 def cgroup_memory():
@@ -699,6 +707,8 @@ def stopped(reason, started, kills_before, process=None, results=(), expected=()
     long = dict.fromkeys(found[1] for line in output.splitlines() if (found := RUNNING_LONG.match(line.strip())))
     still = [name for name in long if name not in results]
     kills = memory.pop("oom_kills")
+    _reported.clear()
+    _reported.update(results)
     _stopped.clear()
     _stopped.update({
         "reason": reason, "ended_by": ended_by, "cargo_exit": process.returncode if process is not None else None,
@@ -786,7 +796,7 @@ def listed_result_records(line, expected, max_name_length):
 def run(package, skip, number=None, count=None, only=None):
     """Each test's result in `package`'s ignored library tests but `skip` (and, with a leg, the other legs'), or None if they didn't build.
 
-    `only=(target, tests)` runs just those ignored tests of one target (`lib`, `bin:NAME`, `test:NAME`) instead.
+    `only=(targets, tests)` runs just those ignored tests of those targets (`lib`, `bin:NAME`, `test:NAME`) instead.
     When it returns None, `_stopped` says why (stopped())."""
     started = time.monotonic()
     kills_before = cgroup_memory()["oom_kills"]
@@ -805,17 +815,18 @@ def run(package, skip, number=None, count=None, only=None):
             env["CARGO_PROFILE_TEST_OPT_LEVEL"] = "3"
         # --no-fail-fast: a target with accepted known failures must not stop the targets after it.
         # Owner-approved stopgap; #2944 removes this when the legs run under 15 minutes.
-        client_half = package == "sunrise-client" and count == 2 and number in (1, 2)
+        client_half = package == "sunrise-client" and count in (2, 2 * CLIENT_BATCHES)
         command = ["cargo", "test", "-p", package, "--lib", *(["--bins", "--tests"] if package in INTEGRATION_TESTS else []), "--no-fail-fast"]
         workspace = "."
         if only:
-            target = only[0]
+            targets = only[0]
             # A package of another workspace (the launcher's) runs from that workspace, against its own lockfile.
             workspace = ignored_shards.workspace_members()[package][1]
             features = workspace_features(workspace).get(package, [])
             command = ["cargo", "test", *(["--locked"] if workspace != "." else []), "-p", package,
                        *(["--features", ",".join(features)] if features else []),
-                       *(["--lib"] if target == "lib" else [f"--{target.split(':')[0]}", target.split(":", 1)[1]])]
+                       *(flag for target in targets for flag in
+                         (["--lib"] if target == "lib" else [f"--{target.split(':')[0]}", target.split(":", 1)[1]]))]
         if client_half:
             # The runner's own cap (tools/ci/cargo_jobs.py --cap) when set, else the old fixed one.
             command.append(f"--jobs={os.environ.get('CI_JOBS', '8')}")
@@ -1022,7 +1033,7 @@ def main(shards, report=None):
         for selection in (
             ("sunrise-client-lib#1of2", "sunrise-client-lib#2of2")
             if shard == "sunrise-client-lib" else
-            [f"{shard}:{package}:{target}" for package, target in groups
+            [f"{shard}:{package}" for package in sorted({package for package, _ in groups})
              if ignored_shards.daily_rows_leg(package) == shard]
             if shard in ignored_shards.DAILY_ROWS_LEGS.values() else (shard,)
         )
@@ -1032,13 +1043,15 @@ def main(shards, report=None):
         # names the run in progress; the run's own outcome replaces it.
         write_report(report, dict(verdict, incomplete=[*verdict["incomplete"], {
             "shard": shard, "in_progress": True, "started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}]))
-        _stopped.clear()
         daily_group = shard.split(":", 1)[0] in ignored_shards.DAILY_ROWS_LEGS.values()
         if daily_group:
-            _, package, target = shard.split(":", 2)
-            print(f"{package} {target}: {len(groups[package, target])} daily tests", flush=True)
-            results = run(package, [], only=(target, groups[package, target]))
-            expected_daily = groups[package, target]
+            _, package = shard.split(":", 1)
+            # Every target of the package in one cargo run: one build that links its test binaries in parallel,
+            # not one cargo run per target (51 of them made the leg outlast its 60 minutes, #1619).
+            targets = sorted(target for listed, target in groups if listed == package)
+            expected_daily = [test for target in targets for test in groups[package, target]]
+            print(f"{package} {', '.join(targets)}: {len(expected_daily)} daily tests", flush=True)
+            runs = [lambda: run(package, [], only=(targets, expected_daily))]
         else:
             package, number, count = parse_shard(shard)
             expected_daily = [row.test for row in daily if row.package == package
@@ -1051,12 +1064,26 @@ def main(shards, report=None):
             # The daily rows whose input only another job builds (DAILY_INPUTS) run there, never here.
             skip += [row.test for row in listed_entries() if row.mark == "daily" and row.reason in DAILY_INPUTS
                      and row.package == package and in_leg(row.test, number, count)]
-            results = run(package, skip, number, count) if number is not None else run(package, skip)
-        if results is None:
-            print(f"{shard}: did not complete: " + json.dumps(_stopped, sort_keys=True), flush=True)
-            problems.append(f"{shard}: the test run did not complete")
-            verdict["incomplete"].append({"shard": shard, **_stopped})
-            continue
+            if package == "sunrise-client" and count == 2:
+                # Half `number` of 2 is legs number, number + 2, ... of 2 * CLIENT_BATCHES (in_leg's crc32 modulo).
+                runs = [lambda sub=number + 2 * batch: run(package, skip, sub, 2 * CLIENT_BATCHES)
+                        for batch in range(CLIENT_BATCHES)]
+            else:
+                runs = [lambda: run(package, skip, number, count) if number is not None else run(package, skip)]
+        results, complete = {}, True
+        for one in runs:
+            _stopped.clear()
+            _reported.clear()
+            found = one()
+            if found is None:
+                complete = False
+                print(f"{shard}: did not complete: " + json.dumps(_stopped, sort_keys=True), flush=True)
+                problems.append(f"{shard}: the test run did not complete")
+                verdict["incomplete"].append({"shard": shard, **_stopped})
+                # The tests that reported before the run stopped keep their verdicts (an out-of-memory kill of the
+                # test process loses only the rest); what never reported is judged by the next complete run.
+                found = dict(_reported)
+            results.update(found)
         for test, passed in sorted(results.items()):
             listed = (package, test) in known
             policy_test = test
@@ -1078,6 +1105,8 @@ def main(shards, report=None):
                 problem(package, policy_test, "passes-now", policy)
             elif passed:
                 verdict["passed"].append({"package": package, "test": test})
+        if not complete:
+            continue
         for test in expected_daily:
             if test not in results:
                 problems.append(f"{package} {safe_identity(test)}: listed in {files[package, test]} but no longer runs")
