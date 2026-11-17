@@ -107,7 +107,7 @@ class NightlyTests(unittest.TestCase):
             # An older selected checkout may not contain the template. It must already be loaded.
             with mock.patch.object(Path, "read_text", side_effect=AssertionError("late template read")):
                 text = notes(merged=[merged_pr(9, "Fix fork install", [])], issues=["- Known issue"])
-        self.assertTrue(text.startswith(nightly.FORK_PLAYERS + "\n\n"))
+        self.assertTrue(text.startswith(nightly.SUNRISE_PLAYERS + "\n\n"))
         self.assertNotIn(nightly.PLAYERS, text)
         self.assertIn("Nightly 2026-10-28 · bbbbbbb: main (mmmmmmm)", text)
         self.assertIn("nightly-source/2026-10-28-bbbbbbb", text)

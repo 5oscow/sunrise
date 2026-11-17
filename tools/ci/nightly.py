@@ -59,7 +59,7 @@ DATED = re.compile(r"^nightly-(\d{4}-\d{2}-\d{2})$")
 TITLE_DATE = re.compile(r"Nightly (\d{4}-\d{2}-\d{2})")
 SOURCE_TAG = "nightly-source/"
 # Load from the trusted workflow checkout before pick() switches to a possibly older green tree.
-FORK_PLAYERS = Path(__file__).with_name("nightly-arismoko.md").read_text().strip()
+SUNRISE_PLAYERS = Path(__file__).with_name("nightly-players.md").read_text().strip()
 
 
 @dataclass
@@ -115,7 +115,7 @@ def notes(today: str, chosen: Ref, main: Ref, picked: list[dict], left_out: list
     built = f"main ({main.sha[:7]})" + (f" with {len(picked)} pull requests merged in" if picked else "")
     # The banner first: people who land on the Nightly ran its game zip for the launcher (a player, 2026-10-30).
     fork = train.REPO == "sunrise-org/sunrise"
-    parts = [FORK_PLAYERS if fork else train.PLAYERS,
+    parts = [SUNRISE_PLAYERS if fork else train.PLAYERS,
              f"Nightly {today} · {chosen.sha[:7]}: {built}, built from `{chosen.name}` ({chosen.sha}).",
              source_line(today, chosen.sha)]
     if not fork:
