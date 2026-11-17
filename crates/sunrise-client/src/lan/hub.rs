@@ -4131,8 +4131,11 @@ impl Hub {
                                 g.record.get_or_insert_default().teleported(at, kept);
                             }
                         });
-                        let rot = (p.yaw, p.pitch);
-                        self.position_change(i, at, rot, 0, Hearing::Confirmation, ctx, events);
+                        // The confirmation is then an ordinary report of where the client
+                        // is: its own position goes through the speed test, the collided
+                        // replay and the moved-wrongly test, from the target just snapped to.
+                        let (to, rot) = ([p.x, p.y, p.z], (p.yaw, p.pitch));
+                        self.position_change(i, to, rot, 0, Hearing::Confirmation, ctx, events);
                     }
                 }
                 // handlePlayerAbilities: the client flies only if it may.
