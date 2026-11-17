@@ -249,6 +249,7 @@ pub(super) struct Tracked {
     /// packet's delta counts from. A TeleportEntity moves the entity but not
     /// this base, so the server's next delta still lands where it means.
     codec_base: [f64; 3],
+    on_fire: bool,
     silent: bool,
     /// `Entity.vehicle`: the entity it rides (`SetPassengers`), whatever either one's type.
     pub(in crate::game) vehicle: Option<u32>,
@@ -2814,6 +2815,7 @@ impl Game<'_> {
                     kind: kind.to_owned(),
                     position,
                     codec_base: position,
+                    on_fire: false,
                     silent: false,
                     vehicle: None,
                 },
@@ -3769,6 +3771,11 @@ impl Game<'_> {
             C::SetEntityData(p) => {
                 if let Some(r) = self.remote.as_mut() {
                     for (index, _, value) in &p.values {
+                        if let (0, Value::Byte(flags)) = (index, value)
+                            && let Some(t) = r.entities.get_mut(&p.id)
+                        {
+                            t.on_fire = flags & 1 != 0;
+                        }
                         if let (4, Value::Bool(silent)) = (index, value) {
                             if p.id == r.entity_id {
                                 r.local_entity_silent = *silent;
@@ -6861,6 +6868,8 @@ impl Game<'_> {
             if let Some(fluids) = fluids {
                 let was = m.fluids.in_water;
                 let first = m.first_tick;
+                // Entity.baseTick saves the preceding eye sample before the new fluid update.
+                m.was_eye_in_water = m.fluids.eye_in_water;
                 m.fluids = fluids;
                 // Entity.doWaterSplashEffect on the client copy. Particles
                 // only: ClientLevel draws addParticle, and playSeededSound
@@ -10655,6 +10664,14 @@ impl Remote {
             .find(|(_, u)| **u == uuid)
             .map(|(id, _)| *id as u32)
     }
+    /// The client's synced Entity shared flag 0, including the local player.
+    pub(in crate::game) fn entity_on_fire(&self, id: i32) -> Option<bool> {
+        if id == self.entity_id {
+            Some(self.own_on_fire)
+        } else {
+            self.entities.get(&id).map(|t| t.on_fire)
+        }
+    }
     /// The kind and last sent position of a tracked server entity.
     pub(super) fn tracked(&self, id: i32) -> Option<(&str, [f64; 3])> {
         self.entities.get(&id).map(|t| (&*t.kind, t.position))
@@ -11200,6 +11217,7 @@ pub(crate) mod tests {
                     kind: "minecraft:zombie".into(),
                     position: [0.0; 3],
                     codec_base: [0.0; 3],
+                    on_fire: false,
                     silent: false,
                     vehicle: None,
                 },
@@ -14935,6 +14953,7 @@ pub(crate) mod tests {
             kind: kind.to_owned(),
             position: [0.0, 64.0, 0.0],
             codec_base: [0.0, 64.0, 0.0],
+            on_fire: false,
             silent: false,
             vehicle: None,
         };
@@ -14973,6 +14992,7 @@ pub(crate) mod tests {
                 kind: "minecraft:cow".to_owned(),
                 position: [8.5, 64.0, -3.5],
                 codec_base: [8.5, 64.0, -3.5],
+                on_fire: false,
                 silent: false,
                 vehicle: None,
             },
@@ -15017,6 +15037,7 @@ pub(crate) mod tests {
                 kind: "minecraft:arrow".to_owned(),
                 position: [8.5, 64.0, -3.5],
                 codec_base: [8.5, 64.0, -3.5],
+                on_fire: false,
                 silent: true,
                 vehicle: None,
             },
