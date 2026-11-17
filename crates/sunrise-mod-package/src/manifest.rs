@@ -1687,9 +1687,10 @@ capabilities = ["registries"]
         let bytes = Package::write_files(EXAMPLE, &[("layouts.json", layouts)]).unwrap();
         let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
         let package = Package::read_zip(&mut zip).unwrap();
-        let changed =
-            crate::layouts::Layouts::read(br#"{"ruby":{"ruby::T":"1123456789abcdef1123456789abcdef"}}"#.as_slice())
-                .unwrap();
+        let changed = crate::layouts::Layouts::read(
+            br#"{"ruby":{"ruby::T":"1123456789abcdef1123456789abcdef"}}"#.as_slice(),
+        )
+        .unwrap();
         assert_eq!(
             package.layouts.first_difference("ruby", &changed),
             Some("ruby::T")
