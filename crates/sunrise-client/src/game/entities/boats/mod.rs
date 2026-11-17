@@ -124,6 +124,29 @@ pub(super) struct Boat {
     pub age: i32,
     pub random: LegacyRandom,
 }
+/// `restituteMovementAfterCollisions` for a boat, which doesn't bounce: each axis the
+/// move was blocked on stops, a sideways one told by `Mth.equal`, the vertical one by
+/// any difference (`verticalCollision`), as `Entity.move` tells them.
+fn stop_blocked_axes(velocity: Vec3, movement: Vec3, moved: Vec3) -> Vec3 {
+    use sunrise_world::entity_move::different;
+    Vec3::new(
+        if different(movement.x, moved.x) {
+            0.0
+        } else {
+            velocity.x
+        },
+        if moved.y != movement.y {
+            0.0
+        } else {
+            velocity.y
+        },
+        if different(movement.z, moved.z) {
+            0.0
+        } else {
+            velocity.z
+        },
+    )
+}
 /// `ChestBoat.CONTAINER_SIZE`.
 pub(super) const CHEST_SLOTS: usize = 27;
 /// `AbstractBoat.BUBBLE_TIME`: the ticks over a bubble column before it
@@ -930,15 +953,7 @@ impl Game<'_> {
             );
             b.on_ground = movement.y < 0.0 && moved.y > movement.y;
             b.fall_distance = self.boat_fall(&b, moved.y);
-            if (moved.x - movement.x).abs() > 1.0e-7 {
-                b.velocity.x = 0.0;
-            }
-            if (moved.z - movement.z).abs() > 1.0e-7 {
-                b.velocity.z = 0.0;
-            }
-            if (moved.y - movement.y).abs() > 1.0e-7 {
-                b.velocity.y = 0.0;
-            }
+            b.velocity = stop_blocked_axes(b.velocity, movement, moved);
         }
         // AbstractBoat.tick's applyEffectsFromBlocks: powder snow or a cobweb makes the
         // boat stuck, which slows its next move, and resets its fall.
@@ -2205,6 +2220,18 @@ mod tests {
 
     fn boat() -> Boat {
         Boat::new(1, Arc::from("oak"), Vec3::ZERO, 0.0)
+    }
+
+    /// Entity.move's collision tests: a vertical move cut short by any amount stops the
+    /// boat's fall, a sideways one only when it is off by `Mth.equal`'s 1e-5 or more.
+    #[test]
+    fn a_boat_stops_on_the_axes_vanilla_counts_as_blocked() {
+        let velocity = Vec3::new(0.3, -1.0e-8, 0.2);
+        let moved = Vec3::new(0.3 - 1.0e-6, 0.0, 0.2 - 1.0e-4);
+        assert_eq!(
+            stop_blocked_axes(velocity, velocity, moved),
+            Vec3::new(0.3, 0.0, 0.0)
+        );
     }
 
     #[test]
