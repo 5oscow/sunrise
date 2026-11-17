@@ -2,3 +2,4 @@
 # where it must pass (README.md). Rows: PACKAGE TEST TARGET daily REASON, sorted; tools/ci/move_to_daily.py writes them.
 sunrise-launcher net::tests::a_request_goes_through_a_socks_proxy lib daily network
 sunrise-launcher porter::tests::a_porter_run_logs_its_lines_keeps_its_status_and_says_what_failed lib daily child-process
+sunrise-launcher process::owned::tests::quitting_stops_the_children_still_running lib daily child-process
