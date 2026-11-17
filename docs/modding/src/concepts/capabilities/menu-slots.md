@@ -323,6 +323,10 @@ if let Some(window) = window {
 }
 ```
 
+The open and the backing can sit in the hook that reacts to the player, such as the backpack's own use. Inside a hook
+of that player's own action the menu's handle doesn't resolve yet (`host.menu` gives none), so the backing is stored
+and its slots are mirrored once the action is over, later in the same tick.
+
 A vanilla menu and a menu no mod backed never take this path: their slots keep the backing they had.
 
 ## Recipe transfer into a mod menu
