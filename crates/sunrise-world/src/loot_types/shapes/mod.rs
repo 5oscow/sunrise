@@ -689,8 +689,9 @@ fn validate_shape<'v>(
             }
             Kind::FloatRange(min, max) => {
                 if !value.as_number().is_some_and(|number| {
-                    let number = f64::from(double_value(number) as f32);
-                    number >= min && number <= max
+                    let number = double_value(number) as f32;
+                    number.total_cmp(&(min as f32)).is_ge()
+                        && number.total_cmp(&(max as f32)).is_le()
                 }) {
                     reason = Some(format!("expected float in {min}..={max}"));
                 }

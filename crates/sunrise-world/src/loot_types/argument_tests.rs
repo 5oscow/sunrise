@@ -578,6 +578,36 @@ fn builtin_shapes_preserve_compact_forms_optional_nulls_and_unknown_fields() {
 }
 
 #[test]
+fn nonnegative_float_components_preserve_signed_zero_ordering_after_narrowing() {
+    for (component, field) in [
+        ("minecraft:weapon", "disable_blocking_for_seconds"),
+        ("minecraft:use_effects", "speed_multiplier"),
+    ] {
+        for (number, accepted) in [(-0.0, false), (-1e-50, false), (0.0, true), (1e-50, true)] {
+            let modifiers = HashMap::from([(
+                "test:signed_zero".into(),
+                json!({
+                    "type":"minecraft:set_components", "components":{(component):{(field):number}}
+                }),
+            )]);
+            let result = Types::default().validate(std::iter::empty(), &HashMap::new(), &modifiers);
+            assert_eq!(
+                result.is_ok(),
+                accepted,
+                "{component}.{field} = {number:?}: {result:?}"
+            );
+            if let Err(error) = result {
+                let error = error.to_string();
+                assert!(
+                    error.contains(field) && error.contains("minecraft:set_components"),
+                    "{error}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn compact_holder_sets_normalize_without_entering_opaque_custom_data() {
     let root = std::env::temp_dir().join(format!(
         "sunrise-loot-shape-normalization-{}-{}",
