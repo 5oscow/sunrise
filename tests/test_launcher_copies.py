@@ -116,6 +116,15 @@ def code(text: str) -> str:
     return re.sub(r",([)\]}])", r"\1", re.sub(r"\s+", "", text))
 
 
+# (the game's file, the launcher's copy, the functions copied whole): compared as code, as `code` reads it.
+SAME_FUNCTIONS = (
+    ("crates/sunrise-prepare/src/java.rs", "launcher/src/jdk.rs", (
+        "command", "executable", "real_path", "without_verbatim", "path_homes", "tool_major", "jdk_parents",
+        "installed_jdks", "find", "find_runtime", "find_tools", "home",
+    )),
+)
+
+
 def files(path: Path) -> dict:
     if path.is_file():
         return {"": path.read_bytes()}
@@ -179,6 +188,13 @@ class LauncherCopies(unittest.TestCase):
                 digest = hashlib.sha256(code(function(path, name)).encode()).hexdigest()
                 self.assertEqual(digest, pinned, f"{path}'s {name} changed: change {mirror} to match, then pin {digest}")
 
+    def test_functions_copied_whole_are_the_games(self):
+        for game, copy, names in SAME_FUNCTIONS:
+            for name in names:
+                with self.subTest(function=name):
+                    self.assertEqual(code(function(copy, name)), code(function(game, name)),
+                                     f"{copy}'s {name} differs from {game}'s: copy the change")
+
     def test_format_constants_match_the_games(self):
         package_format = int((ROOT / "crates/sunrise-mod-package/src/sdk/package-format").read_text().strip())
         self.assertEqual(constant("launcher/crates/smod/src/index/native.rs", "PACKAGE_FORMAT"), package_format)
@@ -186,6 +202,8 @@ class LauncherCopies(unittest.TestCase):
                          constant("crates/sunrise-mod-surface/src/uses.rs", "USES_FILE"))
         self.assertEqual(constant("launcher/crates/smod/src/manifest.rs", "MAX_USES"),
                          constant("crates/sunrise-mod-surface/src/uses.rs", "MAX_USES_BYTES"))
+        self.assertEqual(constant("launcher/src/preparer.rs", "DATA_FILE"),
+                         constant("crates/sunrise-core/src/prepared_files.rs", "FILE_NAME"))
 
     def test_a_drifted_copy_is_caught(self):
         self.assertEqual(code("//! Doc.\nuse a::{b,\n c};\nfn f() { g( 1 ) }\n"), "fnf(){g(1)}")
