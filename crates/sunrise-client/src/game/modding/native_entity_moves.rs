@@ -1,6 +1,6 @@
 //! Moving and turning an entity for native server mods, through an
 //! `EntityRef` (docs/modding/src/how-to/native-mods.md, "Entity and level handles", #7387):
-//! teleport, rotation, head yaw, facing, size and pushes. Writes move the
+//! teleport, collided moves, rotation, head yaw, facing, size and pushes. Writes move the
 //! entity as `/tp` and `/rotate` do, so clients see it as they see those.
 //! Reads return `None`, writes false, for a stale handle or on a client.
 use super::entity::{Entity as _, EntityHandle, with_entity_mut};
@@ -9,7 +9,7 @@ use super::{
     commands::{Target, entity_pitch},
     vehicle_teleport::TeleportMotion,
 };
-use mod_api::EntityRef;
+use mod_api::{EntityRef, MoveCause};
 use sunrise_core::geometry::Vec3;
 
 /// `Level.isInSpawnableBounds` and `/tp`'s limits: 30,000,000 blocks out,
@@ -116,6 +116,28 @@ impl Game<'_> {
             return None;
         }
         Some(t)
+    }
+    /// Moves the entity by `delta` as `Entity.move(cause, delta)` does: collided, stepping,
+    /// through the `entity_move` hook. How far it moved; None for a stale handle, on a client,
+    /// for a player, for an entity outside the entity walk, and for an unknown cause and for a delta
+    /// that is not finite or beyond 64 blocks on an axis.
+    pub(super) fn entity_move_by(
+        &mut self,
+        entity: EntityRef,
+        delta: [f64; 3],
+        cause: MoveCause,
+    ) -> Option<[f64; 3]> {
+        if self.remote.is_some()
+            || !delta.iter().all(|v| v.is_finite() && v.abs() <= 64.0)
+            || self.native_entity_target(entity).is_none()
+        {
+            return None;
+        }
+        let mover = sunrise_client::move_gate::mover_of(cause)?;
+        let handle = self.native_walk_entity(entity.id())?;
+        let [x, y, z] = delta;
+        let moved = self.move_listed_entity(handle, mover, Vec3::new(x, y, z));
+        Some(moved.components())
     }
     /// Turns the entity to `yaw` and `pitch` in degrees (`Entity.setYRot`,
     /// `setXRot`): the pitch wraps and is clamped to -90..90. False for kinds
@@ -371,6 +393,7 @@ mod tests {
                 width: 1,
                 height: 1,
                 check_interval: 0,
+                ticks: 0,
             });
             let painting = game.entity(15).unwrap();
             assert!(!painting.teleport_to(game, [1.0, 64.0, 0.0], None));

@@ -98,13 +98,13 @@ mod tests {
             ("fall_distance", Tag::Double(3.5f64.to_bits())),
         ]);
         let frame = item_frame_from_nbt(&tag, 1).unwrap();
-        let saved = item_frame_to_nbt(&frame, [1, 2, 3, 4], Some(&tag));
+        let saved = item_frame_to_nbt(&frame, [1, 2, 3, 4], Some(&tag), &Default::default());
         // A component beyond 10 loads as 0, the others stay.
         assert_eq!(motion(&saved), Vec3::new(0.5, 0.0, -0.25));
         assert!(flag(&saved, "OnGround"));
         assert_eq!(float(saved.get("fall_distance")), Some(3.5));
         // A frame made in play has nothing loaded: zeros.
-        let made = item_frame_to_nbt(&frame, [1, 2, 3, 4], None);
+        let made = item_frame_to_nbt(&frame, [1, 2, 3, 4], None, &Default::default());
         assert_eq!(motion(&made), Vec3::ZERO);
         assert!(!flag(&made, "OnGround"));
         assert_eq!(float(made.get("fall_distance")), Some(0.0));

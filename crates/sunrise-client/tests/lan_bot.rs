@@ -253,7 +253,7 @@ fn server_sync(sync: Arc<SyncData>, net: NetConfig) -> Server {
         (Arc::<str>::from("minecraft:stone"), false),
         (Arc::<str>::from("minecraft:chest"), false),
     ];
-    let encoder = ChunkEncoder::new(states, &sync.builtin, &biomes, &biomes);
+    let encoder = ChunkEncoder::new(states, &sync.builtin, &biomes, &biomes, Default::default());
     let hub = Hub::new(
         lan,
         sync,
@@ -428,7 +428,7 @@ fn recipe_settings_packets_update_only_the_players_book_and_survive_save() {
             let mut saved = sunrise_client::save::Level::default();
             sunrise_client::lan::playerdata::store(&s.hub.guests[0], &mut saved, None);
             let mut reopened = sunrise_client::save::Level::default();
-            reopened.read_player(&saved.player_tag());
+            reopened.read_player(&saved.player_tag(&Default::default()));
             assert_eq!(reopened.recipe_book.open, settings.open);
             assert_eq!(reopened.recipe_book.filtering, settings.filtering);
         }
@@ -1660,7 +1660,7 @@ fn a_synced_mod_block_entity_reaches_the_chunks_players_once_a_tick() {
         r#"{"minecraft:block_entity_type": {"entries": {"test:machine_entity": {"protocol_id": 60}}}}"#,
     )
     .unwrap();
-    s.hub.encoder = ChunkEncoder::new(states, &builtin, &[], &[]);
+    s.hub.encoder = ChunkEncoder::new(states, &builtin, &[], &[], Default::default());
     // A machine shows whether it runs; one without `on` shows nothing.
     s.hub.encoder.mod_update_tag = Some(|_, entity| {
         let on = entity.nbt.get(&JavaString::from("on"))?.clone();

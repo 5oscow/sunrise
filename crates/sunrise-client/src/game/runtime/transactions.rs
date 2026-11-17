@@ -146,6 +146,8 @@ pub(super) struct Level {
     item_entities: HashMap<u32, ItemStack>,
     /// Each guest's menu storage before this transaction first wrote it, by connection.
     menus: HashMap<u32, KeptMenus>,
+    /// The scoreboard before this transaction first wrote it (`journal_scoreboard`), whole.
+    board: Option<sunrise_client::scoreboard::Scoreboard>,
     /// Each entity's, player's, chunk's and the level's attachment map before this transaction
     /// first reached it (a block entity's is kept with it).
     attachments: HashMap<Holder, KeptAttachments>,
@@ -201,6 +203,7 @@ struct Kept {
     name: Option<sunrise_core::nbt::Tag>,
     /// The container lock and loot table roll kept beside the model.
     extras: BlockEntityExtras,
+    contents_watches: Vec<(Pos, u64)>,
 }
 
 impl Kept {
@@ -216,6 +219,12 @@ impl Kept {
             hopper: hoppers.get(&pos).copied(),
             name: world.block_names.get(&pos).cloned(),
             extras: world.block_entity_extras(pos),
+            contents_watches: world
+                .block_entities
+                .identity(pos)
+                .map_or_else(Vec::new, |observer| {
+                    world.block_entities.contents_watches.snapshot(observer)
+                }),
         }
     }
 }
@@ -531,6 +540,9 @@ impl Game<'_> {
                 }
                 for (id, kept) in level.equipment {
                     outer.equipment.entry(id).or_insert(kept);
+                }
+                if outer.board.is_none() {
+                    outer.board = level.board;
                 }
                 for (id, kept) in level.item_entities {
                     outer.item_entities.entry(id).or_insert(kept);
@@ -895,6 +907,17 @@ impl Game<'_> {
             level.entities.entry(id).or_insert(slots);
         }
     }
+    /// Keeps the scoreboard as it is, if a transaction is open and hasn't yet: a copy of the
+    /// whole board, taken on the transaction's first scoreboard write and never otherwise, so a
+    /// transaction that writes none pays nothing. An abort puts it back.
+    pub(super) fn journal_scoreboard(&mut self) {
+        let Some(level) = self.transactions.last_mut() else {
+            return;
+        };
+        if level.board.is_none() {
+            level.board = Some(self.score.board.clone());
+        }
+    }
     /// Keeps mob `id`'s equipment as it is, if a transaction is open and hasn't yet (#932):
     /// an abort puts every slot back and makes the attribute map over again.
     pub(super) fn journal_equipment(&mut self, id: u32) {
@@ -1163,6 +1186,14 @@ impl Game<'_> {
                 None => self.world.block_names.remove(&pos),
             };
             self.world.set_block_entity_extras(pos, kept.extras);
+            if let Some(observer) = self.world.block_entities.identity(pos)
+                && Some(observer.generation) == kept.generation
+            {
+                self.world
+                    .block_entities
+                    .contents_watches
+                    .restore(observer, kept.contents_watches);
+            }
             match kept.hopper {
                 Some(hopper) => self.hoppers.insert(pos, hopper),
                 None => self.hoppers.remove(&pos),
@@ -1305,6 +1336,10 @@ impl Game<'_> {
             }
         }
         level.actions.rollback_in(self);
+        if let Some(saved) = level.board {
+            self.score.board.restore(saved);
+            self.sync_score_registries();
+        }
         for (uuid, kept) in level.players {
             self.native_as_player(uuid, |g| {
                 g.ender_items = kept.ender_items;

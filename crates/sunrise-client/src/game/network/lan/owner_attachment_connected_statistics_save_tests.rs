@@ -105,19 +105,21 @@ mod connected_statistics_save_tests {
             sunrise_client::save::LevelShape::OVERWORLD,
         ));
         use sunrise_client::server::user_lists::{BanList, IpBanList, OpList, WhiteList};
-        game.server_lists = Some(Arc::new(Mutex::new(super::super::super::dedicated::Lists {
-            ops: OpList::new(dir.join("ops.json")),
-            white: WhiteList::new(dir.join("whitelist.json")),
-            bans: BanList::new(dir.join("banned-players.json")),
-            ip_bans: IpBanList::new(dir.join("banned-ips.json")),
-            use_whitelist: false,
-            enforce_whitelist: false,
-            op_level: 4,
-            player_idle_timeout: 0,
-            stop: false,
-            autosave: true,
-            whitelist_bypass: Vec::new(),
-        })));
+        game.server_lists = Some(Arc::new(Mutex::new(
+            super::super::super::dedicated::Lists {
+                ops: OpList::new(dir.join("ops.json")),
+                white: WhiteList::new(dir.join("whitelist.json")),
+                bans: BanList::new(dir.join("banned-players.json")),
+                ip_bans: IpBanList::new(dir.join("banned-ips.json")),
+                use_whitelist: false,
+                enforce_whitelist: false,
+                op_level: 4,
+                player_idle_timeout: 0,
+                stop: false,
+                autosave: true,
+                whitelist_bypass: Vec::new(),
+            },
+        )));
         game.set_allow_commands(true);
         let _rx = super::super::world_spawn_sync_tests::host_for(&mut game);
         let host = game.lan.as_mut().unwrap();

@@ -647,6 +647,10 @@ impl FluidsRegistrar for PartRegistrar {
         key
     }
 
+    fn fluid_interaction(&mut self, interaction: crate::FluidInteraction) {
+        self.fluid_interactions.push(interaction);
+    }
+
     fn attach_fluid_part(&mut self, fluid: &str, kind: &'static str, part: Arc<dyn FluidPart>) {
         self.attach(|p| &mut p.fluids, kind, fluid, part);
     }

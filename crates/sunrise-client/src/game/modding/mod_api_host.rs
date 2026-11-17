@@ -406,7 +406,9 @@ impl mod_api::LevelHost for super::GameLevel<'_> {
         }
         let entity = self.world.block_entities.get(&key)?;
         let name = &self.facts.get(self.world.block(x, y, z)).name;
-        super::native_block_entity_refs::save_without_metadata(self.world, key, entity, name)
+        super::native_block_entity_refs::save_without_metadata(
+            self.world, key, entity, name, self.items,
+        )
     }
 
     fn block_state_id(&self, name: &str) -> Option<mod_api::BlockState> {
@@ -462,6 +464,18 @@ impl mod_api::LevelHost for super::GameLevel<'_> {
             self.registry,
             state.try_into_engine(&()).ok()?,
         )
+    }
+    fn collision_shape(&self, pos: [i32; 3]) -> Option<Vec<[f64; 6]>> {
+        let [x, y, z] = pos;
+        if !(self.world.shape.contains_y(y) && self.world.loaded(x, z)) {
+            return None;
+        }
+        Some(super::native_state_shapes::collision_boxes(
+            self.collision,
+            self.world,
+            self.world.block(x, y, z),
+            pos,
+        ))
     }
     fn fluid_in_tag(&self, fluid: &str, tag: &str) -> Option<bool> {
         self.native_authoritative
@@ -705,14 +719,36 @@ impl mod_api::HitHost for super::native_hooks::HitLevel<'_> {
     }
 }
 
-pub(super) struct LevelTicks<'a, L> {
-    pub level: L,
-    pub ticks: &'a mut Ticks,
+/// A level with the simulation's ticks beside it: `&mut Ticks` in a write or tick hook, `&Ticks`
+/// where the listener only reads (placement and survival: [`LevelView`](super::native_hooks::LevelView)).
+/// Reads need only a shared view of the ticks; scheduling and writes need them mutable.
+pub(in crate::game) struct LevelTicks<'b, L, T = &'b mut Ticks> {
+    level: L,
+    ticks: T,
+    /// The level's and the ticks' borrow, which the delegating reads below are bounded by.
+    borrow: std::marker::PhantomData<&'b ()>,
 }
 
-impl<'a: 'b, 'b, L: std::ops::Deref<Target = super::GameLevel<'a>>> mod_api::LevelHost
-    for LevelTicks<'b, L>
+impl<'b, L, T> LevelTicks<'b, L, T> {
+    pub(in crate::game) fn new(level: L, ticks: T) -> Self {
+        Self {
+            level,
+            ticks,
+            borrow: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<
+    'a: 'b,
+    'b,
+    L: std::ops::Deref<Target = super::GameLevel<'a>>,
+    T: std::ops::Deref<Target = Ticks>,
+> mod_api::LevelHost for LevelTicks<'b, L, T>
 {
+    fn block_entity_data(&self, entity: mod_api::BlockEntityRef) -> Option<mod_api::Compound> {
+        mod_api::LevelHost::block_entity_data(&*self.level, entity)
+    }
     fn block_state_id(&self, name: &str) -> Option<mod_api::BlockState> {
         mod_api::LevelHost::block_state_id(&*self.level, name)
     }
@@ -772,9 +808,44 @@ impl<'a: 'b, 'b, L: std::ops::Deref<Target = super::GameLevel<'a>>> mod_api::Lev
     fn enabled_features(&self) -> mod_api::FeatureFlags {
         mod_api::LevelHost::enabled_features(&*self.level)
     }
+    fn signal(&self, pos: [i32; 3], direction: Direction) -> Option<i32> {
+        Some(
+            self.signals()
+                .signal(BlockPos::new(pos[0], pos[1], pos[2]), direction),
+        )
+    }
+    fn direct_signal(&self, pos: [i32; 3], direction: Direction) -> Option<i32> {
+        Some(
+            self.signals()
+                .direct_signal(BlockPos::new(pos[0], pos[1], pos[2]), direction),
+        )
+    }
+    fn direct_signal_to(&self, pos: [i32; 3]) -> Option<i32> {
+        Some(
+            self.signals()
+                .direct_signal_to(BlockPos::new(pos[0], pos[1], pos[2])),
+        )
+    }
+    fn best_neighbor_signal(&self, pos: [i32; 3]) -> Option<i32> {
+        Some(
+            self.signals()
+                .best_neighbor_signal(BlockPos::new(pos[0], pos[1], pos[2])),
+        )
+    }
+    fn has_neighbor_signal(&self, pos: [i32; 3]) -> Option<bool> {
+        Some(
+            self.signals()
+                .has_neighbor_signal(BlockPos::new(pos[0], pos[1], pos[2])),
+        )
+    }
+    fn collision_shape(&self, pos: [i32; 3]) -> Option<Vec<[f64; 6]>> {
+        mod_api::LevelHost::collision_shape(&*self.level, pos)
+    }
 }
 
-impl<'a: 'b, 'b> mod_api::LevelRandomHost for LevelTicks<'b, &mut super::GameLevel<'a>> {
+impl<'a: 'b, 'b, T: std::ops::Deref<Target = Ticks>> mod_api::LevelRandomHost
+    for LevelTicks<'b, &mut super::GameLevel<'a>, T>
+{
     fn attachments(&mut self) -> &mut dyn mod_api::AttachmentStore {
         mod_api::LevelRandomHost::attachments(&mut *self.level)
     }
@@ -786,48 +857,40 @@ impl<'a: 'b, 'b> mod_api::LevelRandomHost for LevelTicks<'b, &mut super::GameLev
     }
 }
 
-impl<'a: 'b, 'b, L: std::ops::Deref<Target = super::GameLevel<'a>>> mod_api::LevelTicksHost
-    for LevelTicks<'b, L>
+impl<
+    'a: 'b,
+    'b,
+    L: std::ops::Deref<Target = super::GameLevel<'a>>,
+    T: std::ops::DerefMut<Target = Ticks>,
+> mod_api::LevelTicksHost for LevelTicks<'b, L, T>
 {
     fn schedule_block_tick(&mut self, pos: [i32; 3], block: mod_api::BlockKey, delay: i32) -> bool {
         self.level
-            .native_schedule_block_tick(self.ticks, pos, block, delay)
+            .native_schedule_block_tick(&mut self.ticks, pos, block, delay)
     }
     fn schedule_fluid_tick(&mut self, pos: [i32; 3], fluid: &str, delay: i32) -> bool {
         self.level
-            .native_schedule_fluid_tick(self.ticks, pos, fluid, delay)
-    }
-    fn signal(&self, pos: [i32; 3], direction: Direction) -> i32 {
-        self.signals()
-            .signal(BlockPos::new(pos[0], pos[1], pos[2]), direction)
-    }
-    fn direct_signal(&self, pos: [i32; 3], direction: Direction) -> i32 {
-        self.signals()
-            .direct_signal(BlockPos::new(pos[0], pos[1], pos[2]), direction)
-    }
-    fn direct_signal_to(&self, pos: [i32; 3]) -> i32 {
-        self.signals()
-            .direct_signal_to(BlockPos::new(pos[0], pos[1], pos[2]))
-    }
-    fn best_neighbor_signal(&self, pos: [i32; 3]) -> i32 {
-        self.signals()
-            .best_neighbor_signal(BlockPos::new(pos[0], pos[1], pos[2]))
-    }
-    fn has_neighbor_signal(&self, pos: [i32; 3]) -> bool {
-        self.signals()
-            .has_neighbor_signal(BlockPos::new(pos[0], pos[1], pos[2]))
+            .native_schedule_fluid_tick(&mut self.ticks, pos, fluid, delay)
     }
 }
 
-impl<'a: 'b, 'b, L: std::ops::Deref<Target = super::GameLevel<'a>>> LevelTicks<'b, L> {
+impl<
+    'a: 'b,
+    'b,
+    L: std::ops::Deref<Target = super::GameLevel<'a>>,
+    T: std::ops::Deref<Target = Ticks>,
+> LevelTicks<'b, L, T>
+{
     /// The level in place read through the game's own `SignalGetter`, with this write's
     /// comparator outputs.
     fn signals(&self) -> sunrise_world::level::Signals<'_, super::GameLevel<'a>> {
-        self.level.behaviours.signals(&*self.level, &*self.ticks)
+        self.level.behaviours.signals(&*self.level, &self.ticks)
     }
 }
 
-impl<'a: 'b, 'b> mod_api::LevelWriteHost for LevelTicks<'b, &mut super::GameLevel<'a>> {
+impl<'a: 'b, 'b, T: std::ops::DerefMut<Target = Ticks>> mod_api::LevelWriteHost
+    for LevelTicks<'b, &mut super::GameLevel<'a>, T>
+{
     fn set_block(
         &mut self,
         pos: [i32; 3],
@@ -838,16 +901,16 @@ impl<'a: 'b, 'b> mod_api::LevelWriteHost for LevelTicks<'b, &mut super::GameLeve
             return false;
         };
         self.level
-            .native_set_block(self.ticks, pos, state, flags.bits())
+            .native_set_block(&mut self.ticks, pos, state, flags.bits())
     }
 
     fn remove_block(&mut self, pos: [i32; 3], moved: bool) -> bool {
-        self.level.remove_block_write(self.ticks, pos, moved)
+        self.level.remove_block_write(&mut self.ticks, pos, moved)
     }
 
     fn set_block_property(&mut self, pos: [i32; 3], key: &str, value: &str, flags: i32) -> bool {
         self.level
-            .native_set_block_property(self.ticks, pos, key, value, flags)
+            .native_set_block_property(&mut self.ticks, pos, key, value, flags)
     }
 
     fn play_sound(
@@ -1046,6 +1109,7 @@ mod attachment_membership_tests {
                 width: 1,
                 height: 1,
                 check_interval: 0,
+                ticks: 0,
             });
             game.persist.removals.push(Target::Painting(420));
             assert_eq!(

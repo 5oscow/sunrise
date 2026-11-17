@@ -10,6 +10,8 @@ use sunrise_core::nbt::Tag;
 pub(in crate::game) mod cauldron_contents;
 #[cfg(test)]
 mod contents_changed_tests;
+#[cfg(test)]
+mod contents_watch_tests;
 mod crafter;
 pub(in crate::game) mod native_energy;
 pub(in crate::game) mod native_fluids;
@@ -886,7 +888,7 @@ impl Game<'_> {
             && let Some(level) = self.native_level_here()
         {
             let at = BlockPos::new(pos.0, pos.1, pos.2);
-            self.native_contents_changed(level, at, self.world.block(pos.0, pos.1, pos.2));
+            self.native_contents_changed(level, at, self.world.block(pos.0, pos.1, pos.2), None);
         }
         self.chiseled_bookshelf_synced(pos);
         if matches!(
@@ -1006,7 +1008,7 @@ impl Game<'_> {
             let pos = view.parts[0].0;
             if let Tag::Compound(map) = &mut tag {
                 if let Some(item) = item {
-                    map.insert("item".into(), save::item_to_nbt(&item));
+                    map.insert("item".into(), save::item_to_nbt(&item, self.res.items()));
                 } else {
                     map.remove(&"item".into());
                 }
@@ -1106,7 +1108,7 @@ impl Game<'_> {
         if let Tag::Compound(map) = tag {
             match item {
                 Some(item) => {
-                    map.insert("item".into(), save::item_to_nbt(&item));
+                    map.insert("item".into(), save::item_to_nbt(&item, self.res.items()));
                 }
                 None => {
                     map.remove(&"item".into());

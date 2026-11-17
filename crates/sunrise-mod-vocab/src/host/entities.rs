@@ -152,6 +152,13 @@ pub trait EntitiesBackend {
     #[access(WorldOnly)]
     fn entity_position(&self, entity: EntityRef) -> Option<[f64; 3]>;
     /// Side: server.
+    /// The players this entity is sent to (`ChunkMap.TrackedEntity.seenBy`), in the order the
+    /// server keeps its players: those in the entity's level whose client has the entity from
+    /// its tracking pass. A player is not among its own trackers. Fake players track nothing.
+    /// None on a client, and for a stale handle or an entity that is not in the level in place.
+    #[access(WorldOnly)]
+    fn entity_trackers(&self, entity: EntityRef) -> Option<Vec<PlayerRef>>;
+    /// Side: server.
     /// The block the entity's position is in (`Entity.blockPosition`). API
     /// 373.
     #[access(WorldOnly)]
@@ -232,10 +239,11 @@ pub trait EntitiesBackend {
     /// sent it (`Entity.lerpMotion`). API 379.
     #[access(WorldOnly)]
     fn entity_velocity(&self, entity: EntityRef) -> Option<[f64; 3]>;
-    /// Side: server.
-    /// Whether the entity stands on a block (`Entity.onGround`).
-    /// Whether the entity stands on a block (`Entity.onGround`). API
-    /// 379.
+    /// Side: both.
+    /// Whether the entity stands on a block (`Entity.onGround`). API 379.
+    /// On a client, the local player's own predicted flag (the one it sends); for another
+    /// kept entity, including a tracked player, its client copy's flag. Neither is server
+    /// authority. None for a stale handle or an entity whose body the client doesn't keep.
     #[access(WorldOnly)]
     fn entity_on_ground(&self, entity: EntityRef) -> Option<bool>;
     /// Side: both.
@@ -457,11 +465,21 @@ pub trait EntitiesBackend {
     /// client, reads its own copy as `entity_fluid_heights` does.
     #[access(WorldOnly)]
     fn entity_eye_fluid(&self, entity: EntityRef) -> Option<Option<String>>;
-    /// Side: server.
+    /// Side: both.
     /// Whether the entity touched water at its last fluid update
     /// (`Entity.isInWater`): players and mobs.
+    /// On a client, the local player's own fluid state, or a kept entity's (a tracked player
+    /// or mob) last client update. None for a stale handle or an entity whose body the client
+    /// doesn't keep.
     #[access(WorldOnly)]
     fn entity_is_in_water(&self, entity: EntityRef) -> Option<bool>;
+    /// Side: both.
+    /// The player's swimming flag (`Entity.isSwimming`), not the swimming pose
+    /// (which also covers crawling). On a client, the local player's own state,
+    /// not an authoritative server answer. None for other players (a client keeps them as
+    /// tracked bodies without the flag), other kinds and stale handles.
+    #[access(WorldOnly)]
+    fn entity_is_swimming(&self, entity: EntityRef) -> Option<bool>;
     /// Side: server.
     /// Whether the entity is in lava (`Entity.isInLava`): players and mobs.
     #[access(WorldOnly)]
@@ -482,13 +500,17 @@ pub trait EntitiesBackend {
     /// kinds its portal walk carries (zero when it keeps no state for one).
     #[access(WorldOnly)]
     fn entity_portal_cooldown(&self, entity: EntityRef) -> Option<i32>;
-    /// Side: server.
+    /// Side: both.
     /// The entity's air (`Entity.getAirSupply`): players and mobs.
+    /// On a client this is the last server-synced air, never predicted. None for a stale
+    /// handle or an entity whose body the client doesn't keep.
     #[access(WorldOnly)]
     fn entity_air_supply(&self, entity: EntityRef) -> Option<i32>;
-    /// Side: server.
+    /// Side: both.
     /// The most air the entity holds (`Entity.getMaxAirSupply`): 300, a
     /// dolphin's 4800, an axolotl's 6000.
+    /// On a client this is the maximum for its kept copy's kind, not a new server query.
+    /// None for a stale handle or an entity whose body the client doesn't keep.
     #[access(WorldOnly)]
     fn entity_max_air_supply(&self, entity: EntityRef) -> Option<i32>;
     /// Side: server.
@@ -646,6 +668,30 @@ pub trait EntitiesBackendMut {
         pos: [f64; 3],
         rotation: Option<[f32; 2]>,
     ) -> bool;
+    /// Side: server.
+    /// Moves the entity by `delta` blocks as `Entity.move(cause, delta)` does: the block,
+    /// entity and world border collision scan stops it at what is in the way, it steps up what
+    /// its step height allows, and its ground flag follows the move. It is not a teleport
+    /// (nothing is skipped over) and not a velocity: the entity's velocity is left as it is,
+    /// blocked components included. The `entity_move` hook fires for it with `cause`, once, so
+    /// a listener may replace or cancel the delta as for any other move; a cancelled move is
+    /// `Some([0.0; 3])`. A body with no physics (a marker or `NoGravity` armor stand, or one a
+    /// mod set) moves the whole delta with no collision. `MoveCause::Piston` also applies a
+    /// piston's per-tick limit, 0.51 blocks per axis, on the first non-zero axis only; a
+    /// mob's budget carries across calls in a tick, any other kind's lasts the call. Returns how far
+    /// the entity moved, `delta` less what the collisions took. None for a stale handle, on a
+    /// client, for a player (its client owns its position; teleport it instead), for an entity
+    /// outside the game's entity walk (a display, a painting, an item frame, an End crystal, a
+    /// dragon part) and for a delta that is not finite or has a component beyond 64 blocks. The
+    /// entity's own tick still does what follows a move: fall damage, block effects and
+    /// triggers.
+    #[access(WorldOnly)]
+    fn entity_move_by(
+        &mut self,
+        entity: EntityRef,
+        delta: [f64; 3],
+        cause: MoveCause,
+    ) -> Option<[f64; 3]>;
     /// Side: server.
     /// Sends the entity to `pos` in the level `dimension` (`minecraft:the_nether`,
     /// or a level a mod registered), as `Entity.teleport` does with a portal's

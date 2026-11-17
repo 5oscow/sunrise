@@ -2021,6 +2021,18 @@ impl Audio {
             instance.fade_to(volume, ticks);
         }
     }
+    /// A client mod's `SoundRef::move_to`: the engine's next tick plays the instance there.
+    pub fn move_mod_sound(&mut self, id: InstanceId, position: [f64; 3]) {
+        if let Some(instance) = self.engine.instance_mut(id) {
+            instance.position = position;
+        }
+    }
+    /// A client mod's `SoundRef::set_pitch`, applied by the engine's next tick.
+    pub fn set_mod_sound_pitch(&mut self, id: InstanceId, pitch: f32) {
+        if let Some(instance) = self.engine.instance_mut(id) {
+            instance.pitch = pitch;
+        }
+    }
     /// `SoundManager.playDelayed` of an instance the caller made: it starts
     /// `ticks` sound-engine ticks from now.
     pub fn play_instance_after(&mut self, instance: SoundInstance, ticks: i32) {
@@ -3289,6 +3301,27 @@ mod tests {
             audio.tick(false, &ctx);
             assert_eq!(audio.mod_sound_state(never), Stopped);
         }
+    }
+
+    #[test]
+    fn a_mod_sound_moves_and_changes_pitch_without_restarting() {
+        use mod_api::SoundState::*;
+        let mut audio = live_audio();
+        let ctx = TickContext::default();
+        let play = mod_api::SoundPlay::at(
+            "minecraft:ui.button.click",
+            mod_api::SoundSource::Blocks,
+            [1.0, 2.0, 3.0],
+        )
+        .looping(0);
+        let sound = audio.play_mod_sound(&play, 0);
+        audio.move_mod_sound(sound, [10.0, 20.0, 30.0]);
+        audio.set_mod_sound_pitch(sound, 1.5);
+        audio.tick(false, &ctx);
+        let instance = audio.engine.instance(sound).expect("the same instance");
+        assert_eq!(instance.position, [10.0, 20.0, 30.0]);
+        assert_eq!(instance.pitch, 1.5);
+        assert_eq!(audio.mod_sound_state(sound), Playing, "not restarted");
     }
 
     #[test]

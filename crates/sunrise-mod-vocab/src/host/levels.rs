@@ -270,13 +270,13 @@ pub trait LevelsBackend {
     /// the entities the server tracks to it, other players among them, and the
     /// window's own player, with the same walk.
     /// None there before login and for a level it does not show. The walk
-    /// is in entity-list order followed by players. Every entity list is walked
+    /// is in entity-list order, then item frames and paintings, followed by players. Every entity list is walked
     /// once per call: O(entities) regardless of the box. Each overlapping mob
     /// resolves through a mob-list scan: O(K*N) for K overlapping mobs and N mobs. Tridents do not
     /// resolve. On the server block displays, item displays, text displays, markers and
     /// interactions are included using physical boxes (zero-sized for displays and markers),
     /// not display culling bounds. Eyes of ender and leash knots are not yet returned.
-    /// Frames, paintings and other special entities
+    /// Other special entities
     /// are not on the entity-list walk. The dragon follows ordinary entities;
     /// its eight intersecting parts follow players in vanilla hash-table order (`Level.getEntities`).
     /// During `hears_projectile_impacts`, the projectile list is taken out of
@@ -471,6 +471,13 @@ pub trait LevelsBackend {
         face: BlockFace,
         support: SupportType,
     ) -> Option<bool>;
+    /// Side: server.
+    /// `BlockState.isRedstoneConductor(level, pos)` of the block at `pos`: whether it passes
+    /// redstone power through it (a full block that conducts: stone yes; glass, slabs and
+    /// pistons' heads no). It takes the level and position as vanilla's call does. None for a
+    /// stale handle, a client or an unloaded `pos`; a read never loads a chunk.
+    #[access(WorldOnly)]
+    fn level_is_redstone_conductor(&self, level: LevelRef, pos: [i32; 3]) -> Option<bool>;
     /// Side: server.
     /// How strongly the block at `pos` powers the block on its `direction` side, power it
     /// conducts included (`SignalGetter.getSignal(pos, direction)`, as a block reads its
@@ -1228,8 +1235,11 @@ pub trait LevelsBackendMut {
     /// Side: server.
     /// Plays sound event `sound` at `at` for the players in this level
     /// within range (16 blocks, times the volume above 1), as
-    /// `ServerLevel.playSound(null, ...)` does, under `source`'s volume
-    /// slider. A `minecraft:` event must be registered; a mod's goes by name
+    /// `ServerLevel.playSound(except, ...)` does, under `source`'s volume
+    /// slider. `except` leaves that player out (a client that already played the sound itself
+    /// for its own action); None plays it to everyone, as `playSound(null, ...)`. A fake player
+    /// has no client to leave out, so it excludes no one; a stale or client-side `except` queues
+    /// nothing. A `minecraft:` event must be registered; a mod's goes by name
     /// and is heard where its resources define it. True means queued, not
     /// heard.
     #[access(WorldOnly)]
@@ -1241,6 +1251,7 @@ pub trait LevelsBackendMut {
         source: SoundSource,
         volume: f32,
         pitch: f32,
+        except: Option<PlayerRef>,
     ) -> bool;
     /// Side: server.
     /// Sends `count` particles around `at` to the players in this level

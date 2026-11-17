@@ -19,6 +19,7 @@ pub(crate) struct Installed {
     pub(crate) block_entity_transforms: HashMap<String, Arc<dyn crate::BlockEntityTransform>>,
     pub(crate) entity_attributes: Vec<EntityAttributeDeclaration>,
     pub(crate) world_fluids: Vec<(String, crate::WorldFluid)>,
+    pub(crate) fluid_interactions: Vec<crate::FluidInteraction>,
     pub(crate) entity_attribute_modifications: Vec<EntityAttributeModification>,
     pub(crate) attributes: Vec<super::attributes::AttributeDeclaration>,
     pub(crate) attribute_widenings: Vec<super::attributes::AttributeBoundsWidening>,
@@ -42,6 +43,7 @@ pub(crate) struct Installed {
     pub(crate) controllers: Vec<ControllerInfo>,
     pub(crate) arm_poses: Vec<crate::client::arm_pose::PoseInfo>,
     pub(crate) structure_types: Vec<crate::world::structure_type::StructureTypeInfo>,
+    pub(crate) feature_types: Vec<crate::world::feature_type::FeatureTypeInfo>,
     pub(crate) loot_modifier_serializers:
         Vec<crate::parts::loot_modifiers::LootModifierSerializerInfo>,
     pub(crate) dimensions: Vec<crate::world::dimension::DimensionInfo>,

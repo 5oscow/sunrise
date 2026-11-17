@@ -66,6 +66,17 @@ class ReleaseTrainTests(unittest.TestCase):
             _, body = train.notes("launcher", "launcher@0.2.0", prs, [])
             self.assertNotIn("#27", body)
 
+    def test_a_published_launcher_pre_release_is_the_next_baseline(self):
+        page = [{"tag_name": "launcher@1.0.1", "draft": True, "prerelease": True},
+                {"tag_name": "launcher@1.0.0", "draft": False, "prerelease": True},
+                {"tag_name": "nightly", "draft": False, "prerelease": True}]
+        with mock.patch.object(train, "gh_json", return_value=[page]), \
+                mock.patch.object(train, "merged_between", return_value=[]) as between:
+            last, prs = train.gather("launcher", "head")
+        self.assertEqual(last["tag_name"], "launcher@1.0.0")
+        between.assert_called_once_with("launcher", "launcher@1.0.0", "head")
+        self.assertFalse(train.decision("launcher", prs, NOW)[0])
+
     def test_release_metadata_errors_are_not_imports(self):
         with mock.patch.object(train, "merged_pull_requests", return_value=[(28, "own")]), \
                 mock.patch.object(train, "gh_json", side_effect=RuntimeError("API unavailable")):
@@ -143,6 +154,33 @@ class ReleaseTrainTests(unittest.TestCase):
                     self.assertEqual(result.returncode, 0, result.stderr)
                     self.assertEqual(output.read_text(),
                                      "tag=launcher@0.2.0\nversion=0.2.0\nrelease=true\nhead=head\n")
+
+    def test_launcher_real_dispatch_refuses_a_commit_behind_main_unless_base_names_it(self):
+        workflow = (train.ROOT / ".github/workflows/launcher.yml").read_text()
+        step = workflow.split("      - id: decide\n", 1)[1].split("\n  build:", 1)[0]
+        script = textwrap.dedent(step.split("        run: |\n", 1)[1]).replace("${{ steps.mode.outputs.dry_run }}", "false")
+        # The release base check (the `if [[ -n "$BASE" ]]` block) needs a repository; this exercises what follows.
+        script = script.replace('if [[ -n "$BASE" ]]; then', 'if false; then', 1)
+        cases = [
+            (dict(BASE="", EVENT="workflow_dispatch", DRY_RUN="false"), "older", False),
+            (dict(BASE="", EVENT="workflow_dispatch", DRY_RUN="false"), "head", True),
+            (dict(BASE="", EVENT="workflow_dispatch", DRY_RUN="true"), "older", True),
+            (dict(BASE="", EVENT="schedule", DRY_RUN="false"), "older", True),
+        ]
+        for env, picked, passes in cases:
+            with self.subTest(env=env, picked=picked), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                (root / "tools").mkdir()
+                (root / "tools/release_train.py").write_text(
+                    "import json\n"
+                    f"print(json.dumps({{'reason': 'ready', 'tag': 'launcher@0.2.0', 'head': '{picked}'}}))\n")
+                result = subprocess.run(["bash", "-e", "-c", script], cwd=root, capture_output=True, text=True,
+                                        env={**os.environ, **env, "GITHUB_OUTPUT": str(root / "output"),
+                                             "GITHUB_STEP_SUMMARY": str(root / "summary"), "GITHUB_SHA": "head",
+                                             "SOURCE_SHA": "head", "FORCE": ""})
+                self.assertEqual(result.returncode == 0, passes, result.stdout + result.stderr)
+                if not passes:
+                    self.assertIn("not main's head", result.stdout)
 
     def test_player_facing_paths(self):
         exporters = {"mods/sunrise/src/test/java/dev/sunriselab/parity/VanillaMobDataExporter.java"}
@@ -525,6 +563,13 @@ class ReleaseTrainTests(unittest.TestCase):
         clone = next(line for line in body.splitlines() if line.startswith("git clone "))
         self.assertEqual(shlex.split(clone)[3], tag)
         self.assertNotIn("{tag}", body)
+
+    def test_the_first_fork_launcher_release_lists_no_pull_requests(self):
+        _, body = train.notes("launcher", "launcher@1.0.0", [pr(3, "CI: a runner change")], [],
+                              repository="sunrise-org/sunrise")
+        self.assertIn("The first release of Sunrise's launcher.", body)
+        self.assertNotIn("(#3)", body)
+        self.assertNotIn("Thanks to", body)
 
     def test_a_game_release_opens_with_the_way_to_the_launcher(self):
         # GitHub's latest is a game release: whoever lands on it is sent to the launcher first (#1647).

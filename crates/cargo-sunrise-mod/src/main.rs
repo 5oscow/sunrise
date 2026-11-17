@@ -5,7 +5,7 @@
 //!   `--template native|wasm [--sunrise <build>]`, a code mod pinned to the current Nightly's
 //!   SDK unless `--sunrise` names another build (`nightly-<date>` or a sha), with that SDK fetched
 //!   into `.sunrise/sdk/` (`sdk_fetch.rs`).
-//! - `update [--sunrise <build>]`: repin this native mod and diff/refresh declared internals.
+//! - `update [--sunrise <build>]`: repin this mod; for a native mod, also diff/refresh declared internals.
 //! - `inject update [--accept <id>]…`: refresh declarations without repinning.
 //! - `inject sync --repo <game checkout>`: validate API injection pins against a game catalog.
 //! - `inject add <at> --kind <kind> [--call <callee>] [--nth N] [--with <fn>]`: pin an inject.
@@ -276,20 +276,22 @@ fn pin(sunrise: Option<&str>) -> Result<String, String> {
     )
 }
 
-/// Repins the native mod, reporting signature changes before writing. Its `Cargo.toml` names the
-/// SDK by path, so only the pin moves; the next command fetches the new SDK.
+/// Repins the mod. A native mod's declared internals and injects are checked against the new
+/// build first, reporting signature changes before writing; a wasm mod has none, so only its pin
+/// moves. `Cargo.toml` names the SDK by path, so the next command fetches the new one.
 fn update(dir: &Path, sunrise: Option<&str>, accept: &[&str]) -> Result<(), String> {
     let path = dir.join(MANIFEST);
     let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
     let manifest = Manifest::parse(&text)?;
-    let native = manifest
-        .native
-        .as_ref()
-        .ok_or("update needs a [native] mod")?;
+    let sunrise = pin(sunrise)?;
+    let Some(native) = manifest.native.as_ref() else {
+        sdk_fetch::repin(dir, &sunrise)?;
+        println!("Pinned to Sunrise {sunrise}");
+        return Ok(());
+    };
     let mut doc: toml_edit::DocumentMut = text
         .parse()
         .map_err(|e| format!("{}: {e}", path.display()))?;
-    let sunrise = pin(sunrise)?;
     if !manifest.internals.is_empty() || manifest.inject.iter().any(|i| i.hash.is_none()) {
         // #2593: these become the pinned catalogs with the mod's own modules applied.
         let old = internals::load(dir, &native.sunrise)?;
@@ -310,8 +312,7 @@ fn update(dir: &Path, sunrise: Option<&str>, accept: &[&str]) -> Result<(), Stri
         doc["native"]["sunrise"].as_value_mut().expect("native pin"),
         &sunrise,
     );
-    let candidate = doc.to_string();
-    std::fs::write(&path, candidate).map_err(|e| format!("{}: {e}", path.display()))?;
+    internals::atomic_write_manifest(&path, doc.to_string())?;
     // The old pin's SDK goes; the next command fetches this one.
     sdk_fetch::repin(dir, &sunrise)?;
     println!("Pinned to Sunrise {sunrise}");
@@ -714,6 +715,46 @@ mod tests {
         // The SDK the editor reads is never part of the mod or its repository.
         let ignored = std::fs::read_to_string(path.join(".gitignore")).unwrap();
         assert!(ignored.lines().any(|line| line == "/.sunrise"), "{ignored}");
+    }
+
+    #[test]
+    fn update_moves_a_wasm_mods_cargo_pin_and_drops_its_sdk() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("greeter");
+        let old = "0123456789abcdef0123456789abcdef01234567";
+        let args = [
+            path.display().to_string(),
+            "--template".into(),
+            "wasm".into(),
+            "--sunrise".into(),
+            old.into(),
+        ];
+        new(&args).unwrap();
+        let cargo = path.join("Cargo.toml");
+        let text = std::fs::read_to_string(&cargo).unwrap();
+        let written = format!("sdk = \"{old}\"\n");
+        assert!(text.contains(&written), "{text}");
+        std::fs::write(
+            &cargo,
+            text.replace(&written, &format!("sdk   =  \"{old}\" # pinned\n")),
+        )
+        .unwrap();
+        let manifest = std::fs::read_to_string(path.join(MANIFEST)).unwrap();
+        std::fs::create_dir_all(path.join(sdk_fetch::DIR)).unwrap();
+        let newer = "89abcdef0123456789abcdef0123456789abcdef";
+        update(&path, Some(newer), &[]).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&cargo).unwrap(),
+            text.replace(
+                &written,
+                "sdk   =  \"89abcdef0123456789abcdef0123456789abcdef\" # pinned\n"
+            )
+        );
+        assert_eq!(
+            std::fs::read_to_string(path.join(MANIFEST)).unwrap(),
+            manifest
+        );
+        assert!(!path.join(sdk_fetch::DIR).exists());
     }
 }
 

@@ -58,6 +58,9 @@ impl<L: LevelAccess + ?Sized> FeatureWorld for LevelFeatureWorld<'_, '_, L> {
 }
 
 impl<L: LevelAccess + ?Sized> PlacementContext for LevelFeatureWorld<'_, '_, L> {
+    fn block_registry(&self) -> Option<&'static crate::registry::BlockRegistry> {
+        Some(self.features.registry())
+    }
     /// `BlockEntity.loadWithComponents` on the block a template just placed.
     fn set_block_entity(
         &mut self,
@@ -310,6 +313,13 @@ impl<L: LevelAccess + ?Sized> PlacementContext for LevelFeatureWorld<'_, '_, L> 
         tag: &str,
     ) -> Result<bool, PlacementQueryError> {
         let state = self.sim.state(pos(position));
+        Ok(self.in_tag(state, tag))
+    }
+    fn state_matches_tag(
+        &mut self,
+        state: BlockStateId,
+        tag: &str,
+    ) -> Result<bool, PlacementQueryError> {
         Ok(self.in_tag(state, tag))
     }
     fn max_y(&mut self) -> Result<i32, PlacementQueryError> {

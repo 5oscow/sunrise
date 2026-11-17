@@ -254,6 +254,10 @@ pub mod game {
     pub fn boss_bar_ref(epoch: WorldEpoch, uuid: u128) -> BossBarRef {
         BossBarRef { epoch, uuid }
     }
+    /// A scoreboard objective handle the game names.
+    pub fn objective_ref(epoch: WorldEpoch, id: u64) -> ObjectiveRef {
+        ObjectiveRef { epoch, id }
+    }
     /// A chunk handle the game names.
     pub fn chunk_ref(level: LevelRef, pos: [i32; 2]) -> ChunkRef {
         ChunkRef { level, pos }
@@ -378,6 +382,21 @@ pub mod game {
             BossBarRefFields {
                 epoch: self.epoch,
                 uuid: self.uuid,
+            }
+        }
+    }
+
+    #[non_exhaustive]
+    pub struct ObjectiveRefFields {
+        pub epoch: WorldEpoch,
+        pub id: u64,
+    }
+    impl Fields for ObjectiveRef {
+        type Fields<'a> = ObjectiveRefFields;
+        fn fields(&self) -> ObjectiveRefFields {
+            ObjectiveRefFields {
+                epoch: self.epoch,
+                id: self.id,
             }
         }
     }

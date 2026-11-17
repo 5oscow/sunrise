@@ -590,7 +590,14 @@ mod tests {
         // Animal.addAdditionalSaveData / readAdditionalSaveData: "InLove" (#1396).
         let mut m = rabbit();
         m.extra.in_love = 570;
-        let tag = crate::entity_nbt::mob_to_nbt(&m, [0, 0, 0, 1], None, None, |_| None);
+        let tag = crate::entity_nbt::mob_to_nbt(
+            &m,
+            [0, 0, 0, 1],
+            None,
+            None,
+            |_| None,
+            &Default::default(),
+        );
         assert_eq!(tag.get("InLove"), Some(&sunrise_core::nbt::Tag::Int(570)));
         let types = HashMap::from([(m.kind.id.clone(), m.kind.clone())]);
         let back = crate::entity_nbt::mob_from_nbt(&tag, &types, 2, None).unwrap();

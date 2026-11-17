@@ -4,6 +4,31 @@
 level, position, block state and `include_data`, true when a creative player picks with Ctrl. Return
 `None` to keep the game's item.
 
+## Breaking-crack display
+
+`BlockPart::break_progress_positions(host, event)` supplies extra positions for a
+client crack, with a mutable `ClientHost`. The event identifies the client `level`,
+original `pos`, cracked `state` and `progress` (0 through 9). Append positions to
+`event.positions`, which starts empty. The original position is drawn separately.
+For example, a multi-block can add its other three cells so all four show the same
+crack stage. NeoForge has no counterpart to this vanilla
+`LevelRenderer.destroyBlockProgress` moment.
+
+The part runs only on the cracked state's subscribed block, when a crack is set
+or changes stage/position, for both local prediction and other players' cracks.
+Repeated updates at the same stage refresh the remote crack's expiry without
+asking again. Rendering reads the stored answer, never your callback. Clearing
+the crack, closing/resetting the client level or expiring a remote crack after
+400 ticks removes its extras too. Local extras disappear with local mining.
+
+These are **display bounds**, not interaction limits: at most 64 distinct extras,
+each within Euclidean distance 8 blocks of the original position. `BlockPos`
+coordinates refer to the supplied level. The original position, duplicates,
+out-of-range values and extras past the limit are dropped with a debug log,
+never a panic. Existing render-distance and block-overlay eligibility filters
+still apply. Overlapping cracks use the highest stage for each cell. The callback
+changes neither break speed nor which blocks break, and never runs on a server.
+
 ## Light emission
 
 `BlockPart::light_emission` supplies positional light for blocks that declare
@@ -108,10 +133,18 @@ template block writes still call the rotation Part at their placed world positio
 ## Landing writes
 
 `BlockPart::fall_on` runs at vanilla's landing moment on a read-only level random host.
+Hook version 2 exposes writable `event.distance` and `event.damage_multiplier`, not calculated
+damage. Vanilla blocks supply their own pair: hay uses 0.2, beds 0.5, slime 0,
+and pointed dripstone adds 2.5 to distance and uses 2.0. Other blocks start at 1.0.
+The engine applies `floor((distance + 1e-6 - safe_fall_distance) * damage_multiplier * fall_damage_multiplier_attribute)`.
+The safe fall distance attribute defaults to 3: halving distance is not halving damage.
+A zero multiplier or distance within the safe fall means no damage or generic fall sounds.
+Creative and fall-immune entities and items keep their immunity regardless of edits.
+
 Request a deferred write with `event.request(LandingWrite::SetBlock(state))`, where `state`
 is an API `BlockState`, or `LandingWrite::DestroyBlock { drop }`. The game checks the
 complete write batch before queuing it. An invalid block key or ordinal refuses that
-callback's writes and other outputs, including damage; it never applies a valid prefix.
+callback's writes and other outputs, including distance and multiplier; it never applies a valid prefix.
 After the entity batch ticks, writes apply in request order if the block still matches
 its original landed state. That guard runs once, so a first write can change the state
 without suppressing the next write. SetBlock notifies neighbors and clients; DestroyBlock
@@ -121,7 +154,25 @@ preserves the requested resource-drop flag.
 
 `BlockPart::contents_changed(host, event)` observes a world block's storage at `setChanged`,
 with a `ServerHost`, typed `event.level`, `event.pos: BlockPos` and `event.state`. Attach it to the specific
-blocks you observe, including vanilla containers; it has no global `Hooks` counterpart. The backing
+blocks you observe, including vanilla containers; it has no global `Hooks` counterpart.
+Hook version 2 also lets an automation block entity watch another position without polling or
+attaching Parts to every possible source block type. Its Part calls
+`observer.watch_contents(host, source_pos, true)` on its live `BlockEntityRef`; false unregisters.
+The source is in the observer's level and need not be loaded. Registration is idempotent and
+joins the current transaction: abort restores the previous watches. An observer without a
+subscribing BlockPart returns `ContentsWatchError::NotSubscribed`; a stale or unwritable
+observer returns `Stale`. A block entity temporarily taken for its own tick can still register.
+
+`event.observer` is `None` for the source's own Parts and `Some(observer)` for a watcher.
+The event's level, position and state **always describe the changed source**, not the observer.
+Source Parts run first, then a snapshot of watching observers in registration order, each one's
+subscribing Parts in their usual order. Registration changes made in a callback affect the next
+notice; an observer invalidated before its turn is skipped. A self-watch never duplicates the
+source callback. Removal, replacement and chunk unload discard the observer's watches. Reload
+alone does not restore them: the Part must call `watch_contents` again. Watches are runtime
+state, never saved. Unloading the source does not cancel watches of its position.
+
+The backing
 contents are already written, before dirty/comparator updates. Game-held vanilla container writes
 coalesce their implicit notice per backing block at root commit. Explicit `BlockEntityRef::set_changed`
 notifies immediately, even inside a transaction and for unchanged contents; abort does not retract

@@ -15,3 +15,4 @@ sunrise-client game::native_level_placement_tests::a_break_effect_is_played_for_
 sunrise-client game::native_small_reads_tests::a_client_reads_the_light_of_its_level lib daily resources
 sunrise-client game::native_small_reads_tests::a_guests_sprinting_survives_a_turn lib daily resources
 sunrise-client game::native_small_reads_tests::the_tick_rate_is_frozen_on_a_server_only lib daily resources
+sunrise-client game::native_level_sound_except_tests::a_level_sound_leaves_out_the_player_asked lib daily resources

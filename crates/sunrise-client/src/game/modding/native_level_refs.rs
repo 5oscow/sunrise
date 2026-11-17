@@ -533,6 +533,16 @@ impl Game<'_> {
         let [x, y, z] = pos;
         world.is_loaded_at(x, y, z).then(|| world.block(x, y, z))
     }
+    /// `BlockState.isRedstoneConductor(level, pos)` of the block at `pos`. None for a stale
+    /// handle, a client or an unloaded `pos`.
+    pub(super) fn level_is_redstone_conductor(
+        &self,
+        level: LevelRef,
+        pos: [i32; 3],
+    ) -> Option<bool> {
+        let state = self.level_block_state(level, pos)?;
+        Some(self.res.behaviours().is_redstone_conductor(state))
+    }
     /// Preview a held tool's transformation without changing the block or stack. The existing
     /// block-tool hook fires with `simulated` true; listeners must not mutate the level in a
     /// simulation. The player must be live in the level in place, and the block must be loaded;
@@ -2201,7 +2211,7 @@ mod tests {
             let root = game.save.root.clone();
             let shape = game.world.shape;
             game.native_levels_closing();
-            let save = SaveDir::new(root, shape);
+            let save = SaveDir::new(root, shape, Some(Default::default()));
             let chunk = save.load(0, 0, registry, game.res.biomes()).unwrap();
             game.world = World::new(registry.default_state("minecraft:air").unwrap(), 0);
             game.world.chunks.insert((0, 0), Arc::new(chunk));
@@ -2612,7 +2622,11 @@ mod tests {
                     std::env::temp_dir().join(format!("sunrise-validate-{}", std::process::id()));
                 game.world_root = world.clone();
                 let root = sunrise_client::save::dimension_dir(&world, other.id());
-                let save = sunrise_client::save::SaveDir::new(root, other.shape());
+                let save = sunrise_client::save::SaveDir::new(
+                    root,
+                    other.shape(),
+                    Some(Default::default()),
+                );
                 let mut tickets = sunrise_client::mod_chunk_tickets::ModTickets::default();
                 tickets.insert(saved("machines:quarry", [1, 64, 1], (7, 7)));
                 tickets.insert(saved("machines:quarry", [9, 64, 9], (8, 8)));

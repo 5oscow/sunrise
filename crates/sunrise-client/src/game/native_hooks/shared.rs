@@ -1653,7 +1653,7 @@ pub(super) const BLOCK_CONTACT_HOOKS: sunrise_client::block_contact::Hooks =
                 }
             }
         },
-        fall_on: |dimension, level, c, distance, damage, writes| {
+        fall_on: |dimension, level, c, distance, damage_multiplier, writes| {
             HitLevel(level.reborrow()).native_fall_on(
                 crate::game::native_hooks::fire::FallOnCall {
                     dimension,
@@ -1662,7 +1662,7 @@ pub(super) const BLOCK_CONTACT_HOOKS: sunrise_client::block_contact::Hooks =
                     state: c.state,
                     pos: c.position,
                     distance,
-                    damage,
+                    damage_multiplier,
                     writes,
                 },
             );
@@ -4000,6 +4000,7 @@ mod tests {
                     pos,
                     game.world.block_entities.get(&pos).unwrap(),
                     block,
+                    &Default::default(),
                 );
                 assert_eq!(saved.get("energy"), Some(&Tag::Long(6301)));
                 let (saved_pos, restored) =
@@ -4013,6 +4014,7 @@ mod tests {
                     pos,
                     game.world.block_entities.get(&pos).unwrap(),
                     block,
+                    &Default::default(),
                 );
                 assert_eq!(saved.get("energy"), Some(&Tag::Long(6302)));
             }
@@ -4022,7 +4024,7 @@ mod tests {
             use crate::game::api_values::TryIntoApi;
             let written = game.with_level(|_, level, ticks| {
                 LevelWriteHost::set_block(
-                    &mut super::super::mod_api_host::LevelTicks { level, ticks },
+                    &mut super::super::mod_api_host::LevelTicks::new(level, ticks),
                     [5, 64, 0],
                     first.try_into_api().unwrap(),
                     BlockUpdateFlags::NONE,
@@ -4135,7 +4137,8 @@ mod tests {
             assert_eq!(machine.data, [7]);
             assert_ne!(machine.revision(), made);
             assert!(game.world.modified.contains(&(0, 0)));
-            let saved = block_entity_encode::encode(pos, entity, "minecraft:stone");
+            let saved =
+                block_entity_encode::encode(pos, entity, "minecraft:stone", &Default::default());
             let (saved_pos, loaded) = decode_block_entity(&saved).unwrap();
             assert_eq!(saved_pos, pos);
             assert_eq!(loaded.id(), "test:machine");
@@ -5040,7 +5043,7 @@ mod item_fall_on_tests {
                 event.kind.to_owned(),
                 event.pos,
                 event.distance,
-                event.damage,
+                event.damage_multiplier,
             ));
             event.request(mod_api::LandingWrite::DestroyBlock { drop: false });
         }

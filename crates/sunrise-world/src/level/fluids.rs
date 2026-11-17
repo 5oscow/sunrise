@@ -4,6 +4,7 @@ use super::{
     Behaviours, LevelAccess, Sim, Spread,
     buckets::{Douse, Drain, PlacedLiquid},
     classes::{Class, Interface},
+    fluid_interactions::{Cell, first_match},
     update::{HORIZONTAL, above, below, rel},
 };
 use crate::{
@@ -817,39 +818,31 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
 
     // ---- LiquidBlock ----
 
-    /// `LiquidBlock.shouldSpreadLiquid`, including lava's conversions.
+    /// `LiquidBlock.shouldSpreadLiquid`, through the open world's fluid interactions (vanilla's
+    /// two lava rules and the mods' entries, `fluid_interactions`). A fluid with none spreads.
+    /// A match goes through the `fluid_place_block` veto, fizzes and stops the spread.
     pub(crate) fn should_spread_liquid(&mut self, pos: BlockPos, state: BlockStateId) -> bool {
         let b = self.b;
-        if !b.is_lava_fluid(b.fluid(state).kind()) {
+        let Some(interactions) = b.fluid_interactions(b.fluid(state).kind()) else {
             return true;
-        }
-        let over_soul_soil = b.is_block(self.below_state(pos), b.named.soul_soil);
-        for direction in POSSIBLE_FLOW_DIRECTIONS {
+        };
+        let neighbours = POSSIBLE_FLOW_DIRECTIONS.map(|direction| {
             let neighbour = rel(pos, direction.opposite());
-            if b.is_water_fluid(self.fluid_at(neighbour).kind()) {
-                let block = if self.fluid_at(pos).is_source() {
-                    b.named.obsidian
-                } else {
-                    b.named.cobblestone
-                };
-                if let Some(state) = self.level.fluid_place_block(pos, pos, b.default_of(block)) {
-                    self.set_block_and_update(pos, state);
-                }
-                self.level_event(1501, pos, 0);
-                return false;
+            Cell {
+                fluid: self.fluid_at(neighbour).kind(),
+                block: b.block(self.state(neighbour)),
             }
-            if over_soul_soil && b.is_block(self.state(neighbour), b.named.blue_ice) {
-                if let Some(state) =
-                    self.level
-                        .fluid_place_block(pos, pos, b.default_of(b.named.basalt))
-                {
-                    self.set_block_and_update(pos, state);
-                }
-                self.level_event(1501, pos, 0);
-                return false;
-            }
+        });
+        let below = b.block(self.below_state(pos));
+        let source_cell = self.fluid_at(pos).is_source();
+        let Some(result) = first_match(&interactions, neighbours, below, source_cell) else {
+            return true;
+        };
+        if let Some(state) = self.level.fluid_place_block(pos, pos, result) {
+            self.set_block_and_update(pos, state);
         }
-        true
+        self.level_event(1501, pos, 0);
+        false
     }
     /// `LiquidBlock.onPlace` / `neighborChanged`.
     pub(crate) fn liquid_block_changed(&mut self, pos: BlockPos, state: BlockStateId) {

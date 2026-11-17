@@ -659,6 +659,7 @@ impl Game<'_> {
         // A reload from the title can apply before the start's world-rest worker is done.
         self.join_world_rest()?;
         self.resolve_entity_renderers();
+        self.resolve_client_item_extensions()?;
         super::native_special_renderers::reload();
         self.texture_atlases_stitched();
         self.native_model_baking_completed();

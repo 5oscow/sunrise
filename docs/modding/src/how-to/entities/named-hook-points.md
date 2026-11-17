@@ -64,6 +64,14 @@ delta, not an earlier listener's replacement. Later listeners do not run on that
 invocation, and the failed listener is disabled for this hook for the session;
 its other hooks remain enabled. Native and wasm listeners share this contract.
 
+A mod moves an entity through the same moment with `EntityRef::move_by(host, delta, cause)`
+(`Entity.move(cause, delta)`, server only): the collision scan stops it at blocks, the world border and
+entities, it steps up, and its ground flag follows; its velocity is left as it is, and it is no teleport. The
+`entity_move` hook fires once for it with `cause`, and a cancelled move returns `[0.0; 3]`. It returns how
+far the entity moved, and None for a stale handle, on a client, for a player (teleport it), for an entity
+outside the game's entity walk (a display, a painting, a frame, an End crystal, a dragon part) and for a delta
+that is not finite or beyond 64 blocks on an axis. Fall damage and block effects stay with the entity's tick.
+
 ## Teleport hooks
 
 `ender_pearl_teleport` covers player-owned and mob-owned pearls. Its `owner` is an
@@ -102,3 +110,17 @@ notifies the server.
 The neighbouring events differ: canceling Start prevents the use beginning,
 but duration zero does begin it. Canceling Stop skips only release-using, not
 clearing the use. Finish is not cancellable; its result stack can be replaced.
+
+## Player size and pose fit
+
+`entity_size` resolves dimensions through a read-only `Host` on both native and wasm.
+Before player motion, standing, crouching and swimming candidates are resolved;
+an unchanged current-pose answer is reused. The fit test and pose application share
+the resolved answer. Answer using the event's pose, not the entity's current pose:
+a candidate need not become the actual pose. With subscribers, candidate resolution
+dispatches 2–3 times per player tick; keep the listener cheap.
+
+Cached answers are keyed by pose and vanilla dimensions. A scale change after
+resolution or a replay with another key uses vanilla for that fit decision until
+the next pre-motion resolution. Uncached fall-flying, sleeping and spin-attack
+candidates also use vanilla dimensions.

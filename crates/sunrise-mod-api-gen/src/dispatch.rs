@@ -298,6 +298,22 @@ pub(super) fn emit<'a>(
                     param,
                 )
             });
+        // A block notice may identify a watching block entity. Its Parts receive
+        // the source payload without changing the declared source key.
+        let observer_routed = hook
+            .scope
+            .as_ref()
+            .is_some_and(|scope| scope.kind == PartKind::Block)
+            && args.iter().any(|(arg, ty)| {
+                arg == "observer"
+                    && ty
+                        .to_token_stream()
+                        .to_string()
+                        .replace("mod_api :: ", "")
+                        .split_whitespace()
+                        .collect::<String>()
+                        == "Option<BlockEntityRef>"
+            });
         // A scoped hook's parts: the trait its method goes on, and the lookup
         // of the parts attached to the thing its `key` argument names.
         let scoped = match &hook.scope {
@@ -321,6 +337,15 @@ pub(super) fn emit<'a>(
                     .ok_or_else(|| format!("key {key} is not an argument of {name}"))?;
                 let key_type = ty.to_token_stream().to_string().replace("mod_api :: ", "");
                 let lookup = match key_type.as_str() {
+                    "BlockState" if table == "block" && observer_routed => {
+                        let host = &host
+                            .as_ref()
+                            .ok_or("block observer routing needs a Host")?
+                            .0;
+                        format!(
+                            "block_key(match observer {{ Some(observer) => observer.level.block(&*{host}, observer.position), None => Some({key}.block()) }})"
+                        )
+                    }
                     "BlockState" if table == "block" => format!("block_value({key})"),
                     "BlockState" => {
                         format!(
@@ -677,6 +702,7 @@ pub(super) fn emit<'a>(
                         PartKind::Block => Some(scope.key.as_str()),
                         _ => None,
                     }),
+                    observer_routed,
                     &surface_calls,
                     match hook.stack_count {
                         Some(crate::catalog::StackCount::Trim) => hook.out.as_deref(),
@@ -945,11 +971,12 @@ pub(super) fn emit<'a>(
                     call(&mod_item, "break"),
                 ),
             ),
-            None if name == "setting_changed" => (
+            None if hook.owner.is_some() => (
                 String::new(),
                 format!(
-                    "{{ let mut {entered} = super::runtime::ListenerScope::new(); for (_, owner) in super::listening(HookId::{hook_id}) {{ if owner.id != {event}.mod_id {{ continue; }} let {mod_item} = {entered}.enter(owner, \"{name}\"); {} }} }}",
+                    "{{ let mut {entered} = super::runtime::ListenerScope::new(); for (_, owner) in super::listening(HookId::{hook_id}) {{ if owner.id != {event}.{owner} {{ continue; }} let {mod_item} = {entered}.enter(owner, \"{name}\"); {} }} }}",
                     call(&mod_item, "break"),
+                    owner = hook.owner.as_deref().unwrap(),
                 ),
             ),
             None if mod_cancel && hook.isolate => (
@@ -1062,7 +1089,9 @@ fn stack_crossing(
     scoped: bool,
     surfaces: &std::collections::HashMap<&str, String>,
 ) -> Option<StackCrossing> {
-    stack_crossing_routed(args, output, false, hook_id, scoped, None, surfaces, None)
+    stack_crossing_routed(
+        args, output, false, hook_id, scoped, None, false, surfaces, None,
+    )
 }
 
 fn stack_crossing_routed(
@@ -1072,6 +1101,7 @@ fn stack_crossing_routed(
     hook_id: &str,
     scoped: bool,
     block_scope: Option<&str>,
+    observer_routed: bool,
     surfaces: &std::collections::HashMap<&str, String>,
     trim_count_output: Option<&str>,
 ) -> Option<StackCrossing> {
@@ -1100,7 +1130,12 @@ fn stack_crossing_routed(
     let mut before =
         format!("if !mod_api::__private::{guard}(mod_api::HookId::{hook_id}) {{ return; }} ");
     if let Some(key) = block_scope {
-        before.push_str(&format!("if !crate::game::api_values::block_state::block_listens(mod_api::HookId::{hook_id}, {key}) {{ return; }} "));
+        let source_route = if observer_routed {
+            "observer.is_none() && "
+        } else {
+            ""
+        };
+        before.push_str(&format!("if {source_route}!crate::game::api_values::block_state::block_listens(mod_api::HookId::{hook_id}, {key}) {{ return; }} "));
     }
     before.push_str("use crate::game::api_values::TryIntoApi; ");
     if parameters.iter().any(|(name, ty)| {
@@ -1464,6 +1499,7 @@ mod level { pub trait LevelAccess { fn block_state(&self,pos:crate::BlockPos)->c
             "Proof",
             true,
             Some("state"),
+            false,
             &Default::default(),
             None,
         )
@@ -1479,6 +1515,7 @@ mod level { pub trait LevelAccess { fn block_state(&self,pos:crate::BlockPos)->c
             "Proof",
             false,
             None,
+            false,
             &Default::default(),
             None,
         )

@@ -75,7 +75,13 @@ impl Game<'_> {
         }
         let entity = loaded_block_entity(&self.world, pos)?;
         let block = &self.pack.assets.registry.state(state)?.name;
-        save_without_metadata(&self.world, (pos[0], pos[1], pos[2]), entity, block)
+        save_without_metadata(
+            &self.world,
+            (pos[0], pos[1], pos[2]),
+            entity,
+            block,
+            self.res.items(),
+        )
     }
 
     /// The saved data of `entity` at `key` without identity or position metadata, with its
@@ -86,7 +92,7 @@ impl Game<'_> {
         entity: &BlockEntity,
         block: &str,
     ) -> Option<Compound> {
-        save_without_metadata(&self.world, key, entity, block)
+        save_without_metadata(&self.world, key, entity, block, self.res.items())
     }
 
     /// Opens a block entity's menu for a connected player (`ServerPlayer.openMenu`).
@@ -149,7 +155,7 @@ impl Game<'_> {
         let (world, block_entity) = self.native_block_entity_target(entity)?;
         let [x, y, z] = entity.fields().position;
         let block = &self.pack.assets.registry.state(world.block(x, y, z))?.name;
-        save_without_metadata(world, (x, y, z), block_entity, block)
+        save_without_metadata(world, (x, y, z), block_entity, block, self.res.items())
     }
 
     /// The vanilla lock's item predicate, if present on a loaded block entity.
@@ -176,12 +182,9 @@ impl Game<'_> {
         {
             return Ok(false);
         }
-        let Some(mut tag) = self
-            .world
-            .block_entities
-            .get(&key)
-            .and_then(|current| save_with_metadata(&self.world, key, current, &block))
-        else {
+        let Some(mut tag) = self.world.block_entities.get(&key).and_then(|current| {
+            save_with_metadata(&self.world, key, current, &block, self.res.items())
+        }) else {
             return Ok(false);
         };
         match lock {
@@ -433,7 +436,9 @@ impl Game<'_> {
             .world
             .block_entities
             .get(&key)
-            .and_then(|current| save_with_metadata(&self.world, key, current, &block))
+            .and_then(|current| {
+                save_with_metadata(&self.world, key, current, &block, self.res.items())
+            })
             .map(Tag::Compound)
         else {
             return Ok(false);
@@ -469,6 +474,36 @@ impl Game<'_> {
             .ok_or(BlockEntityError::Stale)?;
         self.container_changed(key);
         Ok(true)
+    }
+
+    /// Register a generation-bound observer in its level's keyed contents index.
+    pub(super) fn block_entity_watch_contents(
+        &mut self,
+        entity: BlockEntityRef,
+        source: mod_api::BlockPos,
+        enabled: bool,
+    ) -> Result<(), mod_api::ContentsWatchError> {
+        let fields = entity.fields();
+        if !self.level_in_place(fields.level)
+            || self.block_entity_identity(fields.level, fields.position) != Some(entity)
+        {
+            return Err(mod_api::ContentsWatchError::Stale);
+        }
+        let [x, y, z] = fields.position;
+        if !crate::game::api_values::block_state::block_listens(
+            mod_api::HookId::ContentsChanged,
+            self.world.block(x, y, z),
+        ) {
+            return Err(mod_api::ContentsWatchError::NotSubscribed);
+        }
+        self.journal_block_entity((x, y, z));
+        let observer = self.world.block_entities.identity((x, y, z)).unwrap();
+        self.world.block_entities.contents_watches.set(
+            observer,
+            (source.x, source.y, source.z),
+            enabled,
+        );
+        Ok(())
     }
 
     /// Publishes the shapes the block entity's block has in place of its declared ones, or
@@ -608,7 +643,7 @@ impl Game<'_> {
             .world
             .block_entities
             .get(&key)
-            .is_some_and(|current| nameable(key, current, &block));
+            .is_some_and(|current| nameable(key, current, &block, self.res.items()));
         if !nameable {
             return Ok(false);
         }
@@ -701,8 +736,9 @@ fn save_with_metadata(
     pos: (i32, i32, i32),
     entity: &BlockEntity,
     block: &str,
+    items: &crate::items::Items,
 ) -> Option<Compound> {
-    let mut tag = save::block_entity_data(pos, entity, block, world.block_lock(pos));
+    let mut tag = save::block_entity_data(pos, entity, block, world.block_lock(pos), items);
     Game::write_pending_loot(world, pos, &mut tag);
     let Tag::Compound(mut data) = tag else {
         return None;
@@ -718,8 +754,9 @@ pub(super) fn save_without_metadata(
     pos: (i32, i32, i32),
     entity: &BlockEntity,
     block: &str,
+    items: &crate::items::Items,
 ) -> Option<Compound> {
-    let mut data = save_with_metadata(world, pos, entity, block)?;
+    let mut data = save_with_metadata(world, pos, entity, block, items)?;
     for key in ["id", "x", "y", "z"] {
         data.remove(&key.into());
     }
@@ -727,8 +764,13 @@ pub(super) fn save_without_metadata(
 }
 
 /// Whether the block entity keeps a `CustomName` (`Nameable`): its saved form does.
-fn nameable(pos: (i32, i32, i32), entity: &BlockEntity, block: &str) -> bool {
-    let mut tag = save::block_entity_encode::encode(pos, entity, block);
+fn nameable(
+    pos: (i32, i32, i32),
+    entity: &BlockEntity,
+    block: &str,
+    items: &crate::items::Items,
+) -> bool {
+    let mut tag = save::block_entity_encode::encode(pos, entity, block, items);
     if let Tag::Compound(map) = &mut tag {
         map.insert("CustomName".into(), Tag::String("x".into()));
     }
@@ -788,7 +830,14 @@ mod tests {
     fn saved_data_omits_metadata_but_keeps_contents() {
         let world = World::new(BlockStateId(0), 0);
         let entity = BlockEntity::Chest(vec![None; 27]);
-        let data = save_without_metadata(&world, (1, 64, 2), &entity, "minecraft:chest").unwrap();
+        let data = save_without_metadata(
+            &world,
+            (1, 64, 2),
+            &entity,
+            "minecraft:chest",
+            &Default::default(),
+        )
+        .unwrap();
         for key in ["id", "x", "y", "z"] {
             assert!(!data.contains_key(&key.into()));
         }
@@ -1494,7 +1543,7 @@ mod tests {
             flags: BlockUpdateFlags,
         ) -> bool {
             game.with_level(|_, level, ticks| {
-                LevelWriteHost::set_block(&mut LevelTicks { level, ticks }, pos, state, flags)
+                LevelWriteHost::set_block(&mut LevelTicks::new(level, ticks), pos, state, flags)
             })
         }
         with_game(|game| {
