@@ -77,6 +77,41 @@ fn impl_form(items: &[syn::ImplItem], module: usize) -> WireForm {
             _ => {}
         }
     }
+    legacy_forwarded_form(items, module)
+}
+
+/// A tree from before `layout_via!` declared a forwarding impl wrote a method (the removed
+/// layout hash of the trait) that returned the other type's: `<T>::layout(visiting)` or
+/// `<T as Wire>::layout(visiting)`. Reading that old declaration keeps a surface comparison
+/// across the change from reporting every such type as moved; nothing here runs or calls it.
+fn legacy_forwarded_form(items: &[syn::ImplItem], module: usize) -> WireForm {
+    for item in items {
+        let syn::ImplItem::Fn(function) = item else {
+            continue;
+        };
+        if function.sig.ident != "layout" {
+            continue;
+        }
+        if let [syn::Stmt::Expr(syn::Expr::Call(call), None)] = &function.block.stmts[..]
+            && let syn::Expr::Path(callee) = &*call.func
+            && callee
+                .path
+                .segments
+                .last()
+                .is_some_and(|s| s.ident == "layout")
+        {
+            if let Some(qself) = &callee.qself {
+                return WireForm::Via((*qself.ty).clone(), module);
+            }
+            let mut path = callee.path.clone();
+            path.segments.pop();
+            path.segments.pop_punct();
+            if !path.segments.is_empty() {
+                return WireForm::Via(Type::Path(syn::TypePath { qself: None, path }), module);
+            }
+        }
+        return WireForm::Manual;
+    }
     WireForm::Manual
 }
 
