@@ -8,8 +8,8 @@ pub trait Hooks {
     /// id when it is on one of yours.
     /// Sunrise sends it to the server (`ContainerButtonClick`,
     /// `menu_button` there, the block entity's) and the press goes no
-    /// further. Only a block's menu has a `menu_button` to hear it: a button
-    /// on a menu opened without one reaches no mod.
+    /// further. Only a block's menu (one `block` names) has a `menu_button`
+    /// to hear it: a button on a menu opened without one reaches no mod.
     #[hook(
         version = 2,
         side = "client",
