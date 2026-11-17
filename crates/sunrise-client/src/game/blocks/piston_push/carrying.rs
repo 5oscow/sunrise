@@ -264,7 +264,15 @@ impl Game<'_> {
             if carried.length_squared() < 1.0e-18 {
                 continue;
             }
-            self.move_by_lid(Lid::Carried, rider.target, body, carried, false, stand_grid);
+            self.move_pushed_body(
+                MoverType::Carried,
+                None,
+                rider.target,
+                body,
+                carried,
+                false,
+                stand_grid,
+            );
             // It still stands on what carries it: a sideways or rising carry must not leave it
             // airborne for the next tick to find.
             match rider.target {
