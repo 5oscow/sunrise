@@ -153,3 +153,25 @@ fn an_anvil_screen_names_the_input_a_click_puts_in() {
         assert!(loaded.anvil.renamed.is_empty());
     });
 }
+
+/// CraftingMenu.slotsChanged works out a result only on a ServerLevel: a server's client's menu
+/// leaves the result slot to the server, so two stone placed in the grid show no plate there.
+#[test]
+#[ignore = "daily"]
+fn a_clients_crafting_grid_works_out_no_result() {
+    let mut ran = false;
+    with_menu(Kind::Crafting, |env, menu| {
+        ran = true;
+        menu.on_client = true;
+        menu.carried = stack("stone", 2);
+        menu.click(env, 1, 1, Input::Pickup).unwrap();
+        menu.click(env, 2, 1, Input::Pickup).unwrap();
+        assert_eq!(menu.slot(1), stack("stone", 1).as_ref());
+        assert_eq!(menu.slot(2), stack("stone", 1).as_ref());
+        assert_eq!(menu.slot(0), None);
+    });
+    assert!(
+        ran,
+        "requires prepared resources in SUNRISE_TEST_RESOURCES or .local/sunrise-client/26.3"
+    );
+}
