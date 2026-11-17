@@ -24,6 +24,15 @@ pub fn import_id(owner: &str, name: &str) -> Option<u32> {
     crate::boundary::import_index(owner, name)
 }
 
+/// What the game's table says is wrong with a built module's imports once it holds one more call
+/// (`added`, a name text): empty when the mod uses nothing the addition touches.
+pub fn mismatches_with_added_call(module: &[u8], added: &str) -> Result<Vec<String>, String> {
+    Ok(crate::imports::mismatches_with_added_call(module, added)?
+        .iter()
+        .map(ToString::to_string)
+        .collect())
+}
+
 /// Load through the shipped compiler command, substituting the downstream game executable.
 #[cfg(unix)]
 pub fn cached_answer(

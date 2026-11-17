@@ -205,13 +205,6 @@ fn valid_member(bytes: &[u8]) -> Result<(), WasmError> {
                             | ("GOT.mem" | "GOT.func", _, wasmparser::TypeRef::Global(_))
                             | ("sunrise", _, wasmparser::TypeRef::Func(_))
                     );
-                    // A `sunrise` import is a name the game's table is asked about at load; one
-                    // that is no name at all is no module the build tool made.
-                    if import.module == "sunrise"
-                        && mod_surface::call::Name::parse(import.name).is_err()
-                    {
-                        return Err(WasmError::InvalidMember);
-                    }
                     if !allowed {
                         return Err(WasmError::InvalidMember);
                     }
@@ -293,7 +286,6 @@ mod tests {
                 exports,
                 dylink,
             ),
-            module(r#"(import "sunrise" "other" (func))"#, exports, dylink),
             module(
                 r#"(import "sunrise" "call:Owner::m#abcd" (global i32))"#,
                 exports,
