@@ -2,7 +2,7 @@
 //! guest's collision exclusions (#3717): a mod's boxes in which the level's blocks don't stop the
 //! player are the same boxes its client moves it through.
 use super::{Guest, Hub, TickCtx};
-use crate::entity_solids::{Mover as Rule, Solids};
+use crate::entity_solids::{Mover as Rule, Side, Solids};
 use crate::{
     collisions::{EntityCollisions, SceneCollisions},
     world::World,
@@ -127,6 +127,9 @@ impl Hub {
             Rule::Player {
                 feet_y: from[1],
                 riding: None,
+                // The server's rule: a ghast is solid only while held still
+                // (`HappyGhast.canBeCollidedWith`, its `isClientSide` branch is the client's).
+                side: Side::Server,
             },
             Some(swept),
         );
@@ -321,6 +324,20 @@ where
     let Ok(old_shape) = VoxelShape::from_box(old.deflate(shrink)) else {
         return (fail, false, stands);
     };
+    // `getPreMoveCollisions` lists the solid entities' shapes before the blocks': one the old
+    // box did not already overlap is new as well (a creative guest, which skips the distance test,
+    // is caught here).
+    let Ok(entities) = world.entity_collisions(EntityIdentity(0), new.deflate(shrink)) else {
+        return (fail, false, stands);
+    };
+    for shape in entities {
+        if !shape
+            .join_is_not_empty(&old_shape, ShapeOp::AND)
+            .unwrap_or(true)
+        {
+            return (fail, true, stands);
+        }
+    }
     let Ok(scan) = BlockCollisionScan::new(world, context, new.deflate(shrink), false, 1 << 20)
     else {
         return (fail, false, stands);

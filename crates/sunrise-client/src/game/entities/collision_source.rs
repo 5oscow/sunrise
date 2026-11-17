@@ -60,6 +60,7 @@ impl Game<'_> {
             Rule::Player {
                 feet_y: 0.0,
                 riding: None,
+                side: Side::Server,
             },
             None,
         );

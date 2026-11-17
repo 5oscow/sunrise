@@ -92,3 +92,100 @@ fn a_reported_move_through_a_shulker_is_moved_wrongly_and_one_that_stops_at_its_
     let (wrongly, refused, _) = hub.collide(0, [22.5, 5.0, 20.5], &ctx);
     assert!(!wrongly && !refused, "a far entity: {wrongly} {refused}");
 }
+
+/// Runs `test` with a hub whose guest 0 stands at (20.5, 5, 20.5) on the floor, and its tick context.
+fn with_rig(test: impl FnOnce(&mut Hub, &TickCtx)) {
+    let Some(fixture) = crate::test_fixtures::vanilla() else {
+        return;
+    };
+    let mut world = floor(fixture);
+    let (mut hub, _rx) = hub_with_a_guest();
+    let mut next_entity = 2;
+    let border = crate::worldborder::WorldBorder::default();
+    let ctx = TickCtx {
+        sea_level: 63,
+        world: &mut world,
+        entities: &[],
+        next_entity: &mut next_entity,
+        spawn: [20.5, 5.0, 20.5],
+        spawn_angle: [0.0; 2],
+        difficulty: 2,
+        difficulty_locked: false,
+        clock_rate: 1.0,
+        tick_rate: 20.0,
+        tick_frozen: false,
+        tick_steps: Default::default(),
+        collision: Some(&fixture.collision),
+        border: &border,
+        streaming: None,
+    };
+    hub.guests.update(0, |g| {
+        g.position = [20.5, 5.0, 20.5];
+        g.on_ground = true;
+    });
+    test(&mut hub, &ctx);
+}
+
+/// `isEntityCollidingWithAnythingNew`: a report that ends inside a solid entity the old box did
+/// not overlap is refused even when it is too small to be moved wrongly, and for a creative
+/// guest, which skips the distance test; a guest already overlapping it may move within it.
+#[test]
+#[ignore = "daily"]
+fn a_report_ending_inside_a_new_solid_entity_is_refused_however_small_or_creative() {
+    with_rig(|hub, ctx| {
+        hub.move_solids = vec![shulker()];
+        // 0.2 into the shulker's west face: under the distance threshold.
+        let (wrongly, refused, _) = hub.collide(0, [21.9, 5.0, 20.5], ctx);
+        assert!(
+            !wrongly && refused,
+            "a small penetration: {wrongly} {refused}"
+        );
+
+        hub.guests
+            .update(0, |g| g.game_mode = crate::lan::guest::CREATIVE);
+        let (wrongly, refused, _) = hub.collide(0, [23.0, 5.0, 20.5], ctx);
+        assert!(!wrongly && refused, "creative: {wrongly} {refused}");
+        hub.guests
+            .update(0, |g| g.game_mode = crate::lan::guest::SURVIVAL);
+
+        // Already overlapping it: a small move within it adds nothing new.
+        hub.guests.update(0, |g| g.position = [22.3, 5.0, 20.5]);
+        let (wrongly, refused, _) = hub.collide(0, [22.4, 5.0, 20.5], ctx);
+        assert!(!wrongly && !refused, "already inside: {wrongly} {refused}");
+    });
+}
+
+/// `HappyGhast.canBeCollidedWith`: on the server only an adult held still is solid to a player;
+/// the feet-over-the-top landing is the client's.
+#[test]
+#[ignore = "daily"]
+fn a_happy_ghast_is_solid_to_a_reported_move_only_while_held_still() {
+    with_rig(|hub, ctx| {
+        let ghast = |still| Candidate {
+            still,
+            ..Candidate::fixed(
+                SolidKind::HappyGhast,
+                502,
+                Aabb::new(Vec3::new(22.0, 5.0, 19.0), Vec3::new(26.0, 9.0, 22.0)),
+            )
+        };
+        // From over its top, straight down into it: the client's own walk lands on it, the
+        // server lets a ghast that is not held still be fallen through.
+        let above = [23.0, 9.0, 20.5];
+        let into = [23.0, 5.0, 20.5];
+        hub.guests.update(0, |g| {
+            g.position = above;
+            g.on_ground = false;
+        });
+        hub.move_solids = vec![ghast(false)];
+        let (wrongly, refused, _) = hub.collide(0, into, ctx);
+        assert!(!wrongly && !refused, "not held still: {wrongly} {refused}");
+        hub.move_solids = vec![ghast(true)];
+        let (_, refused, _) = hub.collide(0, into, ctx);
+        assert!(refused, "held still, dropped into: {refused}");
+        // From the side, held still, through it.
+        hub.guests.update(0, |g| g.position = [20.5, 5.0, 20.5]);
+        let (wrongly, refused, _) = hub.collide(0, [23.0, 5.0, 20.5], ctx);
+        assert!(wrongly && refused, "held still: {wrongly} {refused}");
+    });
+}
