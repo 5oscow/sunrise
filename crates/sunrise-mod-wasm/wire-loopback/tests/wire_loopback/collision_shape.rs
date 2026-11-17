@@ -41,8 +41,8 @@ fn wire_loopback_collision_shape_carries_the_query_in_and_the_boxes_back() {
         mod_api::CollisionQuery::new(Some(7), mod_api::CollisionEntityKind::Player, Some(65.0))
             .with_descending(true)
             .with_always_collide_with_fluid(true)
-            .with_held_item("minecraft:stick")
-            .with_standable_fluids(vec!["minecraft:lava".into()]);
+            .with_held_item("minecraft:stick".into())
+            .with_standable_fluids(vec![Arc::<str>::from("minecraft:lava")].into());
     for answer in [
         None,
         Some(vec![]),

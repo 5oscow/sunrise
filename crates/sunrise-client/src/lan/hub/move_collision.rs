@@ -7,7 +7,7 @@ use std::io;
 use sunrise_core::geometry::{Aabb, ShapeOp, Vec3, VoxelShape};
 use sunrise_world::{
     block_collision_scan::{BlockCollisionScan, BlockCollisionWorld},
-    collision_context::CollisionContext,
+    collision_context::{CollisionContext, CollisionEntity, CollisionItem, EntityContextKind},
     collision_exclusions::Excluding,
     entity_obstruction::EntityIdentity,
     world_movement::{
@@ -77,6 +77,22 @@ impl Hub {
     }
 }
 
+/// The context the guest's own client moves through (`MotionWorld::context`): a player at
+/// `y` with an empty hand, so a part is asked the same query on both sides. The identity is the
+/// mover the gate names.
+fn guest_context(y: f64, descending: bool) -> CollisionContext<'static> {
+    CollisionContext::for_entity(
+        CollisionEntity {
+            identity: EntityIdentity(0),
+            kind: EntityContextKind::Player,
+            y,
+            descending,
+            main_hand: Some(CollisionItem::EMPTY),
+        },
+        false,
+    )
+}
+
 /// [`Hub::collide`] against `world`'s blocks.
 fn check_move<W>(
     g: &Guest,
@@ -104,7 +120,7 @@ where
     // the vertical part: `yDist > -0.5 || yDist < 0.5` always holds).
     // The mover's own sneaking, as CollisionContext.of(player): a sneaking
     // player descends through scaffolding.
-    let context = CollisionContext::position(g.position[1]).with_descending(g.sneaking);
+    let context = guest_context(g.position[1], g.sneaking);
     let done = resolve_world_movement(
         world,
         MovementRequest {
@@ -142,7 +158,7 @@ where
             world,
             CollisionCheckRequest {
                 entity: EntityIdentity(0),
-                context: CollisionContext::position(old.min_position().y),
+                context: guest_context(old.min_position().y, false),
                 bounds: old,
                 candidate_budget: 1_000_000,
             },

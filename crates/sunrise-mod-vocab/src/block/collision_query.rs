@@ -1,4 +1,5 @@
 //! What a collision shape query knows of the entity asking: vanilla's `EntityCollisionContext`.
+use std::sync::Arc;
 
 /// The class of the entity a collision query was made for, as the context captures it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -40,9 +41,9 @@ pub struct CollisionQuery {
     placement: bool,
     always_collide_with_fluid: bool,
     /// The main hand's item id for a living entity.
-    held_item: Option<String>,
+    held_item: Option<Arc<str>>,
     /// The fluids the entity can stand on, when it is a living one (`Entity.canStandOnFluid`).
-    standable_fluids: Vec<String>,
+    standable_fluids: Arc<[Arc<str>]>,
 }
 
 impl CollisionQuery {
@@ -78,16 +79,17 @@ impl CollisionQuery {
         self
     }
 
-    /// The same query, for a living entity holding `item` (an item id) in its main hand.
+    /// The same query, for a living entity holding `item` (an item id) in its main hand. The game
+    /// shares the id between queries rather than copying it.
     #[must_use]
-    pub fn with_held_item(mut self, item: impl Into<String>) -> Self {
-        self.held_item = Some(item.into());
+    pub fn with_held_item(mut self, item: Arc<str>) -> Self {
+        self.held_item = Some(item);
         self
     }
 
     /// The same query, for a living entity that can stand on `fluids` (fluid ids).
     #[must_use]
-    pub fn with_standable_fluids(mut self, fluids: Vec<String>) -> Self {
+    pub fn with_standable_fluids(mut self, fluids: Arc<[Arc<str>]>) -> Self {
         self.standable_fluids = fluids;
         self
     }
@@ -143,6 +145,6 @@ impl CollisionQuery {
             id.strip_prefix("minecraft:flowing_")
                 .map_or_else(|| id.to_owned(), |rest| format!("minecraft:{rest}"))
         };
-        self.standable_fluids.iter().any(|f| f == fluid) && family(above) != family(fluid)
+        self.standable_fluids.iter().any(|f| &**f == fluid) && family(above) != family(fluid)
     }
 }

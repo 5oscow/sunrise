@@ -1083,6 +1083,52 @@ mod scaffolding_sight_tests {
         );
         assert!(ran, "vanilla data is missing");
     }
+
+    /// A part that answers for the viewer is asked through the sight fast path, which reads a
+    /// state's cached shape unless the state has a contextual rule: glass blocks sight, and
+    /// opens for a viewer the part lets through.
+    #[test]
+    #[ignore = "daily"]
+    fn a_part_answers_for_the_viewer_through_the_sight_fast_path() {
+        use crate::native_client_hooks::test_hooks::{COLLISION_ANSWER, install, loop_context};
+        use sunrise_world::{block_collision::BlockCollisionRegistry, part_collision::InParts};
+        install();
+        let ran = super::with_built_test_world(
+            &[],
+            |world, registry| {
+                world.chunks.insert(
+                    (0, 0),
+                    std::sync::Arc::new(crate::chunk::Chunk::empty(0, 0)),
+                );
+                let glass = registry.default_state("minecraft:glass").unwrap();
+                world.set(0, 65, 0, glass).unwrap();
+            },
+            |w, _| {
+                let glass = w.world.block(0, 65, 0);
+                let from = Vec3::new(0.5, 64.0 + 1.62, 0.5);
+                let to = Vec3::new(0.5, 67.0, 0.5);
+                let see = || w.line_of_sight_for(Some(64.0), from, to);
+                let marked: &BlockCollisionRegistry<'_> = w.collision;
+                // Not opted in: the cached cube blocks sight, parts or not.
+                COLLISION_ANSWER
+                    .with_borrow_mut(|answer| *answer = Some(Box::new(|_| Some(Vec::new()))));
+                let context = std::sync::Arc::new(loop_context());
+                let parts = std::rc::Rc::new(crate::collision_parts::ModParts::new(context));
+                let _in = InParts::enter(parts.clone());
+                assert!(!see());
+                // Opted in, the part lets this viewer through: the fast path asked it.
+                marked.set_part_states([glass]);
+                parts.begin_tick(&std::sync::Arc::new(loop_context()));
+                assert!(see());
+                // Opted in, the part keeps the shape: sight is blocked again.
+                COLLISION_ANSWER.with_borrow_mut(|answer| *answer = Some(Box::new(|_| None)));
+                parts.begin_tick(&std::sync::Arc::new(loop_context()));
+                assert!(!see());
+                marked.set_part_states([]);
+            },
+        );
+        assert!(ran, "vanilla data is missing");
+    }
 }
 
 #[cfg(test)]

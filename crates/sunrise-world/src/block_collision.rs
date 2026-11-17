@@ -213,11 +213,12 @@ impl<'r> BlockCollisionRegistry<'r> {
     pub fn publishes_shapes(&self, state: BlockStateId) -> bool {
         self.flags(state).is_some_and(|flags| flags & 16 != 0)
     }
-    /// The state's cached shape, unless it may publish its own: a cached shape of such a state
-    /// stands only when its block entity holds none, so callers that read the cache go through
-    /// [`Self::collision_shape`] for it.
+    /// The state's cached shape, unless it may publish its own or its parts may answer for the
+    /// entity: a cached shape of such a state stands only when its block entity holds none, and
+    /// only for a query with no entity, so callers that read the cache go through
+    /// [`Self::collision_shape`] (or [`Self::collision_shape_with_context`], with a context) for it.
     pub fn static_shape(&self, state: BlockStateId) -> io::Result<Option<&VoxelShape>> {
-        if self.publishes_shapes(state) {
+        if self.publishes_shapes(state) || self.has_part(state) {
             return Ok(None);
         }
         self.cached.cached_shape(state)
@@ -227,11 +228,15 @@ impl<'r> BlockCollisionRegistry<'r> {
     pub fn may_collide(&self, state: BlockStateId) -> bool {
         self.flags(state).is_none_or(|flags| flags & 4 == 0)
     }
-    /// Whether `state` has a contextual collision rule (scaffolding, a liquid, powder snow):
-    /// its shape with an entity's context may differ from the cached one. States outside the
+    /// Whether `state` has a contextual collision rule (scaffolding, a liquid, powder snow, or
+    /// parts that answer collision queries): its shape with an entity's context may differ from
+    /// the cached one. States outside the
     /// registry count.
     pub fn has_context_rule(&self, state: BlockStateId) -> bool {
-        self.flags(state).is_none_or(|flags| flags & 8 != 0)
+        self.flags(state).is_none_or(|flags| flags & (8 | 32) != 0)
+    }
+    fn has_part(&self, state: BlockStateId) -> bool {
+        self.flags(state).is_some_and(|flags| flags & 32 != 0)
     }
     /// Whether a scan keeps `state` in the cells around its box: a large
     /// collision shape or a moving piston. States outside the registry count.
@@ -287,17 +292,19 @@ impl<'r> BlockCollisionRegistry<'r> {
         if flags.is_some_and(|flags| flags & 32 != 0)
             && let Some(shape) = part_collision::ask(state, position, context, &mut || {
                 let Some(entity) = context.living_entity() else {
-                    return Vec::new();
+                    return &[];
                 };
-                [FluidKind::Water, FluidKind::Lava]
-                    .into_iter()
-                    .filter(|kind| {
-                        world
-                            .entity_can_stand(entity, FluidState::new(*kind, 8, false))
-                            .unwrap_or(false)
-                    })
-                    .map(FluidKind::name)
-                    .collect()
+                let mut stands = |kind| {
+                    world
+                        .entity_can_stand(entity, FluidState::new(kind, 8, false))
+                        .unwrap_or(false)
+                };
+                match (stands(FluidKind::Water), stands(FluidKind::Lava)) {
+                    (false, false) => &[],
+                    (true, false) => &["minecraft:water"],
+                    (false, true) => &["minecraft:lava"],
+                    (true, true) => &["minecraft:water", "minecraft:lava"],
+                }
             })
         {
             return Ok(shape);

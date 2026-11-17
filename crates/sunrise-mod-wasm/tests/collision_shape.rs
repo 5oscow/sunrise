@@ -1,7 +1,6 @@
 //! The compiled wasm part answers a collision query like the same part natively, and what a
 //! dispatch to each costs. Run with the fixture and std built as `bench.rs` describes:
 //! `cargo test --release -p sunrise-mod-wasm --test collision_shape -- --ignored --nocapture`.
-#[allow(dead_code)]
 #[path = "fixture/src/collision_shape.rs"]
 mod fixture;
 #[path = "../src/test_stack.rs"]
@@ -124,19 +123,6 @@ fn measure(label: &str, state: BlockState) -> u128 {
 #[ignore = "daily"]
 fn a_compiled_part_answers_a_collision_query_like_the_native_one() {
     test_stack::on_guest_stack(|| {
-        mod_api::testing::with_mods(
-            vec![mod_api::ModEntry::new("collision_native", Box::new(Native))].into(),
-            || {
-                mod_api::__private::part_tests::install_parts_fixture(mod_api::__private::mods())
-                    .unwrap();
-                mod_api::__private::mark_game_thread();
-                let state = stone();
-                resolve();
-                let _phase =
-                    mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
-                measure("native part", state);
-            },
-        );
         let path =
             std::env::var("SUNRISE_WASM_FIXTURE").expect("build tests/fixture from this tree");
         let std = std::env::var("SUNRISE_WASM_STD").expect("build this tree's shared wasm std");
@@ -163,6 +149,11 @@ fn a_compiled_part_answers_a_collision_query_like_the_native_one() {
         );
         assert!(loaded.refused.is_empty(), "{:?}", loaded.refused);
         loaded.initialize(&infos).unwrap();
+        // The fixture guest declares a general entity type in `register`, which only the registration
+        // phase accepts. The scope follows `initialize`: the phase lives in the backend it installs.
+        mod_api::__private::initialize().unwrap();
+        let _registration =
+            mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::Registration);
         mod_api::testing::with_mods(loaded.mods.into(), || {
             mod_api::__private::install_packages(&infos, &[]);
             mod_api::__private::part_tests::install_parts_fixture(mod_api::__private::mods())
@@ -189,5 +180,18 @@ fn a_compiled_part_answers_a_collision_query_like_the_native_one() {
             let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
             measure("wasm part", state);
         });
+        mod_api::testing::with_mods(
+            vec![mod_api::ModEntry::new("collision_native", Box::new(Native))].into(),
+            || {
+                mod_api::__private::part_tests::install_parts_fixture(mod_api::__private::mods())
+                    .unwrap();
+                mod_api::__private::mark_game_thread();
+                let state = stone();
+                resolve();
+                let _phase =
+                    mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+                measure("native part", state);
+            },
+        );
     });
 }

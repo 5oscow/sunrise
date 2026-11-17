@@ -20,7 +20,7 @@ pub trait PartShapes {
         state: BlockStateId,
         position: BlockPos,
         context: &CollisionContext<'_>,
-        standable: &mut dyn FnMut() -> Vec<&'static str>,
+        standable: &mut dyn FnMut() -> &'static [&'static str],
     ) -> Option<VoxelShape>;
 }
 
@@ -54,7 +54,7 @@ pub(crate) fn ask(
     state: BlockStateId,
     position: BlockPos,
     context: &CollisionContext<'_>,
-    standable: &mut dyn FnMut() -> Vec<&'static str>,
+    standable: &mut dyn FnMut() -> &'static [&'static str],
 ) -> Option<VoxelShape> {
     if OPEN.load(Ordering::Relaxed) == 0 {
         return None;

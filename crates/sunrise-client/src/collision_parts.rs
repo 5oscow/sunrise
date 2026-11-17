@@ -6,7 +6,7 @@
 //! position and tick. It runs on the thread that ticks the level and nowhere else, so a worker
 //! reads the normal shape. The part holds no `Host`: it answers from the query.
 use crate::chunk::block_entity::published_shapes::PublishedShapes;
-use mod_api::{BlockEntityShapes, CollisionEntityKind, CollisionQuery};
+use mod_api::{CollisionEntityKind, CollisionQuery};
 use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
@@ -36,15 +36,15 @@ pub fn native_collision_shape(
     crate::native_client_hooks::collision_shape(context, pos, state, query, shape);
 }
 
-/// The shape `boxes` build, checked as a published shape is: at most 64 boxes, each finite and
-/// with its minimum at most its maximum on every axis.
+/// Whether `boxes` pass the bounds of a published shape: at most 64 boxes, each finite and with
+/// its minimum at most its maximum.
+pub fn check_shape(boxes: &[[f64; 6]]) -> Result<(), String> {
+    PublishedShapes::check_boxes(boxes, true).map_err(|error| format!("{error:?}"))
+}
+
+/// The shape `boxes` build, checked as [`check_shape`] does.
 pub fn build_shape(boxes: &[[f64; 6]]) -> Result<VoxelShape, String> {
-    PublishedShapes::new(BlockEntityShapes {
-        outline: Vec::new(),
-        collision: boxes.to_vec(),
-    })
-    .map(|shapes| shapes.collision().clone())
-    .map_err(|error| format!("{error:?}"))
+    PublishedShapes::build(boxes, true).map_err(|error| format!("{error:?}"))
 }
 
 /// The entity a query is for: the context's own, else the one whose move the move gate is
@@ -59,48 +59,81 @@ fn entity_of(context: &CollisionContext<'_>) -> u32 {
     }) as u32
 }
 
-fn query_of(
-    context: &CollisionContext<'_>,
-    entity: u32,
-    standable: &mut dyn FnMut() -> Vec<&'static str>,
-) -> CollisionQuery {
-    let kind = match context.entity_kind() {
-        EntityContextKind::Item => CollisionEntityKind::Item,
-        EntityContextKind::Player => CollisionEntityKind::Player,
-        EntityContextKind::Living => CollisionEntityKind::Living,
-        EntityContextKind::Other | EntityContextKind::None => CollisionEntityKind::Other,
-    };
-    let mut query = CollisionQuery::new((entity != 0).then_some(entity), kind, context.bottom())
-        .with_descending(context.is_descending())
-        .with_placement(context.is_placement())
-        .with_always_collide_with_fluid(context.always_collide_with_fluid());
-    if let Some(item) = context.held_item() {
-        query = query.with_held_item(item);
-    }
-    if context.living_entity().is_some() {
-        query = query.with_standable_fluids(standable().into_iter().map(str::to_owned).collect());
-    }
-    query
-}
-
 /// The parts of one level's tick: answers collision queries from the mods, remembering each
-/// answer for the rest of the tick.
+/// answer for the rest of the tick. One value serves every tick: [`Self::begin_tick`] empties the
+/// answers and keeps their storage and the shared names.
 pub struct ModParts {
-    context: Arc<LoopContext>,
+    context: RefCell<Arc<LoopContext>>,
     /// The answer for an entity (0: none), a position and whether the query was a placement.
     cache: RefCell<HashMap<(u32, [i32; 3], bool), Option<VoxelShape>>>,
     /// Whether a part is running: a query made inside it gets the normal shape, never a nested
     /// call.
     busy: Cell<bool>,
+    /// The item ids queries have named, shared between them.
+    items: RefCell<HashMap<String, Arc<str>>>,
+    /// The fluid lists queries have named, shared between them.
+    fluids: RefCell<Vec<(&'static [&'static str], Arc<[Arc<str>]>)>>,
 }
 
 impl ModParts {
     pub fn new(context: Arc<LoopContext>) -> Self {
         Self {
-            context,
+            context: RefCell::new(context),
             cache: RefCell::default(),
             busy: Cell::new(false),
+            items: RefCell::default(),
+            fluids: RefCell::default(),
         }
+    }
+
+    /// Starts a tick of the level `context` belongs to: nothing is remembered from the last.
+    pub fn begin_tick(&self, context: &Arc<LoopContext>) {
+        if !Arc::ptr_eq(&self.context.borrow(), context) {
+            *self.context.borrow_mut() = Arc::clone(context);
+        }
+        self.cache.borrow_mut().clear();
+    }
+
+    fn query(
+        &self,
+        context: &CollisionContext<'_>,
+        entity: u32,
+        standable: &mut dyn FnMut() -> &'static [&'static str],
+    ) -> CollisionQuery {
+        let kind = match context.entity_kind() {
+            EntityContextKind::Item => CollisionEntityKind::Item,
+            EntityContextKind::Player => CollisionEntityKind::Player,
+            EntityContextKind::Living => CollisionEntityKind::Living,
+            EntityContextKind::Other | EntityContextKind::None => CollisionEntityKind::Other,
+        };
+        let mut query =
+            CollisionQuery::new((entity != 0).then_some(entity), kind, context.bottom())
+                .with_descending(context.is_descending())
+                .with_placement(context.is_placement())
+                .with_always_collide_with_fluid(context.always_collide_with_fluid());
+        if let Some(item) = context.held_item() {
+            let mut items = self.items.borrow_mut();
+            let shared = match items.get(item) {
+                Some(shared) => Arc::clone(shared),
+                None => Arc::clone(items.entry(item.to_owned()).or_insert_with(|| item.into())),
+            };
+            query = query.with_held_item(shared);
+        }
+        if context.living_entity().is_some() {
+            let names = standable();
+            let mut fluids = self.fluids.borrow_mut();
+            let shared = match fluids.iter().find(|(known, _)| *known == names) {
+                Some((_, shared)) => Arc::clone(shared),
+                None => {
+                    let shared: Arc<[Arc<str>]> =
+                        names.iter().map(|name| Arc::from(*name)).collect();
+                    fluids.push((names, Arc::clone(&shared)));
+                    shared
+                }
+            };
+            query = query.with_standable_fluids(shared);
+        }
+        query
     }
 }
 
@@ -110,7 +143,7 @@ impl PartShapes for ModParts {
         state: BlockStateId,
         position: BlockPos,
         context: &CollisionContext<'_>,
-        standable: &mut dyn FnMut() -> Vec<&'static str>,
+        standable: &mut dyn FnMut() -> &'static [&'static str],
     ) -> Option<VoxelShape> {
         if self.busy.get() {
             return None;
@@ -124,7 +157,7 @@ impl PartShapes for ModParts {
         if let Some(answer) = self.cache.borrow().get(&key) {
             return answer.clone();
         }
-        let query = query_of(context, entity, standable);
+        let query = self.query(context, entity, standable);
         struct Running<'a>(&'a Cell<bool>);
         impl Drop for Running<'_> {
             fn drop(&mut self) {
@@ -134,8 +167,9 @@ impl PartShapes for ModParts {
         self.busy.set(true);
         let running = Running(&self.busy);
         let mut boxes = None;
-        native_collision_shape(&self.context, position, state, &query, &mut boxes);
+        native_collision_shape(&self.context.borrow(), position, state, &query, &mut boxes);
         drop(running);
+        // The game checked the boxes against the bounds; they build once, here.
         let answer = boxes.and_then(|boxes| build_shape(&boxes).ok());
         self.cache.borrow_mut().insert(key, answer.clone());
         answer
@@ -175,7 +209,7 @@ mod tests {
             BlockStateId(1),
             BlockPos::new(at[0], at[1], at[2]),
             &entity(id),
-            &mut Vec::new,
+            &mut || &[],
         )
     }
 
@@ -211,12 +245,12 @@ mod tests {
             BlockStateId(1),
             BlockPos::new(1, 64, 1),
             &placing,
-            &mut Vec::new,
+            &mut || &[],
         );
         assert_eq!(COLLISION_ASKS.get(), 4);
-        // The next tick installs fresh parts: the question is asked again.
-        let next = ModParts::new(Arc::new(loop_context()));
-        ask(&next, 7, [1, 64, 1]);
+        // The next tick starts over: the question is asked again.
+        parts.begin_tick(&Arc::new(loop_context()));
+        ask(&parts, 7, [1, 64, 1]);
         assert_eq!(COLLISION_ASKS.get(), 5);
     }
 
@@ -256,7 +290,7 @@ mod tests {
             BlockStateId(1),
             BlockPos::new(1, 64, 1),
             &context,
-            &mut Vec::new,
+            &mut || &[],
         );
         let query = seen.borrow().clone().unwrap();
         assert_eq!(query.entity(), Some(7));
@@ -271,7 +305,7 @@ mod tests {
                 BlockStateId(1),
                 BlockPos::new(3, 64, 3),
                 &CollisionContext::position(65.0),
-                &mut Vec::new,
+                &mut || &[],
             );
         });
         assert_eq!(seen.borrow().as_ref().unwrap().entity(), Some(11));

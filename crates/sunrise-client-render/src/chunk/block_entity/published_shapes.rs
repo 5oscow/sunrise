@@ -36,7 +36,10 @@ impl PublishedShapes {
         })
     }
 
-    fn build(boxes: &[[f64; 6]], collision: bool) -> Result<VoxelShape, BlockEntityShapesError> {
+    /// Checks `boxes` against the limits of `BlockEntityShapes`: at most `MAX_BOXES`, every
+    /// coordinate finite and each minimum at most its maximum. `collision` names the list in
+    /// the error.
+    pub fn check_boxes(boxes: &[[f64; 6]], collision: bool) -> Result<(), BlockEntityShapesError> {
         if boxes.len() > MAX_BOXES {
             return Err(BlockEntityShapesError::TooManyBoxes {
                 collision,
@@ -44,7 +47,6 @@ impl PublishedShapes {
                 limit: MAX_BOXES as u64,
             });
         }
-        let mut shape = VoxelShape::empty();
         for (index, bounds) in boxes.iter().enumerate() {
             let index = index as u64;
             if bounds.iter().any(|value| !value.is_finite()) {
@@ -53,6 +55,18 @@ impl PublishedShapes {
             if (0..3).any(|axis| bounds[axis] > bounds[axis + 3]) {
                 return Err(BlockEntityShapesError::InvertedBox { collision, index });
             }
+        }
+        Ok(())
+    }
+
+    /// The shape `boxes` build once they pass [`Self::check_boxes`].
+    pub fn build(
+        boxes: &[[f64; 6]],
+        collision: bool,
+    ) -> Result<VoxelShape, BlockEntityShapesError> {
+        Self::check_boxes(boxes, collision)?;
+        let mut shape = VoxelShape::empty();
+        for bounds in boxes {
             let part = VoxelShape::from_box(Aabb::new(
                 Vec3::new(bounds[0], bounds[1], bounds[2]),
                 Vec3::new(bounds[3], bounds[4], bounds[5]),

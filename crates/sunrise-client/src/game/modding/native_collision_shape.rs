@@ -11,6 +11,10 @@ use sunrise_core::position::BlockPos;
 use sunrise_world::{native_load_context::LoopContext, registry::BlockStateId};
 
 thread_local! {
+    /// The parts of the level being ticked, kept between ticks so their answers' storage and the
+    /// names they share are not built again each tick.
+    static PARTS: RefCell<Option<Rc<sunrise_client::collision_parts::ModParts>>> =
+        const { RefCell::new(None) };
     /// The blocks whose `collision_shape` parts faulted, for the session: in memory, never
     /// saved, and a new load of the mod set starts empty.
     static DISABLED: RefCell<HashSet<mod_api::BlockKey>> = RefCell::new(HashSet::new());
@@ -49,7 +53,7 @@ pub(crate) fn collision_shape(
     });
     let fault = match (ran, &boxes) {
         (Err(error), _) => Some(format!("panicked: {error}")),
-        (Ok(()), Some(boxes)) => sunrise_client::collision_parts::build_shape(boxes)
+        (Ok(()), Some(boxes)) => sunrise_client::collision_parts::check_shape(boxes)
             .err()
             .map(|error| format!("answered a shape that was refused: {error}")),
         (Ok(()), None) => None,
@@ -92,9 +96,16 @@ impl Game<'_> {
         &self,
     ) -> Option<sunrise_world::part_collision::InParts> {
         mod_api::__private::listened(mod_api::HookId::CollisionShape).then(|| {
-            sunrise_world::part_collision::InParts::enter(Rc::new(
-                sunrise_client::collision_parts::ModParts::new(self.loop_context.clone()),
-            ))
+            let parts = PARTS.with_borrow_mut(|slot| {
+                let parts = slot.get_or_insert_with(|| {
+                    Rc::new(sunrise_client::collision_parts::ModParts::new(
+                        self.loop_context.clone(),
+                    ))
+                });
+                parts.begin_tick(&self.loop_context);
+                Rc::clone(parts)
+            });
+            sunrise_world::part_collision::InParts::enter(parts)
         })
     }
 }

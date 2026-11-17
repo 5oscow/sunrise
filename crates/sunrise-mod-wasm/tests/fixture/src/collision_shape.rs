@@ -11,6 +11,7 @@ impl BlockPart for SlabForSeven {
         }
     }
 }
+#[cfg(target_arch = "wasm32")]
 pub fn register(r: &mut dyn mod_api::Registrar, cx: &mod_api::RegistrationContext) {
     if cx.mods().get("collision_shape_probe").is_none() {
         return;

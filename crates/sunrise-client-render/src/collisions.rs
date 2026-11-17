@@ -1468,7 +1468,7 @@ mod published_shape_tests {
             _: BlockStateId,
             position: BlockPos,
             context: &CollisionContext<'_>,
-            _: &mut dyn FnMut() -> Vec<&'static str>,
+            _: &mut dyn FnMut() -> &'static [&'static str],
         ) -> Option<VoxelShape> {
             self.asked.set(self.asked.get() + 1);
             (self.rule)(context, position)

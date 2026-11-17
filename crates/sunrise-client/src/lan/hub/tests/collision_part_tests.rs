@@ -10,6 +10,20 @@ use std::rc::Rc;
 use sunrise_core::geometry::Vec3;
 use sunrise_world::part_collision::InParts;
 
+/// What a part can tell of the entity apart from where it is: the same on both sides when the
+/// two ask about the same player.
+fn signature(
+    query: &mod_api::CollisionQuery,
+) -> (mod_api::CollisionEntityKind, bool, bool, bool, bool) {
+    (
+        query.kind(),
+        query.is_descending(),
+        query.is_placement(),
+        query.always_collide_with_fluid(),
+        query.is_holding_item("minecraft:air"),
+    )
+}
+
 fn scene(fixture: &crate::test_fixtures::Vanilla) -> World {
     let assets = &fixture.assets;
     let mut scene = World::test_scene(assets, &fixture.render, 2).unwrap();
@@ -43,7 +57,14 @@ fn a_client_and_a_server_that_disagree_about_a_parts_state_get_a_correction() {
     fixture.collision.set_part_states([glass]);
     let mut walled = scene(fixture);
     // The mod's state on the client says the wall is open to this guest: its part answers empty.
-    COLLISION_ANSWER.with_borrow_mut(|answer| *answer = Some(Box::new(|_| Some(Vec::new()))));
+    let client_asked = Rc::new(std::cell::RefCell::new(Vec::new()));
+    let seen = Rc::clone(&client_asked);
+    COLLISION_ANSWER.with_borrow_mut(|answer| {
+        *answer = Some(Box::new(move |query| {
+            seen.borrow_mut().push(signature(query));
+            Some(Vec::new())
+        }));
+    });
     let resources = &fixture.motion;
     let mut client = PlayerMotion::new(resources, Vec3::new(20.5, 5.0, 20.5)).unwrap();
     client.client_side = true;
@@ -84,7 +105,14 @@ fn a_client_and_a_server_that_disagree_about_a_parts_state_get_a_correction() {
     );
 
     // The server's own state says the guest is not let through: its part keeps the glass.
-    COLLISION_ANSWER.with_borrow_mut(|answer| *answer = Some(Box::new(|_| None)));
+    let server_asked = Rc::new(std::cell::RefCell::new(Vec::new()));
+    let seen = Rc::clone(&server_asked);
+    COLLISION_ANSWER.with_borrow_mut(|answer| {
+        *answer = Some(Box::new(move |query| {
+            seen.borrow_mut().push(signature(query));
+            None
+        }));
+    });
     let (mut hub, _rx) = hub_with_a_guest();
     let mut next_entity = 2;
     let border = crate::worldborder::WorldBorder::default();
@@ -118,6 +146,22 @@ fn a_client_and_a_server_that_disagree_about_a_parts_state_get_a_correction() {
     ))));
     let (_, refused, _) = hub.collide(0, walk[into], &ctx);
     assert!(refused, "the server sends the guest back");
+    // Both sides asked the same query about the same player: a player with an empty hand.
+    {
+        let (client, server) = (client_asked.borrow(), server_asked.borrow());
+        assert!(!client.is_empty() && !server.is_empty());
+        assert_eq!(client.last(), server.last());
+        assert_eq!(
+            server.last(),
+            Some(&(
+                mod_api::CollisionEntityKind::Player,
+                false,
+                false,
+                false,
+                true
+            ))
+        );
+    }
     assert_eq!(hub.guests.len(), 1, "a correction, not a kick");
     // With the same state on both sides the same move is accepted.
     COLLISION_ANSWER.with_borrow_mut(|answer| *answer = Some(Box::new(|_| Some(Vec::new()))));
