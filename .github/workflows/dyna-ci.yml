@@ -50,8 +50,11 @@ concurrency:
   # A dispatch for a pull request (`pr`) is grouped by that pull request, never by main's head; any other dispatch
   # (a snapshot's gate) by its commit, and it always finishes.
   # A parity dispatch has a group of its own, so it never replaces a waiting gate dispatch for the same head.
-  group: dyna-checks-${{ github.event.pull_request.number || inputs.pr && format('pr-{0}', inputs.pr) || github.event_name == 'push' && github.ref || github.sha }}${{ inputs.parity && '-parity' || '' }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
+  # A main push run started again (a later attempt) is a release's gate: release.yml re-runs a commit's gate that the
+  # next push cancelled before it publishes that commit (tools/release_train.py gate_again). It is grouped by its
+  # commit and always finishes.
+  group: dyna-checks-${{ github.event.pull_request.number || inputs.pr && format('pr-{0}', inputs.pr) || github.event_name == 'push' && github.run_attempt == '1' && github.ref || github.sha }}${{ inputs.parity && '-parity' || '' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' && github.run_attempt == '1' }}
 env:
   # Test runs never reach the telemetry server: no live-count ping, no uploads (docs/telemetry.md).
   SUNRISE_TELEMETRY_URL: "off"

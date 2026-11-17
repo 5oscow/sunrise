@@ -528,7 +528,7 @@ slot_keys!(registries;
         crate::content::registry_keys::resolved_items().get()?.identifiers.get(id).copied()
     };
     MenuKey => as_menu_key, "menu", |id: &crate::Identifier| {
-        crate::content::registry_keys::MENUS.read().ok()?.as_ref()?.identifiers.get(id).copied()
+        crate::content::registry_keys::resolved_menus().read().ok()?.as_ref()?.identifiers.get(id).copied()
     };
     crate::client::particle_keys::ParticleKey => as_particle_key, "particle_type", |id: &crate::Identifier| {
         crate::client::particle_keys::particle_key(id).map(|key| key.0)

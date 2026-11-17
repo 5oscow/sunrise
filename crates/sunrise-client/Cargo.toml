@@ -171,7 +171,7 @@ sunrise-mod-wasm = { path = "../sunrise-mod-wasm", features = ["runtime-fixture"
 wat = "1.261"
 tempfile = "3"
 sunrise-mod-runtime = { path = "../sunrise-mod-runtime", features = ["test-work-count"] }
-sunrise-threads = { path = "../sunrise-threads", features = ["test-allocation-count"] }
+sunrise-threads = { path = "../sunrise-threads", features = ["test-allocation-count", "test-game-dir"] }
 mod_platform = { package = "sunrise-mod-api", path = "../sunrise-mod-api", features = ["testing"] }
 mod_api = { package = "sunrise-mod-vocab", path = "../sunrise-mod-vocab", features = ["testing"] }
 sunrise-client-render = { path = "../sunrise-client-render", features = ["test-support"] }
