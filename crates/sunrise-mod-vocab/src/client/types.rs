@@ -861,10 +861,10 @@ pub struct Minimap {
     pub round: bool,
 }
 
-/// A mod block's screen over its menu (`screen`): its size, where
+/// A menu type's screen, a mod's (`screen`): its size, where
 /// each of the container's slots is (`Slot.x`, `Slot.y`; none hides the
-/// slot, and so do slots past the list; the server's menu does not have a
-/// hidden slot either, so clicks and shift-clicks skip it), and the player inventory's first
+/// slot, and so do slots past the list; for a block's menu the server's menu
+/// does not have a hidden slot either, so clicks and shift-clicks skip it), and the player inventory's first
 /// row (vanilla's is 84; the hotbar is 58 below it) and left column, from
 /// its top left.
 #[derive(Clone, Debug, Default, PartialEq)]

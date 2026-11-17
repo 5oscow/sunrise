@@ -1,1 +1,2 @@
+sunrise-client game::native_hooks::screen_position_tests::a_mod_menu_opened_without_a_block_gets_its_types_screen lib daily resources
 sunrise-client game::native_hooks::screen_position_tests::screen_draw_receives_open_blocks_position lib daily resources

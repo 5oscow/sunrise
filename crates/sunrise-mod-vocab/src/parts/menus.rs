@@ -31,7 +31,7 @@ pub fn menu_listens(hook: HookId, menu: &str) -> bool {
 }
 
 impl dyn Registrar + '_ {
-    /// Attach `part` to the mod menu type `menu`.
+    /// Attach `part` to the menu type `menu`: a mod's, or one of vanilla's that a mod block opens.
     pub fn menu_part<P: MenuPart>(&mut self, menu: &str, part: P) {
         self.attach_menu_part(menu, type_name::<P>(), Arc::new(part));
     }
@@ -56,6 +56,6 @@ pub trait MenusRegistrar {
         layout: crate::RecipeBookLayout,
         screen: crate::Screen,
     ) -> Result<(), String>;
-    /// Attach `part`, of kind `kind`, to the mod menu type `menu`.
+    /// Attach `part`, of kind `kind`, to the menu type `menu`.
     fn attach_menu_part(&mut self, menu: &str, kind: &'static str, part: Arc<dyn MenuPart>);
 }

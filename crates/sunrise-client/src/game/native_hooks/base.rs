@@ -1111,14 +1111,22 @@ impl Game<'_> {
     ) {
         self.fire_map_decorations(map, decorations);
     }
-    /// A menu opens on this client for block `block`, a mod's: set `screen`
-    /// when the block is yours, to lay its screen out (`native_screen_draw`
-    /// draws it). The server asks it too: a slot it hides is not in the menu
-    /// there either, so shift-clicks never fill it.
-    pub(in crate::game) fn native_screen(&self, block: &str, screen: &mut Option<mod_api::Screen>) {
-        self.fire_screen(block, screen);
+    /// A menu of mod menu type `menu` opens on this client: set `screen` to
+    /// lay its screen out (`native_screen_draw` draws it), whatever opened
+    /// the menu. `block` is the mod block at the menu's position whose
+    /// container opens this menu type (`menu_opener_block`), none without
+    /// one. For a block's menu the server asks it too: a slot it hides is not
+    /// in the menu there either, so shift-clicks never fill it.
+    pub(in crate::game) fn native_screen(
+        &self,
+        menu: &str,
+        block: Option<&str>,
+        screen: &mut Option<mod_api::Screen>,
+    ) {
+        self.fire_screen(menu, block, screen);
     }
-    /// Draw block `block`'s screen at `origin` (its top left, GUI pixels),
+    /// Draw the screen of mod menu type `menu` (`block` as in
+    /// `native_screen`) at `origin` (its top left, GUI pixels),
     /// over a plain panel with its slots' frames and under the items and
     /// labels, from the menu's data slots `data` (the block entity's `data`
     /// on the server): data slots are 16-bit on the wire as in vanilla (a
@@ -1127,13 +1135,14 @@ impl Game<'_> {
     /// `native_text`.
     pub(in crate::game) fn native_screen_draw(
         &self,
-        block: &str,
+        menu: &str,
+        block: Option<&str>,
         pos: Option<[i32; 3]>,
         data: &[i32],
         draw: &mut HudBatch,
         origin: [f32; 2],
     ) {
-        self.fire_screen_draw(block, pos, data, draw, origin);
+        self.fire_screen_draw(menu, block, pos, data, draw, origin);
     }
     /// The open screen has drawn itself and its tooltips (`Screen.render`,
     /// the point of `ScreenEvent.Render.Post`): draw over it with
@@ -1343,32 +1352,36 @@ impl Game<'_> {
         self.fire_screen_char_typed_pre(screen, c, modifiers, field, canceled);
     }
     /// A left or right (`right`) press at `at` (GUI pixels from the screen's
-    /// top left, so outside it too) on block `block`'s screen, a mod's, over
-    /// no slot: set `button` to a menu button id when it is on one of yours.
+    /// top left, so outside it too) on the screen of mod menu type `menu`
+    /// (`block` as in `native_screen`), over no slot: set `button` to a menu
+    /// button id when it is on one of yours.
     /// Sunrise sends it to the server (`ContainerButtonClick`,
     /// `native_menu_button` there) and the press goes no further.
     pub(in crate::game) fn native_screen_click(
         &self,
-        block: &str,
+        menu: &str,
+        block: Option<&str>,
         data: &[i32],
         at: [f32; 2],
         right: bool,
         button: &mut Option<i32>,
     ) {
-        self.fire_screen_click(block, data, at, right, button);
+        self.fire_screen_click(menu, block, data, at, right, button);
     }
-    /// A mod screen's tooltip after item tooltip hooks, before its image and
+    /// The tooltip of mod menu type `menu`'s screen (`block` as in
+    /// `native_screen`) after item tooltip hooks, before its image and
     /// component gathering. `slot` is the hovered menu index, or None outside
     /// a mapped slot. The listener's final lines replace the item's lines.
     pub(in crate::game) fn native_screen_tooltip(
         &self,
-        block: &str,
+        menu: &str,
+        block: Option<&str>,
         data: &[i32],
         at: [f32; 2],
         slot: Option<u32>,
         lines: &mut Vec<(Text, u32)>,
     ) {
-        self.fire_screen_tooltip(block, data, at, slot, lines);
+        self.fire_screen_tooltip(menu, block, data, at, slot, lines);
     }
     /// A player pressed a mod container's button (`clickMenuButton`), on
     /// the server. The block entity is out of the world during the call;

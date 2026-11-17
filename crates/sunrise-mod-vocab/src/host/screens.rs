@@ -45,14 +45,14 @@ pub trait ScreensClientHost {
     #[access(ClientSetup)]
     fn screen_hovered_item(&self) -> Option<ItemKey>;
     /// Side: client.
-    /// Where the open mod screen of block `block` puts container slot `slot` from the next
+    /// Where the open screen of mod menu type `menu` puts container slot `slot` from the next
     /// frame (`Slot.x`, `Slot.y` in GUI pixels from the screen's top left, the item's top left
     /// corner): where `set_screen_slot` last put it, else where the screen declared it. None
-    /// for a hidden slot, another block's screen, or none open.
+    /// for a hidden slot, another menu type's screen, or none open.
     #[access(ClientSetup)]
-    fn screen_slot(&self, block: &str, slot: usize) -> Option<[f32; 2]>;
+    fn screen_slot(&self, menu: &str, slot: usize) -> Option<[f32; 2]>;
     /// Side: client.
-    /// Moves container slot `slot` of the open mod screen of block `block` to `pos`, or hides
+    /// Moves container slot `slot` of the open screen of mod menu type `menu` to `pos`, or hides
     /// it with None, as a Java screen that lays its slots out again sets `Slot.x`/`Slot.y` or
     /// deactivates a slot (Tinkers' station layouts). `slot` indexes `Screen::slots`. From the
     /// next frame the slot is a vanilla slot at that position: the hovered slot (the 18 by 18
@@ -68,7 +68,7 @@ pub trait ScreensClientHost {
     #[access(ClientSetup)]
     fn set_screen_slot(
         &self,
-        block: &str,
+        menu: &str,
         slot: usize,
         pos: Option<[f32; 2]>,
     ) -> Result<(), ScreenSlotRefusal>;

@@ -2,24 +2,25 @@
 // catalog-order: 0028
 
 pub trait Hooks {
-    /// Draw block `block`'s screen at `origin` (its top left, GUI pixels),
-    /// over a plain panel with its slots' frames and under the items and
-    /// labels, from the menu's data slots `data` (the block entity's `data`
-    /// on the server): data slots are 16-bit on the wire as in vanilla (a
-    /// bigger value wraps), and `data` is empty until the server's first
-    /// values arrive, so read it with `get`. Draw with `native_sprite`, `native_fill` and
-    /// `native_text`.
+    /// Draw the screen of mod menu type `menu` at `origin` (its top left, GUI
+    /// pixels), over a plain panel with its slots' frames and under the items
+    /// and labels, from the menu's data slots `data` (the block entity's
+    /// `data` on the server): data slots are 16-bit on the wire as in vanilla
+    /// (a bigger value wraps), and `data` is empty until the server's first
+    /// values arrive, so read it with `get`. Draw with `native_sprite`,
+    /// `native_fill` and `native_text`.
+    /// `block` is the mod block whose menu it is, as in `screen`.
     /// `pos` is the open menu's block position, as reported by the server
     /// (or the clicked block for a server without menu-extra support).
     /// It is `None` for a menu opened without a block position. Read the
     /// client level's current view at this position through the existing
     /// both-sided level reads; it is not an authoritative server snapshot.
     #[hook(
-        version = 2,
+        version = 3,
         side = "client",
         contract = "listen",
-        scope = "block_entity",
-        key = "block",
+        scope = "menu",
+        key = "menu",
         neoforge = "none (see screen)"
     )]
     fn screen_draw();
