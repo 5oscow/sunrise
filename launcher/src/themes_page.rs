@@ -39,9 +39,9 @@ impl Launcher {
     /// field and its main button) under the appearance on screen.
     pub(super) fn launcher_theme_row(&mut self, cx: &mut Context<Self>) -> Div {
         let t = self.theme;
-        let current = themes::theme(self.settings.theme.as_deref()).map(|th| th.id);
+        let current = Some(themes::accent_key(self.settings.theme.as_deref()));
         let mut options: Vec<(Option<&'static str>, &'static str, &'static str, Night)> = vec![(
-            None,
+            Some(themes::SUNRISE),
             "Sunrise",
             themes::SUNRISE_DESCRIPTION,
             theme::night::NIGHT,
@@ -141,7 +141,7 @@ impl Launcher {
                         .child(tr(about)),
                 )
                 .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                    if themes::theme(this.settings.theme.as_deref()).map(|th| th.id) != id {
+                    if Some(themes::accent_key(this.settings.theme.as_deref())) != id {
                         this.pick_theme(id);
                         cx.notify();
                     }
@@ -711,8 +711,8 @@ impl Launcher {
 /// The fields Reset the launcher's look puts back: the look only.
 fn reset_look(s: &mut Settings) {
     s.appearance = Default::default();
-    s.accent = Accent::VIOLET;
     s.theme = None;
+    s.accent = themes::starting_accent(None, &Default::default());
     s.glass = None;
     s.blur = None;
     s.background = None;
@@ -741,7 +741,10 @@ mod tests {
             ..Default::default()
         };
         reset_look(&mut s);
-        assert_eq!(s.accent, Accent::VIOLET);
+        assert_eq!(
+            s.accent,
+            themes::starting_accent(Some("dawn"), &Default::default())
+        );
         assert!(s.theme_accents.is_empty());
         assert_eq!(
             (s.theme, s.glass, s.blur, s.background),

@@ -243,51 +243,38 @@ pub(crate) fn version_tag(tag: &str) -> Div {
         )
 }
 
-/// Sunrise's mark, as the Sunny panel draws it on a 16-unit grid: three rays, the stepped sun
-/// with its low warm row, and the pink horizon, centred in `size` px square.
+/// Sunrise's mark (`docs/media/brand/icon.svg`), cell for cell on its 16 grid: the rays, the sun
+/// and the horizon on the dark tile.
 pub(crate) fn mark(size: f32) -> Div {
-    let unit = size / 16.;
-    div()
-        .flex()
-        .flex_none()
-        .items_center()
-        .size(px(size))
-        .child(sunrise_glyph(unit))
-}
-
-/// The mark's pixels alone, `unit` px to a grid unit: 16 units wide and 11 tall, from the top
-/// ray to the horizon's foot.
-pub(crate) fn sunrise_glyph(unit: f32) -> Div {
-    const RAYS: u32 = 0xffe39a;
-    const SUN: u32 = 0xffcf5c;
-    const SUN_LOW: u32 = 0xffb48a;
-    const HORIZON: u32 = 0xe0458a;
-    // Rounded to whole pixels, so neighbouring rows meet without a seam at any size.
-    let rect = |x: f32, y: f32, w: f32, h: f32, colour: u32| {
-        let y = y - 3.;
-        let (x0, y0) = ((x * unit).round(), (y * unit).round());
-        let (x1, y1) = (((x + w) * unit).round(), ((y + h) * unit).round());
-        div()
-            .absolute()
-            .left(px(x0))
-            .top(px(y0))
-            .w(px(x1 - x0))
-            .h(px(y1 - y0))
-            .bg(gpui::rgb(colour))
-    };
-    div()
+    const CELLS: [(f32, f32, f32, f32, u32); 8] = [
+        (7., 3., 2., 2., 0xffe39a),
+        (2., 5., 2., 2., 0xffe39a),
+        (12., 5., 2., 2., 0xffe39a),
+        (6., 7., 4., 1., 0xffcf5c),
+        (4., 8., 8., 1., 0xffcf5c),
+        (3., 9., 10., 1., 0xffcf5c),
+        (3., 10., 10., 1., 0xffb48a),
+        (1., 12., 14., 2., 0x6f58d9),
+    ];
+    let u = size / 16.;
+    let mut tile = div()
         .relative()
         .flex_none()
-        .w(px((16. * unit).round()))
-        .h(px((11. * unit).round()))
-        .child(rect(7., 3., 2., 2., RAYS))
-        .child(rect(2., 5., 2., 2., RAYS))
-        .child(rect(12., 5., 2., 2., RAYS))
-        .child(rect(6., 7., 4., 1., SUN))
-        .child(rect(4., 8., 8., 1., SUN))
-        .child(rect(3., 9., 10., 1., SUN))
-        .child(rect(3., 10., 10., 1., SUN_LOW))
-        .child(rect(1., 12., 14., 2., HORIZON))
+        .size(px(size))
+        .rounded(px(3. * u))
+        .bg(gpui::rgb(0x100a1f));
+    for (x, y, w, h, color) in CELLS {
+        tile = tile.child(
+            div()
+                .absolute()
+                .left(px(x * u))
+                .top(px(y * u))
+                .w(px(w * u))
+                .h(px(h * u))
+                .bg(gpui::rgb(color)),
+        );
+    }
+    tile
 }
 
 /// The last thing the player did was press Tab: focused controls show a ring (a click focuses them
