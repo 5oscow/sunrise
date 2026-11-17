@@ -194,14 +194,17 @@ mod tests {
         let registry = Arc::new(BlockRegistry::from_facts_json(br#"{"defaults":{"minecraft:air":0,"minecraft:stone":1},"states":[["a",true,false,"","minecraft:air"],["s",false,false,"","minecraft:stone"]]}"#.as_slice()).unwrap());
         let barrier = Arc::new(std::sync::Barrier::new(2));
         let owners: Vec<_> = (0..2)
-            .map(|_| {
+            .map(|owner| {
                 let registry = registry.clone();
                 let barrier = barrier.clone();
                 std::thread::spawn(move || {
                     mod_platform::__private::part_tests::install_parts_fixture(&[]).unwrap();
                     let properties = std::collections::BTreeMap::new();
+                    // Each owner's metadata differs: equal metadata is one shared snapshot.
                     mod_api::__private::resolve_block_keys(
-                        ["minecraft:air", "minecraft:stone"],
+                        ["minecraft:air", "minecraft:stone"]
+                            .into_iter()
+                            .chain((owner == 1).then_some("minecraft:dirt")),
                         |_| {
                             sunrise_mod_runtime::block_definitions::BlockDefinition::new(
                                 &[&properties],
