@@ -92,6 +92,7 @@ fn block_names() -> &'static sunrise_mod_runtime::registry_keys::Names {
 fn share_blocks(
     blocks: sunrise_mod_runtime::block_definitions::Blocks,
 ) -> Arc<sunrise_mod_runtime::block_definitions::Blocks> {
+    #[cfg(any(test, feature = "testing"))]
     static SHARED: std::sync::Mutex<Vec<Arc<sunrise_mod_runtime::block_definitions::Blocks>>> =
         std::sync::Mutex::new(Vec::new());
     let mut shared = SHARED.lock().unwrap_or_else(|error| error.into_inner());
