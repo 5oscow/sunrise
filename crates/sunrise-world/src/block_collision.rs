@@ -107,8 +107,11 @@ impl<'r> BlockCollisionRegistry<'r> {
                         .into_iter()
                         .any(|axis| shape.min(axis) < 0.0 || shape.max(axis) > 1.0)
                 });
-            if let Some(rule) = ScaffoldingCollision::from_state(state)? {
-                contextual.insert(id, ContextualRule::Scaffolding(rule));
+            if cached.declares_scaffolding_collision(id) || state.name == VANILLA_SCAFFOLDING {
+                contextual.insert(
+                    id,
+                    ContextualRule::Scaffolding(ScaffoldingCollision::from_state(state)?),
+                );
             } else if let Some(rule) = LiquidCollision::from_state(state)? {
                 contextual.insert(id, ContextualRule::Liquid(rule));
             } else if state.name == "minecraft:powder_snow" {
@@ -205,6 +208,16 @@ impl<'r> BlockCollisionRegistry<'r> {
             .get(state.0 as usize)
             .is_none_or(|flags| flags & 8 != 0)
     }
+    /// Whether `state` takes scaffolding's context collision (vanilla's scaffolding, or a block
+    /// declaring `context_collision` scaffolding): also what lets a sneaking entity inside it
+    /// slide down (`isScaffolding`).
+    pub fn is_scaffolding(&self, state: BlockStateId) -> bool {
+        self.has_context_rule(state)
+            && matches!(
+                self.contextual.get(&state),
+                Some(ContextualRule::Scaffolding(_))
+            )
+    }
     /// Whether a scan keeps `state` in the cells around its box: a large
     /// collision shape or a moving piston. States outside the registry count.
     pub fn reaches_out(&self, state: BlockStateId) -> bool {
@@ -299,33 +312,41 @@ impl<'r> BlockCollisionRegistry<'r> {
     }
 }
 
-/// Entity-context scaffold selection, independent of world queries. Construction
-/// validates the descriptor so missing properties cannot silently change behavior.
+/// Vanilla's `ScaffoldingBlock`: the vanilla block whose states take [`ScaffoldingCollision`],
+/// as a declared block's do when it sets `context_collision` to scaffolding. The prepared
+/// collision table lists only declared blocks' states (`scaffolding_collision`).
+const VANILLA_SCAFFOLDING: &str = "minecraft:scaffolding";
+
+/// Entity-context scaffold selection (`ScaffoldingBlock.getCollisionShape`), independent of
+/// world queries, for vanilla's scaffolding and every block declaring `context_collision`
+/// scaffolding. Construction validates the descriptor so missing properties cannot silently
+/// change behavior.
 #[derive(Clone, Copy, Debug)]
 pub struct ScaffoldingCollision {
     supported: bool,
     bottom: bool,
 }
 impl ScaffoldingCollision {
-    pub fn from_state(state: &crate::chunk::BlockState) -> io::Result<Option<Self>> {
-        if state.name != "minecraft:scaffolding" {
-            return Ok(None);
-        }
-        let distance = state
-            .properties
-            .get("distance")
-            .and_then(|v| crate::registry::java_integer(v))
+    /// The rule of a state with scaffolding's `distance` (0 to 7) and `bottom` values; an error
+    /// names the one that is missing or out of range.
+    pub fn from_values(distance: Option<&str>, bottom: Option<&str>) -> io::Result<Self> {
+        let distance = distance
+            .and_then(crate::registry::java_integer)
             .filter(|v| (0..=7).contains(v))
             .ok_or_else(|| crate::compression::invalid("invalid scaffold distance"))?;
-        let bottom = match state.properties.get("bottom").map(String::as_str) {
+        let bottom = match bottom {
             Some("true") => true,
             Some("false") => false,
             _ => return Err(crate::compression::invalid("invalid scaffold bottom")),
         };
-        Ok(Some(Self {
+        Ok(Self {
             supported: distance == 0,
             bottom,
-        }))
+        })
+    }
+    pub fn from_state(state: &crate::chunk::BlockState) -> io::Result<Self> {
+        let value = |name| state.properties.get(name).map(String::as_str);
+        Self::from_values(value("distance"), value("bottom"))
     }
 
     pub fn shape(
@@ -359,5 +380,167 @@ impl ScaffoldingCollision {
             }
         }
         VoxelShape::empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        DATA_VERSION,
+        chunk::BlockState,
+        collision_context::{CollisionEntity, EntityContextKind},
+        entity_obstruction::EntityIdentity,
+        fluid::FluidState,
+        powder_snow_collision::PowderSnowEntity,
+    };
+    use std::convert::Infallible;
+    use sunrise_core::{nbt::Tag, position::BlockPos};
+
+    /// A world no scaffolding query reads.
+    struct NoWorld;
+    impl DynamicSupportWorld for NoWorld {
+        type Error = Infallible;
+        fn shulker_is_closed(&mut self, _: [i32; 3]) -> Result<Option<bool>, Infallible> {
+            unreachable!()
+        }
+        fn moving_piston_shape(&mut self, _: [i32; 3]) -> Result<Option<VoxelShape>, Infallible> {
+            unreachable!()
+        }
+    }
+    impl DynamicCollisionWorld for NoWorld {
+        fn shulker_collision_state(
+            &mut self,
+            _: [i32; 3],
+        ) -> Result<Option<ShulkerCollisionState>, Infallible> {
+            unreachable!()
+        }
+    }
+    impl LiquidCollisionWorld for NoWorld {
+        type Error = Infallible;
+        fn entity_liquid_shape(&mut self, _: EntityIdentity) -> Result<VoxelShape, Infallible> {
+            unreachable!()
+        }
+        fn fluid(&mut self, _: BlockPos) -> Result<FluidState, Infallible> {
+            unreachable!()
+        }
+        fn entity_can_stand(
+            &mut self,
+            _: EntityIdentity,
+            _: FluidState,
+        ) -> Result<bool, Infallible> {
+            unreachable!()
+        }
+    }
+    impl PowderSnowWorld for NoWorld {
+        type Error = Infallible;
+        fn powder_snow_entity(
+            &mut self,
+            _: EntityIdentity,
+        ) -> Result<PowderSnowEntity, Infallible> {
+            unreachable!()
+        }
+        fn powder_snow_walkable_tag(&mut self, _: EntityIdentity) -> Result<bool, Infallible> {
+            unreachable!()
+        }
+        fn feet_are_leather_boots(&mut self, _: EntityIdentity) -> Result<bool, Infallible> {
+            unreachable!()
+        }
+    }
+
+    fn state(name: &str, distance: &str, bottom: &str) -> BlockState {
+        BlockState {
+            name: name.into(),
+            properties: [("bottom", bottom), ("distance", distance)]
+                .into_iter()
+                .map(|(k, v)| (k.to_owned(), v.to_owned()))
+                .collect(),
+        }
+    }
+
+    /// A declared block listed under `scaffolding_collision` takes vanilla scaffolding's
+    /// collision: solid on top, open to a descending entity, and the bottom row's floor.
+    #[test]
+    fn a_declared_scaffolding_collision_matches_vanilla_scaffolding() {
+        let states = [
+            state("minecraft:scaffolding", "0", "false"),
+            state("minecraft:scaffolding", "7", "true"),
+            state("test:metal_scaffolding", "0", "false"),
+            state("test:metal_scaffolding", "7", "true"),
+        ];
+        let nbt = || Tag::List(states.iter().map(BlockState::to_nbt).collect());
+        let registry = BlockRegistry::from_nbt(&Tag::compound([
+            ("DataVersion", Tag::Int(DATA_VERSION)),
+            ("states", nbt()),
+            (
+                "defaults",
+                Tag::compound([
+                    ("minecraft:scaffolding", Tag::Int(0)),
+                    ("test:metal_scaffolding", Tag::Int(2)),
+                ]),
+            ),
+        ]))
+        .unwrap();
+        let cube = Tag::compound([
+            ("canonical", Tag::Byte(0)),
+            ("cube", Tag::Byte(1)),
+            ("cube_axes", Tag::Byte(7)),
+            ("x", Tag::LongArray(vec![0, 1.0f64.to_bits() as i64])),
+            ("y", Tag::LongArray(vec![0, 1.0f64.to_bits() as i64])),
+            ("z", Tag::LongArray(vec![0, 1.0f64.to_bits() as i64])),
+            ("occupied", Tag::ByteArray(vec![1])),
+            ("discrete_min", Tag::IntArray(vec![0; 3])),
+            ("discrete_max", Tag::IntArray(vec![1; 3])),
+        ]);
+        let cached = CachedCollisionRegistry::from_nbt(
+            &Tag::compound([
+                ("DataVersion", Tag::Int(DATA_VERSION)),
+                ("states", nbt()),
+                ("shapes", Tag::List(vec![cube])),
+                ("cached_shapes", Tag::IntArray(vec![0; 4])),
+                ("scaffolding_collision", Tag::IntArray(vec![2, 3])),
+            ]),
+            &registry,
+        )
+        .unwrap();
+        let binding = BlockCollisionRegistry::new(Arc::new(cached)).unwrap();
+        let at = BlockPos::new(0, 64, 0);
+        let shape = |state: u32, y: f64, descending: bool| {
+            let context = CollisionContext::for_entity(
+                CollisionEntity {
+                    identity: EntityIdentity(1),
+                    kind: EntityContextKind::Player,
+                    y,
+                    descending,
+                    main_hand: None,
+                },
+                false,
+            );
+            binding
+                .collision_shape_with_context(&mut NoWorld, BlockStateId(state), at, &context)
+                .unwrap()
+                .boxes()
+                .to_vec()
+        };
+        // (supported state, entity y, descending): standing on top, descending through it,
+        // and in the bottom row of an unsupported bottom scaffold.
+        for (supported, y, descending) in [
+            (true, 65.0, false),
+            (true, 65.0, true),
+            (false, 64.5, false),
+        ] {
+            let (vanilla, declared) = if supported { (0, 2) } else { (1, 3) };
+            assert_eq!(
+                shape(declared, y, descending),
+                shape(vanilla, y, descending)
+            );
+        }
+        assert!((0..4).all(|state| binding.is_scaffolding(BlockStateId(state))));
+        assert!(!shape(2, 65.0, false).is_empty());
+        assert!(shape(2, 65.0, true).is_empty());
+        assert_eq!(
+            shape(3, 64.5, false),
+            vec![Aabb::new(Vec3::ZERO, Vec3::new(1.0, 0.125, 1.0))]
+        );
     }
 }

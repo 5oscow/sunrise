@@ -387,6 +387,13 @@ struct GameLevel<'w> {
     cake_requested: std::cell::Cell<bool>,
     cake_answer: Option<bool>,
     api_level: Option<mod_api::LevelRef>,
+    part_state_index: Option<
+        &'w std::sync::Arc<
+            std::sync::Mutex<
+                sunrise_mod_runtime::attachments::index::AttachmentIndex<mod_api::AttachmentHolder>,
+            >,
+        >,
+    >,
     positions: piston_carry_state::PositionState<'w>,
     border: &'w sunrise_core::geometry::border::BorderGeometry,
     world: &'w mut World,
@@ -438,6 +445,7 @@ struct GameLevel<'w> {
     recipes: &'w sunrise_client::crafting::Recipes,
     /// Container loot tables (`unpackLootTable`).
     loot: Option<std::sync::Arc<sunrise_world::loot::LootData>>,
+    loot_storage: std::sync::Arc<sunrise_world::loot::copy::StorageData>,
     registry: &'static sunrise_world::registry::BlockRegistry,
     block_registries: &'w sunrise_client::command::args::Registries,
     rules: sunrise_world::level::GameRules,
@@ -1875,9 +1883,9 @@ struct Game<'a> {
     tick_hit: std::cell::Cell<Option<Option<Hit>>>,
     /// Non-window simulation's tick-local mob ray, including the held attack range.
     tick_mob: Option<Option<(usize, f64, [f64; 3])>>,
-    /// Number keys since the last tick (`keyHotbarSlots[i].consumeClick`):
+    /// Each number key's clicks since it was last consumed (`keyHotbarSlots[i].clickCount`):
     /// `Minecraft.handleKeybinds` selects them before the tick's inputs.
-    hotbar_presses: sunrise_client::input_queue::InputQueue<usize>,
+    hotbar_presses: [sunrise_client::input_queue::ClickQueue; 9],
     /// `Player.entityInteractionRange` and `blockInteractionRange`, refreshed
     /// each tick from the attribute (a server's reach modifier, creative's
     /// +2): the pick helpers' `&self` reach.
@@ -2676,6 +2684,13 @@ impl Game<'_> {
         origin: [f64; 3],
         block_entity: Option<sunrise_core::nbt::Tag>,
     ) -> sunrise_world::loot::LootPlace {
+        let (block_entity, block_components) = match block_entity {
+            Some(saved) => {
+                let source = spill::source_snapshot(saved, None, None);
+                (Some(source.nbt), Some(source.components))
+            }
+            None => (None, None),
+        };
         let (rain, thunder) = self.world.weather.levels(1.0);
         // Level.canHaveWeather: sky light, no ceiling and not the End.
         let weather =
@@ -2683,6 +2698,8 @@ impl Game<'_> {
         sunrise_world::loot::LootPlace {
             origin: Some(origin),
             block_entity,
+            block_components,
+            storage: Some(self.score.storage.snapshot()),
             level: Some(sunrise_world::loot::LootLevel {
                 dimension: self.dim.id().to_owned(),
                 game_time: self.world.game_time,
@@ -2958,6 +2975,7 @@ impl Game<'_> {
             cake_requested: std::cell::Cell::new(false),
             cake_answer: None,
             api_level: self.level(self.dim.id()),
+            part_state_index: self.attachment_indexes.get(&self.dim),
             command_block_transition: None,
             positions: piston_carry_state::PositionState {
                 gateways: &mut self.be_anims.gateway_servers,
@@ -3006,6 +3024,7 @@ impl Game<'_> {
             } else {
                 self.server_loot.get()
             },
+            loot_storage: self.score.storage.snapshot(),
             registry: self.pack.assets.registry,
             block_registries: &self.pack.block_registries,
             rules,
@@ -11233,7 +11252,7 @@ impl<'a> Game<'a> {
             forced_hit: None,
             tick_hit: Default::default(),
             tick_mob: None,
-            hotbar_presses: sunrise_client::input_queue::InputQueue::new(hand::HOTBAR_PRESSES),
+            hotbar_presses: [hand::HOTBAR_CLICKS; 9],
             entity_reach: 3.0,
             block_reach: 4.5,
             client_pick: Default::default(),

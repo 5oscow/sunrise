@@ -1953,11 +1953,10 @@ impl Game<'_> {
             self.native_block_loot(pos, state, None, None, Some(radius), &mut drops);
             let mut pieces: Vec<ExplosionDropPiece> = Vec::new();
             let listened = mod_api::__private::listened(mod_api::HookId::BlockDrops);
-            for mut stack in drops {
+            for stack in drops {
                 if &*stack.item == "minecraft:air" || stack.count == 0 {
                     continue;
                 }
-                self.pending.attach(pos, &mut stack);
                 let items = self.res.items();
                 add_or_append_stack(
                     &mut dropped.stacks,

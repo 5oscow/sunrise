@@ -2,8 +2,10 @@
 //! run anywhere: its kind's own checks (docs/modding/src/reference/registry-index.md), its signature
 //! when given a key, and for a `.smod` that it is content only.
 use serde_json::{Value, json};
+use std::collections::BTreeMap;
 use std::path::Path;
 use sunrise_mod_package::index::{self, Facts, Kind};
+use sunrise_shader_api::mod_pipeline;
 
 pub struct Report {
     pub kind: Kind,
@@ -125,9 +127,75 @@ pub fn check(
     })
 }
 
+/// Composes and validates every render pipeline fragment file in a mod's `files`
+/// (`assets/<namespace>/shaders/pipeline/<path>.wgsl`) with the game's own code
+/// (`sunrise_shader_api::mod_pipeline`), returning how many there are and each refusal as
+/// `<file>:<line>:<column>: <message>` (`<file>: <message>` where it has no span), the text the game logs after the pipeline's id. Whether a pipeline is
+/// textured is in the mod's code, which this cannot see: a file that calls `pipeline_texture`
+/// is composed as textured, any other as untextured.
+pub fn pipeline_shaders(files: &BTreeMap<String, Vec<u8>>) -> (usize, Vec<String>) {
+    let mut count = 0;
+    let mut refused = Vec::new();
+    for (name, bytes) in files {
+        let mut parts = name.splitn(3, '/');
+        let in_folder = parts.next() == Some("assets")
+            && parts.next().is_some()
+            && parts.next().is_some_and(|rest| {
+                rest.strip_prefix(mod_pipeline::FOLDER)
+                    .is_some_and(|rest| rest.starts_with('/') && rest.ends_with(".wgsl"))
+            });
+        if !in_folder {
+            continue;
+        }
+        count += 1;
+        let composed = std::str::from_utf8(bytes)
+            .map_err(|e| e.to_string())
+            .map_err(|e| vec![format!("{name}: {e}")])
+            .and_then(|text| {
+                mod_pipeline::compose_with(name, text, text.contains("pipeline_texture"))
+                    .map_err(|problems| problems.iter().map(ToString::to_string).collect())
+            });
+        if let Err(reasons) = composed {
+            refused.extend(reasons);
+        }
+    }
+    (count, refused)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pipeline_files_are_composed_as_the_game_does() {
+        let glow =
+            "fn pipeline_fragment(input: PipelineInput) -> vec4<f32> { return input.color; }";
+        let sample = "fn pipeline_fragment(input: PipelineInput) -> vec4<f32> { return pipeline_texture(input.uv); }";
+        let files: BTreeMap<String, Vec<u8>> = [
+            ("assets/m/shaders/pipeline/glow.wgsl", glow),
+            ("assets/m/shaders/pipeline/deep/sample.wgsl", sample),
+            ("assets/m/shaders/pipeline/broken.wgsl", "fn nothing() {}"),
+            (
+                "assets/m/shaders/pipeline/typo.wgsl",
+                "fn pipeline_fragment(input: PipelineInput) -> vec4<f32> {\n    let x: f32 = input.uv;\n    return vec4<f32>(x);\n}",
+            ),
+            // Not a pipeline file: other shaders are not this check's.
+            ("assets/m/shaders/post/other.wgsl", "garbage"),
+            ("assets/m/lang/en_us.json", "{}"),
+        ]
+        .map(|(name, text)| (name.to_owned(), text.as_bytes().to_vec()))
+        .into();
+        let (count, refused) = pipeline_shaders(&files);
+        assert_eq!(count, 4);
+        assert_eq!(
+            refused,
+            [
+                "assets/m/shaders/pipeline/broken.wgsl: no function `pipeline_fragment`: expected `fn pipeline_fragment(input: PipelineInput) -> vec4<f32>`",
+                // The binding `x` is at line 2, column 9 of the mod's own file.
+                "assets/m/shaders/pipeline/typo.wgsl:2:9: the type of `x` is expected to be `f32`, but got `vec2<f32>`",
+            ]
+        );
+    }
 
     fn fixture(name: &str) -> std::path::PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR"))

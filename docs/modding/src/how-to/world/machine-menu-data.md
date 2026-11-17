@@ -265,6 +265,13 @@ window, which centres the mouse again; `MenuReplace::InPlace` sends none, so the
 its screen and its mouse where they are until the new screen replaces it, as when one
 screen of a machine leads to the next.
 
+## Laying a screen's slots out again
+
+A screen whose slots move while it is open (Tinkers' tinker station, which lays its input slots out for the
+tool being built) calls `host.set_screen_slot(block, slot, Some([x, y]))` on the client, or `None` to hide a
+slot ([moving or hiding a mod screen's slots](../client/screens.md#moving-or-hiding-a-mod-screens-slots)). Only
+the screen changes: the server's menu keeps every slot.
+
 ## Receiving synchronized data
 
 Implement `block_entity_data_received` on the block entity's part to react on the

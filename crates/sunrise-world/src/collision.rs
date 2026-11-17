@@ -86,6 +86,28 @@ pub struct CachedCollisionRegistry<'r> {
     /// empty when no state does.
     published: Vec<bool>,
     offsets: Vec<Option<ShapeOffset>>,
+    /// Whether each state's block declares scaffolding's context collision
+    /// (`context_collision`); empty when no state does.
+    scaffolding: Vec<bool>,
+}
+
+/// The states a table lists under `key` (an int array), as one flag per registry state; empty
+/// when the table has no such list.
+fn state_flags(tag: &Tag, key: &str, states: usize) -> io::Result<Vec<bool>> {
+    let Some(listed) = tag.get(key) else {
+        return Ok(Vec::new());
+    };
+    let Tag::IntArray(listed) = listed else {
+        return Err(invalid(format!("{key} is not an int array")));
+    };
+    let mut flags = vec![false; states];
+    for state in listed {
+        *usize::try_from(*state)
+            .ok()
+            .and_then(|state| flags.get_mut(state))
+            .ok_or_else(|| invalid(format!("{key} state outside registry")))? = true;
+    }
+    Ok(flags)
 }
 impl<'r> CachedCollisionRegistry<'r> {
     pub fn registry(&self) -> &'r BlockRegistry {
@@ -303,19 +325,8 @@ impl<'r> CachedCollisionRegistry<'r> {
                 }
             }
         }
-        let mut published = Vec::new();
-        if let Some(states) = tag.get("published_shapes") {
-            let Tag::IntArray(states) = states else {
-                return Err(invalid("published shape states is not an int array"));
-            };
-            published = vec![false; registry.len()];
-            for state in states {
-                *usize::try_from(*state)
-                    .ok()
-                    .and_then(|state| published.get_mut(state))
-                    .ok_or_else(|| invalid("published shape state outside registry"))? = true;
-            }
-        }
+        let published = state_flags(tag, "published_shapes", registry.len())?;
+        let scaffolding = state_flags(tag, "scaffolding_collision", registry.len())?;
         let mut offsets = Vec::new();
         if let Some(rows) = tag.get("shape_offsets") {
             let Tag::List(rows) = rows else {
@@ -370,6 +381,7 @@ impl<'r> CachedCollisionRegistry<'r> {
             outline_edges,
             published,
             offsets,
+            scaffolding,
         })
     }
     /// Whether the block entity of `state`'s block publishes the block's shapes
@@ -418,6 +430,13 @@ impl<'r> CachedCollisionRegistry<'r> {
             .copied()
             .flatten()
             .is_some_and(|offset| offset.channels & 3 != 0 && offset.limits != (0.0, 0.0))
+    }
+    /// Whether `state`'s block declares scaffolding's context collision (`context_collision`).
+    pub fn declares_scaffolding_collision(&self, state: BlockStateId) -> bool {
+        self.scaffolding
+            .get(state.0 as usize)
+            .copied()
+            .unwrap_or(false)
     }
     pub fn has_context_shapes(&self, state: BlockStateId) -> bool {
         self.contexts.contains_key(&state)
