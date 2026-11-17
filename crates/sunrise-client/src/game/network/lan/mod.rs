@@ -5529,6 +5529,7 @@ mod mob_swing_sync_tests {
         );
     }
 }
+
 #[cfg(test)]
 mod owner_attachment_connected_statistics_save_tests;
 
