@@ -626,6 +626,11 @@ impl LevelAccess for GameLevel<'_> {
             );
         }
     }
+    fn fence_gate_in_wall(&self, state: BlockStateId) -> Option<bool> {
+        let mut answer = None;
+        self.native_fence_gate_in_wall(state, &mut answer);
+        answer
+    }
     fn before_can_survive(
         &self,
         ticks: &Ticks,
