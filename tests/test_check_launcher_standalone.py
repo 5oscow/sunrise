@@ -45,6 +45,27 @@ class LauncherStandalone(unittest.TestCase):
         self.assertIn("launcher/src/main.rs:1: '../../tools/ci/rust-version' leaves launcher/", found)
         self.assertTrue(any(":4: '..' leaves" in problem for problem in found), found)
 
+    def test_raw_strings_build_scripts_absolute_joins_and_windows_paths_are_read(self):
+        found = self.found({
+            "launcher/crates/a/Cargo.toml": '[dependencies]\ngame = { path = "..\\\\..\\\\..\\\\crates\\\\game" }\n',
+            "launcher/crates/a/build.rs": 'fn main() {\n    let readme = std::fs::read_to_string("../../../README.md");\n'
+                                          '    let ok = std::fs::read_to_string("assets/icon.png");\n'
+                                          '    println!("cargo:rerun-if-changed=../../../tools/ci/rust-version");\n}\n',
+            "launcher/crates/a/src/lib.rs": 'const R: &str = include_str!(r#"../../../../README.md"#);\n'
+                                            'fn f() { Path::new(env!("CARGO_MANIFEST_DIR")).join("data").join("/etc/hostname"); }\n'
+                                            'const W: &[u8] = include_bytes!("C:\\\\game\\\\icon.png");\n'
+                                            'const B: &[u8] = include_bytes!(r"..\\..\\..\\..\\x.bin");\n',
+        })
+        self.assertEqual(len(found), 7, found)
+        for expected in ["launcher/crates/a/Cargo.toml: path",
+                         "launcher/crates/a/build.rs:2: '../../../README.md'",
+                         "launcher/crates/a/build.rs:4: '../../../tools/ci/rust-version'",
+                         "launcher/crates/a/src/lib.rs:1: '../../../../README.md'",
+                         "launcher/crates/a/src/lib.rs:2: '/etc/hostname'",
+                         "launcher/crates/a/src/lib.rs:3: 'C:\\\\game\\\\icon.png'",
+                         "launcher/crates/a/src/lib.rs:4:"]:
+            self.assertTrue(any(problem.startswith(expected) for problem in found), (expected, found))
+
     def test_this_repository_launcher_builds_from_its_own_files(self):
         self.assertEqual(guard.problems(guard.ROOT, guard.tracked(guard.ROOT)), [])
 
