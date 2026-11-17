@@ -15,6 +15,17 @@ pub trait Hooks {
     /// and `experience` awards each (amount, position) as experience orbs.
     /// Each output list accepts at most 1024 entries; invalid positions or stacks
     /// refuse the outputs. Positions must be finite. Default outputs draw nothing.
+    #[notes = r#"- `pre_remove_side_effects` is a mod block entity's `BlockEntity.preRemoveSideEffects`: its block is being
+  replaced or broken with side effects (not under flag 256). Its part puts the stacks it held in `drops`, and they
+  scatter as `Containers.dropItemStack` scatters them, after the block entity's own container slots.
+  Version 2 uses `Option<ItemStack>` entries: `None` consumes an empty slot's three position draws.
+  `keep_contents` skips the base container slots; then `spawns` creates (stack, position) entries
+  with default pickup delay, and `experience` awards (amount, position) entries as orbs.
+  Each list is limited to 1024 entries and positions must be finite. It runs inside
+  the level's write with the level host, like `neighbor_changed`; the block entity is still in place, so the part
+  reads its attachments with `TYPE.get(host, Holder::BlockEntity(pos))`, the level host being their store. A part that returns nothing draws nothing.
+  A block entity that removes its own block during its `block_entity_tick` or `menu_button` is out of the level for
+  that call, so its part isn't asked: its attachments go with it, and only its container slots come back out."#]
     #[hook(
         side = "server",
         contract = "collect",
