@@ -1,7 +1,6 @@
 use super::super::*;
 
 impl Renderer {
-    #[allow(clippy::too_many_arguments)]
     pub(in super::super) fn draw_shadow_passes(
         &mut self,
         mut encoder: &mut wgpu::CommandEncoder,
