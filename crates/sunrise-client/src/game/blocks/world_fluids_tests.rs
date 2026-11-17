@@ -407,7 +407,7 @@ fn journal_level_host_retains_neighbour_updates_from_earlier_writes() {
                     AT,
                     "facing",
                     "west",
-                    BlockUpdateFlags::CLIENTS | BlockUpdateFlags::KNOWN_SHAPE
+                    (BlockUpdateFlags::CLIENTS | BlockUpdateFlags::KNOWN_SHAPE).bits()
                 ));
             }
             if let Some(inner) = inner {
