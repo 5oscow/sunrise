@@ -91,13 +91,14 @@ jobs:
     # `resolve`, so it never queues behind GitHub's runners (the Nightly of 2026-11-16 waited there from 15:34).
     # Signing and publishing below stay on GitHub's runners.
     runs-on: ${{ vars.DYNA_CI_SELF_HOSTED == 'true' && 'dyna-small' || 'ubuntu-latest' }}
-    # Room for building sunrise-release-sign, which checks the SDK's signature below.
-    timeout-minutes: 20
+    # Room for building sunrise-release-sign, which checks the SDK's signature below, and for a real run's wait on its
+    # commit's gate, run again when the next push cancelled it (GATE_RERUN, tools/release_train.py gate_again).
+    timeout-minutes: 170
     permissions:
       contents: write       # nightly/build-<date>-<n> and the nightly-state branch (main is protected)
       issues: write         # says in the thread when the picked pull requests conflict
       pull-requests: write
-      actions: read         # main's newest green checks and parity-main runs (the base)
+      actions: write        # main's newest green checks (the base), and running a cancelled gate again
     outputs:
       build: ${{ steps.pick.outputs.build }}
       sha: ${{ steps.pick.outputs.sha }}
@@ -124,6 +125,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           FORCE: ${{ (inputs.force || steps.mode.outputs.dry_run == 'true') && 'yes' || '' }}
           DRY_RUN: ${{ steps.mode.outputs.dry_run }}
+          # A real run (a hand `-f base=<sha>` too) runs its commit's gate again if the next push cancelled it.
+          GATE_RERUN: ${{ steps.mode.outputs.dry_run != 'true' && '1' || '' }}
           NIGHTLY_ISSUE: ${{ inputs.issue }}
           NIGHTLY_PRS: ${{ inputs.prs }}
           NIGHTLY_BASE: ${{ inputs.base }}

@@ -66,6 +66,9 @@ ACTIONS = {
                        "to the updated sample in a pull request here."),
 }
 HELPERS = ("plan", "route", "fresh", "gate")
+# Calls that are part of another leg (daily.yml names their jobs for it): the sdk leg is two calls, its Linux legs
+# and the others. A leg's result is its worst call's.
+PART_OF = {"sdk-windows-macos": "sdk"}
 # The one green skip: the SDK build skips when sdk-<sha> already exists, which `sdk / fresh` found (it
 # succeeded). Any other skip of an expected job is red.
 FRESH = "sdk / fresh"
@@ -127,6 +130,16 @@ def pages(call, path, key=None):
         if len(batch) < 100:
             return items
     sys.exit(f"::error::{path} has more than {MAX_PAGES * 100} items; refusing to act on a partial listing")
+
+
+def leg_results(needs):
+    """Each leg's call result from RESULTS (toJSON(needs)), a leg made of several calls (PART_OF) taking the first that
+    did not succeed."""
+    results = dict(needs)
+    for part, leg in PART_OF.items():
+        if part in results and results.get(leg, {}).get("result") == "success":
+            results[leg] = results[part]
+    return results
 
 
 def leg_jobs(jobs):
@@ -573,7 +586,7 @@ def main(call=api, run_git=git, query=graphql):
     reports = [json.loads(path.read_text()) for path in sorted(Path(env["REPORTS"]).glob("*/*.json"))] \
         if Path(env.get("REPORTS", "")).is_dir() else []
     jobs = pages(call, f"actions/runs/{env['GITHUB_RUN_ID']}/jobs?filter=latest", "jobs")
-    tests, unfinished, passed, green_legs, green = verdicts(jobs, reports, json.loads(env["RESULTS"]))
+    tests, unfinished, passed, green_legs, green = verdicts(jobs, reports, leg_results(json.loads(env["RESULTS"])))
     open_issues = {issue["title"]: issue["number"]
                    for issue in pages(call, f"issues?state=open&labels={LABEL}")
                    if "pull_request" not in issue and issue["title"].startswith(PREFIX)}
@@ -583,7 +596,7 @@ def main(call=api, run_git=git, query=graphql):
     previous = previous_run(commit, call, run_git) if tests else None
     lines = {test_title(item): line for item in tests if (line := test_suspect_line(item, previous, commit, run_git))}
     actions = plan(commit, run_url, tests, unfinished, passed, green_legs, green, open_issues, numbers, fixes, lines)
-    sdk_green = legs_green(SDK_LEGS, jobs, json.loads(env["RESULTS"]), tests, unfinished)
+    sdk_green = legs_green(SDK_LEGS, jobs, leg_results(json.loads(env["RESULTS"])), tests, unfinished)
     text = render(actions, writes) + (
         f"\nSDK legs ({', '.join(SDK_LEGS)}): {'green' if sdk_green else 'not green'}; "
         f"sdk-publish {'publishes' if sdk_green else 'does not publish'} sdk-<sha> on a writing run.\n")

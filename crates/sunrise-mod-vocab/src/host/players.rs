@@ -193,8 +193,9 @@ pub trait PlayersBackend {
     /// On a client, only the local player's menu is available: its slots and carried stack
     /// are the client's view (server updates plus local prediction), not server authority.
     /// On a server, refuses crafting tables, merchants, workstations, lecterns, mounts,
-    /// menus with hidden slots, stale players and players whose state is swapped out.
-    /// On a client, refuses stale players and unsupported menu layouts.
+    /// menus with hidden slots, stale players and players held out by another active turn;
+    /// reads for the acting player use their current inventory, equipment, cursor and ender
+    /// contents. On a client, refuses stale players and unsupported menu layouts.
     #[access(WorldOnly)]
     fn player_container_menu(&self, player: PlayerRef) -> Option<MenuRef>;
     /// Side: server.
