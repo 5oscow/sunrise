@@ -384,7 +384,8 @@ fn compose_checked(text: &str, textured: bool) -> Result<String, String> {
         ),
         None => message,
     };
-    if let Some((at, message)) = sunrise_shader_api::guard::refusal(&shader) {
+    // The bounds hold for the whole shader the renderer builds, its entry points included.
+    if let Some((at, message)) = sunrise_shader_api::guard::refusal(&format!("{shader}{ENTRIES}")) {
         return Err(located(at, message));
     }
     // First without the entry points, so a missing or mistyped function is reported as such
@@ -580,6 +581,27 @@ fn pipeline_fragment(input: PipelineInput) -> vec4<f32> {
             compose(&long)
                 .unwrap_err()
                 .ends_with("a shader may hold 131072")
+        );
+    }
+
+    /// The byte bound is on the whole shader the renderer builds: the prelude, the file and the
+    /// entry points together, not only what precedes the entry points.
+    #[test]
+    fn the_byte_bound_counts_the_entry_points() {
+        let max = sunrise_shader_api::guard::MAX_SOURCE_BYTES;
+        let body =
+            "fn pipeline_fragment(input: PipelineInput) -> vec4<f32> { return input.color; }\n";
+        // The file padded with a comment to `fill` bytes, its newline included: the whole
+        // shader is the prelude, the file, the newline `compose_with` adds and the entries.
+        let padded = |whole: usize| {
+            let fill = whole - prelude(false).len() - ENTRIES.len() - 1;
+            format!("{body}//{}", "x".repeat(fill - body.len() - 2))
+        };
+        assert!(compose(&padded(max)).is_ok());
+        assert!(
+            compose(&padded(max + 1))
+                .unwrap_err()
+                .ends_with(&format!("a shader may hold {max}"))
         );
     }
 

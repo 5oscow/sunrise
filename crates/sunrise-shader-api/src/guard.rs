@@ -96,7 +96,7 @@ fn longest_chain(text: &str) -> Option<(usize, usize)> {
             }
             c if is_blank(c) => {}
             c if c.is_ascii_digit() => {
-                number(&mut chars);
+                number(c, &mut chars);
                 after_operand = true;
             }
             c if c.is_alphanumeric() || c == '_' || !c.is_ascii() => {
@@ -122,23 +122,32 @@ fn longest_chain(text: &str) -> Option<(usize, usize)> {
     None
 }
 
-/// The rest of a number whose first digit was read: its digits, a point and fraction, and the
-/// sign of an exponent (`1.5e-3`, `0x1p+4`), none of which is an operator.
-fn number(chars: &mut std::iter::Peekable<std::str::CharIndices<'_>>) {
-    let mut last = '0';
-    loop {
-        match chars.peek() {
-            Some(&(_, c)) if c.is_alphanumeric() || c == '_' || c == '.' => {
-                last = c;
-                chars.next();
-            }
-            Some(&(_, c @ ('+' | '-'))) if matches!(last, 'e' | 'E' | 'p' | 'P') => {
-                last = c;
-                chars.next();
-            }
-            _ => return,
+/// The rest of a number whose first digit, `first`, was read, tokenized by its radix as naga
+/// does, so that no operator is taken into it: a decimal number's digits, point and fraction,
+/// then an exponent after `e`/`E` whose sign belongs to it (`1.5e-3`); a hexadecimal number
+/// (`0x`), whose `e` is a digit, with its exponent only after `p`/`P` (`0x1p+4`). After the
+/// exponent's sign only digits and a suffix follow, so `0x1e+0x1e` is two numbers and an
+/// operator.
+fn number(first: char, chars: &mut std::iter::Peekable<std::str::CharIndices<'_>>) {
+    let hex = first == '0' && chars.next_if(|&(_, c)| matches!(c, 'x' | 'X')).is_some();
+    let digit = |c: char| {
+        if hex {
+            c.is_ascii_hexdigit()
+        } else {
+            c.is_ascii_digit()
         }
+    };
+    while chars.next_if(|&(_, c)| digit(c) || c == '.').is_some() {}
+    let exponent = if hex { ['p', 'P'] } else { ['e', 'E'] };
+    if chars.next_if(|&(_, c)| exponent.contains(&c)).is_some() {
+        chars.next_if(|&(_, c)| matches!(c, '+' | '-'));
     }
+    // The exponent's digits and a suffix (`f`, `h`, `i`, `u`), or the rest of a malformed
+    // number, which naga refuses: never a sign.
+    while chars
+        .next_if(|&(_, c)| c.is_alphanumeric() || c == '_')
+        .is_some()
+    {}
 }
 
 /// What ends a `//` comment in WGSL.
@@ -196,6 +205,32 @@ mod tests {
         // Many statements of a chain each are many expressions.
         let statements = format!("var a = 1.0; {}", "a = a + a * a - a; ".repeat(5_000));
         assert_eq!(refusal(&statements), None);
+    }
+
+    /// A hexadecimal number's `e` is a digit, not an exponent: an unspaced chain of hex terms
+    /// is counted term by term, so it cannot pass as one long number.
+    #[test]
+    fn hex_numbers_cannot_hide_a_chain() {
+        for (term, first) in [
+            ("+0x1e", "0x1e"),
+            ("-0x1E", "0x1E"),
+            ("+0xe", "0xe"),
+            ("+1e+1", "1e+1"),
+        ] {
+            // The `=` is one of the chain's operators, as the other tests count it.
+            let refused = format!("let a = {first}{};", term.repeat(MAX_CHAINED_OPERATORS));
+            assert!(refusal(&refused).is_some(), "{term}");
+            let accepted = format!("let a = {first}{};", term.repeat(MAX_CHAINED_OPERATORS - 1));
+            assert_eq!(refusal(&accepted), None, "{term}");
+        }
+        // Exponent signs still belong to their numbers: one operator per term.
+        let floats = format!(
+            "let a = 0x1p+4{};",
+            "+0x1p-4".repeat(MAX_CHAINED_OPERATORS - 1)
+        );
+        assert_eq!(refusal(&floats), None);
+        let floats = format!("let a = 1e+4{};", "+1e-4f".repeat(MAX_CHAINED_OPERATORS));
+        assert!(refusal(&floats).is_some());
     }
 
     /// What is not a chain is not counted: unary signs (negative table entries), the points and
