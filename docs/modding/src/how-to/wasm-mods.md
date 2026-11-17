@@ -177,7 +177,10 @@ item's signature and the shapes of the types it carries, so adding a method, or 
 does not use, refuses nothing. A mod is refused, by name, when an item it uses changed or is gone
 ("or a type it carries changed"). The refusal reads "built for an older Sunrise, rebuild with SDK
 `sdk-<build id>`", with the first eight mismatched items and the count of the rest; the log lists
-them all. Known gap: a behaviour change under an unchanged signature is not caught; the hook's
+them all. A hook hands a mod `&mut dyn ServerHost`, whose vtable keeps every host method, so a built mod
+imports every host call whether it calls it or not: changing or removing any host call refuses every
+built wasm mod (a new method refuses none), while a changed hook, Part method or point refuses only
+the mods that implement it. Known gap: a behaviour change under an unchanged signature is not caught; the hook's
 `hook_version` is how the game says one happened.
 
 Each guest exports:
