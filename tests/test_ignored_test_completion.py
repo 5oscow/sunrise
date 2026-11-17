@@ -238,15 +238,75 @@ class IgnoredTests(unittest.TestCase):
             self.assertEqual(ignored_tests.main(["sunrise-client-lib#2of3"]), 0)
         self.assertEqual(execute.call_args.args, ("sunrise-client-lib", [], 2, 3))
 
-    def daily_main(self, shards, rows, run):
+    def daily_main(self, shards, rows, run, binaries=None):
         report = Path(tempfile.mkdtemp()) / "report.json"
         with patch.object(ignored_tests, "known_failures", return_value={}), \
                 patch.object(ignored_tests, "harness_inputs", return_value={}), \
                 patch.object(ignored_tests, "listed_entries", return_value=rows), \
+                patch.object(ignored_tests, "built_test_binaries", return_value=binaries or {}) as build, \
                 patch.object(ignored_tests, "run", side_effect=run) as execute, \
                 contextlib.redirect_stdout(io.StringIO()) as log:
             code = ignored_tests.main(shards, str(report))
+        self.build_calls = build.call_count
         return code, execute, log.getvalue(), json.loads(report.read_text())
+
+    def test_the_daily_rows_leg_builds_the_workspace_tests_once_and_runs_what_that_build_made(self):
+        rows = [ignored_tests.Row("sunrise-relay", "a", "test:tunnel", "daily", "daily-sunrise-relay.txt", "slow"),
+                ignored_tests.Row("sunrise-core", "c", "lib", "daily", "daily-sunrise-core.txt", "slow"),
+                ignored_tests.Row("sunrise-world", "e", "test:integration", "daily", "daily-sunrise-world.txt", "slow"),
+                ignored_tests.Row("sunrise-client-lib", "f", "test:lan_bot", "daily", "daily-sunrise-client-lib.txt",
+                                  "slow")]
+        # sunrise-world's target didn't build: its rows build and report through cargo test, as before.
+        binaries = {("sunrise-relay", "test:tunnel"): "/t/tunnel-1", ("sunrise-core", "lib"): "/t/sunrise_core-2",
+                    ("sunrise-client-lib", "test:lan_bot"): "/t/lan_bot-3"}
+        code, execute, _, _ = self.daily_main(
+            ["daily-rows"], rows, lambda package, skip, only, binaries: {name: True for name in only[1]}, binaries)
+        self.assertEqual(code, 0)
+        self.assertEqual(self.build_calls, 1)
+        self.assertEqual({call.args[0]: call.kwargs["binaries"] for call in execute.call_args_list}, {
+            "sunrise-client-lib": None,  # its rows build at opt-level 3 (OWN_BUILD)
+            "sunrise-core": {"lib": "/t/sunrise_core-2"},
+            "sunrise-relay": {"test:tunnel": "/t/tunnel-1"},
+            "sunrise-world": None,
+        })
+
+    def test_the_workspace_test_build_maps_each_member_target_to_its_executable(self):
+        relay = str((ignored_tests.ROOT / ignored_tests.ignored_shards.workspace_members()["sunrise-relay"][0]
+                     / "Cargo.toml"))
+        records = [
+            {"reason": "compiler-artifact", "manifest_path": relay, "executable": "/t/sunrise_relay-1",
+             "profile": {"test": True}, "target": {"kind": ["lib"], "name": "sunrise_relay"}},
+            {"reason": "compiler-artifact", "manifest_path": relay, "executable": "/t/it-2",
+             "profile": {"test": True}, "target": {"kind": ["test"], "name": "it"}},
+            {"reason": "compiler-artifact", "manifest_path": relay, "executable": "/t/relay-3",
+             "profile": {"test": False}, "target": {"kind": ["bin"], "name": "relay"}},
+            {"reason": "compiler-artifact", "manifest_path": "/elsewhere/Cargo.toml", "executable": "/t/dep-4",
+             "profile": {"test": True}, "target": {"kind": ["lib"], "name": "dep"}},
+            {"reason": "build-finished", "success": True},
+        ]
+        out = "\n".join(map(json.dumps, records)) + "\n"
+        with patch.object(ignored_tests.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, out)) as build, \
+                contextlib.redirect_stdout(io.StringIO()):
+            binaries = ignored_tests.built_test_binaries()
+        self.assertEqual(binaries, {("sunrise-relay", "lib"): "/t/sunrise_relay-1",
+                                    ("sunrise-relay", "test:it"): "/t/it-2"})
+        command = build.call_args.args[0]
+        self.assertEqual(command[:command.index("--message-format=json")], ignored_tests.WORKSPACE_TEST_BUILD)
+
+    def test_prebuilt_executables_report_like_cargo_test_and_a_killed_one_is_a_crash(self):
+        with tempfile.TemporaryDirectory() as folder:
+            passing, killed = Path(folder, "passes"), Path(folder, "killed")
+            passing.write_text("#!/bin/sh\necho 'running 1 tests'\necho 'test a ... ok'\n"
+                               "echo 'test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out'\n")
+            killed.write_text("#!/bin/sh\necho 'running 1 tests'\nkill -9 $$\n")
+            for script in (passing, killed):
+                script.chmod(0o755)
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(ignored_tests.run("sunrise-relay", [], only=(["lib"], ["a"]),
+                                                   binaries={"lib": str(passing)}), {"a": True})
+                self.assertIsNone(ignored_tests.run("sunrise-relay", [], only=(["lib", "test:it"], ["a", "b"]),
+                                                    binaries={"lib": str(passing), "test:it": str(killed)}))
+            self.assertEqual(ignored_tests._stopped["reason"], "a test process crashed")
 
     def test_daily_rows_of_a_shards_targets_must_run_and_pass_in_that_shard(self):
         rows = [ignored_tests.Row("sunrise-world", f"slow::{name}", "lib", "daily", "daily-sunrise-world.txt", "slow")
@@ -274,7 +334,7 @@ class IgnoredTests(unittest.TestCase):
         results = {"sunrise-relay": {"a": True, "b": True, "f": True}, "sunrise-core": {},
                    "sunrise-world": {"e": False}}
         code, execute, _, report = self.daily_main(
-            ["daily-rows"], rows, lambda package, skip, only: results[package])
+            ["daily-rows"], rows, lambda package, skip, only, binaries: results[package])
         self.assertEqual(code, 1)
         # One run per package, every target of it together.
         self.assertEqual([(call.args[0], call.kwargs["only"]) for call in execute.call_args_list], [
@@ -304,7 +364,7 @@ class IgnoredTests(unittest.TestCase):
                 ignored_tests.Row("sunrise-launcher", "b", "lib", "daily", "daily-sunrise-launcher.txt", "child-process")]
         for leg, expected in (("daily-rows", [("sunrise-relay", (["test:tunnel"], ["a"]))]),
                               ("daily-rows-launcher", [("sunrise-launcher", (["lib"], ["b"]))])):
-            _, execute, _, _ = self.daily_main([leg], rows, lambda package, skip, only: {only[1][0]: True})
+            _, execute, _, _ = self.daily_main([leg], rows, lambda package, skip, only, binaries: {only[1][0]: True})
             self.assertEqual([(call.args[0], call.kwargs["only"]) for call in execute.call_args_list], expected)
 
     def test_a_package_that_needs_something_built_gets_it_before_its_daily_tests(self):
