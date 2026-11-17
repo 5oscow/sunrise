@@ -76,6 +76,58 @@ fn unknown_types_and_bad_composites_name_the_exact_entry() {
     }
 }
 #[test]
+fn pack_predicates_bind_for_validation_and_world_evaluation() {
+    let root = std::env::temp_dir().join(format!("sunrise-pack-predicate-{}", std::process::id()));
+    let dir = root.join("data/test/loot_table");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(root.join("items.json"), "{}").unwrap();
+    std::fs::write(
+        dir.join("root.json"),
+        json!({"pools":[{
+            "rolls":1,"condition":"pack:enabled",
+            "entries":[{"type":"minecraft:item","name":"minecraft:stick"}]
+        }]})
+        .to_string(),
+    )
+    .unwrap();
+    let files = vec![(
+        "predicate/pack:enabled".into(),
+        vec![br#"{"type":"minecraft:random_chance","chance":1.0}"#.to_vec()],
+    )];
+    let defaults = crate::item_defaults::read(&root).unwrap();
+    let data = crate::loot::LootData::load_with_types(
+        &root,
+        &crate::loot::PackOverlay::new(&files),
+        &defaults,
+        Types::default(),
+    )
+    .unwrap();
+    let output = data.roll(
+        "test:root",
+        &mut sunrise_core::random::LegacyRandom::new(1),
+        0.0,
+        None,
+        None,
+    );
+    assert_eq!(output.len(), 1);
+    assert_eq!(output[0].item, "minecraft:stick");
+    let error = crate::loot::LootData::load_with_types(
+        &root,
+        &crate::loot::PackOverlay::NONE,
+        &defaults,
+        Types::default(),
+    )
+    .err()
+    .expect("an unbound registry holder refuses loading")
+    .to_string();
+    assert!(
+        error.contains("pack:enabled") && error.contains("unknown reference"),
+        "{error}"
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn selecting_a_pack_never_falls_back_from_malformed_winning_loot_data() {
     let root = std::env::temp_dir().join(format!("sunrise-codec-selection-{}", std::process::id()));
     std::fs::create_dir_all(root.join("data/test/predicate")).unwrap();
