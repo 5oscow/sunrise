@@ -3170,7 +3170,15 @@ impl Game<'_> {
                 );
             }
         }
-        self.native_screen_draw(&s.block, s.pos(), &s.data, batch, [ox, oy]);
+        self.native_screen_draw(
+            &s.block,
+            s.pos(),
+            &s.data,
+            batch,
+            [ox, oy],
+            [self.cursor.0 as i32, self.cursor.1 as i32],
+            [batch.width as i32, batch.height as i32],
+        );
         self.draw_screen_phase(batch, sunrise_client::screen_draw::RenderPhase::Background);
         if s.screen.own_labels {
             return true;
@@ -3293,7 +3301,16 @@ impl Game<'_> {
         });
         let (ox, oy) = self.inventory_origin(batch);
         let at = [self.cursor.0 - ox, self.cursor.1 - oy];
-        self.native_screen_tooltip(&screen.block, &screen.data, at, menu_slot, lines);
+        self.native_screen_tooltip(
+            &screen.block,
+            &screen.data,
+            at,
+            menu_slot,
+            [ox, oy],
+            [self.cursor.0 as i32, self.cursor.1 as i32],
+            [batch.width as i32, batch.height as i32],
+            lines,
+        );
     }
     /// Options > Mods' rows for loaded code mods, after the content-only rows.
     pub(super) fn list_native_mods(&mut self) {

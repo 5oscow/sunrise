@@ -2,6 +2,10 @@
 // catalog-order: 0030
 
 pub trait Hooks {
+    /// `pointer` is the frame's absolute integer pointer in scaled GUI pixels
+    /// (truncated toward zero); `gui_size` is that frame's scaled width and height.
+    /// `origin` is the panel's top-left in the same coordinates. The pointer may
+    /// be outside the panel; use these frame values rather than caching a size.
     /// The tooltip at `at` (GUI pixels from the mod screen's top-left).
     /// `slot` is the hovered menu index, including player inventory slots,
     /// or `None` outside a mapped slot. On a filled slot, `lines` starts as

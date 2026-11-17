@@ -8,6 +8,9 @@ impl mod_api::BlockPart for Position {}
 impl mod_api::BlockEntityPart for Position {
     fn screen_draw(&self, _: &dyn mod_api::ClientHost, event: &mut mod_api::ScreenDrawEvent<'_>) {
         self.0.lock().unwrap().push(event.pos);
+        assert_eq!(event.pointer, [-3, 129]);
+        assert_eq!(event.gui_size, [128, 128]);
+        assert_eq!(event.origin, [0.0, 0.0]);
     }
 }
 struct Listener(Arc<Mutex<Vec<Option<[i32; 3]>>>>);
@@ -50,6 +53,7 @@ fn screen_draw_receives_open_blocks_position() {
                 data: Vec::new(),
                 extra: None,
             });
+            game.cursor = (-3.75, 129.75);
             let mut batch = HudBatch::scratch([128, 128]);
             assert!(game.draw_native_screen(&mut batch, 0.0, 0.0));
             assert_eq!(*seen.lock().unwrap(), [Some([17, 63, -9])]);

@@ -1132,8 +1132,10 @@ impl Game<'_> {
         data: &[i32],
         draw: &mut HudBatch,
         origin: [f32; 2],
+        pointer: [i32; 2],
+        gui_size: [i32; 2],
     ) {
-        self.fire_screen_draw(block, pos, data, draw, origin);
+        self.fire_screen_draw(block, pos, data, draw, origin, pointer, gui_size);
     }
     /// The open screen has drawn itself and its tooltips (`Screen.render`,
     /// the point of `ScreenEvent.Render.Post`): draw over it with
@@ -1366,9 +1368,12 @@ impl Game<'_> {
         data: &[i32],
         at: [f32; 2],
         slot: Option<u32>,
+        origin: [f32; 2],
+        pointer: [i32; 2],
+        gui_size: [i32; 2],
         lines: &mut Vec<(Text, u32)>,
     ) {
-        self.fire_screen_tooltip(block, data, at, slot, lines);
+        self.fire_screen_tooltip(block, data, at, slot, origin, pointer, gui_size, lines);
     }
     /// A player pressed a mod container's button (`clickMenuButton`), on
     /// the server. The block entity is out of the world during the call;
