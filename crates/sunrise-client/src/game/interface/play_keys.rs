@@ -58,6 +58,7 @@ impl Game<'_> {
                     self.pad_clear_focus();
                     self.mod_browser_closed();
                     self.carried = None;
+                    self.close_creative_menu();
                     self.set_screen(Screen::Playing);
                     self.capture(true);
                 }
@@ -206,6 +207,7 @@ impl Game<'_> {
                     if let Some(c) = self.carried.take() {
                         let _ = self.add_stack_to_inventory(c);
                     }
+                    self.close_creative_menu();
                     self.set_screen(Screen::Playing);
                     self.capture(true);
                 }
@@ -475,6 +477,37 @@ mod swap_hands_tests {
                 g.offhand.as_ref().map(|s| &*s.item),
                 Some("minecraft:torch")
             );
+        });
+    }
+}
+
+#[cfg(test)]
+mod creative_close_tests {
+    use crate::game::{Screen, native_entity_refs::tests::with_game};
+    use sunrise_protocol::packets::play::Serverbound as S;
+    use winit::keyboard::KeyCode;
+
+    /// On a server, leaving the creative inventory closes its menu, window 0, with a
+    /// ServerboundContainerClosePacket (LocalPlayer.closeContainer), as any container
+    /// screen does.
+    #[test]
+    #[ignore = "daily"]
+    fn leaving_the_creative_inventory_tells_the_server() {
+        with_game(|game| {
+            let (mut peer, _writer) = crate::game::remote::tests::connect_menu_test(game);
+            peer.set_read_timeout(Some(std::time::Duration::from_millis(50)))
+                .unwrap();
+            while peer.recv().is_ok() {}
+            game.set_screen(Screen::Creative);
+            game.key_pressed(KeyCode::Escape, KeyCode::Escape).unwrap();
+            assert_eq!(game.screen, Screen::Playing);
+            let mut closed = Vec::new();
+            while let Ok((id, bytes)) = peer.recv() {
+                if let Ok(S::ContainerClose(p)) = S::decode(id, &bytes) {
+                    closed.push(p.container);
+                }
+            }
+            assert_eq!(closed, [0]);
         });
     }
 }
