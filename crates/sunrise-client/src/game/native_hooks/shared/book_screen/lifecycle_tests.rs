@@ -457,7 +457,17 @@ fn a_hidden_slot_leaves_the_screen_and_comes_back_where_put() {
                 screen: mod_api::Screen {
                     width: 176.0,
                     height: 166.0,
-                    slots: vec![Some([8.0, 18.0]), Some([26.0, 18.0]), None],
+                    slots: vec![
+                        Some(mod_api::ScreenSlot {
+                            position: [8.0, 18.0],
+                            ..Default::default()
+                        }),
+                        Some(mod_api::ScreenSlot {
+                            position: [26.0, 18.0],
+                            ..Default::default()
+                        }),
+                        None,
+                    ],
                     inventory_y: 84.0,
                     inventory_x: 8.0,
                     ..Default::default()
