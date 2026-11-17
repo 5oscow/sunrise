@@ -1,0 +1,3 @@
+ids = ["hook:player_container_open", "hook:player_container_close"]
+why = "player_container_open version 2 supplies menu: Option<MenuRef> during the synchronous open callback, using the same support boundary as PlayerRef::container_menu. Crafting tables, merchants, workstations, lecterns, mount inventories and hidden-slot menus still have no handle. Both notices name their menu type string menu_type; close has no version bump because only the field name changes. Open/close timing and pairing are unchanged."
+migrate = "Rebuild mods. Read the type name from event.menu_type on both open and close, and use event.menu on open for a supported live menu handle. Match None for unsupported kinds."

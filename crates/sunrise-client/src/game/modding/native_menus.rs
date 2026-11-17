@@ -306,6 +306,9 @@ impl Game<'_> {
     }
 
     fn player_menu_opened(&mut self, conn: u32, menu: HeardMenu) {
+        if !mod_api::__private::listened(mod_api::HookId::PlayerContainerOpen) {
+            return;
+        }
         let Some((uuid, name)) = self
             .lan
             .as_ref()
@@ -316,7 +319,10 @@ impl Game<'_> {
         };
         let dimension = self.dim.id();
         self.player_hook(conn, move |g| {
-            g.native_player_container_open(uuid, &name, dimension, &menu.menu, menu.pos);
+            let handle = g
+                .player(uuid)
+                .and_then(|player| g.player_container_menu(player));
+            g.native_player_container_open(uuid, &name, dimension, &menu.menu, menu.pos, handle);
         });
     }
 
@@ -444,6 +450,105 @@ mod tests {
 
     #[test]
     #[ignore = "daily"]
+    fn container_open_handles_follow_supported_menus() {
+        use mod_api::{Hooks, ModEntry, Mods, PlayerContainerCloseEvent, PlayerContainerOpenEvent};
+        use std::sync::Mutex;
+        struct Watch(Arc<Mutex<Vec<String>>>);
+        #[mod_api::__subscriptions]
+        impl Hooks for Watch {
+            fn player_container_open(
+                &self,
+                host: &mut dyn ServerHost,
+                event: &mut PlayerContainerOpenEvent<'_>,
+            ) {
+                match event.menu_type {
+                    "minecraft:furnace" => {
+                        let menu = event.menu.expect("furnace has a handle during open");
+                        assert_eq!(
+                            menu.slot(host, 0),
+                            Some(Some(
+                                ItemStack::new("minecraft:iron_ore", 3)
+                                    .try_into_api()
+                                    .unwrap()
+                            ))
+                        );
+                    }
+                    "minecraft:crafting" => assert!(event.menu.is_none()),
+                    "minecraft:generic_9x3" => assert!(event.menu.is_some()),
+                    other => panic!("unexpected menu {other}"),
+                }
+                self.0
+                    .lock()
+                    .unwrap()
+                    .push(format!("open {}", event.menu_type));
+            }
+            fn player_container_close(
+                &self,
+                _: &mut dyn ServerHost,
+                event: &mut PlayerContainerCloseEvent<'_>,
+            ) {
+                self.0
+                    .lock()
+                    .unwrap()
+                    .push(format!("close {}", event.menu_type));
+            }
+        }
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let mods: Mods = vec![ModEntry::new("watch", Box::new(Watch(events.clone())))].into();
+        mod_api::testing::with_mods(mods, || {
+            with_game(|game| {
+                let _rx = watched_guest(game);
+                game.world
+                    .chunks
+                    .insert((0, 0), Arc::new(sunrise_client::chunk::Chunk::empty(0, 0)));
+                let level = game.level("minecraft:overworld").unwrap();
+                for name in [
+                    "minecraft:chest",
+                    "minecraft:furnace",
+                    "minecraft:crafting_table",
+                ] {
+                    let state = game.pack.assets.registry.default_state(name).unwrap();
+                    assert_eq!(
+                        game.level_set_block(
+                            level,
+                            [0, 64, 0],
+                            state,
+                            mod_api::BlockUpdateFlags::NEIGHBORS
+                        ),
+                        Ok(true)
+                    );
+                    if name == "minecraft:furnace" {
+                        let Some(super::super::BlockEntity::Furnace(furnace)) =
+                            game.world.block_entities.get_mut(&(0, 64, 0))
+                        else {
+                            panic!("furnace block entity")
+                        };
+                        furnace.items[0] = Some(ItemStack::new("minecraft:iron_ore", 3));
+                    }
+                    if name == "minecraft:crafting_table" {
+                        game.lan_open_crafting(1, [0, 64, 0]);
+                    } else {
+                        assert!(game.lan_open_container(1, (0, 64, 0)));
+                    }
+                    game.guest_close_all(1);
+                }
+                assert_eq!(
+                    *events.lock().unwrap(),
+                    [
+                        "open minecraft:generic_9x3",
+                        "close minecraft:generic_9x3",
+                        "open minecraft:furnace",
+                        "close minecraft:furnace",
+                        "open minecraft:crafting",
+                        "close minecraft:crafting",
+                    ]
+                );
+            })
+        });
+    }
+
+    #[test]
+    #[ignore = "daily"]
     fn container_hooks_follow_actual_open_boundaries_without_a_tick() {
         use mod_api::{Hooks, ModEntry, Mods, PlayerContainerCloseEvent, PlayerContainerOpenEvent};
         use std::sync::Mutex;
@@ -482,7 +587,7 @@ mod tests {
                 self.events
                     .lock()
                     .unwrap()
-                    .push((true, event.menu.to_string()));
+                    .push((true, event.menu_type.to_string()));
             }
             fn player_container_close(
                 &self,
@@ -492,7 +597,7 @@ mod tests {
                 self.events
                     .lock()
                     .unwrap()
-                    .push((false, event.menu.to_string()));
+                    .push((false, event.menu_type.to_string()));
             }
         }
         let events = Arc::new(Mutex::new(Vec::new()));
@@ -896,14 +1001,20 @@ mod tests {
                 _: &mut dyn ServerHost,
                 event: &mut PlayerContainerOpenEvent<'_>,
             ) {
-                HEARD.lock().unwrap().push(format!("open {}", event.menu));
+                HEARD
+                    .lock()
+                    .unwrap()
+                    .push(format!("open {}", event.menu_type));
             }
             fn player_container_close(
                 &self,
                 _: &mut dyn ServerHost,
                 event: &mut PlayerContainerCloseEvent<'_>,
             ) {
-                HEARD.lock().unwrap().push(format!("close {}", event.menu));
+                HEARD
+                    .lock()
+                    .unwrap()
+                    .push(format!("close {}", event.menu_type));
             }
         }
         let heard = || std::mem::take(&mut *HEARD.lock().unwrap());
