@@ -285,22 +285,17 @@ impl Game<'_> {
         let Some((_, menu, pos)) = open_menu_of(host, conn) else {
             return;
         };
-        let openers = match host
-            .hub
-            .guest(conn)
-            .and_then(|g| g.menu.as_ref())
-            .map(|m| &m.slots)
-        {
-            Some(sunrise_client::lan::menu::Slots::Double(a, b)) => [Some(*a), Some(*b)],
-            _ => [pos.map(|[x, y, z]| (x, y, z)), None],
-        };
+        let openers = host.hub.guest(conn).and_then(|g| g.menu.as_ref()).map_or(
+            [None; 2],
+            super::native_block_entity_refs::menu_container_positions,
+        );
         let menu = HeardMenu {
             menu: menu.to_owned(),
             pos,
             openers,
         };
         host.menus.entry(conn).or_default().menu_heard = Some(menu.clone());
-        self.player_menu_opened(conn, menu);
+        self.player_menu_changed(conn, menu, true);
     }
 
     /// `conn`'s menu closes with the guest in the level in place
@@ -313,51 +308,45 @@ impl Game<'_> {
             .and_then(|host| host.menus.get_mut(&conn))
             .and_then(|p| p.menu_heard.take());
         if let Some(old) = heard {
-            self.player_menu_closed(conn, old);
+            self.player_menu_changed(conn, old, false);
         }
     }
 
-    fn player_menu_opened(&mut self, conn: u32, menu: HeardMenu) {
-        let open_heard = mod_api::__private::listened(mod_api::HookId::PlayerContainerOpen);
-        let Some((uuid, name)) = self
-            .lan
-            .as_ref()
-            .and_then(|host| host.hub.guest(conn))
-            .map(|g| (g.uuid, g.name.clone()))
-        else {
+    fn player_menu_changed(&mut self, conn: u32, menu: HeardMenu, open: bool) {
+        let hook = if open {
+            mod_api::HookId::PlayerContainerOpen
+        } else {
+            mod_api::HookId::PlayerContainerClose
+        };
+        let heard = mod_api::__private::listened(hook);
+        let openers = menu
+            .openers
+            .map(|pos| pos.filter(|&pos| self.mod_menu_at(pos).is_some()));
+        if !heard && openers == [None; 2] {
+            return;
+        }
+        let Some(guest) = self.lan.as_ref().and_then(|host| host.hub.guest(conn)) else {
             return;
         };
+        let uuid = guest.uuid;
+        let name = heard.then(|| guest.name.clone());
         let dimension = self.dim.id();
         self.player_hook(conn, move |g| {
-            for pos in menu.openers.into_iter().flatten() {
-                g.mod_container_player_opener(pos, true);
+            for pos in openers.into_iter().flatten() {
+                g.mod_container_player_opener(pos, open);
             }
-            if open_heard {
-                let handle = g
-                    .player(uuid)
-                    .and_then(|player| g.player_container_menu(player));
-                g.native_player_container_open(
-                    uuid, &name, dimension, &menu.menu, menu.pos, handle,
-                );
+            if let Some(name) = name {
+                if open {
+                    let handle = g
+                        .player(uuid)
+                        .and_then(|player| g.player_container_menu(player));
+                    g.native_player_container_open(
+                        uuid, &name, dimension, &menu.menu, menu.pos, handle,
+                    );
+                } else {
+                    g.native_player_container_close(uuid, &name, dimension, &menu.menu, menu.pos);
+                }
             }
-        });
-    }
-
-    fn player_menu_closed(&mut self, conn: u32, menu: HeardMenu) {
-        let Some((uuid, name)) = self
-            .lan
-            .as_ref()
-            .and_then(|host| host.hub.guest(conn))
-            .map(|g| (g.uuid, g.name.clone()))
-        else {
-            return;
-        };
-        let dimension = self.dim.id();
-        self.player_hook(conn, move |g| {
-            for pos in menu.openers.into_iter().flatten() {
-                g.mod_container_player_opener(pos, false);
-            }
-            g.native_player_container_close(uuid, &name, dimension, &menu.menu, menu.pos);
         });
     }
 
