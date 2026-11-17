@@ -38,6 +38,17 @@ fn consumed_snapshot(stack: &ItemStack) -> Option<mod_api::ItemStack> {
 pub(super) const USE_ITEM_COMPLETE_EVENT: i8 = 9;
 
 impl Game<'_> {
+    /// The consuming player, including the local player outside a guest action.
+    /// Before a world is published the handle is stale, but the effect still runs.
+    pub(super) fn consuming_player_entity(&self) -> mod_api::EntityRef {
+        mod_api::EntityRef::new(
+            self.native_lifecycle
+                .epoch()
+                .unwrap_or(mod_api::WorldEpoch::new(0)),
+            self.native_acting_entity(),
+        )
+    }
+
     /// `stack.get(DataComponents.CONSUMABLE)`: item prototype, data patch or wire patch.
     pub(super) fn consumable(&self, stack: &ItemStack) -> Option<ItemConsumable> {
         sunrise_client::item_sync::consumable(stack, self.items())
@@ -101,8 +112,9 @@ impl Game<'_> {
         // Consumable.onConsume applies these entries on the logical server only;
         // the client's listener, particles and sounds above still run there.
         if self.is_logical_server() {
+            let user = self.consuming_player_entity();
             for effect in &consumable.effects {
-                self.apply_consume_effect(stack, effect, None);
+                self.apply_consume_effect(stack, effect, None, user);
             }
         }
         let event = if consumable.animation == UseAnimation::Drink {
@@ -217,7 +229,12 @@ impl Game<'_> {
                         // The level-style sound uses the user's block center and
                         // category, not Entity.playSound's silent guard or RNG.
                         if game
-                            .apply_consume_effect(&decision.stack, effect, Some(consumer))
+                            .apply_consume_effect(
+                                &decision.stack,
+                                effect,
+                                Some(consumer),
+                                consumer.entity(),
+                            )
                             .is_none()
                         {
                             return Ok(false);

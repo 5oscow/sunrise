@@ -712,6 +712,7 @@ impl Game<'_> {
         consumed: &sunrise_client::items::ItemStack,
         effect: &sunrise_client::items::ConsumeEffect,
         mob: Option<mod_api::LivingRef>,
+        user: mod_api::EntityRef,
     ) -> Option<bool> {
         use sunrise_client::items::ConsumeEffect;
         Some(match effect {
@@ -810,15 +811,9 @@ impl Game<'_> {
                 self.native_queue_sound(level, sound, at, source, 1.0, 1.0, None)?;
                 true
             }
-            ConsumeEffect::Native { kind, data } => {
-                let user = match mob {
-                    Some(living) => living.entity(),
-                    None => self.native_acting_player()?.entity(),
-                };
-                consume_effect_dispatch::dispatch(kind, || {
-                    self.native_consume_effect(kind, data, consumed, user)
-                })
-            }
+            ConsumeEffect::Native { kind, data } => consume_effect_dispatch::dispatch(kind, || {
+                self.native_consume_effect(kind, data, consumed, user)
+            }),
         })
     }
     /// BowItem.releaseUsing: power from charge time, arrows at power * 3, as

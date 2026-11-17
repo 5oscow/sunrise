@@ -1,0 +1,1 @@
+sunrise-client game::consume_effect_dispatch_tests::consuming_player_is_supplied_outside_a_guest_action lib daily resources

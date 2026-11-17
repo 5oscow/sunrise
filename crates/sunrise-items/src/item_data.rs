@@ -1896,6 +1896,10 @@ fn villager_food_stack_override_and_removal() {
     stack
         .data_mut()
         .set_loot_component("minecraft:villager_food", &None);
+    stack.data_mut().set_other(
+        "!minecraft:villager_food",
+        Some(Tag::Compound(Default::default())),
+    );
     assert_eq!(stack.villager_food(info), None);
 }
 

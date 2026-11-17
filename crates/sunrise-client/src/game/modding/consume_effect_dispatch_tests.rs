@@ -99,3 +99,54 @@ fn a_living_handle_dispatches_custom_kinds_with_same_kind_recursion_refused() {
         });
     });
 }
+
+struct PlayerConsumption(Arc<Mutex<Vec<(mod_api::EntityRef, u32)>>>);
+#[mod_api::__subscriptions]
+impl Hooks for PlayerConsumption {
+    fn consume_effect(&self, _: &mut dyn ServerHost, event: &mut ConsumeEffectEvent<'_>) {
+        if event.kind == "player_meal:effect" {
+            self.0
+                .lock()
+                .unwrap()
+                .push((event.user, event.stack.count()));
+        }
+    }
+}
+
+#[test]
+#[ignore = "daily"]
+fn consuming_player_is_supplied_outside_a_guest_action() {
+    let heard = Arc::new(Mutex::new(Vec::new()));
+    mod_platform::testing::with_mods(
+        vec![ModEntry::new(
+            "player_meal",
+            Box::new(PlayerConsumption(heard.clone())),
+        )]
+        .into(),
+        || {
+            with_game(|game| {
+                game.player = Some(
+                    sunrise_client::motion::PlayerMotion::new(
+                        game.motion,
+                        Vec3::new(0.0, 65.0, 0.0),
+                    )
+                    .unwrap(),
+                );
+                assert!(game.native_acting_player().is_none());
+                let user = game.entity(0).unwrap();
+                let stack = ItemStack::new("minecraft:pufferfish", 4);
+                let info = game.items().get(&stack.item).unwrap().clone();
+                let mut consumable = game.consumable(&stack).unwrap();
+                consumable.effects = vec![ConsumeEffect::Native {
+                    kind: "player_meal:effect".into(),
+                    data: Arc::new(Tag::Compound(Default::default())),
+                }];
+                game.creative = false;
+                game.inventory[game.selected] = Some(stack.clone());
+                game.finish_consuming(&info, &consumable, &stack);
+                assert_eq!(*heard.lock().unwrap(), [(user, 4)]);
+                assert_eq!(game.held().unwrap().count, 3);
+            })
+        },
+    );
+}
