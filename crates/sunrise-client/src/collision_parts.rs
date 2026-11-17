@@ -57,7 +57,7 @@ struct AnswerKey {
     /// The entity, 0 for none.
     entity: u32,
     /// The standing height the query is above or below blocks by, as bits.
-    bottom: u64,
+    bottom: Option<u64>,
     kind: EntityContextKind,
     living: bool,
     descending: bool,
@@ -167,7 +167,7 @@ impl PartShapes for ModParts {
             state,
             position: [position.x, position.y, position.z],
             entity,
-            bottom: context.bottom().to_bits(),
+            bottom: context.bottom().map(f64::to_bits),
             kind: context.entity_kind(),
             living: context.living_entity().is_some(),
             descending: context.is_descending(),

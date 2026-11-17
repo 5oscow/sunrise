@@ -146,11 +146,11 @@ impl CollisionQuery {
     pub fn can_stand_on_fluid(&self, above: &str, fluid: &str) -> bool {
         // The id with its namespace and `flowing_` prefix removed, so a flowing fluid and its
         // source compare equal; another namespace keeps its whole id.
-        let family = |id: &str| {
+        fn family(id: &str) -> &str {
             id.strip_prefix("minecraft:flowing_")
                 .or_else(|| id.strip_prefix("minecraft:"))
                 .unwrap_or(id)
-        };
+        }
         let fluid = family(fluid);
         self.standable_fluids.iter().any(|f| family(f) == fluid) && family(above) != fluid
     }
