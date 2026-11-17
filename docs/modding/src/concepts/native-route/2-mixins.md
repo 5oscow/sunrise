@@ -67,7 +67,7 @@ The helper file holds exactly one function: private, safe, with no attributes an
 | `MODIFY_CONSTANT` | on one literal in the body | the new value |
 | `MODIFY_VARIABLE` | on one read or write of a local or parameter | the new value |
 | `MODIFY_EXPRESSION_VALUE` | on the value of one call in the body (`$value`) | the new value |
-| `WRAP_OPERATION` | around one call, which you get as `$operation` and may run or not. The receiver and arguments run at the call site, in order, before the wrapper: a `?` in them returns from the function, with its error conversion, and the wrapper does not run. A receiver that is a call result (`EventLoop::new()?.run_app`) takes the mode its binding type declares: `&T` or `&mut T` borrows the temporary in place, so it lives as long as in the original, and the method autorefs as usual; `T` moves it in, for a method that takes `self` | the call's type |
+| `WRAP_OPERATION` | around one call, which you get as `$operation` and may run or not. The receiver and arguments run at the call site, in order, before the wrapper: a `?` in them returns from the function, with its error conversion, and the wrapper does not run. A receiver that is a call result (`EventLoop::new()?.run_app`) takes the mode its binding type declares: `&T` or `&mut T` borrows the temporary in place, so it lives as long as in the original, and the method autorefs as usual; `T` moves it in and is only for a method that takes `self`: a build check refuses `T` for a method that borrows, since the temporary would drop early | the call's type |
 
 The other kinds act on one place in the body, which a `selector` names as source text. For a call, write the
 callee without arguments: `autosave_interval` or `self.next_autosave_interval`. A bare method name finds no method call: a method's selector writes its receiver as source text, `make()?.method`, and a count of 0 for a bare name called as a method here names that selector when it can be written. For
@@ -95,7 +95,7 @@ callee without arguments: `autosave_interval` or `self.next_autosave_interval`. 
 | `$value` | The value being changed: the return value, the expression's value, or the argument, constant or variable. |
 | `$arg0`, `$arg1`, … | An argument of the selected call (`WRAP_OPERATION`). |
 | `$args` | All arguments of the selected call, as a tuple (`MODIFY_ARGS`). |
-| `$receiver` | The receiver of a selected method call (`WRAP_OPERATION`); the first binding, and the operation's first parameter. |
+| `$receiver` | The receiver of a selected method call (`WRAP_OPERATION`); the first binding, and the operation's first parameter. When the receiver is a call result, its binding type says how the method takes it: `&T` or `&mut T` for `&self` or `&mut self`, which borrows the temporary where the original did, and `T` for `self`, which moves it. The mode is checked when the patch library builds: `T` for a method that takes `&self` or `&mut self` fails to compile, in a function named for the row. |
 | `$operation` | The selected call, as `impl FnOnce(args) -> result` (`WRAP_OPERATION`); the last binding. |
 | `$local:NAME:N`, `$local_ref:NAME:N`, `$local_mut:NAME:N` | The `N`th local named `NAME` in the body, from 0: by value, `&` or `&mut`. |
 

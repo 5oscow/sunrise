@@ -3,7 +3,7 @@
 //! tool's "calls beneath a reference" rule from the whole function to the site a hook rewrites,
 //! and compares binding types as parsed types, so `Vec<T,>` and `Vec<T>` match, and lets a
 //! `WRAP_OPERATION` call carry `?` in its receiver or arguments, which are evaluated at the call
-//! site), and the names of its prebuilt release.
+//! site; a computed receiver bound by value must be a method that takes `self`, checked at build), and the names of its prebuilt release.
 //! `.github/workflows/prebuilt-mixins-tool.yml` builds and
 //! publishes it through `xtask mixins-tool`; the launcher downloads it, or builds the same
 //! patched source where no prebuilt exists.
