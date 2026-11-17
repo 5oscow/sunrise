@@ -104,10 +104,10 @@ impl mod_api::BlockEntityPart for QuickMove {
         if !SCRIPT.with(|script| matches!(*script.borrow(), Script::Handled)) {
             return mod_api::Flow::Continue;
         }
-        let mut moved = event.stack.clone();
+        let mut moved = event.stack.clone().unwrap();
         moved.set_count(1).unwrap();
         event.entity.items[0] = Some(moved);
-        event.stack.set_count(1).unwrap();
+        event.stack.as_mut().unwrap().set_count(1).unwrap();
         mod_api::Flow::Cancel
     }
 }
