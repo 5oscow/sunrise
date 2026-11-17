@@ -285,26 +285,39 @@ impl Integrated {
         &self,
         f: impl FnOnce(&mut Game<'_>) -> T + Send + 'static,
     ) -> Option<T> {
+        if self.flags.stop.load(Ordering::Relaxed) || self.flags.finished.load(Ordering::Acquire) {
+            return None;
+        }
         let (tx, rx) = sync_channel(1);
         self.tasks
             .send(Box::new(move |g| {
                 let _ = tx.send(f(g));
             }))
             .ok()?;
-        match rx.recv_timeout(CALL_TIMEOUT) {
-            Ok(answer) => Some(answer),
-            Err(RecvTimeoutError::Timeout) => {
-                log::warn!(
-                    "Sunrise: the server thread did not answer within {} s (running: {}, \
-                     autosaving: {}, smoothed tick {:.1} ms)",
-                    CALL_TIMEOUT.as_secs(),
-                    !self.stopped(),
-                    self.is_saving(),
-                    self.smoothed_tick_ms()
-                );
-                None
+        let deadline = Instant::now() + CALL_TIMEOUT;
+        loop {
+            match rx.recv_timeout(Duration::from_millis(25)) {
+                Ok(answer) => return Some(answer),
+                Err(RecvTimeoutError::Disconnected) => return None,
+                Err(RecvTimeoutError::Timeout) => {
+                    if self.flags.stop.load(Ordering::Relaxed)
+                        || self.flags.finished.load(Ordering::Acquire)
+                    {
+                        return None;
+                    }
+                    if Instant::now() >= deadline {
+                        log::warn!(
+                            "Sunrise: the server thread did not answer within {} s (running: {}, \
+                             autosaving: {}, smoothed tick {:.1} ms)",
+                            CALL_TIMEOUT.as_secs(),
+                            !self.stopped(),
+                            self.is_saving(),
+                            self.smoothed_tick_ms()
+                        );
+                        return None;
+                    }
+                }
             }
-            Err(RecvTimeoutError::Disconnected) => None,
         }
     }
     /// `execute`: run `f` on the server thread between two ticks, without
@@ -881,9 +894,6 @@ impl Game<'_> {
             self.publish_load_view();
             self.wait_for_next_server_tick(&mut next, paused);
         }
-        if failure.is_none() {
-            self.finish_server_capture();
-        }
         if let Some(error) = failure {
             let finished = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 self.finish_server_capture();
@@ -1057,6 +1067,7 @@ impl Game<'_> {
     pub(super) fn stop_integrated(&mut self, crashed: bool) -> Result<()> {
         // Abort background terrain generation/decoration on shutdown, matching vanilla behavior.
         self.streaming.abort_generation();
+        self.levels.abort_parked_generation();
         // The close request: lifecycle observation stops.
         self.native_lifecycle.begin_close();
         self.native_configs_server_stop();
