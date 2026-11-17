@@ -2441,35 +2441,34 @@ impl Game<'_> {
         use sunrise_core::geometry::{Aabb, Vec3};
         let facts = self.res.facts().get(state);
         let cached = self.collision.cached_shapes();
-        let shape =
-            sunrise_client::collisions::published_outline(&self.world, self.collision, state, pos)
-                .or_else(|| cached.context_outline_shape(state, self.outline_context_kind()));
-        let boxes: Cow<'_, [Aabb]> = if let Some(shape) = shape {
-            Cow::Borrowed(shape.boxes())
-        } else if let Some(b) = self.context_outline(pos, state, true, &self.be_anims) {
-            Cow::Owned(vec![Aabb::new(
+        use native_state_shapes::Outline;
+        let (outline, offset) =
+            self.selected_outline(&self.world, state, &self.be_anims, pos, true);
+        let boxes: Cow<'_, [Aabb]> = match outline {
+            Outline::Published(shape) | Outline::Declared(shape, _) => Cow::Borrowed(shape.boxes()),
+            Outline::Dynamic(b) => Cow::Owned(vec![Aabb::new(
                 Vec3::new(b[0], b[1], b[2]),
                 Vec3::new(b[3], b[4], b[5]),
-            )])
-        } else {
-            Cow::Owned(
+            )]),
+            Outline::Default(facts) => Cow::Owned(
                 facts
                     .outline
                     .iter()
                     .map(|b| Aabb::new(Vec3::new(b[0], b[1], b[2]), Vec3::new(b[3], b[4], b[5])))
                     .collect(),
-            )
-        };
-        let offset = if facts.outline_offset {
-            self.pack
-                .context
-                .tables
-                .offset(state, pos[0], pos[2])
-                .unwrap_or([0.; 3])
-        } else {
-            [0.; 3]
+            ),
         };
         let offset = Vec3::new(offset[0], offset[1], offset[2]);
+        let interaction_offset = cached.shape_offset(
+            state,
+            sunrise_world::collision::ShapeChannel::Interaction,
+            pos,
+        );
+        let interaction_offset = Vec3::new(
+            interaction_offset[0],
+            interaction_offset[1],
+            interaction_offset[2],
+        );
         let interaction: Cow<'_, [Aabb]> = if let Some(shape) = cached.interaction_shape(state) {
             Cow::Borrowed(shape.boxes())
         } else {
@@ -2495,7 +2494,7 @@ impl Game<'_> {
         );
         let hit = sunrise_world::interaction_shapes::clip_with_interaction_override(
             boxes.iter().map(|b| b.move_by(offset)),
-            interaction.iter().copied(),
+            interaction.iter().map(|b| b.move_by(interaction_offset)),
             start,
             end,
             BlockPos::new(pos[0], pos[1], pos[2]),
@@ -8534,7 +8533,6 @@ impl Game<'_> {
                 })
                 .map(|h| {
                     let state = self.world.block(h.pos[0], h.pos[1], h.pos[2]);
-                    let f = self.res.facts().get(state);
                     outline_after_terrain = self
                         .pack
                         .render
@@ -8545,41 +8543,7 @@ impl Game<'_> {
                                 .iter()
                                 .any(|(_, model)| model.faces.iter().any(|f| f.translucent))
                         });
-                    let o = if f.outline_offset {
-                        self.pack
-                            .context
-                            .tables
-                            .offset(state, h.pos[0], h.pos[2])
-                            .unwrap_or([0.0; 3])
-                    } else {
-                        [0.0; 3]
-                    };
-                    let p = h.pos.map(f64::from);
-                    if let Some(edges) = self
-                        .collision
-                        .cached_shapes()
-                        .context_outline_edges(state, self.outline_context_kind())
-                    {
-                        return edges
-                            .iter()
-                            .map(|e| std::array::from_fn(|i| p[i % 3] + o[i % 3] + e[i]))
-                            .collect();
-                    }
-                    if let Some(b) = self.context_outline(h.pos, state, true, &self.be_anims) {
-                        return sunrise_client::blocks::cube_edges()
-                            .iter()
-                            .map(|e| {
-                                std::array::from_fn(|i| {
-                                    let k = i % 3;
-                                    p[k] + b[k] + e[i] * (b[k + 3] - b[k])
-                                })
-                            })
-                            .collect();
-                    }
-                    f.outline_edges
-                        .iter()
-                        .map(|e| std::array::from_fn(|i| p[i % 3] + o[i % 3] + e[i]))
-                        .collect()
+                    self.outline_edges_iter(state, h.pos).collect()
                 })
                 .unwrap_or_default()
         } else {

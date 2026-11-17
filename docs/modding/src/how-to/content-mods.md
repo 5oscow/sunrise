@@ -243,6 +243,19 @@ doesn't leave a hole in the floor under it. It is not a solid render either, so 
 leaves: dampened by 1, or not at all if skylight passes down; special template light rules remain inherited.
 Unset or `true` preserves the template's ability to occlude, using the declared outline when one is supplied.
 
+`offset` takes `NONE`, `XZ` or `XYZ` (`OffsetType` in native and wasm drafts).
+`NONE` disables an inherited offset. `XZ` jitters horizontally; `XYZ` also moves downward.
+An explicit mode defaults to maximum horizontal displacement 0.25 and, for `XYZ`, maximum downward
+displacement 0.2. Optional `max_horizontal_offset` (finite 0 to 0.25) and `max_vertical_offset`
+(finite 0 to 0.2) set these limits; `XZ` ignores the vertical limit. Without `offset`, the template's
+mode and default limits are inherited, and supplied maxima adjust that mode without enabling one.
+
+The model and **declared** outline, collision and interaction shapes follow the same column seed
+(`BlockState.getOffset`, x and z only), including declared entity-context variants. Shape caches stay
+block-local; the position is applied at query time. The occlusion cache uses the outline after applying
+its column offset at `(0, 0, 0)`, as vanilla's state cache does.
+This works on both sides and does not require a hook.
+
 `destroy_overlay: false` hides the breaking crack (`destroy_stage_0` to `9`) on the block, for one broken by use
 (a feast or a cake taken apart bite by bite). It is read once at load into the block's facts, and only the overlay
 is skipped: the mining progress, the server's progress and the destroy-progress packets other players see stay

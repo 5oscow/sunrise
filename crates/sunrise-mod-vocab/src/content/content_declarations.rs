@@ -39,6 +39,26 @@ pub struct BlockProperties {
     /// block broken by use; unset or `true`, it is drawn. Only the overlay: the break and the
     /// destroy-progress packets are vanilla's.
     pub destroy_overlay: Option<bool>,
+    /// Per-column model offset and translation of declared outline, collision and interaction shapes.
+    /// Block-entity published shapes remain as published. Unset inherits the template.
+    pub offset: Option<OffsetType>,
+    /// Maximum horizontal displacement, 0 to 0.25 (default 0.25 for an explicit offset mode).
+    pub max_horizontal_offset: Option<f32>,
+    /// Maximum downward displacement, 0 to 0.2 (default 0.2 for XYZ; XZ has no vertical offset).
+    pub max_vertical_offset: Option<f32>,
+}
+
+/// Vanilla's per-column offset mode (`BlockBehaviour.OffsetType`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+// exhaustive: these are the closed declaration modes.
+#[derive(sunrise_mod_api_macros::Wire)]
+pub enum OffsetType {
+    /// Disable the offset, even on a template that has one.
+    None,
+    /// Horizontal offset only.
+    Xz,
+    /// Horizontal and downward vertical offset.
+    Xyz,
 }
 
 /// PushReaction in a load-time content declaration.

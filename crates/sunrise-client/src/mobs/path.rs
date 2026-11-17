@@ -104,12 +104,12 @@ impl MobWorld<'_> {
         f64::from(below) + self.collision_top(x, below, z)
     }
     /// The block's collision top (0 for an empty shape), as `getFloorLevel`,
-    /// `MoveControl.tick` and `EvokerAttackSpellGoal.createSpellEntity` read it: for a state
-    /// that takes its shapes from its block entity, the published collision shape's, else
-    /// the state's own (#1666, #1710).
+    /// `MoveControl.tick` and `EvokerAttackSpellGoal.createSpellEntity` read it: the shape
+    /// at this cell for published or displaced collision (#1666, #1710), else the state's
+    /// cached height.
     pub fn collision_top(&self, x: i32, y: i32, z: i32) -> f64 {
         let state = self.world.block(x, y, z);
-        if !self.collision.publishes_shapes(state) {
+        if !self.collision.has_positioned_collision(state) {
             return f64::from(self.data.state(state).top);
         }
         self.bound_collision_shape(state, [x, y, z])
