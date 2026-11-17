@@ -850,6 +850,20 @@ pub trait PlayersBackendMut {
         original: &ItemStack,
     ) -> Result<(), TriggerCriterionError>;
     /// Side: server.
+    /// Vanilla `CriteriaTriggers.CONSUME_ITEM.trigger(serverPlayer, stack)`, also public
+    /// to NeoForge mods. Fires only `minecraft:consume_item` through the food-eating
+    /// criterion path, without consuming a stack, awarding a used statistic or reading inventory.
+    /// Predicates and rewards run in the player's own level. `Ok(())` means reached,
+    /// even if nothing matched. Refuses clients (`NotServer`), stale/offline/displaced
+    /// players (`PlayerUnavailable`) and invalid stacks (`Stack(StackWriteError)`)
+    /// before firing.
+    #[access(WorldOnly)]
+    fn player_trigger_consume_item(
+        &mut self,
+        player: PlayerRef,
+        stack: &ItemStack,
+    ) -> Result<(), TriggerCriterionError>;
+    /// Side: server.
     /// `Player.setLastDeathLocation`: stores where the player died, or
     /// forgets it for None. The client hears of it with the player's next
     /// respawn, as in vanilla. False in the cases a read gives None.

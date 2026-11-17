@@ -1763,6 +1763,10 @@ mod tests {
         struct Constructed(Arc<Mutex<Vec<Holder>>>);
         #[mod_api::__subscriptions]
         impl Hooks for Constructed {
+            fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
+                r.register_attachment_type("natural_tree:state", false)
+                    .unwrap();
+            }
             fn entity_constructing(&self, host: HostSide<'_>, event: &mut EntityConstructingEvent) {
                 self.0.lock().unwrap().push(event.holder);
                 if let HostSide::Server(host) = host {

@@ -1559,6 +1559,7 @@ pub(super) mod tests {
             assert!(survives(game, "minecraft:dirt"));
             assert!(!survives(game, "minecraft:stone"));
             // A client's copy of the level does not ask the part.
+            game.options.execution_role = crate::game::execution_role::ExecutionRole::Client;
             game.options.dedicated = None;
             assert!(!survives(game, "minecraft:glass"));
             assert!(survives(game, "minecraft:grass_block"));

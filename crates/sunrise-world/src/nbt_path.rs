@@ -4,6 +4,18 @@
 pub use sunrise_core::nbt::compare_nbt;
 use sunrise_core::nbt::{Compound, JavaString, Tag, parse_snbt};
 
+/// `CompoundTag.merge`: compounds merge recursively, anything else replaces.
+pub fn merge_compound(target: &mut Compound, source: &Compound) {
+    for (k, v) in source {
+        match (target.get_mut(k), v) {
+            (Some(Tag::Compound(t)), Tag::Compound(s)) => merge_compound(t, s),
+            _ => {
+                target.insert(k.clone(), v.clone());
+            }
+        }
+    }
+}
+
 /// An error carrying the translation key and its arguments.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PathError {
@@ -356,11 +368,22 @@ impl NbtPath {
     ) -> Result<(), PathError> {
         self.descend(0, self.nodes.len(), root, true, Some(new_value), f)
     }
-    /// `set`: returns how many tags changed.
-    pub fn set(&self, root: &mut Tag, value: &Tag) -> Result<usize, PathError> {
-        if too_deep(value, self.nodes.len()) {
+    /// Refuse writes outside the existing 512-level NBT budget before creating parents.
+    pub fn check_depth<'a>(
+        &self,
+        values: impl IntoIterator<Item = &'a Tag>,
+    ) -> Result<(), PathError> {
+        if values
+            .into_iter()
+            .any(|value| too_deep(value, self.nodes.len()))
+        {
             return Err(PathError::new("arguments.nbtpath.too_deep", vec![], 0));
         }
+        Ok(())
+    }
+    /// `set`: returns how many tags changed.
+    pub fn set(&self, root: &mut Tag, value: &Tag) -> Result<usize, PathError> {
+        self.check_depth(std::iter::once(value))?;
         let Some(last) = self.nodes.last() else {
             return Ok(0);
         };
@@ -388,22 +411,14 @@ impl NbtPath {
         root: &mut Tag,
         values: &[Tag],
     ) -> Result<usize, CollectionError> {
-        for v in values {
-            if too_deep(v, self.nodes.len()) {
-                return Err(CollectionError::Path(PathError::new(
-                    "arguments.nbtpath.too_deep",
-                    vec![],
-                    0,
-                )));
-            }
-        }
+        self.check_depth(values).map_err(CollectionError::Path)?;
         let mut modified = 0;
         let mut error: Option<CollectionError> = None;
         self.get_or_create(root, &|| Tag::List(Vec::new()), &mut |target| {
             if error.is_some() {
                 return;
             }
-            let shown = crate::snbt::to_snbt(target);
+            let shown = crate::snbt_text::to_snbt(target);
             let result = with_elements(target, |list, kind| {
                 let start = if index < 0 {
                     list.len() as i64 + i64::from(index) + 1
@@ -894,7 +909,7 @@ mod tests {
         NbtPath::parse(s).unwrap_or_else(|e| panic!("{s}: {e:?}"))
     }
     fn show(v: &[Tag]) -> Vec<String> {
-        v.iter().map(crate::snbt::to_snbt).collect()
+        v.iter().map(crate::snbt_text::to_snbt).collect()
     }
 
     #[test]
@@ -945,22 +960,28 @@ mod tests {
         assert_eq!(path("a.x").set(&mut root, &tag("2")).unwrap(), 1);
         assert_eq!(path("a.x").set(&mut root, &tag("2")).unwrap(), 0);
         assert_eq!(path("b.c.d").set(&mut root, &tag("\"deep\"")).unwrap(), 1);
-        assert_eq!(crate::snbt::to_snbt(&root), "{a:{x:2},b:{c:{d:\"deep\"}}}");
+        assert_eq!(
+            crate::snbt_text::to_snbt(&root),
+            "{a:{x:2},b:{c:{d:\"deep\"}}}"
+        );
         let mut root = tag("{l:[1,2,3]}");
         assert_eq!(path("l[1]").set(&mut root, &tag("9")).unwrap(), 1);
         assert_eq!(path("l[7]").set(&mut root, &tag("9")).unwrap(), 0);
         assert_eq!(path("l[]").set(&mut root, &tag("0")).unwrap(), 3);
-        assert_eq!(crate::snbt::to_snbt(&root), "{l:[0,0,0]}");
+        assert_eq!(crate::snbt_text::to_snbt(&root), "{l:[0,0,0]}");
         let mut root = tag("{l:[{id:1,v:0},{id:2,v:0}]}");
         assert_eq!(path("l[{id:2}].v").set(&mut root, &tag("5")).unwrap(), 1);
-        assert_eq!(crate::snbt::to_snbt(&root), "{l:[{id:1,v:0},{id:2,v:5}]}");
+        assert_eq!(
+            crate::snbt_text::to_snbt(&root),
+            "{l:[{id:1,v:0},{id:2,v:5}]}"
+        );
         // A missing match is created from the pattern.
         assert_eq!(path("l[{id:3}].v").set(&mut root, &tag("1")).unwrap(), 1);
         assert_eq!(path("l[{id:3}].v").count(&root), 1);
         // New lists come from index nodes.
         let mut root = tag("{}");
         assert_eq!(path("x[].y").set(&mut root, &tag("1")).unwrap(), 1);
-        assert_eq!(crate::snbt::to_snbt(&root), "{x:[{y:1}]}");
+        assert_eq!(crate::snbt_text::to_snbt(&root), "{x:[{y:1}]}");
     }
 
     #[test]
@@ -970,10 +991,10 @@ mod tests {
         assert_eq!(path("a").remove(&mut root), 0);
         assert_eq!(path("l[1]").remove(&mut root), 1);
         assert_eq!(path("c.d").remove(&mut root), 1);
-        assert_eq!(crate::snbt::to_snbt(&root), "{c:{},l:[1,3,2]}");
+        assert_eq!(crate::snbt_text::to_snbt(&root), "{c:{},l:[1,3,2]}");
         let mut root = tag("{l:[{k:1},{k:2},{k:1}]}");
         assert_eq!(path("l[{k:1}]").remove(&mut root), 2);
-        assert_eq!(crate::snbt::to_snbt(&root), "{l:[{k:2}]}");
+        assert_eq!(crate::snbt_text::to_snbt(&root), "{l:[{k:2}]}");
         assert_eq!(path("l[]").remove(&mut root), 1);
     }
 
@@ -988,7 +1009,7 @@ mod tests {
                 .unwrap(),
             1
         );
-        assert_eq!(crate::snbt::to_snbt(&root), "{l:[0,5,6,1,2,9]}");
+        assert_eq!(crate::snbt_text::to_snbt(&root), "{l:[0,5,6,1,2,9]}");
         assert_eq!(
             path("l").insert(99, &mut root, &[tag("1")]).unwrap_err(),
             CollectionError::InvalidIndex(99)

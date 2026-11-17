@@ -21,6 +21,36 @@ impl View {
     }
 }
 
+impl super::Containers<'_> {
+    fn capability_view(&self, at: BlockSide) -> Option<View> {
+        if !self.world.is_loaded_at(at.pos[0], at.pos[1], at.pos[2]) {
+            return None;
+        }
+        let mut view = self.view((at.pos[0], at.pos[1], at.pos[2]), false)?;
+        if let Kind::Composter(level) = view.kind {
+            view.kind = Kind::Composter(match at.side {
+                None | Some(Direction::Up) if level < 7 => level,
+                Some(Direction::Down) if level == 8 => 8,
+                None | Some(Direction::Up | Direction::Down) => 7,
+                _ => return None,
+            });
+            return Some(view);
+        }
+        (view.len() > 0).then_some(view)
+    }
+    pub(in crate::game) fn capability_size(&self, at: BlockSide) -> Option<usize> {
+        Some(self.capability_view(at)?.capability_slots(at.side).count())
+    }
+    pub(in crate::game) fn capability_stack(
+        &self,
+        at: BlockSide,
+        slot: usize,
+    ) -> Option<ItemStack> {
+        let view = self.capability_view(at)?;
+        let slot = view.capability_slots(at.side).nth(slot)?;
+        self.get(&view, slot).cloned()
+    }
+}
 impl Game<'_> {
     /// Vanilla containers and `WorldlyContainerHolder`s keep their direct automation path.
     /// This owner check borrows storage; it never builds a container view on the tick path.
@@ -136,19 +166,7 @@ impl Game<'_> {
         if !self.level_in_place(at.level) {
             return None;
         }
-        let mut view = self
-            .containers()
-            .view((at.pos[0], at.pos[1], at.pos[2]), false)?;
-        if let Kind::Composter(level) = view.kind {
-            view.kind = Kind::Composter(match at.side {
-                None | Some(Direction::Up) if level < 7 => level,
-                Some(Direction::Down) if level == 8 => 8,
-                None | Some(Direction::Up | Direction::Down) => 7,
-                _ => return None,
-            });
-            return Some(view);
-        }
-        (view.len() > 0).then_some(view)
+        self.containers().capability_view(at)
     }
     pub(in crate::game) fn container_set_stack_limit(
         &mut self,
@@ -178,13 +196,13 @@ impl Game<'_> {
     /// How many slots `at`'s side reaches, including a composter's one-slot ports.
     /// None without supported storage, in a level not in place, or on a client's copy.
     pub(in crate::game) fn container_size(&self, at: BlockSide) -> Option<usize> {
-        Some(self.capability_view(at)?.capability_slots(at.side).count())
+        self.level_in_place(at.level).then_some(())?;
+        self.containers().capability_size(at)
     }
     /// The stack in slot `slot` of those `at`'s side reaches (`container_size`).
     pub(in crate::game) fn container_stack(&self, at: BlockSide, slot: usize) -> Option<ItemStack> {
-        let view = self.capability_view(at)?;
-        let slot = view.capability_slots(at.side).nth(slot)?;
-        self.containers().get(&view, slot).cloned()
+        self.level_in_place(at.level).then_some(())?;
+        self.containers().capability_stack(at, slot)
     }
     /// Keeps what a capability write to slot `slot` of `view` changes: that slot alone where a
     /// write there changes nothing else, else each block entity of the view whole.

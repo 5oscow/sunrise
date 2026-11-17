@@ -139,6 +139,9 @@ impl TryIntoEngine<()> for mod_api::Block {
                 .map(|s| s.try_into_engine(&()))
                 .transpose()?,
             shapes_from_block_entity: self.shapes_from_block_entity,
+            context_collision: self.context_collision.map(|rule| match rule {
+                mod_api::ContextCollision::Scaffolding => engine::ContextCollision::Scaffolding,
+            }),
             state_properties: self
                 .state_properties
                 .iter()

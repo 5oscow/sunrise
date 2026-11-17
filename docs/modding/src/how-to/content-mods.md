@@ -411,6 +411,28 @@ and player selection uses its own outline channel. Callers without a captured
 entity class retain ordinary shapes. These declarations select state/class-only
 geometry, not arbitrary world-dependent block behavior or native callbacks.
 
+### Scaffolding's context collision
+
+A block that is stood on like scaffolding and dropped through while sneaking (a metal
+scaffolding) sets `"context_collision": "scaffolding"` (`Block::context_collision =
+Some(ContextCollision::Scaffolding)`), whatever its template. Entities then collide with it as
+with `minecraft:scaffolding` (`ScaffoldingBlock.getCollisionShape`), which takes the same rule:
+solid on top unless the entity is descending, nothing below the top, and in a `bottom` state
+that is not supported (`distance` above 0) a floor 2 pixels high under an entity above the block
+below. Placement checks see no collision. Its states need scaffolding's `distance` (0 to 7) and
+`bottom` (`false`, `true`) properties, from a `minecraft:scaffolding` template or declared in
+`state_properties`; loading refuses the block, by name, otherwise. Climbing is the
+`minecraft:climbable` block tag, and what keeps `distance` and `bottom` up to date is the
+template's behaviour: neither comes from this field. A `collision_context_shapes` entry for an
+entity class stands over the rule for that class, as it does over the block's other shapes.
+
+```json
+{
+  "template": "minecraft:scaffolding",
+  "context_collision": "scaffolding"
+}
+```
+
 ### Shapes a block entity publishes
 
 A block whose geometry depends on what is inside it (a cable bus with attached parts, a table

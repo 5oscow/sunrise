@@ -42,12 +42,6 @@ pub trait KeysHost {
     #[access(WorldOnly)]
     fn registry_entry_in_tag(&self, entry: &RegistryEntry, tag: &str) -> Option<bool>;
     /// Side: both.
-    /// Resolve a live typed key's load-owned slot, never its protocol numeric id.
-    // hidden: RegistryEntry narrowing transports a host-issued opaque key.
-    #[doc(hidden)]
-    #[access(WorldOnly)]
-    fn registry_entry_key_slot(&self, entry: &RegistryEntry) -> Option<u32>;
-    /// Side: both.
     /// Every block key in the registry's registration order: vanilla's first, then
     /// mod blocks in the order they registered. A block registry lists a name once
     /// per state; this yields it once. Empty before the block table completes.
@@ -95,6 +89,11 @@ pub trait KeysBackend {
     /// A token from another world or reload returns `BiomeKeyError::WrongGeneration`.
     #[access(WorldOnly)]
     fn biome_key_id(&self, key: BiomeKey) -> Result<String, BiomeKeyError>;
+
+    /// Side: both.
+    /// Resolve a live typed key's load-owned slot, never its protocol numeric id.
+    #[access(WorldOnly)]
+    fn registry_entry_key_slot(&self, entry: &RegistryEntry) -> Option<u32>;
 
     /// Side: both. Exact id of an installed game-event slot; invalid keys are refused.
     #[access(Metadata)]

@@ -57,6 +57,33 @@ pub trait BlockEntityPartState: BlockEntityPart + Sized {
         read_state(host, entity, Self::DATA)
     }
 
+    /// The value through a read-only level, or its default. Inserts nothing.
+    /// No chunk loading or loot generation; unloaded/stale holders fail, clients read the
+    /// default. Owning game thread only, never reachable from worker-thread hook bodies.
+    fn state_in(
+        level: &dyn crate::LevelHost,
+        entity: BlockEntityRef,
+    ) -> Result<Self::Data, PartStateError> {
+        Ok(Self::state_existing_in(level, entity)?.unwrap_or_else(Self::DATA.default))
+    }
+    /// The existing value through a read-only level. No chunk loading or loot generation;
+    /// unloaded/stale holders fail and clients return None. Owning game thread only, never
+    /// reachable from worker-thread hook bodies.
+    fn state_existing_in(
+        level: &dyn crate::LevelHost,
+        entity: BlockEntityRef,
+    ) -> Result<Option<Self::Data>, PartStateError> {
+        level
+            .block_entity_part_snapshot(entity, Self::DATA.namespace, Self::DATA.name)?
+            .query(Self::DATA)
+            .map_err(|error| attachment(Self::DATA, error))?
+            .get(AttachmentHolder::BlockEntity(entity))
+            .map_err(|error| match error {
+                AttachmentRowError::Value(error) => attachment(Self::DATA, error),
+                _ => PartStateError::Stale,
+            })
+    }
+
     /// Changes the block entity's value with `edit`, starting from the default when it has
     /// none, and stores the result: see [`edit_part_state`].
     fn edit_state<R>(
@@ -72,7 +99,7 @@ pub trait BlockEntityPartState: BlockEntityPart + Sized {
 /// stored.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
-// no wire: returned inside the mod that called; the calls it reports on cross as attachment calls.
+#[derive(sunrise_mod_api_macros::Wire)]
 pub enum PartStateError {
     /// The handle names a block entity or an entity of another level than the one this host
     /// is in.

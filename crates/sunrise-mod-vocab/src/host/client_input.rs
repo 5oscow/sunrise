@@ -89,10 +89,13 @@ pub trait ClientInputClientHost {
     /// is dropped, as `KeyMapping.releaseAll` drops it. `interaction_key_mapping_triggered` fires
     /// at the action as for the player's click; `key_mapping_pre` is not asked.
     /// Queued actions drain oldest first, at most 64 entries per queue per drain, with at most
-    /// 1024 pending. Excess entries wait for later drains (normally later client ticks); hotbar
-    /// selection can drain more than once per tick. A full queue refuses the new entry and returns
-    /// normally, logging only its first refusal for that queue's lifetime. These bounds also apply
-    /// to physical input queued through the same routes.
+    /// 1024 pending. Excess entries wait for later drains (normally later client ticks). The
+    /// hotbar is the exception: each number key keeps its own click counter, up to 1024 pending
+    /// clicks per key, and a selection drain consumes one click per key, in order from key 1 to
+    /// key 9, so the highest key clicked wins. Selection can drain more than once per tick: there
+    /// is no once-per-tick guard. A full queue refuses the new entry and returns normally,
+    /// logging only its first refusal for that queue's lifetime. These bounds also apply to
+    /// physical input queued through the same routes.
     #[access(WorldOnly)]
     fn click_mapping(&mut self, key: &str) -> Result<(), MappingError>;
     /// Side: client.
