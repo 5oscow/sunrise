@@ -35,6 +35,40 @@ pub struct Plan {
     pub mixins_from_source: bool,
 }
 
+/// What `native-discover` reads: one mod's internals, or its pinned game's build data with its modules applied.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DiscoverPlan {
+    /// Must be [`CONTRACT`].
+    pub contract: u32,
+    /// The tool's own folder: the pinned game's source and the discovery caches.
+    pub work: PathBuf,
+    /// The Rust toolchain the mod's SDK was built with.
+    pub toolchain: Unpacked,
+    /// The mod's folder.
+    pub mods: PathBuf,
+    /// Where to copy the build data (`internals.json`, `points.json`), a folder that doesn't exist yet; absent, the reply lists the mod's internals.
+    #[serde(default)]
+    pub catalog: Option<PathBuf>,
+}
+
+/// What `native-lock` reads: the mod whose registry dependencies to pin in its `Cargo.lock`.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct LockPlan {
+    /// Must be [`CONTRACT`].
+    pub contract: u32,
+    /// The tool's own folder.
+    pub work: PathBuf,
+    /// The Rust toolchain the mod's SDK was built with.
+    pub toolchain: Unpacked,
+    /// The mod's folder.
+    pub mods: PathBuf,
+    /// Resolve again even when the mod has a lock.
+    #[serde(default)]
+    pub update: bool,
+}
+
 /// [`Target`] as a plan names it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
