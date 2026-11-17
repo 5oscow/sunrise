@@ -742,7 +742,7 @@ impl Game<'_> {
                 let tool = self.tool_stack(ctx)?;
                 let mut pending = crate::game::spill::Pending::default();
                 let key = (p[0], p[1], p[2]);
-                let has_block_entity = if let Some(entity) = self.world.block_entities.get(&key) {
+                if let Some(entity) = self.world.block_entities.get(&key) {
                     pending.record(
                         p,
                         entity,
@@ -751,13 +751,9 @@ impl Game<'_> {
                         self.world.block_lock(key),
                         self.res.items(),
                     );
-                    true
                 } else if let Some(saved) = self.block_entity_nbt(p) {
                     pending.record_saved(p, &saved);
-                    true
-                } else {
-                    false
-                };
+                }
                 // LootCommand: the source's entity is `this`, if it has one.
                 let entity = match self.command_source.map(|s| s.entity) {
                     None | Some(Some(Target::Player)) => Some(self.native_clicker().1 as u32),
@@ -788,12 +784,10 @@ impl Game<'_> {
                     breaker: entity.is_some(),
                     ..Default::default()
                 };
-                let mut drops = self.roll_block_loot(p, state, entity, roll);
-                if has_block_entity {
-                    for drop in &mut drops {
-                        pending.attach(p, drop);
-                    }
-                }
+                let source = pending.source(p);
+                let drops = sunrise_world::loot::copy::with_block_source(source.as_deref(), || {
+                    self.roll_block_loot(p, state, entity, roll)
+                });
                 (drops, Some(table))
             }
         };

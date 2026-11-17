@@ -102,3 +102,50 @@ on the completed output list, and `loot_table_load`, which edits table data,
 remain separate mechanisms. Use a custom type for logic not expressible by a
 standard operation; `copy_components`, `copy_custom_data`, `copy_state` and
 `match_block` are vanilla built-ins, not names for custom registration.
+
+## Copying components
+
+`minecraft:copy_components` reads `source` as `block_entity`, `tool`, or an
+available entity target. The world evaluator accepts `this`, `attacker`,
+`direct_attacker`, and `attacking_player`; the item evaluator currently accepts
+only `this`. Each entity source is available only when the caller supplied it.
+The block source is its collected component map, including a mod block entity's
+stored components, retained before removal; it is not restricted to particular
+vanilla block classes. A tool includes its loaded prototype and live component
+patch, with removals respected.
+
+An optional `include` list selects component IDs; omitting it selects every
+source component, while an empty list selects none. `exclude` is applied after
+`include`, so exclusion always wins. Selected values replace their destination
+components without removing unselected values. An absent source makes no edit.
+This is the same operation in both loot evaluators.
+
+Entity sources currently supply custom name when present and custom data
+(including an empty compound when unset). Subtype components such as variants
+and entity-type default components will arrive with the separate general entity
+component-getter follow-up; the copy function does not manufacture those values.
+
+## Copying custom data
+
+`minecraft:copy_custom_data` reads saved NBT rather than a component map. Its
+`source` may be an inline context target such as `"this"` or `"block_entity"`,
+the equivalent `{"type":"minecraft:context","target":"this"}` object, or
+`{"type":"minecraft:storage","source":"example:cache"}`. Context sources are
+available only when the caller supplied that entity or block entity. An unset
+storage entry is an empty compound, not an absent context source. Entity target
+names have the same evaluator-specific availability as `copy_components` above.
+
+Each entry in `ops` has a `source` NBT path, a `target` NBT path into the item's
+custom-data compound, and an `op`:
+- `replace` writes the last matching source value to the target path.
+- `append` appends every source match to each matching list, creating missing
+  lists. It does not append to byte, int or long arrays.
+- `merge` recursively merges compound matches into each target compound,
+  creating missing compounds and ignoring non-compound matches.
+
+Operations run in order. Missing sources and unmatched source paths leave the
+stack unchanged, and the custom-data component is written only if the result
+changed. Other components are untouched. Literal NBT types, arrays and Java
+UTF-16 payloads are retained. Both evaluators use the same path parser and merge
+implementation. Like `set` and `insert`, append and merge refuse writes beyond
+the existing 512-level NBT budget before creating any target parents.

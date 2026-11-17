@@ -9622,6 +9622,7 @@ mod held_item_name_tests {
         let loot = LootData::load(&root, &PackOverlay::new(&[]), &defaults).unwrap();
         let death = Death {
             loot: &loot,
+            this_nbt: None,
             damage: None,
             player: None,
             player_killed: false,
