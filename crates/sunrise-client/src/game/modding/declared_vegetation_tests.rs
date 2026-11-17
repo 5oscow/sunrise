@@ -1,4 +1,4 @@
-//! Vegetation is a Part behaviour, not a restriction on a block's visual template.
+//! Explicit vegetation behaves the same on different templates and is not inferred from Parts.
 use mod_api::{BlockPart, Hooks, LevelHost, MayPlaceOnEvent, Registrar};
 use std::sync::{
     Arc,
@@ -15,7 +15,7 @@ struct Plant(Arc<AtomicUsize>);
 impl BlockPart for Plant {
     fn may_place_on(&self, _: &dyn LevelHost, _: &mut MayPlaceOnEvent) -> Option<bool> {
         self.0.fetch_add(1, Ordering::Relaxed);
-        None // Declare vegetation, using its default supports_vegetation tag.
+        None // Leave the declaration's default supports_vegetation rule in place.
     }
 }
 struct Soil(bool);
@@ -38,10 +38,14 @@ const PLANTS: [(&str, &str); 3] = [
 #[mod_api::__subscriptions]
 impl Hooks for Garden {
     fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
-        for (id, _) in PLANTS {
+        for (id, _) in PLANTS
+            .into_iter()
+            .chain([("garden:ordinary_glass", "minecraft:glass")])
+        {
             let key = r.block_key(id);
             r.block_part(key, Plant(Arc::clone(&self.0)));
         }
+        r.block_part_tag("minecraft:flowers", Plant(Arc::clone(&self.0)));
         for (id, answer) in [
             ("minecraft:gold_block", true),
             ("minecraft:grass_block", false),
@@ -53,10 +57,16 @@ impl Hooks for Garden {
     fn blocks(&self, _: &mod_api::RegistrationContext, event: &mut mod_api::BlocksEvent<'_>) {
         for (id, template) in PLANTS
             .into_iter()
-            .chain([("garden:ordinary_glass", "minecraft:glass")])
+            .chain([("garden:bare", "minecraft:glass")])
         {
-            event.blocks.push(mod_api::Block::new(id, template));
+            let mut block = mod_api::Block::new(id, template);
+            block.properties.vegetation = true;
+            event.blocks.push(block);
         }
+        event.blocks.push(mod_api::Block::new(
+            "garden:ordinary_glass",
+            "minecraft:glass",
+        ));
     }
 }
 
@@ -141,10 +151,59 @@ fn declared_vegetation_places_and_breaks_independently_of_its_template() {
                     }
                 }
             }
-            // The same glass appearance without a vegetation Part stays an ordinary block.
+            // A registered Part does not opt this block into vegetation.
             let ordinary = registry.default_state("garden:ordinary_glass").unwrap();
             game.world.set(5, 64, 5, stone).unwrap();
             assert!(game.with_level(|b, level, ticks| b.can_survive(level, ticks, pos, ordinary)));
+            // Nor does the same Part reached by a vanilla block tag.
+            let leaf = registry.default_state("minecraft:cherry_leaves").unwrap();
+            assert!(super::api_values::block_state::block_listens(
+                mod_api::HookId::MayPlaceOn,
+                leaf
+            ));
+            game.world.set(5, 65, 5, leaf).unwrap();
+            game.with_level(|b, level, ticks| {
+                b.set_block(level, ticks, BlockPos::new(5, 64, 5), air, 3);
+            });
+            assert_ne!(game.world.block(5, 65, 5), air);
         });
+        super::native_entity_refs::tests::with_game_role(
+            root.prepared().to_path_buf(),
+            super::execution_role::ExecutionRole::Client,
+            |game| {
+                use sunrise_client::items::ItemStack;
+                let (pipe, _server) = sunrise_protocol::connection::Pipe::pair();
+                game.connect_local(pipe, "VegetationPrediction").unwrap();
+                game.world
+                    .chunks
+                    .insert((0, 0), Arc::new(sunrise_client::chunk::Chunk::empty(0, 0)));
+                game.sync_tick_chunks();
+                game.set_mode_id(0);
+                let hit = crate::game::Hit {
+                    pos: [5, 64, 5],
+                    face: [0, 1, 0],
+                    point: [5.5, 65.0, 5.5],
+                    inside: false,
+                };
+                for (soil, allowed) in [("minecraft:stone", false), ("minecraft:dirt", true)] {
+                    let ground = game.pack.assets.registry.default_state(soil).unwrap();
+                    game.world.set(5, 64, 5, ground).unwrap();
+                    for id in ["garden:glass", "garden:bare"] {
+                        let before = heard.load(Ordering::Relaxed);
+                        let placement = game.remote_can_place(&hit, &ItemStack::new(id, 1));
+                        assert_eq!(
+                            placement.is_some(),
+                            allowed,
+                            "prediction for {id} on {soil}"
+                        );
+                        assert_eq!(
+                            heard.load(Ordering::Relaxed),
+                            before,
+                            "the client never asks the Part"
+                        );
+                    }
+                }
+            },
+        );
     });
 }

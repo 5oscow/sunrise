@@ -674,13 +674,6 @@ impl LevelAccess for GameLevel<'_> {
             self.native_can_be_hydrated(self.dimension, state, pos, fluid, fluid_pos, hydrates);
         }
     }
-    fn declares_vegetation(&self, state: BlockStateId) -> bool {
-        self.native_authoritative
-            && crate::game::api_values::block_state::block_listens(
-                mod_api::HookId::MayPlaceOn,
-                state,
-            )
-    }
     fn before_may_place_on(
         &self,
         state: BlockStateId,

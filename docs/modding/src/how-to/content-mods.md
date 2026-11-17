@@ -50,16 +50,18 @@ cargo sunrise-mod check target/sunrise-mod/my_mod.smod   # the registry's checks
 
 ## Vegetation behaviour is independent of the template
 
-Attach a `BlockPart` implementing `may_place_on` to declare a block as vegetation,
-including a block whose appearance template is glass or stairs. Placement and
-neighbour updates ask the soil's `can_sustain_plant` first: `Some(true)` or
-`Some(false)` decides immediately. Otherwise the plant's `may_place_on` answers.
-Returning `None` keeps an inherited `VegetationBlock` ground rule, or checks
-`minecraft:supports_vegetation` for other templates. A plant is refused on
-unsupported ground and pops off when its ground changes. A template inheriting
-`VegetationBlock` keeps its existing class-specific checks, such as crop
-light requirements; declaring the Part does not replace those checks. Without
-this Part, a glass or stairs template remains an ordinary block.
+Set `properties.vegetation` to `true` in block JSON or in a code declaration's
+`BlockProperties` to give a block `VegetationBlock` survival, even on a glass or
+stairs template. Placement refuses unsupported ground and a neighbour update
+removes an unsupported plant. The default support is `minecraft:supports_vegetation`
+on both sides. Templates that already inherit `VegetationBlock` keep their own
+checks, such as crop light requirements.
+
+On the server, the soil's `can_sustain_plant` answer decides first. If it returns
+`None`, the plant's `may_place_on` Part can override the ground rule. Neither
+registering a Part for a block nor registering one on a tag changes what kind
+of block it is. The client predicts using the default rule without running these
+server Parts.
 
 ## Declare content in code
 

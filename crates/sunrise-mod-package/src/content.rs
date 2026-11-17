@@ -129,6 +129,9 @@ pub struct BlockProperties {
     /// block broken by use; unset or `true`, it is drawn. Only the overlay: the break and the
     /// destroy-progress packets are vanilla's.
     pub destroy_overlay: Option<bool>,
+    /// Opt into `VegetationBlock` survival independently of the template.
+    #[serde(default)]
+    pub vegetation: bool,
 }
 
 /// Vanilla's `PushReaction`, by its constant's name.

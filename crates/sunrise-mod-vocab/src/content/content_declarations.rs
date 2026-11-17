@@ -39,6 +39,10 @@ pub struct BlockProperties {
     /// block broken by use; unset or `true`, it is drawn. Only the overlay: the break and the
     /// destroy-progress packets are vanilla's.
     pub destroy_overlay: Option<bool>,
+    /// Opt into `VegetationBlock` survival and neighbour checks independently of the
+    /// template. Templates that already inherit `VegetationBlock` keep their rules.
+    /// Otherwise the default support is `minecraft:supports_vegetation`.
+    pub vegetation: bool,
 }
 
 /// PushReaction in a load-time content declaration.

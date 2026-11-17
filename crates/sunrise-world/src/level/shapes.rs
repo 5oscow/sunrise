@@ -51,7 +51,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         {
             return new;
         }
-        if self.uses_declared_vegetation(state) && !self.can_survive(state, pos) {
+        if self.b.data(state).declared_vegetation && !self.can_survive(state, pos) {
             return self.b.air();
         }
         self.update_shape_at(0, state, pos, direction, neighbour_pos, neighbour)

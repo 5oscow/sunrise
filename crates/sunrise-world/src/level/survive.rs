@@ -17,19 +17,13 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         self.level
             .before_can_survive(&*self.ticks, pos, state, &mut survives);
         survives.unwrap_or_else(|| {
-            if self.uses_declared_vegetation(state) {
+            if self.b.data(state).declared_vegetation {
                 let ground = below(pos);
                 self.may_place_on(state, self.state(ground), ground)
             } else {
                 self.can_survive_at(0, state, pos)
             }
         })
-    }
-    /// Plant templates keep their class-specific survival and shape updates. A part
-    /// on any other template declares the base VegetationBlock behaviour instead.
-    pub(super) fn uses_declared_vegetation(&self, state: BlockStateId) -> bool {
-        self.level.declares_vegetation(state)
-            && !self.b.data(state).chain.contains(&Class::Vegetation)
     }
     fn can_survive_at(&self, depth: usize, state: BlockStateId, pos: BlockPos) -> bool {
         let chain = &self.b.data(state).chain;
@@ -392,6 +386,9 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         let b = self.b;
         let t = &b.tags;
         let data = b.data(state);
+        if data.declared_vegetation {
+            return b.in_set(ground, &t.supports_vegetation);
+        }
         for class in &data.chain {
             let result = match class {
                 Class::AttachedStem | Class::NetherFungus | Class::NetherRoots | Class::Stem => {
@@ -442,7 +439,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             };
             return result;
         }
-        self.uses_declared_vegetation(state) && b.in_set(ground, &t.supports_vegetation)
+        false
     }
 
     fn frogspawn_may_place_on(&self, pos: BlockPos) -> bool {
