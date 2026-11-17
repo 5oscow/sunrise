@@ -838,11 +838,12 @@ impl Game<'_> {
                 title.take_pending_toast()
             })
             .or_else(|| {
-                // The launcher's "Playing offline" can sit behind this window: say it here too.
+                // The launcher's "Playing offline" can sit behind this window: say it here too, once
+                // the toast slot is free.
                 let reason = self
                     .options
                     .offline_reason
-                    .take_if(|_| self.title.is_some())?;
+                    .take_if(|_| self.title.as_ref().is_some_and(|title| !title.has_toast()))?;
                 Some(
                     sunrise_client::toasts::SystemToast::new(
                         sunrise_client::text::Text::tr("sunrise.title.playing_offline", &[]),
