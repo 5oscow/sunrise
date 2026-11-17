@@ -152,7 +152,8 @@ impl dyn Registrar + '_ {
     /// [`EntityPart::register_goals`] runs at every `Mob` construction of that
     /// type, spawning or loading, and its goals join the mob's selectors
     /// beside vanilla's. Its `general_entity_tick` runs for one general row
-    /// of the type (#792) — the part's one moment that crosses to a wasm mod.
+    /// of the type (#792). Wasm parts can implement `general_entity_tick`
+    /// and `can_rider_interact`.
     pub fn entity_part<P: EntityPart>(&mut self, entity: &str, part: P) {
         self.attach_entity_part(entity, type_name::<P>(), Arc::new(part));
     }

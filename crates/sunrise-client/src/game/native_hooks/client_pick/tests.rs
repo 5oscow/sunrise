@@ -708,6 +708,11 @@ fn rider_pick_rejects_shared_passengers_unless_their_part_allows_them() {
                     subscribed
                 );
                 assert_eq!(*calls.lock().unwrap(), usize::from(subscribed));
+                // The brush uses the margin-overload ray, not the mounted
+                // crosshair's root-vehicle exclusion or rider part.
+                let (mob, _, _) = game.mob_hit_within(game.block_reach).unwrap();
+                assert_eq!(game.mobs[mob].id, 31);
+                assert_eq!(*calls.lock().unwrap(), usize::from(subscribed));
                 if !subscribed {
                     assert_eq!(game.client_pick.rider_candidates.capacity(), 0);
                 }
@@ -779,6 +784,8 @@ fn rider_pick_refuses_a_camera_changed_by_its_listener() {
             .unwrap();
             game.remote_set_passengers(32, &[7, 31]);
             assert_eq!(game.pick_camera_id(), Some(7));
+            let stone = game.res.blocks().default_state("minecraft:stone").unwrap();
+            game.world.set(3, 2, 0, stone).unwrap();
             game.refresh_client_pick(1.0);
             assert_eq!(*calls.lock().unwrap(), 1);
             assert_eq!(game.pick_camera_id(), Some(31));

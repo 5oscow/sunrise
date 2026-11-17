@@ -6355,30 +6355,44 @@ impl Game<'_> {
         if let Some(hit) = self.tick_mob {
             return hit;
         }
-        self.mob_hit_within(self.entity_reach)
+        let mut pick = crate::game::pick_accumulator::PickAccumulator::new(self.entity_reach);
+        self.mob_hit_within_with_pick(self.entity_reach, &mut pick)
     }
-    /// [`Game::mob_hit`] out to `reach` instead of the entity interaction range
-    /// (`ProjectileUtil.getHitResultOnViewVector` with another range).
+    /// The brush's `ProjectileUtil.getHitResultOnViewVector` uses the nearest
+    /// box entry, excluding the source but not its vehicle or passengers.
     pub(super) fn mob_hit_within(&self, reach: f64) -> Option<(usize, f64, [f64; 3])> {
-        let mut pick = crate::game::pick_accumulator::PickAccumulator::new(reach);
-        self.mob_hit_within_with_pick(reach, &mut pick)
+        let source = self.pick_camera_id();
+        let mut nearest = f64::INFINITY;
+        self.mob_hit_within_consider(reach, |id, distance| {
+            if Some(id) == source || distance == 0.0 || distance >= nearest {
+                return false;
+            }
+            nearest = distance;
+            true
+        })
     }
     pub(super) fn mob_hit_within_with_pick(
         &self,
         reach: f64,
         pick: &mut crate::game::pick_accumulator::PickAccumulator,
     ) -> Option<(usize, f64, [f64; 3])> {
+        self.mob_hit_within_consider(reach, |id, distance| pick.consider(self, id, distance))
+    }
+    fn mob_hit_within_consider(
+        &self,
+        reach: f64,
+        mut consider: impl FnMut(u32, f64) -> bool,
+    ) -> Option<(usize, f64, [f64; 3])> {
         let (eye, dir) = self.aim()?;
         let mut best: Option<(usize, f64, [f64; 3])> = None;
         for (i, m) in self.mobs.iter().enumerate() {
             // EntitySelector.CAN_BE_PICKED is isPickable — `!isRemoved`,
             // not alive: a health-0 fake player still answers a click.
-            // The shared accumulator owns camera and root-vehicle filtering.
             if m.removed {
                 continue;
             }
             if let Some(t) = ray_box(eye, dir, reach, m.bounds())
-                && pick.consider(self, m.id, t)
+                && consider(m.id, t)
             {
                 let point = Vec3::new(
                     eye[0] + dir[0] * t,

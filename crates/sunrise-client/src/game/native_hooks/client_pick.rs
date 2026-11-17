@@ -141,9 +141,13 @@ impl Game<'_> {
                     hit: hit.native(),
                 })
             });
+        let camera_id = self.pick_camera_id();
         let attack_candidate = self.attack_range_pick_entity();
         let entity_candidate = attack_candidate.or_else(|| self.pick_entity_candidate());
-        if self.client_pick.epoch != self.native_lifecycle.epoch()
+        // A rider listener may change the camera. Neither the entity nor
+        // the block traced from the old camera belongs to the new pick.
+        if camera_id != self.pick_camera_id()
+            || self.client_pick.epoch != self.native_lifecycle.epoch()
             || self.client_pick.dimension != Some(self.dim)
         {
             self.client_pick.ray = None;
