@@ -90,7 +90,7 @@ jobs:
           set -euo pipefail
           version=$(ls "$SUNRISE_LAUNCHER_HOME/versions" | head -1)
           dir="$SUNRISE_LAUNCHER_HOME/versions/$version"
-          client=$(ls "$dir"/sunrise-client "$dir"/sunrise-client.exe 2>/dev/null | head -1)
+          client="$dir/sunrise-client"; [[ "$RUNNER_OS" != Windows ]] || client="$client.exe"
           # The game refuses resources inside the launcher's data folder without Play's lease: a copy outside it.
           cp -r "$dir/.local/sunrise-client/26.3" "$H/resources"
           mkdir -p "$H/gamedir" && cd "$H/gamedir"
