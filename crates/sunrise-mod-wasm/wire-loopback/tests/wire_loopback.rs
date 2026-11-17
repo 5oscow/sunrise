@@ -151,14 +151,22 @@ impl WasmMod {
             return None;
         }
         let bytes = unsafe { std::slice::from_raw_parts(at, len as usize) };
+        // Only the action returns an append buffer; the paired cadence answer stays intact.
+        let attack = if EFFECT_APPEND_ATTACK.get() != 0
+            && boundary::export_id("MobEffectPart", "apply_effect_tick") == Some(id)
+        {
+            EFFECT_APPEND_ATTACK.replace(0)
+        } else {
+            0
+        };
         let mut forged;
-        let bytes = if matches!(APPEND_ATTACK.get(), 1 | 2) {
+        let bytes = if matches!(attack, 1 | 2) {
             forged = bytes.to_vec();
             let at = forged
                 .windows(4)
                 .position(|b| b == 0x7fc01234u32.to_le_bytes())
                 .unwrap();
-            if APPEND_ATTACK.get() == 1 {
+            if attack == 1 {
                 forged[at..at + 4].copy_from_slice(&1.0f32.to_le_bytes());
             } else {
                 let count = u32::from_le_bytes(forged[at - 8..at - 4].try_into().unwrap());
@@ -169,7 +177,7 @@ impl WasmMod {
         } else {
             bytes
         };
-        let bytes = if self.corrupt || APPEND_ATTACK.get() == 3 {
+        let bytes = if self.corrupt || APPEND_ATTACK.get() == 3 || attack == 3 {
             &bytes[..bytes.len().saturating_sub(1)]
         } else {
             bytes
@@ -755,7 +763,7 @@ fn wire_loopback_checked_append_is_atomic_and_bit_exact() {
         let effect = REGISTERED_EFFECT.get().unwrap();
         let active_effects = [effect];
         for (ticks, attack) in [(1, 0), (2, 0), (2, 1), (2, 2), (2, 3)] {
-            APPEND_ATTACK.set(attack);
+            EFFECT_APPEND_ATTACK.set(attack);
             let mut changes = vec![EffectTickChange::Heal(f32::from_bits(0x7fc01234))];
             let mut keep = true;
             mod_api::__private::dispatch_mob_effect_tick(
@@ -776,6 +784,11 @@ fn wire_loopback_checked_append_is_atomic_and_bit_exact() {
                     changes: &mut changes,
                     keep: &mut keep,
                 },
+            );
+            assert_eq!(
+                EFFECT_APPEND_ATTACK.get(),
+                0,
+                "the action response must be forged"
             );
             assert!(matches!(changes[0], EffectTickChange::Heal(v) if v.to_bits() == 0x7fc01234));
             if ticks == 1 {
@@ -800,7 +813,6 @@ fn wire_loopback_checked_append_is_atomic_and_bit_exact() {
                 assert_eq!(changes.len(), 1);
             }
         }
-        APPEND_ATTACK.set(0);
     });
 }
 #[test]
@@ -1142,6 +1154,7 @@ thread_local! {
     static REGISTERED_BLOCK:std::cell::Cell<Option<mod_api::BlockKey>> = const {std::cell::Cell::new(None)};
     static REGISTERED_EFFECT:std::cell::Cell<Option<mod_api::EffectKey>> = const {std::cell::Cell::new(None)};
     static APPEND_ATTACK:std::cell::Cell<u8> = const {std::cell::Cell::new(0)};
+    static EFFECT_APPEND_ATTACK: std::cell::Cell<u8> = const { std::cell::Cell::new(0) };
     static REGISTERED_KIND:std::cell::Cell<Option<mod_api::BlockEntityTypeKey>> = const {std::cell::Cell::new(None)};
     static PICKED_UP_POST: std::cell::Cell<Option<(u128, u32, u32, Option<u32>)>> = const { std::cell::Cell::new(None) };
     static TOSSED: std::cell::Cell<Option<(u128, u32)>> = const { std::cell::Cell::new(None) };
