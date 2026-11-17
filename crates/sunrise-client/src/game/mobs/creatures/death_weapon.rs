@@ -186,6 +186,30 @@ impl Game<'_> {
         pos: [f64; 3],
         source: Option<(&'static str, u32)>,
     ) {
+        let mob_drops = self
+            .ui
+            .rules
+            .bool_at(sunrise_client::gamerules::vanilla::MOB_DROPS);
+        self.drop_death_loot_items(m, player_uuid, player_killed, killer, pos, source);
+        let experience =
+            sunrise_client::mobs::drops::experience_reward(m, player_killed, mob_drops);
+        if let Some(reward) = experience.filter(|_| !consumed) {
+            let kind = crate::game::native_hooks::mob_kind(m);
+            let amount = self.living_experience_drop(m.id, &kind, player_uuid, reward);
+            self.spawn_orbs(pos, amount as u32);
+        }
+    }
+
+    /// The snapshot-dependent item half of a death; experience is handled by the caller.
+    fn drop_death_loot_items(
+        &mut self,
+        m: &mut Mob,
+        player_uuid: Option<u128>,
+        player_killed: bool,
+        killer: sunrise_world::loot::LootEntity,
+        pos: [f64; 3],
+        source: Option<(&'static str, u32)>,
+    ) {
         use sunrise_client::mobs::{DamageKind, Who, drops};
         use sunrise_world::loot::{LootDamage, LootEntity};
         let accepted = m
@@ -378,7 +402,6 @@ impl Game<'_> {
             .filter(|stack| stack.count > 0 && &*stack.item != "minecraft:air")
             .map(|stack| (stack, pos, 0))
             .collect();
-        let mut experience = None;
         for d in rest {
             match d {
                 drops::Drop::CarriedBlock(state) => {
@@ -407,7 +430,6 @@ impl Game<'_> {
                         stacks.push((stack, pos, age));
                     }
                 }
-                drops::Drop::Experience(reward) if !consumed => experience = Some(reward),
                 drops::Drop::Item(_) | drops::Drop::Stack(_) | drops::Drop::Experience(_) => {}
             }
         }
@@ -435,10 +457,6 @@ impl Game<'_> {
             recently_hit: player_killed,
         };
         self.drop_death_items(&dying, stacks, 10, |_| None);
-        if let Some(reward) = experience {
-            let amount = self.living_experience_drop(m.id, &kind, player_uuid, reward);
-            self.spawn_orbs(pos, amount as u32);
-        }
     }
 }
 

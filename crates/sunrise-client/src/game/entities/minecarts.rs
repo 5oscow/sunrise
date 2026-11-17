@@ -1960,7 +1960,7 @@ impl Game<'_> {
             for (j, attachment, offset) in seats {
                 let m = &mut self.mobs[j];
                 m.seated(id, attachment, cart_box);
-                m.position = cart_seat(pos, offset);
+                sunrise_client::mobs::living::teleports::set_pos(m, cart_seat(pos, offset));
                 m.previous = cart_seat(prev, offset);
                 m.velocity = Vec3::ZERO;
                 m.fall_distance = 0.0;
@@ -2273,6 +2273,11 @@ impl Game<'_> {
         true
     }
     pub(super) fn cart_hit(&self) -> Option<(usize, f64)> {
+        if let Some(hit) = self.cached_entity_pick() {
+            let (entity, distance, _) = hit?;
+            let index = self.carts.iter().position(|f| f.id == entity.id())?;
+            return Some((index, distance));
+        }
         let (eye, dir) = self.aim()?;
         let reach: f64 = self.entity_reach;
         let mut best: Option<(usize, f64)> = None;
@@ -2863,6 +2868,7 @@ impl Minecart {
         &self,
         uuid: [i32; 4],
         raw: Option<&sunrise_core::nbt::Tag>,
+        items: &crate::items::Items,
     ) -> sunrise_core::nbt::Tag {
         use sunrise_core::nbt::{JavaString, Tag};
         let mut tag = sunrise_client::entity_nbt::vehicle_to_nbt(
@@ -2910,7 +2916,10 @@ impl Minecart {
             }
             match self.kind {
                 CartKind::Chest | CartKind::Hopper => {
-                    put("Items", sunrise_client::save::encode_items(&self.items));
+                    put(
+                        "Items",
+                        sunrise_client::save::encode_items(&self.items, items),
+                    );
                     if self.kind == CartKind::Hopper {
                         put("Enabled", Tag::Byte(i8::from(self.enabled)));
                     }
@@ -4053,7 +4062,7 @@ mod tnt_cart_power_tests {
         let mut cart = Minecart::from_nbt(&raw, 1, CartKind::Tnt).unwrap();
         assert_eq!(cart.explosion_power, 128.0);
         assert_eq!(cart.explosion_speed_factor, 0.0);
-        let saved = cart.to_nbt([0; 4], Some(&raw));
+        let saved = cart.to_nbt([0; 4], Some(&raw), &Default::default());
         assert_eq!(
             saved.get("explosion_power"),
             Some(&Tag::Float(128.0f32.to_bits()))
@@ -4064,7 +4073,7 @@ mod tnt_cart_power_tests {
         );
         cart.explosion_power = DEFAULT_EXPLOSION_POWER;
         cart.explosion_speed_factor = DEFAULT_EXPLOSION_SPEED_FACTOR;
-        let saved = cart.to_nbt([0; 4], Some(&raw));
+        let saved = cart.to_nbt([0; 4], Some(&raw), &Default::default());
         assert!(saved.get("explosion_power").is_none());
         assert!(saved.get("explosion_speed_factor").is_none());
         let restored = Minecart::from_nbt(&saved, 2, CartKind::Tnt).unwrap();

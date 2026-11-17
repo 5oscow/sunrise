@@ -76,8 +76,8 @@ Get **the Sunrise launcher** from [playsunrise.net/download](https://playsunrise
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/media/readme/launcher-home.webp" alt="The launcher's Home page: the Sunrise instance, Play, the version picker, the friend invite field, screenshots and the patch log"></td>
-    <td width="50%"><img src="docs/media/readme/launcher-mods.webp" alt="The launcher's Mods page: Sunrise's mod registry with Zoom selected, and tabs for modpacks, resource packs, shader packs and data packs"></td>
+    <td width="50%"><img src="docs/media/readme/launcher-home.webp" alt="The launcher's Home page on the Dawn theme: the Sunrise instance with its icon, Sign in to play, the friend invite field and the instance's tabs"></td>
+    <td width="50%"><img src="docs/media/readme/launcher-versions.webp" alt="The launcher's Versions page: the installed Nightly, marked latest and in use, with its notes"></td>
   </tr>
 </table>
 

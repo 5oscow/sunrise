@@ -52,7 +52,8 @@ impl BlockEntityPart for Crate {
 #[mod_api::sunrise_part]
 impl ItemPart for Probe {
     fn on_block_placed_by(&self, host: &mut dyn ServerHost, event: &mut OnBlockPlacedByEvent<'_>) {
-        let level = host.level("minecraft:overworld").unwrap();
+        let level = event.level;
+        assert_eq!(level, host.level("minecraft:overworld").unwrap());
         assert_eq!(level.block_state(host, event.pos), Some(event.state));
         let item = event.stack.item().id(host);
         match item.as_str() {

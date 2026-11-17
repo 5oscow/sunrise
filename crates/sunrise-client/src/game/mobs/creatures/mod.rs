@@ -6416,6 +6416,7 @@ impl Game<'_> {
         })?;
         // Only a client's own pick is stopped by a block: the range check passed.
         if target.is_none()
+            && !self.uses_stored_pick()
             && let Some(hit) = self.pick_unfiltered()
             && let Some(eye) = self.eye_position()
         {
@@ -12924,9 +12925,15 @@ mod loaded_mob_arrow_permission_tests {
                 assert!(!p.arrow.as_ref().unwrap().in_ground);
                 game.persist.raw.remove(&p.id);
                 for (route, raw) in [("no-raw", None), ("stale-raw", Some(&stale))] {
-                    let saved =
-                        entity_nbt::arrow_to_nbt(&p, [197, 0, n, 2], p.owner_uuid, None, raw)
-                            .unwrap();
+                    let saved = entity_nbt::arrow_to_nbt(
+                        &p,
+                        [197, 0, n, 2],
+                        p.owner_uuid,
+                        None,
+                        raw,
+                        &Default::default(),
+                    )
+                    .unwrap();
                     let want = predicate.map(|id| parse(&format!("{{blocks:\"minecraft:{id}\"}}")));
                     if saved.get("can_break") != want.as_ref() {
                         missing.push(format!(

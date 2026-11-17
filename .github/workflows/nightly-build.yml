@@ -91,7 +91,8 @@ jobs:
     # `resolve`, so it never queues behind GitHub's runners (the Nightly of 2026-11-16 waited there from 15:34).
     # Signing and publishing below stay on GitHub's runners.
     runs-on: ${{ vars.DYNA_CI_SELF_HOSTED == 'true' && 'dyna-small' || 'ubuntu-latest' }}
-    timeout-minutes: 10
+    # Room for building sunrise-release-sign, which checks the SDK's signature below.
+    timeout-minutes: 20
     permissions:
       contents: write       # nightly/build-<date>-<n> and the nightly-state branch (main is protected)
       issues: write         # says in the thread when the picked pull requests conflict
@@ -160,6 +161,19 @@ jobs:
           retention-days: 3
       # The fork's Nightly is exactly an SDK's build, and carries that SDK's index in its signed sums, so a game's build
       # id and SDK come from the game release itself (checked against sdk-<sha>'s SHA256SUMS here).
+      # The check runs sunrise-release-sign with cargo, which Dyna's small runner doesn't carry: rustup as dyna-ci's
+      # lint installs it, then the pinned Rust (tools/ci/rustup_install.sh).
+      - name: The pinned Rust, for sunrise-release-sign
+        if: steps.pick.outputs.build == 'true' && github.repository == 'sunrise-org/sunrise' && steps.pick.outputs.sdk != 'false'
+        run: |
+          set -euo pipefail
+          if ! command -v rustup > /dev/null; then
+            home=${CARGO_HOME:-$HOME/.cargo}
+            [ -x "$home/bin/rustup" ] || curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal
+            export PATH="$home/bin:$PATH"
+            echo "$home/bin" >> "$GITHUB_PATH"
+          fi
+          bash tools/ci/rustup_install.sh --profile minimal
       - name: The SDK index the Nightly carries (sdk.json of sdk-<sha>)
         if: steps.pick.outputs.build == 'true' && github.repository == 'sunrise-org/sunrise' && steps.pick.outputs.sdk != 'false'
         env:

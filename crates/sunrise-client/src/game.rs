@@ -329,6 +329,8 @@ struct Mining {
     /// The latest destroy-speed query, reused for server crack feedback.
     per_tick: f32,
     ticks: u32,
+    /// The stage's display-only answer, dropped with this mining state.
+    crack: Option<client_cracks::ClientCrack>,
 }
 impl Mining {
     fn stage(&self) -> Option<u8> {
@@ -696,7 +698,7 @@ struct WorldCore {
 }
 
 struct WorldRest {
-    items: Items,
+    items: Arc<Items>,
     recipes: Recipes,
     transformers: sunrise_client::block_transform::Transformers,
     mob_types: HashMap<String, Arc<MobType>>,
@@ -1060,8 +1062,8 @@ struct Game<'a> {
     scratch_slot: Option<ItemStack>,
     mining: Option<Mining>,
     /// The other players' cracks (`LevelRenderer.destroyingBlocks`): breaker id to the block,
-    /// the stage (0..=9) and the game time it last changed.
-    destroying: HashMap<i32, ([i32; 3], u8, i64)>,
+    /// stage (0..=9), last refresh time and stored additional display positions.
+    destroying: HashMap<i32, client_cracks::ClientCrack>,
     destroy_delay: u32,
     use_delay: u32,
     creative: bool,
@@ -1863,23 +1865,19 @@ struct Game<'a> {
     world_icon: Option<WorldIcon>,
     /// The block a guest is acting on (game/network/lan_actions/interaction.rs).
     forced_hit: Option<Hit>,
-    /// `Minecraft.hitResult` while the clicks of a tick act (game/network/remote/mod.rs
-    /// `remote_handle_input`): picked once, so a creative break does not
-    /// move the use that follows it past the broken block.
+    /// Non-window simulation's tick-local block ray. Windows use client_pick.
     tick_hit: std::cell::Cell<Option<Option<Hit>>>,
-    /// The mob of that `hitResult`, picked with the item held at the pick
-    /// (`LocalPlayer.raycastHitResult`: a spear's `attack_range`), before the
-    /// tick's number keys change it.
+    /// Non-window simulation's tick-local mob ray, including the held attack range.
     tick_mob: Option<Option<(usize, f64, [f64; 3])>>,
     /// Number keys since the last tick (`keyHotbarSlots[i].consumeClick`):
-    /// `Minecraft.handleKeybinds` selects them after the tick's pick.
+    /// `Minecraft.handleKeybinds` selects them before the tick's inputs.
     hotbar_presses: sunrise_client::input_queue::InputQueue<usize>,
     /// `Player.entityInteractionRange` and `blockInteractionRange`, refreshed
     /// each tick from the attribute (a server's reach modifier, creative's
     /// +2): the pick helpers' `&self` reach.
     entity_reach: f64,
     block_reach: f64,
-    client_targeting: std::cell::Cell<mod_api::ClientTargeting>,
+    client_pick: native_hooks::ClientPick,
     /// The part of a right click a guest's packet asks for (game/network/lan_actions/interaction.rs).
     guest_use: Option<GuestUse>,
     /// The last `use_hand` that ended the click did so with `FAIL`, which
@@ -2334,6 +2332,9 @@ impl Game<'_> {
     /// crosshair target (blocks, fluids, entities, mod raycasts) is found
     /// along this ray, so a tracked controller can stand in for it.
     fn aim(&self) -> Option<([f64; 3], [f64; 3])> {
+        if let Some(ray) = self.client_pick.ray {
+            return Some(ray);
+        }
         // Minecraft.pick: from the camera entity's eyes along its view
         // (LivingEntity.getViewYRot: the head's yaw).
         if let Some(e) = self.spectated_camera_snapshot() {
@@ -2493,6 +2494,17 @@ impl Game<'_> {
         if let Some(hit) = self.forced_hit {
             return Some(hit);
         }
+        if self.uses_stored_pick() {
+            return match self.crosshair_target() {
+                Some(mod_api::CrosshairTarget::Block { pos, hit, .. }) => Some(Hit {
+                    pos: [pos.x, pos.y, pos.z],
+                    face: hit.face,
+                    point: hit.point,
+                    inside: hit.inside,
+                }),
+                _ => None,
+            };
+        }
         if let Some(hit) = self.tick_hit.get() {
             return hit;
         }
@@ -2500,12 +2512,31 @@ impl Game<'_> {
         // GameRenderer.pick: the block ray runs out to the larger of the two
         // interaction ranges; filterHitResult then drops a hit past the
         // block's.
-        self.clip_targeting_ray(origin, dir, self.block_reach.max(self.entity_reach))
+        self.clip_ray(origin, dir, self.block_reach.max(self.entity_reach))
             .filter(|hit| {
                 let distance: [f64; 3] = std::array::from_fn(|i| hit.point[i] - origin[i]);
                 distance.iter().map(|v| v * v).sum::<f64>() <= self.block_reach.powi(2)
             })
     }
+    /// An item-specific POV outline ray at the current rotation and block reach.
+    pub(super) fn item_pick(&self) -> Option<Hit> {
+        if let Some(hit) = self.forced_hit {
+            return Some(hit);
+        }
+        let (origin, direction) = self.aim()?;
+        self.clip_ray(origin, direction, self.block_reach)
+    }
+
+    /// The raw outline ray out to the larger interaction range, before range filtering.
+    /// Used once by client_pick and by non-window simulation, never by window actions.
+    pub(super) fn pick_unfiltered(&self) -> Option<Hit> {
+        if let Some(hit) = self.forced_hit {
+            return Some(hit);
+        }
+        let (origin, dir) = self.aim()?;
+        self.clip_ray(origin, dir, self.block_reach.max(self.entity_reach))
+    }
+
     /// The first block outline hit within `reach` along the unit `dir`.
     fn clip_ray(&self, origin: [f64; 3], dir: [f64; 3], reach: f64) -> Option<Hit> {
         self.clip_ray_fluids(origin, dir, reach, false)
@@ -2598,7 +2629,10 @@ impl Game<'_> {
         let key = (pos[0], pos[1], pos[2]);
         match self.world.block_entities.get(&key) {
             Some(entity) => Some(sunrise_client::save::block_entity_encode::encode(
-                key, entity, block,
+                key,
+                entity,
+                block,
+                self.res.items(),
             )),
             None => spill::saved_entity(&self.world, pos),
         }
@@ -4062,7 +4096,7 @@ impl Game<'_> {
         let live = self.live_block_entity(key, &facts.name);
         if let Some((entity, _)) = &live {
             self.pending
-                .record_from(&self.world, pos, entity, &facts.name);
+                .record_from(&self.world, pos, entity, &facts.name, self.res.items());
         } else if let Some(tag) = spill::saved_entity(&self.world, pos) {
             self.pending.record_saved(pos, &tag);
         }
@@ -4280,6 +4314,7 @@ impl Game<'_> {
                 progress: 0.0,
                 per_tick: 0.0,
                 ticks: 0,
+                crack: None,
             });
         }
         let state = self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]);
@@ -4315,6 +4350,7 @@ impl Game<'_> {
             self.break_block(pos)?;
             self.destroy_delay = 5;
         }
+        self.update_local_crack();
         Ok(())
     }
     /// A column whose surface is a full solid, non-fluid, non-leaf block open to the sky.
@@ -5952,10 +5988,10 @@ impl Game<'_> {
         self.tnt_geometry(camera, alpha, &mut out);
         self.mark_motion(out.len(), 0);
         self.mark_entity(out.len(), "minecraft:painting");
-        self.painting_geometry(camera, &mut out);
+        self.painting_geometry(camera, alpha, &mut out);
         self.mark_motion(out.len(), 0);
         self.mark_entity(out.len(), "minecraft:item_frame");
-        self.frame_geometry(camera, &mut out);
+        self.frame_geometry(camera, alpha, &mut out);
         self.mark_motion(out.len(), 0);
         self.mark_entity(out.len(), "minecraft:armor_stand");
         self.armor_stand_geometry(camera, alpha, &mut out);
@@ -6062,6 +6098,8 @@ impl Game<'_> {
                         living: None,
                         tnt_fuse: None,
                         orb_value: Some(o.value),
+                        painting: None,
+                        item_frame: None,
                     }
                     .into();
                 let light = self.world.light(
@@ -6260,6 +6298,16 @@ impl Game<'_> {
     /// met its box at, measured from the mob's feet (`EntityHitResult
     /// .getLocation() - entity.position()`, the interact packet's location).
     fn mob_hit(&self) -> Option<(usize, f64, [f64; 3])> {
+        if let Some(hit) = self.cached_entity_pick() {
+            let (entity, distance, point) = hit?;
+            let index = self.mobs.iter().position(|m| m.id == entity.id())?;
+            let feet = self.mobs[index].position;
+            return Some((
+                index,
+                distance,
+                [point[0] - feet.x, point[1] - feet.y, point[2] - feet.z],
+            ));
+        }
         if let Some(hit) = self.tick_mob {
             return hit;
         }
@@ -7096,7 +7144,12 @@ impl Game<'_> {
         if !allow_block_actions && bucket.is_none() {
             return Ok(UseResult::Pass);
         }
-        let Some(hit) = self.pick() else {
+        let hit = if bucket.is_some() {
+            self.item_pick()
+        } else {
+            self.pick()
+        };
+        let Some(hit) = hit else {
             return Ok(UseResult::Pass);
         };
         let clicked = self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]);
@@ -8192,6 +8245,7 @@ impl Game<'_> {
         };
         pr.lap("pr_setup");
         let alpha = self.frame_world_partial_tick();
+        self.refresh_client_pick(alpha as f32);
         // Camera.getCameraEntityPartialTicks: the view, the hand and the
         // player's own model stay smooth while the level is frozen.
         let camera_alpha = self.clock.camera_fraction();
@@ -10561,6 +10615,7 @@ impl<'a> Game<'a> {
                 .join("saves")
                 .join(".sunrise-title"),
             sunrise_client::save::LevelShape::OVERWORLD,
+            None,
         ));
         let prepared = prepared.map(Ok).unwrap_or_else(|| {
             GameCpuResources::load(
@@ -11115,7 +11170,7 @@ impl<'a> Game<'a> {
             hotbar_presses: sunrise_client::input_queue::InputQueue::new(hand::HOTBAR_PRESSES),
             entity_reach: 3.0,
             block_reach: 4.5,
-            client_targeting: Default::default(),
+            client_pick: Default::default(),
             guest_use: None,
             use_failed: false,
             block_use_original: Vec::new(),
@@ -11333,6 +11388,14 @@ pub(crate) fn run_with(
     .is_err()
     {
         log::warn!("Mod structure types already installed; keeping the first table");
+    }
+    // Their feature types, before any world decodes its configured features.
+    if sunrise_world::worldgen::mod_features::install_mod_feature_types(
+        native_feature_types::installed_feature_types(),
+    )
+    .is_err()
+    {
+        log::warn!("Mod feature types already installed; keeping the first table");
     }
     // The levels they registered, below the data packs of every world opened.
     if sunrise_world::worldgen::overrides::install_mod_dimensions(
@@ -11610,9 +11673,10 @@ fn write_level_for_role(
     level: &mut Level,
     dir: &std::path::Path,
     role: execution_role::ExecutionRole,
+    items: &crate::items::Items,
 ) -> Result<()> {
     if role.writes_singleplayer_player() {
-        level.write(dir)
+        level.write(dir, items)
     } else {
         level.write_without_player(dir)
     }

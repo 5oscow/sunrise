@@ -479,7 +479,9 @@ impl Drop for NestedRoll {
     }
 }
 
-#[derive(Clone)]
+/// An empty catalog is useful for synthetic worlds without registered items;
+/// normal worlds load their catalog from the resource snapshot.
+#[derive(Clone, Default)]
 pub struct Items {
     pub items: HashMap<Arc<str>, ItemInfo>,
     /// Shared Block.getItem snapshot, including blocks sharing another block's item.
@@ -1214,27 +1216,7 @@ impl Items {
     }
     /// A table with nothing in it: the tags a client was sent go in with `set_tags`.
     pub fn empty() -> Self {
-        Self {
-            items: HashMap::new(),
-            block_items: Default::default(),
-            component_registry: Default::default(),
-            component_defaults: Default::default(),
-            mob_visibility: HashMap::new(),
-            order: Vec::new(),
-            registry_order: Vec::new(),
-            block_tags: HashMap::new(),
-            item_tags: HashMap::new(),
-            fluid_tags: HashMap::new(),
-            item_tag_order: HashMap::new(),
-            block_tag_order: HashMap::new(),
-            fluid_tag_order: HashMap::new(),
-            loot: Default::default(),
-            global_modifiers: Arc::default(),
-            predicates: Default::default(),
-            songs: HashMap::new(),
-            instruments: HashMap::new(),
-            enchantments: Arc::new(crate::enchant::Enchantments::default()),
-        }
+        Self::default()
     }
     /// An item table with only tags, for unit tests of item rules.
     #[cfg(any(test, feature = "test-support"))]
@@ -2587,7 +2569,7 @@ impl<R: RandomSource> LootContext<'_, R> {
 /// so a modelled one (a potion's contents, a book's pages) lands in its field.
 fn apply_components(stack: &mut ItemStack, patch: &Value) {
     use sunrise_core::nbt::Tag;
-    let mut saved = match crate::item_data::encode_components(stack) {
+    let mut saved = match crate::item_data::component_snapshot(stack) {
         Some(Tag::Compound(c)) => c,
         _ => Default::default(),
     };
@@ -3146,7 +3128,11 @@ mod tests {
         assert_eq!(items.weapon_disable_blocking(&axe), 0.0);
         let removal = crate::item_data::command_components("[!weapon]").unwrap();
         (axe.damage, axe.extra) = crate::item_data::decode_components(Some(&removal));
-        let restored = crate::item_nbt::item_from_nbt(&crate::item_nbt::item_to_nbt(&axe)).unwrap();
+        let restored = crate::item_nbt::item_from_nbt(&crate::item_nbt::item_to_nbt(
+            &axe,
+            &Default::default(),
+        ))
+        .unwrap();
         assert_eq!(items.weapon_disable_blocking(&restored), 0.0);
         fs::remove_dir_all(root).unwrap();
     }
@@ -3456,8 +3442,11 @@ mod tests {
         assert!(items.correct_for_drops(Some(&pick), "minecraft:stone"));
         let removal = crate::item_data::command_components("[!tool]").unwrap();
         (pick.damage, pick.extra) = crate::item_data::decode_components(Some(&removal));
-        let restored =
-            crate::item_nbt::item_from_nbt(&crate::item_nbt::item_to_nbt(&pick)).unwrap();
+        let restored = crate::item_nbt::item_from_nbt(&crate::item_nbt::item_to_nbt(
+            &pick,
+            &Default::default(),
+        ))
+        .unwrap();
         assert_eq!(items.mining_speed(Some(&restored), "minecraft:stone"), 1.0);
         assert!(!items.correct_for_drops(Some(&restored), "minecraft:stone"));
         assert_eq!(items.mining_damage(&restored), None);
@@ -4339,7 +4328,7 @@ mod tests {
             Some(sunrise_core::nbt::Tag::List(Vec::new())),
         ));
         apply_loot(&before, &after, &mut stack, |_, _| Some(true));
-        let saved = crate::item_data::encode_components(&stack);
+        let saved = crate::item_data::encode_components(&stack, &Items::default());
         let Some(sunrise_core::nbt::Tag::Compound(saved)) = saved else {
             panic!("the empty list is saved");
         };
@@ -4384,7 +4373,7 @@ mod tests {
             Some(item == "minecraft:iron_sword" && id == "minecraft:damage")
         });
         assert_eq!(stack.damage, 0);
-        let saved = crate::item_data::encode_components(&stack);
+        let saved = crate::item_data::encode_components(&stack, &Items::default());
         let Some(sunrise_core::nbt::Tag::Compound(saved)) = saved else {
             panic!("the removal is saved");
         };
@@ -4814,7 +4803,8 @@ mod tests {
                 {"type":"minecraft:set_name","name":"Lucky"},
                 {"type":"minecraft:set_name"}]}]}]});
         let drops = ctx(&items, None, &props, "").evaluate(&table, &mut LegacyRandom::new(1));
-        let saved = crate::item_data::encode_components(&drops[0]).expect("components");
+        let saved = crate::item_data::encode_components(&drops[0], &Default::default())
+            .expect("components");
         let saved = sunrise_client_core::scoreboard::tag_to_json(&saved);
         assert_eq!(saved["minecraft:custom_name"], "Lucky");
         assert_eq!(saved["minecraft:item_name"]["text"], "Potion of 1-Up");
@@ -4830,7 +4820,8 @@ mod tests {
         let apple = json!({"pools":[{"rolls":1,"entries":[{"type":"minecraft:item","name":"minecraft:apple",
             "modifier":{"type":"minecraft:set_components","components":{"!food":{}}}}]}]});
         let drops = ctx(&items, None, &props, "").evaluate(&apple, &mut LegacyRandom::new(1));
-        let saved = crate::item_data::encode_components(&drops[0]).expect("components");
+        let saved = crate::item_data::encode_components(&drops[0], &Default::default())
+            .expect("components");
         assert!(saved.get("!minecraft:food").is_some());
     }
 

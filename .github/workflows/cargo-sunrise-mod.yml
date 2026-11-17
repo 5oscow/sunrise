@@ -51,9 +51,8 @@ jobs:
         with:
           toolchain: ${{ steps.rust.outputs.version }}
           targets: ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{ matrix.target }}
+      # No compiler cache: a run's cache serves only its own pull request or tag, as main never runs this workflow,
+      # and the four a push saved (about 1.2 GB) pushed main's caches out of the repository's 10 GB.
       - name: The aarch64 Linux linker
         if: matrix.target == 'aarch64-unknown-linux-gnu'
         run: |

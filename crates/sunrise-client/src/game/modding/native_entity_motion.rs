@@ -199,7 +199,7 @@ impl Game<'_> {
     /// Whether the entity stands on a block (`Entity.onGround`). API
     /// 379.
     pub(super) fn entity_on_ground(&self, entity: EntityRef) -> Option<bool> {
-        let t = self.native_entity_target(entity)?;
+        let t = self.native_entity_read_target(entity)?;
         if let Some(p) = self.native_client_player(t) {
             return Some(p.ground.on_ground);
         }
