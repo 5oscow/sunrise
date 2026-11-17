@@ -1376,10 +1376,13 @@ impl Game<'_> {
                         )))
                     }
                     _ => {
-                        // Permanent entries stay authoritative. The modeled baby
-                        // modifier is transient and absent from that saved store.
-                        let amount =
-                            finalize::modifier_amount(m, attr, &modifier_id).or_else(|| {
+                        // `AttributeInstance.getModifier` finds a permanent or a
+                        // transient modifier: a mod's transient one, then the
+                        // modeled baby modifier, which is transient and absent
+                        // from the saved store.
+                        let amount = finalize::modifier_amount(m, attr, &modifier_id)
+                            .or_else(|| finalize::transient_modifier_amount(m, attr, &modifier_id))
+                            .or_else(|| {
                                 finalize::transient(m, attr)
                                     .filter(|_| modifier_id == "minecraft:baby")
                                     .map(|(amount, _)| amount)
@@ -1417,10 +1420,8 @@ impl Game<'_> {
         attribute: &str,
     ) -> Option<&mut sunrise_world::attributes::entity::EntityAttributes> {
         if let Target::Mob(id) = t
-            && (matches!(
-                attribute,
-                "minecraft:armor" | "minecraft:armor_toughness" | "minecraft:max_absorption"
-            ) || self.sulfur_archetype_attribute(t, attribute))
+            && (matches!(attribute, "minecraft:armor" | "minecraft:armor_toughness")
+                || self.sulfur_archetype_attribute(t, attribute))
         {
             let mob = self.mobs.iter_mut().find(|m| m.id == id)?;
             if mob.extra.armor_attributes.is_none() {
@@ -1475,15 +1476,6 @@ impl Game<'_> {
         };
         let catalog = self.motion.attributes.clone();
         let key = catalog.id(attribute).ok_or_else(no_attribute)?;
-        // A mob's max_absorption counts its Absorption effect's modifier.
-        let absorption_bonus = match target {
-            Target::Mob(mob) if attribute == "minecraft:max_absorption" => self
-                .mobs
-                .iter()
-                .find(|m| m.id == mob)
-                .map(|m| sunrise_client::mobs::armor::absorption_bonus(&m.extra.effects)),
-            _ => None,
-        };
         let map = self
             .generic_attributes(target, attribute)
             .ok_or_else(no_attribute)?;
@@ -1492,12 +1484,7 @@ impl Game<'_> {
         }
         let (message, args, result) = match id {
             "attribute.get" | "attribute.base.get" => {
-                let v = if id == "attribute.get"
-                    && let Some(bonus) = absorption_bonus
-                {
-                    sunrise_client::mobs::armor::max_absorption_of(map, 0.0, bonus)
-                        .ok_or_else(no_attribute)?
-                } else if id == "attribute.get" {
+                let v = if id == "attribute.get" {
                     map.value(key).map_err(|_| no_attribute())?
                 } else {
                     map.base_value(key).map_err(|_| no_attribute())?
@@ -2839,6 +2826,10 @@ mod particle_command_tests;
 #[cfg(test)]
 #[path = "attribute_tests.rs"]
 mod attribute_tests;
+
+#[cfg(test)]
+#[path = "effect_attribute_tests.rs"]
+mod effect_attribute_tests;
 
 #[cfg(test)]
 mod attribute_modifier_command_tests {
