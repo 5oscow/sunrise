@@ -59,7 +59,7 @@ DATED = re.compile(r"^nightly-(\d{4}-\d{2}-\d{2})$")
 TITLE_DATE = re.compile(r"Nightly (\d{4}-\d{2}-\d{2})")
 SOURCE_TAG = "nightly-source/"
 # Load from the trusted workflow checkout before pick() switches to a possibly older green tree.
-FORK_PLAYERS = Path(__file__).with_name("nightly-arismoko.md").read_text().strip()
+SUNRISE_PLAYERS = Path(__file__).with_name("nightly-players.md").read_text().strip()
 
 
 @dataclass
@@ -115,7 +115,7 @@ def notes(today: str, chosen: Ref, main: Ref, picked: list[dict], left_out: list
     built = f"main ({main.sha[:7]})" + (f" with {len(picked)} pull requests merged in" if picked else "")
     # The banner first: people who land on the Nightly ran its game zip for the launcher (a player, 2026-10-30).
     fork = train.REPO == "sunrise-org/sunrise"
-    parts = [FORK_PLAYERS if fork else train.PLAYERS,
+    parts = [SUNRISE_PLAYERS if fork else train.PLAYERS,
              f"Nightly {today} · {chosen.sha[:7]}: {built}, built from `{chosen.name}` ({chosen.sha}).",
              source_line(today, chosen.sha)]
     if not fork:
@@ -238,6 +238,11 @@ def build_set(main: Ref, prs: list[dict], left_out: list[str], today: str, force
         if not dry_run:
             ns.update_state(lambda st, builds: (st, builds + json.dumps(record) + "\n", f"build {name}"), token)
     chosen = Ref(name, sha, dt.datetime.now(dt.timezone.utc))
+    if force and previous == sha:
+        # A forced rebuild of the published Nightly's commit (the macOS legs it lacked, 2026-11-17) replaces that
+        # Nightly, so its notes list what the replaced one did: since the newest Nightly kept on an older commit.
+        older = [c for c in remote_refs(f"refs/tags/{SOURCE_TAG}*").values() if c != sha and is_ancestor(c, sha)]
+        previous = max(older, key=lambda c: int(git("rev-list", "--count", c)), default=None)
     with open("nightly-notes.md", "w") as f:
         f.write(notes(today, chosen, main, kept, left_out, merged_since(previous, main.sha), train.known_issues()))
     output(build=str(build).lower(), sha=sha, short=sha[:7], source=name, date=today, version=f"nightly-{today}",
