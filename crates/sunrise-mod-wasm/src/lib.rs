@@ -1102,6 +1102,20 @@ mod tests {
         }
     }
 
+    /// A guest module that links the shared protocol and nothing else, plus `import`.
+    fn guest(import: &str) -> Vec<u8> {
+        wat::parse_str(format!(
+            r#"(module (@custom "dylink.0" "\01\04\00\00\00\00")
+            (import "env" "memory" (memory 1))
+            (import "sunrise" "{}" (func (param i32 i32 i32 i32) (result i32)))
+            {import}
+            (func (export "sunrise_in") (param i32) (result i32) i32.const 0)
+            (func (export "sunrise_hook") (param i64) (result i64) i64.const 0))"#,
+            mod_surface::call::protocol_name("log", mod_surface::call::SHARED_PROTOCOL).text()
+        ))
+        .unwrap()
+    }
+
     fn declaring(id: &str, sha: char, memory_mib: Option<u32>) -> WasmPackage {
         let mut package = package(id, "1.0.0", "", sha, "t", "");
         package.manifest.wasm_memory_mib = memory_mib;
@@ -1145,6 +1159,61 @@ mod tests {
     }
 
     #[test]
+    fn a_refused_member_leaves_its_library_and_good_sibling_to_form_a_group() {
+        let module = guest;
+        let removed = r#"(import "sunrise" "hook:Hooks::removed_long_ago@1#00112233445566778899aabbccddeeff" (func))"#;
+        let mut library = package("shared", "1.0.0", "", 'a', "t", "");
+        let mut sibling = package("sibling", "1.0.0", "shared = \"^1\"\n", 'b', "t", "");
+        let mut bad = package("bad", "1.0.0", "shared = \"^1\"\n", 'c', "t", "");
+        let mut needs_bad = package("needs_bad", "1.0.0", "bad = \"^1\"\n", 'd', "t", "");
+        library.module = module("");
+        sibling.module = module("");
+        bad.module = module(removed);
+        needs_bad.module = module("");
+        let loaded = load_available_std(
+            Some(&[]),
+            vec![library, sibling, bad, needs_bad],
+            None,
+            sunrise_mod_package::manifest::MAX_WASM_MEMORY_MIB,
+            sunrise_mod_package::manifest::Side::Both,
+        );
+        let why = |id: &str| {
+            loaded
+                .refused
+                .iter()
+                .find(|(name, _)| name == id)
+                .map(|(_, why)| why)
+        };
+        assert!(
+            matches!(why("bad"), Some(Refusal::Boundary { .. })),
+            "{:?}",
+            loaded.refused
+        );
+        assert!(
+            matches!(
+                why("needs_bad"),
+                Some(Refusal::DependencyRefused { .. } | Refusal::MissingDependency { .. })
+            ),
+            "{:?}",
+            loaded.refused
+        );
+        for survivor in ["shared", "sibling"] {
+            assert!(
+                !matches!(
+                    why(survivor),
+                    Some(
+                        Refusal::Boundary { .. }
+                            | Refusal::DependencyRefused { .. }
+                            | Refusal::MissingDependency { .. }
+                    )
+                ),
+                "{survivor}: {:?}",
+                loaded.refused
+            );
+        }
+    }
+
+    #[test]
     fn a_group_takes_its_largest_declared_memory_within_the_instance_cap() {
         let library = declaring("big_lib", 'a', Some(2048));
         let addon = declaring("addon", 'b', Some(1536));
@@ -1163,12 +1232,13 @@ mod tests {
 
     #[test]
     fn a_declared_need_above_the_instance_cap_refuses_the_group_at_load_by_name() {
+        let mut library = declaring("big_lib", 'a', Some(2048));
+        let mut addon = package("addon", "1.0.0", "big_lib = \"1\"\n", 'b', "t", "");
+        library.module = guest("");
+        addon.module = guest("");
         let loaded = load_with_cache(
             b"",
-            vec![
-                declaring("big_lib", 'a', Some(2048)),
-                package("addon", "1.0.0", "big_lib = \"1\"\n", 'b', "t", ""),
-            ],
+            vec![library, addon],
             None,
             1024,
             sunrise_mod_package::manifest::Side::Both,
@@ -1403,7 +1473,7 @@ mod mixed_install_tests {
         std::fs::write(library.join("src/lib.rs"), "pub fn run() {}\n").unwrap();
         std::fs::write(
             addon.join("layouts.json"),
-            br#"{"lib":{"T":"0123456789abcdef"}}"#,
+            br#"{"lib":{"T":"0123456789abcdef0123456789abcdef"}}"#,
         )
         .unwrap();
         std::fs::write(
@@ -1438,14 +1508,14 @@ mod mixed_install_tests {
     #[test]
     fn wasm_to_native_layout_mismatch_names_the_type() {
         assert_eq!(
-            refusal("1123456789abcdef"),
+            refusal("1123456789abcdef0123456789abcdef"),
             "addon: layout mismatch in library lib for type T"
         );
     }
     #[test]
     fn wasm_to_native_matching_layout_is_still_unsupported() {
         assert_eq!(
-            refusal("0123456789abcdef"),
+            refusal("0123456789abcdef0123456789abcdef"),
             "lib is a native mod; wasm mod addon depends on it: mixed native and wasm dependencies aren't supported yet"
         );
     }
