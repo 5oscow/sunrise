@@ -11,7 +11,7 @@ fn a_mod_thrown_type_saves_its_id_and_item_and_loads_back() {
     );
     p.velocity = Vec3::new(0.0, 0.5, 1.0);
     assert!(saved_with_chunk(&p));
-    let tag = throwable_to_nbt(&p, [1; 4], None, None).unwrap();
+    let tag = throwable_to_nbt(&p, [1; 4], None, None, &Default::default()).unwrap();
     assert_eq!(super::kind(&tag).as_deref(), Some("ruby:bolt"));
     let item = tag.get("Item").and_then(item_from_nbt).unwrap();
     assert_eq!(&*item.item, "ruby:gem");
@@ -19,7 +19,7 @@ fn a_mod_thrown_type_saves_its_id_and_item_and_loads_back() {
     assert_eq!((&back.kind, back.velocity), (&p.kind, p.velocity));
     // NoGravity comes back too, as for vanilla's (a summoned bolt that floats).
     p.no_gravity = true;
-    let tag = throwable_to_nbt(&p, [1; 4], None, None).unwrap();
+    let tag = throwable_to_nbt(&p, [1; 4], None, None, &Default::default()).unwrap();
     assert!(throwable_from_nbt(&tag, None).unwrap().no_gravity);
     // a type no mod declares now is not a thrown kind.
     assert!(throwable_kind("gone:bolt").is_none());
@@ -53,12 +53,12 @@ fn summoned_projectiles_of_every_kind_load_and_honour_no_gravity() {
     .0;
     assert!(held.no_gravity);
     // ...and it is saved as the entity type it is.
-    let saved = arrow_to_nbt(&arrow, [1; 4], None, None, None).unwrap();
+    let saved = arrow_to_nbt(&arrow, [1; 4], None, None, None, &Default::default()).unwrap();
     assert_eq!(kind(&saved).as_deref(), Some("minecraft:spectral_arrow"));
     let plain = arrow_from_nbt(&summoned("minecraft:arrow", &[]), None, |_| None)
         .unwrap()
         .0;
-    let saved = arrow_to_nbt(&plain, [1; 4], None, None, None).unwrap();
+    let saved = arrow_to_nbt(&plain, [1; 4], None, None, None, &Default::default()).unwrap();
     assert_eq!(kind(&saved).as_deref(), Some("minecraft:arrow"));
 
     for id in ["minecraft:llama_spit", "minecraft:shulker_bullet"] {
@@ -82,7 +82,7 @@ fn summoned_projectiles_of_every_kind_load_and_honour_no_gravity() {
     assert!(!bottle.no_gravity && (bottle.get_gravity() - 0.07).abs() < 1e-12);
     let held = throwable_from_nbt(&summoned("minecraft:experience_bottle", &[flag]), None).unwrap();
     assert!(held.no_gravity && held.get_gravity() == 0.0);
-    let saved = throwable_to_nbt(&bottle, [1; 4], None, None).unwrap();
+    let saved = throwable_to_nbt(&bottle, [1; 4], None, None, &Default::default()).unwrap();
     assert_eq!(kind(&saved).as_deref(), Some("minecraft:experience_bottle"));
     let item = saved.get("Item").and_then(item_from_nbt).unwrap();
     assert_eq!(&*item.item, "minecraft:experience_bottle");

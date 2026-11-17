@@ -796,8 +796,14 @@ mod tests {
             ));
             game.mobs[0].invulnerable_flag = true;
             game.mobs[0].invulnerable_time = 9;
-            let tag =
-                sunrise_client::entity_nbt::mob_to_nbt(&game.mobs[0], [0; 4], None, None, |_| None);
+            let tag = sunrise_client::entity_nbt::mob_to_nbt(
+                &game.mobs[0],
+                [0; 4],
+                None,
+                None,
+                |_| None,
+                &Default::default(),
+            );
             let back =
                 sunrise_client::entity_nbt::mob_from_nbt(&tag, game.res.mob_types(), 30, None)
                     .unwrap();

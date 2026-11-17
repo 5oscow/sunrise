@@ -15,7 +15,7 @@ fn a_wither_skull_keeps_whether_it_is_dangerous() {
     assert_eq!(skull.kind, ProjectileKind::WitherSkull { dangerous: true });
     assert!(saved_with_chunk(&skull));
     skull.age = 5;
-    let back = fireball_to_nbt(&skull, [1, 2, 3, 4], None, None).unwrap();
+    let back = fireball_to_nbt(&skull, [1, 2, 3, 4], None, None, &Default::default()).unwrap();
     assert_eq!(kind(&back).as_deref(), Some("minecraft:wither_skull"));
     assert_eq!(number(back.get("dangerous")), Some(1));
     // Entity saves Fire every time; a skull's stays 0 (a fireball's is 20 once ticked).
@@ -27,7 +27,7 @@ fn a_wither_skull_keeps_whether_it_is_dangerous() {
     ]);
     let skull = fireball_from_nbt(&black, None).unwrap();
     assert_eq!(skull.kind, ProjectileKind::WitherSkull { dangerous: false });
-    let back = fireball_to_nbt(&skull, [1, 2, 3, 4], None, None).unwrap();
+    let back = fireball_to_nbt(&skull, [1, 2, 3, 4], None, None, &Default::default()).unwrap();
     assert_eq!(number(back.get("dangerous")), Some(0));
 }
 
@@ -43,7 +43,7 @@ fn a_fireball_round_trips_its_flight() {
     let p = fireball_from_nbt(&raw, None).unwrap();
     assert_eq!(p.kind, ProjectileKind::LargeFireball { power: 4 });
     assert_eq!((p.velocity.z, p.acceleration), (1.0, 0.0));
-    let back = fireball_to_nbt(&p, [1, 2, 3, 4], None, None).unwrap();
+    let back = fireball_to_nbt(&p, [1, 2, 3, 4], None, None, &Default::default()).unwrap();
     assert_eq!(number(back.get("ExplosionPower")), Some(4));
     assert_eq!(float(back.get("acceleration_power")), Some(0.0));
     // Projectile.addAdditionalSaveData: no LeftOwner unless set, HasBeenShot always.
@@ -93,7 +93,8 @@ fn a_fireball_saves_its_item() {
             ("Pos", doubles(&[0.0, 0.0, 0.0])),
         ]);
         let p = fireball_from_nbt(&plain, None).unwrap();
-        let back = fireball_to_nbt(&p, [1, 2, 3, 4], None, Some(&plain)).unwrap();
+        let back =
+            fireball_to_nbt(&p, [1, 2, 3, 4], None, Some(&plain), &Default::default()).unwrap();
         assert_eq!(
             item_of(&back),
             ("minecraft:fire_charge".to_owned(), 1),
@@ -104,7 +105,10 @@ fn a_fireball_saves_its_item() {
         put(
             &mut loaded,
             "Item",
-            item_to_nbt(&crate::items::ItemStack::new("minecraft:diamond", 5)),
+            item_to_nbt(
+                &crate::items::ItemStack::new("minecraft:diamond", 5),
+                &Default::default(),
+            ),
         );
         let p = fireball_from_nbt(&loaded, None).unwrap();
         let held = p.item.as_ref().unwrap();
@@ -116,19 +120,27 @@ fn a_fireball_saves_its_item() {
         put(
             &mut stale,
             "Item",
-            item_to_nbt(&crate::items::ItemStack::new("minecraft:stone", 8)),
+            item_to_nbt(
+                &crate::items::ItemStack::new("minecraft:stone", 8),
+                &Default::default(),
+            ),
         );
-        let back = fireball_to_nbt(&p, [1, 2, 3, 4], None, Some(&stale)).unwrap();
+        let back =
+            fireball_to_nbt(&p, [1, 2, 3, 4], None, Some(&stale), &Default::default()).unwrap();
         assert_eq!(item_of(&back), ("minecraft:diamond".to_owned(), 1), "{id}");
         // An empty one falls back to the fire charge.
         let mut empty = plain.clone();
         put(
             &mut empty,
             "Item",
-            item_to_nbt(&crate::items::ItemStack::new("minecraft:air", 1)),
+            item_to_nbt(
+                &crate::items::ItemStack::new("minecraft:air", 1),
+                &Default::default(),
+            ),
         );
         let p = fireball_from_nbt(&empty, None).unwrap();
-        let back = fireball_to_nbt(&p, [1, 2, 3, 4], None, Some(&empty)).unwrap();
+        let back =
+            fireball_to_nbt(&p, [1, 2, 3, 4], None, Some(&empty), &Default::default()).unwrap();
         assert_eq!(
             item_of(&back),
             ("minecraft:fire_charge".to_owned(), 1),
@@ -141,7 +153,7 @@ fn a_fireball_saves_its_item() {
         ("Pos", doubles(&[0.0, 0.0, 0.0])),
     ]);
     let p = fireball_from_nbt(&wind, None).unwrap();
-    let back = fireball_to_nbt(&p, [1, 2, 3, 4], None, Some(&wind)).unwrap();
+    let back = fireball_to_nbt(&p, [1, 2, 3, 4], None, Some(&wind), &Default::default()).unwrap();
     assert!(back.get("Item").is_none());
 }
 
@@ -165,7 +177,7 @@ fn a_summoned_potion_flies_as_the_item_its_compound_names() {
             )
         );
         assert!(saved_with_chunk(&p));
-        let tag = throwable_to_nbt(&p, [1; 4], None, None).unwrap();
+        let tag = throwable_to_nbt(&p, [1; 4], None, None, &Default::default()).unwrap();
         let item = tag.get("Item").and_then(item_from_nbt).unwrap();
         assert_eq!((&*item.item, item.count), (id, 1));
         assert_eq!(item.potion(), None);
@@ -180,6 +192,7 @@ fn a_summoned_potion_flies_as_the_item_its_compound_names() {
             item_to_nbt(
                 &crate::items::ItemStack::new("minecraft:splash_potion", 1)
                     .with_potion("minecraft:harming"),
+                &Default::default(),
             ),
         ),
     ]);
@@ -189,7 +202,7 @@ fn a_summoned_potion_flies_as_the_item_its_compound_names() {
     };
     assert_eq!(stack.potion(), Some("minecraft:harming"));
     // The stack stays in the tag it was loaded from.
-    let tag = throwable_to_nbt(&p, [1; 4], None, Some(&harming)).unwrap();
+    let tag = throwable_to_nbt(&p, [1; 4], None, Some(&harming), &Default::default()).unwrap();
     let item = tag.get("Item").and_then(item_from_nbt).unwrap();
     assert_eq!(item.potion(), Some("minecraft:harming"));
     // A lingering potion is its own entity type.
@@ -201,6 +214,7 @@ fn a_summoned_potion_flies_as_the_item_its_compound_names() {
             item_to_nbt(
                 &crate::items::ItemStack::new("minecraft:lingering_potion", 1)
                     .with_potion("minecraft:poison"),
+                &Default::default(),
             ),
         ),
     ]);
@@ -222,7 +236,7 @@ fn wind_charges_in_flight_are_saved_and_read_back() {
         let p = fireball_from_nbt(&saved, None).unwrap();
         assert_eq!(p.kind.id(), id);
         assert!(saved_with_chunk(&p), "{id}");
-        let tag = fireball_to_nbt(&p, [1; 4], None, Some(&saved)).unwrap();
+        let tag = fireball_to_nbt(&p, [1; 4], None, Some(&saved), &Default::default()).unwrap();
         assert_eq!(kind(&tag).as_deref(), Some(id));
         assert_eq!(tag.get("NoGravity"), Some(&Tag::Byte(1)));
     }
@@ -237,12 +251,15 @@ fn a_lingering_potion_keeps_its_type_whatever_item_it_flies_as() {
         ("Pos", doubles(&[24.5, 80.0, 8.5])),
         (
             "Item",
-            item_to_nbt(&crate::items::ItemStack::new("minecraft:splash_potion", 1)),
+            item_to_nbt(
+                &crate::items::ItemStack::new("minecraft:splash_potion", 1),
+                &Default::default(),
+            ),
         ),
     ]);
     let p = throwable_from_nbt(&tag, None).unwrap();
     assert_eq!(p.kind.id(), "minecraft:lingering_potion");
-    let back = throwable_to_nbt(&p, [1; 4], None, Some(&tag)).unwrap();
+    let back = throwable_to_nbt(&p, [1; 4], None, Some(&tag), &Default::default()).unwrap();
     assert_eq!(kind(&back).as_deref(), Some("minecraft:lingering_potion"));
     let item = back.get("Item").and_then(item_from_nbt).unwrap();
     assert_eq!(&*item.item, "minecraft:splash_potion");
@@ -277,6 +294,7 @@ fn a_painting_keeps_its_saved_pitch_and_takes_its_yaw_from_the_facing() {
             width: 1,
             height: 1,
             check_interval: 0,
+            ticks: 0,
         };
         rotation(&painting_to_nbt(&painting, [1; 4], Some(raw)))
     };
@@ -350,7 +368,10 @@ fn frame_missing_facing_loads_down_and_valid_directions_round_trip() {
                 ("ItemDropChance", Tag::Float(0.25_f32.to_bits())),
                 (
                     "Item",
-                    item_to_nbt(&crate::items::ItemStack::new("minecraft:diamond", 1)),
+                    item_to_nbt(
+                        &crate::items::ItemStack::new("minecraft:diamond", 1),
+                        &Default::default(),
+                    ),
                 ),
             ]);
             if let Some(direction) = facing {
@@ -365,7 +386,7 @@ fn frame_missing_facing_loads_down_and_valid_directions_round_trip() {
                 "minecraft:diamond"
             );
             for raw in [None, Some(&tag)] {
-                let saved = item_frame_to_nbt(&frame, [1, 2, 3, 4], raw);
+                let saved = item_frame_to_nbt(&frame, [1, 2, 3, 4], raw, &Default::default());
                 assert_eq!(
                     saved.get("Facing"),
                     Some(&Tag::Byte(facing.unwrap_or(0))),
@@ -415,7 +436,7 @@ fn frame_rotation_uses_signed_byte_value_and_round_trips() {
             let frame = item_frame_from_nbt(&tag, 17).unwrap();
             assert_eq!(frame.rotation, expected, "{kind}: {tag:?}");
             for raw in [None, Some(&tag)] {
-                let saved = item_frame_to_nbt(&frame, [1, 2, 3, 4], raw);
+                let saved = item_frame_to_nbt(&frame, [1, 2, 3, 4], raw, &Default::default());
                 assert_eq!(saved.get("ItemRotation"), Some(&Tag::Byte(expected)));
                 assert_eq!(item_frame_from_nbt(&saved, 17).unwrap().rotation, expected);
             }
@@ -440,7 +461,7 @@ fn a_named_frame_drops_with_its_custom_name() {
         assert_eq!(&*stack.item, id);
         assert_eq!(stack.count, 1);
         assert_eq!(stack.custom_name().as_deref(), Some("Gallery"));
-        let saved = item_frame_to_nbt(&frame, [1, 2, 3, 4], None);
+        let saved = item_frame_to_nbt(&frame, [1, 2, 3, 4], None, &Default::default());
         assert_eq!(text(saved.get("CustomName")).as_deref(), Some("Gallery"));
     }
     let bare = Tag::compound([
@@ -452,7 +473,7 @@ fn a_named_frame_drops_with_its_custom_name() {
     assert!(frame.custom_name.is_none());
     assert!(frame.item_stack_with_data().custom_name().is_none());
     assert!(
-        item_frame_to_nbt(&frame, [1, 2, 3, 4], Some(&bare))
+        item_frame_to_nbt(&frame, [1, 2, 3, 4], Some(&bare), &Default::default())
             .get("CustomName")
             .is_none()
     );
@@ -479,8 +500,10 @@ fn projectile_shot_flag_round_trips_independently_of_age() {
             assert_eq!(p.has_been_shot, shot != 0);
             for age in [0, 12] {
                 p.age = age;
-                let tag = throwable_to_nbt(&p, [1, 2, 3, 4], None, Some(&raw))
-                    .or_else(|| fireball_to_nbt(&p, [1, 2, 3, 4], None, Some(&raw)))
+                let tag = throwable_to_nbt(&p, [1, 2, 3, 4], None, Some(&raw), &Default::default())
+                    .or_else(|| {
+                        fireball_to_nbt(&p, [1, 2, 3, 4], None, Some(&raw), &Default::default())
+                    })
                     .or_else(|| spit_or_bullet_to_nbt(&p, [1, 2, 3, 4], None, None, Some(&raw)))
                     .unwrap();
                 assert_eq!(number(tag.get("HasBeenShot")), Some(i64::from(shot)));
@@ -501,7 +524,7 @@ fn thrown_item_projectiles_round_trip_their_flight_item_and_owner() {
         (p.velocity, p.left_owner, p.age) = (Vec3::new(0.3, -0.1, 1.2), true, 4);
         p.has_been_shot = true;
         [p.yaw, p.pitch] = [30.0, -10.0];
-        let tag = throwable_to_nbt(&p, [1, 2, 3, 4], player, None).unwrap();
+        let tag = throwable_to_nbt(&p, [1, 2, 3, 4], player, None, &Default::default()).unwrap();
         assert_eq!(super::kind(&tag).as_deref(), Some(id));
         // ThrowableItemProjectile: the item it flies as, by its default.
         let item = tag.get("Item").and_then(item_from_nbt).unwrap();
@@ -519,7 +542,8 @@ fn thrown_item_projectiles_round_trip_their_flight_item_and_owner() {
         let mut away = throwable_from_nbt(&tag, Some([9; 4])).unwrap();
         assert_eq!((away.owner, away.owner_uuid), (None, player));
         away.position.y += 3.0;
-        let resaved = throwable_to_nbt(&away, [1; 4], away.owner_uuid, None).unwrap();
+        let resaved =
+            throwable_to_nbt(&away, [1; 4], away.owner_uuid, None, &Default::default()).unwrap();
         assert_eq!(uuid_from_tag(resaved.get("Owner")), player);
     }
     // the chunk saves arrows, fireballs, wind charges and these, and so takes them with it.
@@ -540,17 +564,20 @@ fn thrown_item_projectiles_round_trip_their_flight_item_and_owner() {
         ("Pos", doubles(&[0.0, 64.0, 0.0])),
         (
             "Item",
-            item_to_nbt(&crate::items::ItemStack::new("minecraft:blue_egg", 1)),
+            item_to_nbt(
+                &crate::items::ItemStack::new("minecraft:blue_egg", 1),
+                &Default::default(),
+            ),
         ),
     ]);
     let egg = throwable_from_nbt(&raw, None).unwrap();
-    let tag = throwable_to_nbt(&egg, [1; 4], None, Some(&raw)).unwrap();
+    let tag = throwable_to_nbt(&egg, [1; 4], None, Some(&raw), &Default::default()).unwrap();
     let item = tag.get("Item").and_then(item_from_nbt).unwrap();
     assert_eq!(&*item.item, "minecraft:blue_egg");
     assert!(tag.get("LeftOwner").is_none() && tag.get("Owner").is_none());
     assert_eq!(number(tag.get("HasBeenShot")), Some(0));
     let wind = Projectile::new(ProjectileKind::WindCharge, Vec3::ZERO, None);
-    assert!(throwable_to_nbt(&wind, [1; 4], None, None).is_none());
+    assert!(throwable_to_nbt(&wind, [1; 4], None, None, &Default::default()).is_none());
     // NoGravity is loaded and saved again (a summoned pearl that floats).
     let floating = Tag::compound([
         ("id", Tag::String("minecraft:ender_pearl".into())),
@@ -559,10 +586,10 @@ fn thrown_item_projectiles_round_trip_their_flight_item_and_owner() {
     ]);
     let pearl = throwable_from_nbt(&floating, None).unwrap();
     assert!(pearl.no_gravity);
-    let tag = throwable_to_nbt(&pearl, [1; 4], None, None).unwrap();
+    let tag = throwable_to_nbt(&pearl, [1; 4], None, None, &Default::default()).unwrap();
     assert_eq!(number(tag.get("NoGravity")), Some(1));
     assert!(
-        throwable_to_nbt(&egg, [1; 4], None, None)
+        throwable_to_nbt(&egg, [1; 4], None, None, &Default::default())
             .unwrap()
             .get("NoGravity")
             .is_none()

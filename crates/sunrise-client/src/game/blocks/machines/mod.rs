@@ -1008,7 +1008,7 @@ impl Game<'_> {
             let pos = view.parts[0].0;
             if let Tag::Compound(map) = &mut tag {
                 if let Some(item) = item {
-                    map.insert("item".into(), save::item_to_nbt(&item));
+                    map.insert("item".into(), save::item_to_nbt(&item, self.res.items()));
                 } else {
                     map.remove(&"item".into());
                 }
@@ -1108,7 +1108,7 @@ impl Game<'_> {
         if let Tag::Compound(map) = tag {
             match item {
                 Some(item) => {
-                    map.insert("item".into(), save::item_to_nbt(&item));
+                    map.insert("item".into(), save::item_to_nbt(&item, self.res.items()));
                 }
                 None => {
                     map.remove(&"item".into());

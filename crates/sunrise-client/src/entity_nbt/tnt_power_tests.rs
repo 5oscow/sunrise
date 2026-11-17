@@ -128,7 +128,14 @@ fn a_dragon_fireball_saves_and_loads_as_itself_without_raw_data() {
     p.velocity = Vec3::new(0.1, 0.0, 0.0);
     p.acceleration = 0.1;
     p.age = 3;
-    let tag = fireball_to_nbt(&p, [1, 2, 3, 4], Some([5, 6, 7, 8]), None).unwrap();
+    let tag = fireball_to_nbt(
+        &p,
+        [1, 2, 3, 4],
+        Some([5, 6, 7, 8]),
+        None,
+        &Default::default(),
+    )
+    .unwrap();
     assert_eq!(kind(&tag).as_deref(), Some("minecraft:dragon_fireball"));
     assert_eq!(uuid(&tag), Some([1, 2, 3, 4]));
     assert_eq!(uuid_from_tag(tag.get("Owner")), Some([5, 6, 7, 8]));

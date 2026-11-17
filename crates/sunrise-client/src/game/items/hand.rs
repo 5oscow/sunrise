@@ -313,11 +313,13 @@ impl Game<'_> {
         self.attack_ticks = 0;
         self.hand_strength.reset();
     }
-    /// `Minecraft.tick`'s `pick`, then `handleKeybinds`' number keys: the
-    /// tick's clicks act on what the item held before the keys picked (a
-    /// spear's 4.5 blocks), with the item the keys select (attribute
-    /// swapping a spear's reach onto a mace).
+    /// Window input preparation only selects queued hotbar keys: the enclosing
+    /// client tick already picked before key handling. Simulation keeps its own ray.
     pub(super) fn pick_tick_targets(&mut self) {
+        if self.native_window() {
+            self.select_queued_hotbar();
+            return;
+        }
         self.tick_hit.set(Some(self.pick()));
         self.tick_mob = None;
         let mob = match self.active_attack_range() {
@@ -333,7 +335,7 @@ impl Game<'_> {
             self.selected = slot;
         }
     }
-    /// The tick's clicks are done: later picks follow the crosshair again.
+    /// Release only the non-window simulation's tick-local caches.
     pub(super) fn release_tick_targets(&mut self) {
         self.tick_hit.set(None);
         self.tick_mob = None;
@@ -361,18 +363,45 @@ impl Game<'_> {
     /// block within the block reach (`getHitEntitiesAlong`'s block result,
     /// kept by `filterHitResult`); `None` on a miss, where the plain pick
     /// decides.
+    pub(super) fn attack_range_pick_entity(&self) -> Option<mod_api::CrosshairTarget> {
+        let range = self.active_attack_range()?;
+        let (i, _, location) = self.attack_range_pick(&range)??;
+        let mob = &self.mobs[i];
+        Some(mod_api::CrosshairTarget::Entity {
+            entity: mod_api::EntityRef::new(self.native_lifecycle.epoch()?, mob.id),
+            point: [
+                mob.position.x + location[0],
+                mob.position.y + location[1],
+                mob.position.z + location[2],
+            ],
+        })
+    }
+
+    pub(super) fn client_pick_entity_reach(&self, direction: [f64; 3]) -> f64 {
+        self.active_attack_range()
+            .map_or(self.entity_reach, |range| {
+                (f64::from(attack_reach(&range, self.creative).1)
+                    + self.known_player_movement().dot(v3(direction)).max(0.0))
+                .max(self.entity_reach)
+            })
+    }
+
     fn attack_range_pick(
         &self,
         range: &serde_json::Value,
     ) -> Option<Option<(usize, f64, [f64; 3])>> {
-        let eye = v3(self.eye_position()?);
-        let look = v3(super::view_vector(self.yaw, self.pitch));
+        let (eye, look) = match self.client_pick.ray {
+            Some((origin, direction)) => (v3(origin), v3(direction)),
+            None => (
+                v3(self.eye_position()?),
+                v3(super::view_vector(self.yaw, self.pitch)),
+            ),
+        };
         let reach = attack_reach(range, self.creative);
         let camera = self.remote_camera_id();
-        let boxes: Vec<(usize, Aabb)> = (self.mobs.iter().enumerate())
+        let boxes = (self.mobs.iter().enumerate())
             .filter(|(_, m)| !m.removed && Some(m.id) != self.riding && Some(m.id) != camera)
-            .map(|(i, m)| (i, m.bounds()))
-            .collect();
+            .map(|(i, m)| (i, m.bounds()));
         let clip = |from: Vec3, to: Vec3| {
             let length = from.distance_squared(to).sqrt();
             let d = to.subtract(from).scale(1.0 / length);
@@ -382,17 +411,21 @@ impl Game<'_> {
                 .map(|hit| Vec3::new(hit.point[0], hit.point[1], hit.point[2]))
         };
         let movement = self.known_player_movement();
-        let nearest = super::spear::hits_in_reach(&boxes, eye, look, movement, reach, clip)
-            .into_iter()
-            .map(|(i, at)| {
-                let feet = self.mobs[i].position;
-                (
-                    i,
-                    eye.distance_squared(at).sqrt(),
-                    interact_location(at, feet),
-                )
-            })
-            .reduce(|a, b| if b.1 < a.1 { b } else { a });
+        let mut nearest: Option<(usize, f64, [f64; 3])> = None;
+        sunrise_client::spear::for_each_hit_in_reach(
+            boxes,
+            eye,
+            look,
+            movement,
+            reach,
+            clip,
+            |i, at| {
+                let distance = eye.distance_squared(at).sqrt();
+                if nearest.is_none_or(|best| distance < best.1) {
+                    nearest = Some((i, distance, interact_location(at, self.mobs[i].position)));
+                }
+            },
+        );
         if nearest.is_some() {
             return Some(nearest);
         }
@@ -413,9 +446,8 @@ impl Game<'_> {
             // (scripts under --control hold buttons without grabbing it).
             let down = self.left;
             let ticks = self.clicks.destroying.ticks;
-            // Minecraft.hitResult is picked once per tick, before the number
-            // keys: a creative break does not move the use that follows it
-            // past the broken block.
+            // Every click and both hands share this tick's stored pick, even
+            // after a creative break changes the block at its position.
             self.pick_tick_targets();
             let mut world = GameHands {
                 game: self,
@@ -466,12 +498,13 @@ impl Game<'_> {
             self.hotbar_presses.clear();
         }
         let d = &self.clicks.destroying;
-        self.mining = d.active.then_some(Mining {
+        self.set_client_mining(d.active.then_some(Mining {
             pos: d.pos,
             progress: d.progress,
             per_tick: 0.0,
             ticks: d.ticks as u32,
-        });
+            crack: None,
+        }));
         if let Some(mining) = &self.mining {
             let pos = mining.pos;
             let progress = mining.progress;
@@ -614,8 +647,11 @@ impl Game<'_> {
     /// Whether an attack would hit an entity rather than the block behind
     /// it: the crosshair's `EntityHitResult`.
     pub(super) fn entity_targeted(&self) -> bool {
-        if let Some(entity) = self.targeting().entity {
-            return self.targeting_entity_hit(entity).is_some();
+        if self.uses_stored_pick() {
+            return matches!(
+                self.crosshair_target(),
+                Some(mod_api::CrosshairTarget::Entity { .. })
+            );
         }
         let before = |d: Option<f64>| d.is_some_and(|d| self.before_block(d));
         before(self.painting_hit().map(|h| h.1))
@@ -776,6 +812,24 @@ impl Game<'_> {
     /// `Minecraft.crosshairPickEntity` when it is a `LivingEntity`: whether
     /// it is alive (the nearest entity under the crosshair, before any block).
     pub(super) fn crosshair_living(&self) -> Option<bool> {
+        if let Some(hit) = self.cached_entity_pick() {
+            let (entity, distance, _) = hit?;
+            if !self.mobs.iter().any(|mob| mob.id == entity.id())
+                && !self
+                    .armor_stands
+                    .iter()
+                    .any(|stand| stand.id == entity.id())
+            {
+                return None;
+            }
+            if self
+                .active_attack_range()
+                .is_some_and(|range| !attack_range_contains(&range, distance, self.creative))
+            {
+                return None;
+            }
+            return Some(true);
+        }
         let nearest = |hits: &[Option<f64>]| hits.iter().flatten().copied().reduce(f64::min);
         let other = nearest(&[
             self.painting_hit().map(|h| h.1),
