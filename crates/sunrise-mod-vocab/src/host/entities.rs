@@ -249,7 +249,7 @@ pub trait EntitiesBackend {
     /// Side: both.
     /// The entity's box (`Entity.getBoundingBox`): its lowest and highest
     /// corner. Displays and markers have zero-sized physical boxes; interactions use
-    /// their saved dimensions. None for End crystals and the dragon; a dragon part's is its own. On a client, reads
+    /// their saved dimensions. End crystals have their 2 x 2 box. None for the dragon; a dragon part's is its own. On a client, reads
     /// its own copy of a tracked entity, or the local player's predicted box.
     #[access(WorldOnly)]
     fn entity_bounding_box(&self, entity: EntityRef) -> Option<[[f64; 3]; 2]>;

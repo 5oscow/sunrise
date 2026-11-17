@@ -178,14 +178,7 @@ impl Game<'_> {
             .iter()
             .enumerate()
             .filter(|(_, c)| c.id != 0)
-            .filter_map(|(i, c)| {
-                let p = c.position;
-                let bounds = Aabb::new(
-                    Vec3::new(p.x - 1.0, p.y, p.z - 1.0),
-                    Vec3::new(p.x + 1.0, p.y + 2.0, p.z + 1.0),
-                );
-                ray_box(eye, dir, self.entity_reach, bounds).map(|d| (i, d))
-            })
+            .filter_map(|(i, c)| ray_box(eye, dir, self.entity_reach, c.bounds()).map(|d| (i, d)))
             .min_by(|a, b| a.1.total_cmp(&b.1))
     }
 
