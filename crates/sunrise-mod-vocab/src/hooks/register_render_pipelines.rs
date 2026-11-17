@@ -49,8 +49,10 @@ fn pipeline_fragment(input: PipelineInput) -> vec4<f32> {
 mod render colour rule (`docs/design/mod-api/mod-render-colour.md`): the function reads and returns linear
 light, 1.0 is paper white, more is brighter, and alpha is coverage. A file that declares its own
 bindings or entry points is refused, and so is one over 20,000 expressions or 64 texture reads, or
-that SPIR-V, MSL or HLSL translation refuses (the refusal names the backend). A refusal with a place
-in the file reads `<file>:<line>:<column>: <reason>`.
+that SPIR-V, MSL or HLSL translation refuses (the refusal names the backend), or one over 131,072
+bytes or with an expression chaining more than 200 binary operators, member accesses or indexings
+(`a + b + c + ...`: split it with `let`), which would overflow the parser's stack. A refusal with a
+place in the file reads `<file>:<line>:<column>: <reason>`.
 
 Resolve the pipeline with `host.render_assets().render_pipeline(&id)` in `client_setup` and again
 in `client_resources_reloaded`, then draw with `WorldDrawContext::pipeline_quads` from

@@ -128,7 +128,16 @@ pub fn compose(file: &str, text: &str) -> Result<String, Vec<Problem>> {
 /// prelude and entry points count as the mod's: its rules above, then naga validation,
 /// [`MAX_EXPRESSIONS`](crate::check::MAX_EXPRESSIONS) and [`MAX_TEXTURE_READS`](crate::check::MAX_TEXTURE_READS) over every function, and translation of the
 /// module to SPIR-V, MSL and HLSL with wgpu's options, refused naming the backend.
+///
+/// The file is parsed and validated on a thread with the stack and the bounds of
+/// [`crate::guard`], so no file, whatever its shape, can crash the game: one that is too long or
+/// chains too many operators in an expression is refused by name.
 pub fn compose_with(file: &str, text: &str, textured: bool) -> Result<String, Vec<Problem>> {
+    crate::guard::guarded(|| compose_checked(file, text, textured))
+        .unwrap_or_else(|reason| Err(vec![problem(file, reason)]))
+}
+
+fn compose_checked(file: &str, text: &str, textured: bool) -> Result<String, Vec<Problem>> {
     let prelude = prelude(textured);
     let own = prelude.len()..prelude.len() + text.len() + 1;
     let entries = own.end..own.end + ENTRIES.len();
@@ -140,6 +149,10 @@ pub fn compose_with(file: &str, text: &str, textured: bool) -> Result<String, Ve
             ("<entries>".to_owned(), entries),
         ],
     };
+    // The bounds hold for the whole shader the renderer builds, its entry points included.
+    if let Some((at, message)) = crate::guard::refusal(&format!("{}{ENTRIES}", composed.text)) {
+        return Err(vec![located(&composed, at, message)]);
+    }
     // First without the entry points, so a missing or mistyped function is reported as such
     // rather than as a call that doesn't resolve.
     let module = naga::front::wgsl::parse_str(&composed.text).map_err(|e| {
@@ -306,6 +319,52 @@ fn pipeline_fragment(input: PipelineInput) -> vec4<f32> {
                 "{GLOW}@fragment fn mine() -> @location(0) vec4<f32> {{ return vec4<f32>(1.0); }}\n"
             ))
             .contains("declares an entry point")
+        );
+    }
+
+    /// An expression chain of ten thousand terms used to overflow naga's parser stack, which
+    /// aborts the process; a file that long, or longer than a shader may be, is refused by name
+    /// at its line, and the same function with a chain inside the bound composes.
+    #[test]
+    fn a_file_that_would_overflow_the_parser_is_refused_not_a_crash() {
+        let shader = |terms: usize| {
+            format!(
+                "fn pipeline_fragment(input: PipelineInput) -> vec4<f32> {{\n    let a = input.color.r;\n    let x = a{};\n    return vec4<f32>(x);\n}}\n",
+                "+a".repeat(terms)
+            )
+        };
+        let message = compose(&shader(10_000)).unwrap_err();
+        assert!(
+            message.contains("an expression chains more than 200 operators (201 here)"),
+            "{message}"
+        );
+        assert!(compose(&shader(150)).is_ok());
+        let long = format!("{}// {}\n", shader(1), "x".repeat(200_000));
+        assert!(
+            compose(&long)
+                .unwrap_err()
+                .ends_with("a shader may hold 131072")
+        );
+    }
+
+    /// The byte bound is on the whole shader the renderer builds: the prelude, the file and the
+    /// entry points together, not only what precedes the entry points.
+    #[test]
+    fn the_byte_bound_counts_the_entry_points() {
+        let max = crate::guard::MAX_SOURCE_BYTES;
+        let body =
+            "fn pipeline_fragment(input: PipelineInput) -> vec4<f32> { return input.color; }\n";
+        // The file padded with a comment to `fill` bytes, its newline included: the whole
+        // shader is the prelude, the file, the newline `compose_with` adds and the entries.
+        let padded = |whole: usize| {
+            let fill = whole - prelude(false).len() - ENTRIES.len() - 1;
+            format!("{body}//{}", "x".repeat(fill - body.len() - 2))
+        };
+        assert!(compose(&padded(max)).is_ok());
+        assert!(
+            compose(&padded(max + 1))
+                .unwrap_err()
+                .ends_with(&format!("a shader may hold {max}"))
         );
     }
 
