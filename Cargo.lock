@@ -525,13 +525,14 @@ dependencies = [
  "sunrise-native-build",
  "sunrise-port-pack",
  "sunrise-release-sign",
+ "sunrise-shader-api",
+ "sunrise-wasmtime",
  "tempfile",
  "toml",
  "toml_edit",
  "ureq",
  "wasm-encoder 0.261.0",
  "wasmparser 0.261.0",
- "wasmtime",
  "zip",
 ]
 
@@ -5113,11 +5114,11 @@ dependencies = [
  "sunrise-mod-points",
  "sunrise-mod-runtime",
  "sunrise-threads",
+ "sunrise-wasmtime",
  "sunrise-world",
  "syn 2.0.119",
  "tempfile",
  "wasmparser 0.261.0",
- "wasmtime",
  "wat",
 ]
 
@@ -5303,6 +5304,7 @@ dependencies = [
  "regex",
  "sha1",
  "sha2",
+ "sunrise-core",
  "zip",
 ]
 
@@ -5349,6 +5351,7 @@ dependencies = [
  "ab_glyph",
  "base64 0.22.1",
  "chrono",
+ "dunce",
  "getrandom 0.3.4",
  "libc",
  "p12-keystore",
@@ -5463,6 +5466,13 @@ dependencies = [
  "rustc-demangle",
  "sunrise-guest-stack",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "sunrise-wasmtime"
+version = "0.1.0"
+dependencies = [
+ "wasmtime",
 ]
 
 [[package]]

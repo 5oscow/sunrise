@@ -402,7 +402,7 @@ fn existing_fieldless_enum_layouts_match_baseline() {
     );
     assert_eq!(
         <crate::entity::types::MoveCause as Wire>::layout(&mut vec![]),
-        0x00bec45d5d6aef41,
+        0xdeed7d85fc9ecdfb,
         "MoveCause"
     );
     assert_eq!(

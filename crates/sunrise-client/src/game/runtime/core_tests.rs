@@ -7,7 +7,12 @@ fn reload_resolves_parts_against_reloaded_tags() {
     struct TagPart;
     #[mod_api::sunrise_part]
     impl BlockPart for TagPart {
-        fn analog_output(&self, _: &dyn mod_api::LevelHost, _: &mut mod_api::AnalogOutputEvent) {}
+        fn analog_output(
+            &self,
+            _: &mut dyn mod_api::LevelRandomHost,
+            _: &mut mod_api::AnalogOutputEvent,
+        ) {
+        }
     }
     struct ReloadMod;
     #[mod_api::__subscriptions]
@@ -753,8 +758,7 @@ fn falling_block_does_not_descend_through_scaffolding() {
             .collect(),
         },
     )
-    .unwrap()
-    .expect("scaffolding collision rule");
+    .unwrap();
 
     // When a falling block is falling downward (wanted.y < 0) above the scaffolding top (y = 11.0):
     let falling_y = 11.0;

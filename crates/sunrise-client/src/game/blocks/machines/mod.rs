@@ -757,14 +757,7 @@ pub(super) fn cat_sitting_above(mobs: &[Mob], key: Pos) -> bool {
 /// `ChestBlock.getContainer(.., false)`, whose blocked check sees the level's
 /// cats (`isCatSittingOnChest`).
 pub(super) fn container_signal(level: &mut super::GameLevel<'_>, pos: BlockPos) -> i32 {
-    let c = Containers {
-        world: &*level.world,
-        behaviours: level.behaviours,
-        items: level.items,
-        registry: level.registry,
-        brewing: None,
-        mobs: level.entities().mobs,
-    };
+    let c = level.containers();
     let view = c
         .view((pos.x, pos.y, pos.z), true)
         .filter(|v| !matches!(v.kind, Kind::Composter(_)))
@@ -774,14 +767,7 @@ pub(super) fn container_signal(level: &mut super::GameLevel<'_>, pos: BlockPos) 
             level.unpack_loot(super::container_loot::LootTarget::Block(key), None);
         }
     }
-    let c = Containers {
-        world: &*level.world,
-        behaviours: level.behaviours,
-        items: level.items,
-        registry: level.registry,
-        brewing: None,
-        mobs: level.entities().mobs,
-    };
+    let c = level.containers();
     view.map_or(0, |v| c.signal(&v))
 }
 
@@ -824,6 +810,19 @@ pub(super) fn shelf_signal(
             .map(|(slot, item)| i32::from(item.is_some()) << slot)
             .sum(),
     )
+}
+
+impl super::GameLevel<'_> {
+    pub(in crate::game) fn containers(&self) -> Containers<'_> {
+        Containers {
+            world: self.world,
+            behaviours: self.behaviours,
+            items: self.items,
+            registry: self.registry,
+            brewing: None,
+            mobs: self.entities().mobs,
+        }
+    }
 }
 
 impl Game<'_> {

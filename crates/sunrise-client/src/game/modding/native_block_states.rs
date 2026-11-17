@@ -14,6 +14,20 @@ use sunrise_world::fluid::{FluidKind, FluidState as EngineFluidState};
 use sunrise_world::level::{fluid_drip_particle, fluid_explosion_resistance, fluid_randomly_ticks};
 use sunrise_world::registry::{BlockRegistry, BlockStateId};
 
+/// The engine's fluid state for an exported one, or none for a state no fluid can be in: no
+/// world form, an amount above 8, a zero amount for anything but the empty fluid, or a source
+/// that isn't full.
+pub(super) fn engine_fluid_state(state: FluidState) -> Option<EngineFluidState> {
+    let kind = super::native_world_read::engine_fluid_kind(state.fluid)?;
+    let engine = EngineFluidState::new(kind, state.amount, state.falling);
+    let consistent = match kind {
+        FluidKind::Empty => state.amount == 0,
+        _ if engine.is_source() => state.amount == 8,
+        _ => (1..=8).contains(&state.amount),
+    };
+    consistent.then_some(engine)
+}
+
 impl Game<'_> {
     /// The exported definition of a world fluid, or a tank-only identity.
     pub(super) fn fluid_state_definition(&self, fluid: FluidKey) -> Option<FluidDefinition> {
@@ -75,14 +89,10 @@ impl Game<'_> {
     /// fluid states with. None for a state no fluid can be in: no world form, an amount above
     /// 8, a zero amount for anything but the empty fluid, or a source that isn't full.
     pub(super) fn fluid_legacy_block(&self, state: FluidState) -> Option<mod_api::BlockStateId> {
-        let kind = super::native_world_read::engine_fluid_kind(state.fluid)?;
-        let engine = EngineFluidState::new(kind, state.amount, state.falling);
-        let consistent = match kind {
-            FluidKind::Empty => state.amount == 0,
-            _ if engine.is_source() => state.amount == 8,
-            _ => (1..=8).contains(&state.amount),
-        };
-        consistent.then(|| mod_api::BlockStateId(self.res.behaviours().legacy_block(engine).0))
+        let engine = engine_fluid_state(state)?;
+        Some(mod_api::BlockStateId(
+            self.res.behaviours().legacy_block(engine).0,
+        ))
     }
 
     /// Validate fluid constraints against the exported property definition.
@@ -384,7 +394,8 @@ pub(super) fn match_state_properties(
 /// the parser checks properties against, whether a world is open or not.
 pub(super) fn block_registries(registry: &'static BlockRegistry) -> Arc<Registries> {
     static CACHE: Mutex<Vec<(usize, Arc<Registries>)>> = Mutex::new(Vec::new());
-    let key = std::ptr::from_ref(registry) as usize;
+    // Derived from the registry's data alone, so equal data across installations shares one.
+    let key = registry.payload_identity();
     let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
     if let Some((_, reg)) = cache.iter().find(|(cached, _)| *cached == key) {
         return reg.clone();

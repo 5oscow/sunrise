@@ -16,7 +16,7 @@ pub mod java_instance;
 pub mod modrinth;
 pub mod sunrise;
 
-pub use sunrise_mod_package::install_lock::{lock_home, try_lock_home, HomeLockGuard};
+pub use sunrise_launcher_smod::install_lock::{lock_home, try_lock_home, HomeLockGuard};
 
 use serde::{Deserialize, Serialize};
 
@@ -386,6 +386,16 @@ fn newest_release(versions: &[String]) -> Option<&str> {
                 .collect::<Vec<_>>()
         })
         .map(String::as_str)
+}
+
+/// A project's licence as the window shows it: an SPDX id as it is (`MIT`, `LGPL-3.0-only`), and
+/// a project's own licence, which Modrinth names `LicenseRef-Words-And-Version`, as those words
+/// (`Polyform Shield 1.0.0`, `All Rights Reserved`). [`Project::license`] keeps the id itself.
+pub fn license_label(id: &str) -> String {
+    match id.strip_prefix("LicenseRef-") {
+        Some(own) if !own.is_empty() => own.replace('-', " "),
+        _ => id.to_owned(),
+    }
 }
 
 /// The version to install: the newest one that runs, or with `everything` the newest at all.

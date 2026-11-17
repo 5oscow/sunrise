@@ -8,7 +8,7 @@ Players read [Control Sunrise with your AI agent](https://playsunrise.net/docs/a
 
 The command lists are generated, so they can't drift:
 
-- [launcher-commands.md](launcher-commands.md): every `sunrise-launcher` command, its arguments
+- [launcher-commands.md](../launcher/docs/launcher-commands.md): every `sunrise-launcher` command, its arguments
   and its MCP tool. It comes from the CLI's clap definition (`cli_tools::markdown`), and the
   launcher test `the_launcher_reference_is_up_to_date` fails when it is stale or a tool is missing.
 - [sunrise-ctl-commands.md](sunrise-ctl-commands.md): every `sunrise-ctl` command, its MCP tool

@@ -194,6 +194,14 @@ impl<W: EntityMovementWorld<Error = io::Error>> EntityMovementWorld for EntityCo
         }
         border.collision_shape().map(Some).map_err(io::Error::other)
     }
+    fn moving_colliders(
+        &mut self,
+        entity: EntityIdentity,
+        bounds: Aabb,
+        out: &mut Vec<sunrise_core::geometry::oriented::OrientedCollider>,
+    ) -> io::Result<()> {
+        self.blocks.moving_colliders(entity, bounds, out)
+    }
 }
 impl<'a, W> EntityCollisions<'a, W>
 where
@@ -582,6 +590,16 @@ impl EntityMovementWorld for SceneCollisions<'_, '_> {
     }
     fn movement_border(&mut self, _: EntityIdentity, _: Aabb) -> io::Result<Option<VoxelShape>> {
         Ok(None)
+    }
+    /// The moving colliders the game placed for this pass: every mover resolves through here.
+    fn moving_colliders(
+        &mut self,
+        entity: EntityIdentity,
+        bounds: Aabb,
+        out: &mut Vec<sunrise_core::geometry::oriented::OrientedCollider>,
+    ) -> io::Result<()> {
+        crate::moving_colliders::near(entity, bounds, out);
+        Ok(())
     }
 }
 impl DynamicSupportWorld for SceneCollisions<'_, '_> {

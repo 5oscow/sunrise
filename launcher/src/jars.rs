@@ -1,4 +1,5 @@
 //! Resolve a mod set's passive Java jars before a launcher-managed launch.
+mod download;
 mod launch;
 use crate::i18n::{tr, trf};
 pub use launch::{prepare_launch, LaunchError};
@@ -7,8 +8,7 @@ use std::{
     fmt, fs, io,
     path::{Path, PathBuf},
 };
-use sunrise_mod_package::manifest::{JarRef, JarRequirement, MissingJar};
-use sunrise_port_pack::{fetch, modrinth};
+use sunrise_launcher_smod::manifest::{JarRef, JarRequirement, MissingJar};
 
 /// Download consent for this mod set, never a permission to execute Java code.
 #[non_exhaustive]
@@ -113,9 +113,20 @@ pub fn prepare(
         home,
         jars,
         permission,
-        modrinth::jar_urls,
-        fetch::download_jar,
+        download::jar_urls,
+        download::download_jar,
     )
+}
+
+/// A jar of a game-crate manifest (the native build's) in the launcher's own types.
+pub fn from_game(jar: &sunrise_mod_package::manifest::JarRef) -> Result<JarRef, String> {
+    JarRef::new(jar.id().into(), jar.version().into(), jar.sha512().into())
+        .map_err(|error| copies_disagree(jar.id(), &error))
+}
+
+/// The two crates' jar checks are copies, so one refusing what the other accepted is a launcher bug to report.
+fn copies_disagree(id: &str, error: &str) -> String {
+    format!("jar {id}: the launcher's and the game's jar checks disagree ({error}); report it on the launcher")
 }
 
 fn prepare_with(
@@ -133,7 +144,7 @@ fn prepare_with(
         match fs::File::open(&path) {
             Ok(file) => {
                 let hash =
-                    fetch::hash_reader::<sha2::Sha512>(file, io::sink()).map_err(|source| {
+                    download::hash_reader::<sha2::Sha512>(file, io::sink()).map_err(|source| {
                         PrepareError::Io {
                             path: path.clone(),
                             source,

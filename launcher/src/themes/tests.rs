@@ -1,5 +1,5 @@
 use super::*;
-use sunrise_theme::night::{DAWN, NIGHT};
+use sunrise_launcher_theme::night::{DAWN, NIGHT};
 
 fn blend(top: u32, under: u32, alpha: f32) -> u32 {
     let channel = |shift: u32| {
@@ -68,7 +68,7 @@ fn colours_go_to_hsl_and_back() {
 
 #[test]
 fn every_theme_palette_reads_over_its_sky() {
-    use sunrise_theme::night::{over, UNCARDED_STOPS};
+    use sunrise_launcher_theme::night::{over, UNCARDED_STOPS};
 
     let palettes = THEMES.iter().filter_map(|t| t.palette.map(|p| (t.id, *p)));
     for (id, p) in palettes {
@@ -181,7 +181,7 @@ fn a_typed_colour_is_worn_as_is_and_survives_settings_json() {
     // The mockup's swatches are the named accents.
     assert_eq!(Accent::parse("#2563EB"), Some(Accent::BLUE));
     assert_eq!(Accent::BLUE.hex(), "#2563eb");
-    assert_eq!(Accent::VIOLET.hex(), "#6b4bff");
+    assert_eq!(Accent::VIOLET.hex(), "#4f60e6");
     // Any other colour keeps its exact value for the glass look, and its hue for the light one.
     let typed = Accent::parse("#ff8800").unwrap();
     assert_eq!(typed.rgb(), 0xff8800);
@@ -193,9 +193,9 @@ fn a_typed_colour_is_worn_as_is_and_survives_settings_json() {
     for wrong in ["#ff88", "#ff88001", "#gg8800", "#"] {
         assert_eq!(Accent::parse(wrong), None, "{wrong}");
     }
-    // A picked hue wears the violet's saturation and lightness.
+    // A picked hue wears the default accent's saturation and lightness.
     let (h, s, l) = hsl(Accent::custom(120.).rgb());
-    let (_, vs, vl) = hsl(0x6b4bff);
+    let (_, vs, vl) = hsl(Accent::VIOLET.rgb());
     assert!((h - 120.).abs() < 1. && (s - vs).abs() < 0.02 && (l - vl).abs() < 0.02);
 }
 

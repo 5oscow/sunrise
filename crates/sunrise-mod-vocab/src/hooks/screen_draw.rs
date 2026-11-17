@@ -9,7 +9,13 @@ pub trait Hooks {
     /// bigger value wraps), and `data` is empty until the server's first
     /// values arrive, so read it with `get`. Draw with `native_sprite`, `native_fill` and
     /// `native_text`.
+    /// `pos` is the open menu's block position, as reported by the server
+    /// (or the clicked block for a server without menu-extra support).
+    /// It is `None` for a menu opened without a block position. Read the
+    /// client level's current view at this position through the existing
+    /// both-sided level reads; it is not an authoritative server snapshot.
     #[hook(
+        version = 2,
         side = "client",
         contract = "listen",
         scope = "block_entity",

@@ -1327,6 +1327,39 @@ impl TriState {
 /// }
 /// ```
 pub trait LevelHost {
+    /// `BlockGetter.getBlockEntity` in this level. None if absent, unloaded or out for its
+    /// own tick. Never loads chunks or opens loot containers. Clients return their local
+    /// block entity handle, not unsynced server contents. Owning game thread only, never
+    /// reachable from a worker-thread hook body.
+    fn block_entity(&self, _pos: [i32; 3]) -> Option<crate::BlockEntityRef> {
+        None
+    }
+    /// The slots on this side, as `ItemsHost::container_size` reads them.
+    /// Snapshot only: never generates loot or loads chunks. None for unloaded positions,
+    /// clients or unsupported storage. Owning game thread only, never in worker hook bodies.
+    fn container_size(&self, _at: crate::BlockSide) -> Option<usize> {
+        None
+    }
+    /// A side-local slot snapshot, as `ItemsHost::container_stack` reads it.
+    /// Never generates unopened container loot or loads chunks; unopened slots remain empty.
+    /// None for unloaded positions, clients, empty slots or unsupported storage.
+    /// Owning game thread only, never reachable from a worker-thread hook body.
+    fn container_stack(&self, _at: crate::BlockSide, _slot: usize) -> Option<crate::ItemStack> {
+        None
+    }
+    /// Capture Part state using the same attachment snapshot as `Host::query`.
+    /// No chunk loading or loot generation. Refuses unloaded or stale holders; clients
+    /// have no server Part state. Owning game thread only, never in worker hook bodies.
+    // hidden: typed BlockEntityPartState read implementation.
+    #[doc(hidden)]
+    fn block_entity_part_snapshot(
+        &self,
+        _entity: crate::BlockEntityRef,
+        _namespace: &str,
+        _name: &str,
+    ) -> Result<crate::AttachmentBatch, crate::PartStateError> {
+        Err(crate::PartStateError::Stale)
+    }
     /// Read a block entity's saved data without identity metadata from this level.
     /// Stale generations and handles from another level or world return None.
     fn block_entity_data(&self, _entity: crate::BlockEntityRef) -> Option<crate::Compound> {
@@ -1469,6 +1502,15 @@ pub trait LevelHost {
 
 /// Access vanilla's `Level.random`, so draws come in vanilla's order.
 pub trait LevelRandomHost: LevelHost {
+    /// Vanilla comparator container signal, 0 to 15, through the engine comparator path.
+    /// Generates unopened container loot once before reading, as vanilla getItem does;
+    /// stack maxima are honoured. `Some(0)` at a loaded position without a usable container view.
+    /// None on clients, for unloaded or out-of-height positions.
+    /// Never loads chunks. Owning game thread only, never
+    /// reachable from a worker-thread hook body.
+    fn container_signal(&mut self, _pos: [i32; 3]) -> Option<i32> {
+        None
+    }
     /// The holders' server-owned attachments; `TYPE.get(host, holder)` reads one through it.
     fn attachments(&mut self) -> &mut dyn AttachmentStore {
         unimplemented!("LevelRandomHost::attachments")
@@ -1680,6 +1722,19 @@ pub enum GameRuleReadError {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct ObjectiveRef {
+    pub(crate) epoch: WorldEpoch,
+    pub(crate) id: u64,
+}
+
+/// One of the scoreboard's teams of an open server world (vanilla's `PlayerTeam`). It holds the
+/// world's epoch and an identity the board gave the team when it was added, so a team that was
+/// removed (even if its name was added again) or a handle from an earlier open reads as stale:
+/// reads answer `None` or [`TeamError::Stale`] and writes change nothing.
+#[derive(sunrise_mod_api_macros::Wire)]
+#[wire(internal_field_layouts)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
+pub struct TeamRef {
     pub(crate) epoch: WorldEpoch,
     pub(crate) id: u64,
 }

@@ -61,6 +61,26 @@ attachment the owner declared (the public attachment API); a key nobody declared
 package. When the attaching package is removed, what it saved stays in the block entity, unread (the saved
 attachment compound keeps entries it does not know on save), and is read again if the package comes back.
 
+## Removal side effects
+
+`pre_remove_side_effects` runs on the authoritative server while the block entity and its
+attachments are still readable, before removal's neighbor effects. The level host permits
+reads and random draws, not world writes. Flag 256 skips the call and its outputs.
+
+The engine applies the answers after the level write, in this order:
+
+1. Unless `keep_contents` is true, scatter the base container slots.
+2. Scatter `drops`, a list of `Option<ItemStack>` in slot order. `None` consumes the
+   three position draws of an empty `Containers.dropItemStack` slot but spawns nothing.
+3. Create `spawns`, each `(ItemStack, [f64; 3])`, at that exact position with the default
+   pickup delay (10 ticks), as a lectern or jukebox does.
+4. Award `experience`, each `(u32, [f64; 3])`, through the furnace's experience-orb path.
+
+Each list accepts at most 1024 entries; positions must be finite. Invalid list sizes or
+positions refuse the outputs. Stack writes use the usual checked item boundary. The same
+fields cross to native and wasm. A part that answers nothing consumes no random draws.
+Version 2 uses optional drops to represent empty slots; wrap a filled slot in `Some`.
+
 ## Part state
 
 A Part that keeps a value on each block entity of its type (a machine's progress, the last

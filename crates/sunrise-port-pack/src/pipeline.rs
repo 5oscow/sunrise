@@ -331,6 +331,14 @@ pub fn portable(r: &inventory::Record) -> bool {
     r.class == "content" && r.tier == "data"
 }
 
+/// Installs the staged resource packs into the profile's home (`<work>/home`) and records what
+/// happened to each in `profile-resourcepacks.json`; a pack already there is never overwritten.
+pub fn profile(work: &Path) -> Result<crate::resourcepacks::Report, String> {
+    let report = crate::resourcepacks::install(work, &work.join("home"))?;
+    write_json(&work.join("profile-resourcepacks.json"), &report)?;
+    Ok(report)
+}
+
 /// Everything after the import, for the portable mods: their jars (`fetch`,
 /// from `from` when the player has them), the inventory again with the jars
 /// read, the carry-over and the report. `resources` is the prepared

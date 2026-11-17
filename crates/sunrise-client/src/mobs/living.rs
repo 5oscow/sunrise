@@ -708,29 +708,34 @@ impl Mob {
             return Vec::new();
         }
         let area = area.inflate(Vec3::new(1.0e-7, 1.0e-7, 1.0e-7));
-        let mover = self.species();
-        let blocks = |s: &&super::Seen| {
-            s.id != self.id
-                && s.blocks_mob(mover)
-                && s.bounds.intersects(area)
-                && !self.passenger_of_same_vehicle(s.id, s.vehicle)
-        };
+        let mut boxes = Vec::new();
+        let solids = crate::entity_solids::Solids::new(
+            crate::entity_solids::Mover::Mob {
+                id: self.id,
+                happy_ghast: self.species() == super::Species::HappyGhast,
+                mount: self.extra.mount,
+            },
+            Some(area),
+        );
         match w.others_solid {
-            Some(slots) => slots
-                .iter()
-                .map(|&i| &w.others[i as usize])
-                .filter(blocks)
-                .map(|s| s.bounds)
-                .collect(),
-            None => w.others.iter().filter(blocks).map(|s| s.bounds).collect(),
+            Some(slots) => {
+                for &i in slots {
+                    let c = w.others[i as usize].solid_candidate();
+                    if solids.accepts(&c, || None) {
+                        boxes.push(c.bounds);
+                    }
+                }
+            }
+            None => {
+                for s in w.others.iter().filter(|s| s.may_block_mobs()) {
+                    let c = s.solid_candidate();
+                    if solids.accepts(&c, || None) {
+                        boxes.push(c.bounds);
+                    }
+                }
+            }
         }
-    }
-    /// `Entity.isPassengerOfSameVehicle` toward the entity `id` riding
-    /// `vehicle`: one rides the other, or both ride the same one.
-    fn passenger_of_same_vehicle(&self, id: u32, vehicle: Option<u32>) -> bool {
-        self.extra.mount == Some(id)
-            || vehicle == Some(self.id)
-            || (self.extra.mount.is_some() && vehicle == self.extra.mount)
+        boxes
     }
     pub fn do_move(
         &mut self,
@@ -1925,7 +1930,6 @@ impl Mob {
         self.needs_sync = true;
         if self.species() == super::Species::Rabbit {
             super::rabbit::jump(self, w);
-            crate::motion::native_living_jump(w.loop_context, self.id, &self.kind.id);
             return;
         }
         if matches!(
@@ -1933,7 +1937,7 @@ impl Mob {
             super::Species::Slime | super::Species::MagmaCube | super::Species::SulfurCube
         ) {
             super::cube::jump(self, w);
-            crate::motion::native_living_jump(w.loop_context, self.id, &self.kind.id);
+            self.living_jumped(w.loop_context);
             return;
         }
         let power = self.jump_power(w);
@@ -1945,6 +1949,9 @@ impl Mob {
                 self.velocity.x += f64::from(-trig::sin(angle)) * 0.2;
                 self.velocity.z += f64::from(trig::cos(angle)) * 0.2;
             }
+            // LivingEntity.jumpFromGround ends with NeoForge's LivingJumpEvent, before the
+            // sniffer's own push below.
+            self.living_jumped(w.loop_context);
         }
         // Sniffer.jumpFromGround: a hop the move control asked for, taken from
         // nearly standing still, carries a tenth of a block forward.
@@ -1954,7 +1961,11 @@ impl Mob {
         {
             self.move_relative(0.1, Vec3::new(0.0, 0.0, 1.0));
         }
-        crate::motion::native_living_jump(w.loop_context, self.id, &self.kind.id);
+    }
+    /// The `living_jump` hook for this mob, with its motion after the jump.
+    pub fn living_jumped(&self, context: &LoopContext) {
+        let v = self.velocity;
+        crate::motion::native_living_jump(context, self.id, &self.kind.id, [v.x, v.y, v.z]);
     }
     /// `LivingEntity.getJumpPower`: the jump power with a multiplier of 1.0.
     pub fn jump_power(&self, w: &MobWorld) -> f32 {
@@ -3784,6 +3795,42 @@ mod tests {
             );
         });
         assert!(ran, "built test world ran");
+    }
+
+    /// `LivingEntity.jumpFromGround` ends with NeoForge's `LivingJumpEvent`: `living_jump`
+    /// hears a cow's jump once, with the motion the jump left it. The rabbit's and the sniffer's
+    /// overrides call it first, so their own forward push from standing comes after the event.
+    #[test]
+    #[ignore = "daily"]
+    fn a_mob_jump_fires_living_jump_once_with_its_velocity() {
+        use crate::native_client_hooks::test_hooks::{install, jumps, record_jumps};
+        install();
+        let _recording = record_jumps();
+        let ran = crate::mobs::world::with_test_world(&[], |w, types| {
+            let mob = |id, kind: &str| {
+                let kind = std::sync::Arc::new(types.types[kind].clone());
+                Mob::new(id, kind, Vec3::new(0.5, 1.0, 0.5), 0.0)
+            };
+            let mut cow = mob(7, "minecraft:cow");
+            cow.jump_from_ground(w);
+            assert_eq!(jumps(), [(7, [0.0, f64::from(0.42_f32), 0.0])]);
+            for (id, kind) in [(8, "minecraft:rabbit"), (9, "minecraft:sniffer")] {
+                let mut m = mob(id, kind);
+                m.ai.mov.speed_modifier = 1.0;
+                m.jump_from_ground(w);
+                let heard = jumps();
+                assert_eq!(heard.len(), 1, "{kind}");
+                let (entity, [x, y, z]) = heard[0];
+                assert_eq!(
+                    (entity, x, z),
+                    (id, 0.0, 0.0),
+                    "{kind} heard before its push"
+                );
+                assert!(y > 0.0, "{kind} jumped");
+                assert!(m.velocity.z > 0.0, "{kind} pushed forward after the event");
+            }
+        });
+        assert!(ran, "test world ran");
     }
 
     /// `LivingEntity.getFlyingSpeed`: a horse its player steers (saddled, ridden) moves
