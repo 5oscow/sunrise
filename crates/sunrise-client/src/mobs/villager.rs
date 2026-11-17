@@ -572,10 +572,9 @@ pub(crate) fn load_container(
 impl Ext {
     /// `countFoodPointsInInventory`, by the food values of `items`.
     pub fn food_in_inventory(&self, items: &Items) -> i32 {
-        self.inventory
-            .iter()
-            .map(|s| food_points(items, s) * s.count as i32)
-            .sum()
+        self.inventory.iter().fold(0i32, |total, stack| {
+            total.wrapping_add(food_points(items, stack).wrapping_mul(stack.count as i32))
+        })
     }
     /// `hasExcessFood` and `wantsMoreFood`.
     pub fn has_excess_food(&self, items: &Items) -> bool {
@@ -596,7 +595,7 @@ impl Ext {
                     self.inventory[slot].villager_food(items.get(&self.inventory[slot].item))
                 {
                     while self.inventory[slot].count > 0 && self.hungry() {
-                        self.food_level += points;
+                        self.food_level = self.food_level.wrapping_add(points);
                         self.inventory[slot].count -= 1;
                     }
                     if self.inventory[slot].count == 0 {
@@ -607,7 +606,7 @@ impl Ext {
                 slot += 1;
             }
         }
-        self.food_level -= 12;
+        self.food_level = self.food_level.wrapping_sub(12);
     }
     /// Whether the stack fits (`SimpleContainer.canAddItem`).
     pub fn can_add(&self, stack: &ItemStack, max_stack: u32) -> bool {
@@ -980,7 +979,7 @@ pub fn can_breed(m: &Mob, items: &Items) -> bool {
     m.species() == Species::Villager
         && m.extra.age == 0
         && !sleeping(m)
-        && ext(m).map_or(0, |e| e.food_level + e.food_in_inventory(items)) >= 12
+        && ext(m).map_or(0, |e| e.food_level.wrapping_add(e.food_in_inventory(items))) >= 12
 }
 /// [`can_breed`] by the registry of `w`: a world without item data counts no
 /// food, so its villagers never breed.
@@ -1749,6 +1748,35 @@ mod tests {
         assert_eq!(e.food_level, 5 - 12);
         assert!(e.inventory.is_empty());
     }
+    #[test]
+    fn villager_food_math_wraps_like_java_ints() {
+        use sunrise_core::nbt::Tag;
+        let items = &vanilla_food();
+        let mut rich = stack("minecraft:bread", 2);
+        rich.data_mut().set_other(
+            "minecraft:villager_food",
+            Some(Tag::compound([("nutrition", Tag::Int(i32::MAX))])),
+        );
+        let mut m = villager();
+        let e = ext_mut(&mut m);
+        e.inventory.push(rich.clone());
+        assert_eq!(e.food_in_inventory(items), -2);
+        e.food_level = 10;
+        e.eat_and_digest(items);
+        assert_eq!(e.food_level, -4);
+        assert!(e.inventory.is_empty());
+        e.food_level = i32::MIN;
+        e.eat_and_digest(items);
+        assert_eq!(e.food_level, 2_147_483_636);
+
+        rich.count = 1;
+        e.inventory.extend([rich.clone(), rich]);
+        assert_eq!(e.food_in_inventory(items), -2);
+        e.inventory.pop();
+        e.food_level = 1;
+        assert!(!can_breed(&m, items));
+    }
+
     #[test]
     fn willingness_to_breed_needs_twelve_food_points() {
         let items = &vanilla_food();

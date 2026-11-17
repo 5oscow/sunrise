@@ -98,6 +98,8 @@ pub struct StackData {
     /// Saved consumable and its typed runtime value, replaced together.
     consumable: Option<Arc<ConsumableComponent>>,
     death_protection: Option<Arc<Vec<crate::items::ConsumeEffect>>>,
+    /// Validated nutrition; the original component is preserved in `other`.
+    villager_food: Option<i32>,
     /// `minecraft:potion_contents.potion`.
     pub potion: Option<Arc<str>>,
     /// The rest of `minecraft:potion_contents` (`custom_color`, `custom_effects`,
@@ -337,6 +339,13 @@ impl StackData {
                 self.set_other(id, tag);
             }
             "minecraft:custom_name" => self.set_other(id, tag),
+            "!minecraft:villager_food" => {
+                self.set_other("minecraft:villager_food", None);
+                self.set_other(
+                    id,
+                    Some(tag.unwrap_or_else(|| Tag::Compound(Default::default()))),
+                );
+            }
             _ if MODELLED.contains(&id) => {
                 let mut saved = match components_tag(0, Some(self)) {
                     Some(Tag::Compound(c)) => c,
@@ -370,6 +379,23 @@ impl StackData {
         } else {
             value
         };
+        if id == "minecraft:villager_food" {
+            self.villager_food = match &value {
+                Some(raw) => {
+                    let Some(nutrition) = raw
+                        .get("nutrition")
+                        .and_then(crate::properties::component_int)
+                        .filter(|&nutrition| nutrition > 0)
+                    else {
+                        return;
+                    };
+                    self.other
+                        .retain(|(key, _)| key != "!minecraft:villager_food");
+                    Some(nutrition)
+                }
+                None => None,
+            };
+        }
         if id == "minecraft:death_protection" {
             let replacement = match value.as_ref() {
                 Some(raw) => match crate::items::parse_death_effects(
@@ -578,10 +604,8 @@ impl ItemStack {
     /// Effective villager food nutrition, including a stack's override or removal.
     pub fn villager_food(&self, info: Option<&ItemInfo>) -> Option<i32> {
         if let Some(data) = self.data() {
-            if let Some(value) = data.other("minecraft:villager_food") {
-                return value
-                    .get("nutrition")
-                    .and_then(crate::properties::component_int);
+            if let Some(nutrition) = data.villager_food {
+                return Some(nutrition);
             }
             if data.other("!minecraft:villager_food").is_some() {
                 return None;
@@ -1669,6 +1693,7 @@ pub fn decode_components(components: Option<&Tag>) -> (u32, Option<Box<StackData
         _ => Vec::new(),
     };
     let mut data = StackData {
+        villager_food: None,
         damage_set: damage == 0 && c.get("minecraft:damage").is_some(),
         enchantments: read_levels(c.get("minecraft:enchantments")),
         stored_enchantments: read_levels(c.get("minecraft:stored_enchantments")),
@@ -1802,6 +1827,10 @@ pub fn decode_components(components: Option<&Tag>) -> (u32, Option<Box<StackData
     if let Tag::Compound(map) = c {
         for (k, v) in map {
             let key = k.to_string_lossy();
+            if key == "minecraft:villager_food" {
+                data.set_other(&key, Some(v.clone()));
+                continue;
+            }
             if MODELLED.contains(&key.as_str())
                 && key != "minecraft:damage"
                 && !data.sets_component(&key)
@@ -1886,20 +1915,42 @@ fn villager_food_stack_override_and_removal() {
     info.villager_food = Some(4);
     let info = Some(&info);
     let mut stack = ItemStack::new("test:meal", 3);
+    let id = "minecraft:villager_food";
+    let set =
+        Some(sunrise_core::json_nbt::json_to_tag(&serde_json::json!({"nutrition": 7})).unwrap());
     assert_eq!(stack.villager_food(info), Some(4));
-    stack.data_mut().set_loot_component(
-        "minecraft:villager_food",
-        &Some(sunrise_core::json_nbt::json_to_tag(&serde_json::json!({"nutrition": 7})).unwrap()),
-    );
+    stack.data_mut().set_loot_component(id, &set);
     assert_eq!(stack.villager_food(info), Some(7));
+    assert!(stack.carries_component(None, id));
     stack
         .data_mut()
-        .set_loot_component("minecraft:villager_food", &None);
-    stack.data_mut().set_other(
-        "!minecraft:villager_food",
-        Some(Tag::Compound(Default::default())),
-    );
+        .set_loot_component("!minecraft:villager_food", &None);
     assert_eq!(stack.villager_food(info), None);
+    assert!(!stack.carries_component(None, id));
+    stack.data_mut().set_loot_component(id, &set);
+    assert_eq!(stack.villager_food(info), Some(7));
+    assert!(stack.carries_component(None, id));
+    let saved = components_tag(0, stack.data()).unwrap();
+    assert!(saved.get("!minecraft:villager_food").is_none());
+    stack.extra = decode_components(Some(&saved)).1;
+    assert_eq!(stack.villager_food(info), Some(7));
+}
+
+#[cfg(test)]
+#[test]
+fn nonpositive_villager_food_patches_are_not_components() {
+    let id = "minecraft:villager_food";
+    for nutrition in [0, -1] {
+        let food = Tag::compound([("nutrition", Tag::Int(nutrition))]);
+        let mut stack = ItemStack::new("test:meal", 1);
+        stack.data_mut().set_loot_component(id, &Some(food.clone()));
+        assert!(!stack.carries_component(None, id));
+        assert_eq!(stack.villager_food(None), None);
+        let patch = Tag::compound([(id, food)]);
+        stack.extra = decode_components(Some(&patch)).1;
+        assert!(!stack.carries_component(None, id));
+        assert_eq!(stack.villager_food(None), None);
+    }
 }
 
 #[cfg(test)]
@@ -3173,6 +3224,7 @@ mod tests {
             _ => Vec::new(),
         };
         let mut data = StackData {
+            villager_food: None,
             damage_set: damage == 0 && c.get("minecraft:damage").is_some(),
             death_protection: c
                 .get("minecraft:death_protection")
