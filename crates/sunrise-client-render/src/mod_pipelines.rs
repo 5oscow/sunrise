@@ -89,15 +89,25 @@ impl Pipelines {
         let built = registered
             .iter()
             .map(|pipeline| {
-                let mut file = fragment_file(&pipeline.fragment);
+                let file = fragment_file(&pipeline.fragment);
+                // A refusal reads `<file>[:<line>:<column>]: <message>`, the shader's own
+                // `Problem`s printed as the pack checker prints them.
                 let loaded = read(&file)
-                    .and_then(|text| compose_with(&text, pipeline.texture.is_some()))
+                    .map_err(|cause| format!("{file}: {cause}"))
+                    .and_then(|text| {
+                        compose_with(&file, &text, pipeline.texture.is_some()).map_err(|problems| {
+                            problems
+                                .iter()
+                                .map(ToString::to_string)
+                                .collect::<Vec<_>>()
+                                .join("; ")
+                        })
+                    })
                     .and_then(|shader| {
                         let texture = match &pipeline.texture {
                             None => None,
                             Some(texture) => Some(load_texture(texture).map_err(|cause| {
-                                file = "its texture".into();
-                                texture_refusal(cause)
+                                format!("its texture: {}", texture_refusal(cause))
                             })?),
                         };
                         Ok((shader, texture))
@@ -114,7 +124,7 @@ impl Pipelines {
                     }),
                     Err(reason) => {
                         let refusal = format!(
-                            "render pipeline {} from mod {} refused: {file}: {reason}",
+                            "render pipeline {} from mod {} refused: {reason}",
                             pipeline.id,
                             pipeline.owner()
                         );
@@ -336,7 +346,7 @@ fn pipeline_fragment(input: PipelineInput) -> vec4<f32> {
         .unwrap_err();
         assert!(
             error.starts_with(
-                "required render pipeline example:beam from mod  refused: assets/example/shaders/pipeline/beam.wgsl: "
+                "required render pipeline example:beam from mod  refused: assets/example/shaders/pipeline/beam.wgsl:1:1: "
             ),
             "{error}"
         );

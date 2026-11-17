@@ -130,7 +130,7 @@ pub fn check(
 /// Composes and validates every render pipeline fragment file in a mod's `files`
 /// (`assets/<namespace>/shaders/pipeline/<path>.wgsl`) with the game's own code
 /// (`sunrise_shader_api::mod_pipeline`), returning how many there are and each refusal as
-/// `<file>: <message>`, the text the game logs after the pipeline's id. Whether a pipeline is
+/// `<file>:<line>:<column>: <message>` (`<file>: <message>` where it has no span), the text the game logs after the pipeline's id. Whether a pipeline is
 /// textured is in the mod's code, which this cannot see: a file that calls `pipeline_texture`
 /// is composed as textured, any other as untextured.
 pub fn pipeline_shaders(files: &BTreeMap<String, Vec<u8>>) -> (usize, Vec<String>) {
@@ -150,9 +150,13 @@ pub fn pipeline_shaders(files: &BTreeMap<String, Vec<u8>>) -> (usize, Vec<String
         count += 1;
         let composed = std::str::from_utf8(bytes)
             .map_err(|e| e.to_string())
-            .and_then(|text| mod_pipeline::compose_with(text, text.contains("pipeline_texture")));
-        if let Err(reason) = composed {
-            refused.push(format!("{name}: {reason}"));
+            .map_err(|e| vec![format!("{name}: {e}")])
+            .and_then(|text| {
+                mod_pipeline::compose_with(name, text, text.contains("pipeline_texture"))
+                    .map_err(|problems| problems.iter().map(ToString::to_string).collect())
+            });
+        if let Err(reasons) = composed {
+            refused.extend(reasons);
         }
     }
     (count, refused)
@@ -171,6 +175,10 @@ mod tests {
             ("assets/m/shaders/pipeline/glow.wgsl", glow),
             ("assets/m/shaders/pipeline/deep/sample.wgsl", sample),
             ("assets/m/shaders/pipeline/broken.wgsl", "fn nothing() {}"),
+            (
+                "assets/m/shaders/pipeline/typo.wgsl",
+                "fn pipeline_fragment(input: PipelineInput) -> vec4<f32> {\n    let x: f32 = input.uv;\n    return vec4<f32>(x);\n}",
+            ),
             // Not a pipeline file: other shaders are not this check's.
             ("assets/m/shaders/post/other.wgsl", "garbage"),
             ("assets/m/lang/en_us.json", "{}"),
@@ -178,12 +186,13 @@ mod tests {
         .map(|(name, text)| (name.to_owned(), text.as_bytes().to_vec()))
         .into();
         let (count, refused) = pipeline_shaders(&files);
-        assert_eq!(count, 3);
+        assert_eq!(count, 4);
         assert_eq!(
             refused,
             [
-                "assets/m/shaders/pipeline/broken.wgsl: no function `pipeline_fragment`: \
-                 expected `fn pipeline_fragment(input: PipelineInput) -> vec4<f32>`"
+                "assets/m/shaders/pipeline/broken.wgsl: no function `pipeline_fragment`: expected `fn pipeline_fragment(input: PipelineInput) -> vec4<f32>`",
+                // The binding `x` is at line 2, column 9 of the mod's own file.
+                "assets/m/shaders/pipeline/typo.wgsl:2:9: the type of `x` is expected to be `f32`, but got `vec2<f32>`",
             ]
         );
     }
