@@ -40,25 +40,15 @@ pub const RELEASE: u64 = 0xFFFF_FF01;
 #[doc(hidden)]
 pub const RESERVED_IDS: u64 = 0x1_0000;
 
-/// Marks one export as used: a call, on wasm, of a no-op import named `$name`. The module's
-/// import section then lists the hook, Part method or handler method; the link keeps the
-/// import exactly while the code that calls this is linked.
-// hidden: boundary plumbing the generated `__sunrise_mark!` expands to.
-#[doc(hidden)]
-#[macro_export]
-macro_rules! __sunrise_import {
-    ($name:literal) => {{
-        #[cfg(target_arch = "wasm32")]
-        {
-            #[link(wasm_import_module = "sunrise")]
-            unsafe extern "C" {
-                #[link_name = $name]
-                fn mark();
-            }
-            unsafe { mark() }
-        }
-    }};
+// The crate's own tests implement hooks with `#[mod_api::__subscriptions]`, which marks each
+// through `__sunrise_mark!`, a macro the guest transport defines in `mod_api`: a test build has
+// this no-op in its place, re-exported at the crate root by `exports/test_marks.rs`.
+#[cfg(test)]
+macro_rules! __sunrise_mark {
+    ($owner:literal $method:ident) => {};
 }
+#[cfg(test)]
+pub(crate) use __sunrise_mark;
 
 /// Maximum static strings retained by either transport string table.
 // hidden: transport plumbing used by generated boundary code.

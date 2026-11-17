@@ -451,12 +451,40 @@ impl Drop for Reply {
     }
 }
 
+/// Marks one export as used: a call, on wasm, of a no-op import named `$name`. The module's
+/// import section then lists the hook, Part method or handler method; the link keeps the
+/// import exactly while the code that calls this is linked.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __sunrise_import {
+    ($name:literal) => {{
+        #[cfg(target_arch = "wasm32")]
+        {
+            #[link(wasm_import_module = "sunrise")]
+            unsafe extern "C" {
+                #[link_name = $name]
+                fn mark();
+            }
+            // SAFETY: a no-op import of the game's table, which takes and returns nothing.
+            unsafe { mark() }
+        }
+    }};
+}
+
 /// Calls the game's import with `args` and returns its answer. `import` is the module's own
 /// import of that call, declared where it is called ([`__sunrise_host_call!`]).
+///
+/// # Safety
+/// `import` must be a call of the game's table: it writes at most `out_cap` bytes at `out_ptr`
+/// and returns the length of its answer, which the reply then takes as initialized.
 #[cfg(target_arch = "wasm32")]
-pub fn host_with(import: impl FnOnce(*const u8, u32, *mut u8, u32) -> u32, args: Writer) -> Reply {
+pub unsafe fn host_with(
+    import: impl FnOnce(*const u8, u32, *mut u8, u32) -> u32,
+    args: Writer,
+) -> Reply {
     let mut out = reply_buffer();
-    transport::call_with(import, args.bytes(), &mut out);
+    // SAFETY: the caller's contract is this one.
+    unsafe { transport::call_with(import, args.bytes(), &mut out) };
     RUNTIME.with(|rt| rt.borrow_mut().recycle(args.into_bytes()));
     Reply(out)
 }
@@ -494,12 +522,13 @@ macro_rules! __sunrise_host_call {
                 #[link_name = $name]
                 fn import(in_ptr: *const u8, in_len: u32, out_ptr: *mut u8, out_cap: u32) -> u32;
             }
-            $crate::wire::guest::host_with(
-                |in_ptr, in_len, out_ptr, out_cap| unsafe {
-                    import(in_ptr, in_len, out_ptr, out_cap)
-                },
-                $args,
-            )
+            // SAFETY: `import` is the game's call of this name, declared above.
+            unsafe {
+                $crate::wire::guest::host_with(
+                    |in_ptr, in_len, out_ptr, out_cap| import(in_ptr, in_len, out_ptr, out_cap),
+                    $args,
+                )
+            }
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -510,14 +539,19 @@ macro_rules! __sunrise_host_call {
 
 /// Calls the import `import` with `input`, the answer appended to `out`; one that does not fit
 /// `out`'s spare capacity is kept by the game and copied by the shared `host_reply` import.
+///
+/// # Safety
+/// `import` must write at most the capacity it is given at the pointer it is given, and return
+/// the length of its answer, which `out` then takes as initialized.
 #[cfg(target_arch = "wasm32")]
 #[doc(hidden)]
-pub fn call_with(
+pub unsafe fn call_with(
     import: impl FnOnce(*const u8, u32, *mut u8, u32) -> u32,
     input: &[u8],
     out: &mut Vec<u8>,
 ) {
-    transport::call_with(import, input, out)
+    // SAFETY: the caller's contract is this one.
+    unsafe { transport::call_with(import, input, out) }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -531,7 +565,10 @@ mod transport {
     pub(super) fn release(input: &[u8]) {
         super::generated::protocol::release(input, &mut Vec::new());
     }
-    pub(super) fn call_with(
+    /// # Safety
+    /// `import` writes at most the capacity it is given at the pointer it is given, and returns
+    /// the length of its answer.
+    pub(super) unsafe fn call_with(
         import: impl FnOnce(*const u8, u32, *mut u8, u32) -> u32,
         input: &[u8],
         out: &mut Vec<u8>,

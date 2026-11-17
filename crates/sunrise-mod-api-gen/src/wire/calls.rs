@@ -1037,7 +1037,7 @@ pub(super) fn dispatchable(types: &Types<'_>, m: &Method) -> bool {
 }
 
 /// A statement marking one export as used: a call of a no-op import named like it, on wasm
-/// (`__sunrise_import!`, in the vocabulary).
+/// (`__sunrise_import!`, in `mod_api`, which holds the guest's unsafe code).
 fn mark_block(root: &str, name: &str) -> String {
     format!("{root}::__sunrise_import!(\"{name}\");")
 }
@@ -1054,7 +1054,7 @@ pub(super) fn mark_macro(names: &super::Names) -> String {
         writeln!(
             out,
             "(\"{owner}\" {method}) => {{ {} }};",
-            mark_block("$crate", &name.text())
+            mark_block("::mod_api", &name.text())
         )
         .unwrap();
     }
@@ -1092,7 +1092,7 @@ pub(crate) mod protocol {{
     pub(crate) fn release(input: &[u8], out: &mut Vec<u8>) {{
         #[link(wasm_import_module = "mod_surface_module")]
         unsafe extern "C" {{ #[link_name = "{release}"] fn import(a: *const u8, b: u32, c: *mut u8, d: u32) -> u32; }}
-        crate::wire::guest::call_with(|a, b, c, d| unsafe {{ import(a, b, c, d) }}, input, out)
+        unsafe {{ crate::wire::guest::call_with(|a, b, c, d| import(a, b, c, d), input, out) }}
     }}
     /// Sends a panic's text to the game.
     #[cfg(target_arch = "wasm32")]
@@ -1100,7 +1100,7 @@ pub(crate) mod protocol {{
     pub(crate) fn log(input: &[u8], out: &mut Vec<u8>) {{
         #[link(wasm_import_module = "mod_surface_module")]
         unsafe extern "C" {{ #[link_name = "{log}"] fn import(a: *const u8, b: u32, c: *mut u8, d: u32) -> u32; }}
-        crate::wire::guest::call_with(|a, b, c, d| unsafe {{ import(a, b, c, d) }}, input, out)
+        unsafe {{ crate::wire::guest::call_with(|a, b, c, d| import(a, b, c, d), input, out) }}
     }}
 }}
 "#,
