@@ -5,7 +5,9 @@
 
 mod colors;
 mod custom_sky;
+pub(crate) mod fusion;
 mod item_bars;
+pub(crate) mod optifine_ctm;
 
 use crate::resource_source::ResourceSource;
 use std::sync::Arc;
