@@ -60,7 +60,6 @@ sunrise-mod-api-gen wire::tests::a_worldgen_part_method_crosses_and_waits_for_it
 sunrise-mod-api-gen wire::tests::only_the_primitive_draws_of_a_random_cross lib daily slow
 sunrise-mod-api-gen wire::tests::coverage_page_is_well_formed lib daily slow
 sunrise-mod-api-gen wire::tests::enchantment_damage_registrar_and_callback_cross_to_wire lib daily slow
-sunrise-mod-api-gen wire::tests::every_crossing_method_has_one_distinct_call_name lib daily slow
 sunrise-mod-api-gen wire::tests::private_borrowed_rules_are_part_of_a_calls_description lib daily slow
 sunrise-mod-api-gen wire::tests::the_hand_written_wire_impls_are_tracked_sources lib daily slow
 sunrise-mod-api-gen wire::ty::tests::staged_identifier_exposure_does_not_add_backing_storage_to_wire_layouts lib daily slow
