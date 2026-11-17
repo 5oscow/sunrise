@@ -551,8 +551,8 @@ impl Game<'_> {
     }
     /// `ServerPlayer.findRespawnAndUseSpawnBlock` for a config in the loaded
     /// dimension: position and angles, using an anchor's charge; a bed's
-    /// stand-up spot. A forced point (`spawnpoint`) that is no anchor or bed
-    /// holds if a player fits in it; anything else is gone.
+    /// stand-up spot. A forced point (`spawnpoint`) not handled by the anchor
+    /// or bed rule holds if the spawn column is clear.
     pub(super) fn find_respawn_and_use(
         &mut self,
         c: RespawnConfig,
@@ -571,10 +571,13 @@ impl Game<'_> {
                 return Ok(self.part_respawn_position(state, c, found));
             }
             let [x, y, z] = c.pos;
-            let free = c.forced
-                && !self.is_anchor(state)
-                && self.possible_to_respawn_in(state)
-                && self.possible_to_respawn_in(self.world.block(x, y + 1, z));
+            let free = if c.forced {
+                let bottom = self.possible_to_respawn_in(state);
+                let top = self.possible_to_respawn_in(self.world.block(x, y + 1, z));
+                bottom && top
+            } else {
+                false
+            };
             let at = Vec3::new(f64::from(x) + 0.5, f64::from(y) + 0.1, f64::from(z) + 0.5);
             return Ok(self.part_respawn_position(state, c, free.then_some((at, c.yaw, c.pitch))));
         }
@@ -924,6 +927,8 @@ mod forced_respawn_space_tests {
             fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
                 let stone = r.block_key("minecraft:stone");
                 r.block_part(stone, Space(true));
+                let anchor = r.block_key("minecraft:respawn_anchor");
+                r.block_part(anchor, Space(true));
                 let air = r.block_key("minecraft:air");
                 r.block_part(air, Space(false));
             }
@@ -934,6 +939,7 @@ mod forced_respawn_space_tests {
             crate::game::native_entity_refs::tests::with_game(|game| {
                 let registry = game.pack.assets.registry;
                 let stone = registry.default_state("minecraft:stone").unwrap();
+                let anchor = registry.default_state("minecraft:respawn_anchor").unwrap();
                 let air = registry.default_state("minecraft:air").unwrap();
                 let glass = registry.default_state("minecraft:glass").unwrap();
                 // Parts can accept solid space and reject normally empty space.
@@ -959,6 +965,15 @@ mod forced_respawn_space_tests {
                 game.world.set(5, 65, 5, stone).unwrap();
                 game.world.set(5, 64, 5, air).unwrap();
                 assert!(game.find_respawn_and_use(config, false).unwrap().is_none());
+
+                // The Overworld anchor cannot set spawn, so its part answers
+                // the ordinary forced-column predicate instead.
+                assert!(!game.anchor_works());
+                game.world.set(5, 64, 5, anchor).unwrap();
+                assert_eq!(
+                    game.find_respawn_and_use(config, false).unwrap(),
+                    Some((Vec3::new(5.5, 64.1, 5.5), 45.0, 10.0)),
+                );
             });
         });
     }
