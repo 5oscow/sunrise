@@ -198,6 +198,7 @@ impl std::ops::DerefMut for ModBlockEntity {
     }
 }
 /// What a slot of a mod container admits, besides what its face rules and the item allow.
+/// Hoppers, droppers, funnels, menu shift-clicks and `ResourceHandler::insert` all apply it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 // exhaustive: the three admission rules are the whole set a declaration can name
 #[derive(sunrise_mod_api_macros::Wire)]
