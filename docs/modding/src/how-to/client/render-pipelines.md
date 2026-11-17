@@ -31,6 +31,11 @@ alpha you return is coverage. The game supplies the vertex stage, the bindings a
 to the frame, so a file that declares a binding or an entry point is refused. Names that start with
 `sunrise_` belong to the game.
 
+The game parses the file before it can compile it, and a very deep expression would overflow the
+parser's stack, so a file longer than 131,072 bytes (the whole shader, with the game's own code
+around yours), or an expression that chains more than 200 binary operators, member accesses or
+indexings (`a + b + c + ...`), is refused by name: split a long sum over several `let` statements.
+
 ## 2. Register the pipeline
 
 ```rust,ignore

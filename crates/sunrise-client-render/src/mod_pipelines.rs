@@ -358,8 +358,16 @@ pub fn compose(text: &str) -> Result<String, String> {
 }
 
 /// The whole shader of a pipeline whose file is `text`, with `pipeline_texture` when it is
-/// `textured`, or why the file is refused, with the file's own line where there is one.
+/// `textured`, or why the file is refused, with the file's own line where there is one. The
+/// file is parsed and validated on a thread with the stack and the bounds of
+/// [`sunrise_shader_api::guard`], so no file, whatever its shape, can crash the game: one that
+/// is too long or chains too many operators in an expression is refused by name.
 pub fn compose_with(text: &str, textured: bool) -> Result<String, String> {
+    sunrise_shader_api::guard::guarded(|| compose_checked(text, textured))
+        .and_then(|composed| composed)
+}
+
+fn compose_checked(text: &str, textured: bool) -> Result<String, String> {
     let prelude = prelude(textured);
     let mut shader = format!("{prelude}{text}\n");
     let located = |at: Option<usize>, message: String| match at
@@ -376,6 +384,9 @@ pub fn compose_with(text: &str, textured: bool) -> Result<String, String> {
         ),
         None => message,
     };
+    if let Some((at, message)) = sunrise_shader_api::guard::refusal(&shader) {
+        return Err(located(at, message));
+    }
     // First without the entry points, so a missing or mistyped function is reported as such
     // rather than as a call that doesn't resolve.
     let module = naga::front::wgsl::parse_str(&shader).map_err(|e| {
@@ -544,6 +555,31 @@ fn pipeline_fragment(input: PipelineInput) -> vec4<f32> {
                 "{GLOW}@fragment fn mine() -> @location(0) vec4<f32> {{ return vec4<f32>(1.0); }}\n"
             ))
             .contains("declares an entry point")
+        );
+    }
+
+    /// An expression chain of ten thousand terms used to overflow naga's parser stack, which
+    /// aborts the process; a file that long, or longer than a shader may be, is refused by name
+    /// at its line, and the same function with a chain inside the bound composes.
+    #[test]
+    fn a_file_that_would_overflow_the_parser_is_refused_not_a_crash() {
+        let shader = |terms: usize| {
+            format!(
+                "fn pipeline_fragment(input: PipelineInput) -> vec4<f32> {{\n    let a = input.color.r;\n    let x = a{};\n    return vec4<f32>(x);\n}}\n",
+                "+a".repeat(terms)
+            )
+        };
+        let message = compose(&shader(10_000)).unwrap_err();
+        assert!(
+            message.starts_with("line 3: an expression chains more than 200 operators (201 here)"),
+            "{message}"
+        );
+        assert!(compose(&shader(150)).is_ok());
+        let long = format!("{}// {}\n", shader(1), "x".repeat(200_000));
+        assert!(
+            compose(&long)
+                .unwrap_err()
+                .ends_with("a shader may hold 131072")
         );
     }
 
