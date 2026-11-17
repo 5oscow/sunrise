@@ -168,7 +168,7 @@ mod tests;
 
 pub use bonemeal::{BonemealCheck, TemplateSettings};
 pub use buckets::{
-    BucketContent, Douse, Drain, FluidChange, FluidWrite, PlacedLiquid, fluid_bucket,
+    BucketContent, Douse, Drain, FluidChange, FluidWrite, LiquidUser, PlacedLiquid, fluid_bucket,
     fluid_empty_sound, fluid_pickup_sound,
 };
 pub use data::{BlockData, ItemBinding, ItemKind, Named, Props, PushReaction, StateFacts, Tags};
@@ -463,6 +463,31 @@ pub trait LevelAccess: BlockEntityNeighbors {
     /// its random draws, which a refusal doesn't change. The default allows.
     fn allow_spread(&self, _kind: Spread, _from: BlockPos, _to: BlockPos) -> bool {
         true
+    }
+    /// Whether the block has a part that can answer the liquid-container predicate.
+    fn has_liquid_container_part(&self, _state: BlockStateId) -> bool {
+        false
+    }
+    /// The block part's read-only liquid-container answer, if it provides one.
+    fn can_place_liquid(
+        &self,
+        _pos: BlockPos,
+        _state: BlockStateId,
+        _fluid: FluidKind,
+        _user: LiquidUser,
+    ) -> Option<bool> {
+        None
+    }
+    /// Replace the template's container write. Player bucket transactions call the
+    /// part with their own journalled host before applying the planned write.
+    fn place_liquid(
+        &mut self,
+        _ticks: &mut Ticks,
+        _pos: BlockPos,
+        _state: BlockStateId,
+        _fluid: FluidState,
+    ) -> Option<bool> {
+        None
     }
     /// Returns the state to place for a liquid conversion, or None to cancel.
     fn fluid_place_block(

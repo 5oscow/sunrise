@@ -8,6 +8,8 @@ pub(super) struct DryLevel<'w> {
     random: sunrise_core::random::LegacyRandom,
     /// The sounds the use plays (a door's creak).
     pub(super) sounds: Vec<DrySound>,
+    /// The server owns liquid-container writes, including a part's replacement.
+    pub(super) filled_container: bool,
 }
 
 impl<'w> DryLevel<'w> {
@@ -17,6 +19,7 @@ impl<'w> DryLevel<'w> {
             changed: HashMap::new(),
             random: sunrise_core::random::LegacyRandom::new(0),
             sounds: Vec::new(),
+            filled_container: false,
         }
     }
 }
@@ -24,6 +27,25 @@ impl<'w> DryLevel<'w> {
 impl sunrise_world::level::BlockEntityNeighbors for DryLevel<'_> {}
 
 impl sunrise_world::level::LevelAccess for DryLevel<'_> {
+    fn can_place_liquid(
+        &self,
+        pos: sunrise_core::position::BlockPos,
+        state: BlockStateId,
+        fluid: sunrise_world::fluid::FluidKind,
+        user: sunrise_world::level::LiquidUser,
+    ) -> Option<bool> {
+        self.base.can_place_liquid(pos, state, fluid, user)
+    }
+    fn place_liquid(
+        &mut self,
+        _: &mut sunrise_world::level::Ticks,
+        _: sunrise_core::position::BlockPos,
+        _: BlockStateId,
+        _: sunrise_world::fluid::FluidState,
+    ) -> Option<bool> {
+        self.filled_container = true;
+        None
+    }
     fn before_smoke_source(&self, state: BlockStateId, smoke: &mut Option<bool>) {
         self.base.before_smoke_source(state, smoke);
     }

@@ -8359,22 +8359,15 @@ impl Game<'_> {
         let [x, y, z] = hit.beside();
         let beside = Some(sunrise_core::position::BlockPos::new(x, y, z));
         let sneaking = self.remote_shift_down();
-        let creative = self.creative;
+        let user = self.bucket_liquid_user();
         self.with_level(|b, level, ticks| {
             let mut level = DryLevel::new(level);
-            let emptied = b.bucket_empty(
-                &mut level, ticks, pos, beside, content, sound, sneaking, creative,
+            let emptied = b.bucket_empty_as(
+                &mut level, ticks, pos, beside, content, sound, sneaking, user,
             );
-            // Water poured into a liquid container (where it went, which may
-            // be the block beside a refusing one) fills it server-side only.
-            let client_change = !(content.is_water()
-                && emptied.is_some_and(|at| {
-                    use sunrise_world::level::LevelAccess as _;
-                    b.is_liquid_container(level.block_state(at))
-                }));
             (
                 emptied.is_some(),
-                client_change.then(|| level.changed.into_iter().collect()),
+                (!level.filled_container).then(|| level.changed.into_iter().collect()),
                 std::mem::take(&mut level.sounds),
             )
         })

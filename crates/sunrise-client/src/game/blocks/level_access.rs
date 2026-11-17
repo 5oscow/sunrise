@@ -117,6 +117,55 @@ impl LevelAccess for GameLevel<'_> {
         }
         !canceled
     }
+    fn has_liquid_container_part(&self, state: BlockStateId) -> bool {
+        super::api_values::block_state::block_listens(mod_api::HookId::CanPlaceLiquid, state)
+    }
+    fn can_place_liquid(
+        &self,
+        pos: BlockPos,
+        state: BlockStateId,
+        fluid: sunrise_world::fluid::FluidKind,
+        user: sunrise_world::level::LiquidUser,
+    ) -> Option<bool> {
+        if !self.has_liquid_container_part(state) {
+            return None;
+        }
+        let fluid = super::native_world_read::api_fluid_state(
+            sunrise_world::fluid::FluidState::new(fluid, 8, false),
+        )?
+        .fluid;
+        let user = self
+            .api_level
+            .zip(user.entity_id)
+            .map(|(level, id)| mod_api::LivingRef::new(mod_api::EntityRef::new(level.epoch(), id)));
+        let mut answer = None;
+        self.native_can_place_liquid(pos, state, fluid, user, &mut answer);
+        answer
+    }
+    fn place_liquid(
+        &mut self,
+        ticks: &mut Ticks,
+        pos: BlockPos,
+        state: BlockStateId,
+        fluid: sunrise_world::fluid::FluidState,
+    ) -> Option<bool> {
+        if !self.native_authoritative
+            || !super::api_values::block_state::block_listens(mod_api::HookId::PlaceLiquid, state)
+            || !self.world.is_loaded_at(pos.x, pos.y, pos.z)
+        {
+            return None;
+        }
+        if self.liquid_transaction_open {
+            log::warn!(
+                "Sunrise: refused direct place_liquid during an open transaction at {pos:?}"
+            );
+            return None;
+        }
+        let fluid = super::native_world_read::api_fluid_state(fluid)?;
+        let mut answer = None;
+        self.native_place_liquid(ticks, pos, state, fluid, &mut answer);
+        answer
+    }
     fn fluid_place_block(
         &self,
         pos: BlockPos,

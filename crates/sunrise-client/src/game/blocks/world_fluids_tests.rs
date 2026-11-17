@@ -296,3 +296,260 @@ fn a_later_write_that_puts_the_block_back_keeps_its_block_entity_at_the_commit()
         ));
     });
 }
+
+#[test]
+#[ignore = "daily"]
+fn journal_level_host_stages_block_entity_random_and_effect_changes() {
+    use crate::game::journal_level_write::JournalLevelWrite;
+    use mod_api::{
+        BlockPos, BlockUpdateFlags, LevelHost, LevelRandomHost, LevelTicksHost, LevelWriteHost,
+        RandomSource,
+    };
+    use sunrise_core::{position::ChunkPos, ticks::TickTypeId};
+    use sunrise_world::fluid::FluidKind;
+
+    with_level(|game, level| {
+        let skull = state(game, "minecraft:skeleton_skull");
+        let stone = state(game, "minecraft:stone");
+        let key = (AT[0], AT[1], AT[2]);
+        let pos = BlockPos::new(AT[0], AT[1], AT[2]);
+        let water = TickTypeId(FluidKind::Water.tick_id());
+        game.block_ticks
+            .add_chunk(ChunkPos::new(0, 0), Default::default(), Default::default())
+            .unwrap();
+        for commit in [false, true] {
+            game.world.set(AT[0], AT[1], AT[2], skull).unwrap();
+            game.world
+                .block_entities
+                .insert(key, BlockEntity::Skull(Default::default()));
+            let before = <(u64, Option<f64>)>::from(&*game.world.random);
+            let seal = game.transaction_open();
+            dispense_fixture::start_recording();
+            {
+                let mut host = JournalLevelWrite::new(game, level).unwrap();
+                assert!(host.block_entity(AT).is_some());
+                assert_eq!(
+                    host.state_block(host.block_state(AT).unwrap()),
+                    Some("minecraft:skeleton_skull")
+                );
+                let stone = host.block_state_id("minecraft:stone").unwrap();
+                assert!(host.set_block(
+                    AT,
+                    stone,
+                    BlockUpdateFlags::CLIENTS | BlockUpdateFlags::KNOWN_SHAPE
+                ));
+                assert_eq!(host.block_state(AT), Some(stone));
+                assert!(host.block_entity(AT).is_none());
+                let mut random = host.random().unwrap();
+                random.next_int();
+                assert!(host.set_random(random));
+                assert!(host.schedule_fluid_tick(AT, "minecraft:water", 5));
+                assert!(host.level_event(1501, AT, 0));
+                assert!(!host.level_event(2001, AT, -1));
+            }
+            assert_eq!(block(game), stone);
+            assert!(!game.block_ticks.fluids.has_scheduled(pos, water));
+            assert!(dispense_fixture::stop_recording().is_empty());
+            dispense_fixture::start_recording();
+            game.transaction_close(&seal, commit);
+            assert_eq!(block(game), if commit { stone } else { skull });
+            assert_eq!(game.world.block_entities.get(&key).is_none(), commit);
+            assert_eq!(
+                <(u64, Option<f64>)>::from(&*game.world.random) != before,
+                commit
+            );
+            assert_eq!(game.block_ticks.fluids.has_scheduled(pos, water), commit);
+            let lines = dispense_fixture::stop_recording();
+            assert_eq!(lines.iter().any(|line| line == "L 1501 2,65,2 0"), commit);
+        }
+    });
+}
+
+#[derive(Default)]
+struct LiquidCalls {
+    queried: std::sync::Mutex<Vec<(bool, Option<u32>, mod_api::FluidKey)>>,
+    placed: std::sync::Mutex<Vec<mod_api::FluidState>>,
+    refuse_place: std::sync::atomic::AtomicBool,
+}
+
+struct LiquidPart(Arc<LiquidCalls>);
+
+#[mod_api::sunrise_part]
+impl mod_api::BlockPart for LiquidPart {
+    fn can_place_liquid(
+        &self,
+        level: mod_api::LevelSide<'_>,
+        event: &mut mod_api::CanPlaceLiquidEvent,
+    ) -> Option<bool> {
+        self.0.queried.lock().unwrap().push((
+            matches!(level, mod_api::LevelSide::Client(_)),
+            event.user.map(mod_api::LivingRef::id),
+            event.fluid,
+        ));
+        Some(true)
+    }
+
+    fn place_liquid(
+        &self,
+        level: &mut dyn mod_api::LevelWriteHost,
+        event: &mut mod_api::PlaceLiquidEvent,
+    ) -> Option<bool> {
+        self.0.placed.lock().unwrap().push(event.fluid);
+        let pos = [event.pos.x, event.pos.y, event.pos.z];
+        let result = level.block_state_id("minecraft:emerald_block").unwrap();
+        let changed = level.set_block(pos, result, mod_api::BlockUpdateFlags::CLIENTS);
+        Some(
+            changed
+                && !self
+                    .0
+                    .refuse_place
+                    .load(std::sync::atomic::Ordering::Relaxed),
+        )
+    }
+}
+
+#[mod_api::__subscriptions]
+impl mod_api::Hooks for LiquidPart {
+    fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
+        let block = r.block_key("minecraft:dandelion");
+        r.block_part(block, LiquidPart(self.0.clone()));
+    }
+}
+
+fn with_liquid_part(test: impl FnOnce(&mut Game<'_>, LevelRef, &LiquidCalls)) {
+    let calls = Arc::new(LiquidCalls::default());
+    let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+        "liquid_container",
+        Box::new(LiquidPart(calls.clone())),
+    )]
+    .into();
+    mod_platform::testing::with_mods(mods, || {
+        with_level(|game, level| {
+            let dandelion = state(game, "minecraft:dandelion");
+            game.world.set(AT[0], AT[1], AT[2], dandelion).unwrap();
+            test(game, level, &calls);
+        })
+    });
+}
+
+#[test]
+#[ignore = "daily"]
+fn liquid_part_accepts_nonwater_from_bucket_and_predicts_the_same_target() {
+    use crate::game::Hit;
+    use sunrise_core::{
+        geometry::{Direction, Vec3},
+        position::BlockPos,
+    };
+    use sunrise_world::{fluid::FluidKind, level::BucketContent};
+    with_liquid_part(|game, _, calls| {
+        let mut player =
+            sunrise_client::motion::PlayerMotion::new(game.motion, Vec3::ZERO).unwrap();
+        player.entity_id = 77;
+        game.player = Some(player);
+        let hit = Hit {
+            pos: AT,
+            face: [0, 1, 0],
+            point: [2.5, 65.5, 2.5],
+            inside: false,
+        };
+        let lava = BucketContent::Fluid(FluidKind::Lava);
+        assert_eq!(game.bucket_target(lava, &hit), AT);
+        let pos = BlockPos::new(AT[0], AT[1], AT[2]);
+        assert_eq!(
+            game.empty_player_bucket(pos, None, lava, "minecraft:item.bucket.empty_lava", false),
+            Some(pos)
+        );
+        assert_eq!(block(game), state(game, "minecraft:emerald_block"));
+        assert!(calls.placed.lock().unwrap()[0].is_source());
+        assert_eq!(calls.placed.lock().unwrap()[0].fluid, key("minecraft:lava"));
+        assert_eq!(
+            *calls.queried.lock().unwrap(),
+            [
+                (false, Some(77), key("minecraft:lava")),
+                (false, Some(77), key("minecraft:lava")),
+            ]
+        );
+        calls.queried.lock().unwrap().clear();
+
+        // A dispenser lends no user and uses the same decision for lava.
+        let dandelion = state(game, "minecraft:dandelion");
+        game.world.set(AT[0], AT[1], AT[2], dandelion).unwrap();
+        let stack = sunrise_client::items::ItemStack::new("minecraft:lava_bucket", 1);
+        game.dispense_filled_bucket((2, 65, 1), Direction::South, stack)
+            .unwrap();
+        assert_eq!(block(game), state(game, "minecraft:emerald_block"));
+        assert_eq!(
+            *calls.queried.lock().unwrap(),
+            [(false, None, key("minecraft:lava"))]
+        );
+
+        // The same target check on a connected client retains the real prediction actor.
+        game.options.execution_role = crate::game::execution_role::ExecutionRole::Client;
+        game.options.dedicated = None;
+        let (client, _server) = sunrise_protocol::connection::Pipe::pair();
+        game.connect_local(client, "LiquidPrediction").unwrap();
+        let remote = game.remote.as_mut().unwrap();
+        remote.logged_in = true;
+        remote.entity_id = 91;
+        remote.profile = 42;
+        game.world
+            .chunks
+            .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+        game.world.set(AT[0], AT[1], AT[2], dandelion).unwrap();
+        assert_eq!(game.bucket_target(lava, &hit), AT);
+        assert_eq!(
+            calls.queried.lock().unwrap().last(),
+            Some(&(true, Some(91), key("minecraft:lava")))
+        );
+        assert_eq!(calls.placed.lock().unwrap().len(), 2);
+    });
+}
+
+#[test]
+#[ignore = "daily"]
+fn validated_fluid_utility_keeps_only_accepted_writes_in_its_outer_transaction() {
+    use std::sync::atomic::Ordering::Relaxed;
+    with_liquid_part(|game, level, calls| {
+        let dandelion = state(game, "minecraft:dandelion");
+        let lava = key("minecraft:lava");
+        let outer = game.transaction_open();
+        calls.refuse_place.store(true, Relaxed);
+        assert!(!game.level_place_fluid(level, AT, lava, None, true, outer.transaction()));
+        assert_eq!(block(game), dandelion);
+        calls.refuse_place.store(false, Relaxed);
+        assert!(game.level_place_fluid(level, AT, lava, None, true, outer.transaction()));
+        assert_eq!(block(game), state(game, "minecraft:emerald_block"));
+        game.transaction_close(&outer, false);
+        assert_eq!(block(game), dandelion);
+        assert_eq!(calls.placed.lock().unwrap().len(), 2);
+    });
+}
+
+#[test]
+#[ignore = "daily"]
+fn direct_spread_skips_container_writes_during_an_open_transaction() {
+    with_liquid_part(|game, level, calls| {
+        let water = state(game, "minecraft:water");
+        let source = [AT[0], AT[1] + 1, AT[2]];
+        game.world
+            .set(source[0], source[1], source[2], water)
+            .unwrap();
+        let seal = game.transaction_open();
+        assert!(level.fluid_tick(game, source));
+        assert_eq!(block(game), state(game, "minecraft:dandelion"));
+        assert!(calls.placed.lock().unwrap().is_empty());
+        game.transaction_close(&seal, false);
+        assert!(level.fluid_tick(game, source));
+        assert_eq!(block(game), state(game, "minecraft:emerald_block"));
+        assert_eq!(calls.placed.lock().unwrap().len(), 1);
+        assert!(!calls.placed.lock().unwrap()[0].is_source());
+        assert!(
+            calls
+                .queried
+                .lock()
+                .unwrap()
+                .iter()
+                .all(|(client, user, _)| !client && user.is_none())
+        );
+    });
+}
