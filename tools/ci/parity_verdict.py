@@ -26,7 +26,8 @@ def verdict(log, expected, status):
     for label, passed in labels.items():
         name = label.split("#", 1)[0]
         harnesses[name] = harnesses.get(name, True) and passed
-    return ({"passed": sorted(name for name, passed in harnesses.items() if passed),
+    # An incomplete run proves no harness passed: its passes stay out of the uploaded verdict.
+    return ({"passed": sorted(name for name, passed in harnesses.items() if passed) if complete else [],
              "failed": sorted(name for name, passed in harnesses.items() if not passed),
              "complete": complete}, labels)
 

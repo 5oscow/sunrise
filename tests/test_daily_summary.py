@@ -233,13 +233,25 @@ class DailySummaryTests(unittest.TestCase):
         jobs = [j for j in GREEN_JOBS if j["name"] != PARITY_JOB]
         # The resolve job supplies one explicit distinction: a skipped required call is still a failure.
         results = dict(LEGS, parity={"result": "skipped"}, resolve={"outputs": {"parity_required": "false"}})
-        for dry_run, ref, writes in (("false", "refs/heads/main", True), ("true", "refs/heads/main", False),
-                                     ("true", "refs/heads/topic", False)):
+        for dry_run, ref in (("true", "refs/heads/main"), ("true", "refs/heads/topic")):
             with self.subTest(dry_run=dry_run, ref=ref):
                 api = Api(jobs, issues=issues)
                 _, out = self.run_summary(api, results=results, parity=None, ref=ref, dry_run=dry_run)
                 self.assertEqual(out.splitlines(), ["green=true", "sdk_green=true"])
-                self.assertEqual([path for _, path, _ in api.writes], ["git/refs"] if writes else [])
+                self.assertEqual(api.writes, [])
+        # A writing run never leaves parity out, whatever resolve said: no tag and no Nightly without it.
+        api = Api(jobs, issues=issues)
+        _, out = self.run_summary(api, results=results, parity=None, ref="refs/heads/main", dry_run="false")
+        self.assertEqual(out.splitlines(), ["green=false", "sdk_green=true"])
+        self.assertNotIn("git/refs", [path for _, path, _ in api.writes])
+
+    def test_an_incomplete_parity_verdict_reports_no_passes(self):
+        log = "PASS loot_a#1 3s\n"
+        report, _ = parity_verdict.verdict(log, {"loot_a#1", "loot_a#2"}, "0")
+        self.assertEqual(report, {"passed": [], "failed": [], "complete": False})
+        log += "PASS loot_a#2 4s\n2 passed, 0 failed in 0.1 min.\n"
+        report, _ = parity_verdict.verdict(log, {"loot_a#1", "loot_a#2"}, "0")
+        self.assertEqual(report, {"passed": ["loot_a"], "failed": [], "complete": True})
 
     def test_an_incomplete_parity_run_files_failures_but_closes_nothing(self):
         api = Api([job(PARITY_JOB, "failure")],
@@ -863,21 +875,21 @@ class DailyWorkflowTests(unittest.TestCase):
         self.assertIn("needs.summary.outputs.sdk_green == 'true'", jobs["sdk-publish"]["if"])
         self.assertNotIn("parity-report", jobs)
 
-    def test_parity_applicability_uses_the_captured_head_not_the_current_tip(self):
+    def test_every_writing_run_requires_parity_and_only_a_dry_run_leaves_it_out(self):
         jobs = self.workflow["jobs"]
         resolve = jobs["resolve"]
         self.assertEqual(resolve["outputs"]["parity_required"], "${{ steps.commit.outputs.parity_required }}")
         self.assertIn("needs.resolve.outputs.parity_required == 'true'", jobs["parity"]["if"])
         with tempfile.TemporaryDirectory() as folder:
             folder = Path(folder)
-            # A checked-in resolve job body exercised with a substitute git: both candidates are ancestors of
-            # current main, but only one matches the SHA captured at dispatch.
+            # A checked-in resolve job body exercised with a substitute git: an older commit of main writes too, so
+            # it runs parity as main's head does.
             stub = folder / "git"
             stub.write_text('#!/bin/sh\n[ "$1" != rev-parse ] || printf "%s\\n" "${4%%^*}"\n')
             stub.chmod(0o755)
             out = folder / "out"
             for ref, dry, commit, required in (("main", "false", "head", "true"),
-                                               ("main", "false", "older", "false"),
+                                               ("main", "false", "older", "true"),
                                                ("main", "true", "head", "false"),
                                                ("topic", "false", "head", "false")):
                 with self.subTest(ref=ref, dry=dry, commit=commit):

@@ -50,7 +50,7 @@ python3 tools/parity.py --repeat 3 food   # run it three times; the runs must ag
 python3 tools/parity.py --hosts macmini,playsunrise   # with other machines (default: tools/parity_hosts.json's default list, empty)
 python3 tools/parity.py --list       # what would run
 python3 tools/parity.py --status     # last result of each harness
-python3 tools/parity.py --changed origin/main      # those a branch's changes can affect (CI's parity job)
+python3 tools/parity.py --changed origin/main      # those a branch's changes can affect
 python3 tools/parity.py --changed-files paths.txt  # the same for listed paths, in a copy without Git (tools/pr_ready.py)
 ```
 

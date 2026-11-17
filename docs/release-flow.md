@@ -63,8 +63,8 @@ Unsure? Add `needs-proof`: it costs a few hours, a broken release costs more.
 ## Parity on main
 
 The [daily run](#daily-run) is the only CI entry point for vanilla parity. It calls `.github/workflows/parity.yml`
-only for a real run testing the main head captured at dispatch. Dry runs, older commits, rollups and pull requests do
-not run parity. The Dyna runner uses its prepared vanilla data and runs all automatic harnesses from scratch.
+on every real (writing) run, which takes only commits of main, so no run can move `daily-green` or start the
+Nightly without it. Dry runs, rollups and pull requests do not run parity. The Dyna runner uses its prepared vanilla data and runs all automatic harnesses from scratch.
 `named_only` in `tools/parity_hosts.json` lists the exceptions, including `frame_identity` and capture-preserving
 harnesses that require explicit arguments; run them locally by name with the required setup.
 

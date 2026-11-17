@@ -97,10 +97,10 @@ jobs:
               echo "### $sha already has a completed daily run: $done" >> "$GITHUB_STEP_SUMMARY"
             fi
           fi
-          # A dry run or an explicitly older commit has no parity leg. Compare with the main head at dispatch,
-          # not the branch tip by the time a queued job gets a runner.
+          # Every writing run, whichever commit of main it takes, runs parity: a writing run can move daily-green and
+          # start the Nightly, so none may skip it. Only a dry run, which writes nothing, has no parity leg.
           parity_required=false
-          if [ "$GITHUB_REF" = refs/heads/main ] && [ "$DRY_RUN" = false ] && [ "$sha" = "$GITHUB_SHA" ]; then
+          if [ "$GITHUB_REF" = refs/heads/main ] && [ "$DRY_RUN" = false ]; then
             parity_required=true
           fi
           printf 'commit=%s\nskip=%s\ndry_run=%s\nparity_required=%s\n' \
@@ -182,7 +182,7 @@ jobs:
       commit: ${{ needs.resolve.outputs.commit }}
       legs: windows-macos
 
-  # Every automatic vanilla parity harness on the main head captured at dispatch. Never on a rollup or a pull
+  # Every automatic vanilla parity harness on this writing run's commit of main. Never on a rollup or a pull
   # request (owner, 2026-11-17). After the test shards, so its large runner is never one of three
   # beside them while gates wait. The summary requires this leg for the nightly and files its failures.
   parity:

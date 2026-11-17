@@ -18,9 +18,9 @@
                                    surface.json to <out>, checked; prints nothing when there is none
 
 A nightly builds main plus the pull requests the trusted reviewers picked (the set: tools/ci/nightly_set.py), merged
-in their order and pushed as nightly/build-<date>-<n>; with no set, main alone. Main is its newest commit where
-the repository's release checks passed (`dyna-checks` on Sunrise, the green daily tag elsewhere)
-(release_train.green_main_head), or NIGHTLY_BASE when the caller gives that commit. It is published as the
+in their order and pushed as nightly/build-<date>-<n>; with no set, main alone. Main is the commit the
+`daily-green` tag points to (release_train.daily_green_commit; on Sunrise through release_train.channel_head, below),
+or NIGHTLY_BASE when the caller gives that commit. It is published as the
 `nightly` pre-release; the previous one stays a week as nightly-<date>.
 On sunrise-org/sunrise only, the base is the commit `daily-green` points to (the newest daily run that passed every
 leg, which also published its SDK: release_train.daily_green_commit), with a complete published `sdk-<sha>` release

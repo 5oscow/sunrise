@@ -614,7 +614,8 @@ def main(call=api, run_git=git, query=graphql):
         parity_report = None
     jobs = pages(call, f"actions/runs/{env['GITHUB_RUN_ID']}/jobs?filter=latest", "jobs")
     results = leg_results(json.loads(env["RESULTS"]))
-    parity_not_applicable = (results.get("resolve", {}).get("outputs", {}).get("parity_required") == "false"
+    # Only a run that writes nothing may leave parity out: a writing run's skipped parity holds green and the tag.
+    parity_not_applicable = (not writes and results.get("resolve", {}).get("outputs", {}).get("parity_required") == "false"
                              and results.get(PARITY, {}).get("result") == "skipped")
     legs = tuple(leg for leg in LEGS if leg != PARITY or not parity_not_applicable)
     tests, unfinished, passed, green_legs, green = verdicts(jobs, reports, results, legs, parity_report)
