@@ -857,7 +857,7 @@ pub fn inspect(kind: &Kind, path: &Path) -> Result<Facts, String> {
             Ok(Facts {
                 capabilities: m.capabilities,
                 id: Some(m.id),
-                version: Some(m.version),
+                version: Some(m.version.to_string()),
                 api: m.api,
                 side: Some(m.side),
                 ..Facts::default()

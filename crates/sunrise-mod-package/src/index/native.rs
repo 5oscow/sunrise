@@ -61,7 +61,7 @@ impl Bundle {
         let native = self.manifest.native.as_ref().expect("native bundle");
         Facts {
             id: Some(self.manifest.id.clone()),
-            version: Some(self.manifest.version.clone()),
+            version: Some(self.manifest.version.to_string()),
             api: format!("native-1/{}/{}", native.sunrise, native.mixins),
             game: Some(native.game.clone()),
             ..Facts::default()

@@ -801,11 +801,11 @@ mod tests {
         let dir = fixture();
         let mut base = sunrise_mod_package::Package::read(&dir).unwrap().manifest;
         base.id = "base".into();
-        base.version = "1.2.3".into();
+        base.version = semver::Version::new(1, 2, 3);
         base.side = mod_vocab::Side::Both;
         let mut extra = base.clone();
         extra.id = "extra".into();
-        extra.version = "2.0.0".into();
+        extra.version = semver::Version::new(2, 0, 0);
         extra.side = mod_vocab::Side::Client;
         let mods = [&base, &extra];
         for count in 0..=2 {

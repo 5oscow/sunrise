@@ -42,13 +42,39 @@ pub const MAX_WASM_MEMORY_MIB: u32 = 4096;
 /// Maximum manifest bytes accepted by package readers and developer tools.
 pub const MAX_MANIFEST: u64 = 32 << 20;
 
+/// A mod's version as semver, padding an omitted minor and patch (`1` is `1.0.0`, `1.2-rc1` is
+/// `1.2.0-rc1`). Pre-release and build metadata are allowed.
+pub fn parse_version(version: &str) -> Result<semver::Version, String> {
+    let at = version.find(['-', '+']).unwrap_or(version.len());
+    let (core, rest) = version.split_at(at);
+    let padded = match core.matches('.').count() {
+        0 => format!("{core}.0.0{rest}"),
+        1 => format!("{core}.0{rest}"),
+        _ => version.to_owned(),
+    };
+    semver::Version::parse(&padded).map_err(|_| {
+        format!(
+            "version {version:?} is not a semver version (MAJOR.MINOR.PATCH, e.g. 3.6.30+refabricated)"
+        )
+    })
+}
+
+fn version_from_str<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<semver::Version, D::Error> {
+    let version = String::deserialize(deserializer)?;
+    parse_version(&version).map_err(serde::de::Error::custom)
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Manifest {
     /// `[a-z0-9_]`, 1 to 64 characters: the mod's folder, log and settings key.
     pub id: String,
     pub name: String,
-    pub version: String,
+    /// Semver, read once here: omitted minor and patch are padded ([`parse_version`]).
+    #[serde(deserialize_with = "version_from_str")]
+    pub version: semver::Version,
     #[serde(default)]
     pub description: String,
     #[serde(default)]
@@ -582,11 +608,7 @@ impl Manifest {
                     ));
                 }
             }
-            if m.version.is_empty()
-                || native.game.is_empty()
-                || !revision(&native.sunrise)
-                || !revision(&native.mixins)
-            {
+            if native.game.is_empty() || !revision(&native.sunrise) || !revision(&native.mixins) {
                 return Err(format!(
                     "{MANIFEST}: native requires game and exact revisions"
                 ));
@@ -1719,7 +1741,7 @@ capabilities = ["registries"]
         let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
         let package = Package::read_zip(&mut zip).unwrap();
         assert_eq!(package.manifest.id, "ruby");
-        assert_eq!(package.manifest.version, "0.1.0");
+        assert_eq!(package.manifest.version.to_string(), "0.1.0");
         assert_eq!(package.manifest.native.unwrap().game, "26.3");
         assert!(
             Package::write_files(&manifest, &[("Cargo.toml", b""), ("src/../bad.rs", b"")])

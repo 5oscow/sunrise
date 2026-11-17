@@ -8,17 +8,6 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::path::Path;
 
-/// Parse an installed mod version, padding omitted minor and patch components.
-/// This is also the comparison used for saved-world mod versions.
-pub fn parse_version(version: &str) -> Result<Version, semver::Error> {
-    let padded = match version.matches('.').count() {
-        0 => format!("{version}.0.0"),
-        1 => format!("{version}.0"),
-        _ => version.to_owned(),
-    };
-    Version::parse(&padded)
-}
-
 #[derive(Debug)]
 pub enum Error {
     Manifest {
@@ -176,7 +165,7 @@ fn parse(owner: &str, value: Option<&toml::Value>) -> Result<Vec<Dependency>, Er
 #[derive(Clone)]
 pub struct Mod<'a> {
     pub id: &'a str,
-    pub version: &'a str,
+    pub version: &'a Version,
     pub has_api: bool,
     /// Code declarations also participate in physical library linking.
     pub code: bool,
@@ -381,8 +370,6 @@ fn resolve_all(
     }
     let mut edges = vec![Vec::new(); mods.len()];
     let mut warnings = Vec::new();
-    // A target's version is parsed only when a logical rule uses it, once per resolution.
-    let mut versions = HashMap::new();
     for (index, item) in mods.iter().enumerate() {
         for dep in item.dependencies {
             let target = ids.get(dep.id.as_str()).copied();
@@ -391,7 +378,7 @@ fn resolve_all(
                 warnings.push(Notice {
                     owner: item.id.into(),
                     target: dep.id.clone(),
-                    version: target.map(|i| mods[i].version.to_owned()),
+                    version: target.map(|i| mods[i].version.to_string()),
                     reason: dep.reason.clone(),
                     url: dep.url.clone(),
                     kind: match action {
@@ -422,19 +409,11 @@ fn resolve_all(
                 });
             }
             if !links {
-                let version = versions
-                    .entry(target)
-                    .or_insert_with(|| parse_version(other.version));
-                let version = version.as_ref().map_err(|error| Error::Manifest {
-                    owner: item.id.into(),
-                    target: dep.id.clone(),
-                    reason: format!("invalid installed version {:?}: {error}", other.version),
-                })?;
-                if !dep.requirement.matches(version) {
+                if !dep.requirement.matches(other.version) {
                     return Err(Error::Version {
                         owner: item.id.into(),
                         target: dep.id.clone(),
-                        version: other.version.into(),
+                        version: other.version.to_string(),
                         requirement: dep.requirement.to_string(),
                         note,
                     });
@@ -462,7 +441,7 @@ fn resolve_all(
                 warnings.push(Notice {
                     owner: item.id.into(),
                     target: rule.id.clone(),
-                    version: target.map(|i| mods[i].version.to_owned()),
+                    version: target.map(|i| mods[i].version.to_string()),
                     reason: rule.reason.clone(),
                     url: rule.url.clone(),
                     kind: match action {
@@ -483,29 +462,21 @@ fn resolve_all(
                 continue;
             }
             let other = &mods[target];
-            let version = versions
-                .entry(target)
-                .or_insert_with(|| parse_version(other.version));
-            let version = version.as_ref().map_err(|error| Error::Manifest {
-                owner: item.id.into(),
-                target: rule.id.clone(),
-                reason: format!("invalid installed version {:?}: {error}", other.version),
-            })?;
-            if !rule.requirement.matches(version) {
+            if !rule.requirement.matches(other.version) {
                 continue;
             }
             if kind == RuleKind::Incompatible {
                 return Err(Error::Incompatible {
                     owner: item.id.into(),
                     target: rule.id.clone(),
-                    version: other.version.into(),
+                    version: other.version.to_string(),
                     note: diagnostic_note(rule.reason.as_deref(), rule.url.as_deref()),
                 });
             }
             warnings.push(Notice {
                 owner: item.id.into(),
                 target: rule.id.clone(),
-                version: Some(other.version.into()),
+                version: Some(other.version.to_string()),
                 reason: rule.reason.clone(),
                 url: rule.url.clone(),
                 kind: NoticeKind::Discouraged,
@@ -689,7 +660,7 @@ mod tests {
     fn item<'a>(id: &'a str, version: &'a str, dependencies: &'a [Dependency]) -> Mod<'a> {
         Mod {
             id,
-            version,
+            version: Box::leak(Box::new(crate::manifest::parse_version(version).unwrap())),
             has_api: true,
             code: true,
             dependencies,
@@ -831,7 +802,7 @@ mod tests {
         assert!(matches!(resolve(&mods[..1]), Err(Error::Missing { .. })));
         let incompatible = Mod {
             id: "base",
-            version: "2",
+            version: &Version::new(2, 0, 0),
             has_api: false,
             code: false,
             dependencies: &[],
@@ -849,7 +820,7 @@ mod tests {
                 mods[0].clone(),
                 Mod {
                     id: "base",
-                    version: "1",
+                    version: &Version::new(1, 0, 0),
                     has_api: false,
                     code: false,
                     dependencies: &back
