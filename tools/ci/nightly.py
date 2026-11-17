@@ -206,6 +206,14 @@ def build_set(main: Ref, prs: list[dict], left_out: list[str], today: str, force
         stop(repo, issue, f"the build stopped: final source {sha} is not the gate-checked main commit.")
     previous = git("ls-remote", "--tags", "origin", "refs/tags/nightly").split("\t")[0] or None
     build = force or previous != sha
+    # A game build is never published without its SDK, published first on the same commit (owner, 2026-11-17).
+    sdk = repo != "sunrise-org/sunrise" or sdk_ready(sha)
+    if build and not sdk:
+        if not dry_run:
+            stop(repo, issue, f"the build stopped: {sha} has no complete published sdk-{sha}; a Nightly is published "
+                              "only after its SDK, on the same commit.")
+        print(f"::warning::{sha} has no published SDK: a real Nightly of it would stop here; this dry run carries no "
+              "sdk.json")
     name = "(unchanged)"
     if build:
         if dry_run:
@@ -230,12 +238,8 @@ def build_set(main: Ref, prs: list[dict], left_out: list[str], today: str, force
         if not dry_run:
             ns.update_state(lambda st, builds: (st, builds + json.dumps(record) + "\n", f"build {name}"), token)
     chosen = Ref(name, sha, dt.datetime.now(dt.timezone.utc))
-    sdk = repo != "sunrise-org/sunrise" or sdk_ready(sha)
-    issues = train.known_issues()
-    if not sdk:
-        issues.append("- Native mods cannot be built for this build: its SDK is not published.")
     with open("nightly-notes.md", "w") as f:
-        f.write(notes(today, chosen, main, kept, left_out, merged_since(previous, main.sha), issues))
+        f.write(notes(today, chosen, main, kept, left_out, merged_since(previous, main.sha), train.known_issues()))
     output(build=str(build).lower(), sha=sha, short=sha[:7], source=name, date=today, version=f"nightly-{today}",
            nightly=f"{today} {sha[:7]}", source_tag=source_tag(today, sha), sdk=str(sdk).lower())
     print(f"{'build' if build else 'skip (unchanged since the last nightly)'}: {name} {sha}, main {main.sha[:7]}"
