@@ -356,7 +356,7 @@ impl Walker<'_> {
         }
         if function {
             if (builtin(kind, true) || self.types.conditional(kind))
-                && let Some(condition) = data.get("condition")
+                && let Some(condition) = data.get("condition").filter(|value| !value.is_null())
             {
                 self.entry(condition, false, &format!("{path}.condition"))?;
             }
