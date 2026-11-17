@@ -208,9 +208,10 @@ impl Game<'_> {
             },
         )
     }
-    /// Vanilla Entity.isUnderWater uses the previous eye sample and current water contact.
+    /// Entity.isUnderWater uses eye sample AND contact; LocalPlayer's override uses the sample alone.
     pub(super) fn entity_is_under_water(&self, entity: EntityRef) -> Option<bool> {
         match self.native_target_body(self.native_entity_read_target(entity)?)? {
+            Body::Player(p) if !self.is_logical_server() => Some(p.is_under_water()),
             Body::Player(p) => Some(p.fluids.was_eye_in_water && p.fluids.was_touching_water),
             Body::Mob(m) => Some(m.was_eye_in_water && m.fluids.in_water),
             Body::Other(_) => None,
@@ -1430,7 +1431,10 @@ mod tests {
                             let p = g.player.as_mut().unwrap();
                             p.fluids.was_eye_in_water = old_eye;
                             p.fluids.was_touching_water = contact;
-                            assert_eq!(g.entity_is_under_water(player), Some(old_eye && contact));
+                            assert_eq!(
+                                g.entity_is_under_water(player),
+                                Some(if client { old_eye } else { old_eye && contact })
+                            );
                             let m = g.mobs.iter_mut().find(|m| m.id == 15).unwrap();
                             m.was_eye_in_water = old_eye;
                             m.fluids.eye_in_water = !old_eye;

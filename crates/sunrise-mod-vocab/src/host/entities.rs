@@ -491,8 +491,10 @@ pub trait EntitiesBackend {
     fn entity_is_in_lava(&self, entity: EntityRef) -> Option<bool>;
     /// Side: both.
     /// `Entity.isUnderWater`: the previous eye-in-water sample AND current water contact,
-    /// not just the current eye fluid. Players and mobs, using the client's own cached
-    /// state on a client. None for other kinds or stale handles.
+    /// not just the current eye fluid. The local client player instead follows
+    /// `LocalPlayer.isUnderWater`: the saved eye sample alone, even without current water contact.
+    /// Players and mobs, using the client's own cached state on a client.
+    /// None for other kinds or stale handles.
     #[access(WorldOnly)]
     fn entity_is_under_water(&self, entity: EntityRef) -> Option<bool>;
     /// Side: both.

@@ -40,8 +40,10 @@ mobs, armor stands and dropped items, including item-stack fire immunity. On a c
 that client's copy, including the local player's predicted timer, not a server query.
 
 `EntityRef::is_under_water(host)` reads `Entity.isUnderWater` for players and mobs on either side:
-the previous eye-in-water sample AND current water contact. It is deliberately not equivalent to
-checking `eye_fluid` now. Both reads return `None` for unsupported kinds or stale handles.
+the previous eye-in-water sample AND current water contact. The local client player follows the
+`LocalPlayer.isUnderWater` override instead: its saved eye sample alone, even when current water
+contact is false. It is deliberately not equivalent to checking `eye_fluid` now. Both reads return
+`None` for unsupported kinds or stale handles.
 
 `PlayerRef::trigger_consume_item(host, &stack)` is server-only and fires just
 `CriteriaTriggers.CONSUME_ITEM.trigger(serverPlayer, stack)`, the vanilla public call that NeoForge
