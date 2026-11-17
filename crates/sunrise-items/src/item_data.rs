@@ -579,10 +579,9 @@ impl ItemStack {
     pub fn villager_food(&self, info: Option<&ItemInfo>) -> Option<i32> {
         if let Some(data) = self.data() {
             if let Some(value) = data.other("minecraft:villager_food") {
-                return value.get("nutrition").and_then(|n| match n {
-                    Tag::Int(n) => Some(*n),
-                    _ => None,
-                });
+                return value
+                    .get("nutrition")
+                    .and_then(crate::properties::component_int);
             }
             if data.other("!minecraft:villager_food").is_some() {
                 return None;
@@ -1890,7 +1889,7 @@ fn villager_food_stack_override_and_removal() {
     assert_eq!(stack.villager_food(info), Some(4));
     stack.data_mut().set_loot_component(
         "minecraft:villager_food",
-        &Some(Tag::compound([("nutrition", Tag::Int(7))])),
+        &Some(sunrise_core::json_nbt::json_to_tag(&serde_json::json!({"nutrition": 7})).unwrap()),
     );
     assert_eq!(stack.villager_food(info), Some(7));
     stack

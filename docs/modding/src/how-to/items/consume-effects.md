@@ -11,7 +11,8 @@ order, interleaved with built-in effects; stack component patches count.
 - You can apply effects, play sounds, teleport entities and drop items through the host.
 - An unclaimed kind does nothing.
 - Consumable and death protection payloads are decoded once for item definitions
-  and stack component patches. The event borrows the retained payload.
+  and stack component patches. The event borrows the retained payload. Player death
+  protection uses this hook; mob death protection does not dispatch it.
 - Invalid payloads refuse loading rather than failing during consumption.
 
 To apply an effect without consuming an item, use
