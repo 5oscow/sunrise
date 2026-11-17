@@ -2,6 +2,58 @@
 //! then the game folder and the account it names.
 use super::*;
 
+/// How this client runs on the machine, independent of its server connection.
+#[derive(Clone)]
+pub(super) enum Role {
+    Alone,
+    /// The owner is rendering into views paced by a shared compositor.
+    Host {
+        visible_window: bool,
+    },
+    Guest {
+        /// The stable hook seat: zero is the owner, regardless of the guest list's order.
+        seat: usize,
+        visible_window: bool,
+        /// A guest must not toggle fullscreen on the owner's window.
+        in_owner_window: bool,
+        /// This player's account, never inherited from the owner.
+        session: Option<Arc<sunrise_client::auth::AuthSession>>,
+    },
+}
+
+impl Role {
+    pub(super) fn is_guest(&self) -> bool {
+        matches!(self, Self::Guest { .. })
+    }
+
+    pub(super) fn is_externally_paced(&self) -> bool {
+        !matches!(self, Self::Alone)
+    }
+
+    pub(super) fn has_visible_view(&self) -> bool {
+        match self {
+            Self::Alone => false,
+            Self::Host { visible_window } | Self::Guest { visible_window, .. } => *visible_window,
+        }
+    }
+
+    pub(super) fn seat(&self) -> usize {
+        match self {
+            Self::Guest { seat, .. } => *seat,
+            _ => 0,
+        }
+    }
+
+    pub(super) fn guest(seat: usize, visible_window: bool) -> Self {
+        Self::Guest {
+            seat,
+            visible_window,
+            in_owner_window: false,
+            session: None,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct Options {
     pub(super) resources: PathBuf,
@@ -14,14 +66,7 @@ pub(crate) struct Options {
     /// `--pregen`: enable the command even when the saved Extras switch is off.
     pub(super) pregen: bool,
     pub(super) frames: Option<u64>,
-    /// A splitscreen player: the split window paces every player's frames, not each its own.
-    pub(super) paced_by_split: bool,
-    /// A splitscreen player other than P1: its windows are the split's (P1 alone decides
-    /// fullscreen; this game neither asks for it nor adopts it into its options).
-    pub(super) split_guest: bool,
-    /// A splitscreen guest drawn in Window 1, the game's own window: its F11 leaves that
-    /// window to P1.
-    pub(super) split_in_main_window: bool,
+    pub(super) role: Role,
     /// `--world-frames N`: exit after N frames drawn in the world (smoke runs; the world may load slowly).
     pub(super) world_frames: Option<u64>,
     pub(super) screenshot_after: Option<u64>,
@@ -88,10 +133,15 @@ pub(crate) struct Options {
 }
 
 impl Options {
+    /// An offscreen view can still take native input when presented in a visible window.
+    pub(super) fn has_visible_window(&self) -> bool {
+        !self.offscreen || self.role.has_visible_view()
+    }
+
     /// Whether this `Game` is the process's client start: not a dedicated server, and not
     /// a splitscreen guest, whose `run` is another local player joining the same process.
     pub(super) fn is_client_start(&self) -> bool {
-        self.execution_role.is_client() && !self.split_guest
+        self.execution_role.is_client() && !self.role.is_guest()
     }
     /// The name to join servers with: the one given, else the offline name kept
     /// next to options.txt (created on first use).
@@ -208,9 +258,7 @@ impl Options {
             test_terrain: false,
             pregen: false,
             frames: None,
-            paced_by_split: false,
-            split_guest: false,
-            split_in_main_window: false,
+            role: Role::Alone,
             world_frames: None,
             screenshot_after: None,
             timeout: None,

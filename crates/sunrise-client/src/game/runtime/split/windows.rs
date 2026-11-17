@@ -329,7 +329,12 @@ impl<'a> Split<'a> {
                 .is_none_or(|old| old.id() != window.id());
             if let Some(game) = self.game_mut(i) {
                 into_window(game, window.clone());
-                game.options.split_in_main_window = surface == 0;
+                if let Role::Guest {
+                    in_owner_window, ..
+                } = &mut game.options.role
+                {
+                    *in_owner_window = surface == 0;
+                }
                 game.view_at = at;
             }
             if moved && i == self.focus && before.get(i).is_some() {

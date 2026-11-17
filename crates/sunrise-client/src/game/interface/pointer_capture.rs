@@ -271,9 +271,7 @@ impl Game<'_> {
     /// it: a genuinely hidden `--offscreen` run, an agent's window no one has clicked yet, or a
     /// scripted run, which plays the game while the person may be using the computer.
     pub(super) fn internal_grab(&self) -> bool {
-        (self.options.offscreen && !self.split_window)
-            || self.unclaimed_window
-            || self.scripted_run()
+        !self.options.has_visible_window() || self.unclaimed_window || self.scripted_run()
     }
     /// A person pressed a mouse button inside the agent's window (`at_unclaimed`): from now on
     /// it is a window like any other, and that press takes the pointer

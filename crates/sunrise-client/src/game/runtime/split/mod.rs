@@ -27,7 +27,7 @@
 //! the controllers). The player in seat N takes `sunrise-ctl` on P1's socket path + "N".
 
 use super::{
-    Game, UiResources, build_renderer,
+    Game, Role, UiResources, build_renderer,
     pad::{PadId, PadRouter},
     start_game,
 };
@@ -76,7 +76,7 @@ impl Game<'_> {
     /// An error stops the event loop, as ever, but not in another splitscreen player's game:
     /// that player drops out (`Split::drop_out`), the others play on.
     pub(in crate::game) fn exit_on_error(&self, event_loop: &dyn super::event_loop::EventLoopCtl) {
-        if !self.options.split_guest {
+        if !self.options.role.is_guest() {
             event_loop.exit();
         }
     }
@@ -255,8 +255,7 @@ impl<'a> Split<'a> {
                 .get(i.wrapping_sub(1))
                 .map(|g| g.options.clone()),
         );
-        let seat = self.guests.get(i.wrapping_sub(1)).map_or(1, |g| g.seat);
-        sunrise_hooks::engine::set_seat(seat - 1);
+        sunrise_hooks::engine::set_seat(self.game(i).map_or(0, |g| g.options.role.seat()));
         self.turn = i;
     }
 
@@ -403,9 +402,10 @@ impl<'a> Split<'a> {
         };
         self.host.renderer = Some(renderer);
         self.host.forget_atlas_slots();
-        self.host.split_window = !self.offscreen;
         self.host.options.offscreen = true;
-        self.host.options.paced_by_split = true;
+        self.host.options.role = Role::Host {
+            visible_window: !self.offscreen,
+        };
         // The new renderer takes the old one's present mode, settings and all: P1's again.
         self.host.apply_settings();
         self.host.clear_lod();
@@ -482,8 +482,7 @@ impl<'a> Split<'a> {
         self.host.renderer = Some(renderer);
         self.host.forget_atlas_slots();
         self.host.options.offscreen = self.offscreen;
-        self.host.split_window = false;
-        self.host.options.paced_by_split = false;
+        self.host.options.role = Role::Alone;
         // Alone again: the pointer is P1's, its view the whole window.
         self.focus = 0;
         self.host.keyboard_mouse = true;

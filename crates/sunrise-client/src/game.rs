@@ -126,6 +126,7 @@ use sunrise_client::random_source;
 use self::api_values::TryIntoApi;
 pub(crate) use api_values::{block_jump_factor, block_speed_factor, is_ladder};
 pub(crate) use launch_options::Options;
+use launch_options::Role;
 pub use native_block_entity_draw::BlockEntityDraw;
 pub use native_claimed_items::{HeldItemSlot, ModEvent};
 pub use native_components::NativeComponentError;
@@ -1102,15 +1103,10 @@ struct Game<'a> {
     regrab_on_refocus: bool,
     /// Only the local player owning keyboard and mouse changes the native pointer.
     keyboard_mouse: bool,
-    /// Offscreen rendering into a visible splitscreen window still accepts native input.
-    split_window: bool,
     /// This view's corner in its shared window; cursor warps include the offset.
     view_at: [u32; 2],
     /// Splitscreen: what it draws over this player's view (its badge, questions, notices).
     split_hud: split::Hud,
-    /// Splitscreen: this player's own Microsoft account session (one of the launcher's other
-    /// accounts), in place of the process's (P1's) for its connections and skin.
-    split_auth: Option<std::sync::Arc<sunrise_client::auth::AuthSession>>,
     focused: bool,
     /// The visible window of a game an agent started, until a person clicks into it: its
     /// pointer grab stays inside the game as `--offscreen`'s does, so the person's pointer is
@@ -7507,7 +7503,7 @@ impl Game<'_> {
         }
         // Split-screen compositors and guests share the device; rebuilding one
         // renderer alone would leave the other windows using invalid resources.
-        if self.options.paced_by_split {
+        if self.options.role.is_externally_paced() {
             return Err("the graphics device was lost during split-screen play".into());
         }
         let now = Instant::now();
@@ -10791,10 +10787,8 @@ impl<'a> Game<'a> {
             capture_mode: None,
             regrab_on_refocus: false,
             keyboard_mouse: true,
-            split_window: false,
             view_at: [0, 0],
             split_hud: Default::default(),
-            split_auth: None,
             focused: true,
             unclaimed_window: false,
             unclaimed_modifiers: None,

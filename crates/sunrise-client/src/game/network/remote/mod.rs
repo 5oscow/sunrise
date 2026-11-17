@@ -979,7 +979,7 @@ impl Game<'_> {
         let info = self
             .settings
             .client_information(client_view_distance(self.settings.render_distance));
-        if local.is_none() && !self.options.split_guest {
+        if local.is_none() && !self.options.role.is_guest() {
             mod_api::content::crash::set_detail(
                 "Server",
                 sunrise_client::net::shown_address(address),
@@ -1595,7 +1595,7 @@ impl Game<'_> {
             None => false,
         };
         // A splitscreen player leaving says nothing of where P1 plays.
-        if !self.options.split_guest {
+        if !self.options.role.is_guest() {
             mod_api::content::crash::clear_detail("Server");
         }
         self.clock = Default::default();
@@ -2087,9 +2087,9 @@ impl Game<'_> {
 
     /// This player's account: a splitscreen player's own, else the game's (P1's).
     pub(super) fn auth(&self) -> Option<std::sync::Arc<sunrise_client::auth::AuthSession>> {
-        match self.options.split_guest {
-            true => self.split_auth.clone(),
-            false => sunrise_client::auth::current(),
+        match &self.options.role {
+            Role::Guest { session, .. } => session.clone(),
+            _ => sunrise_client::auth::current(),
         }
     }
     /// Connected to a server in online mode (its Login): each player needs its own account.

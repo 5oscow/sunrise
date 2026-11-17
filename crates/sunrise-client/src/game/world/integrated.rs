@@ -1512,7 +1512,7 @@ impl Game<'_> {
     pub(super) fn exit_after_server_crash(&mut self) {
         // Only the owner ends the process, as in `idle`: a splitscreen guest owns no
         // server, and exiting from its pass would skip the owner's halt.
-        if self.options.split_guest || !sunrise_client::crash::server_crashed() {
+        if self.options.role.is_guest() || !sunrise_client::crash::server_crashed() {
             return;
         }
         // A crash while the world is still loading leaves the server in `integrated_starting`.

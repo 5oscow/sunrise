@@ -297,7 +297,10 @@ impl Split<'_> {
             .iter()
             .find(|a| a.name.eq_ignore_ascii_case(&name))
             .cloned();
-        self.guests[i].game.split_auth = account.clone();
+        let Role::Guest { session, .. } = &mut self.guests[i].game.options.role else {
+            return Err("only a local guest can switch profiles here".into());
+        };
+        *session = account.clone();
         if account.is_none() && sunrise_client::split_profiles::valid_name(&name) {
             sunrise_client::split_profiles::store::restore(&profiles, &name)?;
         }
@@ -466,9 +469,8 @@ impl Split<'_> {
         // P1's frame-limited test runs end the process; a player's game doesn't.
         options.frames = None;
         options.world_frames = None;
-        options.split_guest = true;
+        options.role = Role::guest(seat - 1, host.options.role.has_visible_view());
         options.offscreen = true;
-        options.paced_by_split = true;
         // P1's socket (`--control` or Agent Control) + the seat: every game in this process
         // would otherwise take the one default endpoint, P1's.
         options.control = host.control.as_ref().map(|c| {
@@ -531,7 +533,6 @@ impl Split<'_> {
         guest.window = Some(window);
         guest.world_renderer_ready = true;
         guest.keyboard_mouse = false;
-        guest.split_window = host.split_window;
         guest.apply_settings();
         // Its pad comes from the split (`route_pads`): it never opens the controllers itself.
         guest.pad.feed = Some(PadState::default());

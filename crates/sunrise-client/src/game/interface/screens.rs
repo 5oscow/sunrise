@@ -416,7 +416,7 @@ impl Game<'_> {
             let hover = active && (ui::hovered(self.cursor, x, y, bw, 20.0) || is_focused);
             let label = match (id, &additions) {
                 (14, Some((label, _))) => label.clone(),
-                _ if self.options.split_guest && key == "menu.disconnect" => {
+                _ if self.options.role.is_guest() && key == "menu.disconnect" => {
                     Text::translate("sunrise.split.leave", &[])
                 }
                 _ => Text::translate(key, &[]),
@@ -545,7 +545,7 @@ impl Game<'_> {
     /// The pause menu's full-width rows above Options: Splitscreen's settings, then the pages
     /// crates registered for the pause menu (`sunrise_hooks::pages`), by their title.
     fn pause_rows(&self) -> impl Iterator<Item = (&'static str, u8)> {
-        let split = self.options.split_guest || self.split_hud.menu;
+        let split = self.options.role.is_guest() || self.split_hud.menu;
         let pages = sunrise_hooks::pages::engine::all().iter().enumerate();
         let added = pages
             .filter(|(i, page)| {

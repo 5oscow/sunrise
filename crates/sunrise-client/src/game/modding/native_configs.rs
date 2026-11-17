@@ -188,7 +188,7 @@ impl Game<'_> {
     pub(super) fn native_configs_client_start(&mut self) {
         // Other local players share the process's client setup, not another
         // Client/Common load or a second config watcher.
-        if self.options.split_guest {
+        if self.options.role.is_guest() {
             return;
         }
         if !self.native_configs.started {
@@ -321,10 +321,10 @@ mod tests {
                     mod_api::__private::PhaseOwner::new(mod_api::__private::ModPhase::Setup);
                 game.native_configs_client_start();
                 game.native_configs_client_start();
-                game.options.split_guest = true;
+                game.options.role = Role::guest(1, true);
                 game.native_configs = NativeConfigs::default();
                 game.native_configs_client_start();
-                game.options.split_guest = false;
+                game.options.role = Role::Alone;
                 game.options.execution_role =
                     crate::game::execution_role::ExecutionRole::IntegratedServer;
                 for world in ["phase-world-one", "phase-world-two"] {

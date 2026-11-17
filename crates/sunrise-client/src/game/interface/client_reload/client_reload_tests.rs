@@ -553,11 +553,11 @@ fn only_the_first_local_client_is_the_client_start() {
 
     with_game(|game| {
         game.options.execution_role = ExecutionRole::Client;
-        game.options.split_guest = false;
+        game.options.role = Role::Alone;
         assert!(game.options.is_client_start());
-        game.options.split_guest = true;
+        game.options.role = Role::guest(1, true);
         assert!(!game.options.is_client_start());
-        game.options.split_guest = false;
+        game.options.role = Role::Alone;
         game.options.execution_role = ExecutionRole::DedicatedServer;
         assert!(!game.options.is_client_start());
     });
