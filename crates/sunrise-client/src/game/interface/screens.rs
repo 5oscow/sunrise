@@ -125,7 +125,7 @@ impl Screen {
 
 /// The pause menu grid's origin: GridLayout of two 98px columns (padding 4),
 /// aligned at (0.5, 0.25). Extra rows hold a server dialog or links
-/// (`PauseScreen.getCustomAdditions`), followed by the guest profile settings.
+/// (`PauseScreen.getCustomAdditions`) or registered pages.
 fn pause_grid(w: f32, h: f32, extra_rows: u8) -> (f32, f32) {
     let (grid_w, grid_h) = (212.0, 166.0 + 24.0 * f32::from(extra_rows));
     (((w - grid_w) * 0.5).floor(), ((h - grid_h) * 0.25).floor())
@@ -233,7 +233,6 @@ fn pause_icon_focus_ids(friends: bool) -> Vec<u8> {
         .map(|i| if i == FRIENDS_ICON { 10 } else { 12 + i as u8 })
         .collect()
 }
-const SPLIT_SETTINGS: &str = "sunrise.pages.split_settings";
 /// The pause menu's first id for the pages crates registered there: id `ADDED_PAGES + i` opens
 /// registered page `i`.
 const ADDED_PAGES: u8 = 40;
@@ -414,9 +413,6 @@ impl Game<'_> {
             let hover = active && (ui::hovered(self.cursor, x, y, bw, 20.0) || is_focused);
             let label = match (id, &additions) {
                 (14, Some((label, _))) => label.clone(),
-                _ if self.options.split_guest && key == "menu.disconnect" => {
-                    Text::translate("sunrise.split.leave", &[])
-                }
                 _ => Text::translate(key, &[]),
             };
             let action = match id {
@@ -520,7 +516,6 @@ impl Game<'_> {
             13 => self.confirm_trusted_link(feedback_link(), Screen::Paused),
             // PauseScreen: `new SocialInteractionsScreen(this)`.
             15 => self.open_social(true),
-            30 => self.open_split_settings(),
             id @ ADDED_PAGES.. => {
                 let page = usize::from(id - ADDED_PAGES);
                 self.open_options_at(false, sunrise_client::options_ui::Page::Added(page));
@@ -540,21 +535,16 @@ impl Game<'_> {
         }
         Ok(())
     }
-    /// The pause menu's full-width rows above Options: Splitscreen's settings, then the pages
-    /// crates registered for the pause menu (`sunrise_hooks::pages`), by their title.
+    /// The registered full-width rows above Options, by their title.
     fn pause_rows(&self) -> impl Iterator<Item = (&'static str, u8)> {
-        let split = self.options.split_guest || self.split_hud.menu;
-        let pages = sunrise_hooks::pages::engine::all().iter().enumerate();
-        let added = pages
+        sunrise_hooks::pages::engine::all()
+            .iter()
+            .enumerate()
             .filter(|(i, page)| {
                 page.place() == sunrise_hooks::pages::Place::Pause
                     && *i < usize::from(u8::MAX - ADDED_PAGES)
             })
-            .map(|(i, page)| (page.title(), ADDED_PAGES + i as u8));
-        split
-            .then_some((SPLIT_SETTINGS, 30))
-            .into_iter()
-            .chain(added)
+            .map(|(i, page)| (page.title(), ADDED_PAGES + i as u8))
     }
     pub(super) fn pause_click(&mut self) -> Result<()> {
         let (w, h) = {
@@ -1032,8 +1022,7 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::{
-        ADDED_PAGES, SPLIT_SETTINGS, Screen, death_buttons, pause_buttons, pause_icon_focus_ids,
-        pause_icons,
+        ADDED_PAGES, Screen, death_buttons, pause_buttons, pause_icon_focus_ids, pause_icons,
     };
 
     #[test]
@@ -1184,26 +1173,24 @@ mod tests {
     #[test]
     fn registered_pages_stack_above_options_in_the_pause_menu() {
         let rows = [
-            (SPLIT_SETTINGS, 30),
             ("test.page.a", ADDED_PAGES),
             ("test.page.b", ADDED_PAGES + 2),
         ];
         let buttons = pause_buttons(427.0, 300.0, true, false, false, &rows);
         let y = |id| buttons.iter().find(|b| b.4 == id).unwrap().1;
-        assert_eq!(y(ADDED_PAGES), y(30) + 24.0);
         assert_eq!(y(ADDED_PAGES + 2), y(ADDED_PAGES) + 24.0);
         assert_eq!(
             y(1),
             y(ADDED_PAGES + 2) + 24.0,
             "Options under the last one"
         );
-        // The grid stays centred: three more rows start it higher.
+        // The grid stays centred: two more rows start it higher.
         let without = pause_buttons(427.0, 300.0, true, false, false, &[]);
         let back = |b: &[(f32, f32, f32, &str, u8, bool)]| b.iter().find(|b| b.4 == 0).unwrap().1;
         assert!(back(&buttons) < back(&without));
     }
     #[test]
-    fn split_settings_preserves_dialog_rows_and_icon_actions() {
+    fn registered_pages_preserve_dialog_rows_and_icon_actions() {
         for (links, additions) in [(false, false), (true, false), (false, true), (true, true)] {
             let buttons = pause_buttons(
                 427.0,
@@ -1211,23 +1198,23 @@ mod tests {
                 true,
                 links,
                 additions,
-                &[(SPLIT_SETTINGS, 30)],
+                &[("test.page", ADDED_PAGES)],
             );
-            let split = buttons.iter().find(|b| b.4 == 30).unwrap();
+            let page = buttons.iter().find(|b| b.4 == ADDED_PAGES).unwrap();
             let options = buttons.iter().find(|b| b.4 == 1).unwrap();
-            assert_eq!(options.1, split.1 + 24.0);
+            assert_eq!(options.1, page.1 + 24.0);
             if links || additions {
                 let custom = buttons
                     .iter()
                     .find(|b| b.4 == if additions { 14 } else { 11 })
                     .unwrap();
-                assert_eq!(split.1, custom.1 + 24.0);
+                assert_eq!(page.1, custom.1 + 24.0);
             }
             assert!(buttons.iter().all(|b| b.4 != 12 && b.4 != 13));
             assert!(
                 !pause_buttons(427.0, 300.0, true, links, additions, &[])
                     .iter()
-                    .any(|b| b.4 == 30)
+                    .any(|b| b.4 == ADDED_PAGES)
             );
         }
     }

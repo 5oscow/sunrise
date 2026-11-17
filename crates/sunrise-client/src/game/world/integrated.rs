@@ -99,9 +99,6 @@ struct Flags {
     legacy_rules: AtomicBool,
     /// `MinecraftServer.isCurrentlySaving`: the server is autosaving.
     saving: AtomicBool,
-    /// Splitscreen players joined through memory (offline uuids): let in although the world is
-    /// not open to the LAN, and the game no longer pauses while they play.
-    split_players: Mutex<Vec<u128>>,
     /// The generators of the levels the server has run, by dimension: what
     /// F3's chunk generation entry asks `ServerChunkCache.getGenerator`.
     terrain: Mutex<
@@ -204,37 +201,7 @@ impl Integrated {
     }
     /// `IntegratedServer.tickServer` skips the world while the game is paused.
     pub fn set_paused(&self, paused: bool) {
-        let split = !self.flags.split_players.lock().unwrap().is_empty();
-        self.flags.paused.store(paused && !split, Ordering::Relaxed);
-    }
-    /// Whether splitscreen players are joined: while any is, the game runs even behind a
-    /// pause menu, so no window may stop ticking for one (`set_paused`, `pauses_game`).
-    pub fn has_split_players(&self) -> bool {
-        !self.flags.split_players.lock().unwrap().is_empty()
-    }
-    /// Splitscreen: `name` left; the game pauses again once every such player has. The owner's
-    /// permissions it was given go with it (a LAN player could otherwise join under that name).
-    pub fn leave_split(&self, name: &str) {
-        let uuid = sunrise_protocol::crypto::offline_uuid(name);
-        self.flags
-            .split_players
-            .lock()
-            .unwrap()
-            .retain(|&u| u != uuid);
-        self.ask(|done| OwnerRequest::LeaveSplit(uuid, done));
-    }
-    /// Splitscreen: a connection through memory for another player on this machine, who gets
-    /// the owner's permissions. `None` once the server has stopped.
-    pub fn join_split(&self, name: &str) -> Option<sunrise_protocol::connection::Pipe> {
-        let uuid = sunrise_protocol::crypto::offline_uuid(name);
-        self.flags.split_players.lock().unwrap().push(uuid);
-        let pipe = self
-            .ask(|reply| OwnerRequest::JoinSplit(uuid, reply))
-            .flatten();
-        if pipe.is_none() {
-            self.leave_split(name);
-        }
-        pipe
+        self.flags.paused.store(paused, Ordering::Relaxed);
     }
     /// The window's render and simulation distances and its Entity Distance
     /// option, for the server to follow.
@@ -423,7 +390,7 @@ struct Launch {
 
 impl Game<'_> {
     /// Only the owner window changes its integrated server's command tree. A remote
-    /// server (or a splitscreen guest) keeps its own choice and permissions.
+    /// server keeps its own choice and permissions.
     pub(super) fn sync_pregen_option(&self) {
         let Some(server) = &self.integrated else {
             return;
@@ -451,13 +418,6 @@ impl Game<'_> {
                 .integrated
                 .as_ref()
                 .is_some_and(|s| s.published().is_some())
-    }
-    /// Splitscreen: players joined through memory play on while one opens a pause menu;
-    /// the world keeps ticking for them (`set_paused`), so this window must keep ticking too.
-    pub(super) fn has_split_players(&self) -> bool {
-        self.integrated
-            .as_ref()
-            .is_some_and(|s| s.has_split_players())
     }
     /// `Minecraft.doWorldLoad`: start the server thread on the world; the
     /// window joins it through memory once it is ready (`poll_integrated_start`).
@@ -978,22 +938,15 @@ impl Game<'_> {
         };
         let owner = launch.owner;
         let published = flags.clone();
-        let local_players = flags.clone();
         let net = NetConfig {
             // No network until it is opened to the LAN; the memory connection
             // is not compressed (`Connection.isMemoryConnection`).
             listen: false,
             online: sunrise_client::lan::OnlineMode::lan(),
-            // Registered local seats share this computer; the vanilla LAN capacity still
-            // applies to other connections when the world is published.
-            bypasses_limit: Some(Arc::new(move |uuid| {
-                local_players.split_players.lock().unwrap().contains(&uuid)
-            })),
             gate: Some(Arc::new(move |address, uuid, _| {
                 refused(
                     uuid == owner,
                     published.published.load(Ordering::Relaxed) != 0,
-                    published.split_players.lock().unwrap().contains(&uuid),
                     address == sunrise_client::lan::conn::MEMORY_ADDRESS,
                 )
                 .then(|| translatable("multiplayer.disconnect.not_whitelisted", &[]))
@@ -1365,17 +1318,13 @@ impl Game<'_> {
     /// `IntegratedServer.setWorldAllowCommands`: the owner is an operator
     /// while the world allows commands; everyone's level is sent again.
     pub(super) fn owner_allow_commands(&mut self, allow: bool) {
-        let Some((owner, flags)) = self.serving.as_ref().map(|s| (s.owner, s.flags.clone())) else {
+        let Some(owner) = self.serving.as_ref().map(|s| s.owner) else {
             return;
         };
         let published = self.published_port().is_some();
         if let Some(host) = self.lan.as_mut() {
             let level = if allow { 4 } else { 0 };
             host.hub.ops.insert(owner, level);
-            // Splitscreen seats have the owner's permissions (`join_split`): they follow it.
-            for &seat in flags.split_players.lock().unwrap().iter() {
-                host.hub.ops.insert(seat, level);
-            }
             if published {
                 host.hub.config.guest_commands = allow && host.settings.guest_commands;
             }
@@ -1500,17 +1449,13 @@ fn server_game(
 }
 
 /// Who the integrated server turns away: anyone but the owner until it is opened to the LAN.
-/// The owner and splitscreen seats are let in only through memory: their window never joins over
-/// the network. A host without a Microsoft account opens the world in offline mode, where a
+/// The owner joins only through memory. A host without a Microsoft account opens the world in
+/// offline mode, where a
 /// player's UUID comes from their name alone, so a LAN or friends player naming themselves after
 /// the host would otherwise get the host's UUID, kick the host and take their operator rights and
 /// player data (vanilla always authenticates LAN guests, so there it can't happen).
-fn refused(owner: bool, published: bool, split_seat: bool, memory: bool) -> bool {
-    if owner || split_seat {
-        !memory
-    } else {
-        !published
-    }
+fn refused(owner: bool, published: bool, memory: bool) -> bool {
+    if owner { !memory } else { !published }
 }
 
 impl Game<'_> {
@@ -1521,9 +1466,7 @@ impl Game<'_> {
     /// error that would create another report. A panic inside a posted task happens
     /// outside the tick loop's catch, so the join doesn't promise a save there.
     pub(super) fn exit_after_server_crash(&mut self) {
-        // Only the owner ends the process, as in `idle`: a splitscreen guest owns no
-        // server, and exiting from its pass would skip the owner's halt.
-        if self.options.split_guest || !sunrise_client::crash::server_crashed() {
+        if !sunrise_client::crash::server_crashed() {
             return;
         }
         // A crash while the world is still loading leaves the server in `integrated_starting`.
@@ -1828,29 +1771,20 @@ pub(super) mod tests {
     }
 
     #[test]
-    fn the_owner_and_splitscreen_seats_are_let_in_only_through_memory() {
-        // (owner, published, seat, memory)
-        assert!(!refused(false, false, true, true), "a local seat joins");
-        assert!(
-            refused(false, true, true, false),
-            "a LAN player under a seat's name"
-        );
-        assert!(refused(false, false, true, false));
-        assert!(
-            !refused(false, true, false, false),
-            "anyone once open to the LAN"
-        );
-        assert!(refused(false, false, false, false), "nobody else before");
-        assert!(!refused(true, false, false, true), "the owner");
-        assert!(
-            !refused(true, true, false, true),
-            "the owner once open to the LAN"
-        );
-        assert!(
-            refused(true, true, false, false),
-            "a LAN player under the owner's offline name"
-        );
-        assert!(refused(true, false, false, false));
+    fn the_owner_joins_only_through_memory_and_lan_guests_only_when_published() {
+        for published in [false, true] {
+            assert!(
+                !refused(true, published, true),
+                "the owner joins through memory"
+            );
+            assert!(
+                refused(true, published, false),
+                "the owner's identity is reserved"
+            );
+            for memory in [false, true] {
+                assert_eq!(refused(false, published, memory), !published);
+            }
+        }
     }
 
     #[test]

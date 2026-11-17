@@ -59,7 +59,6 @@ impl Game<'_> {
     pub(super) fn pauses_game(&self) -> bool {
         self.has_singleplayer_server()
             && !self.is_published()
-            && !self.has_split_players()
             && self.title.is_none()
             && top_screen_pauses(
                 // A dialog (and its warning or waiting screen) is the
@@ -169,27 +168,13 @@ impl Game<'_> {
         }
         // The real pointer takes over from an agent's.
         self.agent_pointer = false;
-        // Splitscreen: another player has the pointer; this one's menus leave it alone.
-        if !self.keyboard_mouse {
-            self.captured = false;
-            self.capture_mode = None;
-            return;
-        }
-        if capture && !self.captured && !cfg!(target_os = "macos") {
-            // MouseHandler.grabMouse: KeyMapping.setAll unless
-            // InputQuirks.RESTORE_KEY_STATE_AFTER_MOUSE_GRAB is off (macOS).
-            self.restore_held_keys();
-        }
         let Some(window) = &self.window else { return };
         let size = self.renderer.as_ref().map_or_else(
             || window.inner_size().into(),
             |r| [r.config.width, r.config.height],
         );
-        let [vx, vy] = self.view_at.map(f64::from);
-        let centre = winit::dpi::PhysicalPosition::new(
-            vx + f64::from(size[0]) / 2.0,
-            vy + f64::from(size[1]) / 2.0,
-        );
+        let centre =
+            winit::dpi::PhysicalPosition::new(f64::from(size[0]) / 2.0, f64::from(size[1]) / 2.0);
         let warp = |window: &Window| {
             let _ = window.set_cursor_position(centre);
         };
@@ -271,9 +256,7 @@ impl Game<'_> {
     /// it: a genuinely hidden `--offscreen` run, an agent's window no one has clicked yet, or a
     /// scripted run, which plays the game while the person may be using the computer.
     pub(super) fn internal_grab(&self) -> bool {
-        (self.options.offscreen && !self.split_window)
-            || self.unclaimed_window
-            || self.scripted_run()
+        self.options.offscreen || self.unclaimed_window || self.scripted_run()
     }
     /// A person pressed a mouse button inside the agent's window (`at_unclaimed`): from now on
     /// it is a window like any other, and that press takes the pointer
@@ -374,7 +357,7 @@ impl Game<'_> {
         } else {
             Cursor::Arrow
         };
-        if effective == self.cursor_icon || !self.keyboard_mouse {
+        if effective == self.cursor_icon {
             return;
         }
         if let Some(window) = &self.window {
