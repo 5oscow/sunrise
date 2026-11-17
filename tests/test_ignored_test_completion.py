@@ -356,7 +356,8 @@ class IgnoredTests(unittest.TestCase):
         command = execute.call_args.args[0]
         # The features the workspace build turns on, as verify compiled the test.
         self.assertEqual(command[:command.index("--")],
-                         ["cargo", "test", "-p", "sunrise-relay", "--features", "fixture,index", "--lib", "--test", "tunnel"])
+                         ["cargo", "test", "-p", "sunrise-relay", "--features", "fixture,index", "--lib", "--test", "tunnel",
+                          "--no-fail-fast"])
         self.assertEqual(command[command.index("--") + 1:], ["--ignored", "--exact", "--test-threads=4", "a", "b"])
 
     def test_each_daily_rows_leg_runs_only_its_workspaces_groups(self):
@@ -398,7 +399,8 @@ class IgnoredTests(unittest.TestCase):
         features.assert_called_once_with("launcher")
         command = execute.call_args.args[0]
         self.assertEqual(command[:command.index("--")],
-                         ["cargo", "test", "--locked", "-p", "sunrise-launcher", "--features", "default", "--test", "logs"])
+                         ["cargo", "test", "--locked", "-p", "sunrise-launcher", "--features", "default", "--test", "logs",
+                          "--no-fail-fast"])
         self.assertEqual(execute.call_args.kwargs["cwd"], ignored_tests.ROOT / "launcher")
         # A game package still runs from the repository root.
         with patch.object(ignored_tests.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, output)) as execute, \
