@@ -228,11 +228,10 @@ impl<P: Copy, S: Copy> Lines<P, S> {
     }
 }
 
-/// The world or the menu's background, veiled.
+/// The world or the menu's background, as vanilla's screens draw it.
 pub(crate) fn backdrop(batch: &mut HudBatch, atlas: &HudAtlas, in_world: bool) {
     let (w, h) = (batch.width, batch.height);
     ui::menu_background(batch, atlas, 0.0, 0.0, w, h, in_world);
-    style::fill(batch, atlas, [0.0, 0.0, w, h], style::veil());
 }
 
 /// The mark and the screen's name over the search field.
@@ -360,15 +359,6 @@ pub(crate) fn list<P: Copy, S: Copy>(
     let mark = crate::widgets::targets_mark();
     let row_y = |line: &Line<P, S>| cols.top + line.y - scroll;
     let shows = |y: f32, h: f32| y + h > cols.top && y < cols.bottom;
-    for line in lines {
-        let y = row_y(line);
-        if let Some((_, panel)) = line.group
-            && shows(y + style::GROUP_ROW, panel)
-        {
-            let rect = [cols.list_x, y + style::GROUP_ROW, cols.list_w, panel];
-            style::group(batch, atlas, rect);
-        }
-    }
     // A group's first row, which has no rule over it.
     let mut first = false;
     for line in lines {
@@ -2346,8 +2336,8 @@ impl<S: Screen + Default> Hosted for Shell<S> {
         }
         let cols = view.cols;
         backdrop(batch, atlas, in_world);
-        style::panel(batch, atlas, cols.plate);
-        style::panel(batch, atlas, cols.dock);
+        style::panel(batch, atlas, cols.plate, in_world);
+        style::panel(batch, atlas, cols.dock, in_world);
         self.frame_draw = Some(view);
     }
     fn draw_contents(&mut self, batch: &mut HudBatch, atlas: &HudAtlas, cursor: (f32, f32)) {
