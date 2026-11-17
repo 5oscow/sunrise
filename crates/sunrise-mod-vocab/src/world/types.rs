@@ -1327,6 +1327,26 @@ impl TriState {
 /// }
 /// ```
 pub trait LevelHost {
+    /// `BlockState.isFaceSturdy`, through the same engine read as `LevelRef::block_face_sturdy`.
+    /// `canSupportRigidBlock` is `(pos, Up, Rigid)`; `canSupportCenter` is `(pos, face, Center)`.
+    /// Returns None for unloaded or out-of-height positions, on clients, or without a support
+    /// view. Never loads chunks or opens loot containers. Available only on the owning game
+    /// thread, never in worker-thread hook bodies.
+    fn block_face_sturdy(
+        &self,
+        _pos: [i32; 3],
+        _face: crate::BlockFace,
+        _support: crate::SupportType,
+    ) -> Option<bool> {
+        None
+    }
+    /// `LevelReader.canSeeSky`: full stored sky light, as `LevelRef::can_see_sky` reads it.
+    /// Returns None for unloaded or out-of-height positions, on clients, or without a light
+    /// view. Never loads chunks or opens loot containers. Available only on the owning game
+    /// thread, never in worker-thread hook bodies.
+    fn can_see_sky(&self, _pos: [i32; 3]) -> Option<bool> {
+        None
+    }
     /// `BlockGetter.getBlockEntity` in this level. None if absent, unloaded or out for its
     /// own tick. Never loads chunks or opens loot containers. Clients return their local
     /// block entity handle, not unsynced server contents. Owning game thread only, never
