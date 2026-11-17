@@ -1,6 +1,5 @@
 #[cfg(test)]
 mod owner_attachment_save_tests {
-    use super::*;
     use sunrise_core::nbt::Tag;
     use sunrise_mod_runtime::attachments::{
         AttachmentCodec, AttachmentError, AttachmentType, Attachments,
