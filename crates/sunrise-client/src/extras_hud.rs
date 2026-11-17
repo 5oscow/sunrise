@@ -119,7 +119,7 @@ struct Canvas<'a> {
 }
 
 /// `0xAARRGGBB` as the batch's colour.
-fn argb_color(argb: u32) -> u32 {
+pub fn argb_color(argb: u32) -> u32 {
     let [a, r, g, b] = argb.to_be_bytes();
     rgba(r, g, b, a)
 }

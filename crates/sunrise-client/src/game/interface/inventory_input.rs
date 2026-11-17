@@ -161,7 +161,7 @@ impl Game<'_> {
             }
             return;
         }
-        if self.tweak_press(slot, right, shift) {
+        if self.container_press(slot, right) || self.tweak_press(slot, right, shift) {
             return;
         }
         if let Some(slot) = slot
@@ -263,7 +263,7 @@ impl Game<'_> {
     }
     /// Mouse movement while a quick craft drag is running.
     pub(super) fn inventory_drag_move(&mut self) {
-        if self.tweaks_on() && self.tweak_drag_move(self.inventory_target().0) {
+        if self.container_drag() || (self.tweaks_on() && self.tweak_drag_move(self.inventory_target().0)) {
             return;
         }
         let Some((ty, slots)) = self.inv_drag.clone() else {
@@ -448,6 +448,7 @@ impl Game<'_> {
     /// cancels the drag, drops a stack released outside, or clicks.
     pub(super) fn inventory_mouse_release(&mut self, right: bool) {
         use sunrise_client::container_screen::{Release, Target};
+        self.container_release();
         self.tweak_release();
         let (slot, outside) = self.inventory_target();
         let dragged = self.inv_drag.as_ref().is_some_and(|(_, s)| !s.is_empty());

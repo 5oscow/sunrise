@@ -507,13 +507,15 @@ pub enum Role { Hotbar, Inventory, Storage, Input, Result, Equipment, Other }   
 pub struct Stack { pub item: String, pub count: u32, pub max: u32, pub kind: u64 }  // kind: equal for the same item and components
 pub enum Click { Pick { right: bool }, QuickMove, Put { one: bool } }               // Put: a one-slot QUICK_CRAFT drag
 
-// In `Hooks`, each `false` (or nothing) by default, so vanilla's handling runs:
-fn container_press(&self, c: &mut dyn Container, slot: Option<SlotId>, right: bool) -> bool;
-fn container_drag(&self, c: &mut dyn Container, slot: Option<SlotId>) -> bool;  // the cursor moved, a button held
-fn container_release(&self, c: &mut dyn Container);
-fn container_wheel(&self, c: &mut dyn Container, slot: Option<SlotId>, steps: f32) -> bool;
-fn container_key(&self, c: &mut dyn Container, slot: Option<SlotId>, key: &str) -> bool;  // `key.keyboard.r`, `key.mouse.middle`
-fn container_draw(&self, c: &dyn Container, canvas: &mut dyn hud::Canvas);    // over the panel, from its corner
+// In `Hooks`: `fn containers(&self) -> Option<&dyn ContainerHooks>`; every `ContainerHooks` method
+// does nothing by default, so vanilla's handling runs:
+fn press(&self, c: &mut dyn Container, slot: Option<SlotId>, right: bool) -> bool;
+fn drag(&self, c: &mut dyn Container, slot: Option<SlotId>) -> bool;  // the cursor moved, a button held
+fn release(&self, c: &mut dyn Container);
+fn wheel(&self, c: &mut dyn Container, slot: Option<SlotId>, steps: f32) -> bool;
+fn key(&self, c: &mut dyn Container, slot: Option<SlotId>, key: &str) -> bool;  // `key.keyboard.r`, `key.mouse.middle`
+fn draw(&self, c: &dyn Container, canvas: &mut dyn hud::Canvas);    // over the panel, from its corner
+// Container also has `fn panel(&self) -> Panel`: width, height, title and inventory label tops.
 ```
 
 - `true` means the hook took the input: vanilla's press, drag or wheel doesn't run, and a press or drag taken
@@ -521,9 +523,13 @@ fn container_draw(&self, c: &dyn Container, canvas: &mut dyn hud::Canvas);    //
   first hook that returns `true` wins.
 - Each `click` is an ordinary slot click: the menu engine's on the player's own world, a `ContainerClick` on a
   server. So an extra built on it works wherever vanilla's clicks do, and anticheats see vanilla's packets.
-- The engine offers every menu screen's slots; the crate decides which menus it acts in, by `menu()` (Mouse
-  Tweaks stays out of those whose slots cost or trigger something: anvils, enchanting, merchants, beacons,
-  crafters). Creative's tabs are no container screen.
+- The engine offers the player's own screen and the containers vanilla has a menu type for (chests, furnaces,
+  crafting, brewing, crafters); the crate decides which menus it acts in, by `menu()` (Mouse Tweaks stays out of
+  those whose slots cost or trigger something: anvils, enchanting, merchants, beacons, crafters). Stations,
+  mounts, creative's tabs and a mod's screen are not offered.
+- `press` is dispatched once, after the recipe book, native screens and double-click bookkeeping, where Mouse
+  Tweaks' press runs; a button that must beat those (sorting's) takes `key` with the mouse name instead, which
+  runs first. `drag` is asked only while a button pressed on the panel is held.
 - The reads that ask the menu's rules take `&mut self`, as the engine's do; drawing gets `&dyn Container`,
   so it reads the rest only.
 - The engine builds a `Container` only when a hook is registered and a container screen gets input or draws.
