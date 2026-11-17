@@ -1,5 +1,6 @@
 """The launcher's copies of game files (launcher/crates/, launcher/assets/) stay byte- and value-equal to the originals."""
 import ast
+import hashlib
 import re
 import unittest
 from pathlib import Path
@@ -59,6 +60,53 @@ SAME_CODE = (
         }"""),
     )),
 )
+
+
+# (the game's file, a function in it, the SHA-256 of its code, the launcher's function that does the same for show):
+# the launcher reads these few things itself, so a change to the game's function is a change to make there too.
+MIRRORED = (
+    ("crates/sunrise-port-pack/src/import.rs", "prism_archive_layout",
+     "9c5580515b41ec63c768d9de42054348e3dec65cc7c04705b0f48cb721929b67", "launcher/src/import.rs prism_instance"),
+    ("crates/sunrise-port-pack/src/import.rs", "curseforge_instance_target",
+     "59251c22e6e81e67985e2436edfbc7d92f1c5a4b8302f65bae4f901c7d67e2da",
+     "launcher/src/other_launchers.rs curseforge_instance_target"),
+    ("crates/sunrise-port-pack/src/import.rs", "curseforge",
+     "85ff06bf7e97dd51c6d2410587acd3c3d5519fec93e6734b87cef0309003d29c",
+     "launcher/src/other_launchers.rs curseforge_instance_target"),
+    ("crates/sunrise-port-pack/src/jar.rs", "read_inner",
+     "a1fdeb9b3daaf5fbd74cd4e18185beb452759b24e3e2cedabd17595ec5d5850d", "launcher/src/browser/java.rs jar_title"),
+    ("crates/sunrise-port-pack/src/jar.rs", "fabric",
+     "052665a32cf9980ffcd1d1cb51f72a918e6613d89fb2097562afb306ca4f4fe2", "launcher/src/browser/java.rs jar_title"),
+    ("crates/sunrise-port-pack/src/jar.rs", "manifest_value",
+     "8eba4a800351645479e1f2fc79c727bf2e3aee7bdcc97b27a3fa249791a2b33e", "launcher/src/browser/java.rs jar_title"),
+)
+
+
+def function(path: str, name: str) -> str:
+    """The text of `fn name` in the Rust file at `path`, from `fn` to its closing brace."""
+    source = (ROOT / path).read_text(encoding="utf-8")
+    found = re.search(rf"\bfn {name}\b", source)
+    if not found:
+        raise AssertionError(f"{path} has no fn {name}")
+    depth, at = 0, source.index("{", found.end())
+    while at < len(source):
+        rest = source[at:]
+        raw = re.match(r'r(#*)"', rest)
+        char = re.match(r"'(\\.|[^\\'])'", rest)
+        if rest.startswith("//"):
+            at = source.find("\n", at)
+        elif raw and (at == 0 or not (source[at - 1].isalnum() or source[at - 1] == "_")):
+            at = source.index('"' + raw.group(1), at + len(raw.group(0))) + len(raw.group(1))
+        elif rest.startswith('"'):
+            at = re.compile(r'"(\\.|[^"\\])*"', re.S).match(source, at).end() - 1
+        elif char:
+            at += len(char.group(0)) - 1
+        elif rest[0] in "{}":
+            depth += 1 if rest[0] == "{" else -1
+            if depth == 0:
+                return source[found.start():at + 1]
+        at += 1
+    raise AssertionError(f"{path}: fn {name} never closes")
 
 
 def code(text: str) -> str:
@@ -124,6 +172,12 @@ class LauncherCopies(unittest.TestCase):
                     original = original.replace(code(old), code(new))
                 self.assertEqual(code((ROOT / copy).read_text(encoding="utf-8")), original,
                                  f"{copy} differs from {game} beyond its listed edits: copy the change, or list it")
+
+    def test_mirrored_game_functions_are_unchanged(self):
+        for path, name, pinned, mirror in MIRRORED:
+            with self.subTest(function=name):
+                digest = hashlib.sha256(code(function(path, name)).encode()).hexdigest()
+                self.assertEqual(digest, pinned, f"{path}'s {name} changed: change {mirror} to match, then pin {digest}")
 
     def test_format_constants_match_the_games(self):
         package_format = int((ROOT / "crates/sunrise-mod-package/src/sdk/package-format").read_text().strip())
