@@ -228,11 +228,20 @@ pub fn check(pack: &Pack) -> Result<Report, Vec<Problem>> {
     }
 }
 
-/// Builds and checks one stage of `pack` from its file.
+/// Builds and checks one stage of `pack` from its file, on a thread of its own with the stack
+/// and the bounds of [`crate::guard`]: a pack's file never crashes the checker.
 pub fn check_stage(pack: &Pack, kind: StageKind, file: &str) -> Result<CheckedStage, Vec<Problem>> {
+    crate::guard::guarded(|| build_stage(pack, kind, file))
+        .unwrap_or_else(|reason| Err(vec![problem(file, reason)]))
+}
+
+fn build_stage(pack: &Pack, kind: StageKind, file: &str) -> Result<CheckedStage, Vec<Problem>> {
     // First without the entry points, so a missing or mistyped stage function
     // is reported as such rather than as a call that doesn't resolve.
     let mut own = compose(pack, kind, file);
+    if let Some((at, message)) = crate::guard::refusal(&own.text) {
+        return Err(vec![located(&own, at, message)]);
+    }
     let entries = own.parts.pop().expect("entries are the last part");
     own.text.truncate(entries.1.start);
     // The material prelude's LabPBR functions call into the renderer: a stand-in here.
