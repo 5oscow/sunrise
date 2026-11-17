@@ -6843,6 +6843,8 @@ impl Game<'_> {
             if let Some(fluids) = fluids {
                 let was = m.fluids.in_water;
                 let first = m.first_tick;
+                // Entity.baseTick saves the preceding eye sample before the new fluid update.
+                m.was_eye_in_water = m.fluids.eye_in_water;
                 m.fluids = fluids;
                 // Entity.doWaterSplashEffect on the client copy. Particles
                 // only: ClientLevel draws addParticle, and playSeededSound
