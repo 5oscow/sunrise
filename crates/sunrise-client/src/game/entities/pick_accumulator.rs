@@ -49,6 +49,7 @@ impl PickAccumulator {
 
     pub(super) fn dispatch(&mut self, game: &mut Game<'_>) -> Vec<PickCandidate> {
         let candidates = self.candidates.take().unwrap_or_default();
+        let camera = game.pick_camera_id();
         for &candidate in &candidates {
             if game.pick_camera_id() == Some(candidate.id) {
                 continue;
@@ -65,6 +66,12 @@ impl PickAccumulator {
                     entity,
                     allowed: &mut allowed,
                 });
+                if game.pick_camera_id() != camera {
+                    // The captured ray and vehicle decision no longer belong
+                    // to this camera. Refuse the pick, never recast it.
+                    self.hovered = None;
+                    break;
+                }
             }
             self.accept(candidate, same_vehicle, allowed);
         }

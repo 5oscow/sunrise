@@ -637,24 +637,27 @@ fn paused_ticks_pick_and_the_frame_can_overwrite_the_tick_target() {
     });
 }
 
-struct RiderPart(Arc<Mutex<usize>>);
+struct RiderPart(Arc<Mutex<usize>>, bool);
 #[mod_api::sunrise_part]
 impl mod_api::EntityPart for RiderPart {
     fn can_rider_interact(
         &self,
-        _: &mut dyn ClientHost,
+        host: &mut dyn ClientHost,
         event: &mut mod_api::CanRiderInteractEvent,
     ) {
         assert_eq!(event.entity.id(), 31);
         *self.0.lock().unwrap() += 1;
         event.allowed = true;
+        if self.1 {
+            assert!(host.set_camera_entity(event.entity));
+        }
     }
 }
-struct RegisterRiderPart(Arc<Mutex<usize>>);
+struct RegisterRiderPart(Arc<Mutex<usize>>, bool);
 #[mod_api::__subscriptions]
 impl Hooks for RegisterRiderPart {
     fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
-        r.entity_part("minecraft:pig", RiderPart(self.0.clone()));
+        r.entity_part("minecraft:pig", RiderPart(self.0.clone(), self.1));
     }
 }
 
@@ -667,7 +670,7 @@ fn rider_pick_rejects_shared_passengers_unless_their_part_allows_them() {
         let mods = if subscribed {
             vec![mod_api::ModEntry::new(
                 "rider",
-                Box::new(RegisterRiderPart(calls.clone())),
+                Box::new(RegisterRiderPart(calls.clone(), false)),
             )]
         } else {
             Vec::new()
@@ -738,4 +741,48 @@ fn rider_pick_rejects_shared_passengers_unless_their_part_allows_them() {
             });
         });
     }
+}
+
+#[test]
+#[ignore = "daily"]
+fn rider_pick_refuses_a_camera_changed_by_its_listener() {
+    use sunrise_protocol::packets::play::{self, Clientbound as C};
+    let calls = Arc::new(Mutex::new(0));
+    let mods = vec![mod_api::ModEntry::new(
+        "rider_camera",
+        Box::new(RegisterRiderPart(calls.clone(), true)),
+    )];
+    mod_platform::testing::with_mods(mods.into(), || {
+        with_pick_game("minecraft:pig", 1.5, |game, _| {
+            let kind = game
+                .remote
+                .as_ref()
+                .unwrap()
+                .builtin
+                .get("minecraft:entity_type")
+                .unwrap()
+                .id("minecraft:oak_boat")
+                .unwrap();
+            game.handle_packet(C::AddEntity(play::AddEntity {
+                id: 32,
+                uuid: 32,
+                kind,
+                position: [0.5, 1.0, 0.5],
+                velocity: [0.0; 3],
+                pitch: 0,
+                yaw: 0,
+                head_yaw: 0,
+                data: 0,
+            }))
+            .unwrap();
+            game.remote_set_passengers(32, &[7, 31]);
+            assert_eq!(game.pick_camera_id(), Some(7));
+            game.refresh_client_pick(1.0);
+            assert_eq!(*calls.lock().unwrap(), 1);
+            assert_eq!(game.pick_camera_id(), Some(31));
+            assert!(game.crosshair_target().is_none());
+            assert!(game.mob_hit().is_none());
+            assert!(!game.entity_targeted());
+        });
+    });
 }
