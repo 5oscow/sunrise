@@ -823,10 +823,13 @@ def run(package, skip, number=None, count=None, only=None):
             # A package of another workspace (the launcher's) runs from that workspace, against its own lockfile.
             workspace = ignored_shards.workspace_members()[package][1]
             features = workspace_features(workspace).get(package, [])
+            # --no-fail-fast: the package's targets share one cargo run, and a failing one must not stop the targets
+            # after it (their rows would read as tests that no longer run).
             command = ["cargo", "test", *(["--locked"] if workspace != "." else []), "-p", package,
                        *(["--features", ",".join(features)] if features else []),
                        *(flag for target in targets for flag in
-                         (["--lib"] if target == "lib" else [f"--{target.split(':')[0]}", target.split(":", 1)[1]]))]
+                         (["--lib"] if target == "lib" else [f"--{target.split(':')[0]}", target.split(":", 1)[1]])),
+                       "--no-fail-fast"]
         if client_half:
             # The runner's own cap (tools/ci/cargo_jobs.py --cap) when set, else the old fixed one.
             command.append(f"--jobs={os.environ.get('CI_JOBS', '8')}")
