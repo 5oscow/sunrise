@@ -14,6 +14,7 @@ use std::{
     sync::Arc,
 };
 use sunrise_core::random::RandomSource;
+use sunrise_world::loot::number::int_value;
 use sunrise_world::registry::{BlockRegistry, BlockStateId};
 use sunrise_world::{
     item_defaults::ItemDefaults,
@@ -21,6 +22,9 @@ use sunrise_world::{
     tag_layers::TagLayers,
 };
 
+#[cfg(test)]
+#[path = "loot_copy_tests.rs"]
+mod copy_tests;
 mod loot_conditions;
 
 fn tool_number(value: &sunrise_core::nbt::Tag) -> Option<f32> {
@@ -1152,7 +1156,7 @@ impl Items {
                 &enchantments,
                 &entity_tags,
             )?,
-            component_defaults: ingredient_defaults::component_defaults(defaults)?,
+            component_defaults: loot_data.component_defaults().clone(),
             mob_visibility,
             order,
             registry_order,
@@ -2039,7 +2043,8 @@ impl<R: RandomSource> LootContext<'_, R> {
                     }
                 }
                 "minecraft:binomial" => {
-                    let n = Self::number(o.get("n").unwrap_or(&Value::Null), random) as u32;
+                    let n =
+                        Self::int_number(o.get("n").unwrap_or(&Value::Null), random).max(0) as u32;
                     let p = Self::number(o.get("p").unwrap_or(&Value::Null), random);
                     (0..n).filter(|_| random.next_float() < p).count() as f32
                 }
@@ -2050,6 +2055,12 @@ impl<R: RandomSource> LootContext<'_, R> {
         }
     }
     fn int_number(v: &Value, random: &mut R) -> i32 {
+        if let Some(number) = v.as_number() {
+            return int_value(number) as i32;
+        }
+        if v["type"].as_str() == Some("minecraft:constant") {
+            return Self::int_number(&v["value"], random);
+        }
         if let Value::Object(o) = v
             && o.get("type")
                 .and_then(Value::as_str)
@@ -2061,7 +2072,7 @@ impl<R: RandomSource> LootContext<'_, R> {
             return if max <= min {
                 min
             } else {
-                min + random.next_int_bound(max - min + 1).unwrap_or(0)
+                random.next_int_between_inclusive(min, max).unwrap_or(min)
             };
         }
         Self::number(v, random).round() as i32
@@ -2131,9 +2142,12 @@ impl<R: RandomSource> LootContext<'_, R> {
                     .all(|e| {
                         let level =
                             self.enchantment_level(e["enchantments"].as_str().unwrap_or(""));
-                        let min = e["levels"]["min"].as_u64().unwrap_or(1) as u32;
-                        let max = e["levels"]["max"].as_u64().map_or(u32::MAX, |m| m as u32);
-                        level >= min.max(1) && level <= max
+                        let min = e["levels"]["min"].as_number().map(int_value).unwrap_or(1);
+                        let max = e["levels"]["max"]
+                            .as_number()
+                            .map(int_value)
+                            .unwrap_or(i64::from(i32::MAX));
+                        i64::from(level) >= min.max(1) && i64::from(level) <= max
                     });
                 let custom_ok = c["predicate"]["predicates"]
                     .get("minecraft:custom_data")
@@ -2212,7 +2226,7 @@ impl<R: RandomSource> LootContext<'_, R> {
         match e["type"].as_str().unwrap_or("") {
             "minecraft:item" => {
                 out.push((
-                    e["weight"].as_i64().unwrap_or(1) as i32,
+                    e["weight"].as_number().map(int_value).unwrap_or(1) as i32,
                     ItemStack {
                         item: Arc::from(e["name"].as_str().unwrap_or("minecraft:air")),
                         count: 1,
@@ -2250,7 +2264,7 @@ impl<R: RandomSource> LootContext<'_, R> {
             // pot's sherds), filled in by `block_drops`.
             "minecraft:dynamic" => {
                 out.push((
-                    e["weight"].as_i64().unwrap_or(1) as i32,
+                    e["weight"].as_number().map(int_value).unwrap_or(1) as i32,
                     ItemStack {
                         item: Arc::from(format!("{DYNAMIC}{}", e["name"].as_str().unwrap_or(""))),
                         count: 1,
@@ -2266,7 +2280,7 @@ impl<R: RandomSource> LootContext<'_, R> {
             // then rolls its table (an id or inline) and applies its functions.
             "minecraft:loot_table" => {
                 out.push((
-                    e["weight"].as_i64().unwrap_or(1) as i32,
+                    e["weight"].as_number().map(int_value).unwrap_or(1) as i32,
                     ItemStack {
                         item: Arc::from(NESTED),
                         count: 1,
@@ -2280,7 +2294,7 @@ impl<R: RandomSource> LootContext<'_, R> {
             }
             "minecraft:empty" => {
                 out.push((
-                    e["weight"].as_i64().unwrap_or(1) as i32,
+                    e["weight"].as_number().map(int_value).unwrap_or(1) as i32,
                     ItemStack {
                         item: Arc::from("minecraft:air"),
                         count: 0,
@@ -2357,6 +2371,25 @@ impl<R: RandomSource> LootContext<'_, R> {
             _ => e.list.iter().map(|x| Arc::clone(&x.id)).collect(),
         }
     }
+    fn effective_custom_data<'s>(
+        &'s self,
+        stack: &'s ItemStack,
+    ) -> Option<std::borrow::Cow<'s, sunrise_core::nbt::Compound>> {
+        let prototype = self.items.component_defaults.get(stack.item.as_ref());
+        if stack
+            .data()
+            .is_some_and(|data| data.other("!minecraft:custom_data").is_some())
+        {
+            None
+        } else if let Some(data) = stack.custom_data() {
+            Some(std::borrow::Cow::Borrowed(data))
+        } else {
+            prototype
+                .and_then(|values| values.get(&"minecraft:custom_data".into()))
+                .and_then(|value| sunrise_world::custom_data::borrow(value).ok())
+        }
+    }
+
     fn modifiers(&self, m: &Value, stack: &mut ItemStack, random: &mut R) {
         let list: Vec<&Value> = match m {
             Value::Array(a) => a.iter().collect(),
@@ -2379,9 +2412,102 @@ impl<R: RandomSource> LootContext<'_, R> {
                 continue;
             }
             match f["type"].as_str().or(f["function"].as_str()).unwrap_or("") {
-                "minecraft:sequence" if self.has_registered_function(f) => {
+                "minecraft:sequence" => {
                     for function in f["functions"].as_array().into_iter().flatten() {
                         self.modifiers(function, stack, random);
+                    }
+                }
+                "minecraft:copy_custom_data" => {
+                    let original = self.effective_custom_data(stack);
+                    let place = sunrise_world::loot::current_native_loot_place();
+                    if let Some(data) = sunrise_world::loot::copy::copy_custom_data(
+                        f,
+                        original.as_deref(),
+                        |source| {
+                            sunrise_world::loot::copy::nbt_source(
+                                source,
+                                place.as_deref(),
+                                |target| {
+                                    (target == "this")
+                                        .then(|| self.target.map(|(entity, _)| entity))
+                                        .flatten()
+                                },
+                            )
+                        },
+                    ) {
+                        apply_component_patch(
+                            stack,
+                            [(
+                                "minecraft:custom_data".into(),
+                                sunrise_core::nbt::Tag::Compound(data),
+                            )]
+                            .into_iter()
+                            .collect(),
+                        );
+                    }
+                }
+                "minecraft:set_custom_data" => {
+                    // Keep flattened SNBT for the shared custom-data codec;
+                    // JSON compounds use the same JsonOps conversion as world loot.
+                    let encoded = match &f["tag"] {
+                        Value::String(text) => {
+                            Some(sunrise_core::nbt::Tag::String(text.as_str().into()))
+                        }
+                        value => sunrise_world::loot::nbt_predicate_tag(value),
+                    };
+                    let Some(encoded) = encoded else {
+                        continue;
+                    };
+                    let Ok(tag) = sunrise_world::custom_data::borrow(&encoded) else {
+                        continue;
+                    };
+                    let mut data = self
+                        .effective_custom_data(stack)
+                        .map(std::borrow::Cow::into_owned)
+                        .unwrap_or_default();
+                    sunrise_world::nbt_path::merge_compound(&mut data, &tag);
+                    let id = if data.is_empty() {
+                        "!minecraft:custom_data"
+                    } else {
+                        "minecraft:custom_data"
+                    };
+                    apply_component_patch(
+                        stack,
+                        [(id.into(), sunrise_core::nbt::Tag::Compound(data))]
+                            .into_iter()
+                            .collect(),
+                    );
+                }
+                "minecraft:copy_components" => {
+                    let place = sunrise_world::loot::current_native_loot_place();
+                    let mut patch = sunrise_core::nbt::Compound::new();
+                    sunrise_world::loot::copy::copy_components(
+                        f,
+                        |source| match source {
+                            "block_entity" => place
+                                .as_ref()?
+                                .block_components
+                                .as_ref()
+                                .map(std::borrow::Cow::Borrowed),
+                            "tool" => self.held.map(|tool| {
+                                std::borrow::Cow::Owned(
+                                    sunrise_world::loot::copy::components_with_patch(
+                                        self.items.component_defaults.get(tool.item.as_ref()),
+                                        crate::item_data::component_snapshot(tool).as_ref(),
+                                    ),
+                                )
+                            }),
+                            "this" => self.target.map(|(entity, _)| {
+                                sunrise_world::loot::copy::entity_components(entity)
+                            }),
+                            _ => None,
+                        },
+                        |id, value| {
+                            patch.insert(id.as_str().into(), value.clone());
+                        },
+                    );
+                    if !patch.is_empty() {
+                        apply_component_patch(stack, patch);
                     }
                 }
                 "minecraft:filtered" => {
@@ -2453,13 +2579,16 @@ impl<R: RandomSource> LootContext<'_, R> {
                             count.saturating_mul(bonus + 1)
                         }
                         "minecraft:uniform_bonus_count" => {
-                            let multiplier = params["bonusMultiplier"].as_i64().unwrap_or(1) as i32;
+                            let multiplier = params["bonusMultiplier"]
+                                .as_number()
+                                .map(int_value)
+                                .unwrap_or(1) as i32;
                             let bound = multiplier.saturating_mul(level).saturating_add(1).max(1);
                             count.saturating_add(random.next_int_bound(bound).unwrap_or(0))
                         }
                         "minecraft:binomial_with_bonus_count" => {
                             let (extra, p) = (
-                                params["extra"].as_i64().unwrap_or(0) as i32,
+                                params["extra"].as_number().map(int_value).unwrap_or(0) as i32,
                                 params["probability"].as_f64().unwrap_or(0.0) as f32,
                             );
                             let mut n = count;
@@ -2483,7 +2612,9 @@ impl<R: RandomSource> LootContext<'_, R> {
                         // ItemStack.grow: an int sum, which wraps as in Java.
                         let count = (stack.count as i32).wrapping_add(add.round() as i32);
                         stack.count = count.max(0) as u32;
-                        if let Some(limit) = f["limit"].as_i64().filter(|l| *l > 0) {
+                        if let Some(limit) =
+                            f["limit"].as_number().map(int_value).filter(|l| *l > 0)
+                        {
                             stack.count = stack.count.min(limit as u32);
                         }
                     }
@@ -2578,12 +2709,14 @@ impl<R: RandomSource> LootContext<'_, R> {
                 }
                 "minecraft:limit_count" => {
                     let limit = &f["limit"];
-                    if let Some(min) = limit["min"].as_i64() {
-                        stack.count = stack.count.max(min as u32);
+                    let mut count = stack.count as i32;
+                    if let Some(min) = limit.get("min").filter(|value| !value.is_null()) {
+                        count = count.max(Self::int_number(min, random));
                     }
-                    if let Some(max) = limit["max"].as_i64() {
-                        stack.count = stack.count.min(max as u32);
+                    if let Some(max) = limit.get("max").filter(|value| !value.is_null()) {
+                        count = count.min(Self::int_number(max, random));
                     }
+                    stack.count = count.max(0) as u32;
                 }
                 // SetNameFunction.run: the component the target names
                 // (custom_name by default), set as a chest's roll sets it. As in
@@ -2628,15 +2761,42 @@ impl<R: RandomSource> LootContext<'_, R> {
 /// (`!id` removes a component), read back as a saved stack's components are,
 /// so a modelled one (a potion's contents, a book's pages) lands in its field.
 fn apply_components(stack: &mut ItemStack, patch: &Value) {
+    let patch = patch
+        .as_object()
+        .into_iter()
+        .flatten()
+        .map(|(id, value)| {
+            if value.is_null() {
+                (
+                    format!("!{}", id.strip_prefix('!').unwrap_or(id))
+                        .as_str()
+                        .into(),
+                    sunrise_core::nbt::Tag::Compound(Default::default()),
+                )
+            } else {
+                (
+                    id.as_str().into(),
+                    sunrise_client_core::scoreboard::json_to_tag(value),
+                )
+            }
+        })
+        .collect();
+    apply_component_patch(stack, patch);
+}
+
+/// One complete patch enters the component codec together, preserving component
+/// interactions (including the ominous banner) and the source's NBT types.
+fn apply_component_patch(stack: &mut ItemStack, patch: sunrise_core::nbt::Compound) {
     use sunrise_core::nbt::Tag;
     let mut saved = match crate::item_data::component_snapshot(stack) {
         Some(Tag::Compound(c)) => c,
         _ => Default::default(),
     };
-    for (key, value) in patch.as_object().into_iter().flatten() {
+    for (key, value) in patch {
+        let key = key.to_string_lossy();
         let (removed, id) = key
             .strip_prefix('!')
-            .map_or((false, &**key), |id| (true, id));
+            .map_or((false, key.as_str()), |id| (true, id));
         let id = if id.contains(':') {
             id.to_owned()
         } else {
@@ -2650,10 +2810,7 @@ fn apply_components(stack: &mut ItemStack, patch: &Value) {
                 Tag::compound(Vec::<(&str, Tag)>::new()),
             );
         } else {
-            saved.insert(
-                id.as_str().into(),
-                sunrise_client_core::scoreboard::json_to_tag(value),
-            );
+            saved.insert(id.as_str().into(), value);
         }
     }
     (stack.damage, stack.extra) = crate::item_data::decode_components(Some(&Tag::Compound(saved)));
@@ -3768,6 +3925,38 @@ mod tests {
         assert!(items.item_in_tag("test:items", "test:apple"));
         assert!(!items.item_in_tag("test:items", "test:stone"));
         assert!(!items.item_in_tag("test:missing", "test:apple"));
+    }
+
+    #[test]
+    fn fractional_and_exponent_entry_weights_reach_the_roll() {
+        for (token, at_seed_three) in [("2.0", "test:control"), ("1e1", "test:weighted")] {
+            let mut items = Items::for_tests(HashMap::new());
+            let weight: Value = serde_json::from_str(token).unwrap();
+            items.loot = Arc::new(
+                [(
+                    "test:weights".to_owned(),
+                    json!({"pools": [{"rolls": 1, "entries": [
+                        {"type": "minecraft:item", "name": "test:weighted", "weight": weight},
+                        {"type": "minecraft:item", "name": "test:control", "weight": 1}
+                    ]}]}),
+                )]
+                .into_iter()
+                .collect(),
+            );
+            // Independent JDK LCG first draws: seed 0 gives 0 modulo 3 or 11;
+            // seed 3 gives 2 modulo 3 and 6 modulo 11. Thus weights 2 and 10
+            // choose different entries at seed 3, and neither is default 1.
+            for (seed, expected) in [(0, "test:weighted"), (3, at_seed_three)] {
+                let stacks =
+                    items.loot_table("test:weights", false, None, &mut LegacyRandom::new(seed));
+                assert_eq!(stacks.len(), 1, "{token}, seed {seed}");
+                assert_eq!(
+                    (&*stacks[0].item, stacks[0].count),
+                    (expected, 1),
+                    "{token}, seed {seed}"
+                );
+            }
+        }
     }
 
     /// `NestedLootTable`: a `loot_table` entry, by id or inline, rolls that

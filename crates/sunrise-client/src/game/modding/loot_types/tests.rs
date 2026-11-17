@@ -180,7 +180,10 @@ fn registered_types_preserve_both_evaluators_order_short_circuit_and_selected_ra
                 .unwrap()
                 .to_string();
                 assert!(
-                    error.contains("loot_table test:root $.modifier") && error.contains(expected),
+                    error.contains("loot_table test:root")
+                        && error.contains("[data/test/loot_table/root.json]")
+                        && error.contains("$.modifier")
+                        && error.contains(expected),
                     "{error}"
                 );
                 // Refusing a candidate never mutates the already published generation.

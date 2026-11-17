@@ -10,6 +10,7 @@
 //! they do for containers.
 mod fill;
 pub mod global_modifiers;
+pub mod number;
 pub mod query;
 #[path = "loot_query.rs"]
 mod query_context;
@@ -22,7 +23,6 @@ mod loot_tags;
 pub use loot_tags::LootTags;
 use serde_json::Value;
 use std::{
-    cell::RefCell,
     collections::HashMap,
     fs, io,
     path::Path,
@@ -31,7 +31,7 @@ use std::{
 use sunrise_core::random::{LegacyRandom, RandomSource};
 use {
     crate::{lazy_json::LazyJson, native_load_context::LoadContext},
-    sunrise_core::nbt::Tag,
+    sunrise_core::nbt::{Compound, Tag},
 };
 
 /// Raw files a world's data packs add over the game's own data, by
@@ -139,63 +139,6 @@ pub struct LootContext<'a> {
     pub place: Option<Arc<LootPlace>>,
 }
 
-/// Where a loot roll happens, as a mod's own loot kinds see it:
-/// `LootContextParams.ORIGIN`, `LootContextParams.BLOCK_ENTITY`, and what
-/// vanilla's own conditions read of `LootContext.getLevel` (`TimeCheck`:
-/// the time; `WeatherCheck`: the rain and the thunder). The game sets it
-/// around a roll with [`with_native_loot_place`].
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct LootPlace {
-    /// `ORIGIN`: a broken block's centre, a dead mob's position.
-    pub origin: Option<[f64; 3]>,
-    /// `BLOCK_ENTITY`: the broken block's entity as it was before the
-    /// break, saved with its id and position (`saveWithFullMetadata`); a
-    /// mod's block entity carries its own data and its `Items`.
-    pub block_entity: Option<Tag>,
-    /// The level the roll is in.
-    pub level: Option<LootLevel>,
-}
-
-/// The level a loot roll is in, as a mod's own loot kinds see it.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct LootLevel {
-    /// The dimension's id (`minecraft:overworld`).
-    pub dimension: String,
-    /// `Level.getGameTime`.
-    pub game_time: i64,
-    /// `Level.getDayTime`: it counts on from day to day, so the time of
-    /// day is `day_time % 24000` (night from 13000 to 23000).
-    pub day_time: i64,
-    /// `Level.isRaining`.
-    pub raining: bool,
-    /// `Level.isThundering`.
-    pub thundering: bool,
-}
-
-thread_local! {
-    static NATIVE_LOOT_PLACE: RefCell<Option<Arc<LootPlace>>> = const { RefCell::new(None) };
-}
-
-/// Runs `roll` with `place` as where its loot rolls happen: every
-/// [`LootContext`] made inside it, by either engine, carries it. The
-/// place before is back when `roll` returns, so these nest.
-pub fn with_native_loot_place<T>(place: LootPlace, roll: impl FnOnce() -> T) -> T {
-    struct Restore(Option<Arc<LootPlace>>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            let before = self.0.take();
-            NATIVE_LOOT_PLACE.with(|p| *p.borrow_mut() = before);
-        }
-    }
-    let _restore = Restore(NATIVE_LOOT_PLACE.with(|p| p.replace(Some(Arc::new(place)))));
-    roll()
-}
-
-/// The place [`with_native_loot_place`] set for the rolls now running, if any.
-pub fn current_native_loot_place() -> Option<Arc<LootPlace>> {
-    NATIVE_LOOT_PLACE.with(|p| p.borrow().clone())
-}
-
 /// One generated item stack.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LootStack {
@@ -245,7 +188,7 @@ impl ExplorationMap {
                 .unwrap_or("minecraft:mansion")
                 .to_owned(),
             zoom: f["zoom"].as_u64().unwrap_or(2) as u8,
-            search_radius: f["search_radius"].as_i64().unwrap_or(50) as i32,
+            search_radius: int_value(&f["search_radius"]).unwrap_or(50) as i32,
             skip_existing_chunks: f["skip_existing_chunks"].as_bool().unwrap_or(true),
         }
     }
@@ -312,6 +255,8 @@ mod holder_sets;
 pub struct LootData {
     holder_sets: holder_sets::Binding,
     types: types::Types,
+    component_defaults: Arc<HashMap<String, Compound>>,
+    copies_entity_nbt: bool,
     tables: Arc<LootTables>,
     global_modifiers: Arc<global_modifiers::GlobalLootModifiers>,
     modifiers: HashMap<String, Value>,
@@ -353,6 +298,10 @@ pub struct LootEntity {
     /// Worn and held items by `EquipmentSlot` name (mainhand, offhand,
     /// feet, legs, chest, head, body, saddle).
     pub equipment: Vec<(String, LootStack)>,
+    /// Components exposed by this entity as a loot source.
+    pub components: Compound,
+    /// The canonical entity tag used by NBT predicates, when the caller has its live state.
+    pub nbt: Option<Arc<Tag>>,
 }
 impl LootEntity {
     pub fn new(kind: &str) -> Self {
@@ -529,13 +478,13 @@ fn json_tag(value: &Value) -> Option<Tag> {
 fn int_bounds(v: &Value, value: i32) -> bool {
     match v {
         Value::Null => true,
-        Value::Number(n) => n.as_i64() == Some(i64::from(value)),
+        Value::Number(n) => number::int_value(n) == i64::from(value),
         Value::Object(o) => {
             o.get("min")
-                .and_then(Value::as_i64)
+                .and_then(int_value)
                 .is_none_or(|m| i64::from(value) >= m)
                 && o.get("max")
-                    .and_then(Value::as_i64)
+                    .and_then(int_value)
                     .is_none_or(|m| i64::from(value) <= m)
         }
         _ => false,
@@ -555,7 +504,7 @@ fn list_operation<T: Clone>(
     let values: Vec<T> = (spec["values"].as_array().into_iter().flatten())
         .map(&mut draw)
         .collect();
-    let offset = spec["offset"].as_i64().unwrap_or(0).max(0) as usize;
+    let offset = int_value(&spec["offset"]).unwrap_or(0).max(0) as usize;
     // A section replacement or an insertion past the end is logged and ignored.
     let fits = offset <= existing.len();
     match spec["mode"].as_str().unwrap_or("replace_all") {
@@ -569,7 +518,7 @@ fn list_operation<T: Clone>(
         }
         "replace_section" if fits => {
             let mut out = existing;
-            let size = (spec["size"].as_i64()).map_or(values.len(), |s| s.max(0) as usize);
+            let size = int_value(&spec["size"]).map_or(values.len(), |s| s.max(0) as usize);
             let tail = out.split_off((offset + size).min(out.len()));
             out.truncate(offset);
             out.extend(values);
@@ -582,43 +531,9 @@ fn list_operation<T: Clone>(
     }
 }
 
-/// `CompoundTag.merge`: a nested compound on both sides merges key by key,
-/// any other value replaces the one the target had.
-/// A compound as `TagParser.LENIENT_CODEC` reads it: a JSON object, or the
-/// SNBT text of a compound. `None` for anything else.
-fn compound_json(v: &Value) -> Option<Value> {
-    match v {
-        Value::Object(_) => Some(v.clone()),
-        Value::String(text) => match sunrise_core::nbt::parse_snbt(text) {
-            Ok((tag @ sunrise_core::nbt::Tag::Compound(_), _)) => {
-                Some(crate::worldgen::tag_json(&tag))
-            }
-            _ => None,
-        },
-        _ => None,
-    }
-}
-
-fn merge_json(into: &mut Value, from: &Value) {
-    let (Value::Object(target), Value::Object(source)) = (into, from) else {
-        return;
-    };
-    for (key, value) in source {
-        if matches!(value, Value::Object(_))
-            && matches!(target.get(key), Some(Value::Object(_)))
-            && let Some(existing) = target.get_mut(key)
-        {
-            merge_json(existing, value);
-        } else {
-            target.insert(key.clone(), value.clone());
-        }
-    }
-}
-
-/// A JSON number read by an int codec (`Number.intValue`): `3.0`, which
-/// 1.21.1 mods write for rolls and counts, is 3.
+/// A JSON scalar at an INT position, using the same narrowing as load validation.
 fn int_value(v: &Value) -> Option<i64> {
-    v.as_i64().or_else(|| v.as_f64().map(|f| f as i64))
+    v.as_number().map(number::int_value)
 }
 
 /// `data/<ns>/<kind>/` of every namespace, as `ns:path`: vanilla's, and in
@@ -627,6 +542,9 @@ fn int_value(v: &Value) -> Option<i64> {
 #[path = "loot_conditions.rs"]
 mod loot_conditions;
 use loot_conditions::overlay_map;
+#[path = "loot_copy.rs"]
+pub mod copy;
+pub use copy::{LootLevel, LootPlace, current_native_loot_place, with_native_loot_place};
 #[path = "loot_item_predicates.rs"]
 pub mod item_predicates;
 mod predicates;
@@ -905,6 +823,9 @@ impl LootData {
         let binding = holder_sets::Binding::load(root, overlay, &items, &enchantments)?;
         let mut loaded = Self {
             holder_sets: Default::default(),
+            copies_entity_nbt: false,
+            component_defaults: copy::component_defaults(defaults)
+                .map_err(|reason| io::Error::new(io::ErrorKind::InvalidData, reason))?,
             types,
             tables,
             global_modifiers: Arc::default(),
@@ -918,6 +839,10 @@ impl LootData {
         binding.snapshot(&mut loaded)?;
         loaded.holder_sets = binding;
         Ok(loaded)
+    }
+    /// Whether any loaded function may request an entity's full saved NBT.
+    pub fn copies_entity_nbt(&self) -> bool {
+        self.copies_entity_nbt
     }
     /// Attach prepared instances to this private, not-yet-published snapshot.
     pub fn set_global_modifiers(&mut self, modifiers: Arc<global_modifiers::GlobalLootModifiers>) {
@@ -1674,6 +1599,8 @@ impl<R: RandomSource> Context<'_, R> {
                     stack.exploration = Some(Box::new(ExplorationMap::from_json(f)));
                 }
             }
+            "minecraft:copy_components" => self.copy_source_components(f, &mut stack),
+            "minecraft:copy_custom_data" => self.copy_source_custom_data(f, &mut stack),
             "minecraft:filtered" => {
                 let pass = self.item_matches(&f["item_filter"], &stack);
                 let branch = if pass { &f["on_pass"] } else { &f["on_fail"] };
@@ -1689,18 +1616,26 @@ impl<R: RandomSource> Context<'_, R> {
                 let id = "minecraft:custom_data";
                 // `TagParser.LENIENT_CODEC`: the tag, and the component, may
                 // be a compound or its SNBT text ("tag": "{a:1b}").
-                let Some(tag) = compound_json(&f["tag"]) else {
+                let Some(encoded) = json_tag(&f["tag"]) else {
                     return stack;
                 };
-                let mut data = stack
+                let Ok(tag) = crate::custom_data::borrow(&encoded) else {
+                    return stack;
+                };
+                let Ok(original) = self.effective_custom_data(&stack) else {
+                    return stack;
+                };
+                let mut data = original
+                    .map(std::borrow::Cow::into_owned)
+                    .unwrap_or_default();
+                crate::nbt_path::merge_compound(&mut data, &tag);
+                stack
                     .components
-                    .iter()
-                    .find(|(k, _)| k == id)
-                    .and_then(|(_, v)| v.as_ref().map(crate::worldgen::tag_json))
-                    .unwrap_or_else(|| Value::Object(serde_json::Map::new()));
-                merge_json(&mut data, &tag);
-                stack.components.retain(|(k, _)| k != id);
-                stack.components.push((id.to_owned(), json_tag(&data)));
+                    .retain(|(key, _)| key != id && key != "!minecraft:custom_data");
+                stack.components.push((
+                    id.to_owned(),
+                    (!data.is_empty()).then_some(Tag::Compound(data)),
+                ));
             }
             "minecraft:enchanted_count_increase" => {
                 let level = self.attacker_level(f["enchantment"].as_str().unwrap_or(""));
@@ -1901,7 +1836,7 @@ impl<R: RandomSource> Context<'_, R> {
                     // `WrittenBookContent`'s generation is 0 to 3; the codec
                     // refuses the rest, so a table that asks for more is clamped
                     // as the item's own parse does.
-                    if let Some(generation) = f["generation"].as_i64() {
+                    if let Some(generation) = int_value(&f["generation"]) {
                         map.insert("generation".into(), Tag::Int(generation.clamp(0, 3) as i32));
                     }
                 }
@@ -2468,16 +2403,19 @@ mod namespace_tests {
             {"type":"minecraft:set_components","components":{"test:value":null}},
             {"type":"minecraft:set_components","components":{"test:value":[7]}}
         ]}]}]}"#;
-        for (name, text) in [
-            ("items.json", r#"{"minecraft:stone":{}}"#),
-            ("data/minecraft/loot_table/patches.json", table),
-        ] {
-            let path = root.join(name);
-            fs::create_dir_all(path.parent().unwrap()).unwrap();
-            fs::write(path, text).unwrap();
-        }
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("items.json"), r#"{"minecraft:stone":{}}"#).unwrap();
         let defaults = crate::item_defaults::read(&root).unwrap();
-        let data = LootData::load(&root, &PackOverlay::NONE, &defaults).unwrap();
+        let mut data = LootData::load(&root, &PackOverlay::NONE, &defaults).unwrap();
+        // This pins permissive evaluator patch ordering, not pack codec acceptance.
+        data.tables = Arc::new(
+            [(
+                "minecraft:patches".into(),
+                serde_json::from_str(table).unwrap(),
+            )]
+            .into_iter()
+            .collect(),
+        );
         let filled = data.fill("minecraft:patches", 7, 27, None);
         let stack = filled.iter().flatten().next().unwrap();
         assert_eq!(

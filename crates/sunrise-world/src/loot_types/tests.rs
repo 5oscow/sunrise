@@ -69,7 +69,9 @@ fn unknown_types_and_bad_composites_name_the_exact_entry() {
             .unwrap_err()
             .to_string();
         assert!(
-            error.contains("loot_table test:root $.pools[0].entries[0].modifier")
+            error.contains("loot_table test:root")
+                && error.contains("data/test/loot_table/root.json")
+                && error.contains("$.pools[0].entries[0].modifier")
                 && error.contains(named),
             "{error}"
         );
