@@ -8,7 +8,11 @@ use loading_screen::{
     App, Loading, leave_fullscreen_after, missing_resources, run_event_loop, unclean_start_recovery,
 };
 use motion_ids::{motion_at, motion_block_entity};
-use resource_load::{Progress, launch_world, load_resources, named_scope, synchronous_startup};
+#[cfg(test)]
+use resource_load::load_resources;
+use resource_load::{
+    Progress, launch_world, load_resources_for_mods, named_scope, synchronous_startup,
+};
 /// The content tables the world plays with, as field-level borrows: the
 /// world's data packs' over the game's own. The `Game::items`/`recipes`/
 /// `stations` methods read the same tables, but taking `&self` blocks a
@@ -11481,7 +11485,7 @@ pub(crate) fn run_with(
         pack_error = Some(e.to_string());
         mods::content_root(&vanilla_root, &options.mods)
     })?;
-    let mut loaded = load_resources(
+    let mut loaded = load_resources_for_mods(
         selected_root,
         pack_finders::data_packs(&options.mods),
         launch_world(&options),
@@ -11492,6 +11496,7 @@ pub(crate) fn run_with(
         mods::LoadRole::startup(options.execution_role),
         &Progress::new(),
         &mut |_, _| {},
+        &options.mods,
     )?;
     let gui = loaded.gui.ok_or("missing menu bundle")?;
     options.resources = loaded.root.clone();
