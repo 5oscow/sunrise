@@ -17,7 +17,7 @@ pub trait Hooks {
     /// be outside the panel; use these frame values rather than caching a size.
     #[hook(
         side = "client",
-        version = 2,
+        version = 3,
         contract = "collect",
         out = "lines",
         scope = "block_entity",
