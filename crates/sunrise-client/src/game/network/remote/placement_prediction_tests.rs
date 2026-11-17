@@ -118,3 +118,55 @@ fn client_placement_prediction_asks_placement_and_survival_parts() {
         );
     });
 }
+
+/// The guess forwards a survival question to the live level only until it
+/// writes: after that the live level would answer without the guess's writes.
+#[test]
+fn a_prediction_asks_the_live_level_only_before_it_writes() {
+    use sunrise_core::{position::BlockPos, random::LegacyRandom};
+    use sunrise_world::level::{LevelAccess, Ticks};
+
+    struct Live;
+    impl sunrise_world::level::BlockEntityNeighbors for Live {}
+    impl LevelAccess for Live {
+        fn block_state(&self, _: BlockPos) -> BlockStateId {
+            BlockStateId(0)
+        }
+        fn set_raw(&mut self, _: BlockPos, _: BlockStateId) -> Option<BlockStateId> {
+            panic!("the guess must not write to the live level");
+        }
+        fn is_loaded(&self, _: BlockPos) -> bool {
+            true
+        }
+        fn is_client_side(&self) -> bool {
+            true
+        }
+        fn random(&mut self) -> &mut LegacyRandom {
+            panic!("the guess must not draw from the live level");
+        }
+        fn game_time(&self) -> i64 {
+            0
+        }
+        fn before_can_survive(
+            &self,
+            _: &Ticks,
+            _: BlockPos,
+            _: BlockStateId,
+            survives: &mut Option<bool>,
+        ) {
+            *survives = Some(false);
+        }
+    }
+
+    let live = Live;
+    let mut guess = DryLevel::new(&live);
+    let pos = BlockPos::new(0, 1, 0);
+    let ask = |guess: &DryLevel<'_>| {
+        let mut survives = None;
+        guess.before_can_survive(&Ticks::default(), pos, BlockStateId(1), &mut survives);
+        survives
+    };
+    assert_eq!(ask(&guess), Some(false));
+    guess.set_raw(BlockPos::new(0, 0, 0), BlockStateId(1));
+    assert_eq!(ask(&guess), None);
+}
