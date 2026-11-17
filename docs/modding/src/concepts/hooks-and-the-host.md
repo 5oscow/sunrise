@@ -183,6 +183,9 @@ sits beside it. The levels of `state_for_placement`, `can_survive` and the level
 the levels other callbacks get (a damage hit's, a part's read view) may return `None` for any of them, signal reads
 and `collision_shape` alike.
 A signal read never asks `state_for_placement` or `can_survive`, so it cannot re-enter the hook it was read in.
+On a client (its placement prediction and its own shape updates ask `state_for_placement`, `can_survive`,
+`may_place_on` and `can_sustain_plant` too) these reads answer from the client's loaded copy of the level, and the
+reads above that refuse clients return `None`.
 `LevelTicksHost`'s signal reads moved here and now return `Option`.
 
 `LevelHost` has no random access: a draw from a read-only hook inside a level write would shift the level's random sequence away from vanilla's order. A hook that may draw is given a `LevelRandomHost`.
