@@ -5,7 +5,9 @@ register it from
 `Hooks::register_load_conditions` using its `RegistrationContext` and
 `event.conditions.register(Identifier::parse("testmod:flag").unwrap(), Flag)`.
 Registration happens once per mod load, with one handler per id and a read-only
-`RegistrationContext`. The name must belong to the calling mod's namespace. Duplicate names refuse registration and name both owners;
+`RegistrationContext`. Any mod may register a name in any namespace: mod B can
+register `a:x` while mod A registers `a:y`. Duplicate ids refuse mod load and name
+both registering mods, even when the mods differ from the id's namespace;
 a registration error refuses admission even if you ignore it.
 
 ```rust,ignore
@@ -48,10 +50,10 @@ usable data. A wasm trap follows the runtime's normal failure policy.
 version. A callback error refuses the reload and names the file. The previous
 usable recipe and resource generation stays installed.
 
-A namespace is owned only when a loaded mod registered at least one condition
-in it. A loaded mod ID alone does not own a condition namespace. An unknown
-name in an owned namespace refuses reload, naming the file, condition and
-registering mod. This refusal also applies at every depth inside `not`, `and` and `or`,
+For unknown-id handling, a namespace is owned whenever at least one handler is
+registered in it, whoever registered that handler. A loaded mod ID alone does not
+own a condition namespace. An unknown name in an owned namespace refuses reload,
+naming the file, condition and registering mod. This refusal also applies at every depth inside `not`, `and` and `or`,
 even beside an already false or true branch.
 
 An unknown name in any other namespace fails closed:

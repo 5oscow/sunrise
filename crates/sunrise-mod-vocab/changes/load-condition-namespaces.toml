@@ -1,0 +1,3 @@
+ids = ["hook:register_load_conditions", "method:LoadConditions::register_handler", "trait:LoadCondition"]
+why = "register_load_conditions version 2 permits a mod to register a handler in any namespace, matching condition type registration. Duplicate ids still refuse mod load and name both registering mods. For unknown-id handling a namespace is owned whenever it has at least one registered handler, whoever registered it. A loaded mod id alone does not own a condition namespace."
+migrate = "Named injections request hook_version = 2. Registrants may use another namespace without a wrapper or alias; each full id still has exactly one handler."

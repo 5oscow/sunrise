@@ -40,7 +40,8 @@ impl From<(Identifier, String)> for ConditionError {
 /// return `ConditionError` for invalid mod input, never panic while decoding it.
 /// Called once per entry per candidate reload, before publication. Return false
 /// to omit the entry, or an error to keep the previous usable generation.
-/// Registering a condition owns its namespace: unknown names there refuse the
+/// Any namespace with at least one registered handler is owned for unknown-id
+/// handling, regardless of which mod registered it: unknown names there refuse the
 /// reload. Foreign unknown ids anywhere inside `not`, `and` or `or` omit the
 /// file, even in `or(true, unknown)`, with one ERROR-level log entry per file
 /// per candidate reload naming its distinct unknown ids. The vanilla view, which
@@ -54,7 +55,8 @@ pub trait LoadCondition: Send + Sync + 'static {
 
 /// Registrar borrowed during `register_load_conditions`.
 pub trait LoadConditions {
-    /// Register a handler under the dispatching mod's namespace.
+    /// Register a handler under any namespace, independently of the dispatching mod.
+    /// A namespace with at least one handler is owned for unknown-id handling.
     /// Duplicate names are refused with both owners in the diagnostic.
     fn register_handler(
         &mut self,
@@ -103,15 +105,6 @@ impl LoadConditions for LoadConditionDeclarations {
         if let Some((previous, _)) = self.entries.get(&name) {
             let error = ConditionError {
                 message: format!("condition {name} registered by both {previous} and {owner}"),
-            };
-            self.errors.push(error.clone());
-            return Err(error);
-        }
-        if name.namespace() != owner {
-            let error = ConditionError {
-                message: format!(
-                    "mod {owner} cannot register condition {name} outside its namespace"
-                ),
             };
             self.errors.push(error.clone());
             return Err(error);

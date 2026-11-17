@@ -333,40 +333,59 @@ fn load_conditions_recipe_reload_counts_and_failed_candidates_keep_old_recipes()
         },
     );
 }
-struct Duplicate;
+struct NamedCondition(&'static str);
 #[mod_api::__subscriptions]
-impl Hooks for Duplicate {
+impl Hooks for NamedCondition {
     fn register_load_conditions(
         &self,
         _: &RegistrationContext,
         event: &mut RegisterLoadConditionsEvent<'_>,
     ) {
         let _ = event.conditions.register(
-            Identifier::parse("testmod:flag").unwrap(),
+            Identifier::parse(self.0).unwrap(),
             Flag(Arc::default(), Arc::default()),
         );
     }
 }
 #[test]
-fn load_conditions_registration_refuses_duplicates_and_foreign_namespace_even_if_ignored() {
-    for owners in [vec!["testmod", "intruder"], vec!["intruder"]] {
-        let entries: Vec<_> = owners
-            .iter()
-            .map(|owner| ModEntry::new(owner, Box::new(Duplicate)))
-            .collect();
-        mod_platform::testing::with_mods(entries.into(), || {
+fn load_conditions_registration_allows_shared_namespaces() {
+    mod_platform::testing::with_mods(
+        vec![
+            ModEntry::new("a", Box::new(NamedCondition("a:y"))),
+            ModEntry::new("b", Box::new(NamedCondition("a:x"))),
+        ]
+        .into(),
+        || {
+            let mut registrar = mod_api::LoadConditionDeclarations::default();
+            mod_api::dispatch_register_load_conditions(&RegistrationContext::new(), &mut registrar);
+            let entries = registrar.finish().unwrap();
+            assert_eq!(entries.len(), 2);
+            for (name, owner, value) in [("a:y", "a", true), ("a:x", "b", false)] {
+                let (registered_owner, handler) =
+                    entries.get(&Identifier::parse(name).unwrap()).unwrap();
+                assert_eq!(registered_owner, owner);
+                assert_eq!(handler.test(&json!({"value": value})), Ok(value));
+            }
+        },
+    );
+}
+
+#[test]
+fn load_conditions_registration_refuses_duplicate_ids_even_if_ignored() {
+    mod_platform::testing::with_mods(
+        vec![
+            ModEntry::new("a", Box::new(NamedCondition("a:x"))),
+            ModEntry::new("b", Box::new(NamedCondition("a:x"))),
+        ]
+        .into(),
+        || {
             let mut registrar = mod_api::LoadConditionDeclarations::default();
             mod_api::dispatch_register_load_conditions(&RegistrationContext::new(), &mut registrar);
             let error = registrar.finish().err().unwrap().message;
-            assert!(error.contains("testmod:flag"), "{error}");
-            assert!(error.contains("intruder"), "{error}");
-            if owners.len() == 2 {
-                assert!(error.contains("both testmod and intruder"), "{error}");
-            } else {
-                assert!(error.contains("outside its namespace"), "{error}");
-            }
-        });
-    }
+            assert!(error.contains("condition a:x"), "{error}");
+            assert!(error.contains("both a and b"), "{error}");
+        },
+    );
 }
 
 #[test]
