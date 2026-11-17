@@ -22,7 +22,7 @@ fn derived(record: &str, field: &str) -> bool {
         ("Parts", "hooks")
             | (
                 "Installed",
-                "hook_bits" | "tag_hook_bits" | "resolved_menus"
+                "epoch" | "hook_bits" | "tag_hook_bits" | "resolved_menus"
             )
     )
 }
