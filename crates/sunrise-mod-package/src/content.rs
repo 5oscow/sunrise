@@ -129,6 +129,48 @@ pub struct BlockProperties {
     /// block broken by use; unset or `true`, it is drawn. Only the overlay: the break and the
     /// destroy-progress packets are vanilla's.
     pub destroy_overlay: Option<bool>,
+    /// Per-column model offset and translation of declared outline, collision and interaction shapes.
+    /// Block-entity published shapes remain as published. Unset inherits the template.
+    #[serde(default, deserialize_with = "deserialize_offset")]
+    pub offset: Option<OffsetType>,
+    /// Maximum horizontal displacement, 0 to 0.25 (default 0.25 for an explicit offset mode).
+    #[serde(default, deserialize_with = "deserialize_horizontal_offset")]
+    pub max_horizontal_offset: Option<f32>,
+    /// Maximum downward displacement, 0 to 0.2 (default 0.2 for XYZ; XZ has no vertical offset).
+    #[serde(default, deserialize_with = "deserialize_vertical_offset")]
+    pub max_vertical_offset: Option<f32>,
+}
+
+/// Vanilla's per-column offset mode (`BlockBehaviour.OffsetType`).
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum OffsetType {
+    None,
+    Xz,
+    Xyz,
+}
+
+fn offset_float<'de, D: serde::Deserializer<'de>>(
+    d: D,
+    key: &str,
+) -> Result<Option<f32>, D::Error> {
+    Option::<f32>::deserialize(d).map_err(|e| serde::de::Error::custom(format!("{key}: {e}")))
+}
+fn deserialize_horizontal_offset<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<f32>, D::Error> {
+    offset_float(d, "max_horizontal_offset")
+}
+fn deserialize_vertical_offset<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<f32>, D::Error> {
+    offset_float(d, "max_vertical_offset")
+}
+fn deserialize_offset<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<OffsetType>, D::Error> {
+    Option::<OffsetType>::deserialize(d)
+        .map_err(|e| serde::de::Error::custom(format!("offset: {e}")))
 }
 
 /// Vanilla's `PushReaction`, by its constant's name.
@@ -1629,6 +1671,14 @@ fn check_block(file: &Block) -> Result<(), String> {
             ));
         }
     }
+    for (key, value, max) in [
+        ("max_horizontal_offset", p.max_horizontal_offset, 0.25),
+        ("max_vertical_offset", p.max_vertical_offset, 0.2),
+    ] {
+        if value.is_some_and(|v| !v.is_finite() || !(0.0..=max).contains(&v)) {
+            return Err(format!("{key} is a finite number from 0 to {max}"));
+        }
+    }
     let finite = |v: Option<f32>| v.is_none_or(f32::is_finite);
     if !finite(p.hardness) || !finite(p.explosion_resistance) || !finite(p.friction) {
         return Err("hardness, explosion_resistance and friction are numbers".into());
@@ -2782,6 +2832,23 @@ capabilities = ["registries"]
         // Only vanilla's constants, as written there.
         for bad in [r#""animated""#, r#""model""#, "1"] {
             assert!(block(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn block_offset_refusals_name_the_file_and_key() {
+        for (properties, key) in [
+            (r#""offset":"XY""#, "offset"),
+            (r#""max_horizontal_offset":-0.1"#, "max_horizontal_offset"),
+            (r#""max_horizontal_offset":0.3"#, "max_horizontal_offset"),
+            (r#""max_horizontal_offset":"wide""#, "max_horizontal_offset"),
+            (r#""max_vertical_offset":0.3"#, "max_vertical_offset"),
+        ] {
+            let json = format!(r#"{{"template":"minecraft:stone","properties":{{{properties}}}}}"#);
+            let file = "data/ruby/sunrise/block/offset.json";
+            let error =
+                smod("offset-refusal", MANIFEST_TEXT, &[(file, json.as_bytes())]).unwrap_err();
+            assert!(error.contains(file) && error.contains(key), "{error}");
         }
     }
 

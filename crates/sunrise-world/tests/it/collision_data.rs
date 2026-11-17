@@ -344,3 +344,149 @@ fn streamed_tables_check_states_while_reading() {
     let file = BlockTableFile::read(&bytes(&swapped), &registry).unwrap();
     assert!(file.table("collision").is_err());
 }
+
+#[test]
+fn declared_shape_offsets_match_vanilla_xz_xyz_and_clamp_without_moving_the_cache() {
+    use std::sync::Arc;
+    use sunrise_core::geometry::{Axis, VoxelShape};
+    use sunrise_world::{
+        block_collision::{BlockCollisionRegistry, DynamicCollisionWorld, ShulkerCollisionState},
+        collision::ShapeChannel,
+        dynamic_support::DynamicSupportWorld,
+    };
+    struct World {
+        published: bool,
+    }
+    impl DynamicSupportWorld for World {
+        type Error = std::convert::Infallible;
+        fn shulker_is_closed(&mut self, _: [i32; 3]) -> Result<Option<bool>, Self::Error> {
+            Ok(None)
+        }
+        fn moving_piston_shape(&mut self, _: [i32; 3]) -> Result<Option<VoxelShape>, Self::Error> {
+            Ok(None)
+        }
+        fn published_collision_shape(
+            &mut self,
+            _: [i32; 3],
+        ) -> Result<Option<VoxelShape>, Self::Error> {
+            Ok(self.published.then(VoxelShape::block))
+        }
+    }
+    impl DynamicCollisionWorld for World {
+        fn shulker_collision_state(
+            &mut self,
+            _: [i32; 3],
+        ) -> Result<Option<ShulkerCollisionState>, Self::Error> {
+            Ok(None)
+        }
+    }
+    // Independently read from 26.3 POPPY (XZ), SHORT_GRASS (XYZ), and POINTED_DRIPSTONE
+    // (horizontal clamp) through their actual BlockState.getOffset at these columns.
+    for (limits, expected) in [
+        (
+            (0.25f32, 0.0f32),
+            [-0.11666665971279144, 0.0, -0.18333332985639572],
+        ),
+        (
+            (0.25, 0.2),
+            [
+                -0.11666665971279144,
+                -0.16000000178813933,
+                -0.18333332985639572,
+            ],
+        ),
+        ((0.125, 0.0), [-0.11666665971279144, 0.0, -0.125]),
+    ] {
+        let (registry_tag, mut tag) = fixture();
+        let registry = BlockRegistry::from_nbt(&registry_tag).unwrap();
+        let Tag::Compound(root) = &mut tag else {
+            unreachable!()
+        };
+        root.insert(
+            "shape_offsets".into(),
+            Tag::List(vec![Tag::compound([
+                ("state", Tag::Int(1)),
+                ("channels", Tag::Byte(31)),
+                ("horizontal", Tag::Float(limits.0.to_bits())),
+                ("vertical", Tag::Float(limits.1.to_bits())),
+            ])]),
+        );
+        let cached = Arc::new(CachedCollisionRegistry::from_nbt(&tag, &registry).unwrap());
+        let state = BlockStateId(1);
+        let local = cached.cached_shape(state).unwrap().unwrap();
+        for channel in [
+            ShapeChannel::Collision,
+            ShapeChannel::ContextCollision,
+            ShapeChannel::Outline,
+            ShapeChannel::ContextOutline,
+            ShapeChannel::Interaction,
+        ] {
+            let shape = cached.positioned_shape(state, channel, [1, 64, 2], local);
+            for (axis, offset) in Axis::ALL.into_iter().zip(expected) {
+                assert_eq!(shape.min(axis), offset);
+                assert_eq!(shape.max(axis), 1.0 + offset);
+            }
+            let second = cached.positioned_shape(state, channel, [-7, 3, 13], local);
+            assert_eq!(second.min(Axis::X), -0.04999999701976776);
+            assert_eq!(second.min(Axis::Z), -0.11666665971279144);
+            assert_eq!(cached.shape_offset(state, channel, [1, -99, 2]), expected);
+        }
+        assert_eq!(local.min(Axis::X), 0.0);
+        assert_eq!(local.max(Axis::Z), 1.0);
+        let binding = BlockCollisionRegistry::new(cached).unwrap();
+        assert!(binding.reaches_out(state));
+        let declared = binding
+            .collision_shape(&mut World { published: false }, state, [1, 64, 2])
+            .unwrap();
+        assert_eq!(declared.min(Axis::X), expected[0]);
+        let suffocation = sunrise_world::suffocation::SuffocationRegistry::new(
+            Arc::new(binding),
+            &["minecraft:air", "minecraft:stone", "minecraft:context"]
+                .into_iter()
+                .map(|name| {
+                    (
+                        name.to_string(),
+                        sunrise_world::suffocation::SuffocationDefinition::TaggedFullCollision,
+                    )
+                })
+                .collect(),
+            &["minecraft:stone".to_string()].into_iter().collect(),
+        )
+        .unwrap();
+        assert!(
+            !suffocation
+                .is_suffocating(&mut World { published: false }, state, [1, 64, 2])
+                .unwrap()
+        );
+        let Tag::Compound(root) = &mut tag else {
+            unreachable!()
+        };
+        root.insert("published_shapes".into(), Tag::IntArray(vec![1]));
+        let published_binding = BlockCollisionRegistry::new(Arc::new(
+            CachedCollisionRegistry::from_nbt(&tag, &registry).unwrap(),
+        ))
+        .unwrap();
+        let published = published_binding
+            .collision_shape(&mut World { published: true }, state, [1, 64, 2])
+            .unwrap();
+        assert_eq!(published.min(Axis::X), 0.0);
+        assert_eq!(published.max(Axis::Z), 1.0);
+    }
+    let (registry_tag, mut tag) = fixture();
+    let registry = BlockRegistry::from_nbt(&registry_tag).unwrap();
+    for horizontal in [f32::NAN, f32::INFINITY, -0.1, 0.3] {
+        let Tag::Compound(root) = &mut tag else {
+            unreachable!()
+        };
+        root.insert(
+            "shape_offsets".into(),
+            Tag::List(vec![Tag::compound([
+                ("state", Tag::Int(1)),
+                ("channels", Tag::Byte(1)),
+                ("horizontal", Tag::Float(horizontal.to_bits())),
+                ("vertical", Tag::Float(0.0f32.to_bits())),
+            ])]),
+        );
+        assert!(CachedCollisionRegistry::from_nbt(&tag, &registry).is_err());
+    }
+}

@@ -7594,3 +7594,82 @@ fn a_declared_shape_decides_the_legacy_solid_bit() {
     assert_eq!(with_solid_bit(flags, Some(true), &boxed(0.1)), 0b11);
     assert_eq!(with_solid_bit(flags | 1, Some(false), &boxed(1.0)), 0b10);
 }
+
+#[test]
+fn declared_offsets_resolve_modes_and_publish_only_declared_shape_channels() {
+    for (label, properties, expected) in [
+        ("none", r#""offset":"NONE""#, None),
+        (
+            "xz",
+            r#""offset":"XZ","max_vertical_offset":0.2"#,
+            Some((0.25f32, 0.0f32)),
+        ),
+        ("xyz", r#""offset":"XYZ""#, Some((0.25, 0.2))),
+        (
+            "clamped",
+            r#""offset":"XYZ","max_horizontal_offset":0.125,"max_vertical_offset":0.1"#,
+            Some((0.125, 0.1)),
+        ),
+        ("inherited", "", Some((0.25, 0.0))),
+        (
+            "inherited-xz",
+            r#""max_horizontal_offset":0.125,"max_vertical_offset":0.2"#,
+            Some((0.125, 0.0)),
+        ),
+    ] {
+        let declaration = format!(
+            r#"{{"template":"minecraft:test","item":false,"properties":{{{properties}}},
+          "shapes":{{"default":[[0,0,0,0.5,1,0.5]]}},
+          "interaction_shapes":{{"default":[[0,0,0,1,1,1]]}}}}"#
+        );
+        let (base, mods) = block_base(&format!("offset-{label}"), &[&declaration]);
+        let row = r#"{"offset":true,"outline_offset":true}"#;
+        fs::write(
+            base.join("gameplay-facts.json"),
+            format!(r#"{{"states":[{row},{row}]}}"#),
+        )
+        .unwrap();
+        let plan = Plan::new(&base, &mods).unwrap();
+        assert_eq!(plan.blocks[0].offset_limits, vec![expected; 2]);
+        let mut gameplay: J =
+            serde_json::from_str(&format!(r#"{{"states":[{row},{row}]}}"#)).unwrap();
+        plan.json("gameplay-facts.json", &mut gameplay).unwrap();
+        let Some(J::Arr(rows)) = gameplay.get("states") else {
+            panic!("states")
+        };
+        for row in &rows[2..] {
+            assert_eq!(row.get("offset"), Some(&J::Bool(expected.is_some())));
+            assert_eq!(
+                row.get("outline_offset"),
+                Some(&J::Bool(expected.is_some()))
+            );
+            if let Some((h, v)) = expected {
+                assert_eq!(
+                    row.get("offset_limits"),
+                    Some(&J::Arr(vec![J::f64(h as f64), J::f64(v as f64)]))
+                );
+            }
+        }
+        let mut tag = Tag::compound([
+            (
+                "states",
+                Tag::List(vec![test_state_row("x"), test_state_row("y")]),
+            ),
+            ("shapes", Tag::List(vec![])),
+            ("cached_shapes", Tag::IntArray(vec![-1, -1])),
+        ]);
+        plan.nbt(&mut tag);
+        plan.declared_shapes(&mut tag, true).unwrap();
+        if expected.is_some() {
+            let Some(Tag::List(offsets)) = tag.get("shape_offsets") else {
+                panic!("offsets")
+            };
+            assert_eq!(offsets.len(), 2);
+            // Default collision and outline, plus interaction; no contextual channels were declared.
+            assert_eq!(offsets[0].get("channels"), Some(&Tag::Byte(21)));
+        } else {
+            assert!(tag.get("shape_offsets").is_none());
+        }
+        fs::remove_dir_all(base.parent().unwrap()).unwrap();
+    }
+}

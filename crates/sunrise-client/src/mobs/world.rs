@@ -409,18 +409,29 @@ impl MobWorld<'_> {
             } else {
                 [0.0; 3]
             };
-            let o = Vec3::new(o[0], o[1], o[2]);
-            let declared = sunrise_client::collisions::published_outline(
+            let published = sunrise_client::collisions::published_outline(
                 self.world,
                 self.collision,
                 state,
                 [p.x, p.y, p.z],
-            )
-            .or_else(|| {
+            );
+            let declared = published.or_else(|| {
                 self.collision
                     .cached_shapes()
                     .context_outline_shape(state, EntityContextKind::Living)
             });
+            let o = if published.is_some() {
+                [0.0; 3]
+            } else if declared.is_some() {
+                self.collision.cached_shapes().shape_offset(
+                    state,
+                    sunrise_world::collision::ShapeChannel::ContextOutline,
+                    [p.x, p.y, p.z],
+                )
+            } else {
+                o
+            };
+            let o = Vec3::new(o[0], o[1], o[2]);
             let hit = match declared {
                 Some(shape) => {
                     VoxelShape::clip_boxes(shape.boxes().iter().map(|b| b.move_by(o)), from, to, p)

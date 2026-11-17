@@ -55,30 +55,40 @@ impl Game<'_> {
         pos: [i32; 3],
         player_context: bool,
     ) -> impl Iterator<Item = [f64; 6]> + 'a {
-        let declared =
-            sunrise_client::collisions::published_outline(world, self.collision, state, pos)
-                .or_else(|| {
-                    self.collision.cached_shapes().context_outline_shape(
-                        state,
-                        if player_context {
-                            self.outline_context_kind()
-                        } else {
-                            sunrise_world::collision_context::EntityContextKind::Other
-                        },
-                    )
-                });
+        let published =
+            sunrise_client::collisions::published_outline(world, self.collision, state, pos);
+        let declared = published.or_else(|| {
+            self.collision.cached_shapes().context_outline_shape(
+                state,
+                if player_context {
+                    self.outline_context_kind()
+                } else {
+                    sunrise_world::collision_context::EntityContextKind::Other
+                },
+            )
+        });
         let context = declared
             .is_none()
             .then(|| self.context_outline(pos, state, player_context, anims))
             .flatten();
         let f = self.res.facts().get(state);
-        let o = perspective::outline_offset(
-            &self.pack.context.tables,
-            state,
-            pos[0],
-            pos[2],
-            f.outline_offset,
-        );
+        let o = if published.is_some() {
+            [0.0; 3]
+        } else if declared.is_some() {
+            self.collision.cached_shapes().shape_offset(
+                state,
+                sunrise_world::collision::ShapeChannel::ContextOutline,
+                pos,
+            )
+        } else {
+            perspective::outline_offset(
+                &self.pack.context.tables,
+                state,
+                pos[0],
+                pos[2],
+                f.outline_offset,
+            )
+        };
         let base = [
             f64::from(pos[0]) + o[0],
             f64::from(pos[1]) + o[1],

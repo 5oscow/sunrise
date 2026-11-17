@@ -2,7 +2,7 @@
 //! Context-sensitive families override the no-context cache explicitly.
 use crate::{
     block_collision_scan::CollisionBlock,
-    collision::CachedCollisionRegistry,
+    collision::{CachedCollisionRegistry, ShapeChannel},
     collision_context::CollisionContext,
     dynamic_support::{DynamicSupport, DynamicSupportError, DynamicSupportWorld},
     liquid_collision::{LiquidCollision, LiquidCollisionWorld},
@@ -101,6 +101,7 @@ impl<'r> BlockCollisionRegistry<'r> {
             // A block entity's shape can leave the cell, so a state that may publish is
             // always scanned for in the cells around its own, as vanilla's dynamic shapes are.
             let mut large = published
+                || cached.offset_collision(id)
                 || cached.cached_shape(id)?.is_none_or(|shape| {
                     Axis::ALL
                         .into_iter()
@@ -229,7 +230,12 @@ impl<'r> BlockCollisionRegistry<'r> {
             .cached_shape(state)
             .map_err(CollisionQueryError::Data)?
         {
-            return Ok(shape.clone());
+            return Ok(self.cached.positioned_shape(
+                state,
+                ShapeChannel::Collision,
+                position,
+                shape,
+            ));
         }
         self.dynamic
             .get(&state)
@@ -272,7 +278,12 @@ impl<'r> BlockCollisionRegistry<'r> {
                 .cached
                 .context_collision_shape(state, context.entity_kind())
         {
-            return Ok(shape.clone());
+            return Ok(self.cached.positioned_shape(
+                state,
+                ShapeChannel::ContextCollision,
+                [position.x, position.y, position.z],
+                shape,
+            ));
         }
         match contextual.then(|| self.contextual.get(&state)).flatten() {
             Some(ContextualRule::Scaffolding(rule)) => Ok(rule.shape(context, position)),

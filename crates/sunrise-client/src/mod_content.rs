@@ -744,6 +744,8 @@ struct NewBlock<'a> {
     collision_shapes: Option<Vec<VoxelShape>>,
     /// Whether each shaped state contains fluid, including intrinsic template fluids.
     has_fluid: Vec<bool>,
+    /// Resolved per-state limits; template inheritance is resolved once at load.
+    offset_limits: Vec<Option<(f32, f32)>>,
     skylight: SkylightRule,
     custom_dampening: bool,
     /// The template's `forceSolidOn` (`Some(true)`) or `forceSolidOff` (`Some(false)`), which keeps
@@ -1065,6 +1067,7 @@ impl<'a> Plan<'a> {
         // use the resolved state's fluid, not the template's cached dry answer.
         let mut skylight_rules = BTreeMap::new();
         let mut custom_dampening = BTreeSet::new();
+        let mut speleothems = BTreeSet::new();
         if base.join("block-behaviours.json").exists() {
             let behaviors = read_json(&base.join("block-behaviours.json"))?;
             let Some(J::Arr(blocks)) = behaviors.get("blocks") else {
@@ -1083,6 +1086,9 @@ impl<'a> Plan<'a> {
                         _ => None,
                     })
                     .collect();
+                if classes.contains(&"SpeleothemBlock") {
+                    speleothems.insert(name.clone());
+                }
                 if let Some(rule) = classes.iter().find_map(|class| match *class {
                     "BarrierBlock"
                     | "CrossCollisionBlock"
@@ -1432,6 +1438,7 @@ impl<'a> Plan<'a> {
                     shapes,
                     collision_shapes,
                     has_fluid,
+                    offset_limits: Vec::new(),
                     skylight: skylight_rules
                         .get(&decl.template)
                         .copied()
@@ -1486,6 +1493,43 @@ impl<'a> Plan<'a> {
         }
         let mut items = Vec::new();
         for b in &mut blocks {
+            let p = &b.decl.properties;
+            let inherited = crate::blocks::inherited_offset_limits(
+                &b.decl.template,
+                speleothems.contains(&b.decl.template),
+            );
+            b.offset_limits = b
+                .order
+                .iter()
+                .map(|(state, _)| {
+                    use sunrise_mod_package::content::OffsetType;
+                    let enabled = match p.offset {
+                        Some(OffsetType::None) => false,
+                        Some(_) => true,
+                        None => matches!(
+                            rows[(b.rename.states.start + state) as usize].get("offset"),
+                            Some(J::Bool(true))
+                        ),
+                    };
+                    enabled.then(|| {
+                        let defaults = match p.offset {
+                            Some(OffsetType::Xz) => (0.25, 0.0),
+                            Some(OffsetType::Xyz) => (0.25, 0.2),
+                            _ => inherited,
+                        };
+                        (
+                            p.max_horizontal_offset.unwrap_or(defaults.0),
+                            if p.offset == Some(OffsetType::Xz)
+                                || (p.offset.is_none() && inherited.1 == 0.0)
+                            {
+                                0.0
+                            } else {
+                                p.max_vertical_offset.unwrap_or(defaults.1)
+                            },
+                        )
+                    })
+                })
+                .collect();
             let row = &rows[b.rename.states.start as usize];
             b.item = match row.get("item") {
                 Some(J::Str(i)) if i != "minecraft:air" => Some(i.clone()),
@@ -1691,6 +1735,17 @@ impl<'a> Plan<'a> {
         row: &mut J,
     ) {
         let p = &b.decl.properties;
+        let offset = b.offset_limits[state_index];
+        row.set("offset", J::Bool(offset.is_some()));
+        if let Some((horizontal, vertical)) = offset {
+            row.set(
+                "offset_limits",
+                J::Arr(vec![J::f64(horizontal as f64), J::f64(vertical as f64)]),
+            );
+        }
+        if b.shapes.is_some() || p.offset == Some(sunrise_mod_package::content::OffsetType::None) {
+            row.set("outline_offset", J::Bool(offset.is_some()));
+        }
         if let Some(ticks) = &p.random_ticks {
             row.set("random_ticks", J::Bool(ticks.applies(combo)));
         }
@@ -2238,6 +2293,54 @@ impl<'a> Plan<'a> {
         }
         if !contexts.is_empty() {
             root.insert("context_shapes".into(), Tag::List(contexts));
+        }
+        if collision {
+            let mut offsets = Vec::new();
+            for block in &self.blocks {
+                let mut channels = 0;
+                if block.shapes.is_some() || block.collision_shapes.is_some() {
+                    channels |= 1;
+                }
+                if block
+                    .context_shapes
+                    .keys()
+                    .any(|key| key.starts_with("collision_"))
+                {
+                    channels |= 2;
+                }
+                if block.shapes.is_some() {
+                    channels |= 4;
+                }
+                if block
+                    .context_shapes
+                    .keys()
+                    .any(|key| key.starts_with("outline_"))
+                {
+                    channels |= 8;
+                }
+                if block.context_shapes.contains_key("interaction") {
+                    channels |= 16;
+                }
+                if channels == 0 {
+                    continue;
+                }
+                for (index, limits) in block.offset_limits.iter().enumerate() {
+                    if let Some((horizontal, vertical)) = limits {
+                        offsets.push(Tag::compound([
+                            (
+                                "state",
+                                Tag::Int((block.rename.first as usize + index) as i32),
+                            ),
+                            ("channels", Tag::Byte(channels)),
+                            ("horizontal", Tag::Float(horizontal.to_bits())),
+                            ("vertical", Tag::Float(vertical.to_bits())),
+                        ]));
+                    }
+                }
+            }
+            if !offsets.is_empty() {
+                root.insert("shape_offsets".into(), Tag::List(offsets));
+            }
         }
         let Some(Tag::IntArray(mapping)) = root.get_mut(&JavaString::from("cached_shapes")) else {
             return Err("collision table has no mapping".into());

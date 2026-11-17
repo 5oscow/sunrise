@@ -58,6 +58,22 @@ struct GridKey {
     max: [i32; 3],
 }
 
+/// Declared shape channels translated by the state's per-column offset.
+#[derive(Clone, Copy)]
+#[repr(u8)]
+pub enum ShapeChannel {
+    Collision = 1,
+    ContextCollision = 2,
+    Outline = 4,
+    ContextOutline = 8,
+    Interaction = 16,
+}
+#[derive(Clone, Copy)]
+struct ShapeOffset {
+    channels: u8,
+    limits: (f32, f32),
+}
+
 pub struct CachedCollisionRegistry<'r> {
     registry: &'r BlockRegistry,
     shapes: Vec<VoxelShape>,
@@ -69,6 +85,7 @@ pub struct CachedCollisionRegistry<'r> {
     /// Whether each state's block entity may publish its shapes (`shapes_from_block_entity`);
     /// empty when no state does.
     published: Vec<bool>,
+    offsets: Vec<Option<ShapeOffset>>,
 }
 impl<'r> CachedCollisionRegistry<'r> {
     pub fn registry(&self) -> &'r BlockRegistry {
@@ -299,6 +316,50 @@ impl<'r> CachedCollisionRegistry<'r> {
                     .ok_or_else(|| invalid("published shape state outside registry"))? = true;
             }
         }
+        let mut offsets = Vec::new();
+        if let Some(rows) = tag.get("shape_offsets") {
+            let Tag::List(rows) = rows else {
+                return Err(invalid("shape_offsets must be a list"));
+            };
+            offsets = vec![None; registry.len()];
+            for row in rows {
+                let (
+                    Some(Tag::Int(state)),
+                    Some(Tag::Byte(channels)),
+                    Some(Tag::Float(horizontal)),
+                    Some(Tag::Float(vertical)),
+                ) = (
+                    row.get("state"),
+                    row.get("channels"),
+                    row.get("horizontal"),
+                    row.get("vertical"),
+                )
+                else {
+                    return Err(invalid("invalid shape offset record"));
+                };
+                let horizontal = f32::from_bits(*horizontal);
+                let vertical = f32::from_bits(*vertical);
+                let slot = usize::try_from(*state)
+                    .ok()
+                    .and_then(|id| offsets.get_mut(id))
+                    .ok_or_else(|| invalid("shape offset state outside registry"))?;
+                if slot.is_some()
+                    || !(1..=31).contains(channels)
+                    || !horizontal.is_finite()
+                    || !(0.0..=0.25).contains(&horizontal)
+                    || !vertical.is_finite()
+                    || !(0.0..=0.2).contains(&vertical)
+                {
+                    return Err(invalid(
+                        "shape offset: duplicate state, invalid channels or limits",
+                    ));
+                }
+                *slot = Some(ShapeOffset {
+                    channels: *channels as u8,
+                    limits: (horizontal, vertical),
+                });
+            }
+        }
         Ok(Self {
             registry,
             shapes,
@@ -308,6 +369,7 @@ impl<'r> CachedCollisionRegistry<'r> {
             contexts,
             outline_edges,
             published,
+            offsets,
         })
     }
     /// Whether the block entity of `state`'s block publishes the block's shapes
@@ -317,6 +379,45 @@ impl<'r> CachedCollisionRegistry<'r> {
             .get(state.0 as usize)
             .copied()
             .unwrap_or(false)
+    }
+    /// The per-position translation for a declared channel. Published shapes bypass this.
+    pub fn shape_offset(
+        &self,
+        state: BlockStateId,
+        channel: ShapeChannel,
+        position: [i32; 3],
+    ) -> [f64; 3] {
+        self.offsets
+            .get(state.0 as usize)
+            .copied()
+            .flatten()
+            .filter(|offset| offset.channels & channel as u8 != 0)
+            .map_or([0.0; 3], |offset| {
+                sunrise_core::random::column_offset(offset.limits, position[0], position[2])
+            })
+    }
+    /// A block-local declared shape at this position, never changing its cached source.
+    pub fn positioned_shape(
+        &self,
+        state: BlockStateId,
+        channel: ShapeChannel,
+        position: [i32; 3],
+        shape: &VoxelShape,
+    ) -> VoxelShape {
+        let [x, y, z] = self.shape_offset(state, channel, position);
+        if [x, y, z] == [0.0; 3] {
+            shape.clone()
+        } else {
+            shape.moved(sunrise_core::geometry::Vec3::new(x, y, z))
+        }
+    }
+    /// Whether translated collision geometry can leave the cell, for collision scan bounds.
+    pub fn offset_collision(&self, state: BlockStateId) -> bool {
+        self.offsets
+            .get(state.0 as usize)
+            .copied()
+            .flatten()
+            .is_some_and(|offset| offset.channels & 3 != 0 && offset.limits != (0.0, 0.0))
     }
     pub fn has_context_shapes(&self, state: BlockStateId) -> bool {
         self.contexts.contains_key(&state)
