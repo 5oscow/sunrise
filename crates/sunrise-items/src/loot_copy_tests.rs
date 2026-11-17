@@ -685,3 +685,68 @@ fn copy_custom_data_respects_removed_prototype_data_in_both_evaluators() {
     }
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn set_custom_data_preserves_nbt_types_and_nested_merges_in_both_evaluators() {
+    let root = std::env::temp_dir().join(format!(
+        "sunrise-set-custom-data-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let folder = root.join("data/test/loot_table");
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(root.join("items.json"), r#"{"minecraft:stick":{}}"#).unwrap();
+    let table = json!({"type":"minecraft:empty","pools":[{"rolls":1,"entries":[{
+        "type":"minecraft:item","name":"minecraft:stick",
+        "modifier":{"type":"minecraft:sequence","functions":[
+            {"type":"minecraft:set_components","components":{
+                "minecraft:custom_data":"{nested:{left:3L}}"
+            }},
+            {"type":"minecraft:set_custom_data","tag":"{keep:13L,array:[I;5,6]}"},
+            {"type":"minecraft:set_custom_data","tag":{"nested":{"right":4}}}
+        ]}
+    }]}]});
+    std::fs::write(folder.join("typed.json"), table.to_string()).unwrap();
+    let data = loot::LootData::load(
+        &root,
+        &loot::PackOverlay::NONE,
+        &sunrise_world::item_defaults::read(&root).unwrap(),
+    )
+    .unwrap();
+    let mut items = Items::for_tests(HashMap::new());
+    items.set_loot_data(&data);
+    let expected = Tag::compound([
+        ("keep", Tag::Long(13)),
+        ("array", Tag::IntArray(vec![5, 6])),
+        (
+            "nested",
+            Tag::compound([("left", Tag::Long(3)), ("right", Tag::Byte(4))]),
+        ),
+    ]);
+    for item_engine in [true, false] {
+        let mut random = LegacyRandom::new(45);
+        let actual = if item_engine {
+            let mut output = items
+                .roll_loot_table("test:typed", None, None, &mut random)
+                .unwrap();
+            assert_eq!(output.len(), 1);
+            Tag::Compound(output.remove(0).custom_data().unwrap().clone())
+        } else {
+            let mut output = data.roll("test:typed", &mut random, 0.0, None, None);
+            assert_eq!(output.len(), 1);
+            output
+                .remove(0)
+                .components
+                .into_iter()
+                .find(|(id, _)| id == "minecraft:custom_data")
+                .unwrap()
+                .1
+                .unwrap()
+        };
+        assert_eq!(actual, expected, "items = {item_engine}");
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}

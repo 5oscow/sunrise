@@ -2428,6 +2428,33 @@ impl<R: RandomSource> LootContext<'_, R> {
                         );
                     }
                 }
+                "minecraft:set_custom_data" => {
+                    // Keep flattened SNBT for the shared custom-data codec;
+                    // JSON compounds use the same JsonOps conversion as world loot.
+                    let encoded = match &f["tag"] {
+                        Value::String(text) => {
+                            Some(sunrise_core::nbt::Tag::String(text.as_str().into()))
+                        }
+                        value => sunrise_world::loot::nbt_predicate_tag(value),
+                    };
+                    let Some(encoded) = encoded else {
+                        continue;
+                    };
+                    let Ok(tag) = sunrise_world::custom_data::borrow(&encoded) else {
+                        continue;
+                    };
+                    let mut data = stack.custom_data().cloned().unwrap_or_default();
+                    sunrise_world::nbt_path::merge_compound(&mut data, &tag);
+                    apply_component_patch(
+                        stack,
+                        [(
+                            "minecraft:custom_data".into(),
+                            sunrise_core::nbt::Tag::Compound(data),
+                        )]
+                        .into_iter()
+                        .collect(),
+                    );
+                }
                 "minecraft:copy_components" => {
                     let place = sunrise_world::loot::current_native_loot_place();
                     let mut patch = sunrise_core::nbt::Compound::new();

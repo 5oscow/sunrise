@@ -530,39 +530,6 @@ fn list_operation<T: Clone>(
     }
 }
 
-/// `CompoundTag.merge`: a nested compound on both sides merges key by key,
-/// any other value replaces the one the target had.
-/// A compound as `TagParser.LENIENT_CODEC` reads it: a JSON object, or the
-/// SNBT text of a compound. `None` for anything else.
-fn compound_json(v: &Value) -> Option<Value> {
-    match v {
-        Value::Object(_) => Some(v.clone()),
-        Value::String(text) => match sunrise_core::nbt::parse_snbt(text) {
-            Ok((tag @ sunrise_core::nbt::Tag::Compound(_), _)) => {
-                Some(crate::worldgen::tag_json(&tag))
-            }
-            _ => None,
-        },
-        _ => None,
-    }
-}
-
-fn merge_json(into: &mut Value, from: &Value) {
-    let (Value::Object(target), Value::Object(source)) = (into, from) else {
-        return;
-    };
-    for (key, value) in source {
-        if matches!(value, Value::Object(_))
-            && matches!(target.get(key), Some(Value::Object(_)))
-            && let Some(existing) = target.get_mut(key)
-        {
-            merge_json(existing, value);
-        } else {
-            target.insert(key.clone(), value.clone());
-        }
-    }
-}
-
 /// A JSON number read by an int codec (`Number.intValue`): `3.0`, which
 /// 1.21.1 mods write for rolls and counts, is 3.
 fn int_value(v: &Value) -> Option<i64> {
@@ -1616,18 +1583,25 @@ impl<R: RandomSource> Context<'_, R> {
                 let id = "minecraft:custom_data";
                 // `TagParser.LENIENT_CODEC`: the tag, and the component, may
                 // be a compound or its SNBT text ("tag": "{a:1b}").
-                let Some(tag) = compound_json(&f["tag"]) else {
+                let Some(encoded) = json_tag(&f["tag"]) else {
+                    return stack;
+                };
+                let Ok(tag) = crate::custom_data::borrow(&encoded) else {
                     return stack;
                 };
                 let mut data = stack
                     .components
                     .iter()
                     .find(|(k, _)| k == id)
-                    .and_then(|(_, v)| v.as_ref().map(crate::worldgen::tag_json))
-                    .unwrap_or_else(|| Value::Object(serde_json::Map::new()));
-                merge_json(&mut data, &tag);
+                    .and_then(|(_, value)| value.as_ref())
+                    .and_then(|value| crate::custom_data::borrow(value).ok())
+                    .map(std::borrow::Cow::into_owned)
+                    .unwrap_or_default();
+                crate::nbt_path::merge_compound(&mut data, &tag);
                 stack.components.retain(|(k, _)| k != id);
-                stack.components.push((id.to_owned(), json_tag(&data)));
+                stack
+                    .components
+                    .push((id.to_owned(), Some(Tag::Compound(data))));
             }
             "minecraft:enchanted_count_increase" => {
                 let level = self.attacker_level(f["enchantment"].as_str().unwrap_or(""));
