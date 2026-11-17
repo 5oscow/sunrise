@@ -1,6 +1,6 @@
 //! `ItemPart::is_primary_item_for` (`IItemExtension.isPrimaryItemFor`): the logical server asks
 //! the answers once when its parts install and stores them on the enchantment registry snapshot
-//! it plays with, which every enchantment selection reads (`sunrise_items::primary_items`).
+//! it plays with, which enchantment selection reads (`sunrise_world::enchantment_answers`).
 use super::*;
 
 impl Game<'_> {
@@ -17,7 +17,7 @@ impl Game<'_> {
         if !self.is_logical_server() {
             return;
         }
-        let mut answers = sunrise_items::primary_items::PrimaryAnswers::new();
+        let mut answers = sunrise_world::enchantment_answers::Answers::new();
         if mod_api::__private::has_part_hook(mod_api::HookId::IsPrimaryItemFor) {
             let enchantments = &self.stations().enchantments;
             let items = self.items();
@@ -57,7 +57,7 @@ impl Game<'_> {
     /// and its items' (loot), once when they are one registry.
     fn primary_answer_tables(
         &self,
-    ) -> impl Iterator<Item = &sunrise_items::primary_items::PrimaryAnswerTable> {
+    ) -> impl Iterator<Item = &sunrise_world::enchantment_answers::AnswerTable> {
         let stations = &self.stations().enchantments;
         let items = &self.items().enchantments;
         let other = (!std::sync::Arc::ptr_eq(stations, items)).then_some(items);

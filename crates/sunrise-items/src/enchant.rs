@@ -198,7 +198,7 @@ pub struct Enchantments {
     lang: HashMap<String, String>,
     /// The mods' `isPrimaryItemFor` answers resolved for this snapshot
     /// (`ItemPart::is_primary_item_for`).
-    primary_answers: crate::primary_items::PrimaryAnswerTable,
+    primary_answers: sunrise_world::enchantment_answers::AnswerTable,
 }
 
 fn string_list(v: &Value) -> Vec<String> {
@@ -534,7 +534,7 @@ impl Enchantments {
     }
     /// The `isPrimaryItemFor` answers the server resolved for this snapshot when its parts
     /// installed ([`crate::primary_items`]); selection reads them.
-    pub fn primary_answers(&self) -> &crate::primary_items::PrimaryAnswerTable {
+    pub fn primary_answers(&self) -> &sunrise_world::enchantment_answers::AnswerTable {
         &self.primary_answers
     }
     pub fn get(&self, id: &str) -> Option<&Enchantment> {
