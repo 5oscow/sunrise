@@ -3248,8 +3248,9 @@ impl Game<'_> {
         self.fire_use_animation(stack, animation);
     }
     /// `Player.canEat` for a food `stack`, or None for cake and candle cake
-    /// regardless of the held item. Cake uses `can_always_eat = false`;
-    /// `vanilla_can_eat` is vanilla's answer (creative, `can_always_eat`, or hungry).
+    /// regardless of the held item. `player` is the eater on either side.
+    /// Vanilla uses always-eat false for cake or the food component for a stack;
+    /// `vanilla_can_eat` is that answer (creative, always-eat, or hungry).
     /// Answer `Some(false)` to refuse the food,
     /// `Some(true)` to let a full player eat; `can_eat` left `None` keeps
     /// `vanilla_can_eat`. Both sides (the client starts eating as the
