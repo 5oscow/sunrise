@@ -963,6 +963,7 @@ impl Game<'_> {
         realm: bool,
     ) -> Result<()> {
         self.realm_session = realm;
+        self.lan_session = lan;
         self.reset_tutorial();
         self.perf.world_opening();
         // A server's own biomes come over the connection; the last local
@@ -1287,6 +1288,7 @@ impl Game<'_> {
     /// Prepare a client session and remote state to receive packets from a studio replay.
     pub(super) fn init_remote_for_replay(&mut self) -> Result<()> {
         self.realm_session = false;
+        self.lan_session = false;
         self.reset_tutorial();
         self.perf.world_opening();
         self.world_biomes = None;
