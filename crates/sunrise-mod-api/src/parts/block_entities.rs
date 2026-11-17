@@ -13,6 +13,13 @@ impl PartRegistrar {
             let parts = &self.parts.block_entity_kinds[id];
             let Some(kind) = self.block_entity_types.iter().find(|kind| kind.id == **id) else {
                 let namespace = id.split_once(':').map_or("", |(namespace, _)| namespace);
+                // The installed package owning the namespace; an absent one is known only by
+                // its id, which an optional dependency is matched against.
+                let package = packages
+                    .iter()
+                    .find(|package| package.namespaces().any(|owned| owned == namespace));
+                let dependency_id = package.map_or(namespace, |package| package.id());
+                let absent = package.is_none();
                 for part in parts {
                     let dependency = packages
                         .iter()
@@ -21,17 +28,16 @@ impl PartRegistrar {
                             package
                                 .dependencies()
                                 .iter()
-                                .find(|dependency| dependency.id() == namespace)
+                                .find(|dependency| dependency.id() == dependency_id)
                         })
                         .map(|dependency| dependency.kind());
-                    let absent = !packages.iter().any(|package| package.id() == namespace);
                     match dependency {
                         Some(crate::DependencyKind::Optional) if absent => log::debug!(
-                            "mod {} skipped {} on block entity type {id}: optional dependency {namespace} is absent",
+                            "mod {} skipped {} on block entity type {id}: optional dependency {dependency_id} is absent",
                             part.mod_id, part.type_name
                         ),
                         Some(crate::DependencyKind::Required) => self.refused.push(format!(
-                            "mod {} attached {} to block entity type {id}, which its required dependency {namespace} does not declare",
+                            "mod {} attached {} to block entity type {id}, which its required dependency {dependency_id} does not declare",
                             part.mod_id, part.type_name
                         )),
                         _ => self.refused.push(format!(
@@ -504,6 +510,33 @@ pub mod tests {
                 )]
             );
         });
+    }
+
+    #[test]
+    pub(crate) fn a_required_dependency_owning_the_namespace_under_another_id_is_named_by_its_id() {
+        let mods = [ModEntry::new("b", Box::new(Attaches(FromB)))];
+        let lib = PackageInfo::new(
+            "owner-lib".into(),
+            "1".into(),
+            PackageKind::Code,
+            Side::Both,
+            vec!["owner-lib".into(), "owner".into()],
+            vec![],
+        );
+        crate::load_state::with_test_package_inventory(
+            vec![lib, package("b", Side::Both, &["owner-lib"])],
+            || {
+                let (attached, refused) = attached_to_owner_block(&mods);
+                assert!(attached.is_empty());
+                assert_eq!(
+                    refused,
+                    [format!(
+                        "mod b attached {} to block entity type owner:press, which its required dependency owner-lib does not declare",
+                        type_name::<FromB>()
+                    )]
+                );
+            },
+        );
     }
 
     #[test]

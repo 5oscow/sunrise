@@ -42,8 +42,8 @@ A Part attaches by type id, whoever declared the type: `r.block_entity_type_key(
 package is installed:
 `mod b attached <Part> to block entity type owner:press, declared by package owner; declare owner as a dependency`.
 A type that no package declares keeps the refusal `mod b attached <Part> to undeclared native block entity type owner:press`;
-when `b` lists the package named by the type's namespace as a required dependency, the refusal says that dependency does
-not declare it. With an optional dependency, the Part is skipped, without a refusal, when that package is not installed
+when `b` lists the installed package that owns the type's namespace (its id or one of its manifest `namespaces`) as a
+required dependency, the refusal says that dependency does not declare it. An optional dependency is recognised for an absent package by a type whose namespace is that package's id. Then the Part is skipped, without a refusal, when that package is not installed
 (a compatibility Part); when it is installed, the Part attaches.
 This keeps resolution independent of what else is installed. Parts of several packages on one type run in
 dispatch order (`mod_index`, then registration order), the same on every load.
