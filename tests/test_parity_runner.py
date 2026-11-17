@@ -618,6 +618,13 @@ class KnownFlakyTests(unittest.TestCase):
                          {"food": "fail", "dedicated_server": "fail"})
         self.assertEqual(len(started), 2)
 
+    def test_only_the_shard_that_fails_on_main_skips_its_retry(self):
+        results, started = self.run_harnesses({"datafix#1": ["fail", "pass"], "datafix#2": ["fail", "pass"]}, {},
+                                              fails_on_main=frozenset({"datafix#2"}))
+        self.assertEqual({name: record["status"] for name, record in results.items()},
+                         {"datafix#1": "pass", "datafix#2": "fail"})
+        self.assertEqual(sorted(label for label, _ in started), ["datafix#1", "datafix#1", "datafix#2"])
+
     def test_repeated_runs_get_no_retry(self):
         results, started = self.run_harnesses({"dedicated_server": ["pass", "fail"]}, {"dedicated_server": "timer"},
                                               rounds={"dedicated_server": 2})

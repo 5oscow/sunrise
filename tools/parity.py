@@ -1106,8 +1106,9 @@ def run(selected, state, hasher, environment_digest, executors, reuse_oracles, r
     must agree, and a harness that both passes and fails is reported as flaky and recorded as failing.
     known_flaky ({name: reason}, tools/parity_hosts.json): a harness listed there that fails its single round runs
     once more, from scratch; its record keeps `retried` (the first run's log is kept beside its own).
-    fails_on_main: harnesses (base names) that failed on the main run this one is judged against; neither retry
-    applies to them, since a pass on the retry wouldn't change that verdict."""
+    fails_on_main: harnesses that failed on the main run this one is judged against, as main named them (a shard, or
+    a harness with all its shards); neither retry applies to them, since a pass on the retry wouldn't change that
+    verdict."""
     records = state["harnesses"]
     rounds = rounds or {}
     known_flaky = known_flaky or {}
@@ -1168,10 +1169,10 @@ def run(selected, state, hasher, environment_digest, executors, reuse_oracles, r
                 queue.insert(0, label)
                 continue
             passed = record["status"] == "pass"
-            flaky_retry = rounds.get(name, 1) == 1 and base_name(name) in known_flaky \
-                and base_name(name) not in fails_on_main
+            on_main = name in fails_on_main or base_name(name) in fails_on_main
+            flaky_retry = rounds.get(name, 1) == 1 and base_name(name) in known_flaky and not on_main
             if not passed and reused and label == name and records.get(name, {}).get("status") != "fail" \
-                    and not flaky_retry and base_name(name) not in fails_on_main:
+                    and not flaky_retry and not on_main:
                 # A new failure might come from a reused oracle result: run it again from scratch. Later rounds reuse
                 # what the first just validated, so their failures count (a flaky harness). A known flaky harness
                 # gets its own retry below instead, which keeps reusing oracle results afterwards.
@@ -1681,7 +1682,7 @@ def main():
     if unknown:
         parser.error("unknown harnesses: " + ", ".join(unknown))
     fails_on_main = frozenset(args.fails_on_main.split())
-    unknown = sorted(fails_on_main - {base_name(name) for name in found})
+    unknown = sorted(fails_on_main - set(found) - {base_name(name) for name in found})
     if unknown:
         parser.error("--fails-on-main names unknown harnesses: " + ", ".join(unknown))
     if args.status:

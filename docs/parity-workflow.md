@@ -236,6 +236,13 @@ in its summary and in the CI job's summary (PR parity and parity-main), so the
 flake stays visible. No other harness gets this retry. Fix the cause, then take
 the harness off the list.
 
+`--fails-on-main NAMES` (space-separated, as main's run named them: a shard such as
+`datafix#2`, or a harness for all its shards) turns off both retries, this one and
+the rerun of a failure that reused oracle results, for harnesses that failed on the
+main run this one is judged against: a pass on the retry wouldn't change the verdict.
+A parity dispatch of `dyna-ci.yml` passes it as the `fails_on_main` input, filled
+only when that main run has already finished.
+
 The game-binary fixture audit keeps these complementary direct rule tests:
 
 - `command_harness.rs`: command feedback, styled spans and result callbacks,
