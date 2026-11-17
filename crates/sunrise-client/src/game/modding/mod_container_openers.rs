@@ -49,8 +49,6 @@ impl Game<'_> {
                 });
             counter.count = count;
             counter.range = counter.range.max(range);
-        } else if count == 0 {
-            self.mod_container_viewers.remove(&key);
         } else if let Some(counter) = self.mod_container_viewers.get_mut(&key) {
             counter.count = count;
         }
@@ -98,19 +96,30 @@ impl Game<'_> {
                 ),
             );
             let mut count = 0;
+            let mut next_range: f64 = 0.0;
             if self.mod_menu_at(pos).is_some() {
-                if let Some(host) = &self.lan {
-                    count += host
-                        .hub
-                        .guests
-                        .iter()
-                        .filter(|g| {
-                            host.hub.here(g)
-                                && !g.spectator()
-                                && g.bounds().intersects(area)
-                                && g.menu.as_ref().is_some_and(|m| m.pos == Some(pos))
-                        })
-                        .count() as u32;
+                if let Some(host) = &mut self.lan {
+                    host.hub.guests.update_all(|g| {
+                        if g.placed_in(dim)
+                            && !g.spectator()
+                            && g.bounds().intersects(area)
+                            && g.menu.as_ref().is_some_and(|m| match m.slots {
+                                sunrise_client::lan::menu::Slots::Double(a, b) => {
+                                    a == pos || b == pos
+                                }
+                                _ => m.pos == Some(pos),
+                            })
+                        {
+                            count += 1;
+                            let fallback = if g.creative() { 5.0 } else { 4.5 };
+                            let reach = g
+                                .motion
+                                .as_mut()
+                                .and_then(|m| m.attribute("minecraft:block_interaction_range").ok())
+                                .unwrap_or(fallback);
+                            next_range = next_range.max(reach);
+                        }
+                    });
                 }
                 if self.container == Some(pos)
                     && !self.spectator()
@@ -119,8 +128,13 @@ impl Game<'_> {
                         .is_some_and(|p| p.bounds.intersects(area))
                 {
                     count += 1;
+                    next_range = next_range.max(self.interaction_range(
+                        "minecraft:block_interaction_range",
+                        4.5,
+                        5.0,
+                    ));
                 }
-                count += self
+                let golems = self
                     .mobs
                     .iter()
                     .filter(|m| {
@@ -130,12 +144,17 @@ impl Game<'_> {
                             && m.bounds().intersects(area)
                     })
                     .count() as u32;
+                count += golems;
+                if golems > 0 {
+                    next_range = next_range.max(3.0);
+                }
             }
             let key = (dim, pos);
             if count == 0 {
                 self.mod_container_viewers.remove(&key);
             } else if let Some(counter) = self.mod_container_viewers.get_mut(&key) {
                 counter.count = count;
+                counter.range = next_range;
                 counter.recheck = time + 5;
             }
             // recheckOpeners uses no entity source, even on a zero crossing.

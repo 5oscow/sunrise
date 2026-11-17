@@ -115,6 +115,31 @@ mod tests {
                     Some(&("minecraft:container_close".into(), None))
                 );
                 assert!(game.mod_container_viewers.is_empty());
+
+                // Combined menus count each block entity; an ordinary close retains its source.
+                let other = (4, 64, 5);
+                game.world.set(other.0, other.1, other.2, state).unwrap();
+                let entity = game.world.block_entities.get(&pos).unwrap().clone();
+                game.world.block_entities.insert(other, entity);
+                let before = notices.lock().unwrap().len();
+                game.lan.as_mut().unwrap().hub.open_container(
+                    13,
+                    "minecraft:generic_3x3",
+                    Tag::String("box".into()),
+                    pos,
+                    Slots::Double(pos, other),
+                    vec![None; 18],
+                    None,
+                );
+                game.player_menu_opening(13);
+                assert_eq!(&notices.lock().unwrap()[before..], [(0, 1), (0, 1)]);
+                game.player_menu_closing(13);
+                assert_eq!(&notices.lock().unwrap()[before + 2..], [(1, 0), (1, 0)]);
+                assert_eq!(notices.lock().unwrap().last(), Some(&(1, 0)));
+                assert_eq!(
+                    events.lock().unwrap().last(),
+                    Some(&("minecraft:container_close".into(), Some(13)))
+                );
             });
         });
     }
