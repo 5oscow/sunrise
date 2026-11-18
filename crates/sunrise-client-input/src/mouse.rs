@@ -324,21 +324,6 @@ pub fn ease_in_out(t: f64) -> f64 {
     0.5 - 0.5 * (std::f64::consts::PI * t).cos()
 }
 
-/// `MouseHandler.grabMouse` / `releaseMouse`: the mouse position is the
-/// window's centre whenever the pointer's grab state changes, so a screen
-/// opened from gameplay starts with the cursor in the middle. A release of
-/// an already free pointer (or a grab of an already grabbed one) leaves the
-/// position where it is, as vanilla does.
-pub fn mouse_position_after_grab_change(
-    grab: bool,
-    was_grabbed: bool,
-    size: [u32; 2],
-) -> Option<winit::dpi::PhysicalPosition<f64>> {
-    (grab != was_grabbed).then(|| {
-        winit::dpi::PhysicalPosition::new(f64::from(size[0]) / 2.0, f64::from(size[1]) / 2.0)
-    })
-}
-
 /// `MacosUtil.setCtrlClickEmulatesRightClick`: with the option on (and only on
 /// macOS), a left click made with Control held is a right click, and so is
 /// its release, whatever Control does in between.
@@ -522,30 +507,6 @@ mod tests {
         assert_eq!(look.on_scroll(0.0, 0.4, false, 1.0), None);
         assert_eq!(look.on_scroll(0.0, 0.7, false, 1.0), Some((1, (0, 1))));
     }
-    #[test]
-    fn the_mouse_position_is_the_centre_when_the_grab_changes() {
-        // A grab of a free pointer and a release of a grabbed one both put
-        // the position at the window's centre (`MouseHandler.grabMouse`,
-        // `MouseHandler.releaseMouse`).
-        assert_eq!(
-            mouse_position_after_grab_change(true, false, [1920, 1080]),
-            Some(winit::dpi::PhysicalPosition::new(960.0, 540.0))
-        );
-        assert_eq!(
-            mouse_position_after_grab_change(false, true, [641, 481]),
-            Some(winit::dpi::PhysicalPosition::new(320.5, 240.5))
-        );
-        // Without a change of the grab state the position stays where it is.
-        assert_eq!(
-            mouse_position_after_grab_change(false, false, [1920, 1080]),
-            None
-        );
-        assert_eq!(
-            mouse_position_after_grab_change(true, true, [1920, 1080]),
-            None
-        );
-    }
-
     #[test]
     fn control_click_is_a_right_click_until_released() {
         let mut e = RightClickEmulation::default();

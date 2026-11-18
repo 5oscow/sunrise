@@ -100,7 +100,7 @@ fn screen_draw_receives_open_blocks_position() {
             let small = [638, 478];
             game.set_window_cursor(
                 PhysicalPosition::new(321.75, 231.75),
-                game.gui_size_for(small),
+                game.pointer_projection(small),
             );
             game.hud(small);
             game.hud([641, 481]);

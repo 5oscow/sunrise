@@ -185,13 +185,14 @@ impl Game<'_> {
             || window.inner_size().into(),
             |r| [r.config.width, r.config.height],
         );
+        let projection = self.pointer_projection(size);
+        let centre = projection.window.center();
         let [vx, vy] = self.view_at.map(f64::from);
-        let centre = winit::dpi::PhysicalPosition::new(
-            vx + f64::from(size[0]) / 2.0,
-            vy + f64::from(size[1]) / 2.0,
-        );
         let warp = |window: &Window| {
-            let _ = window.set_cursor_position(centre);
+            let _ = window.set_cursor_position(winit::dpi::PhysicalPosition::new(
+                vx + centre.x,
+                vy + centre.y,
+            ));
         };
         let was_grabbed = self.captured;
         if self.internal_grab() {
@@ -257,10 +258,11 @@ impl Game<'_> {
         if !self.internal_grab() {
             window.set_cursor_visible(!self.captured);
         }
-        if let Some(pos) =
-            sunrise_client::mouse::mouse_position_after_grab_change(capture, was_grabbed, size)
+        if let Some(pos) = projection
+            .window
+            .center_after_grab_change(capture, was_grabbed)
         {
-            self.set_window_cursor(pos, self.gui_size_for(size));
+            self.set_window_cursor(pos, projection);
         }
     }
     /// The game's pointer grab leaves the system pointer where the person at the computer has

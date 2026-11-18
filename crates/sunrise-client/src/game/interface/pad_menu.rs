@@ -584,15 +584,17 @@ impl Game<'_> {
 
     /// Send the window a pointer move to `at` (GUI pixels), as the mouse would.
     fn pad_pointer_to(&mut self, event_loop: &dyn EventLoopCtl, at: (f32, f32)) {
-        let (Some(window), Some(gui)) = (self.window.as_ref(), self.renderer_gui_size()) else {
+        let (Some(window), Some(projection)) =
+            (self.window.as_ref(), self.renderer_pointer_projection())
+        else {
             return;
         };
         let id = window.id();
         let at = (
-            at.0.clamp(0.0, gui.size[0] as f32 - 1.0),
-            at.1.clamp(0.0, gui.size[1] as f32 - 1.0),
+            at.0.clamp(0.0, projection.gui.size[0] as f32 - 1.0),
+            at.1.clamp(0.0, projection.gui.size[1] as f32 - 1.0),
         );
-        let position = gui.window_pointer(at);
+        let position = projection.window_pointer(at);
         self.pad_synthetic_event(
             event_loop,
             id,

@@ -20,6 +20,7 @@ pub(super) struct StartupMenu {
     root: PathBuf,
     cursor: (f32, f32),
     pointer: (f64, f64),
+    window_pointer_space: std::cell::OnceCell<sunrise_client::window::PointerSpace>,
     modifiers: ModifiersState,
     physical_keys: HashSet<KeyCode>,
     dragging: bool,
@@ -526,13 +527,23 @@ impl Loading {
     }
 
     fn projected_menu_pointer(&self) -> sunrise_client::window::GuiPointer {
+        use sunrise_client::window::{GuiSize, PointerProjection, PointerSpace};
         let inputs = self.settings.gui_scale_inputs();
-        let gui = sunrise_client::window::GuiSize::new(
-            self.menu_size(),
-            inputs.requested,
-            inputs.unicode,
+        let size = self.menu_size();
+        let window = self.window.as_deref().map_or_else(
+            || PointerSpace::new(size, 1.0),
+            |window| {
+                *self
+                    .menu
+                    .window_pointer_space
+                    .get_or_init(|| PointerSpace::from_window(window))
+            },
         );
-        gui.project_pointer(PhysicalPosition::new(
+        let projection = PointerProjection {
+            gui: GuiSize::new(size, inputs.requested, inputs.unicode),
+            window,
+        };
+        projection.project_pointer(PhysicalPosition::new(
             self.menu.pointer.0,
             self.menu.pointer.1,
         ))
@@ -1148,10 +1159,15 @@ impl Loading {
                 event_loop.exit();
             }
             WindowEvent::Resized(size) => {
+                self.menu.window_pointer_space.take();
                 if let Some(r) = &mut self.renderer {
                     r.resize(size.width, size.height);
                 }
                 self.apply_menu_settings();
+            }
+            WindowEvent::ScaleFactorChanged { .. } => {
+                self.menu.window_pointer_space.take();
+                self.update_menu_cursor();
             }
             WindowEvent::RedrawRequested => self.draw(),
             WindowEvent::ModifiersChanged(modifiers) => self.menu.modifiers = modifiers.state(),

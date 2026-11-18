@@ -3,7 +3,11 @@
 //! `FramerateLimiter`, the vsync present-mode choice and the fullscreen
 //! request/state pair.
 
-use winit::dpi::PhysicalPosition;
+use winit::{
+    dpi::PhysicalPosition,
+    raw_window_handle::{HasDisplayHandle, RawDisplayHandle},
+    window::Window,
+};
 
 /// `Window.calculateScale`: the largest scale that leaves at least 320x240
 /// GUI pixels, capped by `max_scale` (0 = automatic); an odd result is bumped
@@ -36,7 +40,6 @@ pub fn gui_scaled_size(framebuffer: [i32; 2], gui_scale: i32) -> [i32; 2] {
 pub struct GuiSize {
     pub scale: u32,
     pub size: [u32; 2],
-    framebuffer: [i32; 2],
 }
 
 impl GuiSize {
@@ -46,34 +49,120 @@ impl GuiSize {
         Self {
             scale: scale as u32,
             size: gui_scaled_size(framebuffer, scale).map(|v| v as u32),
-            framebuffer,
         }
+    }
+}
+
+/// The client extent in the OS coordinate space used by the pointer, and the
+/// backing scale winit applies to its events in that space.
+#[derive(Clone, Copy, Debug)]
+pub struct PointerSpace {
+    screen: [i32; 2],
+    backing_scale: f64,
+}
+
+impl PointerSpace {
+    pub fn new(physical: [u32; 2], backing_scale: f64) -> Self {
+        Self {
+            screen: physical
+                .map(|extent| ((f64::from(extent) / backing_scale).round() as i32).max(1)),
+            backing_scale,
+        }
+    }
+
+    pub fn from_window(window: &Window) -> Self {
+        // Cocoa and Wayland use points/surface units. On Win32 and X11 the
+        // pointer and extent are already in client pixels; their UI scale
+        // does not enter the pointer conversion.
+        let logical = cfg!(target_os = "macos")
+            || matches!(
+                window.display_handle().map(|h| h.as_raw()),
+                Ok(RawDisplayHandle::Wayland(_))
+            );
+        let backing_scale = if logical { window.scale_factor() } else { 1.0 };
+        Self::new(window.inner_size().into(), backing_scale)
+    }
+
+    /// `MouseHandler.grabMouse` / `releaseMouse` center in window units.
+    pub fn center(self) -> PhysicalPosition<f64> {
+        let [x, y] = self
+            .screen
+            .map(|extent| f64::from(extent) * 0.5 * self.backing_scale);
+        PhysicalPosition::new(x, y)
+    }
+
+    /// A grab of an already grabbed pointer, or a release of a free one,
+    /// leaves the pointer where it is.
+    pub fn center_after_grab_change(
+        self,
+        grab: bool,
+        was_grabbed: bool,
+    ) -> Option<PhysicalPosition<f64>> {
+        (grab != was_grabbed).then(|| self.center())
+    }
+}
+
+/// The GUI uses framebuffer-derived dimensions, but the pointer denominator
+/// is the window's screen-coordinate extent, not the rounded drawable size.
+#[derive(Clone, Copy, Debug)]
+pub struct PointerProjection {
+    pub gui: GuiSize,
+    pub window: PointerSpace,
+}
+
+impl PointerProjection {
+    fn project_axis(self, physical: f64, axis: usize) -> f64 {
+        scaled_pos(
+            physical / self.window.backing_scale,
+            self.gui.size[axis] as i32,
+            self.window.screen[axis],
+        )
     }
 
     /// `MouseHandler` projects window coordinates before dispatching mouse input.
     pub fn project_pointer(self, position: PhysicalPosition<f64>) -> GuiPointer {
         GuiPointer(
-            scaled_pos(position.x, self.size[0] as i32, self.framebuffer[0]),
-            scaled_pos(position.y, self.size[1] as i32, self.framebuffer[1]),
+            self.project_axis(position.x, 0),
+            self.project_axis(position.y, 1),
         )
+    }
+
+    /// Measure motion in the current GUI units, even if the scale changed
+    /// since the last sample. Narrow only the final delta for the hook ABI.
+    pub fn drag_delta(
+        self,
+        previous: PhysicalPosition<f64>,
+        current: PhysicalPosition<f64>,
+    ) -> [f32; 2] {
+        [
+            self.project_axis(current.x - previous.x, 0) as f32,
+            self.project_axis(current.y - previous.y, 1) as f32,
+        ]
     }
 
     /// The inverse for input given in GUI coordinates but sent as a window event.
     pub fn window_pointer(self, (x, y): (f32, f32)) -> PhysicalPosition<f64> {
         let physical = |pos: f32, axis: usize| {
-            let (screen, gui) = (self.framebuffer[axis], self.size[axis] as i32);
-            let raw = scaled_pos(f64::from(pos), screen, gui);
-            // At an exact pixel edge the inverse can round toward zero. Use the next
-            // representable physical position away from zero if the forward cast loses a pixel.
-            if (scaled_pos(raw, gui, screen) as i32).unsigned_abs() < (pos as i32).unsigned_abs() {
-                if raw.is_sign_negative() {
-                    raw.next_down()
-                } else {
-                    raw.next_up()
+            let gui = self.gui.size[axis] as i32;
+            if gui == 0 {
+                return 0.0;
+            }
+            let mut raw = scaled_pos(f64::from(pos), self.window.screen[axis], gui)
+                * self.window.backing_scale;
+            // Keep the round trip on the intended side of a hit-test edge.
+            // A negative integer instead keeps the render pixel (truncation
+            // is toward zero), even when it lies outside the window.
+            let target = f64::from(pos);
+            if pos < 0.0 && pos.fract() == 0.0 {
+                while self.project_axis(raw, axis) > target {
+                    raw = raw.next_down();
                 }
             } else {
-                raw
+                while self.project_axis(raw, axis) < target {
+                    raw = raw.next_up();
+                }
             }
+            raw
         };
         PhysicalPosition::new(physical(x, 0), physical(y, 1))
     }
@@ -84,9 +173,19 @@ impl GuiSize {
 pub struct GuiPointer(f64, f64);
 
 impl GuiPointer {
-    /// Mouse button, drag and wheel input retain their subpixel positions.
+    /// Narrow at the UI boundary without crossing a hit-test edge. For every
+    /// `f32` edge, rounding down preserves both `position >= edge` and
+    /// `position < edge`, even when the layout edge is fractional.
     pub fn subpixel(self) -> (f32, f32) {
-        (self.0 as f32, self.1 as f32)
+        let down = |value: f64| {
+            let rounded = value as f32;
+            if f64::from(rounded) > value {
+                rounded.next_down()
+            } else {
+                rounded
+            }
+        };
+        (down(self.0), down(self.1))
     }
 
     /// Screen and HUD rendering truncate the projected values, not the raw pointer.
@@ -809,18 +908,88 @@ mod tests {
     }
 
     #[test]
-    fn gui_pointer_projects_and_round_trips_at_odd_sizes() {
-        let gui = GuiSize::new([641, 481], 2, false);
+    fn the_mouse_position_is_the_centre_when_the_grab_changes() {
+        let even = PointerSpace::new([1920, 1080], 1.0);
+        let odd = PointerSpace::new([641, 481], 1.0);
         assert_eq!(
-            gui.project_pointer(PhysicalPosition::new(321.75, 231.75))
+            even.center_after_grab_change(true, false),
+            Some(PhysicalPosition::new(960.0, 540.0))
+        );
+        assert_eq!(
+            odd.center_after_grab_change(false, true),
+            Some(PhysicalPosition::new(320.5, 240.5))
+        );
+        assert_eq!(even.center_after_grab_change(false, false), None);
+        assert_eq!(even.center_after_grab_change(true, true), None);
+    }
+
+    #[test]
+    fn gui_pointer_projects_against_screen_extent_and_preserves_hit_test_edges() {
+        let size = [641, 481];
+        let gui = GuiSize::new(size, 2, false);
+        let pixel = PointerProjection {
+            gui,
+            window: PointerSpace::new(size, 1.0),
+        };
+        assert_eq!(
+            pixel
+                .project_pointer(PhysicalPosition::new(321.75, 231.75))
                 .pixel(),
             (161.0, 116.0)
         );
-        // 67 and 17 are edges where the naive inverse rounds just below the target pixel.
-        for pixel in [(160.0, 115.0), (161.0, 116.0), (67.0, 17.0), (-67.0, -17.0)] {
-            let projected = gui.project_pointer(gui.window_pointer(pixel));
-            assert_eq!(projected.pixel(), pixel);
-            assert_eq!(projected.subpixel(), pixel);
+        let just_below = pixel.project_pointer(PhysicalPosition::new(321.49844, 231.75));
+        assert_eq!(just_below.pixel().0, 160.0);
+        assert_eq!(just_below.subpixel().0, 161.0f32.next_down());
+        // 513x385 window units at 1.25x, rounded to 641x481 drawable pixels.
+        // x=257.25 in screen units is left of GUI pixel 161. Treating the
+        // raw physical pointer as a fraction of the drawable puts it on 161.
+        let scaled = PointerProjection {
+            gui,
+            window: PointerSpace::new(size, 1.25),
+        };
+        let raw = PhysicalPosition::new(321.5625, 231.75);
+        assert_eq!(pixel.project_pointer(raw).pixel().0, 161.0);
+        assert_eq!(scaled.project_pointer(raw).pixel().0, 160.0);
+        assert_eq!(
+            scaled.window.center(),
+            PhysicalPosition::new(320.625, 240.625)
+        );
+    }
+
+    #[test]
+    fn synthetic_gui_pointers_round_trip_across_window_and_gui_scales() {
+        // 1,966,080 points, with odd sizes, fractional backing factors and
+        // signed pixels. A naive inverse loses e.g. x=67 or y=17 at 641x481.
+        for framebuffer in [
+            [641, 481],
+            [853, 719],
+            [1080, 720],
+            [1920, 1080],
+            [2561, 1441],
+            [3441, 1441],
+            [3841, 2161],
+            [4097, 2291],
+        ] {
+            for gui_scale in [1, 2, 3, 4, 5, 0] {
+                let gui = GuiSize::new(framebuffer, gui_scale, false);
+                for backing_scale in [1.0, 1.25, 1.5, 1.75, 2.0] {
+                    let projection = PointerProjection {
+                        gui,
+                        window: PointerSpace::new(framebuffer, backing_scale),
+                    };
+                    for i in 0..8192 {
+                        let x = (i % gui.size[0]) as f32;
+                        let y = ((i * 173) % gui.size[1]) as f32;
+                        let point = if i % 4 == 0 { (-x, -y) } else { (x, y) };
+                        let projected =
+                            projection.project_pointer(projection.window_pointer(point));
+                        assert_eq!(projected.pixel(), point);
+                        if i % 4 != 0 {
+                            assert_eq!(projected.subpixel(), point);
+                        }
+                    }
+                }
+            }
         }
     }
 

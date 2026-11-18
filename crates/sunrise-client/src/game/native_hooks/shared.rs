@@ -999,8 +999,8 @@ impl Game<'_> {
         // left down, right down, left up sends no drag while right is still held.
         self.drag_button = pressed.then_some(button);
     }
-    pub(super) fn screen_mouse_dragged(&self, previous: (f32, f32)) -> ScreenMousePre {
-        if self.pad_synthetic_input() || self.cursor == previous {
+    pub(super) fn screen_mouse_dragged(&self, delta: [f32; 2]) -> ScreenMousePre {
+        if self.pad_synthetic_input() || delta == [0.0; 2] {
             return ScreenMousePre::NotFired;
         }
         let Some(button) = self
@@ -1013,7 +1013,6 @@ impl Game<'_> {
             return ScreenMousePre::NotFired;
         };
         let button = super::glfw_button(button);
-        let delta = [self.cursor.0 - previous.0, self.cursor.1 - previous.1];
         let mut canceled = false;
         self.native_screen_mouse_dragged_pre(
             &screen,

@@ -1083,6 +1083,7 @@ struct Game<'a> {
     cursor: (f32, f32),
     /// The raw window pointer; frames and input project it at the current GUI size.
     window_cursor: Option<winit::dpi::PhysicalPosition<f64>>,
+    window_pointer_space: std::cell::OnceCell<sunrise_client::window::PointerSpace>,
     /// The cursor icon the window shows (`widgets::take_cursor` each frame).
     cursor_icon: sunrise_client::widgets::Cursor,
     captured: bool,
@@ -4864,11 +4865,10 @@ impl Game<'_> {
     fn hud(&mut self, size: [u32; 2]) -> HudBatch {
         // Gui.extractRenderState passes integer coordinates to the HUD and screen. Keep
         // the projected fractions for input, but draw and hit-test hover at the frame's pixel.
-        let input_cursor = self.window_cursor.map(|position| {
-            let pointer = self.gui_size_for(size).project_pointer(position);
+        let pointer = self.project_window_cursor(size);
+        if let Some(pointer) = pointer {
             self.cursor = pointer.pixel();
-            pointer.subpixel()
-        });
+        }
         // Off a world (title, options, Win, a prompt before joining) the HUD shows nothing to
         // keep clear of; `hud_layers` fills it in once the world's HUD draws.
         let gui = HudBatch::new(size, self.settings.gui_scale_inputs());
@@ -4901,8 +4901,13 @@ impl Game<'_> {
         self.frame_graph
             .draw(self.settings.sunrise.overlay, &mut batch, &self.gui.atlas);
         self.draw_pad_over_hud(&mut batch);
-        if let Some(pointer) = input_cursor {
-            self.cursor = pointer;
+        if let Some(pointer) = pointer {
+            debug_assert_eq!(
+                self.cursor,
+                pointer.pixel(),
+                "drawing changed the input cursor"
+            );
+            self.cursor = pointer.subpixel();
         }
         batch
     }
@@ -8170,16 +8175,19 @@ impl Game<'_> {
                         screen_info::tr("upgradeWorld.title", &[]),
                     )
                 });
+                let cursor = self
+                    .renderer
+                    .as_ref()
+                    .and_then(|r| self.project_window_cursor([r.config.width, r.config.height]))
+                    .map_or(self.cursor, |p| p.pixel());
                 if let Some(renderer) = &mut self.renderer {
-                    let mut hud = HudBatch::new(
-                        [renderer.config.width, renderer.config.height],
-                        self.settings.gui_scale_inputs(),
-                    );
+                    let size = [renderer.config.width, renderer.config.height];
+                    let mut hud = HudBatch::new(size, self.settings.gui_scale_inputs());
                     sunrise_client::level_loading::draw_file_fixer(
                         &mut hud,
                         &self.gui.atlas,
                         upgrade,
-                        self.cursor,
+                        cursor,
                     );
                     pr.lap("pr_loading");
                     drop(prepare);
@@ -9064,30 +9072,54 @@ fn autosave_interval(rate: f32) -> i64 {
 /// winit's events for a window's game, with any loop: a headless client (#4951) has no
 /// winit loop and calls these from its own.
 impl Game<'_> {
-    fn gui_size_for(&self, framebuffer: [u32; 2]) -> sunrise_client::window::GuiSize {
+    fn pointer_projection(
+        &self,
+        framebuffer: [u32; 2],
+    ) -> sunrise_client::window::PointerProjection {
+        use sunrise_client::window::{GuiSize, PointerProjection, PointerSpace};
         let inputs = self.settings.gui_scale_inputs();
-        sunrise_client::window::GuiSize::new(framebuffer, inputs.requested, inputs.unicode)
+        let window = match self.window.as_deref() {
+            // Split panes receive already-local positions. They have no separate OS window.
+            Some(window) if !self.split_window => *self
+                .window_pointer_space
+                .get_or_init(|| PointerSpace::from_window(window)),
+            _ => PointerSpace::new(framebuffer, 1.0),
+        };
+        PointerProjection {
+            gui: GuiSize::new(framebuffer, inputs.requested, inputs.unicode),
+            window,
+        }
     }
 
-    fn renderer_gui_size(&self) -> Option<sunrise_client::window::GuiSize> {
+    fn renderer_pointer_projection(&self) -> Option<sunrise_client::window::PointerProjection> {
         let r = self.renderer.as_ref()?;
-        Some(self.gui_size_for([r.config.width, r.config.height]))
+        Some(self.pointer_projection([r.config.width, r.config.height]))
+    }
+
+    fn project_window_cursor(
+        &self,
+        framebuffer: [u32; 2],
+    ) -> Option<sunrise_client::window::GuiPointer> {
+        self.window_cursor.map(|position| {
+            self.pointer_projection(framebuffer)
+                .project_pointer(position)
+        })
     }
 
     fn set_window_cursor(
         &mut self,
         position: winit::dpi::PhysicalPosition<f64>,
-        gui: sunrise_client::window::GuiSize,
+        projection: sunrise_client::window::PointerProjection,
     ) {
         self.window_cursor = Some(position);
-        self.cursor = gui.project_pointer(position).subpixel();
+        self.cursor = projection.project_pointer(position).subpixel();
     }
 
     fn refresh_window_cursor(&mut self) {
         if let Some(position) = self.window_cursor
-            && let Some(gui) = self.renderer_gui_size()
+            && let Some(projection) = self.renderer_pointer_projection()
         {
-            self.cursor = gui.project_pointer(position).subpixel();
+            self.cursor = projection.project_pointer(position).subpixel();
         }
     }
 
@@ -9099,6 +9131,12 @@ impl Game<'_> {
     /// it a handler both can call and a `gamepad::Route` (screenshot and fullscreen do this). A
     /// screen's own raw keys, text and mods' key hooks stay raw on purpose.
     fn handle_window_event_inner(&mut self, event_loop: &dyn EventLoopCtl, mut event: WindowEvent) {
+        if matches!(
+            event,
+            WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. }
+        ) {
+            self.window_pointer_space.take();
+        }
         let pressed = match &event {
             WindowEvent::KeyboardInput { event, .. } => {
                 event.state == ElementState::Pressed && !event.repeat
@@ -9252,8 +9290,8 @@ impl Game<'_> {
             let upgrade = starting.handle.upgrade();
             match &event {
                 WindowEvent::CursorMoved { position, .. } => {
-                    if let Some(gui) = self.renderer_gui_size() {
-                        self.set_window_cursor(*position, gui);
+                    if let Some(projection) = self.renderer_pointer_projection() {
+                        self.set_window_cursor(*position, projection);
                     }
                 }
                 WindowEvent::MouseInput {
@@ -9555,14 +9593,16 @@ impl Game<'_> {
                 WindowEvent::CursorMoved { position, .. } => {
                     if let Some(r) = &self.renderer {
                         let size = [r.config.width, r.config.height];
-                        let gui = self.gui_size_for(size);
-                        let previous = self.cursor;
-                        self.set_window_cursor(position, gui);
-                        let [w, h] = gui.size.map(|v| v as f32);
+                        let projection = self.pointer_projection(size);
+                        let delta = self.window_cursor.map_or([0.0; 2], |previous| {
+                            projection.drag_delta(previous, position)
+                        });
+                        self.set_window_cursor(position, projection);
+                        let [w, h] = projection.gui.size.map(|v| v as f32);
                         if self.studio_mouse_dragged(w) {
                             return Ok(());
                         }
-                        match self.screen_mouse_dragged(previous) {
+                        match self.screen_mouse_dragged(delta) {
                             native_hooks::ScreenMousePre::Canceled => return Ok(()),
                             native_hooks::ScreenMousePre::Passed(post) => mouse_post = Some(post),
                             native_hooks::ScreenMousePre::NotFired => {}
@@ -10799,6 +10839,7 @@ impl<'a> Game<'a> {
             right: false,
             cursor: (0.0, 0.0),
             window_cursor: None,
+            window_pointer_space: std::cell::OnceCell::new(),
             cursor_icon: sunrise_client::widgets::Cursor::Arrow,
             captured: false,
             capture_mode: None,

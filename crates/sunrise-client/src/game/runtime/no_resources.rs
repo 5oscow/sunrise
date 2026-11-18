@@ -13,6 +13,7 @@ struct Missing {
     screen: NoResources,
     /// The pointer in physical pixels.
     pointer: PhysicalPosition<f64>,
+    window_pointer_space: std::cell::OnceCell<sunrise_client::window::PointerSpace>,
     api: sunrise_client::graphics::GraphicsApi,
     settings: Settings,
     error: Option<Box<dyn std::error::Error>>,
@@ -37,6 +38,7 @@ pub(super) fn show(looked_in: &std::path::Path, settings: &Settings) -> Result<(
         },
         screen: NoResources::new(looked_in, sunrise_hooks::engine::get_the_game()),
         pointer: PhysicalPosition::new(0.0, 0.0),
+        window_pointer_space: std::cell::OnceCell::new(),
         api: settings.sunrise.api,
         settings: settings.clone(),
         error: None,
@@ -54,10 +56,22 @@ impl Missing {
     }
 
     fn projected_pointer(&self) -> sunrise_client::window::GuiPointer {
+        use sunrise_client::window::{GuiSize, PointerProjection, PointerSpace};
         let inputs = self.settings.gui_scale_inputs();
-        let gui =
-            sunrise_client::window::GuiSize::new(self.size(), inputs.requested, inputs.unicode);
-        gui.project_pointer(self.pointer)
+        let size = self.size();
+        let window = self.window.as_deref().map_or_else(
+            || PointerSpace::new(size, 1.0),
+            |window| {
+                *self
+                    .window_pointer_space
+                    .get_or_init(|| PointerSpace::from_window(window))
+            },
+        );
+        PointerProjection {
+            gui: GuiSize::new(size, inputs.requested, inputs.unicode),
+            window,
+        }
+        .project_pointer(self.pointer)
     }
 
     /// `f` over a Ui of the window's size, the cursor where the pointer is.
@@ -146,6 +160,12 @@ impl ApplicationHandler for Missing {
         let Some(window) = self.window.clone().filter(|w| w.id() == id) else {
             return;
         };
+        if matches!(
+            event,
+            WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. }
+        ) {
+            self.window_pointer_space.take();
+        }
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => {

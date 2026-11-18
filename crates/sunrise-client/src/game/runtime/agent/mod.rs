@@ -1059,10 +1059,12 @@ impl Game<'_> {
         button: MouseButton,
     ) -> Result<()> {
         let id = self.window.as_ref().ok_or("no window yet")?.id();
-        let gui = self.renderer_gui_size().ok_or("no renderer yet")?;
+        let projection = self
+            .renderer_pointer_projection()
+            .ok_or("no renderer yet")?;
         let device_id = DeviceId::dummy();
         for (i, &point) in points.iter().enumerate() {
-            let position = gui.window_pointer(point);
+            let position = projection.window_pointer(point);
             self.handle_window_event(
                 event_loop,
                 id,
@@ -1649,9 +1651,11 @@ impl Game<'_> {
                 let (x, y) = (a.f64(0, "X")? as f32, a.f64(1, "Y")? as f32);
                 let steps = a.f64(2, "STEPS")? as f32;
                 let id = self.window.as_ref().ok_or("no window yet")?.id();
-                let gui = self.renderer_gui_size().ok_or("no renderer yet")?;
+                let projection = self
+                    .renderer_pointer_projection()
+                    .ok_or("no renderer yet")?;
                 let device_id = DeviceId::dummy();
-                let position = gui.window_pointer((x, y));
+                let position = projection.window_pointer((x, y));
                 self.handle_window_event(
                     event_loop,
                     id,
