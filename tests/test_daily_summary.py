@@ -360,6 +360,45 @@ class DailySummaryTests(unittest.TestCase):
             self.assertIn(part, issue["body"])
         self.assertFalse(any("tags" in path for _, path, _ in api.writes), "a red run never moves the tag")
 
+    def test_a_failed_windows_row_files_a_named_issue_and_a_passing_row_closes_its_issue(self):
+        name = "windows-runtime-leases / runtime-leases"
+        jobs = [item for item in GREEN_JOBS if item["name"] != name] + [
+            job(name, "failure", ["The Windows-only daily rows"])]
+        source = "crates/sunrise-prepare/tests/exporters.rs:8:3"
+        report = {"windows_rows": True, "problems": [failure("broken", source, package="sunrise-prepare")],
+                  "passed": [{"package": "sunrise-prepare", "test": "fixed"}], "incomplete": []}
+        api = Api(jobs, issues=[{"number": 9, "title": "Daily: sunrise-prepare fixed"}])
+        _, out = self.run_summary(api, [report], results=dict(LEGS, **{"windows-runtime-leases": {"result": "failure"}}),
+                                  merged=[15])
+        self.assertIn("green=false", out)
+        created = [body for method, path, body in api.writes if (method, path) == ("POST", "issues")]
+        self.assertEqual([body["title"] for body in created], ["Daily: sunrise-prepare broken"])
+        for part in (f"`{source}`", "#15", f"`{name}`"):
+            self.assertIn(part, created[0]["body"])
+        self.assertIn(("PATCH", "issues/9", {"state": "closed", "state_reason": "completed"}), api.writes)
+
+    def test_a_windows_build_failure_outside_the_rows_files_a_job_issue(self):
+        name = "windows-runtime-leases / runtime-leases"
+        jobs = [item for item in GREEN_JOBS if item["name"] != name] + [job(name, "failure", ["Build the actor"])]
+        api = Api(jobs)
+        _, out = self.run_summary(api, results=dict(LEGS, **{"windows-runtime-leases": {"result": "failure"}}))
+        self.assertIn("green=false", out)
+        created = [body for method, path, body in api.writes if (method, path) == ("POST", "issues")]
+        self.assertEqual([body["title"] for body in created], [f"Daily: {name} did not complete"])
+        self.assertIn("`Build the actor`", created[0]["body"])
+
+    def test_a_windows_row_build_error_keeps_its_exit_status_in_the_job_issue(self):
+        name = "windows-runtime-leases / runtime-leases"
+        jobs = [item for item in GREEN_JOBS if item["name"] != name] + [
+            job(name, "failure", ["The Windows-only daily rows"])]
+        report = {"windows_rows": True, "problems": [], "passed": [], "incomplete": [
+            {"shard": "sunrise-prepare", "reason": "failed without a failed test", "cargo_exit": 101}]}
+        api = Api(jobs)
+        self.run_summary(api, [report], results=dict(LEGS, **{"windows-runtime-leases": {"result": "failure"}}))
+        created = [body for method, path, body in api.writes if (method, path) == ("POST", "issues")]
+        self.assertEqual([body["title"] for body in created], [f"Daily: {name} did not complete"])
+        self.assertIn("(cargo exit 101)", created[0]["body"])
+
     def test_an_open_issue_gets_a_comment_not_a_duplicate(self):
         jobs = [job("shards / ignored-tests-shards (sunrise-world)", "failure", ["Run"])] + GREEN_JOBS[2:]
         issues = [{"number": n, "title": f"filler {n}"} for n in range(150)]
@@ -861,6 +900,24 @@ class DailyWorkflowTests(unittest.TestCase):
         self.assertLess(order.index("Exactly the assets a Nightly needs"), order.index("Release sdk-<sha>"))
         hand = yaml.load((ROOT / ".github/workflows/prebuilt-game.yml").read_text(), Loader=yaml.BaseLoader)
         self.assertEqual(hand["jobs"]["publish"]["with"]["publish"], "${{ github.ref == 'refs/heads/main' }}")
+
+    def test_the_windows_report_is_uploaded_even_on_failure_and_downloaded_by_the_summary(self):
+        import fnmatch
+
+        from tests.test_ci_concurrency import ROOT, yaml
+        daily_job, windows_job = summary.WINDOWS_ROWS_JOB.split(" / ")
+        workflow_path = ROOT / self.workflow["jobs"][daily_job]["uses"]
+        workflow = yaml.safe_load(workflow_path.read_text())
+        steps = workflow["jobs"][windows_job]["steps"]
+        upload = next(step for step in steps if step.get("uses", "").startswith("actions/upload-artifact@"))
+        self.assertEqual(upload["if"], "always()")
+        filename = upload["with"]["path"].removeprefix("${{ runner.temp }}/")
+        self.assertTrue(filename.endswith(".json"))
+        run = next(step for step in steps if step.get("name") == summary.WINDOWS_ROWS_STEP)
+        self.assertIn(f'--report "$RUNNER_TEMP/{filename}"', run["run"])
+        download = next(step for step in self.workflow["jobs"]["summary"]["steps"]
+                        if step.get("uses", "").startswith("actions/download-artifact@"))
+        self.assertTrue(fnmatch.fnmatchcase(upload["with"]["name"], download["with"]["pattern"]))
 
     def test_parity_holds_the_nightly_through_the_summary_but_not_sdk_publish(self):
         jobs = self.workflow["jobs"]

@@ -130,6 +130,7 @@ fn expand(mut implementation: ItemImpl, export: bool) -> TokenStream {
         "BlockEntityPart" => Some("block_entity_subscribed"),
         "ItemPart" => Some("item_subscribed"),
         "MenuPart" => Some("menu_subscribed"),
+        "MobEffectPart" => Some("effect_subscribed"),
         "FluidPart" => Some("fluid_subscribed"),
         "EntityPart" => Some("entity_subscribed"),
         _ => {

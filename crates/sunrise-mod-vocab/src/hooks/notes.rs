@@ -1606,15 +1606,8 @@ one, where vanilla gives the `by` one.
   `fluids`, so they survive restarts, and the block's own tick reads them there. Other blocks and mods reach them, and a
   cauldron's, through the [`FLUIDS` capability](../concepts/capabilities/block-fluids.md).
 
-- What the mob effects of a content mod ([installing and using mods](../start/installing.md)) do, named after vanilla's `MobEffect` methods,
-  or NeoForge's event where it has one. On the server, each tick a player or a mob has one,
-  `should_apply_effect_tick_this_tick` says whether it acts (vanilla's base answer is no) and
-  `native_apply_effect_tick` acts, and may end it, before it counts down, as in `MobEffectInstance.tickServer`. These
-  two take `&self`: during a mob's tick the mob world borrows the game, so `&mut self` would alias that borrow, and the
-  game doesn't hold the mobs being ticked, nor the player's effects. `on_effect_added` hears it given to an
-  entity that didn't have it, and `mob_effect_added` (NeoForge's `MobEffectEvent.Added`) every time it is given.
-  A mob is its `Entity.getId`; a player is None, with their state swapped in (`host.players().acting_player`). Vanilla's effects
-  never reach them.
+- A content effect's tick behaviour belongs to its [`MobEffectPart`](../how-to/entities/effect-ticks.md), not global listeners.
+  `on_effect_added` hears a content effect given to an entity that did not have it; `mob_effect_added` (NeoForge's `MobEffectEvent.Added`) hears every addition.
   The three moments around them cover every effect, vanilla's included: `mob_effect_applicable`
   (NeoForge's `MobEffectEvent.Applicable`, vanilla's `canBeAffected`) answers whether an effect can land — the first
   mod to answer `Allow` or `Deny` overrides the vanilla tag check, and an unanswered hook falls

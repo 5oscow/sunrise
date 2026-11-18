@@ -70,6 +70,7 @@ pub enum PartKind {
     BlockEntity,
     Item,
     Menu,
+    Effect,
     Fluid,
     Entity,
 }

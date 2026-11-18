@@ -3,6 +3,8 @@ import importlib.util
 import json
 import subprocess
 import sys
+import tempfile
+import textwrap
 import unittest
 import unittest.mock
 from pathlib import Path
@@ -26,7 +28,7 @@ class DailyRowsCoverage(unittest.TestCase):
                "sunrise-client": {"lib", "bin:sunrise-client", "test:lan_bot"}}
 
     def test_the_committed_rows_all_run_in_the_full_daily_matrix(self):
-        rows = ignored_tests.daily_rows()
+        rows = [entry for entry in ignored_tests.listed_entries() if entry.mark == "daily"]
         self.assertTrue(rows)
         self.assertEqual(check.daily_problems(rows, ignored_shards.workspace_targets(), FULL), [])
 
@@ -56,6 +58,15 @@ class DailyRowsCoverage(unittest.TestCase):
             self.assertIn("no workflow runs the tests that need SUNRISE_NO_SUCH_INPUT",
                           check.daily_problems(rows, self.TARGETS, FULL)[0])
 
+    def test_a_windows_row_is_run_by_the_windows_job_not_a_linux_leg(self):
+        rows = [ignored_tests.Row("sunrise-relay", "b", "test:tunnel", "daily", "daily-sunrise-relay.txt", "windows")]
+        self.assertEqual(ignored_tests.daily_rows_groups(rows), {})
+        # Accepted with only the shards and the daily-rows leg, as a row no Linux leg runs would not be.
+        self.assertEqual(check.daily_problems(rows, self.TARGETS, FULL), [])
+        self.assertEqual(check.daily_problems(rows, self.TARGETS, []), [])
+        with unittest.mock.patch.object(check, "windows_daily_runs", return_value=False):
+            self.assertIn("daily.yml must call", check.daily_problems(rows, self.TARGETS, FULL)[0])
+
     def test_a_row_must_name_a_package_and_one_of_its_targets(self):
         problems = check.daily_problems([row("sunrise-nothing", "a"), row("sunrise-relay", "b", "test:missing")],
                                         self.TARGETS, FULL)
@@ -70,6 +81,63 @@ class DailyRowsCoverage(unittest.TestCase):
             in_shard = ignored_tests.shard_runs(entry.package, entry.reference)
             in_leg = entry.test in groups.get((entry.package, entry.reference), ())
             self.assertNotEqual(in_shard, in_leg, entry)
+
+
+class WindowsDailyWorkflow(unittest.TestCase):
+    DAILY = textwrap.dedent("""\
+        jobs:
+          windows-runtime-leases:
+            uses: ./.github/workflows/launcher-windows-check.yml
+            with:
+              commit: ${{ needs.resolve.outputs.commit }}
+        """)
+    COMMAND = 'python tools/ci/ignored_tests.py --windows-rows --run --report "$RUNNER_TEMP/daily-report.json"'
+    WINDOWS = textwrap.dedent(f"""\
+        on:
+          workflow_call:
+        jobs:
+          runtime-leases:
+            if: inputs.commit != '' || github.event_name == 'workflow_dispatch'
+            runs-on: windows-latest
+            steps:
+              - run: {COMMAND}
+        """)
+
+    def wired(self, *, daily=DAILY, windows=WINDOWS, unrelated=None):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            workflows = root / ".github/workflows"
+            workflows.mkdir(parents=True)
+            (workflows / "daily.yml").write_text(daily)
+            (workflows / "launcher-windows-check.yml").write_text(windows)
+            if unrelated is not None:
+                (workflows / "unrelated.yml").write_text(unrelated)
+            return check.windows_daily_runs(root)
+
+    def test_the_daily_calls_the_enabled_windows_runner(self):
+        self.assertTrue(self.wired())
+
+    def test_a_shell_comment_is_not_a_runner(self):
+        self.assertFalse(self.wired(windows=self.WINDOWS.replace(f"run: {self.COMMAND}",
+                                                                f"run: |\n          # {self.COMMAND}")))
+
+    def test_a_runner_in_an_uncalled_workflow_does_not_count(self):
+        self.assertFalse(self.wired(windows=self.WINDOWS.replace(self.COMMAND, "echo skipped"), unrelated=self.WINDOWS))
+
+    def test_a_missing_uses_does_not_count(self):
+        self.assertFalse(self.wired(daily=self.DAILY.replace("uses: ./.github/workflows/launcher-windows-check.yml",
+                                                           "# uses: ./.github/workflows/launcher-windows-check.yml")))
+
+    def test_a_disabled_job_or_step_does_not_count(self):
+        for mutation in (self.WINDOWS.replace("- run:", "- if: ${{ false }}\n        run:"),
+                         self.WINDOWS.replace("inputs.commit != '' || github.event_name == 'workflow_dispatch'",
+                                              "false")):
+            with self.subTest(workflow=mutation):
+                self.assertFalse(self.wired(windows=mutation))
+
+    def test_a_list_only_invocation_does_not_count(self):
+        self.assertFalse(self.wired(windows=self.WINDOWS.replace(self.COMMAND,
+                                                                "python tools/ci/ignored_tests.py --windows-rows")))
 
 
 class DailyRowsMatchTheSource(unittest.TestCase):
