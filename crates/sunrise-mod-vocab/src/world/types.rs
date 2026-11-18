@@ -1334,10 +1334,10 @@ pub trait LevelHost {
     fn can_see_sky(&self, _pos: [i32; 3]) -> Option<bool> {
         None
     }
-    /// `BlockGetter.getBlockEntity` in this level. None if absent, unloaded or out for its
-    /// own tick. Never loads chunks or opens loot containers. Clients return their local
-    /// block entity handle, not unsynced server contents. Owning game thread only, never
-    /// reachable from a worker-thread hook body.
+    /// `BlockGetter.getBlockEntity` in this level. None if absent, unloaded, outside the
+    /// build height, or out for its own tick. Never loads chunks or opens loot containers.
+    /// Clients return their local block entity handle, not unsynced server contents. Owning
+    /// game thread only, never reachable from a worker-thread hook body.
     fn block_entity(&self, _pos: [i32; 3]) -> Option<crate::BlockEntityRef> {
         None
     }

@@ -847,6 +847,8 @@ pub(super) fn part_snapshot(
     }))
 }
 
+/// The handle of the loaded block entity at `pos`, without loading a chunk or taking one
+/// that is out of the world for its own tick.
 pub(super) fn world_block_entity(
     world: &World,
     level: LevelRef,
@@ -860,7 +862,7 @@ pub(super) fn world_block_entity(
 }
 
 fn loaded_block_entity(world: &World, [x, y, z]: [i32; 3]) -> Option<&BlockEntity> {
-    if !world.loaded(x, z) {
+    if !world.loaded(x, z) || !world.shape.contains_y(y) {
         return None;
     }
     world
@@ -915,6 +917,32 @@ mod tests {
             };
             game.world.block_entities.insert(pos, holder());
             let original = game.block_entity(level, [1, 64, 1]).unwrap();
+            assert_eq!(original.merge_data(game, compound("{count:3}")), Ok(true));
+            game.with_level(|_, host, ticks| {
+                let wrapped = super::super::mod_api_host::LevelTicks::new(&*host, ticks);
+                assert_eq!(
+                    mod_api::LevelHost::block_entity(&wrapped, [1, 64, 1]),
+                    mod_api::LevelHost::block_entity(&*host, [1, 64, 1]),
+                );
+                assert_eq!(
+                    mod_api::LevelHost::block_entity(&wrapped, [1, 64, 1]),
+                    Some(original),
+                );
+                assert_eq!(
+                    mod_api::LevelHost::block_entity(&wrapped, [1, 400, 1]),
+                    None,
+                );
+                // The ticks wrapper hands the same reads through, saved data included.
+                let data = mod_api::LevelHost::block_entity_data(&*host, original);
+                assert_eq!(
+                    data.as_ref().and_then(|data| data.get(&"count".into())),
+                    Some(&mod_api::Tag::Int(3))
+                );
+                assert_eq!(
+                    mod_api::LevelHost::block_entity_data(&wrapped, original),
+                    data,
+                );
+            });
             assert_eq!(original.set_data_slots(game, vec![7]), Ok(true));
             let mut tentative = None;
             let _: Result<(), ()> = game.transaction(|game, _| {
@@ -986,6 +1014,16 @@ mod tests {
             .block_entities
             .insert(key, BlockEntity::Mod(Box::default()));
         assert!(loaded_block_entity(&world, pos).is_none());
+        let outside_pos = [-1, world.shape.max_y(), 0];
+        world
+            .block_entities
+            .insert((-1, outside_pos[1], 0), BlockEntity::DaylightDetector);
+        assert!(loaded_block_entity(&world, outside_pos).is_none());
+        let below_pos = [-1, world.shape.min_y - 1, 0];
+        world
+            .block_entities
+            .insert((-1, below_pos[1], 0), BlockEntity::DaylightDetector);
+        assert!(loaded_block_entity(&world, below_pos).is_none());
     }
 
     fn compound(snbt: &str) -> Compound {
