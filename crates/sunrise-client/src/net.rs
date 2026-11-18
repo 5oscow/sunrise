@@ -7,6 +7,7 @@
 //! (crate::auth): the login joins the server through the session service and
 //! encrypts the connection (ClientHandshakePacketListenerImpl.handleHello).
 use crate::auth::AuthSession;
+mod chunk_batch;
 mod held_packets;
 pub mod ingress;
 mod known_packs;
@@ -1135,6 +1136,8 @@ fn receive_play(
     recorder: &RecorderSlot,
     payloads: &Arc<crate::raw_payloads::Transport>,
 ) -> Result<Reason, Reason> {
+    // ClientPacketListener.chunkBatchSizeCalculator.
+    let mut batch = chunk_batch::ChunkBatchSize::default();
     loop {
         let (id, payload) = reader
             .recv()
@@ -1171,6 +1174,18 @@ fn receive_play(
         };
         match packet {
             play::Clientbound::KeepAlive(k) => reply(play::Serverbound::KeepAlive(k)),
+            // ClientPacketListener.handleChunkBatchStart and handleChunkBatchFinished run on the network
+            // thread (no ensureRunningOnSameThread): each batch is timed as it arrives and answered at once,
+            // before what waits for the game thread, with the rate ChunkBatchSizeCalculator derives.
+            play::Clientbound::ChunkBatchStart(_) => batch.on_batch_start(),
+            play::Clientbound::ChunkBatchFinished(p) => {
+                batch.on_batch_finished(p.size);
+                reply(play::Serverbound::ChunkBatchReceived(
+                    play::ChunkBatchReceived {
+                        chunks_per_tick: batch.desired_chunks_per_tick(),
+                    },
+                ));
+            }
             play::Clientbound::BundleDelimiter(_) => {}
             play::Clientbound::ResourcePackPush(p) => {
                 let _ = send.send(Event::PackPush(p));
