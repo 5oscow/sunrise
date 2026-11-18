@@ -701,7 +701,9 @@ fn refuse_primary_namespace_claims(
         .iter()
         .map(|manifest| manifest.id.as_str())
         .collect();
-    primary.extend(mod_api::__private::installed_code_ids());
+    for id in mod_api::__private::installed_code_ids() {
+        primary.insert(id);
+    }
     for manifest in manifests {
         if let Some(namespace) = manifest
             .namespaces
