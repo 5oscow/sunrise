@@ -74,26 +74,18 @@ impl Game<'_> {
                 let root = home.join("server-terrain");
                 let dir = terrain::level_dir(&root, address, remote.hashed_seed, &remote.level);
                 self.lod_level = Some(remote.level.clone());
-                // Past them, the server's BlueMap, if the player named it or
-                // lets Sunrise look for it (on the BlueMap worker).
+                // Past them, the server's BlueMap, if the player named it.
                 let maps = root.join(terrain::server_folder(address)).join("BlueMap");
                 let settings = &self.settings.sunrise.blue_map;
-                let blue_map = sunrise_client::bluemap_detect::source(
-                    settings,
-                    address,
-                    &maps,
-                    std::time::SystemTime::now(),
-                )
-                .map(|source| {
-                    use sunrise_client::{bluemap, bluemap_detect::Source};
+                let blue_map = settings.server(address).map(|server| {
+                    use sunrise_client::bluemap;
                     // The map's address only at debug: logs land in crash reports.
                     log::info!("Sunrise: far terrain also draws {}'s BlueMap", remote.level);
-                    if let Source::Url { url, .. } = &source {
-                        log::debug!("Sunrise: BlueMap at {url}");
-                    }
-                    let map = Arc::new(bluemap::BlueMap::from_source(
-                        source,
+                    log::debug!("Sunrise: BlueMap at {}", server.url);
+                    let map = Arc::new(bluemap::BlueMap::new(
+                        &server.url,
                         &remote.level,
+                        server.maps.clone(),
                         maps,
                         settings.radius_blocks(),
                         bluemap::Palette::from_game(self.pack.assets.registry, self.res.biomes()),
