@@ -624,12 +624,7 @@ impl Game<'_> {
             item: stack.item.to_string(),
             can_use_game_master_blocks: self.can_use_game_master_blocks(),
         };
-        let outcome = if self.player_place_canceled(&ctx) {
-            PlaceOutcome::Failed
-        } else {
-            self.with_level(|b, level, ticks| b.place_block(level, ticks, &ctx))
-        };
-        let PlaceOutcome::Placed { pos, state } = outcome else {
+        let Some((resolved, state)) = self.place_item_block(&ctx, true) else {
             self.process_level_events()?;
             // BlockItem.useOn: a consumable that could not be placed is used,
             // which ItemStack.useOn counts as a use of the item.
@@ -641,6 +636,7 @@ impl Game<'_> {
             }
             return Ok(true);
         };
+        let pos = resolved.pos;
         let target = [pos.x, pos.y, pos.z];
         let game_master = self.can_use_game_master_blocks();
         let state = self.lectern_placed(target, state, &stack, game_master)?;
@@ -673,7 +669,7 @@ impl Game<'_> {
             }
         }
         let placer = self.native_acting_player();
-        self.block_item_placed(&stack, placer, pos, &ctx);
+        self.block_item_placed(&stack, placer, &resolved);
         // BlockItem.place's SUCCESS: the client swings with its own prediction.
         self.swing_arm_predicted();
         // BlockItem.place's sound is among the level events;

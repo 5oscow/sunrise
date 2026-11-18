@@ -8247,6 +8247,13 @@ impl Game<'_> {
         }
     }
 
+    /// The idle controller guide cannot know what these Parts will decide on a click.
+    pub(super) fn can_hint_block_placement(stack: &ItemStack) -> bool {
+        use mod_api::{__private::item_listens, HookId};
+        !item_listens(HookId::PlacementContext, &stack.item)
+            && !item_listens(HookId::MustSurvive, &stack.item)
+    }
+
     /// Run BlockItem.place on a disposable level: where it placed and the
     /// blocks it set. The real level supplies collision shapes and
     /// building-blocking entities; random draws, scheduled ticks and events
@@ -8278,10 +8285,10 @@ impl Game<'_> {
                 &mut sunrise_world::level::Ticks::default(),
                 &ctx,
             ) {
-                sunrise_world::level::PlaceOutcome::Placed { pos, .. } => {
+                PlaceOutcome::Placed { pos, .. } => {
                     Some((pos, level.changed.into_iter().collect()))
                 }
-                sunrise_world::level::PlaceOutcome::Failed => None,
+                PlaceOutcome::Failed => None,
             }
         })
     }

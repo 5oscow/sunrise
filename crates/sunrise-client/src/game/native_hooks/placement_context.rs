@@ -2,7 +2,6 @@ use super::*;
 
 impl GameLevel<'_> {
     /// `BlockItem.updatePlacementContext`, keyed by the placing item.
-    #[allow(clippy::option_option)]
     pub(in crate::game) fn native_placement_context(
         &self,
         item: &str,

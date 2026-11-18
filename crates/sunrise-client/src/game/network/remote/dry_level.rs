@@ -112,7 +112,6 @@ impl sunrise_world::level::LevelAccess for DryLevel<'_> {
     ) -> Option<bool> {
         self.base.is_valid_bonemeal_target(pos, state)
     }
-    #[allow(clippy::option_option)]
     fn placement_context(
         &self,
         item: &str,

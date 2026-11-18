@@ -191,7 +191,10 @@ skips it, `Some(true)` requires it, and `None` keeps vanilla (scaffolding false,
 true). Standing/wall items retain their own unconditional candidate-survival checks. Entity
 obstruction is still checked. Both hooks run on both sides with
 a read-only `LevelSide`, dispatched by item id. These events have no stack yet: they decide from
-the item and level, not held components. Neither changes the sides of the block placement or
+the item and level, not held components. Player and dispenser placement offer the resolved decision
+once to `entity_place`; if a listener changes its inputs, the placement is refused rather than
+retargeted. The veto's placement neighbour and the post-placement notice use the resolved face,
+and the notice uses the resolved click location. Neither changes the sides of the block placement or
 survival hooks.
 
 `LevelHost` has no random access: a draw from a read-only hook inside a level write would shift the level's random sequence away from vanilla's order. A hook that may draw is given a `LevelRandomHost`.

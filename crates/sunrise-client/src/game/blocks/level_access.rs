@@ -626,7 +626,6 @@ impl LevelAccess for GameLevel<'_> {
             );
         }
     }
-    #[allow(clippy::option_option)]
     fn placement_context(
         &self,
         item: &str,
@@ -639,8 +638,12 @@ impl LevelAccess for GameLevel<'_> {
                 if !snapshot.hit.iter().all(|n| n.is_finite())
                     || !snapshot.yaw.is_finite()
                     || !snapshot.pitch.is_finite()
-                    || snapshot.item.and_then(mod_api::__private::item_key_id) != Some(item)
                 {
+                    log::warn!("placement_context: refused {item}: nonfinite hit or rotation");
+                    return None;
+                }
+                if snapshot.item.and_then(mod_api::__private::item_key_id) != Some(item) {
+                    log::warn!("placement_context: refused {item}: replacement changed the item");
                     return None;
                 }
                 Some(PlacementContext {

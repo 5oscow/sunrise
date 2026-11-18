@@ -209,7 +209,9 @@ pub enum LandingWrite {
 }
 pub use interact::{InteractionResult, PlayerContext, PlayerEffect, UseBranch, hit_slot};
 pub use pistons::{BlockEventData, MovingPiston};
-pub use place::{PlaceContext, PlaceOutcome, PlacementContext, PlacementPreview};
+pub use place::{
+    PlaceContext, PlaceOutcome, PlacementContext, PlacementPreview, ResolvedPlacement,
+};
 pub use portal::PortalShape;
 pub use states::{BlockId, PropKey, StateTable};
 pub use tick::{Precipitation, PrecipitationKind, RandomTickMask, RandomTickMaskUpdate};
@@ -784,7 +786,6 @@ pub trait LevelAccess: BlockEntityNeighbors {
     }
     /// `BlockItem.updatePlacementContext`: replace or refuse the item context.
     /// None retains the vanilla item rewrite, including scaffolding's walk.
-    #[allow(clippy::option_option)]
     fn placement_context(
         &self,
         _item: &str,

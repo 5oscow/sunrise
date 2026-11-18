@@ -2519,6 +2519,17 @@ impl Game<'_> {
         if !mod_api::__private::listened(mod_api::HookId::EntityPlace) {
             return false;
         }
+        self.placement_canceled(self.entity(placer), pos, state, placed_against, companion)
+    }
+
+    fn placement_canceled(
+        &mut self,
+        placer: Option<EntityRef>,
+        pos: BlockPos,
+        state: BlockStateId,
+        placed_against: BlockStateId,
+        companion: Option<(BlockPos, BlockStateId)>,
+    ) -> bool {
         let placement = match companion {
             None => Placement::Single,
             Some((at, extra)) => {
@@ -2531,34 +2542,54 @@ impl Game<'_> {
                 ]))
             }
         };
-        let placer = self.entity(placer);
         let mut canceled = false;
         self.native_entity_place(placer, pos, state, placed_against, placement, &mut canceled);
         canceled
     }
-    /// Whether a mod canceled the block the player's `ctx` would place
-    /// (`entity_place`): nothing is previewed unless a mod listens.
-    pub(super) fn player_place_canceled(&mut self, ctx: &PlaceContext) -> bool {
+    /// Let `entity_place` veto exactly the decision the world will apply. If the
+    /// callback changed the inputs, do not choose another target behind its back.
+    pub(super) fn place_item_block(
+        &mut self,
+        ctx: &PlaceContext,
+        by_player: bool,
+    ) -> Option<(PlacementContext, BlockStateId)> {
         if !mod_api::__private::listened(mod_api::HookId::EntityPlace) {
-            return false;
+            return self
+                .with_level(|b, level, ticks| b.place_block_with_context(level, ticks, ctx));
         }
-        let Some(preview) =
-            self.with_level(|b, level, ticks| b.placement_preview(level, ticks, ctx))
-        else {
-            return false;
+        let (decision, preview) =
+            self.with_level(|b, level, ticks| b.decide_placement(level, ticks, ctx))?;
+        let against_pos = decision.placed_against_pos();
+        let block = |game: &Game<'_>, pos: BlockPos| game.world.block(pos.x, pos.y, pos.z);
+        let against = block(self, against_pos);
+        let target_before = block(self, preview.pos);
+        let companion_before = preview.companion.map(|(pos, _)| (pos, block(self, pos)));
+        let hand = if by_player {
+            self.held().cloned()
+        } else {
+            None
         };
-        let against_pos = ctx.placed_against_pos(preview.pos);
-        let against = self
-            .world
-            .block(against_pos.x, against_pos.y, against_pos.z);
-        let (_, entity) = self.native_clicker();
-        self.place_canceled(
-            entity.cast_unsigned(),
+        let placer = by_player
+            .then(|| self.native_clicker().1.cast_unsigned())
+            .and_then(|entity| self.entity(entity));
+        // The existing block revision and journal epoch cover rule inputs such as
+        // supporting blocks and block-entity shapes without tracing ordinary reads.
+        let level = (self.dim, self.world.revision, self.transactions.writes());
+        if self.placement_canceled(
+            placer,
             preview.pos,
             preview.state,
             against,
             preview.companion,
-        )
+        ) || level != (self.dim, self.world.revision, self.transactions.writes())
+            || block(self, preview.pos) != target_before
+            || block(self, against_pos) != against
+            || companion_before.is_some_and(|(pos, state)| block(self, pos) != state)
+            || (by_player && self.held() != hand.as_ref())
+        {
+            return None;
+        }
+        self.with_level(|b, level, ticks| b.apply_placement(level, ticks, decision))
     }
     /// `MobEvent::PlaceBlock`: a mob sets `state` at `pos` unless a mod
     /// cancels `entity_place`. Enderman attempts use `enderman_place_block`.
