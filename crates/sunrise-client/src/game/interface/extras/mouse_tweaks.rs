@@ -53,6 +53,8 @@ struct Drag {
     held: Option<ItemStack>,
     /// The drag replaced vanilla's: its release clicks nothing.
     active: bool,
+    /// `physical_presses` at the press that started it: a later press is another drag.
+    press: u64,
     visited: Vec<usize>,
 }
 
@@ -99,6 +101,7 @@ impl Game<'_> {
                 held,
                 active: true,
                 visited: vec![slot],
+                press: self.physical_presses,
             };
             self.tweak_place(&mut drag, slot);
             self.inv_drag = None;
@@ -112,6 +115,7 @@ impl Game<'_> {
                 held,
                 active: false,
                 visited: vec![slot],
+                press: self.physical_presses,
             });
         }
         false
@@ -134,13 +138,13 @@ impl Game<'_> {
         let Some(mut drag) = self.tweaks.drag.take() else {
             return false;
         };
-        // A drag whose button went up unseen (another handler took its release) is over.
+        // A drag whose button went up unseen (another handler took its release, or the next press) is over.
         let button = if drag.right {
             winit::event::MouseButton::Right
         } else {
             winit::event::MouseButton::Left
         };
-        if !self.physical_buttons.contains(&button) {
+        if !self.physical_buttons.contains(&button) || drag.press != self.physical_presses {
             return false;
         }
         let active = drag.active;
@@ -303,7 +307,7 @@ mod tests {
 
     #[test]
     #[ignore = "daily"]
-    fn a_drag_whose_button_went_up_unseen_moves_nothing_and_ends() {
+    fn a_drag_whose_button_went_up_or_was_pressed_again_unseen_moves_nothing_and_ends() {
         let mut resources = None;
         let mut game = server_game(&mut resources);
         game.screen = Screen::Inventory;
@@ -314,8 +318,22 @@ mod tests {
             held: Some(stone.clone()),
             active: true,
             visited: vec![9],
+            press: game.physical_presses,
         });
         // No button is held: another handler took the release this drag never heard.
+        assert!(!game.tweak_drag_move(Some(10)));
+        assert!(game.tweaks.drag.is_none());
+        // Held again, but by a newer press that another handler took: still over.
+        game.tweaks.drag = Some(Drag {
+            right: true,
+            held: Some(stone.clone()),
+            active: true,
+            visited: vec![9],
+            press: game.physical_presses,
+        });
+        game.physical_buttons
+            .insert(winit::event::MouseButton::Right);
+        game.physical_presses += 1;
         assert!(!game.tweak_drag_move(Some(10)));
         assert!(game.tweaks.drag.is_none());
         assert!(game.inventory[10].is_none());

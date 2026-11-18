@@ -194,6 +194,7 @@ impl Game<'_> {
         if let WindowEvent::MouseInput { state, button, .. } = &event {
             if *state == ElementState::Pressed {
                 self.physical_buttons.insert(*button);
+                self.physical_presses += 1;
             } else {
                 self.physical_buttons.remove(button);
             }

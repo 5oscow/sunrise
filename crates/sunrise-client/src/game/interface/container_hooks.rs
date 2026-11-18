@@ -605,7 +605,8 @@ mod tests {
     struct ReadFar(std::sync::atomic::AtomicUsize);
     impl ReadFar {
         fn read(&self, c: &dyn Container) -> bool {
-            let far = [SlotId(36), SlotId(500), SlotId(9999)];
+            // None of these is a slot of the player's inventory screen (500 to 504, its armour, are).
+            let far = [SlotId(36), SlotId(600), SlotId(9999)];
             let empty = far
                 .iter()
                 .all(|&s| c.stack(s).is_none() && c.name(s).is_none());

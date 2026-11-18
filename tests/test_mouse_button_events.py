@@ -24,7 +24,7 @@ enum WindowEvent { MouseInput { state: ElementState, button: i32 }, Resized(()),
 fn glfw_button(button: i32) -> i32 { button }
 fn glfw_modifiers(modifiers: u32) -> u32 { modifiers }
 struct Game { physical_buttons: HashSet<i32>, modifiers: u32, synthetic: bool, cancel: bool,
-              early: bool, calls: Vec<&'static str>, container_owned_up: bool }
+              early: bool, calls: Vec<&'static str>, container_owned_up: bool, physical_presses: u64 }
 impl Game {
     fn pad_synthetic_input(&self) -> bool { self.synthetic }
     // A container hook's press latch: retired at a real button-up, before the raw Pre.
@@ -67,18 +67,19 @@ fn dispatch_order_and_bookkeeping() {
             (false, false, true, vec!["pre", "mappings", "handle", "post"]),
             (true, true, false, vec!["handle", "finish"])] {
             let mut game = Game { physical_buttons: HashSet::from([2]), modifiers: 5,
-                synthetic, cancel, early, calls: vec![], container_owned_up: false };
+                synthetic, cancel, early, calls: vec![], container_owned_up: false, physical_presses: 0 };
             game.dispatch(WindowEvent::MouseInput { state, button: 2 });
             let mut expected = expected;
             if state == ElementState::Released && !synthetic {
                 expected.insert(0, "up");
             }
             assert_eq!(game.calls, expected);
+            assert_eq!(game.physical_presses, u64::from(state == ElementState::Pressed));
             assert_eq!(game.physical_buttons.contains(&2), state == ElementState::Pressed);
         }
     }
     let mut game = Game { physical_buttons: HashSet::new(), modifiers: 5, synthetic: false,
-        cancel: true, early: false, calls: vec![], container_owned_up: false };
+        cancel: true, early: false, calls: vec![], container_owned_up: false, physical_presses: 0 };
     game.dispatch(WindowEvent::Other);
     assert_eq!(game.calls, ["handle", "finish"]);
 }

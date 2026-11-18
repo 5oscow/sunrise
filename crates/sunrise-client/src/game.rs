@@ -1049,6 +1049,8 @@ struct Game<'a> {
     container_buttons: HashSet<MouseButton>,
     /// This mouse event's button-up ended a container hook's press latch (`container_button_up`).
     container_owned_up: bool,
+    /// Physical mouse presses so far: a drag knows whether its press is still the latest.
+    physical_presses: u64,
     /// `AbstractContainerScreen`'s quick craft and skip-release state.
     inv_clicks: sunrise_client::container_screen::Clicks,
     /// The Mouse Tweaks extra's drag and wheel (`tweaks`).
@@ -10746,6 +10748,7 @@ impl<'a> Game<'a> {
             inv_drag: None,
             container_buttons: HashSet::new(),
             container_owned_up: false,
+            physical_presses: 0,
             tweaks: Default::default(),
             bundle_mouse: Default::default(),
             inv_clicks: Default::default(),
