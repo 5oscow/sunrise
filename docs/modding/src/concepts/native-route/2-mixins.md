@@ -74,6 +74,9 @@ callee without arguments: `autosave_interval` or `self.next_autosave_interval`. 
 `MODIFY_EXPRESSION_VALUE`, write the whole expression: `autosave_interval(rate)`. `MODIFY_VARIABLE` uses
 `variable` instead. `require` is how many matches the body has (inside `slice`, if set), and `ordinal` picks one, from 0.
 
+For a struct-literal receiver, omit whitespace outside literals and the trailing field comma. For example,
+use `selector = "ItemPlace::MenuSlot{menu,slot:n}.stack"` with `AFTER_CALL` to select the `.stack(host)` call.
+
 ## Fields
 
 | Field | Required | Meaning |
