@@ -11,7 +11,7 @@ use sunrise_mod_package::index::{
 const SITE: &str = "https://horizon-rust.github.io/horizon-mods/";
 
 const USAGE: &str = "usage: cargo sunrise-mod registry build <checkout> --files <dir> --out <index.json> [--release <url>] [--site <url>] [--generated <time>] [--counts <counts.json>]
-       cargo sunrise-mod registry review <base checkout> <head checkout> --author <login> [--json]
+       cargo sunrise-mod registry review <base checkout> <head checkout> --author <login> [--files <dir>] [--json]
        cargo sunrise-mod registry check <base checkout> <head checkout> --files <dir>
        cargo sunrise-mod registry list <checkout>
        cargo sunrise-mod registry release <checkout> <id> <file> --tag <tag> --published <YYYY-MM-DD> [--notes <file>] [--signature <file>] [--game <version>]
@@ -85,9 +85,38 @@ pub fn main(args: &[String]) -> Result<(), String> {
                 return Err(USAGE.into());
             };
             let author = flag(rest, "--author").ok_or(USAGE)?;
-            let (base, _) = registry::load(Path::new(base)).map_err(lines)?;
-            let (head, revoked) = registry::load(Path::new(head)).map_err(lines)?;
-            let review = registry::review_with_revoked(&base, &head, &revoked, author);
+            let (base, previous) = registry::load(Path::new(base)).map_err(lines)?;
+            let checkout = Path::new(head);
+            let (head, revoked) = registry::load(checkout).map_err(lines)?;
+            let mut review = registry::review_with_revoked(&base, &head, &revoked, author);
+            if let Some(files) = flag(rest, "--files") {
+                match registry::candidate(
+                    &head,
+                    revoked,
+                    &Sources {
+                        registry: checkout,
+                        files: Path::new(files),
+                        release: FILE_HOST,
+                        site: SITE,
+                        generated: String::new(),
+                    },
+                ) {
+                    Ok(index) => {
+                        review
+                            .notes
+                            .extend(registry::takedown_notes(&base, &previous, &index));
+                        if let Err(error) = index.check() {
+                            review.errors.push(error);
+                        }
+                    }
+                    Err(errors) => review.errors.extend(errors),
+                }
+            } else if registry::new_takedowns(&previous, &revoked)
+                .next()
+                .is_some()
+            {
+                review.errors.push("to review a takedown, give --files <dir> with the head checkout's packages named by SHA-256".into());
+            }
             if rest.iter().any(|a| a == "--json") {
                 let json = serde_json::json!({"errors": review.errors, "notes": review.notes});
                 println!("{json}");
@@ -123,7 +152,8 @@ pub fn main(args: &[String]) -> Result<(), String> {
                 // The first pull request has no entries to compare with.
                 Err(_) => Vec::new(),
             };
-            let (entries, _) = registry::load(Path::new(head)).map_err(lines)?;
+            let checkout = Path::new(head);
+            let (entries, revoked) = registry::load(checkout).map_err(lines)?;
             let mut failed = 0;
             for e in &entries {
                 for v in e.versions.iter().filter(|v| !old.contains(&v.sha256)) {
@@ -143,11 +173,22 @@ pub fn main(args: &[String]) -> Result<(), String> {
                     }
                 }
             }
-            if failed == 0 {
-                Ok(())
-            } else {
-                Err(format!("{failed} file(s) failed their check"))
+            if failed != 0 {
+                return Err(format!("{failed} file(s) failed their check"));
             }
+            registry::candidate(
+                &entries,
+                revoked,
+                &Sources {
+                    registry: checkout,
+                    files,
+                    release: FILE_HOST,
+                    site: SITE,
+                    generated: String::new(),
+                },
+            )
+            .map_err(lines)?
+            .check()
         }
         // The files CI must download for `build`: `<sha256> <id> <version> <file>`.
         Some("list") => {

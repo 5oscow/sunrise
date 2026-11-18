@@ -398,7 +398,8 @@ impl Index {
     /// Every rule a reader relies on: unique valid ids, at least one
     /// version each, plain file names with the kind's extension, `https`
     /// URLs, hex hashes, keys and signatures that decode, and each
-    /// modpack's mods present in the index with the same hash.
+    /// modpack's mods present in the index with the same hash. The publisher also checks that
+    /// required mod dependencies name listed versions and don't form a cycle.
     pub fn check(&self) -> Result<(), String> {
         self.check_with(false)
     }
@@ -423,7 +424,7 @@ impl Index {
         for r in &self.revoked {
             check_revoked(r)?;
         }
-        Ok(())
+        self.check_dependencies()
     }
 
     /// What a reader keeps of an index that fails [`Index::check`]: each project, version and
@@ -1082,6 +1083,7 @@ fn names(caps: &[Capability]) -> String {
     format!("[{}]", names.join(", "))
 }
 
+mod dependencies;
 pub mod native;
 pub mod page;
 pub mod registry;

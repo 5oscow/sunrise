@@ -165,6 +165,140 @@ fn a_content_mod_lists_manifest_dependencies_and_checks_index_claims() {
     }
 }
 
+fn indexed_mod(id: &str, version: &str, dependencies: serde_json::Value) -> Project {
+    let mut p = sample().projects.remove(0);
+    p.id = id.into();
+    p.versions[0].version = version.into();
+    p.versions[0].dependencies = serde_json::from_value(dependencies).unwrap();
+    p
+}
+
+#[test]
+fn the_live_registry_dependency_shape_is_valid() {
+    let mut projects = [
+        "butterflies",
+        "cyclops",
+        "fairies",
+        "fireflies",
+        "scorpions",
+        "vanilla_bestiary",
+        "vulture",
+        "worms",
+    ]
+    .map(|id| {
+        indexed_mod(
+            id,
+            "0.1.0",
+            serde_json::json!([{"id": "creature", "version": "^0.1"}]),
+        )
+    })
+    .to_vec();
+    projects.extend([
+        indexed_mod("creature", "0.1.1", serde_json::Value::Null),
+        indexed_mod(
+            "ironfurnaces",
+            "1.0.0",
+            serde_json::json!([
+                {"id": "ae2", "version": "^15.4.13", "optional": true},
+                {"id": "guideme", "version": "^0.1", "optional": true},
+                {"id": "jei", "version": "^0.5", "optional": true},
+                {"id": "machine_work", "version": "^0.1", "optional": true}
+            ]),
+        ),
+        indexed_mod(
+            "jei",
+            "0.5.0",
+            serde_json::json!([
+                {"id": "guideme", "version": "^0.1", "optional": true}
+            ]),
+        ),
+    ]);
+    let index = Index {
+        schema: SCHEMA,
+        projects,
+        ..Index::default()
+    };
+    assert_eq!(index.check(), Ok(()));
+}
+
+#[test]
+fn a_required_dependency_needs_a_listed_matching_mod() {
+    let mod_for = |range| {
+        indexed_mod(
+            "fireflies",
+            "0.1.0",
+            serde_json::json!([
+                {"id": "creature", "version": range}
+            ]),
+        )
+    };
+    let mut index = Index {
+        schema: SCHEMA,
+        projects: vec![mod_for("^3.6")],
+        ..Index::default()
+    };
+    let assert_error = |index: &Index, range: &str, words: &[&str]| {
+        let e = index.check().unwrap_err();
+        for word in ["fireflies", "0.1.0", "creature", range]
+            .into_iter()
+            .chain(words.iter().copied())
+        {
+            assert!(e.contains(word), "missing {word:?} in {e:?}");
+        }
+    };
+    assert_error(
+        &index,
+        "^3.6",
+        &["does not list", "list it first", "mark it optional"],
+    );
+    index.projects.push(indexed_mod(
+        "creature",
+        "3.6.30-sunrise.1",
+        serde_json::Value::Null,
+    ));
+    assert_error(&index, "^3.6", &["prerelease", "=3.6.30-sunrise.1"]);
+    index.projects[0] = mod_for("^4.0");
+    assert_error(
+        &index,
+        "^4.0",
+        &["no listed version matches", "correct the range"],
+    );
+    index.projects[0] = mod_for("=3.6.30-sunrise.1");
+    assert_eq!(index.check(), Ok(()));
+}
+
+#[test]
+fn only_required_cycles_on_the_same_installation_are_refused() {
+    let mut index = Index {
+        schema: SCHEMA,
+        projects: vec![
+            indexed_mod(
+                "fireflies",
+                "0.1.0",
+                serde_json::json!([
+                    {"id": "creature", "version": "^0.1", "side": "client"}
+                ]),
+            ),
+            indexed_mod(
+                "creature",
+                "0.1.1",
+                serde_json::json!([
+                    {"id": "fireflies", "version": "^0.1", "side": "server"}
+                ]),
+            ),
+        ],
+        ..Index::default()
+    };
+    assert_eq!(index.check(), Ok(()));
+    index.projects[1].versions[0].dependencies.as_mut().unwrap()[0].side = None;
+    let error = index.check().unwrap_err();
+    for word in ["cycle", "fireflies 0.1.0", "creature 0.1.1", "break it"] {
+        assert!(error.contains(word), "{error}");
+    }
+    index.projects[1].versions[0].dependencies.as_mut().unwrap()[0].optional = true;
+    assert_eq!(index.check(), Ok(()));
+}
+
 #[test]
 fn revocations_match_by_hash_or_by_id() {
     let index = sample();

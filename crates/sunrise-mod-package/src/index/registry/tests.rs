@@ -397,6 +397,37 @@ fn a_version_taken_down_by_hash_may_leave_its_entry() {
 }
 
 #[test]
+fn a_takedown_review_names_the_dependents_of_a_removed_version() {
+    let mut index = sample();
+    let base: Entry = toml::from_str(&hud_entry()).unwrap();
+    let mut fireflies = index.projects.remove(0);
+    fireflies.id = "fireflies".into();
+    fireflies.versions[0].dependencies = serde_json::from_value(serde_json::json!([
+        {"id": "coords_hud", "version": "^0.1"}
+    ]))
+    .unwrap();
+    let mut another = fireflies.clone();
+    another.id = "another".into();
+    another.versions[0].dependencies.as_mut().unwrap()[0].version = "^2".into();
+    let mut optional = fireflies.clone();
+    optional.id = "optional".into();
+    optional.versions[0].dependencies.as_mut().unwrap()[0].optional = true;
+    index.projects = vec![fireflies, another, optional];
+    index.revoked = vec![Revoked {
+        id: "coords_hud".into(),
+        sha256: Some(SMOD.into()),
+        reason: "test".into(),
+        date: String::new(),
+    }];
+    let notes = takedown_notes(std::slice::from_ref(&base), &[], &index);
+    assert_eq!(notes.len(), 1);
+    for word in ["fireflies", "0.1.0", "coords_hud", "^0.1", "check"] {
+        assert!(notes[0].contains(word), "{notes:?}");
+    }
+    assert!(takedown_notes(&[base], &index.revoked, &index).is_empty());
+}
+
+#[test]
 fn a_review_refuses_following_a_repository() {
     let pinned: Entry = toml::from_str(COZY).unwrap();
     let follows: Entry = toml::from_str(COZY_REPO).unwrap();
