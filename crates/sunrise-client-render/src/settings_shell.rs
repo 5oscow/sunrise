@@ -453,6 +453,8 @@ pub(crate) struct RowView<'a> {
     pub(crate) focused: bool,
     /// Its slider is being dragged.
     pub(crate) held: bool,
+    /// Its slider's value changes from the keyboard (Enter pressed on it, `can_change_value`).
+    pub(crate) editing: bool,
     /// A key binding, drawn as a button rather than a value between arrows: whether it waits for
     /// its key.
     pub(crate) key: Option<bool>,
@@ -470,6 +472,7 @@ pub(crate) fn row(batch: &mut HudBatch, atlas: &HudAtlas, cols: &Columns, y: f32
         hover,
         focused,
         held,
+        editing,
         key,
     } = view;
     let rect = cols.row(y);
@@ -538,7 +541,13 @@ pub(crate) fn row(batch: &mut HudBatch, atlas: &HudAtlas, cols: &Columns, y: f32
             (None, Some(position)) => {
                 let value = Text::literal(value);
                 if active {
-                    let states = (hover, focused, held, live);
+                    let states = style::SliderState {
+                        hover,
+                        focused,
+                        editing,
+                        held,
+                        live,
+                    };
                     style::slider(batch, atlas, control, &value, position, states);
                 } else {
                     batch.text_styled(atlas, &value, start, ty, soft, true);
@@ -2242,6 +2251,7 @@ impl<S: Screen> Shell<S> {
             hover,
             focused,
             held: self.dragging == Some(row.id),
+            editing: focused && self.can_change_value,
             key: row.binding().map(|_| waits),
         };
         self::row(batch, atlas, cols, y, &view);
