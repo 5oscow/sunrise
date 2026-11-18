@@ -181,9 +181,7 @@ pub(super) fn build(
         .arg("-o")
         .arg(&rlib)
         .arg(prepared.dir.join(name).join("src/lib.rs"));
-        for feature in sdk.game_features() {
-            cmd.arg("--cfg").arg(format!("feature=\"{feature}\""));
-        }
+        game_cfg(&mut cmd, sdk);
         // An `@` file, one argument per line: an extern per SDK crate passes Windows'
         // 32,767-character command-line limit.
         let mut externs = Vec::new();
@@ -548,16 +546,14 @@ pub(super) fn prepare<'a>(
         // flags it is compiled with (the prebuilt game's target is this computer's,
         // `check_identity`), and the features the game was built with.
         let mut print = super::prebuilt::rustc_with(rust, &[], "2024");
+        game_cfg(&mut print, sdk);
         print.args(["--print", "cfg"]);
         let printed = print.output().map_err(|e| e.to_string())?;
         if !printed.status.success() {
             return Err(String::from_utf8_lossy(&printed.stderr).into_owned());
         }
         let mut cmd = super::apply(rust, tool, &workspace, &mods, &patched);
-        for option in build_cfg(
-            &String::from_utf8_lossy(&printed.stdout),
-            sdk.game_features(),
-        ) {
+        for option in build_cfg(&String::from_utf8_lossy(&printed.stdout)) {
             cmd.arg("--cfg").arg(option);
         }
         // The features are the game crate's: the tool decides `feature` predicates only in its
@@ -610,37 +606,33 @@ pub(super) fn prepare<'a>(
     }))
 }
 
+/// The game's features as the `--cfg` flags the patch library is compiled with. The compile and
+/// the `--print cfg` that the tool plans against both take them from here, so they cannot drift.
+fn game_cfg(cmd: &mut std::process::Command, sdk: &Identity) {
+    for feature in sdk.game_features() {
+        cmd.arg("--cfg").arg(format!("feature=\"{feature}\""));
+    }
+}
+
 /// The cfg options of the build the patch library is compiled into, in rustc's `--cfg` spelling:
-/// what `rustc --print cfg` printed and the game's features.
-fn build_cfg(printed: &str, features: &[String]) -> Vec<String> {
+/// what `rustc --print cfg` printed, which carries the game's features and the profile's options
+/// (`debug_assertions` and `overflow_checks` follow the release profile the library compiles under).
+fn build_cfg(printed: &str) -> Vec<String> {
     printed
         .lines()
         .map(str::trim)
         .filter(|line| !line.is_empty())
         .map(str::to_owned)
-        .chain(
-            features
-                .iter()
-                .map(|feature| format!("feature=\"{feature}\"")),
-        )
         .collect()
 }
 
 #[cfg(test)]
 mod refusal_tests {
     #[test]
-    fn the_build_cfg_is_the_printed_set_and_the_games_features() {
+    fn the_build_cfg_is_the_printed_set() {
         assert_eq!(
-            super::build_cfg(
-                "unix\ntarget_os=\"linux\"\n\n",
-                &["audio".into(), "friends".into()]
-            ),
-            [
-                "unix",
-                "target_os=\"linux\"",
-                "feature=\"audio\"",
-                "feature=\"friends\""
-            ]
+            super::build_cfg("unix\ntarget_os=\"linux\"\nfeature=\"audio\"\n\n"),
+            ["unix", "target_os=\"linux\"", "feature=\"audio\""]
         );
     }
 
