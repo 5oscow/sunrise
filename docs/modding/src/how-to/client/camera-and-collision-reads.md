@@ -4,6 +4,11 @@
 screen is open. A multiplayer game continues running while its pause screen is open.
 The pause-change pre hook sees the old state; the post hook sees the new state.
 
+`ClientHost::gui_ticks()` reads the HUD's signed 32-bit tick counter (`Hud.getGuiTicks`).
+It advances once per unpaused client tick, including on the title screen, and wraps like
+Java's `int`. Pausing holds it; a server tick freeze does not. This is not world game time
+or the frame's animation clock.
+
 `ClientHost::gui_scale()` reads the GUI scale in effect (`Window.getGuiScale`), at least 1,
 or `None` without a window (a server, a headless run). Vanilla's `Window.calculateScale` resolves
 it from the GUI Scale option and the window size: the option is a maximum, where 0 means automatic,
@@ -116,9 +121,12 @@ when the server acknowledges them, each block that takes the server's state back
 server update for a block still under a pending prediction is held, as in vanilla, and told when the
 acknowledgement applies it. A write that keeps the state is not told, so nothing has to rescan the
 loaded terrain. It needs no mod on the server: it runs on a client of any server, a LAN guest included.
-An integrated world's own blocks are the server's `block_changed`, and a level a server opens for
+All three hooks also fire in singleplayer, where the window is a client of its own in-process server.
+The server-side world still reports its edits through `block_changed`. A level a server opens for
 viewing (below) is not told. A section update tells each of its blocks, so keep the listener cheap:
 mark the chunk and redraw it later.
+sunrise-org/sunrise-minimap is such a mod: it redraws a marked chunk into its map's dynamic texture and draws
+the map in `render_gui_post`.
 
 ## Viewed levels
 
@@ -158,7 +166,8 @@ in distant terrain or return a block behind a targeted entity.
 
 A client `EntityRef` supports `bounding_box(host)`, `eye_height(host)` and
 `eye_position(host)`. For the local player these use the current predicted body and pose;
-for a tracked target they use the client's displayed body. Stale handles and entities the
+for a tracked target they use the client's displayed body. End crystals expose their 2 x 2 box;
+dragon parts expose their own box. Stale handles and entities the
 client cannot read return `None`.
 
 The local `PlayerRef` also supports `within_entity_reach(host, target, rule)`: it reads the

@@ -258,62 +258,51 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     /// `!merged_face_occludes` for two shapes of which one is published, remembered by the
     /// shapes' identity: the union it builds allocates, and a spread asks again and again.
     fn published_passage(
-        &self,
+        &mut self,
         source: VoxelShape,
         target: VoxelShape,
         direction: Direction,
     ) -> bool {
         const LIMIT: usize = 64;
-        let cached = self
-            .b
-            .published_occlusion_cache
-            .read()
-            .ok()
-            .and_then(|cache| {
-                cache
-                    .iter()
-                    .find(|(s, t, d, _)| {
-                        *d == direction as u8
-                            && s.same_identity(&source)
-                            && t.same_identity(&target)
-                    })
-                    .map(|entry| entry.3)
-            });
-        if let Some(result) = cached {
-            return result;
+        let cache = &mut self.ticks.published_passages;
+        if let Some(entry) = cache.iter().find(|(s, t, d, _)| {
+            *d == direction as u8 && s.same_identity(&source) && t.same_identity(&target)
+        }) {
+            return entry.3;
         }
         let result = !merged_face_occludes(&source, &target, direction);
-        if let Ok(mut cache) = self.b.published_occlusion_cache.write() {
-            if cache.len() >= LIMIT {
-                cache.clear();
-            }
-            cache.push((source, target, direction as u8, result));
+        if cache.len() >= LIMIT {
+            cache.clear();
         }
+        cache.push((source, target, direction as u8, result));
         result
     }
     /// `FlowingFluid.canPassThroughWall` from the cell at `source_pos` toward `direction`: each
-    /// cell's collision shape at its position, so a block entity's published shape stands over
-    /// the state's. A state whose block publishes nothing reads the state-only path below.
+    /// cell's collision shape at its position. Published and displaced shapes take priority
+    /// over the state cache; a translated shape does not enter either passage cache.
     fn can_pass_through_wall(
-        &self,
+        &mut self,
         direction: Direction,
         source_pos: BlockPos,
         source: BlockStateId,
         target: BlockStateId,
     ) -> bool {
         let target_pos = rel(source_pos, direction);
-        let published = (
-            self.level.published_collision_shape(source_pos, source),
-            self.level.published_collision_shape(target_pos, target),
-        );
-        if published.0.is_some() || published.1.is_some() {
-            let shape = |published: Option<VoxelShape>, state| {
-                published.unwrap_or_else(|| self.collision_or_empty(state).1.clone())
-            };
-            let (source_shape, target_shape) =
-                (shape(published.0, source), shape(published.1, target));
+        let signals = self.signals();
+        let source_positioned = signals.positioned_collision(source_pos, source);
+        let target_positioned = signals.positioned_collision(target_pos, target);
+        if source_positioned.is_some() || target_positioned.is_some() {
+            let source_shape =
+                source_positioned.unwrap_or_else(|| self.collision_or_empty(source).1.clone());
+            let target_shape =
+                target_positioned.unwrap_or_else(|| self.collision_or_empty(target).1.clone());
             if target_shape.is_block() || source_shape.is_block() {
                 return false;
+            }
+            if self.b.facts(source).collision_offset.is_some()
+                || self.b.facts(target).collision_offset.is_some()
+            {
+                return !merged_face_occludes(&source_shape, &target_shape, direction);
             }
             return self.published_passage(source_shape, target_shape, direction);
         }
@@ -539,7 +528,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         fluid.kind().same_family(kind) && fluid.is_source()
     }
     /// `FlowingFluid.getNewLiquid`.
-    fn new_liquid(&self, kind: FluidKind, pos: BlockPos, state: BlockStateId) -> FluidState {
+    fn new_liquid(&mut self, kind: FluidKind, pos: BlockPos, state: BlockStateId) -> FluidState {
         let b = self.b;
         let mut highest = 0;
         let mut sources = 0;
@@ -584,7 +573,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         }
     }
     fn is_water_hole(
-        &self,
+        &mut self,
         kind: FluidKind,
         top_pos: BlockPos,
         top: BlockStateId,
@@ -600,7 +589,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         }
     }
     fn can_maybe_pass_through(
-        &self,
+        &mut self,
         kind: FluidKind,
         source_pos: BlockPos,
         source: BlockStateId,
@@ -613,7 +602,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             && self.can_pass_through_wall(direction, source_pos, source, test)
     }
     fn can_pass_through(
-        &self,
+        &mut self,
         kind: FluidKind,
         source_pos: BlockPos,
         source: BlockStateId,
@@ -635,7 +624,12 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         context.states[i] = Some(state);
         state
     }
-    fn context_is_hole(&self, kind: FluidKind, context: &mut SpreadContext, pos: BlockPos) -> bool {
+    fn context_is_hole(
+        &mut self,
+        kind: FluidKind,
+        context: &mut SpreadContext,
+        pos: BlockPos,
+    ) -> bool {
         let index = context.index(pos);
         if let Some(hole) = index.and_then(|i| context.holes[i]) {
             return hole;
@@ -649,7 +643,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         hole
     }
     fn slope_distance(
-        &self,
+        &mut self,
         kind: FluidKind,
         pos: BlockPos,
         pass: i32,
@@ -686,7 +680,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     }
     /// `FlowingFluid.getSpread` (EnumMap: iteration in Direction order).
     fn spread_targets(
-        &self,
+        &mut self,
         kind: FluidKind,
         pos: BlockPos,
         state: BlockStateId,
@@ -1054,6 +1048,38 @@ pub(crate) fn merged_face_occludes(
 mod tests {
     use super::*;
     use crate::fluid::{ModFluidType, register_mod_fluid};
+
+    #[test]
+    #[ignore = "daily"]
+    fn displaced_collision_faces_and_fluid_walls_follow_the_column() {
+        let root = std::path::PathBuf::from(std::env::var_os("SUNRISE_TEST_RESOURCES").unwrap());
+        let registry = super::super::data::load_registry(&root).unwrap();
+        let mut behaviours = Behaviours::load(&registry, &root).unwrap();
+        let stone = registry.default_state("minecraft:stone").unwrap();
+        let air = behaviours.air();
+        // Both columns use the same state. The vertical seed nibble is 3 at (1,2)
+        // (stone's top drops below the cell face), and 15 at (0,1) (no displacement).
+        behaviours.facts[stone.0 as usize].collision_offset = Some((0.0, 0.2));
+        let mut level = super::super::tests::TestLevel::new(&behaviours);
+        let mut ticks = super::super::Ticks::new(0);
+        for (x, z, closed) in [(1, 2, false), (0, 1, true), (1, 2, false)] {
+            let pos = BlockPos::new(x, 64, z);
+            level.set_raw(pos, stone);
+            let mut sim = behaviours.sim(&mut level, &mut ticks);
+            assert_eq!(sim.collision_face_full_at(pos, Direction::Up), closed);
+            assert_eq!(sim.multiface_can_attach_at(pos, Direction::Down), closed);
+            let top = 1 << Direction::Up as u8;
+            assert_eq!(sim.shape_info_at(stone, pos).full_faces & top != 0, closed);
+            assert_eq!(
+                sim.can_pass_through_wall(Direction::Up, pos, stone, air),
+                !closed
+            );
+            assert_eq!(
+                sim.can_pass_through_wall(Direction::Down, above(pos), air, stone),
+                !closed
+            );
+        }
+    }
 
     fn mod_fluid(id: &str, tick_delay: i32) -> FluidKind {
         FluidKind::Mod(

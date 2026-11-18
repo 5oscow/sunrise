@@ -186,7 +186,7 @@ trademarks; Sunrise is not affiliated with AMD.
 The launcher shows the logo of the mod loader an instance plays with, and offers the logos as
 instance icons.
 
-- `launcher/assets/logos/{fabric,quilt,neoforge,forge}.png` are the loaders' logos as the launcher
+- `assets/logos/{fabric,quilt,neoforge,forge}.png` in [sunrise-launcher](https://github.com/sunrise-org/sunrise-launcher) are the loaders' logos as the launcher
   mockup on [playsunrise.net/launcher](https://playsunrise.net/launcher) shows them (sunrise-site
   `public/media/launcher/*.webp`, converted to PNG), each its project's own mark:
   [Fabric](https://fabricmc.net/), [Quilt](https://quiltmc.org/) (its art is
@@ -203,7 +203,7 @@ the project endorses Sunrise.
 The launcher's sign-in buttons follow Microsoft's published branding guidelines for apps that sign in
 with Microsoft accounts
 ([Sign in with Microsoft branding](https://learn.microsoft.com/en-us/entra/identity-platform/howto-add-branding-in-apps)).
-The four-square Microsoft symbol in `launcher/src/microsoft.rs` reproduces the squares, positions and
+The four-square Microsoft symbol in `https://github.com/sunrise-org/sunrise-launcher/blob/main/src/microsoft.rs` reproduces the squares, positions and
 colours of Microsoft's official `ms-symbollockup_mssymbol_19.svg` from that page, unmodified. Microsoft
 and its logo are trademarks of the Microsoft group of companies; Sunrise is not endorsed by Microsoft.
 
@@ -397,31 +397,6 @@ Permission to use, copy, modify, and distribute this
 software is freely granted, provided that this notice
 is preserved.
 ```
-
-## Starling
-
-`crates/sunrise-client-render/src/touch/layout.rs` and `crates/sunrise-client-render/src/touch/aim.rs`
-are adapted from the touch layout and touch helpers of
-[Starling](https://github.com/starling-client/starling), an Android port of Sunrise, at commit
-[150a414b09a1](https://github.com/starling-client/starling/tree/150a414b09a18c900489d9462a7fc035dae744b7)
-(`android` branch), written mostly by Vasysik. Starling is licensed under the same MIT license as
-Horizon (Copyright (c) 2026 Ludovic Marie and the Horizon contributors).
-
-`crates/sunrise-client-render/src/keypad.rs` is adapted from Starling's keypad profile
-(`crates/sunrise-client-render/src/keypad.rs`) at the same commit.
-
-`crates/sunrise-client-render/src/android_gamepad.rs` is adapted from Starling's controller decoder
-(`crates/sunrise-client-render/src/android_gamepad.rs`) and the input-mode part of its
-`android_runtime.rs`, at the same commit.
-
-`crates/sunrise-client-render/src/touch.rs` and `touch/tests/` are adapted from the touch input
-state of Starling's `crates/sunrise-client-render/src/touch.rs` at the same commit.
-
-`crates/sunrise-client-render/src/touch/draw.rs` is adapted from the touch control drawing in
-Starling's `crates/sunrise-client-render/src/touch.rs` at the same commit.
-
-`crates/sunrise-client-render/src/android_runtime.rs` and `android_runtime/tests/` are adapted from the
-input part of Starling's `crates/sunrise-client-render/src/android_runtime.rs` at the same commit.
 
 ## PCG3D hash
 

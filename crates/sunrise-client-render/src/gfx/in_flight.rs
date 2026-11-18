@@ -56,9 +56,7 @@ impl Renderer {
         }
         if offscreen && let Some(submission) = submission {
             self.in_flight.push_back(submission);
-            if !self.paced_elsewhere {
-                self.wait_frames();
-            }
+            self.wait_frames();
         }
     }
     /// No swapchain paces offscreen frames: keep two on the GPU at most.
@@ -67,9 +65,7 @@ impl Renderer {
         self.wait_frames();
     }
     /// The frame on the submit thread submitted: a surface reconfigure waits for the
-    /// device and breaks if a frame is submitted while it waits, and the compositor
-    /// copies views after them. (The end of a frame already lands the frames of the
-    /// turn before; this is the turn's own.)
+    /// device and breaks if a frame is submitted while it waits.
     pub fn wait_submissions(&mut self) {
         self.queue.wait();
     }

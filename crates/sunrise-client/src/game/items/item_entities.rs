@@ -728,8 +728,7 @@ impl Game<'_> {
     }
 
     /// Block.popResource
-    pub(super) fn pop_resource(&mut self, pos: [i32; 3], mut stack: ItemStack) {
-        self.pending.attach(pos, &mut stack);
+    pub(super) fn pop_resource(&mut self, pos: [i32; 3], stack: ItemStack) {
         // Block.popResource: Mth.nextDouble offsets from the level random; the
         // motion is `new ItemEntity(..)`'s own, from the item's random.
         let p = spill::pop_position(&mut self.world.random, pos);
@@ -770,9 +769,8 @@ impl Game<'_> {
         &mut self,
         pos: [i32; 3],
         face: [i32; 3],
-        mut stack: ItemStack,
+        stack: ItemStack,
     ) {
-        self.pending.attach(pos, &mut stack);
         let (p, v) = spill::pop_position_from_face(&mut self.world.random, pos, face);
         // The private overload checks the gamerule after the offsets are drawn.
         if !self

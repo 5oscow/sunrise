@@ -2622,6 +2622,7 @@ mod crossbow_tests {
         std::fs::remove_dir_all(&root).unwrap();
         let death = Death {
             loot: &loot,
+            this_nbt: None,
             damage: None,
             player: None,
             player_killed: false,

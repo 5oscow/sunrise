@@ -3,7 +3,6 @@
 
 use super::native_entity_refs::tests::with_game;
 use mod_api::BlockUpdateFlags;
-use sunrise_world::level::LevelEvent;
 
 fn loaded(game: &mut super::Game<'_>) {
     // The writes are `level_set_block`'s, which an authoritative server only takes.
@@ -80,26 +79,29 @@ fn a_state_is_fitted_to_its_neighbours_without_a_write() {
     });
 }
 
-/// The break effect is level event 2001 with the state's id, and a stale handle plays nothing.
+/// The break effect is level event 2001 with the state's id, and a stale handle plays nothing. The
+/// event plays at once (`Level.levelEvent`), so what is observed is what reaches the guests.
 #[test]
 #[ignore = "daily"]
 fn a_break_effect_is_played_for_a_state() {
     with_game(|game| {
         loaded(game);
+        game.audio.capture = Some(Vec::new());
         let level = game.level(game.dim.id()).unwrap();
         let stone = state(game, "minecraft:stone");
-        game.level_events.clear();
+        game.lan_events.clear();
         assert!(game.level_block_break_effect(level, [1, 70, 1], stone));
-        assert!(game.level_events.iter().any(|e| matches!(
-            e,
-            LevelEvent::LevelEvent { id: 2001, data, .. } if *data == stone.0 as i32
-        )));
+        assert!(
+            game.lan_events
+                .iter()
+                .any(|e| e.kind == 2001 && e.pos == [1, 70, 1] && e.data == stone.0 as i32)
+        );
         let stale = mod_api::LevelRef::new(
             mod_api::WorldEpoch::new(level.epoch().get() + 1),
             level.dimension(),
         );
-        game.level_events.clear();
+        game.lan_events.clear();
         assert!(!game.level_block_break_effect(stale, [1, 70, 1], stone));
-        assert!(game.level_events.is_empty());
+        assert!(game.lan_events.is_empty());
     });
 }

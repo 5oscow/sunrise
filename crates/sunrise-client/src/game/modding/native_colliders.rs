@@ -157,6 +157,13 @@ struct Placement {
     prepared: sunrise_client_render::moving_colliders::Prepared,
 }
 
+/// The recent frames of each level's colliders, on a server, for the move check of a player a
+/// collider carries.
+#[derive(Default)]
+pub(in crate::game) struct Histories(
+    HashMap<Dim, std::rc::Rc<std::cell::RefCell<sunrise_client_render::moving_colliders::History>>>,
+);
+
 /// The placements of each level's colliders, kept from tick to tick.
 #[derive(Default)]
 pub(in crate::game) struct Placements(HashMap<Dim, Placement>);
@@ -279,7 +286,7 @@ impl Game<'_> {
 
     /// Where the collider entity `id` is, in the level in place: the server's entity, or a
     /// client's copy of what its server shows it.
-    fn collider_origin(&self, id: u32) -> Option<Vec3> {
+    pub(in crate::game) fn collider_origin(&self, id: u32) -> Option<Vec3> {
         let at = if self.is_logical_server() {
             self.target_position(self.level_entity(id as i32)?)?
         } else {
@@ -315,6 +322,19 @@ impl Game<'_> {
             return vec![id];
         };
         stack_in_graph(&remote.passenger_vehicles, id)
+    }
+
+    /// The frame the collider of entity `id` has now: where its entity stands and its rotation.
+    pub(in crate::game) fn collider_now_frame(
+        &self,
+        id: u32,
+    ) -> Option<sunrise_core::geometry::oriented::Frame> {
+        let state = if self.is_logical_server() {
+            self.entity_attachments.collider(id).map(|e| &e.state)?
+        } else {
+            self.remote.as_ref()?.colliders.get(&id)?
+        };
+        Some(state.frame(self.collider_origin(id)?))
     }
 
     /// Calls `f` with each collider of the level in place, in an order that is the same from
@@ -421,6 +441,7 @@ impl Game<'_> {
                     stack: stack.clone(),
                 });
                 placed.push(Placed {
+                    id,
                     collider: state.oriented(origin),
                     exempt: stack,
                 });
@@ -436,6 +457,52 @@ impl Game<'_> {
             },
         );
         prepared
+    }
+
+    /// The history the level keeps of its colliders, if it has any.
+    #[cfg(test)]
+    pub(in crate::game) fn level_collider_history(
+        &self,
+    ) -> Option<std::rc::Rc<std::cell::RefCell<sunrise_client_render::moving_colliders::History>>>
+    {
+        self.collider_histories.0.get(&self.dim).cloned()
+    }
+
+    /// Runs `f` with this level's moving colliders and history in scope, for a call into a level
+    /// other than the one ticking (a hook of one level moving a player of another): the scopes
+    /// are otherwise installed per level tick, and a query would read the caller's. The
+    /// history is the level's own, as its tick recorded it, and nothing is recorded now.
+    pub(in crate::game) fn in_this_levels_colliders<R>(
+        &mut self,
+        f: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        let placed = self.placed_moving_colliders();
+        let history = self
+            .is_logical_server()
+            .then(|| self.collider_histories.0.get(&self.dim).cloned())
+            .flatten();
+        let _history = sunrise_client_render::moving_colliders::HistoryScope::replace(history);
+        sunrise_client_render::moving_colliders::in_level(placed, || f(self))
+    }
+
+    /// Records the level's colliders as its tick begins into the level's history and answers it,
+    /// for a server; a client keeps none. A level with no collider keeps nothing.
+    pub(in crate::game) fn collider_history(
+        &mut self,
+        placed: &sunrise_client_render::moving_colliders::Prepared,
+    ) -> Option<std::rc::Rc<std::cell::RefCell<sunrise_client_render::moving_colliders::History>>>
+    {
+        if !self.is_logical_server() {
+            return None;
+        }
+        let level = self.dim;
+        if placed.is_empty() {
+            self.collider_histories.0.remove(&level);
+            return None;
+        }
+        let history = self.collider_histories.0.entry(level).or_default().clone();
+        history.borrow_mut().record(placed);
+        Some(history)
     }
 
     /// Sends what changed this tick to the clients that track each entity and have the
@@ -602,6 +669,7 @@ mod tests {
             Vec3::new(2.0, 1.0, 2.0),
         )]);
         let placed = Prepared::new(vec![Placed {
+            id: 10,
             collider: OrientedCollider::new(Frame::translation(Vec3::ZERO), Arc::new(boxes)),
             exempt: stack_in_graph(&graph, 10),
         }]);

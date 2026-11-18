@@ -1,8 +1,9 @@
 [workspace]
-exclude = ["crates/sunrise-telemetry-server", "launcher", "crates/sunrise-mod-registry", "third_party/wgpu-hal", "third_party/naga", "third_party/libmimalloc-sys", "tools/fixtures/paper-trace-mod"]
+exclude = ["crates/sunrise-telemetry-server", "crates/sunrise-mod-registry", "third_party/wgpu-hal", "third_party/naga", "third_party/libmimalloc-sys", "tools/fixtures/paper-trace-mod"]
 members = [
     "crates/sunrise-guest-stack",
     "crates/sunrise-mod-vocab",
+    "crates/sunrise-wasmtime",
     "crates/sunrise-game-discovery",
     "crates/sunrise-telemetry",
     "crates/sunrise-hooks",
@@ -27,6 +28,8 @@ members = [
     "crates/sunrise-mod-points",
     "crates/sunrise-internals",
     "crates/sunrise-client-lib",
+    "crates/sunrise-gameplay",
+    "crates/sunrise-client-gameplay",
     "crates/sunrise-client-core",
     "crates/sunrise-client-input",
     "crates/sunrise-client-render",
@@ -61,6 +64,7 @@ members = [
     "crates/sunrise-mod-api-macros",
     "crates/sunrise-mod-point-shape",
     "crates/sunrise-mod-source",
+    "crates/sunrise-mod-call",
     "crates/sunrise-mod-surface",
     "crates/sunrise-mod-point-emit",
     "crates/sunrise-native-build",
