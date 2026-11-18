@@ -114,6 +114,18 @@ pub trait RecipesClientHost {
     #[access(WorldOnly)]
     fn panel_style(&mut self, mod_id: &str, style: PanelStyle);
     /// Side: client.
+    /// Sets the text in mod `mod_id`'s item panel search box (`panel_items`)
+    /// as if the player had typed it: the box's value is replaced (cut to
+    /// its length), the cursor goes to its end, and the panel goes back to
+    /// its first page. The mod hears it as `panel_event` `Search(text)` when
+    /// its panel next draws, never during this call. Nothing happens for a
+    /// panel that isn't the mod's, so one mod can't rewrite another's search,
+    /// or for the text the box already holds. Set while no container screen
+    /// is open, the text is what the box shows when the panel next appears.
+    /// JEI's `IIngredientFilter.setFilterText`.
+    #[access(WorldOnly)]
+    fn panel_search(&mut self, mod_id: &str, text: &str);
+    /// Side: client.
     /// Shows `page` in mod `mod_id`'s item panel instead of its items, drawn by
     /// the game with its own slots (`RecipePage`, `RecipeView`): a title and a
     /// back button, tabs, and the recipes paged to the panel's height. `None`,

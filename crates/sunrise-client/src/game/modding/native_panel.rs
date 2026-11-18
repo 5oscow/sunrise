@@ -97,6 +97,24 @@ impl Panel {
             _ => self.styles.insert(mod_id.to_owned(), style),
         };
     }
+    /// `panel_search`: mod `mod_id`'s search box shows `text` (cut to the
+    /// box's length, the cursor at its end), as if the player typed it. The
+    /// mod hears it as `Search` when its panel next draws, not during the
+    /// call. False, and nothing changes, for a panel that isn't the mod's
+    /// or text the box already holds.
+    pub(super) fn set_search(&mut self, mod_id: &str, text: &str) -> bool {
+        let own = self
+            .native
+            .as_ref()
+            .is_some_and(|s| s.owner.native_id() == mod_id);
+        if !own {
+            return false;
+        }
+        let search = self.search.get_or_insert_with(new_search_box);
+        let before = search.value.clone();
+        search.set_value(text);
+        search.value != before
+    }
     /// How `owner`'s panel looks: Sunrise's own Recipes panel is the viewer's.
     fn style(&self, owner: &Owner) -> PanelStyle {
         match owner.native_id() {
@@ -347,12 +365,24 @@ pub(super) fn wheel_turn(
     })
 }
 
+/// The panel's search box before it is first laid out.
+fn new_search_box() -> EditBox {
+    let mut edit = EditBox::new(0.0, 0.0, 0.0, 0.0);
+    edit.max_length = 50;
+    edit.focused = false;
+    edit
+}
+
 impl Game<'_> {
     /// How mod `mod_id`'s panel draws its page buttons and search box from
     /// now on (`PanelStyle`; the recipe book's until it says). Kept for
     /// the session, whether or not its panel is showing.
     pub(in crate::game) fn panel_style(&mut self, mod_id: &str, style: PanelStyle) {
         self.panel.set_style(mod_id, style);
+    }
+    /// `panel_search`: the text in mod `mod_id`'s search box, as if typed.
+    pub(in crate::game) fn panel_search(&mut self, mod_id: &str, text: &str) {
+        self.panel.set_search(mod_id, text);
     }
     fn browser_batch(&self) -> Option<HudBatch> {
         let r = self.renderer.as_ref()?;
@@ -521,12 +551,7 @@ impl Game<'_> {
         })
     }
     fn browser_search(&mut self, layout: &Layout) -> &mut EditBox {
-        let search = self.panel.search.get_or_insert_with(|| {
-            let mut edit = EditBox::new(0.0, 0.0, 0.0, 0.0);
-            edit.max_length = 50;
-            edit.focused = false;
-            edit
-        });
+        let search = self.panel.search.get_or_insert_with(new_search_box);
         [search.x, search.y, search.width, search.height] = layout.search;
         search
     }
@@ -668,6 +693,11 @@ impl Game<'_> {
     /// overlay phase. The carried stack belongs to the enclosing screen.
     pub(super) fn draw_mod_browser(&mut self, batch: &mut HudBatch) -> Option<BrowserTooltip> {
         self.browser_sync()?;
+        // A search text set by the mod (`panel_search`) is heard here, outside
+        // its own call, and the list it sends back is drawn this frame.
+        if self.browser_searched() {
+            self.browser_sync()?;
+        }
         let layout = self.browser_layout(batch)?;
         let cursor = self.cursor;
         if self.panel.recipes.is_some() {
@@ -916,10 +946,10 @@ impl Game<'_> {
         }
         self.browser_searched();
     }
-    /// The mod hears the search text when it changed.
-    fn browser_searched(&mut self) {
+    /// The mod hears the search text when it changed: true when it did.
+    fn browser_searched(&mut self) -> bool {
         let (Some((owner, _)), Some(search)) = (&self.panel.of, &self.panel.search) else {
-            return;
+            return false;
         };
         if search.value != self.panel.sent {
             let (owner, value) = (owner.clone(), search.value.clone());
@@ -928,7 +958,9 @@ impl Game<'_> {
             self.panel.page = 0;
             self.panel_event(&owner, BrowserEvent::Search(value));
             self.panel.searching = false;
+            return true;
         }
+        false
     }
     /// The container screen closed: the search box lets go of the keys.
     pub(super) fn mod_browser_closed(&mut self) {
@@ -1072,6 +1104,33 @@ mod tests {
             note: String::new(),
             action: Some(true),
         }
+    }
+
+    #[test]
+    fn a_mod_sets_its_own_search_text_and_not_anothers() {
+        keys();
+        let mut panel = Panel::default();
+        // No panel yet: nothing to set.
+        assert!(!panel.set_search("jei", "iron"));
+        assert!(panel.search.is_none());
+
+        panel.show_items("jei", vec![stack("minecraft:stone")]);
+        assert!(panel.set_search("jei", "iron"), "the owner sets its text");
+        let search = panel.search.as_ref().expect("a box made for the text");
+        assert_eq!(search.value, "iron");
+        assert_eq!(search.cursor, 4, "the cursor at the end");
+        // Not heard yet: the mod hears it when its panel next draws.
+        assert_eq!(panel.sent, "");
+
+        assert!(!panel.set_search("jei", "iron"), "the same text changes nothing");
+        assert!(!panel.set_search("ae2", ""), "another mod can't rewrite it");
+        assert_eq!(panel.search.as_ref().unwrap().value, "iron");
+
+        assert!(panel.set_search("jei", ""), "clearing is a change");
+        assert_eq!(panel.search.as_ref().unwrap().value, "");
+        // Cut to the box's 50 characters.
+        assert!(panel.set_search("jei", &"x".repeat(80)));
+        assert_eq!(panel.search.as_ref().unwrap().value.len(), 50);
     }
 
     #[test]
