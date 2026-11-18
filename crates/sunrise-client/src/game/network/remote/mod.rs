@@ -11,6 +11,7 @@ use crate::game::collision_source::Mover;
 use selector_metadata::hurt_sound_for;
 mod attack_target;
 mod break_prediction;
+mod connection;
 mod fall_sound;
 mod interaction_actions;
 mod interaction_prediction;
@@ -1010,7 +1011,7 @@ impl Game<'_> {
                 item_data.clone(),
             ),
             None => {
-                self.extras_connecting(address, name, lan);
+                self.connection_starts(address, name, lan);
                 match cookies {
                     Some(cookies) => Session::connect_transferred(
                         address,
@@ -1537,8 +1538,7 @@ impl Game<'_> {
         self.client_logging_out();
         self.finish_perf();
         if reason.is_none() {
-            // Leaving on purpose: nothing for auto-reconnect to retry.
-            self.extras_left();
+            self.connection_left();
         }
         self.clear_waypoints();
         self.hud_disconnected();

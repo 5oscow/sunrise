@@ -106,7 +106,7 @@ impl Game<'_> {
                     uuid,
                 } => {
                     self.set_registries(registries);
-                    self.extras_joined();
+                    self.connection_joined();
                     self.close_dialogs();
                     if let Some(r) = self.remote.as_mut() {
                         r.joined = true;
@@ -253,9 +253,9 @@ impl Game<'_> {
                         self.connect_server_with_cookies(&address, &name, Some(cookies))?;
                         return Ok(());
                     }
-                    let retry = self.reconnect_after(&reason, key.as_deref(), from_server);
+                    self.connection_ended(&reason, key.as_deref(), from_server);
                     self.leave_server(Some(Text::literal(reason)))?;
-                    self.offer_reconnect(retry);
+                    self.offer_retry();
                     return Ok(());
                 }
                 Event::RawPayload(mut incoming) => {

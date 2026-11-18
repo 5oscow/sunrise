@@ -67,7 +67,7 @@ pub mod hooks {
     };
     pub use sunrise_hooks::{
         Activity, Client, ClientIdentity, Dimension, GameMode, GetTheGame, Hooks, Play, Started,
-        TooLate, perf, register, seat, tunnel,
+        TooLate, connection, perf, register, seat, tunnel,
     };
 }
 
