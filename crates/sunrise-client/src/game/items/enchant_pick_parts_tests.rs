@@ -8,7 +8,9 @@ use mod_api::{
     ApplyEnchantmentsEvent, Hooks, IsNotReplaceableByPickActionEvent, IsPrimaryItemForEvent,
     ItemPart, ModEntry, Registrar, RegistrationContext, SupportsEnchantmentEvent,
 };
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use sunrise_core::random::LegacyRandom;
 
 const SHARPNESS: &str = "minecraft:sharpness";
 const FIXTURE_ITEMS: [&str; 4] = [
@@ -24,6 +26,7 @@ struct Answers {
     support: Arc<Mutex<Vec<(String, bool)>>>,
     support_asked: Arc<Mutex<usize>>,
     tag_answers: Option<Arc<Mutex<Vec<Option<bool>>>>>,
+    tag_answer_enabled: Option<Arc<AtomicBool>>,
     primary_incoming: Arc<Mutex<Vec<(String, bool)>>>,
     /// `is_primary_item_for`: the item and the answer for sharpness.
     primary: Arc<Mutex<Vec<(String, bool)>>>,
@@ -66,7 +69,12 @@ impl ItemPart for Part {
                 .unwrap();
             let answer = tags.is_in_tag(sword, swords);
             seen.lock().unwrap().push(answer);
-            return answer;
+            let enabled = self
+                .answers
+                .tag_answer_enabled
+                .as_ref()
+                .is_none_or(|enabled| enabled.load(Ordering::Relaxed));
+            return answer.map(|contains_sword| contains_sword && enabled);
         }
         let answers = self.answers.support.lock().unwrap();
         answers
@@ -130,6 +138,17 @@ impl Hooks for Mod {
         for part in &self.0 {
             let key = r.item_key(part.item);
             r.item_part(key, part.clone());
+        }
+    }
+    fn tags_updated(&self, host: mod_api::HostSide<'_>, _: &mut mod_api::TagsUpdatedEvent) {
+        if let mod_api::HostSide::Client(_) = host {
+            for enabled in self
+                .0
+                .iter()
+                .filter_map(|part| part.answers.tag_answer_enabled.as_ref())
+            {
+                enabled.fetch_xor(true, Ordering::Relaxed);
+            }
         }
     }
 }
@@ -472,6 +491,79 @@ fn support_snapshot_reaches_both_anvils_and_enchant_without_dispatching_inside_t
 
 #[test]
 #[ignore = "daily"]
+fn short_enchantment_item_holders_bind_for_both_selectors() {
+    with_parts(|game, answers| {
+        let root = tempfile::tempdir().unwrap();
+        let pack = root.path().join("datapacks/enchant_test");
+        let data = pack.join("data");
+        std::fs::create_dir_all(data.join("minecraft/enchantment")).unwrap();
+        std::fs::create_dir_all(data.join("test/loot_table")).unwrap();
+        std::fs::write(
+            pack.join("pack.mcmeta"),
+            r#"{"pack":{"description":"Enchantment holder binding"}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.path().join("datapacks.json"),
+            r#"{"enabled":["file/enchant_test"],"disabled":[]}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            data.join("test/loot_table/sword.json"),
+            r#"{"pools":[{"rolls":1,"entries":[{"type":"minecraft:item","name":"minecraft:diamond_sword","modifier":[{"type":"minecraft:enchant_with_levels","levels":30,"options":["minecraft:sharpness"]}]}]}]}"#,
+        )
+        .unwrap();
+        let resources = game.options.resources.clone();
+        let mut sharpness: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(resources.join("data/minecraft/enchantment/sharpness.json")).unwrap(),
+        )
+        .unwrap();
+        sharpness["supported_items"] = serde_json::json!("diamond_sword");
+        sharpness["primary_items"] = serde_json::json!(["diamond_sword"]);
+        std::fs::write(
+            data.join("minecraft/enchantment/sharpness.json"),
+            serde_json::to_vec(&sharpness).unwrap(),
+        )
+        .unwrap();
+        game.world_root = root.path().to_owned();
+        let packs = game.reload_datapacks(false, &[]).unwrap();
+        game.world_tables = game
+            .stage_world_tables(&packs, false, &resources)
+            .unwrap()
+            .0;
+        game.load_server_loot();
+        let roll = |game: &Game<'_>| {
+            let loot = game.server_loot.get().unwrap();
+            let stacks = loot.roll("test:sword", &mut LegacyRandom::new(1), 0.0, None, None);
+            assert_eq!(stacks[0].item, "minecraft:diamond_sword");
+            stacks[0].enchantments.clone()
+        };
+        let sword = "minecraft:diamond_sword";
+        for support in [None, Some(true), Some(false)] {
+            *answers.support.lock().unwrap() =
+                support.into_iter().map(|v| (sword.into(), v)).collect();
+            answers.primary_incoming.lock().unwrap().clear();
+            game.resolve_parts().unwrap();
+            let eligible = support.unwrap_or(true);
+            assert!(
+                answers
+                    .primary_incoming
+                    .lock()
+                    .unwrap()
+                    .contains(&(sword.into(), eligible))
+            );
+            assert_eq!(!sharpness_at_30(game, sword).is_empty(), eligible);
+            let rolled = roll(game);
+            assert_eq!(
+                rolled.first().map(|(id, _)| id.as_str()),
+                eligible.then_some(SHARPNESS)
+            );
+        }
+    });
+}
+
+#[test]
+#[ignore = "daily"]
 fn support_resolves_once_against_the_tags_published_by_world_open_and_play_packets() {
     use crate::game::native_entity_refs::tests::{with_client_game, with_game};
     use sunrise_protocol::packets::{
@@ -480,12 +572,14 @@ fn support_resolves_once_against_the_tags_published_by_world_open_and_play_packe
     };
 
     let seen = Arc::new(Mutex::new(Vec::new()));
+    let enabled = Arc::new(AtomicBool::new(true));
     let mods = vec![ModEntry::new(
         "enchant_tag_probe",
         Box::new(Mod(vec![Part {
             item: "minecraft:stick",
             answers: Answers {
                 tag_answers: Some(seen.clone()),
+                tag_answer_enabled: Some(enabled.clone()),
                 ..Answers::default()
             },
         }])),
@@ -516,6 +610,7 @@ fn support_resolves_once_against_the_tags_published_by_world_open_and_play_packe
             assert!(supports(game));
             game.clear_world_parts();
         });
+        enabled.store(false, Ordering::Relaxed);
         with_client_game(|game| {
             let (pipe, _server) = sunrise_protocol::connection::Pipe::pair();
             game.connect_local(pipe, "EnchantTags").unwrap();
@@ -568,8 +663,15 @@ fn support_resolves_once_against_the_tags_published_by_world_open_and_play_packe
             .unwrap();
             assert_eq!(*seen.lock().unwrap(), [Some(true)]);
             assert!(supports(game));
+            game.handle_packet(C::UpdateTags(tags(vec![sword])))
+                .unwrap();
+            assert_eq!(*seen.lock().unwrap(), [Some(true), Some(true)]);
+            assert!(
+                !supports(game),
+                "the notice changed the part's answer without changing the tag"
+            );
             game.handle_packet(C::UpdateTags(tags(Vec::new()))).unwrap();
-            assert_eq!(*seen.lock().unwrap(), [Some(true), Some(false)]);
+            assert_eq!(*seen.lock().unwrap(), [Some(true), Some(true), Some(false)]);
             assert!(!supports(game));
             game.clear_world_parts();
         });

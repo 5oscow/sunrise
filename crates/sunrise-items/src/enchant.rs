@@ -312,6 +312,12 @@ fn parse_entry(
             .map(|s| Arc::from(s.as_str()))
             .collect(),
     };
+    let item_holders = |value| {
+        string_list(value)
+            .iter()
+            .map(|holder| sunrise_world::enchantment_answers::canonical_item_holder(holder))
+            .collect()
+    };
     let key = v["description"]["translate"].as_str().unwrap_or("");
     Ok(Enchantment {
         native_post_attack,
@@ -331,8 +337,8 @@ fn parse_entry(
         anvil_cost: v["anvil_cost"].as_u64().unwrap_or(0) as u32,
         min_cost: Cost::parse(&v["min_cost"]),
         max_cost: Cost::parse(&v["max_cost"]),
-        supported: string_list(&v["supported_items"]),
-        primary: v.get("primary_items").map(string_list),
+        supported: item_holders(&v["supported_items"]),
+        primary: v.get("primary_items").map(item_holders),
         exclusive: exclusive.into_iter().collect(),
         slots: string_list(&v["slots"]),
         effects: v["effects"].clone(),

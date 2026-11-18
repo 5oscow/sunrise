@@ -843,6 +843,22 @@ impl LootData {
             smelting: Vec::new(),
         };
         binding.snapshot(&mut loaded)?;
+        // Both enchantment engines bind the same item holder identities before
+        // a part can leave an unchanged default out of the shared answer table.
+        for enchantment in &mut loaded.enchantments {
+            for set in std::iter::once(&mut enchantment.supported).chain(&mut enchantment.primary) {
+                let bind = |holder: &mut Value| {
+                    if let Value::String(id) = holder {
+                        *id = crate::enchantment_answers::canonical_item_holder(id);
+                    }
+                };
+                if let Value::Array(members) = set {
+                    members.iter_mut().for_each(bind);
+                } else {
+                    bind(set);
+                }
+            }
+        }
         loaded.holder_sets = binding;
         Ok(loaded)
     }
@@ -973,7 +989,15 @@ impl LootData {
         }
     }
     fn item_in(&self, item: &str, set: &Value) -> bool {
-        self.holder_set("item", set).iter().any(|i| i == item)
+        let matches = |holder: &str| match holder.strip_prefix('#') {
+            Some(tag) => self.tag("item", tag).iter().any(|id| id == item),
+            None => holder == item,
+        };
+        match set {
+            Value::String(holder) => matches(holder),
+            Value::Array(holders) => holders.iter().filter_map(Value::as_str).any(matches),
+            _ => false,
+        }
     }
     fn supports(&self, item: &str, enchantment: &Enchantment) -> bool {
         self.support_answers

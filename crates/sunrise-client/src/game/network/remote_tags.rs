@@ -72,11 +72,12 @@ impl Game<'_> {
             r.tags = Some(items);
             r.has_item_tags = has_item_tags;
         }
-        self.install_parts(parts);
+        self.bind_parts(parts);
         self.refresh_recipe_property_context();
         self.announce_data_bound(mod_api::TagsUpdateCause::ClientPacketReceived {
             integrated_server: self.integrated.is_some(),
         });
+        self.resolve_primary_items();
         self.resolve_enchant_particles();
     }
 }

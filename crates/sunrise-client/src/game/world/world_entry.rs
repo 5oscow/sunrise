@@ -849,7 +849,7 @@ impl Game<'_> {
     }
     /// Publish state keys and bind parts before their state-only answers are cached.
     /// A server also publishes its parts for world generation.
-    fn bind_parts(&self, prepared: PreparedParts) {
+    pub(super) fn bind_parts(&self, prepared: PreparedParts) {
         cauldron_interactions::install(prepared.cauldrons);
         if self.is_logical_server() {
             native_worldgen_parts::publish(
