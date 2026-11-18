@@ -7161,7 +7161,10 @@ impl Game<'_> {
             }
             // Squid.aiStep; WalkAnimationState.update from the horizontal distance.
             sunrise_client::mobs::aquatic::squid_client_step(m, &mut mob_fx);
-            let d = (m.position.x - m.previous.x).hypot(m.position.z - m.previous.z) as f32;
+            let d = sunrise_core::geometry::length(
+                m.position.x - m.previous.x,
+                m.position.z - m.previous.z,
+            ) as f32;
             let (target, factor) = if m.species() == sunrise_client::mobs::Species::Frog {
                 (sunrise_client::mobs::frog::walk_target(m, d), 0.4)
             } else if sunrise_client::mobs::camel::is_camel(m.species()) {

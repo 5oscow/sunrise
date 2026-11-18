@@ -2230,7 +2230,7 @@ impl Game<'_> {
         let current = self.closest_node(dp.x, dp.y, dp.z);
         let target = self.closest_node(p.x, p.y, p.z);
         let (fx, fz) = (p.x.floor() as i32, p.z.floor() as i32);
-        let sd = (f64::from(fx) - dp.x).hypot(f64::from(fz) - dp.z);
+        let sd = sunrise_core::geometry::length(f64::from(fx) - dp.x, f64::from(fz) - dp.z);
         let ho = (f64::from(0.4_f32) + sd / 80.0 - 1.0).min(10.0);
         let last = [fx, (p.y + ho).floor() as i32, fz];
         let mut path = self.dragon_path(current, target, Some(last));
@@ -2361,7 +2361,7 @@ impl Game<'_> {
                     return;
                 };
                 if path.as_ref().is_some_and(|p| p.0.done()) {
-                    let dist = (pp.x - pos.x).hypot(pp.z - pos.z);
+                    let dist = sunrise_core::geometry::length(pp.x - pos.x, pp.z - pos.z);
                     let ho = (f64::from(0.4_f32) + dist / 80.0 - 1.0).min(10.0);
                     *target = Some(Vec3::new(pp.x, pp.y + ho, pp.z));
                 }
