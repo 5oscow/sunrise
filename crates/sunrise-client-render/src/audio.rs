@@ -1360,18 +1360,7 @@ fn build_stream<T: cpal::SizedSample + cpal::FromSample<f32>>(
 ) -> Result<cpal::Stream> {
     let rate = config.sample_rate().0;
     let channels = config.channels() as usize;
-    // The callback's buffer, sized once for the buffer the stream asked for (a default-sized
-    // one is ~100 ms, so 8192 frames covers it up to 48 kHz and beyond) so `resize` below
-    // doesn't allocate on the audio thread; the muffle's bus is reserved the same way, as it
-    // is the other buffer `mix` grows.
-    let samples = match stream_config.buffer_size {
-        cpal::BufferSize::Fixed(frames) => frames as usize,
-        cpal::BufferSize::Default => 8192,
-    } * channels;
-    let mut scratch: Vec<f32> = Vec::with_capacity(samples);
-    if let Ok(mut m) = mixer.lock() {
-        m.muffle.bus.reserve(samples);
-    }
+    let mut scratch = Vec::new();
     let on_error = mixer.clone();
     let stream = device.build_output_stream(
         stream_config,
