@@ -206,10 +206,11 @@ fn walk(dir: &Path, out: &mut BTreeMap<String, Value>, enchantment: bool) {
     }
 }
 
-fn synchronized_root_entries(
+fn synchronized_entries(
     root: &Path,
     resources: &Path,
     key: &str,
+    overlay: &sunrise_world::loot::PackOverlay<'_>,
 ) -> Vec<((String, String), Value, bool)> {
     let path = key.trim_start_matches("minecraft:");
     let enchantments = key == "minecraft:enchantment";
@@ -221,6 +222,19 @@ fn synchronized_root_entries(
         .collect();
     if enchantments {
         mod_entries(resources, path, &mut entries);
+    }
+    if key == BIOME_REGISTRY {
+        // A content mod's own biomes are always sent to clients.
+        for (id, value) in crate::biome::mod_biome_files(resources) {
+            let (ns, path) = id.split_once(':').unwrap_or(("minecraft", &id));
+            entries.push(((ns.to_owned(), path.to_owned()), value, true));
+        }
+    }
+    // These gameplay tables already select pack winners. Wire validation
+    // must not read a losing bootstrap instrument or song instead.
+    if matches!(path, "instrument" | "jukebox_song") {
+        mod_entries(resources, path, &mut entries);
+        pack_entries(path, overlay, &mut entries);
     }
     entries
 }
@@ -332,18 +346,28 @@ pub fn component_nbt(v: &Value) -> Tag {
 }
 
 impl SyncData {
-    /// Accumulate the lazy synchronized registries' condition errors during
-    /// world staging, not on the first connection. Enchantments are checked by
-    /// the world table loader.
-    pub fn stage_pack_conditions(resources: &Path, overlay: &sunrise_world::loot::PackOverlay<'_>) {
+    /// Collect conditions from the same files used by the lazy wire reader.
+    /// The world's damage catalog is already staged, and supplies its frozen wire data.
+    pub fn stage_registry_conditions(
+        resources: &Path,
+        overlay: &sunrise_world::loot::PackOverlay<'_>,
+    ) {
         let root = resources.join("data/minecraft");
-        for &key in PACK_REGISTRIES {
-            if key == "minecraft:enchantment" {
+        for &key in SYNCHRONIZED {
+            if key == "minecraft:damage_type" {
                 continue;
             }
             let path = key.trim_start_matches("minecraft:");
-            let mut entries = synchronized_root_entries(&root, resources, key);
-            pack_entries(path, overlay, &mut entries);
+            let mut entries = synchronized_entries(&root, resources, key, overlay);
+            if PACK_REGISTRIES.contains(&key) {
+                if key == "minecraft:dimension_type" {
+                    mod_dimension_types(
+                        sunrise_world::worldgen::overrides::mod_dimensions(),
+                        &mut entries,
+                    );
+                }
+                pack_entries(path, overlay, &mut entries);
+            }
             condition_filter::filter(&mut entries, false, overlay.conditions, path);
         }
     }
@@ -515,7 +539,7 @@ impl SyncData {
                 continue;
             }
             let path = key.trim_start_matches("minecraft:");
-            let mut entries = synchronized_root_entries(&root, resources, key);
+            let mut entries = synchronized_entries(&root, resources, key, overlay);
             let mut damage_entries = None;
             if *key == "minecraft:damage_type" {
                 // Validate the actual resource bytes before publishing any
@@ -566,13 +590,6 @@ impl SyncData {
                     );
                 }
                 pack_entries(path, overlay, &mut entries);
-            }
-            if *key == BIOME_REGISTRY {
-                // A content mod's own biomes: no client has their files, so their data is sent.
-                for (id, v) in crate::biome::mod_biome_files(resources) {
-                    let (ns, p) = id.split_once(':').unwrap_or(("minecraft", &id));
-                    entries.push(((ns.to_owned(), p.to_owned()), v, true));
-                }
             }
             condition_filter::filter(
                 &mut entries,
@@ -1166,7 +1183,20 @@ mod tests {
                 .to_string()
                 .into_bytes()
         };
+        std::fs::create_dir(root.path().join("worldgen")).unwrap();
+        std::fs::write(
+            root.path().join("worldgen/biomes.json"),
+            serde_json::json!({"test:wire_biome": String::from_utf8(bad("absent:wire_biome")).unwrap()}).to_string(),
+        ).unwrap();
+        let instrument = root.path().join("data/minecraft/instrument");
+        std::fs::create_dir_all(&instrument).unwrap();
+        std::fs::write(
+            instrument.join("override.json"),
+            bad("absent:root_instrument"),
+        )
+        .unwrap();
         let files = [
+            ("instrument/minecraft:override".into(), vec![b"{}".to_vec()]),
             (
                 "dialog/test:valid".into(),
                 vec![bad("absent:loser"), b"{}".to_vec()],
@@ -1181,7 +1211,7 @@ mod tests {
             ),
         ];
         let conditions = sunrise_world::conditions::LoadConditions::new([]);
-        SyncData::stage_pack_conditions(
+        SyncData::stage_registry_conditions(
             root.path(),
             &sunrise_world::loot::PackOverlay {
                 files: &files,
@@ -1199,7 +1229,9 @@ mod tests {
             ),
             "{error}"
         );
+        assert!(error.contains("data/test/worldgen/biome/wire_biome.json: unknown load conditions [absent:wire_biome]"), "{error}");
         assert!(!error.contains("absent:loser"), "{error}");
+        assert!(!error.contains("absent:root_instrument"), "{error}");
     }
 
     #[test]

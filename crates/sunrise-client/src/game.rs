@@ -6418,15 +6418,6 @@ impl Game<'_> {
         // Native tag reads use the lock to tell that the tag tables are ready.
         self.session_lock = Some(session_lock);
         self.refresh_recipe_property_context();
-        // Keep the no-pack preload; a world's packs replace it atomically.
-        // A later /reload keeps this session's synchronized registries.
-        lan::sync::open_world_sync_data(
-            &self.options.resources,
-            &self.res.core.item_data,
-            &pack_files(&self.world_tables),
-            &self.health_resources.damage,
-        )
-        .map_err(|e| format!("world registries: {e}"))?;
         // Warm this world's pack-aware loot data before gameplay can unpack
         // a container's pending table on its first inventory access.
         self.load_server_loot();

@@ -282,10 +282,17 @@ impl Game<'_> {
         let initial = if opening_world {
             // This load warns again about saved attribute bases clamped to their bounds (#3728).
             sunrise_client::living_attributes::LOAD_CLAMPS.begin_load();
-            Some(
-                self.stage_world_tables(&stack, false, &resources)
-                    .map_err(|error| ReloadStageError::DataSource(error.to_string()))?,
+            let tables = self
+                .stage_world_tables(&stack, false, &resources)
+                .map_err(|error| ReloadStageError::DataSource(error.to_string()))?;
+            let wire = super::lan::sync::prepare_world_sync_data(
+                &resources,
+                &self.res.core.item_data,
+                &super::pack_files(&tables.tables),
+                &tables.health.damage,
             )
+            .map_err(|error| ReloadStageError::DataSource(format!("world registries: {error}")))?;
+            Some((tables, wire))
         } else {
             None
         };
@@ -315,9 +322,10 @@ impl Game<'_> {
         // also install its tables before function admission validates inline holders.
         if let Some(world) = world {
             self.install_world_tables(world);
-        } else if let Some(initial) = initial {
+        } else if let Some((initial, wire)) = initial {
             self.open_world_tables(initial)
                 .map_err(|error| ReloadStageError::DataSource(error.to_string()))?;
+            super::lan::sync::install_world_sync_data(wire);
         }
         self.build_native_commands(enabled_features);
         self.apply_server_reload(prepared, &stack);

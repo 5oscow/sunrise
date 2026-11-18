@@ -285,7 +285,7 @@ impl Game<'_> {
         };
         if !reload {
             // These synchronized registries are normally decoded only when a peer joins.
-            sunrise_client::lan::data::SyncData::stage_pack_conditions(root, &overlay);
+            sunrise_client::lan::data::SyncData::stage_registry_conditions(root, &overlay);
         }
         // The recipe tables, the stations and the recipe book read one folder:
         // hold its files so it is read once.

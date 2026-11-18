@@ -167,6 +167,7 @@ pub(in crate::game) fn forget_server_sources() {
 }
 
 /// What `sync_data` loaded from this resource generation.
+#[derive(Clone)]
 pub(super) struct Synced {
     pub(super) root: std::path::PathBuf,
     pub(super) with_packs: bool,
@@ -177,7 +178,7 @@ pub(super) struct Synced {
 /// Only damage is bound eagerly for gameplay. Full wire data remains lazy
 /// except when the entering world actually defines damage types.
 #[derive(Default)]
-pub(super) struct SyncCache {
+pub(in crate::game) struct SyncCache {
     pub(super) data: Option<Synced>,
     pub(super) damage: Option<FrozenDamage>,
     pub(super) world_packs: bool,
@@ -244,14 +245,24 @@ pub(super) fn cached_sync_data(
         .clone()
 }
 
-pub(in crate::game) fn open_world_sync_data(
+/// Keep a usable no-pack preload, but decode any eager world wire data in a
+/// private cache so a refused decode cannot publish the world's registries.
+pub(in crate::game) fn prepare_world_sync_data(
     root: &std::path::Path,
     item_data: &ItemData,
     overlay: &sunrise_world::loot::PackOverlay,
     damage: &sunrise_world::damage_source::Catalog,
-) -> std::result::Result<(), String> {
-    let mut sync = SYNC.lock().unwrap_or_else(|e| e.into_inner());
-    initialize_world_sync_data(&mut sync, root, overlay, damage, item_data)
+) -> std::result::Result<SyncCache, String> {
+    let mut staged = SyncCache {
+        data: SYNC.lock().unwrap_or_else(|e| e.into_inner()).data.clone(),
+        ..Default::default()
+    };
+    initialize_world_sync_data(&mut staged, root, overlay, damage, item_data)?;
+    Ok(staged)
+}
+
+pub(in crate::game) fn install_world_sync_data(staged: SyncCache) {
+    *SYNC.lock().unwrap_or_else(|e| e.into_inner()) = staged;
 }
 
 pub(super) fn initialize_world_sync_data(
