@@ -978,7 +978,18 @@ impl Environment {
             else {
                 continue;
             };
-            let biome: Json = serde_json::from_slice(&root.read(&file)?)?;
+            // One unreadable biome file is skipped with a warning, not the whole environment.
+            let biome = match root
+                .read(&file)
+                .map_err(|e| e.to_string())
+                .and_then(|bytes| serde_json::from_slice::<Json>(&bytes).map_err(|e| e.to_string()))
+            {
+                Ok(biome) => biome,
+                Err(e) => {
+                    log::warn!("biome {file}: {e}");
+                    continue;
+                }
+            };
             let name = format!("{namespace}:{name}");
             let mut map = match AttributeMap::parse(&biome["attributes"]) {
                 Ok(map) => map,
@@ -1351,6 +1362,27 @@ mod tests {
             sky_at(&env, "example:region/test", 0.0).sky_color,
             [0.0, 1.0, 0.0]
         );
+    }
+
+    #[test]
+    fn a_malformed_biome_file_is_skipped_and_its_neighbours_still_load() {
+        use sunrise_assets::resource_source::Resource;
+        let file =
+            |path: &str, text: &str| (path.to_owned(), Resource::bytes(text.as_bytes().to_vec()));
+        let source = ResourceSource::indexed(std::collections::BTreeMap::from([
+            file(
+                "data/minecraft/dimension_type/overworld.json",
+                r##"{"attributes": {"minecraft:visual/sky_color": "#808080"}}"##,
+            ),
+            file("data/example/worldgen/biome/broken.json", "{ not json"),
+            file(
+                "data/example/worldgen/biome/test.json",
+                r##"{"attributes": {"minecraft:visual/sky_color": "#ff0000"}}"##,
+            ),
+        ]));
+        let env = Environment::load(&source).unwrap();
+        assert!(env.biome("example:broken").is_none());
+        assert_eq!(sky_at(&env, "example:test", 0.0).sky_color, [1.0, 0.0, 0.0]);
     }
 
     #[test]
