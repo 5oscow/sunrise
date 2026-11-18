@@ -530,8 +530,8 @@ the player whose turn it is, its filters and its labels (translation keys), and 
   Packs (downloads land in `resourcepacks/`) shows it.
 - The engine draws the browse screen (search box, filters, results, icons, install state) from the source's data
   alone, with the source's labels. It names no site.
-- A browse screen keeps the source and the seat it opened on until it closes or is dropped, so a splitscreen guest
-  leaving on another player's turn still closes its own session.
+- A browse screen keeps the source and the seat it opened on until it closes or is dropped, so one dropped while
+  another seat's turn runs still closes its own session.
 - `sunrise-pack-browser` is the one source today: Modrinth, with its `packBrowser` switch in Extras' Menus group.
 
 ### Lang files (`sunrise_platform::lang`)

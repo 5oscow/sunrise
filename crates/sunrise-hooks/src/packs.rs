@@ -62,8 +62,8 @@ pub trait Source: Sync {
     fn download(&self, hit: usize, dir: &Path, game_version: &str);
     /// The next finished piece of work, if any.
     fn poll(&self) -> Option<Message>;
-    /// The browse screen opened on `seat` is gone: drop what that seat holds. It may come on
-    /// another player's turn (a splitscreen guest leaving).
+    /// The browse screen opened on `seat` is gone: drop what that seat holds. It may come while
+    /// another seat's turn runs, when that player's game is dropped.
     fn close(&self, seat: usize);
 }
 
