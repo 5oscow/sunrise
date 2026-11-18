@@ -77,6 +77,18 @@ impl Game<'_> {
         };
         Some(EntityRef::new(level.epoch(), id))
     }
+    /// `LevelRef::spawn_mob`: [`level_spawn_entity`](Self::level_spawn_entity)'s
+    /// living route for a mob at rest, with no owner.
+    pub(super) fn level_spawn_mob(
+        &mut self,
+        level: LevelRef,
+        kind: &str,
+        pos: [f64; 3],
+        reason: mod_api::SpawnReason,
+    ) -> Option<EntityRef> {
+        let spawn = EntitySpawn::new(SpawnBody::Living { reason });
+        self.level_spawn_entity(level, kind, pos, &spawn)
+    }
     /// `Projectile.spawnProjectile` of a thrown item projectile at `pos`: its
     /// velocity set (`setDeltaMovement`) and its rotation given or taken from
     /// the velocity (`Projectile.shoot`), its owner set before it joins

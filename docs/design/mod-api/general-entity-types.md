@@ -96,7 +96,7 @@ Paths below are verified existing integration owners relative to this repository
 | Route | Existing file:line owner; required treatment |
 | --- | --- |
 | Part registration and dispatch | `crates/sunrise-mod-vocab/src/parts/entities.rs:124` registers behavior; `:53` resolves a type's Parts. Resolve into slots at load. |
-| Mod spawning, including callers using level handles | `crates/sunrise-client/src/game/modding/native_level_spawning.rs` owns `level_spawn_entity` (#2641): `SpawnBody::General` builds a fresh record and inserts it through `spawn_entity_from_nbt`, the boundary `/summon` and chunk load share, without pretending every entity is a mob. |
+| Mod spawning, including callers using level handles | `crates/sunrise-client/src/game/modding/native_level_spawning.rs` owns `level_spawn_entity` (#2641; `level_spawn_mob` is its living route at rest): `SpawnBody::General` builds a fresh record and admits it through `admit_general_record`, the single-record admission chunk loading shares, without pretending every entity is a mob. |
 | Natural/spawner policy | `crates/sunrise-client/src/game/mobs/natural_spawning.rs:43` gates eligible chunks. General MISC types do not gain natural spawning implicitly. Explicit spawn adapters use the same insertion boundary. |
 | Identity, reads and queries | `crates/sunrise-client/src/game/modding/native_entity_refs.rs:101` resolves targets, `:176` creates refs, `:245` queries entities. Extend all three to general rows; do not scan families for each lookup. |
 | Temporary lift | `crates/sunrise-client/src/game/modding/native_entity_refs.rs:86` owns held-out access. General rows must retain residency visibility and balance restoration after panic. |

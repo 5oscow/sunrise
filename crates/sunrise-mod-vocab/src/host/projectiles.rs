@@ -57,6 +57,11 @@ pub trait ProjectilesServerHost {
 #[sunrise_mod_api_macros::host_area]
 pub trait ProjectilesBackend {
     /// Side: server.
+    /// `Projectile.getOwner`: the owner as a resolved entity. None for no
+    /// owner, one that is gone or in another level, or a stale handle.
+    #[access(WorldOnly)]
+    fn projectile_owner(&self, projectile: ProjectileRef) -> Option<EntityRef>;
+    /// Side: server.
     /// `AbstractArrow.pickup`, for an arrow or a mob's trident.
     #[access(WorldOnly)]
     fn projectile_pickup(&self, projectile: ProjectileRef) -> Option<ArrowPickup>;

@@ -33,6 +33,30 @@ pub trait LevelSpawningBackend {
 #[sunrise_mod_api_macros::host_area]
 pub trait LevelSpawningBackendMut {
     /// Side: server.
+    /// Spawns a mob of `kind` (`minecraft:zombie`) at `pos` in the level as
+    /// `EntityType.spawn` does with `reason`: the entity type creates it (its
+    /// Parts and attachments with it, and `entity_constructing`), with a random
+    /// yaw from the level random, then `finalize_spawn` and `finalizeSpawn`
+    /// with that reason (equipment, variants, jockeys), and it joins the level
+    /// (`entity_join_level`), not persistent, as a natural spawn joins. The same
+    /// living route as [`SpawnBody::Living`] through `level_spawn_entity`, at rest. The
+    /// level's spawn limits, flags and spawn rules don't apply, as they don't
+    /// to `/summon`. The new mob as a handle. None, with nothing spawned, for a
+    /// kind that isn't a mob, a position that isn't finite or is outside the
+    /// spawnable bounds (`Level.isInSpawnableBounds`), an unloaded chunk, a
+    /// stale handle, a level not in place, a client, a `finalize_spawn` that
+    /// cancelled the spawn or a mob a mod kept out.
+    /// Inside a transaction its join waits for the root commit, so a mod keeping the mob out is not
+    /// known at the call: the handle is returned and reads stale from the commit on.
+    #[access(WorldOnly)]
+    fn level_spawn_mob(
+        &mut self,
+        level: LevelRef,
+        kind: &str,
+        pos: [f64; 3],
+        reason: SpawnReason,
+    ) -> Option<EntityRef>;
+    /// Side: server.
     /// Spawns an entity of `kind` at `pos` in the level, as `spawn` describes
     /// ([`EntitySpawn`]): a thrown item projectile (`minecraft:snowball` or a
     /// content thrown type), a mob (`minecraft:zombie` or a content living

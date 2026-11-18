@@ -674,7 +674,7 @@ struct Fixture {
 #[ignore = "daily"]
 fn exhausted_ids_refuse_every_mod_spawn() {
     const NAME: &str = "game::transaction_entities_tests::exhausted_ids_refuse_every_mod_spawn";
-    let rows: [(&str, Spawn); 13] = [
+    let rows: [(&str, Spawn); 14] = [
         ("summon", |game, _| {
             summon(game, "minecraft:pig", "{}").is_some()
         }),
@@ -699,6 +699,10 @@ fn exhausted_ids_refuse_every_mod_spawn() {
             let before = game.dropped.len();
             game.drop_at([1, 70, 1], ItemStack::new("minecraft:stone", 1));
             game.dropped.len() > before
+        }),
+        ("level_spawn_mob", |game, f| {
+            let reason = mod_api::SpawnReason::Command;
+            (game.level_spawn_mob(f.level, "minecraft:cow", [1.5, 70.0, 1.5], reason)).is_some()
         }),
         ("level_spawn_entity", |game, f| {
             let reason = mod_api::SpawnReason::Command;
