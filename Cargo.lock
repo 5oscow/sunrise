@@ -4469,6 +4469,7 @@ dependencies = [
  "crypto-common",
  "digest",
  "flate2",
+ "fnv",
  "fs4",
  "gilrs",
  "glam",

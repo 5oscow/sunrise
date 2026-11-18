@@ -38,11 +38,17 @@ class ExtrasFeaturesTest(unittest.TestCase):
         self.assertEqual(self.check(SHARED + "sunrise-friends v0.1.0|\n",
                                     SHARED + "off-only v0.2.0|\n"), (0, ""))
 
-    def test_extras_owners_may_differ(self):
-        owners = ("sunrise-client", "sunrise-game", "sunrise-mod-host")
-        default = "".join(f"{name} v0.1.0 (/workspace/{name})|audio,sunrise-extras\n" for name in owners)
-        extras_off = "".join(f"{name} v0.1.0 (/workspace/{name})|audio\n" for name in owners)
+    def test_workspace_crates_own_the_extras_features_and_may_differ(self):
+        root = check_extras_features.ROOT
+        owners = ("sunrise-client", "sunrise-client-lib", "sunrise-game")
+        default = "".join(f"{name} v0.1.0 ({root}/crates/{name})|audio,controllers\n" for name in owners)
+        extras_off = "".join(f"{name} v0.1.0 ({root}/crates/{name})|audio\n" for name in owners)
         self.assertEqual(self.check(SHARED + default, SHARED + extras_off), (0, ""))
+
+    def test_a_path_dependency_outside_the_workspace_is_still_compared(self):
+        status, diagnostic = self.check("outside v0.1.0 (/elsewhere/outside)|std\n", "outside v0.1.0 (/elsewhere/outside)|\n")
+        self.assertEqual(status, 1)
+        self.assertIn("outside v0.1.0 (/elsewhere/outside): default [std]; Extras-off []", diagnostic)
 
     def test_an_extra_default_host_or_target_instance_passes(self):
         self.assertEqual(self.check(SHARED + "shared v1.0.0|getrandom\n", SHARED), (0, ""))

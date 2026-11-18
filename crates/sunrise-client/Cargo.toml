@@ -71,6 +71,7 @@ sha2 = "0.10.9"
 cipher = { version = "0.4", default-features = false, features = ["zeroize"] }
 crypto-common = { version = "0.1", default-features = false, features = ["getrandom"] }
 digest = { version = "0.10", default-features = false, features = ["mac"] }
+fnv = "1"
 socket2 = { version = "0.6", default-features = false, features = ["all"] }
 # Server resource packs are checked and cached by their SHA-1, as vanilla does.
 sha1 = "0.10"

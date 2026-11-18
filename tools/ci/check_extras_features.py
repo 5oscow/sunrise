@@ -7,9 +7,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 BUILD_ROOTS = ("sunrise-game", "sunrise-mod-host")
-# The release workflows will use this same feature set when they build both variants.
-EXTRAS_OFF_FEATURES = "audio,controllers"
-EXTRAS_OWNERS = {"sunrise-client", "sunrise-game", "sunrise-mod-host"}
+# The vanilla build: Extras off, and controllers with it (an Extras feature). The release workflows will use this
+# same feature set when they build both variants.
+EXTRAS_OFF_FEATURES = "audio"
 
 
 def features_for(root, *, extras_off):
@@ -21,7 +21,8 @@ def features_for(root, *, extras_off):
     packages = {}
     for line in output.splitlines():
         package, features = line.removesuffix(" (*)").split("|", 1)
-        if package.split()[0] not in EXTRAS_OWNERS:
+        # Workspace crates own the Extras features, so theirs differ by design; only shared dependencies must match.
+        if f"({ROOT}" not in package:
             # Build dependencies can have a separate feature set from normal dependencies.
             packages.setdefault(package, set()).add(tuple(sorted(filter(None, features.split(",")))))
     return packages
