@@ -78,7 +78,8 @@ by area. A pull request never adds one, and isn't held back by one it didn't add
 
 ## Only original code, or code whose license allows it
 
-Sunrise is MIT. Its code is written from Minecraft 26.3 itself and from public documentation. Since 30 October 2026
+Sunrise's code is under the PolyForm Shield licence ([LICENSING.md](LICENSING.md)).
+Its code is written from Minecraft 26.3 itself and from public documentation. Since 30 October 2026
 another project's source may also be read and used, **only when that project's license allows it**:
 
 - **Allowed:** MIT, MIT-0, BSD-2-Clause, BSD-3-Clause, 0BSD, ISC, zlib, Apache-2.0, Unlicense, and the CC0-1.0
