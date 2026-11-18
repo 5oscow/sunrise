@@ -139,6 +139,7 @@ mod tests {
             spectator: false,
             permission: 0,
             sunrise: true,
+            general_entity: true,
             moved: true,
             position: [1.0e6, 64.0, 1.0e6],
             view_distance: 2,

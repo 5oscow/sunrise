@@ -1,0 +1,1 @@
+sunrise-client game::remote::general::tests::the_window_keeps_moves_and_drops_the_rows_it_is_shown lib daily resources

@@ -10,7 +10,9 @@ use std::sync::Arc;
 use sunrise_protocol::{
     buf::pack_degrees,
     entity_data::{Particle, Value, serializer},
+    general_entity,
     item::Stack,
+    packets::configuration::CustomPayload,
     packets::play::{
         self, AddEntity, AttributeSnapshot, EntityPositionSync, MoveEntity, MoveEntityPos,
         MoveEntityPosRot, MoveEntityRot, PositionPath, RotateHead, SetEntityData, SetEntityLink,
@@ -243,14 +245,31 @@ impl Riding {
     }
 }
 
+/// How pairing introduces an entity to a client.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Kind {
+    /// `AddEntity` with the registry id of its type.
+    Type(i32),
+    /// A native mod's general row (#792), whose type no client registry holds: a
+    /// `sunrise:general_entity` spawn, to the clients that read it.
+    General,
+}
+
+impl Viewer<'_> {
+    /// Whether this client may be paired with an entity introduced as `kind`.
+    fn pairs_with(&self, kind: Kind) -> bool {
+        kind != Kind::General || self.general_entity
+    }
+}
+
 /// What a level's clients were last told about one entity (ServerEntity's
 /// fields), shared by every client that tracks it.
 struct ServerEntity {
     /// What the mods hear of it when a client starts or stops tracking it.
     tracked: Arc<Tracked>,
-    /// The registry id of its type (None: a type the clients don't know,
-    /// never paired).
-    kind: Option<i32>,
+    /// How pairing introduces it (None: a type the clients don't know, never
+    /// paired).
+    kind: Option<Kind>,
     /// The type's tracking range in chunks, update interval (0: never),
     /// whether velocity is tracked, whether it is an `AbstractArrow` and its
     /// `AbstractHurtingProjectile.accelerationPower`.
@@ -377,7 +396,10 @@ impl ServerEntity {
                 uuid: e.uuid,
                 kind: Arc::from(e.kind.as_str()),
             }),
-            kind,
+            kind: kind.map(Kind::Type).or_else(|| {
+                // `settings` answered from the declaration when the type is a general one.
+                tracking::general(&e.kind).map(|_| Kind::General)
+            }),
             range: i32::from(range),
             interval,
             track_deltas,
@@ -414,21 +436,45 @@ impl ServerEntity {
     fn pairing(
         &self,
         e: &EntityState,
-        kind: i32,
+        kind: Kind,
         riding: &Riding,
         out: &mut Vec<play::Clientbound>,
     ) {
-        out.push(play::Clientbound::AddEntity(AddEntity {
-            id: e.id,
-            uuid: e.uuid,
-            kind,
-            position: e.position,
-            velocity: e.velocity,
-            pitch: pack_degrees(e.pitch),
-            yaw: pack_degrees(e.yaw),
-            head_yaw: pack_degrees(e.head_yaw),
-            data: e.data,
-        }));
+        match kind {
+            Kind::Type(kind) => out.push(play::Clientbound::AddEntity(AddEntity {
+                id: e.id,
+                uuid: e.uuid,
+                kind,
+                position: e.position,
+                velocity: e.velocity,
+                pitch: pack_degrees(e.pitch),
+                yaw: pack_degrees(e.yaw),
+                head_yaw: pack_degrees(e.head_yaw),
+                data: e.data,
+            })),
+            Kind::General => {
+                let spawn = general_entity::Message::Spawn {
+                    id: e.id,
+                    uuid: e.uuid,
+                    type_key: e.kind.clone(),
+                    position: e.position,
+                    rotation: [e.yaw, e.pitch],
+                    velocity: e.velocity,
+                };
+                // The game's own state: a declared key and finite values. A row that breaks
+                // them is not introduced at all.
+                match general_entity::encode(&spawn) {
+                    Ok(data) => out.push(play::Clientbound::CustomPayload(CustomPayload {
+                        channel: general_entity::CHANNEL.into(),
+                        data,
+                    })),
+                    Err(error) => {
+                        log::warn!("Sunrise: general entity {} not paired: {error}", e.id);
+                        return;
+                    }
+                }
+            }
+        }
         if !self.meta.is_empty() {
             out.push(play::Clientbound::SetEntityData(SetEntityData {
                 id: e.id,
@@ -912,6 +958,10 @@ pub struct Viewer<'a> {
     /// Its client is Sunrise's (`Guest::is_sunrise`): it may be sent a native
     /// mod's particle.
     pub sunrise: bool,
+    /// Its client reads `sunrise:general_entity` (`Guest::negotiated_general_entity`): only
+    /// such a client is paired with a native mod's general row. Another never tracks one: no
+    /// spawn, no move and no removal names it.
+    pub general_entity: bool,
     /// It accepted a move since the last tick (ChunkMap.move): every pair
     /// of it is checked again.
     pub moved: bool,
@@ -1155,7 +1205,7 @@ impl Entities {
                 {
                     continue;
                 }
-                let Some(kind) = s.kind else {
+                let Some(kind) = s.kind.filter(|&kind| v.pairs_with(kind)) else {
                     continue;
                 };
                 let bodies = bodies.get_or_insert_with(|| {
@@ -1612,7 +1662,7 @@ impl Entities {
                     v.out.extend(self.bodies.to(v).iter().cloned());
                 } else if f & SEES != 0
                     && !e.bare
-                    && let Some(kind) = s.kind
+                    && let Some(kind) = s.kind.filter(|&kind| v.pairs_with(kind))
                 {
                     let bodies = pairing.get_or_insert_with(|| {
                         let mut packets = Vec::new();
@@ -1731,6 +1781,7 @@ impl Entities {
                         v.out.extend(m.changes.to(v).iter().cloned());
                     } else if f & SEES != 0
                         && let Some(pairing) = &m.pairing
+                        && m.state.kind.is_some_and(|kind| v.pairs_with(kind))
                     {
                         v.out.extend(pairing.to(v).iter().cloned());
                         // As `send_in_order`: the bundle ends before its changes.
@@ -1760,6 +1811,8 @@ impl Entities {
 
 #[cfg(test)]
 mod late_pair_tests;
+#[cfg(test)]
+mod general_pair_tests;
 mod slab;
 
 #[cfg(test)]
@@ -1901,6 +1954,7 @@ mod tests {
                         .map(|(k, (tracker, out))| Viewer {
                             entity_id: 1 + k as i32,
                             sunrise: true,
+                            general_entity: true,
                             sources: None,
                             spectator: false,
                             permission: 0,
@@ -2019,7 +2073,7 @@ mod tests {
     fn moves_go_out_every_update_interval() {
         let mut s = added(&state(0.0));
         let mut spawn = Vec::new();
-        s.pairing(&state(0.0), 100, &Riding::default(), &mut spawn);
+        s.pairing(&state(0.0), Kind::Type(100), &Riding::default(), &mut spawn);
         assert!(matches!(spawn[..], [play::Clientbound::AddEntity(_)]));
         // Tick 0 is due and a multiple of 60: the position goes out unchanged.
         assert!(matches!(
@@ -2214,7 +2268,7 @@ mod tests {
         e.attributes = vec![speed(0.23), armor];
         let mut s = added(&e);
         let mut spawn = Vec::new();
-        s.pairing(&e, 100, &Riding::default(), &mut spawn);
+        s.pairing(&e, Kind::Type(100), &Riding::default(), &mut spawn);
         let Some(play::Clientbound::UpdateAttributes(p)) = spawn.get(1) else {
             panic!("expected the attributes after the add");
         };
@@ -2500,6 +2554,7 @@ mod tests {
                     spectator: self.spectators[0],
                     permission: self.permissions[0],
                     sunrise: true,
+                    general_entity: true,
                     moved: self.moved[0],
                     position: self.positions[0],
                     view_distance: 10,
@@ -2514,6 +2569,7 @@ mod tests {
                     spectator: self.spectators[1],
                     permission: self.permissions[1],
                     sunrise: true,
+                    general_entity: true,
                     moved: self.moved[1],
                     position: self.positions[1],
                     view_distance: 10,
@@ -2674,7 +2730,7 @@ mod tests {
         // Paired in the same pass: the bodies of ServerEntity.sendPairingData.
         c.tick(&mut level, &[&e]);
         let mut pairing = Vec::new();
-        added(&e).pairing(&e, 100, &Riding::default(), &mut pairing);
+        added(&e).pairing(&e, Kind::Type(100), &Riding::default(), &mut pairing);
         let pairing: Vec<_> = pairing.into_iter().map(body).collect();
         assert!(!pairing.is_empty());
         assert_eq!(c.out, [pairing.clone(), pairing]);

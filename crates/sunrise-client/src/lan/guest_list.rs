@@ -127,6 +127,7 @@ impl GuestList {
         let mut viewers = Vec::new();
         for g in self.rows.iter_mut() {
             let (spectator, sunrise) = (g.spectator(), g.is_sunrise());
+            let general_entity = g.negotiated_general_entity();
             let (chunks, sources, tracker, out, gone, moved) = if visible(g) {
                 let Some((out, gone)) = outputs.next() else {
                     continue;
@@ -155,6 +156,7 @@ impl GuestList {
                 spectator,
                 permission: g.permission,
                 sunrise,
+                general_entity,
                 moved,
                 position: g.position,
                 view_distance: g.view_distance,
