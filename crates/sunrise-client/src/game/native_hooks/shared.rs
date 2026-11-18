@@ -79,6 +79,8 @@ fn title_target_id(target: ScreenTarget) -> Option<&'static str> {
         ScreenTarget::WorldSelect => Some("world_select"),
         ScreenTarget::WorldCreate => Some("world_create"),
         ScreenTarget::Multiplayer => Some("multiplayer"),
+        ScreenTarget::AddServer => Some("add_server"),
+        ScreenTarget::DirectConnect => Some("direct_connect"),
         _ => None,
     }
 }
@@ -152,6 +154,12 @@ impl Game<'_> {
                 ScreenDecision::Vanilla(target) => {
                     before(self);
                     self.open_screen_target(target);
+                    if self.title.is_some() {
+                        // A title screen: told here, so the frame's observer
+                        // doesn't announce it again.
+                        self.screen_state.observed = self.observed_now();
+                        self.title_init_post();
+                    }
                     return;
                 }
                 ScreenDecision::Open => {}
@@ -237,7 +245,12 @@ impl Game<'_> {
                 self.capture(false);
             }
             ScreenTarget::Options => self.open_options(false),
-            ScreenTarget::Inventory => self.open_player_inventory(),
+            ScreenTarget::Inventory => {
+                // A menu the server opened for the screen asked for (a crafting
+                // table) closes: the inventory shows the player's own.
+                self.close_container();
+                self.open_player_inventory();
+            }
             ScreenTarget::Advancements => self.open_advancements(false),
             ScreenTarget::Stats => self.open_stats(),
             ScreenTarget::Chat => self.begin_chat_screen("", false),

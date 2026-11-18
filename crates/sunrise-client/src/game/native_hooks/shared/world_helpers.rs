@@ -175,8 +175,11 @@ impl Game<'_> {
                 // `screen_opening` kept it open.
                 return;
             }
-            // Over the title, the title's screen shows again.
-            self.capture(self.title.is_none());
+            // `Screen.onClose`'s `setScreen(null)` with no world: the title screen.
+            match self.title.as_mut() {
+                Some(title) => title.open_by_id("title"),
+                None => self.capture(true),
+            }
         }
         self.native_mod_screen = None;
     }

@@ -815,7 +815,8 @@ impl Title {
         self.requested.take()
     }
     /// Opens the title screen `id` names (`title`, `world_select`,
-    /// `world_create`, `multiplayer`: the ones that take no arguments) at
+    /// `world_create`, `multiplayer`, `add_server`, `direct_connect`: the
+    /// ones that take no arguments) at
     /// once, past the gate: the screen a mod's `screen_opening` answer puts in
     /// place of another, which fires nothing again. The world list opens as
     /// Singleplayer does; the others fresh. Any other id changes nothing.
@@ -831,6 +832,12 @@ impl Title {
             "multiplayer" => self.set_mode(Mode::Multiplayer(crate::multiplayer::Screen::list(
                 &self.saves,
             ))),
+            "add_server" => self.set_mode(Mode::Multiplayer(
+                crate::multiplayer::Screen::add_server(),
+            )),
+            "direct_connect" => {
+                self.set_mode(Mode::Multiplayer(crate::multiplayer::Screen::direct()))
+            }
             _ => {}
         }
         self.gated = gated;

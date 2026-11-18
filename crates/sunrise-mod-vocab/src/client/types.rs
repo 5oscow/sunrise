@@ -717,7 +717,7 @@ pub enum ScreenOpening {
     /// (`Host::mod_screen_open`) opens instead, if it can open there (over the
     /// world or the title's screens, not over a book, a prompt or while a
     /// world loads; the screen that was about to open does then). Over the
-    /// title, closing it returns to the title's screen.
+    /// title, closing it returns to the title screen.
     ModScreen,
     /// `Opening.setNewScreen(..)` with a vanilla screen: `target` opens
     /// instead, as it opens on its own. A target that can't open here (a
@@ -756,6 +756,12 @@ pub enum ScreenTarget {
     WorldCreate,
     /// On the title: the server list (`JoinMultiplayerScreen`), `multiplayer`.
     Multiplayer,
+    /// On the title: Add Server (`EditServerScreen` for a new server),
+    /// `add_server`; it returns to the server list.
+    AddServer,
+    /// On the title: Direct Connection (`DirectJoinServerScreen`),
+    /// `direct_connect`; it returns to the server list.
+    DirectConnect,
 }
 
 /// Where a mod menu's recipe-book toggle sits: `x` GUI pixels right of the menu's left edge and
