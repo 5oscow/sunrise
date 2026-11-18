@@ -9,13 +9,16 @@ pub trait Hooks {
     /// that hydrates ends the scan, and the farmland goes to moisture 7. Rain on the block above,
     /// moisture changes and drying out are unchanged. The farmland decides which fluids water it.
     /// Asked on an authoritative server; the level is read-only. With no part attached to the
-    /// farmland, the scan is vanilla's. Diverges from upstream: new hook.
+    /// farmland, the scan is vanilla's. If the content owner subscribed and is switched off,
+    /// only Parts before the owner can answer. The random tick keeps the current state unless
+    /// one of those answers makes a fluid hydrate it.
     #[hook(
         side = "server",
         contract = "replace",
         out = "hydrates",
         scope = "block",
         key = "state",
+        inert = "*hydrates = None;",
         target = "sunrise_client::game::native_hooks::can_be_hydrated::GameLevel<'_>::native_can_be_hydrated",
         neoforge = "IBlockExtension.canBeHydrated"
     )]

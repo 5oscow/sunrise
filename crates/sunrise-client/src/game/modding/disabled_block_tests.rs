@@ -7,9 +7,9 @@ mod tests {
         native_entity_refs::tests as fixture,
     };
     use mod_api::{
-        BlockPart, BlockToolModificationEvent, DispenseMethodEvent, Dispensed, Flow, Hooks, Host,
-        LevelWriteHost, Registrar, RegistrationContext, ServerHost, TickBlockEvent, ToolAbility,
-        ToolModifiedStateEvent,
+        BlockPart, BlockToolModificationEvent, CanBeHydratedEvent, DispenseMethodEvent, Dispensed,
+        Flow, Hooks, Host, LevelWriteHost, Registrar, RegistrationContext, ServerHost,
+        TickBlockEvent, ToolAbility, ToolModifiedStateEvent,
     };
     use std::sync::{
         Arc, Mutex,
@@ -58,12 +58,26 @@ mod tests {
             Some((Some(remainder), 0))
         }
     }
+    struct HydratesWith(&'static str);
+    #[mod_api::sunrise_part]
+    impl BlockPart for HydratesWith {
+        fn can_be_hydrated(
+            &self,
+            _: &dyn mod_api::LevelHost,
+            event: &mut CanBeHydratedEvent,
+        ) -> Option<bool> {
+            (mod_api::__private::fluid_id(event.fluid.fluid) == Some(self.0)).then_some(true)
+        }
+    }
+
     struct EnabledPrefix(Arc<Probe>);
     #[mod_api::__subscriptions]
     impl Hooks for EnabledPrefix {
         fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
             let block = r.block_key("inert_test:machine");
             r.block_part(block, Earlier(self.0.clone()));
+            let farmland = r.block_key("inert_test:farmland");
+            r.block_part(farmland, HydratesWith("minecraft:water"));
         }
     }
 
@@ -135,6 +149,8 @@ mod tests {
             r.block_part(plant, Plant);
             let soil = r.block_key("inert_test:soil");
             r.block_part(soil, Soil);
+            let farmland = r.block_key("inert_test:farmland");
+            r.block_part(farmland, HydratesWith("minecraft:lava"));
         }
         fn blocks(&self, _: &RegistrationContext, e: &mut mod_api::BlocksEvent<'_>) {
             e.blocks.push(
@@ -150,11 +166,18 @@ mod tests {
             e.blocks.push(plant);
             e.blocks
                 .push(mod_api::Block::new("inert_test:soil", "minecraft:stone"));
+            for id in ["inert_test:farmland", "inert_test:unsubscribed_farmland"] {
+                e.blocks.push(mod_api::Block::new(id, "minecraft:farmland"));
+            }
         }
     }
     struct Observer(Arc<Probe>);
     #[mod_api::__subscriptions]
     impl Hooks for Observer {
+        fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
+            let farmland = r.block_key("inert_test:farmland");
+            r.block_part(farmland, HydratesWith("minecraft:lava"));
+        }
         fn block_tool_modification(
             &self,
             _: &dyn Host,
@@ -276,6 +299,57 @@ mod tests {
                         assert_eq!(calls(), expected, "the held tick runs exactly once");
                     }
                 }
+            },
+        );
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn disabled_hydration_holds_farmland_until_the_owner_returns() {
+        with_inert_block(
+            "disabled_hydration_holds_farmland_until_the_owner_returns",
+            |game, _, _| {
+                let registry = game.pack.assets.registry;
+                let state = |id| registry.default_state(id).unwrap();
+                let (air, dirt, water, lava) = (
+                    state("minecraft:air"),
+                    state("minecraft:dirt"),
+                    state("minecraft:water"),
+                    state("minecraft:lava"),
+                );
+                let dry = state("inert_test:farmland");
+                let control = state("inert_test:unsubscribed_farmland");
+                let [two, three, wet] = game.with_level(|b, _, _| {
+                    [2, 3, 7].map(|moisture| b.table.set_int(dry, b.props.moisture, moisture))
+                });
+                let fluid_pos = POS.offset(2, 0, 0);
+                let mut tick = |initial, fluid| {
+                    game.with_level(|b, level, ticks| {
+                        level.set_raw(POS, initial);
+                        level.set_raw(fluid_pos, fluid);
+                        b.random_tick(level, ticks, POS);
+                        level.block_state(POS)
+                    })
+                };
+
+                assert!(mod_api::__private::set_mod_enabled("inert_test", false));
+                // The later Part accepts lava, but the disabled owner precedes it.
+                assert_eq!(tick(three, lava), three);
+                assert_eq!(tick(dry, lava), dry);
+                assert_eq!(tick(dry, air), dry);
+                assert_eq!(tick(control, lava), dirt);
+                assert_eq!(tick(dry, water), wet, "the earlier enabled Part can answer");
+                assert!(mod_api::__private::set_mod_enabled("enabled_prefix", false));
+                assert_eq!(tick(dry, water), dry);
+
+                assert!(mod_api::__private::set_mod_enabled(
+                    "enabled_observer",
+                    false
+                ));
+                assert!(mod_api::__private::set_mod_enabled("inert_test", true));
+                assert_eq!(tick(dry, lava), wet);
+                assert_eq!(tick(three, air), two);
+                assert_eq!(tick(dry, air), dirt);
             },
         );
     }

@@ -842,6 +842,12 @@ pub trait LevelAccess: BlockEntityNeighbors {
     fn asks_can_be_hydrated(&self, _state: BlockStateId) -> bool {
         false
     }
+    /// Whether the farmland's subscribed hydration rule belongs to its disabled owner.
+    /// Asked only when a Part subscribes. If held, only an earlier Part can make a
+    /// nearby fluid hydrate the farmland; otherwise the random tick leaves it alone.
+    fn hold_farmland_hydration(&self, _state: BlockStateId) -> bool {
+        false
+    }
     /// `IBlockExtension.canBeHydrated` for the farmland `state` at `pos` and
     /// the non-empty `fluid` at `fluid_pos`: an answer put in `hydrates`
     /// decides, left `None` the `#water` rule does. The default does nothing.
