@@ -115,7 +115,8 @@ on = true                   # optional, default true: turned on in the profile's
 Unknown keys are refused. `overrides/` may hold only `options.txt`, `sunrise-graphics.txt`, `sunrise-extras.txt`,
 `resourcepacks/<name>.zip` and `sunrise-mods/.sunrise-mod-data/<a listed mod>/...` (a mod's own saved settings,
 a native mod's saved settings), each at most 64 MiB and 256 MiB in all; anything else refuses the pack. The launcher copies
-them into the profile's game folder.
+them into the profile's game folder, which may itself be a link; a destination under it that is a link, or
+sits in a linked folder, refuses the import before anything is written.
 
 ## Submitting a project
 
