@@ -66,7 +66,7 @@ pub(crate) struct Options {
     /// `--fullscreen` (vanilla's): the window opens fullscreen whatever options.txt says,
     /// as vanilla's DisplayData does, without saving it there.
     pub(super) fullscreen: bool,
-    /// `--game-dir DIR`: the folder `read` makes the working directory (saves, options.txt...);
+    /// `--game-dir DIR`: the folder `read` makes the working directory (saves, options.txt...).
     pub(super) game_dir: Option<PathBuf>,
     /// `--quickPlaySingleplayer`, checked once the game folder is known.
     pub(super) quick_play: Option<String>,

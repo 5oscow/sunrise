@@ -252,7 +252,7 @@ Owner: [martipops](https://github.com/martipops)
 
 The built-in feature was removed. Its replacement will be an official native mod with guests limited to the host's world.
 
-More: [#614](https://github.com/horizon-rust/horizon/issues/614) · [https://github.com/sunrise-org/sunrise-splitscreen](https://github.com/sunrise-org/sunrise-splitscreen)
+More: [https://github.com/sunrise-org/sunrise/issues/614](https://github.com/sunrise-org/sunrise/issues/614) · [https://github.com/sunrise-org/sunrise-splitscreen](https://github.com/sunrise-org/sunrise-splitscreen)
 
 </details>
 
