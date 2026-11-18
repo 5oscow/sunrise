@@ -92,10 +92,13 @@ pub trait Hooks: Sync {
 
     /// How this client presents itself to the server it is joining: the brand it reports
     /// (`ClientBrandRetriever.getClientModName`, the `minecraft:brand` payload) and the custom
-    /// payloads it sends in the configuration phase after it. `server` is the address the player
-    /// joined as typed (host or host:port), before SRV or DNS resolution. The first hook that
-    /// answers is used; none answering is [`ClientIdentity::vanilla`]. Unlike the other methods
-    /// this runs on the network thread, once per join (a transfer is a new join).
+    /// payloads it sends in the configuration phase after it. `server` is the address of the join
+    /// before SRV or DNS resolution: as the player typed it (host or host:port) for a server,
+    /// `host:port` as the server sent it for a transfer, and the announcing `ip:port` for a LAN
+    /// world. Single player's own server thread is no join to an address and never asks: it hears
+    /// [`ClientIdentity::vanilla`]. The first hook that answers is used; none answering is
+    /// [`ClientIdentity::vanilla`]. Unlike the other methods this runs on the network thread,
+    /// once per join (a transfer is a new join).
     fn client_identity(&self, _server: &str) -> Option<ClientIdentity> {
         None
     }
