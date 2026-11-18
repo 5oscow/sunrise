@@ -96,7 +96,7 @@ fn main() -> ExitCode {
         args.remove(0);
     }
     let result = match args.first().map(String::as_str) {
-        Some("new") => new(&args[1..]).and_then(|code| match code {
+        Some("new") => new(&args[1..], &sdk_fetch::fetch_pinned).and_then(|code| match code {
             Some(dir) => fetched(&dir),
             None => Ok(()),
         }),
@@ -137,6 +137,7 @@ fn main() -> ExitCode {
                 .and_then(|()| {
                     update(
                         Path::new("."),
+                        &sdk_fetch::fetch_build,
                         flag(&args[1..], "--sunrise"),
                         &args[1..]
                             .windows(2)
@@ -195,8 +196,12 @@ fn flag<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
     args.get(i + 1).map(String::as_str)
 }
 
-/// Makes the mod `args` asks for; a code mod's folder is returned, for its SDK to be fetched.
-fn new(args: &[String]) -> Result<Option<PathBuf>, String> {
+/// Fetches a build's verified SDK for a project: the SDK the build's `sdk.json` describes.
+type FetchSdk<'a> = &'a dyn Fn(&Path, &str) -> Result<sdk_fetch::PinnedSdk, String>;
+
+/// Makes the mod `args` asks for; a code mod's folder is returned, with its SDK fetched into it
+/// by `fetch`.
+fn new(args: &[String], fetch: FetchSdk) -> Result<Option<PathBuf>, String> {
     let path = args
         .first()
         .filter(|a| !a.starts_with("--"))
@@ -229,6 +234,7 @@ fn new(args: &[String]) -> Result<Option<PathBuf>, String> {
                 &id,
                 template == "native",
                 flag(args, "--sunrise"),
+                fetch,
                 fill,
             )?;
             return Ok(Some(dir.to_owned()));
@@ -307,7 +313,12 @@ fn pin(sunrise: Option<&str>) -> Result<String, String> {
 /// Repins the mod. A native mod's declared internals and injects are checked against the new
 /// build first, reporting signature changes before writing; a wasm mod has none, so only its pin
 /// moves. `Cargo.toml` names the SDK by path, so the next command fetches the new one.
-fn update(dir: &Path, sunrise: Option<&str>, accept: &[&str]) -> Result<(), String> {
+fn update(
+    dir: &Path,
+    fetch: FetchSdk,
+    sunrise: Option<&str>,
+    accept: &[&str],
+) -> Result<(), String> {
     let path = dir.join(MANIFEST);
     let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
     let manifest = Manifest::parse(&text)?;
@@ -317,6 +328,8 @@ fn update(dir: &Path, sunrise: Option<&str>, accept: &[&str]) -> Result<(), Stri
         println!("Pinned to Sunrise {sunrise}");
         return Ok(());
     };
+    // The tool the new build's SDK names, not the one this binary was built with.
+    let mixins = fetch(dir, &sunrise)?.mixins;
     let mut doc: toml_edit::DocumentMut = text
         .parse()
         .map_err(|e| format!("{}: {e}", path.display()))?;
@@ -340,6 +353,12 @@ fn update(dir: &Path, sunrise: Option<&str>, accept: &[&str]) -> Result<(), Stri
         doc["native"]["sunrise"].as_value_mut().expect("native pin"),
         &sunrise,
     );
+    internals::set_string(
+        doc["native"]["mixins"]
+            .as_value_mut()
+            .expect("native mixins"),
+        &mixins,
+    );
     internals::atomic_write_manifest(&path, doc.to_string())?;
     // The old pin's SDK goes; the next command fetches this one.
     sdk_fetch::repin(dir, &sunrise)?;
@@ -355,6 +374,7 @@ fn new_code(
     id: &str,
     native: bool,
     sunrise: Option<&str>,
+    fetch: FetchSdk,
     fill: impl Fn(&str) -> String,
 ) -> Result<(), String> {
     if id.len() > 64 {
@@ -362,12 +382,16 @@ fn new_code(
     }
     let sunrise = pin(sunrise)?;
     let sunrise = sunrise.as_str();
+    // The tool a native mod pins is the one the build's own SDK names, not this binary's.
+    let sdk = fetch(dir, sunrise).inspect_err(|_| {
+        let _ = std::fs::remove_dir_all(dir);
+    })?;
     let (manifest, metadata) = if native {
         (
             format!(
                 "{}\n[native]\ngame = \"26.3\"\nsunrise = \"{sunrise}\"\nmixins = \"{}\"\n",
                 include_str!("../template/native/sunrise-mod.toml"),
-                sunrise_mod_package::mixins_tool::REV,
+                sdk.mixins,
             ),
             String::new(),
         )
@@ -554,6 +578,20 @@ fn run(args: &[String]) -> Result<(), RunError> {
 mod tests {
     use super::*;
 
+    const OLD_MIXINS: &str = "fedcba9876543210fedcba9876543210fedcba98";
+
+    /// A build's SDK as its `sdk.json` names it, without a download: its tool is `OLD_MIXINS`,
+    /// which is never the one this binary was built with.
+    fn offline(project: &Path, build: &str) -> Result<sdk_fetch::PinnedSdk, String> {
+        Ok(sdk_fetch::PinnedSdk {
+            build: build.to_owned(),
+            name: build.to_owned(),
+            dir: project.join(sdk_fetch::DIR),
+            mixins: OLD_MIXINS.to_owned(),
+            surface: project.join(sdk_fetch::DIR).join("surface.json"),
+        })
+    }
+
     #[test]
     fn the_content_template_builds_and_checks_with_no_code() {
         let dir = std::env::temp_dir().join(format!("sunrise-mod-content-{}", std::process::id()));
@@ -563,7 +601,7 @@ mod tests {
             "--template".into(),
             "content".into(),
         ];
-        new(&new_args).unwrap();
+        new(&new_args, &offline).unwrap();
         assert!(!path.join("Cargo.toml").exists());
         let smod = build_in(&path).unwrap();
         assert_eq!(smod, path.join("target/sunrise-mod/gems.smod"));
@@ -593,11 +631,14 @@ mod tests {
         std::fs::write(path.join("Cargo.toml"), "").unwrap();
         assert!(build_in(&path).unwrap_err().contains("native"));
         assert!(
-            new(&[
-                dir.join("x").display().to_string(),
-                "--template".into(),
-                "lua".into()
-            ])
+            new(
+                &[
+                    dir.join("x").display().to_string(),
+                    "--template".into(),
+                    "lua".into()
+                ],
+                &offline
+            )
             .is_err()
         );
         std::fs::remove_dir_all(&dir).unwrap();
@@ -613,13 +654,16 @@ mod tests {
             .join(format!("native-content-contract-{}", std::process::id()));
         let path = dir.join("mixed");
         let _ = std::fs::remove_dir_all(&dir);
-        new(&[
-            path.display().to_string(),
-            "--template".into(),
-            "native".into(),
-            "--sunrise".into(),
-            "0123456789abcdef0123456789abcdef01234567".into(),
-        ])
+        new(
+            &[
+                path.display().to_string(),
+                "--template".into(),
+                "native".into(),
+                "--sunrise".into(),
+                "0123456789abcdef0123456789abcdef01234567".into(),
+            ],
+            &offline,
+        )
         .unwrap();
         let asset = "assets/mixed/program.bin";
         std::fs::create_dir_all(path.join("assets/mixed")).unwrap();
@@ -671,7 +715,11 @@ mod tests {
             "--sunrise".into(),
             commit.into(),
         ];
-        assert_eq!(new(&args).unwrap(), Some(path.clone()));
+        assert_eq!(new(&args, &offline).unwrap(), Some(path.clone()));
+        // The pin's tool comes from the build's SDK, not from this binary.
+        let written =
+            Manifest::parse(&std::fs::read_to_string(path.join(MANIFEST)).unwrap()).unwrap();
+        assert_eq!(written.native.unwrap().mixins, OLD_MIXINS);
         let api = std::fs::read_to_string(path.join("Cargo.toml")).unwrap();
         // The SDK by path, never git: the build is the manifest's pin.
         assert!(
@@ -710,21 +758,26 @@ mod tests {
         let report = check::check(&smod, check::kind_of(&smod).unwrap(), None, None).unwrap();
         assert!(report.text().contains("machine_mod"), "{}", report.text());
         assert!(
-            new(&[
-                dir.join("bad").display().to_string(),
-                "--template".into(),
-                "native".into(),
-                "--sunrise".into(),
-                "main".into(),
-            ])
+            new(
+                &[
+                    dir.join("bad").display().to_string(),
+                    "--template".into(),
+                    "native".into(),
+                    "--sunrise".into(),
+                    "main".into(),
+                ],
+                &offline
+            )
             .unwrap_err()
             .contains("is not a build")
         );
         let newer = "89abcdef0123456789abcdef0123456789abcdef";
-        update(&path, Some(newer), &[]).unwrap();
+        update(&path, &offline, Some(newer), &[]).unwrap();
         let manifest =
             Manifest::parse(&std::fs::read_to_string(path.join(MANIFEST)).unwrap()).unwrap();
-        assert_eq!(manifest.native.unwrap().sunrise, newer);
+        let native = manifest.native.unwrap();
+        assert_eq!(native.sunrise, newer);
+        assert_eq!(native.mixins, OLD_MIXINS);
         assert_eq!(
             std::fs::read_to_string(path.join("Cargo.toml")).unwrap(),
             api
@@ -744,7 +797,7 @@ mod tests {
             "--sunrise".into(),
             commit.into(),
         ];
-        assert_eq!(new(&args).unwrap(), Some(path.clone()));
+        assert_eq!(new(&args, &offline).unwrap(), Some(path.clone()));
         let manifest =
             Manifest::parse(&std::fs::read_to_string(path.join(MANIFEST)).unwrap()).unwrap();
         assert!(manifest.native.is_none() && manifest.wasm.is_none());
@@ -771,7 +824,7 @@ mod tests {
             "--sunrise".into(),
             old.into(),
         ];
-        new(&args).unwrap();
+        new(&args, &offline).unwrap();
         let cargo = path.join("Cargo.toml");
         let text = std::fs::read_to_string(&cargo).unwrap();
         let written = format!("sdk = \"{old}\"\n");
@@ -784,7 +837,7 @@ mod tests {
         let manifest = std::fs::read_to_string(path.join(MANIFEST)).unwrap();
         std::fs::create_dir_all(path.join(sdk_fetch::DIR)).unwrap();
         let newer = "89abcdef0123456789abcdef0123456789abcdef";
-        update(&path, Some(newer), &[]).unwrap();
+        update(&path, &offline, Some(newer), &[]).unwrap();
         assert_eq!(
             std::fs::read_to_string(&cargo).unwrap(),
             text.replace(
