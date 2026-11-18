@@ -332,12 +332,14 @@ impl Game<'_> {
         }
         let state = write.from.try_into_api().ok()?;
         let fluid = super::native_world_read::api_fluid_state(write.source_fluid_state())?;
-        let seal = self.transaction_open();
+        let mut host = JournalLevelWrite::new(self, level)?;
         let mut answer = None;
-        if let Some(mut host) = JournalLevelWrite::new(self, level) {
-            mod_api::dispatch_place_liquid(&mut host, write.pos, state, fluid, &mut answer);
-        }
-        self.transaction_close(&seal, answer == Some(true));
+        mod_api::dispatch_place_liquid_with(write.pos, state, fluid, &mut answer, |part, event| {
+            let seal = host.game.transaction_open();
+            let reply = part.place_liquid(&mut host, event);
+            host.game.transaction_close(&seal, reply == Some(true));
+            reply
+        });
         answer
     }
 }

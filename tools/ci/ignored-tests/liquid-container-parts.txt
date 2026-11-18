@@ -1,3 +1,4 @@
+sunrise-client game::world_fluids_tests::declining_liquid_part_writes_never_reach_the_next_part_or_commit lib daily resources
 sunrise-client game::world_fluids_tests::direct_spread_skips_container_writes_during_an_open_transaction lib daily resources
 sunrise-client game::world_fluids_tests::dispenser_uses_the_liquid_part_with_no_user lib daily resources
 sunrise-client game::world_fluids_tests::journal_level_host_retains_neighbour_updates_from_earlier_writes lib daily resources

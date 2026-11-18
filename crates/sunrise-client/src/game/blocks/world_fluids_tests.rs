@@ -588,6 +588,79 @@ fn validated_fluid_utility_keeps_only_accepted_writes_in_its_outer_transaction()
     });
 }
 
+struct LiquidIsolationPart(bool);
+
+#[mod_api::sunrise_part]
+impl mod_api::BlockPart for LiquidIsolationPart {
+    fn can_place_liquid(
+        &self,
+        _: mod_api::LevelSide<'_>,
+        _: &mut mod_api::CanPlaceLiquidEvent,
+    ) -> Option<bool> {
+        Some(true)
+    }
+
+    fn place_liquid(
+        &self,
+        level: &mut dyn mod_api::LevelWriteHost,
+        _: &mut mod_api::PlaceLiquidEvent,
+    ) -> Option<bool> {
+        let floor = [AT[0], AT[1] - 1, AT[2]];
+        let emerald = level.block_state_id("minecraft:emerald_block").unwrap();
+        if self.0 {
+            assert_eq!(
+                level.block_state(floor),
+                level.block_state_id("minecraft:dirt")
+            );
+            Some(level.set_block(AT, emerald, mod_api::BlockUpdateFlags::CLIENTS))
+        } else {
+            assert!(level.set_block(floor, emerald, mod_api::BlockUpdateFlags::CLIENTS));
+            None
+        }
+    }
+}
+
+#[mod_api::__subscriptions]
+impl mod_api::Hooks for LiquidIsolationPart {
+    fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
+        let block = r.block_key("minecraft:dandelion");
+        r.block_part(block, LiquidIsolationPart(false));
+        r.block_part(block, LiquidIsolationPart(true));
+    }
+}
+
+#[test]
+#[ignore = "daily"]
+fn declining_liquid_part_writes_never_reach_the_next_part_or_commit() {
+    let mods = vec![mod_api::ModEntry::new(
+        "liquid_isolation",
+        Box::new(LiquidIsolationPart(false)),
+    )]
+    .into();
+    mod_platform::testing::with_mods(mods, || {
+        with_level(|game, level| {
+            game.world
+                .set(AT[0], AT[1], AT[2], state(game, "minecraft:dandelion"))
+                .unwrap();
+            let outer = game.transaction_open();
+            assert!(game.level_place_fluid(
+                level,
+                AT,
+                key("minecraft:water"),
+                None,
+                true,
+                outer.transaction()
+            ));
+            game.transaction_close(&outer, true);
+            assert_eq!(block(game), state(game, "minecraft:emerald_block"));
+            assert_eq!(
+                game.world.block(AT[0], AT[1] - 1, AT[2]),
+                state(game, "minecraft:dirt")
+            );
+        });
+    });
+}
+
 #[test]
 #[ignore = "daily"]
 fn direct_spread_skips_container_writes_during_an_open_transaction() {
