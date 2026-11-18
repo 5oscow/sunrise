@@ -3,7 +3,7 @@
 //! stays exactly vanilla's, and the logic behind them. Every extra is off by
 //! default; see `docs/extras.md`. Sunrise's own switches outside the Extras page
 //! (No AI, Agent Control) are kept here too.
-use std::{collections::VecDeque, fs, path::Path};
+use std::{collections::VecDeque, path::Path};
 
 pub const FILE: &str = "sunrise-extras.txt";
 /// The name the options screen uses while the sort key waits for a key.
@@ -109,8 +109,10 @@ pub struct Extras {
     /// built-in track and leaving the off ones out (`musicPage`, off by
     /// default: vanilla plays exactly as before).
     pub music_page: bool,
-    /// Lines no setting here reads, kept in file order so a setting that moved to a store survives a run without it.
+    /// Lines no setting here reads, by key and as written, kept in file order so a setting that moved to a store survives a run without it.
     unknown: Vec<(String, String)>,
+    /// The file is there but couldn't be read: it is never overwritten.
+    unreadable: bool,
     /// The PvP & HUD page's options (`pvp`).
     pub pvp: crate::pvp::Pvp,
 }
@@ -158,6 +160,7 @@ impl Default for Extras {
             music_off: Vec::new(),
             music_page: false,
             unknown: Vec::new(),
+            unreadable: false,
             pvp: Default::default(),
         }
     }
@@ -167,13 +170,12 @@ fn bool_text(v: bool) -> &'static str {
 }
 impl Extras {
     pub fn load(dir: &Path) -> Self {
-        fs::read_to_string(dir.join(FILE))
-            .map(|t| Self::parse(&t))
-            .unwrap_or_default()
+        Self::from_text(Self::read_text(dir).as_deref())
     }
     pub fn parse(text: &str) -> Self {
         let mut e = Self::default();
-        for line in text.lines() {
+        for raw in text.split_inclusive('\n') {
+            let line = raw.trim_end_matches(['\n', '\r']);
             let Some((key, value)) = line.split_once(':') else {
                 continue;
             };
@@ -269,17 +271,18 @@ impl Extras {
                 "musicPage" => e.music_page = flag(e.music_page),
                 key => {
                     if !e.pvp.parse_line(key, value) {
-                        e.unknown.push((key.to_owned(), value.to_owned()));
+                        e.unknown.push((key.to_owned(), raw.to_owned()));
                     }
                 }
             }
         }
         e
     }
+    /// Every line, the kept ones included.
     pub fn serialize(&self) -> String {
-        self.serialize_but(&|key| sunrise_hooks::settings::engine::owned(FILE, key))
+        self.serialize_but(&|_| false)
     }
-    /// `serialize`, leaving out the kept lines `owned` claims: a store writes those itself.
+    /// `serialize`, leaving out the kept lines `owned` claims: a store wrote those itself.
     fn serialize_but(&self, owned: &dyn Fn(&str) -> bool) -> String {
         let mut text = String::new();
         let mut push = |key: &str, value: &dyn std::fmt::Display| {
@@ -339,9 +342,12 @@ impl Extras {
         push("musicOff", &self.music_off.join(","));
         push("musicPage", &bool_text(self.music_page));
         self.pvp.serialize(&mut text);
-        for (key, value) in &self.unknown {
+        for (key, raw) in &self.unknown {
             if !owned(key) {
-                text.push_str(&format!("{key}:{value}\n"));
+                text.push_str(raw);
+                if !raw.ends_with('\n') {
+                    text.push('\n');
+                }
             }
         }
         text
@@ -360,13 +366,45 @@ impl Extras {
     /// setup gains no file. The settings stores of this file follow these lines
     /// (`sunrise_hooks::settings`).
     pub fn save(&self, dir: &Path) {
+        let mut stores = String::new();
+        let stores_default = sunrise_hooks::settings::engine::append(FILE, &mut stores);
+        self.save_with(dir, &stores, stores_default);
+    }
+    /// `save` with the stores' lines of this file made: a kept line goes only when a store
+    /// wrote its key. A file that couldn't be read, or a failed write, leaves the old file.
+    fn save_with(&self, dir: &Path, stores: &str, stores_default: bool) {
+        use sunrise_hooks::settings::engine;
         let path = dir.join(FILE);
-        let mut text = self.serialize();
-        let stores_default = sunrise_hooks::settings::engine::append(FILE, &mut text);
-        if *self == Self::default() && stores_default && !path.exists() {
+        if self.unreadable || (*self == Self::default() && stores_default && !path.exists()) {
             return;
         }
-        let _ = fs::write(path, text);
+        let written = engine::keys(stores);
+        let mut text = self.serialize_but(&|key| written.contains(&key));
+        text.push_str(stores);
+        if let Err(e) = engine::replace(&path, &text) {
+            log::warn!("Sunrise: {FILE} is not saved: {e}");
+        }
+    }
+    /// The file's text in `dir`, or the defaults' (empty) when there is none. A file that is there
+    /// but can't be read gives `None`: its settings stay at their defaults and it is never written.
+    pub fn read_text(dir: &Path) -> Option<String> {
+        match sunrise_hooks::settings::engine::read(&dir.join(FILE)) {
+            Ok(text) => Some(text.unwrap_or_default()),
+            Err(e) => {
+                log::warn!("Sunrise: {FILE} could not be read, so it won't be saved over: {e}");
+                None
+            }
+        }
+    }
+    /// The settings of `text` from [`Self::read_text`]; `None` marks the file unreadable.
+    pub fn from_text(text: Option<&str>) -> Self {
+        match text {
+            Some(text) => Self::parse(text),
+            None => Self {
+                unreadable: true,
+                ..Self::default()
+            },
+        }
     }
 }
 
@@ -774,6 +812,7 @@ impl Item {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     fn all_set() -> Extras {
         Extras {
@@ -809,8 +848,8 @@ mod tests {
         assert_eq!(
             e.unknown,
             [
-                ("discordPresence".into(), "true".into()),
-                ("futureKey".into(), "7".into())
+                ("discordPresence".into(), "discordPresence:true\n".into()),
+                ("futureKey".into(), "futureKey:7\n".into())
             ]
         );
         let out = e.serialize();
@@ -842,12 +881,55 @@ mod tests {
         assert!(e.unknown.is_empty());
     }
 
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("extras-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
     #[test]
-    fn a_line_a_store_owns_is_left_to_it() {
-        let e = Extras::parse("storeOwnedKey:true\nother:1\n");
-        let text = e.serialize_but(&|key| key == "storeOwnedKey");
-        assert!(!text.contains("storeOwnedKey"));
-        assert!(text.ends_with("other:1\n"));
+    fn a_kept_line_goes_only_when_a_store_wrote_its_key() {
+        let dir = scratch("store-wrote");
+        let e = Extras::parse("discordPresence:true\nother:1\n");
+        // A store that skipped the key this time (another seat's save): the line stays.
+        e.save_with(&dir, "", false);
+        let text = fs::read_to_string(dir.join(FILE)).unwrap();
+        assert!(text.contains("\ndiscordPresence:true\nother:1\n"), "{text}");
+        // A store that wrote it: its line, once.
+        e.save_with(&dir, "discordPresence:false\n", false);
+        let text = fs::read_to_string(dir.join(FILE)).unwrap();
+        assert_eq!(text.matches("discordPresence:").count(), 1, "{text}");
+        assert!(text.ends_with("other:1\ndiscordPresence:false\n"), "{text}");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn kept_lines_keep_their_spacing_and_line_ends() {
+        let e = Extras::parse("futureKey : 7 \r\nownNameTag:true\nlast:x");
+        let out = e.serialize();
+        assert!(out.contains("futureKey : 7 \r\n"), "{out:?}");
+        assert!(out.ends_with("last:x\n"), "{out:?}");
+        assert!(e.own_name_tag);
+    }
+
+    #[test]
+    fn a_file_that_cannot_be_read_is_never_saved_over() {
+        let dir = scratch("unreadable");
+        // Bytes that aren't UTF-8 cost only themselves: every other line still loads.
+        fs::write(dir.join(FILE), b"ownNameTag:true\nname:\xff\n").unwrap();
+        assert!(Extras::load(&dir).own_name_tag);
+        // A file that can't be read at all (a folder in its place) is left alone.
+        let other = scratch("unreadable-dir");
+        fs::create_dir_all(other.join(FILE).join("kept")).unwrap();
+        let e = Extras::load(&other);
+        assert!(e.unreadable);
+        let mut changed = e.clone();
+        changed.own_name_tag = true;
+        changed.save(&other);
+        assert!(other.join(FILE).join("kept").is_dir());
+        let _ = fs::remove_dir_all(dir);
+        let _ = fs::remove_dir_all(other);
     }
 
     #[test]

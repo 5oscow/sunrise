@@ -35,10 +35,6 @@ chatIndicator:true
 noAi:false
 agentControl:false
 reproKeys:false
-splitscreen:false
-splitscreenTwo:0
-splitscreenThree:0
-splitscreenNames:true
 wheelCyclesListSettings:false
 musicOff:
 musicPage:false
