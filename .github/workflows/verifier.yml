@@ -20,8 +20,6 @@ name: verifier
 # - `publish` exists only for a publishing run on main and is the only job with a write token: it attests the files
 #   and creates the release. It compiles nothing.
 on:
-  push:
-    branches: [sunrise-release-verify-workflow]  # TEMPORARY: a new workflow can't be dispatched off main; reverted
   workflow_dispatch:
     inputs:
       version:
@@ -53,7 +51,7 @@ jobs:
     steps:
       - id: decide
         env:
-          VERSION: ${{ inputs.version || '1.0.0' }}
+          VERSION: ${{ inputs.version }}
           DRY: ${{ inputs.dry_run }}
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
