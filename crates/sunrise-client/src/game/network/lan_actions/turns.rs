@@ -274,6 +274,7 @@ impl Game<'_> {
         let (entity_reach, block_reach) = (self.entity_reach, self.block_reach);
         let (game_mode, guest_previous) = (g.game_mode, g.previous_game_mode);
         self.set_mode_raw(game_mode);
+        self.sync_main_hand();
         let previous_mode = std::mem::replace(
             &mut self.previous_mode,
             guest_previous.map(crate::game::game_mode::mode_from_id),

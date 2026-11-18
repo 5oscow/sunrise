@@ -849,9 +849,9 @@ mod tests {
         let (game, player) = (Path::new("/games/shared"), Path::new("/games/players/alex"));
         // options.txt moved to the player's folder: the enabled mods stay the game folder's.
         assert_eq!(shared_dir_of(Some(player), player, || game.into()), game);
-        // No --player-dir, or a splitscreen profile's own folder: beside options.txt as before.
+        // With or without --player-dir: beside options.txt.
         assert_eq!(shared_dir_of(None, game, || unreachable!()), game);
-        let profile = Path::new("/games/shared/splitscreen/profiles/P2");
+        let profile = Path::new("/games/shared/profiles/local");
         assert_eq!(
             shared_dir_of(Some(player), profile, || unreachable!()),
             profile

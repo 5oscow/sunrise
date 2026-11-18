@@ -433,7 +433,7 @@ While Discord runs on the same computer, the player's Discord profile shows
 ("In the Nether") and the time since they entered the world. It never shows a
 world's name or a server's address. The switch is on the Extras page, in its
 Multiplayer group (**Discord Rich Presence**, on by default; `discordPresence`
-in `sunrise-extras.txt`; in splitscreen only the first player has it), and
+in `sunrise-extras.txt`), and
 `SUNRISE_NO_DISCORD=1` turns it off for one run.
 
 The crate `sunrise-discord` (Sunrise layer) speaks Discord's local IPC itself

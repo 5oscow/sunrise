@@ -8,8 +8,6 @@ use std::{collections::VecDeque, fs, path::Path};
 pub const FILE: &str = "sunrise-extras.txt";
 /// The name the options screen uses while the sort key waits for a key.
 pub const SORT_KEY: &str = "sunrise.sort";
-/// The 3D skin layers line, here and in the `options.txt` that held it first.
-const SKIN_LAYERS_KEY: &str = "threeDSkinLayers";
 
 /// The minimap's sizes in GUI pixels, and its zooms in blocks per pixel.
 pub const MINIMAP_SIZES: [(u8, &str); 3] = [(64, "Small"), (96, "Medium"), (128, "Large")];
@@ -100,16 +98,6 @@ pub struct Extras {
     /// F3+R and F3+E start/stop a repro recording and write its bundle (off by
     /// default: a recording copies the world).
     pub repro_keys: bool,
-    /// Another controller can join P1's world (`splitscreen`, off by default).
-    pub splitscreen: bool,
-    /// Two players in one window: 0 auto (side by side when wider than tall), 1 side by side,
-    /// 2 top and bottom (`splitscreenTwo`).
-    pub splitscreen_two: u8,
-    /// Three players on a screen: 0 one wide on top, 1 one tall on the left, 2 side by side
-    /// (`splitscreenThree`).
-    pub splitscreen_three: u8,
-    /// Splitscreen: each player's name in the corner of their view (`splitscreenNames`).
-    pub splitscreen_names: bool,
     /// The wheel over a cycle button in the settings changes it (`CycleButton.mouseScrolled`,
     /// on by default as vanilla); off, the wheel only scrolls the list.
     pub wheel_cycles_settings: bool,
@@ -121,10 +109,6 @@ pub struct Extras {
     /// built-in track and leaving the off ones out (`musicPage`, off by
     /// default: vanilla plays exactly as before).
     pub music_page: bool,
-    /// 3D skin layers (`threeDSkinLayers`, Options → Skin Customization): each
-    /// painted texel of a player's outer layer drawn as a slab
-    /// (`sunrise_client::mobs::skin_layers`).
-    pub three_d_skin_layers: bool,
     /// The PvP & HUD page's options (`pvp`).
     pub pvp: crate::pvp::Pvp,
 }
@@ -168,14 +152,9 @@ impl Default for Extras {
             no_ai: false,
             agent_control: false,
             repro_keys: false,
-            splitscreen: false,
-            splitscreen_two: 0,
-            splitscreen_three: 0,
-            splitscreen_names: true,
             wheel_cycles_settings: false,
             music_off: Vec::new(),
             music_page: false,
-            three_d_skin_layers: false,
             pvp: Default::default(),
         }
     }
@@ -263,10 +242,6 @@ impl Extras {
                 sunrise_core::no_ai::KEY => e.no_ai = flag(e.no_ai),
                 "agentControl" => e.agent_control = flag(e.agent_control),
                 "reproKeys" => e.repro_keys = flag(e.repro_keys),
-                "splitscreen" => e.splitscreen = flag(e.splitscreen),
-                "splitscreenTwo" => e.splitscreen_two = value.parse().unwrap_or(0).min(2),
-                "splitscreenThree" => e.splitscreen_three = value.parse().unwrap_or(0).min(2),
-                "splitscreenNames" => e.splitscreen_names = flag(e.splitscreen_names),
                 // A new name: `wheelCyclesSettings` was written as true by every
                 // install while it was the default, so it says nothing of a choice.
                 "wheelCyclesListSettings" => {
@@ -281,7 +256,6 @@ impl Extras {
                         .collect()
                 }
                 "musicPage" => e.music_page = flag(e.music_page),
-                SKIN_LAYERS_KEY => e.three_d_skin_layers = flag(e.three_d_skin_layers),
                 key => {
                     e.pvp.parse_line(key, value);
                 }
@@ -291,7 +265,7 @@ impl Extras {
     }
     pub fn serialize(&self) -> String {
         let mut text = format!(
-            "packBrowser:{}\npregen:{}\nfullbright:{}\ndynamicLights:{}\nzoom:{}\nzoomKey:{}\nzoomLevel:{}\nzoomSmooth:{}\nzoomSensitivity:{}\nlodZoomDetail:{}\nfps:{}\nfpsCorner:{}\nfpsLows:{}\nkeystrokes:{}\nkeystrokesCorner:{}\nkeystrokesCps:{}\nmovedToMods:{}\nminimap:{}\nminimapCorner:{}\nminimapSize:{}\nminimapShape:{}\nminimapZoom:{}\nminimapRotate:{}\nautoReconnect:{}\nuiSoundReserve:{}\nownNameTag:{}\nskipModdedSplashesIfVanillaModified:{}\nhideBlockParticles:{}\nmouseTweaks:{}\nmouseTweaksWheel:{}\nsort:{}\nsortKey:{}\nchatAnimation:{}\nchatIndicator:{}\n{}:{}\nagentControl:{}\nreproKeys:{}\nsplitscreen:{}\nsplitscreenTwo:{}\nsplitscreenThree:{}\nsplitscreenNames:{}\nwheelCyclesListSettings:{}\nmusicOff:{}\nmusicPage:{}\n{}:{}\n",
+            "packBrowser:{}\npregen:{}\nfullbright:{}\ndynamicLights:{}\nzoom:{}\nzoomKey:{}\nzoomLevel:{}\nzoomSmooth:{}\nzoomSensitivity:{}\nlodZoomDetail:{}\nfps:{}\nfpsCorner:{}\nfpsLows:{}\nkeystrokes:{}\nkeystrokesCorner:{}\nkeystrokesCps:{}\nmovedToMods:{}\nminimap:{}\nminimapCorner:{}\nminimapSize:{}\nminimapShape:{}\nminimapZoom:{}\nminimapRotate:{}\nautoReconnect:{}\nuiSoundReserve:{}\nownNameTag:{}\nskipModdedSplashesIfVanillaModified:{}\nhideBlockParticles:{}\nmouseTweaks:{}\nmouseTweaksWheel:{}\nsort:{}\nsortKey:{}\nchatAnimation:{}\nchatIndicator:{}\n{}:{}\nagentControl:{}\nreproKeys:{}\nwheelCyclesListSettings:{}\nmusicOff:{}\nmusicPage:{}\n",
             bool_text(self.pack_browser),
             bool_text(self.pregen),
             bool_text(self.fullbright),
@@ -334,36 +308,12 @@ impl Extras {
             bool_text(self.no_ai),
             bool_text(self.agent_control),
             bool_text(self.repro_keys),
-            bool_text(self.splitscreen),
-            self.splitscreen_two,
-            self.splitscreen_three,
-            bool_text(self.splitscreen_names),
             bool_text(self.wheel_cycles_settings),
             self.music_off.join(","),
             bool_text(self.music_page),
-            SKIN_LAYERS_KEY,
-            bool_text(self.three_d_skin_layers),
         );
         self.pvp.serialize(&mut text);
         text
-    }
-    /// Adopts the settings `options.txt` held before they moved here, while
-    /// this file (`own`) has no line of its own: 3D skin layers were an
-    /// `options.txt` line. Vanilla's `Options.save` drops lines it doesn't
-    /// know, so it is read there once, the first start after the update.
-    pub fn read_old_options(&mut self, own: &str, options_txt: &str) {
-        fn line<'a>(text: &'a str, name: &str) -> Option<&'a str> {
-            text.lines().find_map(|l| {
-                l.split_once(':')
-                    .filter(|(key, _)| *key == name)
-                    .map(|(_, value)| value)
-            })
-        }
-        if line(own, SKIN_LAYERS_KEY).is_none()
-            && let Some(value) = line(options_txt, SKIN_LAYERS_KEY)
-        {
-            self.three_d_skin_layers = value == "true";
-        }
     }
     /// Binds the extra key `name` (`SORT_KEY`); false for
     /// another name (a vanilla mapping).
@@ -480,11 +430,6 @@ impl Cps {
         self.clicks.len()
     }
 }
-/// Two players sharing a window (`splitscreen_two`): halves this way.
-pub const SPLIT_TWO: [&str; 3] = ["Auto", "Side by side", "Top and bottom"];
-/// Three players sharing a window (`splitscreen_three`).
-pub const SPLIT_THREE: [&str; 3] = ["One wide on top", "One tall on the left", "Side by side"];
-
 /// The settings the Extras page shows, one per row.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Item {
@@ -509,8 +454,6 @@ pub enum Item {
     AgentControl,
     /// On the AI Agent page, next to Agent Control: the F3 recording shortcuts.
     ReproKeys,
-    /// On the Splitscreen settings page.
-    Splitscreen,
     WheelCyclesSettings,
     /// The Select Resource Packs screen's Add button (Modrinth).
     PackBrowser,
@@ -564,7 +507,6 @@ impl Item {
             Item::NoAi => "sunrise.extras.no_ai",
             Item::AgentControl => "sunrise.extras.agent_control",
             Item::ReproKeys => "sunrise.extras.repro_keys",
-            Item::Splitscreen => "sunrise.extras.splitscreen",
             Item::ChatAnimation => "sunrise.extras.chat_animation",
             Item::ChatIndicator => "sunrise.extras.chat_indicator",
             Item::WheelCyclesSettings => "sunrise.extras.wheel_cycles_settings",
@@ -590,7 +532,6 @@ impl Item {
             Item::NoAi => "sunrise.extras.no_ai.tooltip",
             Item::AgentControl => "sunrise.extras.agent_control.tooltip",
             Item::ReproKeys => "sunrise.extras.repro_keys.tooltip",
-            Item::Splitscreen => "sunrise.extras.splitscreen.tooltip",
             Item::ChatAnimation => "sunrise.extras.chat_animation.tooltip",
             Item::ChatIndicator => "sunrise.extras.chat_indicator.tooltip",
             Item::WheelCyclesSettings => "sunrise.extras.wheel_cycles_list_settings.tooltip",
@@ -627,7 +568,6 @@ impl Item {
             Item::NoAi => "No AI",
             Item::AgentControl => "Agent Control",
             Item::ReproKeys => "Recording shortcuts",
-            Item::Splitscreen => "Splitscreen",
             Item::WheelCyclesSettings => "Scroll wheel changes settings",
             Item::PackBrowser => "Resource pack browser",
             Item::Pregen => "Chunk pregeneration",
@@ -644,7 +584,7 @@ impl Item {
             ChatIndicator => ChatAnimation,
             Pvp(o) => return o.parent().map(Pvp),
             Fullbright | DynamicLights | OwnNameTag | HideBlockParticles | MouseTweaks | Sort
-            | AutoReconnect | NoAi | AgentControl | ReproKeys | Splitscreen | ChatAnimation
+            | AutoReconnect | NoAi | AgentControl | ReproKeys | ChatAnimation
             | WheelCyclesSettings | MusicPage | PackBrowser | Pregen => {
                 return None;
             }
@@ -694,9 +634,6 @@ impl Item {
             Item::NoAi => {
                 "Hides and turns off every AI feature: agent control, sunrise-ctl and the MCP servers. The launcher's switch too."
             }
-            Item::Splitscreen => {
-                "In a world, another controller can join as a new player: press A when it asks, then pick a profile and where to play."
-            }
             Item::AgentControl => {
                 "Your own AI agent can play this game through sunrise-ctl or an MCP client, on this computer only."
             }
@@ -726,7 +663,6 @@ impl Item {
             | Item::AutoReconnect
             | Item::MouseTweaks
             | Item::Sort
-            | Item::Splitscreen
             | Item::WheelCyclesSettings
             | Item::PackBrowser => Some(Cost::None),
             _ => None,
@@ -750,7 +686,6 @@ impl Item {
             Item::NoAi => e.no_ai,
             Item::AgentControl => e.agent_control,
             Item::ReproKeys => e.repro_keys,
-            Item::Splitscreen => e.splitscreen,
             Item::WheelCyclesSettings => e.wheel_cycles_settings,
             Item::PackBrowser => e.pack_browser,
             Item::Pregen => e.pregen,
@@ -788,7 +723,6 @@ impl Item {
             Item::NoAi => e.no_ai = !e.no_ai,
             Item::AgentControl => e.agent_control = !e.agent_control,
             Item::ReproKeys => e.repro_keys = !e.repro_keys,
-            Item::Splitscreen => e.splitscreen = !e.splitscreen,
             Item::WheelCyclesSettings => e.wheel_cycles_settings = !e.wheel_cycles_settings,
             Item::PackBrowser => e.pack_browser = !e.pack_browser,
             Item::Pregen => e.pregen = !e.pregen,
@@ -867,9 +801,6 @@ mod tests {
         e.sort_key = "key.keyboard.r".into();
         e.chat_animation = true;
         e.chat_indicator = false;
-        assert!(!e.splitscreen);
-        Item::Splitscreen.cycle(&mut e, false);
-        assert_eq!(Item::Splitscreen.switch(&e), Some(true));
         Item::WheelCyclesSettings.cycle(&mut e, false);
         assert_eq!(Item::WheelCyclesSettings.switch(&e), Some(true));
         e.music_off = vec![

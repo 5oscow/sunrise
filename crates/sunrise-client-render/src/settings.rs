@@ -342,8 +342,7 @@ impl Settings {
             .map_or(-1, |i| i as i32)
     }
     /// Loads only the crates' settings stores (`sunrise_hooks::settings`) from the files next to
-    /// `path`, into the seat whose turn it is (`sunrise_hooks::seat`): a splitscreen player whose
-    /// settings were made from P1's rather than loaded.
+    /// `path`, into the local-instance index [`sunrise_hooks::seat`] reports.
     pub fn load_stores(path: &Path) {
         let dir = path.parent();
         sunrise_hooks::settings::engine::load(&mut |file| fs::read_to_string(dir?.join(file)).ok());
@@ -372,7 +371,7 @@ impl Settings {
             .parent()
             .and_then(|dir| fs::read_to_string(dir.join(crate::extras::FILE)).ok())
             .unwrap_or_default();
-        let mut extras = crate::extras::Extras::parse(&extras_text);
+        let extras = crate::extras::Extras::parse(&extras_text);
         // The settings stores of the crates above the engine: their lines of this file, or of
         // their own (docs/layers.md, "Platform registries").
         sunrise_hooks::settings::engine::load(&mut |file| match path.parent() {
@@ -388,7 +387,6 @@ impl Settings {
         let settings = match fs::read(path) {
             Ok(bytes) => {
                 let text = String::from_utf8_lossy(&bytes);
-                extras.read_old_options(&extras_text, &text);
                 Self {
                     sunrise,
                     controller,
@@ -887,8 +885,6 @@ pub enum Opt {
     ModelPart(usize),
     /// A slider of a page a crate registered (`sunrise_hooks::pages`): (page, row).
     Page(usize, usize),
-    /// 3D skin layers: the player's outer layer as extruded slabs.
-    SkinLayers3d,
     MainHand,
     AllowServerListing,
     RealmsNotifications,
@@ -989,31 +985,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn three_d_skin_layers_move_from_options_txt_to_the_extras_file() {
-        // #8091 wrote the switch into options.txt; a player who had it on keeps
-        // it, and the next options.txt is vanilla's again.
-        let dir = std::env::temp_dir().join(format!(
-            "sunrise-skin-layers-{}-{:?}",
-            std::process::id(),
-            std::thread::current().id()
-        ));
-        fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("options.txt"), "fov:0.5\nthreeDSkinLayers:true\n").unwrap();
-        let s = Settings::load(&dir.join("options.txt"));
-        assert!(s.extras.three_d_skin_layers);
-        assert_eq!(s.fov, 90.0);
-        assert!(!s.serialize().contains("threeDSkinLayers"));
-        assert!(crate::extras::Extras::parse(&s.extras.serialize()).three_d_skin_layers);
-        // Once sunrise-extras.txt has its own line, a stale options.txt one is ignored.
-        fs::write(dir.join(crate::extras::FILE), "threeDSkinLayers:false\n").unwrap();
-        assert!(
-            !Settings::load(&dir.join("options.txt"))
-                .extras
-                .three_d_skin_layers
-        );
-        let _ = fs::remove_dir_all(&dir);
-    }
     #[test]
     fn an_option_set_keeps_sunrise_files() {
         let mut s = Settings::parse("fov:70\n");

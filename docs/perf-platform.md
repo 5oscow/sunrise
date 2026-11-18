@@ -41,7 +41,7 @@ in `.local/minecraft/26.3/sources/server/`.
 | `/debug start\|stop`, `/jfr`, `/perf` | Vanilla commands (`game/commands/extra.rs:1006-1163`); `/perf` is listed but has no executor. | **Stay.** They are vanilla parity, not this platform; `/perf` is a separate parity item. Remote profiling borrows its permission level (§4.2). |
 | F3+2/F3+3 charts, performance overlay | `debug_chart.rs`, `perf_overlay.rs`. | **Stay** (live UI). |
 | `render-capture` / `scene_replay` | Input fixture: mesh state + camera, hundreds of MB to 1.45 GB, built from Mojang assets (spec B). | **Stays separate.** A scene capture is a renderer input, not a measurement. `scene_replay --json` results can be stored as a `bench` entry referencing the scene by `corpus_id`. |
-| `SUNRISE_SPLIT_STATS`, `SUNRISE_OCCLUSION_PROFILE` | Subsystem log lines every few seconds (`game/split/frames.rs:1-10`, `game/occlusion_culling.rs:856`). | **Fold when next touched**, as counters (§3.6). Nothing reads them yet. |
+| `SUNRISE_OCCLUSION_PROFILE` | Subsystem log lines every few seconds (`game/occlusion_culling.rs:856`). | **Fold when next touched**, as counters (§3.6). Nothing reads them yet. |
 | `examples/*_bench.rs`, `*_profile.rs` | Microbenchmarks. | **Stay**, out of scope. |
 
 ### On local branches (not on main)

@@ -12,10 +12,6 @@ use sunrise_client::{
 impl Game<'_> {
     /// `Minecraft.tick` -> `MusicManager.tick`, once per client tick.
     pub(super) fn tick_music(&mut self) {
-        // Splitscreen: one music, P1's.
-        if self.options.split_guest {
-            return;
-        }
         let (mut music, mut volume) = self.situational_music();
         // A native mod's own choice of track and volume, then its layers.
         self.native_music(&mut music, &mut volume);

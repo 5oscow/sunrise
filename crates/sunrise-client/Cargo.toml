@@ -23,6 +23,8 @@ mod_api = { package = "sunrise-mod-vocab", path = "../sunrise-mod-vocab" }
 sunrise-engine-slots = { path = "../sunrise-engine-slots" }
 sunrise-mod-api-macros = { path = "../sunrise-mod-api-macros" }
 sunrise-client-lib = { path = "../sunrise-client-lib", default-features = false }
+sunrise-gameplay = { path = "../sunrise-gameplay" }
+sunrise-client-gameplay = { path = "../sunrise-client-gameplay" }
 sunrise-assets = { path = "../sunrise-assets" }
 sunrise-client-core = { path = "../sunrise-client-core" }
 sunrise-client-input = { path = "../sunrise-client-input" }
@@ -65,11 +67,17 @@ bytemuck = { version = "1.24", features = ["derive"] }
 glam = "0.30"
 png = "0.18"
 sha2 = "0.10.9"
+# Match shared feature sets across Extras variants so CI builds the second incrementally; verify-static checks this.
+cipher = { version = "0.4", default-features = false, features = ["zeroize"] }
+crypto-common = { version = "0.1", default-features = false, features = ["getrandom"] }
+digest = { version = "0.10", default-features = false, features = ["mac"] }
+fnv = "1"
+socket2 = { version = "0.6", default-features = false, features = ["all"] }
 # Server resource packs are checked and cached by their SHA-1, as vanilla does.
 sha1 = "0.10"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1.0.151", features = ["raw_value"] }
-# server.toml's [combat], which the dedicated server reads itself.
+# server.toml's sections the dedicated server reads itself ([entities], [chat_filter]...).
 toml = "1.1"
 # hlsl-out: the gfx.rs tests translate every shader as wgpu's DirectX 12 backend does. A normal feature,
 # not a dev-dependency's, so builds, tests and examples share one build of naga, wgpu and this crate.
@@ -111,22 +119,21 @@ rustix = { version = "1", default-features = false, features = ["std", "time", "
 # (dxcompiler.dll beside the game, gfx/dx12_compiler.rs).
 wgpu = { version = "30.0.1", default-features = false, features = ["dx12"] }
 
-[target.'cfg(target_os = "macos")'.dependencies]
-# Splitscreen: a window filling a monitor goes over its menu bar (game/runtime/split/windows.rs
-# `above_menu_bar`); all already in the tree through winit and wgpu.
-objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSResponder", "NSWindow", "NSScreen"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSString"] }
-
 [target.'cfg(not(target_os = "macos"))'.dependencies]
 # OpenGL (WGL on Windows, EGL on Linux), the last fallback, for GPUs with no Vulkan or
 # DirectX 12 driver (`graphicsApi`, graphics.rs).
 wgpu = { version = "30.0.1", default-features = false, features = ["gles"] }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+# Controllers' gilrs turns this on through nix on Linux: pinned like the shared features above.
+libc = { version = "0.2", features = ["extra_traits"] }
+
 [features]
 default = ["audio", "controllers", "sunrise-extras"]
 # Scoped trait-mod installation for a mod's own tests.
 testing = []
+# Per-level-tick state digest for determinism checks (game/world/state_digest.rs).
+state-digest = []
 # Sound output. Without it (and `controllers`) the program links neither libasound nor libudev on
 # Linux: the server build (`--no-default-features`, released as sunrise-engine; docs/server.md).
 audio = ["sunrise-client-render/audio", "sunrise-client-lib/audio"]
