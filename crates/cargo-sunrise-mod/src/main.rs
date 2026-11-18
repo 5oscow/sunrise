@@ -377,7 +377,10 @@ fn update(
             .expect("native mixins"),
         &mixins,
     );
-    internals::atomic_write_manifest(&path, doc.to_string())?;
+    // Every check passes before anything is written: `repin` below parses what lands on disk.
+    let text = doc.to_string();
+    Manifest::parse(&text)?;
+    internals::atomic_write_manifest(&path, text)?;
     // The old pin's SDK goes; the next command fetches this one.
     sdk_fetch::repin(dir, &sunrise)?;
     println!("Pinned to Sunrise {sunrise}");
@@ -400,6 +403,15 @@ fn new_code(
     }
     let sunrise = pin(sunrise)?;
     let sunrise = sunrise.as_str();
+    // The folder is made exclusively, so anything already at the path (a dangling link included)
+    // is refused untouched, and a failed fetch removes only what this run made.
+    if let Some(parent) = dir.parent().filter(|p| !p.as_os_str().is_empty()) {
+        std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
+    }
+    std::fs::create_dir(dir).map_err(|e| match e.kind() {
+        std::io::ErrorKind::AlreadyExists => format!("{} already exists", dir.display()),
+        _ => format!("{}: {e}", dir.display()),
+    })?;
     // The tool a native mod pins is the one the build's own SDK names, not this binary's.
     let sdk = fetch(dir, sunrise).inspect_err(|_| {
         let _ = std::fs::remove_dir_all(dir);
@@ -447,7 +459,7 @@ fn new_code(
     };
     println!(
         "Created {} ({} mod id {id}). Your editor resolves sunrise-mod-api once the SDK is in .sunrise/sdk/: \
-         any cargo sunrise-mod command fetches it in a fresh clone. Next: {next}",
+         `cargo sunrise-mod check` fetches it in a fresh clone. Next: {next}",
         dir.display(),
         if native { "native" } else { "wasm" },
     );
@@ -596,18 +608,94 @@ fn run(args: &[String]) -> Result<(), RunError> {
 mod tests {
     use super::*;
 
+    const OLD_BUILD: &str = "0123456789abcdef0123456789abcdef01234567";
     const OLD_MIXINS: &str = "fedcba9876543210fedcba9876543210fedcba98";
+    const NEW_MIXINS: &str = "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c";
 
-    /// A build's SDK as its `sdk.json` names it, without a download: its tool is `OLD_MIXINS`,
-    /// which is never the one this binary was built with.
+    /// A build's SDK as its `sdk.json` names it, without a download: the tool of `OLD_BUILD` is
+    /// `OLD_MIXINS` and every other build's is `NEW_MIXINS`, never the one this binary was built with.
     fn offline(project: &Path, build: &str) -> Result<sdk_fetch::PinnedSdk, String> {
         Ok(sdk_fetch::PinnedSdk {
             build: build.to_owned(),
             name: build.to_owned(),
             dir: project.join(sdk_fetch::DIR),
-            mixins: OLD_MIXINS.to_owned(),
+            mixins: if build == OLD_BUILD {
+                OLD_MIXINS
+            } else {
+                NEW_MIXINS
+            }
+            .to_owned(),
             surface: project.join(sdk_fetch::DIR).join("surface.json"),
         })
+    }
+
+    fn code_args(path: &Path, template: &str) -> [String; 5] {
+        [
+            path.display().to_string(),
+            "--template".into(),
+            template.into(),
+            "--sunrise".into(),
+            OLD_BUILD.into(),
+        ]
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_dangling_link_at_the_path_is_refused_and_left_in_place() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("greeter");
+        std::os::unix::fs::symlink(dir.path().join("nowhere"), &path).unwrap();
+        let fetch = |_: &Path, _: &str| -> Result<sdk_fetch::PinnedSdk, String> {
+            panic!("a refused path fetches nothing")
+        };
+        let error = new(&code_args(&path, "native"), &fetch).unwrap_err();
+        assert!(error.contains("already exists"), "{error}");
+        assert_eq!(
+            std::fs::read_link(&path).unwrap(),
+            dir.path().join("nowhere")
+        );
+        assert!(!dir.path().join("nowhere").exists());
+    }
+
+    #[test]
+    fn a_failed_fetch_leaves_no_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("greeter");
+        // A fetch that got as far as its folder, as a real one does, then failed.
+        let fetch = |project: &Path, _: &str| -> Result<sdk_fetch::PinnedSdk, String> {
+            std::fs::create_dir_all(project.join(sdk_fetch::DIR)).unwrap();
+            Err("no signed SDK".into())
+        };
+        for template in ["native", "wasm"] {
+            assert_eq!(
+                new(&code_args(&path, template), &fetch).unwrap_err(),
+                "no signed SDK"
+            );
+            assert!(!path.exists());
+        }
+        // A folder that was there before is refused, not removed.
+        std::fs::create_dir(&path).unwrap();
+        std::fs::write(path.join("keep"), "mine").unwrap();
+        assert!(new(&code_args(&path, "native"), &fetch).is_err());
+        assert_eq!(std::fs::read_to_string(path.join("keep")).unwrap(), "mine");
+    }
+
+    #[test]
+    fn a_refused_update_leaves_the_manifest_byte_for_byte() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("greeter");
+        new(&code_args(&path, "native"), &offline).unwrap();
+        let before = std::fs::read(path.join(MANIFEST)).unwrap();
+        // An SDK naming a tool that is not a full sha: the new manifest would be invalid.
+        let broken = |project: &Path, build: &str| {
+            offline(project, build).map(|sdk| sdk_fetch::PinnedSdk {
+                mixins: "main".into(),
+                ..sdk
+            })
+        };
+        let newer = "89abcdef0123456789abcdef0123456789abcdef";
+        assert!(update(&path, &broken, Some(newer), &[]).is_err());
+        assert_eq!(std::fs::read(path.join(MANIFEST)).unwrap(), before);
     }
 
     #[test]
@@ -795,7 +883,8 @@ mod tests {
             Manifest::parse(&std::fs::read_to_string(path.join(MANIFEST)).unwrap()).unwrap();
         let native = manifest.native.unwrap();
         assert_eq!(native.sunrise, newer);
-        assert_eq!(native.mixins, OLD_MIXINS);
+        // The destination SDK's tool, not the scaffold's.
+        assert_eq!(native.mixins, NEW_MIXINS);
         assert_eq!(
             std::fs::read_to_string(path.join("Cargo.toml")).unwrap(),
             api
