@@ -74,17 +74,16 @@ The `Path` change is saved for your user, so new terminals find the tool.
 ### Check it
 
 ```sh
-cargo sunrise-mod
+cargo sunrise-mod --help
 ```
 
-The tool has no separate help page: run with no command it prints its usage and exits with an error, which shows it
-is installed:
+It prints the tool's usage, which shows it is installed:
 
 ```text
-error: usage: cargo sunrise-mod new <path> [--name "Name"] [--template content|native|wasm [--sunrise <build>]] | update [--sunrise <build>] | …
+usage: cargo sunrise-mod new <path> [--name "Name"] [--template content|native|wasm [--sunrise <build>]] | update [--sunrise <build>] | …
 ```
 
-`error: no such command: sunrise-mod` means the folder with `cargo-sunrise-mod` is not on your `PATH`.
+A tool built before `--help` existed prints the same usage after `error:` and exits with 1; that also means it is installed. `error: no such command: sunrise-mod` means the folder with `cargo-sunrise-mod` is not on your `PATH`.
 
 The tool checks every SDK it fetches against Sunrise's release signature before it uses it, whatever the tool's own
 origin.

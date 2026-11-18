@@ -52,6 +52,9 @@ use std::{
     process::{Command, ExitCode},
 };
 
+/// What `cargo sunrise-mod` prints with no command or `--help`, and after an unknown command.
+const USAGE: &str = "cargo sunrise-mod new <path> [--name \"Name\"] [--template content|native|wasm [--sunrise <build>]] | update [--sunrise <build>] | inject update [--accept <id>]… | inject sync --repo <game checkout> | inject add <at> --kind <kind> [--call <canonical callee>] [--nth N] [--with <fn>] | internals sync [--repo <path>] | internals add <path>… [--kind <kind>] | build [--wasm] | wasm-std <out.wasm> | run [--game <sunrise-client>] [-- <game args>] | check [--uses] | check <file> [--kind <kind>] [--key <public key> --signature <file.minisig>] [--json] | hooks <text> [--all] | sdk diff <build> <build> | fits [<file.smod>] [--build <name>]… | registry build|review|check|list | use-jar <path> | native-build < plan.json | native-check < plan.json | native-discover < plan.json | native-lock < plan.json | native-layout < plan.json";
+
 fn is_compiler_wrapper(name: &str) -> bool {
     name.strip_suffix(".exe").unwrap_or(name).ends_with("rustc")
 }
@@ -102,7 +105,18 @@ fn main() -> ExitCode {
         }),
         Some("build") if args.get(1).is_some_and(|a| a == "--wasm") => fetched(Path::new("."))
             .and_then(|()| pinned_surface(Path::new(".")))
-            .and_then(|api| wasm::build(Path::new("."), flag(&args[2..], "--catalog").map(Path::new), &args[2..].windows(2).filter(|a| a[0] == "--with").map(|a| PathBuf::from(&a[1])).collect::<Vec<_>>(), api.as_ref()))
+            .and_then(|api| {
+                wasm::build(
+                    Path::new("."),
+                    flag(&args[2..], "--catalog").map(Path::new),
+                    &args[2..]
+                        .windows(2)
+                        .filter(|a| a[0] == "--with")
+                        .map(|a| PathBuf::from(&a[1]))
+                        .collect::<Vec<_>>(),
+                    api.as_ref(),
+                )
+            })
             .and_then(|()| build(entry))
             .map(|p| println!("Built {}", p.display())),
         Some("wasm-std") => wasm::wasm_std(&args[1..]),
@@ -148,7 +162,11 @@ fn main() -> ExitCode {
                 })
                 .map(|()| println!("Run `cargo sunrise-mod check`."))
         }
-        _ => Err("usage: cargo sunrise-mod new <path> [--name \"Name\"] [--template content|native|wasm [--sunrise <build>]] | update [--sunrise <build>] | inject update [--accept <id>]… | inject sync --repo <game checkout> | inject add <at> --kind <kind> [--call <canonical callee>] [--nth N] [--with <fn>] | internals sync [--repo <path>] | internals add <path>… [--kind <kind>] | build [--wasm] | wasm-std <out.wasm> | run [--game <sunrise-client>] [-- <game args>] | check [--uses] | check <file> [--kind <kind>] [--key <public key> --signature <file.minisig>] [--json] | hooks <text> [--all] | sdk diff <build> <build> | fits [<file.smod>] [--build <name>]… | registry build|review|check|list | use-jar <path> | native-build < plan.json | native-check < plan.json | native-discover < plan.json | native-lock < plan.json | native-layout < plan.json".into()),
+        None | Some("--help" | "-h" | "help") => {
+            println!("usage: {USAGE}");
+            Ok(())
+        }
+        _ => Err(format!("usage: {USAGE}")),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
