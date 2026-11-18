@@ -7,8 +7,8 @@ pub trait Hooks {
     /// labels, from the menu's data slots `data` (the block entity's `data`
     /// on the server): data slots are 16-bit on the wire as in vanilla (a
     /// bigger value wraps), and `data` is empty until the server's first
-    /// values arrive, so read it with `get`. Draw with `native_sprite`, `native_fill` and
-    /// `native_text`.
+    /// values arrive, so read it with `get`. Draw with `event.draw.sprite`,
+    /// `event.draw.fill` and `event.draw.text`.
     /// `pos` is the open menu's block position, as reported by the server
     /// (or the clicked block for a server without menu-extra support).
     /// It is `None` for a menu opened without a block position. Read the
