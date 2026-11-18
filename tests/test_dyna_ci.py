@@ -672,5 +672,34 @@ class ParityWorkflowTests(unittest.TestCase):
         self.assertTrue((self.slot / "loot_b.log").exists())
 
 
+class ScheduledDynaJobTests(unittest.TestCase):
+    def test_no_job_on_a_dyna_runner_runs_for_a_scheduled_event(self):
+        # Dyna's runners refuse a scheduled event at "Set up runner" (hot-paths' scheduled runs, 2026-11-16 to 18):
+        # a scheduled workflow dispatches itself, and its Dyna jobs run from the dispatch.
+        from test_ci_concurrency import yaml
+        def off_schedule(job):
+            condition = " ".join(str(job.get("if", "")).split())
+            return ("github.event_name == 'workflow_dispatch'" in condition
+                    or "github.event_name != 'schedule'" in condition)
+        checked = 0
+        for path in sorted((ROOT / ".github/workflows").glob("*.yml")):
+            workflow = yaml.load(path.read_text(), Loader=yaml.BaseLoader)
+            if "schedule" not in workflow.get("on", {}):
+                continue
+            jobs = workflow["jobs"]
+            def guarded(name, seen=()):
+                job = jobs[name]
+                needs = job.get("needs", [])
+                needs = [needs] if isinstance(needs, str) else needs
+                return off_schedule(job) or any(guarded(other, seen + (name,)) for other in needs if other not in seen)
+            for name, job in jobs.items():
+                # A literal Dyna label; a routed one (wasm-coverage's) sends a scheduled event to GitHub's runners.
+                if str(job.get("runs-on", "")).startswith("dyna-"):
+                    checked += 1
+                    with self.subTest(workflow=path.name, job=name):
+                        self.assertTrue(guarded(name))
+        self.assertGreater(checked, 0)
+
+
 if __name__ == "__main__":
     unittest.main()
