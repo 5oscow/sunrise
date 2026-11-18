@@ -5,13 +5,16 @@ name: verifier
 # releases/latest as a fallback), with the six binaries, SHA256SUMS and a build-provenance attestation.
 #
 # The trust anchor is not a signature. The install scripts on main pin each binary's SHA-256
-# (tools/ci/pin_verifier.py verifier@X.Y.Z rewrites the pin block, in an ordinary pull request), so this workflow
+# (tools/ci/pin_verifier.py verifier@X.Y.Z --commit <dispatch sha> checks the files' attestation, then rewrites the pin
+# block, in an ordinary pull request), so this workflow
 # holds no secret, uses no environment and changes no key. A new release is needed only when the verify code or
 # release-keys.txt changes.
 #
 # By dispatch only. A real run is `-f dry_run=false` on main and publishes; any other run (the default, or any other
 # ref) builds everything, checks it, and publishes nothing, as mod-tool.yml's dry run does.
 #   gh workflow run verifier.yml -f version=1.0.0 -f dry_run=false      (from main)
+# `publish` creates the tag verifier@X.Y.Z itself at the dispatch commit (create-only, so an existing tag is never moved)
+# and then the release with --verify-tag.
 # - `decide` (read-only token) checks the version, refuses an existing tag, and decides whether this run publishes.
 # - `build` compiles one binary per platform on a hosted runner, size-optimised and static (musl; the static CRT on
 #   Windows), with no secret; the profile comes from CARGO_PROFILE_RELEASE_* here, so the workspace profiles stay as
@@ -57,11 +60,17 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::version must be X.Y.Z, not '$VERSION'"; exit 1; }
+          number='(0|[1-9][0-9]{0,8})'
+          [[ "$VERSION" =~ ^$number\.$number\.$number$ ]] || { echo "::error::version must be X.Y.Z, not '$VERSION'"; exit 1; }
           tag="verifier@$VERSION"
-          # An existing release or tag is never replaced: a pinned hash must keep meaning the same file.
-          if gh release view "$tag" > /dev/null 2>&1; then echo "::error::refused: release $tag already exists"; exit 1; fi
-          if gh api "repos/$GH_REPO/git/ref/tags/$tag" > /dev/null 2>&1; then echo "::error::refused: tag $tag already exists"; exit 1; fi
+          # An existing release or tag is never replaced: a pinned hash must keep meaning the same file. Only a 404 is
+          # "absent": any other answer (a rate limit, a server error) refuses.
+          for path in "releases/tags/$tag" "git/ref/tags/$tag"; do
+            if gh api "repos/$GH_REPO/$path" > /dev/null 2> "$RUNNER_TEMP/error"; then
+              echo "::error::refused: $tag already exists here ($path)"; exit 1
+            fi
+            grep -q 'HTTP 404' "$RUNNER_TEMP/error" || { cat "$RUNNER_TEMP/error"; echo "::error::couldn't look up $path"; exit 1; }
+          done
           publish=false
           if [ "$GITHUB_REF" = refs/heads/main ] && [ "$DRY" = false ]; then publish=true; fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
@@ -93,7 +102,7 @@ jobs:
       CARGO_PROFILE_RELEASE_PANIC: abort
       CARGO_PROFILE_RELEASE_STRIP: symbols
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: The pinned Rust
@@ -147,7 +156,7 @@ jobs:
             echo "$out"
             grep -q 'usage: sunrise-verify' <<< "$out"
           fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: verifier-${{ matrix.platform }}
           path: dist/${{ env.NAME }}
@@ -158,7 +167,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: verifier-*
           path: dist
@@ -174,7 +183,7 @@ jobs:
           sha256sum * > SHA256SUMS
           sha256sum -c SHA256SUMS
           { echo '```'; cat SHA256SUMS; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: verifier-release
           path: dist/*
@@ -183,7 +192,7 @@ jobs:
   publish:
     needs: [decide, assemble]
     # The only job with a write token, and only for a publishing run on main.
-    if: needs.decide.outputs.publish == 'true' && github.ref == 'refs/heads/main'
+    if: needs.decide.outputs.publish == 'true' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -195,17 +204,27 @@ jobs:
       GH_REPO: ${{ github.repository }}
       TAG: ${{ needs.decide.outputs.tag }}
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: verifier-release
           path: dist
-      - uses: actions/attest-build-provenance@v2
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: dist/*
+      - name: Tag verifier@X.Y.Z here, never over another tag
+        run: |
+          set -euo pipefail
+          # Checked again here (a tag or release made since `decide` ran is never replaced); only a 404 is "absent".
+          for path in "releases/tags/$TAG" "git/ref/tags/$TAG"; do
+            if gh api "repos/$GH_REPO/$path" > /dev/null 2> "$RUNNER_TEMP/error"; then
+              echo "::error::refused: $TAG already exists here ($path)"; exit 1
+            fi
+            grep -q 'HTTP 404' "$RUNNER_TEMP/error" || { cat "$RUNNER_TEMP/error"; echo "::error::couldn't look up $path"; exit 1; }
+          done
+          # POST git/refs creates and never overwrites: a conflict fails the run.
+          gh api -X POST "repos/$GH_REPO/git/refs" -f ref="refs/tags/$TAG" -f sha="$GITHUB_SHA" > /dev/null
       - name: Release
         run: |
           set -euo pipefail
-          # Checked again here: a release made since `decide` ran is never replaced.
-          if gh release view "$TAG" > /dev/null 2>&1; then echo "::error::refused: release $TAG already exists"; exit 1; fi
           notes="sunrise-verify, the release checker packaging/server/install.sh and install.ps1 pin by SHA-256 (built from $GITHUB_SHA by verifier.yml; the files carry a build-provenance attestation). Not a Sunrise release."
-          gh release create "$TAG" dist/* --target "$GITHUB_SHA" --prerelease --latest=false --title "Verifier ${TAG#verifier@}" --notes "$notes"
+          gh release create "$TAG" dist/* --verify-tag --prerelease --latest=false --title "Verifier ${TAG#verifier@}" --notes "$notes"
