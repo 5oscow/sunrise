@@ -83,5 +83,17 @@ class SaveRoundtripTimersTests(unittest.TestCase):
             self.assertEqual(roundtrip.summarize(report), 1)
 
 
+
+class SaveRoundtripLogTests(unittest.TestCase):
+    def test_the_containers_missing_network_interface_is_not_a_save_problem(self):
+        server = object.__new__(roundtrip.Vanilla)
+        server.lines = [
+            '[17:01:02] [Server thread/WARN]: Failed to find a usable hardware address from the network interfaces; '
+            'using random bytes: 1a:2b:3c:4d:5e:6f:70:81',
+            '[17:01:03] [Server thread/WARN]: Failed to load a block entity at 1, 2, 3',
+        ]
+        self.assertEqual(server.problems(), server.lines[1:])
+
+
 if __name__ == '__main__':
     unittest.main()

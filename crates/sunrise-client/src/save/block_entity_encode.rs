@@ -1,12 +1,23 @@
-use super::{block_entity_id, encode_items, item_to_nbt, string, uuid_tag};
+use super::{block_entity_id, string, uuid_tag};
 use crate::{
     beehive::BeehiveExt,
     mobs::{spawner::SpawnerExt, trial_spawner::TrialSpawnerExt},
 };
 use sunrise_core::nbt::{Compound, Tag};
 
-pub fn encode(p: (i32, i32, i32), e: &crate::containers::BlockEntity, block: &str) -> Tag {
+/// Save block-entity stacks against the world's loaded item prototypes.
+pub fn encode(
+    p: (i32, i32, i32),
+    e: &crate::containers::BlockEntity,
+    block: &str,
+    items: &crate::items::Items,
+) -> Tag {
+    let item_to_nbt =
+        |stack: &crate::items::ItemStack| sunrise_items::item_nbt::item_to_nbt(stack, items);
     use crate::containers::BlockEntity;
+    let encode_items = |slots: &[Option<crate::items::ItemStack>]| {
+        sunrise_items::item_nbt::encode_items_using(slots, item_to_nbt)
+    };
     if let BlockEntity::Mod(m) = e {
         let mut map = m.nbt.clone();
         if let Some((key, shapes)) = m.shapes_tag() {
@@ -161,7 +172,7 @@ pub fn encode(p: (i32, i32, i32), e: &crate::containers::BlockEntity, block: &st
         }
         BlockEntity::Spawner(s) => entries.extend(s.save()),
         BlockEntity::TrialSpawner(s) => entries.extend(s.save()),
-        BlockEntity::Vault(v) => entries.extend(v.save()),
+        BlockEntity::Vault(v) => entries.extend(v.save(items)),
         BlockEntity::Beehive(h) => entries.extend(h.to_nbt()),
         BlockEntity::CommandBlock(c) => entries.extend(c.save()),
         BlockEntity::StructureBlock(b) => entries.extend(b.save()),

@@ -33,7 +33,9 @@ use std::sync::{
 use sunrise_mod_runtime::attachments::{Attachments, observer::AttachmentObserver};
 
 mod carry;
+mod contents_watches;
 pub use carry::Carried;
+pub use contents_watches::{ContentsObservers, ContentsWatches};
 
 static NEXT_TOKEN: AtomicU64 = AtomicU64::new(1);
 
@@ -77,6 +79,8 @@ pub enum Ticking {
 #[derive(Default)]
 pub struct BlockEntities {
     map: HashMap<Pos, BlockEntity>,
+    /// Runtime contents subscriptions, retired with their observer identity.
+    pub contents_watches: ContentsWatches,
     generations: FxHashMap<Pos, u64>,
     on_load: std::collections::VecDeque<(Pos, u64)>,
     on_load_enabled: bool,
@@ -332,10 +336,18 @@ impl BlockEntities {
     pub fn generation(&self, pos: &Pos) -> Option<u64> {
         self.generations.get(pos).copied()
     }
+    /// The live identity, including an instance temporarily taken for its tick.
+    pub fn identity(&self, pos: Pos) -> Option<BlockEntityIdentity> {
+        self.generation(&pos).map(|generation| BlockEntityIdentity {
+            position: [pos.0, pos.1, pos.2],
+            generation,
+        })
+    }
     /// Restore the identity captured with an existing entity by a transaction.
     pub fn restore_generation(&mut self, pos: Pos, generation: u64) {
         assert!(self.map.contains_key(&pos));
         if self.generation(&pos) != Some(generation) {
+            self.contents_watches.remove(pos);
             retire_attachments(
                 &mut self.attachments,
                 self.attachment_observer.as_ref(),
@@ -489,6 +501,7 @@ impl BlockEntities {
     /// Retires the map of the block entity leaving `pos`: at once, or, while a transaction
     /// defers retirement, kept bound until it closes.
     fn retire(&mut self, pos: Pos) {
+        self.contents_watches.remove(pos);
         if let Some(retiring) = &mut self.retiring {
             if let (Some(map), Some(&generation)) =
                 (self.attachments.remove(&pos), self.generations.get(&pos))
@@ -930,10 +943,12 @@ impl BlockEntities {
         let generations = &mut self.generations;
         let observer = self.attachment_observer.as_ref();
         let sign_editors = &mut self.sign_editors;
+        let contents_watches = &mut self.contents_watches;
         self.asleep.clear();
         self.map.retain(|p, e| {
             let kept = keep(p, e);
             if !kept {
+                contents_watches.remove(*p);
                 retire_attachments(attachments, observer, generations, p);
                 generations.remove(p);
                 *freed |= live.remove(p).is_some();
@@ -946,6 +961,7 @@ impl BlockEntities {
         });
     }
     pub fn clear(&mut self) {
+        self.contents_watches = ContentsWatches::default();
         self.unload_attachments();
         self.generations.clear();
         self.on_load.clear();
@@ -973,6 +989,7 @@ impl BlockEntities {
     pub fn load_chunk(&mut self, entities: Vec<(Pos, BlockEntity)>) {
         let order = chunk_map_order(entities.iter().map(|(p, _)| *p));
         for (p, e) in entities {
+            self.contents_watches.remove(p);
             self.replace_taken(p);
             retire_attachments(
                 &mut self.attachments,
@@ -1059,6 +1076,10 @@ impl BlockEntities {
             }
             mine && map.contains_key(p)
         });
+        Arc::clone(&self.tickers)
+    }
+    /// The ticker list as it stands, without promoting pending slots.
+    pub fn ticker_slots(&self) -> Arc<Vec<(Pos, u32)>> {
         Arc::clone(&self.tickers)
     }
     /// Whether a slot from `tickers` still ticks.

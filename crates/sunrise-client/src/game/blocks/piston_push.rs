@@ -10,12 +10,15 @@
 //! then run through the block collision scan, so a pushed entity stops at a
 //! wall instead of passing through it.
 //!
+#[path = "piston_push/carrying.rs"]
+mod carrying;
 use super::{
     Game,
     entity::{Entity, EntityHandle, with_entity, with_entity_mut},
     minecarts::CartHit,
     move_gate::MoveWho,
 };
+use crate::game::collision_source::Mover;
 use sunrise_client::collisions::{
     EntityCollisions, SceneCollisions, no_collision_empty, with_piston_noclip,
 };
@@ -321,7 +324,7 @@ impl Game<'_> {
             MoveWho::Entity(EntityHandle::Boat(_) | EntityHandle::Cart(_)) => Vec::new(),
             MoveWho::Entity(handle) => {
                 let own = with_entity!(self, handle, entity => Entity::bounds(entity));
-                let mut boxes = self.item_entity_collisions();
+                let mut boxes = self.entity_collisions(Mover::Passive);
                 boxes.retain(|b| *b != own);
                 boxes
             }
@@ -376,7 +379,7 @@ impl Game<'_> {
     /// with), without a piston's per-tick travel limit or its noclip; a
     /// `noPhysics` body moves the whole way. The local player takes the
     /// client's own move (`shulker_push_player`), an armor stand its own
-    /// (`lid_shoves_armor_stand`), and a painting, an item frame or a cushion
+    /// (`shoves_armor_stand`), and a painting, an item frame or a cushion
     /// breaks (`lid_breaks_attached`).
     ///
     /// Not reached: the ender dragon is not in the walk (it is `noPhysics`
@@ -395,19 +398,19 @@ impl Game<'_> {
             if !body.bounds.intersects(area) {
                 return;
             }
-            let no_physics = match target {
-                MoveWho::Entity(handle) => with_entity!(self, handle, entity => {
-                    // The four kinds whose struct keeps no `noPhysics` field (a
-                    // shulker bullet among them) hold a mod's write here.
-                    let stored = self.persist.no_physics.get(&entity.id()).copied();
-                    entity.no_physics(stored)
-                }),
-                _ => false,
-            };
+            let no_physics = self.pushed_no_physics(target);
             if self.lid_spares(lid, root, target, no_physics) {
                 return;
             }
-            self.move_by_lid(lid, target, body, movement, no_physics, &mut stand_grid);
+            self.move_pushed_body(
+                lid.mover(),
+                lid.shulker(),
+                target,
+                body,
+                movement,
+                no_physics,
+                &mut stand_grid,
+            );
         });
         self.lid_breaks_attached(area, root);
     }
@@ -518,10 +521,26 @@ impl Game<'_> {
         }
     }
 
-    /// `Entity.move(lid.mover(), movement)` for one body a lid pushes.
-    fn move_by_lid(
+    /// Whether a body moves with `noPhysics`, which `Entity.move` follows with `setPos` the
+    /// whole way. The four kinds whose struct keeps no such field (a shulker bullet among
+    /// them) hold a mod's write in `persist`.
+    fn pushed_no_physics(&self, target: MoveWho) -> bool {
+        match target {
+            MoveWho::Entity(handle) => with_entity!(self, handle, entity => {
+                let stored = self.persist.no_physics.get(&entity.id()).copied();
+                entity.no_physics(stored)
+            }),
+            _ => false,
+        }
+    }
+
+    /// `Entity.move(mover, movement)` for one body: a lid's push (`shulker` is the shulker whose
+    /// lid it is, if one) or a mod's `move_by`. The collision scan stops it at the blocks, the
+    /// world border and the entities it collides with, it steps up and its ground flag follows.
+    fn move_pushed_body(
         &mut self,
-        lid: Lid,
+        mover: MoverType,
+        shulker: Option<u32>,
         target: MoveWho,
         body: Body,
         movement: Vec3,
@@ -529,15 +548,15 @@ impl Game<'_> {
         stand_grid: &mut Option<sunrise_client::entities::ObstacleGrid>,
     ) {
         if target == MoveWho::Player {
-            self.shulker_push_player(lid.mover(), movement);
+            self.shulker_push_player(mover, movement);
             return;
         }
         // Armor stands arm their gate in their own collided shove.
         if let MoveWho::Entity(EntityHandle::ArmorStand(i)) = target {
-            self.lid_shoves_armor_stand(i, lid.shulker(), movement, stand_grid);
+            self.shoves_armor_stand(i, mover, shulker, movement, stand_grid);
             return;
         }
-        let mut gate = self.entity_move(target, lid.mover(), movement);
+        let mut gate = self.entity_move(target, mover, movement);
         if gate.skipped() {
             return;
         }
@@ -559,7 +578,7 @@ impl Game<'_> {
             [body.position.x, body.position.z],
             body.bounds,
             movement,
-            // A lid's `Entity.move` steps and reads the ground flag.
+            // `Entity.move` steps and reads the ground flag.
             body.step_height,
             body.on_ground,
             None,
@@ -573,13 +592,63 @@ impl Game<'_> {
         }
     }
 
+    /// A mod's `Entity.move(cause, movement)` for the listed entity `handle` (never the player
+    /// or a guest: their clients own their positions), in `Entity.move`'s order: the
+    /// `entity_move` gate, a `noPhysics` body's whole-delta `setPos`, then for a piston's cause
+    /// the per-tick limit (`move_pushed`; a mob's budget is its own, any other kind's lasts the
+    /// call), else the collided move a lid's push makes. The entity's velocity is left as it
+    /// is. Returns how far it moved.
+    pub(in crate::game) fn move_listed_entity(
+        &mut self,
+        handle: EntityHandle,
+        cause: MoverType,
+        movement: Vec3,
+    ) -> Vec3 {
+        let target = MoveWho::Entity(handle);
+        let from = with_entity!(self, handle, entity => entity.position());
+        let body = self.listed_body(handle, None);
+        if self.pushed_no_physics(target) {
+            let mut gate = self.entity_move(target, cause, movement);
+            let movement = gate.delta();
+            self.apply_push(&mut gate, target, movement);
+        } else if let Some(direction) = (cause == MoverType::Piston)
+            .then(|| first_axis_direction(movement))
+            .flatten()
+        {
+            let mut pricked = Vec::new();
+            self.move_pushed(
+                target,
+                body.bounds,
+                [body.position.x, body.position.z],
+                body.step_height,
+                body.on_ground,
+                movement,
+                direction,
+                &mut std::collections::HashMap::new(),
+                &mut pricked,
+            );
+            self.hurt_cactus_pricked_vehicles(pricked);
+        } else {
+            // A stand's shove zeroes the velocity a collision blocks; a mod's move keeps it.
+            let stand = match handle {
+                EntityHandle::ArmorStand(i) => Some((i, self.armor_stands[i].velocity)),
+                _ => None,
+            };
+            self.move_pushed_body(cause, None, target, body, movement, false, &mut None);
+            if let Some((i, velocity)) = stand {
+                self.armor_stands[i].velocity = velocity;
+            }
+        }
+        with_entity!(self, handle, entity => entity.position()).subtract(from)
+    }
+
     /// `Entity.move(mover, …)` for the local player, pushed by a lid: an
     /// ordinary move, so the collision scan stops and steps it and its end
     /// writes the ground state (`Entity.setOnGroundWithMovement`). A lid
     /// lifting the body off the ground leaves it airborne, and the next tick's
     /// gravity lands it on the lid instead of a stale ground flag holding it.
     fn shulker_push_player(&mut self, mover: MoverType, movement: Vec3) {
-        let entities = self.player_entity_collisions();
+        let entities = self.entity_collisions(Mover::Player);
         if let Some(player) = self.player.as_mut() {
             let _ = MotionWorld {
                 entities: &entities,
@@ -886,18 +955,21 @@ impl Game<'_> {
                 })
             }
             MoveWho::Entity(handle) => with_entity!(self, handle, entity => {
-                if !entity.is_alive() || entity.get_piston_push_reaction() == IgnoreEntity {
-                    return None;
-                }
-                Some(Body {
-                    bounds: Entity::bounds(entity),
-                    position: entity.position(),
-                    on_ground: entity.on_ground(),
-                    step_height: entity.get_step_height(),
-                    supported: pos.is_some_and(|pos| entity.is_supported_by(pos)),
-                })
-            }),
+                entity.is_alive() && entity.get_piston_push_reaction() != IgnoreEntity
+            })
+            .then(|| self.listed_body(handle, pos)),
         }
+    }
+
+    /// What a move needs from a listed entity.
+    fn listed_body(&self, handle: EntityHandle, pos: Option<BlockPos>) -> Body {
+        with_entity!(self, handle, entity => Body {
+            bounds: Entity::bounds(entity),
+            position: entity.position(),
+            on_ground: entity.on_ground(),
+            step_height: entity.get_step_height(),
+            supported: pos.is_some_and(|pos| entity.is_supported_by(pos)),
+        })
     }
 
     /// `Entity.move(MoverType.PISTON, movement)` for one pushed entity: the
@@ -1261,6 +1333,31 @@ fn shulker_lid(facing: u8, lid: [f64; 6]) -> (Vec3, Aabb) {
             Vec3::new(lid[3], lid[4], lid[5]),
         ),
     )
+}
+
+/// The direction of a movement's first non-zero axis, the one `limitPistonMovement` keeps.
+fn first_axis_direction(movement: Vec3) -> Option<Direction> {
+    if movement.x != 0.0 {
+        Some(if movement.x > 0.0 {
+            Direction::East
+        } else {
+            Direction::West
+        })
+    } else if movement.y != 0.0 {
+        Some(if movement.y > 0.0 {
+            Direction::Up
+        } else {
+            Direction::Down
+        })
+    } else if movement.z != 0.0 {
+        Some(if movement.z > 0.0 {
+            Direction::South
+        } else {
+            Direction::North
+        })
+    } else {
+        None
+    }
 }
 
 /// `Entity.move(MoverType.PISTON, movement)` for a pushed body: the movement

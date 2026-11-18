@@ -78,8 +78,8 @@ fn exercise(reopen: bool) {
                                 ..Default::default()
                             };
                             playerdata::store(g, &mut level, None);
-                            level.write(root.path()).unwrap();
-                            playerdata::save_now(g, root.path()).unwrap();
+                            level.write(root.path(), &Default::default()).unwrap();
+                            playerdata::save_now(g, root.path(), &Default::default()).unwrap();
                             g.inventory.fill(None);
                             let reopened = sunrise_client::save::Level::read(root.path()).unwrap();
                             assert!(playerdata::load_owner(g, root.path(), Some(&reopened)));

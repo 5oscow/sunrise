@@ -1,8 +1,9 @@
 [workspace]
-exclude = ["crates/sunrise-telemetry-server", "launcher", "crates/sunrise-mod-registry", "third_party/wgpu-hal", "third_party/naga", "third_party/libmimalloc-sys", "tools/fixtures/paper-trace-mod"]
+exclude = ["crates/sunrise-telemetry-server", "crates/sunrise-mod-registry", "third_party/wgpu-hal", "third_party/naga", "third_party/libmimalloc-sys", "tools/fixtures/paper-trace-mod"]
 members = [
     "crates/sunrise-guest-stack",
     "crates/sunrise-mod-vocab",
+    "crates/sunrise-wasmtime",
     "crates/sunrise-game-discovery",
     "crates/sunrise-telemetry",
     "crates/sunrise-hooks",
@@ -27,6 +28,8 @@ members = [
     "crates/sunrise-mod-points",
     "crates/sunrise-internals",
     "crates/sunrise-client-lib",
+    "crates/sunrise-gameplay",
+    "crates/sunrise-client-gameplay",
     "crates/sunrise-client-core",
     "crates/sunrise-client-input",
     "crates/sunrise-client-render",
@@ -61,8 +64,10 @@ members = [
     "crates/sunrise-mod-api-macros",
     "crates/sunrise-mod-point-shape",
     "crates/sunrise-mod-source",
+    "crates/sunrise-mod-call",
     "crates/sunrise-mod-surface",
     "crates/sunrise-mod-point-emit",
+    "crates/sunrise-native-build",
     "crates/sunrise-mod-api-gen/dispatch-tests",
     "crates/sunrise-mod-wasm/wire-loopback",
     "crates/cargo-sunrise-mod",
@@ -148,6 +153,10 @@ opt-level = 3
 # which a 16 GiB parity runner killed (signal 9, mount_control, 2026-11-16). At opt-level 0, the test profile's own
 # level and verify's, it takes 12.0 GiB and 124 s instead of 378 s; its dependencies stay at the runner's level.
 [profile.test.package.sunrise-client]
+opt-level = 0
+# The same for sunrise-client-lib's lib test, which a dozen harnesses run: 6.3 GiB and 253 s at opt-level 0 against
+# 8.7 GiB and 349 s at 3 (damage_catalog's build of it beside sunrise-client's was killed, main, run 43884739298).
+[profile.test.package.sunrise-client-lib]
 opt-level = 0
 [profile.release.package.sunrise-mod-api-gen]
 opt-level = 3

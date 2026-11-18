@@ -15,7 +15,7 @@ pub(super) fn is_level(hook: &Hook) -> bool {
 }
 
 fn game_level(hook: &Hook) -> bool {
-    hook.target.contains("::GameLevel<")
+    hook.target.contains("::GameLevel<") || hook.target.contains("::LevelView<")
 }
 
 /// Validate catalog access restrictions against the hook's receiver.
@@ -42,7 +42,7 @@ pub(super) fn validate(
             HostAccess::Level
                 if !game_level(hook)
                     && !ticks
-                    && (hook.side == Side::Server && mutable == Some(true)
+                    && (hook.side == Side::Server && mutable.is_some()
                         || hook.side == Side::Both && mutable == Some(false)) => {}
             // A hit's capability is the server hit's: a both-side hit's host only reads.
             HostAccess::Hit
@@ -162,7 +162,7 @@ pub(super) fn host_param(hook: &Hook, mutable: Option<bool>, ticks: bool) -> Opt
         HostParam {
             ty: format!("&{mutable}dyn {kind}"),
             call: if ticks {
-                "&mut super::mod_api_host::LevelTicks { level: self, ticks }"
+                "&mut super::mod_api_host::LevelTicks::new(self, ticks)"
             } else {
                 "self"
             },

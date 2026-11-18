@@ -7,7 +7,7 @@ A code mod's project names the mod API by the path where `cargo sunrise-mod` kee
 sunrise-mod-api = { path = ".sunrise/sdk/api/crates/sunrise-mod-api" }
 ```
 
-`sunrise-mod-points` and `sunrise-internals` are named the same way, by `.sunrise/sdk/api/crates/<package>`. The
+`sunrise-mod-points`, `sunrise-internals` and `sunrise-wasmtime` (native mods only; [the game's wasmtime](../../concepts/native-route/8-wasmtime.md)) are named the same way, by `.sunrise/sdk/api/crates/<package>`. The
 SDK carries no `sunrise-internals` crate yet: a mod that names game internals builds through the launcher, which
 puts the mod's own generated facade in its place, and not with a plain `cargo check`. Features
 (`features = ["testing"]` on a dev-dependency) are kept.
@@ -29,8 +29,8 @@ The build a mod is made for is its pin, always a full commit sha in the file:
 - a native mod: `[native] sunrise` in `sunrise-mod.toml`;
 - a wasm mod: `sdk` under `[package.metadata.sunrise]` in `Cargo.toml`.
 
-`cargo sunrise-mod new` writes the current Nightly's build, or `--sunrise`'s. `cargo sunrise-mod update` moves a
-native mod's pin. Wherever a build is given, these forms are accepted:
+`cargo sunrise-mod new` writes the current Nightly's build, or `--sunrise`'s. `cargo sunrise-mod update` moves
+either pin, changing only its value. Wherever a build is given, these forms are accepted:
 
 | Written | Means |
 |---|---|

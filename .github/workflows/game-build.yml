@@ -40,10 +40,6 @@ on:
         description: Sign the macOS programs with Developer ID and notarize the zip (the runner's keychain)
         type: boolean
         default: true
-    outputs:
-      complete:
-        description: '"true" once every required leg built (legs); an optional leg that failed, timed out or was cancelled is left out'
-        value: ${{ jobs.legs.outputs.complete }}
 permissions:
   contents: read
 jobs:
@@ -61,8 +57,7 @@ jobs:
     needs: runner-configuration
     # This runner holds the maintainer's own pinned Minecraft jars. Only our classes leave it. An untrusted build
     # goes to the Mac mini's nightly runner (macOS + sunrise-nightly: ludovics-mac-mini-nightly, beside the one that
-    # runs pull requests' parity jobs, so a nightly never waits behind their queue), never the release runner
-    # (MAC_RUNNER: ludovics-mac-mini-release) nor parity-main's.
+    # runs by-hand game tools), never the release runner (MAC_RUNNER: ludovics-mac-mini-release).
     # toJSON keeps an empty trusted runner as an invalid empty label, never a Nightly fallback.
     runs-on: ${{ fromJSON(inputs.trusted && toJSON(vars.MAC_RUNNER) || (vars.DYNA_CI_SELF_HOSTED == 'true' && vars.NIGHTLY_EXPORTERS_RUNNER) || (vars.SELF_HOSTED_CI != 'off' && '["self-hosted", "macOS", "sunrise-nightly"]') || '"ubuntu-latest"') }}
     # Three full preparations (two isolated, one batched) besides the compile.
@@ -120,7 +115,7 @@ jobs:
           # prepares afresh.
           cargo build --release --locked -p sunrise-prepare
           preparer="${CARGO_TARGET_DIR:-target}/release/sunrise-prepare"
-          # Compiled here, never taken from the runner's shared preparations: pull requests' parity jobs
+          # Compiled here, never taken from the runner's shared preparations: other game jobs
           # write those (vanilla-data.sh links .local/exporters to them).
           rm -rf .local/exporters
           bundle=$("$preparer" compile-exporters --root "$PWD" | tail -1)
@@ -263,9 +258,9 @@ jobs:
         with:
           distribution: temurin
           java-version: '25'
-      - name: Build the official game, sunrise-ctl, sunrise-prepare and sunrise-server
+      - name: Build the official game, sunrise-ctl, sunrise-perf, sunrise-prepare, sunrise-server and sunrise-port-pack
         if: ${{ !matrix.musl }}
-        run: cargo build --release --locked ${{ matrix.target && format('--target {0}', matrix.target) || '' }} -p sunrise-official --bin sunrise-official -p sunrise-client-lib --bin sunrise-ctl -p sunrise-prepare --bin sunrise-prepare -p sunrise-server --bin sunrise-server
+        run: cargo build --release --locked ${{ matrix.target && format('--target {0}', matrix.target) || '' }} -p sunrise-official --bin sunrise-official -p sunrise-client-lib --bin sunrise-ctl -p sunrise-perf --bin sunrise-perf -p sunrise-prepare --bin sunrise-prepare -p sunrise-server --bin sunrise-server -p sunrise-port-pack --bin sunrise-port-pack
       - name: The official game is the game players get, under its name
         # sunrise-official: sunrise-client's game with Sunrise's own parts plugged in (docs/layers.md, "How a
         # Sunrise crate plugs in"). Everything below, the launcher and players know it as sunrise-client.
@@ -274,15 +269,16 @@ jobs:
       - name: Every program the release folder takes was built
         if: ${{ !matrix.musl }}
         run: |
-          for binary in sunrise-client sunrise-ctl sunrise-prepare sunrise-server; do
+          for binary in sunrise-client sunrise-ctl sunrise-perf sunrise-prepare sunrise-server sunrise-port-pack; do
             test -f "$BIN/$binary${{ matrix.exe }}" || { echo "::error::$BIN/$binary${{ matrix.exe }} is missing"; exit 1; }
           done
       - name: Verify Windows executable architecture
         if: runner.os == 'Windows'
         run: |
           python tools/check_pe_arch.py "${{ matrix.pe_arch }}" \
-            "$BIN/sunrise-client${{ matrix.exe }}" "$BIN/sunrise-ctl${{ matrix.exe }}" \
-            "$BIN/sunrise-prepare${{ matrix.exe }}" "$BIN/sunrise-server${{ matrix.exe }}"
+            "$BIN/sunrise-client${{ matrix.exe }}" "$BIN/sunrise-ctl${{ matrix.exe }}" "$BIN/sunrise-perf${{ matrix.exe }}" \
+            "$BIN/sunrise-prepare${{ matrix.exe }}" "$BIN/sunrise-server${{ matrix.exe }}" \
+            "$BIN/sunrise-port-pack${{ matrix.exe }}"
       - name: Rosetta for the Intel build on Apple Silicon
         if: runner.os == 'macOS' && matrix.target == 'x86_64-apple-darwin'
         run: |
@@ -294,7 +290,7 @@ jobs:
         env:
           EXPECTED_ARCH: ${{ matrix.target == 'x86_64-apple-darwin' && 'x86_64' || 'arm64' }}
         run: |
-          for binary in sunrise-client sunrise-ctl sunrise-prepare sunrise-server; do
+          for binary in sunrise-client sunrise-ctl sunrise-perf sunrise-prepare sunrise-server sunrise-port-pack; do
             actual=$(lipo -archs "$BIN/$binary")
             [[ "$actual" == "$EXPECTED_ARCH" ]] || { echo "::error::$binary is $actual, expected $EXPECTED_ARCH"; exit 1; }
           done
@@ -309,7 +305,7 @@ jobs:
         env:
           MACOS_SIGN_IDENTITY: ${{ vars.MACOS_SIGN_IDENTITY }}
         run: |
-          for binary in sunrise-client sunrise-ctl sunrise-prepare sunrise-server; do
+          for binary in sunrise-client sunrise-ctl sunrise-perf sunrise-prepare sunrise-server sunrise-port-pack; do
             codesign --force --options runtime --timestamp --keychain "$MACOS_SIGN_KEYCHAIN" \
               --identifier "dev.sunrise.${binary#sunrise-}" --sign "$MACOS_SIGN_IDENTITY" "$BIN/$binary"
             codesign --verify --strict --verbose=2 "$BIN/$binary"
@@ -319,7 +315,7 @@ jobs:
         # Windows: no non-system DLL (a "DLL not found" dialog on some players' machines). Linux: the standard
         # loader and libraries every desktop distribution has. macOS: only the system's own libraries.
         run: |
-          for binary in sunrise-client sunrise-ctl sunrise-prepare sunrise-server; do
+          for binary in sunrise-client sunrise-ctl sunrise-perf sunrise-prepare sunrise-server sunrise-port-pack; do
             file="$BIN/$binary${{ matrix.exe }}"
             if [[ "$RUNNER_OS" == macOS ]]; then
               others=$(otool -L "$file" | tail -n +2 | awk '{print $1}' | grep -v -E '^(/usr/lib/|/System/Library/)' || true)
@@ -336,12 +332,12 @@ jobs:
           set -euo pipefail
           rustup component add llvm-tools
           ${{ runner.os == 'Windows' && 'python' || 'python3' }} tools/check_cpu_baseline.py \
-            $(for binary in sunrise-client sunrise-ctl sunrise-prepare sunrise-server; do echo "$BIN/$binary${{ matrix.exe }}"; done)
+            $(for binary in sunrise-client sunrise-ctl sunrise-perf sunrise-prepare sunrise-server sunrise-port-pack; do echo "$BIN/$binary${{ matrix.exe }}"; done)
       - name: Linux glibc baseline (Ubuntu 22.04)
         if: runner.os == 'Linux' && !matrix.musl
         run: |
           python3 .workflow-tools/tools/check_glibc.py \
-            "$BIN/sunrise-client" "$BIN/sunrise-ctl" "$BIN/sunrise-prepare" "$BIN/sunrise-server"
+            "$BIN/sunrise-client" "$BIN/sunrise-ctl" "$BIN/sunrise-perf" "$BIN/sunrise-prepare" "$BIN/sunrise-server" "$BIN/sunrise-port-pack"
       - name: macOS main-stack diagnostics
         if: runner.os == 'macOS'
         run: |
@@ -367,9 +363,10 @@ jobs:
           bin=$BIN
           "$bin/sunrise-client${{ matrix.exe }}" --help | grep -q -- '--resources'
           "$bin/sunrise-ctl${{ matrix.exe }}" --help > /dev/null
+          "$bin/sunrise-perf${{ matrix.exe }}" --help | grep -q -- 'sunrise-perf summary'
           "$bin/sunrise-prepare${{ matrix.exe }}" --help | grep -q -- '--minecraft-dir'
           # The version is the release's.
-          for binary in sunrise-prepare sunrise-server; do
+          for binary in sunrise-prepare sunrise-server sunrise-port-pack; do
             out=$("$bin/$binary${{ matrix.exe }}" --version | tr -d '\r')
             echo "$out"
             [[ "$out" == "$binary $SUNRISE_VERSION" ]] || { echo "::error::expected $binary $SUNRISE_VERSION"; exit 1; }
@@ -445,7 +442,7 @@ jobs:
         # A zip of programs can't be stapled: Gatekeeper asks Apple the first time each one runs.
         if: runner.os == 'macOS' && vars.MACOS_SIGN_IDENTITY != '' && inputs.developer_id
         run: |
-          for binary in sunrise-client sunrise-ctl sunrise-prepare sunrise-server; do
+          for binary in sunrise-client sunrise-ctl sunrise-perf sunrise-prepare sunrise-server sunrise-port-pack; do
             codesign --verify --strict "dist/${{ matrix.dir }}/$binary"
           done
           packaging/macos/notarize.sh "dist/${{ matrix.asset }}"
@@ -535,6 +532,7 @@ jobs:
             || { echo "::error::not a native Intel runner"; exit 1; }
           "$BIN/sunrise-client" --help | grep -q -- '--resources'
           "$BIN/sunrise-ctl" --help > /dev/null
+          "$BIN/sunrise-perf" --help | grep -q -- 'sunrise-perf summary'
           "$BIN/sunrise-prepare" --help | grep -q -- '--minecraft-dir'
           # The version is the release's.
           for binary in sunrise-prepare sunrise-server; do
@@ -567,8 +565,6 @@ jobs:
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    outputs:
-      complete: ${{ steps.decide.outputs.complete }}
     steps:
       - uses: actions/download-artifact@v8
         # No marker at all (every leg failed) is the next step's to report.
@@ -595,6 +591,18 @@ jobs:
           done
           if (( ${#missing[@]} )); then echo "::error::required legs did not build: ${missing[*]}"; exit 1; fi
           echo complete=true >> "$GITHUB_OUTPUT"
+      # The caller reads this artifact, not a workflow output: a reusable workflow that ends failed or cancelled (an
+      # optional leg that failed, timed out or got no runner) passes back no outputs at all.
+      - name: The build is complete
+        if: steps.decide.outputs.complete == 'true'
+        run: echo complete > "$RUNNER_TEMP/build-complete"
+      - uses: actions/upload-artifact@v7
+        if: steps.decide.outputs.complete == 'true'
+        with:
+          name: build-complete
+          path: ${{ runner.temp }}/build-complete
+          if-no-files-found: error
+          retention-days: 3
 
   linux-smoke:
     name: smoke hosted Linux artifact

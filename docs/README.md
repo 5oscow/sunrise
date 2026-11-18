@@ -1,6 +1,6 @@
 # Sunrise documentation
 
-To play, use [the launcher](../launcher/README.md); the project site is [playsunrise.net](https://playsunrise.net). These pages are for developers. What is being done now and next, the work board and how to help: [the hub](https://playsunrise.net/hub) ([ROADMAP.md](../ROADMAP.md), [roadmap/README.md](../roadmap/README.md) for keeping it current).
+To play, use [the launcher](https://github.com/sunrise-org/sunrise-launcher/blob/main/README.md); the project site is [playsunrise.net](https://playsunrise.net). These pages are for developers. What is being done now and next, the work board and how to help: [the hub](https://playsunrise.net/hub) ([ROADMAP.md](../ROADMAP.md), [roadmap/README.md](../roadmap/README.md) for keeping it current).
 
 ## Build and run
 
@@ -30,7 +30,7 @@ To play, use [the launcher](../launcher/README.md); the project site is [playsun
 - [Realms availability](realms-availability.md): vanilla's check that this client may use Realms, the five results, how a screen reads it (one `Pending`, kept), its caching, and how to test a consumer.
 - [Server against Pumpkin](performance/server-vs-pumpkin.md): Sunrise's server and Pumpkin (Rust) under the same bots at 0, 20, 60 and 100 players: tick time, CPU, memory, chunks, join; where Sunrise loses, and how to run it again.
 - [Benchmark](benchmark.md): Sunrise against vanilla 26.3 and vanilla with performance mods, on the same machine, world, path and settings: what is measured, how it is kept fair, how to reproduce it.
-- [Extras](extras.md): optional zoom, minimap, FPS and keystroke overlays and auto-reconnect, all off by default.
+- [Extras](extras.md): optional conveniences (fullbright, dynamic lights, inventory controls, auto-reconnect), all off by default.
 - [Forking](forking.md): this fork's permanent extras exclusions, independent build features and always-available mod management.
 - [PvP & HUD](pvp.md): optional client settings for PvP players (custom crosshair, block outline, hit color, HUD widgets), fair-play boundaries, and why each is off by default.
 - [Narrator](narrator.md): vanilla's text-to-speech (Ctrl+B): the voices per platform, how screens record what they narrate, `sunrise-ctl narration`, and where it still differs from vanilla.
@@ -38,7 +38,7 @@ To play, use [the launcher](../launcher/README.md); the project site is [playsun
 - [The modding book](modding/src/introduction.md): content mods (data) and native mods (Rust), how to make, install and publish them. [Native mods](modding/src/how-to/native-mods.md): how the launcher builds them. [Hook counterparts](https://sunrise-org.github.io/sunrise/reference/hook-notes.html#counterparts): the NeoForge and Fabric catalog conventions.
 - [Upgrading a 26.2 data pack](datapack-upgrade.md): `sunrise-port-pack upgrade-datapack` rewrites a 26.2 worldgen pack in 26.3's formats, and how the rewrite is checked against vanilla.
 - [Modpacks](modpacks.md): porting whole packs (ATM10 and smaller): import, inventory, carry-over, an agent per mod with a harness against the Java original, coverage, and how "10x" is measured.
-- [Launcher](../launcher/README.md): installs, updates and starts builds; its CLI and MCP server; releasing it.
+- [Launcher](https://github.com/sunrise-org/sunrise-launcher/blob/main/README.md): installs, updates and starts builds; its CLI and MCP server; releasing it.
 - [Versioning](versioning.md): how releases are numbered from 0.2 (`v0.2.x`, `launcher@0.2.x`), and how installs from before 0.2 get there.
 - [Resource packs](resource-packs.md): everything a 26.3 resource pack can change, whether Sunrise honours it, and the proof.
 - [Sunrise sends nothing](telemetry.md): no telemetry; crash, benchmark and bug reports stay local files.
@@ -47,12 +47,12 @@ To play, use [the launcher](../launcher/README.md); the project site is [playsun
 - [Security](security.md): how Sunrise protects code, CI and automatic releases against untrusted input while work is performed by AI agents.
 - [Known issues](known-issues.md): player-facing issues listed in each game release and removed as pull requests fix them.
 - [Sunrise APIs](api/README.md): every surface other programs build on (mods, shaders, agent control, servers, the launcher, data formats), each with its guide, generated reference, stability and changelog, and the [stability and versioning policy](api/stability.md).
-- Menus: every screen is vanilla's (title, world list, create world, multiplayer, options, pause), except Sunrise's graphics settings, drawn in the design system's Blocks palette. Sunrise's own settings hang off vanilla's Options the way mods add theirs, each in one place: **Video Settings...** opens Sunrise's graphics settings screen (every video option, the graphics extras and the shader packs), **Controls → Controller Settings...** the controller settings screen in the same style, **Mods...** and **Sunrise Settings...** take the last two slots of the Options grid (Sunrise Settings opens Extras, PvP & HUD, Splitscreen, Replay Studio and AI Agent, each a vanilla options list). The title screen's and pause menu's Friends buttons open Join a Friend and Play with Friends ([play-with-friends.md](play-with-friends.md)).
+- Menus: every screen is vanilla's (title, world list, create world, multiplayer, options, pause), except Sunrise's graphics settings, drawn in the design system's Blocks palette. Sunrise's own settings hang off vanilla's Options the way mods add theirs, each in one place: **Video Settings...** opens Sunrise's graphics settings screen (every video option, the graphics extras and the shader packs), **Controls → Controller Settings...** the controller settings screen in the same style, **Mods...** and **Sunrise Settings...** take the last two slots of the Options grid (Sunrise Settings opens Extras, PvP & HUD, Replay Studio and AI Agent, each a vanilla options list). The title screen's and pause menu's Friends buttons open Join a Friend and Play with Friends ([play-with-friends.md](play-with-friends.md)).
 
 ## Launcher and platforms
 
 - [The launcher's mod browser](mod-browser.md): searching Modrinth and the Sunrise registry for mods, modpacks, resource packs and shader packs, compatibility checks before install, and checksum verification.
-- [Launcher commands](launcher-commands.md): every command of `sunrise-launcher`, CLI arguments, and the tools `sunrise-launcher mcp` offers for driving launcher actions.
+- [Launcher commands](https://github.com/sunrise-org/sunrise-launcher/blob/main/docs/launcher-commands.md): every command of `sunrise-launcher`, CLI arguments, and the tools `sunrise-launcher mcp` offers for driving launcher actions.
 - [Launcher resource preparation](launcher-preparation.md): compiling Java exporter classes into release bundles, verifying local Minecraft assets against `research-lock.json`, and multi-lane export workflows.
 - [Microsoft account sign-in](microsoft-account.md): signing players in with their Microsoft account in the launcher, joining online-mode servers, the owner gate, and the OAuth device-code flow.
 - [Windows allocators](windows-allocators.md): mimalloc defaults, the optional `windows-segment-heap` Cargo feature for Win32 heap APIs, and how to validate the executable manifest.
@@ -74,7 +74,7 @@ To play, use [the launcher](../launcher/README.md); the project site is [playsun
 ## Design notes
 
 - [Design system](design-system.md): shared tokens and interface rules for the launcher, website and Sunrise-only game overlays.
-- [HUD kit](ui-kit.md): the pieces Sunrise's own HUD overlays share: `Room`, which keeps the controller notice and splitscreen's join strip below the boss bars, and `Plate`, the box behind their text.
+- [HUD kit](ui-kit.md): the pieces Sunrise's own HUD overlays share: `Room`, which keeps controller notices below the boss bars, and `Plate`, the box behind their text.
 - [Linear light for HDR and shader packs](design/hdr-linear-light.md): the proposed shader API 0.2 colour contract and frame format for HDR output.
 - [The shader API 0.2 frame](design/shader-api-frame.md): proposed: where a 0.2 pack's stages, post chain and tone curve run, who owns anti-aliasing and coverage, and room for clouds, mods, LabPBR and ray tracing.
 - [Live mod reloading](design/mod-hotload.md): loading, enabling and updating mods from inside the game without a restart.

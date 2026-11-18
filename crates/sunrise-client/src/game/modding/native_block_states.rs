@@ -14,6 +14,20 @@ use sunrise_world::fluid::{FluidKind, FluidState as EngineFluidState};
 use sunrise_world::level::{fluid_drip_particle, fluid_explosion_resistance, fluid_randomly_ticks};
 use sunrise_world::registry::{BlockRegistry, BlockStateId};
 
+/// The engine's fluid state for an exported one, or none for a state no fluid can be in: no
+/// world form, an amount above 8, a zero amount for anything but the empty fluid, or a source
+/// that isn't full.
+pub(super) fn engine_fluid_state(state: FluidState) -> Option<EngineFluidState> {
+    let kind = super::native_world_read::engine_fluid_kind(state.fluid)?;
+    let engine = EngineFluidState::new(kind, state.amount, state.falling);
+    let consistent = match kind {
+        FluidKind::Empty => state.amount == 0,
+        _ if engine.is_source() => state.amount == 8,
+        _ => (1..=8).contains(&state.amount),
+    };
+    consistent.then_some(engine)
+}
+
 impl Game<'_> {
     /// The exported definition of a world fluid, or a tank-only identity.
     pub(super) fn fluid_state_definition(&self, fluid: FluidKey) -> Option<FluidDefinition> {
@@ -75,14 +89,10 @@ impl Game<'_> {
     /// fluid states with. None for a state no fluid can be in: no world form, an amount above
     /// 8, a zero amount for anything but the empty fluid, or a source that isn't full.
     pub(super) fn fluid_legacy_block(&self, state: FluidState) -> Option<mod_api::BlockStateId> {
-        let kind = super::native_world_read::engine_fluid_kind(state.fluid)?;
-        let engine = EngineFluidState::new(kind, state.amount, state.falling);
-        let consistent = match kind {
-            FluidKind::Empty => state.amount == 0,
-            _ if engine.is_source() => state.amount == 8,
-            _ => (1..=8).contains(&state.amount),
-        };
-        consistent.then(|| mod_api::BlockStateId(self.res.behaviours().legacy_block(engine).0))
+        let engine = engine_fluid_state(state)?;
+        Some(mod_api::BlockStateId(
+            self.res.behaviours().legacy_block(engine).0,
+        ))
     }
 
     /// Validate fluid constraints against the exported property definition.
@@ -259,6 +269,25 @@ impl Game<'_> {
         self.pack.assets.registry.state(state)?;
         Some(self.res.facts().get(state).map_color)
     }
+    /// Decode a packed pixel with the same palette and shade arithmetic as map rendering.
+    pub(super) fn block_state_map_color_rgba(&self, packed: u8) -> Option<[u8; 4]> {
+        Some(super::maps::packed_rgba(packed))
+    }
+    /// `BlockState.getLightEmission()`. None for an unknown state.
+    pub(super) fn block_state_light_emission(&self, state: BlockStateId) -> Option<u8> {
+        self.pack.assets.registry.state(state)?;
+        Some(self.res.facts().get(state).emission)
+    }
+    /// `BlockBehaviour.getFriction()` of the state's block. None for an unknown state.
+    pub(super) fn block_state_friction(&self, state: BlockStateId) -> Option<f32> {
+        self.pack.assets.registry.state(state)?;
+        Some(self.res.facts().get(state).friction)
+    }
+    /// `BlockState.isSolidRender()`. None for an unknown state.
+    pub(super) fn block_state_is_solid_render(&self, state: BlockStateId) -> Option<bool> {
+        self.pack.assets.registry.state(state)?;
+        Some(self.res.facts().get(state).solid_render)
+    }
     /// The immutable local ordinals of `block`, independent of current world ID order.
     pub(super) fn block_states_of(&self, block: BlockKey) -> Option<BlockStateRange> {
         mod_api::__private::block_state_range(block).ok()
@@ -320,6 +349,7 @@ impl Game<'_> {
 
     pub(in crate::game) fn craft_grid_remainders(&self, recipe: &str) -> Vec<Option<ItemStack>> {
         self.recipes().remainders(
+            &self.loop_context,
             recipe,
             &self.craft_grid[..self.craft_size * self.craft_size],
             self.craft_size,
@@ -369,7 +399,8 @@ pub(super) fn match_state_properties(
 /// the parser checks properties against, whether a world is open or not.
 pub(super) fn block_registries(registry: &'static BlockRegistry) -> Arc<Registries> {
     static CACHE: Mutex<Vec<(usize, Arc<Registries>)>> = Mutex::new(Vec::new());
-    let key = std::ptr::from_ref(registry) as usize;
+    // Derived from the registry's data alone, so equal data across installations shares one.
+    let key = registry.payload_identity();
     let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
     if let Some((_, reg)) = cache.iter().find(|(cached, _)| *cached == key) {
         return reg.clone();
@@ -1045,6 +1076,21 @@ mod facts_tests {
             // MapColor.STONE is id 11 and air has none.
             assert_eq!(facts.map_color(stone), Some(11));
             assert_eq!(facts.map_color(air), Some(0));
+            // getLightEmission: a torch 14, glowstone 15, stone 0.
+            assert_eq!(facts.light_emission(state("minecraft:torch")), Some(14));
+            assert_eq!(facts.light_emission(state("minecraft:glowstone")), Some(15));
+            assert_eq!(facts.light_emission(stone), Some(0));
+            // getFriction: 0.6 by default, ice 0.98, slime 0.8.
+            assert_eq!(facts.friction(stone), Some(0.6));
+            assert_eq!(facts.friction(state("minecraft:ice")), Some(0.98));
+            assert_eq!(facts.friction(state("minecraft:slime_block")), Some(0.8));
+            // isSolidRender: a full occluding cube only.
+            assert_eq!(facts.is_solid_render(stone), Some(true));
+            assert_eq!(facts.is_solid_render(state("minecraft:glass")), Some(false));
+            assert_eq!(
+                facts.is_solid_render(state("minecraft:stone_slab")),
+                Some(false)
+            );
             // SoundType.STONE: its break event, at volume and pitch 1.
             let sound = facts.sound(stone).unwrap();
             assert_eq!(&*sound.break_sound, "minecraft:block.stone.break");
@@ -1160,9 +1206,11 @@ mod crafting_remainder_tests {
                     Some(ItemStack::new("minecraft:stone", 1)),
                     None,
                 ];
-                let remaining = game
-                    .recipes()
-                    .remainders("missing", &grid, 2, &|s| game.crafting_remainder(s));
+                let remaining =
+                    game.recipes()
+                        .remainders(&game.loop_context, "missing", &grid, 2, &|s| {
+                            game.crafting_remainder(s)
+                        });
                 assert_eq!(
                     remaining,
                     vec![
@@ -1248,9 +1296,11 @@ mod crafting_remainder_tests {
                     &|s| game.crafting_remainder(s),
                 );
                 let grid = [Some(fuel), None, None, None];
-                let crafted = game
-                    .recipes()
-                    .remainders("missing", &grid, 2, &|s| game.crafting_remainder(s));
+                let crafted =
+                    game.recipes()
+                        .remainders(&game.loop_context, "missing", &grid, 2, &|s| {
+                            game.crafting_remainder(s)
+                        });
                 assert_eq!(furnace.items[1], crafted[0]);
                 assert_eq!(
                     furnace.items[1].as_ref().map(|s| (s.damage, s.count)),

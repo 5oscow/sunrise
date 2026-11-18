@@ -163,10 +163,20 @@ fn mod_dependencies(
     }
 }
 
+/// The SDK package a wasm mod's manifest names that only a native mod can link: the game's wasmtime.
+fn native_only_dependency(package: &Value) -> Option<&str> {
+    package["dependencies"]
+        .as_array()?
+        .iter()
+        .filter_map(|dependency| dependency["name"].as_str())
+        .find(|name| *name == "sunrise-wasmtime")
+}
+
 pub(super) fn build(
     root: &Path,
     catalog: Option<&Path>,
     additional: &[PathBuf],
+    api: Option<&mod_surface::Surface>,
 ) -> Result<(), String> {
     let root = dunce::canonicalize(root).map_err(|e| e.to_string())?;
     let toolchain = toolchain()?;
@@ -216,6 +226,12 @@ pub(super) fn build(
             continue;
         }
         let id = manifest["id"].as_str().ok_or("mod has no id")?;
+        if let Some(dependency) = native_only_dependency(package) {
+            return Err(format!(
+                "E_WASM_NATIVE_PACKAGE: {id}: depends on {dependency}, which is for native mods: it is the game's own wasmtime, \
+                 and a wasm mod runs inside it, not beside it; remove the dependency, or make this a native mod"
+            ));
+        }
         members.push(Member {
             root: dunce::canonicalize(source).map_err(|e| e.to_string())?,
             stage: stage.join(id),
@@ -545,12 +561,14 @@ pub(super) fn build(
             wasm["linked"][&dep] = toml_edit::value(hash);
         }
         member.manifest["wasm"] = toml_edit::Item::Table(wasm);
-        std::fs::write(member.root.join(MANIFEST), member.manifest.to_string())
-            .map_err(|e| e.to_string())?;
+        crate::internals::atomic_write_manifest(
+            &member.root.join(MANIFEST),
+            member.manifest.to_string(),
+        )?;
     }
     for member in &members {
         // A group member packs no uses table yet, so it counts as made for its build only.
-        crate::pack_into(&member.root, &target, None)?;
+        crate::pack_into(&member.root, &target, None, api)?;
     }
     Ok(())
 }
@@ -667,6 +685,19 @@ pub fn rustc(mut args: Vec<String>) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_wasm_mod_may_not_depend_on_the_games_wasmtime() {
+        let named = |names: &[&str]| serde_json::json!({ "dependencies": names.iter().map(|name| serde_json::json!({ "name": name })).collect::<Vec<_>>() });
+        assert_eq!(
+            native_only_dependency(&named(&["sunrise-mod-api", "sunrise-wasmtime"])),
+            Some("sunrise-wasmtime")
+        );
+        assert_eq!(
+            native_only_dependency(&named(&["sunrise-mod-api", "wasmtime"])),
+            None
+        );
+    }
 
     #[test]
     fn staged_paths_keep_aliases_features_and_target_dependencies() {

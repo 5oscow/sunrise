@@ -15,7 +15,7 @@ use sunrise_world::{
 
 /// The component patch of `stack`.
 fn components(stack: &ItemStack) -> Compound {
-    match item_data::encode_components(stack) {
+    match item_data::component_snapshot(stack) {
         Some(Tag::Compound(c)) => c,
         _ => Compound::new(),
     }
@@ -97,7 +97,7 @@ impl Game<'_> {
             .facts()
             .get(self.world.block(key.0, key.1, key.2))
             .name;
-        let mut tag = save::block_entity_encode::encode(key, entity, block);
+        let mut tag = save::block_entity_encode::encode(key, entity, block, self.res.items());
         if let (Some(name), Tag::Compound(map)) = (self.world.block_names.get(&key), &mut tag) {
             map.insert("CustomName".into(), name.clone());
         }
@@ -334,7 +334,9 @@ impl Game<'_> {
         game_master: bool,
     ) {
         let key = (pos[0], pos[1], pos[2]);
-        self.pending.banner.remove(&pos);
+        self.pending.clear(pos);
+        let state = self.world.block(pos[0], pos[1], pos[2]);
+        self.sculk_place_entity(state);
         let Some(saved) = self.saved_block_entity(key) else {
             return;
         };
@@ -363,6 +365,47 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::{clone_item, picked_item};
+
+    #[test]
+    #[ignore = "daily"]
+    fn placed_sculk_item_data_survives_pending_placement() {
+        use crate::game::native_entity_refs::tests::with_game;
+        use std::sync::Arc;
+        use sunrise_client::{chunk::Chunk, items::ItemStack};
+        use sunrise_core::nbt::Tag;
+
+        with_game(|game| {
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            game.sculk_prepare();
+            for (block, field, value) in [
+                ("minecraft:sculk_sensor", "last_vibration_frequency", 6),
+                (
+                    "minecraft:calibrated_sculk_sensor",
+                    "last_vibration_frequency",
+                    11,
+                ),
+                ("minecraft:sculk_shrieker", "warning_level", 2),
+            ] {
+                let state = game.pack.assets.registry.default_state(block).unwrap();
+                let key = (2, 230, 11);
+                game.world.block_entities.remove(&key);
+                game.world.set(key.0, key.1, key.2, state).unwrap();
+                let mut stack = ItemStack::new(block, 1);
+                let patch = Tag::compound([(
+                    "minecraft:block_entity_data",
+                    Tag::compound([("id", Tag::String(block.into())), (field, Tag::Int(value))]),
+                )]);
+                (stack.damage, stack.extra) =
+                    sunrise_client::item_data::decode_components(Some(&patch));
+                game.apply_placed_item([2, 230, 11], &stack, false);
+                game.sculk_sync_index();
+                let saved = game.block_entity_nbt([2, 230, 11]).unwrap();
+                assert_eq!(saved.get(field), Some(&Tag::Int(value)), "{block}");
+            }
+        });
+    }
 
     #[test]
     fn a_potted_plant_picks_its_plant_and_an_empty_pot_the_pot() {
@@ -755,7 +798,12 @@ mod plain_name_overlay_tests {
                     assert!(source.get("lock").is_some());
                 }
                 let snapshot = game.with_entities([resident]).remove(0);
-                let encoded = save::encode(&snapshot, game.pack.assets.registry, game.res.biomes());
+                let encoded = save::encode(
+                    &snapshot,
+                    game.pack.assets.registry,
+                    game.res.biomes(),
+                    &Default::default(),
+                );
                 let Tag::List(entries) = encoded.tag.get("block_entities").unwrap() else {
                     panic!("actual saved entries")
                 };
@@ -805,7 +853,12 @@ mod styled_name_model_tests {
     fn chunk_saved(game: &Game<'_>, pos: (i32, i32, i32)) -> Tag {
         let resident = game.world.chunks.get(&(0, 0)).unwrap();
         let snapshot = game.with_entities([resident]).remove(0);
-        let encoded = save::encode(&snapshot, game.pack.assets.registry, game.res.biomes());
+        let encoded = save::encode(
+            &snapshot,
+            game.pack.assets.registry,
+            game.res.biomes(),
+            &Default::default(),
+        );
         let Tag::List(entities) = encoded.tag.get("block_entities").unwrap() else {
             panic!("actual chunk entities")
         };

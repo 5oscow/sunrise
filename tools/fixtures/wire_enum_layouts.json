@@ -486,7 +486,7 @@
     {
       "name": "MoveCause",
       "path": "crate::entity::types::MoveCause",
-      "hash": "00bec45d5d6aef41",
+      "hash": "deed7d85fc9ecdfb",
       "canonical_path": "crate::entity::types::MoveCause"
     },
     {

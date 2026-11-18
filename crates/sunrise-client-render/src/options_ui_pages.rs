@@ -82,10 +82,8 @@ pub(super) fn sunrise_page_tooltip(page: Page) -> Option<&'static str> {
         Page::Extras => "sunrise.pages.extras.tooltip",
         Page::Pvp => "sunrise.pages.pvp.tooltip",
         Page::Agent => "sunrise.pages.agent.tooltip",
-        Page::SplitProfiles => "sunrise.pages.split_profiles.tooltip",
         Page::ShaderPacks => "sunrise.pages.shader_packs.tooltip",
         Page::Mods => "sunrise.pages.mods.tooltip",
-        Page::SplitSetup => "sunrise.pages.split_setup.tooltip",
         Page::Music => "sunrise.pages.music.tooltip",
         _ => return None,
     })
@@ -113,17 +111,7 @@ impl OptionsUi {
                 open("sunrise.pages.open.extras", Page::Extras),
                 Some(open("sunrise.pages.open.pvp", Page::Pvp)),
             ),
-            Row::Buttons(
-                open(
-                    "sunrise.pages.open.split_setup",
-                    if self.split_guest {
-                        Page::SplitProfiles
-                    } else {
-                        Page::SplitSetup
-                    },
-                ),
-                Some(open("sunrise.pages.open.studio", Page::Studio)),
-            ),
+            Row::Buttons(open("sunrise.pages.open.studio", Page::Studio), None),
             // No AI hides the AI Agent page and everything AI.
             if s.extras.no_ai {
                 Row::Buttons(self.extra_button(s, crate::extras::Item::NoAi), None)

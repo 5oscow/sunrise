@@ -4,7 +4,8 @@
 //! Players and mobs have them all; the other kinds have the ones Sunrise
 //! keeps for them (an armor stand's fire and invisibility, an item's fire),
 //! and `None` for the rest, as for a stale handle. Secondary use also reads
-//! the local client's live semantic sneak state; the other flags are server-only.
+//! the local client's live semantic sneak state; fire and underwater reads also
+//! use the client's own cached state.
 //! Ticks lived (`Entity.tickCount`) are read for mobs, items, orbs and minecarts.
 use super::{Game, commands::Target};
 use mod_api::EntityRef;
@@ -153,10 +154,17 @@ impl Game<'_> {
     /// Whether the entity touched water at its last fluid update
     /// (`Entity.isInWater`): players and mobs.
     pub(super) fn entity_is_in_water(&self, entity: EntityRef) -> Option<bool> {
-        match self.native_entity_body(entity)? {
+        match self.native_target_body(self.native_entity_read_target(entity)?)? {
             Body::Player(p) => Some(p.fluids.was_touching_water),
             Body::Mob(m) => Some(m.fluids.in_water),
             Body::Other(_) => None,
+        }
+    }
+    /// The player's swimming flag, distinct from its pose (which also covers crawling).
+    pub(super) fn entity_is_swimming(&self, entity: EntityRef) -> Option<bool> {
+        match self.native_target_body(self.native_entity_read_target(entity)?)? {
+            Body::Player(p) => Some(p.swimming),
+            _ => None,
         }
     }
     /// Whether the entity is in lava (`Entity.isInLava`): players and mobs.
@@ -200,6 +208,43 @@ impl Game<'_> {
             },
         )
     }
+    /// Entity.isUnderWater uses eye sample AND contact; LocalPlayer's override uses the sample alone.
+    pub(super) fn entity_is_under_water(&self, entity: EntityRef) -> Option<bool> {
+        match self.native_target_body(self.native_entity_read_target(entity)?)? {
+            Body::Player(p) if !self.is_logical_server() => Some(p.is_under_water()),
+            Body::Player(p) => Some(p.fluids.was_eye_in_water && p.fluids.was_touching_water),
+            Body::Mob(m) => Some(m.was_eye_in_water && m.fluids.in_water),
+            Body::Other(_) => None,
+        }
+    }
+
+    /// Entity.isOnFire: remaining ticks or the client's synced flag, unless fire immune.
+    pub(super) fn entity_is_on_fire(&self, entity: EntityRef) -> Option<bool> {
+        let (ticks, immune) =
+            match self.native_target_body(self.native_entity_read_target(entity)?)? {
+                Body::Player(p) => (p.fire_ticks, false),
+                Body::Mob(m) => (m.fire_ticks, m.kind.flags.fire_immune),
+                Body::Other(Target::Stand(id)) => (
+                    self.armor_stands.iter().find(|s| s.id == id)?.fire_ticks,
+                    false,
+                ),
+                Body::Other(Target::Item(id)) => {
+                    let item = self.dropped.iter().find(|i| i.id == id)?;
+                    (
+                        item.fire_ticks,
+                        self.stack_can_be_hurt_by(&item.stack, "minecraft:in_fire") == Some(false),
+                    )
+                }
+                Body::Other(_) => return None,
+            };
+        let synced = !self.is_logical_server()
+            && self
+                .remote
+                .as_ref()?
+                .entity_on_fire(i32::try_from(entity.id()).ok()?)?;
+        Some(!immune && (ticks > 0 || synced))
+    }
+
     /// Whether the entity's type never burns (`EntityType.fireImmune`):
     /// players and mobs.
     pub(super) fn entity_fire_immune(&self, entity: EntityRef) -> Option<bool> {
@@ -366,7 +411,7 @@ impl Game<'_> {
     }
     /// The entity's air (`Entity.getAirSupply`): players and mobs.
     pub(super) fn entity_air_supply(&self, entity: EntityRef) -> Option<i32> {
-        match self.native_entity_body(entity)? {
+        match self.native_target_body(self.native_entity_read_target(entity)?)? {
             Body::Player(p) => Some(p.air),
             Body::Mob(m) => Some(m.air),
             Body::Other(_) => None,
@@ -407,7 +452,7 @@ impl Game<'_> {
     /// The most air the entity holds (`Entity.getMaxAirSupply`): 300, a
     /// dolphin's 4800, an axolotl's 6000.
     pub(super) fn entity_max_air_supply(&self, entity: EntityRef) -> Option<i32> {
-        match self.native_entity_body(entity)? {
+        match self.native_target_body(self.native_entity_read_target(entity)?)? {
             Body::Mob(m) => Some(max_air(Some(m.species()))),
             _ => Some(max_air(None)),
         }
@@ -1284,6 +1329,152 @@ mod tests {
         with_player(|game, player| {
             assert!(player.set_ticks_frozen(game, 53));
             assert_eq!(game.player.as_ref().unwrap().ticks_frozen, 53);
+        });
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn on_fire_reads_timers_immunity_and_client_shared_flag() {
+        mod_platform::testing::with_mods(Vec::new().into(), || {
+            with_player(|g, player| {
+                for ticks in [-1, 0, 1] {
+                    g.player.as_mut().unwrap().fire_ticks = ticks;
+                    assert_eq!(player.is_on_fire(g), Some(ticks > 0));
+                }
+                for (id, kind, expected) in [
+                    (40, "minecraft:zombie", true),
+                    (41, "minecraft:blaze", false),
+                ] {
+                    let kind = g.res.mob_types().get(kind).unwrap().clone();
+                    g.mobs
+                        .push(Mob::new(id, kind, sunrise_core::geometry::Vec3::ZERO, 0.0));
+                    g.mobs.last_mut().unwrap().fire_ticks = 20;
+                    assert_eq!(g.entity(id).unwrap().is_on_fire(g), Some(expected));
+                }
+                assert_eq!(
+                    EntityRef::new(mod_api::WorldEpoch::new(0), 40).is_on_fire(g),
+                    None
+                );
+            });
+            super::super::native_entity_refs::tests::with_client_game(|g| {
+                let _server = super::super::native_client_session::tests::logged_client(g);
+                g.player =
+                    Some(PlayerMotion::new(g.motion, sunrise_core::geometry::Vec3::ZERO).unwrap());
+                let local = g.entity(7).unwrap();
+                // The packet a server sends: it makes the client's own copy of the stand, which a bare
+                // `spawn_entity` (the tracking half of `handleAddEntity`) does not.
+                let stand_kind = g
+                    .remote
+                    .as_ref()
+                    .unwrap()
+                    .builtin
+                    .get("minecraft:entity_type")
+                    .unwrap()
+                    .id("minecraft:armor_stand")
+                    .unwrap();
+                g.handle_packet(sunrise_protocol::packets::play::Clientbound::AddEntity(
+                    sunrise_protocol::packets::play::AddEntity {
+                        id: 15,
+                        uuid: 15,
+                        kind: stand_kind,
+                        position: [0.0; 3],
+                        velocity: [0.0; 3],
+                        pitch: 0,
+                        yaw: 0,
+                        head_yaw: 0,
+                        data: 0,
+                    },
+                ))
+                .unwrap();
+                let stand = g.entity(15).unwrap();
+                for flag in [1, 0] {
+                    for id in [7, 15] {
+                        g.handle_packet(
+                            sunrise_protocol::packets::play::Clientbound::SetEntityData(
+                                sunrise_protocol::packets::play::SetEntityData {
+                                    id,
+                                    values: vec![(
+                                        0,
+                                        0,
+                                        sunrise_protocol::entity_data::Value::Byte(flag),
+                                    )],
+                                },
+                            ),
+                        )
+                        .unwrap();
+                    }
+                    assert_eq!(
+                        local.is_on_fire(&*g as &dyn mod_api::ClientHost),
+                        Some(flag != 0)
+                    );
+                    assert_eq!(
+                        stand.is_on_fire(&*g as &dyn mod_api::ClientHost),
+                        Some(flag != 0)
+                    );
+                }
+                g.player.as_mut().unwrap().fire_ticks = 2;
+                assert_eq!(
+                    local.is_on_fire(&*g as &dyn mod_api::ClientHost),
+                    Some(true)
+                );
+            });
+        });
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn under_water_reads_previous_eye_sample_and_current_contact_on_both_sides() {
+        mod_platform::testing::with_mods(Vec::new().into(), || {
+            for client in [false, true] {
+                super::super::native_entity_refs::tests::with_game(|g| {
+                    if client {
+                        g.options.execution_role =
+                            super::super::execution_role::ExecutionRole::Client;
+                        g.options.dedicated = None;
+                    }
+                    let _server = client
+                        .then(|| super::super::native_client_session::tests::logged_client(g));
+                    g.player = Some(
+                        PlayerMotion::new(g.motion, sunrise_core::geometry::Vec3::ZERO).unwrap(),
+                    );
+                    if !client {
+                        g.options.dedicated = Some(Vec::new());
+                        super::super::native_entity_refs::tests::bind_local_player(g, 7, 123);
+                    }
+                    let player = g.entity(7).unwrap();
+                    if client {
+                        g.spawn_entity(15, "minecraft:zombie", [0.0; 3], [0.0; 3]);
+                    } else {
+                        let kind = g.res.mob_types().get("minecraft:zombie").unwrap().clone();
+                        g.mobs
+                            .push(Mob::new(15, kind, sunrise_core::geometry::Vec3::ZERO, 0.0));
+                    }
+                    let mob = g.entity(15).unwrap();
+                    for old_eye in [false, true] {
+                        for contact in [false, true] {
+                            let p = g.player.as_mut().unwrap();
+                            p.fluids.was_eye_in_water = old_eye;
+                            p.fluids.was_touching_water = contact;
+                            assert_eq!(
+                                g.entity_is_under_water(player),
+                                Some(if client { old_eye } else { old_eye && contact })
+                            );
+                            let m = g.mobs.iter_mut().find(|m| m.id == 15).unwrap();
+                            m.was_eye_in_water = old_eye;
+                            m.fluids.eye_in_water = !old_eye;
+                            m.fluids.in_water = contact;
+                            assert_eq!(g.entity_is_under_water(mob), Some(old_eye && contact));
+                            assert_eq!(
+                                g.entity_is_under_water(EntityRef::new(
+                                    mod_api::WorldEpoch::new(0),
+                                    15
+                                )),
+                                None
+                            );
+                        }
+                    }
+                });
+            }
         });
     }
 
