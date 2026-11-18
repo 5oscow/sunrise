@@ -120,7 +120,13 @@ struct Finder {
 }
 #[mod_api::__subscriptions]
 impl Hooks for Finder {
-    fn add_pack_finders(&self, _host: HostSide<'_>, event: &mut AddPackFindersEvent<'_>) {
+    fn add_pack_finders(&self, host: HostSide<'_>, event: &mut AddPackFindersEvent<'_>) {
+        let component = mod_api::Text::literal("Startup");
+        let resolved = match host {
+            HostSide::Client(host) => host.text_string(&component),
+            HostSide::Server(host) => host.text_string(&component),
+        };
+        assert_eq!(resolved, Err(mod_api::text::TextFormError::Unavailable));
         for (kind, path) in [
             (PackType::ClientResources, ASSET_PACK),
             (PackType::ServerData, DATA_PACK),

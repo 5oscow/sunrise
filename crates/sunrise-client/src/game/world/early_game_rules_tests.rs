@@ -100,7 +100,7 @@ fn early_server_game_rules_saved_and_creation_values() {
                         };
                         game.native_server_about_to_start(dedicated);
                         game.native_server_starting(dedicated);
-                        game.finish_open_world(prepared).unwrap();
+                        game.finish_open_world(prepared, None).unwrap();
                         assert_rules(game);
                         let level = game.level(game.dim.id()).unwrap();
                         assert_eq!(

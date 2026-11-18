@@ -49,6 +49,9 @@ pub(super) mod report;
 mod status;
 mod transfer;
 
+#[cfg(test)]
+mod language_tests;
+
 /// What the tick loop tells `ServerWatchdog`: when the tick in progress was
 /// due (`getNextTickTime`), how long a tick is, and whether the server runs.
 struct Watchdog {
@@ -742,6 +745,26 @@ impl std::fmt::Display for DatapacksRefused {
 impl std::error::Error for DatapacksRefused {}
 
 impl Game<'_> {
+    /// Keep the two startup notices at their established points. Only the
+    /// starting notice sees the English of the selection this world adopts.
+    fn start_dedicated_world(
+        &mut self,
+        prepared: &super::world_loading::PreparedWorld,
+    ) -> Result<super::functions::StagedPackStack> {
+        use sunrise_client::lang::{self, Language};
+
+        self.native_server_about_to_start(true);
+        let staged = self.stage_datapacks(&prepared.save_root, &prepared.level.enabled_features)?;
+        let language = Language::load_server(
+            &self.ui.vanilla_root,
+            staged.asset_layers(&self.pack),
+            |value| super::native_text_grammar::build(value, &self.ui.registries, false),
+        );
+        lang::set(language);
+        self.native_server_starting(true);
+        Ok(staged)
+    }
+
     /// DedicatedServerProperties.createDimensions for a world that doesn't
     /// exist yet: `level-type`'s preset, a flat world's `generator-settings`
     /// and `generate-structures`, written before the world opens so that
@@ -1114,33 +1137,11 @@ impl Game<'_> {
             Arc::new(crate::game::api_values::game_rule_registry()),
         )?)?;
         *startup_began = true;
-        self.native_server_about_to_start(true);
-        {
-            // Read the same world selection as opening the server data, but
-            // use its asset side just once before the starting listeners run.
-            use super::functions::pack_stack;
-            use sunrise_client::lang::{self, Language, ResourceSource};
-            let stack = pack_stack(
-                &prepared.save_root,
-                &self.options.resources,
-                &self.pack.data_source,
-                &self.pack.data_changes,
-                self.cmds.vanilla_disabled,
-                &prepared.level.enabled_features,
-                &self.pack.additional_data,
-            );
-            let layers = std::iter::once(&self.pack.source as &dyn ResourceSource).chain(
-                stack
-                    .enabled_packs()
-                    .map(|pack| pack.source() as &dyn ResourceSource),
-            );
-            lang::set(Language::load_server(&self.ui.vanilla_root, layers));
-        }
-        self.native_server_starting(true);
+        let opening_packs = self.start_dedicated_world(&prepared)?;
         self.native_lifecycle_open_started();
         // The registries the server sends are read while the world prepares.
         let sync = super::lan::sync::preload_sync_data(&self.res.core.item_data);
-        self.finish_open_world(prepared)?;
+        self.finish_open_world(prepared, Some(opening_packs))?;
         // WorldLoader: the world's packs must load before the server starts. The data store is read
         // now rather than at the first tick (reading parses functions; it runs none), and a broken
         // predicate graph stops the start before anything listens (a partial check: predicate_graph.rs).

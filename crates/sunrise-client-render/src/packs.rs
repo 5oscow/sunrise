@@ -1020,6 +1020,16 @@ pub fn resources(
     for (name, bytes) in merged {
         index.insert(name, Resource::bytes(bytes));
     }
+    let deprecated = "assets/minecraft/lang/deprecated.json";
+    // These renames come from the game, not its resource packs.
+    if base.contains(deprecated) {
+        index.insert(
+            deprecated.to_owned(),
+            Resource::file(base, deprecated.to_owned()),
+        );
+    } else {
+        index.remove(deprecated);
+    }
     Ok(ResourceSource::indexed(index))
 }
 
@@ -1403,6 +1413,9 @@ pub fn merge_stacks(name: &str) -> bool {
 
 fn merge_kind(name: &str) -> Option<Merge> {
     let (_, rest) = name.strip_prefix("assets/")?.split_once('/')?;
+    if name == "assets/minecraft/lang/deprecated.json" {
+        return None;
+    }
     if rest == "sounds.json" {
         return Some(Merge::Sounds);
     }
@@ -1419,29 +1432,26 @@ fn merge_kind(name: &str) -> Option<Merge> {
 /// does. Layers that do not parse are skipped, as vanilla logs and skips them.
 fn merge(kind: Merge, layers: &[Vec<u8>]) -> Option<Vec<u8>> {
     use serde_json::{Map, Value};
+    if kind == Merge::Lang {
+        // The client reads each original file in its own order. A non-primitive
+        // ends that file, not the rest of the stack; merging JSON objects first
+        // can both lose and admit the wrong entries.
+        let mut strings = std::collections::HashMap::new();
+        for layer in layers {
+            sunrise_client_core::lang::read_lang_file(layer, &mut strings);
+        }
+        return serde_json::to_vec(&Map::from_iter(
+            strings
+                .into_iter()
+                .map(|(key, value)| (key, Value::String(value))),
+        ))
+        .ok();
+    }
     let mut parsed: Vec<Map<String, Value>> = layers
         .iter()
         // SoundManager skips a sounds.json Gson rejects, whole.
         .filter(|b| kind != Merge::Sounds || crate::sound_events::is_valid_file(b))
-        .filter_map(|b| {
-            match serde_json::from_slice(b) {
-                Ok(Value::Object(m)) => Some(m),
-                // `Language.loadFromJson` reads with Gson's lenient reader, so
-                // a lang file with `#` comments still counts; a file that
-                // strict JSON accepts keeps its bytes as they are.
-                _ if kind == Merge::Lang => {
-                    let mut strings = std::collections::HashMap::new();
-                    sunrise_client_core::lang::read_lang_file(b, &mut strings);
-                    Some(
-                        strings
-                            .into_iter()
-                            .map(|(k, v)| (k, Value::String(v)))
-                            .collect(),
-                    )
-                }
-                _ => None,
-            }
-        })
+        .filter_map(|b| serde_json::from_slice(b).ok())
         .collect();
     let list = |key: &str, layers: &mut dyn Iterator<Item = &Map<String, Value>>| {
         let items: Vec<Value> = layers
@@ -1452,7 +1462,7 @@ fn merge(kind: Merge, layers: &[Vec<u8>]) -> Option<Vec<u8>> {
         Value::Object(Map::from_iter([(key.to_owned(), Value::Array(items))]))
     };
     let out = match kind {
-        Merge::Lang => Value::Object(parsed.into_iter().flatten().collect()),
+        Merge::Lang => unreachable!("language files are read before merging"),
         Merge::Sounds => {
             let mut events = Map::new();
             for (event, def) in parsed.into_iter().flatten() {
@@ -2264,6 +2274,35 @@ mod tests {
         );
         let _ = fs::remove_dir_all(base);
     }
+    #[test]
+    fn mod_pack_languages_keep_each_files_primitive_prefix() {
+        use crate::resource_source::{Resource, ResourceSource};
+        let make_source = |data: &str| {
+            ResourceSource::indexed(BTreeMap::from([(
+                "assets/test/lang/en_us.json".to_owned(),
+                Resource::bytes(data.as_bytes().to_vec()),
+            )]))
+        };
+        let base = make_source(r#"{"a":"old","m":"still here"}"#);
+        let lower = Pack::mod_layer(
+            "lower".into(),
+            Source::Opened(make_source(
+                r#"{"z":1.50,"b":{"text":"not a client value"},"a":"unread"}"#,
+            )),
+        );
+        let upper = Pack::mod_layer(
+            "upper".into(),
+            Source::Opened(make_source(r#"{"h":"higher pack still loads"}"#)),
+        );
+        let merged = resources(base, &[lower, upper]).unwrap();
+        let language = sunrise_client_core::lang::Language::load(&[&merged], "en_us");
+        assert_eq!(language.get("a"), Some("old"));
+        assert_eq!(language.get("m"), Some("still here"));
+        assert_eq!(language.get("z"), Some("1.50"));
+        assert_eq!(language.get("h"), Some("higher pack still loads"));
+        assert_eq!(language.get("b"), None);
+    }
+
     #[test]
     fn stacked_resources_merge_like_vanilla() {
         let json = |v: &str| v.as_bytes().to_vec();

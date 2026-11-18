@@ -812,6 +812,7 @@ pub struct PackResources {
     data_source: sunrise_assets::resource_source::ResourceSource,
     data_changes: sunrise_assets::resource_source::ResourceSource,
     additional_data: Arc<[Arc<sunrise_client::datapack::DataPack>]>,
+    mod_layers: Arc<[sunrise_assets::resource_source::ResourceSource]>,
     assets: Arc<Assets>,
     block_registries: Arc<sunrise_client::command::args::Registries>,
     render: Arc<RenderAssets>,
@@ -6289,7 +6290,11 @@ impl Game<'_> {
         })
         .collect()
     }
-    fn finish_open_world(&mut self, prepared: world_loading::PreparedWorld) -> Result<()> {
+    fn finish_open_world(
+        &mut self,
+        prepared: world_loading::PreparedWorld,
+        opening_packs: Option<functions::StagedPackStack>,
+    ) -> Result<()> {
         self.reset_tutorial();
         // Another world: its generator, not the last one's Density line.
         self.debug_density.borrow_mut().clear();
@@ -6325,7 +6330,7 @@ impl Game<'_> {
         self.end.set_locator(locator);
         self.share_spawn_conditions();
         self.score = Default::default();
-        let stack = self.open_world_datapacks(&level.enabled_features)?;
+        let stack = self.open_world_datapacks(&level.enabled_features, opening_packs)?;
         let root = self.options.resources.clone();
         self.damage_tag_generation = self.damage_tag_generation.wrapping_add(1);
         self.resolve_parts()?;

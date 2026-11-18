@@ -477,7 +477,6 @@ pub fn apply_deprecated<T>(map: &mut HashMap<String, T>, json: &[u8]) {
 /// from `Language.loadFromJson`, Gson). A file that is not JSON even so adds nothing; a value
 /// that is not a string, number or boolean (`GsonHelper.convertToString`) ends the file there.
 pub fn read_lang_file(bytes: &[u8], map: &mut HashMap<String, String>) {
-    use sunrise_world::datafix::json::{Json, parse_lenient};
     if let Ok(entries) = serde_json::from_slice::<HashMap<String, String>>(bytes) {
         map.extend(entries.into_iter().map(|(key, mut value)| {
             normalize_numeric_placeholders(&mut value);
@@ -485,23 +484,37 @@ pub fn read_lang_file(bytes: &[u8], map: &mut HashMap<String, String>) {
         }));
         return;
     }
+    if let Some(entries) = lang_entries(bytes) {
+        for (key, value) in entries {
+            let Some(value) = lang_primitive(value) else {
+                break;
+            };
+            map.insert(String::from_utf16_lossy(&key), value);
+        }
+    }
+}
+
+fn lang_entries(bytes: &[u8]) -> Option<Vec<(Vec<u16>, sunrise_world::datafix::json::Json)>> {
+    use sunrise_world::datafix::json::{Json, parse_lenient};
     let text = String::from_utf8_lossy(bytes);
     // Gson's JsonReader skips a leading byte order mark.
     let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
-    let utf16: Vec<u16> = text.encode_utf16().collect();
-    let Some(Json::Obj(entries)) = parse_lenient(&utf16) else {
-        return;
-    };
-    for (key, value) in entries {
-        let mut value = match value {
-            Json::Str(s) => String::from_utf16_lossy(&s),
-            Json::Num(n) => n,
-            Json::Bool(b) => b.to_string(),
-            Json::Null | Json::Arr(_) | Json::Obj(_) => break,
-        };
-        normalize_numeric_placeholders(&mut value);
-        map.insert(String::from_utf16_lossy(&key), value);
+    match parse_lenient(&text.encode_utf16().collect::<Vec<_>>())? {
+        Json::Obj(entries) => Some(entries),
+        _ => None,
     }
+}
+
+fn lang_primitive(value: sunrise_world::datafix::json::Json) -> Option<String> {
+    use sunrise_world::datafix::json::Json;
+    let mut text = match value {
+        Json::Str(s) => String::from_utf16_lossy(&s),
+        Json::Num(n) => n,
+        Json::Bool(b) => b.to_string(),
+        _ => return None,
+    };
+    normalize_numeric_placeholders(&mut text);
+    Some(text)
 }
 
 /// `Language.loadFromJson` treats numeric placeholders as strings:
@@ -541,18 +554,19 @@ impl Language {
         }
     }
 
-    /// `Language.loadDefault`: the dedicated server's built-in English from
-    /// the unlayered prepared vanilla root, with deprecated keys applied.
+    /// `Language.loadDefault`: built-in English from the unlayered vanilla root
+    /// and the platform's bundles, with vanilla's deprecated keys applied.
     pub fn load_default(source: &dyn ResourceSource) -> Self {
-        Self::load_server(source, std::iter::empty())
+        Self::load_server(source, std::iter::empty(), |_| None)
     }
 
-    /// The dedicated server's English at startup. Later packs win; inside
-    /// one pack, namespaces are read in lexical order. Only the unlayered
-    /// vanilla root supplies deprecations, applied after all overrides.
+    /// The dedicated server's English at startup. Namespaces load in lexical
+    /// order; within a namespace later packs win, until the first invalid file.
+    /// The caller supplies the shared component codec for object and array values.
     pub fn load_server<'a>(
         vanilla: &dyn ResourceSource,
         packs: impl IntoIterator<Item = &'a dyn ResourceSource>,
+        decode: impl Fn(&serde_json::Value) -> Option<serde_json::Value>,
     ) -> Self {
         let mut language = Self {
             code: DEFAULT.to_owned(),
@@ -562,14 +576,25 @@ impl Language {
         if let Some(bytes) = vanilla.read("assets/minecraft/lang/en_us.json") {
             read_lang_file(&bytes, &mut language.map);
         }
-        for pack in packs {
-            let mut namespaces = pack.namespaces();
-            // NeoForge leaves collisions between namespaces unspecified.
-            // Sort them so the same packs always choose the same winner.
-            namespaces.sort_unstable();
-            for ns in namespaces {
-                if let Some(bytes) = pack.read(&format!("assets/{ns}/lang/en_us.json")) {
-                    language.overlay(&bytes);
+        if let Some(bytes) = Bundled.read("assets/sunrise/lang/en_us.json") {
+            read_lang_file(&bytes, &mut language.map);
+        }
+        read_crate_files(
+            CRATE_FILES.get().copied().unwrap_or_default(),
+            DEFAULT,
+            &mut language.map,
+        );
+        let packs: Vec<_> = packs.into_iter().collect();
+        let namespaces: std::collections::BTreeSet<_> =
+            packs.iter().flat_map(|pack| pack.namespaces()).collect();
+        for namespace in namespaces {
+            let path = format!("assets/{namespace}/lang/en_us.json");
+            for bytes in packs.iter().filter_map(|pack| pack.read(&path)) {
+                if !language.overlay(&bytes, &decode) {
+                    log::warn!(
+                        "Skipped language file {path} and remaining layers in its namespace"
+                    );
+                    break;
                 }
             }
         }
@@ -579,33 +604,35 @@ impl Language {
         language
     }
 
-    fn overlay(&mut self, bytes: &[u8]) {
-        use serde_json::{Map, Value};
-        if let Ok(entries) = serde_json::from_slice::<Map<String, Value>>(bytes) {
-            for (key, value) in entries {
-                let mut template = match value {
-                    Value::String(value) => value,
-                    Value::Number(value) => value.to_string(),
-                    Value::Bool(value) => value.to_string(),
-                    value @ (Value::Object(_) | Value::Array(_)) => {
-                        self.map.remove(&key);
-                        self.components.insert(key, value);
-                        continue;
-                    }
-                    Value::Null => continue,
+    fn overlay(
+        &mut self,
+        bytes: &[u8],
+        decode: &impl Fn(&serde_json::Value) -> Option<serde_json::Value>,
+    ) -> bool {
+        use sunrise_world::datafix::json::{Json, to_stable_string};
+        let Some(entries) = lang_entries(bytes) else {
+            return false;
+        };
+        for (key, value) in entries {
+            let key = String::from_utf16_lossy(&key);
+            if matches!(value, Json::Obj(_) | Json::Arr(_)) {
+                let json = String::from_utf16_lossy(&to_stable_string(&value));
+                let Some(component) = serde_json::from_str(&json)
+                    .ok()
+                    .and_then(|value| decode(&value))
+                else {
+                    return false;
                 };
-                normalize_numeric_placeholders(&mut template);
+                self.map.remove(&key);
+                self.components.insert(key, component);
+            } else if let Some(template) = lang_primitive(value) {
                 self.components.remove(&key);
                 self.map.insert(key, template);
-            }
-        } else {
-            let mut entries = HashMap::new();
-            read_lang_file(bytes, &mut entries);
-            for (key, value) in entries {
-                self.components.remove(&key);
-                self.map.insert(key, value);
+            } else {
+                return false;
             }
         }
+        true
     }
 
     fn deprecate(&mut self, bytes: &[u8]) {
@@ -910,10 +937,11 @@ pub fn get_or(key: &str, fallback: &str) -> String {
     current()
         .and_then(|l| {
             l.get(key).map(str::to_owned).or_else(|| {
-                l.component(key).map(|component| {
-                    crate::text::resolve_lang_component(component, crate::text::Origin::Local)
-                        .plain()
-                })
+                l.component(key)
+                    .and_then(|component| {
+                        crate::text::resolve_lang_component(component, crate::text::Origin::Local)
+                    })
+                    .map(|text| text.plain())
             })
         })
         .unwrap_or_else(|| {
@@ -1049,7 +1077,9 @@ mod tests {
             assert_eq!(read("test.priority"), "fallback");
         });
         scoped(
-            Language::load_server(&base, [&mods as &dyn ResourceSource, &pack]),
+            Language::load_server(&base, [&mods as &dyn ResourceSource, &pack], |value| {
+                Some(value.clone())
+            }),
             || {
                 assert_eq!(read("test.order"), "z");
                 assert_eq!(read("test.text"), "Pack priority!");
@@ -1058,6 +1088,45 @@ mod tests {
                 assert_eq!(read("test.loop"), "");
             },
         );
+    }
+
+    #[test]
+    fn server_language_only_elides_active_cycles() {
+        let mut entries = serde_json::Map::new();
+        for n in 0..40 {
+            entries.insert(
+                format!("test.chain.{n}"),
+                serde_json::json!({"translate": format!("test.chain.{}", n + 1)}),
+            );
+        }
+        entries.insert(
+            "test.chain.40".into(),
+            serde_json::json!({"text":"endpoint"}),
+        );
+        entries.insert(
+            "test.repeat".into(),
+            serde_json::Value::Array(vec![serde_json::json!({"translate":"test.shared"}); 160]),
+        );
+        entries.insert("test.shared".into(), serde_json::json!({"text":"."}));
+        entries.insert(
+            "test.cycle.a".into(),
+            serde_json::json!({"translate":"test.cycle.b"}),
+        );
+        entries.insert(
+            "test.cycle.b".into(),
+            serde_json::json!({"translate":"test.cycle.a","fallback":"unused","extra":["!"]}),
+        );
+        let mut language = Language::default();
+        assert!(
+            language.overlay(&serde_json::to_vec(&entries).unwrap(), &|value| Some(
+                value.clone()
+            ))
+        );
+        scoped(language, || {
+            assert_eq!(get("test.chain.0"), "endpoint");
+            assert_eq!(get("test.repeat"), ".".repeat(160));
+            assert_eq!(get("test.cycle.a"), "!");
+        });
     }
 
     #[test]

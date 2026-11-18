@@ -1198,7 +1198,8 @@ pub(crate) fn format_translatable_origin(
 ) -> Text {
     let language = lang::current();
     if let Some(component) = language.as_ref().and_then(|l| l.component(key)) {
-        return resolve_lang_component(component, origin);
+        return resolve_lang_component(component, origin)
+            .unwrap_or_else(|| format_translation_origin(fallback.unwrap_or(key), args, origin));
     }
     let template = language
         .as_ref()
@@ -1212,17 +1213,22 @@ pub(crate) fn format_translatable_origin(
     format_translation_origin(template, args, origin)
 }
 
-/// Component-valued language entries replace the translation, not its
-/// template. Refuse re-entry into the same entry, and bound expansion of
-/// an acyclic chain (pack data can repeat the same component in siblings).
-pub(crate) fn resolve_lang_component(component: &Value, origin: Origin) -> Text {
+/// Component-valued language entries replace the translation, not its template.
+/// Only an active re-entry contributes empty text. If an expansion can't be
+/// rendered within the traversal budget, the top-level lookup uses its fallback.
+pub(crate) fn resolve_lang_component(component: &Value, origin: Origin) -> Option<Text> {
     struct Expansion {
         active: Vec<usize>,
-        remaining: usize,
+        visits_left: usize,
+        spans: usize,
+        bytes: usize,
+        exhausted: bool,
     }
     thread_local! {
         static EXPANSION: std::cell::RefCell<Expansion> = const {
-            std::cell::RefCell::new(Expansion { active: Vec::new(), remaining: 0 })
+            std::cell::RefCell::new(Expansion {
+                active: Vec::new(), visits_left: 0, spans: 0, bytes: 0, exhausted: false,
+            })
         };
     }
     struct Leave;
@@ -1233,27 +1239,49 @@ pub(crate) fn resolve_lang_component(component: &Value, origin: Origin) -> Text 
             });
         }
     }
-
     let id = std::ptr::from_ref(component) as usize;
-    let allowed = EXPANSION.with_borrow_mut(|expansion| {
+    let enter = EXPANSION.with_borrow_mut(|expansion| {
         if expansion.active.is_empty() {
-            expansion.remaining = 128;
+            expansion.visits_left = MAX_TRANSLATION_SPANS;
+            expansion.spans = 0;
+            expansion.bytes = 0;
+            expansion.exhausted = false;
         }
-        if expansion.remaining == 0
-            || expansion.active.len() == 32
-            || expansion.active.contains(&id)
-        {
+        if expansion.active.contains(&id) {
             return false;
         }
-        expansion.remaining -= 1;
+        // Each translated entry uses the recursive component renderer.
+        if expansion.exhausted || expansion.visits_left == 0 || expansion.active.len() == 128 {
+            expansion.exhausted = true;
+            return false;
+        }
+        expansion.visits_left -= 1;
         expansion.active.push(id);
         true
     });
-    if !allowed {
-        return Text::empty();
+    if !enter {
+        // At this point a parent still owns the traversal; it will handle a
+        // refused expansion rather than each reference appending its fallback.
+        return Some(Text::empty());
     }
     let _leave = Leave;
-    crate::component::render_source(component, &|_| origin)
+    let text = crate::component::render_source(component, &|_| origin);
+    EXPANSION.with_borrow_mut(|expansion| {
+        expansion.spans += text.rendered.spans.len();
+        expansion.bytes += text
+            .rendered
+            .spans
+            .iter()
+            .map(|span| span.text.len())
+            .sum::<usize>();
+        expansion.exhausted |=
+            expansion.spans > MAX_TRANSLATION_SPANS || expansion.bytes > MAX_TRANSLATION_BYTES;
+        if expansion.exhausted {
+            (expansion.active.len() != 1).then(Text::empty)
+        } else {
+            Some(text)
+        }
+    })
 }
 /// The most spans one translation expands to. Vanilla's `TranslatableContents.decompose` keeps
 /// references to its arguments, so its cost stays linear in the input; copying them here makes

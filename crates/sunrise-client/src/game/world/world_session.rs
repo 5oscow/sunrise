@@ -184,7 +184,7 @@ impl Game<'_> {
     #[cfg(test)]
     pub(super) fn load_world(&mut self, request: world_loading::WorldRequest) -> Result<()> {
         let prepared = self.prepare_world_and_rules(request)?;
-        self.finish_open_world(prepared)
+        self.finish_open_world(prepared, None)
     }
 
     /// Leaving the game with a world open (window closed, Quit, `quit`):

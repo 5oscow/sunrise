@@ -151,7 +151,7 @@ mod tests {
                 )
                 .unwrap();
                 let prepared = game.prepare_early_game_rules(loader).unwrap();
-                game.finish_open_world(prepared).unwrap();
+                game.finish_open_world(prepared, None).unwrap();
             });
             crate::game::native_entity_refs::tests::with_client_game(|game| {
                 game.announce_data_bound(TagsUpdateCause::ClientPacketReceived {

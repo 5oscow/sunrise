@@ -92,6 +92,28 @@ pub(super) struct PackStack {
     /// open, before `self.level` holds them (what `neoforge:feature_flags_enabled` reads).
     pub(super) features: Vec<String>,
 }
+/// The one pack selection for an open or reload, kept until adoption.
+pub(super) struct StagedPackStack {
+    next_root: Option<sunrise_assets::resource_source::ResourceRoot>,
+    resources: std::path::PathBuf,
+    additional: Vec<Arc<DataPack>>,
+    stack: PackStack,
+}
+
+impl StagedPackStack {
+    pub(super) fn asset_layers<'a>(
+        &'a self,
+        current: &'a super::PackResources,
+    ) -> impl Iterator<Item = &'a dyn sunrise_client::lang::ResourceSource> {
+        self.next_root
+            .as_ref()
+            .map_or(&current.mod_layers, |root| root.mod_layers())
+            .iter()
+            .chain(self.stack.enabled_packs().map(DataPack::source))
+            .map(|source| source as &dyn sunrise_client::lang::ResourceSource)
+    }
+}
+
 impl PackStack {
     /// The enabled packs in `enabled` (the selected) order, later overriding
     /// earlier: `PackRepository.openAllSelected` keeps the selected order.
@@ -222,11 +244,16 @@ impl Game<'_> {
     pub(super) fn open_world_datapacks(
         &mut self,
         enabled_features: &[String],
+        staged: Option<StagedPackStack>,
     ) -> Result<PackStack, ReloadStageError> {
         // Function admission parses commands immediately, including block arguments.
         // Populate static registries on first open; admission synchronizes pack IDs.
         self.build_registries();
-        self.reload_datapacks(false, enabled_features)
+        let staged = match staged {
+            Some(staged) => staged,
+            None => self.stage_datapacks(&self.world_root.clone(), enabled_features)?,
+        };
+        self.adopt_datapacks(staged, false)
     }
 
     pub(super) fn reload_datapacks(
@@ -234,7 +261,15 @@ impl Game<'_> {
         run_load: bool,
         enabled_features: &[String],
     ) -> Result<PackStack, ReloadStageError> {
-        let opening_world = !run_load;
+        let staged = self.stage_datapacks(&self.world_root.clone(), enabled_features)?;
+        self.adopt_datapacks(staged, run_load)
+    }
+
+    pub(super) fn stage_datapacks(
+        &mut self,
+        world_root: &std::path::Path,
+        enabled_features: &[String],
+    ) -> Result<StagedPackStack, ReloadStageError> {
         sunrise_client::mod_content::check_jars(
             &self.options.resources,
             &sunrise_client::logging::game_home().join("jars"),
@@ -259,7 +294,7 @@ impl Game<'_> {
             .map_or(&self.pack.data_changes, |root| root.data_changes());
         let additional = super::pack_finders::data_packs(&self.mods);
         let stack = pack_stack(
-            &self.world_root,
+            world_root,
             &resources,
             data,
             changes,
@@ -267,6 +302,26 @@ impl Game<'_> {
             enabled_features,
             &additional,
         );
+        Ok(StagedPackStack {
+            next_root,
+            resources,
+            additional,
+            stack,
+        })
+    }
+
+    fn adopt_datapacks(
+        &mut self,
+        staged: StagedPackStack,
+        run_load: bool,
+    ) -> Result<PackStack, ReloadStageError> {
+        let StagedPackStack {
+            next_root,
+            resources,
+            additional,
+            stack,
+        } = staged;
+        let opening_world = !run_load;
         let prepared = self.begin_condition_reload(&stack, &resources)?;
         let context = self
             .prepare_loop_context(&resources)
@@ -289,6 +344,7 @@ impl Game<'_> {
             self.options.resources = root.prepared().to_owned();
             self.pack.data_source = root.data().clone();
             self.pack.data_changes = root.data_changes().clone();
+            self.pack.mod_layers = root.mod_layers().clone();
             self.mods.data_switched = true;
         }
         self.install_loop_context(context);
@@ -309,7 +365,7 @@ impl Game<'_> {
             self.open_world_tables(&stack, &resources)
                 .map_err(|error| ReloadStageError::DataSource(error.to_string()))?;
         }
-        self.build_native_commands(enabled_features);
+        self.build_native_commands(&stack.features);
         self.apply_server_reload(prepared, &stack);
         self.run_native_advancement_grants();
         // The schedule is the world's live `TimerQueue` `SavedData`, not pack

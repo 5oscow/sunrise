@@ -46,15 +46,18 @@ string. Invalid components return the same boundary errors as the other text rea
 - **Client and integrated server:** both use the local player's selected language,
   active resource packs (including client mod translations) and key bindings.
   An integrated server does not resolve against a LAN guest's language.
-- **Dedicated server:** starts with vanilla's built-in `en_us`. Just before
-  `server_starting`, it loads `assets/<namespace>/lang/en_us.json` from
-  enabled mods and data packs. The mod layer goes first, then the enabled
-  data packs in pack priority order. NeoForge doesn't specify precedence
-  between namespaces; Sunrise sorts them lexically within a layer so the
-  last value for a key always wins. Vanilla's deprecated keys are
-  applied to the result. Neither client resource packs nor later server
-  data-pack reloads affect this language. Keybind components give their
-  literal IDs.
+- **Dedicated server:** starts with built-in vanilla and Sunrise English. Just
+  before `server_starting`, it loads `assets/<namespace>/lang/en_us.json` from
+  enabled mods and the data packs selected for this world. Sunrise visits
+  namespaces in lexical order and, within each namespace, reads the original
+  files in pack priority order (mods first). Later values win. An invalid
+  entry leaves the earlier values intact and stops the remaining files in
+  that namespace. Vanilla's deprecated keys are applied at the end. Neither
+  client resource packs nor later data-pack reloads affect the snapshot.
+  Keybind components give their literal IDs.
+
+The pack-discovery host has no game text backend. `text_string` there returns
+`TextFormError::Unavailable`.
 
 A missing key uses its component fallback, or the key itself without a
 fallback. On a dedicated server, a pack language file may also supply an

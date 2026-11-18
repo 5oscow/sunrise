@@ -3634,6 +3634,11 @@ pub fn resolved_resources(
             assets_base = ResourceSource::indexed(files);
         }
     }
+    let mod_layers = loaded
+        .iter()
+        .flat_map(|group| &group.layers)
+        .map(|layer| layer.data.source().clone())
+        .collect();
     let layers = loaded
         .into_iter()
         .flat_map(|group| group.layers.into_iter().map(|layer| layer.assets))
@@ -3655,10 +3660,12 @@ pub fn resolved_resources(
     }
     let assets = crate::packs::resources(assets_base, &layers)?;
     data.extend(changes.clone());
-    Ok(ResourceRoot::new(prepared, cache, assets).with_data(
-        ResourceSource::indexed(data),
-        ResourceSource::indexed(changes),
-    ))
+    Ok(ResourceRoot::new(prepared, cache, assets)
+        .with_data(
+            ResourceSource::indexed(data),
+            ResourceSource::indexed(changes),
+        )
+        .with_mod_layers(mod_layers))
 }
 
 /// The root to load: `base` itself with no content, else the mods' overlay
