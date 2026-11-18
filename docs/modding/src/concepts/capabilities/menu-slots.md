@@ -126,19 +126,11 @@ the client's prediction ask the same number of times.
 
 ## Crafted-by processing for held stacks
 
-Server-side code that delivers an item into a menu slot or the carried stack can call
-`ItemPlace::on_crafted_by` inside the caller's transaction:
+After delivering an item into a menu slot or onto the cursor, server-side code can use the
+held `place`, the caller's transaction `tx`, and the actual crafted count `amount` (`i32`):
 
 ```rust,ignore
-if let Some(player) = host.players().acting_player()
-    && let Some(menu) = player.container_menu(host)
-{
-    let place = menu.cursor();
-    let tx = host.transaction_current().expect("menu take transaction");
-    place
-        .on_crafted_by(host, &tx, event.stack.count() as i32)
-        .expect("the delivered stack is still held");
-}
+place.on_crafted_by(host, tx, amount)?;
 ```
 
 The operation applies vanilla crafted-by processing to the held stack: it awards the crafted
