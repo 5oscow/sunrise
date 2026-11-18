@@ -7,7 +7,6 @@
 //! (crate::auth): the login joins the server through the session service and
 //! encrypts the connection (ClientHandshakePacketListenerImpl.handleHello).
 use crate::auth::AuthSession;
-mod chunk_batch;
 mod held_packets;
 pub mod ingress;
 mod known_packs;
@@ -1137,7 +1136,7 @@ fn receive_play(
     payloads: &Arc<crate::raw_payloads::Transport>,
 ) -> Result<Reason, Reason> {
     // ClientPacketListener.chunkBatchSizeCalculator.
-    let mut batch = chunk_batch::ChunkBatchSize::default();
+    let mut batch = sunrise_protocol::chunk_batch::ChunkBatchSize::default();
     loop {
         let (id, payload) = reader
             .recv()
@@ -2681,6 +2680,66 @@ mod tests {
         let (event, _ping_credit) = events.recv_timeout_owned(timeout).unwrap().into_parts();
         assert!(
             matches!(event, Event::Packet(p) if *p == play::Clientbound::Ping(cfg::Ping { id: 7 }))
+        );
+        writer.lock().unwrap().take().unwrap().shutdown();
+        assert!(thread.join().unwrap().is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// ClientPacketListener.handleChunkBatchStart and handleChunkBatchFinished: the
+    /// receive loop answers a batch itself, with the game's queue never read.
+    #[test]
+    fn the_network_thread_answers_each_chunk_batch_once() {
+        let (root, data) = empty_item_data("chunk-batch");
+        let (client, server) = sunrise_protocol::connection::Pipe::pair();
+        let (mut reader, writer) = Connection::local(client).split();
+        let writer = Arc::new(Mutex::new(Some(QueuedWriter::new(writer).unwrap())));
+        // Held and never polled: nothing the game thread does can answer.
+        let (send, _events) = event_channel();
+        let thread_writer = writer.clone();
+        let thread = std::thread::spawn(move || {
+            receive_play(
+                &mut reader,
+                &thread_writer,
+                &Arc::new(AtomicBool::new(false)),
+                &Language::new(),
+                &send,
+                &Cookies::default(),
+                &crate::lod_net::Inbox::default(),
+                &data,
+                &Arc::new(Mutex::new(None)),
+                &crate::raw_payloads::Transport::empty(),
+            )
+        });
+        let mut server = Connection::local(server);
+        let keep_alive = |id| play::Clientbound::KeepAlive(cfg::KeepAlive { id }).encode();
+        let next = |server: &mut Connection| {
+            let (id, body) = server.recv().unwrap();
+            play::Serverbound::decode(id, &body).unwrap()
+        };
+        // The start sends nothing: the first answer is the keep-alive after it.
+        server
+            .send(&play::Clientbound::ChunkBatchStart(Empty).encode())
+            .unwrap();
+        server.send(&keep_alive(1)).unwrap();
+        assert_eq!(
+            next(&mut server),
+            play::Serverbound::KeepAlive(cfg::KeepAlive { id: 1 })
+        );
+        // An empty first batch leaves the starting average: 7e6 / 2e6 chunks a tick.
+        let finished = play::Clientbound::ChunkBatchFinished(play::ChunkBatchFinished { size: 0 });
+        server.send(&finished.encode()).unwrap();
+        server.send(&keep_alive(2)).unwrap();
+        assert_eq!(
+            next(&mut server),
+            play::Serverbound::ChunkBatchReceived(play::ChunkBatchReceived {
+                chunks_per_tick: 3.5
+            })
+        );
+        // Exactly one answer: the next is the keep-alive sent after the finish.
+        assert_eq!(
+            next(&mut server),
+            play::Serverbound::KeepAlive(cfg::KeepAlive { id: 2 })
         );
         writer.lock().unwrap().take().unwrap().shutdown();
         assert!(thread.join().unwrap().is_err());

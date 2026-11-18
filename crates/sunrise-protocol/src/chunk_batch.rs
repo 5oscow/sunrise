@@ -1,12 +1,12 @@
-//! `ChunkBatchSizeCalculator`: how many chunks a tick the client asks the
-//! server for, from how long its last chunk batches took to arrive (timed on
-//! the network thread, as vanilla's handlers run there).
+//! `ChunkBatchSizeCalculator`: how many chunks a tick a client asks the
+//! server for, from how long its last chunk batches took to arrive. The game's
+//! network thread and the load bots time their batches with it.
 
 use std::time::Instant;
 
 /// The moving average of the nanoseconds a batch's chunks took each, its
 /// weight and when the current batch started.
-pub(super) struct ChunkBatchSize {
+pub struct ChunkBatchSize {
     aggregated_nanos_per_chunk: f64,
     old_samples_weight: i32,
     batch_start: Instant,
@@ -24,13 +24,13 @@ impl Default for ChunkBatchSize {
 
 impl ChunkBatchSize {
     /// `onBatchStart`, on `ClientboundChunkBatchStartPacket`.
-    pub(super) fn on_batch_start(&mut self) {
+    pub fn on_batch_start(&mut self) {
         self.batch_start = Instant::now();
     }
 
     /// `onBatchFinished`, on `ClientboundChunkBatchFinishedPacket`: the batch's
     /// `batch_size` chunks took the time since its start.
-    pub(super) fn on_batch_finished(&mut self, batch_size: i32) {
+    pub fn on_batch_finished(&mut self, batch_size: i32) {
         let nanos = self.batch_start.elapsed().as_nanos() as f64;
         self.record(batch_size, nanos);
     }
@@ -57,7 +57,7 @@ impl ChunkBatchSize {
 
     /// `getDesiredChunksPerTick`: what `ServerboundChunkBatchReceivedPacket`
     /// asks for.
-    pub(super) fn desired_chunks_per_tick(&self) -> f32 {
+    pub fn desired_chunks_per_tick(&self) -> f32 {
         (7_000_000.0 / self.aggregated_nanos_per_chunk) as f32
     }
 }

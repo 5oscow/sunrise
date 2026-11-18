@@ -2153,8 +2153,9 @@ impl Game<'_> {
     /// `Minecraft.runTick` handles every packet that came (`runAllTasks`)
     /// before the frame's ticks. What this frame's poll left for later (chunks
     /// past its budget or still decoding, and everything after them) is taken
-    /// when a tick is about to run, so the tick moves through those chunks and
-    /// a batch's `ChunkBatchReceived` goes out from it, as vanilla's does.
+    /// when a tick is about to run, so the tick moves through those chunks, as
+    /// vanilla's does. A batch's `ChunkBatchReceived` is not among them: the
+    /// network thread answers it (`net::receive_play`).
     pub(in crate::game) fn poll_remote_before_tick(&mut self) -> Result<()> {
         if self.remote.as_ref().is_none_or(|r| r.backlog.is_empty()) {
             return Ok(());
