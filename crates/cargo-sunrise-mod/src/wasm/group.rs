@@ -538,7 +538,8 @@ pub(super) fn build(
                 .to_owned(),
             sha512_of(&module),
         );
-        std::fs::write(member.root.join(WASM), module).map_err(|e| e.to_string())?;
+        // Replaced, never written through: a link at `mod.wasm` is not followed.
+        crate::internals::atomic_write(&member.root.join(WASM), module)?;
     }
     for member in &mut members {
         let id = member.manifest["id"]
