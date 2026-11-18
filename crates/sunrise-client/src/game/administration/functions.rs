@@ -3675,29 +3675,35 @@ mod required_tag_tests {
             assert!(game.check_predicate("h121:absent").is_err());
             game.command_source = previous;
             // Defensive evaluator controls only. Java rejects these graphs at
-            // world load, so this does not establish startup/availability parity.
-            write(
-                "missing",
+            // world load (a reload refuses a dangling or cyclic reference, so they cannot come from a
+            // pack): they are put in the loaded store directly. This does not establish
+            // startup/availability parity.
+            let mut defensive_graphs = Vec::new();
+            let mut defensive = |name: &str, value: serde_json::Value| {
+                defensive_graphs.push((name.to_owned(), value));
+            };
+            defensive(
+                "h121:missing",
                 serde_json::json!({"type":"minecraft:all_of","terms":["h121:absent"]}),
             );
-            write(
-                "nested_missing",
+            defensive(
+                "h121:nested_missing",
                 serde_json::json!({"type":"minecraft:all_of","terms":["h121:missing"]}),
             );
-            write(
-                "not_missing",
+            defensive(
+                "h121:not_missing",
                 serde_json::json!({"type":"minecraft:inverted","term":"h121:absent"}),
             );
-            write(
-                "cycle_a",
+            defensive(
+                "h121:cycle_a",
                 serde_json::json!({"type":"minecraft:all_of","terms":["h121:cycle_b"]}),
             );
-            write(
-                "cycle_b",
+            defensive(
+                "h121:cycle_b",
                 serde_json::json!({"type":"minecraft:all_of","terms":["h121:cycle_a"]}),
             );
-            write(
-                "not_cycle",
+            defensive(
+                "h121:not_cycle",
                 serde_json::json!({"type":"minecraft:inverted","term":"h121:cycle_a"}),
             );
             for invalid in ["h121:absent", "h121:cycle_a"] {
@@ -3707,20 +3713,18 @@ mod required_tag_tests {
                     ("all_skip", "minecraft:all_of", "h121:cow"),
                     ("all_reach", "minecraft:all_of", "h121:pig"),
                 ] {
-                    write(
-                        &format!("{label}_{}", invalid.split(':').next_back().unwrap()),
+                    defensive(
+                        &format!("h121:{label}_{}", invalid.split(':').next_back().unwrap()),
                         serde_json::json!({"type":kind,"terms":[first,invalid]}),
                     );
                 }
             }
-            let canonical = pack.join("data/minecraft/predicate/h121_canonical.json");
-            std::fs::create_dir_all(canonical.parent().unwrap()).unwrap();
-            std::fs::write(
-                canonical,
-                r#"{"type":"minecraft:all_of","terms":["h121_canonical"]}"#,
-            )
-            .unwrap();
-            game.reload_datapacks(false, &[]).unwrap();
+            // A predicate naming itself by its short id: the same cycle, under its canonical name.
+            defensive(
+                "minecraft:h121_canonical",
+                serde_json::json!({"type":"minecraft:all_of","terms":["h121_canonical"]}),
+            );
+            game.fns.store.predicates.extend(defensive_graphs);
             let mut source = game.player_source();
             source.entity = Some(Target::Mob(actors[0].0));
             source.pos = game.target_position(Target::Mob(actors[0].0)).unwrap();

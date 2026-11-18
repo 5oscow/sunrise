@@ -20,6 +20,7 @@ my_mod.smod
 ├── icon.png                # optional
 ├── assets/my_mod/
 ├── data/my_mod/
+├── runtime/                # code mods only, optional
 ├── Cargo.toml              # code mods only
 ├── src/lib.rs              # code mods only
 └── mod.wasm                # wasm mods only
@@ -30,6 +31,8 @@ my_mod.smod
   against the pinned prebuilt game; mixins compile into a separate function-replacement patch library. The game itself does not compile. Its resources load through the same content reader as a content mod's.
 - **Wasm code:** `mod.wasm` at the top, declared by `[wasm]`, with the `Cargo.toml` and `src/` it was built from
   (a converted mod records `built_with` instead and carries no source). The game runs it with no rebuild.
+- **Runtime files:** a native or wasm package may carry a `runtime/` folder of data its code opens beside
+  itself, listed in a top-level `[runtime]` table (below). A content mod has none.
 - Inconsistent code declarations and files refuse the package. `mod.wasm` anywhere else, undeclared, or
   declared but missing, refuses it; so does any other executable file.
 
@@ -72,7 +75,7 @@ file that receives it, a `name` that is a Rust module identifier, and a `source`
 
 `[[inject]]` only fills compiled slots and never compiles game code. Native source edits
 use `[[native.mixin]]` with `id`, `target`, uppercase `kind`, `helper` and the other
-horizon-mixins options ([Mixins](../concepts/native-route/2-mixins.md)). `[[native.loop]]`, `[[native.bridge]]` and `[[native.module]]` complete the route; `[[native.state]]` is refused. See [The native route](../concepts/native-route.md) for every table, its fields and its refusals.
+horizon-mixins options ([Mixins](../concepts/native-route/2-mixins.md)). This package reads only `id`, `target`, `kind` and `helper` of a row (and refuses `hook` and `hook_version`) and forwards every other key to the tool as written; the tool then refuses a key it does not know, so an unknown key on a mixin row fails at build time, not when the manifest is read. The same holds for the keys of `[[native.bridge]]` and `[[native.state]]` rows. An `OVERWRITE` row must carry the tool's `fingerprint`. `[[native.loop]]`, `[[native.bridge]]` and `[[native.module]]` complete the route; `[[native.state]]` is refused. See [The native route](../concepts/native-route.md) for every table, its fields and its refusals.
 
 A wasm mod adds `[wasm]` instead, written by `cargo sunrise-mod build --wasm`
 ([Building to `mod.wasm`](../how-to/wasm-mods.md)):
@@ -86,6 +89,35 @@ A wasm mod adds `[wasm]` instead, written by `cargo sunrise-mod build --wasm`
 
 At load `mod.wasm` must start with `\0asm`, be at most 64 MiB and match `sha512`; each failure refuses the
 package with its reason.
+
+### `[runtime]`: data files beside the code
+
+A native or a wasm mod whose code runs a large precompiled artefact (a script bundle, an interpreter image,
+a baked lookup table) puts the bytes in a `runtime/` folder and lists each file with its SHA-512:
+
+```toml
+[runtime]
+"tables/nav.bin" = "<128 lowercase hex characters>"
+"image" = "<128 lowercase hex characters>"
+```
+
+Each key is a plain relative path below `runtime/` (the rules of every package path: no `..`, no backslash
+or colon, no symlink). Any file type is allowed; a runtime file is data, never loaded as code by the game.
+Runtime files are not pack data: no datapack or resource pack can replace them and no reload touches them.
+
+| Rule | Refusal |
+| --- | --- |
+| Every file of `runtime/` is listed | `runtime/<name>: not listed in [runtime]` |
+| Every listed file exists | `[runtime] lists <name>, but the package has no runtime/<name>` |
+| Each file matches its SHA-512 | `runtime/<name> doesn't match its [runtime] sha512` |
+| At most 256 files | `…over the 256-file runtime cap` |
+| At most 64 MiB a file | `runtime/<name> is over 64 MiB, the per-file runtime cap` |
+| At most 256 MiB in all | `runtime/ is over 256 MiB, the package's runtime total cap` |
+| A content mod has none | `a content mod has no code, so no [runtime]` |
+
+The hashes are checked once, when the package opens: at install, at a dedicated server's or a game's start
+(also for a folder edited by hand), and by `native-build` and `cargo sunrise-mod` packing. The package is
+refused by name; nothing else is skipped.
 
 A wasm mod or library may declare the memory it expects its dependency group to have, as top-level
 `wasm_memory_mib`: an integer from 1 to 4096 (wasm32's 4 GiB), in MiB. The group gets the largest value any

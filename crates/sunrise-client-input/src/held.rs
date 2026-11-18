@@ -1,6 +1,6 @@
 //! The keys a player's mappings hold, as their vanilla default keys, and which
 //! devices hold each one. A key stays held while any device holds it, so one
-//! device letting go (splitscreen moving the keyboard to another player, say)
+//! device letting go
 //! can't release what another still presses.
 
 use crate::actions::Action;

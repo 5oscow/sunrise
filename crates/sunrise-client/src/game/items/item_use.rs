@@ -1390,7 +1390,8 @@ pub(super) mod interact_vibration_tests {
                     inside: false,
                 };
                 let held = game.held().cloned();
-                let (result, (changes, _)) = game.remote_block_template(&hit, held.as_ref(), true);
+                let (result, (changes, _)) =
+                    game.remote_block_template(&hit, held.as_ref(), true, true);
                 assert_eq!(result, sunrise_world::level::InteractionResult::Success);
                 assert_eq!(changes.len(), 1, "the client predicts a bitten cake");
                 let bitten = game.with_level(|b, _, _| {
@@ -1487,6 +1488,8 @@ pub(super) mod interact_vibration_tests {
             stick_info.id = std::sync::Arc::from("ruby:stick");
             stick_info.template = Some(std::sync::Arc::from("minecraft:stick"));
             items.insert(stick_info.id.clone(), stick_info);
+            // Publish the edited tables as world open or reload would.
+            game.load_server_loot();
             let stick = ItemStack::new("ruby:stick", 1);
             assert!(!game.use_fishing_rod(&stick), "a content stick is no rod");
             assert!(game.hook.is_none());

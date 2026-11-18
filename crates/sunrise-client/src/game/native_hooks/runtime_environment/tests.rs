@@ -267,7 +267,7 @@ fn run(wasm: bool) {
             ExecutionRole::Client
         };
         crate::game::native_entity_refs::tests::with_game_role(
-            root,
+            crate::game::native_entity_refs::tests::fixture_root(),
             role,
             |game: &mut Game<'_>| {
                 let _phase =

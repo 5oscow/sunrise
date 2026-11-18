@@ -48,6 +48,21 @@ cargo sunrise-mod check target/sunrise-mod/my_mod.smod   # the registry's checks
 - `use-jar <path>` records an original Java jar as an external asset/data source, without copying it into the mod
   ([Java jars as external assets](#java-jars-as-external-assets)).
 
+## Vegetation behaviour is independent of the template
+
+Set `properties.vegetation` to `true` in block JSON or in a code declaration's
+`BlockProperties` to give a block `VegetationBlock` survival, even on a glass or
+stairs template. Placement refuses unsupported ground and a neighbour update
+removes an unsupported plant. The default support is `minecraft:supports_vegetation`
+on both sides. Templates that already inherit `VegetationBlock` keep their own
+checks, such as crop light requirements.
+
+On the server, the soil's `can_sustain_plant` answer decides first. If it returns
+`None`, the plant's `may_place_on` Part can override the ground rule. Neither
+registering a Part for a block nor registering one on a tag changes what kind
+of block it is. The client predicts using the default rule without running these
+server Parts.
+
 ## Declare content in code
 
 Code mods declare content through `BlocksEvent` and `ItemsEvent`, using API-owned
@@ -74,8 +89,11 @@ No declaration conversion runs per tick.
 
 Implement `BlockPart::remove_block` for a block that leaves a support or another
 state behind when removed. This server-only replacement receives the dimension,
-position, removed state and `moved_by_piston`. Answer `Some(state)` to choose the
-replacement, or `None` to keep vanilla's fluid block (air when dry). Only the
+position, removed state, `moved_by_piston` and `replacement`: the exact state
+written if the listener leaves `answer` unanswered, the fluid's legacy block
+(air when dry, water for a waterlogged block). Answer `Some(state)` to choose a
+different state, or `None` to keep `replacement`. Named injections request
+`hook_version = 2`; native and wasm mods rebuild against this signature. Only the
 removed block's own Part is called, not the replacement block's Part.
 
 The chosen state goes through the normal `setBlock` effects with flags 3, plus
@@ -202,11 +220,15 @@ A block names its template and what differs from it:
 ```
 
 A fence gate needs no kind of its own: a block whose template is a vanilla `minecraft:*_fence_gate` is a
-`FenceGateBlock`, with the template wood's open and close sounds. `"open_sound"` and `"close_sound"` (sound event ids,
-such as `"minecraft:block.chain.break"` or a sound of the mod's own `sounds.json`) replace them, as a gate built with its
-own `WoodType` has, and they are what opening by hand, a redstone signal and a wind-charge or other explosion toggle all
-play. Either key needs a `*_fence_gate` template and a `namespace:path` id, or the load fails naming the file; leaving
-both out keeps the wood's sounds.
+`FenceGateBlock`, with the template wood's open and close sounds. `"open_sound"` and `"close_sound"` accept a sound
+event id, such as `"minecraft:block.chain.break"` or a sound of the mod's own `sounds.json`, to replace that sound at
+all three sites. They also accept an object, for example `"open_sound": {"use": "rope:open", "redstone": "rope:powered"}`:
+`use` is a player's interaction (including client prediction), `explosion` is an unpowered gate triggered by an
+explosion, and `redstone` is a power change that changes the open state. A missing site keeps the **template wood's**
+sound, not another site's override. Native and wasm declarations use `GateSound::All` or `GateSound::Sites` with
+`on_use`, `on_explosion`, and `on_redstone`. Both keys need a `*_fence_gate` template; unknown sites and invalid
+`namespace:path` sound ids fail the load naming the file and key. Leaving both keys out keeps the wood's sounds.
+Pitch draws, volume, sound source, player exclusion and game events are unchanged.
 
 A block gets a block item of its own id by default. `"item": false` gives it none: pick-block takes nothing and
 `Block.asItem` is air (what a block drops comes from its loot table). `"block_item": "<item id>"` (with `"item": false`) makes the block
@@ -238,7 +260,23 @@ covers stay hidden unless it also sets `occludes`.
 of the blocks beside it are drawn, so a thin panel or a block drawn by its block entity on a full-cube template
 doesn't leave a hole in the floor under it. It is not a solid render either, so light passes it as it passes
 leaves: dampened by 1, or not at all if skylight passes down; special template light rules remain inherited.
-Unset or `true` preserves the template's ability to occlude, using the declared outline when one is supplied.
+`occludes: true` occludes whatever the template does, using the declared outline when supplied, otherwise the
+template's published occlusion shape. A full shape is a solid render with light dampening 15; a partial or empty
+shape is not. Unset preserves the template's ability to occlude. Skylight-down and special template light rules
+remain inherited. Partial declared outlines retain the existing directional shape-light occlusion rule.
+
+`offset` takes `NONE`, `XZ` or `XYZ` (`OffsetType` in native and wasm drafts).
+`NONE` disables an inherited offset. `XZ` jitters horizontally; `XYZ` also moves downward.
+An explicit mode defaults to maximum horizontal displacement 0.25 and, for `XYZ`, maximum downward
+displacement 0.2. Optional `max_horizontal_offset` (finite 0 to 0.25) and `max_vertical_offset`
+(finite 0 to 0.2) set these limits; `XZ` ignores the vertical limit. Without `offset`, the template's
+mode and default limits are inherited, and supplied maxima adjust that mode without enabling one.
+
+The model and **declared** outline, collision and interaction shapes follow the same column seed
+(`BlockState.getOffset`, x and z only), including declared entity-context variants. Shape caches stay
+block-local; the position is applied at query time. The occlusion cache uses the outline after applying
+its column offset at `(0, 0, 0)`, as vanilla's state cache does.
+This works on both sides and does not require a hook.
 
 `destroy_overlay: false` hides the breaking crack (`destroy_stage_0` to `9`) on the block, for one broken by use
 (a feast or a cake taken apart bite by bite). It is read once at load into the block's facts, and only the overlay
@@ -280,6 +318,23 @@ A declared name may not be one the template already has, and `default_state`
 takes one value per declared property too, so a block's default is exactly one
 state of its own. Every combination has to fit in the states a world holds
 (2^20), so a declaration that would not is refused when the mods load.
+
+A declared **boolean** `waterlogged` also makes the block a `SimpleWaterloggedBlock`: buckets fill and drain it,
+water can flow into it, and draining breaks it if it cannot survive dry. This applies even to a stone template.
+The default placement takes `waterlogged` from source water at the target cell (flowing water leaves it dry); a shape update schedules the contained
+water's tick. A block's `state_for_placement` or `update_shape` Part answer replaces the corresponding default.
+A double plant keeps its template's class and companion-half behaviour, so this declares a two-high water plant:
+
+```json
+{ "template": "minecraft:tall_grass",
+  "state_properties": { "waterlogged": { "type": "boolean" } },
+  "default_state": { "waterlogged": "true" } }
+```
+
+The placed half takes source water at its cell; the companion half uses the water tag at its own cell, so an upper half above the water line is dry. An enum named `waterlogged`,
+a template that already has that property, a standalone liquid block such as `minecraft:lava`, or an
+always-water template (`seagrass`, `tall_seagrass`, `kelp`, `kelp_plant`, `bubble_column`) is refused.
+Native and wasm `Block` declarations use the same rule.
 
 A block with template `minecraft:farmland` may set `"base_block": "namespace:block"` to choose the block it becomes when it dries out, is trampled, or has a solid block placed above it. The ID must name a registered block; without the key, the template's dirt base is used.
 
@@ -404,6 +459,28 @@ and player selection uses its own outline channel. Callers without a captured
 entity class retain ordinary shapes. These declarations select state/class-only
 geometry, not arbitrary world-dependent block behavior or native callbacks.
 
+### Scaffolding's context collision
+
+A block that is stood on like scaffolding and dropped through while sneaking (a metal
+scaffolding) sets `"context_collision": "scaffolding"` (`Block::context_collision =
+Some(ContextCollision::Scaffolding)`), whatever its template. Entities then collide with it as
+with `minecraft:scaffolding` (`ScaffoldingBlock.getCollisionShape`), which takes the same rule:
+solid on top unless the entity is descending, nothing below the top, and in a `bottom` state
+that is not supported (`distance` above 0) a floor 2 pixels high under an entity above the block
+below. Placement checks see no collision. Its states need scaffolding's `distance` (0 to 7) and
+`bottom` (`false`, `true`) properties, from a `minecraft:scaffolding` template or declared in
+`state_properties`; loading refuses the block, by name, otherwise. Climbing is the
+`minecraft:climbable` block tag, and what keeps `distance` and `bottom` up to date is the
+template's behaviour: neither comes from this field. A `collision_context_shapes` entry for an
+entity class stands over the rule for that class, as it does over the block's other shapes.
+
+```json
+{
+  "template": "minecraft:scaffolding",
+  "context_collision": "scaffolding"
+}
+```
+
 ### Shapes a block entity publishes
 
 A block whose geometry depends on what is inside it (a cable bus with attached parts, a table
@@ -418,12 +495,18 @@ This differs from NeoForge, where `getShape` is asked for on every query: here a
 **published when it changes, not asked for per query**, and a port of a `getShape` override calls
 `set_shapes` wherever that state changes (a part attached, a lid opened). Physics, selection,
 ray casts (outline and collider, over a dynamic template's shape too), support, the floor a
-mob's path stands on and its move control's jump read the published value at the position;
-nothing calls into the mod.
+mob's path stands on, its move control's jump, the height of an evoker's fangs, a panicking mob's
+search for water and whether a summoned iron golem can stand there read the published value at
+the position; nothing calls into the mod.
 Face sturdiness and multiface attachment between neighbouring blocks (placement, survival,
 shape updates, as for lichen and sculk veins) read the published collision shape at the position too.
-Shapes that depend on the querying entity are not covered; `outline_context_shapes` and
-`collision_context_shapes` stay declared, and a published shape stands over them.
+The sturdy floor an evoker's fangs look for under them still reads the declared shape.
+Fluid passage reads it as well: water and lava pass between two cells by their collision shapes at
+their positions. A publish, a clear and an aborted publish (the old shapes put back) each notify the
+block's neighbours, so a fluid beside it reads the new shape; publishing an unchanged value notifies nothing.
+Shapes that depend on the querying entity are not published: a part answers them per query
+(next section), and a published shape stands over the declared `outline_context_shapes` and
+`collision_context_shapes`.
 
 - **Checks**, refused by name with a `BlockEntityShapesError` and never clamped: every
   coordinate finite and each minimum at most its maximum; at most 64 boxes in each list.
@@ -445,6 +528,50 @@ Shapes that depend on the querying entity are not covered; `outline_context_shap
   repair. They are dropped when the block entity is removed or its block changes. The key they
   are kept under is the engine's: `replace_data` and `merge_data` leave them alone, and a
   payload that carries it has it ignored.
+
+### Shapes that depend on the querying entity
+
+A block part can give a block another collision shape for the entity that asks, as vanilla's
+`getCollisionShape(state, level, pos, context)` does: `BlockPart::collision_shape(context, event)`
+sets `event.shape = Some(boxes)` (block-local `[min_x, min_y, min_z, max_x, max_y, max_z]`, as in
+`shapes`) for the state `event.state` at `event.pos`. This is the one place the engine calls a
+mod in the middle of physics, for the blocks whose parts opt in; everything else, and every
+published shape, is read without a call. It reverses the rule above for those blocks only.
+
+`event.query` is a `CollisionQuery`, vanilla's `EntityCollisionContext` as it was when the query
+was made: `entity()` (the entity's id, `None` for the empty, position and cache contexts),
+`kind()`, `is_descending()`, `is_placement()`, `always_collide_with_fluid()`,
+`is_above(shape, pos, default)`, `is_holding_item(item)` and `can_stand_on_fluid(above, fluid)`.
+
+- **Ordering.** `None`, the starting value, keeps whatever the block would otherwise have: its
+  declared shape, a context-keyed one, or the one its block entity published. `Some` replaces
+  that for this query only. The per-state shape cache stays the empty-context answer, so a block
+  that is large there is still scanned in the cells around its own.
+- **Who asks.** Entity movement (step-up retries included), placement checks and projectile
+  paths, on the thread that owns the level: the server tick, and the client's own prediction. A
+  guest's move is checked by the server with the same entity id. Fluid passage and face-support
+  checks never ask. Another thread (the mesher, world generation) reads the normal shape.
+- **Once a tick.** A part is asked once for each distinct question in a tick: the state, the
+  position and every input of the query (entity, kind, height, descending, placement, held item)
+  make one question. A step-up retry or a second sweep reads the first answer, so the shape cannot change
+  in the middle of a move.
+- **No re-entry.** The query holds the entity's state from before the move, and a collision query
+  made inside the callback gets the empty-context answer, never a nested call.
+- **No `Host`.** A move holds the level's collision data and cannot lend a `Host`, as for
+  `entity_move` and `friction`. The part answers from the query and from state it keeps itself. A
+  rule that needs more (a belt's set of carried entities; powder snow's fall distance) tracks that
+  state in the mod, keyed by `query.entity()`. If a mod needs an entity read it cannot track, one
+  captured field is added to `CollisionQuery`; the `Host` is not reopened.
+- **The client must sync that state.** The client asks the same question for its own prediction,
+  so a mod whose rule reads its own state must send it to the client. If the two disagree the
+  server corrects the player's position (the usual "moved wrongly" correction), never a kick.
+- **Bounds**, as for a published shape: at most 64 boxes, every coordinate finite and each minimum
+  at most its maximum. These bound what crosses the Wire from a wasm part too.
+- **Faults.** A panic, a trap or a refused shape keeps the normal shape, switches that block's
+  `collision_shape` off for the session, for every mod's part on that block, and logs once,
+  naming the mods and the block.
+- **Cost.** Nothing for a block without such a part. An opted-in block costs one call per
+  distinct question in a tick, and a wasm part adds a Wire crossing to each.
 
 An item copies its template's data components, with `max_stack_size` and
 `rarity` changed, and any other 26.3 component set or removed in
@@ -874,6 +1001,11 @@ The fence: files go in the mod's own namespaces (`assets/<id>/`,
 (`data/minecraft/tags/`), to the convention tags NeoForge and Fabric mods
 share (`data/c/tags/`), and sources added to vanilla's atlases
 (`assets/minecraft/atlases/`), which follow vanilla's own as a reload appends them.
+Packages of every kind may also add to the declared [`sunrise:` extension tags](extension-tags.md),
+by writing exactly the listed registry and tag path under `data/sunrise/tags/`.
+Other `data/sunrise/` and all `assets/sunrise/` files remain refused; the namespace cannot be claimed.
+Generated `sunrise:class/*` tags are refused by name: attach a part with `block_part_tag` instead.
+The SDK surface's `extension_tags` lists these same declarations, and `sdk diff` treats a removed tag as breaking.
 Templates and `sounds` name vanilla blocks; unknown keys are refused.
 
 Some Java mods ship their files under other names than their mod id (Towns and Towers, mod id `t_and_t`, under
@@ -1093,7 +1225,10 @@ that replaces a biome keeps the mods' changes too.
 
 **A biome of your own.** A mod's `data/<ns>/worldgen/biome/<path>.json` (any namespace but `minecraft`) adds a biome.
 The game loads it into its biome table after vanilla's biomes, sorted by path and then namespace, so vanilla's biome ids
-never move. A joining client receives it in the biome registry with its data even when it has the vanilla pack, builds
+never move. The content build puts it in the content root's biome bundle as `<ns>:<path>`, after vanilla's biomes and
+in namespace then path order; a file in the `minecraft` namespace is ignored, since mods cannot replace vanilla's
+biomes. Biome tags keep the mod's ids, biome modifiers apply over vanilla's biomes and the mods' together (a modifier
+reaches a mod biome through its tag and never drops it), and `/locate biome` and `/place` suggest it. A joining client receives it in the biome registry with its data even when it has the vanilla pack, builds
 it from that data, and plays its colours, ambient particles, ambient sounds and music from it; a client with the same
 mod already has it. Its network id is its place in the registry sorted by path, then namespace, as in vanilla.
 Saved worlds name a column's biomes, not their ids: a world saved before the mod existed holds only vanilla names and

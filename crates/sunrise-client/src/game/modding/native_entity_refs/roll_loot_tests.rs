@@ -207,16 +207,11 @@ fn a_roll_is_the_engines_own_roll_for_the_same_seed_and_tool() {
                 after,
                 "seed {seed}: the same draws"
             );
-            // The command fills a slot per stack and merges nothing; the pearls
-            // are one stack of 40 there, split to stack size by the roll.
-            let mut rolled = lines(&rolled);
-            if let Some(i) = rolled
-                .iter()
-                .position(|l| l.starts_with("minecraft:ender_pearl"))
-            {
-                rolled.splice(i..i + 3, ["minecraft:ender_pearl x40 ".to_owned()]);
-            }
-            assert_eq!(rolled, by_command, "seed {seed}, tool {command_tool}");
+            assert_eq!(
+                lines(&rolled),
+                by_command,
+                "seed {seed}, tool {command_tool}"
+            );
         }
     }
 }
